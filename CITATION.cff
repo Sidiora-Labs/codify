@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+title: "Codify: agent-native code graph with built-in version control"
+message: "If you use Codify in your research or software, please cite it using the metadata below."
+type: software
+authors:
+  - family-names: "Andrew"
+    affiliation: "Sidiora Labs"
+  - name: "Sidiora Labs"
+    website: "https://sidiora.com"
+repository-code: "https://github.com/sidiora-labs/codify"
+url: "https://github.com/sidiora-labs/codify"
+abstract: >-
+  Codify (cg) is a local-first code intelligence engine written in pure
+  C11. It indexes a codebase into a queryable graph of symbols, call edges,
+  and framework routes stored in a single SQLite database, layered with a
+  content-addressed SHA-256 snapshot system for version control. It is
+  designed for AI agents: a single context call returns entry points,
+  matching symbols, callers, callees, and related routes, and a built-in
+  MCP stdio server exposes the full engine, including a task engine for
+  Ion kvx specifications. It adapts its worker pool and caches to the
+  host machine, supports nineteen languages and over twenty web
+  frameworks, and sends no data off the machine.
+keywords:
+  - code-intelligence
+  - static-analysis
+  - ai-agents
+  - model-context-protocol
+  - version-control
+  - content-addressed-storage
+  - sqlite
+  - c11
+  - impact-analysis
+  - developer-tools
+license: MIT
+version: "1.0.0"
+date-released: "2026-08-13"

@@ -1,0 +1,9 @@
+build/
+/cg
+*.o
+*.a
+.codegraph/
+/CLAUDE.md
+/AGENTS.md
+*.vsix
+node_modules/

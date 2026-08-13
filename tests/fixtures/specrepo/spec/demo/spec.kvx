@@ -1,0 +1,67 @@
+# Demo feature spec — exercises every render path.
+
+[meta]
+feature = "demo"
+intro   = "A tiny feature used to test the spec engine."
+
+[req.1]
+title = "Parsing"
+story = "As a developer, I want kvx files parsed so that specs are data."
+ac_1  = "WHEN a kvx file is read THE parser SHALL preserve section order."
+ac_2  = "WHEN a key repeats THE parser SHALL keep the last value."
+
+[req.2]
+title = "Rendering"
+story = "As a developer, I want markdown mirrors so that humans can read specs."
+ac_1  = "WHEN rendering runs THE output SHALL be byte-stable."
+ac_2  = "WHEN sources change THE check mode SHALL exit non-zero."
+
+[design]
+overview = "The engine parses kvx into an ordered document and renders it."
+include  = "design.body.md"
+
+[design.notes]
+title  = "Notes"
+points = ["ordered sections", "surgical writes"]
+para   = "Scalar paragraphs are emitted verbatim."
+
+[tasks]
+heading = "Implementation Plan: Demo"
+
+[task.1]
+title   = "Foundation"
+section = "Slice 1: Core"
+status  = "pending"
+
+[task.1.1]
+title  = "Parse kvx files"
+status = "done"
+wave   = 0
+do_1   = "Write the ordered parser"
+do_2   = "Cover comments and quoting"
+reqs   = ["1.1", "1.2"]
+
+[task.1.2]
+title      = "Render the mirror"
+status     = "pending"
+wave       = 1
+requires   = ["1.1"]
+verify_cmd = "test -f verify.marker"
+do_1       = "Write the renderer"
+note       = "Byte-stable output is the bar."
+reqs       = ["2.1"]
+
+[task.2]
+title  = "Follow-on"
+status = "pending"
+
+[task.2.1]
+title    = "Check mode"
+status   = "pending"
+wave     = 2
+requires = ["1.2"]
+symbols  = ["checkMode"]
+touches  = ["src/*.ts"]
+property = "Property: render is idempotent"
+validates = "check exits 2 on stale output"
+reqs     = ["2.2"]

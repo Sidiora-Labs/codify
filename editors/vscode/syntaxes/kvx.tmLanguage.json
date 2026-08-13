@@ -1,0 +1,136 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ion KVX",
+  "scopeName": "source.kvx",
+  "fileTypes": ["kvx"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#section-header" },
+    { "include": "#kv-status" },
+    { "include": "#kv-line" }
+  ],
+  "repository": {
+
+    "comment": {
+      "match": "^\\s*#.*$",
+      "name": "comment.line.number-sign.kvx"
+    },
+
+    "section-header": {
+      "match": "^\\s*(\\[)((?:task|req)\\.[A-Za-z0-9_.]+|[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)(\\])\\s*$",
+      "captures": {
+        "1": { "name": "punctuation.definition.section.begin.kvx" },
+        "2": { "name": "entity.name.section.kvx markup.heading.kvx" },
+        "3": { "name": "punctuation.definition.section.end.kvx" }
+      }
+    },
+
+    "kv-status": {
+      "begin": "^\\s*(status)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "support.type.property-name.status.kvx" },
+        "2": { "name": "keyword.operator.assignment.kvx" }
+      },
+      "end": "$",
+      "name": "meta.kv.status.kvx",
+      "patterns": [
+        {
+          "match": "(\")(done)(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.kvx" },
+            "2": { "name": "markup.inserted.status.done.kvx" },
+            "3": { "name": "punctuation.definition.string.kvx" }
+          }
+        },
+        {
+          "match": "(\")(in_progress)(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.kvx" },
+            "2": { "name": "markup.changed.status.in-progress.kvx" },
+            "3": { "name": "punctuation.definition.string.kvx" }
+          }
+        },
+        {
+          "match": "(\")(pending|blocked|deferred)(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.kvx" },
+            "2": { "name": "constant.language.status.kvx" },
+            "3": { "name": "punctuation.definition.string.kvx" }
+          }
+        },
+        { "include": "#string-double" },
+        { "include": "#inline-comment" }
+      ]
+    },
+
+    "kv-line": {
+      "begin": "^\\s*([A-Za-z0-9_]+)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "support.type.property-name.kvx" },
+        "2": { "name": "keyword.operator.assignment.kvx" }
+      },
+      "end": "$",
+      "name": "meta.kv.kvx",
+      "patterns": [ { "include": "#value" } ]
+    },
+
+    "value": {
+      "patterns": [
+        { "include": "#string-double" },
+        { "include": "#list-punctuation" },
+        { "include": "#boolean" },
+        { "include": "#number" },
+        { "include": "#inline-comment" }
+      ]
+    },
+
+    "string-double": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.kvx",
+      "patterns": [
+        {
+          "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}",
+          "name": "variable.other.interpolation.env.kvx"
+        },
+        {
+          "match": "\\b(https?)://[^\\s\"<>]+",
+          "name": "markup.underline.link.kvx"
+        },
+        {
+          "begin": "`",
+          "end": "`",
+          "name": "markup.raw.inline.kvx"
+        },
+        {
+          "comment": "dotted task/requirement ids inside list strings: \"1.2\", \"16.7\"",
+          "match": "(?<=\")\\d+(?:\\.\\d+)*(?=\")",
+          "name": "constant.numeric.task-id.kvx"
+        }
+      ]
+    },
+
+    "list-punctuation": {
+      "patterns": [
+        { "match": "\\[", "name": "punctuation.definition.list.begin.kvx" },
+        { "match": "\\]", "name": "punctuation.definition.list.end.kvx" },
+        { "match": ",", "name": "punctuation.separator.list.kvx" }
+      ]
+    },
+
+    "boolean": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.boolean.kvx"
+    },
+
+    "number": {
+      "match": "\\b\\d+(?:\\.\\d+)?\\b",
+      "name": "constant.numeric.kvx"
+    },
+
+    "inline-comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.kvx"
+    }
+  }
+}

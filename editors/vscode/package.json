@@ -1,0 +1,99 @@
+{
+  "name": "codify",
+  "displayName": "Codify",
+  "description": "Agent workflow for any codebase: kvx spec highlighting plus a live task board (waves, status, graph verification) driven by the cg CLI.",
+  "version": "0.1.1",
+  "publisher": "sidiora-labs",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/sidiora-labs/codify" },
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages", "Other"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "kvx",
+        "aliases": ["kvx", "Ion KVX"],
+        "extensions": [".kvx"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kvx",
+        "scopeName": "source.kvx",
+        "path": "./syntaxes/kvx.tmLanguage.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codify",
+          "title": "Codify",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codify": [
+        {
+          "id": "codifyTasks",
+          "name": "Tasks",
+          "contextualTitle": "Codify Tasks"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "codifyTasks",
+        "contents": "No Codify spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the cg binary is on PATH (or set codify.binaryPath).\n[Refresh](command:codify.refresh)"
+      }
+    ],
+    "commands": [
+      { "command": "codify.refresh", "title": "Codify: Refresh Task Board", "icon": "$(refresh)" },
+      { "command": "codify.nextTask", "title": "Codify: Next Eligible Task" },
+      { "command": "codify.startTask", "title": "Codify: Start Task", "icon": "$(play)" },
+      { "command": "codify.doneTask", "title": "Codify: Complete Task (verified)", "icon": "$(check)" },
+      { "command": "codify.traceTask", "title": "Codify: Trace Task to Code" },
+      { "command": "codify.render", "title": "Codify: Render Spec Mirror" },
+      { "command": "codify.openTask", "title": "Codify: Open Task in Spec" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "codify.refresh", "when": "view == codifyTasks", "group": "navigation" },
+        { "command": "codify.render", "when": "view == codifyTasks" },
+        { "command": "codify.nextTask", "when": "view == codifyTasks" }
+      ],
+      "view/item/context": [
+        { "command": "codify.startTask", "when": "view == codifyTasks && viewItem == task-pending", "group": "inline" },
+        { "command": "codify.doneTask", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "inline" },
+        { "command": "codify.traceTask", "when": "view == codifyTasks && viewItem =~ /^task-/" }
+      ],
+      "commandPalette": [
+        { "command": "codify.openTask", "when": "false" }
+      ],
+      "explorer/context": [
+        { "command": "codify.render", "when": "resourceExtname == .kvx", "group": "codify" },
+        { "command": "codify.refresh", "when": "resourceExtname == .kvx", "group": "codify" }
+      ]
+    },
+    "configuration": {
+      "title": "Codify",
+      "properties": {
+        "codify.binaryPath": {
+          "type": "string",
+          "default": "cg",
+          "description": "Path to the cg binary."
+        },
+        "codify.feature": {
+          "type": "string",
+          "default": "",
+          "description": "Spec feature override (passed as -f). Empty uses [meta] active_feature."
+        }
+      }
+    }
+  }
+}
