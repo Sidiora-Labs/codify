@@ -133,6 +133,11 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0) {
+        printf("%s\n", CG_VERSION);
+        return 0;
+    }
+
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0)
         return cmd_spec(argc - 2, argv + 2, json);

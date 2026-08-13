@@ -73,7 +73,15 @@ cg spec trace 16.7            # 证明:任务 -> 符号 -> 文件 -> 提交
 
 ## 安装
 
-依赖:一个 C 编译器和 `libsqlite3-dev`。
+Linux x86_64 — 一条命令即可安装(或更新)经校验和验证的静态二进制文件:
+
+```sh
+curl -fsSL https://codify.centra.ag/install | bash
+```
+
+卸载同样简单:`curl -fsSL https://codify.centra.ag/uninstall | bash`。各项目的 `.codegraph/` 数据不会被触碰。
+
+其他平台请从源码构建(依赖:C 编译器和 `libsqlite3-dev`):
 
 ```sh
 make && sudo make install
@@ -195,6 +203,7 @@ spec 渲染的黄金输出由原始的 Go 版 specgen 生成,因此渲染一致�
 
 ## 社区
 
+- [Codify 的由来](../../WHY.md)
 - [贡献指南](../../CONTRIBUTING.md)
 - [安全策略](../../SECURITY.md)
 - [行为准则](../../CODE_OF_CONDUCT.md)

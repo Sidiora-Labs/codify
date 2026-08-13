@@ -50,4 +50,8 @@ uninstall:
 clean:
 	rm -rf $(BUILD) $(BIN)
 
-.PHONY: all unit integration test install uninstall clean
+.PHONY: all unit integration test install uninstall clean release
+
+# static release binary published to the web root (see scripts/release.sh)
+release:
+	scripts/release.sh

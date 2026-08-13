@@ -73,7 +73,15 @@ cg spec trace 16.7            # الإثبات: المهمة -> الرموز -> 
 
 ## التثبيت
 
-المتطلبات: مُصرِّف C وحزمة `libsqlite3-dev`.
+‏Linux x86_64 — أمر واحد يثبّت (أو يحدّث) ملفًا تنفيذيًا ساكنًا متحقَّقًا منه عبر checksum:
+
+```sh
+curl -fsSL https://codify.centra.ag/install | bash
+```
+
+لإزالة التثبيت: `curl -fsSL https://codify.centra.ag/uninstall | bash`. بيانات `.codegraph/` الخاصة بكل مشروع لا تُمَس أبدًا.
+
+على المنصات الأخرى، ابنِ من المصدر (المتطلبات: مترجم C و`libsqlite3-dev`):
 
 ```sh
 make && sudo make install
@@ -195,6 +203,7 @@ docs/ARCHITECTURE.md كيف تتكامل الأجزاء
 
 ## المجتمع
 
+- [لماذا وُجد Codify](../../WHY.md)
 - [دليل المساهمة](../../CONTRIBUTING.md)
 - [سياسة الأمان](../../SECURITY.md)
 - [مدونة السلوك](../../CODE_OF_CONDUCT.md)

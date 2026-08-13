@@ -73,7 +73,15 @@ cg spec trace 16.7            # प्रमाण: टास्क -> सिं
 
 ## इंस्टॉलेशन
 
-निर्भरताएँ: एक C कंपाइलर और `libsqlite3-dev`।
+Linux x86_64 — एक ही कमांड checksum-सत्यापित स्टैटिक बाइनरी इंस्टॉल (या अपडेट) कर देता है:
+
+```sh
+curl -fsSL https://codify.centra.ag/install | bash
+```
+
+अनइंस्टॉल भी उसी तरह: `curl -fsSL https://codify.centra.ag/uninstall | bash`। हर प्रोजेक्ट का `.codegraph/` डेटा कभी नहीं छुआ जाता।
+
+अन्य प्लेटफ़ॉर्म पर सोर्स से बिल्ड करें (निर्भरताएँ: C कंपाइलर और `libsqlite3-dev`):
 
 ```sh
 make && sudo make install
@@ -195,6 +203,7 @@ spec रेंडर के golden आउटपुट मूल Go specgen स�
 
 ## समुदाय
 
+- [Codify क्यों बना](../../WHY.md)
 - [योगदान गाइड](../../CONTRIBUTING.md)
 - [सुरक्षा नीति](../../SECURITY.md)
 - [आचार संहिता](../../CODE_OF_CONDUCT.md)

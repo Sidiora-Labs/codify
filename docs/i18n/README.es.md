@@ -73,7 +73,15 @@ Cada comando de ese ciclo es también una herramienta MCP, así que un agente co
 
 ## Instalación
 
-Dependencias: un compilador de C y `libsqlite3-dev`.
+Linux x86_64 — un solo comando instala (o actualiza) un binario estático verificado por checksum:
+
+```sh
+curl -fsSL https://codify.centra.ag/install | bash
+```
+
+Para desinstalar: `curl -fsSL https://codify.centra.ag/uninstall | bash`. Los datos `.codegraph/` de cada proyecto nunca se tocan.
+
+En cualquier otra plataforma, compila desde el código fuente (dependencias: un compilador de C y `libsqlite3-dev`):
 
 ```sh
 make && sudo make install
@@ -195,6 +203,7 @@ Las salidas doradas del renderizado de specs se generaron con el specgen origina
 
 ## Comunidad
 
+- [Por qué existe Codify](../../WHY.md)
 - [Guía de contribución](../../CONTRIBUTING.md)
 - [Política de seguridad](../../SECURITY.md)
 - [Código de conducta](../../CODE_OF_CONDUCT.md)

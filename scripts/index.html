@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codify</title>
+<meta name="description" content="Codify — the agent workflow tool that scales from small, simple projects to large, complex codebases.">
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    background: #10151c; color: #e8e4da;
+    font: 16px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    display: flex; min-height: 100vh; align-items: center; justify-content: center;
+    padding: 2rem;
+  }
+  main { max-width: 42rem; width: 100%; }
+  h1 { font-size: 2rem; letter-spacing: .04em; }
+  h1 span { color: #e8702a; }
+  p.tag { color: #9aa3ad; margin: .5rem 0 2rem; }
+  .block { background: #171e27; padding: 1rem 1.25rem; margin: 1rem 0; overflow-x: auto; }
+  .block .c { color: #6b7683; }
+  .block code { white-space: pre; }
+  a { color: #e8702a; text-decoration: none; }
+  h2 { font-size: 1rem; margin-top: 2rem; color: #9aa3ad; font-weight: normal; }
+  footer { margin-top: 3rem; color: #6b7683; font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>codify<span>.</span></h1>
+  <p class="tag">The agent workflow tool that scales from small, simple projects to large, complex codebases. One binary, 100% local.</p>
+
+  <h2>install or update (Linux x86_64)</h2>
+  <div class="block"><code>curl -fsSL https://codify.centra.ag/install | bash</code></div>
+
+  <h2>then, in any project</h2>
+  <div class="block"><code>cg init            <span class="c"># graph + snapshots</span>
+cg context "auth"  <span class="c"># one-call context for agents</span>
+cg mcp-install     <span class="c"># connect Claude Code, Cursor, VS Code, ...</span>
+cg spec            <span class="c"># task board, verified done</span></code></div>
+
+  <h2>uninstall</h2>
+  <div class="block"><code>curl -fsSL https://codify.centra.ag/uninstall | bash</code></div>
+
+  <p>Source, docs, and other platforms: <a href="https://github.com/sidiora-labs/codify">github.com/sidiora-labs/codify</a></p>
+
+  <footer>MIT · Sidiora Labs · no telemetry, nothing leaves your machine</footer>
+</main>
+</body>
+</html>

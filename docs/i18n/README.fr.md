@@ -73,7 +73,15 @@ Chaque commande de cette boucle est aussi un outil MCP, si bien qu'un agent conn
 
 ## Installation
 
-Dépendances : un compilateur C et `libsqlite3-dev`.
+Linux x86_64 — une seule commande installe (ou met à jour) un binaire statique vérifié par checksum :
+
+```sh
+curl -fsSL https://codify.centra.ag/install | bash
+```
+
+Pour désinstaller : `curl -fsSL https://codify.centra.ag/uninstall | bash`. Les données `.codegraph/` de chaque projet ne sont jamais touchées.
+
+Partout ailleurs, compilez depuis les sources (dépendances : un compilateur C et `libsqlite3-dev`) :
 
 ```sh
 make && sudo make install
@@ -195,6 +203,7 @@ Les sorties de référence du rendu de specs ont été générées par le specge
 
 ## Communauté
 
+- [Pourquoi Codify existe](../../WHY.md)
 - [Guide de contribution](../../CONTRIBUTING.md)
 - [Politique de sécurité](../../SECURITY.md)
 - [Code de conduite](../../CODE_OF_CONDUCT.md)
