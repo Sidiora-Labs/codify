@@ -31,7 +31,7 @@ Everything is driven by the `cg` binary — the extension holds no state and nev
 No build step — the extension is plain JavaScript.
 
 ```sh
-cd editors/vscode
+cd /root/codify/editors/vscode/
 npx @vscode/vsce package        # produces codify-0.1.0.vsix
 code --install-extension codify-0.1.0.vsix
 ```

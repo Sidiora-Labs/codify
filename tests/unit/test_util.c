@@ -61,5 +61,14 @@ int main(void) {
     ok_str(path_ext("noext"), "");
     ok_str(path_ext("dir.v2/noext"), "");    /* dot in dir, not in base */
 
+    /* generated root build output is ignored without hiding authored rules
+       in conventional nested paths such as tools/build. */
+    Ignore ig;
+    ignore_load(&ig, "/tmp/cg-no-ignore-file-here");
+    ok(ignore_match(&ig, "build", true), "root build directory ignored");
+    ok(!ignore_match(&ig, "tools/build", true), "nested tools/build retained");
+    ok(ignore_match(&ig, "node_modules", true), "other defaults unchanged");
+    ignore_free(&ig);
+
     return t_done("util");
 }

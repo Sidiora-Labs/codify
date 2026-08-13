@@ -201,7 +201,6 @@ void ignore_load(Ignore *ig, const char *root) {
 }
 
 bool ignore_match(const Ignore *ig, const char *rel, bool is_dir) {
-    (void)is_dir;
     const char *base = strrchr(rel, '/');
     base = base ? base + 1 : rel;
     if (base[0] == '.' && strcmp(base, ".") != 0) {
@@ -209,7 +208,15 @@ bool ignore_match(const Ignore *ig, const char *rel, bool is_dir) {
         if (strcmp(base, CG_IGNORE) != 0) return true;
     }
     for (int i = 0; i < ig->n; i++) {
-        if (fnmatch(ig->pats[i], base, 0) == 0) return true;
+        if (fnmatch(ig->pats[i], base, 0) == 0) {
+            /* A root build directory is generated output, but repositories
+             * commonly keep authored build rules under tools/build. */
+            if (is_dir && strcmp(ig->pats[i], "build") == 0 &&
+                strchr(rel, '/') != NULL) {
+                continue;
+            }
+            return true;
+        }
         if (strchr(ig->pats[i], '/') && fnmatch(ig->pats[i], rel, FNM_PATHNAME) == 0)
             return true;
     }
