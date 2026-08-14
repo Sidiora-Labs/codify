@@ -204,8 +204,11 @@ bool ignore_match(const Ignore *ig, const char *rel, bool is_dir) {
     const char *base = strrchr(rel, '/');
     base = base ? base + 1 : rel;
     if (base[0] == '.' && strcmp(base, ".") != 0) {
-        /* hidden files/dirs skipped except a few known source names */
-        if (strcmp(base, CG_IGNORE) != 0) return true;
+        /* Keep authored GitHub automation visible to snapshots and task
+         * traces while retaining the fail-closed default for secret-bearing
+         * and tool-owned hidden paths. */
+        if (strcmp(base, CG_IGNORE) != 0 && strcmp(base, ".github") != 0)
+            return true;
     }
     for (int i = 0; i < ig->n; i++) {
         if (fnmatch(ig->pats[i], base, 0) == 0) {

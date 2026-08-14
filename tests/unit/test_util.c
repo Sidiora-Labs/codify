@@ -67,6 +67,10 @@ int main(void) {
     ignore_load(&ig, "/tmp/cg-no-ignore-file-here");
     ok(ignore_match(&ig, "build", true), "root build directory ignored");
     ok(!ignore_match(&ig, "tools/build", true), "nested tools/build retained");
+    ok(!ignore_match(&ig, ".github", true), "authored .github directory retained");
+    ok(!ignore_match(&ig, ".github/workflows/ci.yml", false),
+       "authored GitHub workflow retained");
+    ok(ignore_match(&ig, ".env", false), "other hidden files remain ignored");
     ok(ignore_match(&ig, "node_modules", true), "other defaults unchanged");
     ignore_free(&ig);
 

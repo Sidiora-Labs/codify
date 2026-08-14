@@ -113,4 +113,42 @@ ids = [t['id'] for t in d['tasks']]
 assert ids == ['1.1', '1.2', '2.1'], ids
 "
 
+# Qualified Rust paths resolve their short graph symbols and disambiguate
+# duplicate function names using the declared crate/module path.
+cat >> spec/demo/spec.kvx <<'EOF'
+
+[task.3.1]
+title    = "Verify qualified Rust symbols"
+status   = "pending"
+wave     = 3
+requires = ["2.1"]
+symbols  = ["layerx_crypto::ed25519::verify", "layerx_crypto::secp256k1::verify"]
+touches  = ["agent/crates/layerx-crypto/src/*.rs"]
+EOF
+mkdir -p agent/crates/layerx-crypto/src
+cat > agent/crates/layerx-crypto/src/ed25519.rs <<'EOF'
+pub fn verify(bytes: &[u8]) -> bool {
+    !bytes.is_empty()
+}
+EOF
+cat > agent/crates/layerx-crypto/src/secp256k1.rs <<'EOF'
+pub fn verify(bytes: &[u8]) -> bool {
+    bytes.len() > 1
+}
+EOF
+"$CG" spec start 3.1 >/dev/null
+"$CG" commit -m "qualified rust symbols" >/dev/null
+out="$("$CG" spec done 3.1 2>&1)"
+has "$out" "layerx_crypto::ed25519::verify  function  agent/crates/layerx-crypto/src/ed25519.rs"
+has "$out" "layerx_crypto::secp256k1::verify  function  agent/crates/layerx-crypto/src/secp256k1.rs"
+"$CG" spec trace 3.1 --json | python3 -c "
+import json, sys
+symbols = json.load(sys.stdin)['task']['symbols']
+assert [s['found'] for s in symbols] == [True, True], symbols
+assert [s['path'] for s in symbols] == [
+    'agent/crates/layerx-crypto/src/ed25519.rs',
+    'agent/crates/layerx-crypto/src/secp256k1.rs',
+], symbols
+"
+
 echo ok

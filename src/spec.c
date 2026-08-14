@@ -1120,28 +1120,102 @@ static bool spec_graph_open(Cg *g) {
     return true;
 }
 
-/* first definition of a symbol + its ref count; 0 when not in the graph */
-static int graph_symbol(Cg *g, const char *name, char *path, size_t pcap,
-                        int *line, char *kind, size_t kcap, int *refs) {
+static void graph_symbol_row(sqlite3_stmt *st, char *path, size_t pcap,
+                             int *line, char *kind, size_t kcap, int *refs) {
+    const char *k = (const char *)sqlite3_column_text(st, 0);
+    const char *p = (const char *)sqlite3_column_text(st, 1);
+    snprintf(kind, kcap, "%s", k ? k : "");
+    snprintf(path, pcap, "%s", p ? p : "");
+    *line = sqlite3_column_int(st, 2);
+    *refs = sqlite3_column_int(st, 3);
+}
+
+/* Match a Rust-style qualifier against a path component or Rust file stem. */
+static bool path_has_qualifier(const char *path, const char *segment,
+                               size_t slen) {
+    if (slen == 0 || slen >= 256) return false;
+    char raw[256], normal[256];
+    memcpy(raw, segment, slen);
+    raw[slen] = 0;
+    for (size_t i = 0; i <= slen; i++)
+        normal[i] = raw[i] == '_' ? '-' : raw[i];
+
+    const char *forms[2] = { raw, normal };
+    for (int i = 0; i < 2; i++) {
+        char dir[300], file[300];
+        snprintf(dir, sizeof dir, "/%s/", forms[i]);
+        snprintf(file, sizeof file, "/%s.rs", forms[i]);
+        if (strstr(path, dir) || strstr(path, file) ||
+            strncmp(path, forms[i], strlen(forms[i])) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* Later qualifiers carry more weight: module/file is more discriminating
+ * than crate/package when two modules define the same short symbol. */
+static int qualified_path_score(const char *qualified, const char *path) {
+    const char *cursor = qualified;
+    int score = 0, weight = 1;
+    for (;;) {
+        const char *sep = strstr(cursor, "::");
+        if (!sep) break;                  /* final segment is the symbol */
+        if (path_has_qualifier(path, cursor, (size_t)(sep - cursor)))
+            score += weight;
+        if (weight < 1024) weight *= 2;
+        cursor = sep + 2;
+    }
+    return score;
+}
+
+/* Resolve one graph name. Qualified fallback refuses an unresolved tie
+ * instead of silently attributing the task to an arbitrary definition. */
+static int graph_symbol_named(Cg *g, const char *lookup,
+                              const char *qualified, char *path, size_t pcap,
+                              int *line, char *kind, size_t kcap, int *refs) {
     sqlite3_stmt *st = cg_prep(g,
         "SELECT s.kind, f.path, s.line,"
         " (SELECT COUNT(*) FROM refs r WHERE r.name = s.name)"
         " FROM symbols s JOIN files f ON f.id = s.file_id"
-        " WHERE s.name = ? ORDER BY s.id LIMIT 1");
+        " WHERE s.name = ? ORDER BY s.id");
     if (!st) return 0;
-    sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
-    int found = 0;
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        found = 1;
-        const char *k = (const char *)sqlite3_column_text(st, 0);
-        const char *p = (const char *)sqlite3_column_text(st, 1);
-        snprintf(kind, kcap, "%s", k ? k : "");
-        snprintf(path, pcap, "%s", p ? p : "");
-        *line = sqlite3_column_int(st, 2);
-        *refs = sqlite3_column_int(st, 3);
+    sqlite3_bind_text(st, 1, lookup, -1, SQLITE_STATIC);
+    int found = 0, best = -1, best_count = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *candidate = (const char *)sqlite3_column_text(st, 1);
+        int score = qualified && candidate
+            ? qualified_path_score(qualified, candidate) : 0;
+        if (!qualified) {
+            graph_symbol_row(st, path, pcap, line, kind, kcap, refs);
+            found = 1;
+            break;
+        }
+        if (score > best) {
+            best = score;
+            best_count = 1;
+            graph_symbol_row(st, path, pcap, line, kind, kcap, refs);
+            found = 1;
+        } else if (score == best) {
+            best_count++;
+        }
     }
     sqlite3_finalize(st);
-    return found;
+    return found && (!qualified || best_count == 1);
+}
+
+/* First definition of a symbol + its ref count. Rust-style qualified names
+ * fall back to the graph's short names and use their crate/module path to
+ * disambiguate definitions such as ed25519::verify vs secp256k1::verify. */
+static int graph_symbol(Cg *g, const char *name, char *path, size_t pcap,
+                        int *line, char *kind, size_t kcap, int *refs) {
+    if (graph_symbol_named(g, name, NULL, path, pcap, line, kind, kcap, refs))
+        return 1;
+    const char *sep = NULL;
+    for (const char *p = strstr(name, "::"); p; p = strstr(p + 2, "::"))
+        sep = p;
+    if (!sep || !sep[2]) return 0;
+    return graph_symbol_named(g, sep + 2, name, path, pcap, line, kind,
+                              kcap, refs);
 }
 
 static void task_tag(const Spec *s, const char *id, char *out, size_t cap) {
