@@ -123,7 +123,7 @@ status   = "pending"
 wave     = 3
 requires = ["2.1"]
 symbols  = ["layerx_crypto::ed25519::verify", "layerx_crypto::secp256k1::verify"]
-touches  = ["agent/crates/layerx-crypto/src/*.rs"]
+touches  = ["agent/crates/layerx-crypto/src/*.rs", "agent/crates/layerx-crypto/src/"]
 EOF
 mkdir -p agent/crates/layerx-crypto/src
 cat > agent/crates/layerx-crypto/src/ed25519.rs <<'EOF'
@@ -141,6 +141,7 @@ EOF
 out="$("$CG" spec done 3.1 2>&1)"
 has "$out" "layerx_crypto::ed25519::verify  function  agent/crates/layerx-crypto/src/ed25519.rs"
 has "$out" "layerx_crypto::secp256k1::verify  function  agent/crates/layerx-crypto/src/secp256k1.rs"
+has "$out" "✓ touched agent/crates/layerx-crypto/src/"
 "$CG" spec trace 3.1 --json | python3 -c "
 import json, sys
 symbols = json.load(sys.stdin)['task']['symbols']
@@ -149,6 +150,14 @@ assert [s['path'] for s in symbols] == [
     'agent/crates/layerx-crypto/src/ed25519.rs',
     'agent/crates/layerx-crypto/src/secp256k1.rs',
 ], symbols
+"
+"$CG" spec trace 3.1 --json | python3 -c "
+import json, sys
+touches = json.load(sys.stdin)['task']['touches']
+assert touches[-1] == {
+    'pattern': 'agent/crates/layerx-crypto/src/',
+    'changed': True,
+}, touches
 "
 
 echo ok
