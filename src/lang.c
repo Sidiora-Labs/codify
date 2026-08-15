@@ -152,11 +152,26 @@ static const char *KEYWORDS[] = {
     "delete","new","do","try","in","instanceof","assert",NULL
 };
 
-static bool is_keyword(const char *s, size_t n) {
-    for (int i = 0; KEYWORDS[i]; i++)
-        if (strlen(KEYWORDS[i]) == n && strncmp(KEYWORDS[i], s, n) == 0)
+static const char *RUST_KEYWORDS[] = {
+    "abstract","as","async","await","become","box","break","const",
+    "continue","crate","do","dyn","else","enum","extern","false","final",
+    "fn","for","gen","if","impl","in","let","loop","macro","match",
+    "mod","move","mut","override","priv","pub","ref","return","self",
+    "Self","static","struct","super","trait","true","try","type","typeof",
+    "unsafe","unsized","use","virtual","where","while","yield",NULL
+};
+
+static bool word_in(const char *const *words, const char *s, size_t n) {
+    for (int i = 0; words[i]; i++)
+        if (strlen(words[i]) == n && strncmp(words[i], s, n) == 0)
             return true;
     return false;
+}
+
+static bool is_keyword(const LangSpec *L, const char *s, size_t n) {
+    if (strcmp(L->name, "rust") == 0)
+        return word_in(RUST_KEYWORDS, s, n);
+    return word_in(KEYWORDS, s, n);
 }
 
 void lang_global_init(void) {
@@ -360,7 +375,7 @@ void lang_parse(const char *lang, const char *path, const char *src,
                 if (m[g].rm_so >= 0 && m[g].rm_eo > m[g].rm_so) {
                     const char *nm = cursor + m[g].rm_so;
                     size_t nn = (size_t)(m[g].rm_eo - m[g].rm_so);
-                    bool skip = is_keyword(nm, nn);
+                    bool skip = is_keyword(L, nm, nn);
                     /* C/C++: a line ending in ';' that looks like a def is a
                        prototype/extern decl, not a definition */
                     if (!skip && cfam_protos &&
@@ -388,7 +403,7 @@ void lang_parse(const char *lang, const char *path, const char *src,
                 size_t k = j;
                 while (k < cl && (clean[k] == ' ' || clean[k] == '\t')) k++;
                 if (k < cl && clean[k] == '(' && j - i >= 2 &&
-                    !is_keyword(clean + i, j - i)) {
+                    !is_keyword(L, clean + i, j - i)) {
                     bool is_def = false;
                     for (int d = defs_before; d < pr->ndefs; d++)
                         if (strlen(pr->defs[d].name) == j - i &&
