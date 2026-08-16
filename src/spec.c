@@ -1225,10 +1225,15 @@ static void task_tag(const Spec *s, const char *id, char *out, size_t cap) {
 static bool pattern_hit(const char *pat, char **paths, int np) {
     size_t plen = strlen(pat);
     bool directory = plen > 0 && pat[plen - 1] == '/';
+    bool literal = strpbrk(pat, "*?[") == NULL;
     for (int i = 0; i < np; i++) {
+        size_t pathlen = strlen(paths[i]);
         if (strcmp(paths[i], pat) == 0 || fnmatch(pat, paths[i], 0) == 0)
             return true;
         if (directory && strncmp(paths[i], pat, plen) == 0)
+            return true;
+        if (literal && pathlen > plen && strncmp(paths[i], pat, plen) == 0 &&
+            paths[i][plen] == '/')
             return true;
     }
     return false;
