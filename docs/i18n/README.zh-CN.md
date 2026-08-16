@@ -20,7 +20,7 @@
 
 ## 概述
 
-Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作流引擎。它维护着代码本身之外、项目最需要的三样东西——代码**是什么**、它是**如何走到今天**的、以及**接下来**要做什么——并将这三者同时提供给人类和 AI 智能体。
+Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作流引擎。它维护着代码本身之外、项目最需要的四样东西——代码**是什么**、它是**如何走到今天**的、**接下来**要做什么、以及一路走来**学到了什么**——并将这四者同时提供给人类和 AI 智能体。
 
 **代码是什么。** Codify 将 19 种语言索引成一个可查询的图:符号、调用边、框架感知的路由,以及即时全文检索,全部本地存储在 SQLite 中。`cg context <query>` 一次调用即可回答"帮我快速了解这一块":入口点、匹配的符号及代码片段、调用者、被调用者,以及相关路由。
 
@@ -28,7 +28,9 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 
 **接下来做什么。** 一个 spec 引擎将纯文本 kvx 规格文件转化为可执行的计划:带依赖波次(wave)的任务面板、同一时刻只允许一个任务进行中的纪律、附在每个任务上的验收标准——以及一个经过验证而非口头宣称的 `done`。任务的检查必须通过,它声称交付的符号和文件必须真实存在于图和历史中,Codify 才会将其标记为完成。
 
-这三层相互增强:提交会自动打上其所实现任务的标签,`cg spec trace` 能从任意任务一路追溯到它的符号和提交,而内置的 MCP 服务器将这一切——共 15 个工具——暴露给 Claude Code、Cursor 以及所有支持 MCP 的智能体。
+**一路走来学到了什么。** 智能体记忆将刻意留下的笔记——决策(`decision`)、约束(`constraint`)、结果(`outcome`)、偏好(`preference`)、事实(`fact`)——存储在与图相同的数据库中,并关联到写下它们时所在的任务。`cg remember` 在任务进行中保存一条记忆,每次 `cg spec done` 都会自动记录一条如实的结果(包括被拒绝的完成),而 `cg recall` 按相关性与新近程度排序,将这一切重新带回。
+
+这几层相互增强:提交会自动打上其所实现任务的标签,记忆会浮现在它们所属的任务上,`cg spec trace` 能从任意任务一路追溯到它的符号、提交和记忆,而内置的 MCP 服务器将这一切——共 17 个工具——暴露给 Claude Code、Cursor 以及所有支持 MCP 的智能体。
 
 没有 API 密钥,没有后台服务,没有遥测。一切都在你的机器上运行,并且只留在你的机器上。
 
@@ -37,6 +39,8 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 **它闭合了从计划到证明的回路。** 大多数工具要么规划工作(任务列表),要么描述代码(搜索、索引)。Codify 在同一个数据库上同时做这两件事,因此计划可以对照现实来核验:当一个任务声明它引入 `checkMode` 并涉及 `src/*.ts` 时,`cg spec done` 会在图和历史都确认之前拒绝将其标记为完成。
 
 **智能体像工程师一样工作,而不是像游客。** 智能体无需逐个文件地漫游仓库,而是通过 `cg spec next` 询问该做什么,通过 `cg context` 获取该区域的全部信息,通过 `cg impact` 了解谁会被破坏——然后提交时自动附上任务归属。整个循环都可以通过 MCP 完成,智能体全程无需离开协议。
+
+**会话会遗忘,项目会记住。** 智能体的上下文窗口会重置,记忆表不会。用 `cg remember` 写下一次的决策,会自动迎接下一次会话——出现在 `cg spec next` 里、出现在 `cg spec start` 里、出现在会话开始时的 `cg recall` 里——而不必付出全价重新发现一遍。而且被拒绝的完成同样会被记录,"这个任务被卡了两次,原因在这里"只需一次查询。
 
 **上下文一次到位,而不是二十次往返。** `cg context <query>` 围绕智能体消费代码的真实方式设计。一次请求即可返回开始工作所需的全部信息:执行从哪里进入、匹配到什么、谁调用它、它调用谁,以及哪些路由与之相关。
 
@@ -53,14 +57,16 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 ## Codify 的一次会话
 
 ```sh
-cg spec next                  # 下一个可执行任务,附验收标准
+cg recall auth                # 早前的会话对这一块做过哪些决定
+cg spec next                  # 下一个可执行任务,附验收标准与相关记忆
 cg spec start 16.7            # 认领它——同一时刻只允许一个任务进行中
 cg context "password auth"    # 一次调用获得入口点、符号、调用者、路由
 cg impact verifyLogin -d 2    # 改了它谁会坏
 # ……实现……
+cg remember "sessions rotate on login" --type decision   # 关联到任务 16.7
 cg commit -m "add password auth"   # 快照,自动打上 [spec:ion_spec/16.7] 标签
-cg spec done 16.7             # 运行任务的 verify_cmd 与图检查
-cg spec trace 16.7            # 证明:任务 -> 符号 -> 文件 -> 提交
+cg spec done 16.7             # verify_cmd 与图检查,并记录结果记忆
+cg spec trace 16.7            # 证明:任务 -> 符号 -> 提交 -> 记忆
 ```
 
 这个循环中的每条命令同时也是一个 MCP 工具,连接的智能体可以端到端地跑完全程——并且每一步在十个文件的小项目和 monorepo 中同样好用。
@@ -122,11 +128,21 @@ cg init
 | `cg checkout <id> [--force]` | 恢复某个快照 |
 | `cg changes` | 未提交修改的影响半径:你改动的符号及其外部调用者 |
 
+### 记忆
+
+持久的智能体笔记,与图存储在同一个 SQLite 数据库中。在 spec 任务进行中写下的记忆会自动关联到该任务,`cg spec done` 也会自动记录结果。切勿在其中存储任何机密信息。
+
+| 命令 | 说明 |
+|---|---|
+| `cg remember <text>` | 保存一条记忆——`--type decision\|constraint\|outcome\|preference\|fact`(默认 `fact`),`--task <feature/id>`(默认为进行中的 spec 任务),可选的 `--symbols` / `--files` 锚点 |
+| `cg recall [query]` | 搜索记忆:对正文做全文检索,先按相关性再按新近程度排序;可用 `--task`、`--type`、`-n N` 过滤 |
+| `cg forget <id>` | 删除一条记忆 |
+
 ### 智能体相关
 
 | 命令 | 说明 |
 |---|---|
-| `cg mcp` | 以 MCP stdio 服务器运行,提供 15 个工具:search、context、symbol、impact、routes、status、change-impact、log、commit,以及 spec 系列工具(status、next、start、done、render、trace) |
+| `cg mcp` | 以 MCP stdio 服务器运行,提供 17 个工具:search、context、symbol、impact、routes、status、change-impact、log、commit、spec 系列工具(status、next、start、done、render、trace),以及记忆工具(remember、recall) |
 | `cg mcp-install` | 自动接入 Claude Code(`.mcp.json`)、Cursor、VS Code、Windsurf、Gemini CLI 与 Codex CLI,并合并进已有配置 |
 | `cg changelog [-n N] [-o FILE]` | 基于快照生成变更日志,包含符号级差异:新增和删除的函数、新路由 |
 | `cg agentmd [--write]` | 生成 `AGENTS.md` 与 `CLAUDE.md`:语言、目录结构、构建工具、入口点、路由,以及被引用最多的符号 |
@@ -143,8 +159,8 @@ Spec 工作流是 Codify 将特性计划转化为可追踪、可验证工作的�
 | `cg spec` / `cg spec status` | 任务面板:数量统计、进度、当前进行中的任务与下一个可执行任务 |
 | `cg spec next` | `requires` 已全部完成的、最低 wave 的待办任务,附执行要点和展开后的验收标准 |
 | `cg spec start <id>` | 标记为 `in_progress`;强制同一时刻只能有一个任务且 `requires` 已满足,`--force` 可覆盖 |
-| `cg spec done <id>` | 运行任务的 `verify_cmd` 与图检查(失败即拒绝,`--force` 可覆盖),标记为 `done`,并给出下一个任务建议 |
-| `cg spec trace [<id>]` | 将任务追溯到代码:在图中解析出的已声明符号(位置、种类、引用数)、与实际改动匹配的涉及路径,以及打上该任务标签的提交 |
+| `cg spec done <id>` | 运行任务的 `verify_cmd` 与图检查(失败即拒绝,`--force` 可覆盖),标记为 `done`,记录一条结果记忆,并给出下一个任务建议 |
+| `cg spec trace [<id>]` | 将任务追溯到代码:在图中解析出的已声明符号(位置、种类、引用数)、与实际改动匹配的涉及路径、打上该任务标签的提交,以及它的记忆 |
 
 `start` 与 `done` 只重写 kvx 文件中那一行 `status = "..."`,其余每个字节、注释与空行都原样保留,随后静默重新渲染,保证 `tasks.md` 中的复选框始终最新。kvx 文件始终是唯一的事实来源,`-f <feature>` 可覆盖 `[meta] active_feature`。
 
@@ -160,6 +176,8 @@ touches = ["src/*.ts"]       # 必须有匹配的路径确实发生了改动
 ```
 
 `symbols` 会在已建立的图中查找;`touches` 模式(精确路径或 glob)则与工作树改动和打上该任务标签的提交所改动文件的并集进行匹配——因此工作提交之后验证依然能通过。检查失败会拒绝完成(`--force` 可覆盖)。`cg spec trace [<id>]` 展示单个任务或整个特性的完整"任务→代码→提交"链条,支持文本或 `--json` 输出。
+
+这条工作流还会自行滋养记忆层。每次完成都会写下一条简洁的结果记忆——包括被拒绝的完成,让之后的会话能够看到某个任务曾被卡住以及原因。`cg spec next` 与 `cg spec start` 会打印与该任务相关的记忆(通过 id 关联,或与其标题匹配),`cg spec trace` 也会将它们纳入链条。驱动这个循环的智能体无需任何指示,就会逐步积累起项目记忆。
 
 ## VS Code 扩展
 

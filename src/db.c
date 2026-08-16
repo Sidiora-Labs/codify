@@ -29,7 +29,15 @@ static const char *SCHEMA =
     "  name, kind UNINDEXED, path UNINDEXED, sig, tokenize='trigram');"
     /* word FTS over file bodies */
     "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
-    "  path UNINDEXED, body, tokenize='unicode61');";
+    "  path UNINDEXED, body, tokenize='unicode61');"
+    /* agent memory: deliberate notes, linked to spec tasks by "feature/id" */
+    "CREATE TABLE IF NOT EXISTS memories("
+    "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL, type TEXT NOT NULL,"
+    "  task TEXT, body TEXT NOT NULL, symbols TEXT, files TEXT,"
+    "  source TEXT NOT NULL);"
+    "CREATE INDEX IF NOT EXISTS idx_mem_task ON memories(task);"
+    "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
+    "  body, task, symbols, tokenize='unicode61');";
 
 int cg_find_root(char *out, size_t cap) {
     char cwd[4096];

@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.1.0"
+#define CG_VERSION  "0.2.0"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -158,6 +158,31 @@ int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,
 /* unique repo-relative paths changed in worktree-vs-HEAD, plus by commits
  * whose message contains needle (needle may be NULL); returns count */
 int vcs_changed_paths(Cg *cg, const char *needle, char ***out);
+
+/* ---------------- agent memory (memories table in graph.db) ---------- */
+typedef struct {
+    long id, created;                    /* created = unix seconds */
+    char *type, *task, *body, *symbols, *files, *source;  /* task.. nullable */
+} Memory;
+
+/* insert one memory; returns its id, -1 on failure */
+long memory_add(Cg *cg, const char *type, const char *task, const char *body,
+                const char *symbols, const char *files, const char *source);
+/* query: free text matched via FTS (NULL = recency only); task/type exact
+ * filters (NULL = any); fills a malloc'd array, returns count */
+int  memory_query(Cg *cg, const char *query, const char *task,
+                  const char *type, int limit, Memory **out);
+void memory_clear(Memory *m);            /* free one entry's fields */
+void memory_free(Memory *v, int n);
+void memory_json(const Memory *m, StrBuf *b);
+void memory_print_brief(const Memory *m, const char *indent);
+/* open the enclosing .codegraph without reindexing; false when absent */
+bool memory_open_quiet(Cg *g);
+int  cmd_remember(Cg *cg, const char *text, const char *type, const char *task,
+                  const char *symbols, const char *files, bool json);
+int  cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
+                int limit, bool json);
+int  cmd_forget(Cg *cg, const char *idstr);
 
 /* ---------------- watcher ---------------- */
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms);

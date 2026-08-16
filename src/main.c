@@ -29,6 +29,13 @@ static void usage(void) {
 "  checkout <id> [--force]  restore a snapshot\n"
 "  changes                  impact radius of uncommitted edits\n"
 "\n"
+"memory (durable agent notes, stored beside the graph)\n"
+"  remember <text>          save a memory; --type decision|constraint|\n"
+"                           outcome|preference|fact, --task <feature/id>\n"
+"                           (defaults to the in-progress spec task)\n"
+"  recall [query] [-n N]    search memories (FTS + recency); --task, --type\n"
+"  forget <id>              delete a memory\n"
+"\n"
 "agentic\n"
 "  mcp                      run as an MCP server (stdio) for coding agents\n"
 "  mcp-install              auto-connect to Claude Code, Cursor, VS Code,\n"
@@ -42,7 +49,7 @@ static void usage(void) {
 "  spec next                next eligible task with its acceptance criteria\n"
 "  spec start <id>          mark a task in_progress (one at a time)\n"
 "  spec done <id>           verify_cmd + graph checks (symbols/touches),\n"
-"                           then mark done\n"
+"                           then mark done; records an outcome memory\n"
 "  spec trace [<id>]        trace tasks to code: symbols in the graph,\n"
 "                           touched paths, tagged commits\n"
 "\n"
@@ -221,6 +228,30 @@ int main(int argc, char **argv) {
         else rc = cmd_checkout(&cg, argv[2], force);
     } else if (strcmp(cmd, "changes") == 0) {
         rc = cmd_changes(&cg, json);
+    } else if (strcmp(cmd, "remember") == 0) {
+        const char *type = opt(&argc, argv, "--type", NULL);
+        const char *task = opt(&argc, argv, "--task", NULL);
+        const char *symbols = opt(&argc, argv, "--symbols", NULL);
+        const char *files = opt(&argc, argv, "--files", NULL);
+        if (argc < 3) {
+            fprintf(stderr, "usage: cg remember \"<text>\" [--type T] "
+                    "[--task <feature/id>] [--symbols a,b] [--files x,y]\n");
+            rc = 1;
+        } else {
+            char *dflt = task ? NULL : spec_active_tag();
+            rc = cmd_remember(&cg, argv[2], type, task ? task : dflt,
+                              symbols, files, json);
+            free(dflt);
+        }
+    } else if (strcmp(cmd, "recall") == 0) {
+        const char *task = opt(&argc, argv, "--task", NULL);
+        const char *type = opt(&argc, argv, "--type", NULL);
+        int limit = atoi(opt(&argc, argv, "-n", "10"));
+        rc = cmd_recall(&cg, argc >= 3 ? argv[2] : NULL, task, type,
+                        limit > 0 ? limit : 10, json);
+    } else if (strcmp(cmd, "forget") == 0) {
+        if (argc < 3) { fprintf(stderr, "usage: cg forget <id>\n"); rc = 1; }
+        else rc = cmd_forget(&cg, argv[2]);
     } else if (strcmp(cmd, "mcp") == 0) {
         rc = cmd_mcp(&cg, &si);
     } else if (strcmp(cmd, "mcp-install") == 0) {

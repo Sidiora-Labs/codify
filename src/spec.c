@@ -878,6 +878,78 @@ static const char *spec_current(const Spec *s) {
     return NULL;
 }
 
+/* ---------------- memory hooks ---------------- */
+
+/* join a kvx list into one space-separated malloc'd string; NULL when empty */
+static char *join_list(const Kvx *k, const char *sec, const char *key) {
+    char **v; int n = kvx_list(k, sec, key, &v);
+    if (n <= 0) { free(v); return NULL; }
+    StrBuf b; sb_init(&b);
+    for (int i = 0; i < n; i++) {
+        if (i) sb_putc(&b, ' ');
+        sb_puts(&b, v[i]);
+        free(v[i]);
+    }
+    free(v);
+    return b.p;
+}
+
+/* auto-record a terse outcome memory for a task; silent no-op when the repo
+ * has no .codegraph — the spec engine stays usable standalone */
+static void spec_note_outcome(Spec *s, const char *id, const char *body) {
+    Cg g;
+    if (!memory_open_quiet(&g)) return;
+    char task[700], sec[300];
+    snprintf(task, sizeof task, "%s/%s", s->feature, id);
+    task_sec(sec, sizeof sec, id);
+    char *syms = join_list(s->f, sec, "symbols");
+    char *tchs = join_list(s->f, sec, "touches");
+    memory_add(&g, "outcome", task, body, syms, tchs, "auto");
+    free(syms); free(tchs);
+    cg_close(&g);
+}
+
+/* memories worth seeing before working on <id>: rows linked to the task,
+ * then FTS matches on its title; newest first, capped at 5 */
+static int spec_task_memories(Spec *s, const char *id, Memory **out) {
+    *out = NULL;
+    Cg g;
+    if (!memory_open_quiet(&g)) return 0;
+    char task[700], sec[300];
+    snprintf(task, sizeof task, "%s/%s", s->feature, id);
+    task_sec(sec, sizeof sec, id);
+    Memory *a = NULL, *b = NULL;
+    int na = memory_query(&g, NULL, task, NULL, 3, &a);
+    char *title = S(s->f, sec, "title");
+    int nb = title[0] ? memory_query(&g, title, NULL, NULL, 5, &b) : 0;
+    free(title);
+    cg_close(&g);
+
+    Memory *v = xmalloc(sizeof(Memory) * (size_t)(na + nb > 0 ? na + nb : 1));
+    int n = 0;
+    for (int i = 0; i < na; i++) v[n++] = a[i];
+    for (int i = 0; i < nb; i++) {
+        bool dup = b[i].task && strcmp(b[i].task, task) == 0;
+        for (int j = 0; j < na && !dup; j++)
+            if (a[j].id == b[i].id) dup = true;
+        if (!dup && n < 5) v[n++] = b[i];
+        else memory_clear(&b[i]);
+    }
+    free(a); free(b);
+    *out = v;
+    return n;
+}
+
+static void spec_print_memories(Spec *s, const char *id) {
+    Memory *v = NULL;
+    int n = spec_task_memories(s, id, &v);
+    if (n > 0) {
+        printf("  memories:\n");
+        for (int i = 0; i < n; i++) memory_print_brief(&v[i], "    ");
+    }
+    memory_free(v, n);
+}
+
 static int spec_status_cmd(Spec *s, bool json) {
     int done = 0, inprog = 0, pending = 0, leaves = 0;
     for (int i = 0; i < s->nids; i++) {
@@ -956,12 +1028,24 @@ static int spec_next_cmd(Spec *s, bool json) {
         StrBuf b; sb_init(&b);
         sb_puts(&b, "{\"next\":");
         json_task(s, next, &b);
+        Memory *mv = NULL;
+        int nm = spec_task_memories(s, next, &mv);
+        if (nm > 0) {
+            sb_puts(&b, ",\"memories\":[");
+            for (int i = 0; i < nm; i++) {
+                if (i) sb_putc(&b, ',');
+                memory_json(&mv[i], &b);
+            }
+            sb_putc(&b, ']');
+        }
+        memory_free(mv, nm);
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
         return 0;
     }
     print_task(s, next);
+    spec_print_memories(s, next);
     printf("\nstart it: cg spec start %s\n", next);
     return 0;
 }
@@ -1015,7 +1099,10 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     printf("started %s\n\n", id);
-    if (s->f) print_task(s, id);
+    if (s->f) {
+        print_task(s, id);
+        spec_print_memories(s, id);
+    }
     return 0;
 }
 
@@ -1038,6 +1125,7 @@ static int spec_done_cmd(Spec *s, const char *id, bool force) {
 
     char sec[300];
     task_sec(sec, sizeof sec, id);
+    bool forced_past = false;
     char *vc = S(s->f, sec, "verify_cmd");
     if (vc[0]) {
         printf("verify: %s\n", vc);
@@ -1051,9 +1139,18 @@ static int spec_done_cmd(Spec *s, const char *id, bool force) {
             fprintf(stderr, "cg spec: verify_cmd failed (exit %d) — task %s "
                     "NOT marked done%s\n", code,
                     id, force ? "" : " (--force to override)");
-            if (!force) { free(vc); return 1; }
+            if (!force) {
+                char *t = S(s->f, sec, "title");
+                StrBuf mb; sb_init(&mb);
+                sb_printf(&mb, "blocked: %s — verify_cmd failed (exit %d)",
+                          t, code);
+                spec_note_outcome(s, id, mb.p);
+                sb_free(&mb); free(t); free(vc);
+                return 1;
+            }
             fprintf(stderr, "cg spec: --force: marking done despite failed "
                     "verify\n");
+            forced_past = true;
         }
     }
     free(vc);
@@ -1065,10 +1162,16 @@ static int spec_done_cmd(Spec *s, const char *id, bool force) {
         if (!force) {
             fprintf(stderr, "cg spec: %d graph check(s) failed — task %s NOT "
                     "marked done (--force to override)\n", vfail, id);
+            char *t = S(s->f, sec, "title");
+            StrBuf mb; sb_init(&mb);
+            sb_printf(&mb, "blocked: %s — %d graph check(s) failed", t, vfail);
+            spec_note_outcome(s, id, mb.p);
+            sb_free(&mb); free(t);
             return 1;
         }
         fprintf(stderr, "cg spec: --force: marking done despite %d failed "
                 "graph check(s)\n", vfail);
+        forced_past = true;
     }
 
     if (kvx_set_status(s->fpath, sec, "done") != 0) {
@@ -1082,6 +1185,13 @@ static int spec_done_cmd(Spec *s, const char *id, bool force) {
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
     printf("done %s — %s\n", id, title);
+    if (s->f) {
+        StrBuf mb; sb_init(&mb);
+        sb_printf(&mb, "%s: %s", forced_past ? "done (forced past failed "
+                  "checks)" : "done", title);
+        spec_note_outcome(s, id, mb.p);
+        sb_free(&mb);
+    }
     free(title);
     if (s->f) {
         const char *next = spec_next_id(s);
@@ -1396,14 +1506,32 @@ static void trace_task(Spec *s, Cg *g, bool have_graph, const char *id,
         free(cids[i]);
         free(cmsgs[i]);
     }
-    if (json) sb_puts(jb, "]}");
-    else {
+    Memory *mv = NULL;
+    int nm = 0;
+    if (have_graph) {
+        char mtask[700];
+        snprintf(mtask, sizeof mtask, "%s/%s", s->feature, id);
+        nm = memory_query(g, NULL, mtask, NULL, 10, &mv);
+    }
+    if (json) {
+        sb_puts(jb, "],\"memories\":[");
+        for (int i = 0; i < nm; i++) {
+            if (i) sb_putc(jb, ',');
+            memory_json(&mv[i], jb);
+        }
+        sb_puts(jb, "]}");
+    } else {
+        for (int i = 0; i < nm; i++) {
+            if (i == 0) printf("  memories:\n");
+            memory_print_brief(&mv[i], "    ");
+        }
         if (!nsym && !ntch && !nc)
             printf("  (nothing declared: add `symbols`/`touches` keys or tag "
                    "commits by working with `cg spec start`)\n");
         if (!have_graph)
             printf("  (no .codegraph project — graph columns unavailable)\n");
     }
+    memory_free(mv, nm);
     for (int i = 0; i < np; i++) free(paths[i]);
     free(paths);
     free(cids); free(cmsgs); free(cdates);

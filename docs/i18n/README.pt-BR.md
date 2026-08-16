@@ -20,7 +20,7 @@ C11 puro. Um único binário. Um único banco SQLite. Nada sai da sua máquina.
 
 ## Visão geral
 
-O Codify (invocado como `cg`) é um motor de fluxo de trabalho para agentes em um único binário. Ele mantém as três coisas de que um projeto precisa além do próprio código — o que o código **é**, como ele chegou **até aqui** e o que vem **a seguir** — e entrega as três tanto a humanos quanto a agentes de IA.
+O Codify (invocado como `cg`) é um motor de fluxo de trabalho para agentes em um único binário. Ele mantém as quatro coisas de que um projeto precisa além do próprio código — o que o código **é**, como ele chegou **até aqui**, o que vem **a seguir** e o que foi **aprendido** ao longo do caminho — e entrega as quatro tanto a humanos quanto a agentes de IA.
 
 **O que o código é.** O Codify indexa 19 linguagens em um grafo consultável: símbolos, arestas de chamada, rotas cientes do framework e busca instantânea em texto completo, tudo armazenado localmente em SQLite. `cg context <consulta>` responde a "me atualize sobre esta área" em uma única chamada: pontos de entrada, símbolos correspondentes com trechos de código, chamadores, chamados e rotas relacionadas.
 
@@ -28,7 +28,9 @@ O Codify (invocado como `cg`) é um motor de fluxo de trabalho para agentes em u
 
 **O que vem a seguir.** Um motor de specs transforma arquivos de spec kvx em texto puro em um plano funcional: um quadro de tarefas com ondas de dependência, disciplina de uma-tarefa-em-andamento, critérios de aceitação anexados a cada tarefa — e um `done` que é verificado, não apenas declarado. As checagens de uma tarefa precisam passar, e os símbolos e arquivos que ela afirma entregar precisam de fato existir no grafo e no histórico, antes que o Codify a marque como concluída.
 
-As três camadas se reforçam mutuamente: os commits são etiquetados automaticamente com a tarefa que implementam, `cg spec trace` percorre qualquer tarefa até seus símbolos e commits, e um servidor MCP embutido expõe tudo isso — 15 ferramentas — ao Claude Code, ao Cursor e a qualquer outro agente compatível com MCP.
+**O que foi aprendido ao longo do caminho.** Uma memória de agente armazena anotações deliberadas — decisões, restrições, resultados, preferências, fatos — no mesmo banco de dados que o grafo, ligadas à tarefa sob a qual foram feitas. `cg remember` salva uma no meio da tarefa, cada `cg spec done` registra automaticamente um resultado honesto (incluindo recusas), e `cg recall` traz tudo de volta, ordenado por relevância e recência.
+
+As camadas se reforçam mutuamente: os commits são etiquetados automaticamente com a tarefa que implementam, as memórias aparecem na tarefa a que pertencem, `cg spec trace` percorre qualquer tarefa até seus símbolos, commits e memórias, e um servidor MCP embutido expõe tudo isso — 17 ferramentas — ao Claude Code, ao Cursor e a qualquer outro agente compatível com MCP.
 
 Sem chaves de API, sem serviços em segundo plano, sem telemetria. Tudo roda na sua máquina e fica nela.
 
@@ -37,6 +39,8 @@ Sem chaves de API, sem serviços em segundo plano, sem telemetria. Tudo roda na 
 **Ele fecha o ciclo do plano à prova.** A maioria das ferramentas ou planeja o trabalho (listas de tarefas) ou descreve o código (busca, índices). O Codify faz as duas coisas contra o mesmo banco de dados, então o plano pode ser confrontado com a realidade: quando uma tarefa declara que introduz `checkMode` e toca `src/*.ts`, `cg spec done` se recusa a marcá-la como concluída até que o grafo e o histórico concordem.
 
 **Agentes trabalham como engenheiros, não como turistas.** Em vez de vagar pelo repositório arquivo por arquivo, um agente pergunta a `cg spec next` o que fazer, a `cg context` tudo sobre a área e a `cg impact` quem quebra — e então faz o commit com atribuição automática da tarefa. O ciclo inteiro está disponível via MCP, então ele nunca precisa sair do protocolo.
+
+**O projeto lembra o que as sessões esquecem.** As janelas de contexto dos agentes são reiniciadas; a tabela de memórias, não. Uma decisão escrita uma única vez com `cg remember` encontra a sessão seguinte automaticamente — em `cg spec next`, em `cg spec start`, em `cg recall` no início da sessão — em vez de ser redescoberta pagando o preço cheio. E como as conclusões recusadas também são registradas, "esta tarefa foi bloqueada duas vezes e eis o porquê" está a uma consulta de distância.
 
 **O contexto chega em uma chamada, não em vinte.** `cg context <consulta>` foi projetado em torno de como os agentes realmente consomem código. Uma única requisição retorna tudo o que é preciso para começar a trabalhar: por onde a execução entra, o que correspondeu, quem chama, o que é chamado e quais rotas tocam aquilo.
 
@@ -53,14 +57,16 @@ Sem chaves de API, sem serviços em segundo plano, sem telemetria. Tudo roda na 
 ## Uma sessão com o Codify
 
 ```sh
-cg spec next                  # a próxima tarefa elegível, com critérios de aceitação
+cg recall auth                # o que as sessões anteriores decidiram sobre esta área
+cg spec next                  # a próxima tarefa elegível, critérios de aceitação + memórias relevantes
 cg spec start 16.7            # reivindique-a — uma tarefa em andamento por vez
 cg context "password auth"    # pontos de entrada, símbolos, chamadores, rotas em uma chamada
 cg impact verifyLogin -d 2    # quem quebra se isso mudar
 # ...implementar...
+cg remember "sessions rotate on login" --type decision   # ligada à tarefa 16.7
 cg commit -m "add password auth"   # snapshot, etiquetado automaticamente [spec:ion_spec/16.7]
-cg spec done 16.7             # roda o verify_cmd da tarefa + as checagens do grafo
-cg spec trace 16.7            # prova: tarefa -> símbolos -> arquivos -> commits
+cg spec done 16.7             # verify_cmd + checagens do grafo, memória de resultado registrada
+cg spec trace 16.7            # prova: tarefa -> símbolos -> commits -> memórias
 ```
 
 Cada comando desse ciclo também é uma ferramenta MCP, então um agente conectado pode executá-lo de ponta a ponta — e cada etapa funciona tão bem em um projeto de dez arquivos quanto em um monorepo.
@@ -122,11 +128,21 @@ Snapshots são endereçados por conteúdo com SHA-256 e os blobs são deduplicad
 | `cg checkout <id> [--force]` | Restaura um snapshot |
 | `cg changes` | Raio de impacto das edições não commitadas: os símbolos que você tocou mais seus chamadores externos |
 
+### Memória
+
+Anotações duráveis de agente, armazenadas no mesmo banco SQLite que o grafo. Memórias escritas enquanto uma tarefa de spec está em andamento se ligam a ela sozinhas, e `cg spec done` registra os resultados automaticamente. Nunca armazene segredos nelas.
+
+| Comando | Descrição |
+|---|---|
+| `cg remember <text>` | Salva uma memória — `--type decision\|constraint\|outcome\|preference\|fact` (padrão `fact`), `--task <feature/id>` (por padrão, a tarefa de spec em andamento), âncoras opcionais `--symbols` / `--files` |
+| `cg recall [query]` | Busca memórias: texto completo sobre o corpo, ordenado por relevância e depois por recência; filtre com `--task`, `--type`, `-n N` |
+| `cg forget <id>` | Apaga uma memória |
+
 ### Agentes
 
 | Comando | Descrição |
 |---|---|
-| `cg mcp` | Roda como servidor MCP via stdio com 15 ferramentas: search, context, symbol, impact, routes, status, change-impact, log, commit e as de spec (status, next, start, done, render, trace) |
+| `cg mcp` | Roda como servidor MCP via stdio com 17 ferramentas: search, context, symbol, impact, routes, status, change-impact, log, commit, as de spec (status, next, start, done, render, trace) e as de memória (remember, recall) |
 | `cg mcp-install` | Conexão automática com Claude Code (`.mcp.json`), Cursor, VS Code, Windsurf, Gemini CLI e Codex CLI, mesclando com as configurações existentes |
 | `cg changelog [-n N] [-o FILE]` | Changelog a partir dos snapshots com diffs em nível de símbolo: funções adicionadas e removidas, rotas novas |
 | `cg agentmd [--write]` | Gera `AGENTS.md` e `CLAUDE.md`: linguagens, mapa de diretórios, ferramentas de build, pontos de entrada, rotas e os símbolos mais referenciados |
@@ -143,8 +159,8 @@ O fluxo de trabalho de specs é como o Codify transforma o plano de uma funciona
 | `cg spec` / `cg spec status` | Quadro de tarefas: contagens, progresso, a tarefa em andamento e a próxima elegível |
 | `cg spec next` | A tarefa pendente de menor wave cujos `requires` estão todos concluídos, com seus itens de ação e critérios de aceitação expandidos |
 | `cg spec start <id>` | Marca uma tarefa como `in_progress`; impõe uma por vez e `requires` cumpridos, com `--force` para sobrepor |
-| `cg spec done <id>` | Executa o `verify_cmd` da tarefa e as checagens do grafo (recusa em caso de falha, `--force` para sobrepor), marca como `done` e sugere a próxima tarefa |
-| `cg spec trace [<id>]` | Rastreia tarefas até o código: símbolos declarados resolvidos no grafo (localização, tipo, referências), caminhos tocados comparados às mudanças reais e os commits etiquetados com a tarefa |
+| `cg spec done <id>` | Executa o `verify_cmd` da tarefa e as checagens do grafo (recusa em caso de falha, `--force` para sobrepor), marca como `done`, registra uma memória de resultado e sugere a próxima tarefa |
+| `cg spec trace [<id>]` | Rastreia tarefas até o código: símbolos declarados resolvidos no grafo (localização, tipo, referências), caminhos tocados comparados às mudanças reais, os commits etiquetados com a tarefa e suas memórias |
 
 `start` e `done` reescrevem apenas a linha `status = "..."` do arquivo kvx. Todos os outros bytes, comentários e linhas em branco sobrevivem. Em seguida o comando re-renderiza silenciosamente para que as caixas de seleção do `tasks.md` fiquem em dia. Os arquivos kvx continuam sendo a única fonte de verdade, e `-f <feature>` sobrepõe `[meta] active_feature`.
 
@@ -160,6 +176,8 @@ touches = ["src/*.ts"]       # um caminho correspondente precisa de fato ter mud
 ```
 
 Os `symbols` são procurados no grafo indexado; os padrões de `touches` (caminhos exatos ou globs) são comparados à união das mudanças na árvore de trabalho com os arquivos alterados pelos commits etiquetados com a tarefa — assim a verificação continua passando depois que o trabalho foi commitado. Checagens que falham recusam a conclusão (`--force` sobrepõe). `cg spec trace [<id>]` mostra a cadeia completa tarefa→código→commit para uma tarefa ou para a funcionalidade inteira, em texto ou com `--json`.
+
+O fluxo de trabalho também alimenta a camada de memória por conta própria. Cada conclusão escreve uma memória de resultado sucinta — incluindo as recusadas, para que uma sessão posterior possa ver que uma tarefa foi bloqueada e por quê. `cg spec next` e `cg spec start` imprimem as memórias relevantes para a tarefa (ligadas pelo id, ou que correspondam ao seu título), e `cg spec trace` as inclui na cadeia. Um agente conduzindo o ciclo acumula memória de projeto sem que ninguém precise pedir.
 
 ## Extensão para VS Code
 

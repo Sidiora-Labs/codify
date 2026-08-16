@@ -139,6 +139,29 @@ static int t_spec_trace(void *v) {
     free(id);
     return rc;
 }
+static int t_remember(void *v) {
+    CallCtx *c = v;
+    char *text = c->args ? json_get_string(c->args, "text") : NULL;
+    if (!text) { printf("{\"error\":\"missing text\"}\n"); return 1; }
+    char *type = c->args ? json_get_string(c->args, "type") : NULL;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    char *symbols = c->args ? json_get_string(c->args, "symbols") : NULL;
+    char *files = c->args ? json_get_string(c->args, "files") : NULL;
+    if (!task) task = spec_active_tag();
+    int rc = cmd_remember(c->cg, text, type, task, symbols, files, true);
+    free(text); free(type); free(task); free(symbols); free(files);
+    return rc;
+}
+static int t_recall(void *v) {
+    CallCtx *c = v;
+    char *q = c->args ? json_get_string(c->args, "query") : NULL;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    char *type = c->args ? json_get_string(c->args, "type") : NULL;
+    int limit = c->args ? (int)json_get_int(c->args, "limit", 10) : 10;
+    int rc = cmd_recall(c->cg, q, task, type, limit > 0 ? limit : 10, true);
+    free(q); free(task); free(type);
+    return rc;
+}
 
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
@@ -161,6 +184,19 @@ static int t_spec_trace(void *v) {
 #define S_CHECK  "{\"type\":\"object\",\"properties\":{\"check\":{\"type\":\"boolean\"}}}"
 #define S_TRACE  "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \
                  "\"description\":\"dotted task id; omit for all tasks\"}}}"
+#define S_REMEMBER "{\"type\":\"object\",\"properties\":{" \
+                 "\"text\":{\"type\":\"string\"}," \
+                 "\"type\":{\"type\":\"string\",\"description\":" \
+                 "\"decision|constraint|outcome|preference|fact (default fact)\"}," \
+                 "\"task\":{\"type\":\"string\",\"description\":" \
+                 "\"feature/id; defaults to the in-progress spec task\"}," \
+                 "\"symbols\":{\"type\":\"string\"}," \
+                 "\"files\":{\"type\":\"string\"}},\"required\":[\"text\"]}"
+#define S_RECALL "{\"type\":\"object\",\"properties\":{" \
+                 "\"query\":{\"type\":\"string\",\"description\":" \
+                 "\"free text; omit for most recent\"}," \
+                 "\"task\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"}," \
+                 "\"limit\":{\"type\":\"integer\"}}}"
 
 static const struct {
     const char *name, *desc, *schema;
@@ -232,6 +268,18 @@ static const struct {
       "(location, refs), touched paths matched against actual changes, and "
       "commits tagged with the task. One task by id, or all tasks.",
       S_TRACE, t_spec_trace, false },   /* trace refreshes its own graph */
+    { "remember",
+      "Save a durable project memory — a decision, constraint, outcome, "
+      "preference, or fact worth knowing in later sessions — into Codify's "
+      "database. Automatically linked to the in-progress spec task unless "
+      "a task is given. Never store secrets.",
+      S_REMEMBER, t_remember, false },
+    { "recall",
+      "Search project memories: full-text over the body, ranked by relevance "
+      "then recency, filterable by task (feature/id) and type. Call at "
+      "session start and before starting a task to load prior decisions "
+      "and outcomes.",
+      S_RECALL, t_recall, false },
 };
 #define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))
 
