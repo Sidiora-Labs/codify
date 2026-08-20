@@ -867,7 +867,7 @@ static void json_task(const Spec *s, const char *id, StrBuf *b) {
     sb_putc(b, '}');
 }
 
-/* find the (single expected) in_progress task; NULL if none */
+/* find the first in_progress task; NULL if none */
 static const char *spec_current(const Spec *s) {
     for (int i = 0; i < s->nids; i++) {
         char *st = task_status(s, s->ids[i]);
@@ -876,6 +876,17 @@ static const char *spec_current(const Spec *s) {
         if (ip) return s->ids[i];
     }
     return NULL;
+}
+
+static int spec_in_progress_count(const Spec *s) {
+    int count = 0;
+    for (int i = 0; i < s->nids; i++) {
+        if (!task_is_leaf(s, s->ids[i])) continue;
+        char *st = task_status(s, s->ids[i]);
+        if (strcmp(st, "in_progress") == 0) count++;
+        free(st);
+    }
+    return count;
 }
 
 /* ---------------- memory hooks ---------------- */
@@ -1060,14 +1071,8 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
                 "start one of its subtasks\n", id);
         return 1;
     }
-    const char *cur = spec_current(s);
-    if (cur && strcmp(cur, id) != 0 && !force) {
-        fprintf(stderr, "cg spec: task %s is already in_progress (one at a "
-                "time) — finish it with `cg spec done %s` or use --force\n",
-                cur, cur);
-        return 1;
-    }
     char *st = task_status(s, id);
+    bool already_in_progress = strcmp(st, "in_progress") == 0;
     if (strcmp(st, "done") == 0 && !force) {
         fprintf(stderr, "cg spec: task %s is already done (--force to "
                 "restart)\n", id);
@@ -1075,6 +1080,17 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
         return 1;
     }
     free(st);
+    long max_in_progress = kvx_long(s->wf, "limits", "max_in_progress", 1);
+    if (max_in_progress < 1) max_in_progress = 1;
+    int in_progress = spec_in_progress_count(s);
+    if (!already_in_progress && in_progress >= max_in_progress && !force) {
+        fprintf(stderr,
+                "cg spec: %d task(s) already in_progress (limit %ld) — finish "
+                "one or raise [limits].max_in_progress; use --force only to "
+                "override the configured safety gate\n",
+                in_progress, max_in_progress);
+        return 1;
+    }
     char *unmet[8];
     int nu = task_unmet(s, id, unmet, 8);
     if (nu > 0 && !force) {
@@ -1591,18 +1607,50 @@ static int spec_trace_cmd(Spec *s, const char *id, bool json) {
     return 0;
 }
 
-/* the in_progress task of the cwd's spec repo as "feature/id", or NULL —
- * silent on every failure so callers (cg commit) can probe unconditionally */
+/* the sole in_progress task of the cwd's spec repo as "feature/id", or NULL.
+ * Multiple tasks are intentionally ambiguous: callers must select one. */
 char *spec_active_tag(void) {
     Spec s;
     char *out = NULL;
     if (spec_load(&s, NULL, NULL, true) == 0) {
         const char *cur = spec_current(&s);
-        if (cur) {
+        if (cur && spec_in_progress_count(&s) == 1) {
             StrBuf b; sb_init(&b);
             sb_printf(&b, "%s/%s", s.feature, cur);
             out = b.p;
         }
+    }
+    spec_close(&s);
+    return out;
+}
+
+char *spec_task_tag(const char *requested) {
+    if (!requested || !requested[0]) return NULL;
+    Spec s;
+    char *out = NULL;
+    if (spec_load(&s, NULL, NULL, true) != 0) {
+        spec_close(&s);
+        return NULL;
+    }
+    const char *id = requested;
+    const char *slash = strchr(requested, '/');
+    if (slash) {
+        size_t feature_len = (size_t)(slash - requested);
+        if (strlen(s.feature) != feature_len ||
+            strncmp(requested, s.feature, feature_len) != 0) {
+            spec_close(&s);
+            return NULL;
+        }
+        id = slash + 1;
+    }
+    if (task_exists(&s, id) && task_is_leaf(&s, id)) {
+        char *status = task_status(&s, id);
+        if (strcmp(status, "in_progress") == 0) {
+            StrBuf b; sb_init(&b);
+            sb_printf(&b, "%s/%s", s.feature, id);
+            out = b.p;
+        }
+        free(status);
     }
     spec_close(&s);
     return out;

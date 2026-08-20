@@ -145,6 +145,8 @@ int cmd_routes (Cg *cg, const char *filter, bool json);
 
 /* ---------------- vcs ---------------- */
 int cmd_commit  (Cg *cg, const char *msg, bool quiet);
+int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,
+                            const char *spec_tag, bool amend);
 int cmd_log     (Cg *cg, int limit, bool json);
 int cmd_status  (Cg *cg, bool json);
 int cmd_diff    (Cg *cg, const char *a, const char *b);
@@ -223,6 +225,8 @@ int cmd_spec(int argc, char **argv, bool json);
 /* in_progress task of the cwd's spec repo as "feature/id" (malloc'd), or
  * NULL when there is no spec repo / no active task — never prints */
 char *spec_active_tag(void);
+/* requested in_progress task as "feature/id"; NULL when invalid/not active */
+char *spec_task_tag(const char *requested);
 
 /* ---------------- agentic layer ---------------- */
 int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */

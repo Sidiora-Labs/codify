@@ -201,7 +201,8 @@ static int commit_load(const Cg *cg, const char *hash, Commit *c) {
     return 0;
 }
 
-int cmd_commit(Cg *cg, const char *msg, bool quiet) {
+int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,
+                            const char *spec_tag, bool amend) {
     Manifest m = {0};
     snapshot_tree(cg, &m, true);
     size_t mlen = 0;
@@ -212,16 +213,29 @@ int cmd_commit(Cg *cg, const char *msg, bool quiet) {
 
     char parent[65] = "";
     bool has_parent = head_read(cg, parent) == 0;
+    if (amend && !has_parent) {
+        if (!quiet) fprintf(stderr, "cg: cannot amend before the first snapshot\n");
+        man_free(&m);
+        return 1;
+    }
     if (has_parent) {
         Commit pc;
         if (commit_load(cg, parent, &pc) == 0) {
             bool same = strcmp(pc.tree, tree_hash) == 0;
+            if (amend) {
+                has_parent = pc.parent[0] != 0;
+                snprintf(parent, sizeof parent, "%s", pc.parent);
+            }
             free(pc.message);
-            if (same) {
+            if (same && !amend) {
                 if (!quiet) printf("nothing to commit (tree unchanged)\n");
                 man_free(&m);
                 return 0;
             }
+        } else if (amend) {
+            if (!quiet) fprintf(stderr, "cg: cannot load snapshot being amended\n");
+            man_free(&m);
+            return 1;
         }
     }
 
@@ -229,7 +243,7 @@ int cmd_commit(Cg *cg, const char *msg, bool quiet) {
     char *tagged = NULL;
     const char *final_msg = msg ? msg : "";
     if (!strstr(final_msg, "[spec:")) {
-        char *tag = spec_active_tag();
+        char *tag = spec_tag ? xstrdup(spec_tag) : spec_active_tag();
         if (tag) {
             StrBuf t; sb_init(&t);
             sb_printf(&t, "%s [spec:%s]", final_msg, tag);
@@ -254,6 +268,10 @@ int cmd_commit(Cg *cg, const char *msg, bool quiet) {
     free(tagged);
     man_free(&m);
     return 0;
+}
+
+int cmd_commit(Cg *cg, const char *msg, bool quiet) {
+    return cmd_commit_with_options(cg, msg, quiet, NULL, false);
 }
 
 int cmd_log(Cg *cg, int limit, bool json) {

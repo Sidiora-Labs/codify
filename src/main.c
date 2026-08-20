@@ -22,7 +22,7 @@ static void usage(void) {
 "  info                     machine profile and how the pipeline was sized\n"
 "\n"
 "version control\n"
-"  commit -m <msg>          snapshot the working tree (content-addressed)\n"
+"  commit -m <msg>          snapshot; optional --task <id> and --amend\n"
 "  log [-n N]               commit history\n"
 "  status                   working tree vs HEAD\n"
 "  diff [A] [B]             HEAD vs worktree | A vs worktree | A vs B\n"
@@ -47,7 +47,7 @@ static void usage(void) {
 "  spec render [--check]    regenerate IDE pointer files + markdown mirror\n"
 "  spec [status]            task board for the active feature\n"
 "  spec next                next eligible task with its acceptance criteria\n"
-"  spec start <id>          mark a task in_progress (one at a time)\n"
+"  spec start <id>          mark a task in_progress (honors workflow limit)\n"
 "  spec done <id>           verify_cmd + graph checks (symbols/touches),\n"
 "                           then mark done; records an outcome memory\n"
 "  spec trace [<id>]        trace tasks to code: symbols in the graph,\n"
@@ -208,12 +208,25 @@ int main(int argc, char **argv) {
         rc = cmd_watch(&cg, &si, deb > 0 ? deb : 300);
     } else if (strcmp(cmd, "commit") == 0) {
         const char *msg = opt(&argc, argv, "-m", NULL);
-        if (!msg) { fprintf(stderr, "usage: cg commit -m <message>\n"); rc = 1; }
+        const char *task = opt(&argc, argv, "--task", NULL);
+        bool amend = flag(&argc, argv, "--amend");
+        char *tag = task ? spec_task_tag(task) : NULL;
+        if (!msg) {
+            fprintf(stderr,
+                    "usage: cg commit -m <message> [--task <id>] [--amend]\n");
+            rc = 1;
+        } else if (task && !tag) {
+            fprintf(stderr,
+                    "cg: --task %s is not an in_progress task of the active spec\n",
+                    task);
+            rc = 1;
+        }
         else {
             IndexStats st;
             cg_index(&cg, &si, false, &st, true);   /* graph stays fresh */
-            rc = cmd_commit(&cg, msg, false);
+            rc = cmd_commit_with_options(&cg, msg, false, tag, amend);
         }
+        free(tag);
     } else if (strcmp(cmd, "log") == 0) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         rc = cmd_log(&cg, limit > 0 ? limit : 20, json);

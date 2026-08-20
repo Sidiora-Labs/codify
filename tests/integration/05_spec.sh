@@ -52,9 +52,9 @@ has "$out" "group heading"
 grep -q -- "- \[-\] 1.2" spec/demo/tasks.md \
     || fail "tasks.md checkbox not refreshed to [-]"
 
-# one in progress at a time
+# default workflow limit remains one in progress at a time
 out="$("$CG" spec start 2.1 2>&1)" && fail "second start should refuse"
-has "$out" "one at a time"
+has "$out" "limit 1"
 
 # verify_cmd gates done (fixture task needs verify.marker in repo root)
 out="$("$CG" spec done 1.2 2>&1)" && fail "done should refuse without marker"
@@ -110,5 +110,38 @@ echo z >> scratch.txt
 out="$("$CG" commit -m "manual [spec:demo/9.9]")"
 has "$out" "[spec:demo/9.9]"
 hasnt "$out" "2.1"
+
+# ---- configured parallel tasks, explicit tags and snapshot amend ----
+cp -r "$FIXTURES/specrepo" "$TMP/multi"
+cd "$TMP/multi"
+python3 - <<'EOF'
+p = "spec/workflow.kvx"
+s = open(p).read()
+s = s.replace("[loop]", "[limits]\nmax_in_progress = 2\n\n[loop]")
+open(p, "w").write(s)
+p = "spec/demo/spec.kvx"
+s = open(p).read().replace('requires = ["1.2"]', 'requires = ["1.1"]')
+open(p, "w").write(s)
+EOF
+"$CG" spec start 1.2 >/dev/null
+"$CG" spec start 2.1 >/dev/null
+out="$("$CG" spec start 1.1 2>&1)" && fail "done task restart should refuse"
+has "$out" "already done"
+
+"$CG" init >/dev/null
+echo a > scratch.txt
+out="$("$CG" commit -m "ambiguous parallel work")"
+hasnt "$out" "[spec:"
+echo b >> scratch.txt
+out="$("$CG" commit -m "selected work" --task 2.1)"
+has "$out" "[spec:demo/2.1]"
+out="$("$CG" commit -m "corrected selection" --task 1.2 --amend)"
+has "$out" "[spec:demo/1.2]"
+out="$("$CG" log)"
+has "$out" "corrected selection"
+hasnt "$out" "selected work"
+out="$("$CG" commit -m "bad selection" --task 9.9 2>&1)" \
+    && fail "unknown explicit task should refuse"
+has "$out" "not an in_progress task"
 
 echo ok
