@@ -6,6 +6,7 @@
  *   cg spec [status]           task board for the active feature
  *   cg spec next               lowest-wave eligible task, with its ACs
  *   cg spec start <id>         mark in_progress (one at a time), refresh mirror
+ *   cg spec implemented <id>   graph-check source work, mark qualification pending
  *   cg spec done <id>          verify_cmd gate, mark done, refresh mirror
  *
  * The kvx files stay the single source of truth: start/done rewrite only the
@@ -416,8 +417,11 @@ static char *render_tasks(const Kvx *f, const char *fdir, const char *banner,
         snprintf(idlabel, sizeof idlabel, depth == 0 ? "%s." : "%s", ids[i]);
         char *status = S(f, sec, "status");
         char *title = S(f, sec, "title");
-        sb_printf(&b, "%s- %s %s %s\n", indent, checkbox(status), idlabel,
+        sb_printf(&b, "%s- %s %s %s", indent, checkbox(status), idlabel,
                   title);
+        if (strcmp(status, "implemented") == 0)
+            sb_puts(&b, " — **Implemented - qualification pending**");
+        sb_putc(&b, '\n');
         free(status); free(title);
         FOR_KV(f, sec, "do_", j) {
             char *v = entry_val(f, j);
@@ -625,6 +629,7 @@ static int spec_render(const char *root, bool check, bool quiet) {
 
 typedef struct {
     char root[4096];
+    char wfpath[4700];     /* spec/workflow.kvx */
     char fpath[4700];      /* spec/<feature>/spec.kvx */
     char *feature;
     Kvx *wf, *f;
@@ -649,11 +654,10 @@ static int spec_load(Spec *s, const char *root_ov, const char *feature_ov,
                     "any parent directory\n");
         return -1;
     }
-    char wfpath[4700];
-    snprintf(wfpath, sizeof wfpath, "%s/spec/workflow.kvx", s->root);
-    s->wf = kvx_parse(wfpath);
+    snprintf(s->wfpath, sizeof s->wfpath, "%s/spec/workflow.kvx", s->root);
+    s->wf = kvx_parse(s->wfpath);
     if (!s->wf) {
-        if (!quiet) fprintf(stderr, "cg spec: cannot parse %s\n", wfpath);
+        if (!quiet) fprintf(stderr, "cg spec: cannot parse %s\n", s->wfpath);
         return -1;
     }
     s->feature = feature_ov ? xstrdup(feature_ov)
@@ -693,6 +697,11 @@ static char *task_status(const Spec *s, const char *id) {
     return S(s->f, sec, "status");
 }
 
+static bool spec_prod_mode(const Spec *s) {
+    const char *raw = kvx_raw(s->wf, "mode", "name");
+    return raw && (strcmp(raw, "prod") == 0 || strcmp(raw, "\"prod\"") == 0);
+}
+
 static bool task_is_leaf(const Spec *s, const char *id) {
     char sec[300];
     task_sec(sec, sizeof sec, id);
@@ -700,9 +709,10 @@ static bool task_is_leaf(const Spec *s, const char *id) {
     return raw && raw[0];
 }
 
-static bool task_done(const Spec *s, const char *id) {
+static bool task_satisfies_requires(const Spec *s, const char *id) {
     char *st = task_status(s, id);
-    bool d = strcmp(st, "done") == 0;
+    bool d = strcmp(st, "done") == 0 ||
+             (spec_prod_mode(s) && strcmp(st, "implemented") == 0);
     free(st);
     return d;
 }
@@ -714,7 +724,7 @@ static int task_unmet(const Spec *s, const char *id, char **unmet, int cap) {
     char **reqs; int nr = kvx_list(s->f, sec, "requires", &reqs);
     int n = 0;
     for (int i = 0; i < nr; i++) {
-        if (!task_done(s, reqs[i])) {
+        if (!task_satisfies_requires(s, reqs[i])) {
             if (n < cap) unmet[n] = reqs[i];
             else free(reqs[i]);
             n++;
@@ -785,7 +795,12 @@ static void print_task(const Spec *s, const char *id) {
     if (nreq > 0) {
         printf("  requires:");
         for (int i = 0; i < nreq; i++) {
-            printf(" %s%s", reqids[i], task_done(s, reqids[i]) ? "(done)" : "(NOT done)");
+            char *rst = task_status(s, reqids[i]);
+            const char *label = strcmp(rst, "done") == 0 ? "(done)" :
+                (spec_prod_mode(s) && strcmp(rst, "implemented") == 0) ?
+                "(implemented)" : "(NOT ready)";
+            printf(" %s%s", reqids[i], label);
+            free(rst);
             free(reqids[i]);
         }
         printf("\n");
@@ -962,12 +977,13 @@ static void spec_print_memories(Spec *s, const char *id) {
 }
 
 static int spec_status_cmd(Spec *s, bool json) {
-    int done = 0, inprog = 0, pending = 0, leaves = 0;
+    int done = 0, implemented = 0, inprog = 0, pending = 0, leaves = 0;
     for (int i = 0; i < s->nids; i++) {
         if (!task_is_leaf(s, s->ids[i])) continue;
         leaves++;
         char *st = task_status(s, s->ids[i]);
         if (strcmp(st, "done") == 0) done++;
+        else if (strcmp(st, "implemented") == 0) implemented++;
         else if (strcmp(st, "in_progress") == 0) inprog++;
         else pending++;
         free(st);
@@ -983,8 +999,11 @@ static int spec_status_cmd(Spec *s, bool json) {
         char rel[4700];
         snprintf(rel, sizeof rel, "spec/%s/spec.kvx", s->feature);
         sb_json_str(&b, rel);
-        sb_printf(&b, ",\"tasks\":%d,\"done\":%d,\"in_progress\":%d,"
-                  "\"pending\":%d", leaves, done, inprog, pending);
+        sb_puts(&b, ",\"mode\":");
+        sb_json_str(&b, spec_prod_mode(s) ? "prod" : "standard");
+        sb_printf(&b, ",\"tasks\":%d,\"done\":%d,\"implemented\":%d,"
+                  "\"in_progress\":%d,\"pending\":%d", leaves, done,
+                  implemented, inprog, pending);
         if (cur) { sb_puts(&b, ",\"current\":"); json_task(s, cur, &b); }
         if (next) { sb_puts(&b, ",\"next\":"); json_task(s, next, &b); }
         sb_puts(&b, "}\n");
@@ -994,14 +1013,25 @@ static int spec_status_cmd(Spec *s, bool json) {
     }
 
     printf("feature: %s (spec/%s/spec.kvx)\n", s->feature, s->feature);
-    printf("tasks: %d — %d done, %d in progress, %d pending\n", leaves, done,
-           inprog, pending);
+    printf("mode: %s\n", spec_prod_mode(s) ? "prod" : "standard");
+    if (spec_prod_mode(s) || implemented > 0)
+        printf("tasks: %d — %d done, %d implemented, %d in progress, "
+               "%d pending\n", leaves, done, implemented, inprog, pending);
+    else
+        printf("tasks: %d — %d done, %d in progress, %d pending\n", leaves,
+               done, inprog, pending);
     if (leaves > 0) {
         int width = 30;
         int fill = leaves ? done * width / leaves : 0;
-        printf("progress: [");
+        printf(spec_prod_mode(s) ? "qualified progress: [" : "progress: [");
         for (int i = 0; i < width; i++) putchar(i < fill ? '#' : '-');
         printf("] %d%%\n", leaves ? done * 100 / leaves : 0);
+        if (spec_prod_mode(s)) {
+            fill = (done + implemented) * width / leaves;
+            printf("coding progress: [");
+            for (int i = 0; i < width; i++) putchar(i < fill ? '#' : '-');
+            printf("] %d%%\n", (done + implemented) * 100 / leaves);
+        }
     }
     if (cur) {
         char sec[300];
@@ -1017,12 +1047,32 @@ static int spec_status_cmd(Spec *s, bool json) {
         printf("next: %s — %s (wave %lu)\n", next, t,
                uint_or(s->f, sec, "wave", 0));
         free(t);
-    } else if (!cur && pending == 0 && leaves > 0) {
+    } else if (!cur && done == leaves && leaves > 0) {
         printf("all tasks done\n");
-    } else if (!next && pending > 0) {
+    } else if (!next && (pending > 0 || implemented > 0)) {
         printf("next: none eligible (blocked on in-progress or unmet "
                "requires)\n");
     }
+    return 0;
+}
+
+static int spec_mode_cmd(Spec *s, const char *mode) {
+    if (!mode || (strcmp(mode, "prod") != 0 && strcmp(mode, "standard") != 0)) {
+        fprintf(stderr, "cg spec: mode must be prod or standard\n");
+        return 1;
+    }
+    if (kvx_set_string(s->wfpath, "mode", "name", mode) != 0) {
+        fprintf(stderr, "cg spec: could not set [mode].name in %s\n", s->wfpath);
+        return 1;
+    }
+    spec_render(s->root, false, true);
+    kvx_free(s->wf);
+    s->wf = kvx_parse(s->wfpath);
+    if (!s->wf) {
+        fprintf(stderr, "cg spec: cannot parse %s after mode update\n", s->wfpath);
+        return 1;
+    }
+    printf("mode: %s\n", mode);
     return 0;
 }
 
@@ -1079,6 +1129,13 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
         free(st);
         return 1;
     }
+    if (strcmp(st, "implemented") == 0 && !force) {
+        fprintf(stderr, "cg spec: task %s is implemented — qualification "
+                "pending; use `cg spec done %s` or --force to restart\n", id,
+                id);
+        free(st);
+        return 1;
+    }
     free(st);
     long max_in_progress = kvx_long(s->wf, "limits", "max_in_progress", 1);
     if (max_in_progress < 1) max_in_progress = 1;
@@ -1124,15 +1181,94 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
 
 static int spec_verify_task(Spec *s, const char *id);
 
+static int spec_implemented_cmd(Spec *s, const char *id) {
+    if (!spec_prod_mode(s)) {
+        fprintf(stderr, "cg spec: `implemented` requires Prod mode; run "
+                "`cg spec mode prod` first\n");
+        return 1;
+    }
+    if (!task_exists(s, id)) {
+        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        return 1;
+    }
+    if (!task_is_leaf(s, id)) {
+        fprintf(stderr, "cg spec: task %s is a group heading (no wave)\n", id);
+        return 1;
+    }
+    char *st = task_status(s, id);
+    if (strcmp(st, "in_progress") != 0) {
+        fprintf(stderr, "cg spec: task %s is %s, not in_progress — "
+                "`cg spec start %s` first\n", id,
+                st[0] ? st : "pending", id);
+        free(st);
+        return 1;
+    }
+    free(st);
+
+    char sec[300];
+    task_sec(sec, sizeof sec, id);
+    int vfail = spec_verify_task(s, id);
+    if (vfail > 0) {
+        fprintf(stderr, "cg spec: %d graph check(s) failed — task %s NOT "
+                "marked implemented\n", vfail, id);
+        char *title = S(s->f, sec, "title");
+        StrBuf mb; sb_init(&mb);
+        sb_printf(&mb, "blocked: %s — %d source graph check(s) failed",
+                  title, vfail);
+        spec_note_outcome(s, id, mb.p);
+        sb_free(&mb); free(title);
+        return 1;
+    }
+
+    if (kvx_set_status(s->fpath, sec, "implemented") != 0) {
+        fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
+                sec, s->fpath);
+        return 1;
+    }
+    spec_render(s->root, false, true);
+    kvx_free(s->f);
+    s->f = kvx_parse(s->fpath);
+    char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
+    printf("implemented %s — %s (qualification pending)\n", id, title);
+    if (s->f) {
+        StrBuf mb; sb_init(&mb);
+        sb_printf(&mb, "implemented: %s - qualification pending", title);
+        spec_note_outcome(s, id, mb.p);
+        sb_free(&mb);
+    }
+    free(title);
+    if (s->f) {
+        const char *next = spec_next_id(s);
+        if (next) {
+            char nsec[300];
+            task_sec(nsec, sizeof nsec, next);
+            char *next_title = S(s->f, nsec, "title");
+            printf("next: %s — %s (wave %lu)\n", next, next_title,
+                   uint_or(s->f, nsec, "wave", 0));
+            free(next_title);
+        } else {
+            printf("next: none eligible yet\n");
+        }
+    }
+    return 0;
+}
+
 static int spec_done_cmd(Spec *s, const char *id, bool force) {
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     char *st = task_status(s, id);
-    if (strcmp(st, "in_progress") != 0 && !force) {
-        fprintf(stderr, "cg spec: task %s is %s, not in_progress — "
-                "`cg spec start %s` first, or --force\n", id,
+    bool was_implemented = strcmp(st, "implemented") == 0;
+    if (was_implemented && force) {
+        fprintf(stderr, "cg spec: cannot force an implemented task to done; "
+                "qualification must pass\n");
+        free(st);
+        return 1;
+    }
+    if (strcmp(st, "in_progress") != 0 && !was_implemented && !force) {
+        fprintf(stderr, "cg spec: task %s is %s, not in_progress or "
+                "implemented — `cg spec start %s` first, or --force\n", id,
                 st[0] ? st : "pending", id);
         free(st);
         return 1;
@@ -1686,10 +1822,12 @@ int cmd_spec(int argc, char **argv, bool json) {
     }
 
     if (strcmp(sub, "status") != 0 && strcmp(sub, "next") != 0 &&
-        strcmp(sub, "start") != 0 && strcmp(sub, "done") != 0 &&
+        strcmp(sub, "start") != 0 && strcmp(sub, "implemented") != 0 &&
+        strcmp(sub, "done") != 0 && strcmp(sub, "mode") != 0 &&
         strcmp(sub, "trace") != 0) {
         fprintf(stderr, "usage: cg spec [render [--check] | status | next | "
-                "start <id> | done <id> [--force] | trace [<id>]] "
+                "mode <prod|standard> | start <id> | implemented <id> | "
+                "done <id> [--force] | trace [<id>]] "
                 "[-f <feature>]\n");
         return 1;
     }
@@ -1704,11 +1842,28 @@ int cmd_spec(int argc, char **argv, bool json) {
         rc = spec_status_cmd(&s, json);
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
+    } else if (strcmp(sub, "mode") == 0) {
+        if (npos != 1) {
+            fprintf(stderr, "usage: cg spec mode <prod|standard>\n");
+            rc = 1;
+        } else {
+            rc = spec_mode_cmd(&s, pos[0]);
+        }
     } else if (strcmp(sub, "trace") == 0) {
         rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, json);
     } else if (strcmp(sub, "start") == 0) {
         if (npos < 1) { fprintf(stderr, "usage: cg spec start <id>\n"); rc = 1; }
         else rc = spec_start_cmd(&s, pos[0], force);
+    } else if (strcmp(sub, "implemented") == 0) {
+        if (force) {
+            fprintf(stderr, "cg spec implemented does not support --force\n");
+            rc = 1;
+        } else if (npos != 1) {
+            fprintf(stderr, "usage: cg spec implemented <id>\n");
+            rc = 1;
+        } else {
+            rc = spec_implemented_cmd(&s, pos[0]);
+        }
     } else {
         if (npos < 1) { fprintf(stderr, "usage: cg spec done <id>\n"); rc = 1; }
         else rc = spec_done_cmd(&s, pos[0], force);

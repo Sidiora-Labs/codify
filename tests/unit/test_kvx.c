@@ -173,12 +173,82 @@ static void test_set_status(void) {
        "missing file reports -1");
 }
 
+static void test_set_string(void) {
+    write_tmp(
+        "# keep\n"
+        "[mode]\n"
+        "name    = \"standard\"  # effective mode\n"
+        "other = \"untouched\"\n"
+        "\n"
+        "[next]\n"
+        "value = \"same\"\n");
+    ok(kvx_set_string(tmppath, "mode", "name", "prod") == 0,
+       "set_string updates existing key");
+    char *after = read_entire_file(tmppath, NULL);
+    ok_str(after,
+        "# keep\n"
+        "[mode]\n"
+        "name    = \"prod\"  # effective mode\n"
+        "other = \"untouched\"\n"
+        "\n"
+        "[next]\n"
+        "value = \"same\"\n");
+    free(after);
+
+    write_tmp(
+        "[mode]\n"
+        "name = \"first\"\n"
+        "name = \"standard\" # last value wins\n");
+    ok(kvx_set_string(tmppath, "mode", "name", "prod") == 0,
+       "set_string updates effective duplicate");
+    after = read_entire_file(tmppath, NULL);
+    ok_str(after,
+        "[mode]\n"
+        "name = \"first\"\n"
+        "name = \"prod\" # last value wins\n");
+    free(after);
+
+    write_tmp(
+        "[mode]\n"
+        "other = \"untouched\"\n"
+        "\n"
+        "[next]\n"
+        "value = \"same\"\n");
+    ok(kvx_set_string(tmppath, "mode", "name", "prod") == 0,
+       "set_string inserts missing key");
+    after = read_entire_file(tmppath, NULL);
+    ok_str(after,
+        "[mode]\n"
+        "other = \"untouched\"\n"
+        "\n"
+        "name = \"prod\"\n"
+        "[next]\n"
+        "value = \"same\"\n");
+    free(after);
+
+    write_tmp("[meta]\nname = \"demo\"");
+    ok(kvx_set_string(tmppath, "mode", "name", "prod") == 0,
+       "set_string appends missing section without final newline");
+    after = read_entire_file(tmppath, NULL);
+    ok_str(after,
+        "[meta]\n"
+        "name = \"demo\"\n"
+        "\n"
+        "[mode]\n"
+        "name = \"prod\"\n");
+    free(after);
+
+    ok(kvx_set_string("/nonexistent/x.kvx", "mode", "name", "prod") == -1,
+       "set_string reports missing file");
+}
+
 int main(void) {
     snprintf(tmppath, sizeof tmppath, "/tmp/cg_test_kvx_%d.kvx", getpid());
     test_parse();
     test_sort_edge();
     test_errors();
     test_set_status();
+    test_set_string();
     unlink(tmppath);
     return t_done("kvx");
 }

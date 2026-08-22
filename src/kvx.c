@@ -347,3 +347,126 @@ int kvx_set_status(const char *path, const char *section, const char *value) {
     sb_free(&out);
     return rc;
 }
+
+static void sb_kvx_string(StrBuf *b, const char *value) {
+    sb_putc(b, '"');
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        if (*p == '\\' || *p == '"') {
+            sb_putc(b, '\\');
+            sb_putc(b, (char)*p);
+        } else if (*p == '\n') {
+            sb_puts(b, "\\n");
+        } else if (*p == '\r') {
+            sb_puts(b, "\\r");
+        } else if (*p == '\t') {
+            sb_puts(b, "\\t");
+        } else {
+            sb_putc(b, (char)*p);
+        }
+    }
+    sb_putc(b, '"');
+}
+
+int kvx_set_string(const char *path, const char *section, const char *key,
+                   const char *value) {
+    size_t len = 0;
+    char *body = read_entire_file(path, &len);
+    if (!body) return -1;
+
+    bool section_found = false, in_target = false;
+    size_t section_end = len;
+    size_t key_start = SIZE_MAX, key_len = 0, key_eq = 0, key_tail = 0;
+    size_t pos = 0;
+    while (pos < len) {
+        char *nl = memchr(body + pos, '\n', len - pos);
+        size_t ll = nl ? (size_t)(nl - (body + pos)) : len - pos;
+        char line[4096];
+        size_t cl = ll < sizeof line - 1 ? ll : sizeof line - 1;
+        memcpy(line, body + pos, cl);
+        line[cl] = 0;
+
+        char probe[4096];
+        snprintf(probe, sizeof probe, "%s", line);
+        strip_comment(probe, strlen(probe));
+        char *t = trim(probe);
+        if (t[0] == '[' && t[strlen(t) - 1] == ']') {
+            if (in_target) section_end = pos;
+            t[strlen(t) - 1] = 0;
+            in_target = strcmp(trim(t + 1), section) == 0;
+            if (in_target) {
+                section_found = true;
+                section_end = len;
+            }
+        } else if (in_target) {
+            char *eq = strchr(line, '=');
+            if (eq) {
+                char keybuf[256];
+                size_t kn = (size_t)(eq - line);
+                if (kn < sizeof keybuf) {
+                    memcpy(keybuf, line, kn);
+                    keybuf[kn] = 0;
+                    if (strcmp(trim(keybuf), key) == 0) {
+                        size_t comment = ll;
+                        bool quoted = false, escaped = false;
+                        for (size_t i = (size_t)(eq - line) + 1; i < ll; i++) {
+                            char c = line[i];
+                            if (escaped) { escaped = false; continue; }
+                            if (quoted && c == '\\') { escaped = true; continue; }
+                            if (c == '"') { quoted = !quoted; continue; }
+                            if (!quoted && c == '#') { comment = i; break; }
+                        }
+                        while (comment > (size_t)(eq - line) + 1 &&
+                               isspace((unsigned char)line[comment - 1]))
+                            comment--;
+                        key_start = pos;
+                        key_len = ll;
+                        key_eq = (size_t)(eq - line);
+                        key_tail = comment;
+                    }
+                }
+            }
+        }
+        pos += ll + (nl ? 1 : 0);
+    }
+
+    StrBuf out; sb_init(&out);
+    if (key_start != SIZE_MAX) {
+        for (size_t i = 0; i <= key_eq; i++) sb_putc(&out, body[key_start + i]);
+        sb_putc(&out, ' ');
+        sb_kvx_string(&out, value);
+        for (size_t i = key_tail; i < key_len; i++)
+            sb_putc(&out, body[key_start + i]);
+        if (key_start > 0) {
+            StrBuf joined; sb_init(&joined);
+            for (size_t i = 0; i < key_start; i++) sb_putc(&joined, body[i]);
+            sb_puts(&joined, out.p);
+            size_t rest = key_start + key_len;
+            for (size_t i = rest; i < len; i++) sb_putc(&joined, body[i]);
+            sb_free(&out);
+            out = joined;
+        } else {
+            size_t rest = key_len;
+            for (size_t i = rest; i < len; i++) sb_putc(&out, body[i]);
+        }
+    } else if (section_found) {
+        for (size_t i = 0; i < section_end; i++) sb_putc(&out, body[i]);
+        if (section_end && body[section_end - 1] != '\n') sb_putc(&out, '\n');
+        sb_printf(&out, "%s = ", key);
+        sb_kvx_string(&out, value);
+        sb_putc(&out, '\n');
+        for (size_t i = section_end; i < len; i++) sb_putc(&out, body[i]);
+    } else {
+        sb_puts(&out, body);
+        if (len && body[len - 1] != '\n') sb_putc(&out, '\n');
+        if (out.len && (out.len < 2 || out.p[out.len - 2] != '\n'))
+            sb_putc(&out, '\n');
+        sb_printf(&out, "[%s]\n%s = ", section, key);
+        sb_kvx_string(&out, value);
+        sb_putc(&out, '\n');
+    }
+
+    free(body);
+    int rc = write_entire_file(path, out.p, out.len);
+    sb_free(&out);
+    return rc;
+}

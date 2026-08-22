@@ -111,4 +111,26 @@ assert any('blocked: Check mode' in m['body'] for m in mems), mems
 assert all(m['task'] == 'demo/2.1' for m in mems), mems
 "
 
+# ---- Prod mode records implementation without a qualification claim ----
+cp -r "$FIXTURES/specrepo" "$TMP/prod-memory"
+cd "$TMP/prod-memory"
+"$CG" init >/dev/null
+"$CG" spec mode prod >/dev/null
+"$CG" spec start 1.2 >/dev/null
+"$CG" spec implemented 1.2 >/dev/null
+out="$("$CG" recall --task demo/1.2 --type outcome)"
+has "$out" "implemented: Render the mirror - qualification pending"
+has "$out" "auto"
+hasnt "$out" "done: Render the mirror"
+"$CG" recall --task demo/1.2 --type outcome --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["count"] == 1, d
+m = d["memories"][0]
+assert m["body"] == "implemented: Render the mirror - qualification pending", m
+assert m["task"] == "demo/1.2" and m["source"] == "auto", m
+'
+out="$("$CG" remember "Qualification remains human-owned")"
+hasnt "$out" "task demo/1.2"
+
 echo ok

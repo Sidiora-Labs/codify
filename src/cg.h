@@ -220,6 +220,9 @@ int   kvx_subsections(const Kvx *k, const char *prefix, char ***out); /* file or
 void  kvx_sort_dotted(char **ids, int n);
 /* surgically rewrite `status = "..."` inside [section]; preserves all else */
 int   kvx_set_status(const char *path, const char *section, const char *value);
+/* surgically set a quoted scalar, adding the key/section when absent */
+int   kvx_set_string(const char *path, const char *section, const char *key,
+                     const char *value);
 
 int cmd_spec(int argc, char **argv, bool json);
 /* in_progress task of the cwd's spec repo as "feature/id" (malloc'd), or

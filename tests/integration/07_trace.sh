@@ -161,4 +161,40 @@ assert touches[-1] == {
 }, touches
 "
 
+# ---- Prod mode trace preserves implemented source-evidence state ----
+cp -r "$FIXTURES/specrepo" "$TMP/prod-trace"
+cd "$TMP/prod-trace"
+"$CG" init >/dev/null
+"$CG" commit -m "baseline" >/dev/null
+"$CG" spec mode prod >/dev/null
+"$CG" spec start 1.2 >/dev/null
+"$CG" spec implemented 1.2 >/dev/null
+"$CG" spec start 2.1 >/dev/null
+
+rc=0; out="$("$CG" spec implemented 2.1 2>&1)" || rc=$?
+[ "$rc" -eq 1 ] || fail "implemented should refuse failed graph checks"
+has "$out" "NOT marked implemented"
+out="$("$CG" spec status)"
+has "$out" "1 in progress"
+
+mkdir -p src
+cat > src/check.ts <<'EOF'
+export function checkMode(stale: number): number {
+  return stale > 0 ? 2 : 0;
+}
+EOF
+out="$("$CG" commit -m "implemented check mode")"
+has "$out" "[spec:demo/2.1]"
+"$CG" spec implemented 2.1 >/dev/null
+out="$("$CG" spec trace 2.1)"
+has "$out" "task 2.1 — Check mode [implemented]"
+has "$out" "implemented check mode [spec:demo/2.1]"
+"$CG" spec trace 2.1 --json | python3 -c '
+import json, sys
+t = json.load(sys.stdin)["task"]
+assert t["id"] == "2.1" and t["status"] == "implemented", t
+assert t["symbols"][0]["found"] is True, t
+assert t["touches"][0]["changed"] is True, t
+'
+
 echo ok
