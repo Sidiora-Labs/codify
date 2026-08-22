@@ -111,6 +111,30 @@ static int t_spec_start(void *v) {
     free(id);
     return rc;
 }
+static int t_spec_mode(void *v) {
+    CallCtx *c = v;
+    char *mode = c->args ? json_get_string(c->args, "mode") : NULL;
+    if (!mode) { printf("{\"error\":\"missing mode\"}\n"); return 1; }
+    char *a[] = { "mode", mode };
+    int rc = run_spec(2, a, false);
+    free(mode);
+    return rc;
+}
+static int t_spec_implemented(void *v) {
+    CallCtx *c = v;
+    char *id = c->args ? json_get_string(c->args, "id") : NULL;
+    if (!id) { printf("{\"error\":\"missing id\"}\n"); return 1; }
+    char *force = c->args ? json_get_raw(c->args, "force") : NULL;
+    if (force) {
+        free(force); free(id);
+        printf("{\"error\":\"spec_implemented does not support force\"}\n");
+        return 1;
+    }
+    char *a[] = { "implemented", id };
+    int rc = run_spec(2, a, false);
+    free(id);
+    return rc;
+}
 static int t_spec_done(void *v) {
     CallCtx *c = v;
     char *id = c->args ? json_get_string(c->args, "id") : NULL;
@@ -181,6 +205,9 @@ static int t_recall(void *v) {
 #define S_TASKDN "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \
                  "\"description\":\"dotted task id, e.g. 16.7\"}," \
                  "\"force\":{\"type\":\"boolean\"}},\"required\":[\"id\"]}"
+#define S_MODE   "{\"type\":\"object\",\"properties\":{\"mode\":{" \
+                 "\"type\":\"string\",\"enum\":[\"prod\",\"standard\"]}}," \
+                 "\"required\":[\"mode\"]}"
 #define S_CHECK  "{\"type\":\"object\",\"properties\":{\"check\":{\"type\":\"boolean\"}}}"
 #define S_TRACE  "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \
                  "\"description\":\"dotted task id; omit for all tasks\"}}}"
@@ -242,22 +269,32 @@ static const struct {
       S_MSG, t_commit, false },
     { "spec_status",
       "Task board of the active Ion spec feature (spec/<feature>/spec.kvx): "
-      "totals, current in-progress task, and the next eligible task.",
+      "workflow mode, separate done/implemented totals, current in-progress "
+      "task, and the next eligible task.",
       S_EMPTY, t_spec_status, false },
     { "spec_next",
       "The next eligible spec task — lowest wave whose `requires` are all "
-      "done — with its implementation bullets and expanded acceptance "
-      "criteria. Call before starting new work.",
+      "done (or implemented in Prod mode) — with its implementation bullets "
+      "and expanded acceptance criteria. Call before starting new work.",
       S_EMPTY, t_spec_next, false },
+    { "spec_mode",
+      "Set the repository spec workflow to Prod mode or standard mode. Prod "
+      "mode lets implemented prerequisites unlock later implementation.",
+      S_MODE, t_spec_mode, false },
     { "spec_start",
       "Mark a spec task in_progress in spec.kvx (enforces one-at-a-time and "
       "met `requires`) and refresh the markdown mirror. Do this before "
       "implementing the task.",
       S_TASKID, t_spec_start, false },
+    { "spec_implemented",
+      "Prod mode only: run non-executing symbol/touched-path graph checks and "
+      "mark coding complete with qualification pending. Never executes "
+      "verify_cmd and has no force bypass.",
+      S_TASKID, t_spec_implemented, false },
     { "spec_done",
-      "Mark a spec task done: runs the task's verify_cmd first (refuses on "
-      "failure unless force), rewrites its status in spec.kvx, refreshes the "
-      "markdown mirror, and reports the next eligible task.",
+      "Qualify an in-progress or implemented task: run verify_cmd and graph "
+      "checks, mark done only on success, refresh the mirror, and report the "
+      "next task. Failed qualification preserves implemented status.",
       S_TASKDN, t_spec_done, false },
     { "spec_render",
       "Regenerate the spec system's IDE pointer files and markdown mirror "

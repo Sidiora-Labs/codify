@@ -6,8 +6,14 @@ cp -r "$FIXTURES/sample" "$TMP/proj"
 cp -r "$FIXTURES/specrepo/spec" "$TMP/proj/spec"
 cd "$TMP/proj"
 "$CG" init >/dev/null
+python3 - <<'EOF'
+p = "spec/demo/spec.kvx"
+s = open(p).read().replace('verify_cmd = "test -f verify.marker"',
+                            'verify_cmd = "touch mcp-qualification.ran"')
+open(p, "w").write(s)
+EOF
 
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
 '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
 '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_code","arguments":{"query":"formatName"}}}' \
@@ -16,10 +22,16 @@ printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 '{"jsonrpc":"2.0","id":6,"method":"ping"}' \
 '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"remember","arguments":{"text":"MCP roundtrip memory","type":"decision"}}}' \
 '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"recall","arguments":{"query":"roundtrip"}}}' \
-'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"spec_mode","arguments":{"mode":"prod"}}}' \
-'{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"spec_start","arguments":{"id":"1.2"}}}' \
-'{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"spec_implemented","arguments":{"id":"1.2"}}}' \
+'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"spec_implemented","arguments":{"id":"1.2"}}}' \
+'{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"spec_mode","arguments":{"mode":"prod"}}}' \
+'{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"spec_start","arguments":{"id":"1.2"}}}' \
+'{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"spec_implemented","arguments":{"id":"1.2"}}}' \
+'{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"spec_implemented","arguments":{"id":"1.2","force":true}}}' \
+'{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"spec_status","arguments":{}}}' \
 | "$CG" mcp > "$TMP/mcp.out"
+
+[ ! -e mcp-qualification.ran ] \
+    || fail "MCP spec_implemented executed verify_cmd"
 
 python3 - "$TMP/mcp.out" <<'EOF'
 import json, sys
@@ -41,6 +53,12 @@ for t in ("search_code", "get_context", "impact_analysis", "vcs_commit",
 for t in by_id[2]["result"]["tools"]:
     assert t["description"], f"tool {t['name']} has no description"
     assert "inputSchema" in t, f"tool {t['name']} has no schema"
+
+tool_defs = {t["name"]: t for t in by_id[2]["result"]["tools"]}
+assert tool_defs["spec_mode"]["inputSchema"]["properties"]["mode"]["enum"] == ["prod", "standard"]
+impl_schema = tool_defs["spec_implemented"]["inputSchema"]
+assert impl_schema["required"] == ["id"], impl_schema
+assert "force" not in impl_schema["properties"], impl_schema
 
 search = by_id[3]["result"]
 assert search["isError"] is False, search
@@ -68,16 +86,29 @@ found = json.loads(rec["content"][0]["text"])
 assert found["count"] == 1, found
 assert "MCP roundtrip" in found["memories"][0]["body"], found
 
-mode = by_id[9]["result"]
+before_mode = by_id[9]["result"]
+assert before_mode["isError"] is True, before_mode
+assert "requires Prod mode" in before_mode["content"][0]["text"], before_mode
+
+mode = by_id[10]["result"]
 assert mode["isError"] is False, mode
 assert "mode: prod" in mode["content"][0]["text"], mode
 
-started = by_id[10]["result"]
+started = by_id[11]["result"]
 assert started["isError"] is False, started
 
-implemented = by_id[11]["result"]
+implemented = by_id[12]["result"]
 assert implemented["isError"] is False, implemented
 assert "implemented 1.2" in implemented["content"][0]["text"], implemented
+
+forced = by_id[13]["result"]
+assert forced["isError"] is True, forced
+assert "does not support force" in forced["content"][0]["text"], forced
+
+status = by_id[14]["result"]
+assert status["isError"] is False, status
+prod = json.loads(status["content"][0]["text"])
+assert prod["mode"] == "prod" and prod["implemented"] == 1, prod
 EOF
 
 echo ok
