@@ -254,15 +254,23 @@ vim.lsp.start({ name = "codify", cmd = { "cg", "lsp" },
 
 ### VS Code extension
 
-`editors/vscode/` ships the Codify extension: syntax highlighting for `.kvx` spec files, plus a live task board in the Explorer — tasks grouped by dependency wave with status icons, the graph-verification data behind each task (symbols with locations, touched paths, tagged commits), start/complete actions that run the real `cg spec` commands (including the refusal when checks fail), and a status bar progress item. It shells out to `cg` and needs no build step:
+`editors/vscode/` ships the Codify extension — the whole workflow in the editor:
+
+- **Code navigation from the graph.** It runs `cg lsp` and speaks LSP to it, so go-to-definition, find-references, workspace symbols, and code lens work in every indexed language with no compiler and no configuration. Hover shows what a symbol is, how many references it has, and the decisions recorded about it.
+- **Scope drift as a squiggle.** Editing a file outside the in-progress task's declared `touches` raises a warning in the Problems panel, at the moment of the edit. Advisory, never an error.
+- **A live task board.** Tasks by dependency wave with their verification data — declared symbols resolved in the graph, touched paths, tagged commits, memories. Start, mark implemented, and complete run the real `cg spec` commands, refusal included. In parallel mode it shows who holds each lease.
+- **A memory view**, and one Actions menu covering brief, review, test-impact, why, check, guard, snapshot, spec authoring, and hook installation. Reports open as rendered markdown.
+- **kvx editing.** Go-to-definition on a `requires` entry jumps to that task; completion offers the keys a task actually understands; the outline lists every requirement and task.
+
+The extension has no dependencies and no build step — including its Language Server client, which is written by hand for exactly that reason.
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-0.1.0.vsix
-code --install-extension codify-0.1.0.vsix
+npx @vscode/vsce package        # produces codify-0.3.0.vsix
+code --install-extension codify-0.3.0.vsix
 ```
 
-See [editors/vscode/README.md](editors/vscode/README.md).
+See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.
 
 ## Development
 

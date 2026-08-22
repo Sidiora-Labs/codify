@@ -1,13 +1,14 @@
 {
   "name": "codify",
   "displayName": "Codify",
-  "description": "Agent workflow for any codebase: kvx spec highlighting plus a live task board (waves, status, graph verification) driven by the cg CLI.",
-  "version": "0.1.1",
+  "description": "The whole agent workflow in your editor: code graph navigation, a live task board with verified completion, scope diagnostics, and project memory — all from the cg binary.",
+  "version": "0.3.0",
   "publisher": "sidiora-labs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/sidiora-labs/codify" },
   "engines": { "vscode": "^1.75.0" },
-  "categories": ["Programming Languages", "Other"],
+  "categories": ["Programming Languages", "Other", "Linters"],
+  "keywords": ["codify", "code graph", "spec", "agent", "kvx"],
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -43,41 +44,90 @@
           "id": "codifyTasks",
           "name": "Tasks",
           "contextualTitle": "Codify Tasks"
+        },
+        {
+          "id": "codifyMemories",
+          "name": "Memory",
+          "contextualTitle": "Codify Memory",
+          "visibility": "collapsed"
         }
       ]
     },
     "viewsWelcome": [
       {
         "view": "codifyTasks",
-        "contents": "No Codify spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the cg binary is on PATH (or set codify.binaryPath).\n[Refresh](command:codify.refresh)"
+        "contents": "No Codify spec found.\nA task board appears here when the workspace contains spec/workflow.kvx and the cg binary is on PATH (or set codify.binaryPath).\n[Create a feature spec](command:codify.newFeature)\n[Refresh](command:codify.refresh)"
+      },
+      {
+        "view": "codifyMemories",
+        "contents": "No project memories yet.\nMemories are decisions, constraints, and facts worth knowing in a later session. They live in .codegraph beside the code graph.\n[Remember a decision](command:codify.remember)"
       }
     ],
     "commands": [
-      { "command": "codify.refresh", "title": "Codify: Refresh Task Board", "icon": "$(refresh)" },
+      { "command": "codify.actions", "title": "Codify: Actions…", "icon": "$(list-unordered)" },
+      { "command": "codify.refresh", "title": "Codify: Refresh", "icon": "$(refresh)" },
+      { "command": "codify.brief", "title": "Codify: Session Brief", "icon": "$(rocket)" },
       { "command": "codify.nextTask", "title": "Codify: Next Eligible Task" },
+      { "command": "codify.wave", "title": "Codify: Show Current Wave" },
       { "command": "codify.startTask", "title": "Codify: Start Task", "icon": "$(play)" },
+      { "command": "codify.implementedTask", "title": "Codify: Mark Implemented (qualification pending)", "icon": "$(circle-large-filled)" },
       { "command": "codify.doneTask", "title": "Codify: Complete Task (verified)", "icon": "$(check)" },
-      { "command": "codify.traceTask", "title": "Codify: Trace Task to Code" },
+      { "command": "codify.claimTask", "title": "Codify: Claim Task", "icon": "$(person-add)" },
+      { "command": "codify.releaseTask", "title": "Codify: Release Claim" },
+      { "command": "codify.traceTask", "title": "Codify: Trace Task to Code", "icon": "$(references)" },
       { "command": "codify.render", "title": "Codify: Render Spec Mirror" },
-      { "command": "codify.openTask", "title": "Codify: Open Task in Spec" }
+      { "command": "codify.lint", "title": "Codify: Lint Spec", "icon": "$(law)" },
+      { "command": "codify.newFeature", "title": "Codify: New Feature Spec", "icon": "$(add)" },
+      { "command": "codify.addTask", "title": "Codify: Add Task", "icon": "$(diff-added)" },
+      { "command": "codify.openTask", "title": "Codify: Open Task in Spec" },
+      { "command": "codify.review", "title": "Codify: Review the Change", "icon": "$(git-compare)" },
+      { "command": "codify.check", "title": "Codify: Check the Repository", "icon": "$(verified)" },
+      { "command": "codify.guard", "title": "Codify: Check Edit Scope", "icon": "$(shield)" },
+      { "command": "codify.why", "title": "Codify: Why Does This Exist?" },
+      { "command": "codify.testImpact", "title": "Codify: Tests Touching This Change", "icon": "$(beaker)" },
+      { "command": "codify.remember", "title": "Codify: Remember a Decision", "icon": "$(lightbulb)" },
+      { "command": "codify.forget", "title": "Codify: Forget This Memory", "icon": "$(trash)" },
+      { "command": "codify.snapshot", "title": "Codify: Snapshot the Working Tree", "icon": "$(save)" },
+      { "command": "codify.sync", "title": "Codify: Sync the Index", "icon": "$(sync)" },
+      { "command": "codify.hookInstall", "title": "Codify: Install Hooks" }
     ],
     "menus": {
       "view/title": [
-        { "command": "codify.refresh", "when": "view == codifyTasks", "group": "navigation" },
-        { "command": "codify.render", "when": "view == codifyTasks" },
-        { "command": "codify.nextTask", "when": "view == codifyTasks" }
+        { "command": "codify.refresh", "when": "view == codifyTasks", "group": "navigation@1" },
+        { "command": "codify.brief", "when": "view == codifyTasks", "group": "navigation@2" },
+        { "command": "codify.actions", "when": "view == codifyTasks", "group": "navigation@3" },
+        { "command": "codify.addTask", "when": "view == codifyTasks", "group": "1_spec@1" },
+        { "command": "codify.newFeature", "when": "view == codifyTasks", "group": "1_spec@2" },
+        { "command": "codify.lint", "when": "view == codifyTasks", "group": "1_spec@3" },
+        { "command": "codify.render", "when": "view == codifyTasks", "group": "1_spec@4" },
+        { "command": "codify.nextTask", "when": "view == codifyTasks", "group": "2_work@1" },
+        { "command": "codify.wave", "when": "view == codifyTasks", "group": "2_work@2" },
+        { "command": "codify.review", "when": "view == codifyTasks", "group": "2_work@3" },
+        { "command": "codify.check", "when": "view == codifyTasks", "group": "2_work@4" },
+        { "command": "codify.remember", "when": "view == codifyMemories", "group": "navigation@1" },
+        { "command": "codify.refresh", "when": "view == codifyMemories", "group": "navigation@2" }
       ],
       "view/item/context": [
-        { "command": "codify.startTask", "when": "view == codifyTasks && viewItem == task-pending", "group": "inline" },
-        { "command": "codify.doneTask", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "inline" },
-        { "command": "codify.traceTask", "when": "view == codifyTasks && viewItem =~ /^task-/" }
+        { "command": "codify.startTask", "when": "view == codifyTasks && viewItem == task-pending", "group": "inline@1" },
+        { "command": "codify.implementedTask", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "inline@1" },
+        { "command": "codify.doneTask", "when": "view == codifyTasks && viewItem =~ /^task-(in_progress|implemented)$/", "group": "inline@2" },
+        { "command": "codify.traceTask", "when": "view == codifyTasks && viewItem =~ /^task-/", "group": "1_task@1" },
+        { "command": "codify.openTask", "when": "view == codifyTasks && viewItem =~ /^task-/", "group": "1_task@2" },
+        { "command": "codify.claimTask", "when": "view == codifyTasks && viewItem =~ /^task-/ && codify.parallel", "group": "2_claim@1" },
+        { "command": "codify.releaseTask", "when": "view == codifyTasks && viewItem =~ /^task-/ && codify.parallel", "group": "2_claim@2" },
+        { "command": "codify.forget", "when": "view == codifyMemories && viewItem == memory", "group": "inline" }
       ],
-      "commandPalette": [
-        { "command": "codify.openTask", "when": "false" }
+      "editor/context": [
+        { "command": "codify.why", "when": "editorTextFocus && codify.hasSpec", "group": "codify@1" },
+        { "command": "codify.testImpact", "when": "editorTextFocus", "group": "codify@2" }
       ],
       "explorer/context": [
-        { "command": "codify.render", "when": "resourceExtname == .kvx", "group": "codify" },
-        { "command": "codify.refresh", "when": "resourceExtname == .kvx", "group": "codify" }
+        { "command": "codify.render", "when": "resourceExtname == .kvx", "group": "codify@1" },
+        { "command": "codify.lint", "when": "resourceExtname == .kvx", "group": "codify@2" }
+      ],
+      "commandPalette": [
+        { "command": "codify.openTask", "when": "false" },
+        { "command": "codify.forget", "when": "false" }
       ]
     },
     "configuration": {
@@ -92,6 +142,16 @@
           "type": "string",
           "default": "",
           "description": "Spec feature override (passed as -f). Empty uses [meta] active_feature."
+        },
+        "codify.languageServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `cg lsp` for go-to-definition, references, hover, code lens, and scope diagnostics. Turn off to use the task board alone."
+        },
+        "codify.agentName": {
+          "type": "string",
+          "default": "",
+          "description": "Default name used when claiming a task in parallel mode."
         }
       }
     }

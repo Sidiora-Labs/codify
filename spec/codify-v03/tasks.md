@@ -93,6 +93,13 @@
     - Integration coverage for every new command, including nested-root boundaries
     - Update README, ARCHITECTURE, and the command reference
     - _Requirements: 1.1, 6.5_
+  - [x] 7.1 VS Code extension: language features and full workflow surface
+    - Speak LSP to cg lsp with a dependency-free client
+    - Definitions, references, hover, symbols, code lens, diagnostics
+    - Task board with claims, parallel mode, and every spec action
+    - Commands for brief, review, guard, check, why, test-impact, memory
+    - kvx editing: navigate requires, complete keys, outline sections
+    - _Requirements: 6.4_
 
 ## Task Dependency Graph
 
@@ -107,7 +114,8 @@
     { "id": 5,  "tasks": ["4.1", "4.2"] },
     { "id": 6,  "tasks": ["5.1"] },
     { "id": 7,  "tasks": ["5.2"] },
-    { "id": 8,  "tasks": ["6.1"] }
+    { "id": 8,  "tasks": ["6.1"] },
+    { "id": 9,  "tasks": ["7.1"] }
   ]
 }
 ```

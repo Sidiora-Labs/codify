@@ -260,3 +260,18 @@ verify_cmd = "make test"
 do_1       = "Integration coverage for every new command, including nested-root boundaries"
 do_2       = "Update README, ARCHITECTURE, and the command reference"
 reqs       = ["1.1", "6.5"]
+
+[task.7.1]
+title = "VS Code extension: language features and full workflow surface"
+status = "done"
+section = "Wave 9: the editor people actually use"
+wave = 9
+verify_cmd = "CG=$PWD/cg tests/integration/14_vscode.sh"
+requires = ["5.2"]
+touches = ["editors/vscode/extension.js", "editors/vscode/client.js", "editors/vscode/package.json"]
+reqs = ["6.4"]
+do_1 = "Speak LSP to cg lsp with a dependency-free client"
+do_2 = "Definitions, references, hover, symbols, code lens, diagnostics"
+do_3 = "Task board with claims, parallel mode, and every spec action"
+do_4 = "Commands for brief, review, guard, check, why, test-impact, memory"
+do_5 = "kvx editing: navigate requires, complete keys, outline sections"
