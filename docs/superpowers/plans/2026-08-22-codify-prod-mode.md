@@ -14,6 +14,7 @@
 
 - `done` continues to mean executable qualification and graph checks passed.
 - `implemented` never executes `verify_cmd` and never renders as `[x]`.
+- `done --force` cannot promote an `implemented` task past failed qualification.
 - Only Prod mode lets `implemented` satisfy `requires`.
 - The implemented transition has no force bypass.
 - Missing or unknown mode configuration behaves as standard mode.
@@ -85,6 +86,9 @@ git commit -m "Specify Codify Prod mode lifecycle"
 
 **Files:**
 - Modify: `src/spec.c`
+- Modify: `src/kvx.c`
+- Modify: `src/cg.h`
+- Test: `tests/unit/test_kvx.c`
 
 **Interfaces:**
 - Consumes: `Kvx`, `kvx_set_status`, `spec_verify_task`, `spec_note_outcome`, and existing task rendering helpers.
@@ -138,6 +142,8 @@ Do not change standard-mode golden output when no implemented state exists.
 - [ ] **Step 6: Add command dispatch**
 
 Extend `cmd_spec` usage and dispatch for `mode <prod|standard>` and `implemented <id>`, with no `--force` accepted by the latter.
+
+Implement and unit-test a generic surgical KVX scalar writer that updates an existing key or appends a missing section/key while preserving unrelated bytes. Use it for `[mode].name`; do not duplicate file-rewrite logic in the spec engine.
 
 - [ ] **Step 7: Run the focused spec test and verify GREEN**
 

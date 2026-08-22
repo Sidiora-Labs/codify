@@ -144,4 +144,85 @@ out="$("$CG" commit -m "bad selection" --task 9.9 2>&1)" \
     && fail "unknown explicit task should refuse"
 has "$out" "not an in_progress task"
 
+# ---- Prod mode: implementation and qualification are separate states ----
+cp -r "$FIXTURES/specrepo" "$TMP/prod"
+cd "$TMP/prod"
+
+out="$("$CG" spec status)"
+has "$out" "mode: standard"
+out="$("$CG" spec mode unknown 2>&1)" && fail "unknown spec mode should refuse"
+has "$out" "mode must be prod or standard"
+
+"$CG" spec start 1.2 >/dev/null
+out="$("$CG" spec implemented 1.2 2>&1)" \
+    && fail "implemented should require Prod mode"
+has "$out" "requires Prod mode"
+
+"$CG" spec mode prod >/dev/null
+out="$("$CG" spec implemented 1.2 --force 2>&1)" \
+    && fail "implemented must not expose a force bypass"
+has "$out" "does not support --force"
+
+python3 - <<'EOF'
+p = "spec/demo/spec.kvx"
+s = open(p).read().replace('verify_cmd = "test -f verify.marker"',
+                            'verify_cmd = "touch qualification.ran"')
+open(p, "w").write(s)
+EOF
+"$CG" spec implemented 1.2 >/dev/null
+[ ! -e qualification.ran ] || fail "implemented executed verify_cmd"
+
+out="$("$CG" spec status)"
+has "$out" "mode: prod"
+has "$out" "1 done, 1 implemented, 0 in progress, 1 pending"
+has "$out" "coding progress:"
+has "$out" "qualified progress:"
+has "$out" "next: 2.1"
+"$CG" spec status --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["mode"] == "prod", d
+assert d["done"] == 1 and d["implemented"] == 1, d
+assert d["in_progress"] == 0 and d["pending"] == 1, d
+assert d["next"]["id"] == "2.1", d
+'
+grep -q -- '- \[ \] 1.2 Render the mirror — \*\*Implemented - qualification pending\*\*' \
+    spec/demo/tasks.md || fail "implemented task rendered incorrectly"
+out="$("$CG" spec next)"
+has "$out" "task 2.1"
+has "$out" "1.2(implemented)"
+
+# Qualification failures, including --force, preserve implemented state.
+python3 - <<'EOF'
+p = "spec/demo/spec.kvx"
+s = open(p).read().replace('verify_cmd = "touch qualification.ran"',
+                            'verify_cmd = "false"')
+open(p, "w").write(s)
+EOF
+out="$("$CG" spec done 1.2 2>&1)" && fail "failed qualification should refuse"
+has "$out" "verify_cmd failed"
+out="$("$CG" spec done 1.2 --force 2>&1)" \
+    && fail "force must not promote implemented past qualification"
+has "$out" "cannot force an implemented task to done"
+"$CG" spec status --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["implemented"] == 1 and d["done"] == 1, d
+'
+
+python3 - <<'EOF'
+p = "spec/demo/spec.kvx"
+s = open(p).read().replace('verify_cmd = "false"',
+                            'verify_cmd = "touch qualification.ran"')
+open(p, "w").write(s)
+EOF
+"$CG" spec done 1.2 >/dev/null
+[ -e qualification.ran ] || fail "done did not execute verify_cmd"
+grep -q -- '- \[x\] 1.2 Render the mirror' spec/demo/tasks.md \
+    || fail "qualified task not rendered done"
+
+"$CG" spec mode standard >/dev/null
+out="$("$CG" spec status --json)"
+has "$out" '"mode":"standard"'
+
 echo ok

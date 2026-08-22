@@ -28,13 +28,15 @@ Prod mode is repository-owned configuration in `spec/workflow.kvx`:
 name = "prod"
 ```
 
-`cg spec mode prod` writes that setting surgically and refreshes generated projections. `cg spec mode standard` restores standard behavior. An absent or unrecognized mode behaves as `standard`, preserving compatibility with every existing workflow file.
+`cg spec mode prod` writes that setting surgically and refreshes generated projections. `cg spec mode standard` restores standard behavior. An absent or unrecognized mode behaves as `standard`, preserving compatibility with every existing workflow file. Only the literal repository value `prod` activates Prod mode; environment interpolation cannot activate it implicitly.
 
 ## Commands
 
 `cg spec implemented <id>` is available only when Prod mode is active. It requires the task to be `in_progress`, performs the existing non-executing symbol and touched-path graph checks, does not read or execute `verify_cmd`, changes only the task status to `implemented`, refreshes projections, records an `implemented: <title> - qualification pending` outcome, and reports the next implementation-eligible task. It has no `--force` option.
 
 `cg spec done <id>` retains its current qualification behavior. It accepts either `in_progress` or `implemented`, executes `verify_cmd`, performs graph checks, and changes the status to `done` only if all checks pass. Failed qualification leaves an `implemented` task implemented.
+
+The legacy `--force` behavior remains available for non-implemented tasks for backward compatibility, but it cannot promote an `implemented` task past failed qualification. That boundary ensures `implemented -> done` always carries real qualification evidence.
 
 ## Dependency Semantics
 
