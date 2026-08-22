@@ -48,7 +48,7 @@ platforms stub out behind the same interface.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
-`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 17
+`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 19
 tools. CLI command output is captured via `dup2` + tmpfile
 (`cg_capture`), so the CLI and MCP surfaces share one implementation.
 `json.c` is a minimal scanner (no DOM) used for JSON-RPC parsing and

@@ -1,6 +1,6 @@
 # Security Policy
 
-Codify runs entirely on the local machine, parses untrusted source code, executes user-defined commands (`verify_cmd`), and writes into developer configuration files (`cg mcp-install`). Each of those is an attack surface, and we treat reports against them seriously.
+Codify runs entirely on the local machine, parses untrusted source code, executes user-defined commands (`verify_cmd`) only during `cg spec done`, and writes into developer configuration files (`cg mcp-install`). Each of those is an attack surface, and we treat reports against them seriously. `cg spec implemented` performs source graph checks without executing `verify_cmd`.
 
 ## Supported versions
 
@@ -37,7 +37,7 @@ Reports we especially want:
 - **Parser abuse.** Crafted source files that crash the indexer, cause memory corruption, or trigger out-of-bounds reads or writes in the per-language pattern engines, the kvx parser, or the JSON scanner.
 - **Path traversal.** Snapshot restore (`cg checkout`) or object storage writing outside the repository, or ignore-rule bypasses that leak files into snapshots unexpectedly.
 - **Config injection.** `cg mcp-install` merges into editor configuration files; anything that lets a hostile repository plant unintended entries there is in scope.
-- **Command execution.** `cg spec done` runs `verify_cmd` from the spec file. That is by design when the user trusts the repo, but any way to run commands *without* that step, or to smuggle commands past what the file visibly declares, is a vulnerability.
+- **Command execution.** `cg spec done` runs `verify_cmd` from the spec file; `cg spec implemented` is deliberately a non-executing source-evidence transition. Running commands outside the declared `verify_cmd` qualification step, or smuggling commands past what the file visibly declares, is a vulnerability.
 - **MCP server issues.** Malformed protocol input crashing the stdio server or corrupting the database.
 - **Hash integrity.** Anything that breaks the content-addressing guarantees of the snapshot store.
 

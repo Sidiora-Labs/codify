@@ -30,7 +30,7 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 
 **一路走来学到了什么。** 智能体记忆将刻意留下的笔记——决策(`decision`)、约束(`constraint`)、结果(`outcome`)、偏好(`preference`)、事实(`fact`)——存储在与图相同的数据库中,并关联到写下它们时所在的任务。`cg remember` 在任务进行中保存一条记忆,每次 `cg spec done` 都会自动记录一条如实的结果(包括被拒绝的完成),而 `cg recall` 按相关性与新近程度排序,将这一切重新带回。
 
-这几层相互增强:提交会自动打上其所实现任务的标签,记忆会浮现在它们所属的任务上,`cg spec trace` 能从任意任务一路追溯到它的符号、提交和记忆,而内置的 MCP 服务器将这一切——共 17 个工具——暴露给 Claude Code、Cursor 以及所有支持 MCP 的智能体。
+这几层相互增强:提交会自动打上其所实现任务的标签,记忆会浮现在它们所属的任务上,`cg spec trace` 能从任意任务一路追溯到它的符号、提交和记忆,而内置的 MCP 服务器将这一切——共 19 个工具——暴露给 Claude Code、Cursor 以及所有支持 MCP 的智能体。
 
 没有 API 密钥,没有后台服务,没有遥测。一切都在你的机器上运行,并且只留在你的机器上。
 
@@ -142,7 +142,7 @@ cg init
 
 | 命令 | 说明 |
 |---|---|
-| `cg mcp` | 以 MCP stdio 服务器运行,提供 17 个工具:search、context、symbol、impact、routes、status、change-impact、log、commit、spec 系列工具(status、next、start、done、render、trace),以及记忆工具(remember、recall) |
+| `cg mcp` | 以 MCP stdio 服务器运行,提供 19 个工具:search、context、symbol、impact、routes、status、change-impact、log、commit、spec 系列工具(status、next、start、done、render、trace、mode、implemented),以及记忆工具(remember、recall) |
 | `cg mcp-install` | 自动接入 Claude Code(`.mcp.json`)、Cursor、VS Code、Windsurf、Gemini CLI 与 Codex CLI,并合并进已有配置 |
 | `cg changelog [-n N] [-o FILE]` | 基于快照生成变更日志,包含符号级差异:新增和删除的函数、新路由 |
 | `cg agentmd [--write]` | 生成 `AGENTS.md` 与 `CLAUDE.md`:语言、目录结构、构建工具、入口点、路由,以及被引用最多的符号 |
@@ -156,17 +156,19 @@ Spec 工作流是 Codify 将特性计划转化为可追踪、可验证工作的�
 | 命令 | 说明 |
 |---|---|
 | `cg spec render [--check]` | 重新生成 IDE 指针文件(Cursor、Devin、Claude、Codex、Copilot、Kiro)和 markdown 镜像(`requirements.md`、`design.md`、`tasks.md`);`--check` 在发现过期内容时以状态码 2 退出 |
-| `cg spec` / `cg spec status` | 任务面板:数量统计、进度、当前进行中的任务与下一个可执行任务 |
-| `cg spec next` | `requires` 已全部完成的、最低 wave 的待办任务,附执行要点和展开后的验收标准 |
+| `cg spec` / `cg spec status` | 任务面板:模式,分别统计 `done`、`implemented`、`in_progress` 与 `pending`,以及进度、当前任务与下一个可执行任务 |
+| `cg spec mode <prod\|standard>` | 配置 Prod 模式及其依赖语义;缺失或未知模式按 standard 处理 |
+| `cg spec next` | `requires` 已满足的、最低 wave 的待办任务(`standard` 仅接受 `done`;Prod 接受 `implemented` 或 `done`),附执行要点和展开后的验收标准 |
 | `cg spec start <id>` | 标记为 `in_progress`;强制同一时刻只能有一个任务且 `requires` 已满足,`--force` 可覆盖 |
-| `cg spec done <id>` | 运行任务的 `verify_cmd` 与图检查(失败即拒绝,`--force` 可覆盖),标记为 `done`,记录一条结果记忆,并给出下一个任务建议 |
+| `cg spec implemented <id>` | 在 Prod 中检查源代码证据而不执行 `verify_cmd`,然后标记为 `implemented`(未勾选;等待资格确认;不提供 `--force`) |
+| `cg spec done <id>` | 从 `in_progress` 或 `implemented` 开始运行 `verify_cmd` 与图检查;只有资格确认通过才标记 `done`,失败时保留 `implemented` |
 | `cg spec trace [<id>]` | 将任务追溯到代码:在图中解析出的已声明符号(位置、种类、引用数)、与实际改动匹配的涉及路径、打上该任务标签的提交,以及它的记忆 |
 
-`start` 与 `done` 只重写 kvx 文件中那一行 `status = "..."`,其余每个字节、注释与空行都原样保留,随后静默重新渲染,保证 `tasks.md` 中的复选框始终最新。kvx 文件始终是唯一的事实来源,`-f <feature>` 可覆盖 `[meta] active_feature`。
+`mode`、`start`、`implemented` 与 `done` 只重写 kvx 文件中的 mode 或 `status = "..."` 行,其余每个字节、注释与空行都原样保留,随后静默重新渲染;`implemented` 任务保持未勾选并带有 `Implemented - qualification pending`。kvx 文件始终是唯一的事实来源,`-f <feature>` 可覆盖 `[meta] active_feature`。
 
-`cg commit` 会自动在提交信息中附上进行中的任务标签,例如 `... [spec:ion_spec/16.7]`,因此 `cg log` 与 `cg changelog` 能将每个快照追溯到规格。六个 spec 命令同时以 MCP 工具的形式暴露,连接的智能体可以在协议内完成整个循环(next、start、实现、done)。
+`cg commit` 会自动在提交信息中附上进行中的任务标签,例如 `... [spec:ion_spec/16.7]`,因此 `cg log` 与 `cg changelog` 能将每个快照追溯到规格。八个 spec 命令同时以 MCP 工具的形式暴露,连接的智能体可以在协议内完成 standard 循环(next、start、snapshot、done)或 Prod 循环(next、start、snapshot、implemented、资格确认、done)。
 
-当项目同时拥有 `.codegraph/` 索引时,任务可以声明其实现应有的样子,`cg spec done` 会对照现实进行验证:
+当项目同时拥有 `.codegraph/` 索引时,任务可以声明其实现应有的样子。`cg spec implemented` 检查源代码证据但不执行命令;`cg spec done` 则针对现实执行资格确认:
 
 ```ini
 [task.2.1]
@@ -175,7 +177,7 @@ symbols = ["checkMode"]      # 必须存在于代码图中
 touches = ["src/*.ts"]       # 必须有匹配的路径确实发生了改动
 ```
 
-`symbols` 会在已建立的图中查找;`touches` 模式(精确路径或 glob)则与工作树改动和打上该任务标签的提交所改动文件的并集进行匹配——因此工作提交之后验证依然能通过。检查失败会拒绝完成(`--force` 可覆盖)。`cg spec trace [<id>]` 展示单个任务或整个特性的完整"任务→代码→提交"链条,支持文本或 `--json` 输出。
+`symbols` 会在已建立的图中查找;`touches` 模式(精确路径或 glob)则与工作树改动和打上该任务标签的提交所改动文件的并集进行匹配——因此工作提交之后验证依然能通过。在 Prod 中,`implemented` 可满足后续 `requires`,但尚未完成资格确认且不会显示为 `[x]`;资格确认失败时任务仍保持 `implemented`。`cg spec trace [<id>]` 展示单个任务或整个特性的完整"任务→代码→提交"链条,支持文本或 `--json` 输出。
 
 这条工作流还会自行滋养记忆层。每次完成都会写下一条简洁的结果记忆——包括被拒绝的完成,让之后的会话能够看到某个任务曾被卡住以及原因。`cg spec next` 与 `cg spec start` 会打印与该任务相关的记忆(通过 id 关联,或与其标题匹配),`cg spec trace` 也会将它们纳入链条。驱动这个循环的智能体无需任何指示,就会逐步积累起项目记忆。
 

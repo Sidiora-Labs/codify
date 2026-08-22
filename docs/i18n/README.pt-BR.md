@@ -30,7 +30,7 @@ O Codify (invocado como `cg`) é um motor de fluxo de trabalho para agentes em u
 
 **O que foi aprendido ao longo do caminho.** Uma memória de agente armazena anotações deliberadas — decisões, restrições, resultados, preferências, fatos — no mesmo banco de dados que o grafo, ligadas à tarefa sob a qual foram feitas. `cg remember` salva uma no meio da tarefa, cada `cg spec done` registra automaticamente um resultado honesto (incluindo recusas), e `cg recall` traz tudo de volta, ordenado por relevância e recência.
 
-As camadas se reforçam mutuamente: os commits são etiquetados automaticamente com a tarefa que implementam, as memórias aparecem na tarefa a que pertencem, `cg spec trace` percorre qualquer tarefa até seus símbolos, commits e memórias, e um servidor MCP embutido expõe tudo isso — 17 ferramentas — ao Claude Code, ao Cursor e a qualquer outro agente compatível com MCP.
+As camadas se reforçam mutuamente: os commits são etiquetados automaticamente com a tarefa que implementam, as memórias aparecem na tarefa a que pertencem, `cg spec trace` percorre qualquer tarefa até seus símbolos, commits e memórias, e um servidor MCP embutido expõe tudo isso — 19 ferramentas — ao Claude Code, ao Cursor e a qualquer outro agente compatível com MCP.
 
 Sem chaves de API, sem serviços em segundo plano, sem telemetria. Tudo roda na sua máquina e fica nela.
 
@@ -142,7 +142,7 @@ Anotações duráveis de agente, armazenadas no mesmo banco SQLite que o grafo. 
 
 | Comando | Descrição |
 |---|---|
-| `cg mcp` | Roda como servidor MCP via stdio com 17 ferramentas: search, context, symbol, impact, routes, status, change-impact, log, commit, as de spec (status, next, start, done, render, trace) e as de memória (remember, recall) |
+| `cg mcp` | Roda como servidor MCP via stdio com 19 ferramentas: search, context, symbol, impact, routes, status, change-impact, log, commit, as de spec (status, next, start, done, render, trace, mode, implemented) e as de memória (remember, recall) |
 | `cg mcp-install` | Conexão automática com Claude Code (`.mcp.json`), Cursor, VS Code, Windsurf, Gemini CLI e Codex CLI, mesclando com as configurações existentes |
 | `cg changelog [-n N] [-o FILE]` | Changelog a partir dos snapshots com diffs em nível de símbolo: funções adicionadas e removidas, rotas novas |
 | `cg agentmd [--write]` | Gera `AGENTS.md` e `CLAUDE.md`: linguagens, mapa de diretórios, ferramentas de build, pontos de entrada, rotas e os símbolos mais referenciados |
@@ -156,17 +156,19 @@ O fluxo de trabalho de specs é como o Codify transforma o plano de uma funciona
 | Comando | Descrição |
 |---|---|
 | `cg spec render [--check]` | Regenera os arquivos ponteiro de IDE (Cursor, Devin, Claude, Codex, Copilot, Kiro) e o espelho em markdown (`requirements.md`, `design.md`, `tasks.md`); `--check` sai com código 2 se algo estiver desatualizado |
-| `cg spec` / `cg spec status` | Quadro de tarefas: contagens, progresso, a tarefa em andamento e a próxima elegível |
-| `cg spec next` | A tarefa pendente de menor wave cujos `requires` estão todos concluídos, com seus itens de ação e critérios de aceitação expandidos |
+| `cg spec` / `cg spec status` | Quadro de tarefas: modo, contagens separadas de `done`, `implemented`, `in_progress` e `pending`, progresso, tarefa atual e próxima elegível |
+| `cg spec mode <prod\|standard>` | Configura o modo Prod e suas regras de dependência; modo ausente ou desconhecido é standard |
+| `cg spec next` | A tarefa pendente de menor wave cujos `requires` estão satisfeitos (`done` apenas em standard; `implemented` ou `done` em Prod), com seus itens de ação e critérios de aceitação expandidos |
 | `cg spec start <id>` | Marca uma tarefa como `in_progress`; impõe uma por vez e `requires` cumpridos, com `--force` para sobrepor |
-| `cg spec done <id>` | Executa o `verify_cmd` da tarefa e as checagens do grafo (recusa em caso de falha, `--force` para sobrepor), marca como `done`, registra uma memória de resultado e sugere a próxima tarefa |
+| `cg spec implemented <id>` | Em Prod, verifica a evidência do código sem executar `verify_cmd` e marca a tarefa como `implemented` (não marcada; qualificação pendente; sem `--force`) |
+| `cg spec done <id>` | A partir de `in_progress` ou `implemented`, executa `verify_cmd` e as checagens do grafo; só marca `done` quando a qualificação passa e, se falhar, preserva `implemented` |
 | `cg spec trace [<id>]` | Rastreia tarefas até o código: símbolos declarados resolvidos no grafo (localização, tipo, referências), caminhos tocados comparados às mudanças reais, os commits etiquetados com a tarefa e suas memórias |
 
-`start` e `done` reescrevem apenas a linha `status = "..."` do arquivo kvx. Todos os outros bytes, comentários e linhas em branco sobrevivem. Em seguida o comando re-renderiza silenciosamente para que as caixas de seleção do `tasks.md` fiquem em dia. Os arquivos kvx continuam sendo a única fonte de verdade, e `-f <feature>` sobrepõe `[meta] active_feature`.
+`mode`, `start`, `implemented` e `done` reescrevem apenas a linha de modo ou `status = "..."` do arquivo kvx. Todos os outros bytes, comentários e linhas em branco sobrevivem. Em seguida o comando re-renderiza silenciosamente; tarefas `implemented` continuam não marcadas e recebem `Implemented - qualification pending`. Os arquivos kvx continuam sendo a única fonte de verdade, e `-f <feature>` sobrepõe `[meta] active_feature`.
 
-O `cg commit` etiqueta automaticamente sua mensagem com a tarefa em andamento, por exemplo `... [spec:ion_spec/16.7]`, de modo que `cg log` e `cg changelog` rastreiam cada snapshot de volta à spec. Os seis comandos de spec também são expostos como ferramentas MCP, permitindo que um agente conectado conduza o ciclo completo (next, start, implementar, done) sem sair do protocolo.
+O `cg commit` etiqueta automaticamente sua mensagem com a tarefa em andamento, por exemplo `... [spec:ion_spec/16.7]`, de modo que `cg log` e `cg changelog` rastreiam cada snapshot de volta à spec. Os oito comandos de spec também são expostos como ferramentas MCP, permitindo que um agente conectado conduza o ciclo standard (next, start, snapshot, done) ou Prod (next, start, snapshot, implemented, qualificação, done) sem sair do protocolo.
 
-Quando o projeto também tem um índice `.codegraph/`, as tarefas podem declarar como sua implementação deve se parecer, e `cg spec done` verifica isso contra a realidade:
+Quando o projeto também tem um índice `.codegraph/`, as tarefas podem declarar como sua implementação deve se parecer. `cg spec implemented` verifica a evidência do código sem executar comandos; `cg spec done` realiza a qualificação executável contra a realidade:
 
 ```ini
 [task.2.1]
@@ -175,7 +177,7 @@ symbols = ["checkMode"]      # precisa existir no grafo de código
 touches = ["src/*.ts"]       # um caminho correspondente precisa de fato ter mudado
 ```
 
-Os `symbols` são procurados no grafo indexado; os padrões de `touches` (caminhos exatos ou globs) são comparados à união das mudanças na árvore de trabalho com os arquivos alterados pelos commits etiquetados com a tarefa — assim a verificação continua passando depois que o trabalho foi commitado. Checagens que falham recusam a conclusão (`--force` sobrepõe). `cg spec trace [<id>]` mostra a cadeia completa tarefa→código→commit para uma tarefa ou para a funcionalidade inteira, em texto ou com `--json`.
+Os `symbols` são procurados no grafo indexado; os padrões de `touches` (caminhos exatos ou globs) são comparados à união das mudanças na árvore de trabalho com os arquivos alterados pelos commits etiquetados com a tarefa — assim a verificação continua passando depois que o trabalho foi commitado. Em Prod, `implemented` satisfaz os `requires` seguintes, mas não é qualificada nem aparece como `[x]`; se a qualificação falhar, a tarefa permanece `implemented`. `cg spec trace [<id>]` mostra a cadeia completa tarefa→código→commit para uma tarefa ou para a funcionalidade inteira, em texto ou com `--json`.
 
 O fluxo de trabalho também alimenta a camada de memória por conta própria. Cada conclusão escreve uma memória de resultado sucinta — incluindo as recusadas, para que uma sessão posterior possa ver que uma tarefa foi bloqueada e por quê. `cg spec next` e `cg spec start` imprimem as memórias relevantes para a tarefa (ligadas pelo id, ou que correspondam ao seu título), e `cg spec trace` as inclui na cadeia. Um agente conduzindo o ciclo acumula memória de projeto sem que ninguém precise pedir.
 

@@ -1014,12 +1014,8 @@ static int spec_status_cmd(Spec *s, bool json) {
 
     printf("feature: %s (spec/%s/spec.kvx)\n", s->feature, s->feature);
     printf("mode: %s\n", spec_prod_mode(s) ? "prod" : "standard");
-    if (spec_prod_mode(s) || implemented > 0)
-        printf("tasks: %d — %d done, %d implemented, %d in progress, "
-               "%d pending\n", leaves, done, implemented, inprog, pending);
-    else
-        printf("tasks: %d — %d done, %d in progress, %d pending\n", leaves,
-               done, inprog, pending);
+    printf("tasks: %d — %d done, %d implemented, %d in progress, "
+           "%d pending\n", leaves, done, implemented, inprog, pending);
     if (leaves > 0) {
         int width = 30;
         int fill = leaves ? done * width / leaves : 0;
@@ -1065,7 +1061,11 @@ static int spec_mode_cmd(Spec *s, const char *mode) {
         fprintf(stderr, "cg spec: could not set [mode].name in %s\n", s->wfpath);
         return 1;
     }
-    spec_render(s->root, false, true);
+    if (spec_render(s->root, false, true) != 0) {
+        fprintf(stderr, "cg spec: mode updated, but generated projections "
+                "could not be refreshed\n");
+        return 1;
+    }
     kvx_free(s->wf);
     s->wf = kvx_parse(s->wfpath);
     if (!s->wf) {
@@ -1225,7 +1225,11 @@ static int spec_implemented_cmd(Spec *s, const char *id) {
                 sec, s->fpath);
         return 1;
     }
-    spec_render(s->root, false, true);
+    if (spec_render(s->root, false, true) != 0) {
+        fprintf(stderr, "cg spec: task %s marked implemented, but generated "
+                "projections could not be refreshed\n", id);
+        return 1;
+    }
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
@@ -1821,6 +1825,30 @@ int cmd_spec(int argc, char **argv, bool json) {
         return spec_render(root, check, false);
     }
 
+    if (strcmp(sub, "mode") == 0) {
+        if (npos != 1) {
+            fprintf(stderr, "usage: cg spec mode <prod|standard>\n");
+            return 1;
+        }
+        Spec s;
+        memset(&s, 0, sizeof s);
+        if (root_ov) snprintf(s.root, sizeof s.root, "%s", root_ov);
+        else if (spec_find_root(s.root, sizeof s.root) != 0) {
+            fprintf(stderr, "cg spec: no spec/workflow.kvx found here or in "
+                    "any parent directory\n");
+            return 1;
+        }
+        snprintf(s.wfpath, sizeof s.wfpath, "%s/spec/workflow.kvx", s.root);
+        s.wf = kvx_parse(s.wfpath);
+        if (!s.wf) {
+            fprintf(stderr, "cg spec: cannot parse %s\n", s.wfpath);
+            return 1;
+        }
+        int rc = spec_mode_cmd(&s, pos[0]);
+        spec_close(&s);
+        return rc;
+    }
+
     if (strcmp(sub, "status") != 0 && strcmp(sub, "next") != 0 &&
         strcmp(sub, "start") != 0 && strcmp(sub, "implemented") != 0 &&
         strcmp(sub, "done") != 0 && strcmp(sub, "mode") != 0 &&
@@ -1842,13 +1870,6 @@ int cmd_spec(int argc, char **argv, bool json) {
         rc = spec_status_cmd(&s, json);
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
-    } else if (strcmp(sub, "mode") == 0) {
-        if (npos != 1) {
-            fprintf(stderr, "usage: cg spec mode <prod|standard>\n");
-            rc = 1;
-        } else {
-            rc = spec_mode_cmd(&s, pos[0]);
-        }
     } else if (strcmp(sub, "trace") == 0) {
         rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, json);
     } else if (strcmp(sub, "start") == 0) {

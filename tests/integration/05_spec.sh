@@ -24,7 +24,7 @@ cmp -s CLAUDE.md "$FIXTURES/specrepo/CLAUDE.md" \
 # ---- task engine ----
 out="$("$CG" spec status)"
 has "$out" "feature: demo"
-has "$out" "3 — 1 done, 0 in progress, 2 pending"
+has "$out" "3 — 1 done, 0 implemented, 0 in progress, 2 pending"
 has "$out" "next: 1.2"
 
 "$CG" spec status --json | python3 -c "
@@ -150,8 +150,19 @@ cd "$TMP/prod"
 
 out="$("$CG" spec status)"
 has "$out" "mode: standard"
+cp spec/workflow.kvx workflow.before-invalid
 out="$("$CG" spec mode unknown 2>&1)" && fail "unknown spec mode should refuse"
 has "$out" "mode must be prod or standard"
+cmp -s spec/workflow.kvx workflow.before-invalid \
+    || fail "invalid mode changed workflow.kvx"
+
+cat >> spec/workflow.kvx <<'EOF'
+
+[mode]
+name = "${CODIFY_TEST_MODE}"
+EOF
+out="$(CODIFY_TEST_MODE=prod "$CG" spec status --json)"
+has "$out" '"mode":"standard"'
 
 "$CG" spec start 1.2 >/dev/null
 out="$("$CG" spec implemented 1.2 2>&1)" \
@@ -192,6 +203,16 @@ out="$("$CG" spec next)"
 has "$out" "task 2.1"
 has "$out" "1.2(implemented)"
 
+# Returning to standard mode blocks implemented dependencies but still permits
+# the prerequisite itself to be qualified and promoted later.
+"$CG" spec mode standard >/dev/null
+out="$("$CG" spec next)"
+hasnt "$out" "task 2.1"
+out="$("$CG" spec start 2.1 2>&1)" \
+    && fail "standard mode must not unlock implemented dependencies"
+has "$out" "unmet requires: 1.2"
+"$CG" spec mode prod >/dev/null
+
 # Qualification failures, including --force, preserve implemented state.
 python3 - <<'EOF'
 p = "spec/demo/spec.kvx"
@@ -220,6 +241,7 @@ EOF
 [ -e qualification.ran ] || fail "done did not execute verify_cmd"
 grep -q -- '- \[x\] 1.2 Render the mirror' spec/demo/tasks.md \
     || fail "qualified task not rendered done"
+"$CG" spec render --check >/dev/null
 
 "$CG" spec mode standard >/dev/null
 out="$("$CG" spec status --json)"

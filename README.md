@@ -26,11 +26,11 @@ Codify (invoked as `cg`) is an agent workflow engine in a single binary. It main
 
 **How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits, and `cg changelog` writes symbol-level release notes by itself.
 
-**What happens next.** A spec engine turns plain-text kvx spec files into a working plan: a task board with dependency waves, one-task-in-progress discipline, acceptance criteria attached to every task — and a `done` that is verified, not asserted. A task's checks must pass, and the symbols and files it claims to deliver must actually exist in the graph and the history, before Codify will mark it complete.
+**What happens next.** A spec engine turns plain-text kvx spec files into a working plan: a task board with dependency waves, one-task-in-progress discipline, acceptance criteria attached to every task — and a `done` that is verified, not asserted. In Prod mode, `implemented` records coding completion and source evidence without claiming qualification; only `done` means executable qualification and graph checks passed.
 
 **What was learned along the way.** An agent memory stores deliberate notes — decisions, constraints, outcomes, preferences, facts — in the same database as the graph, linked to the task they were made under. `cg remember` saves one mid-task, every `cg spec done` records an honest outcome automatically (including refusals), and `cg recall` brings it all back, ranked by relevance and recency.
 
-The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg spec trace` walks any task to its symbols, commits, and memories, and a built-in MCP server exposes all of it — 17 tools — to Claude Code, Cursor, and every other MCP-capable agent.
+The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg spec trace` walks any task to its symbols, commits, and memories, and a built-in MCP server exposes all of it — 19 tools — to Claude Code, Cursor, and every other MCP-capable agent.
 
 There are no API keys, no background services, and no telemetry. Everything runs on your machine and stays there.
 
@@ -65,7 +65,7 @@ cg impact verifyLogin -d 2    # who breaks if this changes
 # ...implement...
 cg remember "sessions rotate on login" --type decision   # linked to task 16.7
 cg commit -m "add password auth"   # snapshot, auto-tagged [spec:ion_spec/16.7]
-cg spec done 16.7             # verify_cmd + graph checks, outcome memory recorded
+cg spec done 16.7             # qualification: verify_cmd + graph checks; outcome recorded
 cg spec trace 16.7            # proof: task -> symbols -> commits -> memories
 ```
 
@@ -142,7 +142,7 @@ Durable agent notes, stored in the same SQLite database as the graph. Memories w
 
 | Command | Description |
 |---|---|
-| `cg mcp` | Run as an MCP stdio server with 17 tools: search, context, symbol, impact, routes, status, change-impact, log, commit, the spec tools (status, next, start, done, render, trace), and memory (remember, recall) |
+| `cg mcp` | Run as an MCP stdio server with 19 tools: search, context, symbol, impact, routes, status, change-impact, log, commit, the spec tools (status, next, start, done, render, trace, mode, implemented), and memory (remember, recall) |
 | `cg mcp-install` | Auto-connect to Claude Code (`.mcp.json`), Cursor, VS Code, Windsurf, Gemini CLI, and Codex CLI, merging into existing configs |
 | `cg changelog [-n N] [-o FILE]` | Changelog from snapshots with symbol-level diffs: added and removed functions, new routes |
 | `cg agentmd [--write]` | Generate `AGENTS.md` and `CLAUDE.md`: languages, directory map, build tooling, entry points, routes, and the most-referenced symbols |
@@ -156,17 +156,19 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 | Command | Description |
 |---|---|
 | `cg spec render [--check]` | Regenerate IDE pointer files (Cursor, Devin, Claude, Codex, Copilot, Kiro) and the markdown mirror (`requirements.md`, `design.md`, `tasks.md`); `--check` exits 2 if anything is stale |
-| `cg spec` / `cg spec status` | Task board: counts, progress, the current in-progress task, and the next eligible one |
-| `cg spec next` | The lowest-wave pending task whose `requires` are all done, with its do-bullets and expanded acceptance criteria |
+| `cg spec` / `cg spec status` | Task board: mode plus separate `done`, `implemented`, `in_progress`, and `pending` counts, progress, the current task, and the next eligible one |
+| `cg spec mode <prod\|standard>` | Configure Prod mode and its dependency semantics; absent or unknown mode is standard |
+| `cg spec next` | The lowest-wave pending task whose `requires` are satisfied (`done` only in standard mode; `implemented` or `done` in Prod mode), with its do-bullets and expanded acceptance criteria |
 | `cg spec start <id>` | Mark a task `in_progress`; enforces one at a time and met `requires`, with `--force` to override |
-| `cg spec done <id>` | Run the task's `verify_cmd` and graph checks (refuses on failure, `--force` to override), mark it `done`, record an outcome memory, and suggest the next task |
+| `cg spec implemented <id>` | In Prod mode, run source graph checks without executing `verify_cmd`, then mark coding complete as `implemented` (unchecked; qualification pending; no `--force`) |
+| `cg spec done <id>` | From `in_progress` or `implemented`, run the task's `verify_cmd` and graph checks; mark it `done` only when qualification passes, otherwise preserve `implemented` |
 | `cg spec trace [<id>]` | Trace tasks to code: declared symbols resolved in the graph (location, kind, refs), touched paths matched against actual changes, the commits tagged with the task, and its memories |
 
-`start` and `done` rewrite only the single `status = "..."` line in the kvx file. Every other byte, comment, and blank line survives. The command then quietly re-renders so the checkboxes in `tasks.md` stay current. The kvx files remain the single source of truth, and `-f <feature>` overrides `[meta] active_feature`.
+`mode`, `start`, `implemented`, and `done` rewrite only the single `status = "..."` or mode setting line in the kvx file. Every other byte, comment, and blank line survives. The command then quietly re-renders so the checkboxes in `tasks.md` stay current; implemented tasks remain unchecked and carry `Implemented - qualification pending`. The kvx files remain the single source of truth, and `-f <feature>` overrides `[meta] active_feature`.
 
-`cg commit` automatically tags its message with the in-progress task, for example `... [spec:ion_spec/16.7]`, so `cg log` and `cg changelog` trace every snapshot back to the spec. The six spec commands are also exposed as MCP tools, letting a connected agent drive the full loop (next, start, implement, done) without leaving the protocol.
+`cg commit` automatically tags its message with the in-progress task, for example `... [spec:ion_spec/16.7]`, so `cg log` and `cg changelog` trace every snapshot back to the spec. The eight spec commands are also exposed as MCP tools, letting a connected agent drive the standard loop (next, start, snapshot, done) or the Prod loop (next, start, snapshot, implemented, qualification, done) without leaving the protocol.
 
-When the project also has a `.codegraph/` index, tasks can declare what their implementation looks like, and `cg spec done` verifies it against reality:
+When the project also has a `.codegraph/` index, tasks can declare what their implementation looks like. `cg spec implemented` checks source evidence without running commands; `cg spec done` performs executable qualification against reality:
 
 ```ini
 [task.2.1]
@@ -175,7 +177,7 @@ symbols = ["checkMode"]      # must exist in the code graph
 touches = ["src/*.ts"]       # a matching path must actually have changed
 ```
 
-`symbols` are looked up in the indexed graph; `touches` patterns (exact paths or globs) are matched against the union of worktree changes and the files changed by commits tagged with the task — so verification still passes after the work has been committed. Failing checks refuse the completion (`--force` overrides). `cg spec trace [<id>]` shows the full task→code→commit chain for one task or the whole feature, in text or `--json`.
+`symbols` are looked up in the indexed graph; `touches` patterns (exact paths or globs) are matched against the union of worktree changes and the files changed by commits tagged with the task — so verification still passes after the work has been committed. In Prod mode, `implemented` satisfies downstream `requires` but is not qualified and never renders as `[x]`; if qualification fails, the task remains `implemented`. `cg spec trace [<id>]` shows the full task→code→commit chain for one task or the whole feature, in text or `--json`.
 
 The workflow also feeds the memory layer on its own. Every completion writes a terse outcome memory — including refused ones, so a later session can see that a task was blocked and why. `cg spec next` and `cg spec start` print the memories relevant to the task (linked by id, or matching its title), and `cg spec trace` includes them in the chain. An agent driving the loop builds up project memory without ever being asked to.
 
