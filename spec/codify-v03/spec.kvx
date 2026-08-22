@@ -1,0 +1,262 @@
+# Codify v0.3 — govern the whole lifecycle, from one binary.
+
+[meta]
+feature = "codify-v03"
+intro   = "Close the gaps between plan and proof: correct project boundaries, a real editor protocol, git as a peer, spec authoring, and per-edit governance that advises before it blocks."
+
+[req.1]
+title = "Correct project boundaries"
+story = "As a developer, I want cg to bind to the right project so that commands never silently operate on an ancestor directory."
+ac_1  = "WHEN an ancestor holds .codegraph but a nearer directory holds .git THE root walk SHALL stop at the .git boundary and report no project."
+ac_2  = "WHEN cg init runs in a directory whose ancestor is a project THE command SHALL initialize here unless --nested is withheld and the user is warned."
+ac_3  = "WHEN cg init targets $HOME THE command SHALL refuse without --force."
+ac_4  = "WHEN any command binds a project THE resolved root SHALL be discoverable via cg root and cg info."
+ac_5  = "WHEN two cg processes write concurrently THE database SHALL use WAL and a busy timeout rather than failing."
+
+[req.2]
+title = "Graph quality"
+story = "As an agent, I want context calls to return relevant code so that I do not waste turns on noise."
+ac_1  = "WHEN a query has multiple words THE search SHALL match per token and fuse scores rather than matching the whole phrase."
+ac_2  = "WHEN context returns entry points THE entry points SHALL relate to the query, with main() only as a fallback."
+ac_3  = "WHEN a symbol is requested THE tool SHALL be able to return just that symbol body rather than its whole file."
+ac_4  = "WHEN a change touches symbols THE tool SHALL report which tests reference them."
+ac_5  = "WHEN provenance is requested THE tool SHALL join a symbol to the commits, tasks, and memories behind it."
+
+[req.3]
+title = "Git as a peer"
+story = "As a developer, I want Codify to understand my git repository so that adopting it is not all-or-nothing."
+ac_1  = "WHEN .gitignore exists THE ignore rules SHALL honour it alongside .cgignore."
+ac_2  = "WHEN git history is present THE graph SHALL ingest commits, authors, and per-file churn."
+ac_3  = "WHEN churn data exists THE search and context ranking SHALL use it."
+ac_4  = "WHEN cg commit runs with --git THE snapshot and a real git commit SHALL carry the same spec tag."
+
+[req.4]
+title = "Spec authoring and governance"
+story = "As an agent, I want to create and validate plans so that the whole lifecycle lives in one tool."
+ac_1  = "WHEN a feature is created THE tool SHALL scaffold spec/<feature>/spec.kvx and workflow.kvx if absent."
+ac_2  = "WHEN a task is added THE kvx file SHALL gain the task with every other byte preserved."
+ac_3  = "WHEN a spec is linted THE tool SHALL report requires cycles, unknown ids, missing acceptance criteria, and dead touches globs."
+ac_4  = "WHEN mode is parallel THE tool SHALL allow multiple claims bounded by wave independence and touches disjointness."
+ac_5  = "WHEN cg check runs THE command SHALL gate render staleness, lint, and task evidence in one exit code."
+
+[req.5]
+title = "Ambient agent governance"
+story = "As a developer, I want Codify present at every step without being invoked so that the workflow governs itself."
+ac_1  = "WHEN a session starts THE brief SHALL return repo state, active task, memories, and uncommitted blast radius in one call."
+ac_2  = "WHEN a change is reviewed THE review SHALL pair changed symbols with the task's acceptance criteria and at-risk callers."
+ac_3  = "WHEN an edit lands outside the active task's declared touches THE guard SHALL report it, warning by default."
+ac_4  = "WHEN hooks are installed THE graph SHALL stay fresh without any explicit sync call."
+ac_5  = "WHEN a decision is superseded THE older memory SHALL stop surfacing first."
+
+[req.6]
+title = "Modern agent and editor protocols"
+story = "As an agent or editor, I want current protocol features so that Codify integrates without custom glue."
+ac_1  = "WHEN tools are listed THE response SHALL carry read-only and destructive annotations and output schemas."
+ac_2  = "WHEN a client supports resources and prompts THE server SHALL expose the spec and the workflow loop through them."
+ac_3  = "WHEN initialize is called THE server SHALL negotiate a protocol version it supports rather than echoing the client."
+ac_4  = "WHEN an editor speaks LSP THE cg lsp server SHALL answer definition, references, hover, and workspace symbol from the graph."
+ac_5  = "WHEN a spec or scope problem exists THE LSP SHALL publish it as a diagnostic in the editor."
+
+[design]
+overview = "Every addition is a new command in the existing dispatch plus, where needed, one new module. No new link-time dependencies: git is read by piping git(1), and the LSP reuses the JSON scanner already used for MCP. Governance is advisory by default — cg guard warns unless --strict — so adoption never breaks an existing workflow."
+
+[design.boundaries]
+title  = "Root resolution"
+points = ["cg_find_root gains a boundary set: .git/.hg/.svn stop the walk, $HOME stops the walk, a st_dev change stops the walk", "cg_find_root_at resolves from an explicit directory for the LSP and MCP roots", "init checks the cwd only and asks about ancestors"]
+
+[design.modules]
+title  = "New modules"
+points = ["src/gitint.c — git history ingestion and churn", "src/lsp.c — Content-Length framed LSP server over the graph", "src/govern.c — brief, review, guard, check, hook install"]
+
+[tasks]
+heading = "Implementation Plan: Codify v0.3"
+
+[task.0]
+title   = "Foundation"
+section = "Wave 0: correct boundaries"
+status  = "pending"
+
+[task.0.1]
+title      = "Bound root resolution and harden the database"
+status     = "done"
+wave       = 0
+symbols    = ["cg_find_root_at", "cmd_root"]
+touches    = ["src/db.c", "src/main.c", "src/cg.h"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/09_root.sh"
+do_1       = "Stop the upward walk at .git/.hg/.svn, $HOME, and mount boundaries"
+do_2       = "Add cg_find_root_at for explicit-directory resolution"
+do_3       = "init checks cwd only; --nested for ancestors; refuse $HOME without --force"
+do_4       = "Add cg root and print the project root in cg info"
+do_5       = "Enable WAL and a busy timeout in cg_open"
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5"]
+
+[task.0.2]
+title      = "Honour .gitignore"
+status     = "done"
+wave       = 0
+symbols    = ["ig_load_file", "ig_entry_hits"]
+touches    = ["src/util.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/09_root.sh"
+do_1       = "Parse .gitignore with negation and anchored patterns alongside .cgignore"
+reqs       = ["3.1"]
+
+[task.1]
+title   = "Graph quality"
+section = "Wave 1: make context worth the call"
+status  = "pending"
+
+[task.1.1]
+title      = "Tokenized search and query-aware context"
+status     = "done"
+wave       = 1
+requires   = ["0.1"]
+symbols    = ["find_symbols_tokenized", "context_entry_points"]
+touches    = ["src/graph.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/01_graph.sh"
+do_1       = "Split queries into tokens, match each, fuse scores"
+do_2       = "Derive entry points from the query: routes, exported symbols in matched files, then main()"
+reqs       = ["2.1", "2.2"]
+
+[task.1.2]
+title      = "Symbol-scoped read, test impact, and provenance"
+status     = "done"
+wave       = 1
+requires   = ["0.1"]
+symbols    = ["cmd_show", "cmd_test_impact", "cmd_why"]
+touches    = ["src/graph.c", "src/main.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/10_lifecycle.sh"
+do_1       = "cg show returns one symbol body, not a file"
+do_2       = "Detect test files and add cg test-impact over refs"
+do_3       = "cg why joins symbol to commits, tasks, and memories"
+reqs       = ["2.3", "2.4", "2.5"]
+
+[task.2]
+title   = "Git integration"
+section = "Wave 2: git as a peer"
+status  = "pending"
+
+[task.2.1]
+title      = "Ingest git history and rank by churn"
+status     = "done"
+wave       = 2
+requires   = ["0.2"]
+symbols    = ["cmd_git_sync", "git_churn_for_path"]
+touches    = ["src/gitint.c", "src/db.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/11_git.sh"
+do_1       = "Pipe git log to fill git_commits and git_churn tables"
+do_2       = "Use churn and recency as a ranking signal"
+do_3       = "cg commit --git mirrors the snapshot into a real git commit"
+reqs       = ["3.2", "3.3", "3.4"]
+
+[task.3]
+title   = "Spec authoring"
+section = "Wave 3: the plan lives in the tool"
+status  = "pending"
+
+[task.3.1]
+title      = "Create, extend, and validate specs"
+status     = "done"
+wave       = 3
+requires   = ["0.1"]
+symbols    = ["spec_new_cmd", "spec_add_cmd", "spec_lint_cmd"]
+touches    = ["src/spec.c", "src/kvx.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/05_spec.sh && CG=$PWD/cg tests/integration/12_authoring.sh"
+do_1       = "cg spec new scaffolds a feature and workflow.kvx when absent"
+do_2       = "cg spec add inserts a task, preserving every other byte"
+do_3       = "cg spec lint reports cycles, unknown requires, missing ACs, dead globs"
+reqs       = ["4.1", "4.2", "4.3"]
+
+[task.3.2]
+title      = "Parallel mode, leases, and the CI gate"
+status     = "done"
+wave       = 4
+requires   = ["3.1"]
+symbols    = ["spec_wave_cmd", "spec_claim_cmd", "cmd_check"]
+touches    = ["src/spec.c", "src/govern.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/12_authoring.sh"
+do_1       = "Add parallel mode with claims, TTL leases, and touches-disjointness"
+do_2       = "cg spec wave lists every eligible task, not just the first"
+do_3       = "cg check gates render staleness, lint, and evidence in one command"
+reqs       = ["4.4", "4.5"]
+
+[task.4]
+title   = "Ambient governance"
+section = "Wave 5: present at every step"
+status  = "pending"
+
+[task.4.1]
+title      = "Brief, review, guard, and hooks"
+status     = "done"
+wave       = 5
+requires   = ["1.2", "3.2"]
+symbols    = ["cmd_brief", "cmd_review", "cmd_guard", "cmd_hook_install"]
+touches    = ["src/govern.c", "src/main.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/10_lifecycle.sh"
+do_1       = "cg brief returns session state in one call"
+do_2       = "cg review pairs changed symbols with acceptance criteria and at-risk callers"
+do_3       = "cg guard reports out-of-scope edits, warning unless --strict"
+do_4       = "cg hook install wires agent, git, and editor hooks to keep the graph fresh"
+reqs       = ["5.1", "5.2", "5.3", "5.4"]
+
+[task.4.2]
+title      = "Memory maturity"
+status     = "done"
+wave       = 5
+requires   = ["0.1"]
+symbols    = ["cmd_memory_compact", "memory_supersede", "cmd_recall_near"]
+touches    = ["src/memory.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/08_memory.sh"
+do_1       = "Add --supersedes so reversed decisions stop surfacing first"
+do_2       = "Add cg memory compact to dedupe and decay outcome noise"
+do_3       = "Add recall --near <file> anchored retrieval"
+reqs       = ["5.5"]
+
+[task.5]
+title   = "Protocols"
+section = "Wave 6: speak what agents and editors speak"
+status  = "pending"
+
+[task.5.1]
+title      = "Modernize the MCP surface"
+status     = "done"
+wave       = 6
+requires   = ["4.1"]
+symbols    = ["mcp_tool_annotations", "mcp_list_resources", "mcp_list_prompts"]
+touches    = ["src/mcp.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "Add annotations and output schemas to every tool"
+do_2       = "Expose spec files and the task board as resources"
+do_3       = "Ship the workflow loop as prompts"
+do_4       = "Negotiate protocolVersion instead of echoing the client"
+do_5       = "Register every new command as a tool"
+reqs       = ["6.1", "6.2", "6.3"]
+
+[task.5.2]
+title      = "Language server"
+status     = "done"
+wave       = 7
+requires   = ["5.1"]
+symbols    = ["cmd_lsp", "lsp_hover", "lsp_diagnostics"]
+touches    = ["src/lsp.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/13_lsp.sh"
+do_1       = "Content-Length framed JSON-RPC lifecycle"
+do_2       = "definition, references, hover, and workspace symbol from the graph"
+do_3       = "Diagnostics for kvx errors, stale render, and out-of-scope edits"
+do_4       = "codeLens and codeAction over tasks and memories"
+reqs       = ["6.4", "6.5"]
+
+[task.6]
+title   = "Proof"
+section = "Wave 8: tests and documentation"
+status  = "pending"
+
+[task.6.1]
+title      = "Tests and documentation"
+status     = "done"
+wave       = 8
+requires   = ["5.2"]
+touches    = ["tests/integration/09_root.sh", "README.md", "docs/ARCHITECTURE.md"]
+verify_cmd = "make test"
+do_1       = "Integration coverage for every new command, including nested-root boundaries"
+do_2       = "Update README, ARCHITECTURE, and the command reference"
+reqs       = ["1.1", "6.5"]

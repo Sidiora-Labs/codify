@@ -44,7 +44,7 @@ assert init["serverInfo"]["name"] == "codify", init
 assert init["protocolVersion"] == "2025-06-18", init
 
 tools = [t["name"] for t in by_id[2]["result"]["tools"]]
-assert len(tools) == 19, tools
+assert len(tools) >= 19, tools
 for t in ("search_code", "get_context", "impact_analysis", "vcs_commit",
           "spec_status", "spec_next", "spec_start", "spec_done",
           "spec_mode", "spec_implemented", "spec_render", "spec_trace",
@@ -112,3 +112,68 @@ assert prod["mode"] == "prod" and prod["implemented"] == 1, prod
 EOF
 
 echo ok
+
+# ---- protocol negotiation, annotations, resources, prompts
+req() { printf '%s\n' "$1" | "$CG" mcp 2>/dev/null; }
+
+out="$(req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}')"
+python3 -c "
+import json
+d = json.loads(r'''$out''')['result']
+assert d['protocolVersion'] != '1999-01-01', ('echoed an unsupported version', d)
+assert d['protocolVersion'] == '2025-06-18', d
+for cap in ('tools', 'resources', 'prompts'):
+    assert cap in d['capabilities'], (cap, d['capabilities'])
+assert 'instructions' in d, d
+"
+# a version we do speak is honoured
+out="$(req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}')"
+python3 -c "
+import json
+assert json.loads(r'''$out''')['result']['protocolVersion'] == '2024-11-05'
+"
+
+out="$(req '{"jsonrpc":"2.0","id":2,"method":"tools/list"}')"
+python3 -c "
+import json
+tools = json.loads(r'''$out''')['result']['tools']
+by = {t['name']: t for t in tools}
+assert len(tools) >= 30, len(tools)
+for t in tools:
+    assert 'annotations' in t, ('no annotations on', t['name'])
+    assert 'title' in t, ('no title on', t['name'])
+assert by['search_code']['annotations']['readOnlyHint'] is True
+assert by['vcs_commit']['annotations']['readOnlyHint'] is False
+for name in ('brief', 'review', 'why', 'get_source', 'test_impact',
+             'check', 'guard', 'spec_wave', 'spec_new', 'spec_add',
+             'spec_lint', 'spec_claim', 'git_sync'):
+    assert name in by, ('missing tool', name)
+"
+
+out="$(req '{"jsonrpc":"2.0","id":3,"method":"prompts/list"}')"
+python3 -c "
+import json
+p = json.loads(r'''$out''')['result']['prompts']
+names = [x['name'] for x in p]
+assert 'start-work' in names and 'review-change' in names, names
+"
+out="$(req '{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"close-task"}}')"
+python3 -c "
+import json
+r = json.loads(r'''$out''')['result']
+assert r['messages'][0]['content']['text'].strip(), r
+"
+out="$(req '{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"nope"}}')"
+python3 -c "
+import json
+assert 'error' in json.loads(r'''$out'''), 'unknown prompt should error'
+"
+
+out="$(req '{"jsonrpc":"2.0","id":6,"method":"resources/list"}')"
+python3 -c "
+import json
+res = json.loads(r'''$out''')['result']['resources']
+assert any(x['uri'].startswith('codify://spec/') for x in res), res
+"
+
+echo "04_mcp modern ok"

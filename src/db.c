@@ -36,24 +36,110 @@ static const char *SCHEMA =
     "  task TEXT, body TEXT NOT NULL, symbols TEXT, files TEXT,"
     "  source TEXT NOT NULL);"
     "CREATE INDEX IF NOT EXISTS idx_mem_task ON memories(task);"
+    /* a superseded memory stays readable but stops surfacing first */
+    "CREATE TABLE IF NOT EXISTS memory_superseded("
+    "  id INTEGER PRIMARY KEY, by_id INTEGER NOT NULL, at INTEGER NOT NULL);"
     "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
-    "  body, task, symbols, tokenize='unicode61');";
+    "  body, task, symbols, tokenize='unicode61');"
+    /* git history, ingested by `cg git-sync`; empty when the repo has no git */
+    "CREATE TABLE IF NOT EXISTS git_commits("
+    "  hash TEXT PRIMARY KEY, author TEXT, date INTEGER, subject TEXT);"
+    "CREATE TABLE IF NOT EXISTS git_churn("
+    "  path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(path,hash));"
+    "CREATE INDEX IF NOT EXISTS idx_churn_path ON git_churn(path);"
+    /* leases: parallel-mode task claims, one row per claimed spec task */
+    "CREATE TABLE IF NOT EXISTS leases("
+    "  task TEXT PRIMARY KEY, agent TEXT NOT NULL, claimed INTEGER NOT NULL,"
+    "  expires INTEGER NOT NULL, touches TEXT);";
+
+/* Does `base/name` exist at all? `.git` is a file in worktrees and
+ * submodules, so existence — not directory-ness — is the boundary test. */
+static bool path_exists(const char *base, const char *name) {
+    char p[4600];
+    struct stat st;
+    snprintf(p, sizeof p, "%s/%s", base, name);
+    return stat(p, &st) == 0;
+}
+
+static bool is_project_dir(const char *base) {
+    char p[4600];
+    struct stat st;
+    snprintf(p, sizeof p, "%s/%s", base, CG_DIR);
+    return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* A directory that owns its subtree. Crossing one of these while looking for
+ * .codegraph means the enclosing project is a different project, so the walk
+ * must stop rather than silently binding an ancestor's database. */
+bool cg_is_boundary(const char *dir) {
+    static const char *MARKERS[] = {
+        ".git", ".hg", ".svn", "go.mod", "Cargo.toml", "package.json",
+        "pyproject.toml", "pom.xml", "build.gradle", "composer.json", NULL
+    };
+    for (int i = 0; MARKERS[i]; i++)
+        if (path_exists(dir, MARKERS[i])) return true;
+    return false;
+}
+
+int cg_find_root_at(const char *start, char *out, size_t cap) {
+    const char *ov = getenv("CODIFY_ROOT");
+    if (ov && ov[0]) {                       /* explicit override wins */
+        if (!is_project_dir(ov)) return -1;
+        snprintf(out, cap, "%s", ov);
+        return 0;
+    }
+    char cwd[4096];
+    snprintf(cwd, sizeof cwd, "%s", start);
+    size_t n = strlen(cwd);
+    while (n > 1 && cwd[n - 1] == '/') cwd[--n] = 0;
+
+    const char *home = getenv("HOME");
+    struct stat st0;
+    bool have_dev = stat(cwd, &st0) == 0;
+
+    for (;;) {
+        if (is_project_dir(cwd)) {           /* probe before any boundary */
+            snprintf(out, cap, "%s", cwd);
+            return 0;
+        }
+        if (cg_is_boundary(cwd)) return -1;  /* a different project owns this */
+        if (home && home[0] && strcmp(cwd, home) == 0) return -1;
+        char *slash = strrchr(cwd, '/');
+        if (!slash || slash == cwd) return -1;
+        *slash = 0;
+        struct stat st;
+        if (have_dev && stat(cwd, &st) == 0 && st.st_dev != st0.st_dev)
+            return -1;                       /* crossed a mount point */
+    }
+}
 
 int cg_find_root(char *out, size_t cap) {
     char cwd[4096];
     if (!getcwd(cwd, sizeof cwd)) return -1;
-    char probe[4600];
-    for (;;) {
-        snprintf(probe, sizeof probe, "%s/%s", cwd, CG_DIR);
-        struct stat st;
-        if (stat(probe, &st) == 0 && S_ISDIR(st.st_mode)) {
-            snprintf(out, cap, "%s", cwd);
-            return 0;
-        }
-        char *slash = strrchr(cwd, '/');
-        if (!slash || slash == cwd) return -1;
-        *slash = 0;
+    return cg_find_root_at(cwd, out, cap);
+}
+
+/* Report which project cg binds to here. The whole class of "it silently used
+ * an ancestor" confusion is one command away from being diagnosed. */
+int cmd_root(bool json) {
+    char root[4096];
+    if (cg_find_root(root, sizeof root) != 0) {
+        if (json) printf("{\"root\":null}\n");
+        else fprintf(stderr, "cg: no Codify project here or in any parent "
+                             "directory (run `cg init`)\n");
+        return 1;
     }
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"root\":");
+        sb_json_str(&b, root);
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("%s\n", root);
+    }
+    return 0;
 }
 
 int cg_open(Cg *cg, bool create) {
@@ -76,6 +162,11 @@ int cg_open(Cg *cg, bool create) {
         fprintf(stderr, "cg: cannot open %s: %s\n", dbpath, sqlite3_errmsg(cg->db));
         return -1;
     }
+    /* WAL lets readers run while one writer indexes, and the busy timeout
+     * makes concurrent cg processes wait instead of failing outright. */
+    sqlite3_busy_timeout(cg->db, 5000);
+    sqlite3_exec(cg->db, "PRAGMA journal_mode=WAL;PRAGMA synchronous=NORMAL",
+                 NULL, NULL, NULL);
     char *err = NULL;
     if (sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {
         fprintf(stderr, "cg: schema: %s\n", err ? err : "?");

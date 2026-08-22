@@ -367,8 +367,10 @@ static void sb_kvx_string(StrBuf *b, const char *value) {
     sb_putc(b, '"');
 }
 
-int kvx_set_string(const char *path, const char *section, const char *key,
-                   const char *value) {
+/* Shared writer for kvx_set_string (quoted scalar) and kvx_set_raw (a list or
+ * other literal). Both preserve every byte outside the one line they touch. */
+static int kvx_set_value(const char *path, const char *section, const char *key,
+                         const char *value, bool raw) {
     size_t len = 0;
     char *body = read_entire_file(path, &len);
     if (!body) return -1;
@@ -433,7 +435,7 @@ int kvx_set_string(const char *path, const char *section, const char *key,
     if (key_start != SIZE_MAX) {
         for (size_t i = 0; i <= key_eq; i++) sb_putc(&out, body[key_start + i]);
         sb_putc(&out, ' ');
-        sb_kvx_string(&out, value);
+        if (raw) sb_puts(&out, value); else sb_kvx_string(&out, value);
         for (size_t i = key_tail; i < key_len; i++)
             sb_putc(&out, body[key_start + i]);
         if (key_start > 0) {
@@ -452,7 +454,7 @@ int kvx_set_string(const char *path, const char *section, const char *key,
         for (size_t i = 0; i < section_end; i++) sb_putc(&out, body[i]);
         if (section_end && body[section_end - 1] != '\n') sb_putc(&out, '\n');
         sb_printf(&out, "%s = ", key);
-        sb_kvx_string(&out, value);
+        if (raw) sb_puts(&out, value); else sb_kvx_string(&out, value);
         sb_putc(&out, '\n');
         for (size_t i = section_end; i < len; i++) sb_putc(&out, body[i]);
     } else {
@@ -461,7 +463,7 @@ int kvx_set_string(const char *path, const char *section, const char *key,
         if (out.len && (out.len < 2 || out.p[out.len - 2] != '\n'))
             sb_putc(&out, '\n');
         sb_printf(&out, "[%s]\n%s = ", section, key);
-        sb_kvx_string(&out, value);
+        if (raw) sb_puts(&out, value); else sb_kvx_string(&out, value);
         sb_putc(&out, '\n');
     }
 
@@ -469,4 +471,14 @@ int kvx_set_string(const char *path, const char *section, const char *key,
     int rc = write_entire_file(path, out.p, out.len);
     sb_free(&out);
     return rc;
+}
+
+int kvx_set_string(const char *path, const char *section, const char *key,
+                   const char *value) {
+    return kvx_set_value(path, section, key, value, false);
+}
+
+int kvx_set_raw(const char *path, const char *section, const char *key,
+                const char *raw) {
+    return kvx_set_value(path, section, key, raw, true);
 }

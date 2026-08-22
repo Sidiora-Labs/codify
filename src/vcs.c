@@ -1044,6 +1044,59 @@ static void man_diff_paths(const Manifest *a, const Manifest *b, PathSet *p) {
     }
 }
 
+/* Commits whose snapshot changed `path`, newest first. This is the history
+ * half of `cg why` — provenance for a file, walked from HEAD. */
+int vcs_commits_for_path(Cg *cg, const char *path, int limit, char ***ids,
+                         char ***msgs, long **dates) {
+    *ids = NULL; *msgs = NULL; *dates = NULL;
+    char hash[65];
+    if (head_read(cg, hash) != 0) return 0;
+    int n = 0, cap = 8;
+    char **iv = xmalloc(sizeof(char *) * (size_t)cap);
+    char **mv = xmalloc(sizeof(char *) * (size_t)cap);
+    long *dv  = xmalloc(sizeof(long) * (size_t)cap);
+    while (hash[0] && n < limit) {
+        Commit c;
+        if (commit_load(cg, hash, &c) != 0) break;
+        Manifest cur, par;
+        memset(&cur, 0, sizeof cur);
+        memset(&par, 0, sizeof par);
+        man_load(cg, c.tree, &cur);
+        Commit pc;
+        bool have_par = c.parent[0] && commit_load(cg, c.parent, &pc) == 0;
+        if (have_par) man_load(cg, pc.tree, &par);
+
+        PathSet ps;
+        memset(&ps, 0, sizeof ps);
+        man_diff_paths(&par, &cur, &ps);
+        bool hit = false;
+        for (int i = 0; i < ps.n; i++)
+            if (strcmp(ps.v[i], path) == 0) { hit = true; break; }
+        for (int i = 0; i < ps.n; i++) free(ps.v[i]);
+        free(ps.v);
+        man_free(&cur);
+        man_free(&par);
+        if (have_par) free(pc.message);
+
+        if (hit) {
+            if (n == cap) {
+                cap *= 2;
+                iv = xrealloc(iv, sizeof(char *) * (size_t)cap);
+                mv = xrealloc(mv, sizeof(char *) * (size_t)cap);
+                dv = xrealloc(dv, sizeof(long) * (size_t)cap);
+            }
+            iv[n] = xstrdup(hash);
+            mv[n] = xstrdup(c.message ? c.message : "");
+            dv[n] = c.date;
+            n++;
+        }
+        snprintf(hash, sizeof hash, "%s", c.parent);
+        free(c.message);
+    }
+    *ids = iv; *msgs = mv; *dates = dv;
+    return n;
+}
+
 int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,
                      long **dates) {
     *ids = NULL; *msgs = NULL; *dates = NULL;

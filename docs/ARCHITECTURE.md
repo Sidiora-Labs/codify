@@ -25,9 +25,15 @@ files ───────────────────────► j
   spec plus POSIX ERE definition patterns; a framework route is one regex
   row. Adding a language or framework is adding a table entry.
 - **`db.c`** owns the schema: `files`, `symbols`, `refs`, `routes`, `meta`,
-  `memories`, plus three FTS5 tables — trigram over symbol names
-  (substring search), unicode61 over file bodies (word search), and
-  unicode61 over memory bodies.
+  `memories`, `memory_superseded`, `git_commits`, `git_churn`, `leases`,
+  plus three FTS5 tables — trigram over symbol names (substring search),
+  unicode61 over file bodies (word search), and unicode61 over memory
+  bodies. It also resolves the project root, which is load-bearing:
+  `cg_find_root_at` stops the upward walk at a `.git`/`go.mod`/
+  `package.json`-style boundary, at `$HOME`, and at a mount change, so a
+  stray `.codegraph` in an ancestor can never silently capture a project
+  beneath it. `CODIFY_ROOT` overrides the walk; `cg root` prints the
+  answer.
 - **`graph.c`** implements the query commands (`search`, `symbol`,
   `impact`, `context`, `routes`) with `--json` variants.
 
@@ -48,8 +54,14 @@ platforms stub out behind the same interface.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
-`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 19
-tools. CLI command output is captured via `dup2` + tmpfile
+`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 32
+tools, each carrying read-only/destructive annotations so a client can
+auto-approve reads instead of prompting on every search. It also serves
+resources (the workflow file, the rendered board, the generated agent
+briefs, and every feature spec) and prompts (the workflow loop itself,
+so Codify's opinion travels to any client). `initialize` negotiates a
+protocolVersion the server actually speaks rather than echoing the
+client's. CLI command output is captured via `dup2` + tmpfile
 (`cg_capture`), so the CLI and MCP surfaces share one implementation.
 `json.c` is a minimal scanner (no DOM) used for JSON-RPC parsing and
 `package.json` introspection. `cg mcp-install` splices the server into
@@ -82,6 +94,47 @@ bm25, recency breaking ties. `spec next`/`start` surface task-linked and
 title-matched memories; `trace` appends the task's memories to its
 chain.
 
+## Git interop (`gitint.c`)
+
+`cg git-sync` pipes `git log --name-only` into `git_commits` and
+`git_churn` — no libgit2, no new link-time dependency. Churn then feeds
+the fused ranking in `find_symbols_tokenized`, lifting code that is
+actually being worked on. `cg commit --git` mirrors a snapshot into a
+real git commit carrying the same `[spec:feature/id]` tag, and
+`ignore_load` reads `.gitignore` (including nested ones, with negation
+and anchoring) alongside `.cgignore`. Adopting Codify is therefore never
+all-or-nothing.
+
+## Governance (`govern.c`)
+
+The commands that put Codify inside the loop rather than at its ends:
+`cg brief` (session state in one call), `cg review` (changed symbols
+paired with the acceptance criteria they claim and the callers now at
+risk), `cg guard` (edits outside the in-progress task's declared
+`touches`), and `cg check` (the single CI gate: render staleness, lint,
+task evidence, lease consistency, worktree state). They read the spec
+through `cmd_spec`'s own `--json` output via `cg_capture`, so there is
+one implementation of the task model rather than two.
+
+Everything here is advisory by default. `cg guard` exits zero unless
+`--strict`, which is what makes `cg hook install` safe: wiring it into a
+`PostToolUse` hook or a pre-commit hook can report scope drift without
+ever breaking a workflow that was working before.
+
+## Language server (`lsp.c`)
+
+`cg lsp` speaks Content-Length framed JSON-RPC 2.0 on stdio and answers
+definition, references, hover, document and workspace symbols, and code
+lens straight from the graph — no compiler, no toolchain, no project
+configuration. Reading reuses `json.c`, the same scanner the MCP server
+uses; LSP's zero-based positions are converted at the boundary.
+
+Diagnostics are the reason it exists as much as navigation: an
+unparseable kvx file and an edit outside the active task's `touches` are
+published as squiggles, so governance reaches the editor without anyone
+running a command. Hover joins all four layers — what the symbol is, how
+many references it has, and the decisions recorded about it.
+
 ## Tests
 
 - `tests/unit/` — standalone binaries linked against `build/libcg.a`
@@ -90,5 +143,8 @@ chain.
 - `tests/integration/` — shell scripts driving the real binary in
   temp sandboxes: graph queries, VCS flows, changelog/agentmd/
   mcp-install, the MCP protocol, the spec engine against Go-generated
-  goldens, graph-verified completion + trace, agent memory, and the
-  inotify watcher.
+  goldens, graph-verified completion + trace, agent memory, the inotify
+  watcher, root-resolution boundaries and .gitignore (`09_root`), the
+  read and governance lifecycle (`10_lifecycle`), git interop
+  (`11_git`), spec authoring and the CI gate (`12_authoring`), and the
+  language server driven as a real editor would (`13_lsp`).

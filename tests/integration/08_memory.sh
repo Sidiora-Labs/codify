@@ -134,3 +134,55 @@ out="$("$CG" remember "Qualification remains human-owned")"
 hasnt "$out" "task demo/1.2"
 
 echo ok
+
+# ---- superseding a decision keeps it readable but stops it leading
+cd "$TMP/proj" 2>/dev/null || cd "$TMP"/*/ 2>/dev/null || true
+"$CG" remember "sessions expire after 1 hour" --type decision >/dev/null
+old_id="$("$CG" recall "sessions expire" --json | python3 -c "
+import json,sys
+print(json.load(sys.stdin)['memories'][0]['id'])")"
+"$CG" remember "sessions expire after 24 hours" --type decision \
+      --supersedes "$old_id" >/dev/null
+out="$("$CG" recall "sessions expire" --json)"
+python3 -c "
+import json
+d = json.loads(r'''$out''')
+bodies = [m['body'] for m in d['memories']]
+assert '24 hours' in bodies[0], ('superseded memory still leads', bodies)
+assert any('1 hour' in b for b in bodies), ('history was deleted', bodies)
+"
+
+# ---- recall --near finds memories anchored to a file
+"$CG" remember "this file owns ignore rules" --type fact --files src/util.ts >/dev/null
+out="$("$CG" recall --near src/util.ts)"
+has "$out" "owns ignore rules"
+
+# ---- compact removes exact repeats and reports honestly
+"$CG" remember "duplicated note" --type fact >/dev/null
+"$CG" remember "duplicated note" --type fact >/dev/null
+out="$("$CG" memory compact --dry-run)"
+has "$out" "1 duplicate"
+out="$("$CG" memory compact --json)"
+python3 -c "
+import json
+d = json.loads(r'''$out''')
+assert d['removed'] >= 1, d
+"
+out="$("$CG" memory compact)"
+has "$out" "removed 0 duplicate"
+
+echo "08_memory maturity ok"
+
+# ---- repeated spec outcomes collapse instead of piling up identical rows
+before="$("$CG" recall --json -n 200 | python3 -c "
+import json,sys; print(len(json.load(sys.stdin)['memories']))")"
+"$CG" spec start 1.2 >/dev/null 2>&1 || true
+"$CG" spec done 1.2 >/dev/null 2>&1 || true
+"$CG" spec start 1.2 --force >/dev/null 2>&1 || true
+"$CG" spec done 1.2 >/dev/null 2>&1 || true
+after="$("$CG" recall --json -n 200 | python3 -c "
+import json,sys; print(len(json.load(sys.stdin)['memories']))")"
+[ "$after" -le "$((before + 1))" ] \
+    || fail "repeated spec outcomes piled up: $before -> $after"
+
+echo "08_memory dedup ok"

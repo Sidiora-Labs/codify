@@ -152,7 +152,7 @@ out="$("$CG" spec status)"
 has "$out" "mode: standard"
 cp spec/workflow.kvx workflow.before-invalid
 out="$("$CG" spec mode unknown 2>&1)" && fail "unknown spec mode should refuse"
-has "$out" "mode must be prod or standard"
+has "$out" "mode must be standard, prod, or parallel"
 cmp -s spec/workflow.kvx workflow.before-invalid \
     || fail "invalid mode changed workflow.kvx"
 

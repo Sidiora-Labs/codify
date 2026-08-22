@@ -5,6 +5,7 @@
  */
 #include "cg.h"
 #include <ctype.h>
+#include <strings.h>
 
 /* ---------------- helpers ---------------- */
 
@@ -129,6 +130,92 @@ static int find_symbols(Cg *cg, const char *q, SymRow *out, int cap) {
     return n;
 }
 
+#define MAX_TOK 8
+
+/* split a free-text query into identifier-ish tokens */
+static int tokenize(const char *q, char toks[][128], int cap) {
+    int n = 0;
+    for (const char *p = q; *p && n < cap; ) {
+        while (*p && !isalnum((unsigned char)*p) && *p != '_') p++;
+        if (!*p) break;
+        const char *s = p;
+        while (*p && (isalnum((unsigned char)*p) || *p == '_')) p++;
+        size_t len = (size_t)(p - s);
+        if (len < 2) continue;                  /* single letters are noise */
+        if (len > 127) len = 127;
+        memcpy(toks[n], s, len);
+        toks[n][len] = 0;
+        n++;
+    }
+    return n;
+}
+
+static bool ci_contains(const char *hay, const char *needle) {
+    size_t nl = strlen(needle);
+    for (const char *p = hay; *p; p++) {
+        if (strncasecmp(p, needle, nl) == 0) return true;
+    }
+    return false;
+}
+
+typedef struct { SymRow r; int score, hits; } Cand;
+
+static void cand_add(Cand *c, int *nc, int cap, const SymRow *r, int score) {
+    for (int i = 0; i < *nc; i++) {
+        if (c[i].r.id == r->id) {
+            c[i].score += score;
+            c[i].hits++;
+            return;
+        }
+    }
+    if (*nc >= cap) return;
+    c[*nc].r = *r;
+    c[*nc].score = score;
+    c[*nc].hits = 1;
+    (*nc)++;
+}
+
+static int cand_cmp(const void *a, const void *b) {
+    const Cand *x = a, *y = b;
+    if (x->hits != y->hits) return y->hits - x->hits;   /* more tokens first */
+    if (x->score != y->score) return y->score - x->score;
+    return (int)strlen(x->r.name) - (int)strlen(y->r.name);
+}
+
+/* Multi-word queries are the common case for agents ("password auth",
+ * "spec done"), and matching the whole phrase as one trigram string finds
+ * nothing. Match each token separately and fuse: symbols hit by more tokens
+ * rank above symbols hit by one, exact name matches above substrings. */
+static int find_symbols_tokenized(Cg *cg, const char *q, SymRow *out, int cap) {
+    int n = find_symbols(cg, q, out, cap);      /* whole phrase is strongest */
+    char toks[MAX_TOK][128];
+    int nt = tokenize(q, toks, MAX_TOK);
+    if (nt < 2 || n >= cap) return n;
+
+    Cand cands[128];
+    int nc = 0;
+    for (int i = 0; i < n; i++) cand_add(cands, &nc, 128, &out[i], 1000);
+
+    SymRow tmp[24];
+    for (int t = 0; t < nt; t++) {
+        int m = find_symbols(cg, toks[t], tmp, 24);
+        for (int i = 0; i < m; i++) {
+            int score = 20;
+            if (strcasecmp(tmp[i].name, toks[t]) == 0) score = 100;
+            else if (ci_contains(tmp[i].name, toks[t])) score = 45;
+            /* churn lifts code that is actually being worked on; absent git
+             * history this is a uniform zero and changes nothing */
+            int churn = git_churn_for_path(cg, tmp[i].path);
+            score += churn > 10 ? 20 : churn * 2;
+            cand_add(cands, &nc, 128, &tmp[i], score);
+        }
+    }
+    qsort(cands, (size_t)nc, sizeof(Cand), cand_cmp);
+    int k = 0;
+    for (int i = 0; i < nc && k < cap; i++) out[k++] = cands[i].r;
+    return k;
+}
+
 /* callers of a symbol NAME: enclosing symbols of refs to it */
 static int callers_of(Cg *cg, const char *name, SymRow *out, int cap) {
     sqlite3_stmt *st = cg_prep(cg,
@@ -172,6 +259,67 @@ static int ref_count(Cg *cg, const char *name) {
     return n;
 }
 
+/* Entry points that actually relate to the query: handlers of routes whose
+ * pattern or handler name matches, then call-graph roots found by walking up
+ * from the matched symbols. main() is a fallback the caller applies only when
+ * this returns nothing. */
+static bool ep_interesting(const SymRow *r) {
+    /* heuristic extraction yields some noise (macros, struct tags); entry
+     * points are callable things, so keep only those kinds */
+    return strcmp(r->kind, "function") == 0 || strcmp(r->kind, "method") == 0 ||
+           strcmp(r->kind, "class") == 0;
+}
+
+static bool ep_push(SymRow *out, int *n, int cap, const SymRow *r) {
+    if (*n >= cap) return false;
+    for (int i = 0; i < *n; i++)
+        if (strcmp(out[i].name, r->name) == 0) return false;   /* by name */
+    out[(*n)++] = *r;
+    return true;
+}
+
+static void ep_climb(Cg *cg, const SymRow *from, SymRow *out, int *n, int cap,
+                     int depth, char seen[][256], int *nseen) {
+    if (depth <= 0 || *n >= cap || *nseen >= 64) return;
+    for (int i = 0; i < *nseen; i++)
+        if (strcmp(seen[i], from->name) == 0) return;
+    snprintf(seen[(*nseen)++], 256, "%s", from->name);
+
+    SymRow up[8];
+    int nu = callers_of(cg, from->name, up, 8);
+    if (nu == 0) {                       /* nothing calls it — a root */
+        if (ep_interesting(from)) ep_push(out, n, cap, from);
+        return;
+    }
+    for (int j = 0; j < nu && *n < cap; j++)
+        ep_climb(cg, &up[j], out, n, cap, depth - 1, seen, nseen);
+}
+
+static int context_entry_points(Cg *cg, const char *q, const SymRow *matched,
+                                int nmatched, SymRow *out, int cap) {
+    int n = 0;
+    char like[300];
+    snprintf(like, sizeof like, "%%%s%%", q);
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT " SYM_COLS " FROM routes r "
+        "JOIN symbols s ON s.name=r.handler "
+        "JOIN files f ON f.id=s.file_id "
+        "WHERE r.pattern LIKE ?1 OR ifnull(r.handler,'') LIKE ?1 LIMIT ?2");
+    sqlite3_bind_text(st, 1, like, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 2, cap);
+    while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
+        SymRow r; sym_from_stmt(st, &r);
+        ep_push(out, &n, cap, &r);
+    }
+    sqlite3_finalize(st);
+
+    char seen[64][256];
+    int nseen = 0;
+    for (int i = 0; i < nmatched && n < cap; i++)
+        ep_climb(cg, &matched[i], out, &n, cap, 5, seen, &nseen);
+    return n;
+}
+
 static void json_sym(StrBuf *b, const SymRow *r) {
     sb_puts(b, "{\"name\":");   sb_json_str(b, r->name);
     sb_puts(b, ",\"kind\":");   sb_json_str(b, r->kind);
@@ -185,7 +333,7 @@ static void json_sym(StrBuf *b, const SymRow *r) {
 
 int cmd_search(Cg *cg, const char *q, int limit, bool json) {
     SymRow *rows = xmalloc(sizeof(SymRow) * (size_t)limit);
-    int n = find_symbols(cg, q, rows, limit);
+    int n = find_symbols_tokenized(cg, q, rows, limit);
 
     /* body full-text hits */
     char *fw = fts_words(q);
@@ -454,7 +602,7 @@ int cmd_routes(Cg *cg, const char *filter, bool json) {
 
 int cmd_context(Cg *cg, const char *q, bool json) {
     SymRow rows[8];
-    int n = find_symbols(cg, q, rows, 8);
+    int n = find_symbols_tokenized(cg, q, rows, 8);
 
     StrBuf b; sb_init(&b);
     if (json) {
@@ -519,24 +667,43 @@ int cmd_context(Cg *cg, const char *q, bool json) {
         free(snip);
     }
 
-    /* entry points: main()s and routes touching the query */
+    /* entry points: derived from the query — route handlers that match it,
+     * then call-graph roots above the matched symbols, and only then main() */
     if (json) sb_puts(&b, "],\"entry_points\":[");
     else sb_puts(&b, "\nentry points:\n");
     int ne = 0;
-    sqlite3_stmt *st = cg_prep(cg,
-        "SELECT " SYM_COLS " FROM symbols s JOIN files f ON f.id=s.file_id "
-        "WHERE s.name IN ('main','Main','__main__') LIMIT 5");
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        SymRow r; sym_from_stmt(st, &r);
+    SymRow eps[8];
+    int nep = context_entry_points(cg, q, rows, n, eps, 8);
+    for (int i = 0; i < nep; i++) {
         if (json) {
             if (ne) sb_putc(&b, ',');
-            json_sym(&b, &r);
+            json_sym(&b, &eps[i]);
         } else {
-            sb_printf(&b, "  %s %s — %s:%d\n", r.kind, r.name, r.path, r.line);
+            sb_printf(&b, "  %s %s — %s:%d\n", eps[i].kind, eps[i].name,
+                      eps[i].path, eps[i].line);
         }
         ne++;
     }
-    sqlite3_finalize(st);
+    sqlite3_stmt *st;
+    if (ne == 0) {                      /* nothing query-specific — fall back */
+        st = cg_prep(cg,
+            "SELECT " SYM_COLS " FROM symbols s JOIN files f ON f.id=s.file_id "
+            "WHERE s.name IN ('main','Main','__main__') "
+            "ORDER BY (f.path LIKE '%test%' OR f.path LIKE '%fixture%'), "
+            "length(f.path) LIMIT 3");
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            SymRow r; sym_from_stmt(st, &r);
+            if (json) {
+                if (ne) sb_putc(&b, ',');
+                json_sym(&b, &r);
+            } else {
+                sb_printf(&b, "  %s %s — %s:%d\n", r.kind, r.name, r.path,
+                          r.line);
+            }
+            ne++;
+        }
+        sqlite3_finalize(st);
+    }
 
     char like[300];
     snprintf(like, sizeof like, "%%%s%%", q);
@@ -599,6 +766,320 @@ int cmd_context(Cg *cg, const char *q, bool json) {
         free(fw2);
     }
     if (json) sb_puts(&b, "]}\n");
+    fputs(b.p, stdout);
+    sb_free(&b);
+    return 0;
+}
+
+/* ---------------- show: one symbol, not its whole file ---------------- */
+
+/* Agents burn context reading a 2000-line file to see one function. `cg show`
+ * returns exactly the symbol body the graph already knows the bounds of. */
+/* Resolve "path:line" to the symbol whose body encloses that line. Editors
+ * and agents hold a cursor, not a name, so this is the position-first door
+ * into the graph — the same lookup `cg lsp` answers over the wire. */
+static int symbols_at_position(Cg *cg, const char *path, int line,
+                               SymRow *out, int cap) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT " SYM_COLS " FROM symbols s JOIN files f ON f.id=s.file_id "
+        "WHERE (f.path=?1 OR f.path LIKE '%/' || ?1) "
+        "AND s.line<=?2 AND (s.end_line>=?2 OR s.end_line=0) "
+        "ORDER BY s.line DESC LIMIT ?3");
+    sqlite3_bind_text(st, 1, path, -1, SQLITE_STATIC);
+    sqlite3_bind_int(st, 2, line);
+    sqlite3_bind_int(st, 3, cap);
+    int n = 0;
+    while (n < cap && sqlite3_step(st) == SQLITE_ROW)
+        sym_from_stmt(st, &out[n++]);
+    sqlite3_finalize(st);
+    return n;
+}
+
+int graph_symbol_at(Cg *cg, const char *path, int line, char *name,
+                    size_t cap) {
+    SymRow r[1];
+    if (symbols_at_position(cg, path, line, r, 1) == 0) return -1;
+    snprintf(name, cap, "%s", r[0].name);
+    return 0;
+}
+
+int cmd_show(Cg *cg, const char *name, bool json) {
+    SymRow rows[8];
+    int n = 0;
+    /* "src/util.ts:42" addresses a position; a bare word addresses a name */
+    const char *colon = strrchr(name, ':');
+    if (colon && colon[1] && strspn(colon + 1, "0123456789") == strlen(colon + 1)) {
+        char path[1024];
+        snprintf(path, sizeof path, "%.*s", (int)(colon - name), name);
+        n = symbols_at_position(cg, path, atoi(colon + 1), rows, 8);
+    }
+    if (n == 0) n = find_symbols(cg, name, rows, 8);
+    if (n == 0) {
+        if (json) printf("{\"name\":\"%s\",\"definitions\":[]}\n", name);
+        else fprintf(stderr, "cg: no symbol named '%s'\n", name);
+        return 1;
+    }
+    StrBuf b; sb_init(&b);
+    if (json) { sb_puts(&b, "{\"name\":"); sb_json_str(&b, name);
+                sb_puts(&b, ",\"definitions\":["); }
+    for (int i = 0; i < n; i++) {
+        char *body = file_snippet(cg, rows[i].path, rows[i].line,
+                                  rows[i].end_line > rows[i].line
+                                      ? rows[i].end_line : rows[i].line);
+        if (json) {
+            if (i) sb_putc(&b, ',');
+            sb_puts(&b, "{\"path\":");     sb_json_str(&b, rows[i].path);
+            sb_printf(&b, ",\"line\":%d,\"end_line\":%d,\"kind\":",
+                      rows[i].line, rows[i].end_line);
+            sb_json_str(&b, rows[i].kind);
+            sb_puts(&b, ",\"body\":");
+            sb_json_str(&b, body ? body : "");
+            sb_putc(&b, '}');
+        } else {
+            sb_printf(&b, "%s %s — %s:%d-%d\n", rows[i].kind, rows[i].name,
+                      rows[i].path, rows[i].line, rows[i].end_line);
+            if (body) sb_puts(&b, body);
+            if (i + 1 < n) sb_putc(&b, '\n');
+        }
+        free(body);
+    }
+    if (json) sb_puts(&b, "]}\n");
+    fputs(b.p, stdout);
+    sb_free(&b);
+    return 0;
+}
+
+/* ---------------- test impact ---------------- */
+
+/* Path shapes that mean "this file is a test" across the supported languages.
+ * Kept as SQL so the join stays in one query. */
+#define TEST_PATH_SQL \
+    "(f.path LIKE 'test/%' OR f.path LIKE 'tests/%' OR f.path LIKE '%/test/%'" \
+    " OR f.path LIKE '%/tests/%' OR f.path LIKE '%/spec/%' OR f.path LIKE 'spec/%'" \
+    " OR f.path LIKE '%\\_test.%' ESCAPE '\\' OR f.path LIKE '%test\\_%' ESCAPE '\\'" \
+    " OR f.path LIKE '%.test.%' OR f.path LIKE '%.spec.%' OR f.path LIKE '%Test.%'" \
+    " OR f.path LIKE '%Tests.%' OR f.path LIKE '%_spec.%')"
+
+bool graph_path_is_test(const char *path) {
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    const char *ext = path_ext(path);
+
+    /* Plans and prose are never tests. Codify's own spec/ directory holds kvx
+     * and markdown, so a bare `spec/` prefix cannot mean "test" on its own. */
+    /* path_ext keeps the leading dot */
+    static const char *PROSE[] = { ".md", ".kvx", ".txt", ".json", ".yml",
+                                   ".yaml", NULL };
+    for (int i = 0; ext && PROSE[i]; i++)
+        if (strcasecmp(ext, PROSE[i]) == 0) return false;
+
+    if (strstr(path, "/test/") || strstr(path, "/tests/") ||
+        strstr(path, "/__tests__/") || strncmp(path, "test/", 5) == 0 ||
+        strncmp(path, "tests/", 6) == 0)
+        return true;
+    /* `spec/` is a test directory in Ruby, and a plan directory here */
+    if ((strncmp(path, "spec/", 5) == 0 || strstr(path, "/spec/")) &&
+        ext && strcasecmp(ext, ".rb") == 0)
+        return true;
+
+    /* filename conventions: foo.test.ts, foo_test.go, test_foo.py, FooTest.java */
+    if (strstr(base, ".test.") || strstr(base, ".spec.") ||
+        strstr(base, "_test.") || strstr(base, "_spec.") ||
+        strncmp(base, "test_", 5) == 0)
+        return true;
+    size_t bl = strlen(base);
+    const char *dot = strrchr(base, '.');
+    size_t stem = dot ? (size_t)(dot - base) : bl;
+    if (stem > 4 && strncmp(base + stem - 4, "Test", 4) == 0) return true;
+    if (stem > 5 && strncmp(base + stem - 5, "Tests", 5) == 0) return true;
+    return false;
+}
+
+/* tests referencing `name`; returns count, appends rows to b */
+static int tests_for_symbol(Cg *cg, const char *name, StrBuf *b, bool json,
+                            int *emitted) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT DISTINCT f.path, r.line FROM refs r "
+        "JOIN files f ON f.id=r.file_id "
+        "WHERE r.name=? AND " TEST_PATH_SQL " ORDER BY f.path, r.line LIMIT 25");
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *path = (const char *)sqlite3_column_text(st, 0);
+        int line = sqlite3_column_int(st, 1);
+        if (json) {
+            if (*emitted) sb_putc(b, ',');
+            sb_puts(b, "{\"symbol\":");  sb_json_str(b, name);
+            sb_puts(b, ",\"path\":");    sb_json_str(b, path);
+            sb_printf(b, ",\"line\":%d}", line);
+        } else {
+            sb_printf(b, "  %-28s %s:%d\n", name, path, line);
+        }
+        (*emitted)++;
+        n++;
+    }
+    sqlite3_finalize(st);
+    return n;
+}
+
+/* Which tests exercise this change? With a name, that symbol; without one,
+ * every symbol defined in a file that differs from the last snapshot. */
+int cmd_test_impact(Cg *cg, const char *name, bool json) {
+    StrBuf b; sb_init(&b);
+    if (json) sb_puts(&b, "{\"covered\":[");
+    else      sb_puts(&b, "tests touching this change:\n");
+    int emitted = 0, uncovered = 0;
+    StrBuf un; sb_init(&un);
+
+    if (name) {
+        if (tests_for_symbol(cg, name, &b, json, &emitted) == 0) {
+            uncovered++;
+            sb_printf(&un, "  %s\n", name);
+        }
+    } else {
+        char **paths = NULL;
+        int np = vcs_changed_paths(cg, NULL, &paths);
+        for (int i = 0; i < np; i++) {
+            if (graph_path_is_test(paths[i])) { free(paths[i]); continue; }
+            sqlite3_stmt *st = cg_prep(cg,
+                "SELECT s.name FROM symbols s JOIN files f ON f.id=s.file_id "
+                "WHERE f.path=? ORDER BY s.line");
+            sqlite3_bind_text(st, 1, paths[i], -1, SQLITE_STATIC);
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const char *sn = (const char *)sqlite3_column_text(st, 0);
+                char keep[256];
+                snprintf(keep, sizeof keep, "%s", sn);
+                if (tests_for_symbol(cg, keep, &b, json, &emitted) == 0) {
+                    uncovered++;
+                    if (uncovered <= 20) sb_printf(&un, "  %s (%s)\n", keep,
+                                                   paths[i]);
+                }
+            }
+            sqlite3_finalize(st);
+            free(paths[i]);
+        }
+        free(paths);
+    }
+
+    if (json) {
+        sb_printf(&b, "],\"uncovered_count\":%d}\n", uncovered);
+    } else {
+        if (!emitted) sb_puts(&b, "  (none)\n");
+        if (uncovered) {
+            sb_printf(&b, "\nno test references (%d):\n", uncovered);
+            sb_puts(&b, un.p);
+        }
+    }
+    fputs(b.p, stdout);
+    sb_free(&b);
+    sb_free(&un);
+    return 0;
+}
+
+/* ---------------- why: provenance for a symbol ---------------- */
+
+/* Codify already stores what the code is, what changed it, which task owned
+ * that change, and what was decided along the way. `cg why` is the join:
+ * symbol -> definition -> commits that touched its file -> spec tasks tagged
+ * on those commits -> memories anchored to the symbol or those tasks. */
+int cmd_why(Cg *cg, const char *name, bool json) {
+    SymRow rows[4];
+    int n = find_symbols(cg, name, rows, 4);
+    if (n == 0) {
+        if (json) printf("{\"symbol\":\"%s\",\"found\":false}\n", name);
+        else fprintf(stderr, "cg: no symbol named '%s'\n", name);
+        return 1;
+    }
+    StrBuf b; sb_init(&b);
+    if (json) {
+        sb_puts(&b, "{\"symbol\":"); sb_json_str(&b, name);
+        sb_puts(&b, ",\"definitions\":[");
+        for (int i = 0; i < n; i++) { if (i) sb_putc(&b, ','); json_sym(&b, &rows[i]); }
+        sb_puts(&b, "],\"commits\":[");
+    } else {
+        sb_printf(&b, "why %s\n", name);
+        for (int i = 0; i < n; i++)
+            sb_printf(&b, "  defined  %s %s — %s:%d\n", rows[i].kind,
+                      rows[i].name, rows[i].path, rows[i].line);
+    }
+
+    /* history for the defining file, and the spec tasks those commits carry */
+    char tasks[16][128];
+    int ntask = 0, ncom = 0;
+    for (int i = 0; i < n; i++) {
+        char **ids = NULL, **msgs = NULL; long *dates = NULL;
+        int nc = vcs_commits_for_path(cg, rows[i].path, 20, &ids, &msgs, &dates);
+        for (int j = 0; j < nc; j++) {
+            if (json) {
+                if (ncom) sb_putc(&b, ',');
+                sb_puts(&b, "{\"id\":");
+                char sid[16]; snprintf(sid, sizeof sid, "%.12s", ids[j]);
+                sb_json_str(&b, sid);
+                sb_puts(&b, ",\"message\":"); sb_json_str(&b, msgs[j]);
+                sb_printf(&b, ",\"date\":%ld}", dates[j]);
+            } else if (ncom < 10) {
+                sb_printf(&b, "  changed  %.12s  %s\n", ids[j], msgs[j]);
+            }
+            ncom++;
+            const char *tag = strstr(msgs[j], "[spec:");
+            if (tag && ntask < 16) {
+                char buf[128];
+                snprintf(buf, sizeof buf, "%s", tag + 6);
+                char *end = strchr(buf, ']');
+                if (end) *end = 0;
+                bool dup = false;
+                for (int k = 0; k < ntask; k++)
+                    if (strcmp(tasks[k], buf) == 0) { dup = true; break; }
+                if (!dup) snprintf(tasks[ntask++], 128, "%s", buf);
+            }
+            free(ids[j]); free(msgs[j]);
+        }
+        free(ids); free(msgs); free(dates);
+    }
+
+    if (json) sb_puts(&b, "],\"tasks\":[");
+    else if (ntask) sb_puts(&b, "\n");
+    for (int i = 0; i < ntask; i++) {
+        if (json) {
+            if (i) sb_putc(&b, ',');
+            sb_json_str(&b, tasks[i]);
+        } else {
+            sb_printf(&b, "  task     %s\n", tasks[i]);
+        }
+    }
+
+    /* Memories anchored to the symbol, or written under one of those tasks.
+     * The two queries overlap, so dedupe by id — the same decision reported
+     * twice reads as two decisions. */
+    if (json) sb_puts(&b, "],\"memories\":[");
+    int nm_emitted = 0;
+    long seen_ids[64];
+    int nseen_id = 0;
+    for (int pass = 0; pass <= ntask; pass++) {
+        Memory *mem = NULL;
+        int nm = pass == 0 ? memory_query(cg, name, NULL, NULL, 5, &mem)
+                           : memory_query(cg, NULL, tasks[pass - 1], NULL, 5,
+                                          &mem);
+        for (int i = 0; i < nm; i++) {
+            bool dup = false;
+            for (int k = 0; k < nseen_id; k++)
+                if (seen_ids[k] == mem[i].id) { dup = true; break; }
+            if (dup) continue;
+            if (nseen_id < 64) seen_ids[nseen_id++] = mem[i].id;
+            if (json) {
+                if (nm_emitted) sb_putc(&b, ',');
+                memory_json(&mem[i], &b);
+            } else {
+                sb_printf(&b, "  memory   [%s] %s\n", mem[i].type,
+                          mem[i].body);
+            }
+            nm_emitted++;
+        }
+        memory_free(mem, nm);
+    }
+    if (json) sb_puts(&b, "]}\n");
+    else if (!ncom && !nm_emitted)
+        sb_puts(&b, "  (no history or memories yet for this symbol)\n");
     fputs(b.p, stdout);
     sb_free(&b);
     return 0;

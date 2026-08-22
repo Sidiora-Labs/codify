@@ -697,9 +697,22 @@ static char *task_status(const Spec *s, const char *id) {
     return S(s->f, sec, "status");
 }
 
-static bool spec_prod_mode(const Spec *s) {
+static bool spec_mode_is(const Spec *s, const char *want) {
     const char *raw = kvx_raw(s->wf, "mode", "name");
-    return raw && (strcmp(raw, "prod") == 0 || strcmp(raw, "\"prod\"") == 0);
+    if (!raw) return false;
+    char q[64];
+    snprintf(q, sizeof q, "\"%s\"", want);
+    return strcmp(raw, want) == 0 || strcmp(raw, q) == 0;
+}
+
+static bool spec_prod_mode(const Spec *s) {
+    /* parallel mode keeps prod's implemented-unlocks-implementation semantics
+     * and only relaxes how many tasks may be in flight at once */
+    return spec_mode_is(s, "prod") || spec_mode_is(s, "parallel");
+}
+
+static bool spec_parallel_mode(const Spec *s) {
+    return spec_mode_is(s, "parallel");
 }
 
 static bool task_is_leaf(const Spec *s, const char *id) {
@@ -876,6 +889,19 @@ static void json_task(const Spec *s, const char *id, StrBuf *b) {
     }
     free(clauses);
     sb_puts(b, "]");
+    /* the declared scope of the task — what `cg guard` measures edits against */
+    const char *decl[2] = { "symbols", "touches" };
+    for (int d = 0; d < 2; d++) {
+        char **v; int nv = kvx_list(s->f, sec, decl[d], &v);
+        sb_printf(b, ",\"%s\":[", decl[d]);
+        for (int i = 0; i < nv; i++) {
+            if (i) sb_putc(b, ',');
+            sb_json_str(b, v[i]);
+            free(v[i]);
+        }
+        free(v);
+        sb_putc(b, ']');
+    }
     char *vc = S(s->f, sec, "verify_cmd");
     if (vc[0]) { sb_puts(b, ",\"verify_cmd\":"); sb_json_str(b, vc); }
     free(vc);
@@ -976,6 +1002,8 @@ static void spec_print_memories(Spec *s, const char *id) {
     memory_free(v, n);
 }
 
+static int spec_live_leases(const Spec *s, StrBuf *b, bool json);
+
 static int spec_status_cmd(Spec *s, bool json) {
     int done = 0, implemented = 0, inprog = 0, pending = 0, leaves = 0;
     for (int i = 0; i < s->nids; i++) {
@@ -1006,7 +1034,9 @@ static int spec_status_cmd(Spec *s, bool json) {
                   implemented, inprog, pending);
         if (cur) { sb_puts(&b, ",\"current\":"); json_task(s, cur, &b); }
         if (next) { sb_puts(&b, ",\"next\":"); json_task(s, next, &b); }
-        sb_puts(&b, "}\n");
+        sb_puts(&b, ",\"claims\":[");
+        spec_live_leases(s, &b, true);
+        sb_puts(&b, "]}\n");
         fputs(b.p, stdout);
         sb_free(&b);
         return 0;
@@ -1049,12 +1079,19 @@ static int spec_status_cmd(Spec *s, bool json) {
         printf("next: none eligible (blocked on in-progress or unmet "
                "requires)\n");
     }
+    StrBuf lb; sb_init(&lb);
+    if (spec_live_leases(s, &lb, false) > 0) {
+        printf("claims:\n");
+        fputs(lb.p, stdout);
+    }
+    sb_free(&lb);
     return 0;
 }
 
 static int spec_mode_cmd(Spec *s, const char *mode) {
-    if (!mode || (strcmp(mode, "prod") != 0 && strcmp(mode, "standard") != 0)) {
-        fprintf(stderr, "cg spec: mode must be prod or standard\n");
+    if (!mode || (strcmp(mode, "prod") != 0 && strcmp(mode, "standard") != 0 &&
+                  strcmp(mode, "parallel") != 0)) {
+        fprintf(stderr, "cg spec: mode must be standard, prod, or parallel\n");
         return 1;
     }
     if (kvx_set_string(s->wfpath, "mode", "name", mode) != 0) {
@@ -1111,6 +1148,212 @@ static int spec_next_cmd(Spec *s, bool json) {
     return 0;
 }
 
+/* Two agents editing the same files is the classic parallel-agent failure.
+ * The plan already declares each task's `touches`, so overlap is knowable
+ * before any work starts — refuse the claim instead of merging the wreckage. */
+static bool spec_touches_conflict(Spec *s, const char *id, char *other,
+                                  size_t ocap, char *pat, size_t pcap) {
+    char sec[300];
+    task_sec(sec, sizeof sec, id);
+    char **mine; int nm = kvx_list(s->f, sec, "touches", &mine);
+    if (nm == 0) { free(mine); return false; }
+
+    bool clash = false;
+    for (int i = 0; i < s->nids && !clash; i++) {
+        if (strcmp(s->ids[i], id) == 0) continue;
+        char *st = task_status(s, s->ids[i]);
+        bool live = strcmp(st, "in_progress") == 0;
+        free(st);
+        if (!live) continue;
+        char osec[300];
+        task_sec(osec, sizeof osec, s->ids[i]);
+        char **theirs; int nt = kvx_list(s->f, osec, "touches", &theirs);
+        for (int a = 0; a < nm && !clash; a++)
+            for (int b = 0; b < nt && !clash; b++)
+                if (strcmp(mine[a], theirs[b]) == 0 ||
+                    fnmatch(mine[a], theirs[b], 0) == 0 ||
+                    fnmatch(theirs[b], mine[a], 0) == 0) {
+                    clash = true;
+                    snprintf(other, ocap, "%s", s->ids[i]);
+                    snprintf(pat, pcap, "%s", mine[a]);
+                }
+        for (int b = 0; b < nt; b++) free(theirs[b]);
+        free(theirs);
+    }
+    for (int a = 0; a < nm; a++) free(mine[a]);
+    free(mine);
+    return clash;
+}
+
+/* Every eligible task, not just the first. An orchestrator fanning agents out
+ * needs the whole wave; `spec next` alone forces it to work one at a time. */
+/* Live claims, so `spec status` answers "who is working on what" rather than
+ * leaving leases invisible in a table nobody reads. Expired rows are swept on
+ * read, which is what makes a crashed agent's task return to the pool. */
+static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
+    Cg g;
+    if (!memory_open_quiet(&g)) return 0;
+    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+    sqlite3_stmt *st = cg_prep(&g,
+        "SELECT task,agent,expires FROM leases WHERE task LIKE ?||'/%' "
+        "ORDER BY task");
+    sqlite3_bind_text(st, 1, s->feature, -1, SQLITE_STATIC);
+    int n = 0;
+    long now = (long)time(NULL);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *task = (const char *)sqlite3_column_text(st, 0);
+        const char *agent = (const char *)sqlite3_column_text(st, 1);
+        long exp = (long)sqlite3_column_int64(st, 2);
+        const char *id = strrchr(task, '/');
+        id = id ? id + 1 : task;
+        if (json) {
+            if (n) sb_putc(b, ',');
+            sb_puts(b, "{\"id\":");     sb_json_str(b, id);
+            sb_puts(b, ",\"agent\":");  sb_json_str(b, agent);
+            sb_printf(b, ",\"expires_in_min\":%ld}", (exp - now + 59) / 60);
+        } else {
+            sb_printf(b, "  %-8s claimed by %s (%ld min left)\n", id, agent,
+                      (exp - now + 59) / 60);
+        }
+        n++;
+    }
+    sqlite3_finalize(st);
+    cg_close(&g);
+    return n;
+}
+
+static int spec_wave_cmd(Spec *s, bool json) {
+    StrBuf b; sb_init(&b);
+    int n = 0;
+    unsigned long wave = 0;
+    bool have = false;
+    for (int i = 0; i < s->nids; i++) {
+        if (!task_eligible(s, s->ids[i])) continue;
+        char sec[300];
+        task_sec(sec, sizeof sec, s->ids[i]);
+        unsigned long w = uint_or(s->f, sec, "wave", 0);
+        if (!have || w < wave) { wave = w; have = true; }
+    }
+    if (json) sb_printf(&b, "{\"mode\":\"%s\",\"wave\":%lu,\"tasks\":[",
+                        spec_parallel_mode(s) ? "parallel" :
+                        spec_prod_mode(s) ? "prod" : "standard", wave);
+    for (int i = 0; i < s->nids; i++) {
+        if (!task_eligible(s, s->ids[i])) continue;
+        char sec[300];
+        task_sec(sec, sizeof sec, s->ids[i]);
+        if (uint_or(s->f, sec, "wave", 0) != wave) continue;
+        if (json) {
+            if (n) sb_putc(&b, ',');
+            json_task(s, s->ids[i], &b);
+        } else {
+            char *t = S(s->f, sec, "title");
+            char **tp; int ntp = kvx_list(s->f, sec, "touches", &tp);
+            sb_printf(&b, "  %-8s %s", s->ids[i], t);
+            if (ntp) {
+                sb_puts(&b, "   touches:");
+                for (int j = 0; j < ntp; j++) {
+                    sb_printf(&b, " %s", tp[j]);
+                    free(tp[j]);
+                }
+            }
+            free(tp);
+            sb_putc(&b, '\n');
+            free(t);
+        }
+        n++;
+    }
+    if (json) sb_puts(&b, "]}\n");
+    else if (n) {
+        StrBuf h; sb_init(&h);
+        sb_printf(&h, "wave %lu — %d eligible task(s)%s:\n", wave, n,
+                  spec_parallel_mode(s) ? ", claimable in parallel" : "");
+        sb_puts(&h, b.p);
+        sb_free(&b);
+        b = h;
+    } else {
+        sb_puts(&b, "no eligible tasks\n");
+    }
+    fputs(b.p, stdout);
+    sb_free(&b);
+    return 0;
+}
+
+/* A lease is a claim with an owner and an expiry, so a crashed agent's task
+ * returns to the pool instead of blocking the wave forever. */
+static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
+                          long ttl_min, bool release, bool json) {
+    Cg g;
+    if (!memory_open_quiet(&g)) {
+        fprintf(stderr, "cg spec: claims need a Codify index here "
+                        "(run `cg init`)\n");
+        return 1;
+    }
+    char tag[256];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    long now = (long)time(NULL);
+    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+
+    if (release) {
+        sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
+        sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        printf("released %s\n", id);
+        cg_close(&g);
+        return 0;
+    }
+    if (!task_exists(s, id)) {
+        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        cg_close(&g);
+        return 1;
+    }
+    sqlite3_stmt *q = cg_prep(&g, "SELECT agent,expires FROM leases WHERE task=?");
+    sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
+    if (sqlite3_step(q) == SQLITE_ROW) {
+        const char *owner = (const char *)sqlite3_column_text(q, 0);
+        if (strcmp(owner, agent) != 0) {
+            fprintf(stderr, "cg spec: %s is already claimed by %s\n", id, owner);
+            sqlite3_finalize(q);
+            cg_close(&g);
+            return 1;
+        }
+    }
+    sqlite3_finalize(q);
+
+    char other[64] = "", pat[256] = "";
+    if (spec_parallel_mode(s) &&
+        spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat)) {
+        fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
+                "also claims — pick a disjoint task\n", id, pat, other);
+        cg_close(&g);
+        return 1;
+    }
+
+    char sec[300];
+    task_sec(sec, sizeof sec, id);
+    char *touches = join_list(s->f, sec, "touches");
+    sqlite3_stmt *ins = cg_prep(&g,
+        "INSERT INTO leases(task,agent,claimed,expires,touches) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(task) DO UPDATE SET "
+        "agent=excluded.agent,expires=excluded.expires");
+    sqlite3_bind_text(ins, 1, tag, -1, SQLITE_STATIC);
+    sqlite3_bind_text(ins, 2, agent, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(ins, 3, now);
+    sqlite3_bind_int64(ins, 4, now + ttl_min * 60);
+    sqlite3_bind_text(ins, 5, touches, -1, SQLITE_TRANSIENT);
+    sqlite3_step(ins);
+    sqlite3_finalize(ins);
+    cg_close(&g);
+    free(touches);
+
+    if (json)
+        printf("{\"task\":\"%s\",\"agent\":\"%s\",\"expires_in_min\":%ld}\n",
+               tag, agent, ttl_min);
+    else
+        printf("claimed %s for %s (expires in %ld min)\n", id, agent, ttl_min);
+    return 0;
+}
+
 static int spec_start_cmd(Spec *s, const char *id, bool force) {
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
@@ -1137,8 +1380,19 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
         return 1;
     }
     free(st);
-    long max_in_progress = kvx_long(s->wf, "limits", "max_in_progress", 1);
+    /* parallel mode is the whole point of allowing more than one in flight */
+    long max_in_progress = kvx_long(s->wf, "limits", "max_in_progress",
+                                    spec_parallel_mode(s) ? 8 : 1);
     if (max_in_progress < 1) max_in_progress = 1;
+    if (spec_parallel_mode(s) && !force) {
+        char other[64] = "", pat[256] = "";
+        if (spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat)) {
+            fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
+                    "also claims — pick a disjoint task (--force to "
+                    "override)\n", id, pat, other);
+            return 1;
+        }
+    }
     int in_progress = spec_in_progress_count(s);
     if (!already_in_progress && in_progress >= max_in_progress && !force) {
         fprintf(stderr,
@@ -1749,6 +2003,406 @@ static int spec_trace_cmd(Spec *s, const char *id, bool json) {
 
 /* the sole in_progress task of the cwd's spec repo as "feature/id", or NULL.
  * Multiple tasks are intentionally ambiguous: callers must select one. */
+/* ---------------- authoring: new, add, lint ---------------- */
+
+static const char *WORKFLOW_TEMPLATE =
+"# Spec workflow for this repository. Edit freely; cg reads it as data.\n"
+"\n"
+"[meta]\n"
+"name            = \"%s\"\n"
+"active_feature  = \"%s\"\n"
+"source_of_truth = \"spec/ (kvx). Generated files are pointers — regenerate, "
+"never hand-edit.\"\n"
+"\n"
+"[mode]\n"
+"name = \"standard\"\n"
+"\n"
+"[principle]\n"
+"task_driven   = \"Work is driven by the active feature's task list, in wave "
+"order.\"\n"
+"verified_done = \"A task is done only when its verify_cmd and graph checks "
+"pass.\"\n"
+"\n"
+"[loop]\n"
+"step_1 = \"cg brief — load repo state, active task, and prior decisions.\"\n"
+"step_2 = \"cg spec next — take the lowest-wave eligible task.\"\n"
+"step_3 = \"cg spec start <id> — claim it.\"\n"
+"step_4 = \"cg context <area> — pull the code you need in one call.\"\n"
+"step_5 = \"Implement, and cg remember anything worth keeping.\"\n"
+"step_6 = \"cg commit -m <msg> — snapshot, auto-tagged with the task.\"\n"
+"step_7 = \"cg spec done <id> — qualification runs; done means proven.\"\n"
+"\n"
+"[memory]\n"
+"recall   = \"cg recall at session start.\"\n"
+"remember = \"Persist decisions and constraints as they occur.\"\n"
+"\n"
+"[status_values]\n"
+"task = [\"pending\", \"in_progress\", \"implemented\", \"done\"]\n"
+"\n"
+"[hard_rules]\n"
+"no_fakes      = \"Never fake a test to make it pass.\"\n"
+"no_false_done = \"Never mark a task done that did not qualify.\"\n"
+"\n"
+"[render]\n"
+"markdown_mirror = true\n"
+"mirror_to_kiro  = false\n"
+"banner = \"GENERATED by cg spec render from spec/ kvx — DO NOT EDIT.\"\n"
+"\n"
+"[adapters]\n"
+"claude = \"CLAUDE.md\"\n"
+"agents = \"AGENTS.md\"\n";
+
+static const char *FEATURE_TEMPLATE =
+"# %s — feature spec. Requirements, design, then the task list.\n"
+"\n"
+"[meta]\n"
+"feature = \"%s\"\n"
+"intro   = \"Describe what this feature is for in one or two sentences.\"\n"
+"\n"
+"[req.1]\n"
+"title = \"First requirement\"\n"
+"story = \"As a <role>, I want <capability> so that <benefit>.\"\n"
+"ac_1  = \"WHEN <trigger> THE <component> SHALL <observable behaviour>.\"\n"
+"\n"
+"[design]\n"
+"overview = \"How this will be built.\"\n"
+"\n"
+"[tasks]\n"
+"heading = \"Implementation Plan: %s\"\n"
+"\n"
+"[task.1]\n"
+"title   = \"First slice\"\n"
+"section = \"Slice 1\"\n"
+"status  = \"pending\"\n"
+"\n"
+"[task.1.1]\n"
+"title      = \"First task\"\n"
+"status     = \"pending\"\n"
+"wave       = 0\n"
+"do_1       = \"Describe the first concrete step\"\n"
+"reqs       = [\"1.1\"]\n";
+
+/* Scaffold a feature — and the workflow file itself when the repo has none.
+ * Without this an agent can drive a plan but never create one, so the first
+ * step of the lifecycle lives outside the tool. */
+static int spec_new_cmd(const char *root_ov, const char *feature) {
+    for (const char *p = feature; *p; p++) {
+        if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
+            fprintf(stderr, "cg spec: feature names may use letters, digits, "
+                    "'-' and '_' only\n");
+            return 1;
+        }
+    }
+    char root[4096];
+    if (root_ov) snprintf(root, sizeof root, "%s", root_ov);
+    else if (spec_find_root(root, sizeof root) != 0) {
+        if (!getcwd(root, sizeof root)) return 1;   /* bootstrap a new repo */
+    }
+
+    char specdir[4600], wfpath[4700], fdir[4700], fpath[4800];
+    snprintf(specdir, sizeof specdir, "%s/spec", root);
+    snprintf(wfpath, sizeof wfpath, "%s/workflow.kvx", specdir);
+    snprintf(fdir, sizeof fdir, "%s/%s", specdir, feature);
+    snprintf(fpath, sizeof fpath, "%s/spec.kvx", fdir);
+
+    struct stat st;
+    if (stat(fpath, &st) == 0) {
+        fprintf(stderr, "cg spec: %s already exists\n", fpath);
+        return 1;
+    }
+    if (mkdirs(fdir) != 0) {
+        fprintf(stderr, "cg spec: cannot create %s\n", fdir);
+        return 1;
+    }
+
+    bool made_wf = false;
+    if (stat(wfpath, &st) != 0) {
+        StrBuf b; sb_init(&b);
+        sb_printf(&b, WORKFLOW_TEMPLATE, "Spec Workflow", feature);
+        if (write_entire_file(wfpath, b.p, b.len) != 0) {
+            fprintf(stderr, "cg spec: cannot write %s\n", wfpath);
+            sb_free(&b);
+            return 1;
+        }
+        sb_free(&b);
+        made_wf = true;
+    }
+
+    StrBuf b; sb_init(&b);
+    sb_printf(&b, FEATURE_TEMPLATE, feature, feature, feature);
+    int rc = write_entire_file(fpath, b.p, b.len);
+    sb_free(&b);
+    if (rc != 0) {
+        fprintf(stderr, "cg spec: cannot write %s\n", fpath);
+        return 1;
+    }
+    if (!made_wf) kvx_set_string(wfpath, "meta", "active_feature", feature);
+
+    printf("created %s\n", fpath);
+    if (made_wf) printf("created %s\n", wfpath);
+    printf("active feature: %s\n", feature);
+    spec_render(root, false, true);
+    return 0;
+}
+
+/* Build a kvx list literal: ["a", "b"] from "a,b" */
+static char *list_literal(const char *csv) {
+    StrBuf b; sb_init(&b);
+    sb_putc(&b, '[');
+    int n = 0;
+    const char *p = csv;
+    while (*p) {
+        while (*p == ' ' || *p == ',') p++;
+        if (!*p) break;
+        const char *s = p;
+        while (*p && *p != ',') p++;
+        const char *e = p;
+        while (e > s && e[-1] == ' ') e--;
+        if (e == s) continue;
+        if (n++) sb_puts(&b, ", ");
+        sb_putc(&b, '"');
+        for (const char *c = s; c < e; c++) {
+            if (*c == '"' || *c == '\\') sb_putc(&b, '\\');
+            sb_putc(&b, *c);
+        }
+        sb_putc(&b, '"');
+    }
+    sb_putc(&b, ']');
+    return b.p;
+}
+
+typedef struct {
+    const char *title, *wave, *requires, *symbols, *touches, *verify;
+    const char *section, *dos, *reqs;
+} TaskSpec;
+
+/* Add a task to the active feature. Every write goes through the surgical kvx
+ * writer, so an existing file keeps its comments, ordering, and blank lines. */
+static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t) {
+    if (!t->title) {
+        fprintf(stderr, "cg spec add: --title is required\n");
+        return 1;
+    }
+    for (const char *p = id; *p; p++) {
+        if (!isdigit((unsigned char)*p) && *p != '.') {
+            fprintf(stderr, "cg spec add: task ids are dotted numbers "
+                    "(e.g. 2.1)\n");
+            return 1;
+        }
+    }
+    if (task_exists(s, id)) {
+        fprintf(stderr, "cg spec add: [task.%s] already exists in %s\n",
+                id, s->fpath);
+        return 1;
+    }
+    char sec[300];
+    task_sec(sec, sizeof sec, id);
+
+    if (kvx_set_string(s->fpath, sec, "title", t->title) != 0) {
+        fprintf(stderr, "cg spec add: cannot write %s\n", s->fpath);
+        return 1;
+    }
+    kvx_set_string(s->fpath, sec, "status", "pending");
+    if (t->section) kvx_set_string(s->fpath, sec, "section", t->section);
+    /* a task with no wave is a heading, not work — default leaves to wave 0 */
+    if (t->wave)   kvx_set_raw(s->fpath, sec, "wave", t->wave);
+    else if (strchr(id, '.')) kvx_set_raw(s->fpath, sec, "wave", "0");
+    if (t->verify) kvx_set_string(s->fpath, sec, "verify_cmd", t->verify);
+
+    const char *lists[][2] = {
+        { "requires", t->requires }, { "symbols", t->symbols },
+        { "touches",  t->touches  }, { "reqs",    t->reqs    },
+    };
+    for (size_t i = 0; i < sizeof lists / sizeof lists[0]; i++) {
+        if (!lists[i][1]) continue;
+        char *lit = list_literal(lists[i][1]);
+        kvx_set_raw(s->fpath, sec, lists[i][0], lit);
+        free(lit);
+    }
+    if (t->dos) {
+        int n = 0;
+        const char *p = t->dos;
+        while (*p) {
+            while (*p == ';' || *p == ' ') p++;
+            if (!*p) break;
+            const char *b = p;
+            while (*p && *p != ';') p++;
+            const char *e = p;
+            while (e > b && e[-1] == ' ') e--;
+            if (e == b) continue;
+            char key[16], val[1024];
+            snprintf(key, sizeof key, "do_%d", ++n);
+            snprintf(val, sizeof val, "%.*s", (int)(e - b), b);
+            kvx_set_string(s->fpath, sec, key, val);
+        }
+    }
+    printf("added task %s — %s\n", id, t->title);
+    spec_render(s->root, false, true);
+    return 0;
+}
+
+/* ---------------- lint ---------------- */
+
+typedef struct { StrBuf b; int errors, warnings; } Lint;
+
+static void lint_say(Lint *l, bool error, const char *id, const char *fmt, ...) {
+    va_list ap;
+    sb_printf(&l->b, "  %-5s %-8s ", error ? "error" : "warn", id ? id : "-");
+    va_start(ap, fmt);
+    char msg[1024];
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    sb_printf(&l->b, "%s\n", msg);
+    if (error) l->errors++; else l->warnings++;
+}
+
+/* depth-first cycle detection over `requires`; colour 1 = on stack, 2 = done */
+static bool lint_cycle(Spec *s, const char *id, char **stack, int depth,
+                       char (*colour)[2][256], int ncol, Lint *l) {
+    (void)colour; (void)ncol;
+    if (depth > 64) return false;
+    for (int i = 0; i < depth; i++) {
+        if (strcmp(stack[i], id) == 0) {
+            StrBuf c; sb_init(&c);
+            for (int j = i; j < depth; j++) sb_printf(&c, "%s -> ", stack[j]);
+            sb_printf(&c, "%s", id);
+            lint_say(l, true, id, "requires cycle: %s", c.p);
+            sb_free(&c);
+            return true;
+        }
+    }
+    char sec[300];
+    task_sec(sec, sizeof sec, id);
+    char **reqs; int nr = kvx_list(s->f, sec, "requires", &reqs);
+    stack[depth] = (char *)id;
+    bool found = false;
+    for (int i = 0; i < nr; i++) {
+        if (!found && task_exists(s, reqs[i]))
+            found = lint_cycle(s, reqs[i], stack, depth + 1, colour, ncol, l);
+        free(reqs[i]);
+    }
+    free(reqs);
+    return found;
+}
+
+/* A plan that cannot be executed is worse than no plan. Lint catches the
+ * failures that only surface much later: unreachable waves, requires that
+ * point at nothing, tasks with no acceptance criteria, and globs that can
+ * never match a real path. */
+static int spec_lint_cmd(Spec *s, bool json) {
+    Lint l;
+    memset(&l, 0, sizeof l);
+    sb_init(&l.b);
+
+    /* every acceptance criterion id declared by [req.*] */
+    char **reqsecs; int nreq = kvx_subsections(s->f, "req", &reqsecs);
+
+    for (int i = 0; i < s->nids; i++) {
+        const char *id = s->ids[i];
+        char sec[300];
+        task_sec(sec, sizeof sec, id);
+        char *title = S(s->f, sec, "title");
+        if (!title[0]) lint_say(&l, true, id, "task has no title");
+        free(title);
+
+        char *status = task_status(s, id);
+        if (status[0] && strcmp(status, "pending") != 0 &&
+            strcmp(status, "in_progress") != 0 &&
+            strcmp(status, "implemented") != 0 && strcmp(status, "done") != 0)
+            lint_say(&l, true, id, "unknown status \"%s\"", status);
+        free(status);
+
+        char **rq; int nr = kvx_list(s->f, sec, "requires", &rq);
+        for (int j = 0; j < nr; j++) {
+            if (!task_exists(s, rq[j]))
+                lint_say(&l, true, id, "requires unknown task %s", rq[j]);
+            else if (strcmp(rq[j], id) == 0)
+                lint_say(&l, true, id, "requires itself");
+            free(rq[j]);
+        }
+        free(rq);
+
+        if (!task_is_leaf(s, id)) continue;    /* headings need nothing more */
+
+        char *stack[80];
+        lint_cycle(s, id, stack, 0, NULL, 0, &l);
+
+        char **rs; int nrs = kvx_list(s->f, sec, "reqs", &rs);
+        if (nrs == 0)
+            lint_say(&l, false, id, "no reqs — nothing ties this task to an "
+                     "acceptance criterion");
+        for (int j = 0; j < nrs; j++) {
+            char want[64];
+            snprintf(want, sizeof want, "%s", rs[j]);
+            char *dot = strchr(want, '.');
+            bool ok = false;
+            if (dot) {
+                *dot = 0;
+                char rsec[128], ackey[64];
+                snprintf(rsec, sizeof rsec, "req.%s", want);
+                snprintf(ackey, sizeof ackey, "ac_%s", dot + 1);
+                ok = kvx_raw(s->f, rsec, ackey) != NULL;
+            }
+            if (!ok) lint_say(&l, true, id, "reqs points at %s, which no "
+                              "[req.*] declares", rs[j]);
+            free(rs[j]);
+        }
+        free(rs);
+
+        char **tp; int ntp = kvx_list(s->f, sec, "touches", &tp);
+        for (int j = 0; j < ntp; j++) {
+            /* a glob nothing in the repo could ever match is a dead check */
+            if (!strchr(tp[j], '*')) {
+                char abs[4800];
+                struct stat st;
+                snprintf(abs, sizeof abs, "%s/%s", s->root, tp[j]);
+                if (stat(abs, &st) != 0)
+                    lint_say(&l, false, id, "touches %s, which does not exist",
+                             tp[j]);
+            }
+            free(tp[j]);
+        }
+        free(tp);
+    }
+
+    for (int i = 0; i < nreq; i++) free(reqsecs[i]);
+    free(reqsecs);
+
+    if (json) {
+        printf("{\"errors\":%d,\"warnings\":%d,\"report\":", l.errors,
+               l.warnings);
+        StrBuf j; sb_init(&j);
+        sb_json_str(&j, l.b.p ? l.b.p : "");
+        fputs(j.p, stdout);
+        sb_free(&j);
+        printf("}\n");
+    } else if (l.errors || l.warnings) {
+        printf("lint %s (%s):\n", s->feature, s->fpath);
+        fputs(l.b.p, stdout);
+        printf("%d error(s), %d warning(s)\n", l.errors, l.warnings);
+    } else {
+        printf("lint %s: clean\n", s->feature);
+    }
+    sb_free(&l.b);
+    return l.errors ? 2 : 0;
+}
+
+/* Globs the in-progress task declared it would touch. The LSP needs this to
+ * mark scope drift inline; returns 0 when there is no active task or it
+ * declared nothing, which means "everything is in scope". */
+int spec_active_touches(char ***out) {
+    *out = NULL;
+    Spec s;
+    if (spec_load(&s, NULL, NULL, true) != 0) { spec_close(&s); return 0; }
+    const char *cur = spec_current(&s);
+    if (!cur) { spec_close(&s); return 0; }
+    char sec[300];
+    task_sec(sec, sizeof sec, cur);
+    int n = kvx_list(s.f, sec, "touches", out);
+    spec_close(&s);
+    return n;
+}
+
 char *spec_active_tag(void) {
     Spec s;
     char *out = NULL;
@@ -1804,6 +2458,10 @@ int cmd_spec(int argc, char **argv, bool json) {
     const char *feature_ov = NULL, *root_ov = NULL;
     const char *pos[4];
     int npos = 0;
+    TaskSpec ts;
+    const char *agent = NULL;
+    long ttl = 30;
+    memset(&ts, 0, sizeof ts);
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) check = true;
         else if (strcmp(argv[i], "--force") == 0) force = true;
@@ -1811,7 +2469,37 @@ int cmd_spec(int argc, char **argv, bool json) {
             feature_ov = argv[++i];
         else if (strcmp(argv[i], "--root") == 0 && i + 1 < argc)
             root_ov = argv[++i];
+        else if (strcmp(argv[i], "--title") == 0 && i + 1 < argc)
+            ts.title = argv[++i];
+        else if (strcmp(argv[i], "--wave") == 0 && i + 1 < argc)
+            ts.wave = argv[++i];
+        else if (strcmp(argv[i], "--requires") == 0 && i + 1 < argc)
+            ts.requires = argv[++i];
+        else if (strcmp(argv[i], "--symbols") == 0 && i + 1 < argc)
+            ts.symbols = argv[++i];
+        else if (strcmp(argv[i], "--touches") == 0 && i + 1 < argc)
+            ts.touches = argv[++i];
+        else if (strcmp(argv[i], "--verify") == 0 && i + 1 < argc)
+            ts.verify = argv[++i];
+        else if (strcmp(argv[i], "--section") == 0 && i + 1 < argc)
+            ts.section = argv[++i];
+        else if (strcmp(argv[i], "--do") == 0 && i + 1 < argc)
+            ts.dos = argv[++i];
+        else if (strcmp(argv[i], "--reqs") == 0 && i + 1 < argc)
+            ts.reqs = argv[++i];
+        else if (strcmp(argv[i], "--agent") == 0 && i + 1 < argc)
+            agent = argv[++i];
+        else if (strcmp(argv[i], "--ttl") == 0 && i + 1 < argc)
+            ttl = atol(argv[++i]);
         else if (npos < 4) pos[npos++] = argv[i];
+    }
+
+    if (strcmp(sub, "new") == 0) {
+        if (npos != 1) {
+            fprintf(stderr, "usage: cg spec new <feature>\n");
+            return 1;
+        }
+        return spec_new_cmd(root_ov, pos[0]);
     }
 
     if (strcmp(sub, "render") == 0) {
@@ -1852,10 +2540,15 @@ int cmd_spec(int argc, char **argv, bool json) {
     if (strcmp(sub, "status") != 0 && strcmp(sub, "next") != 0 &&
         strcmp(sub, "start") != 0 && strcmp(sub, "implemented") != 0 &&
         strcmp(sub, "done") != 0 && strcmp(sub, "mode") != 0 &&
-        strcmp(sub, "trace") != 0) {
+        strcmp(sub, "trace") != 0 && strcmp(sub, "add") != 0 &&
+        strcmp(sub, "lint") != 0 && strcmp(sub, "wave") != 0 &&
+        strcmp(sub, "claim") != 0 && strcmp(sub, "release") != 0) {
         fprintf(stderr, "usage: cg spec [render [--check] | status | next | "
-                "mode <prod|standard> | start <id> | implemented <id> | "
-                "done <id> [--force] | trace [<id>]] "
+                "new <feature> | add <id> --title T [--wave N] [--requires a,b]"
+                " [--symbols a,b] [--touches a,b] [--verify CMD] [--do \"a;b\"]"
+                " [--reqs a,b] | lint | mode <standard|prod|parallel> | start <id> | "
+                "implemented <id> | done <id> [--force] | trace [<id>] | "
+                "wave | claim <id> [--agent N] [--ttl M] | release <id>] "
                 "[-f <feature>]\n");
         return 1;
     }
@@ -1868,6 +2561,24 @@ int cmd_spec(int argc, char **argv, bool json) {
     int rc;
     if (strcmp(sub, "status") == 0) {
         rc = spec_status_cmd(&s, json);
+    } else if (strcmp(sub, "add") == 0) {
+        if (npos < 1) { fprintf(stderr, "usage: cg spec add <id> --title T\n");
+                        rc = 1; }
+        else rc = spec_add_cmd(&s, pos[0], &ts);
+    } else if (strcmp(sub, "lint") == 0) {
+        rc = spec_lint_cmd(&s, json);
+    } else if (strcmp(sub, "wave") == 0) {
+        rc = spec_wave_cmd(&s, json);
+    } else if (strcmp(sub, "claim") == 0 || strcmp(sub, "release") == 0) {
+        if (npos < 1) {
+            fprintf(stderr, "usage: cg spec %s <id> [--agent NAME] "
+                    "[--ttl MIN]\n", sub);
+            rc = 1;
+        } else {
+            rc = spec_claim_cmd(&s, pos[0], agent ? agent : "agent",
+                                ttl > 0 ? ttl : 30,
+                                strcmp(sub, "release") == 0, json);
+        }
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
     } else if (strcmp(sub, "trace") == 0) {

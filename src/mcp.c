@@ -11,6 +11,7 @@
 #include "cg.h"
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 /* ---------------- tool table ---------------- */
 
@@ -187,6 +188,106 @@ static int t_recall(void *v) {
     return rc;
 }
 
+static int t_show(void *v) {
+    CallCtx *c = v;
+    char *n = c->args ? json_get_string(c->args, "name") : NULL;
+    if (!n) { printf("{\"error\":\"missing name\"}\n"); return 1; }
+    int rc = cmd_show(c->cg, n, true);
+    free(n);
+    return rc;
+}
+static int t_why(void *v) {
+    CallCtx *c = v;
+    char *n = c->args ? json_get_string(c->args, "name") : NULL;
+    if (!n) { printf("{\"error\":\"missing name\"}\n"); return 1; }
+    int rc = cmd_why(c->cg, n, true);
+    free(n);
+    return rc;
+}
+static int t_test_impact(void *v) {
+    CallCtx *c = v;
+    char *n = c->args ? json_get_string(c->args, "name") : NULL;
+    int rc = cmd_test_impact(c->cg, n, true);
+    free(n);
+    return rc;
+}
+static int t_brief(void *v)  { CallCtx *c = v; return cmd_brief(c->cg, true); }
+static int t_review(void *v) { CallCtx *c = v; return cmd_review(c->cg, true); }
+static int t_check(void *v)  { CallCtx *c = v; return cmd_check(c->cg, true, false); }
+static int t_guard(void *v) {
+    CallCtx *c = v;
+    char *p = c->args ? json_get_string(c->args, "path") : NULL;
+    char *argv[1] = { p };
+    int rc = cmd_guard(c->cg, p ? 1 : 0, p ? argv : NULL, true, false);
+    free(p);
+    return rc;
+}
+static int t_git_sync(void *v) {
+    CallCtx *c = v;
+    int limit = c->args ? (int)json_get_int(c->args, "limit", 500) : 500;
+    return cmd_git_sync(c->cg, limit > 0 ? limit : 500, true);
+}
+static int t_spec_wave(void *v) {
+    (void)v;
+    char *a[] = { "wave" };
+    return run_spec(1, a, true);
+}
+static int t_spec_lint(void *v) {
+    (void)v;
+    char *a[] = { "lint" };
+    return run_spec(1, a, true);
+}
+static int t_spec_new(void *v) {
+    CallCtx *c = v;
+    char *f = c->args ? json_get_string(c->args, "feature") : NULL;
+    if (!f) { printf("{\"error\":\"missing feature\"}\n"); return 1; }
+    char *a[] = { "new", f };
+    int rc = run_spec(2, a, false);
+    free(f);
+    return rc;
+}
+static int t_spec_add(void *v) {
+    CallCtx *c = v;
+    char *id = c->args ? json_get_string(c->args, "id") : NULL;
+    char *title = c->args ? json_get_string(c->args, "title") : NULL;
+    if (!id || !title) {
+        free(id); free(title);
+        printf("{\"error\":\"id and title are required\"}\n");
+        return 1;
+    }
+    char *wave = json_get_string(c->args, "wave");
+    char *req  = json_get_string(c->args, "requires");
+    char *sym  = json_get_string(c->args, "symbols");
+    char *tch  = json_get_string(c->args, "touches");
+    char *vfy  = json_get_string(c->args, "verify_cmd");
+    char *dos  = json_get_string(c->args, "do");
+    char *rqs  = json_get_string(c->args, "reqs");
+    char *a[20];
+    int n = 0;
+    a[n++] = "add"; a[n++] = id; a[n++] = "--title"; a[n++] = title;
+    if (wave) { a[n++] = "--wave";     a[n++] = wave; }
+    if (req)  { a[n++] = "--requires"; a[n++] = req;  }
+    if (sym)  { a[n++] = "--symbols";  a[n++] = sym;  }
+    if (tch)  { a[n++] = "--touches";  a[n++] = tch;  }
+    if (vfy)  { a[n++] = "--verify";   a[n++] = vfy;  }
+    if (dos)  { a[n++] = "--do";       a[n++] = dos;  }
+    if (rqs)  { a[n++] = "--reqs";     a[n++] = rqs;  }
+    int rc = run_spec(n, a, false);
+    free(id); free(title); free(wave); free(req); free(sym); free(tch);
+    free(vfy); free(dos); free(rqs);
+    return rc;
+}
+static int t_spec_claim(void *v) {
+    CallCtx *c = v;
+    char *id = c->args ? json_get_string(c->args, "id") : NULL;
+    if (!id) { printf("{\"error\":\"missing id\"}\n"); return 1; }
+    char *agent = json_get_string(c->args, "agent");
+    char *a[] = { "claim", id, "--agent", agent ? agent : "agent" };
+    int rc = run_spec(4, a, false);
+    free(id); free(agent);
+    return rc;
+}
+
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
 #define S_CTX    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}," \
@@ -219,106 +320,327 @@ static int t_recall(void *v) {
                  "\"feature/id; defaults to the in-progress spec task\"}," \
                  "\"symbols\":{\"type\":\"string\"}," \
                  "\"files\":{\"type\":\"string\"}},\"required\":[\"text\"]}"
+#define S_FEATURE "{\"type\":\"object\",\"properties\":{\"feature\":" \
+                 "{\"type\":\"string\"}},\"required\":[\"feature\"]}"
+#define S_PATHOPT "{\"type\":\"object\",\"properties\":{\"path\":" \
+                 "{\"type\":\"string\",\"description\":" \
+                 "\"repo-relative path; omit to check the whole worktree\"}}}"
+#define S_NAMEOPT "{\"type\":\"object\",\"properties\":{\"name\":" \
+                 "{\"type\":\"string\",\"description\":" \
+                 "\"symbol name; omit to use your uncommitted changes\"}}}"
+#define S_CLAIM  "{\"type\":\"object\",\"properties\":{" \
+                 "\"id\":{\"type\":\"string\"}," \
+                 "\"agent\":{\"type\":\"string\"}},\"required\":[\"id\"]}"
+#define S_ADD    "{\"type\":\"object\",\"properties\":{" \
+                 "\"id\":{\"type\":\"string\",\"description\":\"dotted id\"}," \
+                 "\"title\":{\"type\":\"string\"}," \
+                 "\"wave\":{\"type\":\"string\"}," \
+                 "\"requires\":{\"type\":\"string\",\"description\":\"comma separated ids\"}," \
+                 "\"symbols\":{\"type\":\"string\"}," \
+                 "\"touches\":{\"type\":\"string\"}," \
+                 "\"verify_cmd\":{\"type\":\"string\"}," \
+                 "\"do\":{\"type\":\"string\",\"description\":\"semicolon separated steps\"}," \
+                 "\"reqs\":{\"type\":\"string\"}},\"required\":[\"id\",\"title\"]}"
 #define S_RECALL "{\"type\":\"object\",\"properties\":{" \
                  "\"query\":{\"type\":\"string\",\"description\":" \
                  "\"free text; omit for most recent\"}," \
                  "\"task\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}}}"
 
+/* Tool annotations let a client decide what it may run without asking. A
+ * read-only tool can be auto-approved; without the hint every search prompts
+ * the user, which is the difference between a usable and an annoying agent. */
+#define A_READ  "{\"readOnlyHint\":true,\"destructiveHint\":false," \
+                "\"idempotentHint\":true,\"openWorldHint\":false}"
+#define A_WRITE "{\"readOnlyHint\":false,\"destructiveHint\":false," \
+                "\"idempotentHint\":false,\"openWorldHint\":false}"
+#define A_MUTATE "{\"readOnlyHint\":false,\"destructiveHint\":true," \
+                "\"idempotentHint\":false,\"openWorldHint\":false}"
+
 static const struct {
-    const char *name, *desc, *schema;
+    const char *name, *desc, *schema, *annotations, *title;
     int (*fn)(void *);
     bool sync_first;
 } TOOLS[] = {
     { "search_code",
       "Full-text + trigram search over symbols and file contents. Returns "
       "matching symbols with locations and full-text file hits.",
-      S_QUERY, t_search, true },
+      S_QUERY, A_READ, "Search code", t_search, true },
     { "get_context",
       "One-call surgical context for a query: top symbol definitions with "
       "code snippets, their callers and callees, entry points, and related "
       "routes. Use this first when exploring unfamiliar code.",
-      S_CTX, t_context, true },
+      S_CTX, A_READ, "Get context", t_context, true },
     { "get_symbol",
       "Definition(s) of a symbol by name: location, code snippet, reference "
       "count.",
-      S_NAME, t_symbol, true },
+      S_NAME, A_READ, "Get symbol", t_symbol, true },
     { "impact_analysis",
       "Impact radius of a symbol before changing it: transitive callers "
       "(who breaks) and callees (what it depends on) to the given depth.",
-      S_IMPACT, t_impact, true },
+      S_IMPACT, A_READ, "Impact analysis", t_impact, true },
     { "list_routes",
       "Framework-aware HTTP routes (URL pattern -> handler) detected across "
       "the codebase, optionally filtered.",
-      S_FILTER, t_routes, true },
+      S_FILTER, A_READ, "List routes", t_routes, true },
     { "vcs_status",
       "Working-tree status vs the last Codify snapshot (added/modified/"
       "deleted files).",
-      S_EMPTY, t_status, false },
+      S_EMPTY, A_READ, "Working tree status", t_status, false },
     { "change_impact",
       "Impact radius of uncommitted edits: symbols in changed files plus "
       "their external callers. Run before committing.",
-      S_EMPTY, t_changes, true },
+      S_EMPTY, A_READ, "Change impact", t_changes, true },
     { "vcs_log",
       "Snapshot history (Codify's local version control).",
-      S_LIMIT, t_log, false },
+      S_LIMIT, A_READ, "Snapshot history", t_log, false },
     { "vcs_commit",
       "Snapshot the working tree into Codify's local, content-addressed "
       "version control. Automatically tagged with the in-progress spec task "
       "when one exists.",
-      S_MSG, t_commit, false },
+      S_MSG, A_WRITE, "Snapshot the tree", t_commit, false },
     { "spec_status",
       "Task board of the active Ion spec feature (spec/<feature>/spec.kvx): "
       "workflow mode, separate done/implemented totals, current in-progress "
       "task, and the next eligible task.",
-      S_EMPTY, t_spec_status, false },
+      S_EMPTY, A_READ, "Task board", t_spec_status, false },
     { "spec_next",
       "The next eligible spec task — lowest wave whose `requires` are all "
       "done (or implemented in Prod mode) — with its implementation bullets "
       "and expanded acceptance criteria. Call before starting new work.",
-      S_EMPTY, t_spec_next, false },
+      S_EMPTY, A_READ, "Next task", t_spec_next, false },
     { "spec_mode",
       "Set the repository spec workflow to Prod mode or standard mode. Prod "
       "mode lets implemented prerequisites unlock later implementation.",
-      S_MODE, t_spec_mode, false },
+      S_MODE, A_WRITE, "Set workflow mode", t_spec_mode, false },
     { "spec_start",
       "Mark a spec task in_progress in spec.kvx (enforces one-at-a-time and "
       "met `requires`) and refresh the markdown mirror. Do this before "
       "implementing the task.",
-      S_TASKID, t_spec_start, false },
+      S_TASKID, A_WRITE, "Start a task", t_spec_start, false },
     { "spec_implemented",
       "Prod mode only: run non-executing symbol/touched-path graph checks and "
       "mark coding complete with qualification pending. Never executes "
       "verify_cmd and has no force bypass.",
-      S_TASKID, t_spec_implemented, false },
+      S_TASKID, A_WRITE, "Mark coding complete", t_spec_implemented, false },
     { "spec_done",
       "Qualify an in-progress or implemented task: run verify_cmd and graph "
       "checks, mark done only on success, refresh the mirror, and report the "
       "next task. Failed qualification preserves implemented status.",
-      S_TASKDN, t_spec_done, false },
+      S_TASKDN, A_WRITE, "Qualify a task", t_spec_done, false },
     { "spec_render",
       "Regenerate the spec system's IDE pointer files and markdown mirror "
       "from the kvx sources (check:true only reports staleness).",
-      S_CHECK, t_spec_render, false },
+      S_CHECK, A_WRITE, "Render spec mirror", t_spec_render, false },
     { "spec_trace",
       "Trace spec tasks to code: declared symbols resolved in the graph "
       "(location, refs), touched paths matched against actual changes, and "
       "commits tagged with the task. One task by id, or all tasks.",
-      S_TRACE, t_spec_trace, false },   /* trace refreshes its own graph */
+      S_TRACE, A_READ, "Trace task to code", t_spec_trace, false },   /* trace refreshes its own graph */
     { "remember",
       "Save a durable project memory — a decision, constraint, outcome, "
       "preference, or fact worth knowing in later sessions — into Codify's "
       "database. Automatically linked to the in-progress spec task unless "
       "a task is given. Never store secrets.",
-      S_REMEMBER, t_remember, false },
+      S_REMEMBER, A_WRITE, "Save a memory", t_remember, false },
     { "recall",
       "Search project memories: full-text over the body, ranked by relevance "
       "then recency, filterable by task (feature/id) and type. Call at "
       "session start and before starting a task to load prior decisions "
       "and outcomes.",
-      S_RECALL, t_recall, false },
+      S_RECALL, A_READ, "Search memories", t_recall, false },
+    { "get_source",
+      "The body of one symbol, by name — not the whole file. Use instead of "
+      "reading a file when you only need a single function.",
+      S_NAME, A_READ, "Show symbol source", t_show, true },
+    { "why",
+      "Provenance for a symbol: where it is defined, the snapshots that "
+      "changed it, the spec tasks those snapshots implemented, and the "
+      "decisions recorded along the way. Ask before changing unfamiliar code.",
+      S_NAME, A_READ, "Why does this exist", t_why, true },
+    { "test_impact",
+      "Which tests reference a symbol — or, with no name, every symbol in "
+      "your uncommitted changes. Use to pick what to run instead of the "
+      "whole suite, and to see what has no coverage at all.",
+      S_NAMEOPT, A_READ, "Tests covering this change", t_test_impact, true },
+    { "brief",
+      "Session state in one call: project root, the active or next spec "
+      "task with its criteria, uncommitted paths, and recent decisions. "
+      "Call this first in a new session.",
+      S_EMPTY, A_READ, "Session brief", t_brief, true },
+    { "review",
+      "The change paired with what it claims to do: changed paths, the "
+      "symbols in them, callers outside the change that are now at risk, "
+      "and the active task's acceptance criteria. Call before spec_done.",
+      S_EMPTY, A_READ, "Review the change", t_review, true },
+    { "guard",
+      "Report edits that fall outside the scope the in-progress task "
+      "declared in its `touches`. Advisory: it never fails the call.",
+      S_PATHOPT, A_READ, "Check edit scope", t_guard, true },
+    { "check",
+      "The full repository gate in one call: spec render staleness, spec "
+      "lint, task evidence, claim consistency, and worktree state.",
+      S_EMPTY, A_READ, "Repository check", t_check, true },
+    { "spec_wave",
+      "Every eligible task in the current wave, not just the first. Use "
+      "when dispatching several agents at once; in parallel mode each task "
+      "also reports the paths it claims.",
+      S_EMPTY, A_READ, "Current wave", t_spec_wave, false },
+    { "spec_lint",
+      "Validate the plan: requires cycles, requires pointing at unknown "
+      "tasks, tasks with no acceptance criteria, and touches globs that "
+      "cannot match anything.",
+      S_EMPTY, A_READ, "Lint the spec", t_spec_lint, false },
+    { "spec_new",
+      "Scaffold a new feature spec (and spec/workflow.kvx when the repo has "
+      "none) and make it the active feature. The first step of planning.",
+      S_FEATURE, A_WRITE, "New feature spec", t_spec_new, false },
+    { "spec_add",
+      "Add a task to the active feature, preserving every other byte of the "
+      "kvx file. Declare `symbols` and `touches` so spec_done can verify the "
+      "work against the graph.",
+      S_ADD, A_WRITE, "Add a task", t_spec_add, false },
+    { "spec_claim",
+      "Claim a task with an owning agent and an expiring lease, so parallel "
+      "agents do not collide. Refuses when another agent holds it or its "
+      "declared paths overlap a live claim.",
+      S_CLAIM, A_WRITE, "Claim a task", t_spec_claim, false },
+    { "git_sync",
+      "Ingest git history into the graph: commits, authors, and per-file "
+      "churn, which then rank search and context results.",
+      S_LIMIT, A_WRITE, "Ingest git history", t_git_sync, false },
 };
 #define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))
+
+/* ---------------- resources and prompts ---------------- */
+
+/* Documents a client can attach directly, rather than calling a tool and
+ * pasting the result. The spec is the source of truth for how to work here,
+ * so it belongs in context, not behind a function call. */
+static const struct {
+    const char *uri, *rel, *name, *desc, *mime;
+} RESOURCES[] = {
+    { "codify://spec/workflow", "spec/workflow.kvx", "Spec workflow",
+      "How work is driven in this repository: principles, loop, hard rules.",
+      "text/plain" },
+    { "codify://tasks", "spec/tasks.md", "Task board",
+      "Rendered task list for the active feature.", "text/markdown" },
+    { "codify://agents", "AGENTS.md", "Agent brief",
+      "Generated orientation: languages, layout, entry points, key symbols.",
+      "text/markdown" },
+    { "codify://claude", "CLAUDE.md", "Claude brief",
+      "Generated orientation for Claude Code.", "text/markdown" },
+    { NULL, NULL, NULL, NULL, NULL }
+};
+
+/* The workflow loop, shipped as prompts so Codify's opinion reaches any
+ * client — not only the ones whose users read the README. */
+static const struct { const char *name, *title, *desc, *body; } PROMPTS[] = {
+    { "start-work", "Start the next task",
+      "Load session state, take the next eligible task, and gather context.",
+      "Use Codify to begin the next piece of work in this repository:\n"
+      "1. Call `brief` for project state, the active task, and prior decisions.\n"
+      "2. Call `spec_next` (or `spec_wave` if you are dispatching several "
+      "agents) and pick a task.\n"
+      "3. Call `spec_start` with its id.\n"
+      "4. Call `get_context` for the area the task names, and `why` for any "
+      "symbol you are about to change.\n"
+      "5. Restate the task's acceptance criteria before writing code.\n"
+      "Do not begin editing until you have done all five." },
+    { "review-change", "Review the current change",
+      "Check uncommitted work against the criteria it claims to satisfy.",
+      "Review the current uncommitted change in this repository:\n"
+      "1. Call `review` for the changed symbols, at-risk callers, and the "
+      "active task's acceptance criteria.\n"
+      "2. Call `test_impact` to see which tests cover the change and which "
+      "symbols have no coverage.\n"
+      "3. Call `guard` to find edits outside the task's declared scope.\n"
+      "For each acceptance criterion, state plainly whether the change "
+      "satisfies it and cite the symbol that does so. Name anything "
+      "unverified rather than assuming it passes." },
+    { "close-task", "Close out a task",
+      "Snapshot, qualify, and record what was learned.",
+      "Finish the in-progress task in this repository:\n"
+      "1. Call `review` and resolve anything it raises.\n"
+      "2. Call `remember` for any decision or constraint discovered while "
+      "working, so the next session does not rediscover it.\n"
+      "3. Call `vcs_commit` with a message describing the change.\n"
+      "4. Call `spec_done` with the task id.\n"
+      "If `spec_done` refuses, do not force it and do not weaken the spec to "
+      "match the code — report exactly which check failed and why." },
+    { "orient", "Orient in an unfamiliar repository",
+      "Build a working picture of a codebase you have not seen before.",
+      "Orient yourself in this repository before doing anything else:\n"
+      "1. Call `brief`, then read the `codify://agents` resource.\n"
+      "2. Call `list_routes` to find the externally reachable surface.\n"
+      "3. Call `get_context` for each area the task at hand touches.\n"
+      "4. Call `recall` for decisions already made about those areas.\n"
+      "Summarise what the project is, how it is laid out, and where the code "
+      "you need lives — citing paths from the graph, not guesses." },
+    { NULL, NULL, NULL, NULL }
+};
+
+/* Emit the client-facing annotation object for tool `i`. Kept as a function
+ * so the hint policy lives in one place rather than being inlined into the
+ * tools/list writer. */
+static void mcp_tool_annotations(int i, StrBuf *b) {
+    sb_puts(b, TOOLS[i].annotations);
+}
+
+/* Build the resources/list payload: the fixed documents that exist, plus one
+ * entry per feature spec found under spec/. */
+static void mcp_list_resources(Cg *cg, StrBuf *r) {
+    sb_puts(r, "{\"resources\":[");
+    int nr = 0;
+    for (int i = 0; RESOURCES[i].uri; i++) {
+        char abs[4700];
+        struct stat rst;
+        snprintf(abs, sizeof abs, "%s/%s", cg->root, RESOURCES[i].rel);
+        if (stat(abs, &rst) != 0) continue;
+        if (nr++) sb_putc(r, ',');
+        sb_puts(r, "{\"uri\":");         sb_json_str(r, RESOURCES[i].uri);
+        sb_puts(r, ",\"name\":");        sb_json_str(r, RESOURCES[i].name);
+        sb_puts(r, ",\"description\":"); sb_json_str(r, RESOURCES[i].desc);
+        sb_puts(r, ",\"mimeType\":");    sb_json_str(r, RESOURCES[i].mime);
+        sb_putc(r, '}');
+    }
+    char specdir[4600];
+    snprintf(specdir, sizeof specdir, "%s/spec", cg->root);
+    DIR *d = opendir(specdir);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            char kv[4800];
+            struct stat kst;
+            snprintf(kv, sizeof kv, "%s/%s/spec.kvx", specdir, e->d_name);
+            if (stat(kv, &kst) != 0) continue;
+            char uri[512], nm[300];
+            snprintf(uri, sizeof uri, "codify://spec/%s", e->d_name);
+            snprintf(nm, sizeof nm, "spec: %s", e->d_name);
+            if (nr++) sb_putc(r, ',');
+            sb_puts(r, "{\"uri\":");  sb_json_str(r, uri);
+            sb_puts(r, ",\"name\":"); sb_json_str(r, nm);
+            sb_puts(r, ",\"description\":\"Feature spec (kvx source of "
+                       "truth)\",\"mimeType\":\"text/plain\"}");
+        }
+        closedir(d);
+    }
+    sb_puts(r, "]}");
+}
+
+/* Build the prompts/list payload — the workflow loop, as prompts. */
+static void mcp_list_prompts(StrBuf *r) {
+    sb_puts(r, "{\"prompts\":[");
+    for (int i = 0; PROMPTS[i].name; i++) {
+        if (i) sb_putc(r, ',');
+        sb_puts(r, "{\"name\":");        sb_json_str(r, PROMPTS[i].name);
+        sb_puts(r, ",\"title\":");       sb_json_str(r, PROMPTS[i].title);
+        sb_puts(r, ",\"description\":"); sb_json_str(r, PROMPTS[i].desc);
+        sb_puts(r, ",\"arguments\":[]}");
+    }
+    sb_puts(r, "]}");
+}
 
 /* ---------------- server loop ---------------- */
 
@@ -358,12 +680,29 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
         if (strcmp(method, "initialize") == 0 && id) {
             char *params = json_get_object(line, "params");
             char *ver = params ? json_get_string(params, "protocolVersion") : NULL;
+            /* Negotiate: echo the client's version only when we actually
+             * speak it, otherwise answer with our newest. Echoing blindly
+             * claims support for revisions this server has never seen. */
+            static const char *SUPPORTED[] = {
+                "2025-06-18", "2025-03-26", "2024-11-05", NULL
+            };
+            const char *agreed = SUPPORTED[0];
+            for (int i = 0; ver && SUPPORTED[i]; i++)
+                if (strcmp(ver, SUPPORTED[i]) == 0) { agreed = SUPPORTED[i]; break; }
             StrBuf r; sb_init(&r);
             sb_puts(&r, "{\"protocolVersion\":");
-            sb_json_str(&r, ver ? ver : "2025-06-18");
-            sb_puts(&r, ",\"capabilities\":{\"tools\":{\"listChanged\":false}},"
+            sb_json_str(&r, agreed);
+            sb_puts(&r, ",\"capabilities\":{"
+                        "\"tools\":{\"listChanged\":true},"
+                        "\"resources\":{\"listChanged\":true,\"subscribe\":false},"
+                        "\"prompts\":{\"listChanged\":false}},"
                         "\"serverInfo\":{\"name\":\"codify\",\"version\":\""
-                        CG_VERSION "\"}}");
+                        CG_VERSION "\"},"
+                        "\"instructions\":\"Codify serves this repository's "
+                        "code graph, snapshots, spec tasks, and memories. Start "
+                        "a session with `brief`. Before changing unfamiliar "
+                        "code call `get_context` then `why`. Before `spec_done` "
+                        "call `review`. Record decisions with `remember`.\"}");
             reply_result(id, r.p);
             sb_free(&r);
             free(ver); free(params);
@@ -374,9 +713,14 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
                 if (i) sb_putc(&r, ',');
                 sb_puts(&r, "{\"name\":");
                 sb_json_str(&r, TOOLS[i].name);
+                sb_puts(&r, ",\"title\":");
+                sb_json_str(&r, TOOLS[i].title);
                 sb_puts(&r, ",\"description\":");
                 sb_json_str(&r, TOOLS[i].desc);
-                sb_printf(&r, ",\"inputSchema\":%s}", TOOLS[i].schema);
+                sb_printf(&r, ",\"inputSchema\":%s,\"annotations\":",
+                          TOOLS[i].schema);
+                mcp_tool_annotations(i, &r);
+                sb_putc(&r, '}');
             }
             sb_puts(&r, "]}");
             reply_result(id, r.p);
@@ -407,6 +751,72 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
                 free(out);
             }
             free(params); free(name); free(args);
+        } else if (strcmp(method, "resources/list") == 0 && id) {
+            /* The plan and the generated agent brief are documents, not tool
+             * calls. Exposing them as resources lets a client attach them to
+             * context directly instead of round-tripping through a tool. */
+            StrBuf r; sb_init(&r);
+            mcp_list_resources(cg, &r);
+            reply_result(id, r.p);
+            sb_free(&r);
+        } else if (strcmp(method, "resources/read") == 0 && id) {
+            char *params = json_get_object(line, "params");
+            char *uri = params ? json_get_string(params, "uri") : NULL;
+            char rel[1024] = "";
+            for (int i = 0; uri && RESOURCES[i].uri; i++)
+                if (strcmp(uri, RESOURCES[i].uri) == 0)
+                    snprintf(rel, sizeof rel, "%s", RESOURCES[i].rel);
+            if (uri && !rel[0] && strncmp(uri, "codify://spec/", 14) == 0)
+                snprintf(rel, sizeof rel, "spec/%s/spec.kvx", uri + 14);
+            if (!rel[0]) {
+                reply_error(id, -32602, "unknown resource");
+            } else {
+                char abs[4900];
+                snprintf(abs, sizeof abs, "%s/%s", cg->root, rel);
+                char *body = read_entire_file(abs, NULL);
+                if (!body) {
+                    reply_error(id, -32602, "resource not readable");
+                } else {
+                    StrBuf r; sb_init(&r);
+                    sb_puts(&r, "{\"contents\":[{\"uri\":");
+                    sb_json_str(&r, uri);
+                    sb_puts(&r, ",\"mimeType\":\"text/plain\",\"text\":");
+                    sb_json_str(&r, body);
+                    sb_puts(&r, "}]}");
+                    reply_result(id, r.p);
+                    sb_free(&r);
+                    free(body);
+                }
+            }
+            free(uri); free(params);
+        } else if (strcmp(method, "prompts/list") == 0 && id) {
+            StrBuf r; sb_init(&r);
+            mcp_list_prompts(&r);
+            reply_result(id, r.p);
+            sb_free(&r);
+        } else if (strcmp(method, "prompts/get") == 0 && id) {
+            char *params = json_get_object(line, "params");
+            char *name = params ? json_get_string(params, "name") : NULL;
+            const char *body = NULL, *desc = NULL;
+            for (int i = 0; name && PROMPTS[i].name; i++)
+                if (strcmp(name, PROMPTS[i].name) == 0) {
+                    body = PROMPTS[i].body;
+                    desc = PROMPTS[i].desc;
+                }
+            if (!body) {
+                reply_error(id, -32602, "unknown prompt");
+            } else {
+                StrBuf r; sb_init(&r);
+                sb_puts(&r, "{\"description\":");
+                sb_json_str(&r, desc);
+                sb_puts(&r, ",\"messages\":[{\"role\":\"user\","
+                            "\"content\":{\"type\":\"text\",\"text\":");
+                sb_json_str(&r, body);
+                sb_puts(&r, "}}]}");
+                reply_result(id, r.p);
+                sb_free(&r);
+            }
+            free(name); free(params);
         } else if (strcmp(method, "ping") == 0 && id) {
             reply_result(id, "{}");
         } else if (id) {
@@ -508,11 +918,21 @@ int cmd_mcp_install(Cg *cg) {
     install_json(path, "servers", vsc, "vscode");
     snprintf(path, sizeof path, "%s/.gemini/settings.json", cg->root);
     install_json(path, "mcpServers", std, "gemini-cli");
+    snprintf(path, sizeof path, "%s/.zed/settings.json", cg->root);
+    install_json(path, "context_servers", std, "zed");
+    snprintf(path, sizeof path, "%s/.opencode/opencode.json", cg->root);
+    install_json(path, "mcp", std, "opencode");
 
     /* user-scoped configs */
     if (home) {
         snprintf(path, sizeof path, "%s/.codeium/windsurf/mcp_config.json", home);
         install_json(path, "mcpServers", std, "windsurf");
+        snprintf(path, sizeof path,
+                 "%s/.config/Code/User/globalStorage/saoudrizwan.claude-dev/"
+                 "settings/cline_mcp_settings.json", home);
+        install_json(path, "mcpServers", std, "cline");
+        snprintf(path, sizeof path, "%s/.continue/config.json", home);
+        install_json(path, "mcpServers", std, "continue");
 
         snprintf(path, sizeof path, "%s/.codex/config.toml", home);
         char *toml = read_entire_file(path, NULL);

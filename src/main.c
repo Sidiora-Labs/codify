@@ -1,5 +1,7 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
+#include <unistd.h>
+#include <sys/stat.h>
 
 static void usage(void) {
     printf(
@@ -9,7 +11,8 @@ static void usage(void) {
 "usage: cg <command> [args]\n"
 "\n"
 "graph\n"
-"  init                     create .codegraph/ here and build the index\n"
+"  init [--nested]          create .codegraph/ here and build the index\n"
+"  root                     print the project root cg resolves to\n"
 "  index [--full]           (re)index the project\n"
 "  sync                     incremental index (changed files only)\n"
 "  search <query> [-n N]    find code by name (FTS5 trigram + full text)\n"
@@ -18,11 +21,15 @@ static void usage(void) {
 "  context <query>          one-call context: symbols, snippets, edges,\n"
 "                           entry points, routes\n"
 "  routes [filter]          framework-aware URL routes -> handlers\n"
+"  show <symbol|path:line>  print just that symbol's body\n"
+"  test-impact [symbol]     tests referencing a symbol, or your changes\n"
+"  why <symbol>             provenance: commits, tasks, and decisions\n"
 "  watch [--debounce MS]    auto-sync on file changes (native OS events)\n"
 "  info                     machine profile and how the pipeline was sized\n"
 "\n"
 "version control\n"
-"  commit -m <msg>          snapshot; optional --task <id> and --amend\n"
+"  commit -m <msg>          snapshot; --task <id>, --amend, --git\n"
+"  git-sync [-n N]          ingest git history for provenance and ranking\n"
 "  log [-n N]               commit history\n"
 "  status                   working tree vs HEAD\n"
 "  diff [A] [B]             HEAD vs worktree | A vs worktree | A vs B\n"
@@ -33,15 +40,23 @@ static void usage(void) {
 "  remember <text>          save a memory; --type decision|constraint|\n"
 "                           outcome|preference|fact, --task <feature/id>\n"
 "                           (defaults to the in-progress spec task)\n"
-"  recall [query] [-n N]    search memories (FTS + recency); --task, --type\n"
+"  recall [query] [-n N]    search memories (FTS + recency); --task, --type,\n"
+"                           --near <file> for anchored retrieval\n"
+"  memory compact           drop duplicate memories (--dry-run to preview)\n"
 "  forget <id>              delete a memory\n"
 "\n"
 "agentic\n"
 "  mcp                      run as an MCP server (stdio) for coding agents\n"
+"  lsp                      run as a Language Server (stdio) for editors\n"
 "  mcp-install              auto-connect to Claude Code, Cursor, VS Code,\n"
 "                           Windsurf, Gemini CLI, Codex CLI\n"
 "  changelog [-n N] [-o F]  changelog from snapshots with symbol-level diffs\n"
 "  agentmd [--write]        generate AGENTS.md + CLAUDE.md from the graph\n"
+"  check [--strict]         one CI gate: render, lint, evidence, tree\n"
+"  brief                    session state: task, changes, decisions\n"
+"  review                   changed symbols vs acceptance criteria + risk\n"
+"  guard [paths] [--strict] edits outside the active task's declared scope\n"
+"  hook install             wire agent + git hooks so the graph self-syncs\n"
 "\n"
 "spec workflow (Ion kvx specs — works in any repo with spec/workflow.kvx)\n"
 "  spec render [--check]    regenerate IDE pointer files + markdown mirror\n"
@@ -92,8 +107,10 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
     char *nb = cg ? cg_meta_get(cg, "last_index_bytes") : NULL;
     if (json) {
         StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"root\":");
+        if (cg) sb_json_str(&b, cg->root); else sb_puts(&b, "null");
         sb_printf(&b,
-            "{\"profile\":\"%s\",\"cores_online\":%d,\"cores_affinity\":%d,"
+            ",\"profile\":\"%s\",\"cores_online\":%d,\"cores_affinity\":%d,"
             "\"cores_cgroup_quota\":%.2f,\"cores_effective\":%d,"
             "\"mem_total_kb\":%ld,\"mem_available_kb\":%ld,"
             "\"cgroup_mem_limit_kb\":%ld,\"workers\":%d,"
@@ -109,6 +126,10 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
         fputs(b.p, stdout);
         sb_free(&b);
     } else {
+        /* The bound project is the single most useful line here: it is how a
+         * user notices that cg resolved to an ancestor they did not expect. */
+        if (cg) printf("project root: %s\n", cg->root);
+        else    printf("project root: (none — not inside a Codify project)\n");
         printf("machine profile: %s\n", si->profile);
         printf("  cores: %d online, %d affinity", si->cores_online,
                si->cores_affinity);
@@ -152,6 +173,9 @@ int main(int argc, char **argv) {
     if (strcmp(cmd, "spec") == 0)
         return cmd_spec(argc - 2, argv + 2, json);
 
+    if (strcmp(cmd, "root") == 0)
+        return cmd_root(json);
+
     SysInfo si;
     sysinfo_detect(&si);
 
@@ -167,9 +191,37 @@ int main(int argc, char **argv) {
 
     Cg cg;
     if (strcmp(cmd, "init") == 0) {
-        char root[4096];
-        if (cg_find_root(root, sizeof root) == 0) {
-            fprintf(stderr, "cg: already initialized at %s\n", root);
+        bool nested = flag(&argc, argv, "--nested");
+        bool force  = flag(&argc, argv, "--force");
+        char here[4096], root[4096];
+        if (!getcwd(here, sizeof here)) {
+            fprintf(stderr, "cg: cannot determine the current directory\n");
+            return 1;
+        }
+        char probe[4600];
+        struct stat pst;
+        snprintf(probe, sizeof probe, "%s/%s", here, CG_DIR);
+        if (stat(probe, &pst) == 0) {
+            fprintf(stderr, "cg: already initialized at %s\n", here);
+            return 1;
+        }
+        const char *home = getenv("HOME");
+        if (!force && home && home[0] && strcmp(here, home) == 0) {
+            fprintf(stderr,
+                "cg: refusing to initialize in your home directory.\n"
+                "    Every project underneath would silently bind to this "
+                "index.\n    Run cg init inside a project, or --force if you "
+                "meant it.\n");
+            return 1;
+        }
+        /* An ancestor project is legitimate in a monorepo, but it is far more
+         * often a stray index that would silently capture this directory. */
+        if (cg_find_root(root, sizeof root) == 0 && !nested) {
+            fprintf(stderr,
+                "cg: %s is already a Codify project and encloses this "
+                "directory.\n    Commands here would operate on it, not on "
+                "%s.\n    Use --nested to make this its own project "
+                "anyway.\n", root, here);
             return 1;
         }
         if (cg_open(&cg, true) != 0) return 1;
@@ -204,15 +256,43 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "context") == 0) {
         if (argc < 3) { fprintf(stderr, "usage: cg context <query>\n"); rc = 1; }
         else rc = cmd_context(&cg, argv[2], json);
+    } else if (strcmp(cmd, "show") == 0) {
+        if (argc < 3) { fprintf(stderr, "usage: cg show <symbol>\n"); rc = 1; }
+        else rc = cmd_show(&cg, argv[2], json);
+    } else if (strcmp(cmd, "test-impact") == 0) {
+        rc = cmd_test_impact(&cg, argc >= 3 ? argv[2] : NULL, json);
+    } else if (strcmp(cmd, "why") == 0) {
+        if (argc < 3) { fprintf(stderr, "usage: cg why <symbol>\n"); rc = 1; }
+        else rc = cmd_why(&cg, argv[2], json);
     } else if (strcmp(cmd, "routes") == 0) {
         rc = cmd_routes(&cg, argc >= 3 ? argv[2] : NULL, json);
     } else if (strcmp(cmd, "watch") == 0) {
         int deb = atoi(opt(&argc, argv, "--debounce", "300"));
         rc = cmd_watch(&cg, &si, deb > 0 ? deb : 300);
+    } else if (strcmp(cmd, "brief") == 0) {
+        rc = cmd_brief(&cg, json);
+    } else if (strcmp(cmd, "review") == 0) {
+        IndexStats st;
+        cg_index(&cg, &si, false, &st, true);   /* review needs a fresh graph */
+        rc = cmd_review(&cg, json);
+    } else if (strcmp(cmd, "guard") == 0) {
+        bool strict = flag(&argc, argv, "--strict");
+        rc = cmd_guard(&cg, argc - 2, argv + 2, json, strict);
+    } else if (strcmp(cmd, "hook") == 0) {
+        if (argc >= 3 && strcmp(argv[2], "install") == 0)
+            rc = cmd_hook_install(&cg);
+        else { fprintf(stderr, "usage: cg hook install\n"); rc = 1; }
+    } else if (strcmp(cmd, "check") == 0) {
+        bool strict = flag(&argc, argv, "--strict");
+        rc = cmd_check(&cg, json, strict);
+    } else if (strcmp(cmd, "git-sync") == 0) {
+        int limit = atoi(opt(&argc, argv, "-n", "2000"));
+        rc = cmd_git_sync(&cg, limit > 0 ? limit : 2000, json);
     } else if (strcmp(cmd, "commit") == 0) {
         const char *msg = opt(&argc, argv, "-m", NULL);
         const char *task = opt(&argc, argv, "--task", NULL);
         bool amend = flag(&argc, argv, "--amend");
+        bool to_git = flag(&argc, argv, "--git");
         char *tag = task ? spec_task_tag(task) : NULL;
         if (!msg) {
             fprintf(stderr,
@@ -228,6 +308,12 @@ int main(int argc, char **argv) {
             IndexStats st;
             cg_index(&cg, &si, false, &st, true);   /* graph stays fresh */
             rc = cmd_commit_with_options(&cg, msg, false, tag, amend);
+            if (rc == 0 && to_git) {
+                StrBuf gm; sb_init(&gm);
+                sb_printf(&gm, "%s%s%s", msg, tag ? " " : "", tag ? tag : "");
+                rc = git_commit_mirror(&cg, gm.p);
+                sb_free(&gm);
+            }
         }
         free(tag);
     } else if (strcmp(cmd, "log") == 0) {
@@ -249,6 +335,7 @@ int main(int argc, char **argv) {
         const char *task = opt(&argc, argv, "--task", NULL);
         const char *symbols = opt(&argc, argv, "--symbols", NULL);
         const char *files = opt(&argc, argv, "--files", NULL);
+        const char *supersedes = opt(&argc, argv, "--supersedes", NULL);
         if (argc < 3) {
             fprintf(stderr, "usage: cg remember \"<text>\" [--type T] "
                     "[--task <feature/id>] [--symbols a,b] [--files x,y]\n");
@@ -258,16 +345,33 @@ int main(int argc, char **argv) {
             rc = cmd_remember(&cg, argv[2], type, task ? task : dflt,
                               symbols, files, json);
             free(dflt);
+            if (rc == 0 && supersedes)
+                rc = memory_supersede(&cg, atol(supersedes),
+                                      (long)sqlite3_last_insert_rowid(cg.db));
         }
     } else if (strcmp(cmd, "recall") == 0) {
         const char *task = opt(&argc, argv, "--task", NULL);
         const char *type = opt(&argc, argv, "--type", NULL);
+        const char *near = opt(&argc, argv, "--near", NULL);
         int limit = atoi(opt(&argc, argv, "-n", "10"));
-        rc = cmd_recall(&cg, argc >= 3 ? argv[2] : NULL, task, type,
-                        limit > 0 ? limit : 10, json);
+        if (near)
+            rc = cmd_recall_near(&cg, near, limit > 0 ? limit : 10, json);
+        else
+            rc = cmd_recall(&cg, argc >= 3 ? argv[2] : NULL, task, type,
+                            limit > 0 ? limit : 10, json);
+    } else if (strcmp(cmd, "memory") == 0) {
+        if (argc >= 3 && strcmp(argv[2], "compact") == 0) {
+            bool dry = flag(&argc, argv, "--dry-run");
+            rc = cmd_memory_compact(&cg, dry, json);
+        } else {
+            fprintf(stderr, "usage: cg memory compact [--dry-run]\n");
+            rc = 1;
+        }
     } else if (strcmp(cmd, "forget") == 0) {
         if (argc < 3) { fprintf(stderr, "usage: cg forget <id>\n"); rc = 1; }
         else rc = cmd_forget(&cg, argv[2]);
+    } else if (strcmp(cmd, "lsp") == 0) {
+        rc = cmd_lsp(&cg, &si);
     } else if (strcmp(cmd, "mcp") == 0) {
         rc = cmd_mcp(&cg, &si);
     } else if (strcmp(cmd, "mcp-install") == 0) {

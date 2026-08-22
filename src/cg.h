@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.2.0"
+#define CG_VERSION  "0.3.0"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -63,9 +63,17 @@ void sha256_hex(const void *data, size_t len, char out_hex[65]);
 
 /* ---------------- ignore rules ---------------- */
 typedef struct {
-    char **pats; int n, cap;
+    char *pat;
+    bool negate;       /* `!rule` — re-includes a previously ignored path */
+    bool dir_only;     /* `rule/` — matches directories only */
+    bool anchored;     /* rule holds a `/` — matched against the full rel path */
+} IgnorePat;
+
+typedef struct {
+    IgnorePat *pats; int n, cap;
 } Ignore;
-void ignore_load(Ignore *ig, const char *root);  /* defaults + .cgignore */
+/* defaults + .gitignore + .cgignore, in that precedence order */
+void ignore_load(Ignore *ig, const char *root);
 bool ignore_match(const Ignore *ig, const char *rel, bool is_dir);
 void ignore_free(Ignore *ig);
 
@@ -122,6 +130,11 @@ typedef struct {
 int  cg_open(Cg *cg, bool create);                 /* finds root upward */
 void cg_close(Cg *cg);
 int  cg_find_root(char *out, size_t cap);          /* 0 ok */
+/* resolve from an explicit directory (LSP/MCP roots, hooks) */
+int  cg_find_root_at(const char *start, char *out, size_t cap);
+/* true when dir owns its subtree (.git, go.mod, package.json, ...) */
+bool cg_is_boundary(const char *dir);
+int  cmd_root(bool json);                          /* print the bound root */
 sqlite3_stmt *cg_prep(Cg *cg, const char *sql);
 void cg_exec(Cg *cg, const char *sql);
 void cg_meta_set(Cg *cg, const char *k, const char *v);
@@ -142,6 +155,12 @@ int cmd_symbol (Cg *cg, const char *name, bool json);
 int cmd_impact (Cg *cg, const char *name, int depth, bool json);
 int cmd_context(Cg *cg, const char *q, bool json);
 int cmd_routes (Cg *cg, const char *filter, bool json);
+int cmd_show   (Cg *cg, const char *name, bool json);   /* one symbol body */
+int cmd_test_impact(Cg *cg, const char *name, bool json);
+int cmd_why    (Cg *cg, const char *name, bool json);   /* provenance join */
+bool graph_path_is_test(const char *path);
+/* name of the symbol enclosing path:line; 0 ok, -1 when nothing encloses it */
+int  graph_symbol_at(Cg *cg, const char *path, int line, char *name, size_t cap);
 
 /* ---------------- vcs ---------------- */
 int cmd_commit  (Cg *cg, const char *msg, bool quiet);
@@ -160,6 +179,9 @@ int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,
 /* unique repo-relative paths changed in worktree-vs-HEAD, plus by commits
  * whose message contains needle (needle may be NULL); returns count */
 int vcs_changed_paths(Cg *cg, const char *needle, char ***out);
+/* commits whose snapshot changed <path>, newest first — provenance for why */
+int vcs_commits_for_path(Cg *cg, const char *path, int limit, char ***ids,
+                         char ***msgs, long **dates);
 
 /* ---------------- agent memory (memories table in graph.db) ---------- */
 typedef struct {
@@ -185,6 +207,9 @@ int  cmd_remember(Cg *cg, const char *text, const char *type, const char *task,
 int  cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
                 int limit, bool json);
 int  cmd_forget(Cg *cg, const char *idstr);
+int  memory_supersede(Cg *cg, long old_id, long new_id);
+int  cmd_recall_near(Cg *cg, const char *path, int limit, bool json);
+int  cmd_memory_compact(Cg *cg, bool dry_run, bool json);
 
 /* ---------------- watcher ---------------- */
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms);
@@ -223,6 +248,9 @@ int   kvx_set_status(const char *path, const char *section, const char *value);
 /* surgically set a quoted scalar, adding the key/section when absent */
 int   kvx_set_string(const char *path, const char *section, const char *key,
                      const char *value);
+/* same, but writes the literal (a list such as ["a", "b"]) unquoted */
+int   kvx_set_raw(const char *path, const char *section, const char *key,
+                  const char *raw);
 
 int cmd_spec(int argc, char **argv, bool json);
 /* in_progress task of the cwd's spec repo as "feature/id" (malloc'd), or
@@ -230,6 +258,27 @@ int cmd_spec(int argc, char **argv, bool json);
 char *spec_active_tag(void);
 /* requested in_progress task as "feature/id"; NULL when invalid/not active */
 char *spec_task_tag(const char *requested);
+/* touches globs of the in-progress task; 0 when none (everything in scope) */
+int   spec_active_touches(char ***out);
+
+/* ---------------- language server (lsp.c) ---------------- */
+int  cmd_lsp(Cg *cg, const SysInfo *si);
+void lsp_hover(Cg *cg, const char *name, StrBuf *md);
+void lsp_diagnostics(Cg *cg, const char *abs, StrBuf *out);
+bool lsp_path_in_task_scope(Cg *cg, const char *rel);
+
+/* ---------------- governance (govern.c) ---------------- */
+int cmd_check(Cg *cg, bool json, bool strict);   /* the single CI gate */
+int cmd_brief(Cg *cg, bool json);                /* session state in one call */
+int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);
+int cmd_review(Cg *cg, bool json);
+int cmd_hook_install(Cg *cg);
+
+/* ---------------- git interop (gitint.c) ---------------- */
+bool git_available(const Cg *cg);
+int  cmd_git_sync(Cg *cg, int limit, bool json);
+int  git_churn_for_path(Cg *cg, const char *path);
+int  git_commit_mirror(Cg *cg, const char *message);
 
 /* ---------------- agentic layer ---------------- */
 int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */

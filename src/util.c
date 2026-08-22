@@ -1,4 +1,5 @@
 #include "cg.h"
+#include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -174,30 +175,150 @@ static const char *DEFAULT_IGNORES[] = {
     NULL
 };
 
-static void ig_add(Ignore *ig, const char *pat) {
+static void ig_add_flags(Ignore *ig, const char *pat, bool negate,
+                         bool dir_only, bool anchored) {
+    if (!pat[0]) return;
     if (ig->n == ig->cap) {
-        ig->cap = ig->cap ? ig->cap * 2 : 32;
-        ig->pats = xrealloc(ig->pats, sizeof(char *) * (size_t)ig->cap);
+        ig->cap = ig->cap ? ig->cap * 2 : 64;
+        ig->pats = xrealloc(ig->pats, sizeof(IgnorePat) * (size_t)ig->cap);
     }
-    ig->pats[ig->n++] = xstrdup(pat);
+    IgnorePat *e = &ig->pats[ig->n++];
+    e->pat = xstrdup(pat);
+    e->negate = negate;
+    e->dir_only = dir_only;
+    e->anchored = anchored;
+}
+
+static void ig_add(Ignore *ig, const char *pat) {
+    ig_add_flags(ig, pat, false, false, strchr(pat, '/') != NULL);
+}
+
+/* Parse one ignore file with gitignore semantics: `#` comments, `!` negation,
+ * a trailing `/` restricting to directories, and a leading or interior `/`
+ * anchoring the pattern to the repository root instead of matching basenames.
+ * Later entries win, which is what makes `!` work. */
+static void ig_load_file(Ignore *ig, const char *path) {
+    char *body = read_entire_file(path, NULL);
+    if (!body) return;
+    char *save = NULL;
+    for (char *line = strtok_r(body, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        while (*line == ' ' || *line == '\t') line++;
+        size_t n = strlen(line);
+        while (n && (line[n-1] == ' ' || line[n-1] == '\r')) line[--n] = 0;
+        if (!n || line[0] == '#') continue;
+        bool negate = false;
+        if (line[0] == '!') { negate = true; line++; n--; }
+        else if (line[0] == '\\' && (line[1] == '#' || line[1] == '!')) {
+            line++; n--;                     /* escaped literal # or ! */
+        }
+        bool dir_only = false;
+        while (n && line[n-1] == '/') { dir_only = true; line[--n] = 0; }
+        if (!n) continue;
+        bool anchored = strchr(line, '/') != NULL;
+        if (line[0] == '/') { line++; n--; anchored = true; }
+        if (!n) continue;
+        ig_add_flags(ig, line, negate, dir_only, anchored);
+    }
+    free(body);
+}
+
+/* Rules from a nested .gitignore apply only beneath its own directory, so
+ * rebase each pattern onto that prefix: an unanchored name gains a
+ * double-star segment under the directory, an anchored one is joined
+ * directly. Either way the result is matched against the full rel path. */
+static void ig_load_nested(Ignore *ig, const char *root, const char *reldir) {
+    char path[4700];
+    snprintf(path, sizeof path, "%s/%s/.gitignore", root, reldir);
+    int before = ig->n;
+    ig_load_file(ig, path);
+    int after = ig->n;
+    for (int i = before; i < after; i++) {
+        IgnorePat *e = &ig->pats[i];
+        bool deep = !e->anchored;
+        StrBuf b; sb_init(&b);
+        sb_printf(&b, "%s/%s", reldir, e->pat);
+        /* An unanchored name also matches at any depth below the directory.
+         * fnmatch's `**` will not match zero segments, so that case needs its
+         * own entry rather than a single double-star pattern. */
+        if (deep) {
+            StrBuf d; sb_init(&d);
+            sb_printf(&d, "%s/**/%s", reldir, e->pat);
+            ig_add_flags(ig, d.p, e->negate, e->dir_only, true);
+            sb_free(&d);
+            e = &ig->pats[i];         /* ig_add_flags may realloc */
+        }
+        free(e->pat);
+        e->pat = b.p;
+        e->anchored = true;
+    }
+}
+
+/* Collect nested .gitignore files, bounded in depth so the scan stays cheap
+ * on deep trees. Directories already ignored are not descended into. */
+static void ig_walk_gitignores(Ignore *ig, const char *root,
+                               const char *reldir, int depth) {
+    if (depth > 6) return;
+    char abs[4700];
+    snprintf(abs, sizeof abs, "%s%s%s", root, reldir[0] ? "/" : "", reldir);
+    DIR *d = opendir(abs);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char rel[4700];
+        snprintf(rel, sizeof rel, "%s%s%s", reldir, reldir[0] ? "/" : "",
+                 e->d_name);
+        char child[4800];
+        snprintf(child, sizeof child, "%s/%s", root, rel);
+        struct stat st;
+        if (stat(child, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        if (ignore_match(ig, rel, true)) continue;
+        ig_load_nested(ig, root, rel);
+        ig_walk_gitignores(ig, root, rel, depth + 1);
+    }
+    closedir(d);
 }
 
 void ignore_load(Ignore *ig, const char *root) {
     memset(ig, 0, sizeof *ig);
     for (int i = 0; DEFAULT_IGNORES[i]; i++) ig_add(ig, DEFAULT_IGNORES[i]);
     char path[4096];
+    /* .gitignore first so an explicit .cgignore rule can still override it */
+    snprintf(path, sizeof path, "%s/.gitignore", root);
+    ig_load_file(ig, path);
+    ig_walk_gitignores(ig, root, "", 0);
     snprintf(path, sizeof path, "%s/%s", root, CG_IGNORE);
-    char *body = read_entire_file(path, NULL);
-    if (!body) return;
-    char *save = NULL;
-    for (char *line = strtok_r(body, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
-        while (*line == ' ' || *line == '\t') line++;
-        size_t n = strlen(line);
-        while (n && (line[n-1] == ' ' || line[n-1] == '\r' || line[n-1] == '/')) line[--n] = 0;
-        if (!n || line[0] == '#') continue;
-        ig_add(ig, line);
+    ig_load_file(ig, path);
+}
+
+/* fnmatch with `**` allowed to span separators, as gitignore specifies */
+static bool pat_match(const char *pat, const char *text, bool anchored) {
+    int flags = anchored && !strstr(pat, "**") ? FNM_PATHNAME : 0;
+    return fnmatch(pat, text, flags) == 0;
+}
+
+static bool ig_entry_hits(const IgnorePat *e, const char *rel,
+                          const char *base, bool is_dir) {
+    if (e->dir_only && !is_dir) return false;
+    if (e->anchored) {
+        if (pat_match(e->pat, rel, true)) return true;
+        /* an anchored directory rule also covers everything beneath it */
+        size_t pl = strlen(e->pat);
+        if (strncmp(rel, e->pat, pl) == 0 && rel[pl] == '/') return true;
+        return false;
     }
-    free(body);
+    if (pat_match(e->pat, base, false)) return true;
+    /* an unanchored name matches at any depth, including parent segments */
+    const char *p = rel;
+    for (;;) {
+        const char *slash = strchr(p, '/');
+        if (!slash) break;
+        size_t seg = (size_t)(slash - p);
+        if (strlen(e->pat) == seg && strncmp(e->pat, p, seg) == 0) return true;
+        p = slash + 1;
+    }
+    return false;
 }
 
 bool ignore_match(const Ignore *ig, const char *rel, bool is_dir) {
@@ -206,28 +327,27 @@ bool ignore_match(const Ignore *ig, const char *rel, bool is_dir) {
     if (base[0] == '.' && strcmp(base, ".") != 0) {
         /* Keep authored GitHub automation visible to snapshots and task
          * traces while retaining the fail-closed default for secret-bearing
-         * and tool-owned hidden paths. */
-        if (strcmp(base, CG_IGNORE) != 0 && strcmp(base, ".github") != 0)
+         * and tool-owned hidden paths. Negation cannot reopen this. */
+        if (strcmp(base, CG_IGNORE) != 0 && strcmp(base, ".github") != 0 &&
+            strcmp(base, ".gitignore") != 0)
             return true;
     }
+    bool ignored = false;
     for (int i = 0; i < ig->n; i++) {
-        if (fnmatch(ig->pats[i], base, 0) == 0) {
-            /* A root build directory is generated output, but repositories
-             * commonly keep authored build rules under tools/build. */
-            if (is_dir && strcmp(ig->pats[i], "build") == 0 &&
-                strchr(rel, '/') != NULL) {
-                continue;
-            }
-            return true;
-        }
-        if (strchr(ig->pats[i], '/') && fnmatch(ig->pats[i], rel, FNM_PATHNAME) == 0)
-            return true;
+        const IgnorePat *e = &ig->pats[i];
+        if (!ig_entry_hits(e, rel, base, is_dir)) continue;
+        /* A root build directory is generated output, but repositories
+         * commonly keep authored build rules under tools/build. */
+        if (is_dir && !e->negate && strcmp(e->pat, "build") == 0 &&
+            strchr(rel, '/') != NULL)
+            continue;
+        ignored = !e->negate;      /* last matching rule wins */
     }
-    return false;
+    return ignored;
 }
 
 void ignore_free(Ignore *ig) {
-    for (int i = 0; i < ig->n; i++) free(ig->pats[i]);
+    for (int i = 0; i < ig->n; i++) free(ig->pats[i].pat);
     free(ig->pats);
     memset(ig, 0, sizeof *ig);
 }
