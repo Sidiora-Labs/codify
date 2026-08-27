@@ -227,8 +227,13 @@ function splitCommand(s) {
 /* ---------------- PANEL: everything below needs VS Code ---------------- */
 
 let deps;                    /* {cg, cgJson, refresh, workspaceRoot, startTerminal} */
-const panels = new Map();    /* task id -> PanelSession */
+const panels = new Map();    /* task id -> editor-panel session */
 let permitSeq = 0;
+
+/* The sidebar chat view — resolved once, lives as long as the window. */
+let agentView = null;        /* vscode.WebviewView */
+let viewSession = null;      /* the session bound to the sidebar view */
+let viewDriver = '';         /* header picker override; '' -> settings */
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 
@@ -236,8 +241,9 @@ function firstLine(s) {
     return String(s || '').trim().split('\n')[0] || 'no output';
 }
 
-function adapterCommand() {
-    const driver = config().get('agent.driver') === 'claude' ? 'claude' : 'codex';
+function adapterCommand(override) {
+    const driver = (override || config().get('agent.driver')) === 'claude'
+        ? 'claude' : 'codex';
     const custom = (config().get('acp.customCommand') || '').trim();
     if (custom) return { driver: 'custom', argv: splitCommand(custom) };
     const cmd = driver === 'claude'
@@ -303,7 +309,7 @@ async function resumePrompt(id) {
 }
 
 function panelPost(sess, msg) {
-    try { sess.panel.webview.postMessage(msg); } catch (_) { /* disposed */ }
+    try { sess.webview.postMessage(msg); } catch (_) { /* disposed */ }
 }
 
 function panelHtml(webview) {
@@ -316,10 +322,11 @@ function panelHtml(webview) {
 
 /* One prompt turn. Turns are serialized: input sent while the agent is
  * thinking queues until the turn ends. */
-function sendPrompt(sess, text) {
-    if (sess.running) { sess.queue.push(text); return; }
+function sendPrompt(sess, text, echo) {
+    if (sess.running) { sess.queue.push({ text, echo }); return; }
     sess.running = true;
-    panelPost(sess, { type: 'chunk', role: 'user', text });
+    panelPost(sess, { type: 'chunk', role: 'user',
+        text: echo || text, cmd: !!echo });
     panelPost(sess, { type: 'turn', running: true });
     sess.client.request('session/prompt', {
         sessionId: sess.sessionId,
@@ -332,7 +339,10 @@ function sendPrompt(sess, text) {
             deps.refresh();
             const status = await taskStatus(sess.taskId);
             if (status) panelPost(sess, { type: 'task_status', status });
-            if (sess.queue.length) sendPrompt(sess, sess.queue.shift());
+            if (sess.queue.length) {
+                const q = sess.queue.shift();
+                sendPrompt(sess, q.text, q.echo);
+            }
         },
         (e) => {
             sess.running = false;
@@ -399,7 +409,12 @@ function sessionUpdate(sess, params) {
 }
 
 async function endOfSession(sess, why) {
-    panels.delete(sess.taskId);
+    if (sess.panel) panels.delete(sess.taskId);
+    if (viewSession === sess) {
+        viewSession = null;
+        panelPost(sess, { type: 'session_end', why });
+    }
+    if (!sess.taskId) { deps.refresh(); return; }
     const status = await taskStatus(sess.taskId);
     if (status === 'done' || status === 'implemented') {
         deps.refresh();
@@ -425,22 +440,10 @@ async function endOfSession(sess, why) {
     deps.refresh();
 }
 
-/* task id -> live panel session: webview + ACP client + board bookkeeping */
-async function openAgentPanel(id, agent, promptText, claimed) {
-    const { driver, argv } = adapterCommand();
-    const task = await taskRow(id);
-    const panel = vscode.window.createWebviewPanel(
-        'codifyAgent', `codify: ${driver} ${id}`,
-        vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true });
-    panel.webview.html = panelHtml(panel.webview);
-
-    const sess = {
-        taskId: id, agent, claimed, panel,
-        client: undefined, sessionId: undefined,
-        running: false, queue: [], permits: new Map(), disposed: false,
-    };
-    panels.set(id, sess);
-
+/* Spawn the adapter and open the ACP session for sess. Throws on any
+ * failure; the caller owns cleanup. */
+async function connectSession(sess, driverOverride) {
+    const { argv } = adapterCommand(driverOverride);
     sess.client = new AcpClient({
         command: argv[0],
         args: argv.slice(1),
@@ -448,64 +451,287 @@ async function openAgentPanel(id, agent, promptText, claimed) {
         onNotify: (m, p) => { if (m === 'session/update') sessionUpdate(sess, p); },
         onRequest: (m, p) => sessionRequest(sess, m, p),
         onClose: (reason) => {
-            if (sess.disposed) return;
+            if (sess.disposed || sess.closing) return;
+            sess.closing = true;
             panelPost(sess, { type: 'status', text: `agent closed: ${reason}` });
             panelPost(sess, { type: 'turn', running: false, stopReason: 'closed' });
-            if (panels.has(id)) endOfSession(sess, reason);
+            if (sess.panel ? panels.has(sess.taskId) : viewSession === sess) {
+                endOfSession(sess, reason);
+            }
         },
     });
+    await sess.client.initialize();
+    const binary = config().get('binaryPath') || 'cg';
+    const res = await sess.client.request('session/new', {
+        cwd: deps.workspaceRoot(),
+        mcpServers: [
+            { name: 'codify', command: binary, args: ['mcp'], env: [] },
+        ],
+    }, 120000);
+    sess.sessionId = res && res.sessionId;
+    if (!sess.sessionId) throw new Error('agent returned no sessionId');
+}
 
-    panel.webview.onDidReceiveMessage((msg) => {
-        if (!msg) return;
-        if (msg.type === 'send' && msg.text) sendPrompt(sess, String(msg.text));
-        else if (msg.type === 'cancel') cancelTurn(sess);
-        else if (msg.type === 'permission') {
-            const resolve = sess.permits.get(msg.pid);
-            if (resolve) {
-                sess.permits.delete(msg.pid);
-                resolve({ outcome: { outcome: 'selected', optionId: msg.optionId } });
-                panelPost(sess, { type: 'permission_done', pid: msg.pid });
-            }
-        } else if (msg.type === 'handoff') {
-            vscode.commands.executeCommand('codify.agent.handoff', id);
+function connectFailureHint(sess, e) {
+    const auth = sess.client && sess.client.agent && sess.client.agent.authMethods;
+    const hint = auth && auth.length
+        ? ` (auth methods: ${auth.map((a) => a.name || a.id).join(', ')})` : '';
+    return `${e.message}${hint}`;
+}
+
+/* Post to whichever surface owns this session; a null session means the
+ * idle sidebar view. */
+function surfacePost(sess, msg) {
+    if (sess) panelPost(sess, msg);
+    else postView(msg);
+}
+
+/* Open a workspace-relative (or absolute) path in the editor. */
+async function openLocation(p, line) {
+    const root = deps.workspaceRoot();
+    if (!root || !p) return;
+    let abs;
+    try {
+        abs = workspacePath(root, path.isAbsolute(p) ? p : path.join(root, p));
+    } catch (_) {
+        return;                       /* outside the workspace: not ours to open */
+    }
+    try {
+        const doc = await vscode.workspace.openTextDocument(abs);
+        const ed = await vscode.window.showTextDocument(doc, { preview: true });
+        if (line) {
+            const at = new vscode.Position(Math.max(0, line - 1), 0);
+            ed.selection = new vscode.Selection(at, at);
+            ed.revealRange(new vscode.Range(at, at),
+                vscode.TextEditorRevealType.InCenterIfOutsideViewport);
         }
-    });
+    } catch (e) {
+        vscode.window.showWarningMessage(`Codify: cannot open ${p} — ${e.message}`);
+    }
+}
 
+/* cg verbs the chat can run inline. `zero` means the command takes no
+ * arguments, so trailing text is the user's instruction instead. */
+const CG_CMDS = {
+    brief:   { argv: () => ['brief'], zero: true,
+        ask: 'Pick up from this state; say what you plan to do first.' },
+    next:    { argv: () => ['spec', 'next'], zero: true,
+        ask: 'Is this the right task to take? Say what it needs.' },
+    status:  { argv: () => ['spec', 'status'], zero: true,
+        ask: 'Summarise where the board stands.' },
+    review:  { argv: () => ['review'], zero: true,
+        ask: 'Review this against the acceptance criteria and flag the risk.' },
+    check:   { argv: () => ['check'], zero: true,
+        ask: 'Fix whatever this gate reports.' },
+    changes: { argv: () => ['changes'], zero: true,
+        ask: 'What is the blast radius of these edits?' },
+    tests:   { argv: (a) => (a ? ['test-impact', a] : ['test-impact']),
+        ask: 'Which of these should I run, and why?' },
+    context: { argv: (a) => ['context', a], need: 'a query',
+        ask: 'Use this context to answer what I ask next.' },
+    search:  { argv: (a) => ['search', a], need: 'a query',
+        ask: 'Which of these is the definition I want?' },
+    impact:  { argv: (a) => ['impact', a], need: 'a symbol',
+        ask: 'What breaks if I change this?' },
+    why:     { argv: (a) => ['why', a], need: 'a symbol',
+        ask: 'Explain why this exists the way it does.' },
+};
+
+async function boardInfo() {
+    const st = await deps.cgJson(['spec', 'status']);
+    return st && st.feature
+        ? { feature: st.feature, mode: st.mode || '' } : { feature: 'codify', mode: '' };
+}
+
+/* Run a Codify command, show its output in the transcript, and hand the
+ * result to the agent as context. */
+async function runCgSlash(sess, cmd, args, send) {
+    const spec = CG_CMDS[cmd];
+    if (spec.need && !args) {
+        surfacePost(sess, { type: 'chunk', role: 'user',
+            text: `/${cmd}`, cmd: true });
+        surfacePost(sess, { type: 'status',
+            text: `/${cmd} needs ${spec.need} — try /${cmd} <${spec.need.split(' ').pop()}>` });
+        return;
+    }
+    const argv = spec.argv(args);
+    const r = await deps.cg(argv);
+    const out = ((r.stdout || '') + (r.code === 0 ? '' : '\n' + (r.stderr || ''))).trim();
+    const echo = `/${cmd}${args ? ' ' + args : ''}`;
+    surfacePost(sess, { type: 'cmdout', cmd: argv.join(' '),
+        ok: r.code === 0, output: out || '(no output)' });
+    if (!out) {
+        surfacePost(sess, { type: 'chunk', role: 'user', text: echo, cmd: true });
+        return;
+    }
+    const ask = (spec.zero && args) ? args : spec.ask;
+    const prompt = `\`cg ${argv.join(' ')}\` says:\n\n\`\`\`\n${out}\n\`\`\`\n\n${ask}`;
+    await send(prompt, echo);
+}
+
+/* Attach a spec task to a live session: claim, start, and brief the agent
+ * with the resume packet — the board discipline, mid-conversation. */
+async function attachTask(sess, id) {
+    const mode = await deps.cgJson(['spec', 'status']);
+    if (mode && mode.mode === 'parallel' && !sess.claimed) {
+        const c = await deps.cg(['spec', 'claim', id, '--agent', sess.agent]);
+        if (c.code !== 0) {
+            surfacePost(sess, { type: 'status',
+                text: `claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}` });
+            return;
+        }
+        sess.claimed = true;
+    }
+    sess.taskId = id;
+    const s = await deps.cg(['spec', 'start', id]);
+    if (s.code !== 0) {
+        surfacePost(sess, { type: 'status',
+            text: `spec start ${id}: ${firstLine(s.stderr || s.stdout)}` });
+    }
+    const task = await taskRow(id);
+    surfacePost(sess, { type: 'task',
+        task: { id, title: task.title || '', status: task.status || '' } });
+    const prompt = await resumePrompt(id);
+    sendPrompt(sess, prompt, `/task ${id}`);
+    deps.refresh();
+}
+
+async function pickTaskId(placeHolder) {
+    const trace = await deps.cgJson(['spec', 'trace']);
+    const items = ((trace && trace.tasks) || [])
+        .filter((t) => t.status === 'pending' || t.status === 'in_progress')
+        .map((t) => ({ label: `${t.id}  ${t.title}`, description: t.status, id: t.id }));
+    if (!items.length) {
+        vscode.window.showInformationMessage('Codify: no eligible tasks.');
+        return undefined;
+    }
+    const pick = await vscode.window.showQuickPick(items, { placeHolder });
+    return pick && pick.id;
+}
+
+/* Webview messages any session surface understands. Returns true when
+ * handled. */
+function handleSessionMessage(sess, msg) {
+    if (!msg) return false;
+    if (msg.type === 'send' && msg.text) {
+        sendPrompt(sess, String(msg.text));
+        return true;
+    }
+    if (msg.type === 'cancel') { cancelTurn(sess); return true; }
+    if (msg.type === 'permission') {
+        const resolve = sess.permits.get(msg.pid);
+        if (resolve) {
+            sess.permits.delete(msg.pid);
+            resolve({ outcome: { outcome: 'selected', optionId: msg.optionId } });
+            panelPost(sess, { type: 'permission_done', pid: msg.pid });
+        }
+        return true;
+    }
+    if (msg.type === 'handoff' && sess.taskId) {
+        vscode.commands.executeCommand('codify.agent.handoff', sess.taskId);
+        return true;
+    }
+    if (msg.type === 'open') { openLocation(msg.path, msg.line); return true; }
+    if (msg.type === 'copy') {
+        vscode.env.clipboard.writeText(String(msg.text || ''));
+        return true;
+    }
+    if (msg.type === 'ready') {
+        if (sess.initMsg) panelPost(sess, sess.initMsg);
+        return true;
+    }
+    if (msg.type === 'slash') {
+        sessionSlash(sess, String(msg.cmd || ''), String(msg.args || ''));
+        return true;
+    }
+    return false;
+}
+
+/* Slash commands against a live session (sidebar or editor panel). */
+async function sessionSlash(sess, cmd, args) {
+    if (CG_CMDS[cmd]) {
+        await runCgSlash(sess, cmd, args,
+            (text, echo) => sendPrompt(sess, text, echo));
+        return;
+    }
+    if (cmd === 'task') {
+        const id = args || await pickTaskId('Attach which task to this chat?');
+        if (id) await attachTask(sess, id);
+        return;
+    }
+    if (cmd === 'remember') {
+        if (!args) {
+            surfacePost(sess, { type: 'status', text: '/remember needs the decision text' });
+            return;
+        }
+        const r = await deps.cg(['remember', args]);
+        surfacePost(sess, { type: 'chunk', role: 'user',
+            text: `/remember ${args}`, cmd: true });
+        surfacePost(sess, { type: 'cmdout', cmd: 'remember', ok: r.code === 0,
+            output: (r.stdout || r.stderr || '').trim() || 'saved' });
+        deps.refresh();
+        return;
+    }
+    if (cmd === 'open') {
+        if (args) openLocation(args);
+        return;
+    }
+    if (cmd === 'handoff') {
+        if (sess.taskId) vscode.commands.executeCommand('codify.agent.handoff', sess.taskId);
+        else surfacePost(sess, { type: 'status', text: 'no task is attached to this chat' });
+        return;
+    }
+    if (cmd === 'new') { await resetViewSession(); return; }
+    surfacePost(sess, { type: 'status', text: `unknown command /${cmd}` });
+}
+
+function newSession(webview, extra) {
+    return Object.assign({
+        taskId: undefined, agent: '', claimed: false, panel: undefined,
+        webview, client: undefined, sessionId: undefined,
+        running: false, queue: [], permits: new Map(),
+        disposed: false, closing: false, initMsg: undefined,
+    }, extra || {});
+}
+
+/* Editor-panel session on a task. The sidebar view is the default surface;
+ * editor panels carry additional concurrent task sessions beside it. */
+async function openAgentPanel(id, agent, promptText, claimed) {
+    const { driver } = adapterCommand();
+    const task = await taskRow(id);
+    const panel = vscode.window.createWebviewPanel(
+        'codifyAgent', `codify: ${driver} ${id}`,
+        vscode.ViewColumn.Beside, { enableScripts: true, retainContextWhenHidden: true });
+    panel.webview.html = panelHtml(panel.webview);
+
+    const sess = newSession(panel.webview, { taskId: id, agent, claimed, panel });
+    panels.set(id, sess);
+
+    panel.webview.onDidReceiveMessage((msg) => handleSessionMessage(sess, msg));
     panel.onDidDispose(() => {
         sess.disposed = true;
         cancelTurn(sess);
-        sess.client.stop();
+        if (sess.client) sess.client.stop();
         if (panels.has(id)) endOfSession(sess, 'panel closed');
     });
 
-    panelPost(sess, { type: 'init',
+    sess.initMsg = { type: 'init', idle: false,
         task: { id, title: task.title || '', status: task.status || '' },
-        agent, driver });
+        agent, driver, drivers: [driver], feature: id };
+    panelPost(sess, sess.initMsg);
 
     try {
-        await sess.client.initialize();
-        const binary = config().get('binaryPath') || 'cg';
-        const res = await sess.client.request('session/new', {
-            cwd: deps.workspaceRoot(),
-            mcpServers: [
-                { name: 'codify', command: binary, args: ['mcp'], env: [] },
-            ],
-        }, 120000);
-        sess.sessionId = res && res.sessionId;
-        if (!sess.sessionId) throw new Error('agent returned no sessionId');
+        await connectSession(sess);
     } catch (e) {
-        const auth = sess.client.agent && sess.client.agent.authMethods;
-        const hint = auth && auth.length
-            ? ` (auth methods: ${auth.map((a) => a.name || a.id).join(', ')})` : '';
-        panelPost(sess, { type: 'status', text: `${e.message}${hint}` });
+        const why = connectFailureHint(sess, e);
+        panelPost(sess, { type: 'status', text: why });
         panels.delete(id);
         if (claimed) await deps.cg(['spec', 'release', id, '--agent', agent]);
         deps.refresh();
         /* the terminal path stays the fallback when no adapter is available */
         const items = deps.startTerminal ? ['Use terminal session'] : [];
         const pick = await vscode.window.showErrorMessage(
-            `Codify: agent session on ${id} failed to start — ${e.message}${hint}`,
-            ...items);
+            `Codify: agent session on ${id} failed to start — ${why}`, ...items);
         if (pick === 'Use terminal session') {
             try { panel.dispose(); } catch (_) { /* already gone */ }
             await deps.startTerminal(id);
@@ -515,9 +741,9 @@ async function openAgentPanel(id, agent, promptText, claimed) {
     sendPrompt(sess, promptText);
 }
 
-/* Claim (parallel mode), start, seed the resume packet, open the panel.
- * Same discipline as the terminal path in agents.js: reserve before the
- * first await, release the lease on every failure path. */
+/* Claim (parallel mode), start, seed the resume packet, open an editor
+ * panel. Same discipline as the terminal path in agents.js: reserve before
+ * the first await, release the lease on every failure path. */
 async function startPanelSession(id) {
     if (!deps.workspaceRoot()) return;
     if (panels.has(id)) {
@@ -553,6 +779,210 @@ async function startPanelSession(id) {
     deps.refresh();
 }
 
+/* ---------------- the sidebar chat view ---------------- */
+
+function currentDriver() {
+    return adapterCommand(viewDriver).driver;
+}
+
+function postView(msg) {
+    if (agentView) {
+        try { agentView.webview.postMessage(msg); } catch (_) { /* hidden */ }
+    }
+}
+
+function viewIdle() { return !viewSession; }
+
+/* Reveal the view and wait for VS Code to resolve it. */
+async function focusView() {
+    try {
+        await vscode.commands.executeCommand('codifyAgentView.focus');
+    } catch (_) { /* view container hidden by the user */ }
+    for (let i = 0; i < 50 && !agentView; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    return !!agentView;
+}
+
+/* Chat in the sidebar: the adapter spawns lazily on the first message —
+ * a workspace session with Codify's MCP tools, no task and no claim unless
+ * taskOpts says so. */
+async function startChatSession(firstText, taskOpts, echo) {
+    const sess = newSession(agentView.webview,
+        Object.assign({ agent: `vscode-chat-${++permitSeq}` }, taskOpts || {}));
+    viewSession = sess;
+    const driver = currentDriver();
+    postView({ type: 'status', text: `starting ${driver} agent…` });
+    postView({ type: 'session', live: true });
+    try {
+        await connectSession(sess, viewDriver);
+    } catch (e) {
+        const why = connectFailureHint(sess, e);
+        viewSession = null;
+        if (sess.claimed) {
+            await deps.cg(['spec', 'release', sess.taskId, '--agent', sess.agent]);
+        }
+        postView({ type: 'status', text: why });
+        postView({ type: 'session', live: false });
+        deps.refresh();
+        const items = sess.taskId && deps.startTerminal
+            ? ['Use terminal session'] : [];
+        const pick = await vscode.window.showErrorMessage(
+            `Codify: ${driver} agent failed to start — ${why}`, ...items);
+        if (pick === 'Use terminal session') await deps.startTerminal(sess.taskId);
+        return;
+    }
+    postView({ type: 'status', text: '' });
+    sendPrompt(sess, firstText, echo);
+    deps.refresh();
+}
+
+/* Start-on-task, sidebar edition: the agents.js discipline, then the
+ * session runs in the view with the resume packet as its first message. */
+async function startTaskInView(id) {
+    const agent = `vscode-acp-${++permitSeq}`;
+    /* reserve before the first await so a double invocation offers
+     * replace/beside instead of racing this claim */
+    viewSession = newSession(agentView.webview, { taskId: id, agent, starting: true });
+    let claimed = false;
+    const mode = await deps.cgJson(['spec', 'status']);
+    if (mode && mode.mode === 'parallel') {
+        const c = await deps.cg(['spec', 'claim', id, '--agent', agent]);
+        if (c.code !== 0) {
+            viewSession = null;
+            vscode.window.showErrorMessage(
+                `Codify: claim of ${id} refused — ${firstLine(c.stderr || c.stdout)}`);
+            return;
+        }
+        claimed = true;
+    }
+    const s = await deps.cg(['spec', 'start', id]);
+    if (s.code !== 0) {
+        vscode.window.showWarningMessage(
+            `Codify: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
+    }
+    const task = await taskRow(id);
+    postView({ type: 'task',
+        task: { id, title: task.title || '', status: task.status || '' } });
+    const prompt = await resumePrompt(id);
+    viewSession = null;   /* startChatSession installs the live session */
+    await startChatSession(prompt, { taskId: id, agent, claimed }, `/task ${id}`);
+}
+
+/* End the view's session (offering handoff/release for an unqualified
+ * attached task) and put the view back in its idle chat state. */
+async function resetViewSession() {
+    const sess = viewSession;
+    viewSession = null;
+    if (sess && sess.client) {
+        sess.closing = true;
+        cancelTurn(sess);
+        sess.client.stop();
+        if (sess.taskId) await endOfSession(sess, 'new chat');
+    } else if (sess && sess.claimed) {
+        await deps.cg(['spec', 'release', sess.taskId, '--agent', sess.agent]);
+    }
+    postView({ type: 'reset', driver: currentDriver() });
+    deps.refresh();
+}
+
+async function postViewInit() {
+    const b = await boardInfo();
+    const sess = viewSession;
+    let task;
+    if (sess && sess.taskId) {
+        const row = await taskRow(sess.taskId);
+        task = { id: sess.taskId, title: row.title || '', status: row.status || '' };
+    }
+    postView({ type: 'init', idle: viewIdle(),
+        driver: currentDriver(), drivers: ['codex', 'claude'],
+        feature: b.feature + (b.mode ? ' · ' + b.mode : ''), task });
+    if (sess && sess.client) postView({ type: 'session', live: true });
+}
+
+/* Slash commands with no session yet: the cg output becomes the opening
+ * prompt, so /brief starts the agent already briefed. */
+async function idleSlash(cmd, args) {
+    if (CG_CMDS[cmd]) {
+        await runCgSlash(null, cmd, args,
+            (text, echo) => startChatSession(text, undefined, echo));
+        return;
+    }
+    if (cmd === 'task') {
+        const id = args || await pickTaskId('Work which task in the agent chat?');
+        if (id) await startTaskInView(id);
+        return;
+    }
+    if (cmd === 'remember') {
+        if (!args) {
+            postView({ type: 'status', text: '/remember needs the decision text' });
+            return;
+        }
+        const r = await deps.cg(['remember', args]);
+        postView({ type: 'chunk', role: 'user', text: `/remember ${args}`, cmd: true });
+        postView({ type: 'cmdout', cmd: 'remember', ok: r.code === 0,
+            output: (r.stdout || r.stderr || '').trim() || 'saved' });
+        deps.refresh();
+        return;
+    }
+    if (cmd === 'open') { if (args) openLocation(args); return; }
+    if (cmd === 'new') { postView({ type: 'reset', driver: currentDriver() }); return; }
+    if (cmd === 'handoff') {
+        postView({ type: 'status', text: 'no task is attached to this chat' });
+        return;
+    }
+    postView({ type: 'status', text: `unknown command /${cmd}` });
+}
+
+function registerAgentView(ctx) {
+    const provider = {
+        resolveWebviewView(view) {
+            agentView = view;
+            view.webview.options = { enableScripts: true };
+            view.webview.html = panelHtml(view.webview);
+            view.webview.onDidReceiveMessage((msg) => {
+                if (!msg) return;
+                if (msg.type === 'ready') { postViewInit(); return; }
+                if (msg.type === 'driver') {
+                    viewDriver = msg.value === 'claude' ? 'claude' : 'codex';
+                    return;
+                }
+                if (msg.type === 'open') { openLocation(msg.path, msg.line); return; }
+                if (msg.type === 'copy') {
+                    vscode.env.clipboard.writeText(String(msg.text || ''));
+                    return;
+                }
+                if (viewSession && viewSession.starting) return; /* still claiming */
+                if (viewSession && handleSessionMessage(viewSession, msg)) return;
+                if (msg.type === 'slash') {
+                    idleSlash(String(msg.cmd || ''), String(msg.args || ''));
+                    return;
+                }
+                if (msg.type === 'send' && msg.text && viewIdle()) {
+                    startChatSession(String(msg.text));
+                }
+            });
+            view.onDidDispose(() => {
+                if (agentView === view) agentView = null;
+                const sess = viewSession;
+                viewSession = null;
+                if (sess && sess.client) {
+                    sess.disposed = true;
+                    cancelTurn(sess);
+                    sess.client.stop();
+                    if (sess.taskId) endOfSession(sess, 'view closed');
+                }
+            });
+            postViewInit();
+        },
+    };
+    ctx.subscriptions.push(vscode.window.registerWebviewViewProvider(
+        'codifyAgentView', provider,
+        { webviewOptions: { retainContextWhenHidden: true } }));
+}
+
+/* ---------------- commands ---------------- */
+
 async function cmdOpenPanel(arg) {
     let id = typeof arg === 'string' ? arg : arg && arg.task && arg.task.id;
     if (!id) {
@@ -565,16 +995,42 @@ async function cmdOpenPanel(arg) {
             return;
         }
         const pick = await vscode.window.showQuickPick(items,
-            { placeHolder: 'Open an agent panel on which task?' });
+            { placeHolder: 'Start an agent on which task?' });
         if (!pick) return;
         id = pick.id;
     }
-    await startPanelSession(id);
+    if (!deps.workspaceRoot()) return;
+    if (panels.has(id) || (viewSession && viewSession.taskId === id)) {
+        const p = panels.get(id);
+        if (p && p.panel) p.panel.reveal();
+        else await focusView();
+        return;
+    }
+    if (viewIdle()) {
+        if (await focusView()) await startTaskInView(id);
+        else await startPanelSession(id);   /* view unavailable: open beside */
+    } else {
+        const pick = await vscode.window.showWarningMessage(
+            `Codify: the agent view already has a chat. Start ${id} where?`,
+            'Replace current chat', 'Open beside');
+        if (pick === 'Replace current chat') {
+            await resetViewSession();
+            if (await focusView()) await startTaskInView(id);
+        } else if (pick === 'Open beside') {
+            await startPanelSession(id);
+        }
+    }
+    deps.refresh();
+}
+
+async function cmdNewChat() {
+    if (await focusView()) await resetViewSession();
 }
 
 function registerAcpCommands(ctx) {
     const cmds = {
         'codify.agent.openPanel': cmdOpenPanel,
+        'codify.agent.newChat': cmdNewChat,
     };
     for (const [name, fn] of Object.entries(cmds)) {
         ctx.subscriptions.push(vscode.commands.registerCommand(name, fn));
@@ -584,8 +1040,10 @@ function registerAcpCommands(ctx) {
 function register(ctx, d) {
     deps = d;
     registerAcpCommands(ctx);
+    registerAgentView(ctx);
     return {
-        hasPanel: (id) => panels.has(id),
+        hasPanel: (id) => panels.has(id) ||
+            !!(viewSession && viewSession.taskId === id),
     };
 }
 

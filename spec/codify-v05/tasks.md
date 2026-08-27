@@ -33,6 +33,18 @@
     - Task-node start honors codify.agent.interface; terminal path stays the fallback when no adapter is available
     - README agent-panel section, vscode README settings table, CHANGELOG entry; 14_vscode manifest coherence covers acp.js
     - _Requirements: 2.1, 3.1_
+  - [x] 3.2 Sidebar agent view: chat-first, task optional
+    - codifyAgentView webview view in the Codify container — always visible, like the Codex extension's chat, no task required
+    - First message spawns the ACP session lazily (cwd session, MCP injected, no claim); driver picker in the header; New Chat resets
+    - Start-on-task routes into the sidebar view when idle (claim + resume packet); busy view offers replace-or-open-beside; editor panels remain for concurrent tasks
+    - Session end with an attached unqualified task still offers handoff/release; 14_vscode covers the view registration
+    - _Requirements: 3.1_
+  - [x] 3.3 Full chat surface: markdown, tool cards, and cg slash commands
+    - Chat rendering: markdown (headings, lists, tables, quotes), fenced code blocks with copy, collapsed thoughts, and file paths that open in the editor
+    - Slash palette over the cg verbs (brief, next, review, check, context, search, impact, why, …): the output lands as a card and is handed to the agent as context
+    - Composer: autosizing input, history recall, queued input while a turn runs, stop, and a context bar carrying feature, task chip, task status, and driver
+    - Panel script driven headlessly against a DOM shim in 19_acp.sh: rendering, tool/permission/plan cards, palette, and the ready handshake
+    - _Requirements: 3.1, 3.2, 3.3, 3.4_
 
 ## Task Dependency Graph
 
@@ -41,7 +53,7 @@
   "waves": [
     { "id": 1,  "tasks": ["1.1"] },
     { "id": 2,  "tasks": ["2.1", "2.2"] },
-    { "id": 3,  "tasks": ["3.1"] }
+    { "id": 3,  "tasks": ["3.1", "3.2", "3.3"] }
   ]
 }
 ```

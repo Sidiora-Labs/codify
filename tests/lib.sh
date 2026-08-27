@@ -11,18 +11,23 @@ fail() {
     exit 1
 }
 
-# has "<haystack>" "<needle>" — assert substring (fixed string)
+# has "<haystack>" "<needle>" — assert substring (fixed string).
+# Matched in the shell, not through a pipe: `grep -q` exits at the first hit and
+# a large haystack then loses the rest of the write to SIGPIPE, which pipefail
+# turns into a spurious failure (and, in hasnt, a silent pass).
 has() {
-    printf '%s' "$1" | grep -qF -- "$2" \
-        || fail "expected '$2' in output:
-$(printf '%s' "$1" | head -8)"
+    case "$1" in
+        *"$2"*) : ;;
+        *) fail "expected '$2' in output:
+$(printf '%s\n' "$1" | head -8)" ;;
+    esac
 }
 
 # hasnt "<haystack>" "<needle>"
 hasnt() {
-    if printf '%s' "$1" | grep -qF -- "$2"; then
-        fail "did not expect '$2' in output"
-    fi
+    case "$1" in
+        *"$2"*) fail "did not expect '$2' in output" ;;
+    esac
 }
 
 # expect_rc <want> <cmd...> — run a command that may fail under set -e

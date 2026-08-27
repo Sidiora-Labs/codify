@@ -31,19 +31,50 @@ A "Codify" container in the activity bar, with two views.
 
 **Memory** lists recent decisions, constraints and facts, grouped by type, with the task each was written under. Add one from anywhere with **Codify: Remember a Decision** — if a file is open, it is anchored to that file automatically.
 
-## The agent panel
+## The agent view
 
-The board can also *drive* work. Each task node carries a **Start Agent Session on Task** action (also in the palette) that runs the whole pickup for you — and by default it opens the **Codify agent panel**: the extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the configured agent's ACP adapter (`claude-code-acp` or `codex-acp`) and renders the session in a Codify-native view beside your editor.
+The Codify sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or `codex-acp`); the adapter spawns lazily on your first message, running in the workspace with **Codify's own MCP server injected** (`cg mcp`), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A driver picker in the header switches between codex and claude for the next chat; the **＋ New Agent Chat** button on the view resets to a fresh session.
+
+The view streams the agent's replies and (collapsed) thinking, renders each tool call as a card with its status and diffs, tracks the agent's plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. File reads and writes requested by the agent over ACP are served by the extension and are refused outside the workspace root. **Stop** cancels the in-flight turn (`session/cancel`); typing while the agent is working queues your message for the next turn.
+
+Replies render as markdown — headings, lists, tables, quotes, inline code, and fenced code blocks with a copy button and the language on the rail. Any file path the agent mentions (`src/graph.c`, `editors/vscode/acp.js:42`) becomes a link that opens the file at that line, and so does every location a tool call reports. The composer grows with your message, `↑` recalls what you sent before, and the context bar above the chat carries the active feature and mode, the attached task and its live board status, and the driver.
+
+### Codify commands in the chat
+
+Type `/` for the command palette. Each one runs the real `cg` verb in the workspace, shows the output as a collapsible card, and hands the same output to the agent as context with a short instruction — so the agent works from the graph rather than from a guess.
+
+| Command | Runs |
+|---|---|
+| `/brief` | `cg brief` — session state: task, changes, decisions |
+| `/next` | `cg spec next` — the next eligible task |
+| `/status` | `cg spec status` — the board for the active feature |
+| `/task [id]` | Claim, start, and attach a task, then brief the agent with its resume packet |
+| `/context <query>` | `cg context` — symbols, snippets and edges in one call |
+| `/search <query>` | `cg search` — find code by name across the graph |
+| `/impact <name>` | `cg impact` — callers and callees |
+| `/why <name>` | `cg why` — commits, tasks, decisions behind a symbol |
+| `/changes` | `cg changes` — impact radius of the uncommitted edits |
+| `/review` | `cg review` — changed symbols vs the task's acceptance criteria |
+| `/tests [symbol]` | `cg test-impact` — the tests that exercise it |
+| `/check` | `cg check` — the gate: render, lint, evidence, tree |
+| `/remember <text>` | `cg remember` — save a decision to project memory |
+| `/handoff` | `cg handoff` — record where you stopped on the attached task |
+| `/open <path>` | Open a file in the editor |
+| `/new`, `/help` | Fresh chat; the palette itself |
+
+`/brief`, `/next`, `/review`, `/check` and `/task` are also one-click chips on the empty chat.
+
+### Working tasks in the view
+
+The board *drives* the same chat. **Start Agent Session on Task** (task node or palette) runs the whole pickup into the Agent view:
 
 1. In parallel mode the task is claimed first (`cg spec claim <id> --agent vscode-acp-<n>`), then started. A claim someone else holds is refused, not stolen.
 2. A resume packet is generated with `cg resume --task <id> --prompt` (degrading to the session brief on an older `cg`) and sent as the opening prompt.
-3. The agent is spawned with the workspace as its `cwd` and **Codify's own MCP server injected** (`cg mcp`), so every session has the full graph, spec, and memory toolset without any per-repo MCP config.
+3. The view's header shows the task id, title, and live board status while the agent works it.
 
-The panel shows the task id, title and live status in its header, streams the agent's replies and (collapsed) thinking, renders each tool call as a card with its status and diffs, tracks the agent's plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. File reads and writes requested by the agent over ACP are served by the extension and are refused outside the workspace root. **Stop** cancels the in-flight turn (`session/cancel`); typing while the agent is working queues your message for the next turn.
+If the view already has a chat going, you choose: replace it (with the usual handoff/release offer for an attached task) or **open beside** — an editor panel running a second concurrent session. When any session ends with its task not yet qualified, the extension offers to record a handoff or release the claim — the same discipline as the terminal path.
 
-If the adapter is missing or fails to start (auth methods, when the agent reports them, are named in the error), the claim is released and the extension offers the terminal session as the fallback. Set `codify.agent.interface: "terminal"` to skip the panel entirely: then the command opens a terminal named `codify: <driver> <id>` running the configured driver CLI — Codex by default, Claude Code with `codify.agent.driver: "claude"` — seeded with the same prompt. **Open Agent Panel on Task** in the task context menu always opens the panel regardless of the setting.
-
-When a panel session ends (agent exit or panel closed) with the task not yet qualified, the extension offers to record a handoff or release the claim — the same discipline as the terminal path.
+If the adapter is missing or fails to start (auth methods, when the agent reports them, are named in the error), any claim is released and the extension offers the terminal session as the fallback. Set `codify.agent.interface: "terminal"` to route task starts to a seeded terminal (`codify: <driver> <id>`) instead of the view.
 
 The rest of the lifecycle:
 

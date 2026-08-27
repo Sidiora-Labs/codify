@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<!-- Codify agent panel. Rendered inside a VS Code webview; all styling comes
-     from the editor's theme variables so the panel is native in any theme.
-     ${cspSource} and ${nonce} are substituted by acp.js at load time. -->
+<!-- Codify agent chat. Rendered inside a VS Code webview view (sidebar) or an
+     editor panel; all styling comes from the editor's theme variables so the
+     chat is native in any theme. ${cspSource} and ${nonce} are substituted by
+     acp.js at load time. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -13,323 +14,1090 @@
   * { box-sizing: border-box; }
   html, body {
     height: 100%; margin: 0; padding: 0;
-    background: var(--vscode-editor-background);
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
     color: var(--vscode-foreground);
     font-family: var(--vscode-font-family);
-    font-size: var(--vscode-font-size);
+    font-size: var(--vscode-font-size, 13px);
   }
-  #root { display: flex; flex-direction: column; height: 100%; }
-  header {
-    padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border);
-    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  #root { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+  /* ---- context bar ---- */
+  #ctxbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; min-height: 30px;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+    font-size: 0.92em;
   }
-  header .task { font-weight: 600; }
-  header .who {
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--vscode-descriptionForeground);
+  }
+  body.live .dot { background: var(--vscode-testing-iconPassed, #3fb950); }
+  body.running .dot { background: var(--vscode-charts-yellow, #d29922); }
+  #ctxfeature {
+    font-family: var(--vscode-editor-font-family);
     color: var(--vscode-descriptionForeground);
-    font-family: var(--vscode-editor-font-family); font-size: 0.85em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 40%;
+  }
+  .grow { flex: 1 1 auto; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: transparent; color: var(--vscode-foreground);
+    border: 1px dashed var(--vscode-panel-border, rgba(128,128,128,0.4));
+    border-radius: 10px; padding: 1px 8px; cursor: pointer;
+    font-family: inherit; font-size: 0.92em; max-width: 55%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chip:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.15)); }
+  .chip.attached {
+    border-style: solid;
+    border-color: var(--vscode-textLink-foreground, #4a9eda);
+    color: var(--vscode-textLink-foreground, #4a9eda);
   }
   .pill {
-    font-size: 0.8em; padding: 1px 8px; border-radius: 8px;
-    border: 1px solid var(--vscode-panel-border);
+    font-size: 0.85em; padding: 0 7px; border-radius: 9px; white-space: nowrap;
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
     color: var(--vscode-descriptionForeground);
   }
+  .pill:empty { display: none; }
   .pill.done, .pill.implemented {
     color: var(--vscode-testing-iconPassed, #3fb950);
     border-color: var(--vscode-testing-iconPassed, #3fb950);
   }
-  #log { flex: 1; overflow-y: auto; padding: 10px 12px; }
-  .block { margin: 0 0 10px; max-width: 100%; }
-  .agent { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
-  .user {
-    white-space: pre-wrap; word-break: break-word;
-    border-left: 3px solid var(--vscode-textLink-foreground, #4a9eda);
-    padding: 4px 10px; color: var(--vscode-descriptionForeground);
-    font-family: var(--vscode-editor-font-family); font-size: 0.92em;
+  .pill.in_progress { color: var(--vscode-charts-yellow, #d29922); }
+  select {
+    background: var(--vscode-dropdown-background, var(--vscode-input-background));
+    color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+    border-radius: 3px; padding: 1px 4px; font-family: inherit; font-size: 0.9em;
   }
-  details.thought {
-    color: var(--vscode-descriptionForeground); font-size: 0.92em;
+  select:disabled { opacity: 0.6; }
+  select:focus-visible, button:focus-visible, textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px;
   }
-  details.thought summary { cursor: pointer; user-select: none; }
-  details.thought .body { white-space: pre-wrap; padding: 4px 0 0 14px; }
-  .card {
-    border: 1px solid var(--vscode-panel-border); border-radius: 4px;
-    padding: 6px 10px; margin: 0 0 10px;
-    background: var(--vscode-sideBar-background, transparent);
+
+  /* ---- transcript ---- */
+  #scroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; position: relative; }
+  #log { padding: 10px 10px 4px; display: flex; flex-direction: column; gap: 10px; }
+
+  .msg { max-width: 100%; }
+  .msg.user {
+    align-self: flex-end; max-width: 90%;
+    background: var(--vscode-editorWidget-background, rgba(128,128,128,0.14));
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.22));
+    border-radius: 10px 10px 3px 10px;
+    padding: 6px 10px; white-space: pre-wrap; word-break: break-word;
+    line-height: 1.5;
   }
-  .card .head { display: flex; gap: 8px; align-items: baseline; }
-  .card .kind {
-    font-family: var(--vscode-editor-font-family); font-size: 0.8em;
+  .msg.user.cmd {
+    font-family: var(--vscode-editor-font-family);
+    color: var(--vscode-textLink-foreground, #4a9eda);
+    border-style: dashed;
+  }
+  .who {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 0.85em; letter-spacing: 0.03em; text-transform: lowercase;
+  }
+  .who .actions { margin-left: auto; opacity: 0; display: flex; gap: 4px; }
+  .msg.agent:hover .who .actions { opacity: 1; }
+  .md { line-height: 1.55; word-break: break-word; }
+  .md > *:first-child { margin-top: 0; }
+  .md > *:last-child { margin-bottom: 0; }
+  .md p { margin: 0 0 8px; }
+  .md h1, .md h2, .md h3, .md h4 {
+    margin: 14px 0 6px; line-height: 1.3; font-weight: 600;
+  }
+  .md h1 { font-size: 1.28em; } .md h2 { font-size: 1.16em; }
+  .md h3 { font-size: 1.06em; } .md h4 { font-size: 1em; }
+  .md ul, .md ol { margin: 0 0 8px; padding-left: 20px; }
+  .md li { margin: 2px 0; }
+  .md blockquote {
+    margin: 0 0 8px; padding: 2px 0 2px 10px;
+    border-left: 3px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
     color: var(--vscode-descriptionForeground);
   }
-  .card .title { flex: 1; word-break: break-word; }
-  .status { font-size: 0.8em; }
+  .md hr {
+    border: none; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));
+    margin: 12px 0;
+  }
+  .md code, code.inline {
+    font-family: var(--vscode-editor-font-family);
+    font-size: 0.92em;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.16));
+    border-radius: 3px; padding: 0.1em 0.35em;
+  }
+  .md a, .flink {
+    color: var(--vscode-textLink-foreground, #4a9eda);
+    text-decoration: none; cursor: pointer;
+  }
+  .md a:hover, .flink:hover { text-decoration: underline; }
+  .flink {
+    font-family: var(--vscode-editor-font-family); font-size: 0.92em;
+    background: none; border: none; padding: 0; font-weight: inherit;
+  }
+  .tablewrap { overflow-x: auto; margin: 0 0 8px; }
+  .md table { border-collapse: collapse; font-size: 0.95em; }
+  .md th, .md td {
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.3));
+    padding: 3px 8px; text-align: left;
+  }
+  .md th { background: var(--vscode-editorWidget-background, rgba(128,128,128,0.12)); }
+
+  /* ---- code blocks ---- */
+  .codeblock {
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+    border-radius: 5px; margin: 0 0 8px; overflow: hidden;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.10));
+  }
+  .codeblock .cbhead {
+    display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 9px;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family); font-size: 0.82em;
+  }
+  pre {
+    margin: 0; padding: 8px 10px; overflow-x: auto;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size, 12px); line-height: 1.5;
+    white-space: pre;
+  }
+  pre.wrap { white-space: pre-wrap; word-break: break-word; }
+
+  /* ---- cards: tools, permissions, plan, cg output ---- */
+  .card {
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+    border-radius: 6px; overflow: hidden;
+    background: var(--vscode-editorWidget-background, rgba(128,128,128,0.07));
+  }
+  .card .head {
+    display: flex; align-items: center; gap: 7px; padding: 5px 9px;
+    cursor: default; width: 100%; text-align: left;
+    background: none; border: none; color: inherit;
+    font-family: inherit; font-size: inherit;
+  }
+  .card.collapsible .head { cursor: pointer; }
+  .card.collapsible .head:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.12)); }
+  .card .glyph {
+    flex: none; width: 14px; text-align: center;
+    color: var(--vscode-descriptionForeground); font-size: 0.95em;
+  }
+  .card .title {
+    flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card .title .sub {
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family); font-size: 0.85em;
+    margin-left: 6px;
+  }
+  .card .chev { flex: none; color: var(--vscode-descriptionForeground); font-size: 0.8em; }
+  .card .body { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2)); }
+  .card.closed .body { display: none; }
+  .card.closed .chev { transform: rotate(-90deg); }
+  .chev { display: inline-block; transition: transform 0.12s ease; }
+  @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+  .status { font-size: 0.82em; flex: none; color: var(--vscode-descriptionForeground); }
   .status.pending, .status.in_progress { color: var(--vscode-charts-yellow, #d29922); }
   .status.completed { color: var(--vscode-testing-iconPassed, #3fb950); }
   .status.failed { color: var(--vscode-testing-iconFailed, #f85149); }
-  pre {
-    margin: 6px 0 2px; padding: 6px 8px; overflow-x: auto;
-    font-family: var(--vscode-editor-font-family);
-    font-size: var(--vscode-editor-font-size, 12px);
-    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
-    border-radius: 3px;
+  .card.tool.failed { border-color: var(--vscode-testing-iconFailed, #f85149); }
+  .locs { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 10px; }
+
+  pre.del {
+    background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,0.14));
+    border-left: 2px solid var(--vscode-testing-iconFailed, #f85149);
   }
-  pre.del { background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,0.15)); }
-  pre.add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(63,185,80,0.15)); }
-  .perm .opts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-  button {
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    border: none; border-radius: 2px; padding: 4px 12px; cursor: pointer;
-    font-family: inherit; font-size: inherit;
+  pre.add {
+    background: var(--vscode-diffEditor-insertedTextBackground, rgba(63,185,80,0.14));
+    border-left: 2px solid var(--vscode-testing-iconPassed, #3fb950);
   }
-  button:hover { background: var(--vscode-button-hoverBackground); }
-  button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-  button.secondary {
-    background: var(--vscode-button-secondaryBackground, transparent);
-    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-    border: 1px solid var(--vscode-panel-border);
+
+  .card.perm { border-left: 3px solid var(--vscode-charts-yellow, #d29922); }
+  .card.perm .opts { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px; }
+  .card.perm.answered .opts { display: none; }
+  .card.perm .answer {
+    display: none; padding: 6px 10px; font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
   }
-  .perm.answered .opts { display: none; }
-  .perm.answered .head::after { content: " · answered"; color: var(--vscode-descriptionForeground); }
-  ul.plan { list-style: none; margin: 4px 0 0; padding: 0; }
-  ul.plan li { padding: 1px 0; }
+  .card.perm.answered .answer { display: block; }
+
+  .card.cg { border-left: 3px solid var(--vscode-textLink-foreground, #4a9eda); }
+  .card.cg .head .title { font-family: var(--vscode-editor-font-family); font-size: 0.92em; }
+
+  ul.plan { list-style: none; margin: 0; padding: 6px 10px; }
+  ul.plan li { padding: 1px 0 1px 18px; text-indent: -18px; }
   ul.plan li::before { content: "○ "; color: var(--vscode-descriptionForeground); }
   ul.plan li.in_progress::before { content: "◐ "; color: var(--vscode-charts-yellow, #d29922); }
   ul.plan li.completed::before { content: "● "; color: var(--vscode-testing-iconPassed, #3fb950); }
-  .turnend {
-    color: var(--vscode-descriptionForeground); font-size: 0.85em;
-    margin: 0 0 10px; font-family: var(--vscode-editor-font-family);
+  ul.plan li.completed { color: var(--vscode-descriptionForeground); }
+
+  details.thought { color: var(--vscode-descriptionForeground); font-size: 0.95em; }
+  details.thought summary { cursor: pointer; user-select: none; opacity: 0.85; }
+  details.thought .body {
+    white-space: pre-wrap; word-break: break-word;
+    padding: 4px 0 0 14px; line-height: 1.5;
   }
-  footer { border-top: 1px solid var(--vscode-panel-border); padding: 8px 12px; }
+
+  .sysline {
+    color: var(--vscode-descriptionForeground); font-size: 0.88em;
+    font-family: var(--vscode-editor-font-family); text-align: center;
+    padding: 2px 0;
+  }
+  .sysline.err { color: var(--vscode-errorForeground, #f85149); text-align: left; }
+
+  /* ---- welcome ---- */
+  .welcome { padding: 6px 2px 2px; }
+  .welcome h2 { margin: 0 0 4px; font-size: 1.08em; font-weight: 600; }
+  .welcome p {
+    margin: 0 0 10px; color: var(--vscode-descriptionForeground); line-height: 1.5;
+  }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; }
+  .quick button {
+    background: var(--vscode-button-secondaryBackground, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
+    border-radius: 12px; padding: 3px 10px; cursor: pointer;
+    font-family: inherit; font-size: 0.92em;
+  }
+  .quick button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.18)); }
+  .quick button .k {
+    font-family: var(--vscode-editor-font-family);
+    color: var(--vscode-descriptionForeground); margin-right: 5px;
+  }
+
+  /* ---- buttons ---- */
+  button {
+    font-family: inherit; font-size: inherit; cursor: pointer;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+    border: none; border-radius: 3px; padding: 3px 12px;
+  }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  button.secondary {
+    background: var(--vscode-button-secondaryBackground, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
+  }
+  button.secondary:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.18)); }
+  button.icon {
+    background: none; border: none; padding: 1px 5px; border-radius: 3px;
+    color: var(--vscode-descriptionForeground); font-size: 0.85em;
+  }
+  button.icon:hover {
+    background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2));
+    color: var(--vscode-foreground);
+  }
+
+  /* ---- composer ---- */
+  footer { padding: 6px 8px 8px; position: relative; }
   #statusline {
-    color: var(--vscode-errorForeground, #f85149); font-size: 0.85em;
-    white-space: pre-wrap; margin-bottom: 6px;
+    color: var(--vscode-errorForeground, #f85149); font-size: 0.88em;
+    white-space: pre-wrap; margin: 0 2px 5px; word-break: break-word;
   }
   #statusline:empty { display: none; }
-  .inputrow { display: flex; gap: 8px; align-items: flex-end; }
-  textarea {
-    flex: 1; resize: vertical; min-height: 34px; max-height: 160px;
-    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-    border-radius: 2px; padding: 6px 8px; font-family: inherit; font-size: inherit;
+  .composer {
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, rgba(128,128,128,0.4)));
+    border-radius: 6px; background: var(--vscode-input-background);
+    padding: 5px 6px 4px;
   }
-  textarea:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+  .composer:focus-within { border-color: var(--vscode-focusBorder); }
+  textarea {
+    display: block; width: 100%; resize: none; border: none; outline: none;
+    background: transparent; color: var(--vscode-input-foreground);
+    font-family: inherit; font-size: inherit; line-height: 1.5;
+    padding: 2px 3px; max-height: 190px; min-height: 22px; overflow-y: auto;
+  }
+  textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
+  .crow { display: flex; align-items: center; gap: 6px; padding-top: 4px; }
+  .crow .hint {
+    color: var(--vscode-descriptionForeground); font-size: 0.85em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .crow .hint kbd {
+    font-family: var(--vscode-editor-font-family);
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
+    border-radius: 3px; padding: 0 3px;
+  }
   #spin { display: none; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
   body.running #spin { display: inline; }
   body.running #send { display: none; }
   #stop { display: none; }
   body.running #stop { display: inline-block; }
+
+  /* ---- slash menu ---- */
+  #slashmenu {
+    display: none; position: absolute; left: 8px; right: 8px; bottom: 100%;
+    max-height: 230px; overflow-y: auto; z-index: 5;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, rgba(128,128,128,0.4)));
+    border-radius: 6px; padding: 3px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.28);
+  }
+  body.slashing #slashmenu { display: block; }
+  .sitem {
+    display: flex; align-items: baseline; gap: 8px; padding: 3px 7px;
+    border-radius: 4px; cursor: pointer;
+  }
+  .sitem .n {
+    font-family: var(--vscode-editor-font-family); flex: none;
+    color: var(--vscode-textLink-foreground, #4a9eda);
+  }
+  .sitem .d {
+    color: var(--vscode-descriptionForeground); font-size: 0.9em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sitem.sel {
+    background: var(--vscode-list-activeSelectionBackground, rgba(128,128,128,0.3));
+    color: var(--vscode-list-activeSelectionForeground, inherit);
+  }
+  .sitem.sel .d { color: inherit; opacity: 0.8; }
+
+  /* ---- scroll to bottom ---- */
+  #tobottom {
+    display: none; position: absolute; right: 14px; bottom: 8px; z-index: 4;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, rgba(128,128,128,0.4)));
+    border-radius: 12px; padding: 2px 10px; font-size: 0.85em;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  }
+  body.scrolled #tobottom { display: block; }
 </style>
 </head>
 <body>
 <div id="root">
-  <header>
-    <span class="task" id="tasklabel">agent session</span>
+  <header id="ctxbar">
+    <span class="dot" id="livedot"></span>
+    <span id="ctxfeature">codify</span>
+    <button class="chip" id="taskchip" title="Attach a spec task to this chat">no task</button>
     <span class="pill" id="taskstatus"></span>
-    <span class="who" id="who"></span>
+    <span class="grow"></span>
+    <select id="driver" title="Agent"></select>
   </header>
-  <div id="log"></div>
+
+  <div id="scroll">
+    <div id="log"></div>
+    <button id="tobottom">↓ latest</button>
+  </div>
+
   <footer>
     <div id="statusline"></div>
-    <div class="inputrow">
+    <div id="slashmenu"></div>
+    <div class="composer">
       <textarea id="input" rows="1"
-        placeholder="Message the agent… (Enter to send, Shift+Enter for a new line)"></textarea>
-      <span id="spin">working…</span>
-      <button id="send">Send</button>
-      <button id="stop" class="secondary">Stop</button>
+        placeholder="Ask the agent, or / for Codify commands"></textarea>
+      <div class="crow">
+        <span class="hint" id="hint"><kbd>/</kbd> commands · <kbd>Enter</kbd> send</span>
+        <span class="grow"></span>
+        <span id="spin">working…</span>
+        <button id="stop" class="secondary">Stop</button>
+        <button id="send">Send</button>
+      </div>
     </div>
   </footer>
 </div>
+
 <script nonce="${nonce}">
 (function () {
-    const vsc = acquireVsCodeApi();
-    const log = document.getElementById('log');
-    const input = document.getElementById('input');
-    const statusline = document.getElementById('statusline');
-    const tools = new Map();      /* toolCallId -> card element */
-    let agentBlock = null;        /* open streaming blocks */
-    let thoughtBlock = null;
-    let planList = null;
+    'use strict';
+    var vsc = acquireVsCodeApi();
+    var log = document.getElementById('log');
+    var scroller = document.getElementById('scroll');
+    var input = document.getElementById('input');
+    var statusline = document.getElementById('statusline');
+    var driverSel = document.getElementById('driver');
+    var taskChip = document.getElementById('taskchip');
+    var taskStatus = document.getElementById('taskstatus');
+    var slashmenu = document.getElementById('slashmenu');
+    var body = document.body;
 
-    function scrolled() {
-        return log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-    }
-    function append(el) {
-        const stick = scrolled();
-        log.appendChild(el);
-        if (stick) log.scrollTop = log.scrollHeight;
-    }
-    function breakBlocks() { agentBlock = null; thoughtBlock = null; }
-    function text(el, s) { el.textContent += s; }
+    var tools = new Map();        /* toolCallId -> card */
+    var agentMsg = null;          /* open streaming agent message */
+    var thoughtBlock = null;
+    var planCard = null;
+    var history = [];
+    var histIdx = -1;
 
-    function chunk(role, s) {
-        const stick = scrolled();
-        if (role === 'agent') {
-            thoughtBlock = null;
-            if (!agentBlock) {
-                agentBlock = document.createElement('div');
-                agentBlock.className = 'block agent';
-                log.appendChild(agentBlock);
-            }
-            text(agentBlock, s);
-        } else if (role === 'thought') {
-            agentBlock = null;
-            if (!thoughtBlock) {
-                const d = document.createElement('details');
-                d.className = 'block thought';
-                const sum = document.createElement('summary');
-                sum.textContent = 'thinking…';
-                const body = document.createElement('div');
-                body.className = 'body';
-                d.appendChild(sum); d.appendChild(body);
-                log.appendChild(d);
-                thoughtBlock = body;
-            }
-            text(thoughtBlock, s);
-        } else {
-            breakBlocks();
-            const d = document.createElement('div');
-            d.className = 'block user';
-            d.textContent = s;
-            log.appendChild(d);
+    /* ---------------- Codify slash commands ---------------- */
+    var COMMANDS = [
+        { n: 'brief',    a: '',        d: 'Session state: task, changes, decisions — into the chat' },
+        { n: 'next',     a: '',        d: 'Next eligible task on the board' },
+        { n: 'task',     a: '[id]',    d: 'Attach a spec task: claim, start, and brief the agent' },
+        { n: 'context',  a: '<query>', d: 'One-call code context: symbols, snippets, edges' },
+        { n: 'search',   a: '<query>', d: 'Find code by name across the graph' },
+        { n: 'impact',   a: '<name>',  d: 'Callers and callees of a symbol' },
+        { n: 'why',      a: '<name>',  d: 'Provenance: commits, tasks, decisions' },
+        { n: 'changes',  a: '',        d: 'Impact radius of the uncommitted edits' },
+        { n: 'review',   a: '',        d: 'Changed symbols vs acceptance criteria + risk' },
+        { n: 'tests',    a: '[symbol]',d: 'Tests referencing a symbol, or your changes' },
+        { n: 'check',    a: '',        d: 'The gate: render, lint, evidence, tree' },
+        { n: 'status',   a: '',        d: 'Board status for the active feature' },
+        { n: 'remember', a: '<text>',  d: 'Save a decision to project memory' },
+        { n: 'handoff',  a: '',        d: 'Record where you stopped on the attached task' },
+        { n: 'open',     a: '<path>',  d: 'Open a file in the editor' },
+        { n: 'new',      a: '',        d: 'Start a fresh chat' },
+        { n: 'help',     a: '',        d: 'Show these commands' },
+    ];
+    var CMDNAMES = COMMANDS.map(function (c) { return c.n; });
+
+    /* ---------------- scrolling ---------------- */
+    function atBottom() {
+        return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+    }
+    function toBottom() {
+        scroller.scrollTop = scroller.scrollHeight;
+        body.classList.remove('scrolled');
+    }
+    function keep(fn) {
+        var stick = atBottom();
+        fn();
+        if (stick) toBottom();
+    }
+    scroller.addEventListener('scroll', function () {
+        body.classList.toggle('scrolled', !atBottom());
+    });
+    document.getElementById('tobottom').addEventListener('click', toBottom);
+
+    function el(tag, cls, txt) {
+        var e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (txt !== undefined) e.textContent = txt;
+        return e;
+    }
+    function add(node) { keep(function () { log.appendChild(node); }); return node; }
+    function clearWelcome() {
+        var w = document.getElementById('welcome');
+        if (w) w.remove();
+    }
+    function breakBlocks() { agentMsg = null; thoughtBlock = null; }
+
+    /* ---------------- markdown ---------------- */
+    var FILE_RE = /((?:[A-Za-z0-9_.@-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z][A-Za-z0-9]{0,5})(?::(\d+))?/g;
+
+    function linkify(parent, text) {
+        var last = 0, m;
+        FILE_RE.lastIndex = 0;
+        while ((m = FILE_RE.exec(text)) !== null) {
+            if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+            var b = el('button', 'flink', m[0]);
+            b.dataset.path = m[1];
+            if (m[2]) b.dataset.line = m[2];
+            b.addEventListener('click', function () {
+                vsc.postMessage({ type: 'open', path: this.dataset.path,
+                    line: this.dataset.line ? Number(this.dataset.line) : undefined });
+            });
+            parent.appendChild(b);
+            last = m.index + m[0].length;
         }
-        if (stick) log.scrollTop = log.scrollHeight;
+        if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
     }
 
-    function toolCard(call) {
-        breakBlocks();
-        let card = tools.get(call.toolCallId);
-        if (!card) {
-            card = document.createElement('div');
-            card.className = 'card tool';
-            card.innerHTML = '<div class="head"><span class="kind"></span>' +
-                '<span class="title"></span><span class="status"></span></div>' +
-                '<div class="payload"></div>';
-            tools.set(call.toolCallId, card);
-            append(card);
-        }
-        if (call.kind) card.querySelector('.kind').textContent = call.kind;
-        if (call.title) card.querySelector('.title').textContent = call.title;
-        if (call.status) {
-            const st = card.querySelector('.status');
-            st.textContent = call.status;
-            st.className = 'status ' + call.status;
-        }
-        if (Array.isArray(call.content) && call.content.length) {
-            const pay = card.querySelector('.payload');
-            pay.textContent = '';
-            for (const item of call.content) {
-                if (item.type === 'diff') {
-                    if (item.oldText) {
-                        const o = document.createElement('pre');
-                        o.className = 'del'; o.textContent = item.oldText;
-                        pay.appendChild(o);
-                    }
-                    const n = document.createElement('pre');
-                    n.className = 'add'; n.textContent = item.newText || '';
-                    pay.appendChild(n);
-                } else if (item.type === 'content' && item.content &&
-                           item.content.type === 'text') {
-                    const p = document.createElement('pre');
-                    p.textContent = item.content.text;
-                    pay.appendChild(p);
+    var INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(~~[^~\n]+~~)|(\[[^\]\n]+\]\([^)\s]+\))/g;
+
+    function inline(parent, text) {
+        var last = 0, m;
+        INLINE_RE.lastIndex = 0;
+        while ((m = INLINE_RE.exec(text)) !== null) {
+            if (m.index > last) linkify(parent, text.slice(last, m.index));
+            var t = m[0];
+            if (t[0] === '`') {
+                parent.appendChild(el('code', 'inline', t.slice(1, -1)));
+            } else if (t.slice(0, 2) === '**' || t.slice(0, 2) === '__') {
+                parent.appendChild(el('strong', null, t.slice(2, -2)));
+            } else if (t.slice(0, 2) === '~~') {
+                parent.appendChild(el('s', null, t.slice(2, -2)));
+            } else if (t[0] === '*') {
+                parent.appendChild(el('em', null, t.slice(1, -1)));
+            } else {
+                var cut = t.indexOf(']('),
+                    label = t.slice(1, cut), href = t.slice(cut + 2, -1);
+                if (/^https?:/i.test(href)) {
+                    var a = el('a', null, label);
+                    a.href = href; a.title = href;
+                    parent.appendChild(a);
+                } else {
+                    var fb = el('button', 'flink', label);
+                    var parts = href.split(':');
+                    fb.dataset.path = parts[0];
+                    if (parts[1] && /^\d+$/.test(parts[1])) fb.dataset.line = parts[1];
+                    fb.addEventListener('click', function () {
+                        vsc.postMessage({ type: 'open', path: this.dataset.path,
+                            line: this.dataset.line ? Number(this.dataset.line) : undefined });
+                    });
+                    parent.appendChild(fb);
                 }
             }
+            last = m.index + t.length;
         }
+        if (last < text.length) linkify(parent, text.slice(last));
+    }
+
+    function codeBlock(code, lang) {
+        var box = el('div', 'codeblock');
+        var head = el('div', 'cbhead');
+        head.appendChild(el('span', null, lang || 'text'));
+        head.appendChild(el('span', 'grow'));
+        var copy = el('button', 'icon', 'copy');
+        copy.addEventListener('click', function () {
+            vsc.postMessage({ type: 'copy', text: code });
+            copy.textContent = 'copied';
+            setTimeout(function () { copy.textContent = 'copy'; }, 1200);
+        });
+        head.appendChild(copy);
+        box.appendChild(head);
+        var pre = el('pre', null, code);
+        box.appendChild(pre);
+        return box;
+    }
+
+    function tableFrom(rows) {
+        var wrap = el('div', 'tablewrap'), t = el('table');
+        var head = el('thead'), hr = el('tr');
+        rows[0].forEach(function (c) { var th = el('th'); inline(th, c); hr.appendChild(th); });
+        head.appendChild(hr); t.appendChild(head);
+        var tb = el('tbody');
+        rows.slice(1).forEach(function (r) {
+            var tr = el('tr');
+            r.forEach(function (c) { var td = el('td'); inline(td, c); tr.appendChild(td); });
+            tb.appendChild(tr);
+        });
+        t.appendChild(tb); wrap.appendChild(t);
+        return wrap;
+    }
+    function splitRow(line) {
+        return line.replace(/^\s*\|/, '').replace(/\|\s*$/, '')
+            .split('|').map(function (s) { return s.trim(); });
+    }
+
+    function renderMd(host, src) {
+        host.textContent = '';
+        var lines = String(src == null ? '' : src).split('\n');
+        var i = 0;
+        while (i < lines.length) {
+            var line = lines[i];
+            if (/^\s*```/.test(line)) {
+                var lang = line.replace(/^\s*```/, '').trim();
+                var buf = [];
+                i++;
+                while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
+                i++;
+                host.appendChild(codeBlock(buf.join('\n'), lang));
+                continue;
+            }
+            if (/^\s*$/.test(line)) { i++; continue; }
+            var h = line.match(/^\s*(#{1,6})\s+(.*)$/);
+            if (h) {
+                var lvl = Math.min(h[1].length, 4);
+                var hd = el('h' + lvl);
+                inline(hd, h[2]);
+                host.appendChild(hd); i++;
+                continue;
+            }
+            if (/^\s*(?:---+|\*\*\*+|___+)\s*$/.test(line)) {
+                host.appendChild(el('hr')); i++;
+                continue;
+            }
+            if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length &&
+                /^\s*\|?[\s:-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+                var rows = [splitRow(line)];
+                i += 2;
+                while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+                    rows.push(splitRow(lines[i])); i++;
+                }
+                host.appendChild(tableFrom(rows));
+                continue;
+            }
+            if (/^\s*>/.test(line)) {
+                var q = el('blockquote'), qb = [];
+                while (i < lines.length && /^\s*>/.test(lines[i])) {
+                    qb.push(lines[i].replace(/^\s*>\s?/, '')); i++;
+                }
+                inline(q, qb.join('\n'));
+                host.appendChild(q);
+                continue;
+            }
+            var lm = line.match(/^\s*([-*+]|\d+[.)])\s+/);
+            if (lm) {
+                var ordered = /\d/.test(lm[1]);
+                var list = el(ordered ? 'ol' : 'ul');
+                while (i < lines.length) {
+                    var im = lines[i].match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/);
+                    if (!im) break;
+                    var li = el('li'), parts = [im[1]];
+                    i++;
+                    while (i < lines.length && /^\s{2,}\S/.test(lines[i]) &&
+                           !/^\s*(?:[-*+]|\d+[.)])\s/.test(lines[i])) {
+                        parts.push(lines[i].trim()); i++;
+                    }
+                    inline(li, parts.join(' '));
+                    list.appendChild(li);
+                }
+                host.appendChild(list);
+                continue;
+            }
+            var para = [];
+            while (i < lines.length && !/^\s*$/.test(lines[i]) &&
+                   !/^\s*```/.test(lines[i]) && !/^\s*(#{1,6})\s/.test(lines[i]) &&
+                   !/^\s*([-*+]|\d+[.)])\s/.test(lines[i]) && !/^\s*>/.test(lines[i])) {
+                para.push(lines[i]); i++;
+            }
+            var p = el('p');
+            inline(p, para.join('\n'));
+            host.appendChild(p);
+        }
+    }
+
+    /* ---------------- messages ---------------- */
+    function userMsg(text, isCmd) {
+        clearWelcome();
+        breakBlocks();
+        var d = el('div', 'msg user' + (isCmd ? ' cmd' : ''), text);
+        add(d);
+    }
+
+    function agentStream(text) {
+        clearWelcome();
+        if (!agentMsg) {
+            thoughtBlock = null;
+            var wrap = el('div', 'msg agent');
+            var who = el('div', 'who');
+            who.appendChild(el('span', null, driverSel.value || 'agent'));
+            var actions = el('div', 'actions');
+            var copy = el('button', 'icon', 'copy');
+            copy.addEventListener('click', function () {
+                vsc.postMessage({ type: 'copy', text: wrap.dataset.raw || '' });
+                copy.textContent = 'copied';
+                setTimeout(function () { copy.textContent = 'copy'; }, 1200);
+            });
+            actions.appendChild(copy);
+            who.appendChild(actions);
+            var md = el('div', 'md');
+            wrap.appendChild(who); wrap.appendChild(md);
+            wrap.dataset.raw = '';
+            add(wrap);
+            agentMsg = { wrap: wrap, md: md, pending: false };
+        }
+        agentMsg.wrap.dataset.raw += text;
+        var cur = agentMsg;
+        if (!cur.pending) {
+            cur.pending = true;
+            requestAnimationFrame(function () {
+                cur.pending = false;
+                keep(function () { renderMd(cur.md, cur.wrap.dataset.raw); });
+            });
+        }
+    }
+
+    function thoughtStream(text) {
+        clearWelcome();
+        if (!thoughtBlock) {
+            agentMsg = null;
+            var d = el('details', 'thought');
+            var s = el('summary', null, 'thinking');
+            var b = el('div', 'body');
+            d.appendChild(s); d.appendChild(b);
+            add(d);
+            thoughtBlock = b;
+        }
+        keep(function () { thoughtBlock.textContent += text; });
+    }
+
+    function sysline(text, isErr) {
+        add(el('div', 'sysline' + (isErr ? ' err' : ''), text));
+    }
+
+    /* ---------------- cards ---------------- */
+    function makeCard(cls, glyph, title, sub) {
+        var card = el('div', 'card ' + cls);
+        var head = el('button', 'head');
+        head.type = 'button';
+        head.appendChild(el('span', 'glyph', glyph));
+        var t = el('span', 'title', title);
+        if (sub) t.appendChild(el('span', 'sub', sub));
+        head.appendChild(t);
+        head.appendChild(el('span', 'status'));
+        head.appendChild(el('span', 'chev', '⌄'));
+        card.appendChild(head);
+        card.appendChild(el('div', 'body'));
+        head.addEventListener('click', function () {
+            if (card.classList.contains('collapsible')) {
+                keep(function () { card.classList.toggle('closed'); });
+            }
+        });
+        return card;
+    }
+
+    var KIND_GLYPH = {
+        read: '▤', edit: '✎', delete: '⌫', move: '⇄', search: '⌕',
+        execute: '❯', think: '◇', fetch: '↧', other: '•',
+    };
+
+    function toolCard(call) {
+        clearWelcome();
+        breakBlocks();
+        var card = tools.get(call.toolCallId);
+        if (!card) {
+            card = makeCard('tool collapsible closed',
+                KIND_GLYPH[call.kind] || KIND_GLYPH.other, call.title || 'tool call');
+            tools.set(call.toolCallId, card);
+            add(card);
+        }
+        if (call.kind) card.querySelector('.glyph').textContent =
+            KIND_GLYPH[call.kind] || KIND_GLYPH.other;
+        if (call.title) {
+            var tnode = card.querySelector('.title');
+            tnode.textContent = call.title;
+        }
+        if (call.status) {
+            var st = card.querySelector('.status');
+            st.textContent = call.status === 'completed' ? '' : call.status;
+            st.className = 'status ' + call.status;
+            card.classList.toggle('failed', call.status === 'failed');
+            if (call.status === 'failed') card.classList.remove('closed');
+        }
+        var payload = [];
+        if (Array.isArray(call.content)) payload = call.content;
+        var locs = Array.isArray(call.locations) ? call.locations : [];
+        if (!payload.length && !locs.length) return;
+
+        var bodyEl = card.querySelector('.body');
+        bodyEl.textContent = '';
+        if (locs.length) {
+            var row = el('div', 'locs');
+            locs.forEach(function (l) {
+                if (!l || !l.path) return;
+                var b = el('button', 'flink',
+                    l.path.split('/').pop() + (l.line ? ':' + l.line : ''));
+                b.title = l.path;
+                b.addEventListener('click', function () {
+                    vsc.postMessage({ type: 'open', path: l.path, line: l.line });
+                });
+                row.appendChild(b);
+            });
+            bodyEl.appendChild(row);
+        }
+        payload.forEach(function (item) {
+            if (!item) return;
+            if (item.type === 'diff') {
+                if (item.path) {
+                    var lr = el('div', 'locs');
+                    var lb = el('button', 'flink', item.path);
+                    lb.addEventListener('click', function () {
+                        vsc.postMessage({ type: 'open', path: item.path });
+                    });
+                    lr.appendChild(lb);
+                    bodyEl.appendChild(lr);
+                }
+                if (item.oldText) bodyEl.appendChild(el('pre', 'del', item.oldText));
+                if (item.newText) bodyEl.appendChild(el('pre', 'add', item.newText));
+            } else if (item.type === 'content' && item.content &&
+                       item.content.type === 'text') {
+                bodyEl.appendChild(el('pre', 'wrap', item.content.text));
+            } else if (item.type === 'terminal') {
+                bodyEl.appendChild(el('pre', 'wrap', item.output || '(terminal)'));
+            }
+        });
     }
 
     function permission(msg) {
+        clearWelcome();
         breakBlocks();
-        const card = document.createElement('div');
-        card.className = 'card perm';
+        var card = makeCard('perm', '⚑', msg.title || 'Permission request');
         card.dataset.pid = msg.pid;
-        const head = document.createElement('div');
-        head.className = 'head';
-        head.textContent = msg.title || 'Permission request';
-        const opts = document.createElement('div');
-        opts.className = 'opts';
-        for (const o of msg.options) {
-            const b = document.createElement('button');
-            if (o.kind && o.kind.indexOf('reject') === 0) b.className = 'secondary';
-            b.textContent = o.name || o.optionId;
+        card.querySelector('.chev').remove();
+        var bodyEl = card.querySelector('.body');
+        var opts = el('div', 'opts');
+        (msg.options || []).forEach(function (o) {
+            var reject = o.kind && o.kind.indexOf('reject') === 0;
+            var b = el('button', reject ? 'secondary' : '', o.name || o.optionId);
             b.addEventListener('click', function () {
                 vsc.postMessage({ type: 'permission', pid: msg.pid, optionId: o.optionId });
+                card.dataset.answer = o.name || o.optionId;
             });
             opts.appendChild(b);
-        }
-        card.appendChild(head); card.appendChild(opts);
-        append(card);
+        });
+        bodyEl.appendChild(opts);
+        bodyEl.appendChild(el('div', 'answer', ''));
+        add(card);
+        var first = opts.querySelector('button');
+        if (first && atBottom()) first.focus();
     }
 
     function plan(entries) {
-        if (!planList) {
-            const card = document.createElement('div');
-            card.className = 'card';
-            const head = document.createElement('div');
-            head.className = 'head';
-            head.textContent = 'Plan';
-            planList = document.createElement('ul');
-            planList.className = 'plan';
-            card.appendChild(head); card.appendChild(planList);
-            append(card);
+        clearWelcome();
+        if (!planCard) {
+            planCard = makeCard('plan collapsible', '☰', 'Plan');
+            add(planCard);
         }
-        planList.textContent = '';
-        for (const e of entries) {
-            const li = document.createElement('li');
-            li.className = e.status || '';
-            li.textContent = e.content || e.title || '';
-            planList.appendChild(li);
-        }
+        breakBlocks();
+        var done = entries.filter(function (e) { return e.status === 'completed'; }).length;
+        var t = planCard.querySelector('.title');
+        t.textContent = 'Plan';
+        t.appendChild(el('span', 'sub', done + '/' + entries.length));
+        var bodyEl = planCard.querySelector('.body');
+        bodyEl.textContent = '';
+        var ul = el('ul', 'plan');
+        entries.forEach(function (e) {
+            var li = el('li', e.status || '', e.content || e.title || '');
+            ul.appendChild(li);
+        });
+        bodyEl.appendChild(ul);
+        keep(function () {});
     }
 
-    window.addEventListener('message', function (ev) {
-        const m = ev.data || {};
-        if (m.type === 'init') {
-            document.getElementById('tasklabel').textContent =
-                m.task.id + '  ' + m.task.title;
-            document.getElementById('who').textContent =
-                m.driver + ' · ' + m.agent;
-            const st = document.getElementById('taskstatus');
-            st.textContent = m.task.status;
-            st.className = 'pill ' + m.task.status;
-        } else if (m.type === 'chunk') chunk(m.role, m.text);
-        else if (m.type === 'tool') toolCard(m.call);
-        else if (m.type === 'plan') plan(m.entries);
-        else if (m.type === 'permission') permission(m);
-        else if (m.type === 'permission_done') {
-            const card = log.querySelector('.perm[data-pid="' + m.pid + '"]');
-            if (card) card.classList.add('answered');
-        } else if (m.type === 'turn') {
-            document.body.classList.toggle('running', !!m.running);
-            if (!m.running) {
-                breakBlocks();
-                if (m.stopReason && m.stopReason !== 'end_turn') {
-                    const d = document.createElement('div');
-                    d.className = 'turnend';
-                    d.textContent = '— turn ended: ' + m.stopReason + ' —';
-                    append(d);
-                }
-            }
-        } else if (m.type === 'task_status') {
-            const st = document.getElementById('taskstatus');
-            st.textContent = m.status;
-            st.className = 'pill ' + m.status;
-        } else if (m.type === 'status') statusline.textContent = m.text;
-    });
+    function cmdCard(m) {
+        clearWelcome();
+        breakBlocks();
+        var card = makeCard('cg collapsible' + (m.open ? '' : ' closed'), '⌘',
+            'cg ' + m.cmd, m.ok === false ? 'failed' : '');
+        var bodyEl = card.querySelector('.body');
+        bodyEl.appendChild(el('pre', 'wrap', m.output || '(no output)'));
+        add(card);
+    }
 
-    function send() {
-        const t = input.value.trim();
-        if (!t) return;
-        input.value = '';
+    /* ---------------- welcome ---------------- */
+    function welcome(subtitle) {
+        var w = el('div', 'welcome');
+        w.id = 'welcome';
+        w.appendChild(el('h2', null, 'Codify agent'));
+        var p = el('p', null, subtitle ||
+            'Chat with the agent in this workspace. It has Codify’s tools ' +
+            'connected — code graph, spec board, and project memory — ' +
+            'and starts on your first message.');
+        w.appendChild(p);
+        var q = el('div', 'quick');
+        [['brief', 'Session brief'], ['next', 'Next task'],
+            ['review', 'Review my change'], ['check', 'Check the repo'],
+            ['task', 'Work a task']].forEach(function (pair) {
+            var b = el('button');
+            b.appendChild(el('span', 'k', '/' + pair[0]));
+            b.appendChild(document.createTextNode(pair[1]));
+            b.addEventListener('click', function () { runSlash(pair[0], ''); });
+            q.appendChild(b);
+        });
+        w.appendChild(q);
+        log.appendChild(w);
+    }
+
+    function helpCard() {
+        var card = makeCard('cg collapsible', '?', 'Codify commands');
+        var bodyEl = card.querySelector('.body');
+        var lines = COMMANDS.map(function (c) {
+            var name = ('/' + c.n + (c.a ? ' ' + c.a : ''));
+            while (name.length < 20) name += ' ';
+            return name + c.d;
+        }).join('\n');
+        bodyEl.appendChild(el('pre', 'wrap', lines));
+        add(card);
+    }
+
+    /* ---------------- slash menu ---------------- */
+    var slashSel = 0, slashItems = [];
+
+    function updateSlash() {
+        var v = input.value;
+        var m = v.match(/^\/([a-z]*)$/i);
+        if (!m) { body.classList.remove('slashing'); return; }
+        var q = m[1].toLowerCase();
+        slashItems = COMMANDS.filter(function (c) { return c.n.indexOf(q) === 0; });
+        if (!slashItems.length) { body.classList.remove('slashing'); return; }
+        slashSel = 0;
+        slashmenu.textContent = '';
+        slashItems.forEach(function (c, idx) {
+            var it = el('div', 'sitem' + (idx === 0 ? ' sel' : ''));
+            it.appendChild(el('span', 'n', '/' + c.n + (c.a ? ' ' + c.a : '')));
+            it.appendChild(el('span', 'd', c.d));
+            it.addEventListener('mousedown', function (ev) {
+                ev.preventDefault();
+                acceptSlash(idx, true);
+            });
+            slashmenu.appendChild(it);
+        });
+        body.classList.add('slashing');
+    }
+    function moveSlash(delta) {
+        var items = slashmenu.querySelectorAll('.sitem');
+        if (!items.length) return;
+        items[slashSel].classList.remove('sel');
+        slashSel = (slashSel + delta + items.length) % items.length;
+        items[slashSel].classList.add('sel');
+        items[slashSel].scrollIntoView({ block: 'nearest' });
+    }
+    function acceptSlash(idx, submitIfReady) {
+        var c = slashItems[idx === undefined ? slashSel : idx];
+        if (!c) return;
+        body.classList.remove('slashing');
+        if (!c.a && submitIfReady) { runSlash(c.n, ''); input.value = ''; autosize(); return; }
+        input.value = '/' + c.n + ' ';
+        input.focus();
+        autosize();
+    }
+
+    /* ---------------- composer ---------------- */
+    function autosize() {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 190) + 'px';
+    }
+
+    function runSlash(cmd, args) {
+        clearWelcome();
+        if (cmd === 'help') { userMsg('/help', true); helpCard(); return; }
+        vsc.postMessage({ type: 'slash', cmd: cmd, args: args });
+    }
+
+    function submit() {
+        var raw = input.value.replace(/\s+$/, '');
+        if (!raw.trim()) return;
+        input.value = ''; autosize();
+        body.classList.remove('slashing');
+        history.push(raw); histIdx = history.length;
         statusline.textContent = '';
-        vsc.postMessage({ type: 'send', text: t });
+        var m = raw.match(/^\/([A-Za-z][\w-]*)\s*([\s\S]*)$/);
+        if (m) {
+            var cmd = m[1].toLowerCase();
+            if (CMDNAMES.indexOf(cmd) >= 0) { runSlash(cmd, m[2].trim()); return; }
+            userMsg(raw, true);
+            sysline('unknown command /' + cmd + ' — /help lists them', true);
+            return;
+        }
+        clearWelcome();
+        vsc.postMessage({ type: 'send', text: raw });
     }
-    document.getElementById('send').addEventListener('click', send);
+
+    input.addEventListener('input', function () { autosize(); updateSlash(); });
+    input.addEventListener('keydown', function (ev) {
+        if (body.classList.contains('slashing')) {
+            if (ev.key === 'ArrowDown') { ev.preventDefault(); moveSlash(1); return; }
+            if (ev.key === 'ArrowUp') { ev.preventDefault(); moveSlash(-1); return; }
+            if (ev.key === 'Tab') { ev.preventDefault(); acceptSlash(undefined, false); return; }
+            if (ev.key === 'Enter' && !ev.shiftKey) {
+                ev.preventDefault(); acceptSlash(undefined, true); return;
+            }
+            if (ev.key === 'Escape') { body.classList.remove('slashing'); return; }
+        }
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(); return; }
+        if (ev.key === 'ArrowUp' && !input.value && history.length) {
+            ev.preventDefault();
+            histIdx = Math.max(0, histIdx - 1);
+            input.value = history[histIdx] || '';
+            autosize();
+            return;
+        }
+        if (ev.key === 'ArrowDown' && histIdx < history.length - 1 && input.value) {
+            ev.preventDefault();
+            histIdx = Math.min(history.length - 1, histIdx + 1);
+            input.value = history[histIdx] || '';
+            autosize();
+        }
+    });
+    document.getElementById('send').addEventListener('click', submit);
     document.getElementById('stop').addEventListener('click', function () {
         vsc.postMessage({ type: 'cancel' });
     });
-    input.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); send(); }
+    taskChip.addEventListener('click', function () {
+        vsc.postMessage({ type: 'slash', cmd: 'task', args: '' });
     });
+    driverSel.addEventListener('change', function () {
+        vsc.postMessage({ type: 'driver', value: driverSel.value });
+    });
+
+    /* ---------------- extension messages ---------------- */
+    function setTask(task) {
+        if (task && task.id) {
+            taskChip.textContent = task.id + '  ' + (task.title || '');
+            taskChip.title = 'Attached task — click to attach a different one';
+            taskChip.classList.add('attached');
+            taskStatus.textContent = task.status || '';
+            taskStatus.className = 'pill ' + (task.status || '');
+        } else {
+            taskChip.textContent = 'no task';
+            taskChip.title = 'Attach a spec task to this chat';
+            taskChip.classList.remove('attached');
+            taskStatus.textContent = '';
+            taskStatus.className = 'pill';
+        }
+    }
+
+    function resetTranscript(sub) {
+        log.textContent = '';
+        tools.clear(); planCard = null; breakBlocks();
+        statusline.textContent = '';
+        body.classList.remove('running', 'live');
+        driverSel.disabled = false;
+        welcome(sub);
+        toBottom();
+    }
+
+    window.addEventListener('message', function (ev) {
+        var m = ev.data || {};
+        if (m.type === 'init') {
+            if (Array.isArray(m.drivers) && m.drivers.length) {
+                driverSel.textContent = '';
+                m.drivers.forEach(function (d) {
+                    var o = el('option', null, d);
+                    o.value = d;
+                    driverSel.appendChild(o);
+                });
+            }
+            if (m.driver) driverSel.value = m.driver;
+            if (m.feature) document.getElementById('ctxfeature').textContent = m.feature;
+            setTask(m.task);
+            if (m.idle && !log.childElementCount) welcome();
+        } else if (m.type === 'board') {
+            document.getElementById('ctxfeature').textContent =
+                m.feature ? m.feature + (m.mode ? ' · ' + m.mode : '') : 'codify';
+        } else if (m.type === 'task') {
+            setTask(m.task);
+        } else if (m.type === 'session') {
+            body.classList.toggle('live', !!m.live);
+            driverSel.disabled = !!m.live;
+        } else if (m.type === 'reset') {
+            if (m.driver) driverSel.value = m.driver;
+            setTask(null);
+            resetTranscript();
+        } else if (m.type === 'session_end') {
+            body.classList.remove('running', 'live');
+            driverSel.disabled = false;
+            breakBlocks();
+            sysline('session ended' + (m.why ? ' — ' + m.why : '') +
+                ' · your next message starts a fresh one');
+        } else if (m.type === 'chunk') {
+            if (m.role === 'agent') agentStream(m.text);
+            else if (m.role === 'thought') thoughtStream(m.text);
+            else userMsg(m.text, !!m.cmd);
+        } else if (m.type === 'tool') toolCard(m.call);
+        else if (m.type === 'plan') plan(m.entries || []);
+        else if (m.type === 'permission') permission(m);
+        else if (m.type === 'permission_done') {
+            var card = log.querySelector('.perm[data-pid="' + m.pid + '"]');
+            if (card) {
+                card.classList.add('answered');
+                var a = card.querySelector('.answer');
+                if (a) a.textContent = m.answer || card.dataset.answer || 'answered';
+            }
+        } else if (m.type === 'cmdout') cmdCard(m);
+        else if (m.type === 'turn') {
+            body.classList.toggle('running', !!m.running);
+            if (!m.running) {
+                breakBlocks();
+                if (m.stopReason && m.stopReason !== 'end_turn') {
+                    sysline('turn ended: ' + m.stopReason);
+                }
+            }
+        } else if (m.type === 'task_status') {
+            taskStatus.textContent = m.status;
+            taskStatus.className = 'pill ' + m.status;
+        } else if (m.type === 'status') {
+            statusline.textContent = m.text || '';
+        } else if (m.type === 'focus') {
+            input.focus();
+        }
+    });
+
+    welcome();
+    autosize();
+    vsc.postMessage({ type: 'ready' });
 })();
 </script>
 </body>

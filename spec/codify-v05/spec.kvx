@@ -94,3 +94,31 @@ do_2       = "Settings: codify.acp.claudeCommand, codify.acp.codexCommand, codif
 do_3       = "Task-node start honors codify.agent.interface; terminal path stays the fallback when no adapter is available"
 do_4       = "README agent-panel section, vscode README settings table, CHANGELOG entry; 14_vscode manifest coherence covers acp.js"
 reqs       = ["2.1", "3.1"]
+
+[task.3.2]
+title      = "Sidebar agent view: chat-first, task optional"
+status     = "done"
+wave       = 3
+requires   = ["3.1"]
+symbols    = ["registerAgentView"]
+touches    = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "editors/vscode/package.json", "editors/vscode/README.md", "README.md", "CHANGELOG.md", "tests/integration/14_vscode.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "codifyAgentView webview view in the Codify container — always visible, like the Codex extension's chat, no task required"
+do_2       = "First message spawns the ACP session lazily (cwd session, MCP injected, no claim); driver picker in the header; New Chat resets"
+do_3       = "Start-on-task routes into the sidebar view when idle (claim + resume packet); busy view offers replace-or-open-beside; editor panels remain for concurrent tasks"
+do_4       = "Session end with an attached unqualified task still offers handoff/release; 14_vscode covers the view registration"
+reqs       = ["3.1"]
+
+[task.3.3]
+title      = "Full chat surface: markdown, tool cards, and cg slash commands"
+status     = "done"
+wave       = 3
+requires   = ["3.2"]
+symbols    = ["runCgSlash"]
+touches    = ["editors/vscode/agentpanel.html", "editors/vscode/acp.js", "editors/vscode/README.md", "README.md", "CHANGELOG.md", "tests/integration/19_acp.sh", "tests/fixtures/acp/*"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "Chat rendering: markdown (headings, lists, tables, quotes), fenced code blocks with copy, collapsed thoughts, and file paths that open in the editor"
+do_2       = "Slash palette over the cg verbs (brief, next, review, check, context, search, impact, why, …): the output lands as a card and is handed to the agent as context"
+do_3       = "Composer: autosizing input, history recall, queued input while a turn runs, stop, and a context bar carrying feature, task chip, task status, and driver"
+do_4       = "Panel script driven headlessly against a DOM shim in 19_acp.sh: rendering, tool/permission/plan cards, palette, and the ready handshake"
+reqs       = ["3.1", "3.2", "3.3", "3.4"]

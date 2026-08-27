@@ -43,11 +43,14 @@ for (const m of menus) {
 
 // views the code registers must exist in the manifest
 const views = Object.values(pkg.contributes.views).flat().map((v) => v.id);
-for (const v of ['codifyTasks', 'codifyMemories']) {
+for (const v of ['codifyTasks', 'codifyMemories', 'codifyAgentView']) {
     if (!views.includes(v)) throw new Error(`missing view: ${v}`);
 }
 if (!/registerTreeDataProvider\('codifyMemories'/.test(src)) {
     throw new Error('codifyMemories view is declared but never populated');
+}
+if (!/registerWebviewViewProvider\(\s*'codifyAgentView'/.test(src)) {
+    throw new Error('codifyAgentView is declared but never provided');
 }
 
 // the extension must not have grown dependencies: the whole point is that

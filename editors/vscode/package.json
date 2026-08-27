@@ -2,7 +2,7 @@
   "name": "codify",
   "displayName": "Codify",
   "description": "The whole agent workflow in your editor: code graph navigation, a live task board with verified completion, scope diagnostics, and project memory — all from the cg binary.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "sidiora-labs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/sidiora-labs/codify" },
@@ -44,6 +44,12 @@
           "id": "codifyTasks",
           "name": "Tasks",
           "contextualTitle": "Codify Tasks"
+        },
+        {
+          "type": "webview",
+          "id": "codifyAgentView",
+          "name": "Agent",
+          "contextualTitle": "Codify Agent"
         },
         {
           "id": "codifyMemories",
@@ -91,7 +97,8 @@
       { "command": "codify.sync", "title": "Codify: Sync the Index", "icon": "$(sync)" },
       { "command": "codify.hookInstall", "title": "Codify: Install Hooks" },
       { "command": "codify.agent.startOnTask", "title": "Codify: Start Agent Session on Task", "icon": "$(hubot)" },
-      { "command": "codify.agent.openPanel", "title": "Codify: Open Agent Panel on Task", "icon": "$(comment-discussion)" },
+      { "command": "codify.agent.openPanel", "title": "Codify: Start Agent on Task", "icon": "$(comment-discussion)" },
+      { "command": "codify.agent.newChat", "title": "Codify: New Agent Chat", "icon": "$(add)" },
       { "command": "codify.agent.startHeadless", "title": "Codify: Run Agent Headless on Task" },
       { "command": "codify.agent.handoff", "title": "Codify: Hand Off Task" },
       { "command": "codify.agent.resume", "title": "Codify: Resume Task in Agent Session" },
@@ -112,6 +119,7 @@
         { "command": "codify.review", "when": "view == codifyTasks", "group": "2_work@3" },
         { "command": "codify.check", "when": "view == codifyTasks", "group": "2_work@4" },
         { "command": "codify.agent.runWave", "when": "view == codifyTasks", "group": "2_work@5" },
+        { "command": "codify.agent.newChat", "when": "view == codifyAgentView", "group": "navigation@1" },
         { "command": "codify.remember", "when": "view == codifyMemories", "group": "navigation@1" },
         { "command": "codify.refresh", "when": "view == codifyMemories", "group": "navigation@2" }
       ],
