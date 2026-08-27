@@ -31,13 +31,19 @@ A "Codify" container in the activity bar, with two views.
 
 **Memory** lists recent decisions, constraints and facts, grouped by type, with the task each was written under. Add one from anywhere with **Codify: Remember a Decision** — if a file is open, it is anchored to that file automatically.
 
-## Agent sessions
+## The agent panel
 
-The board can also *drive* work. Each task node carries a **Start Agent Session on Task** action (also in the palette) that runs the whole pickup for you:
+The board can also *drive* work. Each task node carries a **Start Agent Session on Task** action (also in the palette) that runs the whole pickup for you — and by default it opens the **Codify agent panel**: the extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the configured agent's ACP adapter (`claude-code-acp` or `codex-acp`) and renders the session in a Codify-native view beside your editor.
 
-1. In parallel mode the task is claimed first (`cg spec claim <id> --agent vscode-<n>`), then started. A claim someone else holds is refused, not stolen.
-2. A session prompt is generated with `cg resume --task <id> --prompt` and written to `.codegraph/agents/vscode-<id>.prompt`. With an older `cg` that has no `resume`, the prompt degrades to the session brief plus explicit finish/handoff instructions.
-3. A terminal named `codify: <driver> <id>` opens and launches the configured driver — Codex CLI by default, Claude Code with `codify.agent.driver: "claude"` — seeded with that prompt.
+1. In parallel mode the task is claimed first (`cg spec claim <id> --agent vscode-acp-<n>`), then started. A claim someone else holds is refused, not stolen.
+2. A resume packet is generated with `cg resume --task <id> --prompt` (degrading to the session brief on an older `cg`) and sent as the opening prompt.
+3. The agent is spawned with the workspace as its `cwd` and **Codify's own MCP server injected** (`cg mcp`), so every session has the full graph, spec, and memory toolset without any per-repo MCP config.
+
+The panel shows the task id, title and live status in its header, streams the agent's replies and (collapsed) thinking, renders each tool call as a card with its status and diffs, tracks the agent's plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. File reads and writes requested by the agent over ACP are served by the extension and are refused outside the workspace root. **Stop** cancels the in-flight turn (`session/cancel`); typing while the agent is working queues your message for the next turn.
+
+If the adapter is missing or fails to start (auth methods, when the agent reports them, are named in the error), the claim is released and the extension offers the terminal session as the fallback. Set `codify.agent.interface: "terminal"` to skip the panel entirely: then the command opens a terminal named `codify: <driver> <id>` running the configured driver CLI — Codex by default, Claude Code with `codify.agent.driver: "claude"` — seeded with the same prompt. **Open Agent Panel on Task** in the task context menu always opens the panel regardless of the setting.
+
+When a panel session ends (agent exit or panel closed) with the task not yet qualified, the extension offers to record a handoff or release the claim — the same discipline as the terminal path.
 
 The rest of the lifecycle:
 
@@ -49,7 +55,7 @@ The rest of the lifecycle:
 | Run Wave with Agents | Opens a terminal running `cg spec run -n <codify.agent.parallelism> --driver <driver>` — the built-in orchestrator works the whole eligible frontier |
 | Stop Agent Session | Closes the session's terminal (or terminates the headless task) |
 
-When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. While any tracked session exists, the board refreshes on a 3-second poll in addition to watching `.codegraph/graph.db`, so work done by agents outside the editor shows up without a manual refresh. Tasks with a live claim show `$(person)` plus the agent name, and `$(terminal)` marks tasks with a tracked session in this window.
+When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. While any tracked session exists, the board refreshes on a 3-second poll in addition to watching `.codegraph/graph.db`, so work done by agents outside the editor shows up without a manual refresh. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
 
 ## The rest of the workflow
 
@@ -97,8 +103,12 @@ Neither is required for the other. kvx highlighting works everywhere.
 | `codify.feature` | *(empty)* | Feature override, passed to every spec command as `-f` |
 | `codify.languageServer` | `true` | Run `cg lsp` for navigation, hover, code lens and diagnostics |
 | `codify.agentName` | *(empty)* | Default name used when claiming a task in parallel mode |
-| `codify.agent.driver` | `codex` | Which agent CLI drives task sessions: `codex` or `claude` |
-| `codify.agent.codexPath` | `codex` | Path to the Codex CLI |
+| `codify.agent.driver` | `codex` | Which agent drives task sessions: `codex` or `claude` |
+| `codify.agent.interface` | `panel` | How a session opens: the ACP agent panel or a seeded terminal |
+| `codify.acp.claudeCommand` | `claude-code-acp` | Command that starts the Claude Code ACP adapter (quote-aware) |
+| `codify.acp.codexCommand` | `codex-acp` | Command that starts the Codex ACP adapter (quote-aware) |
+| `codify.acp.customCommand` | *(empty)* | Any ACP-speaking agent command; overrides both adapter settings |
+| `codify.agent.codexPath` | `codex` | Path to the Codex CLI (terminal sessions) |
 | `codify.agent.claudePath` | `claude` | Path to the Claude Code CLI |
 | `codify.agent.codexArgs` | *(empty)* | Extra arguments passed to codex when starting a session |
 | `codify.agent.claudeArgs` | *(empty)* | Extra arguments passed to claude when starting a session |

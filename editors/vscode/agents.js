@@ -241,7 +241,14 @@ async function cmdStartOnTask(arg) {
     const id = taskIdFrom(arg) ||
         await pickTask((t) => t.status === 'pending' || t.status === 'in_progress',
             'Start an agent session on which task?');
-    if (id) await startAgentSession(id, false);
+    if (!id) return;
+    /* the ACP panel is the default surface; the terminal stays one setting
+     * (or one failed adapter) away */
+    if (config().get('agent.interface') !== 'terminal') {
+        await vscode.commands.executeCommand('codify.agent.openPanel', id);
+        return;
+    }
+    await startAgentSession(id, false);
 }
 
 async function cmdStartHeadless(arg) {
@@ -416,6 +423,9 @@ function register(ctx, d) {
             const s = sessions.get(id);
             return !!(s && (s.terminal || s.headless));
         },
+        /* direct terminal path for the panel's adapter-failure fallback —
+         * bypasses the codify.agent.interface switch on purpose */
+        startTerminal: (id) => startAgentSession(id, false),
     };
 }
 

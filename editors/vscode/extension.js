@@ -13,6 +13,7 @@ const { LspClient } = require('./client');
 const language = require('./language');
 const kvx = require('./kvx');
 const agents = require('./agents');
+const acp = require('./acp');
 
 let provider;
 let memories;
@@ -23,6 +24,7 @@ let client;
 let diagnostics;
 let revalidate = () => {};
 let agentApi = { hasTerminal: () => false };
+let acpApi = { hasPanel: () => false };
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 function binary() { return config().get('binaryPath') || 'cg'; }
@@ -133,7 +135,8 @@ class TaskProvider {
         it.contextValue = `task-${t.status}`;
         const next = this.model.status.next && this.model.status.next.id === t.id;
         const claim = this.claimFor(t.id);
-        const term = agentApi.hasTerminal(t.id) ? ' $(terminal)' : '';
+        const term = agentApi.hasTerminal(t.id) ? ' $(terminal)'
+            : acpApi.hasPanel(t.id) ? ' $(comment-discussion)' : '';
         it.description = claim ? `${t.status} · $(person) ${claim.agent}${term}`
             : term ? `${t.status}${term}`
             : t.status === 'in_progress' ? 'in progress'
@@ -695,6 +698,10 @@ async function activate(ctx) {
     kvx.register(ctx, cgJson, workspaceRoot);
     agentApi = agents.register(ctx, {
         cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
+    });
+    acpApi = acp.register(ctx, {
+        cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
+        startTerminal: agentApi.startTerminal,
     });
 
     /* Language features are best-effort: a workspace with no .codegraph, or

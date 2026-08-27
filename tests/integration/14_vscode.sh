@@ -18,9 +18,10 @@ node - "$EXT" <<'JS'
 const fs = require('fs'), path = require('path');
 const dir = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-// commands are registered from extension.js and agents.js
+// commands are registered from extension.js, agents.js, and acp.js
 const src = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8') +
-    fs.readFileSync(path.join(dir, 'agents.js'), 'utf8');
+    fs.readFileSync(path.join(dir, 'agents.js'), 'utf8') +
+    fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
 
 const declared = pkg.contributes.commands.map((c) => c.command);
 const registered = [...src.matchAll(/'(codify\.[A-Za-z.]+)':/g)].map((m) => m[1]);

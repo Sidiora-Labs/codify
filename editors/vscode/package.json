@@ -2,7 +2,7 @@
   "name": "codify",
   "displayName": "Codify",
   "description": "The whole agent workflow in your editor: code graph navigation, a live task board with verified completion, scope diagnostics, and project memory — all from the cg binary.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "sidiora-labs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/sidiora-labs/codify" },
@@ -91,6 +91,7 @@
       { "command": "codify.sync", "title": "Codify: Sync the Index", "icon": "$(sync)" },
       { "command": "codify.hookInstall", "title": "Codify: Install Hooks" },
       { "command": "codify.agent.startOnTask", "title": "Codify: Start Agent Session on Task", "icon": "$(hubot)" },
+      { "command": "codify.agent.openPanel", "title": "Codify: Open Agent Panel on Task", "icon": "$(comment-discussion)" },
       { "command": "codify.agent.startHeadless", "title": "Codify: Run Agent Headless on Task" },
       { "command": "codify.agent.handoff", "title": "Codify: Hand Off Task" },
       { "command": "codify.agent.resume", "title": "Codify: Resume Task in Agent Session" },
@@ -123,6 +124,7 @@
         { "command": "codify.claimTask", "when": "view == codifyTasks && viewItem =~ /^task-/ && codify.parallel", "group": "2_claim@1" },
         { "command": "codify.releaseTask", "when": "view == codifyTasks && viewItem =~ /^task-/ && codify.parallel", "group": "2_claim@2" },
         { "command": "codify.agent.startOnTask", "when": "view == codifyTasks && viewItem =~ /^task-(pending|in_progress)$/", "group": "inline@3" },
+        { "command": "codify.agent.openPanel", "when": "view == codifyTasks && viewItem =~ /^task-(pending|in_progress)$/", "group": "3_agent@0" },
         { "command": "codify.agent.startHeadless", "when": "view == codifyTasks && viewItem =~ /^task-(pending|in_progress)$/", "group": "3_agent@1" },
         { "command": "codify.agent.resume", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "3_agent@2" },
         { "command": "codify.agent.handoff", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "3_agent@3" },
@@ -170,6 +172,27 @@
           "enum": ["codex", "claude"],
           "default": "codex",
           "description": "Which agent CLI drives task sessions."
+        },
+        "codify.agent.interface": {
+          "type": "string",
+          "enum": ["panel", "terminal"],
+          "default": "panel",
+          "description": "How a task agent session opens: the Codify agent panel (ACP) or a seeded terminal. The terminal is offered as the fallback when the ACP adapter fails to start."
+        },
+        "codify.acp.claudeCommand": {
+          "type": "string",
+          "default": "claude-code-acp",
+          "description": "Command that starts the Claude Code ACP adapter (quote-aware; e.g. npx -y @zed-industries/claude-code-acp)."
+        },
+        "codify.acp.codexCommand": {
+          "type": "string",
+          "default": "codex-acp",
+          "description": "Command that starts the Codex ACP adapter (quote-aware; e.g. npx -y @zed-industries/codex-acp)."
+        },
+        "codify.acp.customCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Any ACP-speaking agent command; when set it overrides both adapter settings. Empty uses the codify.agent.driver adapter."
         },
         "codify.agent.codexPath": {
           "type": "string",
