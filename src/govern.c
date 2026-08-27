@@ -72,7 +72,8 @@ static bool lease_touches_overlap(const char *a, const char *b) {
 }
 
 /* One command for CI. Everything Codify can prove about the repository,
- * gated behind a single exit code so a pipeline needs exactly one step. */
+ * gated behind a single exit code so a pipeline needs exactly one step.
+ * Anchor drift is reported here but never gates: warn, don't block. */
 int cmd_check(Cg *cg, bool json, bool strict)
 {
     int failures = 0, warnings = 0;
@@ -209,9 +210,20 @@ int cmd_check(Cg *cg, bool json, bool strict)
         free(paths);
     }
 
+    /* the intent layer degrades loudly: a stale anchor is a doc comment
+     * outliving the code it describes — a warning, never a gate */
+    int stale = anchor_stale(cg, NULL, NULL);
+    if (stale) {
+        warnings++;
+        sb_printf(&rep, "  warn  %d stale anchor(s) — doc comments whose "
+                  "code has moved on (cg anchors --stale)\n", stale);
+    } else {
+        sb_puts(&rep, "  ok    anchors current\n");
+    }
+
     if (json) {
-        printf("{\"failures\":%d,\"warnings\":%d,\"report\":", failures,
-               warnings);
+        printf("{\"failures\":%d,\"warnings\":%d,\"stale_anchors\":%d,"
+               "\"report\":", failures, warnings, stale);
         StrBuf j; sb_init(&j);
         sb_json_str(&j, rep.p ? rep.p : "");
         fputs(j.p, stdout);
@@ -408,6 +420,37 @@ static bool path_in_scope(const char *task_json, const char *path) {
 /* Scope drift is the failure mode nobody notices until review. Given paths
  * (or the working tree), report the ones the active task never claimed.
  * Advisory by default so this is safe to wire into a hook. */
+/* stale anchors filtered to the paths guard is looking at */
+typedef struct {
+    char **pathv;
+    int npath;
+    const char *root;
+    StrBuf txt, js;
+    int n;
+} GuardStale;
+
+static void guard_stale_cb(void *u, const char *path, int line,
+                           const char *sym, int sym_line) {
+    GuardStale *g = u;
+    size_t rl = strlen(g->root);
+    bool hit = false;
+    for (int i = 0; i < g->npath && !hit; i++) {
+        const char *rel = g->pathv[i];
+        if (strncmp(rel, g->root, rl) == 0 && rel[rl] == '/') rel += rl + 1;
+        hit = strcmp(rel, path) == 0;
+    }
+    if (!hit) return;
+    sb_printf(&g->txt, "  %s:%d — doc for %s (line %d) predates this "
+              "change\n", path, line, sym, sym_line);
+    if (g->n) sb_putc(&g->js, ',');
+    sb_puts(&g->js, "{\"path\":");
+    sb_json_str(&g->js, path);
+    sb_printf(&g->js, ",\"line\":%d,\"symbol\":", line);
+    sb_json_str(&g->js, sym);
+    sb_putc(&g->js, '}');
+    g->n++;
+}
+
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
 {
     bool is_current = false;
@@ -445,14 +488,23 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
         bad++;
     }
 
+    /* anchors this work made stale: advisory always, never part of the
+     * exit code — the warn-dont-block rule is load-bearing here */
+    GuardStale gs = { pathv, npath, cg->root, {0}, {0}, 0 };
+    sb_init(&gs.txt);
+    sb_init(&gs.js);
+    anchor_stale(cg, guard_stale_cb, &gs);
+
     if (json) {
         printf("{\"guarded\":true,\"task\":");
         StrBuf j; sb_init(&j);
         sb_json_str(&j, id ? id : "");
         fputs(j.p, stdout);
         sb_free(&j);
-        printf(",\"out_of_scope\":[%s],\"count\":%d,\"strict\":%s}\n",
-               b.p ? b.p : "", bad, strict ? "true" : "false");
+        printf(",\"out_of_scope\":[%s],\"count\":%d,"
+               "\"stale_anchors\":[%s],\"strict\":%s}\n",
+               b.p ? b.p : "", bad, gs.js.p ? gs.js.p : "",
+               strict ? "true" : "false");
     } else if (bad) {
         printf("guard: %d path(s) outside the scope task %s declared:\n", bad,
                id ? id : "?");
@@ -465,6 +517,13 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
         printf("guard: every change is inside task %s's declared scope\n",
                id ? id : "?");
     }
+    if (!json && gs.n) {
+        printf("guard: %d anchor(s) went stale in this work (advisory):\n",
+               gs.n);
+        fputs(gs.txt.p, stdout);
+    }
+    sb_free(&gs.txt);
+    sb_free(&gs.js);
     sb_free(&b);
     for (int i = 0; i < nown; i++) free(owned[i]);
     free(owned);

@@ -141,4 +141,28 @@ assert hits, d['files']
 assert hits[0].get('line', 0) > 0, hits
 "
 
+# (9) doc-first snippets buy strictly more symbols for the same budget where
+# docs exist — measured against the body-first baseline the same binary
+# keeps alive under CG_BODY_FIRST=1
+for i in 1 2 3 4 5 6; do
+    {
+        echo "/** ledger step $i: guards an invariant no parser could infer. */"
+        echo "export function ledger_step$i(): number {"
+        for j in $(seq 1 30); do echo "  const v$j = $j + $i;"; done
+        echo "  return v1;"
+        echo "}"
+    } > "src/ledger$i.ts"
+done
+"$CG" sync >/dev/null
+count_syms() {
+    python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(len([s for s in d.get('symbols', []) if 'name' in s or 'n' in s]))"
+}
+docfirst=$("$CG" context ledger --budget 300 --json | count_syms)
+bodyfirst=$(CG_BODY_FIRST=1 "$CG" context ledger --budget 300 --json | count_syms)
+[ "$docfirst" -gt "$bodyfirst" ] \
+    || fail "doc-first fits $docfirst symbols, body-first $bodyfirst — no gain"
+
 echo ok

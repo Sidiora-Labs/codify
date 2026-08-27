@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.4.0"
+#define CG_VERSION  "0.6.0"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -62,6 +62,11 @@ const char *cg_agent_name(const char *flag);
 
 /* ---------------- sha256 ---------------- */
 void sha256_hex(const void *data, size_t len, char out_hex[65]);
+/* sha256 of the raw bytes of lines [from..to], 1-based inclusive — the
+ * drift identity behind comments.anchored_hash. Index time and query time
+ * must compute it identically, so both go through here. */
+void hash_lines(const char *data, size_t len, int from, int to,
+                char out_hex[65]);
 
 /* ---------------- ignore rules ---------------- */
 typedef struct {
@@ -111,12 +116,25 @@ typedef struct {
     int line;
 } RouteDef;
 
+/* One captured comment span — the raw material of the intent layer.
+ * lang.c lexes and coalesces; scan.c classifies and binds it to a symbol,
+ * exactly as it does for refs. `pure` is false for a comment trailing code
+ * on the same line, which never coalesces into a doc block. */
+typedef struct {
+    char *body;        /* span text, lines joined with '\n' (owned) */
+    int line, end_line;
+    bool pure;         /* the span's lines carry no code */
+    bool below;        /* documents the def ABOVE it — a python docstring */
+} CmtDef;
+
 typedef struct {
     SymDef  *defs;   int ndefs,  cdefs;
     SymRef  *refs;   int nrefs,  crefs;
     RouteDef*routes; int nroutes,croutes;
     int nlines;
     ImportDef *imports; int nimports, cimports;
+    CmtDef  *cmts;   int ncmts,  ccmts;
+    int first_code_line;   /* 1-based; 0 = the file is all comment or empty */
 } ParseResult;
 
 const char *lang_for_path(const char *path);       /* NULL if not source */
@@ -137,6 +155,7 @@ void route_add(ParseResult *pr, const char *framework, const char *method,
 typedef struct {
     sqlite3 *db;
     char root[4096];       /* project root (dir containing .codegraph) */
+    bool no_soft;          /* --no-soft: exclude prose-derived soft edges */
 } Cg;
 
 int  cg_open(Cg *cg, bool create);                 /* finds root upward */
@@ -158,7 +177,7 @@ int  cg_schema_upgrade(Cg *cg);
 /* ---------------- scan / index ---------------- */
 typedef struct {
     long files_seen, files_indexed, files_removed, files_skipped;
-    long symbols, refs, routes, bytes;
+    long symbols, refs, routes, anchors, soft, bytes;
     long ms;
 } IndexStats;
 
@@ -169,6 +188,10 @@ int cmd_search (Cg *cg, const char *q, int limit, bool json);
 int cmd_symbol (Cg *cg, const char *name, bool json);
 int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);
 int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);
+/* the tier below bodies: purpose lines and docs, wide and cheap */
+int cmd_survey(Cg *cg, const char *scope, int budget, bool json);
+/* anchor health: stale docs plus the coordination-ranked backfill list */
+int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json);
 int cmd_routes (Cg *cg, const char *filter, bool json);
 int cmd_show   (Cg *cg, const char *name, bool full, bool json); /* one body */
 int cmd_test_impact(Cg *cg, const char *name, bool json);
@@ -292,6 +315,15 @@ void lsp_diagnostics(Cg *cg, const char *abs, StrBuf *out);
 bool lsp_path_in_task_scope(Cg *cg, const char *rel);
 
 /* ---------------- governance (govern.c) ---------------- */
+/* Walk every baselined doc anchor; report each stale one through cb (may
+ * be NULL when only the count matters). Returns the stale count. Stale is
+ * derived, never stored: the baseline in comments.anchored_hash no longer
+ * matches the bound symbol's current body bytes. */
+int anchor_stale(Cg *cg,
+                 void (*cb)(void *u, const char *path, int line,
+                            const char *sym, int sym_line),
+                 void *u);
+
 int cmd_check(Cg *cg, bool json, bool strict);   /* the single CI gate */
 int cmd_brief(Cg *cg, bool json);                /* session state in one call */
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);

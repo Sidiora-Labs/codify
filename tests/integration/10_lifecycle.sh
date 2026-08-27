@@ -122,7 +122,12 @@ d = json.loads(r'''$out''')
 assert d['guarded'] is True, d
 assert d['task'] == '2.1', d
 assert d['out_of_scope'] == ['src/server.ts'], d
+assert d['stale_anchors'] == [], d      # present, and empty when none
 "
+
+# ---- check carries the intent layer's health in its summary
+out="$("$CG" check 2>/dev/null)" || true
+has "$out" "anchors current"
 
 # ---- review pairs the change with the criteria it claims
 out="$("$CG" review)"

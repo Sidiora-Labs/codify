@@ -2,7 +2,7 @@
 
 [meta]
 name            = "Codify Workflow"
-active_feature  = "codify-v05"
+active_feature  = "codify-v06"
 source_of_truth = "spec/ (kvx). Generated files are pointers — regenerate, never hand-edit."
 
 [mode]
@@ -22,14 +22,15 @@ verified_done   = "A task is done only when its verify_cmd and graph checks pass
 one_binary      = "Everything ships in the single cg binary. No new runtime dependencies."
 non_invasive    = "Codify observes and advises by default; it blocks only where the user asked it to."
 local_only      = "No network calls, no telemetry, no API keys. Ever."
+anchor_intent   = "Anchor what a reader could not derive from the code: purpose, contract, danger, pointer. Derivable comments are noise."
 
 [loop]
 step_1 = "cg brief — load repo state, active task, and prior decisions."
 step_2 = "cg spec next — take the lowest-wave eligible task."
 step_3 = "cg spec start <id> — claim it."
-step_4 = "cg context <area> — pull the code you need in one call."
-step_5 = "Implement. cg remember any decision worth keeping."
-step_6 = "cg review — check the change against the task's acceptance criteria."
+step_4 = "cg survey <area> for the wide picture, then cg context <area> — the code you need in one call."
+step_5 = "Implement. Anchor what a reader could not derive. cg remember any decision worth keeping."
+step_6 = "cg review — the change against its criteria; cg anchors --stale for docs your edits outdated."
 step_7 = "cg commit -m <msg> — snapshot, auto-tagged with the task."
 step_8 = "cg spec done <id> — qualification runs; done means proven."
 

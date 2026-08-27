@@ -22,7 +22,7 @@ Pure C11. One binary. One SQLite database. Nothing leaves your machine.
 
 Codify (invoked as `cg`) is an agent workflow engine in a single binary. It maintains the four things a project needs beyond the code itself — what the code **is**, how it got **here**, what happens **next**, and what was **learned** along the way — and serves all four to humans and AI agents alike.
 
-**What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes.
+**What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes. And beyond what a parser sees, comments are indexed as first-class nodes — the intent layer: purpose, contracts, dangers, and the couplings that live only in prose.
 
 **How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits, and `cg changelog` writes symbol-level release notes by itself.
 
@@ -32,7 +32,7 @@ Codify (invoked as `cg`) is an agent workflow engine in a single binary. It main
 
 The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg why` walks a symbol back to the decisions behind it, and `cg spec trace` walks any task to its symbols, commits, and memories.
 
-**And it is present between the steps, not only at them.** `cg brief` starts a session, `cg guard` notices when an edit drifts outside what the task declared, `cg review` pairs a change with the criteria it claims to satisfy, and `cg check` gates all of it in CI as one command. A built-in MCP server exposes the whole thing — 37 tools, plus resources and prompts — to Claude Code, Cursor, and every other MCP-capable agent, while `cg lsp` serves the same graph to any editor that speaks LSP.
+**And it is present between the steps, not only at them.** `cg brief` starts a session, `cg guard` notices when an edit drifts outside what the task declared, `cg review` pairs a change with the criteria it claims to satisfy, and `cg check` gates all of it in CI as one command. A built-in MCP server exposes the whole thing — 39 tools, plus resources and prompts — to Claude Code, Cursor, and every other MCP-capable agent, while `cg lsp` serves the same graph to any editor that speaks LSP.
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
@@ -57,6 +57,35 @@ There are no API keys, no background services, and no telemetry. Everything runs
 **It adapts to the hardware it runs on.** At startup, `cg` sizes its worker pool and SQLite caches from what the system actually provides: container-aware core counts (the intersection of cgroup v1/v2 CPU quota, the affinity mask, and online CPUs), honest available RAM (`MemAvailable` intersected with cgroup memory limits), and measured per-project cost. A 16-core workstation gets the full parallel pipeline. A 2-core VPS gets one tuned to finish reliably. Run `cg info` to see exactly how the pipeline was sized.
 
 **Everything stays local.** The graph lives in a SQLite database under `.codegraph/`, and snapshots are content-addressed objects under `.codegraph/objects/`. Delete the directory and every trace is gone.
+
+## The intent layer
+
+A parser sees symbols, calls, and routes. It cannot see *why* a function
+exists, what its callers must hold true, or that `save_tasks` must run
+after `load_tasks` reads the disk — that half of the codebase lives only in
+comments. Codify indexes it ([docs/ANCHORS.md](docs/ANCHORS.md) is the full
+convention):
+
+- **Anchors** are comments that pass the derivability test — *if an agent
+  could have written it by reading the code, it is not an anchor.* Four
+  kinds pay: **purpose**, **contract**, **danger**, **pointer**.
+- **Doc-first retrieval**: where an anchor exists, `cg context` serves doc +
+  signature instead of body lines — several times more symbols per token
+  budget.
+- **`cg survey`** reads a hundred files for the price of one body: purpose
+  lines and docs with signatures, never bodies.
+- **Soft edges**: names inside anchors resolve into `(soft)` references —
+  cross-language and dynamic couplings no parser can derive, labeled so
+  they are never mistaken for parsed calls.
+- **Drift honesty**: every anchor baselines the code it describes. When the
+  code moves on, the doc is marked stale — in `cg check`, `cg guard`, and
+  in retrieval itself — until it is updated or deleted. Warn, don't block.
+- **`cg anchors`** ranks uncovered symbols by coordination score (fan-out ×
+  extent × referencing files, deliberately not raw popularity) so backfill
+  starts at orchestration points, not at `sb_puts`.
+
+None of it is required: a repository that never adopts the convention still
+gets capture, survey, and soft edges from whatever comments already exist.
 
 ## One session with Codify
 
@@ -137,6 +166,8 @@ cg init
 | `cg symbol <name>` | Definition, snippet, and reference count |
 | `cg impact <name> [-d N] [--budget N]` | Transitive callers and callees, fitted to a token budget (default 8000) |
 | `cg context <q> [--budget N] [-n K]` | One-call context bundle for agents: memories, symbols, entry points, routes — top K symbols (default 8), fitted to a token budget (default 4000) with explicit omitted counts |
+| `cg survey [path\|query] [--budget N]` | The tier below bodies: file purpose lines and symbol docs with signatures across ~100 files per call — never a body. Uncovered files and symbols are named, and anything cut by the budget (default 16000) is an explicit omitted count |
+| `cg anchors [--stale] [--uncovered]` | Anchor health: docs whose code moved on, and uncovered symbols ranked by coordination score (fan-out × extent × referencing files) — the backfill work list |
 | `cg routes [filter]` | URL pattern to handler table |
 | `cg show <symbol\|path:line> [--full]` | Just that symbol's body — by name, or by the cursor position an editor holds; long bodies truncate with a `… (+N more lines, use --full)` marker |
 | `cg why <symbol>` | Provenance: the commits that changed it, the tasks they implemented, the decisions recorded |
@@ -177,7 +208,7 @@ A superseded memory is never deleted — the reversal is history worth keeping. 
 
 | Command | Description |
 |---|---|
-| `cg mcp` | Run as an MCP stdio server: 37 tools, plus resources and prompts (see below) |
+| `cg mcp` | Run as an MCP stdio server: 39 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
 | `cg mcp-install` | Auto-connect to Claude Code (`.mcp.json`), Cursor, VS Code, Windsurf, Zed, OpenCode, Cline, Continue, Gemini CLI, and Codex CLI, merging into existing configs |
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |

@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <ctype.h>
 #include <sys/stat.h>
 
 #define MAX_FILE_BYTES (8L * 1024 * 1024)   /* larger files: skip entirely */
@@ -166,7 +167,9 @@ static void *worker(void *arg) {
 typedef struct {
     sqlite3_stmt *up_file, *sel_file, *del_symfts, *del_syms, *del_refs,
                  *del_routes, *del_body, *ins_sym, *ins_symfts, *ins_ref,
-                 *ins_route, *ins_body, *del_imports, *ins_import;
+                 *ins_route, *ins_body, *del_imports, *ins_import,
+                 *del_cmts, *del_cmtfts, *ins_cmt, *ins_cmtfts,
+                 *sel_docs;
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
@@ -193,6 +196,17 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->del_imports= cg_prep(cg, "DELETE FROM imports WHERE file_id=?");
     s->ins_import = cg_prep(cg, "INSERT INTO imports(file_id,name,module,line)"
                                 " VALUES(?,?,?,?)");
+    s->del_cmtfts = cg_prep(cg, "DELETE FROM comment_fts WHERE rowid IN"
+                                " (SELECT id FROM comments WHERE file_id=?)");
+    s->del_cmts   = cg_prep(cg, "DELETE FROM comments WHERE file_id=?");
+    s->ins_cmt    = cg_prep(cg, "INSERT INTO comments"
+                                "(file_id,line,end_line,kind,sym_id,body,"
+                                "anchored_hash) VALUES(?,?,?,?,?,?,?)");
+    s->ins_cmtfts = cg_prep(cg, "INSERT INTO comment_fts(rowid,body)"
+                                " VALUES(?,?)");
+    s->sel_docs   = cg_prep(cg, "SELECT body, anchored_hash FROM comments"
+                                " WHERE file_id=? AND kind='doc'"
+                                " AND anchored_hash IS NOT NULL");
 }
 
 static void stmts_fin(Stmts *s) {
@@ -214,6 +228,8 @@ static void purge_file_children(Stmts *s, long file_id) {
     sqlite3_bind_int64(s->del_routes, 1, file_id); step_reset(s->del_routes);
     sqlite3_bind_int64(s->del_body,   1, file_id); step_reset(s->del_body);
     sqlite3_bind_int64(s->del_imports,1, file_id); step_reset(s->del_imports);
+    sqlite3_bind_int64(s->del_cmtfts, 1, file_id); step_reset(s->del_cmtfts);
+    sqlite3_bind_int64(s->del_cmts,   1, file_id); step_reset(s->del_cmts);
 }
 
 static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
@@ -240,6 +256,25 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
      * upsert above refreshed the metadata; keep the child rows — and with
      * them, stable symbol rowids. */
     if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return;
+
+    /* Drift baselines about to be purged with the rows: a doc whose text
+     * is unchanged must keep the body hash it was written against, so a
+     * body edit shows up as a stale anchor instead of silently
+     * re-baselining. Changed or new text re-baselines below. */
+    struct { char *body, *hash; } *oldd = NULL;
+    int noldd = 0;
+    sqlite3_bind_int64(s->sel_docs, 1, file_id);
+    while (sqlite3_step(s->sel_docs) == SQLITE_ROW) {
+        const char *ob = (const char *)sqlite3_column_text(s->sel_docs, 0);
+        const char *oh = (const char *)sqlite3_column_text(s->sel_docs, 1);
+        if (!ob || !oh) continue;
+        oldd = xrealloc(oldd, sizeof *oldd * (size_t)(noldd + 1));
+        oldd[noldd].body = xstrdup(ob);
+        oldd[noldd].hash = xstrdup(oh);
+        noldd++;
+    }
+    sqlite3_reset(s->sel_docs);
+    sqlite3_clear_bindings(s->sel_docs);
 
     purge_file_children(s, file_id);
 
@@ -302,6 +337,84 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             step_reset(s->ins_ref);
             st->refs++;
         }
+        /* Comment classification, against the very extents that attributed
+         * the refs above: doc when the span sits directly on a definition,
+         * file when nothing is defined above it, inline when it falls inside
+         * a symbol's scope, orphan otherwise. Position is the whole schema —
+         * no annotation syntax to learn and none to get wrong. */
+        for (int i = 0; i < pr->ncmts; i++) {
+            CmtDef *c = &pr->cmts[i];
+            const char *kind = "orphan";
+            long sym = 0;
+            char ah[65];
+            ah[0] = 0;
+            int doc = -1;
+            if (c->pure)
+                for (int dj = 0; dj < pr->ndefs; dj++)
+                    if (c->below ? pr->defs[dj].line == c->line - 1
+                                 : pr->defs[dj].line == c->end_line + 1)
+                        { doc = dj; break; }
+            if (doc >= 0) {
+                kind = "doc";
+                sym = rowids[doc];
+                const char *keep = NULL;    /* unchanged text keeps baseline */
+                for (int oi = 0; oi < noldd; oi++)
+                    if (strcmp(oldd[oi].body, c->body) == 0)
+                        { keep = oldd[oi].hash; break; }
+                if (keep)
+                    snprintf(ah, sizeof ah, "%s", keep);
+                else if (d->body)           /* new or edited: re-baseline */
+                    hash_lines(d->body, d->body_len,
+                               pr->defs[doc].line, ends[doc], ah);
+            } else {
+                int best = -1, best_fn = -1;
+                for (int dj = 0;
+                     dj < pr->ndefs && pr->defs[dj].line <= c->line; dj++) {
+                    if (ends[dj] < c->line) continue;
+                    best = dj;
+                    const char *k = pr->defs[dj].kind;
+                    if (strcmp(k, "function") == 0 || strcmp(k, "method") == 0 ||
+                        strcmp(k, "ctor") == 0)
+                        best_fn = dj;
+                }
+                int pick = best_fn >= 0 ? best_fn : best;
+                if (pick >= 0) {
+                    kind = "inline";
+                    sym = rowids[pick];
+                } else if (c->pure && (!pr->first_code_line ||
+                                       c->line < pr->first_code_line)) {
+                    /* opens the file: nothing but comment above it. A note
+                     * merely sitting above the first def is not a header. */
+                    kind = "file";
+                }
+            }
+            sqlite3_bind_int64(s->ins_cmt, 1, file_id);
+            sqlite3_bind_int  (s->ins_cmt, 2, c->line);
+            sqlite3_bind_int  (s->ins_cmt, 3, c->end_line);
+            sqlite3_bind_text (s->ins_cmt, 4, kind, -1, SQLITE_STATIC);
+            if (sym) sqlite3_bind_int64(s->ins_cmt, 5, sym);
+            else     sqlite3_bind_null (s->ins_cmt, 5);
+            sqlite3_bind_text (s->ins_cmt, 6, c->body, -1, SQLITE_STATIC);
+            if (ah[0]) sqlite3_bind_text(s->ins_cmt, 7, ah, -1, SQLITE_TRANSIENT);
+            else       sqlite3_bind_null(s->ins_cmt, 7);
+            step_reset(s->ins_cmt);
+
+            /* The prose index carries anchors — every file header and doc
+             * — plus any multi-line note, which is someone stopping to
+             * explain something. Single-line labels ("raw online CPUs")
+             * stay in `comments`, bound to their symbol and still word-
+             * searchable through body_fts; indexing them here would cost
+             * a fifth of the index budget to make the prose index worse. */
+            if (strcmp(kind, "file") == 0 || strcmp(kind, "doc") == 0 ||
+                c->end_line > c->line) {
+                sqlite3_bind_int64(s->ins_cmtfts, 1,
+                                   sqlite3_last_insert_rowid(cg->db));
+                sqlite3_bind_text (s->ins_cmtfts, 2, c->body, -1,
+                                   SQLITE_STATIC);
+                step_reset(s->ins_cmtfts);
+            }
+            st->anchors++;
+        }
         free(rowids);
         free(ends);
         for (int i = 0; i < pr->nroutes; i++) {
@@ -334,11 +447,130 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
         sqlite3_bind_text (s->ins_body, 3, d->body, (int)d->body_len, SQLITE_STATIC);
         step_reset(s->ins_body);
     }
+    for (int i = 0; i < noldd; i++) { free(oldd[i].body); free(oldd[i].hash); }
+    free(oldd);
     st->files_indexed++;
     st->bytes += w->size;
 }
 
 /* ---------------- top level ---------------- */
+
+/* -------- soft edges: the couplings only prose records -------- */
+
+/* One resolved mention: insert refs(kind='soft'). qual carries what the
+ * name is — NULL a symbol, 'path' a file, 'route' a route pattern. */
+static void soft_insert(sqlite3_stmt *ins, long file_id, int line,
+                        long sym_id, const char *name, const char *qual,
+                        IndexStats *st) {
+    sqlite3_bind_int64(ins, 1, file_id);
+    sqlite3_bind_text (ins, 2, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int  (ins, 3, line);
+    if (sym_id) sqlite3_bind_int64(ins, 4, sym_id);
+    else        sqlite3_bind_null (ins, 4);
+    if (qual) sqlite3_bind_text(ins, 5, qual, -1, SQLITE_STATIC);
+    else      sqlite3_bind_null(ins, 5);
+    sqlite3_step(ins);
+    sqlite3_reset(ins);
+    st->soft++;
+}
+
+/* single-row existence probe; for is_path returns the resolved path */
+static bool probe(sqlite3_stmt *st, const char *tok, char *out, size_t cap) {
+    sqlite3_bind_text(st, 1, tok, -1, SQLITE_TRANSIENT);
+    bool hit = sqlite3_step(st) == SQLITE_ROW;
+    if (hit && out) {
+        const char *p = (const char *)sqlite3_column_text(st, 0);
+        snprintf(out, cap, "%s", p ? p : tok);
+    }
+    sqlite3_reset(st);
+    return hit;
+}
+
+/* Rebuild refs kind='soft' from anchor comments (kind file and doc).
+ * Runs once after the scan completes so existence checks see the whole
+ * tree — checking at write time would make edges depend on file order.
+ * A token becomes an edge only when it resolves to a symbol, a file, or
+ * a route that exists; everything else is silence (req 4.4). */
+static void anchor_edges(Cg *cg, IndexStats *st) {
+    cg_exec(cg, "DELETE FROM refs WHERE kind='soft'");
+    sqlite3_stmt *sel = cg_prep(cg,
+        "SELECT c.file_id, c.line, c.sym_id, c.body, coalesce(s.name,'') "
+        "FROM comments c LEFT JOIN symbols s ON s.id=c.sym_id "
+        "WHERE c.kind IN ('file','doc') ORDER BY c.file_id, c.line");
+    sqlite3_stmt *ins = cg_prep(cg,
+        "INSERT INTO refs(file_id,name,line,sym_id,qual,kind) "
+        "VALUES(?,?,?,?,?,'soft')");
+    sqlite3_stmt *is_sym = cg_prep(cg,
+        "SELECT 1 FROM symbols WHERE name=? LIMIT 1");
+    sqlite3_stmt *is_path = cg_prep(cg,
+        "SELECT path FROM files WHERE path=?1 OR path LIKE '%/'||?1 LIMIT 1");
+    sqlite3_stmt *is_route = cg_prep(cg,
+        "SELECT pattern FROM routes WHERE pattern=?1 LIMIT 1");
+    while (sqlite3_step(sel) == SQLITE_ROW) {
+        long fid    = sqlite3_column_int64(sel, 0);
+        int  line   = sqlite3_column_int  (sel, 1);
+        long sym    = sqlite3_column_int64(sel, 2);
+        const char *body = (const char *)sqlite3_column_text(sel, 3);
+        const char *self = (const char *)sqlite3_column_text(sel, 4);
+        if (!body) continue;
+        char seen[24][512];                 /* per-span dedupe */
+        int nseen = 0;
+        for (const char *p = body; *p && nseen < 24; ) {
+            /* words are runs of identifier/path characters */
+            while (*p && !(isalnum((unsigned char)*p) || *p == '_' ||
+                           *p == '/' || *p == '.')) p++;
+            if (!*p) break;
+            const char *w = p;
+            while (isalnum((unsigned char)*p) || *p == '_' ||
+                   *p == '/' || *p == '.' || *p == '-') p++;
+            size_t n = (size_t)(p - w);
+            while (n && (w[n-1] == '.' || w[n-1] == ',' || w[n-1] == '-' ||
+                         w[n-1] == '/')) n--;      /* sentence punctuation */
+            if (n < 3 || n >= 512) continue;
+            char tok[512];
+            memcpy(tok, w, n); tok[n] = 0;
+            bool digits = true;
+            for (size_t i = 0; i < n; i++)
+                if (!isdigit((unsigned char)tok[i]) && tok[i] != '.')
+                    { digits = false; break; }
+            if (digits) continue;                  /* versions, numbers */
+            if (self[0] && strcmp(tok, self) == 0) continue;  /* self-edge */
+            bool dup = false;
+            for (int i = 0; i < nseen; i++)
+                if (strcmp(seen[i], tok) == 0) { dup = true; break; }
+            if (dup) continue;
+            snprintf(seen[nseen++], sizeof seen[0], "%s", tok);
+
+            char rp[1024];
+            const char *slash = strchr(tok, '/');
+            const char *dot   = strchr(tok, '.');
+            if (slash) {
+                /* route patterns first (/api/tasks), then repo paths */
+                if (tok[0] == '/' && probe(is_route, tok, NULL, 0))
+                    soft_insert(ins, fid, line, sym, tok, "route", st);
+                else if (probe(is_path, tok, rp, sizeof rp))
+                    soft_insert(ins, fid, line, sym, rp, "path", st);
+            } else if (probe(is_sym, tok, NULL, 0)) {
+                soft_insert(ins, fid, line, sym, tok, NULL, st);
+            } else if (dot) {
+                /* main.go — a bare basename; db.Reconcile — a dotted name */
+                if (probe(is_path, tok, rp, sizeof rp)) {
+                    soft_insert(ins, fid, line, sym, rp, "path", st);
+                } else {
+                    const char *last = strrchr(tok, '.') + 1;
+                    if (strlen(last) >= 3 && strcmp(last, self) != 0 &&
+                        probe(is_sym, last, NULL, 0))
+                        soft_insert(ins, fid, line, sym, last, NULL, st);
+                }
+            }
+        }
+    }
+    sqlite3_finalize(sel);
+    sqlite3_finalize(ins);
+    sqlite3_finalize(is_sym);
+    sqlite3_finalize(is_path);
+    sqlite3_finalize(is_route);
+}
 
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     long t0 = now_ms();
@@ -459,6 +691,8 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     }
 
     stmts_fin(&s);
+    if (st->files_indexed + st->files_removed > 0)
+        anchor_edges(cg, st);
     cg_exec(cg, "COMMIT");
 
     st->ms = now_ms() - t0;
@@ -480,11 +714,13 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
 
     if (!quiet) {
         printf("indexed %ld file%s (%ld unchanged, %ld removed, %ld skipped) "
-               "in %ldms — %ld symbols, %ld refs, %ld routes [%d workers]\n",
+               "in %ldms — %ld symbols, %ld refs, %ld routes, %ld comments, "
+               "%ld soft [%d workers]\n",
                st->files_indexed, st->files_indexed == 1 ? "" : "s",
                st->files_seen - st->files_indexed - st->files_skipped,
                st->files_removed, st->files_skipped, st->ms,
-               st->symbols, st->refs, st->routes, si->workers);
+               st->symbols, st->refs, st->routes, st->anchors, st->soft,
+               si->workers);
     }
     return 0;
 }

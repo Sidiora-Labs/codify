@@ -23,6 +23,14 @@ static const SymRef *ref_of(const ParseResult *result, const char *name) {
     return NULL;
 }
 
+/* a captured comment span starting at `line`, or NULL */
+static const CmtDef *span_at(const ParseResult *result, int line) {
+    for (int i = 0; i < result->ncmts; i++)
+        if (result->cmts[i].line == line)
+            return &result->cmts[i];
+    return NULL;
+}
+
 static bool import_row(const ParseResult *result, const char *name,
                        const char *module) {
     for (int i = 0; i < result->nimports; i++)
@@ -213,6 +221,73 @@ int main(void) {
     const char ics[] = "using A.B;\n";
     lang_parse("csharp", "src/I.cs", ics, sizeof ics - 1, &parsed);
     ok(import_row(&parsed, "B", "A"), "c# using splits last segment");
+    parse_result_free(&parsed);
+
+    /* ---- comment capture: spans, coalescing, purity ---- */
+    const char cmt[] =
+        "/* header line one\n"
+        " * header line two */\n"
+        "\n"
+        "/* doc for f */\n"
+        "int f(void) {\n"
+        "    int x = 1;   /* trailing */\n"
+        "    /* step */\n"
+        "    return x;\n"
+        "}\n";
+    lang_parse("c", "src/c.c", cmt, sizeof cmt - 1, &parsed);
+    const CmtDef *c1 = span_at(&parsed, 1);
+    ok(c1 != NULL, "c: header span captured");
+    ok(c1 && c1->end_line == 2, "c: block comment coalesces across lines");
+    ok(c1 && c1->pure, "c: a comment-only line is pure");
+    ok(span_at(&parsed, 3) == NULL, "c: a blank line closes the span");
+    const CmtDef *c4 = span_at(&parsed, 4);
+    ok(c4 && c4->end_line == 4, "c: doc span stops before the definition");
+    const CmtDef *c6 = span_at(&parsed, 6);
+    ok(c6 && !c6->pure, "c: a comment trailing code is not pure");
+    ok(span_at(&parsed, 7) != NULL, "c: an in-body comment is its own span");
+    ok(parsed.first_code_line == 5, "c: first code line is the definition");
+    parse_result_free(&parsed);
+
+    /* line comments on consecutive lines are one span, not three */
+    const char run[] =
+        "// one\n"
+        "// two\n"
+        "// three\n"
+        "int g(void) { return 0; }\n";
+    lang_parse("c", "src/r.c", run, sizeof run - 1, &parsed);
+    ok(parsed.ncmts == 1, "c: consecutive line comments coalesce");
+    ok(span_at(&parsed, 1) && span_at(&parsed, 1)->end_line == 3,
+       "c: coalesced span spans all three lines");
+    parse_result_free(&parsed);
+
+    /* python docstrings are the language's doc comments, and they follow
+       the definition rather than precede it */
+    const char pydoc[] =
+        "\"\"\"module doc\"\"\"\n"
+        "\n"
+        "def f(path):\n"
+        "    \"\"\"doc for f\n"
+        "    second line\"\"\"\n"
+        "    return path\n";
+    lang_parse("python", "src/p.py", pydoc, sizeof pydoc - 1, &parsed);
+    const CmtDef *p1 = span_at(&parsed, 1);
+    ok(p1 != NULL, "python: module docstring captured");
+    ok(p1 && p1->below, "python: docstring flagged as documenting from below");
+    const CmtDef *p4 = span_at(&parsed, 4);
+    ok(p4 != NULL, "python: function docstring captured");
+    ok(p4 && p4->end_line == 5, "python: multi-line docstring coalesces");
+    ok(parsed.first_code_line == 3, "python: docstring is not code");
+    parse_result_free(&parsed);
+
+    /* a triple-quoted string that is not in a docstring position stays a
+       string — capturing it would fill the index with data */
+    const char pystr[] =
+        "def f():\n"
+        "    x = 1\n"
+        "    q = \"\"\"just a string\"\"\"\n"
+        "    return q\n";
+    lang_parse("python", "src/q.py", pystr, sizeof pystr - 1, &parsed);
+    ok(parsed.ncmts == 0, "python: a plain triple-quoted string is not a doc");
     parse_result_free(&parsed);
 
     return t_done("lang");

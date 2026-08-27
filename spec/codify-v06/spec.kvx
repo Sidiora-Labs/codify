@@ -1,0 +1,169 @@
+# Codify v0.6 — the intent layer.
+
+[meta]
+feature = "codify-v06"
+intro   = "Index the half of a codebase the parser cannot see. Symbols, calls, and routes are the structure graph; purpose, contract, danger, and coupling are the intent graph, and the intent graph lives only in prose. Codify already lexes every comment in 19 languages inside clean_line and then discards them. Capture them as first-class nodes bound to symbols, resolve the names inside them into edges no static analysis can derive, serve them as a survey tier an agent reads before paying for bodies, and use snapshot diffs to keep them honest."
+
+measured_perf = "Capturing every span and indexing every span for prose costs +16 percent full-index time. Indexing only anchors and multi-line notes brings it to +5.8 percent median over 17 paired runs (CPU, user+sys, 280-file tree), with capture slower in 17 of 17 — a real but small effect inside the budget. A word-count filter was measured and rejected: it drops short field docs like 'raw online CPUs' while keeping long section separators."
+measured = "Baseline on this repository at spec time: 841 symbols, 23 percent carrying a doc comment. Doc-first snippets cut 55 percent where a doc exists (2.2x), 16 percent repo-wide at current coverage. The compression is not the prize: cg context gives snippets to only the top 3 hits, so the real delta is 3 informative symbols per call today versus roughly 80 at 49 tokens per doc inside the same 4000-token budget. Doc coverage is inversely correlated with inbound reference count (3 percent among 20-plus-ref symbols) because that tail is sb_puts and xmalloc, which correctly need no anchor — hence the coordination-score ranking in req.6."
+
+[req.1]
+title = "Comment capture"
+story = "As the indexer, I want every comment recorded and classified so that intent becomes queryable without a second parse."
+ac_1  = "WHEN a file is indexed THE scan SHALL record each comment span with its file, start line, end line, and text, taken from the existing cross-line stripper pass."
+ac_2  = "WHEN a comment immediately precedes a definition THE comment SHALL be classified doc and bound to that symbol's id."
+ac_3  = "WHEN a comment opens a file before any definition THE comment SHALL be classified file."
+ac_4  = "WHEN a comment sits inside a symbol's extent THE comment SHALL be classified inline and bound to the enclosing symbol."
+ac_5  = "WHEN comments are captured THE full-repository index time SHALL stay within 10 percent of the pre-capture baseline and SHALL add no link-time dependency."
+ac_6  = "WHEN a captured comment is an anchor — a file header or a doc — or a multi-line note THE text SHALL be matchable by word in a prose index separate from body_fts."
+ac_7  = "WHEN a captured comment is a single-line note inside a symbol THE span SHALL still be stored and bound, and SHALL stay out of the prose index, where a label would dilute retrieval and cost a fifth of the index budget."
+
+[req.2]
+title = "Doc-first retrieval"
+story = "As an agent, I want a symbol's intent before its boilerplate so that the same budget buys more understanding."
+ac_1  = "WHEN a symbol carries a doc comment THE snippet SHALL lead with that comment and the signature rather than the first body lines."
+ac_2  = "WHEN a symbol carries no doc comment THE snippet SHALL fall back to the existing body-line behaviour unchanged."
+ac_3  = "WHEN context renders under a fixed budget THE doc-first form SHALL fit strictly more distinct symbols than the body-first form for the same query."
+ac_4  = "WHEN a bound doc comment is stale THE render SHALL mark it stale rather than present it as current."
+ac_5  = "WHEN a doc comment exceeds the per-symbol share of the budget THE render SHALL truncate it and announce the truncation."
+
+[req.3]
+title = "The survey tier"
+story = "As a main agent, I want to survey a wide area for the price of one body read so that exploration stops being delegated to sub-agents."
+ac_1  = "WHEN cg survey runs over a path or a query THE output SHALL contain file purpose lines and symbol docs with signatures and SHALL NOT contain symbol bodies."
+ac_2  = "WHEN survey covers a directory THE per-file cost SHALL stay bounded so that at least one hundred files fit inside the default budget."
+ac_3  = "WHEN a file or a symbol carries no anchor THE survey SHALL name it as uncovered rather than omit it silently."
+ac_4  = "WHEN the budget elides entries THE survey SHALL report an explicit omitted count."
+ac_5  = "WHEN survey is invoked over MCP THE same output SHALL be exposed as a tool."
+
+[req.4]
+title = "Soft edges"
+story = "As an agent, I want the couplings a parser cannot see so that cross-language and dynamic relationships stop costing a search."
+ac_1  = "WHEN an anchor comment names a symbol that exists THE indexer SHALL record a reference of kind soft attributed to the symbol the comment is bound to."
+ac_2  = "WHEN a soft edge is traversed or printed THE output SHALL label it soft so that it is never presented as a parsed call."
+ac_3  = "WHEN an anchor names a repository path or a route that exists THE edge SHALL resolve to that file or route."
+ac_4  = "WHEN a name in a comment matches no symbol, path, or route THE indexer SHALL record nothing rather than invent an edge."
+ac_5  = "WHEN cg impact runs THE soft edges SHALL be included and attributed as soft, and excludable by flag."
+
+[req.5]
+title = "Anchor honesty"
+story = "As a reviewer, I want stale anchors surfaced so that the intent layer degrades loudly instead of lying quietly."
+ac_1  = "WHEN a bound symbol's body changes and the text of its doc comment does not THE anchor SHALL be marked stale."
+ac_2  = "WHEN the text of an anchor comment changes THE anchor SHALL re-baseline against the current symbol body and clear its stale mark."
+ac_3  = "WHEN retrieval ranks anchors THE stale anchors SHALL rank below current ones."
+ac_4  = "WHEN cg guard runs over uncommitted work THE anchors that work made stale SHALL be reported as warnings and SHALL NOT block."
+ac_5  = "WHEN cg check runs THE stale anchor count SHALL be reported as part of its summary."
+
+[req.6]
+title = "The anchor convention"
+story = "As a maintainer, I want a stated contract and a way to find gaps so that anchors get written where they pay and nowhere else."
+ac_1  = "WHEN the convention is documented THE four anchor kinds — purpose, contract, danger, pointer — SHALL be stated together with the derivability test that excludes any comment restating the code."
+ac_2  = "WHEN cg anchors ranks uncovered symbols THE ranking SHALL use a coordination score — fan-out times extent times distinct referencing files — and SHALL NOT use raw inbound reference count, which ranks self-evident utilities highest."
+ac_3  = "WHEN a repository has never adopted the convention THE capture, retrieval, survey, and edge features SHALL still function on whatever comments already exist."
+ac_4  = "WHEN the convention ships THE agent instructions SHALL carry it and the workflow spec SHALL name anchors as part of the loop."
+
+[tasks]
+
+[task.1]
+title = "Capture"
+
+[task.1.1]
+title      = "Comment spans, classification, and the anchor index"
+status     = "done"
+wave       = 1
+symbols    = ["add_cmt", "cmt_flush", "cmt_mark"]
+touches    = ["src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "tests/unit/test_lang.c", "tests/integration/20_anchors.sh", "tests/fixtures/anchors/*"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/20_anchors.sh"
+do_1       = "clean_line reports the comment byte range it just blanked (cmt_mark); lang_parse coalesces consecutive pure-comment lines into one span (cmt_flush/add_cmt). No second pass over file bytes."
+do_2       = "comments table (file_id, line, end_line, kind, sym_id, body, anchored_hash) plus comment_fts over body keyed by comments.id; delete-and-reinsert per file like body_fts. stale is derived in task 4.1, not stored."
+do_3       = "Classify by position against the def list the same pass already builds: doc when the span ends on the line before a def, file when it precedes every def, inline when inside a symbol extent, orphan otherwise"
+do_4       = "Bind doc and inline comments to sym_id; reuse lang_scope_end extents so binding matches the scope attribution v0.4 already proved"
+do_5       = "Unit tests for classification across brace, indentation, and block-comment languages; 20_anchors.sh fixture repo covering c, go, python, ts"
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]
+
+[task.2]
+title = "Retrieval"
+
+[task.2.1]
+title      = "Doc-first snippets"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["symbol_doc"]
+touches    = ["src/graph.c", "src/cg.h", "tests/integration/16_retrieval.sh", "tests/integration/20_anchors.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/16_retrieval.sh && CG=$PWD/cg tests/integration/20_anchors.sh"
+do_1       = "symbol_doc: fetch the bound doc comment for a symbol, returning NULL when absent or when it fails the derivability check"
+do_2       = "file_snippet leads with doc plus signature when a doc exists; unchanged body-line fallback when it does not"
+do_3       = "Stale docs render with a stale marker; over-long docs truncate with an announced cut"
+do_4       = "Budget accounting unchanged in shape: docs count against the same cap, so more symbols survive the same budget"
+do_5       = "16_retrieval asserts the symbol-count increase for a fixed query and budget against the body-first baseline"
+reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5"]
+
+[task.3]
+title = "Edges"
+
+[task.3.1]
+title      = "Soft edges from anchor prose"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["anchor_edges"]
+touches    = ["src/scan.c", "src/graph.c", "src/db.c", "src/main.c", "src/cg.h", "tests/integration/20_anchors.sh", "tests/fixtures/anchors/*"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/20_anchors.sh && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "Tokenize identifier-shaped words, dotted names, and repository-relative paths out of captured comment text"
+do_2       = "Record them into refs with kind soft, file_id and line of the comment, sym_id of the bound symbol; resolution stays by name at query time, matching the existing refs contract"
+do_3       = "Drop tokens matching no symbol, file, or route: silence beats an invented edge"
+do_4       = "callers_of, callees_of, and cg impact label soft edges distinctly; --no-soft excludes them"
+do_5       = "Accuracy test proves soft edges never displace or overwrite a parsed call edge"
+reqs       = ["4.1", "4.2", "4.3", "4.4", "4.5"]
+
+[task.4]
+title = "Honesty and survey"
+
+[task.4.1]
+title      = "Anchor drift baseline, guard, and check"
+status     = "done"
+wave       = 3
+requires   = ["1.1", "2.1"]
+symbols    = ["anchor_stale"]
+touches    = ["src/scan.c", "src/govern.c", "src/cg.h", "tests/integration/20_anchors.sh", "tests/integration/10_lifecycle.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/20_anchors.sh && CG=$PWD/cg tests/integration/10_lifecycle.sh"
+do_1       = "anchored_hash carries the bound symbol's body hash as of the last time the comment text itself changed: on reindex, unchanged comment text keeps the old baseline, changed text re-baselines"
+do_2       = "stale is derived, not stored by hand: current body hash differs from anchored_hash"
+do_3       = "Retrieval ranking pushes stale anchors below current ones wherever anchors are ranked"
+do_4       = "cg guard reports anchors the uncommitted work made stale, as warnings only, per the warn-dont-block rule"
+do_5       = "cg check reports the stale anchor count in its summary"
+reqs       = ["5.1", "5.2", "5.3", "5.4", "5.5"]
+
+[task.4.2]
+title      = "cg survey — the tier below bodies"
+status     = "done"
+wave       = 3
+requires   = ["2.1"]
+symbols    = ["cmd_survey"]
+touches    = ["src/graph.c", "src/main.c", "src/mcp.c", "src/cg.h", "tests/integration/20_anchors.sh", "tests/integration/04_mcp.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/20_anchors.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "cg survey [path|query] [--budget N] [--json]: file purpose lines, then symbol docs with signatures, grouped by file. Never a body."
+do_2       = "Per-file cost bounded so one hundred files fit the default budget; entries cut by the budget reported as an explicit omitted count"
+do_3       = "Files and symbols carrying no anchor listed under uncovered rather than dropped"
+do_4       = "MCP tool exposing the same output; registered beside context and impact"
+do_5       = "20_anchors asserts the no-bodies guarantee and the hundred-file bound"
+reqs       = ["3.1", "3.2", "3.3", "3.4", "3.5"]
+
+[task.5]
+title = "Surface"
+
+[task.5.1]
+title      = "cg anchors, the convention, and the docs"
+status     = "done"
+wave       = 4
+requires   = ["3.1", "4.1", "4.2"]
+symbols    = ["cmd_anchors"]
+touches    = ["src/graph.c", "src/main.c", "src/mcp.c", "src/cg.h", "src/govern.c", "spec/workflow.kvx", "README.md", "CHANGELOG.md", "docs/*", "tests/integration/20_anchors.sh"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/20_anchors.sh && CG=$PWD/cg tests/integration/12_authoring.sh"
+do_1       = "cg anchors [--stale] [--uncovered] [--json]: stale anchors and unanchored symbols ranked by coordination score, so backfill starts at the orchestration points rather than at sb_puts"
+do_2       = "Document the four kinds — purpose, contract, danger, pointer — with the derivability test: if an agent could have written the comment by reading the code, it is not an anchor"
+do_3       = "workflow.kvx gains anchors in the loop; regenerate AGENTS.md and CLAUDE.md through specgen rather than editing them"
+do_4       = "README intent-layer section, CHANGELOG entry for 0.6.0"
+do_5       = "Backfill guidance: cg anchors --uncovered is the work list, and the drift lint is what keeps a backfill honest afterwards"
+reqs       = ["6.1", "6.2", "6.3", "6.4"]

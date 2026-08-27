@@ -233,6 +233,39 @@ static const LangSpec *spec_for_path(const char *path) {
 
 /* ---------------- result buffers ---------------- */
 
+#define CMT_MAX_BYTES 4000        /* a span longer than this is a licence header */
+
+static void add_cmt(ParseResult *pr, const char *body, int line, int end,
+                    bool pure, bool below) {
+    while (*body == ' ' || *body == '\t') body++;
+    if (!*body) return;                      /* a bare marker carries nothing */
+    if (pr->ncmts == pr->ccmts) {
+        pr->ccmts = pr->ccmts ? pr->ccmts * 2 : 64;
+        pr->cmts = xrealloc(pr->cmts, sizeof(CmtDef) * (size_t)pr->ccmts);
+    }
+    CmtDef *c = &pr->cmts[pr->ncmts++];
+    c->body = xstrdup(body);
+    c->line = line;
+    c->end_line = end;
+    c->pure = pure;
+    c->below = below;
+}
+
+/* Coalescing accumulator: consecutive pure-comment lines become one span. */
+typedef struct { StrBuf b; int line, end; bool pure, open, below; } CmtAcc;
+
+static void cmt_flush(CmtAcc *a, ParseResult *pr) {
+    if (!a->open) return;
+    /* trim trailing blank lines the block may have collected */
+    while (a->b.len && (a->b.p[a->b.len-1] == '\n' ||
+                        a->b.p[a->b.len-1] == ' ' ||
+                        a->b.p[a->b.len-1] == '\t'))
+        a->b.p[--a->b.len] = 0;
+    add_cmt(pr, a->b.p, a->line, a->end, a->pure, a->below);
+    sb_free(&a->b);
+    memset(a, 0, sizeof *a);
+}
+
 static void add_def(ParseResult *pr, const char *name, size_t nlen,
                     const char *kind, int line, const char *sig) {
     for (int i = pr->ndefs - 1; i >= 0 && pr->defs[i].line == line; i--)
@@ -324,7 +357,9 @@ void parse_result_free(ParseResult *pr) {
     for (int i = 0; i < pr->nimports; i++) {
         free(pr->imports[i].name); free(pr->imports[i].module);
     }
+    for (int i = 0; i < pr->ncmts; i++) free(pr->cmts[i].body);
     free(pr->defs); free(pr->refs); free(pr->routes); free(pr->imports);
+    free(pr->cmts);
     memset(pr, 0, sizeof *pr);
 }
 
@@ -332,6 +367,17 @@ void parse_result_free(ParseResult *pr) {
 
 static bool starts_with(const char *s, const char *pre) {
     return pre && strncmp(s, pre, strlen(pre)) == 0;
+}
+
+/* Byte range of comment text on the current line, as a by-product of the
+ * pass that blanks it. start < 0 means the line carried no comment. The
+ * range is the union over the line: a line rarely holds more than one. */
+typedef struct { int start, end; } CmtRange;
+
+static void cmt_mark(CmtRange *cr, size_t a, size_t b) {
+    if (!cr) return;
+    if (cr->start < 0 || (int)a < cr->start) cr->start = (int)a;
+    if ((int)b > cr->end) cr->end = (int)b;
 }
 
 /* cross-line stripper state: block comments and multi-line strings */
@@ -345,7 +391,8 @@ typedef struct {
  * clean may be NULL: advance the cross-line state only, emitting nothing —
  * used for over-long lines so skipping them cannot desync the stripper. */
 static void clean_line(const LangSpec *L, const char *line, size_t n,
-                       char *clean, CleanState *cs) {
+                       char *clean, CleanState *cs, CmtRange *cr) {
+    if (cr) { cr->start = -1; cr->end = -1; }
     bool py = strcmp(L->name, "python") == 0;
     bool jss = strcmp(L->name, "js") == 0;
     size_t i = 0;
@@ -357,9 +404,10 @@ static void clean_line(const LangSpec *L, const char *line, size_t n,
                 size_t bl = strlen(L->block_close);
                 for (size_t k = 0; k < bl && i + k < n; k++)
                     if (clean) clean[i + k] = ' ';
+                cmt_mark(cr, i, i + bl > n ? n : i + bl);
                 i += bl;
                 cs->in_block = false;
-            } else { if (clean) clean[i] = ' '; i++; }
+            } else { if (clean) clean[i] = ' '; cmt_mark(cr, i, i + 1); i++; }
         } else if (cs->mstr) {
             if (cs->triple && i + 2 < n && c == cs->mstr &&
                 line[i+1] == cs->mstr && line[i+2] == cs->mstr) {
@@ -384,13 +432,16 @@ static void clean_line(const LangSpec *L, const char *line, size_t n,
                 i++;
             }
         } else if (L->line_comment && starts_with(line + i, L->line_comment)) {
+            cmt_mark(cr, i, n);
             while (i < n) { if (clean) clean[i] = ' '; i++; }
         } else if (L->line_comment2 && starts_with(line + i, L->line_comment2)) {
+            cmt_mark(cr, i, n);
             while (i < n) { if (clean) clean[i] = ' '; i++; }
         } else if (L->block_open && starts_with(line + i, L->block_open)) {
             size_t bl = strlen(L->block_open);
             for (size_t k = 0; k < bl && i + k < n; k++)
                 if (clean) clean[i + k] = ' ';
+            cmt_mark(cr, i, i + bl > n ? n : i + bl);
             i += bl;
             cs->in_block = true;
         } else if (py && (c == '\'' || c == '"') && i + 2 < n &&
@@ -700,6 +751,10 @@ void lang_parse(const char *lang, const char *path, const char *src,
     bool cfam_protos = strcmp(L->name, "c") == 0 || strcmp(L->name, "cpp") == 0;
 
     CleanState cs = {0};
+    CmtRange cr = { -1, -1 };
+    CmtAcc acc; memset(&acc, 0, sizeof acc);
+    bool pylang = strcmp(L->name, "python") == 0;
+    bool ds_open = false;              /* inside a docstring we accepted */
     int impstate = 0;
     int lineno = 0;
     size_t pos = 0;
@@ -722,8 +777,9 @@ void lang_parse(const char *lang, const char *path, const char *src,
         }
         if (ll >= sizeof orig) {           /* minified / generated: skip */
             /* advance the stripper state so later lines stay in sync */
-            clean_line(L, ls, ll, NULL, &cs);
+            clean_line(L, ls, ll, NULL, &cs, NULL);
             clines[lineno - 1] = xstrdup("");
+            cmt_flush(&acc, pr);
             continue;
         }
         memcpy(orig, ls, ll);
@@ -731,8 +787,75 @@ void lang_parse(const char *lang, const char *path, const char *src,
         if (ll && orig[ll-1] == '\r') orig[--ll] = 0;
 
         bool in_str = cs.mstr != 0 || cs.in_block;   /* line starts inside */
-        clean_line(L, orig, ll, clean, &cs);
+        clean_line(L, orig, ll, clean, &cs, &cr);
         clines[lineno - 1] = xstrdup(clean);
+
+        bool code = false;
+        for (const char *q = clean; *q; q++)
+            if (!isspace((unsigned char)*q)) { code = true; break; }
+        if (code && !pr->first_code_line) pr->first_code_line = lineno;
+
+        /* Python keeps its intent in docstrings, which the stripper sees as
+         * strings, not comments. A triple-quoted string opening a module or
+         * sitting directly under a def is the language's doc comment, so it
+         * enters the same index — flagged `below`, since unlike every other
+         * language it follows the definition it documents. */
+        bool ds_line = false;
+        if (pylang) {
+            if (ds_open) {
+                ds_line = true;
+            } else if (!code) {
+                const char *t = orig;
+                while (*t == ' ' || *t == '\t') t++;
+                bool opens = strncmp(t, "\"\"\"", 3) == 0 ||
+                             strncmp(t, "'''", 3) == 0;
+                if (opens && (!pr->first_code_line ||
+                              (pr->ndefs &&
+                               pr->defs[pr->ndefs-1].line == lineno - 1)))
+                    ds_line = true;
+            }
+            ds_open = ds_line && cs.mstr != 0;
+        }
+        if (ds_line) {
+            const char *t = orig;
+            while (*t == ' ' || *t == '\t') t++;
+            bool cont = acc.open && acc.below && acc.end == lineno - 1;
+            if (!cont) {
+                cmt_flush(&acc, pr);
+                sb_init(&acc.b);
+                acc.open = true; acc.line = lineno;
+                acc.pure = true; acc.below = true;
+            } else {
+                sb_putc(&acc.b, '\n');
+            }
+            if (acc.b.len < CMT_MAX_BYTES) sb_puts(&acc.b, t);
+            acc.end = lineno;
+        }
+        /* Comment capture, free-riding on the pass that just blanked them:
+         * consecutive pure-comment lines coalesce into one span, a comment
+         * trailing code stands alone, and any other line closes the block. */
+        else if (cr.start >= 0) {
+            int cs0 = cr.start;
+            int ce  = cr.end > (int)ll ? (int)ll : cr.end;
+            while (ce > cs0 && (orig[ce-1] == ' ' || orig[ce-1] == '\t')) ce--;
+            bool pure = !code;
+            /* only pure lines extend a pure block, and only contiguously */
+            if (!(acc.open && pure && acc.pure && !acc.below &&
+                  acc.end == lineno - 1))
+                cmt_flush(&acc, pr);
+            if (!acc.open) {
+                sb_init(&acc.b);
+                acc.open = true; acc.line = lineno; acc.pure = pure;
+            } else {
+                sb_putc(&acc.b, '\n');
+            }
+            if (acc.b.len < CMT_MAX_BYTES)
+                for (int q = cs0; q < ce; q++) sb_putc(&acc.b, orig[q]);
+            acc.end = lineno;
+        } else {
+            cmt_flush(&acc, pr);
+        }
+
         if (!in_str) lang_scan_imports(L, orig, lineno, pr, &impstate);
 
         int defs_before = pr->ndefs;
@@ -808,6 +931,7 @@ void lang_parse(const char *lang, const char *path, const char *src,
 
         routes_scan_line(L->name, path, lineno, orig, pr);
     }
+    cmt_flush(&acc, pr);
     /* real scope ends now that every line's cleaned form is known */
     for (int i = 0; i < pr->ndefs; i++)
         pr->defs[i].end_line = lang_scope_end(L, clines, lineno,

@@ -13,7 +13,7 @@ s = open(p).read().replace('verify_cmd = "test -f verify.marker"',
 open(p, "w").write(s)
 EOF
 
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
 '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
 '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_code","arguments":{"query":"formatName"}}}' \
@@ -31,6 +31,7 @@ printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"spec_ready","arguments":{}}}' \
 '{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"get_context","arguments":{"query":"formatName","budget":200,"limit":2}}}' \
 '{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"resume","arguments":{}}}' \
+'{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"survey","arguments":{"scope":"src","budget":2000}}}' \
 | "$CG" mcp > "$TMP/mcp.out"
 
 [ ! -e mcp-qualification.ran ] \
@@ -48,7 +49,8 @@ assert init["protocolVersion"] == "2025-06-18", init
 
 tools = [t["name"] for t in by_id[2]["result"]["tools"]]
 assert len(tools) >= 19, tools
-for t in ("search_code", "get_context", "impact_analysis", "vcs_commit",
+for t in ("search_code", "get_context", "impact_analysis", "survey",
+          "vcs_commit",
           "spec_status", "spec_next", "spec_start", "spec_done",
           "spec_mode", "spec_implemented", "spec_render", "spec_trace",
           "remember", "recall", "spec_ready", "spec_claim_next",
@@ -130,6 +132,14 @@ assert any("formatName" in s.get("name", "")
 res = by_id[17]["result"]                     # no task in progress -> the
 assert res["isError"] is True, res            # explanation reaches the body
 assert "no task in progress" in res["content"][0]["text"], res
+
+svy = by_id[18]["result"]                     # survey: the tier below bodies
+assert svy["isError"] is False, svy
+sv = json.loads(svy["content"][0]["text"])
+assert sv["scope"] == "src", sv
+assert isinstance(sv["files"], list) and sv["files"], sv
+assert "omitted" in sv, sv
+assert not any("return" in json.dumps(f.get("docs", [])) for f in sv["files"]), sv
 EOF
 
 echo ok

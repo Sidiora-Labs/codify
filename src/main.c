@@ -21,6 +21,11 @@ static void usage(void) {
 "  context <query>          one-call context: symbols, snippets, edges,\n"
 "                           entry points, routes\n"
 "  routes [filter]          framework-aware URL routes -> handlers\n"
+"  survey [scope]           purpose lines and docs across many files,\n"
+"                           never bodies (scope: path prefix or query)\n"
+"  anchors [--stale] [--uncovered]\n"
+"                           anchor health: stale docs, and uncovered\n"
+"                           symbols ranked by coordination score\n"
 "  show <symbol|path:line>  print just that symbol's body\n"
 "  test-impact [symbol]     tests referencing a symbol, or your changes\n"
 "  why <symbol>             provenance: commits, tasks, and decisions\n"
@@ -168,6 +173,7 @@ int main(int argc, char **argv) {
     if (argc < 2) { usage(); return 1; }
     const char *cmd = argv[1];
     bool json = flag(&argc, argv, "--json");
+    bool no_soft = flag(&argc, argv, "--no-soft");
 
     if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
         strcmp(cmd, "-h") == 0) {
@@ -247,6 +253,7 @@ int main(int argc, char **argv) {
     }
 
     if (cg_open(&cg, false) != 0) return 1;
+    cg.no_soft = no_soft;
     int rc = 0;
 
     if (strcmp(cmd, "index") == 0) {
@@ -289,6 +296,14 @@ int main(int argc, char **argv) {
         else rc = cmd_why(&cg, argv[2], json);
     } else if (strcmp(cmd, "routes") == 0) {
         rc = cmd_routes(&cg, argc >= 3 ? argv[2] : NULL, json);
+    } else if (strcmp(cmd, "anchors") == 0) {
+        bool st = flag(&argc, argv, "--stale");
+        bool un = flag(&argc, argv, "--uncovered");
+        rc = cmd_anchors(&cg, st, un, json);
+    } else if (strcmp(cmd, "survey") == 0) {
+        int budget = atoi(opt(&argc, argv, "--budget", "16000"));
+        rc = cmd_survey(&cg, argc >= 3 ? argv[2] : NULL,
+                        budget > 0 ? budget : 16000, json);
     } else if (strcmp(cmd, "watch") == 0) {
         int deb = atoi(opt(&argc, argv, "--debounce", "300"));
         rc = cmd_watch(&cg, &si, deb > 0 ? deb : 300);

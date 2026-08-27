@@ -57,10 +57,25 @@ static const char *SCHEMA =
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
     "  name TEXT NOT NULL, module TEXT NOT NULL, line INTEGER);"
     "CREATE INDEX IF NOT EXISTS idx_import_file ON imports(file_id);"
-    "CREATE INDEX IF NOT EXISTS idx_import_name ON imports(name);";
+    "CREATE INDEX IF NOT EXISTS idx_import_name ON imports(name);"
+    /* the intent layer: comment spans bound to the symbol they describe.
+     * anchored_hash is the bound symbol's body hash as of the last change
+     * to this comment's own text — drift detection compares against it. */
+    "CREATE TABLE IF NOT EXISTS comments("
+    "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),"
+    "  line INTEGER NOT NULL, end_line INTEGER, kind TEXT, sym_id INTEGER,"
+    "  body TEXT NOT NULL, anchored_hash TEXT);"
+    "CREATE INDEX IF NOT EXISTS idx_cmt_file ON comments(file_id);"
+    "CREATE INDEX IF NOT EXISTS idx_cmt_sym  ON comments(sym_id);"
+    /* word FTS over comment text, separate from body_fts so prose can be
+     * searched without competing with code tokens. Body only: the rowid is
+     * comments.id, so path, kind, and the bound symbol come from the join
+     * rather than from duplicated UNINDEXED columns on every row. */
+    "CREATE VIRTUAL TABLE IF NOT EXISTS comment_fts USING fts5("
+    "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "2"
+#define SCHEMA_VERSION "6"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -209,7 +224,8 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS files;DROP TABLE IF EXISTS symbols;"
         "DROP TABLE IF EXISTS refs;DROP TABLE IF EXISTS routes;"
         "DROP TABLE IF EXISTS imports;DROP TABLE IF EXISTS symbol_fts;"
-        "DROP TABLE IF EXISTS body_fts;";
+        "DROP TABLE IF EXISTS body_fts;DROP TABLE IF EXISTS comments;"
+        "DROP TABLE IF EXISTS comment_fts;";
     char *err = NULL;
     if (sqlite3_exec(cg->db, DROPS, NULL, NULL, &err) != SQLITE_OK ||
         sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {

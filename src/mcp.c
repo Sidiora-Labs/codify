@@ -41,6 +41,25 @@ static int t_context(void *v) {
     free(q);
     return rc;
 }
+
+static int t_survey(void *v) {
+    CallCtx *c = v;
+    char *scope = c->args ? json_get_string(c->args, "scope") : NULL;
+    int budget = (int)json_get_int(c->args, "budget", 16000);
+    int rc = cmd_survey(c->cg, scope, budget > 0 ? budget : 16000, true);
+    free(scope);
+    return rc;
+}
+
+static int t_anchors(void *v) {
+    CallCtx *c = v;
+    char *st = c->args ? json_get_raw(c->args, "stale") : NULL;
+    char *un = c->args ? json_get_raw(c->args, "uncovered") : NULL;
+    int rc = cmd_anchors(c->cg, st && strcmp(st, "true") == 0,
+                         un && strcmp(un, "true") == 0, true);
+    free(st); free(un);
+    return rc;
+}
 static int t_symbol(void *v) {
     CallCtx *c = v;
     char *n = c->args ? json_get_string(c->args, "name") : NULL;
@@ -373,6 +392,14 @@ static int t_resume(void *v) {
                  "\"budget\":{\"type\":\"integer\",\"description\":" \
                  "\"token budget, default 4000\"}," \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
+#define S_SURVEY "{\"type\":\"object\",\"properties\":{\"scope\":{\"type\":" \
+                 "\"string\",\"description\":\"path prefix or prose query; omit " \
+                 "for the whole tree\"},\"budget\":{\"type\":\"integer\"," \
+                 "\"description\":\"token budget, default 16000\"}}}"
+#define S_ANCHORS "{\"type\":\"object\",\"properties\":{\"stale\":{\"type\":" \
+                 "\"boolean\",\"description\":\"only stale anchors\"}," \
+                 "\"uncovered\":{\"type\":\"boolean\",\"description\":" \
+                 "\"only the uncovered backfill list\"}}}"
 #define S_NAME   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}," \
                  "\"required\":[\"name\"]}"
 #define S_IMPACT "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \
@@ -480,6 +507,18 @@ static const struct {
       "code snippets, their callers and callees, entry points, and related "
       "routes. Use this first when exploring unfamiliar code.",
       S_CTX, A_READ, "Get context", t_context, true },
+    { "survey",
+      "Wide, cheap orientation over many files: each file's purpose line "
+      "and its documented symbols with signatures — never bodies. Covers "
+      "~100 files per call; undocumented files and symbols are named as "
+      "uncovered. Use before get_context when the area is unfamiliar.",
+      S_SURVEY, A_READ, "Survey", t_survey, true },
+    { "anchors",
+      "Anchor health: doc comments gone stale (their code moved on) and "
+      "uncovered symbols ranked by coordination score — fan-out × extent × "
+      "distinct referencing files. The backfill work list: anchor from the "
+      "top; a score of zero is a self-evident leaf that needs none.",
+      S_ANCHORS, A_READ, "Anchors", t_anchors, true },
     { "get_symbol",
       "Definition(s) of a symbol by name: location, code snippet, reference "
       "count.",
@@ -834,9 +873,13 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
                         CG_VERSION "\"},"
                         "\"instructions\":\"Codify serves this repository's "
                         "code graph, snapshots, spec tasks, and memories. Start "
-                        "a session with `brief`. Before changing unfamiliar "
-                        "code call `get_context` then `why`. Before `spec_done` "
-                        "call `review`. Record decisions with `remember`.\"}");
+                        "a session with `brief`. In unfamiliar areas call "
+                        "`survey` first, then `get_context`, then `why`. "
+                        "Before `spec_done` call `review`. Record decisions "
+                        "with `remember`. When you write code, anchor what a "
+                        "reader could not derive from it — purpose, contract, "
+                        "danger, pointer — as doc comments; `anchors` lists "
+                        "stale docs and where coverage pays next.\"}");
             reply_result(id, r.p);
             sb_free(&r);
             free(ver); free(params);

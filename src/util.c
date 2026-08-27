@@ -92,6 +92,27 @@ char *read_entire_file(const char *path, size_t *out_len) {
     return buf;
 }
 
+/* sha256 of the raw bytes of lines [from..to], 1-based inclusive, each
+ * line taken through its newline. The anchored_hash identity: scan.c
+ * baselines with it at index time, graph.c re-derives it at render time,
+ * and 20_anchors locks the byte range from the outside. */
+void hash_lines(const char *data, size_t len, int from, int to,
+                char out_hex[65]) {
+    const char *p = data, *end = data + len, *a = NULL, *b = end;
+    int line = 1;
+    while (p < end && line <= to) {
+        const char *nl = memchr(p, '\n', (size_t)(end - p));
+        const char *stop = nl ? nl + 1 : end;
+        if (line == from) a = p;
+        if (line == to) b = stop;
+        p = stop;
+        line++;
+        if (!nl) break;
+    }
+    if (!a || b < a) { sha256_hex("", 0, out_hex); return; }
+    sha256_hex(a, (size_t)(b - a), out_hex);
+}
+
 int write_entire_file(const char *path, const void *data, size_t len) {
     /* temp + rename in the same directory: lock-free readers see either the
        old file or the new one, never a truncated or partial write */
