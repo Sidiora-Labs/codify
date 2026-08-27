@@ -1,79 +1,136 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "KVX",
+  "name": "Ion KVX",
   "scopeName": "source.kvx",
   "fileTypes": ["kvx"],
   "patterns": [
     { "include": "#comment" },
-    { "include": "#section" },
-    { "include": "#pair" }
+    { "include": "#section-header" },
+    { "include": "#kv-status" },
+    { "include": "#kv-line" }
   ],
   "repository": {
+
     "comment": {
-      "name": "comment.line.number-sign.kvx",
-      "match": "#.*$"
+      "match": "^\\s*#.*$",
+      "name": "comment.line.number-sign.kvx"
     },
-    "section": {
-      "match": "^\\s*(\\[)\\s*([A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z0-9_-]+)*)\\s*(\\])",
+
+    "section-header": {
+      "match": "^\\s*(\\[)((?:task|req)\\.[A-Za-z0-9_.]+|[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*)(\\])\\s*$",
       "captures": {
         "1": { "name": "punctuation.definition.section.begin.kvx" },
-        "2": { "name": "entity.name.section.kvx" },
+        "2": { "name": "entity.name.section.kvx markup.heading.kvx" },
         "3": { "name": "punctuation.definition.section.end.kvx" }
       }
     },
-    "pair": {
-      "begin": "^\\s*([A-Za-z0-9_.-]+)\\s*(=)\\s*",
+
+    "kv-status": {
+      "begin": "^\\s*(status)\\s*(=)",
       "beginCaptures": {
-        "1": { "name": "variable.parameter.key.kvx" },
+        "1": { "name": "support.type.property-name.status.kvx" },
         "2": { "name": "keyword.operator.assignment.kvx" }
       },
       "end": "$",
-      "patterns": [{ "include": "#value" }]
-    },
-    "value": {
+      "name": "meta.kv.status.kvx",
       "patterns": [
-        { "include": "#comment" },
-        { "include": "#list" },
-        { "include": "#string" },
-        { "include": "#env" },
-        { "include": "#boolean" },
-        { "include": "#number" },
-        { "include": "#uri" }
+        {
+          "match": "(\")(done)(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.kvx" },
+            "2": { "name": "markup.inserted.status.done.kvx" },
+            "3": { "name": "punctuation.definition.string.kvx" }
+          }
+        },
+        {
+          "match": "(\")(in_progress)(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.kvx" },
+            "2": { "name": "markup.changed.status.in-progress.kvx" },
+            "3": { "name": "punctuation.definition.string.kvx" }
+          }
+        },
+        {
+          "match": "(\")(pending|blocked|deferred)(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.kvx" },
+            "2": { "name": "constant.language.status.kvx" },
+            "3": { "name": "punctuation.definition.string.kvx" }
+          }
+        },
+        { "include": "#string-double" },
+        { "include": "#inline-comment" }
       ]
     },
-    "list": {
-      "begin": "\\[",
-      "beginCaptures": { "0": { "name": "punctuation.definition.list.begin.kvx" } },
-      "end": "\\]",
-      "endCaptures": { "0": { "name": "punctuation.definition.list.end.kvx" } },
+
+    "kv-line": {
+      "begin": "^\\s*([A-Za-z0-9_]+)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "support.type.property-name.kvx" },
+        "2": { "name": "keyword.operator.assignment.kvx" }
+      },
+      "end": "$",
+      "name": "meta.kv.kvx",
+      "patterns": [ { "include": "#value" } ]
+    },
+
+    "value": {
       "patterns": [
-        { "include": "#string" },
-        { "include": "#env" },
+        { "include": "#string-double" },
+        { "include": "#list-punctuation" },
+        { "include": "#boolean" },
         { "include": "#number" },
+        { "include": "#inline-comment" }
+      ]
+    },
+
+    "string-double": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.kvx",
+      "patterns": [
+        {
+          "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}",
+          "name": "variable.other.interpolation.env.kvx"
+        },
+        {
+          "match": "\\b(https?)://[^\\s\"<>]+",
+          "name": "markup.underline.link.kvx"
+        },
+        {
+          "begin": "`",
+          "end": "`",
+          "name": "markup.raw.inline.kvx"
+        },
+        {
+          "comment": "dotted task/requirement ids inside list strings: \"1.2\", \"16.7\"",
+          "match": "(?<=\")\\d+(?:\\.\\d+)*(?=\")",
+          "name": "constant.numeric.task-id.kvx"
+        }
+      ]
+    },
+
+    "list-punctuation": {
+      "patterns": [
+        { "match": "\\[", "name": "punctuation.definition.list.begin.kvx" },
+        { "match": "\\]", "name": "punctuation.definition.list.end.kvx" },
         { "match": ",", "name": "punctuation.separator.list.kvx" }
       ]
     },
-    "string": {
-      "name": "string.quoted.double.kvx",
-      "begin": "\"",
-      "end": "\"",
-      "patterns": [{ "include": "#env" }]
-    },
-    "env": {
-      "name": "variable.other.env.kvx",
-      "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
-    },
+
     "boolean": {
-      "name": "constant.language.boolean.kvx",
-      "match": "\\b(true|false|yes|no)\\b"
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.boolean.kvx"
     },
+
     "number": {
-      "name": "constant.numeric.kvx",
-      "match": "(?<![\\w.])-?\\d+(\\.\\d+)*(?![\\w])"
+      "match": "\\b\\d+(?:\\.\\d+)?\\b",
+      "name": "constant.numeric.kvx"
     },
-    "uri": {
-      "name": "string.unquoted.uri.kvx",
-      "match": "\\b[a-z][a-z0-9+.-]*://\\S+"
+
+    "inline-comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.kvx"
     }
   }
 }
