@@ -1,0 +1,212 @@
+[schema]
+name = "LayerX Node Interface"
+major = 1
+minor = 0
+encoding = "major:u16be minor:u16be message_tag:u16be correlation_id:u64be canonical_payload:bytes32 proof_material:bytes32"
+compatibility = "Within major version 1, minor releases may add only new message tags, optional trailing fields, and capabilities; removal, reuse, reordering, or changed meaning requires a new major version."
+protocol_payload = "Any protocol datum is opaque canonical LayerX bytes. It is never expanded into an LNI-specific activity, receipt, state, batch, checkpoint, proof, or event layout."
+transport = "Length-prefixed canonical frames over Unix sockets by default, mutual-TLS TCP remotely, or the separately versioned opaque-buffer C ABI."
+handshake = "NodeInfo is the first exchange and carries LNI version, protocol version, network id, node role, chain head, latest sealed batch, latest finalised checkpoint, authorised sequencer key, and capabilities."
+
+[capabilities]
+values = ["node_info","submit","receipt_lookup","account_read","history_range","batch_header","checkpoint","proof_bundle","availability_fetch","event_subscribe","historical_proofs"]
+
+[message.1]
+name = "NodeInfoRequest"
+kind = "request"
+capability = "node_info"
+canonical_payload = "empty selector bytes"
+proof_material = "empty"
+golden = "0001000000010000000000000000000000010100000000"
+
+[message.2]
+name = "NodeInfoResponse"
+kind = "response"
+capability = "node_info"
+canonical_payload = "canonical node-info bytes"
+proof_material = "empty"
+golden = "0001000000020000000000000000000000010200000000"
+
+[message.3]
+name = "SubmitRequest"
+kind = "request"
+capability = "submit"
+canonical_payload = "canonical signed LayerX activity bytes"
+proof_material = "empty"
+golden = "0001000000030000000000000000000000010300000000"
+
+[message.4]
+name = "SubmitResponse"
+kind = "response"
+capability = "submit"
+canonical_payload = "canonical admission acknowledgement or rejection bytes"
+proof_material = "core result evidence bytes"
+golden = "0001000000040000000000000000000000010400000001a5"
+
+[message.5]
+name = "ReceiptLookupRequest"
+kind = "request"
+capability = "receipt_lookup"
+canonical_payload = "canonical activity-id, idempotency-key, or sequence selector bytes"
+proof_material = "empty"
+golden = "0001000000050000000000000000000000010500000000"
+
+[message.6]
+name = "ReceiptLookupResponse"
+kind = "response"
+capability = "receipt_lookup"
+canonical_payload = "canonical signed LayerX receipt bytes or canonical absence marker"
+proof_material = "receipt verification context bytes"
+golden = "0001000000060000000000000000000000010600000001a5"
+
+[message.7]
+name = "AccountReadRequest"
+kind = "request"
+capability = "account_read"
+canonical_payload = "canonical account, asset, root selector, and proof request bytes"
+proof_material = "empty"
+golden = "0001000000070000000000000000000000010700000000"
+
+[message.8]
+name = "AccountReadResponse"
+kind = "response"
+capability = "account_read"
+canonical_payload = "canonical LayerX account-state bytes"
+proof_material = "state inclusion proof and signed batch evidence bytes"
+golden = "0001000000080000000000000000000000010800000001a5"
+
+[message.9]
+name = "HistoryRangeRequest"
+kind = "request"
+capability = "history_range"
+canonical_payload = "canonical sequence-range, cursor, filter, and page-bound bytes"
+proof_material = "empty"
+golden = "0001000000090000000000000000000000010900000000"
+
+[message.10]
+name = "HistoryItem"
+kind = "stream"
+capability = "history_range"
+canonical_payload = "canonical LayerX activity, receipt, and event bytes"
+proof_material = "ordered inclusion evidence bytes"
+golden = "00010000000a0000000000000000000000010a00000001a5"
+
+[message.11]
+name = "HistoryEnd"
+kind = "stream"
+capability = "history_range"
+canonical_payload = "canonical next-cursor and range-completion bytes"
+proof_material = "empty"
+golden = "00010000000b0000000000000000000000010b00000000"
+
+[message.12]
+name = "BatchHeaderRequest"
+kind = "request"
+capability = "batch_header"
+canonical_payload = "version:u16be=1 selector_batch_number:u64be; zero and trailing bytes are refused"
+proof_material = "empty"
+golden = "00010000000c0000000000000000000000010c00000000"
+
+[message.13]
+name = "BatchHeaderResponse"
+kind = "response"
+capability = "batch_header"
+canonical_payload = "canonical LayerX batch-header bytes"
+proof_material = "version:u16be=1 sequencer_id:bytes32 authorised_sequencer_public_key:bytes32 first_batch_number:u64be last_batch_number:u64be canonical_header_signature:bytes64; key must equal the authenticated NodeInfo key and the selected batch must lie in the inclusive nonzero range"
+golden = "00010000000d0000000000000000000000010d00000001a5"
+
+[message.14]
+name = "CheckpointRequest"
+kind = "request"
+capability = "checkpoint"
+canonical_payload = "canonical checkpoint-id or batch-number selector bytes"
+proof_material = "empty"
+golden = "00010000000e0000000000000000000000010e00000000"
+
+[message.15]
+name = "CheckpointResponse"
+kind = "response"
+capability = "checkpoint"
+canonical_payload = "canonical LayerX checkpoint bytes"
+proof_material = "certificate, guarantor signatures, threshold, and settlement reference bytes"
+golden = "00010000000f0000000000000000000000010f00000001a5"
+
+[message.16]
+name = "ProofBundleRequest"
+kind = "request"
+capability = "proof_bundle"
+canonical_payload = "canonical activity or account target and root-selector bytes"
+proof_material = "empty"
+golden = "0001000000100000000000000000000000011000000000"
+
+[message.17]
+name = "ProofBundleResponse"
+kind = "response"
+capability = "proof_bundle"
+canonical_payload = "opaque canonical target LayerX bytes"
+proof_material = "activity and state inclusion proof bytes"
+golden = "0001000000110000000000000000000000011100000001a5"
+
+[message.18]
+name = "AvailabilityFetchRequest"
+kind = "request"
+capability = "availability_fetch"
+canonical_payload = "canonical checkpoint, batch, sequence-range, or activity selector and class bytes"
+proof_material = "empty"
+golden = "0001000000120000000000000000000000011200000000"
+
+[message.19]
+name = "AvailabilityChunk"
+kind = "stream"
+capability = "availability_fetch"
+canonical_payload = "canonical LayerX availability chunk bytes"
+proof_material = "chunk inclusion and class evidence bytes"
+golden = "0001000000130000000000000000000000011300000001a5"
+
+[message.20]
+name = "AvailabilityEnd"
+kind = "stream"
+capability = "availability_fetch"
+canonical_payload = "canonical availability class report bytes"
+proof_material = "reassembled commitment evidence bytes"
+golden = "0001000000140000000000000000000000011400000001a5"
+
+[message.21]
+name = "EventSubscribeRequest"
+kind = "request"
+capability = "event_subscribe"
+canonical_payload = "canonical start-cursor and filter bytes"
+proof_material = "empty"
+golden = "0001000000150000000000000000000000011500000000"
+
+[message.22]
+name = "EventRecord"
+kind = "stream"
+capability = "event_subscribe"
+canonical_payload = "canonical LayerX event bytes"
+proof_material = "event ordering and inclusion evidence bytes"
+golden = "0001000000160000000000000000000000011600000001a5"
+
+[message.23]
+name = "EventGap"
+kind = "stream"
+capability = "event_subscribe"
+canonical_payload = "canonical gap range and recovery cursor bytes"
+proof_material = "empty"
+golden = "0001000000170000000000000000000000011700000000"
+
+[message.24]
+name = "EventHeartbeat"
+kind = "stream"
+capability = "event_subscribe"
+canonical_payload = "canonical head and cursor bytes"
+proof_material = "empty"
+golden = "0001000000180000000000000000000000011800000000"
+
+[message.25]
+name = "ErrorResponse"
+kind = "response"
+capability = "node_info"
+canonical_payload = "canonical typed boundary-error bytes"
+proof_material = "empty"
+golden = "0001000000190000000000000000000000011900000000"

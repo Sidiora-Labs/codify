@@ -1,0 +1,165 @@
+[observation.22.5.1]
+task = "22.5"
+file = "contracts/CheckpointRegistry.sol, contracts/challenge/CheckpointChallengeManager.sol, contracts/EmergencyExit.sol, test/CheckpointRegistry.t.sol, test/ContractIntegration.t.sol"
+symbol = "CheckpointRegistry.invalidateCheckpoint, CheckpointRegistry.latestCanonicalCheckpointHash, EmergencyExit.latestCheckpointHash"
+observed = "The inherited emergency-exit path treated an upheld challenge against the latest checkpoint as both the eligibility trigger and the checkpoint whose state root authorised payout. The repair makes challenge resolution record an irreversible invalidation watermark through the existing slashing-authority boundary, preserves every registered checkpoint and certificate for audit, makes the challenged checkpoint and all descendants non-canonical, halts further registration on that invalid lineage, and selects the immediately preceding canonical checkpoint for emergency exit. If the first registered checkpoint is invalidated, no certificate-backed predecessor is invented and exit remains fail-closed."
+assumption = "Human qualification must exercise an upheld challenge against the latest and a non-latest checkpoint, prove no invalid checkpoint or descendant can authorise a withdrawal or emergency exit, prove the last canonical predecessor remains executable with sequencer and guarantors offline, and confirm deployment sets the challenge manager as the GuarantorBond slashing authority before challenges are accepted. No build or test result is asserted by this implementation repair."
+severity = "qualification-repair"
+
+[observation.1.4.1]
+task = "1.4"
+file = "src/protocol/lxp_arena.c, tests/protocol/lxp_test_arena.c"
+symbol = "lxp_arena_alloc"
+observed = "Post-implementation review found that a valid zero-capacity arena could reach null-pointer arithmetic during a zero-byte allocation. The repair defines that exact case as a successful null allocation and refuses every nonzero request as arena exhaustion without pointer arithmetic."
+assumption = "Human qualification must run the arena suite under the declared sanitizers and retain identical allocation/content behavior for nonempty arenas. No passing test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.2.1.1]
+task = "2.1"
+file = "src/codec/lxp_codec.c, tests/codec/lxp_test_codec_primitives.c"
+symbol = "lxp_codec_read_u16"
+observed = "The primitive decoder consumed two input bytes before checking whether the caller supplied an output pointer. The repair refuses a null output before reading, so a rejected call leaves the canonical decoder cursor unchanged."
+assumption = "Human qualification must exercise every primitive reader with null output, truncation and exact-boundary input and confirm rejection never advances the cursor."
+severity = "post-implementation-repair"
+
+[observation.3.3.1]
+task = "3.3"
+file = "src/crypto/lxp_secp256k1.c"
+symbol = "lxp_secp256k1_recover_address"
+observed = "The recovery path passed potentially null OpenSSL group and big-number allocations into dependent constructors before its aggregate null check. The repair validates all prerequisite allocations first, then creates dependent points and checks those before use."
+assumption = "Human qualification must run allocation-failure injection and the published recovery, malformed-point and low-S vectors under ASan and leak detection."
+severity = "post-implementation-repair"
+
+[observation.8.1.1]
+task = "8.1"
+file = "src/protocol/lxp_kernel.c, tests/protocol/lxp_test_kernel.c"
+symbol = "validate_iface"
+observed = "Module registration used unbounded strlen/strcmp on the caller-supplied interface name. The repair requires a terminator within LXP_MODULE_MAX_NAME plus one byte and then compares the exact bounded length and bytes against the canonical static module name."
+assumption = "Human qualification must exercise unterminated, overlong, embedded-null and exact canonical module names through real registration."
+severity = "post-implementation-repair"
+
+[observation.8.5.1]
+task = "8.5"
+file = "src/state/lxp_state_root.c, tests/state/lxp_test_state_root.c"
+symbol = "kernel_state_validate"
+observed = "State-root and proof entry points trusted public kernel counts, blob totals and nested state pointers before iterating fixed-capacity storage. The repair centralises fail-closed validation of state/account/idempotency/module/KV/blob bounds, receipt lengths, account-root presence, non-null blob storage and exact blob-byte totals before any root, proof or supply traversal."
+assumption = "Human qualification must run state-root/proof/supply suites with each count at, below and above its declared capacity, inconsistent totals and missing nested storage, and must prove valid histories retain byte-identical roots."
+severity = "post-implementation-repair"
+
+[observation.18.4.1]
+task = "18.4"
+file = "src/state/lxp_snapshot.c, tests/test_snapshot.c"
+symbol = "lxp_snapshot_load"
+observed = "Snapshot loading accepted global sequence UINT64_MAX and later derived next_sequence by adding one, allowing wrap to zero. The repair refuses that terminal value before manifest comparison or state mutation."
+assumption = "Human qualification must exercise maximum-minus-one and maximum sequences, prove refused loads leave the destination unchanged, and replay a valid restored snapshot to the same terminal root."
+severity = "post-implementation-repair"
+
+[observation.19.2.1]
+task = "19.2"
+file = "src/paxeer/lxp_checkpoint_cert.c, tests/test_guarantor_cert.c"
+symbol = "lxp_guarantor_cert_verify"
+observed = "Certificate verification checked threshold relations but not that attestation_count fit the fixed certificate array before traversal. The repair rejects any count above LXP_MAX_GUARANTOR_ATTESTATIONS at the admission boundary."
+assumption = "Human qualification must retain exact threshold behavior at the maximum and refuse every over-maximum certificate without reading beyond the fixed array."
+severity = "post-implementation-repair"
+
+[observation.23.5.1]
+task = "23.5"
+file = "cmd/layerxd/lxp_daemon_config.c, tests/test_layerxd.c"
+symbol = "parse_u64"
+observed = "The daemon configuration delegated unsigned parsing directly to strtoull, which accepts a leading minus sign and can map -1 to UINT64_MAX. The repair requires the first value byte to be an ASCII digit before conversion, thereby also refusing plus signs and whitespace-prefixed values."
+assumption = "Human qualification must exercise negative, signed, whitespace, overflow and exact-maximum values and prove invalid configuration is rejected before daemon state is created."
+severity = "post-implementation-repair"
+[observation.23.2.1]
+task = "23.2"
+file = "include/layerx/lxp_gateway.h, include/layerx/lxp_ledger.h, src/network/lxp_gateway_send.c, src/network/lxp_gateway_receive.c, Makefile"
+symbol = "lxp_gateway_send_settle, lxp_gateway_receive_claim, lxp_gateway_invoice_registry_init"
+observed = "Post-implementation review found that gateway settlement could coordinate through caller-selected mutexes or distinct invoice registries while mutating the same canonical account registry, and that public production contexts and transfer contexts exposed deterministic failure switches. The repair gives each account registry one claimed gateway owner, validates that ownership before locking or mutation, serialises SEND, RECEIVE and invoice lookup through that owner, and confines deterministic fault controls to a separately compiled LXP_TESTING archive whose fields and symbols are absent from liblayerx.a."
+assumption = "Human qualification must inspect the shipped archive symbol and type surface, exercise mismatched ownership and concurrent SEND/RECEIVE against one account registry, and run the dedicated fault suites against liblayerx-testing.a. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.23.3.1]
+task = "23.3"
+file = "src/network/lxp_gateway_receive.c, src/network/lxp_gateway_send.c, tests/test_gateway_receive.c, tests/test_gateway_send.c"
+symbol = "receive_transaction_abort, send_transaction_abort, lxp_gateway_invoice_registry_destroy"
+observed = "Post-implementation review found that RECEIVE could snapshot one grant identifier while presenting another, duplicate grant detection compared padding through raw struct memcmp, a public grant-present helper could mutate and iterate stores outside gateway coordination, rollback cleared only the first appended slot, caller-owned registry initialization inspected an atomic object before atomic_init, and invoice lookup read a plain owner pointer before joining the active-user protocol while destroy concurrently cleared it. An intermediate repair retained destroyed allocations as permanent tombstones, leaking memory and preventing replacement. The final repair rejects mismatched grant identifiers before mutation, compares every canonical grant field, makes grant presentation an internal locked operation with count bounds, clears every appended in-capacity slot before restoring counts, and gives the stable account registry an atomic acquisition/transition gate. Every raw registry pointer is validated against that owner while an acquisition reference is held; destroy requires the exact account owner, blocks new acquisition, refuses active/pre-active users, atomically detaches, zeroes receipt records, destroys the mutex, frees the allocation, and permits canonical recreation. Account previews and snapshot decode/installation now initialize transient atomics normally and copy only canonical account count and records, never byte-copying, serializing or overwriting live coordination state."
+assumption = "Human qualification must present field-identical grants with different padding, call every remaining public gateway helper at capacity and over-capacity, fault every post-mutation seam, force multi-slot count corruption within and above capacity, exercise null create status, duplicate creation, alternate-account ownership, active destroy and double destroy, force destroy between acquisition and active-user increment, recreate after successful destroy, run preview and snapshot restore while an owner exists, and confirm stale pointers refuse through the stable owner without dereference under memory and thread instrumentation. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.22.3.1]
+task = "22.3"
+file = "include/layerx/lx_asset.h, src/modules/asset/lx_asset_custody.c, src/modules/bridge/lxp_bridge_deposit.c, tests/test_bridge_deposit.c, tests/modules/test_asset_deposit.c"
+symbol = "lx_checkpoint_registry_register_deposit_root, lx_paxeer_deposit_leaf_hash, lx_bridge_verify_deposit, lx_asset_deposit_credit"
+observed = "Post-implementation review found deposit credit accepted a caller-declared finalised boolean and a self-computed unkeyed commitment while matching an unrelated LayerX checkpoint state root; no Paxeer deposit-root membership or trusted checkpoint authority was required. The first replay repair also hashed alterable custody and asset fields and mutated a caller-owned nullifier array outside module rollback, permitting the same deposit identifier under another signed asset leaf and permitting rollback to consume without credit. The final repair makes the checkpoint registry opaque and authority-keyed, admits a deposit root only under a canonical Ed25519-signed Paxeer checkpoint registration bound to network, protocol, checkpoint state root and custody settlement, verifies an index-aware canonical leaf path, derives replay identity solely from the globally consumed Paxeer deposit identifier, and stages that nullifier in canonical module KV beside the transfer so failure and outer rollback remove both while commit retains both."
+assumption = "Human qualification must import a real Paxeer-produced signed deposit-root registration and inclusion proof, reject fabricated self-roots and every wrong root, leaf index, sibling, direction, settlement, network, protocol, checkpoint and authority signature, replay the accepted proof under a separately signed leaf with the same deposit identifier and altered asset, exercise the real-kernel insufficient-balance refusal, and roll back a successful activity before retry to prove canonical nullifier and balance coupling. No build, test or live Paxeer result is asserted by this implementation repair."
+severity = "post-implementation-repair"
+[observation.10.1.1]
+task = "10.1"
+file = "src/network/lxp_da_bundle.c, tests/test_da_bundle.c"
+symbol = "lxp_da_chunk_hash, lxp_da_bundle_root"
+observed = "Post-implementation review found public DA chunk hashing dereferenced a null chunk and accepted mismatched declared/present byte lengths, invalid availability classes and overflowing class ranges. Bundle-root verification authenticated each supplied chunk independently but did not enforce one batch number, contiguous class offsets, exact class ordering, a populated final recovery class or the declared total byte count. The repair validates each chunk before metadata access and requires one ordered contiguous sequence across all five DA classes whose exact accumulated bytes equal the bundle declaration. Batch zero remains canonical only for genesis, matching replica chain admission; cross-batch chunks are refused."
+assumption = "Human qualification must run DA bundle, retrieval, possession, challenge and unavailable suites, retain a canonical genesis batch-zero bundle, alter every chunk metadata field and batch number independently, omit each class including final recovery metadata, and confirm valid bundle roots remain byte-identical. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.12.2.1]
+task = "12.2"
+file = "include/layerx/lxp_governance.h, src/modules/governance/lxp_params.c, src/modules/governance/lxp_gov_param.c, tests/test_governance_params.c"
+symbol = "lxp_param_table_validate"
+observed = "Governance parameter APIs traversed caller-visible count, version, proposal, key, history and cohort fields before proving they fit their fixed arrays. A corrupt restored or directly supplied table could therefore read out of bounds in lookup, proposal, activation, enactment, version and state-root paths. The repair centralises structural admission and invokes it before every public traversal or mutation."
+assumption = "Human qualification must corrupt each table and nested count one at a time at exact capacity and capacity plus one, exercise every public parameter and rollout API, and confirm valid activation roots and histories are unchanged. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.17.1.1]
+task = "17.1"
+file = "src/modules/budget/lx_budget_create.c, src/modules/asset/lx_asset_registry.c, src/modules/escrow/lx_escrow_open.c, src/modules/stream/lx_stream_open.c, src/modules/service, src/modules/perps/lx_perps_book.c, src/modules/perps/lx_perps_position.c, src/modules/perps/lx_perps_insurance.c, src/modules/perps/lx_oracle_intake.c, src/modules/bridge/lxp_bridge_withdraw.c"
+symbol = "fixed-capacity public store admission"
+observed = "Several public module lookup, matching and mutation paths trusted caller-visible store counts and iterated fixed arrays before checking capacity. The repair rejects over-capacity budget, asset, escrow, stream, service, order-book, position, deficit, oracle-market and withdrawal stores at their public admission boundaries before lookup, sorting, matching, fee mutation or record access. Service admission is centralised across all six parallel fixed record arrays so one corrupt nested count cannot bypass through another activity path."
+assumption = "Human qualification must exercise every repaired API with empty, exact-capacity and over-capacity stores under ASan, confirm rejection leaves outputs and stores unchanged, and retain exact valid matching and lookup results. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.14.2.1]
+task = "14.2"
+file = "src/protocol/lxp_receipt.c"
+symbol = "lxp_verified_receipt_index_add"
+observed = "Duplicate verified-receipt admission compared the raw object representation of receipt facts, including padding bytes, to decide whether an identical digest was consistent. The repair compares every canonical field explicitly, so logical equality is independent of compiler layout and indeterminate padding."
+assumption = "Human qualification must admit logically identical facts with deliberately different padding representations and prove a changed canonical field still raises the invariant failure. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.17.1.2]
+task = "17.1"
+file = "src/modules/asset, src/modules/budget, src/modules/escrow, src/modules/governance, src/modules/perps, src/modules/service, src/modules/stream, tests/modules, tests/test_governance_emergency.c"
+symbol = "epoch callbacks and fixed-capacity public mutation helpers"
+observed = "A second full traversal audit found epoch callbacks, reverse lookups, state-root and reserve helpers, idempotency tables, delegate and meter key arrays, oracle accepted/key stores, governance emergency state and effect buffers that still trusted caller-visible counts. Several append paths called a bounded lookup but discarded its malformed-store result, then checked only count equal to capacity; count above capacity could therefore proceed through a balance transfer and out-of-bounds append. The repair performs typed structural admission before every affected traversal or economic mutation, makes the boolean withdrawal replay helper conservatively report seen for malformed state while public mutators return NON_CANONICAL, and caps asset attestations to the asset registry bound."
+assumption = "Human qualification must exercise each epoch and helper with every count at zero, exact capacity and capacity plus one under memory instrumentation, prove malformed mutation requests emit no transfer and change no state, and retain canonical roots, reserve totals, replay receipts and valid exact-capacity behavior. No build or test result is asserted here."
+severity = "post-implementation-repair"
+
+[observation.22.2.1]
+task = "22.2"
+file = "contracts/GuarantorBond.sol, contracts/CheckpointRegistry.sol, contracts/challenge/CheckpointChallengeManager.sol, spec/layerx-protocol/docs/guarantors.md"
+symbol = "GuarantorBond.activateGuarantor, GuarantorBond.depositBond, GuarantorBond.submitEquivocation, GuarantorBond.membershipVersion, CheckpointRegistry.verifyRegisteredCertificate"
+observed = "Post-implementation review found that depositBond created its own guarantor identity, signer and caller-selected joined epoch, allowing bond funding to manufacture historical threshold membership, and registered-certificate verification accepted a caller-selected epoch instead of the recorded checkpoint epoch. A follow-up review found that merely recording the set version was insufficient because verification still consulted current jail, slashing, bond and minimum-bond state, and permissionless equivocation accepted a caller-selected removal epoch that could rewrite membership history. The repair separates strictly sequenced governed activation, rotation, jailing and removal from permissionless funding, binds each exact registered certificate to its immutable checkpoint epoch and guarantor-set version, verifies recorded certificates without mutable current eligibility, and makes proven slashing an immediate versioned exclusion without inventing a removal epoch or rewriting signer intervals. The normative guarantor guide currently orders bond posting before the GOV_SET_GUARANTOR_SET activation step, while the explicit repair requirement permits deposits only after an authorised record exists; the implementation follows the explicit fail-closed repair boundary and does not preserve self-enrolment as a pre-activation funding shortcut."
+assumption = "Human qualification must reconcile the onboarding-order wording with the governed Paxeer record ceremony and exercise sequence replay, rotation, governed removal, permissionless funding, old-signer equivocation, outside-set signatures and recorded-certificate verification after jailing, unresolved slashing, rotation, removal, unbonding, slashing and minimum-bond changes. No build or test result is asserted here."
+severity = "spec-conflict"
+
+[observation.19.4.1]
+task = "19.4"
+file = "include/layerx/lxp_guarantor.h, src/guarantor/lxp_attestation.c, src/guarantor/lxp_guarantor.c, src/guarantor/lxp_equivocation.c, src/paxeer/lxp_bond_client.c, src/paxeer/lxp_slashing_submit.c, contracts/libraries/CanonicalCheckpoint.sol, contracts/GuarantorBond.sol, contracts/CheckpointRegistry.sol, agent/crates/layerx-proof/src/checkpoint.rs, human/crates/layerx-paxeer-client/src/withdraw.rs, platform/sdk, agent/sdk, spec/layerx-protocol/docs/guarantors.md, spec/layerx-protocol/docs/wire-format.md"
+symbol = "lxp_guarantor_attestation, lxp_equivocation_verify, lxp_slashing_submit, CanonicalCheckpoint.attestationHash, GuarantorBond.submitEquivocation"
+observed = "Post-implementation review found that the signed guarantor statement omitted protocol, LayerX network, Paxeer chain, settlement contract and checkpoint epoch, so two otherwise valid signatures from unrelated networks or settlement deployments could be presented as a same-height contradiction, while the slashing target could establish only that the key had once existed. The repair defines one 189-byte big-endian signed statement under the distinct LXP/v1/guarantor-attestation domain, requires an exact protocol/network/Paxeer-chain/settlement-contract/epoch/batch coordinate, requires each checkpoint identifier to equal its signed checkpoint hash and the two hashes to differ, checks the evidence epoch against the historical signer-authorisation interval, and makes accepted evidence an immediate versioned ejection without a submitter-selected removal epoch. Certificate producers and verifiers carry the same domain coordinate and reject header or settlement-domain mismatch. The normative guarantor and wire-format guides still specify a 55-byte checkpoint_id-plus-flags preimage and describe body-assisted contradiction checks; that format cannot satisfy the explicit cross-network replay rejection and self-contained historical-height slashing requirements, so generated or normative documents were not hand-edited around the contradiction."
+assumption = "Human qualification must reconcile and regenerate the normative wire documents, regenerate every published SDK artifact from source, publish cross-language golden vectors for the 189-byte signed statement, 277-byte canonical C attestation record and enclosing equivocation evidence, and exercise foreign LayerX network, foreign Paxeer chain, foreign settlement contract, mixed epoch, mixed batch, unauthorized-era signer, rotated historical signer, malformed identifier/hash relation and genuine same-domain same-height conflicts. No build, test, formatting or qualification result is asserted here."
+severity = "spec-conflict"
+
+[observation.19.4.2]
+task = "19.4"
+file = "contracts/CheckpointRegistry.sol, include/layerx/lxp_guarantor.h, include/layerx/lxp_paxeer.h, src/guarantor/lxp_attestation.c, src/guarantor/lxp_bond_state.c, src/paxeer/lxp_finalisation.c, src/paxeer/lxp_paxeer_client.c, src/paxeer/lxp_slashing_submit.c, agent/crates/layerx-crypto/src/secp256k1.rs, agent/crates/layerx-proof/src/checkpoint.rs, human/crates/layerx-paxeer-client/src/withdraw.rs, agent/sdk, platform/sdk"
+symbol = "CheckpointRegistry._wallClockMilliseconds, lxp_guarantor_signer_authorization, lxp_guarantor_attest, lxp_checkpoint_registration, WithdrawalBoundary.rpc"
+observed = "The integration review found three cross-boundary failures after the domain-bound attestation repair. Canonical batch and attestation timestamps are unsigned milliseconds, while CheckpointRegistry compared them directly with EVM wall-clock seconds and second-denominated configuration; the registry now preserves the canonical millisecond fields and performs checked seconds-to-milliseconds conversion only at its wall-clock boundary. The C Paxeer mirror previously overwrote the sole signer key on rotation, so old-key evidence and pre-rotation certificates could not be verified; each member now retains a bounded, version-stamped, half-open signer-authorisation history, finalisation selects the key authorised at the checkpoint epoch, and slashing accepts a historically authorised old signer while recording an immediate versioned ejection. C signing previously emitted only compact r||s and could not produce the Solidity signer+r+s+v tuple; signing now derives the EVM signer, searches all four secp256k1 recovery identifiers, admits only the Solidity-representable 0/1 cases as v 27/28, explicitly fails the rare 2/3 case, and lxp_checkpoint_registration exposes the exact typed header, validity proof and 18-field Paxeer attestations. Rust verifies the carried signer and recovery byte against the member key, while SDK verifier source types carry signer and recovery metadata and reject absent or non-EVM values. The rebased Human withdrawal boundary obtains every registry-domain field and eth_chainId through verifier-owned agreed_call quorum reads; no first-endpoint fallback was introduced. No repository-owned transaction broadcaster consumes lxp_checkpoint_registration and submits registerCheckpoint, so the typed producer-to-contract transport remains an external integration responsibility rather than an end-to-end path proved here."
+assumption = "Human qualification must publish new cross-language vectors for canonical millisecond timestamps, the 306-byte C attestation evidence record, signer address, r, s and v; exercise exact drift and delay boundaries around a real 1.7e12 millisecond timestamp; rotate and remove signers around checkpoint epochs; corrupt every set and signer-history count and interval boundary; submit old-key same-height evidence; force a recovery-id 2/3 fixture and confirm publication fails explicitly; prove the new domain reads reject split endpoint observations; and connect the typed C registration output to the real transaction broadcaster. The normative wire guide still describes the superseded 55-byte preimage and must be reconciled and regenerated by its owner. No build, test, formatting, deployment or passing result is asserted by this source repair."
+severity = "integration-boundary"
+
+[observation.22.2.2]
+task = "22.2"
+file = "include/layerx/lxp_paxeer.h, src/paxeer/lxp_bond_client.c, tests/test_paxeer_bond.c"
+symbol = "lxp_paxeer_bond_deposit, lxp_paxeer_membership_sync_status"
+observed = "The C Paxeer bond mirror still let a bond deposit create a guarantor from caller-selected identity, key and historical joined epoch, and its jail and rotation wrappers manufactured ordered-governance admission internally. The repair removes those unauthenticated Paxeer membership mutation wrappers, makes deposit accept only value for an already governed core record without advancing membership version, and exposes an explicit typed UNAVAILABLE membership-sync status. The repository contains no authentic producer or verifier for the identical Paxeer and LayerX GOV_SET_GUARANTOR_SET registry evidence, so the C Paxeer client fails closed at that integration boundary instead of representing a caller boolean as governance authority. Core signer history and ordered set application remain the state-machine consumer for a future authenticated registry producer."
+assumption = "Human qualification must provide and bind the real canonical membership-registry evidence producer before enabling C Paxeer membership sync; prove identity, signer, activation/removal epoch, governance sequence and set version against both registries; then exercise deposit before activation, after activation, after removal and after versioned ejection. No build, test, formatting, deployment or passing result is asserted by this source repair."
+severity = "integration-boundary"

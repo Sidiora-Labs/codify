@@ -10,3 +10,5 @@ node_modules/
 *.kvx.lock
 *.kvx.claim.lock
 docs/superpowers/
+# preserved local history of the vendored kvx subproject
+/kvx/.git-local/

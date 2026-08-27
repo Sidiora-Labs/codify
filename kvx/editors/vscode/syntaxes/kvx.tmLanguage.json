@@ -1,0 +1,79 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "KVX",
+  "scopeName": "source.kvx",
+  "fileTypes": ["kvx"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#section" },
+    { "include": "#pair" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.number-sign.kvx",
+      "match": "#.*$"
+    },
+    "section": {
+      "match": "^\\s*(\\[)\\s*([A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z0-9_-]+)*)\\s*(\\])",
+      "captures": {
+        "1": { "name": "punctuation.definition.section.begin.kvx" },
+        "2": { "name": "entity.name.section.kvx" },
+        "3": { "name": "punctuation.definition.section.end.kvx" }
+      }
+    },
+    "pair": {
+      "begin": "^\\s*([A-Za-z0-9_.-]+)\\s*(=)\\s*",
+      "beginCaptures": {
+        "1": { "name": "variable.parameter.key.kvx" },
+        "2": { "name": "keyword.operator.assignment.kvx" }
+      },
+      "end": "$",
+      "patterns": [{ "include": "#value" }]
+    },
+    "value": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#list" },
+        { "include": "#string" },
+        { "include": "#env" },
+        { "include": "#boolean" },
+        { "include": "#number" },
+        { "include": "#uri" }
+      ]
+    },
+    "list": {
+      "begin": "\\[",
+      "beginCaptures": { "0": { "name": "punctuation.definition.list.begin.kvx" } },
+      "end": "\\]",
+      "endCaptures": { "0": { "name": "punctuation.definition.list.end.kvx" } },
+      "patterns": [
+        { "include": "#string" },
+        { "include": "#env" },
+        { "include": "#number" },
+        { "match": ",", "name": "punctuation.separator.list.kvx" }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.kvx",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "include": "#env" }]
+    },
+    "env": {
+      "name": "variable.other.env.kvx",
+      "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
+    },
+    "boolean": {
+      "name": "constant.language.boolean.kvx",
+      "match": "\\b(true|false|yes|no)\\b"
+    },
+    "number": {
+      "name": "constant.numeric.kvx",
+      "match": "(?<![\\w.])-?\\d+(\\.\\d+)*(?![\\w])"
+    },
+    "uri": {
+      "name": "string.unquoted.uri.kvx",
+      "match": "\\b[a-z][a-z0-9+.-]*://\\S+"
+    }
+  }
+}

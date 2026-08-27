@@ -1,0 +1,476 @@
+[module]
+name = "identity"
+contract_major = 1
+compatibility = "additive_only"
+spine = "One account held by passkeys, carried by sessions, linked to one payout wallet. Everything a person can do on the authenticated plane starts with the operations declared here: creating the account, confirming it is really them, watching onboarding finish honestly, and linking the wallet their money arrives from and returns to."
+separation = "The application identity a passkey unlocks, the protocol identity the custody service establishes underneath it, and the wallet a person links for money in and out are three distinct things. Protocol mechanics stay behind evidence references, and the browser never holds signing power."
+ceremonies = "Passkey ceremonies travel as typed records whose ceremony and credential fields are opaque base64 strings produced and consumed by the platform credential machinery. This plane relays them without interpreting them."
+
+[scalar.AccountId]
+json = "string"
+prefix = "act_"
+rust = "String"
+typescript = "string"
+
+[scalar.PasskeyId]
+json = "string"
+prefix = "pky_"
+rust = "String"
+typescript = "string"
+
+[scalar.RegistrationId]
+json = "string"
+prefix = "reg_"
+rust = "String"
+typescript = "string"
+
+[scalar.AssertionId]
+json = "string"
+prefix = "asr_"
+rust = "String"
+typescript = "string"
+
+[scalar.SessionId]
+json = "string"
+prefix = "ses_"
+rust = "String"
+typescript = "string"
+
+[scalar.DeviceId]
+json = "string"
+prefix = "dev_"
+rust = "String"
+typescript = "string"
+
+[scalar.StepUpChallengeId]
+json = "string"
+prefix = "chg_"
+rust = "String"
+typescript = "string"
+
+[scalar.AuthenticatorId]
+json = "string"
+prefix = "mfa_"
+rust = "String"
+typescript = "string"
+
+[scalar.AuthenticatorSetupId]
+json = "string"
+prefix = "mfs_"
+rust = "String"
+typescript = "string"
+
+[scalar.OperationDigest]
+json = "string"
+prefix = "opd_"
+rust = "String"
+typescript = "string"
+binding = "Names exactly one operation a person is confirming. A step-up ceremony answers for this one digest and for nothing else."
+
+[scalar.OpaqueCredential]
+json = "string"
+rust = "String"
+typescript = "string"
+opacity = "A base64url string the platform credential machinery produces or consumes. This plane relays it unread, and it never contains key material this plane can use."
+
+[scalar.EmailAddress]
+json = "string"
+rust = "String"
+typescript = "string"
+
+[scalar.EvmAddress]
+json = "string"
+prefix = "0x"
+rust = "String"
+typescript = "string"
+rendering = "Always transported and rendered in its full checksummed mixed-case form, never a truncation alone."
+
+[scalar.EvmSignature]
+json = "string"
+prefix = "0x"
+rust = "String"
+typescript = "string"
+
+[type.AccountCreateRequest]
+required = ["email:EmailAddress","display_name:string"]
+
+[type.AccountCreation]
+required = ["account_id:AccountId","onboarding:Journey"]
+journey = "Creating an account starts the onboarding journey that stands up the protocol identity underneath it, and the journey is the account's honest per-stage progress from the first moment."
+
+[operation.account.create]
+method = "POST"
+path = "/v1/accounts"
+request = "AccountCreateRequest"
+response = "AccountCreation"
+idempotency = true
+convergence = "Repeating the request under the same key returns the original account and its onboarding journey: one application identity, one protocol identity, one set of receipts, no orphaned protocol state."
+
+[type.PasskeyRegistrationBegin]
+required = ["account_id:AccountId"]
+
+[type.PasskeyRegistrationChallenge]
+required = ["registration_id:RegistrationId","ceremony:OpaqueCredential","expires_at:Timestamp"]
+
+[type.PasskeyRegistrationFinish]
+required = ["credential:OpaqueCredential"]
+
+[type.Passkey]
+required = ["passkey_id:PasskeyId","label:string","created_at:Timestamp"]
+optional = ["last_used_at:Timestamp"]
+
+[operation.passkey.register.begin]
+method = "POST"
+path = "/v1/passkeys/registrations"
+request = "PasskeyRegistrationBegin"
+response = "PasskeyRegistrationChallenge"
+
+[operation.passkey.register.finish]
+method = "POST"
+path = "/v1/passkeys/registrations/{registration_id}"
+request = "PasskeyRegistrationFinish"
+response = "Passkey"
+
+[type.PasskeyAssertionBegin]
+required = []
+optional = ["email:EmailAddress"]
+discovery = "Sign-in may begin with an email address, or with no input at all when the platform offers a discoverable passkey."
+
+[type.PasskeyAssertionChallenge]
+required = ["assertion_id:AssertionId","ceremony:OpaqueCredential","expires_at:Timestamp"]
+
+[type.PasskeyAssertionFinish]
+required = ["credential:OpaqueCredential"]
+
+[type.PasskeyAssertion]
+required = ["assertion_id:AssertionId","passkey_id:PasskeyId","completed_at:Timestamp","expires_at:Timestamp"]
+consumption = "A completed assertion opens exactly one session before expires_at, then it is spent."
+
+[operation.passkey.assert.begin]
+method = "POST"
+path = "/v1/passkeys/assertions"
+request = "PasskeyAssertionBegin"
+response = "PasskeyAssertionChallenge"
+
+[operation.passkey.assert.finish]
+method = "POST"
+path = "/v1/passkeys/assertions/{assertion_id}"
+request = "PasskeyAssertionFinish"
+response = "PasskeyAssertion"
+
+[type.Device]
+required = ["device_id:DeviceId","label:string","platform:string"]
+
+[type.Session]
+required = ["session_id:SessionId","device:Device","opened_at:Timestamp","last_active_at:Timestamp","current:boolean"]
+inventory = "The session inventory shows every device holding access, each with its last activity, so a person can see and end access from anywhere."
+
+[type.SessionOpenRequest]
+required = ["assertion_id:AssertionId"]
+
+[type.SessionList]
+required = ["sessions:Session[]"]
+
+[type.SessionRevocation]
+required = ["revoked_session_ids:SessionId[]","revoked_at:Timestamp"]
+
+[operation.session.open]
+method = "POST"
+path = "/v1/sessions"
+request = "SessionOpenRequest"
+response = "Session"
+scope = "Every operation on the authenticated plane is scoped to the principal this session belongs to. A session never grants a view into anyone else's account, and opening one on a new device records the device and sends a security notification."
+
+[operation.session.refresh]
+method = "POST"
+path = "/v1/sessions/refresh"
+request = "Empty"
+response = "Session"
+
+[operation.session.list]
+method = "GET"
+path = "/v1/sessions"
+request = "Empty"
+response = "SessionList"
+
+[operation.session.revoke]
+method = "DELETE"
+path = "/v1/sessions/{session_id}"
+request = "Empty"
+response = "SessionRevocation"
+effect = "Revocation takes effect promptly on every shell holding the session."
+
+[operation.session.revoke-all]
+method = "POST"
+path = "/v1/sessions/revoke-all"
+request = "Empty"
+response = "SessionRevocation"
+everywhere = "Signs out every session of the principal, including the one making the call."
+
+[type.StepUpRequest]
+required = ["confirms:OperationDigest"]
+
+[type.StepUpChallenge]
+required = ["challenge_id:StepUpChallengeId","confirms:OperationDigest","ceremony:OpaqueCredential","expires_at:Timestamp"]
+binding = "A fresh passkey ceremony that answers for the one operation named by confirms. It cannot be replayed against any other operation."
+
+[type.StepUpFinish]
+required = ["credential:OpaqueCredential"]
+
+[type.StepUpEvidence]
+required = ["challenge_id:StepUpChallengeId","confirms:OperationDigest","passkey_id:PasskeyId","completed_at:Timestamp","expires_at:Timestamp"]
+reference = "The record other modules carry when an operation requires fresh confirmation: acting on an approval, starting a withdrawal or exit, changing security settings, revealing a secret, replacing the payout wallet, archiving an agent."
+
+[operation.stepup.begin]
+method = "POST"
+path = "/v1/step-up"
+request = "StepUpRequest"
+response = "StepUpChallenge"
+
+[operation.stepup.finish]
+method = "POST"
+path = "/v1/step-up/{challenge_id}"
+request = "StepUpFinish"
+response = "StepUpEvidence"
+
+[type.SecurityActionKind]
+variants = ["add-passkey","revoke-passkey","revoke-session","revoke-all-sessions","add-authenticator","disable-authenticator","rotate-backup-codes","reveal-recovery-evidence"]
+
+[type.SecurityActionRequest]
+required = ["action:SecurityActionKind"]
+optional = ["target_id:string"]
+binding = "The service derives the operation digest from the authenticated principal, action, target and current security state. The browser never invents a digest for a security mutation."
+
+[type.SecurityAction]
+required = ["confirms:OperationDigest"]
+
+[operation.security.action]
+method = "POST"
+path = "/v1/security/actions"
+request = "SecurityActionRequest"
+response = "SecurityAction"
+
+[type.PasskeyList]
+required = ["passkeys:Passkey[]"]
+
+[type.SecurityPasskeyRegistrationBegin]
+required = ["label:string","step_up:StepUpEvidence"]
+
+[type.SecurityPasskeyRegistrationFinish]
+required = ["credential:OpaqueCredential","step_up:StepUpEvidence"]
+
+[type.SecurityPasskeyRevocation]
+required = ["step_up:StepUpEvidence"]
+
+[operation.security.passkey.list]
+method = "GET"
+path = "/v1/security/passkeys"
+request = "Empty"
+response = "PasskeyList"
+
+[operation.security.passkey.register.begin]
+method = "POST"
+path = "/v1/security/passkeys/registrations"
+request = "SecurityPasskeyRegistrationBegin"
+response = "PasskeyRegistrationChallenge"
+
+[operation.security.passkey.register.finish]
+method = "POST"
+path = "/v1/security/passkeys/registrations/{registration_id}"
+request = "SecurityPasskeyRegistrationFinish"
+response = "Passkey"
+
+[operation.security.passkey.revoke]
+method = "POST"
+path = "/v1/security/passkeys/{passkey_id}/revoke"
+request = "SecurityPasskeyRevocation"
+response = "PasskeyList"
+lockout = "The service refuses removal of the final passkey."
+
+[type.SecuritySessionRevocation]
+required = ["step_up:StepUpEvidence"]
+
+[operation.security.session.revoke]
+method = "POST"
+path = "/v1/security/sessions/{session_id}/revoke"
+request = "SecuritySessionRevocation"
+response = "SessionRevocation"
+
+[operation.security.session.revoke-all]
+method = "POST"
+path = "/v1/security/sessions/revoke-all"
+request = "SecuritySessionRevocation"
+response = "SessionRevocation"
+everywhere = "Invalidates active sessions and every refresh path, including the caller."
+
+[type.TimedSecret]
+required = ["value:string","remask_at:Timestamp","copyable:boolean"]
+handling = "The value is returned only after fresh operation-bound step-up. The client masks it by default, clears it at remask_at, and writes it to the clipboard only after a separate explicit action when copyable is true."
+
+[type.AuthenticatorMethod]
+required = ["authenticator_id:AuthenticatorId","label:string","enabled_at:Timestamp"]
+optional = ["last_used_at:Timestamp"]
+
+[type.AuthenticatorStatus]
+required = ["methods:AuthenticatorMethod[]","backup_codes_remaining:integer"]
+
+[type.AuthenticatorSetupBegin]
+required = ["label:string","step_up:StepUpEvidence"]
+
+[type.AuthenticatorSetupChallenge]
+required = ["setup_id:AuthenticatorSetupId","secret:TimedSecret","otpauth_uri:TimedSecret","expires_at:Timestamp"]
+
+[type.AuthenticatorSetupFinish]
+required = ["code:string","step_up:StepUpEvidence"]
+
+[type.BackupCodeSet]
+required = ["codes:string[]","remask_at:Timestamp","copyable:boolean"]
+one_time = "Codes are issued once at setup or explicit rotation. The service stores only provider-verifiable digests and never returns the set again."
+
+[type.AuthenticatorSetupResult]
+required = ["method:AuthenticatorMethod","backup_codes:BackupCodeSet"]
+
+[type.AuthenticatorDisable]
+required = ["step_up:StepUpEvidence"]
+
+[type.BackupCodeRotation]
+required = ["step_up:StepUpEvidence"]
+
+[operation.authenticator.status]
+method = "GET"
+path = "/v1/security/authenticators"
+request = "Empty"
+response = "AuthenticatorStatus"
+
+[operation.authenticator.setup.begin]
+method = "POST"
+path = "/v1/security/authenticators/setups"
+request = "AuthenticatorSetupBegin"
+response = "AuthenticatorSetupChallenge"
+
+[operation.authenticator.setup.finish]
+method = "POST"
+path = "/v1/security/authenticators/setups/{setup_id}"
+request = "AuthenticatorSetupFinish"
+response = "AuthenticatorSetupResult"
+
+[operation.authenticator.disable]
+method = "POST"
+path = "/v1/security/authenticators/{authenticator_id}/disable"
+request = "AuthenticatorDisable"
+response = "AuthenticatorStatus"
+warning = "The client presents explicit consequence copy before requesting step-up."
+
+[operation.authenticator.backup.rotate]
+method = "POST"
+path = "/v1/security/authenticators/backup-codes"
+request = "BackupCodeRotation"
+response = "BackupCodeSet"
+
+[type.SecurityRecoveryReveal]
+required = ["evidence_id:EvidenceId","step_up:StepUpEvidence"]
+
+[operation.security.recovery.reveal]
+method = "POST"
+path = "/v1/security/recovery/evidence"
+request = "SecurityRecoveryReveal"
+response = "TimedSecret"
+receipt = "The revealed bytes are the exact recovery registration receipt already referenced by onboarding status, never a client-authored representation."
+
+[operation.onboarding.status]
+method = "GET"
+path = "/v1/onboarding"
+request = "Empty"
+response = "Journey"
+kind = "The journey of kind onboarding: creating the account, adding the passkey, establishing the protocol identity, putting recovery in place, each stage reported honestly."
+active = "The account reads as active only when the journey's protocol-identity stage carries evidence of class layerx-receipt at verification receipt-verified or higher. No stage is presented as done from local state alone."
+
+[operation.onboarding.resume]
+method = "POST"
+path = "/v1/onboarding/resume"
+request = "Empty"
+response = "Journey"
+resumption = "Resuming after a crash, a timeout or a repeated request converges on the one journey account creation started, without restarting completed stages and without orphaned protocol state."
+
+[type.BindingStatementRequest]
+required = ["address:EvmAddress"]
+
+[type.BindingStatement]
+required = ["statement:string","address:EvmAddress","expires_at:Timestamp"]
+exactness = "statement is the exact text the wallet must sign, character for character. The wallet opens once to sign it and at no other moment."
+authority = "The linked wallet is a payout and provenance association only. It cannot move LayerX funds."
+
+[type.BindingSubmission]
+required = ["address:EvmAddress","statement:string","signature:EvmSignature"]
+
+[type.BindingState]
+variants = ["none","binding","bound","rebinding"]
+
+[type.WalletBinding]
+required = ["state:BindingState"]
+optional = ["address:EvmAddress","bound_at:Timestamp","evidence:EvidenceRef"]
+checksum = "address always carries the full checksummed mixed-case rendering."
+evidence = "evidence references the receipt-backed record that established the current binding, and the binding reads as bound only once it verifies."
+
+[type.RebindingSubmission]
+required = ["address:EvmAddress","statement:string","signature:EvmSignature","step_up:StepUpEvidence"]
+
+[operation.binding.statement]
+method = "POST"
+path = "/v1/wallet-binding/statement"
+request = "BindingStatementRequest"
+response = "BindingStatement"
+
+[operation.binding.submit]
+method = "POST"
+path = "/v1/wallet-binding"
+request = "BindingSubmission"
+response = "Journey"
+idempotency = true
+journey = "Returns the journey of kind wallet-binding. The binding reads as established only when its receipt-backed evidence verifies, and a signature from any address other than the named one is refused, never silently accepted."
+
+[operation.binding.status]
+method = "GET"
+path = "/v1/wallet-binding"
+request = "Empty"
+response = "WalletBinding"
+
+[type.BindingRebindAction]
+required = ["binding:BindingStatement","confirms:OperationDigest"]
+binding = "The service issues the exact replacement statement and derives confirms from the current receipt-backed binding and that statement. The browser signs the returned statement and never constructs the operation digest."
+
+[operation.binding.rebind.action]
+method = "POST"
+path = "/v1/wallet-binding/rebind/action"
+request = "BindingStatementRequest"
+response = "BindingRebindAction"
+step_up = "This is the only source of the operation digest used to request fresh passkey evidence for a wallet replacement."
+
+[operation.binding.rebind]
+method = "POST"
+path = "/v1/wallet-binding/rebind"
+request = "RebindingSubmission"
+response = "Journey"
+idempotency = true
+step_up = "Replacing the payout wallet requires fresh step-up evidence confirming exactly this operation. The old binding stays effective until the new one's receipt-backed evidence verifies, and a security notification with an action is sent."
+
+[type.Profile]
+required = ["display_name:string"]
+optional = ["avatar_url:string"]
+locality = "Declared-local data. Editing or deleting it never touches protocol identity or protocol state."
+
+[type.ProfileUpdate]
+required = []
+optional = ["display_name:string","avatar_url:string"]
+
+[operation.profile.get]
+method = "GET"
+path = "/v1/profile"
+request = "Empty"
+response = "Profile"
+
+[operation.profile.update]
+method = "PATCH"
+path = "/v1/profile"
+request = "ProfileUpdate"
+response = "Profile"

@@ -1,0 +1,64 @@
+(* KVX — Formal Grammar (EBNF) *)
+(* Version: 1.0  |  Canonical reference for KVX parsers *)
+
+(* ------------------------------------------------------------------ *)
+(* TOP LEVEL                                                           *)
+(* ------------------------------------------------------------------ *)
+
+file           = { line } EOF ;
+line           = blank_line | comment_line | section_header | kv_pair ;
+
+blank_line     = { SPACE } NEWLINE ;
+comment_line   = { SPACE } comment NEWLINE ;
+comment        = "#" { any_char_except_newline } ;
+
+(* ------------------------------------------------------------------ *)
+(* SECTIONS                                                            *)
+(* ------------------------------------------------------------------ *)
+
+section_header = { SPACE } "[" { SPACE } section_name { SPACE } "]"
+                 [ comment ] NEWLINE ;
+section_name   = name_seg { "." name_sub } ;
+name_seg       = ( LETTER | "_" ) { LETTER | DIGIT | "_" | "-" } ;
+name_sub       = ( LETTER | DIGIT | "_" | "-" ) { LETTER | DIGIT | "_" | "-" } ;
+
+(* ------------------------------------------------------------------ *)
+(* KEY-VALUE PAIRS                                                     *)
+(* ------------------------------------------------------------------ *)
+
+kv_pair        = { SPACE } key { SPACE } "=" { SPACE } value
+                 [ comment ] NEWLINE ;
+key            = key_char { key_char } ;
+key_char       = LETTER | DIGIT | "_" | "-" | "." ;
+
+value          = list | scalar ;
+
+(* ------------------------------------------------------------------ *)
+(* VALUES                                                              *)
+(* ------------------------------------------------------------------ *)
+
+list           = "[" { SPACE } [ list_items ] { SPACE } "]" ;
+list_items     = list_item { { SPACE } "," { SPACE } list_item } ;
+list_item      = string | bare_scalar ;
+
+scalar         = string | bare_scalar ;
+
+string         = '"' { string_char | env_ref } '"' ;
+string_char    = any_char_except_quote_and_newline ;
+
+(* A bare scalar runs to end of line or unquoted "#". Interpretation as
+   int / uint / bool / etc. is an application-level typing concern. *)
+bare_scalar    = bare_char { bare_char | env_ref } ;
+bare_char      = any_char_except_newline_hash_quote_comma_bracket ;
+
+env_ref        = "${" env_name "}" ;
+env_name       = ( LETTER | "_" ) { LETTER | DIGIT | "_" } ;
+
+(* ------------------------------------------------------------------ *)
+(* TERMINALS                                                           *)
+(* ------------------------------------------------------------------ *)
+
+LETTER         = "a" … "z" | "A" … "Z" ;
+DIGIT          = "0" … "9" ;
+SPACE          = " " | "\t" ;
+NEWLINE        = "\n" ;   (* CRLF normalised to LF on read *)

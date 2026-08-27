@@ -1,0 +1,124 @@
+# Codify v0.5 — the IDE talks to agents, not terminals.
+
+[meta]
+feature = "codify-v05"
+intro   = "Replace seeded terminals with a real agent interface: the VS Code extension becomes an ACP client that spawns Codex or Claude Code through their Agent Client Protocol adapters, drives the session over JSON-RPC, and renders the conversation in a Codify-native panel — task context, streaming replies, tool-call cards, permission prompts, handoff on exit."
+
+[req.1]
+title = "ACP client core"
+story = "As the extension, I want a dependency-free ACP client so that any ACP agent can be driven over stdio without adding a runtime dependency."
+ac_1  = "WHEN the extension connects to an agent THE client SHALL speak newline-delimited JSON-RPC 2.0 over the agent process's stdio."
+ac_2  = "WHEN initialize negotiates an incompatible protocol version or the process fails to start THE session SHALL fail with a clear surfaced message, never a hang."
+ac_3  = "WHEN the agent sends a request THE client SHALL dispatch it by method and answer with the matching id; notifications SHALL dispatch without a reply."
+ac_4  = "WHEN the agent process exits or emits a malformed frame THE client SHALL reject all pending requests and report the loss."
+
+[req.2]
+title = "Codify session bridge"
+story = "As a developer, I want panel sessions to obey the same board discipline as terminal sessions so that claims, prompts, and releases stay honest."
+ac_1  = "WHEN a panel session starts on a task THE extension SHALL claim and start the task exactly as terminal sessions do, owner checks included."
+ac_2  = "WHEN session/new is issued THE request SHALL carry the workspace cwd and Codify's own MCP server so the agent gets cg tools without repo config."
+ac_3  = "WHEN the session opens THE first prompt SHALL be the task's resume packet."
+ac_4  = "WHEN the agent requests a workspace file read or write THE client SHALL serve it from the workspace and refuse absolute paths outside the workspace root."
+ac_5  = "WHEN the session ends without the task qualifying THE extension SHALL offer handoff and claim release."
+
+[req.3]
+title = "Agent panel"
+story = "As a developer, I want to watch and steer the agent inside the IDE so that a session is a conversation, not an opaque terminal."
+ac_1  = "WHEN the agent streams message or thought chunks THE panel SHALL render them incrementally as they arrive."
+ac_2  = "WHEN a tool call starts or updates THE panel SHALL show its title, kind, and status, including diff and content payloads."
+ac_3  = "WHEN the agent requests permission THE panel SHALL present the offered options and return exactly the selected optionId."
+ac_4  = "WHEN a turn is running THE panel SHALL offer cancel via session/cancel and further input SHALL queue until the turn ends."
+
+[tasks]
+
+[task.1]
+title = "ACP core"
+
+[task.1.1]
+title      = "AcpClient — ndjson JSON-RPC over child stdio"
+status     = "done"
+wave       = 1
+symbols    = ["AcpClient"]
+touches    = ["editors/vscode/acp.js", "tests/integration/19_acp.sh", "tests/fixtures/acp/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "AcpClient: spawn agent command, newline-delimited JSON-RPC framing, id correlation, request/notify, onRequest/onNotify dispatch"
+do_2       = "initialize handshake helper with protocolVersion 1 and fs capabilities; hard failure on version mismatch or spawn error"
+do_3       = "Process-exit and parse-error handling: reject pending requests, emit close reason"
+do_4       = "Fake ACP agent fixture (node) + integration test driving a full session: initialize, session/new, prompt, streamed updates, permission round-trip, fs read/write, cancel"
+reqs       = ["1.1", "1.2", "1.3", "1.4"]
+
+[task.2]
+title = "Session bridge and panel"
+
+[task.2.1]
+title      = "Panel session lifecycle bridged to the board"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["startPanelSession"]
+touches    = ["editors/vscode/acp.js"]
+verify_cmd = "CG=$PWD/cg tests/integration/19_acp.sh && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "startPanelSession: claim (parallel mode) + spec start + resume-packet first prompt, reusing the agents.js discipline"
+do_2       = "session/new carries workspace cwd and mcpServers: [{name: codify, command: cg, args: [mcp]}]"
+do_3       = "fs/read_text_file and fs/write_text_file served from the workspace; paths outside the root refused"
+do_4       = "On session end without done/implemented: offer handoff and claim release; on qualify: quiet close"
+reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5"]
+
+[task.2.2]
+title      = "Agent panel webview"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["openAgentPanel"]
+touches    = ["editors/vscode/agentpanel.html", "editors/vscode/acp.js"]
+verify_cmd = "node --check editors/vscode/acp.js && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "Webview panel: task header, streaming transcript (message and collapsed thought chunks), tool-call cards with kind/status/diff, plan view"
+do_2       = "Permission requests rendered as option buttons; reply carries the selected optionId; cancelled turns resolve the request as cancelled"
+do_3       = "Input box with send; cancel button while a turn runs; queued input after cancel"
+do_4       = "VS Code theme variables throughout; strict webview CSP with nonce"
+reqs       = ["3.1", "3.2", "3.3", "3.4"]
+
+[task.3]
+title = "Surface"
+
+[task.3.1]
+title      = "Commands, settings, wiring, docs"
+status     = "done"
+wave       = 3
+requires   = ["2.1", "2.2"]
+symbols    = ["registerAcpCommands"]
+touches    = ["editors/vscode/*.js", "editors/vscode/package.json", "editors/vscode/README.md", "README.md", "CHANGELOG.md", "tests/integration/14_vscode.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "Commands: codify.agent.openPanel (task node + palette), panel variants wired beside the terminal commands"
+do_2       = "Settings: codify.acp.claudeCommand, codify.acp.codexCommand, codify.acp.customCommand, codify.agent.interface (panel|terminal)"
+do_3       = "Task-node start honors codify.agent.interface; terminal path stays the fallback when no adapter is available"
+do_4       = "README agent-panel section, vscode README settings table, CHANGELOG entry; 14_vscode manifest coherence covers acp.js"
+reqs       = ["2.1", "3.1"]
+
+[task.3.2]
+title      = "Sidebar agent view: chat-first, task optional"
+status     = "done"
+wave       = 3
+requires   = ["3.1"]
+symbols    = ["registerAgentView"]
+touches    = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "editors/vscode/package.json", "editors/vscode/README.md", "README.md", "CHANGELOG.md", "tests/integration/14_vscode.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "codifyAgentView webview view in the Codify container — always visible, like the Codex extension's chat, no task required"
+do_2       = "First message spawns the ACP session lazily (cwd session, MCP injected, no claim); driver picker in the header; New Chat resets"
+do_3       = "Start-on-task routes into the sidebar view when idle (claim + resume packet); busy view offers replace-or-open-beside; editor panels remain for concurrent tasks"
+do_4       = "Session end with an attached unqualified task still offers handoff/release; 14_vscode covers the view registration"
+reqs       = ["3.1"]
+
+[task.3.3]
+title      = "Full chat surface: markdown, tool cards, and cg slash commands"
+status     = "done"
+wave       = 3
+requires   = ["3.2"]
+symbols    = ["runCgSlash"]
+touches    = ["editors/vscode/agentpanel.html", "editors/vscode/acp.js", "editors/vscode/README.md", "README.md", "CHANGELOG.md", "tests/integration/19_acp.sh", "tests/fixtures/acp/*"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "Chat rendering: markdown (headings, lists, tables, quotes), fenced code blocks with copy, collapsed thoughts, and file paths that open in the editor"
+do_2       = "Slash palette over the cg verbs (brief, next, review, check, context, search, impact, why, …): the output lands as a card and is handed to the agent as context"
+do_3       = "Composer: autosizing input, history recall, queued input while a turn runs, stop, and a context bar carrying feature, task chip, task status, and driver"
+do_4       = "Panel script driven headlessly against a DOM shim in 19_acp.sh: rendering, tool/permission/plan cards, palette, and the ready handshake"
+reqs       = ["3.1", "3.2", "3.3", "3.4"]

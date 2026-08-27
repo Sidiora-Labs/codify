@@ -1,0 +1,27 @@
+{
+  "name": "kvx-lang",
+  "displayName": "KVX",
+  "description": "Syntax highlighting for KVX (.kvx) — ordered, sectioned key/value documents.",
+  "version": "1.0.0",
+  "publisher": "sidiora-labs",
+  "license": "MIT",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "kvx",
+        "aliases": ["KVX", "kvx"],
+        "extensions": [".kvx"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kvx",
+        "scopeName": "source.kvx",
+        "path": "./syntaxes/kvx.tmLanguage.json"
+      }
+    ]
+  }
+}

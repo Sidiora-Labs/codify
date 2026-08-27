@@ -1,0 +1,27 @@
+[interface]
+schema = 1
+name = "layerx.reference.escrow"
+version = 1
+abi = 2
+calldata = "version:u8 || operation:u8 || operation_payload"
+response = "CallResult"
+
+[entry.open]
+discriminator = 1
+payload = "seed_length:u16 || seed || derived_account:bytes32 || asset:bytes32 || beneficiary:bytes32 || refund_account:bytes32 || amount:u128be || release_receipt:bytes32 || refund_receipt:bytes32"
+law = "the invoking principal funds the declared derived account through ordinary 402LXP; the runtime rederives the same account before either payout"
+
+[entry.release]
+discriminator = 2
+payload = "derived_account:bytes32 || condition_receipt:bytes32"
+law = "a successful verified receipt matching the immutable release digest, escrow asset and escrow amount permits one owner-frame program-account payout"
+
+[entry.refund]
+discriminator = 3
+payload = "derived_account:bytes32 || condition_receipt:bytes32"
+law = "a successful verified receipt matching the distinct immutable refund digest, escrow asset and escrow amount permits one owner-frame program-account payout"
+
+[state]
+key = "shared:'lx.ref.escrow/' || derived_account"
+value = "status:u8 || seed_length:u16 || seed || derived_account || asset || beneficiary || refund_account || amount:u128be || release_receipt || refund_receipt"
+statuses = ["funded=1", "released=2", "refunded=3"]
