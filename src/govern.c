@@ -53,6 +53,24 @@ static bool has_spec_repo(const char *root) {
     return stat(p, &st) == 0;
 }
 
+/* Do two space-joined touch-pattern lists share any pair of patterns that
+ * could cover a common path? Delegates the per-pattern question to
+ * spec_globs_overlap so glob-vs-glob near-misses are caught too. */
+static bool lease_touches_overlap(const char *a, const char *b) {
+    char abuf[2048], bbuf[2048];
+    snprintf(abuf, sizeof abuf, "%s", a);
+    char *sa;
+    for (char *pa = strtok_r(abuf, " ", &sa); pa;
+         pa = strtok_r(NULL, " ", &sa)) {
+        snprintf(bbuf, sizeof bbuf, "%s", b);
+        char *sb;
+        for (char *pb = strtok_r(bbuf, " ", &sb); pb;
+             pb = strtok_r(NULL, " ", &sb))
+            if (spec_globs_overlap(pa, pb)) return true;
+    }
+    return false;
+}
+
 /* One command for CI. Everything Codify can prove about the repository,
  * gated behind a single exit code so a pipeline needs exactly one step. */
 int cmd_check(Cg *cg, bool json, bool strict)
@@ -86,12 +104,27 @@ int cmd_check(Cg *cg, bool json, bool strict)
         }
         free(out);
 
-        /* every task claimed done must still hold its evidence */
+        /* Every task claimed done must still hold its evidence. Pending
+         * tasks legitimately lack theirs, so track which task's trace we are
+         * inside and only count misses under done/implemented status. */
         out = NULL;
         spec_sub(&out, true, 1, "trace");
         if (out) {
             int bad = 0;
-            for (const char *p = out; (p = strstr(p, "\"ok\":false")); p++) bad++;
+            char status[32] = "";
+            for (const char *p = out; *p; p++) {
+                if (strncmp(p, "\"status\":\"", 10) == 0) {
+                    const char *s = p + 10;
+                    const char *e = strchr(s, '"');
+                    if (e) snprintf(status, sizeof status, "%.*s",
+                                    (int)(e - s), s);
+                } else if (strncmp(p, "\"found\":false", 13) == 0 ||
+                           strncmp(p, "\"changed\":false", 15) == 0) {
+                    if (strcmp(status, "done") == 0 ||
+                        strcmp(status, "implemented") == 0)
+                        bad++;
+                }
+            }
             if (bad) {
                 failures++;
                 sb_printf(&rep, "  FAIL  %d task check(s) no longer hold — "
@@ -114,21 +147,47 @@ int cmd_check(Cg *cg, bool json, bool strict)
             sb_printf(&rep, "  warn  %d expired task lease(s) — run "
                       "`cg spec release <id>` or re-claim\n", expired);
         }
+        /* Two live claims whose touch patterns can cover a common path are a
+         * collision in waiting, whether the patterns are equal or merely
+         * compatible globs — compare them pairwise instead of joining on
+         * string equality. */
         sqlite3_stmt *dq = cg_prep(cg,
-            "SELECT l.task, l.agent FROM leases l JOIN leases o "
-            "ON o.task<>l.task AND o.touches=l.touches "
-            "WHERE l.touches<>'' AND l.expires > strftime('%s','now') LIMIT 5");
-        int clash = 0;
-        while (sqlite3_step(dq) == SQLITE_ROW) {
-            if (!clash++) {
-                failures++;
-                sb_puts(&rep, "  FAIL  overlapping live claims:\n");
-            }
-            sb_printf(&rep, "        %s held by %s\n",
-                      (const char *)sqlite3_column_text(dq, 0),
-                      (const char *)sqlite3_column_text(dq, 1));
+            "SELECT task, agent, ifnull(touches,'') FROM leases "
+            "WHERE expires > strftime('%s','now') LIMIT 64");
+        enum { MAXL = 64 };
+        char *lt[MAXL], *la[MAXL], *lo[MAXL];
+        bool flagged[MAXL] = { false };
+        int nl = 0;
+        while (nl < MAXL && sqlite3_step(dq) == SQLITE_ROW) {
+            const char *t = (const char *)sqlite3_column_text(dq, 0);
+            const char *a = (const char *)sqlite3_column_text(dq, 1);
+            const char *o = (const char *)sqlite3_column_text(dq, 2);
+            lt[nl] = xstrdup(t ? t : "");
+            la[nl] = xstrdup(a ? a : "");
+            lo[nl] = xstrdup(o ? o : "");
+            nl++;
         }
         sqlite3_finalize(dq);
+        int clash = 0;
+        for (int i = 0; i < nl; i++) {
+            for (int j = i + 1; j < nl; j++) {
+                if (!lo[i][0] || !lo[j][0]) continue;
+                if (!lease_touches_overlap(lo[i], lo[j])) continue;
+                if (!clash++) {
+                    failures++;
+                    sb_puts(&rep, "  FAIL  overlapping live claims:\n");
+                }
+                if (!flagged[i]) {
+                    flagged[i] = true;
+                    sb_printf(&rep, "        %s held by %s\n", lt[i], la[i]);
+                }
+                if (!flagged[j]) {
+                    flagged[j] = true;
+                    sb_printf(&rep, "        %s held by %s\n", lt[j], la[j]);
+                }
+            }
+        }
+        for (int i = 0; i < nl; i++) { free(lt[i]); free(la[i]); free(lo[i]); }
         if (!expired && !clash)
             sb_puts(&rep, "  ok    task claims are consistent\n");
     } else {
@@ -184,6 +243,64 @@ static char *active_task_json(bool *is_current) {
     return next;
 }
 
+/* A briefing memory longer than a few lines is a document, not a reminder —
+ * cap bodies at 400 bytes, cutting on a UTF-8 boundary. */
+static void brief_cap_body(Memory *m) {
+    if (!m->body || strlen(m->body) <= 400) return;
+    size_t cut = 400;
+    while (cut > 0 && (m->body[cut] & 0xC0) == 0x80) cut--;
+    char *nb = xmalloc(cut + 4);
+    memcpy(nb, m->body, cut);
+    memcpy(nb + cut, "\xE2\x80\xA6", 4);          /* ellipsis + NUL */
+    free(m->body);
+    m->body = nb;
+}
+
+/* Memories scoped to the active task, then recent ones — deduplicated by id
+ * and by identical body, capped at 6 total. Task context must outrank mere
+ * recency or a busy repository buries the one note that matters. */
+static int brief_memories(Cg *cg, const char *task_json, Memory **out) {
+    Memory *mem = xmalloc(12 * sizeof *mem);
+    int nm = 0;
+
+    Memory *tmem = NULL;
+    int ntm = 0;
+    if (task_json) {
+        char *tid = json_get_string(task_json, "id");
+        if (tid) {
+            char *tag = spec_resolve_task(tid, NULL);
+            if (tag) ntm = spec_task_memories_tag(tag, &tmem);
+            free(tag);
+        }
+        free(tid);
+    }
+    Memory *rmem = NULL;
+    int nrm = memory_query(cg, NULL, NULL, NULL, 6, &rmem);
+
+    for (int pass = 0; pass < 2; pass++) {
+        Memory *src = pass ? rmem : tmem;
+        int n = pass ? nrm : ntm;
+        for (int i = 0; i < n; i++) {
+            bool dup = nm >= 6;
+            for (int k = 0; !dup && k < nm; k++)
+                if (mem[k].id == src[i].id ||
+                    (mem[k].body && src[i].body &&
+                     strcmp(mem[k].body, src[i].body) == 0))
+                    dup = true;
+            if (dup) {
+                memory_clear(&src[i]);
+            } else {
+                mem[nm] = src[i];             /* move; fields now owned here */
+                brief_cap_body(&mem[nm]);
+                nm++;
+            }
+        }
+        free(src);
+    }
+    *out = mem;
+    return nm;
+}
+
 /* Everything a session needs before its first real decision, in one call.
  * Without this an agent spends four or five round trips reassembling state
  * it had yesterday. */
@@ -198,7 +315,7 @@ int cmd_brief(Cg *cg, bool json)
     int np = vcs_changed_paths(cg, NULL, &paths);
 
     Memory *mem = NULL;
-    int nm = memory_query(cg, NULL, NULL, NULL, 6, &mem);
+    int nm = brief_memories(cg, task, &mem);
 
     if (json) {
         sb_puts(&b, "{\"root\":");
@@ -591,5 +708,292 @@ static int cmd_hook_install_git(Cg *cg, const char *bin)
     }
     printf("\nhooks are advisory: `cg guard` reports scope drift without\n"
            "failing. Use `cg guard --strict` to enforce.\n");
+    return 0;
+}
+
+/* ---------------- handoff / resume ---------------- */
+
+/* A handoff is one structured memory: 'handoff|done:…|next:…|blocked:…|
+ * note:…|files:…'. Each new handoff supersedes the previous live one, so
+ * resume always reads exactly one authoritative note per task. */
+
+static const char *HANDOFF_KEYS[] = { "done", "next", "blocked", "note",
+                                      "files" };
+
+/* extract one field from a handoff body; malloc'd, NULL when absent */
+static char *handoff_field(const char *body, const char *key) {
+    char pat[16];
+    snprintf(pat, sizeof pat, "|%s:", key);
+    const char *p = strstr(body, pat);
+    if (!p) return NULL;
+    p += strlen(pat);
+    const char *end = body + strlen(body);
+    for (size_t i = 0; i < sizeof HANDOFF_KEYS / sizeof *HANDOFF_KEYS; i++) {
+        char q[16];
+        snprintf(q, sizeof q, "|%s:", HANDOFF_KEYS[i]);
+        const char *m = strstr(p, q);
+        if (m && m < end) end = m;
+    }
+    size_t n = (size_t)(end - p);
+    char *v = xmalloc(n + 1);
+    memcpy(v, p, n);
+    v[n] = 0;
+    return v;
+}
+
+/* id of the newest non-superseded handoff memory for a task, or -1 */
+static long handoff_live_id(Cg *cg, const char *tag) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT m.id FROM memories m WHERE m.type='handoff' AND m.task=? "
+        "AND m.id NOT IN (SELECT id FROM memory_superseded) "
+        "ORDER BY m.id DESC LIMIT 1");
+    sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
+    long id = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return id;
+}
+
+/* uncommitted paths, comma-joined, capped at `cap` entries; malloc'd */
+static char *handoff_files(Cg *cg, int cap, int *count) {
+    char **paths = NULL;
+    int np = vcs_changed_paths(cg, NULL, &paths);
+    StrBuf f; sb_init(&f);
+    for (int i = 0; i < np && i < cap; i++) {
+        if (i) sb_putc(&f, ',');
+        sb_puts(&f, paths[i]);
+    }
+    for (int i = 0; i < np; i++) free(paths[i]);
+    free(paths);
+    if (count) *count = np;
+    if (f.len == 0) { sb_free(&f); return NULL; }
+    return f.p;
+}
+
+/* Session state that survives the session: what got done, what comes next,
+ * what is blocked — stored against the task, not the conversation. */
+int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,
+                const char *blocked, const char *note, bool json)
+{
+    char *tag = spec_resolve_task(task, cg_agent_name(NULL));
+    if (!tag) {
+        fprintf(stderr, task && task[0]
+                ? "cg handoff: unknown task '%s'\n"
+                : "cg handoff: no task in progress — pass --task <id>\n",
+                task ? task : "");
+        return 1;
+    }
+    char *files = handoff_files(cg, 20, NULL);
+
+    StrBuf body; sb_init(&body);
+    sb_puts(&body, "handoff");
+    if (done && done[0])       sb_printf(&body, "|done:%s", done);
+    if (next && next[0])       sb_printf(&body, "|next:%s", next);
+    if (blocked && blocked[0]) sb_printf(&body, "|blocked:%s", blocked);
+    if (note && note[0])       sb_printf(&body, "|note:%s", note);
+    if (files)                 sb_printf(&body, "|files:%s", files);
+
+    long prev = handoff_live_id(cg, tag);
+    long id = memory_add(cg, "handoff", tag, body.p, NULL, files, "manual");
+    if (id < 0) {
+        fprintf(stderr, "cg handoff: cannot store handoff\n");
+        sb_free(&body); free(files); free(tag);
+        return 1;
+    }
+    if (prev > 0) memory_supersede(cg, prev, id);
+
+    if (json) {
+        StrBuf j; sb_init(&j);
+        sb_printf(&j, "{\"handoff\":%ld,\"task\":", id);
+        sb_json_str(&j, tag);
+        if (prev > 0) sb_printf(&j, ",\"superseded\":%ld", prev);
+        else          sb_puts(&j, ",\"superseded\":null");
+        sb_puts(&j, "}\n");
+        fputs(j.p, stdout);
+        sb_free(&j);
+    } else {
+        printf("handoff recorded for %s\n", tag);
+        if (prev > 0) printf("  supersedes handoff #%ld\n", prev);
+        if (next && next[0]) printf("  next: %s\n", next);
+    }
+    sb_free(&body);
+    free(files);
+    free(tag);
+    return 0;
+}
+
+/* append one parsed handoff field to a JSON object under construction */
+static void resume_json_field(StrBuf *b, const char *name, const char *v) {
+    sb_printf(b, ",\"%s\":", name);
+    if (v) sb_json_str(b, v);
+    else   sb_puts(b, "null");
+}
+
+/* The other half of handoff: everything a fresh session needs to pick a task
+ * back up — the task packet, the latest live handoff, task-scoped memories,
+ * the dirty paths, and who (if anyone) holds the lease. */
+int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)
+{
+    char *tag = spec_resolve_task(task, cg_agent_name(NULL));
+    if (!tag) {
+        fprintf(stderr, task && task[0]
+                ? "cg resume: unknown task '%s'\n"
+                : "cg resume: no task in progress — pass --task <id>\n",
+                task ? task : "");
+        return 1;
+    }
+    char *packet = spec_task_packet(tag);
+
+    /* latest live handoff, parsed */
+    char *hdone = NULL, *hnext = NULL, *hblocked = NULL, *hnote = NULL,
+         *hfiles = NULL;
+    bool have_handoff = false;
+    {
+        long hid = handoff_live_id(cg, tag);
+        if (hid > 0) {
+            sqlite3_stmt *st = cg_prep(cg,
+                "SELECT body FROM memories WHERE id=?");
+            sqlite3_bind_int64(st, 1, hid);
+            if (sqlite3_step(st) == SQLITE_ROW) {
+                const char *body = (const char *)sqlite3_column_text(st, 0);
+                if (body) {
+                    have_handoff = true;
+                    hdone    = handoff_field(body, "done");
+                    hnext    = handoff_field(body, "next");
+                    hblocked = handoff_field(body, "blocked");
+                    hnote    = handoff_field(body, "note");
+                    hfiles   = handoff_field(body, "files");
+                }
+            }
+            sqlite3_finalize(st);
+        }
+    }
+
+    /* task-scoped memories, minus raw handoff rows (already parsed above) */
+    Memory *mem = NULL;
+    int nm = spec_task_memories_tag(tag, &mem);
+    char **paths = NULL;
+    int np = vcs_changed_paths(cg, NULL, &paths);
+
+    char *lagent = NULL;
+    long lmin = 0;
+    {
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT agent, (expires - strftime('%s','now'))/60 FROM leases "
+            "WHERE task=? AND expires > strftime('%s','now')");
+        sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *a = (const char *)sqlite3_column_text(st, 0);
+            lagent = xstrdup(a ? a : "");
+            lmin = sqlite3_column_int64(st, 1);
+        }
+        sqlite3_finalize(st);
+    }
+
+    StrBuf b; sb_init(&b);
+    if (json) {
+        sb_puts(&b, "{\"root\":");
+        sb_json_str(&b, cg->root);
+        sb_puts(&b, ",\"task\":");
+        sb_puts(&b, packet ? packet : "null");
+        if (have_handoff) {
+            sb_puts(&b, ",\"handoff\":{\"done\":");
+            if (hdone) sb_json_str(&b, hdone); else sb_puts(&b, "null");
+            resume_json_field(&b, "next", hnext);
+            resume_json_field(&b, "blocked", hblocked);
+            resume_json_field(&b, "note", hnote);
+            sb_puts(&b, ",\"files\":[");
+            if (hfiles) {
+                char *sav;
+                int i = 0;
+                for (char *f = strtok_r(hfiles, ",", &sav); f;
+                     f = strtok_r(NULL, ",", &sav)) {
+                    if (i++) sb_putc(&b, ',');
+                    sb_json_str(&b, f);
+                }
+            }
+            sb_puts(&b, "]}");
+        } else {
+            sb_puts(&b, ",\"handoff\":null");
+        }
+        sb_puts(&b, ",\"memories\":[");
+        int shown = 0;
+        for (int i = 0; i < nm && shown < 5; i++) {
+            if (strcmp(mem[i].type, "handoff") == 0) continue;
+            if (shown++) sb_putc(&b, ',');
+            memory_json(&mem[i], &b);
+        }
+        sb_puts(&b, "],\"uncommitted\":[");
+        for (int i = 0; i < np && i < 20; i++) {
+            if (i) sb_putc(&b, ',');
+            sb_json_str(&b, paths[i]);
+        }
+        sb_printf(&b, "],\"uncommitted_count\":%d", np);
+        if (lagent) {
+            sb_puts(&b, ",\"lease\":{\"agent\":");
+            sb_json_str(&b, lagent);
+            sb_printf(&b, ",\"expires_in_min\":%ld}", lmin);
+        } else {
+            sb_puts(&b, ",\"lease\":null");
+        }
+        sb_puts(&b, "}\n");
+    } else {
+        char *id = packet ? json_get_string(packet, "id") : NULL;
+        char *ti = packet ? json_get_string(packet, "title") : NULL;
+        char *stt = packet ? json_get_string(packet, "status") : NULL;
+        char *vc = packet ? json_get_string(packet, "verify_cmd") : NULL;
+        if (prompt) sb_printf(&b, "# resume: %s\n", tag);
+        else        sb_printf(&b, "resume — %s\n", tag);
+        sb_printf(&b, "task %s — %s  (%s)\n", id ? id : "?", ti ? ti : "?",
+                  stt ? stt : "?");
+        if (vc) sb_printf(&b, "verify: %s\n", vc);
+        if (have_handoff) {
+            sb_puts(&b, "last handoff:\n");
+            if (hdone)    sb_printf(&b, "  done: %s\n", hdone);
+            if (hnext)    sb_printf(&b, "  next: %s\n", hnext);
+            if (hblocked) sb_printf(&b, "  blocked: %s\n", hblocked);
+            if (hnote)    sb_printf(&b, "  note: %s\n", hnote);
+            if (hfiles)   sb_printf(&b, "  files: %s\n", hfiles);
+        } else {
+            sb_puts(&b, "last handoff: none recorded\n");
+        }
+        int shown = 0;
+        for (int i = 0; i < nm && shown < 5; i++) {
+            if (strcmp(mem[i].type, "handoff") == 0) continue;
+            if (!shown) sb_puts(&b, "task memories:\n");
+            sb_printf(&b, "  [%s] %s\n", mem[i].type, mem[i].body);
+            shown++;
+        }
+        if (np) {
+            sb_printf(&b, "uncommitted (%d):\n", np);
+            for (int i = 0; i < np && i < 20; i++)
+                sb_printf(&b, "  %s\n", paths[i]);
+            if (np > 20) sb_printf(&b, "  ... and %d more\n", np - 20);
+        } else {
+            sb_puts(&b, "uncommitted: clean\n");
+        }
+        if (lagent)
+            sb_printf(&b, "lease: held by %s, expires in %ld min\n",
+                      lagent, lmin);
+        else
+            sb_puts(&b, "lease: none — claim with `cg spec claim <id>`\n");
+        if (prompt) {
+            const char *sid = id ? id : "?";
+            sb_printf(&b,
+                "\nwhen done: run the verify command, then `cg spec done %s`."
+                "\nbefore stopping: `cg handoff --task %s --done ... "
+                "--next ...` to hand off.\n", sid, sid);
+        }
+        free(id); free(ti); free(stt); free(vc);
+    }
+    fputs(b.p, stdout);
+    sb_free(&b);
+    memory_free(mem, nm);
+    for (int i = 0; i < np; i++) free(paths[i]);
+    free(paths);
+    free(lagent);
+    free(hdone); free(hnext); free(hblocked); free(hnote); free(hfiles);
+    free(packet);
+    free(tag);
     return 0;
 }

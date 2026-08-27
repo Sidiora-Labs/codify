@@ -56,12 +56,19 @@ static void usage(void) {
 "  brief                    session state: task, changes, decisions\n"
 "  review                   changed symbols vs acceptance criteria + risk\n"
 "  guard [paths] [--strict] edits outside the active task's declared scope\n"
+"  handoff [--task <id>]    record session state against a task: --done,\n"
+"                           --next, --blocked, -m <note>\n"
+"  resume [--task <id>]     task packet + latest handoff + memories + tree\n"
+"                           state; --prompt for a paste-ready block\n"
 "  hook install             wire agent + git hooks so the graph self-syncs\n"
 "\n"
 "spec workflow (Ion kvx specs — works in any repo with spec/workflow.kvx)\n"
 "  spec render [--check]    regenerate IDE pointer files + markdown mirror\n"
 "  spec [status]            task board for the active feature\n"
 "  spec next                next eligible task with its acceptance criteria\n"
+"  spec ready               all eligible tasks across waves (parallel view)\n"
+"  spec claim-next          atomically claim the first conflict-free task;\n"
+"                           --agent <name>, --ttl <min>\n"
 "  spec mode <prod|standard> configure implementation dependency semantics\n"
 "  spec start <id>          mark a task in_progress (honors workflow limit)\n"
 "  spec implemented <id>    graph-check coding work without verify_cmd;\n"
@@ -70,6 +77,10 @@ static void usage(void) {
 "                           then mark done; records an outcome memory\n"
 "  spec trace [<id>]        trace tasks to code: symbols in the graph,\n"
 "                           touched paths, tagged commits\n"
+"  spec run [-n N]          orchestrate parallel/prod work: claim eligible\n"
+"                           tasks and drive one agent per slot; --driver\n"
+"                           codex|claude|custom, --dry-run, --max-fail K,\n"
+"                           --agent-prefix P\n"
 "\n"
 "most query commands accept --json for machine-readable output\n",
         CG_VERSION);
@@ -170,8 +181,11 @@ int main(int argc, char **argv) {
     }
 
     /* spec works without .codegraph — dispatch before opening the graph */
-    if (strcmp(cmd, "spec") == 0)
+    if (strcmp(cmd, "spec") == 0) {
+        if (argc > 2 && strcmp(argv[2], "run") == 0)
+            return cmd_spec_run(argc - 3, argv + 3);
         return cmd_spec(argc - 2, argv + 2, json);
+    }
 
     if (strcmp(cmd, "root") == 0)
         return cmd_root(json);
@@ -251,14 +265,23 @@ int main(int argc, char **argv) {
         else rc = cmd_symbol(&cg, argv[2], json);
     } else if (strcmp(cmd, "impact") == 0) {
         int depth = atoi(opt(&argc, argv, "-d", "3"));
-        if (argc < 3) { fprintf(stderr, "usage: cg impact <name>\n"); rc = 1; }
-        else rc = cmd_impact(&cg, argv[2], depth > 0 ? depth : 3, json);
+        int budget = atoi(opt(&argc, argv, "--budget", "8000"));
+        if (argc < 3) { fprintf(stderr, "usage: cg impact <name> [-d N] "
+                                        "[--budget N]\n"); rc = 1; }
+        else rc = cmd_impact(&cg, argv[2], depth > 0 ? depth : 3,
+                             budget > 0 ? budget : 8000, json);
     } else if (strcmp(cmd, "context") == 0) {
-        if (argc < 3) { fprintf(stderr, "usage: cg context <query>\n"); rc = 1; }
-        else rc = cmd_context(&cg, argv[2], json);
+        int budget = atoi(opt(&argc, argv, "--budget", "4000"));
+        int limit = atoi(opt(&argc, argv, "-n", "8"));
+        if (argc < 3) { fprintf(stderr, "usage: cg context <query> "
+                                        "[--budget N] [-n K]\n"); rc = 1; }
+        else rc = cmd_context(&cg, argv[2], budget > 0 ? budget : 4000,
+                              limit > 0 ? limit : 8, json);
     } else if (strcmp(cmd, "show") == 0) {
-        if (argc < 3) { fprintf(stderr, "usage: cg show <symbol>\n"); rc = 1; }
-        else rc = cmd_show(&cg, argv[2], json);
+        bool full = flag(&argc, argv, "--full");
+        if (argc < 3) { fprintf(stderr, "usage: cg show <symbol> [--full]\n");
+                        rc = 1; }
+        else rc = cmd_show(&cg, argv[2], full, json);
     } else if (strcmp(cmd, "test-impact") == 0) {
         rc = cmd_test_impact(&cg, argc >= 3 ? argv[2] : NULL, json);
     } else if (strcmp(cmd, "why") == 0) {
@@ -329,7 +352,8 @@ int main(int argc, char **argv) {
         if (argc < 3) { fprintf(stderr, "usage: cg checkout <id>\n"); rc = 1; }
         else rc = cmd_checkout(&cg, argv[2], force);
     } else if (strcmp(cmd, "changes") == 0) {
-        rc = cmd_changes(&cg, json);
+        int limit = atoi(opt(&argc, argv, "--limit", "0"));
+        rc = cmd_changes(&cg, limit, json);
     } else if (strcmp(cmd, "remember") == 0) {
         const char *type = opt(&argc, argv, "--type", NULL);
         const char *task = opt(&argc, argv, "--task", NULL);
@@ -385,6 +409,17 @@ int main(int argc, char **argv) {
         IndexStats st;
         cg_index(&cg, &si, false, &st, true);   /* fresh graph first */
         rc = cmd_agentmd(&cg, write_files);
+    } else if (strcmp(cmd, "handoff") == 0) {
+        const char *task = opt(&argc, argv, "--task", NULL);
+        const char *done = opt(&argc, argv, "--done", NULL);
+        const char *next = opt(&argc, argv, "--next", NULL);
+        const char *blocked = opt(&argc, argv, "--blocked", NULL);
+        const char *note = opt(&argc, argv, "-m", NULL);
+        rc = cmd_handoff(&cg, task, done, next, blocked, note, json);
+    } else if (strcmp(cmd, "resume") == 0) {
+        const char *task = opt(&argc, argv, "--task", NULL);
+        bool prompt = flag(&argc, argv, "--prompt");
+        rc = cmd_resume(&cg, task, json, prompt);
     } else {
         fprintf(stderr, "cg: unknown command '%s' (try `cg help`)\n", cmd);
         rc = 1;

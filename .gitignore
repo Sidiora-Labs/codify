@@ -7,3 +7,6 @@ build/
 /AGENTS.md
 *.vsix
 node_modules/
+*.kvx.lock
+*.kvx.claim.lock
+docs/superpowers/

@@ -2,11 +2,19 @@
 
 [meta]
 name            = "Codify Workflow"
-active_feature  = "codify-v03"
+active_feature  = "codify-v04"
 source_of_truth = "spec/ (kvx). Generated files are pointers — regenerate, never hand-edit."
 
 [mode]
-name = "standard"
+name = "parallel"
+
+[limits]
+max_in_progress = 8
+
+[agents]
+driver = "codex"
+max    = 3
+ttl    = 3600
 
 [principle]
 task_driven     = "Work is driven by the active feature's task list, in wave order."

@@ -13,7 +13,7 @@ s = open(p).read().replace('verify_cmd = "test -f verify.marker"',
 open(p, "w").write(s)
 EOF
 
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
 '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
 '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_code","arguments":{"query":"formatName"}}}' \
@@ -28,6 +28,9 @@ printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"spec_implemented","arguments":{"id":"1.2"}}}' \
 '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"spec_implemented","arguments":{"id":"1.2","force":true}}}' \
 '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"spec_status","arguments":{}}}' \
+'{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"spec_ready","arguments":{}}}' \
+'{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"get_context","arguments":{"query":"formatName","budget":200,"limit":2}}}' \
+'{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"resume","arguments":{}}}' \
 | "$CG" mcp > "$TMP/mcp.out"
 
 [ ! -e mcp-qualification.ran ] \
@@ -48,7 +51,8 @@ assert len(tools) >= 19, tools
 for t in ("search_code", "get_context", "impact_analysis", "vcs_commit",
           "spec_status", "spec_next", "spec_start", "spec_done",
           "spec_mode", "spec_implemented", "spec_render", "spec_trace",
-          "remember", "recall"):
+          "remember", "recall", "spec_ready", "spec_claim_next",
+          "spec_release", "handoff", "resume"):
     assert t in tools, f"missing tool {t}"
 for t in by_id[2]["result"]["tools"]:
     assert t["description"], f"tool {t['name']} has no description"
@@ -92,14 +96,14 @@ assert "requires Prod mode" in before_mode["content"][0]["text"], before_mode
 
 mode = by_id[10]["result"]
 assert mode["isError"] is False, mode
-assert "mode: prod" in mode["content"][0]["text"], mode
+assert '"mode":"prod"' in mode["content"][0]["text"], mode
 
 started = by_id[11]["result"]
 assert started["isError"] is False, started
 
 implemented = by_id[12]["result"]
 assert implemented["isError"] is False, implemented
-assert "implemented 1.2" in implemented["content"][0]["text"], implemented
+assert '"implemented":"1.2"' in implemented["content"][0]["text"], implemented
 
 forced = by_id[13]["result"]
 assert forced["isError"] is True, forced
@@ -109,6 +113,23 @@ status = by_id[14]["result"]
 assert status["isError"] is False, status
 prod = json.loads(status["content"][0]["text"])
 assert prod["mode"] == "prod" and prod["implemented"] == 1, prod
+
+ready = by_id[15]["result"]
+assert ready["isError"] is False, ready
+rd = json.loads(ready["content"][0]["text"])
+assert rd["mode"] == "prod", rd
+assert isinstance(rd["tasks"], list), rd
+
+ctx = by_id[16]["result"]                     # budget/limit args plumbed through
+assert ctx["isError"] is False, ctx
+cx = json.loads(ctx["content"][0]["text"])
+assert cx["query"] == "formatName", cx
+assert any("formatName" in s.get("name", "")
+           for s in cx.get("symbols", [])), cx
+
+res = by_id[17]["result"]                     # no task in progress -> the
+assert res["isError"] is True, res            # explanation reaches the body
+assert "no task in progress" in res["content"][0]["text"], res
 EOF
 
 echo ok
@@ -146,7 +167,8 @@ assert by['search_code']['annotations']['readOnlyHint'] is True
 assert by['vcs_commit']['annotations']['readOnlyHint'] is False
 for name in ('brief', 'review', 'why', 'get_source', 'test_impact',
              'check', 'guard', 'spec_wave', 'spec_new', 'spec_add',
-             'spec_lint', 'spec_claim', 'git_sync'):
+             'spec_lint', 'spec_claim', 'git_sync', 'spec_ready',
+             'spec_claim_next', 'spec_release', 'handoff', 'resume'):
     assert name in by, ('missing tool', name)
 "
 

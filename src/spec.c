@@ -17,7 +17,9 @@
 #include "cg.h"
 #include <ctype.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <fnmatch.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -625,6 +627,14 @@ static int spec_render(const char *root, bool check, bool quiet) {
     return 0;
 }
 
+/* machine-readable wrapper for MCP and --json callers */
+static int spec_render_json(const char *root, bool check) {
+    int rc = spec_render(root, check, true);
+    printf("{\"ok\":%s,\"stale\":%s}\n", rc == 0 ? "true" : "false",
+           rc == 2 ? "true" : "false");
+    return rc;
+}
+
 /* ---------------- task engine ---------------- */
 
 typedef struct {
@@ -865,6 +875,17 @@ static void json_task(const Spec *s, const char *id, StrBuf *b) {
     sb_json_str(b, status[0] ? status : "pending");
     sb_printf(b, ",\"wave\":%lu", uint_or(s->f, sec, "wave", 0));
     free(title); free(status);
+    sb_puts(b, ",\"feature\":");
+    sb_json_str(b, s->feature);
+    sb_puts(b, ",\"requires\":[");
+    char **reqv; int nrq = kvx_list(s->f, sec, "requires", &reqv);
+    for (int i = 0; i < nrq; i++) {
+        if (i) sb_putc(b, ',');
+        sb_json_str(b, reqv[i]);
+        free(reqv[i]);
+    }
+    free(reqv);
+    sb_putc(b, ']');
 
     sb_puts(b, ",\"do\":[");
     bool first = true;
@@ -928,6 +949,45 @@ static int spec_in_progress_count(const Spec *s) {
         free(st);
     }
     return count;
+}
+
+/* the in_progress task the agent's own live lease points at, if any;
+ * returns a pointer borrowed from s->ids, NULL when there is none */
+static const char *spec_agent_leased(const Spec *s, const char *agent) {
+    if (!agent || !agent[0]) return NULL;
+    Cg g;
+    if (!memory_open_quiet(&g)) return NULL;
+    const char *found = NULL;
+    sqlite3_stmt *st = cg_prep(&g,
+        "SELECT task FROM leases WHERE agent=? AND task LIKE ?||'/%' "
+        "AND expires > strftime('%s','now') ORDER BY task");
+    sqlite3_bind_text(st, 1, agent, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, s->feature, -1, SQLITE_STATIC);
+    while (!found && sqlite3_step(st) == SQLITE_ROW) {
+        const char *task = (const char *)sqlite3_column_text(st, 0);
+        const char *id = strrchr(task, '/');
+        id = id ? id + 1 : task;
+        for (int i = 0; i < s->nids && !found; i++) {
+            if (strcmp(s->ids[i], id) != 0) continue;
+            char *ts = task_status(s, s->ids[i]);
+            if (strcmp(ts, "in_progress") == 0) found = s->ids[i];
+            free(ts);
+        }
+    }
+    sqlite3_finalize(st);
+    cg_close(&g);
+    return found;
+}
+
+/* Which task is "current" for this agent? In parallel mode several tasks
+ * are in flight at once, and "the first in_progress row" would hand every
+ * agent the same one — the agent's own live lease disambiguates. */
+static const char *spec_current_for_agent(const Spec *s, const char *agent) {
+    if (spec_parallel_mode(s)) {
+        const char *own = spec_agent_leased(s, agent);
+        if (own) return own;
+    }
+    return spec_current(s);
 }
 
 /* ---------------- memory hooks ---------------- */
@@ -1016,7 +1076,7 @@ static int spec_status_cmd(Spec *s, bool json) {
         else pending++;
         free(st);
     }
-    const char *cur = spec_current(s);
+    const char *cur = spec_current_for_agent(s, cg_agent_name(NULL));
     const char *next = spec_next_id(s);
 
     if (json) {
@@ -1028,7 +1088,8 @@ static int spec_status_cmd(Spec *s, bool json) {
         snprintf(rel, sizeof rel, "spec/%s/spec.kvx", s->feature);
         sb_json_str(&b, rel);
         sb_puts(&b, ",\"mode\":");
-        sb_json_str(&b, spec_prod_mode(s) ? "prod" : "standard");
+        sb_json_str(&b, spec_parallel_mode(s) ? "parallel" :
+                        spec_prod_mode(s) ? "prod" : "standard");
         sb_printf(&b, ",\"tasks\":%d,\"done\":%d,\"implemented\":%d,"
                   "\"in_progress\":%d,\"pending\":%d", leaves, done,
                   implemented, inprog, pending);
@@ -1043,7 +1104,8 @@ static int spec_status_cmd(Spec *s, bool json) {
     }
 
     printf("feature: %s (spec/%s/spec.kvx)\n", s->feature, s->feature);
-    printf("mode: %s\n", spec_prod_mode(s) ? "prod" : "standard");
+    printf("mode: %s\n", spec_parallel_mode(s) ? "parallel" :
+                         spec_prod_mode(s) ? "prod" : "standard");
     printf("tasks: %d — %d done, %d implemented, %d in progress, "
            "%d pending\n", leaves, done, implemented, inprog, pending);
     if (leaves > 0) {
@@ -1088,7 +1150,7 @@ static int spec_status_cmd(Spec *s, bool json) {
     return 0;
 }
 
-static int spec_mode_cmd(Spec *s, const char *mode) {
+static int spec_mode_cmd(Spec *s, const char *mode, bool json) {
     if (!mode || (strcmp(mode, "prod") != 0 && strcmp(mode, "standard") != 0 &&
                   strcmp(mode, "parallel") != 0)) {
         fprintf(stderr, "cg spec: mode must be standard, prod, or parallel\n");
@@ -1109,7 +1171,8 @@ static int spec_mode_cmd(Spec *s, const char *mode) {
         fprintf(stderr, "cg spec: cannot parse %s after mode update\n", s->wfpath);
         return 1;
     }
-    printf("mode: %s\n", mode);
+    if (json) printf("{\"mode\":\"%s\"}\n", mode);
+    else printf("mode: %s\n", mode);
     return 0;
 }
 
@@ -1148,11 +1211,30 @@ static int spec_next_cmd(Spec *s, bool json) {
     return 0;
 }
 
+/* Can two touch patterns cover a common path? fnmatch handles glob-vs-
+ * literal in both directions, but two globs never fnmatch each other —
+ * 'src/a*.c' vs 'src/[star]b.c' both cover src/ab.c and slipped through.
+ * When either side is a glob, fall back to comparing the literal prefixes
+ * up to the first metacharacter: compatible prefixes mean the pattern
+ * families can collide, so treat them as overlapping. */
+bool spec_globs_overlap(const char *a, const char *b) {
+    if (strcmp(a, b) == 0) return true;
+    if (fnmatch(a, b, 0) == 0 || fnmatch(b, a, 0) == 0) return true;
+    size_t la = strcspn(a, "*?["), lb = strcspn(b, "*?[");
+    if (a[la] == 0 && b[lb] == 0) return false;   /* both literal, unequal */
+    size_t n = la < lb ? la : lb;
+    return strncmp(a, b, n) == 0;
+}
+
 /* Two agents editing the same files is the classic parallel-agent failure.
  * The plan already declares each task's `touches`, so overlap is knowable
- * before any work starts — refuse the claim instead of merging the wreckage. */
+ * before any work starts — refuse the claim instead of merging the wreckage.
+ * Consults both in_progress tasks and LIVE leases: a claimed-but-unstarted
+ * task blocks the same paths as a started one. Pass an open db (or NULL to
+ * open one quietly) for the lease scan. */
 static bool spec_touches_conflict(Spec *s, const char *id, char *other,
-                                  size_t ocap, char *pat, size_t pcap) {
+                                  size_t ocap, char *pat, size_t pcap,
+                                  Cg *db) {
     char sec[300];
     task_sec(sec, sizeof sec, id);
     char **mine; int nm = kvx_list(s->f, sec, "touches", &mine);
@@ -1170,9 +1252,7 @@ static bool spec_touches_conflict(Spec *s, const char *id, char *other,
         char **theirs; int nt = kvx_list(s->f, osec, "touches", &theirs);
         for (int a = 0; a < nm && !clash; a++)
             for (int b = 0; b < nt && !clash; b++)
-                if (strcmp(mine[a], theirs[b]) == 0 ||
-                    fnmatch(mine[a], theirs[b], 0) == 0 ||
-                    fnmatch(theirs[b], mine[a], 0) == 0) {
+                if (spec_globs_overlap(mine[a], theirs[b])) {
                     clash = true;
                     snprintf(other, ocap, "%s", s->ids[i]);
                     snprintf(pat, pcap, "%s", mine[a]);
@@ -1180,6 +1260,41 @@ static bool spec_touches_conflict(Spec *s, const char *id, char *other,
         for (int b = 0; b < nt; b++) free(theirs[b]);
         free(theirs);
     }
+
+    Cg local;
+    Cg *g = db;
+    if (!clash && !g && memory_open_quiet(&local)) g = &local;
+    if (!clash && g) {
+        char tag[700];
+        snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+        sqlite3_stmt *st = cg_prep(g,
+            "SELECT task,ifnull(touches,'') FROM leases WHERE task<>? "
+            "AND expires > strftime('%s','now') ORDER BY task");
+        sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
+        while (!clash && sqlite3_step(st) == SQLITE_ROW) {
+            const char *task = (const char *)sqlite3_column_text(st, 0);
+            const char *tch = (const char *)sqlite3_column_text(st, 1);
+            const char *oid = strrchr(task, '/');
+            oid = oid ? oid + 1 : task;
+            for (const char *p = tch; *p && !clash; ) {   /* space-joined */
+                while (*p == ' ') p++;
+                if (!*p) break;
+                size_t n = strcspn(p, " ");
+                char theirs[512];
+                snprintf(theirs, sizeof theirs, "%.*s", (int)n, p);
+                for (int a = 0; a < nm && !clash; a++)
+                    if (spec_globs_overlap(mine[a], theirs)) {
+                        clash = true;
+                        snprintf(other, ocap, "%s", oid);
+                        snprintf(pat, pcap, "%s", mine[a]);
+                    }
+                p += n;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    if (g == &local) cg_close(&local);
+
     for (int a = 0; a < nm; a++) free(mine[a]);
     free(mine);
     return clash;
@@ -1278,10 +1393,44 @@ static int spec_wave_cmd(Spec *s, bool json) {
     return 0;
 }
 
+/* upsert one lease; runs inside whatever transaction the caller holds */
+static void spec_lease_upsert(Cg *g, const char *tag, const char *agent,
+                              long now, long ttl_min, const char *touches) {
+    sqlite3_stmt *ins = cg_prep(g,
+        "INSERT INTO leases(task,agent,claimed,expires,touches) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(task) DO UPDATE SET "
+        "agent=excluded.agent,expires=excluded.expires,"
+        "touches=excluded.touches");
+    sqlite3_bind_text(ins, 1, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 2, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(ins, 3, now);
+    sqlite3_bind_int64(ins, 4, now + ttl_min * 60);
+    sqlite3_bind_text(ins, 5, touches, -1, SQLITE_TRANSIENT);
+    sqlite3_step(ins);
+    sqlite3_finalize(ins);
+}
+
+/* A finished task's lease must die with it, or the next `spec ready` keeps
+ * reporting a conflict against work that is already over. Quiet no-op when
+ * the repo has no .codegraph. */
+static void spec_release_lease(Spec *s, const char *id) {
+    Cg g;
+    if (!memory_open_quiet(&g)) return;
+    char tag[700];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
+    sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    cg_close(&g);
+}
+
 /* A lease is a claim with an owner and an expiry, so a crashed agent's task
- * returns to the pool instead of blocking the wave forever. */
+ * returns to the pool instead of blocking the wave forever. The whole claim
+ * runs inside BEGIN IMMEDIATE so two racing agents cannot both pass the
+ * owner check and silently steal each other's lease. */
 static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
-                          long ttl_min, bool release, bool json) {
+                          long ttl_min, bool release, bool force, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) {
         fprintf(stderr, "cg spec: claims need a Codify index here "
@@ -1291,22 +1440,65 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     char tag[256];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
     long now = (long)time(NULL);
-    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
 
     if (release) {
+        /* owner check and delete must be one transaction, or a racing
+         * agent's fresh lease can vanish under a vacuous release */
+        cg_exec(&g, "BEGIN IMMEDIATE");
+        cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+        /* releasing someone else's lease is the steal this exists to stop */
+        sqlite3_stmt *q = cg_prep(&g, "SELECT agent FROM leases WHERE task=?");
+        sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            const char *owner = (const char *)sqlite3_column_text(q, 0);
+            if (strcmp(owner, agent) != 0 && !force) {
+                fprintf(stderr, "cg spec: %s is held by %s, not %s — release "
+                        "with --agent %s or --force\n", id, owner, agent,
+                        owner);
+                sqlite3_finalize(q);
+                cg_exec(&g, "ROLLBACK");
+                cg_close(&g);
+                return 1;
+            }
+        }
+        sqlite3_finalize(q);
         sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
         sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
         sqlite3_step(st);
         sqlite3_finalize(st);
-        printf("released %s\n", id);
+        cg_exec(&g, "COMMIT");
+        if (json) {
+            StrBuf b; sb_init(&b);
+            sb_puts(&b, "{\"released\":");
+            sb_json_str(&b, tag);
+            sb_puts(&b, "}\n");
+            fputs(b.p, stdout);
+            sb_free(&b);
+        } else printf("released %s\n", id);
         cg_close(&g);
         return 0;
     }
+    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         cg_close(&g);
         return 1;
     }
+    /* only claimable work: an eligible pending leaf, or a task already in
+     * flight — claiming done work or a blocked task hides real state */
+    {
+        char *st0 = task_status(s, id);
+        bool in_flight = strcmp(st0, "in_progress") == 0;
+        free(st0);
+        if (!in_flight && !task_eligible(s, id)) {
+            fprintf(stderr, "cg spec: %s is not claimable — it is finished, "
+                    "a heading, or has unmet requires\n", id);
+            cg_close(&g);
+            return 1;
+        }
+    }
+
+    cg_exec(&g, "BEGIN IMMEDIATE");
     sqlite3_stmt *q = cg_prep(&g, "SELECT agent,expires FROM leases WHERE task=?");
     sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
     if (sqlite3_step(q) == SQLITE_ROW) {
@@ -1314,6 +1506,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         if (strcmp(owner, agent) != 0) {
             fprintf(stderr, "cg spec: %s is already claimed by %s\n", id, owner);
             sqlite3_finalize(q);
+            cg_exec(&g, "ROLLBACK");
             cg_close(&g);
             return 1;
         }
@@ -1322,9 +1515,11 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
 
     char other[64] = "", pat[256] = "";
     if (spec_parallel_mode(s) &&
-        spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat)) {
+        spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
+                              &g)) {
         fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
                 "also claims — pick a disjoint task\n", id, pat, other);
+        cg_exec(&g, "ROLLBACK");
         cg_close(&g);
         return 1;
     }
@@ -1332,29 +1527,261 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     char sec[300];
     task_sec(sec, sizeof sec, id);
     char *touches = join_list(s->f, sec, "touches");
-    sqlite3_stmt *ins = cg_prep(&g,
-        "INSERT INTO leases(task,agent,claimed,expires,touches) "
-        "VALUES(?,?,?,?,?) ON CONFLICT(task) DO UPDATE SET "
-        "agent=excluded.agent,expires=excluded.expires");
-    sqlite3_bind_text(ins, 1, tag, -1, SQLITE_STATIC);
-    sqlite3_bind_text(ins, 2, agent, -1, SQLITE_STATIC);
-    sqlite3_bind_int64(ins, 3, now);
-    sqlite3_bind_int64(ins, 4, now + ttl_min * 60);
-    sqlite3_bind_text(ins, 5, touches, -1, SQLITE_TRANSIENT);
-    sqlite3_step(ins);
-    sqlite3_finalize(ins);
+    spec_lease_upsert(&g, tag, agent, now, ttl_min, touches);
+    cg_exec(&g, "COMMIT");
     cg_close(&g);
     free(touches);
 
-    if (json)
-        printf("{\"task\":\"%s\",\"agent\":\"%s\",\"expires_in_min\":%ld}\n",
-               tag, agent, ttl_min);
-    else
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"task\":");
+        sb_json_str(&b, tag);
+        sb_puts(&b, ",\"agent\":");
+        sb_json_str(&b, agent);
+        sb_printf(&b, ",\"expires_in_min\":%ld}\n", ttl_min);
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else
         printf("claimed %s for %s (expires in %ld min)\n", id, agent, ttl_min);
     return 0;
 }
 
-static int spec_start_cmd(Spec *s, const char *id, bool force) {
+/* Every eligible task across every wave, not just the frontier. `spec wave`
+ * answers "what runs now"; an orchestrator fanning agents out needs the
+ * whole claimable backlog, and whether a live claim already blocks each. */
+static int spec_ready_cmd(Spec *s, bool json) {
+    Cg g;
+    bool have_db = memory_open_quiet(&g);
+    if (have_db)
+        cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+
+    /* eligible task indices, sorted by wave (stable: dotted order within) */
+    int *el = xmalloc(sizeof(int) * (size_t)(s->nids > 0 ? s->nids : 1));
+    int ne = 0;
+    for (int i = 0; i < s->nids; i++)
+        if (task_eligible(s, s->ids[i])) el[ne++] = i;
+    for (int i = 1; i < ne; i++) {
+        int v = el[i];
+        char sec[300];
+        task_sec(sec, sizeof sec, s->ids[v]);
+        unsigned long w = uint_or(s->f, sec, "wave", 0);
+        int j = i;
+        while (j > 0) {
+            task_sec(sec, sizeof sec, s->ids[el[j - 1]]);
+            if (uint_or(s->f, sec, "wave", 0) <= w) break;
+            el[j] = el[j - 1];
+            j--;
+        }
+        el[j] = v;
+    }
+
+    StrBuf b; sb_init(&b);
+    if (json)
+        sb_printf(&b, "{\"mode\":\"%s\",\"tasks\":[",
+                  spec_parallel_mode(s) ? "parallel" :
+                  spec_prod_mode(s) ? "prod" : "standard");
+    unsigned long lastw = 0;
+    bool havew = false;
+    for (int e = 0; e < ne; e++) {
+        const char *id = s->ids[el[e]];
+        char sec[300];
+        task_sec(sec, sizeof sec, id);
+        unsigned long w = uint_or(s->f, sec, "wave", 0);
+        char other[64] = "", pat[256] = "";
+        bool conflict = spec_touches_conflict(s, id, other, sizeof other,
+                                              pat, sizeof pat,
+                                              have_db ? &g : NULL);
+        if (json) {
+            if (e) sb_putc(&b, ',');
+            StrBuf t; sb_init(&t);
+            json_task(s, id, &t);
+            t.p[--t.len] = 0;               /* reopen the closing brace */
+            sb_puts(&b, t.p);
+            sb_free(&t);
+            sb_printf(&b, ",\"conflicts_with_live\":%s}",
+                      conflict ? "true" : "false");
+        } else {
+            if (!havew || w != lastw) sb_printf(&b, "wave %lu:\n", w);
+            char *t = S(s->f, sec, "title");
+            sb_printf(&b, "  %-8s %s", id, t);
+            free(t);
+            char **tp; int ntp = kvx_list(s->f, sec, "touches", &tp);
+            if (ntp) {
+                sb_puts(&b, "   touches:");
+                for (int j = 0; j < ntp; j++) {
+                    sb_printf(&b, " %s", tp[j]);
+                    free(tp[j]);
+                }
+            }
+            free(tp);
+            if (conflict)
+                sb_printf(&b, "   [blocked by live claim on %s]", pat);
+            sb_putc(&b, '\n');
+        }
+        lastw = w;
+        havew = true;
+    }
+    free(el);
+    if (have_db) cg_close(&g);
+    if (json) {
+        sb_puts(&b, "]}\n");
+    } else if (ne) {
+        StrBuf h; sb_init(&h);
+        sb_printf(&h, "ready — %d eligible task(s)%s:\n", ne,
+                  spec_parallel_mode(s) ? ", claimable in parallel" : "");
+        sb_puts(&h, b.p);
+        sb_free(&b);
+        b = h;
+    } else {
+        sb_puts(&b, "no eligible tasks\n");
+    }
+    fputs(b.p, stdout);
+    sb_free(&b);
+    return 0;
+}
+
+/* Atomically pick and claim the next runnable task. flock on a stable
+ * sibling '<file>.claim.lock' serialises racing claim-nexts across
+ * processes: spec.kvx itself is rename-replaced by every kvx writer (a lock
+ * on it would sit on a dead inode), and '<file>.lock' is taken by
+ * kvx_set_status inside this very call — flocking a second fd of the same
+ * file would self-deadlock. BEGIN IMMEDIATE keeps the lease write atomic
+ * against plain `spec claim`. Empty frontier is exit 3, distinct from an
+ * error, so an orchestrator's dispatch loop can tell "done for now" from
+ * "broken". */
+static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
+                               bool json) {
+    Cg g;
+    if (!memory_open_quiet(&g)) {
+        fprintf(stderr, "cg spec: claims need a Codify index here "
+                        "(run `cg init`)\n");
+        return 1;
+    }
+    char lockpath[4720];
+    snprintf(lockpath, sizeof lockpath, "%s.claim.lock", s->fpath);
+    int lockfd = open(lockpath, O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+    if (lockfd >= 0) flock(lockfd, LOCK_EX);
+
+    /* reload under the lock: a racing claim-next may have flipped statuses */
+    Kvx *fresh = kvx_parse(s->fpath);
+    if (fresh) {
+        kvx_free(s->f);
+        s->f = fresh;
+    }
+
+    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+    cg_exec(&g, "BEGIN IMMEDIATE");
+
+    /* lowest wave first, dotted order within, skipping anything whose
+     * touches collide with in-progress work or a live lease */
+    const char *pick = NULL;
+    unsigned long pickw = 0;
+    for (int i = 0; i < s->nids; i++) {
+        if (!task_eligible(s, s->ids[i])) continue;
+        char sec[300];
+        task_sec(sec, sizeof sec, s->ids[i]);
+        unsigned long w = uint_or(s->f, sec, "wave", 0);
+        if (pick && w >= pickw) continue;
+        /* a live lease held by another agent is theirs — never steal it */
+        char ctag[700];
+        snprintf(ctag, sizeof ctag, "%s/%s", s->feature, s->ids[i]);
+        sqlite3_stmt *lq = cg_prep(&g,
+            "SELECT agent FROM leases WHERE task=? "
+            "AND expires > strftime('%s','now')");
+        sqlite3_bind_text(lq, 1, ctag, -1, SQLITE_TRANSIENT);
+        bool foreign = sqlite3_step(lq) == SQLITE_ROW &&
+            strcmp((const char *)sqlite3_column_text(lq, 0), agent) != 0;
+        sqlite3_finalize(lq);
+        if (foreign) continue;
+        char other[64] = "", pat[256] = "";
+        if (spec_touches_conflict(s, s->ids[i], other, sizeof other, pat,
+                                  sizeof pat, &g))
+            continue;
+        pick = s->ids[i];
+        pickw = w;
+    }
+    if (!pick) {
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
+        if (json) printf("{\"empty\":true}\n");
+        else printf("no claimable task — the frontier is empty or fully "
+                    "claimed\n");
+        return 3;
+    }
+
+    char id[64];
+    snprintf(id, sizeof id, "%s", pick);
+    char tag[700], sec[300];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    task_sec(sec, sizeof sec, id);
+    char *touches = join_list(s->f, sec, "touches");
+    spec_lease_upsert(&g, tag, agent, (long)time(NULL), ttl_min, touches);
+    cg_exec(&g, "COMMIT");
+    free(touches);
+
+    if (kvx_set_status(s->fpath, sec, "in_progress") != 0) {
+        /* never leave a lease on a task that did not actually start */
+        sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
+        sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        cg_close(&g);
+        if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
+        fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
+                sec, s->fpath);
+        return 1;
+    }
+    cg_close(&g);
+    spec_render(s->root, false, true);
+    kvx_free(s->f);
+    s->f = kvx_parse(s->fpath);
+    if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
+
+    if (json) {
+        if (s->f) {
+            StrBuf b; sb_init(&b);
+            sb_puts(&b, "{\"task\":");
+            json_task(s, id, &b);
+            sb_puts(&b, ",\"lease\":{\"agent\":");
+            sb_json_str(&b, agent);
+            sb_printf(&b, ",\"expires_in_min\":%ld}", ttl_min);
+            Memory *mv = NULL;
+            int nm = spec_task_memories(s, id, &mv);
+            sb_puts(&b, ",\"memories\":[");
+            for (int i = 0; i < nm; i++) {
+                if (i) sb_putc(&b, ',');
+                memory_json(&mv[i], &b);
+            }
+            memory_free(mv, nm);
+            sb_puts(&b, "]}\n");
+            fputs(b.p, stdout);
+            sb_free(&b);
+            return 0;
+        }
+        /* reparse failed but the claim stands — a --json caller must still
+         * get JSON, or its parse breaks and the live lease is stranded */
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"task\":{\"id\":");
+        sb_json_str(&b, id);
+        sb_puts(&b, ",\"feature\":");
+        sb_json_str(&b, s->feature);
+        sb_puts(&b, "},\"lease\":{\"agent\":");
+        sb_json_str(&b, agent);
+        sb_printf(&b, ",\"expires_in_min\":%ld},\"reload\":false}\n", ttl_min);
+        fputs(b.p, stdout);
+        sb_free(&b);
+        return 0;
+    }
+    printf("claimed %s for %s (expires in %ld min)\n\n", id, agent, ttl_min);
+    if (s->f) {
+        print_task(s, id);
+        spec_print_memories(s, id);
+    }
+    return 0;
+}
+
+static int spec_start_cmd(Spec *s, const char *id, bool force, bool json) {
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
@@ -1386,7 +1813,8 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
     if (max_in_progress < 1) max_in_progress = 1;
     if (spec_parallel_mode(s) && !force) {
         char other[64] = "", pat[256] = "";
-        if (spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat)) {
+        if (spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
+                                  NULL)) {
             fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
                     "also claims — pick a disjoint task (--force to "
                     "override)\n", id, pat, other);
@@ -1425,6 +1853,17 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
     /* reload so the printed detail reflects the new status */
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
+    if (json && s->f) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"started\":");
+        sb_json_str(&b, id);
+        sb_puts(&b, ",\"task\":");
+        json_task(s, id, &b);
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+        return 0;
+    }
     printf("started %s\n\n", id);
     if (s->f) {
         print_task(s, id);
@@ -1435,7 +1874,7 @@ static int spec_start_cmd(Spec *s, const char *id, bool force) {
 
 static int spec_verify_task(Spec *s, const char *id);
 
-static int spec_implemented_cmd(Spec *s, const char *id) {
+static int spec_implemented_cmd(Spec *s, const char *id, bool json) {
     if (!spec_prod_mode(s)) {
         fprintf(stderr, "cg spec: `implemented` requires Prod mode; run "
                 "`cg spec mode prod` first\n");
@@ -1484,10 +1923,12 @@ static int spec_implemented_cmd(Spec *s, const char *id) {
                 "projections could not be refreshed\n", id);
         return 1;
     }
+    spec_release_lease(s, id);   /* coding is over; free the claim */
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
-    printf("implemented %s — %s (qualification pending)\n", id, title);
+    if (!json)
+        printf("implemented %s — %s (qualification pending)\n", id, title);
     if (s->f) {
         StrBuf mb; sb_init(&mb);
         sb_printf(&mb, "implemented: %s - qualification pending", title);
@@ -1495,8 +1936,17 @@ static int spec_implemented_cmd(Spec *s, const char *id) {
         sb_free(&mb);
     }
     free(title);
-    if (s->f) {
-        const char *next = spec_next_id(s);
+    const char *next = s->f ? spec_next_id(s) : NULL;
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"implemented\":");
+        sb_json_str(&b, id);
+        sb_puts(&b, ",\"qualification\":\"pending\",\"next\":");
+        if (next) sb_json_str(&b, next); else sb_puts(&b, "null");
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else if (s->f) {
         if (next) {
             char nsec[300];
             task_sec(nsec, sizeof nsec, next);
@@ -1511,7 +1961,7 @@ static int spec_implemented_cmd(Spec *s, const char *id) {
     return 0;
 }
 
-static int spec_done_cmd(Spec *s, const char *id, bool force) {
+static int spec_done_cmd(Spec *s, const char *id, bool force, bool json) {
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
@@ -1590,11 +2040,24 @@ static int spec_done_cmd(Spec *s, const char *id, bool force) {
         return 1;
     }
     spec_render(s->root, false, true);
+    spec_release_lease(s, id);   /* the task is over; free the claim */
 
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
-    printf("done %s — %s\n", id, title);
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"done\":");
+        sb_json_str(&b, id);
+        sb_puts(&b, ",\"next\":");
+        const char *jn = s->f ? spec_next_id(s) : NULL;
+        if (jn) sb_json_str(&b, jn); else sb_puts(&b, "null");
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("done %s — %s\n", id, title);
+    }
     if (s->f) {
         StrBuf mb; sb_init(&mb);
         sb_printf(&mb, "%s: %s", forced_past ? "done (forced past failed "
@@ -1603,7 +2066,7 @@ static int spec_done_cmd(Spec *s, const char *id, bool force) {
         sb_free(&mb);
     }
     free(title);
-    if (s->f) {
+    if (s->f && !json) {
         const char *next = spec_next_id(s);
         if (next) {
             char nsec[300];
@@ -2085,7 +2548,7 @@ static const char *FEATURE_TEMPLATE =
 /* Scaffold a feature — and the workflow file itself when the repo has none.
  * Without this an agent can drive a plan but never create one, so the first
  * step of the lifecycle lives outside the tool. */
-static int spec_new_cmd(const char *root_ov, const char *feature) {
+static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {
     for (const char *p = feature; *p; p++) {
         if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
             fprintf(stderr, "cg spec: feature names may use letters, digits, "
@@ -2138,9 +2601,19 @@ static int spec_new_cmd(const char *root_ov, const char *feature) {
     }
     if (!made_wf) kvx_set_string(wfpath, "meta", "active_feature", feature);
 
-    printf("created %s\n", fpath);
-    if (made_wf) printf("created %s\n", wfpath);
-    printf("active feature: %s\n", feature);
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"created\":");
+        sb_json_str(&b, feature);
+        sb_printf(&b, ",\"workflow_created\":%s}\n",
+                  made_wf ? "true" : "false");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("created %s\n", fpath);
+        if (made_wf) printf("created %s\n", wfpath);
+        printf("active feature: %s\n", feature);
+    }
     spec_render(root, false, true);
     return 0;
 }
@@ -2178,7 +2651,8 @@ typedef struct {
 
 /* Add a task to the active feature. Every write goes through the surgical kvx
  * writer, so an existing file keeps its comments, ordering, and blank lines. */
-static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t) {
+static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t,
+                        bool json) {
     if (!t->title) {
         fprintf(stderr, "cg spec add: --title is required\n");
         return 1;
@@ -2236,7 +2710,18 @@ static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t) {
             kvx_set_string(s->fpath, sec, key, val);
         }
     }
-    printf("added task %s — %s\n", id, t->title);
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"added\":");
+        sb_json_str(&b, id);
+        sb_puts(&b, ",\"title\":");
+        sb_json_str(&b, t->title);
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("added task %s — %s\n", id, t->title);
+    }
     spec_render(s->root, false, true);
     return 0;
 }
@@ -2394,7 +2879,7 @@ int spec_active_touches(char ***out) {
     *out = NULL;
     Spec s;
     if (spec_load(&s, NULL, NULL, true) != 0) { spec_close(&s); return 0; }
-    const char *cur = spec_current(&s);
+    const char *cur = spec_current_for_agent(&s, cg_agent_name(NULL));
     if (!cur) { spec_close(&s); return 0; }
     char sec[300];
     task_sec(sec, sizeof sec, cur);
@@ -2407,8 +2892,12 @@ char *spec_active_tag(void) {
     Spec s;
     char *out = NULL;
     if (spec_load(&s, NULL, NULL, true) == 0) {
-        const char *cur = spec_current(&s);
-        if (cur && spec_in_progress_count(&s) == 1) {
+        /* exactly one in flight is unambiguous; with several, only the
+         * calling agent's own live lease can say which task is theirs */
+        const char *cur = spec_in_progress_count(&s) == 1
+            ? spec_current(&s)
+            : spec_agent_leased(&s, cg_agent_name(NULL));
+        if (cur) {
             StrBuf b; sb_init(&b);
             sb_printf(&b, "%s/%s", s.feature, cur);
             out = b.p;
@@ -2448,6 +2937,78 @@ char *spec_task_tag(const char *requested) {
     }
     spec_close(&s);
     return out;
+}
+
+/* resolve "id" or "feature/id" — or, with NULL, the calling agent's current
+ * task — to a malloc'd "feature/id", regardless of status. Handoff and
+ * resume need to address blocked or finished work, not only started work. */
+char *spec_resolve_task(const char *requested, const char *agent) {
+    Spec s;
+    char *out = NULL;
+    if (spec_load(&s, NULL, NULL, true) != 0) {
+        spec_close(&s);
+        return NULL;
+    }
+    const char *id = NULL;
+    if (requested && requested[0]) {
+        id = requested;
+        const char *slash = strchr(requested, '/');
+        if (slash) {
+            size_t fl = (size_t)(slash - requested);
+            if (strlen(s.feature) != fl ||
+                strncmp(requested, s.feature, fl) != 0) {
+                spec_close(&s);
+                return NULL;
+            }
+            id = slash + 1;
+        }
+        if (!task_exists(&s, id) || !task_is_leaf(&s, id)) id = NULL;
+    } else {
+        id = spec_current_for_agent(&s, agent);
+    }
+    if (id) {
+        StrBuf b; sb_init(&b);
+        sb_printf(&b, "%s/%s", s.feature, id);
+        out = b.p;
+    }
+    spec_close(&s);
+    return out;
+}
+
+/* json_task of a resolved "feature/id", for callers outside the engine */
+char *spec_task_packet(const char *requested) {
+    if (!requested || !requested[0]) return NULL;
+    Spec s;
+    if (spec_load(&s, NULL, NULL, true) != 0) {
+        spec_close(&s);
+        return NULL;
+    }
+    const char *id = strchr(requested, '/');
+    id = id ? id + 1 : requested;
+    char *out = NULL;
+    if (task_exists(&s, id)) {
+        StrBuf b; sb_init(&b);
+        json_task(&s, id, &b);
+        out = b.p;
+    }
+    spec_close(&s);
+    return out;
+}
+
+/* task-scoped memory retrieval for a resolved "feature/id" */
+int spec_task_memories_tag(const char *requested, Memory **out) {
+    *out = NULL;
+    if (!requested || !requested[0]) return 0;
+    Spec s;
+    if (spec_load(&s, NULL, NULL, true) != 0) {
+        spec_close(&s);
+        return 0;
+    }
+    const char *id = strchr(requested, '/');
+    id = id ? id + 1 : requested;
+    int n = task_exists(&s, id) ? spec_task_memories(&s, id, out) : 0;
+    spec_close(&s);
+    return n;
 }
 
 /* ---------------- entry ---------------- */
@@ -2499,7 +3060,7 @@ int cmd_spec(int argc, char **argv, bool json) {
             fprintf(stderr, "usage: cg spec new <feature>\n");
             return 1;
         }
-        return spec_new_cmd(root_ov, pos[0]);
+        return spec_new_cmd(root_ov, pos[0], json);
     }
 
     if (strcmp(sub, "render") == 0) {
@@ -2510,7 +3071,8 @@ int cmd_spec(int argc, char **argv, bool json) {
                     "any parent directory\n");
             return 1;
         }
-        return spec_render(root, check, false);
+        return json ? spec_render_json(root, check)
+                    : spec_render(root, check, false);
     }
 
     if (strcmp(sub, "mode") == 0) {
@@ -2532,7 +3094,7 @@ int cmd_spec(int argc, char **argv, bool json) {
             fprintf(stderr, "cg spec: cannot parse %s\n", s.wfpath);
             return 1;
         }
-        int rc = spec_mode_cmd(&s, pos[0]);
+        int rc = spec_mode_cmd(&s, pos[0], json);
         spec_close(&s);
         return rc;
     }
@@ -2542,13 +3104,16 @@ int cmd_spec(int argc, char **argv, bool json) {
         strcmp(sub, "done") != 0 && strcmp(sub, "mode") != 0 &&
         strcmp(sub, "trace") != 0 && strcmp(sub, "add") != 0 &&
         strcmp(sub, "lint") != 0 && strcmp(sub, "wave") != 0 &&
-        strcmp(sub, "claim") != 0 && strcmp(sub, "release") != 0) {
+        strcmp(sub, "claim") != 0 && strcmp(sub, "release") != 0 &&
+        strcmp(sub, "ready") != 0 && strcmp(sub, "claim-next") != 0) {
         fprintf(stderr, "usage: cg spec [render [--check] | status | next | "
                 "new <feature> | add <id> --title T [--wave N] [--requires a,b]"
                 " [--symbols a,b] [--touches a,b] [--verify CMD] [--do \"a;b\"]"
                 " [--reqs a,b] | lint | mode <standard|prod|parallel> | start <id> | "
                 "implemented <id> | done <id> [--force] | trace [<id>] | "
-                "wave | claim <id> [--agent N] [--ttl M] | release <id>] "
+                "wave | ready | claim <id> [--agent N] [--ttl M] | "
+                "release <id> [--agent N] [--force] | "
+                "claim-next [--agent N] [--ttl M]] "
                 "[-f <feature>]\n");
         return 1;
     }
@@ -2564,7 +3129,7 @@ int cmd_spec(int argc, char **argv, bool json) {
     } else if (strcmp(sub, "add") == 0) {
         if (npos < 1) { fprintf(stderr, "usage: cg spec add <id> --title T\n");
                         rc = 1; }
-        else rc = spec_add_cmd(&s, pos[0], &ts);
+        else rc = spec_add_cmd(&s, pos[0], &ts, json);
     } else if (strcmp(sub, "lint") == 0) {
         rc = spec_lint_cmd(&s, json);
     } else if (strcmp(sub, "wave") == 0) {
@@ -2575,17 +3140,22 @@ int cmd_spec(int argc, char **argv, bool json) {
                     "[--ttl MIN]\n", sub);
             rc = 1;
         } else {
-            rc = spec_claim_cmd(&s, pos[0], agent ? agent : "agent",
+            rc = spec_claim_cmd(&s, pos[0], cg_agent_name(agent),
                                 ttl > 0 ? ttl : 30,
-                                strcmp(sub, "release") == 0, json);
+                                strcmp(sub, "release") == 0, force, json);
         }
+    } else if (strcmp(sub, "ready") == 0) {
+        rc = spec_ready_cmd(&s, json);
+    } else if (strcmp(sub, "claim-next") == 0) {
+        rc = spec_claim_next_cmd(&s, cg_agent_name(agent),
+                                 ttl > 0 ? ttl : 30, json);
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
     } else if (strcmp(sub, "trace") == 0) {
         rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, json);
     } else if (strcmp(sub, "start") == 0) {
         if (npos < 1) { fprintf(stderr, "usage: cg spec start <id>\n"); rc = 1; }
-        else rc = spec_start_cmd(&s, pos[0], force);
+        else rc = spec_start_cmd(&s, pos[0], force, json);
     } else if (strcmp(sub, "implemented") == 0) {
         if (force) {
             fprintf(stderr, "cg spec implemented does not support --force\n");
@@ -2594,11 +3164,11 @@ int cmd_spec(int argc, char **argv, bool json) {
             fprintf(stderr, "usage: cg spec implemented <id>\n");
             rc = 1;
         } else {
-            rc = spec_implemented_cmd(&s, pos[0]);
+            rc = spec_implemented_cmd(&s, pos[0], json);
         }
     } else {
         if (npos < 1) { fprintf(stderr, "usage: cg spec done <id>\n"); rc = 1; }
-        else rc = spec_done_cmd(&s, pos[0], force);
+        else rc = spec_done_cmd(&s, pos[0], force, json);
     }
     spec_close(&s);
     return rc;

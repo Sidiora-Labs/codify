@@ -31,6 +31,26 @@ A "Codify" container in the activity bar, with two views.
 
 **Memory** lists recent decisions, constraints and facts, grouped by type, with the task each was written under. Add one from anywhere with **Codify: Remember a Decision** — if a file is open, it is anchored to that file automatically.
 
+## Agent sessions
+
+The board can also *drive* work. Each task node carries a **Start Agent Session on Task** action (also in the palette) that runs the whole pickup for you:
+
+1. In parallel mode the task is claimed first (`cg spec claim <id> --agent vscode-<n>`), then started. A claim someone else holds is refused, not stolen.
+2. A session prompt is generated with `cg resume --task <id> --prompt` and written to `.codegraph/agents/vscode-<id>.prompt`. With an older `cg` that has no `resume`, the prompt degrades to the session brief plus explicit finish/handoff instructions.
+3. A terminal named `codify: <driver> <id>` opens and launches the configured driver — Codex CLI by default, Claude Code with `codify.agent.driver: "claude"` — seeded with that prompt.
+
+The rest of the lifecycle:
+
+| Command | What it does |
+|---|---|
+| Run Agent Headless on Task | Same claim + prompt, but runs `codex exec --sandbox workspace-write` (or `claude -p`) as a VS Code task; the exit is reported with the task's resulting status |
+| Hand Off Task | Records what is done, what is next, and what is blocked (`cg handoff`) so a fresh session can pick up cleanly |
+| Resume Task in Agent Session | Quick-picks an in-progress task and opens a new driver terminal seeded from `cg resume --prompt` — the fresh-session half of a handoff |
+| Run Wave with Agents | Opens a terminal running `cg spec run -n <codify.agent.parallelism> --driver <driver>` — the built-in orchestrator works the whole eligible frontier |
+| Stop Agent Session | Closes the session's terminal (or terminates the headless task) |
+
+When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. While any tracked session exists, the board refreshes on a 3-second poll in addition to watching `.codegraph/graph.db`, so work done by agents outside the editor shows up without a manual refresh. Tasks with a live claim show `$(person)` plus the agent name, and `$(terminal)` marks tasks with a tracked session in this window.
+
 ## The rest of the workflow
 
 Click the status bar item, or run **Codify: Actions…**, for one menu covering the whole loop:
@@ -77,6 +97,12 @@ Neither is required for the other. kvx highlighting works everywhere.
 | `codify.feature` | *(empty)* | Feature override, passed to every spec command as `-f` |
 | `codify.languageServer` | `true` | Run `cg lsp` for navigation, hover, code lens and diagnostics |
 | `codify.agentName` | *(empty)* | Default name used when claiming a task in parallel mode |
+| `codify.agent.driver` | `codex` | Which agent CLI drives task sessions: `codex` or `claude` |
+| `codify.agent.codexPath` | `codex` | Path to the Codex CLI |
+| `codify.agent.claudePath` | `claude` | Path to the Claude Code CLI |
+| `codify.agent.codexArgs` | *(empty)* | Extra arguments passed to codex when starting a session |
+| `codify.agent.claudeArgs` | *(empty)* | Extra arguments passed to claude when starting a session |
+| `codify.agent.parallelism` | `2` | Agent slots used by Run Wave with Agents (`cg spec run -n`) |
 
 ## Install
 
@@ -84,8 +110,8 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-0.3.0.vsix
-code --install-extension codify-0.3.0.vsix
+npx @vscode/vsce package        # produces codify-0.4.0.vsix
+code --install-extension codify-0.4.0.vsix
 ```
 
 For development, open `editors/vscode/` in VS Code and press F5.

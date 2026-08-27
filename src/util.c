@@ -93,10 +93,26 @@ char *read_entire_file(const char *path, size_t *out_len) {
 }
 
 int write_entire_file(const char *path, const void *data, size_t len) {
-    FILE *f = fopen(path, "wb");
-    if (!f) return -1;
+    /* temp + rename in the same directory: lock-free readers see either the
+       old file or the new one, never a truncated or partial write */
+    size_t plen = strlen(path);
+    char *tmp = xmalloc(plen + 32);
+    snprintf(tmp, plen + 32, "%s.tmp.%ld", path, (long)getpid());
+    FILE *f = fopen(tmp, "wb");
+    if (!f) { free(tmp); return -1; }
     size_t wr = fwrite(data, 1, len, f);
-    if (fclose(f) != 0 || wr != len) return -1;
+    if (wr != len || fflush(f) != 0) {
+        fclose(f);
+        unlink(tmp);
+        free(tmp);
+        return -1;
+    }
+    if (fclose(f) != 0 || rename(tmp, path) != 0) {
+        unlink(tmp);
+        free(tmp);
+        return -1;
+    }
+    free(tmp);
     return 0;
 }
 
@@ -158,6 +174,16 @@ const char *path_ext(const char *path) {
     base = base ? base + 1 : path;
     const char *dot = strrchr(base, '.');
     return dot ? dot : "";
+}
+
+/* Who is acting? An explicit --agent flag wins, then $CG_AGENT (how a
+ * parallel orchestrator names each worker), then a shared default. Never
+ * NULL, never malloc'd — always safe to print or bind. */
+const char *cg_agent_name(const char *flag) {
+    if (flag && flag[0]) return flag;
+    const char *env = getenv("CG_AGENT");
+    if (env && env[0]) return env;
+    return "agent";
 }
 
 /* ---------------- ignore rules ---------------- */

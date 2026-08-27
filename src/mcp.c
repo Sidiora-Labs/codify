@@ -34,7 +34,10 @@ static int t_context(void *v) {
     CallCtx *c = v;
     char *q = c->args ? json_get_string(c->args, "query") : NULL;
     if (!q) { printf("{\"error\":\"missing query\"}\n"); return 1; }
-    int rc = cmd_context(c->cg, q, true);
+    int budget = (int)json_get_int(c->args, "budget", 4000);
+    int limit = (int)json_get_int(c->args, "limit", 8);
+    int rc = cmd_context(c->cg, q, budget > 0 ? budget : 4000,
+                         limit > 0 ? limit : 8, true);
     free(q);
     return rc;
 }
@@ -51,7 +54,9 @@ static int t_impact(void *v) {
     char *n = c->args ? json_get_string(c->args, "name") : NULL;
     if (!n) { printf("{\"error\":\"missing name\"}\n"); return 1; }
     int depth = (int)json_get_int(c->args, "depth", 3);
-    int rc = cmd_impact(c->cg, n, depth > 0 ? depth : 3, true);
+    int budget = (int)json_get_int(c->args, "budget", 8000);
+    int rc = cmd_impact(c->cg, n, depth > 0 ? depth : 3,
+                        budget > 0 ? budget : 8000, true);
     free(n);
     return rc;
 }
@@ -63,7 +68,11 @@ static int t_routes(void *v) {
     return rc;
 }
 static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c->cg, true); }
-static int t_changes(void *v) { CallCtx *c = v; return cmd_changes(c->cg, true); }
+static int t_changes(void *v) {
+    CallCtx *c = v;
+    int limit = c->args ? (int)json_get_int(c->args, "limit", 0) : 0;
+    return cmd_changes(c->cg, limit, true);
+}
 static int t_log(void *v) {
     CallCtx *c = v;
     int limit = c->args ? (int)json_get_int(c->args, "limit", 20) : 20;
@@ -78,18 +87,25 @@ static int t_commit(void *v) {
     return rc;
 }
 
-/* spec tools: cmd_spec reports refusals on stderr, which cg_capture does not
- * see — temporarily fold stderr into the captured stdout so the agent gets
- * the explanation, not just isError:true */
-static int run_spec(int argc, char **argv, bool json) {
+/* spec tools: cmd_spec (and cmd_handoff/cmd_resume) report refusals on
+ * stderr, which cg_capture does not see — temporarily fold stderr into the
+ * captured stdout so the agent gets the explanation, not just isError:true */
+static int fold_stderr(void) {
     fflush(stderr);
     int saved = dup(2);
     dup2(1, 2);
-    int rc = cmd_spec(argc, argv, json);
+    return saved;
+}
+static void unfold_stderr(int saved) {
     fflush(stdout);
     fflush(stderr);
     dup2(saved, 2);
     close(saved);
+}
+static int run_spec(int argc, char **argv, bool json) {
+    int saved = fold_stderr();
+    int rc = cmd_spec(argc, argv, json);
+    unfold_stderr(saved);
     return rc;
 }
 
@@ -108,7 +124,7 @@ static int t_spec_start(void *v) {
     char *id = c->args ? json_get_string(c->args, "id") : NULL;
     if (!id) { printf("{\"error\":\"missing id\"}\n"); return 1; }
     char *a[] = { "start", id };
-    int rc = run_spec(2, a, false);
+    int rc = run_spec(2, a, true);
     free(id);
     return rc;
 }
@@ -117,7 +133,7 @@ static int t_spec_mode(void *v) {
     char *mode = c->args ? json_get_string(c->args, "mode") : NULL;
     if (!mode) { printf("{\"error\":\"missing mode\"}\n"); return 1; }
     char *a[] = { "mode", mode };
-    int rc = run_spec(2, a, false);
+    int rc = run_spec(2, a, true);
     free(mode);
     return rc;
 }
@@ -132,7 +148,7 @@ static int t_spec_implemented(void *v) {
         return 1;
     }
     char *a[] = { "implemented", id };
-    int rc = run_spec(2, a, false);
+    int rc = run_spec(2, a, true);
     free(id);
     return rc;
 }
@@ -144,7 +160,7 @@ static int t_spec_done(void *v) {
     bool f = force && strcmp(force, "true") == 0;
     free(force);
     char *a[] = { "done", id, "--force" };
-    int rc = run_spec(f ? 3 : 2, a, false);
+    int rc = run_spec(f ? 3 : 2, a, true);
     free(id);
     return rc;
 }
@@ -154,7 +170,7 @@ static int t_spec_render(void *v) {
     bool chk = check && strcmp(check, "true") == 0;
     free(check);
     char *a[] = { "render", "--check" };
-    return run_spec(chk ? 2 : 1, a, false);
+    return run_spec(chk ? 2 : 1, a, true);
 }
 static int t_spec_trace(void *v) {
     CallCtx *c = v;
@@ -192,7 +208,10 @@ static int t_show(void *v) {
     CallCtx *c = v;
     char *n = c->args ? json_get_string(c->args, "name") : NULL;
     if (!n) { printf("{\"error\":\"missing name\"}\n"); return 1; }
-    int rc = cmd_show(c->cg, n, true);
+    char *fv = json_get_raw(c->args, "full");
+    bool full = fv && (strcmp(fv, "true") == 0 || strcmp(fv, "1") == 0);
+    free(fv);
+    int rc = cmd_show(c->cg, n, full, true);
     free(n);
     return rc;
 }
@@ -242,7 +261,7 @@ static int t_spec_new(void *v) {
     char *f = c->args ? json_get_string(c->args, "feature") : NULL;
     if (!f) { printf("{\"error\":\"missing feature\"}\n"); return 1; }
     char *a[] = { "new", f };
-    int rc = run_spec(2, a, false);
+    int rc = run_spec(2, a, true);
     free(f);
     return rc;
 }
@@ -272,7 +291,7 @@ static int t_spec_add(void *v) {
     if (vfy)  { a[n++] = "--verify";   a[n++] = vfy;  }
     if (dos)  { a[n++] = "--do";       a[n++] = dos;  }
     if (rqs)  { a[n++] = "--reqs";     a[n++] = rqs;  }
-    int rc = run_spec(n, a, false);
+    int rc = run_spec(n, a, true);
     free(id); free(title); free(wave); free(req); free(sym); free(tch);
     free(vfy); free(dos); free(rqs);
     return rc;
@@ -282,20 +301,84 @@ static int t_spec_claim(void *v) {
     char *id = c->args ? json_get_string(c->args, "id") : NULL;
     if (!id) { printf("{\"error\":\"missing id\"}\n"); return 1; }
     char *agent = json_get_string(c->args, "agent");
-    char *a[] = { "claim", id, "--agent", agent ? agent : "agent" };
-    int rc = run_spec(4, a, false);
+    long ttl = json_get_int(c->args, "ttl", 30);
+    char ttlbuf[24];
+    snprintf(ttlbuf, sizeof ttlbuf, "%ld", ttl > 0 ? ttl : 30);
+    char *a[] = { "claim", id, "--agent",
+                  agent && agent[0] ? agent : (char *)cg_agent_name(NULL),
+                  "--ttl", ttlbuf };
+    int rc = run_spec(6, a, true);
     free(id); free(agent);
+    return rc;
+}
+static int t_spec_release(void *v) {
+    CallCtx *c = v;
+    char *id = c->args ? json_get_string(c->args, "id") : NULL;
+    if (!id) { printf("{\"error\":\"missing id\"}\n"); return 1; }
+    char *agent = json_get_string(c->args, "agent");
+    char *force = json_get_raw(c->args, "force");
+    bool f = force && strcmp(force, "true") == 0;
+    free(force);
+    char *a[] = { "release", id, "--agent",
+                  agent && agent[0] ? agent : (char *)cg_agent_name(NULL),
+                  "--force" };
+    int rc = run_spec(f ? 5 : 4, a, true);
+    free(id); free(agent);
+    return rc;
+}
+static int t_spec_ready(void *v) {
+    (void)v;
+    char *a[] = { "ready" };
+    return run_spec(1, a, true);
+}
+static int t_spec_claim_next(void *v) {
+    CallCtx *c = v;
+    char *agent = c->args ? json_get_string(c->args, "agent") : NULL;
+    long ttl = c->args ? json_get_int(c->args, "ttl", 30) : 30;
+    char ttlbuf[24];
+    snprintf(ttlbuf, sizeof ttlbuf, "%ld", ttl > 0 ? ttl : 30);
+    char *a[] = { "claim-next", "--agent",
+                  agent && agent[0] ? agent : (char *)cg_agent_name(NULL),
+                  "--ttl", ttlbuf };
+    int rc = run_spec(5, a, true);
+    free(agent);
+    return rc;
+}
+static int t_handoff(void *v) {
+    CallCtx *c = v;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    char *done = c->args ? json_get_string(c->args, "done") : NULL;
+    char *next = c->args ? json_get_string(c->args, "next") : NULL;
+    char *blocked = c->args ? json_get_string(c->args, "blocked") : NULL;
+    char *note = c->args ? json_get_string(c->args, "note") : NULL;
+    int saved = fold_stderr();
+    int rc = cmd_handoff(c->cg, task, done, next, blocked, note, true);
+    unfold_stderr(saved);
+    free(task); free(done); free(next); free(blocked); free(note);
+    return rc;
+}
+static int t_resume(void *v) {
+    CallCtx *c = v;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    int saved = fold_stderr();
+    int rc = cmd_resume(c->cg, task, true, false);
+    unfold_stderr(saved);
+    free(task);
     return rc;
 }
 
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
-#define S_CTX    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}," \
-                 "\"required\":[\"query\"]}"
+#define S_CTX    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
+                 "\"budget\":{\"type\":\"integer\",\"description\":" \
+                 "\"token budget, default 4000\"}," \
+                 "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
 #define S_NAME   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}," \
                  "\"required\":[\"name\"]}"
 #define S_IMPACT "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \
-                 "\"depth\":{\"type\":\"integer\"}},\"required\":[\"name\"]}"
+                 "\"depth\":{\"type\":\"integer\"}," \
+                 "\"budget\":{\"type\":\"integer\",\"description\":" \
+                 "\"token budget, default 8000\"}},\"required\":[\"name\"]}"
 #define S_FILTER "{\"type\":\"object\",\"properties\":{\"filter\":{\"type\":\"string\"}}}"
 #define S_EMPTY  "{\"type\":\"object\",\"properties\":{}}"
 #define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"
@@ -325,12 +408,17 @@ static int t_spec_claim(void *v) {
 #define S_PATHOPT "{\"type\":\"object\",\"properties\":{\"path\":" \
                  "{\"type\":\"string\",\"description\":" \
                  "\"repo-relative path; omit to check the whole worktree\"}}}"
+#define S_SHOW   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \
+                 "\"full\":{\"type\":\"boolean\",\"description\":" \
+                 "\"return whole body, no 40-line cap\"}},\"required\":[\"name\"]}"
 #define S_NAMEOPT "{\"type\":\"object\",\"properties\":{\"name\":" \
                  "{\"type\":\"string\",\"description\":" \
                  "\"symbol name; omit to use your uncommitted changes\"}}}"
 #define S_CLAIM  "{\"type\":\"object\",\"properties\":{" \
                  "\"id\":{\"type\":\"string\"}," \
-                 "\"agent\":{\"type\":\"string\"}},\"required\":[\"id\"]}"
+                 "\"agent\":{\"type\":\"string\"}," \
+                 "\"ttl\":{\"type\":\"integer\",\"description\":" \
+                 "\"lease minutes (default 30)\"}},\"required\":[\"id\"]}"
 #define S_ADD    "{\"type\":\"object\",\"properties\":{" \
                  "\"id\":{\"type\":\"string\",\"description\":\"dotted id\"}," \
                  "\"title\":{\"type\":\"string\"}," \
@@ -346,6 +434,27 @@ static int t_spec_claim(void *v) {
                  "\"free text; omit for most recent\"}," \
                  "\"task\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}}}"
+#define S_CLAIMNEXT "{\"type\":\"object\",\"properties\":{" \
+                 "\"agent\":{\"type\":\"string\",\"description\":" \
+                 "\"claiming agent name (default CG_AGENT or 'agent')\"}," \
+                 "\"ttl\":{\"type\":\"integer\",\"description\":" \
+                 "\"lease minutes (default 30)\"}}}"
+#define S_RELEASE "{\"type\":\"object\",\"properties\":{" \
+                 "\"id\":{\"type\":\"string\"}," \
+                 "\"agent\":{\"type\":\"string\"}," \
+                 "\"force\":{\"type\":\"boolean\",\"description\":" \
+                 "\"release even when another agent holds the lease\"}}," \
+                 "\"required\":[\"id\"]}"
+#define S_HANDOFF "{\"type\":\"object\",\"properties\":{" \
+                 "\"task\":{\"type\":\"string\",\"description\":" \
+                 "\"feature/id or id; defaults to your current task\"}," \
+                 "\"done\":{\"type\":\"string\"}," \
+                 "\"next\":{\"type\":\"string\"}," \
+                 "\"blocked\":{\"type\":\"string\"}," \
+                 "\"note\":{\"type\":\"string\"}}}"
+#define S_RESUME "{\"type\":\"object\",\"properties\":{" \
+                 "\"task\":{\"type\":\"string\",\"description\":" \
+                 "\"feature/id or id; defaults to your current task\"}}}"
 
 /* Tool annotations let a client decide what it may run without asking. A
  * read-only tool can be auto-approved; without the hint every search prompts
@@ -390,7 +499,7 @@ static const struct {
     { "change_impact",
       "Impact radius of uncommitted edits: symbols in changed files plus "
       "their external callers. Run before committing.",
-      S_EMPTY, A_READ, "Change impact", t_changes, true },
+      S_LIMIT, A_READ, "Change impact", t_changes, true },
     { "vcs_log",
       "Snapshot history (Codify's local version control).",
       S_LIMIT, A_READ, "Snapshot history", t_log, false },
@@ -452,7 +561,7 @@ static const struct {
     { "get_source",
       "The body of one symbol, by name — not the whole file. Use instead of "
       "reading a file when you only need a single function.",
-      S_NAME, A_READ, "Show symbol source", t_show, true },
+      S_SHOW, A_READ, "Show symbol source", t_show, true },
     { "why",
       "Provenance for a symbol: where it is defined, the snapshots that "
       "changed it, the spec tasks those snapshots implemented, and the "
@@ -509,6 +618,31 @@ static const struct {
       "Ingest git history into the graph: commits, authors, and per-file "
       "churn, which then rank search and context results.",
       S_LIMIT, A_WRITE, "Ingest git history", t_git_sync, false },
+    { "spec_ready",
+      "Every eligible task across all waves, each with whether its declared "
+      "paths conflict with a live claim. The dispatch view for parallel "
+      "work: what could start right now, and what would collide.",
+      S_EMPTY, A_READ, "All eligible tasks", t_spec_ready, false },
+    { "spec_claim_next",
+      "Atomically claim the first eligible task whose declared paths are "
+      "disjoint from every in-progress task and live lease, mark it "
+      "in_progress, and return the task with its lease and related "
+      "memories. Empty frontier returns empty:true.",
+      S_CLAIMNEXT, A_WRITE, "Claim next task", t_spec_claim_next, false },
+    { "spec_release",
+      "Release a task's lease. Owner-checked: refuses when another agent "
+      "holds it unless force is set.",
+      S_RELEASE, A_WRITE, "Release a claim", t_spec_release, false },
+    { "handoff",
+      "Record session state against a task before stopping: what got done, "
+      "what comes next, what is blocked, plus the dirty paths. Supersedes "
+      "the previous handoff so resume reads exactly one note.",
+      S_HANDOFF, A_WRITE, "Hand off a task", t_handoff, false },
+    { "resume",
+      "Pick a task back up: the task packet, the latest handoff, task-"
+      "scoped memories, uncommitted paths, and the lease holder. Call at "
+      "session start when continuing earlier work.",
+      S_RESUME, A_READ, "Resume a task", t_resume, false },
 };
 #define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))
 

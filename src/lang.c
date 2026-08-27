@@ -12,6 +12,17 @@
 
 typedef struct { const char *kind; const char *pat; int group; } DefPat;
 
+/* import extraction style — table-driven per language */
+typedef enum {
+    IMP_NONE = 0,
+    IMP_JS,     /* import {a,b} from 'm' / import d from 'm' / require('m') */
+    IMP_PY,     /* from m import a, b / import m */
+    IMP_GO,     /* import "p" and import ( ... ) blocks */
+    IMP_INC,    /* #include "p" — local includes only */
+    IMP_RUST,   /* use a::b::{c,d} / use a::b::c */
+    IMP_DOT,    /* imp_kw a.b.C; — java import / c# using */
+} ImpStyle;
+
 #define MAXPATS 12
 typedef struct {
     const char *name;
@@ -20,6 +31,8 @@ typedef struct {
     const char *block_open, *block_close;
     const char *quotes;
     bool icase;
+    ImpStyle imp;
+    const char *imp_kw;       /* IMP_DOT keyword: "import" / "using" */
     DefPat pats[MAXPATS];
     regex_t re[MAXPATS];
     int npats;
@@ -27,7 +40,7 @@ typedef struct {
 
 static LangSpec LANGS[] = {
     { .name = "c", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"'", .pats = {
+      .quotes = "\"'", .imp = IMP_INC, .pats = {
         {"function", "^[A-Za-z_][A-Za-z0-9_ \t*]*[ \t*](" ID ")[ \t]*\\(", 1},
         {"macro",    "^#[ \t]*define[ \t]+(" ID ")", 1},
         {"struct",   "^[ \t]*(typedef[ \t]+)?(struct|union)[ \t]+(" ID ")", 3},
@@ -35,7 +48,7 @@ static LangSpec LANGS[] = {
         {"typedef",  "^typedef[^(;]*[ \t*](" ID ")[ \t]*;", 1},
     }},
     { .name = "cpp", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"'", .pats = {
+      .quotes = "\"'", .imp = IMP_INC, .pats = {
         {"function",  "^[A-Za-z_][A-Za-z0-9_ \t*&:<>~]*[ \t*&](" ID ")[ \t]*\\(", 1},
         {"method",    "(" ID ")::(~?" ID ")[ \t]*\\(", 2},
         {"macro",     "^#[ \t]*define[ \t]+(" ID ")", 1},
@@ -43,12 +56,13 @@ static LangSpec LANGS[] = {
         {"enum",      "^[ \t]*enum[ \t]+(class[ \t]+)?(" ID ")", 2},
         {"namespace", "^[ \t]*namespace[ \t]+(" ID ")", 1},
     }},
-    { .name = "python", .line_comment = "#", .quotes = "\"'", .pats = {
+    { .name = "python", .line_comment = "#", .quotes = "\"'", .imp = IMP_PY,
+      .pats = {
         {"function", "^[ \t]*(async[ \t]+)?def[ \t]+(" ID ")", 2},
         {"class",    "^[ \t]*class[ \t]+(" ID ")", 1},
     }},
     { .name = "js", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"'`", .pats = {
+      .quotes = "\"'`", .imp = IMP_JS, .pats = {
         {"function",  NW "function[ \t*]+(" ID ")", 2},
         {"class",     NW "class[ \t]+(" ID ")", 2},
         {"function",  "^[ \t]*(export[ \t]+)?(const|let|var)[ \t]+(" ID ")[ \t]*=[ \t]*"
@@ -59,13 +73,13 @@ static LangSpec LANGS[] = {
         {"enum",      "^[ \t]*(export[ \t]+)?(const[ \t]+)?enum[ \t]+(" ID ")", 3},
     }},
     { .name = "go", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"'`", .pats = {
+      .quotes = "\"'`", .imp = IMP_GO, .pats = {
         {"function", "^func[ \t]+(" ID ")[ \t]*[(\\[]", 1},
         {"method",   "^func[ \t]*\\([^)]*\\)[ \t]*(" ID ")[ \t]*[(\\[]", 1},
         {"type",     "^type[ \t]+(" ID ")", 1},
     }},
     { .name = "rust", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"", .pats = {
+      .quotes = "\"", .imp = IMP_RUST, .pats = {
         {"function", NW "fn[ \t]+(" ID ")", 2},
         {"struct",   NW "struct[ \t]+(" ID ")", 2},
         {"enum",     NW "enum[ \t]+(" ID ")", 2},
@@ -74,13 +88,13 @@ static LangSpec LANGS[] = {
         {"macro",    "macro_rules![ \t]*(" ID ")", 1},
     }},
     { .name = "java", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"'", .pats = {
+      .quotes = "\"'", .imp = IMP_DOT, .imp_kw = "import", .pats = {
         {"class",  NW "(class|interface|enum|record)[ \t]+(" ID ")", 3},
         {"method", "^[ \t]+(public|private|protected|static|final|abstract|synchronized|native|default)"
                    "[ \t].*[ \t](" ID ")[ \t]*\\(", 2},
     }},
     { .name = "csharp", .line_comment = "//", .block_open = "/*", .block_close = "*/",
-      .quotes = "\"'", .pats = {
+      .quotes = "\"'", .imp = IMP_DOT, .imp_kw = "using", .pats = {
         {"class",     NW "(class|interface|struct|record|enum)[ \t]+(" ID ")", 3},
         {"namespace", "^[ \t]*namespace[ \t]+([A-Za-z_][A-Za-z0-9_.]*)", 1},
         {"method",    "^[ \t]+(public|private|protected|internal|static|override|virtual|async|sealed)"
@@ -235,6 +249,7 @@ static void add_def(ParseResult *pr, const char *name, size_t nlen,
     d->name[nlen] = 0;
     d->kind = kind;
     d->line = line;
+    d->end_line = 0;
     /* signature: trimmed line, capped */
     while (*sig == ' ' || *sig == '\t') sig++;
     size_t sl = strlen(sig);
@@ -246,7 +261,8 @@ static void add_def(ParseResult *pr, const char *name, size_t nlen,
     d->sig[sl] = 0;
 }
 
-static void add_ref(ParseResult *pr, const char *name, size_t nlen, int line) {
+static void add_ref(ParseResult *pr, const char *name, size_t nlen, int line,
+                    const char *qual, size_t qlen) {
     if (pr->nrefs == pr->crefs) {
         pr->crefs = pr->crefs ? pr->crefs * 2 : 128;
         pr->refs = xrealloc(pr->refs, sizeof(SymRef) * (size_t)pr->crefs);
@@ -256,6 +272,32 @@ static void add_ref(ParseResult *pr, const char *name, size_t nlen, int line) {
     memcpy(r->name, name, nlen);
     r->name[nlen] = 0;
     r->line = line;
+    r->ref_kind = 'c';
+    if (qual && qlen) {
+        if (qlen >= sizeof r->qual) qlen = sizeof r->qual - 1;
+        memcpy(r->qual, qual, qlen);
+        r->qual[qlen] = 0;
+    } else {
+        r->qual[0] = 0;
+    }
+}
+
+static void add_import(ParseResult *pr, const char *name, size_t nlen,
+                       const char *module, size_t mlen, int line) {
+    if (nlen == 0) return;
+    if (pr->nimports == pr->cimports) {
+        pr->cimports = pr->cimports ? pr->cimports * 2 : 8;
+        pr->imports = xrealloc(pr->imports,
+                               sizeof(ImportDef) * (size_t)pr->cimports);
+    }
+    ImportDef *im = &pr->imports[pr->nimports++];
+    im->name = xmalloc(nlen + 1);
+    memcpy(im->name, name, nlen);
+    im->name[nlen] = 0;
+    im->module = xmalloc(mlen + 1);
+    if (mlen) memcpy(im->module, module, mlen);
+    im->module[mlen] = 0;
+    im->line = line;
 }
 
 void route_add(ParseResult *pr, const char *framework, const char *method,
@@ -279,7 +321,10 @@ void parse_result_free(ParseResult *pr) {
         free(pr->routes[i].method); free(pr->routes[i].pattern);
         free(pr->routes[i].handler);
     }
-    free(pr->defs); free(pr->refs); free(pr->routes);
+    for (int i = 0; i < pr->nimports; i++) {
+        free(pr->imports[i].name); free(pr->imports[i].module);
+    }
+    free(pr->defs); free(pr->refs); free(pr->routes); free(pr->imports);
     memset(pr, 0, sizeof *pr);
 }
 
@@ -289,48 +334,362 @@ static bool starts_with(const char *s, const char *pre) {
     return pre && strncmp(s, pre, strlen(pre)) == 0;
 }
 
-/* Blank strings and comments in-place into `clean` (same length as line). */
+/* cross-line stripper state: block comments and multi-line strings */
+typedef struct {
+    bool in_block;     /* inside a block comment */
+    char mstr;         /* multi-line string delimiter char, 0 = none */
+    bool triple;       /* mstr is a python ''' / """ (else a js backtick) */
+} CleanState;
+
+/* Blank strings and comments in-place into `clean` (same length as line).
+ * clean may be NULL: advance the cross-line state only, emitting nothing —
+ * used for over-long lines so skipping them cannot desync the stripper. */
 static void clean_line(const LangSpec *L, const char *line, size_t n,
-                       char *clean, bool *in_block) {
+                       char *clean, CleanState *cs) {
+    bool py = strcmp(L->name, "python") == 0;
+    bool jss = strcmp(L->name, "js") == 0;
     size_t i = 0;
     char quote = 0;
     while (i < n) {
         char c = line[i];
-        if (*in_block) {
+        if (cs->in_block) {
             if (starts_with(line + i, L->block_close)) {
                 size_t bl = strlen(L->block_close);
-                for (size_t k = 0; k < bl; k++) clean[i + k] = ' ';
+                for (size_t k = 0; k < bl && i + k < n; k++)
+                    if (clean) clean[i + k] = ' ';
                 i += bl;
-                *in_block = false;
-            } else { clean[i++] = ' '; }
+                cs->in_block = false;
+            } else { if (clean) clean[i] = ' '; i++; }
+        } else if (cs->mstr) {
+            if (cs->triple && i + 2 < n && c == cs->mstr &&
+                line[i+1] == cs->mstr && line[i+2] == cs->mstr) {
+                if (clean) { clean[i] = clean[i+1] = clean[i+2] = ' '; }
+                i += 3;
+                cs->mstr = 0;
+            } else if (!cs->triple && c == '\\' && i + 1 < n) {
+                if (clean) { clean[i] = ' '; clean[i+1] = ' '; }
+                i += 2;
+            } else if (!cs->triple && c == cs->mstr) {
+                if (clean) clean[i] = ' ';
+                i++;
+                cs->mstr = 0;
+            } else { if (clean) clean[i] = ' '; i++; }
         } else if (quote) {
             if (c == '\\' && i + 1 < n && strcmp(L->name, "vbnet") != 0) {
-                clean[i] = ' '; clean[i+1] = ' '; i += 2;
+                if (clean) { clean[i] = ' '; clean[i+1] = ' '; }
+                i += 2;
             } else {
                 if (c == quote) quote = 0;
-                clean[i++] = ' ';
+                if (clean) clean[i] = ' ';
+                i++;
             }
         } else if (L->line_comment && starts_with(line + i, L->line_comment)) {
-            while (i < n) clean[i++] = ' ';
+            while (i < n) { if (clean) clean[i] = ' '; i++; }
         } else if (L->line_comment2 && starts_with(line + i, L->line_comment2)) {
-            while (i < n) clean[i++] = ' ';
+            while (i < n) { if (clean) clean[i] = ' '; i++; }
         } else if (L->block_open && starts_with(line + i, L->block_open)) {
             size_t bl = strlen(L->block_open);
-            for (size_t k = 0; k < bl && i + k < n; k++) clean[i + k] = ' ';
+            for (size_t k = 0; k < bl && i + k < n; k++)
+                if (clean) clean[i + k] = ' ';
             i += bl;
-            *in_block = true;
+            cs->in_block = true;
+        } else if (py && (c == '\'' || c == '"') && i + 2 < n &&
+                   line[i+1] == c && line[i+2] == c) {
+            if (clean) { clean[i] = clean[i+1] = clean[i+2] = ' '; }
+            i += 3;
+            cs->mstr = c;
+            cs->triple = true;
+        } else if (jss && c == '`') {
+            if (clean) clean[i] = ' ';
+            i++;
+            cs->mstr = '`';
+            cs->triple = false;
         } else if (L->quotes && strchr(L->quotes, c)) {
             quote = c;
-            clean[i++] = ' ';
+            if (clean) clean[i] = ' ';
+            i++;
         } else {
-            clean[i++] = c;
+            if (clean) clean[i] = c;
+            i++;
         }
     }
-    clean[n] = 0;
+    if (clean) clean[n] = 0;
 }
 
 static bool idstart(char c) { return isalpha((unsigned char)c) || c == '_'; }
 static bool idchar(char c)  { return isalnum((unsigned char)c) || c == '_'; }
+
+/* ---------------- scope ends ---------------- */
+
+/* Real scope end for a definition starting at def_line (1-based), from the
+ * file's cleaned lines. Brace languages: depth tracking from the def line,
+ * accepting the opening brace on the def line or the next one. Python: the
+ * last non-blank line indented deeper than the def line. 0 = unresolved —
+ * the writer falls back to its gap estimate. */
+static int lang_scope_end(const LangSpec *L, char *const *lines, int nlines,
+                          int def_line) {
+    if (def_line < 1 || def_line > nlines) return 0;
+    if (strcmp(L->name, "python") == 0) {
+        const char *dl = lines[def_line - 1];
+        int base = 0;
+        while (dl[base] == ' ' || dl[base] == '\t') base++;
+        int last = 0;
+        for (int j = def_line + 1; j <= nlines; j++) {
+            const char *s = lines[j - 1];
+            int ind = 0;
+            while (s[ind] == ' ' || s[ind] == '\t') ind++;
+            if (!s[ind]) continue;                 /* blank / stripped line */
+            if (ind <= base) break;
+            last = j;
+        }
+        return last;
+    }
+    if (strcmp(L->name, "ruby") == 0 || strcmp(L->name, "erlang") == 0 ||
+        strcmp(L->name, "vbnet") == 0)
+        return 0;                                  /* no brace scopes */
+    int depth = 0;
+    bool opened = false;
+    for (int j = def_line; j <= nlines; j++) {
+        for (const char *s = lines[j - 1]; *s; s++) {
+            if (!opened) {
+                if (*s == '{') { opened = true; depth = 1; }
+                else if (*s == ';') return 0;      /* declaration, no body */
+            } else if (*s == '{') {
+                depth++;
+            } else if (*s == '}' && --depth == 0) {
+                return j;
+            }
+        }
+        if (!opened && j > def_line) return 0;     /* body brace not nearby */
+    }
+    return 0;
+}
+
+/* ---------------- imports ---------------- */
+
+static const char *skip_sp(const char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    return s;
+}
+
+static bool kw_at(const char *s, const char *kw) {
+    size_t n = strlen(kw);
+    return strncmp(s, kw, n) == 0 && !idchar(s[n]);
+}
+
+/* first 'm' / "m" span on s; false when absent or unterminated */
+static bool quoted_span(const char *s, const char **out, size_t *n) {
+    while (*s && *s != '"' && *s != '\'') s++;
+    if (!*s) return false;
+    const char *e = strchr(s + 1, *s);
+    if (!e) return false;
+    *out = s + 1;
+    *n = (size_t)(e - s - 1);
+    return true;
+}
+
+/* last identifier token in [s,e); a '*' anywhere wins (star import).
+ * "a as b" therefore yields the binding name b. */
+static void seg_name(const char *s, const char *e, const char **out, size_t *n) {
+    *out = NULL;
+    *n = 0;
+    for (const char *p = s; p < e; p++) {
+        if (*p == '*') { *out = "*"; *n = 1; return; }
+        if (idstart(*p)) {
+            const char *q = p;
+            while (q < e && idchar(*q)) q++;
+            *out = p;
+            *n = (size_t)(q - p);
+            p = q;
+        }
+    }
+}
+
+static void imp_js(const char *line, int lineno, ParseResult *pr) {
+    const char *s = skip_sp(line);
+    if (kw_at(s, "export")) s = skip_sp(s + 6);
+    if (kw_at(s, "import")) {
+        const char *from = NULL;
+        for (const char *p = s + 6; *p; p++)
+            if (!idchar(p[-1]) && kw_at(p, "from")) { from = p; break; }
+        const char *mod;
+        size_t ml;
+        if (from && quoted_span(from + 4, &mod, &ml) && ml) {
+            const char *it = s + 6;                /* one row per name */
+            for (const char *p = it; ; p++) {
+                if (p >= from || *p == ',') {
+                    const char *nm;
+                    size_t nn;
+                    seg_name(it, p, &nm, &nn);
+                    if (nn) add_import(pr, nm, nn, mod, ml, lineno);
+                    it = p + 1;
+                    if (p >= from) break;
+                }
+            }
+        }
+    }
+    for (const char *r = line; (r = strstr(r, "require")); r += 7) {
+        if (r > line && idchar(r[-1])) continue;
+        if (idchar(r[7])) continue;
+        const char *p = skip_sp(r + 7);
+        if (*p != '(') continue;
+        const char *cl = strchr(p, ')');
+        const char *mod;
+        size_t ml;
+        if (cl && quoted_span(p, &mod, &ml) && ml && mod + ml < cl)
+            add_import(pr, "*", 1, mod, ml, lineno);
+    }
+}
+
+static void imp_py(const char *line, int lineno, ParseResult *pr) {
+    const char *s = skip_sp(line);
+    if (kw_at(s, "from")) {
+        const char *m = skip_sp(s + 4);
+        const char *q = m;
+        while (idchar(*q) || *q == '.') q++;
+        if (q == m) return;
+        const char *im = skip_sp(q);
+        if (!kw_at(im, "import")) return;
+        const char *list = skip_sp(im + 6);
+        const char *end = list + strlen(list);
+        const char *it = list;                     /* one row per name */
+        for (const char *p = it; ; p++) {
+            if (p >= end || *p == ',') {
+                const char *nm;
+                size_t nn;
+                seg_name(it, p, &nm, &nn);
+                if (nn) add_import(pr, nm, nn, m, (size_t)(q - m), lineno);
+                it = p + 1;
+                if (p >= end) break;
+            }
+        }
+    } else if (kw_at(s, "import")) {
+        const char *p = skip_sp(s + 6);
+        while (*p) {                               /* import a.b, c as d */
+            const char *m = p;
+            const char *q = m;
+            while (idchar(*q) || *q == '.') q++;
+            if (q == m) break;
+            add_import(pr, "*", 1, m, (size_t)(q - m), lineno);
+            p = skip_sp(q);
+            if (kw_at(p, "as")) {
+                p = skip_sp(p + 2);
+                while (idchar(*p)) p++;
+                p = skip_sp(p);
+            }
+            if (*p != ',') break;
+            p = skip_sp(p + 1);
+        }
+    }
+}
+
+static void imp_go(const char *line, int lineno, ParseResult *pr, int *state) {
+    const char *s = skip_sp(line);
+    const char *mod;
+    size_t ml;
+    if (*state) {                                  /* inside import ( ... ) */
+        if (*s == ')') { *state = 0; return; }
+        if (quoted_span(s, &mod, &ml) && ml)
+            add_import(pr, "*", 1, mod, ml, lineno);
+        return;
+    }
+    if (!kw_at(s, "import")) return;
+    const char *p = skip_sp(s + 6);
+    if (*p == '(') {
+        *state = 1;
+        if (quoted_span(p, &mod, &ml) && ml)
+            add_import(pr, "*", 1, mod, ml, lineno);
+        if (strchr(p, ')')) *state = 0;            /* one-line block */
+        return;
+    }
+    if (quoted_span(p, &mod, &ml) && ml)
+        add_import(pr, "*", 1, mod, ml, lineno);
+}
+
+static void imp_inc(const char *line, int lineno, ParseResult *pr) {
+    const char *s = skip_sp(line);
+    if (*s != '#') return;
+    s = skip_sp(s + 1);
+    if (strncmp(s, "include", 7) != 0) return;
+    s = skip_sp(s + 7);
+    if (*s != '"') return;                         /* <...> system: skip */
+    const char *e = strchr(s + 1, '"');
+    if (e && e > s + 1)
+        add_import(pr, "*", 1, s + 1, (size_t)(e - s - 1), lineno);
+}
+
+static void imp_rust(const char *line, int lineno, ParseResult *pr) {
+    const char *s = skip_sp(line);
+    if (kw_at(s, "pub")) s = skip_sp(s + 3);
+    if (!kw_at(s, "use")) return;
+    const char *p = skip_sp(s + 3);
+    const char *semi = strchr(p, ';');
+    const char *end = semi ? semi : p + strlen(p);
+    const char *brace = memchr(p, '{', (size_t)(end - p));
+    const char *nm;
+    size_t nn;
+    if (brace) {                                   /* use a::b::{c, d}; */
+        const char *me = brace;
+        while (me > p && (me[-1] == ':' || me[-1] == ' ' || me[-1] == '\t'))
+            me--;
+        const char *close = memchr(brace, '}', (size_t)(end - brace));
+        const char *ge = close ? close : end;
+        const char *it = brace + 1;
+        for (const char *q = it; ; q++) {
+            if (q >= ge || *q == ',') {
+                seg_name(it, q, &nm, &nn);
+                if (nn) add_import(pr, nm, nn, p, (size_t)(me - p), lineno);
+                it = q + 1;
+                if (q >= ge) break;
+            }
+        }
+        return;
+    }
+    const char *last = NULL;                       /* use a::b::c; */
+    for (const char *q = p; q + 1 < end; q++)
+        if (q[0] == ':' && q[1] == ':') last = q;
+    seg_name(last ? last + 2 : p, end, &nm, &nn);
+    if (!nn) return;
+    if (last) add_import(pr, nm, nn, p, (size_t)(last - p), lineno);
+    else      add_import(pr, nm, nn, nm, nn, lineno);
+}
+
+static void imp_dot(const LangSpec *L, const char *line, int lineno,
+                    ParseResult *pr) {
+    const char *s = skip_sp(line);
+    if (!kw_at(s, L->imp_kw)) return;
+    const char *p = skip_sp(s + strlen(L->imp_kw));
+    if (kw_at(p, "static")) p = skip_sp(p + 6);    /* java import static */
+    const char *q = p;
+    while (idchar(*q) || *q == '.') q++;
+    bool star = *q == '*';                         /* import a.b.*; */
+    if (q == p || *skip_sp(star ? q + 1 : q) != ';') return;
+    const char *dot = NULL;
+    for (const char *r = p; r < q; r++)
+        if (*r == '.') dot = r;
+    if (star) {
+        if (dot) add_import(pr, "*", 1, p, (size_t)(dot - p), lineno);
+    } else if (dot) {
+        add_import(pr, dot + 1, (size_t)(q - dot - 1), p, (size_t)(dot - p),
+                   lineno);
+    } else {
+        add_import(pr, p, (size_t)(q - p), "", 0, lineno);
+    }
+}
+
+/* table-driven import extraction; `state` carries go's import-block flag */
+static void lang_scan_imports(const LangSpec *L, const char *line, int lineno,
+                              ParseResult *pr, int *state) {
+    switch (L->imp) {
+    case IMP_JS:   imp_js(line, lineno, pr);        break;
+    case IMP_PY:   imp_py(line, lineno, pr);        break;
+    case IMP_GO:   imp_go(line, lineno, pr, state); break;
+    case IMP_INC:  imp_inc(line, lineno, pr);       break;
+    case IMP_RUST: imp_rust(line, lineno, pr);      break;
+    case IMP_DOT:  imp_dot(L, line, lineno, pr);    break;
+    case IMP_NONE: break;
+    }
+}
 
 void lang_parse(const char *lang, const char *path, const char *src,
                 size_t len, ParseResult *pr) {
@@ -340,10 +699,13 @@ void lang_parse(const char *lang, const char *path, const char *src,
     if (!L) return;
     bool cfam_protos = strcmp(L->name, "c") == 0 || strcmp(L->name, "cpp") == 0;
 
-    bool in_block = false;
+    CleanState cs = {0};
+    int impstate = 0;
     int lineno = 0;
     size_t pos = 0;
     char orig[4096], clean[4096];
+    char **clines = NULL;              /* cleaned lines, for scope tracking */
+    int ccl = 0;
 
     routes_scan_file(path, pr);
 
@@ -353,15 +715,25 @@ void lang_parse(const char *lang, const char *path, const char *src,
         size_t ll = nl ? (size_t)(nl - ls) : len - pos;
         pos += ll + (nl ? 1 : 0);
         lineno++;
+        if (lineno > ccl) {
+            ccl = ccl ? ccl * 2 : 256;
+            if (ccl < lineno) ccl = lineno;
+            clines = xrealloc(clines, sizeof(char *) * (size_t)ccl);
+        }
         if (ll >= sizeof orig) {           /* minified / generated: skip */
-            /* still track block comments conservatively: leave state as-is */
+            /* advance the stripper state so later lines stay in sync */
+            clean_line(L, ls, ll, NULL, &cs);
+            clines[lineno - 1] = xstrdup("");
             continue;
         }
         memcpy(orig, ls, ll);
         orig[ll] = 0;
         if (ll && orig[ll-1] == '\r') orig[--ll] = 0;
 
-        clean_line(L, orig, ll, clean, &in_block);
+        bool in_str = cs.mstr != 0 || cs.in_block;   /* line starts inside */
+        clean_line(L, orig, ll, clean, &cs);
+        clines[lineno - 1] = xstrdup(clean);
+        if (!in_str) lang_scan_imports(L, orig, lineno, pr, &impstate);
 
         int defs_before = pr->ndefs;
 
@@ -409,8 +781,26 @@ void lang_parse(const char *lang, const char *path, const char *src,
                         if (strlen(pr->defs[d].name) == j - i &&
                             strncmp(pr->defs[d].name, clean + i, j - i) == 0)
                             { is_def = true; break; }
-                    if (!is_def)
-                        add_ref(pr, clean + i, j - i, lineno);
+                    if (!is_def) {
+                        /* immediate receiver: recv.name( recv->name( R::name( */
+                        size_t e = 0;
+                        if (i >= 2 && clean[i-1] == '.') e = i - 1;
+                        else if (i >= 3 && clean[i-2] == '-' && clean[i-1] == '>')
+                            e = i - 2;
+                        else if (i >= 3 && clean[i-2] == ':' && clean[i-1] == ':')
+                            e = i - 2;
+                        const char *qs = NULL;
+                        size_t qn = 0;
+                        if (e) {
+                            size_t st = e;
+                            while (st > 0 && idchar(clean[st-1])) st--;
+                            if (st < e && idstart(clean[st])) {
+                                qs = clean + st;
+                                qn = e - st;
+                            }
+                        }
+                        add_ref(pr, clean + i, j - i, lineno, qs, qn);
+                    }
                 }
                 i = j;
             } else i++;
@@ -418,5 +808,11 @@ void lang_parse(const char *lang, const char *path, const char *src,
 
         routes_scan_line(L->name, path, lineno, orig, pr);
     }
+    /* real scope ends now that every line's cleaned form is known */
+    for (int i = 0; i < pr->ndefs; i++)
+        pr->defs[i].end_line = lang_scope_end(L, clines, lineno,
+                                              pr->defs[i].line);
+    for (int i = 0; i < lineno; i++) free(clines[i]);
+    free(clines);
     pr->nlines = lineno;
 }

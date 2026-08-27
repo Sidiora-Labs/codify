@@ -32,7 +32,9 @@ Codify (invoked as `cg`) is an agent workflow engine in a single binary. It main
 
 The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg why` walks a symbol back to the decisions behind it, and `cg spec trace` walks any task to its symbols, commits, and memories.
 
-**And it is present between the steps, not only at them.** `cg brief` starts a session, `cg guard` notices when an edit drifts outside what the task declared, `cg review` pairs a change with the criteria it claims to satisfy, and `cg check` gates all of it in CI as one command. A built-in MCP server exposes the whole thing — 32 tools, plus resources and prompts — to Claude Code, Cursor, and every other MCP-capable agent, while `cg lsp` serves the same graph to any editor that speaks LSP.
+**And it is present between the steps, not only at them.** `cg brief` starts a session, `cg guard` notices when an edit drifts outside what the task declared, `cg review` pairs a change with the criteria it claims to satisfy, and `cg check` gates all of it in CI as one command. A built-in MCP server exposes the whole thing — 37 tools, plus resources and prompts — to Claude Code, Cursor, and every other MCP-capable agent, while `cg lsp` serves the same graph to any editor that speaks LSP.
+
+**And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
 There are no API keys, no background services, and no telemetry. Everything runs on your machine and stays there.
 
@@ -44,7 +46,7 @@ There are no API keys, no background services, and no telemetry. Everything runs
 
 **The project remembers what sessions forget.** Agent context windows reset; the memory table does not. A decision written once with `cg remember` meets the next session automatically — on `cg spec next`, on `cg spec start`, in `cg recall` at session start — instead of being rediscovered at full price. And because refused completions are recorded too, "this task was blocked twice and here is why" is one query away.
 
-**Context arrives in one call, not twenty.** `cg context <query>` is designed around how agents actually consume code. One request returns everything needed to start working: where execution enters, what matched, who calls it, what it calls, and which routes touch it.
+**Context arrives in one call, not twenty — and inside a budget.** `cg context <query>` is designed around how agents actually consume code. One request returns everything needed to start working: relevant memories, where execution enters, what matched, who calls it, what it calls, and which routes touch it — ranked (real definitions above test fixtures, called code above dead code) and fitted to a token budget (`--budget`, default 4000). A symbol is printed in full once; every later mention is a compact `name path:line`, and anything cut by the budget is announced with an explicit omitted count instead of silently dropped.
 
 **Impact analysis is a first-class command.** `cg impact <name> -d 3` walks caller and callee edges transitively and answers the two questions that matter before any change: who breaks if this moves, and what does it depend on.
 
@@ -62,7 +64,7 @@ There are no API keys, no background services, and no telemetry. Everything runs
 cg brief                      # root, active task + ACs, uncommitted work, prior decisions
 cg spec next                  # the next eligible task, ACs + relevant memories
 cg spec start 16.7            # claim it — one task in progress at a time
-cg context "password auth"    # entry points, symbols, callers, routes in one call
+cg context "password auth"    # memories, entry points, symbols, callers, routes in one call
 cg why verifyLogin            # who changed it, under which task, and what was decided
 cg impact verifyLogin -d 2    # who breaks if this changes
 # ...implement...
@@ -74,6 +76,21 @@ cg commit -m "add password auth"   # snapshot, auto-tagged [spec:ion_spec/16.7]
 cg spec done 16.7             # qualification: verify_cmd + graph checks; outcome recorded
 cg spec trace 16.7            # proof: task -> symbols -> commits -> memories
 ```
+
+And when a session has to stop before the task is finished — the context window is full, the day is over — the work does not evaporate:
+
+```sh
+# session A, stopping early
+cg handoff --done "schema migration; token rotation" \
+           --next "wire the login route; extend 03_auth test" \
+           --blocked "flaky fixture on CI" -m "rotate on login, not refresh"
+
+# session B, hours later, a fresh context window
+cg resume --prompt            # paste-ready block: task, steps done, blockers,
+                              # next steps, uncommitted files, lease state
+```
+
+A handoff is stored as a structured memory linked to the task; each new one supersedes the previous, so `cg resume` always meets the latest state, not a pile of stale notes.
 
 Every command in that loop is also an MCP tool, so a connected agent can run it end to end — and every step works just as well in a ten-file project as in a monorepo. `cg check` runs the whole gate in CI as a single step, and `cg hook install` wires the sync and the scope check so most of this happens without anyone invoking it.
 
@@ -92,6 +109,8 @@ curl -fsSL https://codify.centra.ag/install | bash
 ```
 
 Uninstall the same way: `curl -fsSL https://codify.centra.ag/uninstall | bash`. Per-project `.codegraph/` data is never touched.
+
+Upgrades are safe on existing projects: the database carries a schema version, and on the first open after an upgrade `cg` rebuilds only the derived index tables (files, symbols, refs, routes, imports, and the search indexes) — the next sync repopulates them. Memories, git history, and leases are never dropped by a migration.
 
 Anywhere else, build from source (dependencies: a C compiler and `libsqlite3-dev`):
 
@@ -116,10 +135,10 @@ cg init
 | `cg sync` / `cg index [--full]` | Incremental or full reindex |
 | `cg search <q> [-n N]` | Symbol and full-text search |
 | `cg symbol <name>` | Definition, snippet, and reference count |
-| `cg impact <name> [-d N]` | Transitive callers and callees |
-| `cg context <q>` | One-call context bundle for agents |
+| `cg impact <name> [-d N] [--budget N]` | Transitive callers and callees, fitted to a token budget (default 8000) |
+| `cg context <q> [--budget N] [-n K]` | One-call context bundle for agents: memories, symbols, entry points, routes — top K symbols (default 8), fitted to a token budget (default 4000) with explicit omitted counts |
 | `cg routes [filter]` | URL pattern to handler table |
-| `cg show <symbol\|path:line>` | Just that symbol's body — by name, or by the cursor position an editor holds |
+| `cg show <symbol\|path:line> [--full]` | Just that symbol's body — by name, or by the cursor position an editor holds; long bodies truncate with a `… (+N more lines, use --full)` marker |
 | `cg why <symbol>` | Provenance: the commits that changed it, the tasks they implemented, the decisions recorded |
 | `cg test-impact [symbol]` | Tests referencing a symbol — or every symbol in your uncommitted changes |
 | `cg watch [--debounce MS]` | Auto-sync on native filesystem events |
@@ -136,7 +155,7 @@ Snapshots are content-addressed with SHA-256 and blobs are deduplicated.
 | `cg log` / `cg status` | History, and worktree versus HEAD |
 | `cg diff [A] [B]` | LCS line diff between snapshots or the worktree |
 | `cg checkout <id> [--force]` | Restore a snapshot |
-| `cg changes` | Impact radius of uncommitted edits: the symbols you touched plus their external callers |
+| `cg changes [--limit N]` | Impact radius of uncommitted edits: the symbols you touched plus their external callers — capped by default (40 symbols, 8 callers each) with `(+N more)` markers; `--limit` overrides |
 | `cg git-sync [-n N]` | Ingest git history — commits, authors, per-file churn — which then ranks search and context |
 
 Codify's snapshots do not replace git. `.gitignore` is honoured alongside `.cgignore`, `cg git-sync` reads your real history, and `cg commit --git` writes to both, so adopting Codify is never all-or-nothing.
@@ -158,7 +177,7 @@ A superseded memory is never deleted — the reversal is history worth keeping. 
 
 | Command | Description |
 |---|---|
-| `cg mcp` | Run as an MCP stdio server: 32 tools, plus resources and prompts (see below) |
+| `cg mcp` | Run as an MCP stdio server: 37 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
 | `cg mcp-install` | Auto-connect to Claude Code (`.mcp.json`), Cursor, VS Code, Windsurf, Zed, OpenCode, Cline, Continue, Gemini CLI, and Codex CLI, merging into existing configs |
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |
@@ -175,6 +194,8 @@ These four are what make Codify present at every step rather than only at the bo
 | `cg review` | The change paired with what it claims: changed symbols, callers now at risk, and the task's acceptance criteria |
 | `cg guard [paths] [--strict]` | Edits falling outside the scope the in-progress task declared in `touches` |
 | `cg check [--strict]` | The single CI gate: render staleness, spec lint, task evidence, claim consistency, worktree state |
+| `cg handoff` | Record session state against a task before stopping: `--done "a;b"`, `--next "a;b"`, `--blocked "x"`, `-m <note>`, `--task <id>` (defaults to your current task). Stored as a structured memory; each handoff supersedes the previous one for the task |
+| `cg resume [--task <id>] [--prompt]` | Everything a fresh session needs to pick a task up: the task packet, the latest handoff (parsed back into done/next/blocked), task-scoped memories, uncommitted paths, lease state. `--prompt` renders it as a paste-ready block for a new agent session |
 
 All query commands accept `--json`. That flag, the MCP server, and the language server are the agent-native interfaces.
 
@@ -190,8 +211,11 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 | `cg spec render [--check]` | Regenerate IDE pointer files (Cursor, Devin, Claude, Codex, Copilot, Kiro) and the markdown mirror (`requirements.md`, `design.md`, `tasks.md`); `--check` exits 2 if anything is stale |
 | `cg spec` / `cg spec status` | Task board: mode plus separate `done`, `implemented`, `in_progress`, and `pending` counts, progress, the current task, the next eligible one, and any live claims |
 | `cg spec mode <prod\|standard\|parallel>` | Configure dependency and concurrency semantics; absent or unknown mode is standard |
-| `cg spec wave` | Every eligible task in the current wave, not just the first — what an orchestrator needs to fan agents out |
-| `cg spec claim <id>` / `release <id>` | Lease a task to an owning agent with an expiry (`--agent`, `--ttl`); refuses a second claimant or an overlapping scope |
+| `cg spec wave` | Every eligible task in the current wave, not just the first |
+| `cg spec ready` | Every eligible task across **all** waves, grouped by wave, each marked when its `touches` conflict with a live claim — the full frontier an orchestrator can dispatch |
+| `cg spec claim <id>` / `release <id>` | Lease a task to an owning agent with an expiry (`--agent`, `--ttl` minutes); claiming refuses a task another agent holds live, and releasing someone else's lease requires that agent's name or `--force` — no silent steals. `done` and `implemented` release the task's lease automatically |
+| `cg spec claim-next` | Atomically claim the first eligible task whose `touches` conflict with neither in-progress tasks nor live leases (file lock + one transaction), and return the full packet: task, lease, task-scoped memories. Exits 3 when the frontier is empty — distinct from an error |
+| `cg spec run` | Orchestrate a parallel or Prod wave: claim eligible tasks and drive one agent process per slot — see [Driving agents](#driving-agents). `-n N`, `--driver codex\|claude\|custom`, `--dry-run`, `--max-fail K`, `--agent-prefix P` |
 | `cg spec next` | The lowest-wave pending task whose `requires` are satisfied (`done` only in standard mode; `implemented` or `done` in Prod mode), with its do-bullets and expanded acceptance criteria |
 | `cg spec start <id>` | Mark a task `in_progress`; enforces one at a time and met `requires`, with `--force` to override |
 | `cg spec implemented <id>` | In Prod mode, run source graph checks without executing `verify_cmd`, then mark coding complete as `implemented` (unchecked; qualification pending; no `--force`) |
@@ -200,7 +224,7 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 
 `mode`, `start`, `implemented`, and `done` rewrite only the single `status = "..."` or mode setting line in the kvx file. Every other byte, comment, and blank line survives. The command then quietly re-renders so the checkboxes in `tasks.md` stay current; implemented tasks remain unchecked and carry `Implemented - qualification pending`. The kvx files remain the single source of truth, and `-f <feature>` overrides `[meta] active_feature`.
 
-`cg commit` automatically tags its message with the in-progress task, for example `... [spec:ion_spec/16.7]`, so `cg log` and `cg changelog` trace every snapshot back to the spec. The spec commands are also exposed as MCP tools, letting a connected agent plan (`spec_new`, `spec_add`, `spec_lint`) and then drive the standard loop (next, start, snapshot, done) or the Prod loop (next, start, snapshot, implemented, qualification, done) without leaving the protocol.
+`cg commit` automatically tags its message with the in-progress task, for example `... [spec:ion_spec/16.7]`, so `cg log` and `cg changelog` trace every snapshot back to the spec. The spec commands are also exposed as MCP tools, letting a connected agent plan (`spec_new`, `spec_add`, `spec_lint`), drive the standard loop (next, start, snapshot, done) or the Prod loop (next, start, snapshot, implemented, qualification, done), and work the parallel frontier (`spec_ready`, `spec_claim_next`, `spec_release`, `handoff`, `resume`) without leaving the protocol.
 
 ### Parallel mode
 
@@ -209,10 +233,15 @@ Standard and Prod mode both run one task at a time. Agents increasingly do not �
 `cg spec mode parallel` keeps Prod mode's `implemented`-unlocks-implementation semantics and relaxes only how many tasks may be in flight, because the plan already declares each task's `touches`. That makes overlap knowable before any work starts:
 
 ```sh
-cg spec wave                          # every eligible task, with the paths each claims
+cg spec ready                         # the whole frontier: every eligible task, every wave,
+                                      # conflicts with live claims marked
 cg spec claim 4.1 --agent alice       # a lease with an owner and an expiry
 cg spec start 4.1                     # refused if another live task claims the same paths
+cg spec claim-next --agent bob        # or skip the choosing: atomically claim the first
+                                      # conflict-free task and get the full packet back
 ```
+
+`claim-next` is the primitive a fleet runs on: the pick and the claim happen under a file lock and a single database transaction, so twenty agents calling it at once get twenty different, disjoint tasks — or exit code 3 when the frontier is empty. A claim held by another agent can be neither taken nor released out from under it (`--force` exists, and is loud). Finishing honestly is automatic: `cg spec done` and `cg spec implemented` release the task's lease themselves.
 
 Leases expire, so an agent that dies holding one does not wedge the wave; `cg check` reports expired leases and overlapping live claims as problems.
 
@@ -228,6 +257,46 @@ touches = ["src/*.ts"]       # a matching path must actually have changed
 `symbols` are looked up in the indexed graph; `touches` patterns (exact paths or globs) are matched against the union of worktree changes and the files changed by commits tagged with the task — so verification still passes after the work has been committed. In Prod mode, `implemented` satisfies downstream `requires` but is not qualified and never renders as `[x]`; if qualification fails, the task remains `implemented`. `cg spec trace [<id>]` shows the full task→code→commit chain for one task or the whole feature, in text or `--json`.
 
 The workflow also feeds the memory layer on its own. Every completion writes a terse outcome memory — including refused ones, so a later session can see that a task was blocked and why. `cg spec next` and `cg spec start` print the memories relevant to the task (linked by id, or matching its title), and `cg spec trace` includes them in the chain. An agent driving the loop builds up project memory without ever being asked to.
+
+## Driving agents
+
+Everything above serves an agent that already exists. Codify can also be the thing that starts them: from the terminal with `cg spec run`, or from VS Code one task at a time.
+
+### The orchestrator: `cg spec run`
+
+`cg spec run` turns a parallel spec into running agent sessions. It loops the same primitives a human fleet would use — `claim-next` picks a conflict-free task, `resume --prompt` writes its briefing — then forks one driver process per slot, feeding each the prompt on stdin and capturing its output to a per-task log:
+
+```
+$ cg spec run -n 3
+[run] task 2.1 → codex (agent run-1, log .codegraph/agents/myfeature-2.1.log)
+[run] task 2.3 → codex (agent run-2, log .codegraph/agents/myfeature-2.3.log)
+[run] task 2.1 exit 0 → status done
+...
+[run] frontier empty — 0 failure(s) this run
+```
+
+Configuration lives in `spec/workflow.kvx`, next to everything else the workflow owns:
+
+```ini
+[agents]
+driver      = "codex"        # codex | claude | custom
+max         = 3              # default slot count (-n overrides)
+ttl         = 3600           # lease TTL, seconds
+codex_args  = ""             # extra arguments for the codex driver
+claude_args = ""             # extra arguments for the claude driver
+cmd         = ""             # custom driver: a shell template with
+                             # ${PROMPT_FILE} ${TASK} ${ROOT} ${AGENT}
+```
+
+The safety posture is deliberate. The `codex` driver runs `codex exec --sandbox workspace-write --skip-git-repo-check -C <root>`, so children get Codex CLI's workspace-write sandbox — they can edit the project and nothing else. The `claude` driver runs `claude -p --permission-mode acceptEdits`: headless, edits auto-accepted, everything riskier still gated by Claude Code's own permission system. The `custom` driver hands your own command template to `/bin/sh -c` with the prompt file, task id, root, and agent name substituted — which is also how the orchestrator tests itself without either CLI installed.
+
+Completion is judged by the spec, not the process: after a child exits, the task's status is re-read. `done` or `implemented` means success (the lease was already auto-released); anything else releases the lease so the task returns to the pool, and records an outcome memory — `agent exited rc=N without completing` — so the failure is knowledge, not just a log line. The run stops when the frontier is empty, or when failures exceed `--max-fail` (default 2). Ctrl-C terminates the children, releases their leases, and exits 130; nothing stays claimed by a dead run. `--dry-run` prints the full plan — waves, tasks, the exact argv per task — and claims nothing.
+
+Orchestration requires a `.codegraph/` index (leases live there) and `cg spec mode parallel` (or `prod`); anything else is refused with a one-line hint.
+
+### Agent sessions from VS Code
+
+The extension drives the same machinery one task at a time. **Start Agent Session on Task** claims the task, seeds a prompt from `cg resume --task <id> --prompt`, and opens a terminal running your configured driver (`codify.agent.driver`, with `codify.agent.codexPath` / `claudePath` / `codexArgs` / `claudeArgs` to taste). **Run Agent Headless on Task** does the same as a background VS Code task (`codex exec --sandbox workspace-write` or `claude -p`) and reports the exit as a notification. **Run Wave with Agents** launches `cg spec run -n <codify.agent.parallelism>` in a terminal. **Hand Off Task** and **Resume Task in Agent Session** wrap `cg handoff` and `cg resume`, and **Stop Agent Session** closes a session's terminal — offering to release the claim when the task is not finished. While sessions run, the task board watches `graph.db` and decorates each task with the agent holding its lease. See [editors/vscode/README.md](editors/vscode/README.md).
 
 ## Editors
 
@@ -259,6 +328,7 @@ vim.lsp.start({ name = "codify", cmd = { "cg", "lsp" },
 - **Code navigation from the graph.** It runs `cg lsp` and speaks LSP to it, so go-to-definition, find-references, workspace symbols, and code lens work in every indexed language with no compiler and no configuration. Hover shows what a symbol is, how many references it has, and the decisions recorded about it.
 - **Scope drift as a squiggle.** Editing a file outside the in-progress task's declared `touches` raises a warning in the Problems panel, at the moment of the edit. Advisory, never an error.
 - **A live task board.** Tasks by dependency wave with their verification data — declared symbols resolved in the graph, touched paths, tagged commits, memories. Start, mark implemented, and complete run the real `cg spec` commands, refusal included. In parallel mode it shows who holds each lease.
+- **Agent sessions from the task board.** Start a Codex CLI or Claude Code session on a task — in a terminal or headless — hand off, resume, run a whole wave, and stop sessions, with live lease decorations on the board. See [Driving agents](#driving-agents).
 - **A memory view**, and one Actions menu covering brief, review, test-impact, why, check, guard, snapshot, spec authoring, and hook installation. Reports open as rendered markdown.
 - **kvx editing.** Go-to-definition on a `requires` entry jumps to that task; completion offers the keys a task actually understands; the outline lists every requirement and task.
 
@@ -266,8 +336,8 @@ The extension has no dependencies and no build step — including its Language S
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-0.3.0.vsix
-code --install-extension codify-0.3.0.vsix
+npx @vscode/vsce package        # produces codify-0.4.0.vsix
+code --install-extension codify-0.4.0.vsix
 ```
 
 See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.
@@ -286,7 +356,8 @@ Repository layout:
 
 ```
 src/                 one .c file per module; src/cg.h is the only header
-src/govern.c         brief, review, guard, check — the governance layer
+src/govern.c         brief, review, guard, check, handoff, resume — the governance layer
+src/orchestrate.c    cg spec run — drives agent processes over claimed tasks
 src/lsp.c            language server over the graph
 src/gitint.c         git history ingestion, churn, commit mirroring
 tests/unit/          kvx grammar, SHA-256 vectors, JSON scanner, StrBuf/IO

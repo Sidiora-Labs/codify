@@ -1,0 +1,285 @@
+# Codify v0.4 — agent-native indexing, sessions, and orchestration.
+
+[meta]
+feature = "codify-v04"
+intro   = "Make the graph accurate enough to trust, the output cheap enough to read, and the workflow strong enough to drive real agent sessions: scope-aware indexing, ranked and budgeted retrieval, session handoff, and an orchestrator that runs parallel Codex and Claude Code sub-agents over the task board."
+
+[req.1]
+title = "Scope-accurate indexing"
+story = "As an agent, I want call edges that reflect real scopes and imports so that impact analysis stops inventing callers."
+ac_1  = "WHEN a reference sits between two function bodies THE indexer SHALL NOT attribute it to the preceding function."
+ac_2  = "WHEN a definition ends THE symbol's end_line SHALL reflect its real scope from brace or indentation structure, not the next definition's start."
+ac_3  = "WHEN a call has a receiver or qualifier THE reference SHALL record it for disambiguation."
+ac_4  = "WHEN a file imports names or modules THE graph SHALL record the imports for query-time resolution."
+ac_5  = "WHEN a multi-line string spans lines THE continuation lines SHALL NOT produce symbols or references."
+ac_6  = "WHEN a file's content is unchanged THE rescan SHALL NOT regenerate its symbol rows."
+ac_7  = "WHEN the database schema version changes THE derived graph tables SHALL rebuild while memories, leases, and history survive."
+
+[req.2]
+title = "Accurate, budgeted retrieval"
+story = "As an agent, I want ranked, deduplicated, size-bounded answers so that one call gives me signal instead of noise."
+ac_1  = "WHEN real code and test fixtures both match a query THE real code SHALL rank first."
+ac_2  = "WHEN a name resolves to several definitions THE resolution SHALL prefer same file, then imported modules, then same directory, deterministically."
+ac_3  = "WHEN context output would exceed the requested budget THE sections SHALL truncate with explicit omitted counts."
+ac_4  = "WHEN a symbol repeats across context sections THE later occurrences SHALL use a compact reference form."
+ac_5  = "WHEN edge lists are truncated THE selection SHALL be deterministic across runs."
+ac_6  = "WHEN a spec-mutating MCP tool completes THE result SHALL be machine-readable JSON."
+
+[req.3]
+title = "Session handoff"
+story = "As an agent, I want to hand work to a fresh session so that context bloat never forces me to lose progress."
+ac_1  = "WHEN a session records a handoff THE note SHALL capture done steps, next steps, blockers, and touched files against the task."
+ac_2  = "WHEN a fresh session resumes a task THE resume bundle SHALL include the task packet, the latest handoff, and task-scoped memories in one call."
+ac_3  = "WHEN resume renders a prompt THE output SHALL be paste-ready for a new agent session."
+ac_4  = "WHEN a newer handoff exists THE older handoff SHALL stop surfacing first."
+ac_5  = "WHEN brief reports memories THE task-scoped memories SHALL rank before unrelated recent ones."
+
+[req.4]
+title = "Parallel-safe dispatch"
+story = "As an orchestrator, I want atomic claims and honest gates so that parallel agents never collide or lie."
+ac_1  = "WHEN two agents claim concurrently THE claims SHALL be atomic and never silently steal ownership."
+ac_2  = "WHEN the ready frontier is requested THE output SHALL list every eligible task across waves."
+ac_3  = "WHEN claim-next runs THE tool SHALL atomically pick, claim, and start a touches-disjoint task and return its full packet."
+ac_4  = "WHEN a task completes THE lease SHALL release automatically."
+ac_5  = "WHEN two live leases overlap on touches THE check SHALL fail even for partial overlaps."
+ac_6  = "WHEN several tasks are in progress THE guard, review, brief, and commit tagging SHALL follow the invoking agent's task."
+
+[req.5]
+title = "Sub-agent orchestration"
+story = "As a developer, I want cg to run the plan with parallel sub-agents so that a wave of disjoint tasks executes itself."
+ac_1  = "WHEN cg spec run starts THE orchestrator SHALL claim disjoint tasks and spawn one driver process per slot up to the requested parallelism."
+ac_2  = "WHEN a driver process exits THE orchestrator SHALL verify the task status and record an outcome instead of trusting the exit code."
+ac_3  = "WHEN a driver fails THE lease SHALL release and the failure SHALL count toward a stop threshold."
+ac_4  = "WHEN --dry-run is passed THE orchestrator SHALL print the plan without claiming anything."
+ac_5  = "WHEN the driver is codex or claude THE spawned session SHALL receive a resume-style prompt for its task on stdin."
+
+[req.6]
+title = "IDE-driven agent sessions"
+story = "As a developer, I want to start, watch, and hand off Codex and Claude Code sessions from VS Code so that the board drives the work."
+ac_1  = "WHEN a task node action starts an agent THE extension SHALL claim the task and open a terminal session seeded with the task's resume prompt."
+ac_2  = "WHEN a tracked session's terminal closes without completion THE extension SHALL offer to release the claim."
+ac_3  = "WHEN sessions are active THE task board SHALL refresh from graph and spec changes without manual action."
+ac_4  = "WHEN a wave run is requested THE extension SHALL execute the orchestrator with the configured parallelism."
+ac_5  = "WHEN a handoff or resume is requested from the IDE THE extension SHALL drive the corresponding cg commands."
+
+[design]
+overview = "Every addition is a new command in the existing dispatch plus one new module (src/orchestrate.c). Accuracy work stays table-driven inside the existing regex engine: real scope ends, persistent string state, qualifier capture, and an imports table — no parser dependency. Retrieval gains a shared ranking function, deterministic ordering, and byte budgets threaded from CLI and MCP. Sessions become a first-class handoff artifact stored as superseding memories. Orchestration composes claim-next, resume prompts, and fork/exec drivers; the VS Code extension attaches terminals to claims. No new link-time dependencies."
+
+[design.modules]
+title  = "Structure"
+points = ["src/lang.c — scope ends, string state, qualifiers, table-driven imports", "src/graph.c — find_symbols_all ranking, import-aware resolution, budgets, compact emission", "src/spec.c + src/govern.c — ready frontier, atomic claim-next, per-agent identity, handoff/resume", "src/orchestrate.c — cg spec run driver loop (new module)", "editors/vscode/agents.js — terminal-attached agent sessions (new module)"]
+
+[tasks]
+heading = "Implementation Plan: Codify v0.4"
+
+[task.1]
+title   = "Indexing accuracy"
+section = "Wave 1: the graph tells the truth"
+status  = "pending"
+
+[task.1.1]
+title      = "Scope-accurate extents and enclosing attribution"
+status     = "done"
+wave       = 1
+symbols    = ["lang_scope_end"]
+touches    = ["src/lang.c", "src/scan.c", "src/cg.h", "tests/unit/*.c", "tests/fixtures/*", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "Compute real end_line per def: brace depth for brace languages, indentation for python, next-def fallback"
+do_2       = "Persist multi-line string state in clean_line (python triple quotes, js template literals)"
+do_3       = "Attribute refs to the innermost containing function/method scope; NULL outside any scope"
+do_4       = "Unit tests for scoping, string state, and attribution"
+reqs       = ["1.1", "1.2", "1.5"]
+
+[task.1.2]
+title      = "Ref qualifiers, kinds, and the imports table"
+status     = "done"
+wave       = 1
+symbols    = ["lang_scan_imports"]
+touches    = ["src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "tests/unit/*.c", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "SymRef gains qual + kind; capture receiver tokens for qualified calls"
+do_2       = "Table-driven import extraction per language into the imports table"
+do_3       = "Writer inserts and purges imports alongside other child rows"
+reqs       = ["1.3", "1.4"]
+
+[task.1.3]
+title      = "Schema v2 with survivable migration and content-hash skip"
+status     = "done"
+wave       = 1
+symbols    = ["cg_schema_upgrade"]
+touches    = ["src/db.c", "src/scan.c", "src/cg.h", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "meta schema_version=2; on mismatch rebuild derived tables only — memories, leases, git data survive"
+do_2       = "Skip purge+reinsert when the recomputed content hash is unchanged"
+reqs       = ["1.6", "1.7"]
+
+[task.2]
+title   = "Retrieval quality"
+section = "Wave 1: answers worth their tokens"
+status  = "pending"
+
+[task.2.1]
+title      = "Ranking overhaul and deterministic edges"
+status     = "done"
+wave       = 1
+requires   = ["1.1", "1.2"]
+symbols    = ["find_symbols_all"]
+touches    = ["src/graph.c", "src/main.c", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/16_retrieval.sh"
+do_1       = "find_symbols_all fuses exact and trigram tiers without the exact-match short-circuit"
+do_2       = "Score kinds, centrality, and churn; penalize test, fixture, and vendored paths"
+do_3       = "Import-aware, same-file-first resolution for callers and callees with stable ORDER BY"
+reqs       = ["2.1", "2.2", "2.5"]
+
+[task.2.2]
+title      = "Budgeted, deduplicated context and capped reports"
+status     = "done"
+wave       = 1
+requires   = ["2.1"]
+symbols    = ["json_sym_compact"]
+touches    = ["src/graph.c", "src/vcs.c", "src/main.c", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/16_retrieval.sh"
+do_1       = "context --budget with proportional section slices, omitted counts, and a cross-section seen-set"
+do_2       = "Compact symbol form for repeats and edge lists; drop empty arrays"
+do_3       = "Cap changes and test-impact output; line numbers on full-text hits; show --full"
+do_4       = "Task-relevant memories and test-filtered entry points inside context"
+reqs       = ["2.3", "2.4"]
+
+[task.2.3]
+title      = "MCP parameters and structured spec results"
+status     = "done"
+wave       = 1
+requires   = ["2.2"]
+symbols    = ["t_context"]
+touches    = ["src/mcp.c", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/16_retrieval.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "budget and limit parameters on context, impact, and changes tool schemas"
+do_2       = "Spec-mutating tools return JSON instead of prose"
+reqs       = ["2.6"]
+
+[task.3]
+title   = "Sessions and parallel-safe dispatch"
+section = "Wave 1: the workflow carries the state"
+status  = "pending"
+
+[task.3.1]
+title      = "Handoff and resume"
+status     = "done"
+wave       = 1
+symbols    = ["cmd_handoff", "cmd_resume"]
+touches    = ["src/govern.c", "src/memory.c", "src/main.c", "src/mcp.c", "src/cg.h", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/17_session.sh"
+do_1       = "cg handoff stores a structured, superseding handoff memory against the task"
+do_2       = "cg resume returns task packet, latest handoff, task-scoped memories; --prompt renders a paste-ready block"
+do_3       = "handoff and resume MCP tools"
+reqs       = ["3.1", "3.2", "3.3", "3.4"]
+
+[task.3.2]
+title      = "Per-agent identity and honest brief"
+status     = "done"
+wave       = 1
+symbols    = ["cg_agent_name", "spec_current_for_agent"]
+touches    = ["src/spec.c", "src/govern.c", "src/util.c", "src/cg.h", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/17_session.sh"
+do_1       = "Agent identity from flag or CG_AGENT; guard, review, brief, remember, and commit tagging follow the agent's task"
+do_2       = "brief surfaces task-scoped memories first with byte caps"
+reqs       = ["3.5", "4.6"]
+
+[task.3.3]
+title      = "Lease integrity and honest gates"
+status     = "done"
+wave       = 1
+symbols    = ["spec_globs_overlap"]
+touches    = ["src/spec.c", "src/govern.c", "src/kvx.c", "tests/integration/*.sh", "tests/unit/*.c"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/17_session.sh"
+do_1       = "Atomic claims, owner-checked release, auto-release on done/implemented, live-lease conflict checks"
+do_2       = "flock around kvx read-modify-write"
+do_3       = "check catches partial glob overlaps and real trace evidence regressions"
+reqs       = ["4.1", "4.4", "4.5"]
+
+[task.3.4]
+title      = "Ready frontier and atomic claim-next"
+status     = "done"
+wave       = 1
+requires   = ["3.3"]
+symbols    = ["spec_ready_cmd", "spec_claim_next_cmd"]
+touches    = ["src/spec.c", "src/mcp.c", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/17_session.sh"
+do_1       = "cg spec ready lists every eligible task across waves"
+do_2       = "cg spec claim-next atomically picks, claims, and starts a disjoint task and returns the packet"
+do_3       = "spec_ready, spec_claim_next, spec_release MCP tools; ttl on claim"
+reqs       = ["4.2", "4.3"]
+
+[task.4]
+title   = "Orchestration"
+section = "Wave 2: the plan runs itself"
+status  = "pending"
+
+[task.4.1]
+title      = "cg spec run driver loop"
+status     = "done"
+wave       = 2
+requires   = ["3.1", "3.4"]
+symbols    = ["cmd_spec_run"]
+touches    = ["src/*.c", "src/cg.h", "src/main.c", "tests/integration/*.sh", "tests/fixtures/*"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/18_orchestrate.sh"
+do_1       = "New module src/orchestrate.c: claim-next loop, fork/exec drivers, per-task logs, SIGINT cleanup"
+do_2       = "Verify task status on driver exit; release and record outcomes on failure; stop threshold"
+do_3       = "--dry-run prints the plan without claiming"
+reqs       = ["5.1", "5.2", "5.3", "5.4"]
+
+[task.4.2]
+title      = "Codex and Claude drivers with workflow config"
+status     = "done"
+wave       = 2
+requires   = ["4.1"]
+symbols    = ["orch_driver_argv"]
+touches    = ["src/*.c", "spec/workflow.kvx", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/18_orchestrate.sh"
+do_1       = "[agents] config: driver, cmd template, max, ttl, per-driver args"
+do_2       = "codex exec and claude -p templates with sandboxed defaults and stdin prompts"
+reqs       = ["5.5"]
+
+[task.5]
+title   = "IDE agent sessions"
+section = "Wave 1: the board drives the work"
+status  = "pending"
+
+[task.5.1]
+title      = "Terminal-attached agent sessions"
+status     = "done"
+wave       = 1
+symbols    = ["startAgentSession"]
+touches    = ["editors/vscode/*.js", "editors/vscode/package.json", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "agents.js: claim task, seed terminal with the resume prompt, track terminal-to-claim mapping"
+do_2       = "Release offer on close; headless runs via the Tasks API"
+reqs       = ["6.1", "6.2"]
+
+[task.5.2]
+title      = "Board freshness and handoff UX"
+status     = "done"
+wave       = 1
+requires   = ["5.1"]
+symbols    = ["registerAgentCommands"]
+touches    = ["editors/vscode/*.js", "editors/vscode/package.json", "editors/vscode/README.md", "tests/integration/*.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "graph.db watcher plus polling while sessions live; claim decorations on the board"
+do_2       = "handoff, resume, and run-wave commands from the IDE"
+reqs       = ["6.3", "6.4", "6.5"]
+
+[task.6]
+title   = "Docs and release"
+section = "Wave 3: ship it"
+status  = "pending"
+
+[task.6.1]
+title      = "Documentation and changelog"
+status     = "done"
+wave       = 3
+requires   = ["1.3", "2.3", "3.4", "4.2", "5.2"]
+touches    = ["README.md", "docs/ARCHITECTURE.md", "editors/vscode/README.md", "CHANGELOG.md"]
+verify_cmd = "make && CG=$PWD/cg tests/run.sh"
+do_1       = "README command reference and Driving agents section; ARCHITECTURE schema v2, sessions, orchestrator"
+do_2       = "CHANGELOG 0.4.0"
+reqs       = ["5.1", "6.1"]

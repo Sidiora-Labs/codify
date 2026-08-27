@@ -11,6 +11,9 @@
  */
 #include "cg.h"
 #include <ctype.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 /* strip # comment outside quotes; returns new length */
 static size_t strip_comment(char *s, size_t n) {
@@ -290,10 +293,28 @@ void kvx_sort_dotted(char **ids, int n) {
     qsort(ids, (size_t)n, sizeof(char *), dotted_cmp);
 }
 
+/* Parallel agents rewrite the same spec.kvx. An advisory flock on a side
+ * file ('<file>.lock') makes each read-modify-write atomic across processes
+ * without ever touching the target's own bytes. Writers rename-replace the
+ * target, so any lock must live on a stable sibling like this one — a flock
+ * on the target itself would sit on a dead inode after the first write. */
+static int kvx_lock(const char *path) {
+    char lp[4700];
+    snprintf(lp, sizeof lp, "%s.lock", path);
+    int fd = open(lp, O_CREAT | O_RDWR | O_CLOEXEC, 0666);
+    if (fd >= 0 && flock(fd, LOCK_EX) != 0) { close(fd); return -1; }
+    return fd;
+}
+
+static void kvx_unlock(int fd) {
+    if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
+}
+
 int kvx_set_status(const char *path, const char *section, const char *value) {
+    int lk = kvx_lock(path);
     size_t len = 0;
     char *body = read_entire_file(path, &len);
-    if (!body) return -1;
+    if (!body) { kvx_unlock(lk); return -1; }
     StrBuf out; sb_init(&out);
     char cur[256] = "";
     bool done = false, in_target = false;
@@ -342,9 +363,10 @@ int kvx_set_status(const char *path, const char *section, const char *value) {
         if (nl) { sb_putc(&out, '\n'); pos++; }
     }
     free(body);
-    if (!done) { sb_free(&out); return -2; }   /* section or status not found */
+    if (!done) { sb_free(&out); kvx_unlock(lk); return -2; }
     int rc = write_entire_file(path, out.p, out.len);
     sb_free(&out);
+    kvx_unlock(lk);
     return rc;
 }
 
@@ -371,9 +393,10 @@ static void sb_kvx_string(StrBuf *b, const char *value) {
  * other literal). Both preserve every byte outside the one line they touch. */
 static int kvx_set_value(const char *path, const char *section, const char *key,
                          const char *value, bool raw) {
+    int lk = kvx_lock(path);
     size_t len = 0;
     char *body = read_entire_file(path, &len);
-    if (!body) return -1;
+    if (!body) { kvx_unlock(lk); return -1; }
 
     bool section_found = false, in_target = false;
     size_t section_end = len;
@@ -470,6 +493,7 @@ static int kvx_set_value(const char *path, const char *section, const char *key,
     free(body);
     int rc = write_entire_file(path, out.p, out.len);
     sb_free(&out);
+    kvx_unlock(lk);
     return rc;
 }
 

@@ -115,7 +115,7 @@ out="$("$CG" spec claim 2.2 --agent alice --ttl 5)"
 has "$out" "claimed 2.2 for alice"
 out="$("$CG" spec claim 2.2 --agent bob 2>&1 || true)"
 has "$out" "already claimed by alice"
-out="$("$CG" spec release 2.2)"
+out="$("$CG" spec release 2.2 --agent alice)"
 has "$out" "released 2.2"
 out="$("$CG" spec claim 2.2 --agent bob)"
 has "$out" "claimed 2.2 for bob"
@@ -152,7 +152,7 @@ import json
 d = json.loads(r'''$out''')
 assert any(c['agent'] == 'bob' for c in d['claims']), d
 "
-"$CG" spec release 2.2 >/dev/null
+"$CG" spec release 2.2 --agent bob >/dev/null
 out="$("$CG" spec status)"
 hasnt "$out" "claimed by bob"
 
@@ -171,8 +171,8 @@ has "$out" "task claims are consistent"
 out="$("$CG" check 2>&1 || true)"
 has "$out" "overlapping live claims"
 expect_rc 1 "$CG" check
-"$CG" spec release 4.1 >/dev/null
-"$CG" spec release 4.2 >/dev/null
+"$CG" spec release 4.1 --agent dave >/dev/null
+"$CG" spec release 4.2 --agent erin >/dev/null
 expect_rc 0 "$CG" check
 
 echo "12_authoring leasecheck ok"

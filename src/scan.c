@@ -13,7 +13,7 @@
 #define MAX_FTS_BYTES  (2L * 1024 * 1024)   /* larger: no body full-text */
 #define RING_CAP 256
 
-typedef struct { char *rel; long size, mtime; } Walked;
+typedef struct { char *rel; long size, mtime; char dbhash[65]; } Walked;
 typedef struct { char *path; long id, size, mtime; char hash[65]; } DbFile;
 
 typedef struct {
@@ -37,6 +37,7 @@ static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {
     wl->v[wl->n].rel = xstrdup(rel);
     wl->v[wl->n].size = size;
     wl->v[wl->n].mtime = mtime;
+    wl->v[wl->n].dbhash[0] = 0;
     wl->n++;
 }
 
@@ -165,7 +166,7 @@ static void *worker(void *arg) {
 typedef struct {
     sqlite3_stmt *up_file, *sel_file, *del_symfts, *del_syms, *del_refs,
                  *del_routes, *del_body, *ins_sym, *ins_symfts, *ins_ref,
-                 *ins_route, *ins_body;
+                 *ins_route, *ins_body, *del_imports, *ins_import;
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
@@ -184,11 +185,14 @@ static void stmts_init(Cg *cg, Stmts *s) {
                                 " VALUES(?,?,?,?,?,?)");
     s->ins_symfts = cg_prep(cg, "INSERT INTO symbol_fts(rowid,name,kind,path,sig)"
                                 " VALUES(?,?,?,?,?)");
-    s->ins_ref    = cg_prep(cg, "INSERT INTO refs(file_id,name,line,sym_id)"
-                                " VALUES(?,?,?,?)");
+    s->ins_ref    = cg_prep(cg, "INSERT INTO refs(file_id,name,line,sym_id,qual,kind)"
+                                " VALUES(?,?,?,?,?,?)");
     s->ins_route  = cg_prep(cg, "INSERT INTO routes(file_id,framework,method,pattern,handler,line)"
                                 " VALUES(?,?,?,?,?,?)");
     s->ins_body   = cg_prep(cg, "INSERT INTO body_fts(rowid,path,body) VALUES(?,?,?)");
+    s->del_imports= cg_prep(cg, "DELETE FROM imports WHERE file_id=?");
+    s->ins_import = cg_prep(cg, "INSERT INTO imports(file_id,name,module,line)"
+                                " VALUES(?,?,?,?)");
 }
 
 static void stmts_fin(Stmts *s) {
@@ -209,6 +213,7 @@ static void purge_file_children(Stmts *s, long file_id) {
     sqlite3_bind_int64(s->del_refs,   1, file_id); step_reset(s->del_refs);
     sqlite3_bind_int64(s->del_routes, 1, file_id); step_reset(s->del_routes);
     sqlite3_bind_int64(s->del_body,   1, file_id); step_reset(s->del_body);
+    sqlite3_bind_int64(s->del_imports,1, file_id); step_reset(s->del_imports);
 }
 
 static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
@@ -231,16 +236,25 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     sqlite3_clear_bindings(s->sel_file);
     if (!file_id) return;
 
+    /* size/mtime changed but content did not (touch, branch switch): the
+     * upsert above refreshed the metadata; keep the child rows — and with
+     * them, stable symbol rowids. */
+    if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return;
+
     purge_file_children(s, file_id);
 
     if (d->parsed) {
         ParseResult *pr = &d->pr;
         long *rowids = pr->ndefs ? xmalloc(sizeof(long) * (size_t)pr->ndefs) : NULL;
+        int  *ends   = pr->ndefs ? xmalloc(sizeof(int) * (size_t)pr->ndefs) : NULL;
         for (int i = 0; i < pr->ndefs; i++) {
-            int end = (i + 1 < pr->ndefs && pr->defs[i+1].line > pr->defs[i].line)
+            int end = pr->defs[i].end_line;
+            if (end <= 0)     /* parser could not resolve: gap estimate */
+                end = (i + 1 < pr->ndefs && pr->defs[i+1].line > pr->defs[i].line)
                         ? pr->defs[i+1].line - 1
                         : (i + 1 < pr->ndefs ? pr->defs[i].line : pr->nlines);
             if (end < pr->defs[i].line) end = pr->defs[i].line;
+            ends[i] = end;
             sqlite3_bind_int64(s->ins_sym, 1, file_id);
             sqlite3_bind_text (s->ins_sym, 2, pr->defs[i].name, -1, SQLITE_STATIC);
             sqlite3_bind_text (s->ins_sym, 3, pr->defs[i].kind, -1, SQLITE_STATIC);
@@ -258,20 +272,38 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             step_reset(s->ins_symfts);
             st->symbols++;
         }
-        /* enclosing symbol for each ref: last def with line <= ref line */
-        int di = 0;
+        /* enclosing symbol for each ref: innermost def whose span contains
+         * the ref line, preferring callable kinds; refs contained by no def
+         * stay NULL — top-level code is not somebody's call site */
         for (int i = 0; i < pr->nrefs; i++) {
-            while (di < pr->ndefs && pr->defs[di].line <= pr->refs[i].line) di++;
-            long enc = (di > 0) ? rowids[di - 1] : 0;
+            int best = -1, best_fn = -1;
+            for (int dj = 0;
+                 dj < pr->ndefs && pr->defs[dj].line <= pr->refs[i].line; dj++) {
+                if (ends[dj] < pr->refs[i].line) continue;
+                best = dj;              /* defs ascend by line: later = inner */
+                const char *k = pr->defs[dj].kind;
+                if (strcmp(k, "function") == 0 || strcmp(k, "method") == 0 ||
+                    strcmp(k, "ctor") == 0)
+                    best_fn = dj;
+            }
+            int pick = best_fn >= 0 ? best_fn : best;
+            long enc = pick >= 0 ? rowids[pick] : 0;
             sqlite3_bind_int64(s->ins_ref, 1, file_id);
             sqlite3_bind_text (s->ins_ref, 2, pr->refs[i].name, -1, SQLITE_STATIC);
             sqlite3_bind_int  (s->ins_ref, 3, pr->refs[i].line);
             if (enc) sqlite3_bind_int64(s->ins_ref, 4, enc);
             else     sqlite3_bind_null (s->ins_ref, 4);
+            if (pr->refs[i].qual[0])
+                sqlite3_bind_text(s->ins_ref, 5, pr->refs[i].qual, -1,
+                                  SQLITE_STATIC);
+            else
+                sqlite3_bind_null(s->ins_ref, 5);
+            sqlite3_bind_text(s->ins_ref, 6, "call", -1, SQLITE_STATIC);
             step_reset(s->ins_ref);
             st->refs++;
         }
         free(rowids);
+        free(ends);
         for (int i = 0; i < pr->nroutes; i++) {
             sqlite3_bind_int64(s->ins_route, 1, file_id);
             sqlite3_bind_text (s->ins_route, 2, pr->routes[i].framework, -1, SQLITE_STATIC);
@@ -284,6 +316,15 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             sqlite3_bind_int(s->ins_route, 6, pr->routes[i].line);
             step_reset(s->ins_route);
             st->routes++;
+        }
+        for (int i = 0; i < pr->nimports; i++) {
+            sqlite3_bind_int64(s->ins_import, 1, file_id);
+            sqlite3_bind_text (s->ins_import, 2, pr->imports[i].name, -1,
+                               SQLITE_STATIC);
+            sqlite3_bind_text (s->ins_import, 3, pr->imports[i].module, -1,
+                               SQLITE_STATIC);
+            sqlite3_bind_int  (s->ins_import, 4, pr->imports[i].line);
+            step_reset(s->ins_import);
         }
     }
 
@@ -348,8 +389,15 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
               : strcmp(wl.v[wi].rel, dbf[di].path);
         if (c == 0) {
             if (full || wl.v[wi].size != dbf[di].size ||
-                wl.v[wi].mtime != dbf[di].mtime)
+                wl.v[wi].mtime != dbf[di].mtime) {
                 walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size, wl.v[wi].mtime);
+                /* remember the stored hash so unchanged content can skip the
+                 * purge+reinsert; --full keeps its force-reparse meaning */
+                if (!full)
+                    snprintf(jobs.v[jobs.n - 1].dbhash,
+                             sizeof jobs.v[jobs.n - 1].dbhash, "%s",
+                             dbf[di].hash);
+            }
             wi++; di++;
         } else if (c < 0) {
             walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size, wl.v[wi].mtime);

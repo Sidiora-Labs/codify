@@ -16,7 +16,8 @@ static const char *SCHEMA =
     "CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id);"
     "CREATE TABLE IF NOT EXISTS refs("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
-    "  name TEXT NOT NULL, line INTEGER, sym_id INTEGER);"
+    "  name TEXT NOT NULL, line INTEGER, sym_id INTEGER,"
+    "  qual TEXT, kind TEXT NOT NULL DEFAULT 'call');"
     "CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(name);"
     "CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(file_id);"
     "CREATE INDEX IF NOT EXISTS idx_ref_sym  ON refs(sym_id);"
@@ -50,7 +51,16 @@ static const char *SCHEMA =
     /* leases: parallel-mode task claims, one row per claimed spec task */
     "CREATE TABLE IF NOT EXISTS leases("
     "  task TEXT PRIMARY KEY, agent TEXT NOT NULL, claimed INTEGER NOT NULL,"
-    "  expires INTEGER NOT NULL, touches TEXT);";
+    "  expires INTEGER NOT NULL, touches TEXT);"
+    /* per-file import rows; name '*' means a whole-module import */
+    "CREATE TABLE IF NOT EXISTS imports("
+    "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
+    "  name TEXT NOT NULL, module TEXT NOT NULL, line INTEGER);"
+    "CREATE INDEX IF NOT EXISTS idx_import_file ON imports(file_id);"
+    "CREATE INDEX IF NOT EXISTS idx_import_name ON imports(name);";
+
+/* the schema above, as stored in meta.schema_version */
+#define SCHEMA_VERSION "2"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -173,6 +183,44 @@ int cg_open(Cg *cg, bool create) {
         sqlite3_free(err);
         return -1;
     }
+    if (cg_schema_upgrade(cg) != 0) return -1;
+    return 0;
+}
+
+/* Derived tables (everything the indexer rebuilds from source) are dropped
+ * and recreated on every schema_version mismatch — even with an empty files
+ * table, an old DB may carry the old refs shape. Agent memory, git history,
+ * and leases are never touched: they are the durable state a version bump
+ * must not destroy. The DROPs are IF EXISTS, a no-op on a fresh DB. */
+int cg_schema_upgrade(Cg *cg) {
+    char *ver = cg_meta_get(cg, "schema_version");
+    bool current = ver && strcmp(ver, SCHEMA_VERSION) == 0;
+    free(ver);
+    if (current) return 0;
+    /* meta rows mean an existing project DB, not a freshly created one */
+    long nmeta = 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT COUNT(*) FROM meta", -1, &st,
+                           NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) nmeta = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    static const char *DROPS =
+        "DROP TABLE IF EXISTS files;DROP TABLE IF EXISTS symbols;"
+        "DROP TABLE IF EXISTS refs;DROP TABLE IF EXISTS routes;"
+        "DROP TABLE IF EXISTS imports;DROP TABLE IF EXISTS symbol_fts;"
+        "DROP TABLE IF EXISTS body_fts;";
+    char *err = NULL;
+    if (sqlite3_exec(cg->db, DROPS, NULL, NULL, &err) != SQLITE_OK ||
+        sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {
+        fprintf(stderr, "cg: schema upgrade: %s\n", err ? err : "?");
+        sqlite3_free(err);
+        return -1;
+    }
+    if (nmeta > 0)
+        fprintf(stderr, "cg: schema upgraded to v%s — run 'cg sync' to "
+                        "rebuild the graph\n", SCHEMA_VERSION);
+    cg_meta_set(cg, "schema_version", SCHEMA_VERSION);
     return 0;
 }
 

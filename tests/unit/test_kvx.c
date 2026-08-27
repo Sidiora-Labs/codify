@@ -154,6 +154,12 @@ static void test_set_status(void) {
         "title = \"second\"   # kept\n";
     write_tmp(before);
     ok(kvx_set_status(tmppath, "task.2", "done") == 0, "set_status succeeds");
+    {
+        char lockpath[300];
+        snprintf(lockpath, sizeof lockpath, "%s.lock", tmppath);
+        ok(access(lockpath, F_OK) == 0,
+           "surgical write takes its flock side-file");
+    }
     char *after = read_entire_file(tmppath, NULL);
     const char *want =
         "# header comment stays\n"
@@ -250,5 +256,10 @@ int main(void) {
     test_set_status();
     test_set_string();
     unlink(tmppath);
+    {
+        char lockpath[300];
+        snprintf(lockpath, sizeof lockpath, "%s.lock", tmppath);
+        unlink(lockpath);
+    }
     return t_done("kvx");
 }

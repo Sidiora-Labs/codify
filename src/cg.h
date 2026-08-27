@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.3.0"
+#define CG_VERSION  "0.4.0"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -57,6 +57,8 @@ int   mkdirs(const char *path);                 /* mkdir -p for dirs */
 long  now_ms(void);
 bool  looks_binary(const char *data, size_t len);
 const char *path_ext(const char *path);
+/* agent identity: flag > $CG_AGENT > "agent"; never NULL, not malloc'd */
+const char *cg_agent_name(const char *flag);
 
 /* ---------------- sha256 ---------------- */
 void sha256_hex(const void *data, size_t len, char out_hex[65]);
@@ -85,12 +87,21 @@ typedef struct {
     const char *kind;  /* static string: function/class/... */
     int line;
     char *sig;         /* trimmed definition line (owned) */
+    int end_line;      /* real scope end (brace/indent tracked); 0 = unresolved */
 } SymDef;
 
 typedef struct {
     char *name;        /* callee-ish identifier (owned) */
     int line;
+    char qual[64];     /* immediate receiver of a.b( / a->b( / A::b(; "" none */
+    char ref_kind;     /* 'c' = call */
 } SymRef;
+
+typedef struct {
+    char *name;        /* imported name, "*" = whole module (owned) */
+    char *module;      /* module/path as written (owned) */
+    int line;
+} ImportDef;
 
 typedef struct {
     const char *framework;
@@ -105,6 +116,7 @@ typedef struct {
     SymRef  *refs;   int nrefs,  crefs;
     RouteDef*routes; int nroutes,croutes;
     int nlines;
+    ImportDef *imports; int nimports, cimports;
 } ParseResult;
 
 const char *lang_for_path(const char *path);       /* NULL if not source */
@@ -139,6 +151,9 @@ sqlite3_stmt *cg_prep(Cg *cg, const char *sql);
 void cg_exec(Cg *cg, const char *sql);
 void cg_meta_set(Cg *cg, const char *k, const char *v);
 char *cg_meta_get(Cg *cg, const char *k);          /* malloc'd or NULL */
+/* schema_version migration: drop+recreate derived tables so the next sync
+ * rebuilds them; memories/history/leases always survive. 0 ok */
+int  cg_schema_upgrade(Cg *cg);
 
 /* ---------------- scan / index ---------------- */
 typedef struct {
@@ -152,10 +167,10 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);
 /* ---------------- graph queries ---------------- */
 int cmd_search (Cg *cg, const char *q, int limit, bool json);
 int cmd_symbol (Cg *cg, const char *name, bool json);
-int cmd_impact (Cg *cg, const char *name, int depth, bool json);
-int cmd_context(Cg *cg, const char *q, bool json);
+int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);
+int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);
 int cmd_routes (Cg *cg, const char *filter, bool json);
-int cmd_show   (Cg *cg, const char *name, bool json);   /* one symbol body */
+int cmd_show   (Cg *cg, const char *name, bool full, bool json); /* one body */
 int cmd_test_impact(Cg *cg, const char *name, bool json);
 int cmd_why    (Cg *cg, const char *name, bool json);   /* provenance join */
 bool graph_path_is_test(const char *path);
@@ -170,7 +185,7 @@ int cmd_log     (Cg *cg, int limit, bool json);
 int cmd_status  (Cg *cg, bool json);
 int cmd_diff    (Cg *cg, const char *a, const char *b);
 int cmd_checkout(Cg *cg, const char *id, bool force);
-int cmd_changes (Cg *cg, bool json);   /* impact radius of uncommitted edits */
+int cmd_changes (Cg *cg, int limit, bool json); /* impact of uncommitted edits */
 
 /* history probes for `cg spec trace` / graph-verified task completion */
 /* commits whose message contains needle; fills malloc'd arrays, returns n */
@@ -260,6 +275,15 @@ char *spec_active_tag(void);
 char *spec_task_tag(const char *requested);
 /* touches globs of the in-progress task; 0 when none (everything in scope) */
 int   spec_active_touches(char ***out);
+/* can these two touch patterns cover a common path? glob-vs-glob aware */
+bool  spec_globs_overlap(const char *a, const char *b);
+/* resolve "id" or "feature/id" (or, when NULL, the calling agent's current
+ * task) to a malloc'd "feature/id"; NULL when nothing matches */
+char *spec_resolve_task(const char *requested, const char *agent);
+/* json task packet for a resolved "feature/id" (malloc'd); NULL if unknown */
+char *spec_task_packet(const char *requested);
+/* task-scoped memories for a resolved "feature/id"; count (<=5), malloc'd */
+int   spec_task_memories_tag(const char *requested, Memory **out);
 
 /* ---------------- language server (lsp.c) ---------------- */
 int  cmd_lsp(Cg *cg, const SysInfo *si);
@@ -273,6 +297,25 @@ int cmd_brief(Cg *cg, bool json);                /* session state in one call */
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);
 int cmd_review(Cg *cg, bool json);
 int cmd_hook_install(Cg *cg);
+/* structured session handoff stored as a superseding task memory */
+int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,
+                const char *blocked, const char *note, bool json);
+/* task packet + latest handoff + task memories + tree/lease state */
+int cmd_resume(Cg *cg, const char *task, bool json, bool prompt);
+
+/* ---------------- orchestrator (orchestrate.c) ---------------- */
+/* `cg spec run` — claim conflict-free tasks and drive one agent per slot;
+ * argv is everything after `run` */
+int cmd_spec_run(int argc, char **argv);
+/* build one driver command line: codex/claude take extra_args split on
+ * whitespace (the prompt file arrives on stdin); custom renders cmd_tmpl
+ * with ${PROMPT_FILE} ${TASK} ${ROOT} ${AGENT} substituted and runs it via
+ * /bin/sh -c. av receives malloc'd entries plus a NULL terminator; returns
+ * argc, or -1 for an unknown driver / custom without a template. */
+int orch_driver_argv(const char *driver, const char *extra_args,
+                     const char *cmd_tmpl, const char *root,
+                     const char *promptfile, const char *task,
+                     const char *agent, char **av, int cap);
 
 /* ---------------- git interop (gitint.c) ---------------- */
 bool git_available(const Cg *cg);

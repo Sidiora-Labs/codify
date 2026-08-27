@@ -12,6 +12,7 @@ const path = require('path');
 const { LspClient } = require('./client');
 const language = require('./language');
 const kvx = require('./kvx');
+const agents = require('./agents');
 
 let provider;
 let memories;
@@ -21,6 +22,7 @@ let out;
 let client;
 let diagnostics;
 let revalidate = () => {};
+let agentApi = { hasTerminal: () => false };
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 function binary() { return config().get('binaryPath') || 'cg'; }
@@ -131,7 +133,9 @@ class TaskProvider {
         it.contextValue = `task-${t.status}`;
         const next = this.model.status.next && this.model.status.next.id === t.id;
         const claim = this.claimFor(t.id);
-        it.description = claim ? `${t.status} · ${claim.agent}`
+        const term = agentApi.hasTerminal(t.id) ? ' $(terminal)' : '';
+        it.description = claim ? `${t.status} · $(person) ${claim.agent}${term}`
+            : term ? `${t.status}${term}`
             : t.status === 'in_progress' ? 'in progress'
             : t.status === 'implemented' ? 'qualification pending'
             : next ? 'next' : t.status;
@@ -689,6 +693,9 @@ async function activate(ctx) {
     }
 
     kvx.register(ctx, cgJson, workspaceRoot);
+    agentApi = agents.register(ctx, {
+        cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
+    });
 
     /* Language features are best-effort: a workspace with no .codegraph, or
      * no cg on PATH, still gets the spec tooling above. */

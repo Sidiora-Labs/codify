@@ -400,8 +400,15 @@ int cmd_status(Cg *cg, bool json) {
     return 0;
 }
 
-/* impact radius of uncommitted edits: symbols in touched files + callers */
-int cmd_changes(Cg *cg, bool json) {
+/* impact radius of uncommitted edits: symbols in touched files + callers.
+ * Capped so a broad edit does not dump the whole graph: <limit> symbols
+ * across all files (default 40) and 8 external callers per symbol, with
+ * omitted-count markers where the caps bite. */
+#define CHANGES_SYM_CAP 40
+#define CHANGES_CAL_CAP 8
+
+int cmd_changes(Cg *cg, int limit, bool json) {
+    if (limit <= 0) limit = CHANGES_SYM_CAP;
     TreeDiff td;
     tree_status(cg, &td, false);
     StrBuf b; sb_init(&b);
@@ -416,8 +423,15 @@ int cmd_changes(Cg *cg, bool json) {
         "SELECT DISTINCT s2.name, f2.path, s2.line "
         "FROM refs r JOIN symbols s2 ON s2.id=r.sym_id "
         "JOIN files f2 ON f2.id=s2.file_id "
-        "WHERE r.name=? AND f2.path<>? LIMIT 12");
+        "WHERE r.name=?1 AND f2.path<>?2 "
+        "ORDER BY f2.path, s2.line LIMIT ?3");
+    sqlite3_stmt *calcnt = cg_prep(cg,
+        "SELECT COUNT(*) FROM (SELECT DISTINCT s2.name, f2.path, s2.line "
+        "FROM refs r JOIN symbols s2 ON s2.id=r.sym_id "
+        "JOIN files f2 ON f2.id=s2.file_id "
+        "WHERE r.name=?1 AND f2.path<>?2)");
 
+    int remaining = limit;
     for (int i = 0; i < td.nmod_paths; i++) {
         const char *path = td.mod_paths[i];
         if (json) {
@@ -429,8 +443,9 @@ int cmd_changes(Cg *cg, bool json) {
             sb_printf(&b, "\n%s\n", path);
         }
         sqlite3_bind_text(syms, 1, path, -1, SQLITE_TRANSIENT);
-        int ns = 0;
+        int ns = 0, skipped = 0;
         while (sqlite3_step(syms) == SQLITE_ROW) {
+            if (remaining == 0) { skipped++; continue; }
             const char *nm = (const char *)sqlite3_column_text(syms, 1);
             const char *kd = (const char *)sqlite3_column_text(syms, 2);
             int line = sqlite3_column_int(syms, 3);
@@ -444,6 +459,7 @@ int cmd_changes(Cg *cg, bool json) {
             }
             sqlite3_bind_text(cals, 1, nm, -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(cals, 2, path, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(cals, 3, CHANGES_CAL_CAP);
             int nc = 0;
             while (sqlite3_step(cals) == SQLITE_ROW) {
                 const char *cn = (const char *)sqlite3_column_text(cals, 0);
@@ -462,16 +478,35 @@ int cmd_changes(Cg *cg, bool json) {
             }
             sqlite3_reset(cals);
             sqlite3_clear_bindings(cals);
+            if (nc == CHANGES_CAL_CAP) {   /* the cap may have bitten */
+                sqlite3_bind_text(calcnt, 1, nm, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(calcnt, 2, path, -1, SQLITE_TRANSIENT);
+                int total = sqlite3_step(calcnt) == SQLITE_ROW
+                                ? sqlite3_column_int(calcnt, 0) : nc;
+                sqlite3_reset(calcnt);
+                sqlite3_clear_bindings(calcnt);
+                if (total > nc) {
+                    if (json) sb_printf(&b, ",{\"omitted\":%d}", total - nc);
+                    else sb_printf(&b, " (+%d more)", total - nc);
+                }
+            }
             if (json) sb_puts(&b, "]}");
             else sb_putc(&b, '\n');
             ns++;
+            remaining--;
         }
         sqlite3_reset(syms);
         sqlite3_clear_bindings(syms);
+        if (skipped) {
+            if (json) sb_printf(&b, "%s{\"omitted\":%d}", ns ? "," : "",
+                                skipped);
+            else sb_printf(&b, "  (+%d more symbols)\n", skipped);
+        }
         if (json) sb_puts(&b, "]}");
     }
     sqlite3_finalize(syms);
     sqlite3_finalize(cals);
+    sqlite3_finalize(calcnt);
     if (json) sb_puts(&b, "]}\n");
     fputs(b.p, stdout);
     sb_free(&b);

@@ -23,19 +23,50 @@ files ───────────────────────► j
   buffer, and writes results back on the main thread in one transaction.
 - **`lang.c` / `routes.c`** are table-driven: a language is a comment/string
   spec plus POSIX ERE definition patterns; a framework route is one regex
-  row. Adding a language or framework is adding a table entry.
-- **`db.c`** owns the schema: `files`, `symbols`, `refs`, `routes`, `meta`,
-  `memories`, `memory_superseded`, `git_commits`, `git_churn`, `leases`,
+  row. Adding a language or framework is adding a table entry. Extraction
+  is scope-aware: each definition gets a real `end_line` (brace-depth
+  tracking for brace languages, indentation for Python), each call ref
+  records its immediate receiver qualifier (`recv.name(` / `recv->name(` /
+  `Recv::name(`) and a ref kind, and per-language import patterns fill an
+  `imports` table (one row per imported name; `*` for whole-module).
+  `clean_line` keeps persistent state across lines for block comments *and*
+  multi-line strings (Python triple quotes, JS/TS template literals), so
+  string continuation lines never emit junk symbols.
+- **`scan.c`** attribution uses those scopes: a ref belongs to the innermost
+  *function-like* definition whose `[line, end_line]` contains it, and refs
+  contained by no definition get a NULL symbol — a call between two
+  functions is no longer credited to the one above it. A rescan whose
+  content hash is unchanged (touch, branch switch) updates size/mtime only,
+  so symbol rowids stay stable.
+- **`db.c`** owns the schema: `files`, `symbols`, `refs` (with `qual` and
+  `kind`), `imports`, `routes`, `meta`, `memories`, `memory_superseded`,
+  `git_commits`, `git_churn`, `leases`,
   plus three FTS5 tables — trigram over symbol names (substring search),
   unicode61 over file bodies (word search), and unicode61 over memory
-  bodies. It also resolves the project root, which is load-bearing:
+  bodies. The schema is versioned in `meta.schema_version`
+  (`cg_schema_upgrade`): on a mismatch the derived tables — everything the
+  indexer rebuilds from source — are dropped and recreated for the next
+  sync, while memories, git history, and leases are never touched.
+  It also resolves the project root, which is load-bearing:
   `cg_find_root_at` stops the upward walk at a `.git`/`go.mod`/
   `package.json`-style boundary, at `$HOME`, and at a mount change, so a
   stray `.codegraph` in an ancestor can never silently capture a project
   beneath it. `CODIFY_ROOT` overrides the walk; `cg root` prints the
   answer.
 - **`graph.c`** implements the query commands (`search`, `symbol`,
-  `impact`, `context`, `routes`) with `--json` variants.
+  `impact`, `context`, `routes`) with `--json` variants. Ranking fuses
+  exact, prefix, substring, and token tiers (`find_symbols_all` — no
+  exact-match short-circuit), then scores by kind (functions and types
+  above macros and vars), resolution-aware reference count, git churn, and
+  a hard penalty on test/fixture/vendor paths; ties break on refs then
+  path, deterministically. Call edges resolve a name to *one* definition:
+  same file, then a file the ref's file imports (module path matched
+  against candidate paths), then same directory, then shallowest path.
+  Output is budgeted: `context` (default 4000 tokens) and `impact`
+  (default 8000) emit each symbol in full once and as a compact
+  `{"n","at"}` form on every repeat, cut sections carry an explicit
+  `omitted` count, full-text hits carry a line number, and `show`
+  truncates long bodies with a `use --full` marker.
 
 ## Version control (`vcs.c`, `sha256.c`)
 
@@ -54,7 +85,7 @@ platforms stub out behind the same interface.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
-`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 32
+`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 37
 tools, each carrying read-only/destructive annotations so a client can
 auto-approve reads instead of prompting on every search. It also serves
 resources (the workflow file, the rendered board, the generated agent
@@ -72,14 +103,29 @@ key's opening brace.
 
 `kvx.c` parses the Ion `.kvx` format (ordered sections, `key = "value"`,
 `${ENV}` interpolation) and can surgically rewrite a single `status`
-line, preserving every other byte. `spec.c` renders IDE pointer files
-and the markdown mirror byte-identically to the original Go `specgen`
-(locked in by golden fixtures under `tests/fixtures/specrepo/`), and
-drives the task loop: wave-ordered `next`, one-in-progress `start`,
-`verify_cmd`-gated `done`. When the repo also has a `.codegraph/`, `done`
-additionally checks the task's declared `symbols` against the graph and
-its `touches` globs against worktree changes plus commits tagged with
-the task, and `cg spec trace` walks task → symbols → commits.
+line, preserving every other byte; the rewrite takes an advisory `flock`
+on a `<file>.lock` side file, so parallel agents' read-modify-writes on
+the same spec.kvx are atomic across processes. `spec.c` renders IDE
+pointer files and the markdown mirror byte-identically to the original
+Go `specgen` (locked in by golden fixtures under
+`tests/fixtures/specrepo/`), and drives the task loop: wave-ordered
+`next`, one-in-progress `start`, `verify_cmd`-gated `done`. When the
+repo also has a `.codegraph/`, `done` additionally checks the task's
+declared `symbols` against the graph and its `touches` globs against
+worktree changes plus commits tagged with the task, and `cg spec trace`
+walks task → symbols → commits.
+
+Parallel mode adds a dispatch frontier with integrity guarantees.
+`spec ready` lists every eligible task across waves with a
+`conflicts_with_live` flag; `spec claim-next` picks and claims the first
+conflict-free one under the spec-file flock plus a `BEGIN IMMEDIATE`
+transaction, returning the full task packet (task + lease + task-scoped
+memories) — exit 3, not an error, on an empty frontier. Leases have
+owners: claiming a task held live by someone else is refused, releasing
+one requires the owner's name or `--force`, and `done`/`implemented`
+auto-release on success. Agent identity comes from `--agent`, then
+`$CG_AGENT`, then `"agent"`, and in parallel mode "the current task"
+means the one the agent holds a live lease on.
 
 ## Agent memory (`memory.c`)
 
@@ -108,18 +154,70 @@ all-or-nothing.
 ## Governance (`govern.c`)
 
 The commands that put Codify inside the loop rather than at its ends:
-`cg brief` (session state in one call), `cg review` (changed symbols
-paired with the acceptance criteria they claim and the callers now at
-risk), `cg guard` (edits outside the in-progress task's declared
+`cg brief` (session state in one call — task-scoped memories first,
+padded with recent, deduplicated, bodies capped), `cg review` (changed
+symbols paired with the acceptance criteria they claim and the callers
+now at risk), `cg guard` (edits outside the in-progress task's declared
 `touches`), and `cg check` (the single CI gate: render staleness, lint,
 task evidence, lease consistency, worktree state). They read the spec
 through `cmd_spec`'s own `--json` output via `cg_capture`, so there is
 one implementation of the task model rather than two.
 
+`govern.c` also owns session continuity. `cg handoff` writes one
+structured memory of type `handoff`
+(`handoff|done:…|next:…|blocked:…|note:…|files:…`, files = current
+uncommitted paths) linked to the task; each new handoff supersedes the
+previous live one through the `memory_superseded` chain, so there is
+exactly one current handoff per task. `cg resume` reverses it for a
+fresh session: task packet, the latest handoff parsed back into fields,
+task-scoped memories, uncommitted paths, and lease state — `--prompt`
+renders the bundle as a paste-ready briefing, which is also what the
+orchestrator and the VS Code extension feed to agent sessions.
+
 Everything here is advisory by default. `cg guard` exits zero unless
 `--strict`, which is what makes `cg hook install` safe: wiring it into a
 `PostToolUse` hook or a pre-commit hook can report scope drift without
 ever breaking a workflow that was working before.
+
+## Orchestrator (`orchestrate.c`)
+
+`cg spec run` composes the primitives above into a driver of agent
+processes: `claim-next` picks a conflict-free task per free slot,
+`resume --prompt` (captured in-process via `cg_capture`) writes its
+briefing to `.codegraph/agents/<feature>-<id>.prompt`, and `fork`/`exec`
+hands that prompt on stdin to the configured driver — `codex exec
+--sandbox workspace-write --skip-git-repo-check -C <root>`, `claude -p
+--permission-mode acceptEdits`, or a custom `/bin/sh -c` template with
+`${PROMPT_FILE}` `${TASK}` `${ROOT}` `${AGENT}` substituted — with
+stdout+stderr captured to `.codegraph/agents/<feature>-<id>.log`.
+Configuration is the `[agents]` section of `spec/workflow.kvx` (driver,
+cmd, max, ttl, codex_args, claude_args); the custom template is read
+uninterpolated so kvx's own `${ENV}` expansion cannot eat the
+placeholders.
+
+Success is judged by the spec, not the exit code alone: after `waitpid`,
+the task's status is re-read — `done`/`implemented` count as success
+(the lease was auto-released by the completion), anything else releases
+the lease and records an auto `outcome` memory (`agent exited rc=N
+without completing`). The loop stops on an empty frontier or when
+failures exceed `--max-fail`; SIGINT terminates the children, releases
+their leases, and exits 130. `--dry-run` prints waves, tasks, and the
+exact argv per task without claiming anything. Requires a `.codegraph/`
+and parallel or prod mode.
+
+## VS Code agent sessions (`editors/vscode/agents.js`)
+
+The extension's counterpart to the orchestrator, in the same
+zero-dependency plain JS as the rest of `editors/vscode/`. It claims a
+task (`spec claim` + `spec start`), writes a prompt file from
+`cg resume --task <id> --prompt`, and launches the configured driver in
+a named terminal or as a headless VS Code task; closing a terminal whose
+task is unfinished offers to release the claim. A `graph.db` watcher
+plus a slow poll — active only while sessions exist — keeps the task
+board fresh, decorating tasks with the lease-holding agent and a
+terminal marker. Every `cg` verb is called defensively, so an older
+binary fails with a message rather than a hang; the manifest-coherence
+test keeps declared and registered commands in lockstep.
 
 ## Language server (`lsp.c`)
 
@@ -146,5 +244,11 @@ many references it has, and the decisions recorded about it.
   goldens, graph-verified completion + trace, agent memory, the inotify
   watcher, root-resolution boundaries and .gitignore (`09_root`), the
   read and governance lifecycle (`10_lifecycle`), git interop
-  (`11_git`), spec authoring and the CI gate (`12_authoring`), and the
-  language server driven as a real editor would (`13_lsp`).
+  (`11_git`), spec authoring and the CI gate (`12_authoring`), the
+  language server driven as a real editor would (`13_lsp`), the VS Code
+  extension without VS Code — syntax checks, manifest coherence, the
+  LSP client against the real binary (`14_vscode`) — indexing accuracy:
+  scope attribution, stable rowids on touch, schema migration
+  (`15_accuracy`), ranking and budgets (`16_retrieval`), claim-next
+  atomicity plus handoff/resume round-trips (`17_session`), and the
+  orchestrator run end to end on a custom driver (`18_orchestrate`).
