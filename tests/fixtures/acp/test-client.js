@@ -8,7 +8,8 @@ const fs = require('fs');
 const path = require('path');
 
 const [, , ACP_JS, FAKE, TMP] = process.argv;
-const { AcpClient, splitCommand, workspacePath, readTextFile, writeTextFile } =
+const { AcpClient, splitCommand, workspacePath, readTextFile, writeTextFile,
+    sessionUpdate } =
     require(path.resolve(ACP_JS));
 
 let step = '';
@@ -61,12 +62,37 @@ async function happyPath() {
     const init = await c.initialize({ name: 'test', version: '0' });
     assert(init.protocolVersion === 1, 'protocolVersion 1 negotiated');
     assert(init.agentInfo.name === 'fake-acp-agent', 'agentInfo present');
+    assert(init.agentCapabilities.loadSession &&
+        init.agentCapabilities.sessionCapabilities.list,
+    'agent advertises list and full session replay');
 
     const sess = await c.request('session/new', {
         cwd: dir,
         mcpServers: [{ name: 'codify', command: 'cg', args: ['mcp'], env: [] }],
     }, 5000);
     assert(sess.sessionId === 'sess_fake_1', 'sessionId returned');
+    assert(sess.modes.currentModeId === 'agent', 'initial session mode returned');
+    assert(sess.configOptions.length === 2, 'initial session config returned');
+
+    const listed = await c.request('session/list', { cwd: dir, cursor: null }, 5000);
+    assert(listed.sessions.length === 1 && listed.sessions[0].sessionId === 'sess_past_1',
+        'past sessions can be listed for this workspace');
+    const loaded = await c.request('session/load', {
+        sessionId: 'sess_past_1', cwd: dir,
+        mcpServers: [{ name: 'codify', command: 'cg', args: ['mcp'], env: [] }],
+    }, 5000);
+    assert(loaded.modes.currentModeId === 'agent', 'past session load returns controls');
+    assert(updates.some((u) => u.sessionUpdate === 'agent_message_chunk' &&
+        u.content.text === 'Earlier context restored.'),
+    'session/load replays the earlier transcript');
+
+    await c.request('session/set_mode', {
+        sessionId: sess.sessionId, modeId: 'plan' }, 5000);
+    const changed = await c.request('session/set_config_option', {
+        sessionId: sess.sessionId, configId: 'thinking',
+        type: 'boolean', value: false }, 5000);
+    assert(changed.configOptions.find((o) => o.id === 'thinking').currentValue === false,
+        'boolean session config round-trips');
 
     const res = await c.request('session/prompt', {
         sessionId: sess.sessionId,
@@ -80,8 +106,10 @@ async function happyPath() {
         === 'written by fake agent\n', 'file written through fs bridge');
 
     const kinds = updates.map((u) => u.sessionUpdate);
-    for (const want of ['agent_thought_chunk', 'plan', 'agent_message_chunk',
-        'tool_call', 'tool_call_update']) {
+    for (const want of ['user_message_chunk', 'agent_thought_chunk', 'plan', 'agent_message_chunk',
+        'tool_call', 'tool_call_update', 'available_commands_update',
+        'current_mode_update', 'config_option_update', 'session_info_update',
+        'usage_update']) {
         assert(kinds.includes(want), `update stream carries ${want}`);
     }
     const done = updates.find((u) =>
@@ -97,6 +125,17 @@ async function happyPath() {
     assert(seen.params.mcpServers[0].name === 'codify' &&
         seen.params.mcpServers[0].args[0] === 'mcp',
     'mcpServers delivered to agent');
+    const initialized = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean)
+        .map((l) => JSON.parse(l)).find((e) => e.method === 'initialize');
+    assert(initialized.params.clientCapabilities.fs.readTextFile &&
+        initialized.params.clientCapabilities.fs.writeTextFile,
+    'client advertises the fs bridge it serves');
+    assert(initialized.params.clientCapabilities.session.configOptions.boolean,
+        'client advertises boolean session controls');
+    const loadedWire = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean)
+        .map((l) => JSON.parse(l)).find((e) => e.method === 'session/load');
+    assert(loadedWire.params.mcpServers[0].name === 'codify',
+        'restored session receives the Codify MCP server');
 
     c.stop();
     ok('happy path: handshake, prompt turn, permission, fs round-trip');
@@ -233,9 +272,33 @@ function splitSanity() {
     ok('splitCommand handles quoting');
 }
 
+function updateMappingSanity() {
+    step = 'session-update-mapping';
+    const shown = [];
+    const sess = { webview: { postMessage: (m) => shown.push(m) },
+        commands: [], configOptions: [], modes: {
+            currentModeId: 'agent', availableModes: [{ id: 'agent', name: 'Agent' }] } };
+    const emit = (update) => sessionUpdate(sess, { sessionId: 's', update });
+    emit({ sessionUpdate: 'available_commands_update', availableCommands: [
+        { name: 'init', description: 'Initialize' }] });
+    emit({ sessionUpdate: 'current_mode_update', currentModeId: 'plan' });
+    emit({ sessionUpdate: 'config_option_update', configOptions: [
+        { id: 'thinking', type: 'boolean', currentValue: true }] });
+    emit({ sessionUpdate: 'session_info_update', title: 'A useful title' });
+    emit({ sessionUpdate: 'usage_update', used: 5, size: 10 });
+    const types = shown.map((m) => m.type);
+    for (const type of ['agent_commands', 'mode', 'config', 'session_info', 'usage']) {
+        assert(types.includes(type), `extension maps ${type} into a panel message`);
+    }
+    assert(sess.modes.currentModeId === 'plan', 'session mode state retained');
+    assert(sess.commands[0].name === 'init', 'agent commands retained');
+    ok('all stable session state updates map to the panel');
+}
+
 (async () => {
     splitSanity();
     bridgeSanity();
+    updateMappingSanity();
     await happyPath();
     await rejectPath();
     await cancelPath();

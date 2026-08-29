@@ -14,12 +14,14 @@
   * { box-sizing: border-box; }
   html, body {
     height: 100%; margin: 0; padding: 0;
+    min-width: 0; overflow: hidden;
     background: var(--vscode-sideBar-background, var(--vscode-editor-background));
     color: var(--vscode-foreground);
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size, 13px);
   }
   #root { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .hidden { display: none !important; }
 
   /* ---- context bar ---- */
   #ctxbar {
@@ -28,6 +30,7 @@
     border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
     font-size: 0.92em;
   }
+  #ctxbar > * { min-width: 0; }
   .dot {
     width: 7px; height: 7px; border-radius: 50%; flex: none;
     background: var(--vscode-descriptionForeground);
@@ -40,6 +43,13 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     max-width: 40%;
   }
+  #buildversion {
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family); font-size: 0.82em;
+    white-space: nowrap;
+  }
+  #history { max-width: 190px; min-width: 105px; }
+  #refreshhistory { padding: 1px 5px; }
   .grow { flex: 1 1 auto; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
@@ -77,10 +87,41 @@
   [tabindex]:focus-visible {
     outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px;
   }
+  #sessionbar {
+    display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
+    color: var(--vscode-descriptionForeground); font-size: 0.86em;
+  }
+  #sessiontitle {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 220px; color: var(--vscode-foreground);
+  }
+  #mcpstate.connected { color: var(--vscode-testing-iconPassed, #3fb950); }
+  #configs { display: contents; }
+  .configitem { display: inline-flex; align-items: center; gap: 4px; }
+  .configitem select { max-width: 150px; }
+
+  /* ---- live activity ---- */
+  #activitybar {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    min-height: 27px; padding: 4px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
+    color: var(--vscode-descriptionForeground); font-size: 0.86em;
+  }
+  #activitybar .label { color: var(--vscode-foreground); font-weight: 500; }
+  #activitybar .metric {
+    border-left: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+    padding-left: 6px; white-space: nowrap;
+  }
+  #activitybar .attention { color: var(--vscode-charts-yellow, #d29922); }
 
   /* ---- transcript ---- */
   #scroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; position: relative; }
-  #log { padding: 10px 10px 4px; display: flex; flex-direction: column; gap: 10px; }
+  #log {
+    width: 100%; max-width: 900px; margin: 0 auto;
+    padding: 12px 12px 6px; display: flex; flex-direction: column; gap: 11px;
+  }
 
   .msg { max-width: 100%; }
   .msg.user {
@@ -114,6 +155,13 @@
   .md h3 { font-size: 1.06em; } .md h4 { font-size: 1em; }
   .md ul, .md ol { margin: 0 0 8px; padding-left: 20px; }
   .md li { margin: 2px 0; }
+  .md li > ul, .md li > ol { margin: 3px 0 2px; }
+  .md li.task { list-style: none; margin-left: -18px; }
+  .md .taskbox {
+    display: inline-block; width: 18px;
+    color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family);
+  }
+  .md li.task.done { color: var(--vscode-descriptionForeground); }
   .md blockquote {
     margin: 0 0 8px; padding: 2px 0 2px 10px;
     border-left: 3px solid var(--vscode-panel-border, rgba(128,128,128,0.4));
@@ -194,6 +242,8 @@
   }
   .card .chev { flex: none; color: var(--vscode-descriptionForeground); font-size: 0.8em; }
   .card .body { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2)); }
+  .card .body { min-width: 0; overflow: hidden; }
+  .card .body > .md { padding: 8px 10px; }
   .card.closed .body { display: none; }
   .card.closed .chev { transform: rotate(-90deg); }
   .chev { display: inline-block; transition: transform 0.12s ease; }
@@ -290,7 +340,7 @@
   }
 
   /* ---- composer ---- */
-  footer { padding: 6px 8px 8px; position: relative; }
+  footer { width: 100%; max-width: 900px; margin: 0 auto; padding: 6px 10px 10px; position: relative; }
   #statusline {
     color: var(--vscode-errorForeground, #f85149); font-size: 0.88em;
     white-space: pre-wrap; margin: 0 2px 5px; word-break: break-word;
@@ -363,6 +413,31 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.25);
   }
   body.scrolled #tobottom { display: block; }
+
+  @media (max-width: 430px) {
+    #ctxbar { flex-wrap: wrap; min-height: 34px; }
+    #ctxfeature { order: 4; max-width: none; width: 100%; }
+    #taskchip { max-width: calc(100% - 100px); }
+    #history { flex: 1 1 135px; max-width: none; }
+    #sessionbar { align-items: stretch; }
+    #sessiontitle { width: 100%; max-width: none; }
+    .configitem { flex: 1 1 130px; justify-content: space-between; }
+    .configitem select { flex: 1 1 auto; min-width: 0; max-width: none; }
+    #log { padding: 10px 8px 5px; }
+    .msg.user { max-width: 96%; }
+    .card .head { padding: 6px 7px; }
+    .card .title { white-space: normal; overflow-wrap: anywhere; }
+    .crow { flex-wrap: wrap; }
+    .crow .hint { flex: 1 1 100%; order: 3; }
+    footer { padding: 5px 7px 8px; }
+  }
+  @media (min-width: 700px) {
+    .msg.user { max-width: 75%; }
+    .md { font-size: 1.02em; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -370,11 +445,35 @@
   <header id="ctxbar">
     <span class="dot" id="livedot"></span>
     <span id="ctxfeature">codify</span>
+    <span id="buildversion" title="Running Codify extension version"></span>
     <button class="chip" id="taskchip" title="Attach a spec task to this chat">no task</button>
     <span class="pill" id="taskstatus"></span>
     <span class="grow"></span>
+    <select id="history" aria-label="Past agent sessions" title="Past agent sessions">
+      <option value="">Past sessions</option>
+    </select>
+    <button id="refreshhistory" class="icon" aria-label="Refresh past sessions"
+      title="Refresh past sessions">↻</button>
     <select id="driver" title="Agent"></select>
   </header>
+
+  <div id="sessionbar" class="hidden" aria-live="polite">
+    <span id="sessiontitle"></span>
+    <span id="mcpstate">MCP connecting</span>
+    <span id="usage"></span>
+    <label id="modewrap" class="configitem hidden">mode
+      <select id="mode" title="Agent session mode"></select>
+    </label>
+    <span id="configs"></span>
+  </div>
+
+  <div id="activitybar" role="status" aria-live="polite">
+    <span id="activitylabel" class="label">Ready</span>
+    <span id="toolactivity" class="metric hidden"></span>
+    <span id="planactivity" class="metric hidden"></span>
+    <span id="queueactivity" class="metric attention hidden"></span>
+    <span id="permitactivity" class="metric attention hidden"></span>
+  </div>
 
   <div id="scroll">
     <div id="log"></div>
@@ -407,6 +506,21 @@
     var input = document.getElementById('input');
     var statusline = document.getElementById('statusline');
     var driverSel = document.getElementById('driver');
+    var historySel = document.getElementById('history');
+    var refreshHistory = document.getElementById('refreshhistory');
+    var buildVersion = document.getElementById('buildversion');
+    var modeSel = document.getElementById('mode');
+    var modeWrap = document.getElementById('modewrap');
+    var sessionbar = document.getElementById('sessionbar');
+    var sessionTitle = document.getElementById('sessiontitle');
+    var mcpState = document.getElementById('mcpstate');
+    var usage = document.getElementById('usage');
+    var configs = document.getElementById('configs');
+    var activityLabel = document.getElementById('activitylabel');
+    var toolActivity = document.getElementById('toolactivity');
+    var planActivity = document.getElementById('planactivity');
+    var queueActivity = document.getElementById('queueactivity');
+    var permitActivity = document.getElementById('permitactivity');
     var taskChip = document.getElementById('taskchip');
     var taskStatus = document.getElementById('taskstatus');
     var slashmenu = document.getElementById('slashmenu');
@@ -418,6 +532,33 @@
     var planCard = null;
     var history = [];
     var histIdx = -1;
+    var agentCommands = [];
+    var activity = { live: false, running: false, queued: 0,
+        toolStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
+
+    function metric(node, text) {
+        node.textContent = text || '';
+        node.classList.toggle('hidden', !text);
+    }
+
+    function updateActivity() {
+        activityLabel.textContent = activity.running ? 'Agent working' :
+            !activity.live ? 'Ready' : 'Agent ready';
+        var statuses = Object.keys(activity.toolStatus).map(function (id) {
+            return activity.toolStatus[id];
+        });
+        var active = statuses.filter(function (s) {
+            return s === 'pending' || s === 'in_progress';
+        }).length;
+        var completed = statuses.filter(function (s) { return s === 'completed'; }).length;
+        var failed = statuses.filter(function (s) { return s === 'failed'; }).length;
+        metric(toolActivity, active ? active + ' tool' + (active === 1 ? '' : 's') + ' active' :
+            statuses.length ? completed + ' done' + (failed ? ', ' + failed + ' failed' : '') : '');
+        metric(planActivity, activity.planTotal ?
+            'plan ' + activity.planDone + '/' + activity.planTotal : '');
+        metric(queueActivity, activity.queued ? activity.queued + ' queued' : '');
+        metric(permitActivity, activity.permits ? 'permission needed' : '');
+    }
 
     /* ---------------- Codify slash commands ---------------- */
     var COMMANDS = [
@@ -439,7 +580,19 @@
         { n: 'new',      a: '',        d: 'Start a fresh chat' },
         { n: 'help',     a: '',        d: 'Show these commands' },
     ];
-    var CMDNAMES = COMMANDS.map(function (c) { return c.n; });
+    function allCommands() {
+        var local = COMMANDS.slice();
+        var localNames = local.map(function (c) { return c.n; });
+        return local.concat(agentCommands.map(function (c) {
+            var alias = localNames.indexOf(c.name) >= 0 ? 'agent-' + c.name : c.name;
+            return { n: alias, a: c.input ? '<input>' : '',
+                d: c.description || 'Agent command', agent: true, actual: c.name };
+        }));
+    }
+
+    function commandNamed(name) {
+        return allCommands().find(function (c) { return c.n === name; });
+    }
 
     /* ---------------- scrolling ---------------- */
     function atBottom() {
@@ -514,7 +667,11 @@
                     label = t.slice(1, cut), href = t.slice(cut + 2, -1);
                 if (/^https?:/i.test(href)) {
                     var a = el('a', null, label);
-                    a.href = href; a.title = href;
+                    a.href = '#'; a.title = href; a.dataset.href = href;
+                    a.addEventListener('click', function (ev) {
+                        ev.preventDefault();
+                        vsc.postMessage({ type: 'external', href: this.dataset.href });
+                    });
                     parent.appendChild(a);
                 } else {
                     var fb = el('button', 'flink', label);
@@ -619,19 +776,44 @@
             }
             var lm = line.match(/^\s*([-*+]|\d+[.)])\s+/);
             if (lm) {
+                var firstIndent = (line.match(/^\s*/) || [''])[0].length;
                 var ordered = /\d/.test(lm[1]);
                 var list = el(ordered ? 'ol' : 'ul');
+                var stack = [{ indent: firstIndent, list: list, last: null,
+                    ordered: ordered }];
                 while (i < lines.length) {
-                    var im = lines[i].match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/);
+                    var im = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
                     if (!im) break;
-                    var li = el('li'), parts = [im[1]];
+                    var indent = im[1].length, isOrdered = /\d/.test(im[2]);
+                    while (stack.length > 1 && indent < stack[stack.length - 1].indent) {
+                        stack.pop();
+                    }
+                    var top = stack[stack.length - 1];
+                    if (indent > top.indent && top.last) {
+                        var nested = el(isOrdered ? 'ol' : 'ul');
+                        top.last.appendChild(nested);
+                        top = { indent: indent, list: nested, last: null,
+                            ordered: isOrdered };
+                        stack.push(top);
+                    } else if (indent !== top.indent || isOrdered !== top.ordered) {
+                        break;
+                    }
+                    var li = el('li'), parts = [im[3]];
                     i++;
                     while (i < lines.length && /^\s{2,}\S/.test(lines[i]) &&
                            !/^\s*(?:[-*+]|\d+[.)])\s/.test(lines[i])) {
                         parts.push(lines[i].trim()); i++;
                     }
-                    inline(li, parts.join(' '));
-                    list.appendChild(li);
+                    var task = parts.join(' ').match(/^\[([ xX])\]\s+(.*)$/);
+                    if (task) {
+                        var done = task[1].toLowerCase() === 'x';
+                        li.className = 'task' + (done ? ' done' : '');
+                        li.appendChild(el('span', 'taskbox', done ? '☑' : '☐'));
+                        inline(li, task[2]);
+                    } else {
+                        inline(li, parts.join(' '));
+                    }
+                    top.list.appendChild(li); top.last = li;
                 }
                 host.appendChild(list);
                 continue;
@@ -736,6 +918,11 @@
     function toolCard(call) {
         clearWelcome();
         breakBlocks();
+        if (call.toolCallId) {
+            activity.toolStatus[call.toolCallId] = call.status ||
+                activity.toolStatus[call.toolCallId] || 'pending';
+            updateActivity();
+        }
         var card = tools.get(call.toolCallId);
         if (!card) {
             card = makeCard('tool collapsible closed',
@@ -793,7 +980,9 @@
                 if (item.newText) bodyEl.appendChild(el('pre', 'add', item.newText));
             } else if (item.type === 'content' && item.content &&
                        item.content.type === 'text') {
-                bodyEl.appendChild(el('pre', 'wrap', item.content.text));
+                var toolMd = el('div', 'md');
+                renderMd(toolMd, item.content.text);
+                bodyEl.appendChild(toolMd);
             } else if (item.type === 'terminal') {
                 bodyEl.appendChild(el('pre', 'wrap', item.output || '(terminal)'));
             }
@@ -803,6 +992,8 @@
     function permission(msg) {
         clearWelcome();
         breakBlocks();
+        activity.permits++;
+        updateActivity();
         var card = makeCard('perm', '⚑', msg.title || 'Permission request');
         card.dataset.pid = msg.pid;
         card.querySelector('.chev').remove();
@@ -832,6 +1023,8 @@
         }
         breakBlocks();
         var done = entries.filter(function (e) { return e.status === 'completed'; }).length;
+        activity.planDone = done; activity.planTotal = entries.length;
+        updateActivity();
         var t = planCard.querySelector('.title');
         t.textContent = 'Plan';
         t.appendChild(el('span', 'sub', done + '/' + entries.length));
@@ -883,7 +1076,7 @@
     function helpCard() {
         var card = makeCard('cg collapsible', '?', 'Codify commands');
         var bodyEl = card.querySelector('.body');
-        var lines = COMMANDS.map(function (c) {
+        var lines = allCommands().map(function (c) {
             var name = ('/' + c.n + (c.a ? ' ' + c.a : ''));
             while (name.length < 20) name += ' ';
             return name + c.d;
@@ -900,7 +1093,7 @@
         var m = v.match(/^\/([a-z]*)$/i);
         if (!m) { body.classList.remove('slashing'); return; }
         var q = m[1].toLowerCase();
-        slashItems = COMMANDS.filter(function (c) { return c.n.indexOf(q) === 0; });
+        slashItems = allCommands().filter(function (c) { return c.n.indexOf(q) === 0; });
         if (!slashItems.length) { body.classList.remove('slashing'); return; }
         slashSel = 0;
         slashmenu.textContent = '';
@@ -928,7 +1121,10 @@
         var c = slashItems[idx === undefined ? slashSel : idx];
         if (!c) return;
         body.classList.remove('slashing');
-        if (!c.a && submitIfReady) { runSlash(c.n, ''); input.value = ''; autosize(); return; }
+        if (!c.a && submitIfReady) {
+            if (c.agent) runAgentCommand(c, ''); else runSlash(c.n, '');
+            input.value = ''; autosize(); return;
+        }
         input.value = '/' + c.n + ' ';
         input.focus();
         autosize();
@@ -946,6 +1142,12 @@
         vsc.postMessage({ type: 'slash', cmd: cmd, args: args });
     }
 
+    function runAgentCommand(c, inputText) {
+        clearWelcome();
+        vsc.postMessage({ type: 'agent_command', name: c.actual,
+            input: inputText || '' });
+    }
+
     function submit() {
         var raw = input.value.replace(/\s+$/, '');
         if (!raw.trim()) return;
@@ -956,7 +1158,11 @@
         var m = raw.match(/^\/([A-Za-z][\w-]*)\s*([\s\S]*)$/);
         if (m) {
             var cmd = m[1].toLowerCase();
-            if (CMDNAMES.indexOf(cmd) >= 0) { runSlash(cmd, m[2].trim()); return; }
+            var offered = commandNamed(cmd);
+            if (offered && offered.agent) {
+                runAgentCommand(offered, m[2].trim()); return;
+            }
+            if (offered) { runSlash(cmd, m[2].trim()); return; }
             userMsg(raw, true);
             sysline('unknown command /' + cmd + ' — /help lists them', true);
             return;
@@ -1001,6 +1207,80 @@
     driverSel.addEventListener('change', function () {
         vsc.postMessage({ type: 'driver', value: driverSel.value });
     });
+    historySel.addEventListener('change', function () {
+        var option = historySel.children[historySel.selectedIndex];
+        if (!historySel.value) return;
+        vsc.postMessage({ type: 'load_session', sessionId: historySel.value,
+            driver: option && option.dataset.driver });
+        historySel.value = '';
+    });
+    refreshHistory.addEventListener('click', function () {
+        vsc.postMessage({ type: 'refresh_sessions' });
+    });
+    modeSel.addEventListener('change', function () {
+        vsc.postMessage({ type: 'set_mode', modeId: modeSel.value });
+    });
+
+    function setModes(current, modes) {
+        if (Array.isArray(modes) && modes.length) {
+            modeSel.textContent = '';
+            modes.forEach(function (m) {
+                var o = el('option', null, m.name || m.id);
+                o.value = m.id; o.title = m.description || '';
+                modeSel.appendChild(o);
+            });
+            modeWrap.classList.remove('hidden');
+        }
+        if (current) modeSel.value = current;
+    }
+
+    function setConfigs(options) {
+        configs.textContent = '';
+        (options || []).forEach(function (o) {
+            if (!o || !o.id) return;
+            var label = el('label', 'configitem', o.name || o.id);
+            var select = el('select');
+            select.title = o.description || o.name || o.id;
+            if (o.type === 'boolean') {
+                ['true', 'false'].forEach(function (value) {
+                    var opt = el('option', null, value);
+                    opt.value = value; select.appendChild(opt);
+                });
+                select.value = String(!!o.currentValue);
+            } else {
+                (o.options || []).forEach(function (value) {
+                    var opt = el('option', null, value.name || value.value || value.id);
+                    opt.value = value.value || value.id;
+                    select.appendChild(opt);
+                });
+                select.value = o.currentValue || '';
+            }
+            select.addEventListener('change', function () {
+                vsc.postMessage({ type: 'set_config', configId: o.id,
+                    value: o.type === 'boolean' ? select.value === 'true' : select.value,
+                    valueType: o.type });
+            });
+            label.appendChild(select); configs.appendChild(label);
+        });
+    }
+
+    function setSessions(rows, note, loading) {
+        historySel.textContent = '';
+        var first = el('option', null, loading ? 'Loading sessions…' :
+            rows && rows.length ? 'Past sessions' : note || 'No past sessions');
+        first.value = ''; first.disabled = true; first.selected = true;
+        historySel.appendChild(first);
+        (rows || []).forEach(function (row) {
+            var title = row.title || row.sessionId;
+            var when = row.updatedAt ? new Date(row.updatedAt) : null;
+            var stamp = when && !isNaN(when.getTime()) ? ' · ' + when.toLocaleDateString() : '';
+            var option = el('option', null, title + ' · ' + (row.driver || 'agent') + stamp);
+            option.value = row.sessionId; option.dataset.driver = row.driver || '';
+            option.title = row.sessionId;
+            historySel.appendChild(option);
+        });
+        historySel.title = note || 'Past agent sessions';
+    }
 
     /* ---------------- extension messages ---------------- */
     function setTask(task) {
@@ -1022,6 +1302,14 @@
     function resetTranscript(sub) {
         log.textContent = '';
         tools.clear(); planCard = null; breakBlocks();
+        agentCommands = [];
+        configs.textContent = ''; modeSel.textContent = '';
+        modeWrap.classList.add('hidden'); sessionbar.classList.add('hidden');
+        sessionTitle.textContent = ''; usage.textContent = '';
+        mcpState.textContent = 'MCP connecting'; mcpState.classList.remove('connected');
+        activity = { live: false, running: false, queued: 0,
+            toolStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
+        updateActivity();
         statusline.textContent = '';
         body.classList.remove('running', 'live');
         driverSel.disabled = false;
@@ -1041,6 +1329,7 @@
                 });
             }
             if (m.driver) driverSel.value = m.driver;
+            if (m.version) buildVersion.textContent = 'v' + m.version;
             if (m.feature) document.getElementById('ctxfeature').textContent = m.feature;
             setTask(m.task);
             if (m.idle && !log.childElementCount) welcome();
@@ -1052,13 +1341,38 @@
         } else if (m.type === 'session') {
             body.classList.toggle('live', !!m.live);
             driverSel.disabled = !!m.live;
+            sessionbar.classList.toggle('hidden', !m.live);
+            activity.live = !!m.live; updateActivity();
+        } else if (m.type === 'connection') {
+            sessionbar.classList.remove('hidden');
+            var info = m.agent || {};
+            sessionTitle.textContent = info.title || info.name || '';
+            mcpState.textContent = (m.mcpServers || []).length
+                ? 'MCP · ' + m.mcpServers.join(', ') : 'MCP unavailable';
+            mcpState.classList.toggle('connected', !!(m.mcpServers || []).length);
+        } else if (m.type === 'mode') {
+            setModes(m.currentModeId, m.modes);
+        } else if (m.type === 'config') {
+            setConfigs(m.options);
+        } else if (m.type === 'agent_commands') {
+            agentCommands = Array.isArray(m.commands) ? m.commands : [];
+        } else if (m.type === 'session_info') {
+            if (m.title !== undefined) sessionTitle.textContent = m.title || '';
+        } else if (m.type === 'usage') {
+            var pct = m.size ? Math.min(100, Math.round(m.used * 100 / m.size)) : 0;
+            usage.textContent = m.size ? 'context ' + pct + '%' : '';
+            usage.title = m.size ? m.used + ' / ' + m.size + ' tokens' : '';
+        } else if (m.type === 'sessions') {
+            setSessions(m.sessions || [], m.note, !!m.loading);
         } else if (m.type === 'reset') {
             if (m.driver) driverSel.value = m.driver;
             setTask(null);
             resetTranscript();
         } else if (m.type === 'session_end') {
             body.classList.remove('running', 'live');
+            sessionbar.classList.add('hidden');
             driverSel.disabled = false;
+            activity.live = false; activity.running = false; updateActivity();
             breakBlocks();
             sysline('session ended' + (m.why ? ' — ' + m.why : '') +
                 ' · your next message starts a fresh one');
@@ -1076,9 +1390,11 @@
                 var a = card.querySelector('.answer');
                 if (a) a.textContent = m.answer || card.dataset.answer || 'answered';
             }
+            activity.permits = Math.max(0, activity.permits - 1); updateActivity();
         } else if (m.type === 'cmdout') cmdCard(m);
         else if (m.type === 'turn') {
             body.classList.toggle('running', !!m.running);
+            activity.running = !!m.running; updateActivity();
             if (!m.running) {
                 breakBlocks();
                 if (m.stopReason && m.stopReason !== 'end_turn') {
@@ -1090,6 +1406,10 @@
             taskStatus.className = 'pill ' + m.status;
         } else if (m.type === 'status') {
             statusline.textContent = m.text || '';
+        } else if (m.type === 'notice') {
+            sysline(m.text || '');
+        } else if (m.type === 'queue') {
+            activity.queued = Number(m.count) || 0; updateActivity();
         } else if (m.type === 'focus') {
             input.focus();
         }

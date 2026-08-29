@@ -23,6 +23,16 @@ const src = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8') +
     fs.readFileSync(path.join(dir, 'agents.js'), 'utf8') +
     fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
 
+if (pkg.publisher !== 'SidioraLabs' || pkg.name !== 'codify') {
+    throw new Error(`unexpected Marketplace identity: ${pkg.publisher}.${pkg.name}`);
+}
+if (pkg.version !== '1.0.0') {
+    throw new Error(`expected the visible 1.0.0 build, got ${pkg.version}`);
+}
+if (!/version: extensionVersion\(\)/.test(src)) {
+    throw new Error('agent view does not receive the installed extension version');
+}
+
 const declared = pkg.contributes.commands.map((c) => c.command);
 const registered = [...src.matchAll(/'(codify\.[A-Za-z.]+)':/g)].map((m) => m[1]);
 

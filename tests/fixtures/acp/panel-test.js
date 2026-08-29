@@ -18,7 +18,10 @@ function assert(cond, what) {
 
 const IDS = ['log', 'scroll', 'input', 'statusline', 'driver', 'taskchip',
     'taskstatus', 'slashmenu', 'tobottom', 'send', 'stop', 'ctxfeature', 'hint',
-    'livedot'];
+    'livedot', 'sessionbar', 'sessiontitle', 'mcpstate', 'usage', 'modewrap',
+    'mode', 'configs', 'activitybar', 'activitylabel', 'toolactivity',
+    'planactivity', 'queueactivity', 'permitactivity', 'history',
+    'refreshhistory', 'buildversion'];
 
 function load() {
     const m = HTML.match(/<script nonce="\$\{nonce\}">([\s\S]*?)<\/script>/);
@@ -42,21 +45,31 @@ function load() {
         log: doc.getElementById('log'), input: doc.getElementById('input') };
 }
 
-/* ---- the chat renders an agent message as markdown ---- */
+/* ---- streamed Markdown: rich blocks, task nesting, and safe links ---- */
 function markdown() {
     step = 'markdown';
     const p = load();
     p.send({ type: 'init', idle: true, driver: 'claude', drivers: ['codex', 'claude'] });
     p.send({ type: 'chunk', role: 'agent', text: '## Plan\n\nUse `cg brief` and ' });
     p.send({ type: 'chunk', role: 'agent',
-        text: 'edit src/acp.c:42.\n\n- one\n- two\n\n```c\nint x = 1;\n```\n' });
+        text: 'edit src/acp.c:42 with **care** and *focus*.\n\n' +
+            '- [x] connected\n  - [ ] nested check\n\n' +
+            '| signal | state |\n| --- | --- |\n| MCP | ready |\n\n' +
+            '> Follow the evidence.\n\n[ACP docs](https://agentclientprotocol.com)\n\n' +
+            '```c\nint x = 1;\n```\n' });
 
     const msg = p.log.querySelector('.msg.agent');
     assert(msg, 'agent message rendered');
     assert(msg.querySelector('h2'), 'heading rendered from markdown');
     assert(msg.querySelector('code.inline').textContent === 'cg brief',
         'inline code rendered');
-    assert(msg.querySelectorAll('li').length === 2, 'list items rendered');
+    assert(msg.querySelectorAll('li').length === 2, 'nested list items rendered');
+    assert(msg.querySelectorAll('li.task').length === 2, 'task lists rendered');
+    assert(msg.querySelector('li ul'), 'nested list structure preserved');
+    assert(msg.querySelector('strong') && msg.querySelector('em'),
+        'emphasis rendered');
+    assert(msg.querySelector('table') && msg.querySelector('blockquote'),
+        'table and quote rendered');
     const code = msg.querySelector('.codeblock');
     assert(code, 'fenced code block rendered');
     assert(code.querySelector('pre').textContent === 'int x = 1;', 'code text kept verbatim');
@@ -69,6 +82,10 @@ function markdown() {
     const open = p.posted.find((x) => x.type === 'open');
     assert(open && open.path === 'src/acp.c' && open.line === 42,
         'clicking a file link asks the extension to open it');
+    msg.querySelector('a').click();
+    assert(p.posted.some((x) => x.type === 'external' &&
+        x.href === 'https://agentclientprotocol.com'),
+    'external links leave through the extension');
 
     /* streaming keeps one message, not one per chunk */
     assert(p.log.querySelectorAll('.msg.agent').length === 1,
@@ -77,12 +94,14 @@ function markdown() {
     ok('markdown, code blocks, and clickable file paths');
 }
 
-/* ---- tool calls, permissions, plan ---- */
+/* ---- tool evidence plus the persistent activity summary ---- */
 function cards() {
     step = 'cards';
     const p = load();
     p.send({ type: 'tool', call: { toolCallId: 't1', title: 'Write acp.js',
         kind: 'edit', status: 'pending' } });
+    assert(p.doc.getElementById('toolactivity').textContent === '1 tool active',
+        'active tool summarized above the transcript');
     let card = p.log.querySelector('.card.tool');
     assert(card, 'tool card created');
     assert(card.querySelector('.title').textContent.indexOf('Write acp.js') === 0,
@@ -97,6 +116,8 @@ function cards() {
         'the update reuses the same card');
     assert(card.querySelector('pre.del') && card.querySelector('pre.add'),
         'diff rendered as removed + added');
+    assert(p.doc.getElementById('toolactivity').textContent === '1 done',
+        'completed tool summarized');
     card.querySelector('.locs .flink').click();
     assert(p.posted.some((x) => x.type === 'open' && x.line === 7),
         'tool locations open in the editor');
@@ -111,12 +132,16 @@ function cards() {
     const plan = p.log.querySelector('.card.plan');
     assert(plan, 'plan card rendered');
     assert(plan.querySelector('.sub').textContent === '1/2', 'plan progress counted');
+    assert(p.doc.getElementById('planactivity').textContent === 'plan 1/2',
+        'plan progress stays visible while its card can collapse');
 
     p.send({ type: 'permission', pid: 9, title: 'Write file',
         options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
             { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] });
     const perm = p.log.querySelector('.card.perm');
     assert(perm, 'permission card rendered');
+    assert(p.doc.getElementById('permitactivity').textContent === 'permission needed',
+        'permission need is visible outside its card');
     const buttons = perm.querySelectorAll('button');
     assert(buttons.length === 3, 'head plus both options are buttons');
     buttons[1].click();
@@ -125,6 +150,8 @@ function cards() {
         'the selected optionId goes back to the extension');
     p.send({ type: 'permission_done', pid: 9, answer: 'Allow once' });
     assert(perm.classList.contains('answered'), 'answered permission is marked');
+    assert(p.doc.getElementById('permitactivity').classList.contains('hidden'),
+        'permission summary clears after an answer');
     ok('tool cards, diffs, plan progress, and permission round-trip');
 }
 
@@ -169,15 +196,88 @@ function composer() {
     ok('slash palette, arguments, history, and unknown commands');
 }
 
-/* ---- session state: task chip, running, reset ---- */
+/* ---- ACP-native session state and controls ---- */
+function agentState() {
+    step = 'agent-state';
+    const p = load();
+    p.send({ type: 'session', live: true });
+    p.send({ type: 'connection', agent: { name: 'codex-acp' },
+        mcpServers: ['codify'] });
+    assert(p.doc.getElementById('mcpstate').textContent === 'MCP · codify',
+        'the injected MCP server is visible');
+    assert(p.doc.getElementById('sessiontitle').textContent === 'codex-acp',
+        'the connected ACP adapter is visible');
+
+    p.send({ type: 'mode', currentModeId: 'plan', modes: [
+        { id: 'agent', name: 'Agent' }, { id: 'plan', name: 'Plan' }] });
+    const mode = p.doc.getElementById('mode');
+    assert(mode.value === 'plan', 'current ACP mode shown');
+    mode.value = 'agent'; mode.dispatch('change');
+    assert(p.posted.some((x) => x.type === 'set_mode' && x.modeId === 'agent'),
+        'mode changes round-trip to the extension');
+
+    p.send({ type: 'config', options: [
+        { id: 'model', name: 'Model', type: 'select', currentValue: 'deep',
+            options: [{ value: 'fast', name: 'Fast' }, { value: 'deep', name: 'Deep' }] },
+        { id: 'thinking', name: 'Thinking', type: 'boolean', currentValue: true },
+    ] });
+    const selectors = p.doc.getElementById('configs').querySelectorAll('select');
+    assert(selectors.length === 2, 'select and boolean ACP config controls rendered');
+    selectors[1].value = 'false'; selectors[1].dispatch('change');
+    assert(p.posted.some((x) => x.type === 'set_config' &&
+        x.configId === 'thinking' && x.value === false),
+    'config changes round-trip with their value type');
+
+    p.send({ type: 'session_info', title: 'Refine agent panel' });
+    p.send({ type: 'usage', used: 8000, size: 10000 });
+    assert(p.doc.getElementById('sessiontitle').textContent === 'Refine agent panel',
+        'session title updates in place');
+    assert(p.doc.getElementById('usage').textContent === 'context 80%',
+        'context usage is understandable');
+
+    p.send({ type: 'agent_commands', commands: [
+        { name: 'init', description: 'Initialize the workspace' },
+        { name: 'review', description: 'Agent review' },
+    ] });
+    p.input.value = '/init'; p.input.dispatch('input');
+    p.input.dispatch('keydown', { key: 'Enter', shiftKey: false });
+    assert(p.posted.some((x) => x.type === 'agent_command' && x.name === 'init'),
+        'an advertised agent command can be run from the composer');
+    p.input.value = '/agent-review focus security';
+    p.input.dispatch('keydown', { key: 'Enter', shiftKey: false });
+    assert(p.posted.some((x) => x.type === 'agent_command' && x.name === 'review' &&
+        x.input === 'focus security'),
+    'agent command collisions are namespaced instead of shadowing Codify commands');
+    ok('ACP commands, MCP state, modes, config, title, and usage');
+}
+
+/* ---- session state: task, build, history, running, queue, cancel, reset ---- */
 function state() {
     step = 'state';
     const p = load();
     assert(p.log.querySelector('.welcome'), 'welcome shown when idle');
-    p.send({ type: 'init', idle: true, driver: 'codex', drivers: ['codex', 'claude'],
+    p.send({ type: 'init', idle: true, version: '0.9.0',
+        driver: 'codex', drivers: ['codex', 'claude'],
         feature: 'codify-v05 · parallel' });
     assert(p.doc.getElementById('ctxfeature').textContent === 'codify-v05 · parallel',
         'feature and mode shown in the context bar');
+    assert(p.doc.getElementById('buildversion').textContent === 'v0.9.0',
+        'the running extension version is visible');
+
+    p.send({ type: 'sessions', sessions: [
+        { sessionId: 'sess_old', title: 'Earlier work', driver: 'claude',
+            updatedAt: '2026-08-28T12:00:00Z' },
+    ] });
+    const history = p.doc.getElementById('history');
+    assert(history.children.length === 2 && /Earlier work/.test(history.textContent),
+        'past-session selector shows workspace history');
+    history.value = 'sess_old'; history.selectedIndex = 1; history.dispatch('change');
+    assert(p.posted.some((x) => x.type === 'load_session' &&
+        x.sessionId === 'sess_old' && x.driver === 'claude'),
+    'selecting history requests the matching adapter session');
+    p.doc.getElementById('refreshhistory').click();
+    assert(p.posted.some((x) => x.type === 'refresh_sessions'),
+        'history can be refreshed from the adapter');
 
     p.send({ type: 'task', task: { id: '3.2', title: 'Sidebar view', status: 'in_progress' } });
     const chip = p.doc.getElementById('taskchip');
@@ -191,6 +291,11 @@ function state() {
 
     p.send({ type: 'turn', running: true });
     assert(p.doc.body.classList.contains('running'), 'running state toggles the composer');
+    assert(p.doc.getElementById('activitylabel').textContent === 'Agent working',
+        'activity says what the agent is doing');
+    p.send({ type: 'queue', count: 2 });
+    assert(p.doc.getElementById('queueactivity').textContent === '2 queued',
+        'queued follow-ups remain visible');
     p.doc.getElementById('stop').click();
     assert(p.posted.some((x) => x.type === 'cancel'), 'Stop cancels the turn');
     p.send({ type: 'turn', running: false, stopReason: 'cancelled' });
@@ -218,9 +323,22 @@ function handshake() {
     ok('ready handshake');
 }
 
+function responsiveContract() {
+    step = 'responsive';
+    assert(/@media \(max-width: 430px\)/.test(HTML), 'narrow sidebar breakpoint exists');
+    assert(/@media \(min-width: 700px\)/.test(HTML), 'wide editor breakpoint exists');
+    assert(/id="activitybar" role="status"/.test(HTML),
+        'activity summary is announced accessibly');
+    assert(/overflow: hidden/.test(HTML) && /min-width: 0/.test(HTML),
+        'page and flex children guard against horizontal overflow');
+    ok('responsive and accessible layout hooks');
+}
+
 markdown();
 cards();
 composer();
+agentState();
 state();
 handshake();
+responsiveContract();
 console.log('agent panel: all scenarios pass');

@@ -1,0 +1,101 @@
+# codify-v07.5 — an agent-native VS Code conversation surface.
+
+[meta]
+feature = "codify-v07.5"
+intro   = "Make the VS Code Agent view a responsive, transparent ACP client where Codex and Claude Code can use Codify's MCP server naturally and users can follow every turn."
+
+[req.1]
+title = "Natural ACP sessions"
+story = "As a developer, I want Codex and Claude Code sessions to expose their native ACP controls and state so that the editor feels like a first-class client instead of a thin prompt box."
+ac_1  = "WHEN an ACP session starts THE extension SHALL advertise the client capabilities it actually serves and inject the workspace-scoped Codify MCP server into session/new."
+ac_2  = "WHEN the agent reports modes, configuration, commands, session information, or usage THE panel SHALL surface the update and allow supported mode and configuration changes through ACP."
+ac_3  = "WHEN an agent command is advertised THE composer SHALL make it discoverable without shadowing Codify's local slash commands and SHALL send it to the agent as a normal prompt."
+
+[req.2]
+title = "Readable, responsive conversation"
+story = "As a developer, I want streamed work to remain readable at sidebar and editor widths so that I always know what the agent is doing and what needs my attention."
+ac_1  = "WHEN the agent streams Markdown THE panel SHALL render headings, emphasis, links, lists, task lists, tables, quotes, and fenced code safely while preserving one stable message during streaming."
+ac_2  = "WHEN tools, plans, permissions, queued prompts, or turn state change THE panel SHALL present a concise live activity summary plus detailed expandable evidence."
+ac_3  = "WHEN the view becomes narrow or wide THE header, transcript, tool cards, and composer SHALL reflow without clipped controls or horizontal page scrolling."
+
+[req.3]
+title = "Grounded integration"
+story = "As a maintainer, I want the richer client behavior covered by dependency-free tests and accurate docs so that ACP adapter changes do not silently degrade the chat."
+ac_1  = "WHEN the ACP fixture emits every supported session update THE integration tests SHALL prove the extension-to-panel mapping and user control round trips."
+ac_2  = "WHEN the panel renders representative Markdown and activity THE headless DOM tests SHALL prove the visible state, responsive hooks, and command routing."
+ac_3  = "WHEN the feature ships THE extension documentation and changelog SHALL describe the user-visible ACP, MCP, Markdown, and activity behavior."
+
+[req.4]
+title = "Session continuity"
+story = "As a developer, I want to find and reopen earlier agent sessions so that a reload or new chat does not make ongoing work disappear."
+ac_1  = "WHEN the Agent view opens THE panel SHALL offer a past-session selector populated from workspace history and ACP session/list when the adapter supports it."
+ac_2  = "WHEN a past session is selected THE extension SHALL restore it with session/load, or session/resume when full replay is unavailable, while reinjecting the workspace Codify MCP server."
+ac_3  = "WHEN the adapter cannot list or restore sessions THE selector SHALL degrade honestly and preserve locally known metadata without claiming that history was loaded."
+
+[req.5]
+title = "Visible installed build"
+story = "As a developer installing a VSIX, I want to see which Codify build is active so that reload and packaging failures are immediately obvious."
+ac_1  = "WHEN the Agent view initializes THE panel SHALL display the running extension version from its own installed manifest."
+ac_2  = "WHEN the current Codify extension is packaged THE manifest SHALL use the authoritative Marketplace identity SidioraLabs.codify and the VSIX SHALL contain the current ACP controller and panel payloads."
+
+[design]
+overview = "Keep the extension dependency-free. acp.js remains the protocol/session controller, agentpanel.html remains a CSP-strict theme-native webview, and the fake ACP agent plus DOM shim exercise both sides headlessly. ACP owns agent-native commands, modes, configuration, usage, and session metadata; Codify slash commands remain local shortcuts that deliberately feed grounded cg output back into the same agent turn."
+
+[tasks]
+heading = "Implementation Plan: codify-v07.5"
+
+[task.1]
+title   = "Protocol integration"
+section = "ACP and MCP"
+status  = "pending"
+
+[task.1.1]
+title      = "Expose the full ACP session state"
+status     = "done"
+wave       = 1
+symbols    = ["AcpClient", "connectSession", "sessionUpdate", "handleSessionMessage"]
+touches    = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "tests/fixtures/acp/*", "spec/codify-v07.5/*", "spec/workflow.kvx"]
+verify_cmd = "CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "Advertise the supported client capabilities during initialize and keep the cg mcp injection explicit in session/new."
+do_2       = "Map all stable ACP session update variants into panel messages, including command, mode, config, session-info, usage, and user-message updates."
+do_3       = "Round-trip session/set_mode and session/set_config_option from controls in the webview, with inline failure feedback."
+do_4       = "Extend the fake agent and protocol tests so pre-response session updates and interactive state changes cannot regress."
+reqs       = ["1.1", "1.2", "1.3", "3.1"]
+
+[task.2]
+title   = "Conversation experience"
+section = "Responsive chat UI"
+status  = "pending"
+
+[task.2.1]
+title      = "Make Markdown and live work easy to follow"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["sendPrompt", "openExternal"]
+touches    = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "tests/fixtures/acp/panel-test.js", "editors/vscode/README.md", "CHANGELOG.md", "spec/codify-v07.5/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/19_acp.sh && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "Strengthen safe Markdown rendering for streaming task lists, nested content, external links, and code while keeping file links editor-native."
+do_2       = "Add a compact activity summary for tool progress, plan progress, queued prompts, permissions, connection state, and context usage."
+do_3       = "Reflow the context bar, transcript, cards, and composer for narrow sidebars and wider editor panels with accessible labels and reduced-motion support."
+do_4       = "Extend DOM scenarios and document the visible behavior for users and adapter maintainers."
+reqs       = ["2.1", "2.2", "2.3", "3.2", "3.3"]
+
+[task.3]
+title   = "Session continuity and install identity"
+section = "Past sessions"
+status  = "pending"
+
+[task.3.1]
+title      = "Select and restore past ACP sessions"
+status     = "in_progress"
+wave       = 3
+requires   = ["2.1"]
+symbols    = ["connectAgent", "listPastSessions", "restorePastSession"]
+touches    = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "editors/vscode/package.json", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "editors/vscode/LICENSE", "CHANGELOG.md", "tests/fixtures/acp/*", "tests/integration/14_vscode.sh", "spec/codify-v07.5/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/19_acp.sh && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "Persist compact workspace-scoped ACP session metadata and merge it with paginated session/list results without inventing unavailable history."
+do_2       = "Add a past-session selector and refresh action, restoring through session/load or session/resume according to negotiated capabilities."
+do_3       = "Keep cg mcp attached on restored sessions and surface adapter limitations or restore failures inline."
+do_4       = "Show the installed extension version, use the authoritative SidioraLabs publisher identity, rebuild the current version, and prove the VSIX carries the current panel/controller."
+reqs       = ["4.1", "4.2", "4.3", "5.1", "5.2"]

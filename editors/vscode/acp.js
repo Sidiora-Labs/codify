@@ -194,6 +194,11 @@ AcpClient.prototype.initialize = function (clientInfo) {
             clientCapabilities: {
                 fs: { readTextFile: true, writeTextFile: true },
                 terminal: false,
+                /* The panel renders both select and boolean session options.
+                 * Advertising boolean support is what permits an ACP agent to
+                 * include those controls in session/new and later updates. */
+                session: { configOptions: { boolean: {} } },
+                auth: { terminal: false },
             },
             clientInfo: clientInfo ||
                 { name: 'codify', title: 'Codify', version: extensionVersion() },
@@ -227,13 +232,18 @@ function splitCommand(s) {
 /* ---------------- PANEL: everything below needs VS Code ---------------- */
 
 let deps;                    /* {cg, cgJson, refresh, workspaceRoot, startTerminal} */
+let extensionCtx;            /* VS Code ExtensionContext for workspace history */
 const panels = new Map();    /* task id -> editor-panel session */
 let permitSeq = 0;
+const SESSION_HISTORY_KEY = 'codify.acp.sessionHistory.v1';
+const SESSION_HISTORY_MAX = 60;
+let sessionHistory = [];
 
 /* The sidebar chat view — resolved once, lives as long as the window. */
 let agentView = null;        /* vscode.WebviewView */
 let viewSession = null;      /* the session bound to the sidebar view */
 let viewDriver = '';         /* header picker override; '' -> settings */
+let historyProbeStarted = false;
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 
@@ -250,6 +260,50 @@ function adapterCommand(override) {
         ? (config().get('acp.claudeCommand') || 'claude-code-acp')
         : (config().get('acp.codexCommand') || 'codex-acp');
     return { driver, argv: splitCommand(cmd) };
+}
+
+function sessionRecord(row, driver) {
+    if (!row || !row.sessionId) return undefined;
+    return {
+        sessionId: String(row.sessionId),
+        title: row.title == null ? '' : String(row.title),
+        updatedAt: row.updatedAt || new Date().toISOString(),
+        cwd: row.cwd || (deps && deps.workspaceRoot && deps.workspaceRoot()) || '',
+        driver: driver === 'claude' ? 'claude' : 'codex',
+    };
+}
+
+function mergeSessionHistory(rows, driver) {
+    const merged = new Map(sessionHistory.map((r) => [`${r.driver}:${r.sessionId}`, r]));
+    for (const row of rows || []) {
+        const next = sessionRecord(row, row.driver || driver);
+        if (!next) continue;
+        const key = `${next.driver}:${next.sessionId}`;
+        merged.set(key, Object.assign({}, merged.get(key) || {}, next));
+    }
+    sessionHistory = Array.from(merged.values())
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+        .slice(0, SESSION_HISTORY_MAX);
+    if (extensionCtx && extensionCtx.workspaceState) {
+        extensionCtx.workspaceState.update(SESSION_HISTORY_KEY, sessionHistory);
+    }
+    return sessionHistory;
+}
+
+function rememberSession(sess, extra) {
+    if (!sess || !sess.sessionId) return;
+    const info = Object.assign({}, sess.sessionInfo || {}, extra || {}, {
+        sessionId: sess.sessionId, driver: sess.driver,
+        cwd: deps.workspaceRoot(), updatedAt: (extra && extra.updatedAt) ||
+            (sess.sessionInfo && sess.sessionInfo.updatedAt) || new Date().toISOString(),
+    });
+    mergeSessionHistory([info], sess.driver);
+    postView({ type: 'sessions', sessions: sessionHistory });
+}
+
+function mcpServers() {
+    const binary = config().get('binaryPath') || 'cg';
+    return [{ name: 'codify', command: binary, args: ['mcp'], env: [] }];
 }
 
 /* The session's fs bridge: serve workspace files, refuse everything else.
@@ -320,11 +374,17 @@ function panelHtml(webview) {
         .replace(/\$\{nonce\}/g, nonce);
 }
 
-/* One prompt turn. Turns are serialized: input sent while the agent is
- * thinking queues until the turn ends. */
+/* One prompt turn. Turns are serialized, queued input is reported to the
+ * activity bar, localEcho absorbs mirrored user_message_chunk updates, and a
+ * successful turn refreshes the compact workspace session registry. */
 function sendPrompt(sess, text, echo) {
-    if (sess.running) { sess.queue.push({ text, echo }); return; }
+    if (sess.running) {
+        sess.queue.push({ text, echo });
+        panelPost(sess, { type: 'queue', count: sess.queue.length });
+        return;
+    }
     sess.running = true;
+    sess.localEcho = echo || text;
     panelPost(sess, { type: 'chunk', role: 'user',
         text: echo || text, cmd: !!echo });
     panelPost(sess, { type: 'turn', running: true });
@@ -334,18 +394,22 @@ function sendPrompt(sess, text, echo) {
     }).then(
         async (res) => {
             sess.running = false;
+            sess.localEcho = '';
             panelPost(sess, { type: 'turn', running: false,
                 stopReason: (res && res.stopReason) || 'end_turn' });
+            rememberSession(sess);
             deps.refresh();
             const status = await taskStatus(sess.taskId);
             if (status) panelPost(sess, { type: 'task_status', status });
             if (sess.queue.length) {
                 const q = sess.queue.shift();
+                panelPost(sess, { type: 'queue', count: sess.queue.length });
                 sendPrompt(sess, q.text, q.echo);
             }
         },
         (e) => {
             sess.running = false;
+            sess.localEcho = '';
             panelPost(sess, { type: 'turn', running: false, stopReason: 'error' });
             panelPost(sess, { type: 'status', text: e.message });
         });
@@ -388,6 +452,17 @@ function sessionRequest(sess, method, params) {
 function sessionUpdate(sess, params) {
     const u = (params && params.update) || {};
     switch (u.sessionUpdate) {
+    case 'user_message_chunk': {
+        const text = u.content && u.content.type === 'text' ? u.content.text : '';
+        /* Most adapters echo the prompt we already drew locally. Consume that
+         * echo, but retain user chunks received while restoring a session. */
+        if (text && sess.localEcho && sess.localEcho.indexOf(text) === 0) {
+            sess.localEcho = sess.localEcho.slice(text.length);
+        } else if (text) {
+            panelPost(sess, { type: 'chunk', role: 'user', text });
+        }
+        break;
+    }
     case 'agent_message_chunk':
         panelPost(sess, { type: 'chunk', role: 'agent',
             text: u.content && u.content.type === 'text' ? u.content.text : '' });
@@ -403,8 +478,32 @@ function sessionUpdate(sess, params) {
     case 'plan':
         panelPost(sess, { type: 'plan', entries: u.entries || [] });
         break;
+    case 'available_commands_update':
+        sess.commands = Array.isArray(u.availableCommands) ? u.availableCommands : [];
+        panelPost(sess, { type: 'agent_commands', commands: sess.commands });
+        break;
+    case 'current_mode_update':
+        if (sess.modes) sess.modes.currentModeId = u.currentModeId;
+        panelPost(sess, { type: 'mode', currentModeId: u.currentModeId,
+            modes: sess.modes && sess.modes.availableModes });
+        break;
+    case 'config_option_update':
+        sess.configOptions = Array.isArray(u.configOptions) ? u.configOptions : [];
+        panelPost(sess, { type: 'config', options: sess.configOptions });
+        break;
+    case 'session_info_update':
+        sess.sessionInfo = Object.assign({}, sess.sessionInfo || {});
+        if (u.title !== undefined) sess.sessionInfo.title = u.title;
+        if (u.updatedAt !== undefined) sess.sessionInfo.updatedAt = u.updatedAt;
+        panelPost(sess, { type: 'session_info', title: u.title,
+            updatedAt: u.updatedAt });
+        rememberSession(sess, sess.sessionInfo);
+        break;
+    case 'usage_update':
+        panelPost(sess, { type: 'usage', used: u.used, size: u.size, cost: u.cost });
+        break;
     default:
-        break; /* mode/command updates are informational */
+        break; /* unknown variants are forward-compatible */
     }
 }
 
@@ -440,10 +539,11 @@ async function endOfSession(sess, why) {
     deps.refresh();
 }
 
-/* Spawn the adapter and open the ACP session for sess. Throws on any
- * failure; the caller owns cleanup. */
-async function connectSession(sess, driverOverride) {
-    const { argv } = adapterCommand(driverOverride);
+/* Start and initialize one adapter process without assuming whether the next
+ * operation creates, lists, loads, or resumes a session. */
+async function connectAgent(sess, driverOverride) {
+    const { driver, argv } = adapterCommand(driverOverride);
+    sess.driver = driver === 'claude' ? 'claude' : 'codex';
     sess.client = new AcpClient({
         command: argv[0],
         args: argv.slice(1),
@@ -451,7 +551,7 @@ async function connectSession(sess, driverOverride) {
         onNotify: (m, p) => { if (m === 'session/update') sessionUpdate(sess, p); },
         onRequest: (m, p) => sessionRequest(sess, m, p),
         onClose: (reason) => {
-            if (sess.disposed || sess.closing) return;
+            if (sess.disposed || sess.closing || sess.probe) return;
             sess.closing = true;
             panelPost(sess, { type: 'status', text: `agent closed: ${reason}` });
             panelPost(sess, { type: 'turn', running: false, stopReason: 'closed' });
@@ -460,16 +560,42 @@ async function connectSession(sess, driverOverride) {
             }
         },
     });
-    await sess.client.initialize();
-    const binary = config().get('binaryPath') || 'cg';
+    return sess.client.initialize();
+}
+
+/* Apply the common state returned by session/new, session/load, and
+ * session/resume after any replay notifications have already been rendered. */
+function publishConnectedSession(sess, res) {
+    res = res || {};
+    sess.modes = res.modes || sess.modes;
+    sess.configOptions = res.configOptions || sess.configOptions || [];
+    panelPost(sess, { type: 'connection',
+        agent: sess.client.agent && sess.client.agent.agentInfo,
+        mcpServers: ['codify'] });
+    if (sess.modes) panelPost(sess, { type: 'mode',
+        currentModeId: sess.modes.currentModeId,
+        modes: sess.modes.availableModes || [] });
+    if (sess.configOptions.length) {
+        panelPost(sess, { type: 'config', options: sess.configOptions });
+    }
+    if (sess.sessionInfo) {
+        panelPost(sess, { type: 'session_info', title: sess.sessionInfo.title,
+            updatedAt: sess.sessionInfo.updatedAt });
+    }
+    rememberSession(sess);
+}
+
+/* Negotiate the adapter, create a fresh session, and inject Codify's MCP
+ * server. Initial updates may legally arrive before session/new returns. */
+async function connectSession(sess, driverOverride) {
+    await connectAgent(sess, driverOverride);
     const res = await sess.client.request('session/new', {
         cwd: deps.workspaceRoot(),
-        mcpServers: [
-            { name: 'codify', command: binary, args: ['mcp'], env: [] },
-        ],
+        mcpServers: mcpServers(),
     }, 120000);
     sess.sessionId = res && res.sessionId;
     if (!sess.sessionId) throw new Error('agent returned no sessionId');
+    publishConnectedSession(sess, res);
 }
 
 function connectFailureHint(sess, e) {
@@ -508,6 +634,15 @@ async function openLocation(p, line) {
     } catch (e) {
         vscode.window.showWarningMessage(`Codify: cannot open ${p} — ${e.message}`);
     }
+}
+
+/* External Markdown links leave the webview through VS Code so navigation is
+ * explicit and only http(s) targets accepted from agent-authored content. */
+async function openExternal(href) {
+    let target;
+    try { target = new URL(String(href || '')); } catch (_) { return; }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return;
+    await vscode.env.openExternal(vscode.Uri.parse(target.href));
 }
 
 /* cg verbs the chat can run inline. `zero` means the command takes no
@@ -609,12 +744,40 @@ async function pickTaskId(placeHolder) {
     return pick && pick.id;
 }
 
-/* Webview messages any session surface understands. Returns true when
- * handled. */
+/* Webview messages any session surface understands: native ACP controls and
+ * commands, workspace locations, and validated external links. */
 function handleSessionMessage(sess, msg) {
     if (!msg) return false;
     if (msg.type === 'send' && msg.text) {
         sendPrompt(sess, String(msg.text));
+        return true;
+    }
+    if (msg.type === 'agent_command' && msg.name) {
+        const input = String(msg.input || '').trim();
+        const text = `/${String(msg.name)}${input ? ' ' + input : ''}`;
+        sendPrompt(sess, text);
+        return true;
+    }
+    if (msg.type === 'set_mode' && msg.modeId) {
+        sess.client.request('session/set_mode', {
+            sessionId: sess.sessionId, modeId: String(msg.modeId),
+        }, 30000).catch((e) => panelPost(sess,
+            { type: 'status', text: `mode change failed: ${e.message}` }));
+        return true;
+    }
+    if (msg.type === 'set_config' && msg.configId) {
+        const params = { sessionId: sess.sessionId,
+            configId: String(msg.configId), value: msg.value };
+        if (msg.valueType === 'boolean') params.type = 'boolean';
+        sess.client.request('session/set_config_option', params, 30000).then(
+            (res) => {
+                if (res && Array.isArray(res.configOptions)) {
+                    sess.configOptions = res.configOptions;
+                    panelPost(sess, { type: 'config', options: res.configOptions });
+                }
+            },
+            (e) => panelPost(sess,
+                { type: 'status', text: `setting change failed: ${e.message}` }));
         return true;
     }
     if (msg.type === 'cancel') { cancelTurn(sess); return true; }
@@ -632,6 +795,7 @@ function handleSessionMessage(sess, msg) {
         return true;
     }
     if (msg.type === 'open') { openLocation(msg.path, msg.line); return true; }
+    if (msg.type === 'external') { openExternal(msg.href); return true; }
     if (msg.type === 'copy') {
         vscode.env.clipboard.writeText(String(msg.text || ''));
         return true;
@@ -690,12 +854,15 @@ function newSession(webview, extra) {
         taskId: undefined, agent: '', claimed: false, panel: undefined,
         webview, client: undefined, sessionId: undefined,
         running: false, queue: [], permits: new Map(),
+        commands: [], modes: undefined, configOptions: [], sessionInfo: undefined,
+        localEcho: '',
         disposed: false, closing: false, initMsg: undefined,
     }, extra || {});
 }
 
 /* Editor-panel session on a task. The sidebar view is the default surface;
- * editor panels carry additional concurrent task sessions beside it. */
+ * editor panels carry concurrent task sessions beside it and receive the same
+ * visible build identity as the sidebar. */
 async function openAgentPanel(id, agent, promptText, claimed) {
     const { driver } = adapterCommand();
     const task = await taskRow(id);
@@ -715,7 +882,7 @@ async function openAgentPanel(id, agent, promptText, claimed) {
         if (panels.has(id)) endOfSession(sess, 'panel closed');
     });
 
-    sess.initMsg = { type: 'init', idle: false,
+    sess.initMsg = { type: 'init', idle: false, version: extensionVersion(),
         task: { id, title: task.title || '', status: task.status || '' },
         agent, driver, drivers: [driver], feature: id };
     panelPost(sess, sess.initMsg);
@@ -802,6 +969,111 @@ async function focusView() {
         await new Promise((r) => setTimeout(r, 100));
     }
     return !!agentView;
+}
+
+function agentCapabilities(sess) {
+    return (sess && sess.client && sess.client.agent &&
+        sess.client.agent.agentCapabilities) || {};
+}
+
+/* Merge the durable workspace registry with the adapter's authoritative,
+ * paginated session/list surface. A probe never becomes the active chat. */
+async function listPastSessions(quiet) {
+    postView({ type: 'sessions', sessions: sessionHistory, loading: true });
+    let sess = viewSession && viewSession.client ? viewSession : undefined;
+    let probe;
+    try {
+        if (!sess) {
+            probe = newSession(agentView.webview, {
+                agent: `vscode-history-${++permitSeq}`, probe: true,
+            });
+            sess = probe;
+            await connectAgent(sess, viewDriver);
+        }
+        const caps = agentCapabilities(sess);
+        const lifecycle = caps.sessionCapabilities || {};
+        if (!lifecycle.list) {
+            postView({ type: 'sessions', sessions: sessionHistory,
+                note: sessionHistory.length ?
+                    'Adapter cannot list more sessions; showing saved workspace history.' :
+                    'This adapter does not expose session history.' });
+            return sessionHistory;
+        }
+        const found = [];
+        let cursor;
+        for (let page = 0; page < 5; page++) {
+            const res = await sess.client.request('session/list', {
+                cwd: deps.workspaceRoot(), cursor: cursor || null,
+            }, 30000);
+            for (const row of (res && res.sessions) || []) {
+                found.push(Object.assign({}, row, { driver: sess.driver }));
+            }
+            cursor = res && res.nextCursor;
+            if (!cursor) break;
+        }
+        mergeSessionHistory(found, sess.driver);
+        postView({ type: 'sessions', sessions: sessionHistory });
+        return sessionHistory;
+    } catch (e) {
+        postView({ type: 'sessions', sessions: sessionHistory,
+            note: `Session history unavailable: ${e.message}` });
+        if (!quiet) postView({ type: 'status', text: `session history: ${e.message}` });
+        return sessionHistory;
+    } finally {
+        if (probe && probe.client) {
+            probe.closing = true;
+            probe.client.stop();
+        }
+    }
+}
+
+/* Restore a selected session with full replay when possible, otherwise use
+ * ACP resume and state clearly that the previous transcript was not replayed. */
+async function restorePastSession(sessionId, driver) {
+    const known = sessionHistory.find((r) => r.sessionId === sessionId &&
+        (!driver || r.driver === driver));
+    if (!known) {
+        postView({ type: 'status', text: 'That past session is no longer available.' });
+        return;
+    }
+    if (viewSession) await resetViewSession();
+    viewDriver = known.driver === 'claude' ? 'claude' : 'codex';
+    postView({ type: 'reset', driver: viewDriver });
+
+    const sess = newSession(agentView.webview, {
+        agent: `vscode-restore-${++permitSeq}`, sessionId: known.sessionId,
+        sessionInfo: { title: known.title, updatedAt: known.updatedAt }, restoring: true,
+    });
+    viewSession = sess;
+    postView({ type: 'status', text: `restoring ${known.title || known.sessionId}…` });
+    postView({ type: 'session', live: true });
+    try {
+        await connectAgent(sess, viewDriver);
+        const caps = agentCapabilities(sess);
+        const lifecycle = caps.sessionCapabilities || {};
+        let res;
+        let replayed = false;
+        const params = { sessionId: known.sessionId, cwd: deps.workspaceRoot(),
+            mcpServers: mcpServers() };
+        if (caps.loadSession) {
+            res = await sess.client.request('session/load', params, 120000);
+            replayed = true;
+        } else if (lifecycle.resume) {
+            res = await sess.client.request('session/resume', params, 120000);
+        } else {
+            throw new Error('adapter can list sessions but cannot load or resume them');
+        }
+        publishConnectedSession(sess, res);
+        postView({ type: 'status', text: '' });
+        postView({ type: 'notice', text: replayed ? 'Past session loaded.' :
+            'Session context resumed; this adapter cannot replay the earlier transcript.' });
+    } catch (e) {
+        sess.closing = true;
+        if (sess.client) sess.client.stop();
+        if (viewSession === sess) viewSession = null;
+        postView({ type: 'session', live: false });
+        postView({ type: 'status', text: `restore failed: ${e.message}` });
+    }
 }
 
 /* Chat in the sidebar: the adapter spawns lazily on the first message —
@@ -894,10 +1166,15 @@ async function postViewInit() {
         const row = await taskRow(sess.taskId);
         task = { id: sess.taskId, title: row.title || '', status: row.status || '' };
     }
-    postView({ type: 'init', idle: viewIdle(),
+    postView({ type: 'init', idle: viewIdle(), version: extensionVersion(),
         driver: currentDriver(), drivers: ['codex', 'claude'],
         feature: b.feature + (b.mode ? ' · ' + b.mode : ''), task });
+    postView({ type: 'sessions', sessions: sessionHistory });
     if (sess && sess.client) postView({ type: 'session', live: true });
+    if (!historyProbeStarted) {
+        historyProbeStarted = true;
+        setTimeout(() => listPastSessions(true), 0);
+    }
 }
 
 /* Slash commands with no session yet: the cg output becomes the opening
@@ -945,9 +1222,16 @@ function registerAgentView(ctx) {
                 if (msg.type === 'ready') { postViewInit(); return; }
                 if (msg.type === 'driver') {
                     viewDriver = msg.value === 'claude' ? 'claude' : 'codex';
+                    listPastSessions(true);
+                    return;
+                }
+                if (msg.type === 'refresh_sessions') { listPastSessions(false); return; }
+                if (msg.type === 'load_session' && msg.sessionId) {
+                    restorePastSession(String(msg.sessionId), String(msg.driver || ''));
                     return;
                 }
                 if (msg.type === 'open') { openLocation(msg.path, msg.line); return; }
+                if (msg.type === 'external') { openExternal(msg.href); return; }
                 if (msg.type === 'copy') {
                     vscode.env.clipboard.writeText(String(msg.text || ''));
                     return;
@@ -964,6 +1248,7 @@ function registerAgentView(ctx) {
             });
             view.onDidDispose(() => {
                 if (agentView === view) agentView = null;
+                historyProbeStarted = false;
                 const sess = viewSession;
                 viewSession = null;
                 if (sess && sess.client) {
@@ -1039,6 +1324,9 @@ function registerAcpCommands(ctx) {
 
 function register(ctx, d) {
     deps = d;
+    extensionCtx = ctx;
+    const stored = ctx.workspaceState && ctx.workspaceState.get(SESSION_HISTORY_KEY, []);
+    sessionHistory = Array.isArray(stored) ? stored.filter((r) => r && r.sessionId) : [];
     registerAcpCommands(ctx);
     registerAgentView(ctx);
     return {
@@ -1050,5 +1338,5 @@ function register(ctx, d) {
 module.exports = {
     AcpClient, splitCommand, register,
     /* exported for the headless fs-bridge tests */
-    workspacePath, readTextFile, writeTextFile,
+    workspacePath, readTextFile, writeTextFile, sessionUpdate,
 };

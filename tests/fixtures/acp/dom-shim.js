@@ -112,12 +112,15 @@ const doc = {
     body: null,
 };
 
-/* the panel's static markup, as ids the script expects */
+/* The panel's static markup, including ACP session, history, and build
+ * controls, as ids the script expects. Selects need their real tag for control
+ * round trips. */
 function bootstrap(ids) {
     doc.body = new El('body');
     doc._byId.clear();
     for (const id of ids) {
-        const e = new El(id === 'input' ? 'textarea' : id === 'driver' ? 'select' : 'div');
+        const e = new El(id === 'input' ? 'textarea' :
+            (id === 'driver' || id === 'mode' || id === 'history') ? 'select' : 'div');
         e.id = id;
         e.value = '';
         doc.body.appendChild(e);

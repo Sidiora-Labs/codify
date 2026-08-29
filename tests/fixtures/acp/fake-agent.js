@@ -21,6 +21,37 @@ let sessionCwd = '';
 let cancelled = false;
 let cancelTimer = null;
 let pendingCancelPrompt = null;
+let currentMode = 'agent';
+let currentModel = 'fake-fast';
+let thinking = true;
+
+function modes() {
+    return { currentModeId: currentMode, availableModes: [
+        { id: 'agent', name: 'Agent', description: 'Work autonomously' },
+        { id: 'plan', name: 'Plan', description: 'Plan before editing' },
+    ] };
+}
+
+function configOptions() {
+    return [
+        { id: 'model', name: 'Model', type: 'select', category: 'model',
+            currentValue: currentModel, options: [
+                { value: 'fake-fast', name: 'Fast' },
+                { value: 'fake-deep', name: 'Deep' },
+            ] },
+        { id: 'thinking', name: 'Thinking', type: 'boolean',
+            category: 'thought_level', currentValue: thinking },
+    ];
+}
+
+function replaySession(sid) {
+    update(sid, { sessionUpdate: 'session_info_update',
+        title: 'Past fake session', updatedAt: '2026-08-28T12:00:00Z' });
+    update(sid, { sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Continue the earlier work.' } });
+    update(sid, { sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Earlier context restored.' } });
+}
 
 function send(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 function reply(id, result) { send({ jsonrpc: '2.0', id, result }); }
@@ -45,6 +76,9 @@ async function promptTurn(id, params) {
     const sid = params.sessionId;
     const text = (params.prompt || [])
         .filter((b) => b.type === 'text').map((b) => b.text).join('');
+
+    update(sid, { sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text } });
 
     if (text.indexOf('cancel-me') >= 0) {
         /* stream slowly until session/cancel arrives */
@@ -118,7 +152,8 @@ function dispatch(msg) {
     if (msg.method === 'initialize') {
         reply(msg.id, {
             protocolVersion: PROTOVER,
-            agentCapabilities: { loadSession: false },
+            agentCapabilities: { loadSession: true,
+                sessionCapabilities: { list: {}, resume: {} } },
             agentInfo: { name: 'fake-acp-agent', version: '1.0.0' },
             authMethods: [],
         });
@@ -130,7 +165,59 @@ function dispatch(msg) {
     }
     if (msg.method === 'session/new') {
         sessionCwd = msg.params.cwd;
-        reply(msg.id, { sessionId: 'sess_fake_1' });
+        /* Real adapters may publish initial state before session/new resolves.
+         * A client must retain these notifications rather than race them. */
+        update('sess_fake_1', { sessionUpdate: 'available_commands_update',
+            availableCommands: [
+                { name: 'init', description: 'Initialize the workspace' },
+                { name: 'review', description: 'Agent-native review command' },
+            ] });
+        update('sess_fake_1', { sessionUpdate: 'current_mode_update',
+            currentModeId: currentMode });
+        update('sess_fake_1', { sessionUpdate: 'config_option_update',
+            configOptions: configOptions() });
+        update('sess_fake_1', { sessionUpdate: 'session_info_update',
+            title: 'Fake ACP session', updatedAt: '2026-08-29T00:00:00Z' });
+        update('sess_fake_1', { sessionUpdate: 'usage_update', used: 1200,
+            size: 12000, cost: { amount: 0.01, currency: 'USD' } });
+        reply(msg.id, { sessionId: 'sess_fake_1', modes: modes(),
+            configOptions: configOptions() });
+        return;
+    }
+    if (msg.method === 'session/list') {
+        reply(msg.id, { sessions: [
+            { sessionId: 'sess_past_1', cwd: msg.params.cwd || sessionCwd,
+                title: 'Past fake session', updatedAt: '2026-08-28T12:00:00Z' },
+        ] });
+        return;
+    }
+    if (msg.method === 'session/load') {
+        sessionCwd = msg.params.cwd;
+        replaySession(msg.params.sessionId);
+        reply(msg.id, { modes: modes(), configOptions: configOptions() });
+        return;
+    }
+    if (msg.method === 'session/resume') {
+        sessionCwd = msg.params.cwd;
+        update(msg.params.sessionId, { sessionUpdate: 'session_info_update',
+            title: 'Resumed fake session', updatedAt: '2026-08-29T10:00:00Z' });
+        reply(msg.id, { modes: modes(), configOptions: configOptions() });
+        return;
+    }
+    if (msg.method === 'session/set_mode') {
+        currentMode = msg.params.modeId;
+        update(msg.params.sessionId, { sessionUpdate: 'current_mode_update',
+            currentModeId: currentMode });
+        reply(msg.id, {});
+        return;
+    }
+    if (msg.method === 'session/set_config_option') {
+        if (msg.params.configId === 'model') currentModel = msg.params.value;
+        if (msg.params.configId === 'thinking') thinking = !!msg.params.value;
+        const next = configOptions();
+        update(msg.params.sessionId, { sessionUpdate: 'config_option_update',
+            configOptions: next });
+        reply(msg.id, { configOptions: next });
         return;
     }
     if (msg.method === 'session/prompt') {
