@@ -17,7 +17,11 @@ static const char *SCHEMA =
     "CREATE TABLE IF NOT EXISTS refs("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
     "  name TEXT NOT NULL, line INTEGER, sym_id INTEGER,"
-    "  qual TEXT, kind TEXT NOT NULL DEFAULT 'call');"
+    "  qual TEXT, kind TEXT NOT NULL DEFAULT 'call',"
+    "  target_id INTEGER DEFAULT NULL,"
+    "  verdict TEXT DEFAULT NULL,"
+    "  conf TEXT DEFAULT NULL,"
+    "  argc INTEGER DEFAULT -1);"
     "CREATE INDEX IF NOT EXISTS idx_ref_name ON refs(name);"
     "CREATE INDEX IF NOT EXISTS idx_ref_file ON refs(file_id);"
     "CREATE INDEX IF NOT EXISTS idx_ref_sym  ON refs(sym_id);"
@@ -55,7 +59,10 @@ static const char *SCHEMA =
     /* per-file import rows; name '*' means a whole-module import */
     "CREATE TABLE IF NOT EXISTS imports("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
-    "  name TEXT NOT NULL, module TEXT NOT NULL, line INTEGER);"
+    "  name TEXT NOT NULL, module TEXT NOT NULL, line INTEGER,"
+    "  system INTEGER NOT NULL DEFAULT 0,"
+    "  target_file_id INTEGER DEFAULT NULL,"
+    "  origin TEXT DEFAULT NULL);"
     "CREATE INDEX IF NOT EXISTS idx_import_file ON imports(file_id);"
     "CREATE INDEX IF NOT EXISTS idx_import_name ON imports(name);"
     /* the intent layer: comment spans bound to the symbol they describe.
@@ -75,7 +82,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "6"
+#define SCHEMA_VERSION "10"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */

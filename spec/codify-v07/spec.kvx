@@ -1,0 +1,221 @@
+# Codify v0.7 — the resolution layer.
+
+[meta]
+feature = "codify-v07"
+intro   = "Codify's graph has never resolved a call. refs.sym_id is the enclosing caller, not the target; the callee is matched at query time by string equality on the name, and resolve_best picks a winner from the same-named candidates even when nothing distinguishes them. Resolve references at index time instead — against imports, visibility, and the declared dependency manifests — and store the verdict beside the edge. Two things fall out of one column. Impact and context traverse the edge that exists rather than every symbol sharing a name, and every name the repository cannot account for becomes visible. An agent that calls an API it invented, imports a package that is in no manifest, or lands one token off a real symbol writes a name nothing accounts for. That is the signal. The engineering is entirely in refusing to raise it anywhere else."
+
+measured = "Baseline on this repository at spec time: 155 files, 914 symbols, 8283 call references. 3897 of them — 47 percent — match no symbol in the graph, and essentially none are errors: free (601), strcmp (329), snprintf (275), printf (219), fprintf (154), the sqlite3_* family, and the JavaScript builtins push, map, join, require, Error. A check that reads unresolved as wrong therefore opens at 3897 false positives and zero true ones, which is why the external surface — builtin tables, manifest-backed imports, system headers — is the feature rather than a refinement of it."
+
+measured_ambiguity = "Ambiguity is the smaller and more tractable half: only 51 names carry more than one definition, covering 340 references, 4 percent of the total. The worst are parser artefacts rather than real collisions, which is why precision precedes resolution: `struct stat st;` — a variable declaration — is recorded as a struct definition named stat nineteen times, and `ok` carries four definitions across two JavaScript fixtures, a test macro, and an arrow function, absorbing 128 references. Resolution amplifies a parse error into both a wrong edge and a wrong finding."
+
+measured_hygiene = "163 of 782 functions — 21 percent — have no inbound reference, and 0 of 7 named imports are unused. The first number is why the hygiene tier ships delta-only: as a full-repository default it is a standing backlog nobody reads. The second is a cheap true-negative baseline for the unused-import check."
+
+scope = "Four languages resolve: C and C++, TypeScript and JavaScript, Python, Go. The remaining fifteen index and carry verdicts as before and raise no findings, because a finding from a parser that cannot resolve is noise wearing the costume of rigour."
+
+[req.1]
+title = "Definition sites"
+story = "As the graph, I want only real definitions recorded so that resolution does not amplify a parse error into a wrong edge and a wrong finding."
+ac_1  = "WHEN a line uses a type rather than defining it THE indexer SHALL NOT record a definition."
+ac_2  = "WHEN a C or C++ aggregate is defined THE definition SHALL be recorded once, at the line carrying its body or its typedef name."
+ac_3  = "WHEN a translation unit includes a system header THE include SHALL be recorded as an import carrying the header name, so that the names the header provides can be accounted for."
+ac_4  = "WHEN a prototype and its definition both appear THE symbol SHALL be recorded once, so that the resolver is not offered a choice that has no meaning."
+ac_5  = "WHEN the precision changes land THE recorded symbol count SHALL fall toward the hand-counted truth for the fixture tree and no reference resolvable before SHALL become unresolvable."
+
+[req.2]
+title = "Resolution at index time"
+story = "As an agent, I want impact and context to follow the edge that exists rather than every symbol sharing a name so that retrieval stops widening on common identifiers."
+ac_1  = "WHEN a file is indexed THE indexer SHALL resolve each call reference to at most one target symbol and SHALL store that target beside the reference."
+ac_2  = "WHEN several definitions share a name THE resolver SHALL decide by visibility and import evidence — same file, then a name this file explicitly imports, then the same package or directory, then a unique definition repository-wide — and SHALL record which rule decided."
+ac_3  = "WHEN no rule decides between candidates THE reference SHALL be left unresolved rather than assigned a guess."
+ac_4  = "WHEN callers, callees, impact, and test-impact run THE traversal SHALL follow stored targets and SHALL NOT fall back to name equality for a reference that resolved."
+ac_5  = "WHEN impact runs on a name carrying several definitions THE result SHALL contain only the callers of the definition asked for."
+ac_6  = "WHEN resolution runs over this repository THE full index time SHALL stay within 10 percent of the pre-resolution baseline and SHALL add no link-time dependency."
+
+[req.3]
+title = "Accounting for the outside"
+story = "As a maintainer, I want every name the repository legitimately uses accounted for so that whatever remains is worth reading."
+ac_1  = "WHEN a name is a builtin of its language THE reference SHALL be recorded external and SHALL never become a finding."
+ac_2  = "WHEN an import names a module declared in a dependency manifest THE import SHALL be recorded external and the names it brings into the file SHALL be accounted for."
+ac_3  = "WHEN an import names a path inside the repository THE import SHALL resolve to that file."
+ac_4  = "WHEN a member call's receiver has no known origin THE reference SHALL be recorded external and never unknown, because an unprovable name is not evidence."
+ac_5  = "WHEN a repository declares no manifest for a language THE references in that language SHALL be accounted external rather than reported."
+
+[req.4]
+title = "Grounding"
+story = "As a reviewer of agent work, I want names nothing accounts for surfaced so that an invented API is caught before it is committed."
+ac_1  = "WHEN a call resolves to no internal symbol and nothing external accounts for it THE reference SHALL be reported as ungrounded."
+ac_2  = "WHEN an import names a module that is neither a repository path nor declared in any manifest THE import SHALL be reported, and this SHALL be the highest-confidence finding the tool raises."
+ac_3  = "WHEN an ungrounded name is within typo distance of an existing symbol THE finding SHALL name that symbol as the likely intent."
+ac_4  = "WHEN a file's share of accounted references falls materially below the median for its language THE file SHALL raise no grounding finding and SHALL say why, because the parser is failing rather than the code."
+ac_5  = "WHEN a language is outside the resolving set THE references in it SHALL carry verdicts and SHALL raise no findings."
+
+[req.5]
+title = "Contract"
+story = "As an agent, I want calls checked against the shape of what they call so that a right name with the wrong arguments does not read as correct."
+ac_1  = "WHEN a call resolves to an internal definition and passes more arguments than that definition can accept THE call SHALL be reported."
+ac_2  = "WHEN a definition takes variadic, defaulted, or optional parameters THE arity check SHALL widen to the widest form it accepts and SHALL NOT report."
+ac_3  = "WHEN a call resolves to a symbol that is not callable THE call SHALL be reported as a kind mismatch."
+ac_4  = "WHEN a route declares a handler that resolves to no symbol THE route SHALL be reported."
+ac_5  = "WHEN the argument text at a call site cannot be counted with confidence THE call SHALL raise nothing."
+
+[req.6]
+title = "Hygiene"
+story = "As a reviewer, I want the code a change stranded so that unused work is caught where it is written rather than accumulating as a backlog."
+ac_1  = "WHEN work is uncommitted THE hygiene findings SHALL cover only what that work introduced, measured against the last snapshot."
+ac_2  = "WHEN a symbol is an entry point, an export, a route handler, a test, or named by a dispatch table THE symbol SHALL NOT be reported as unused."
+ac_3  = "WHEN an imported name is referenced nowhere in its file THE import SHALL be reported."
+ac_4  = "WHEN a full-repository sweep is asked for explicitly THE same findings SHALL be produced over the whole tree, ranked, with an explicit count of whatever the cap elided."
+ac_5  = "WHEN a symbol is reachable only through dynamic dispatch THE limit SHALL be documented rather than worked around."
+
+[req.7]
+title = "Surface"
+story = "As an agent, I want the check where I already work so that grounding is part of the loop rather than a command to remember."
+ac_1  = "WHEN cg guard runs over uncommitted work THE grounding, contract, and hygiene findings for those paths SHALL be reported."
+ac_2  = "WHEN a finding is reported THE default SHALL be a warning and blocking SHALL be opt-in, per the warn-dont-block rule."
+ac_3  = "WHEN cg check runs THE finding counts SHALL appear in its summary."
+ac_4  = "WHEN a file is open in an editor THE language server SHALL publish grounding and contract findings as diagnostics at the offending line."
+ac_5  = "WHEN an agent works over MCP THE same findings SHALL be available as a tool so that it can check its own work before committing."
+ac_6  = "WHEN cg review runs THE findings the change introduced SHALL be part of its report."
+
+[tasks]
+
+[task.1]
+title = "Precision"
+
+[task.1.1]
+title      = "Definition sites, not use sites"
+status     = "done"
+wave       = 1
+symbols    = ["lang_parse", "imp_inc"]
+touches    = ["src/lang.c", "src/cg.h", "tests/unit/test_lang.c", "tests/integration/15_accuracy.sh"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "The C and C++ aggregate patterns match a use as readily as a definition, which is how `struct stat st;` becomes a definition of stat nineteen times in this tree. Require a body brace, a typedef name, or a forward declaration's semicolon directly after the tag."
+do_2       = "imp_inc keeps local includes only. Record system includes too, with the header as the module and a marker saying it is a system header — the accounting in 2.2 needs them to explain printf and sqlite3_step."
+do_3       = "The cfam_protos path already knows a prototype from a definition. Collapse the pair into one symbol so the resolver is never offered a choice with no meaning behind it."
+do_4       = "Unit tests for use-versus-definition across struct, union, enum, and typedef; 15_accuracy asserts the fixture tree's symbol count against a hand count."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5"]
+
+[task.2]
+title = "Resolution"
+
+[task.2.1]
+title      = "Import resolution and the manifest surface"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["resolve_imports", "manifest_load"]
+touches    = ["src/resolve.c", "src/db.c", "src/scan.c", "src/cg.h", "tests/integration/21_grounding.sh"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/21_grounding.sh"
+do_1       = "New src/resolve.c; the Makefile globs src/*.c, so there is no build change. Everything here runs after the parallel parse, over the database, single-threaded."
+do_2       = "imports gains target_file_id and origin — repo, manifest, system, unknown. Resolve module strings per language: relative and rooted paths for TS and JS, package paths for Python, paths against the module line of go.mod for Go, quoted includes for C."
+do_3       = "Manifest readers for package.json dependencies, go.mod require blocks, Cargo.toml dependencies, pyproject.toml, and requirements.txt. json.c already reads objects; the rest are line-shaped and small."
+do_4       = "A module matching no repository path and no manifest entry is origin unknown. This is the strongest signal the tool has and the whole input to req 4.2."
+do_5       = "Schema version bump. cg_schema_upgrade already drops and rebuilds the derived tables, so the next sync repopulates and memories, history, and leases survive."
+reqs       = ["3.2", "3.3", "3.5"]
+
+[task.2.2]
+title      = "The verdict column and the builtin surface"
+status     = "done"
+wave       = 3
+requires   = ["2.1"]
+symbols    = ["resolve_refs", "builtin_known"]
+touches    = ["src/resolve.c", "src/db.c", "src/scan.c", "src/cg.h", "tests/integration/21_grounding.sh", "tests/integration/15_accuracy.sh"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/21_grounding.sh && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "refs gains target_id, verdict — internal, external, unknown — and conf, the rule that decided. A wrong edge should be diagnosable rather than mysterious."
+do_2       = "Resolve in tiers: same file, then a name this file explicitly imports, then the same directory or package, then a unique definition repository-wide. No tier fires, no target. This is what replaces resolve_best's always-pick-a-winner behaviour."
+do_3       = "Builtin tables per resolving language, static const in the binary: C and POSIX gated on the headers actually included, node and browser globals, Python builtins, Go stdlib package members. Sized by measured frequency, not by completeness."
+do_4       = "Member calls already carry qual. Bind the receiver to an import or a visible local construction where that is provable; where it is not, the verdict is external."
+do_5       = "Record the resolved, external, and unknown share per language into meta — the calibration in 3.1 reads it, and it is how the ten percent index-time budget is proven."
+reqs       = ["2.1", "2.2", "2.3", "2.6", "3.1", "3.4"]
+
+[task.2.3]
+title      = "Retrieval on resolved edges"
+status     = "done"
+wave       = 4
+requires   = ["2.2"]
+symbols    = ["callers_of", "callees_of", "cmd_impact"]
+touches    = ["src/graph.c", "src/cg.h", "tests/integration/15_accuracy.sh", "tests/integration/16_retrieval.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/15_accuracy.sh && CG=$PWD/cg tests/integration/16_retrieval.sh"
+do_1       = "callers_of, callees_of, cmd_impact, and cmd_test_impact traverse refs.target_id. Name equality survives only for references that did not resolve."
+do_2       = "resolve_best and its RESOLVE_MAX_DEFS bail-out come out: the work happens once at index time instead of per query on every common name."
+do_3       = "Soft edges from v0.6 keep their own path and stay labelled soft. A soft edge never overwrites a resolved call."
+do_4       = "15_accuracy asserts that impact on a multiply-defined name returns only the callers of the definition asked for."
+reqs       = ["2.4", "2.5"]
+
+[task.3]
+title = "Findings"
+
+[task.3.1]
+title      = "Grounding findings, calibration, and near-miss"
+status     = "done"
+wave       = 4
+requires   = ["2.2"]
+symbols    = ["ground_findings", "near_miss", "file_calibrated"]
+touches    = ["src/resolve.c", "src/govern.c", "src/cg.h", "tests/integration/21_grounding.sh", "tests/fixtures/grounding/*"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/21_grounding.sh"
+do_1       = "A finding is derived from the verdict columns at query time and never stored — the rule anchor staleness already follows."
+do_2       = "Ungrounded call: verdict unknown, in a resolving language, in a file that passes calibration. Ungrounded import: origin unknown."
+do_3       = "Near-miss queries symbol_fts, which is already trigram, for the ungrounded name and offers the closest symbol when the distance reads as a typo rather than a different word."
+do_4       = "Calibration compares a file's accounted share against the median for its language across the repository. Below the floor the file reports nothing and states that the parser, not the code, is the reason."
+do_5       = "21_grounding fixture tree carries an invented API, an invented import, a near-miss, and a file the parser handles badly. The last one must stay silent, and that assertion is the point of the test."
+reqs       = ["4.1", "4.2", "4.3", "4.4", "4.5"]
+
+[task.3.2]
+title      = "Contract findings: arity, kind, and route handlers"
+status     = "done"
+wave       = 4
+requires   = ["2.2"]
+symbols    = ["call_arity", "contract_findings"]
+touches    = ["src/lang.c", "src/resolve.c", "src/db.c", "src/cg.h", "tests/unit/test_lang.c", "tests/integration/21_grounding.sh"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/21_grounding.sh"
+do_1       = "The parser records the argument count at a call site and whether it could count with confidence. Nested calls, commas inside strings, and line continuations are the cases that must abstain rather than guess."
+do_2       = "Definitions record their parameter count and whether the tail is variadic, defaulted, or optional. The check reports only a call exceeding the widest form the definition accepts."
+do_3       = "Kind mismatch: a call whose target resolves to a struct, type, or enum rather than to something callable."
+do_4       = "Route handlers resolve to symbols. routes.handler is a bare string today, so a handler naming nothing is currently invisible."
+reqs       = ["5.1", "5.2", "5.3", "5.4", "5.5"]
+
+[task.3.3]
+title      = "Hygiene, delta by default"
+status     = "done"
+wave       = 4
+requires   = ["2.2"]
+symbols    = ["hygiene_findings", "is_entrypoint"]
+touches    = ["src/resolve.c", "src/govern.c", "src/vcs.c", "src/cg.h", "tests/integration/21_grounding.sh"]
+verify_cmd = "make && CG=$PWD/cg tests/integration/21_grounding.sh && CG=$PWD/cg tests/integration/10_lifecycle.sh"
+do_1       = "Delta is the default: findings restricted to the symbols and imports the uncommitted work introduced, against the last snapshot. vcs_changed_paths already computes the changed set."
+do_2       = "Entry-point exclusions — main, exports, route handlers, test files, and names appearing as string literals in a dispatch table. Codify's own main.c dispatches on strcmp, so without the last rule every command handler in this repository reads as dead."
+do_3       = "Unused import: an imported name with no reference in its file. Zero here today, which makes it a cheap true-negative to hold onto."
+do_4       = "--all sweeps the tree, ranked, stating what the cap elided. 163 of 782 functions here have no inbound reference, which is the whole reason this is not the default."
+do_5       = "Document the dynamic-dispatch floor instead of special-casing around it."
+reqs       = ["6.1", "6.2", "6.3", "6.4", "6.5"]
+
+[task.4]
+title = "Surface"
+
+[task.4.1]
+title      = "guard, check, review, LSP, and MCP"
+status     = "done"
+wave       = 5
+requires   = ["3.1", "3.2", "3.3"]
+symbols    = ["cmd_guard", "cmd_check", "cmd_review", "lsp_diagnostics"]
+touches    = ["src/govern.c", "src/lsp.c", "src/mcp.c", "src/main.c", "src/cg.h", "tests/integration/13_lsp.sh", "tests/integration/04_mcp.sh", "tests/integration/10_lifecycle.sh"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/13_lsp.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "cg guard reports findings for the paths it already walks, beside the stale anchors it already reports. Warnings by default; --strict is what gates."
+do_2       = "cg check adds the finding counts to its summary, in the shape the stale anchor count already uses."
+do_3       = "lsp_diagnostics publishes grounding and contract findings at the offending line, next to the kvx and scope-drift diagnostics already there."
+do_4       = "An MCP tool, so the agent that wrote the code can check it before committing. This is the loop the feature exists for."
+do_5       = "cg review includes the findings the change introduced."
+reqs       = ["7.1", "7.2", "7.3", "7.4", "7.5", "7.6"]
+
+[task.4.2]
+title      = "The convention and the docs"
+status     = "done"
+wave       = 6
+requires   = ["2.3", "4.1"]
+touches    = ["README.md", "CHANGELOG.md", "docs/*", "spec/workflow.kvx", "AGENTS.md", "CLAUDE.md"]
+verify_cmd = "make && make test && CG=$PWD/cg tests/integration/12_authoring.sh"
+do_1       = "README section on the verdict model, and on why external is the load-bearing state rather than a footnote."
+do_2       = "workflow.kvx gains the check in the loop beside cg review at step 6; regenerate AGENTS.md and CLAUDE.md through specgen rather than editing them."
+do_3       = "CHANGELOG entry for 0.7.0."
+do_4       = "State the limits plainly: dynamic dispatch, untyped receivers, and the fifteen languages that carry verdicts and raise nothing."
+reqs       = ["6.5", "7.2"]

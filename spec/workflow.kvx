@@ -2,7 +2,7 @@
 
 [meta]
 name            = "Codify Workflow"
-active_feature  = "codify-v06"
+active_feature  = "codify-v07"
 source_of_truth = "spec/ (kvx). Generated files are pointers — regenerate, never hand-edit."
 
 [mode]
@@ -12,8 +12,8 @@ name = "parallel"
 max_in_progress = 8
 
 [agents]
-driver = "codex"
-max    = 3
+driver = "claude"
+max    = 10
 ttl    = 3600
 
 [principle]
@@ -30,7 +30,7 @@ step_2 = "cg spec next — take the lowest-wave eligible task."
 step_3 = "cg spec start <id> — claim it."
 step_4 = "cg survey <area> for the wide picture, then cg context <area> — the code you need in one call."
 step_5 = "Implement. Anchor what a reader could not derive. cg remember any decision worth keeping."
-step_6 = "cg review — the change against its criteria; cg anchors --stale for docs your edits outdated."
+step_6 = "cg review — the change against its criteria; cg guard for grounding, contract, and hygiene findings; cg anchors --stale for docs your edits outdated."
 step_7 = "cg commit -m <msg> — snapshot, auto-tagged with the task."
 step_8 = "cg spec done <id> — qualification runs; done means proven."
 

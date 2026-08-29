@@ -1,0 +1,11 @@
+{
+  "name": "grounding-test",
+  "version": "1.0.0",
+  "dependencies": {
+    "express": "^4.19.0",
+    "@scope/utils": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  }
+}

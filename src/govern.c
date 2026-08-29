@@ -221,9 +221,37 @@ int cmd_check(Cg *cg, bool json, bool strict)
         sb_puts(&rep, "  ok    anchors current\n");
     }
 
+    /* grounding, contract, and hygiene finding counts */
+    int nfindings = 0;
+    {
+        char **paths = NULL;
+        int np = vcs_changed_paths(cg, NULL, &paths);
+        for (int i = 0; i < np; i++) {
+            GroundFinding *gf = NULL;
+            nfindings += ground_findings(cg, paths[i], &gf);
+            ground_findings_free(gf, 0);
+            ContractFinding *cf = NULL;
+            nfindings += contract_findings(cg, paths[i], &cf);
+            contract_findings_free(cf, 0);
+            HygieneFinding *hf = NULL;
+            nfindings += hygiene_findings(cg, paths[i], &hf);
+            hygiene_findings_free(hf, 0);
+            free(paths[i]);
+        }
+        free(paths);
+    }
+    if (nfindings) {
+        warnings++;
+        sb_printf(&rep, "  warn  %d finding(s) — grounding, contract, or hygiene "
+                  "(cg guard for details)\n", nfindings);
+    } else {
+        sb_puts(&rep, "  ok    no grounding/contract/hygiene findings\n");
+    }
+
     if (json) {
         printf("{\"failures\":%d,\"warnings\":%d,\"stale_anchors\":%d,"
-               "\"report\":", failures, warnings, stale);
+               "\"findings\":%d,\"report\":", failures, warnings, stale,
+               nfindings);
         StrBuf j; sb_init(&j);
         sb_json_str(&j, rep.p ? rep.p : "");
         fputs(j.p, stdout);
@@ -522,6 +550,42 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
                gs.n);
         fputs(gs.txt.p, stdout);
     }
+    /* grounding, contract, and hygiene findings for the changed paths */
+    int nfindings = 0;
+    for (int i = 0; i < npath; i++) {
+        const char *rel = pathv[i];
+        size_t rl2 = strlen(cg->root);
+        if (strncmp(rel, cg->root, rl2) == 0 && rel[rl2] == '/') rel += rl2 + 1;
+        GroundFinding *gf = NULL;
+        int ng = ground_findings(cg, rel, &gf);
+        for (int g = 0; g < ng; g++) {
+            nfindings++;
+            if (!json)
+                printf("  warn  %s:%d: %s\n", gf[g].path, gf[g].line,
+                       gf[g].detail);
+        }
+        ground_findings_free(gf, ng);
+        ContractFinding *cf = NULL;
+        int nc = contract_findings(cg, rel, &cf);
+        for (int c = 0; c < nc; c++) {
+            nfindings++;
+            if (!json)
+                printf("  warn  %s:%d: %s\n", cf[c].path, cf[c].line,
+                       cf[c].detail);
+        }
+        contract_findings_free(cf, nc);
+        HygieneFinding *hf = NULL;
+        int nh = hygiene_findings(cg, rel, &hf);
+        for (int h = 0; h < nh; h++) {
+            nfindings++;
+            if (!json)
+                printf("  warn  %s:%d: %s\n", hf[h].path, hf[h].line,
+                       hf[h].detail);
+        }
+        hygiene_findings_free(hf, nh);
+    }
+    if (!json && nfindings)
+        printf("guard: %d finding(s) (advisory)\n", nfindings);
     sb_free(&gs.txt);
     sb_free(&gs.js);
     sb_free(&b);
@@ -628,13 +692,48 @@ int cmd_review(Cg *cg, bool json)
         sqlite3_finalize(st);
     }
 
+    /* findings the change introduced */
+    int nfindings = 0;
+    StrBuf ftxt; sb_init(&ftxt);
+    for (int i = 0; i < np; i++) {
+        GroundFinding *gf = NULL;
+        int ng = ground_findings(cg, paths[i], &gf);
+        for (int g = 0; g < ng; g++) {
+            nfindings++;
+            sb_printf(&ftxt, "  %s:%d: %s\n", gf[g].path, gf[g].line,
+                      gf[g].detail);
+        }
+        ground_findings_free(gf, ng);
+        ContractFinding *cf = NULL;
+        int nc = contract_findings(cg, paths[i], &cf);
+        for (int c = 0; c < nc; c++) {
+            nfindings++;
+            sb_printf(&ftxt, "  %s:%d: %s\n", cf[c].path, cf[c].line,
+                      cf[c].detail);
+        }
+        contract_findings_free(cf, nc);
+        HygieneFinding *hf = NULL;
+        int nh = hygiene_findings(cg, paths[i], &hf);
+        for (int h = 0; h < nh; h++) {
+            nfindings++;
+            sb_printf(&ftxt, "  %s:%d: %s\n", hf[h].path, hf[h].line,
+                      hf[h].detail);
+        }
+        hygiene_findings_free(hf, nh);
+    }
+
     if (json) {
-        sb_printf(&b, "],\"external_caller_count\":%d}\n", nrisk);
+        sb_printf(&b, "],\"external_caller_count\":%d,\"findings\":%d}\n",
+                  nrisk, nfindings);
     } else {
         if (!nsym) sb_puts(&b, "  (none)\n");
         if (nrisk) {
             sb_puts(&b, "\nat risk:\n");
             sb_puts(&b, risk.p);
+        }
+        if (nfindings) {
+            sb_printf(&b, "\nfindings (%d):\n", nfindings);
+            sb_puts(&b, ftxt.p);
         }
         if (task) {
             char *acs = json_get_raw(task, "acceptance_criteria");
@@ -652,6 +751,7 @@ int cmd_review(Cg *cg, bool json)
             }
         }
     }
+    sb_free(&ftxt);
     fputs(b.p, stdout);
     sb_free(&b);
     sb_free(&risk);

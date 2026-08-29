@@ -243,6 +243,22 @@ void lsp_diagnostics(Cg *cg, const char *abs, StrBuf *out) {
             free(tag);
         }
     }
+    /* grounding and contract findings for the open file */
+    if (rel) {
+        GroundFinding *gf = NULL;
+        int ng = ground_findings(cg, rel, &gf);
+        for (int g = 0; g < ng; g++)
+            diag_add(out, &n, gf[g].line > 0 ? gf[g].line - 1 : 0, 2,
+                     "ungrounded", gf[g].detail);
+        ground_findings_free(gf, ng);
+
+        ContractFinding *cf = NULL;
+        int nc = contract_findings(cg, rel, &cf);
+        for (int c = 0; c < nc; c++)
+            diag_add(out, &n, cf[c].line > 0 ? cf[c].line - 1 : 0, 2,
+                     cf[c].kind, cf[c].detail);
+        contract_findings_free(cf, nc);
+    }
     sb_puts(out, "]");
 }
 

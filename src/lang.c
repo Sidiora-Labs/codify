@@ -294,8 +294,27 @@ static void add_def(ParseResult *pr, const char *name, size_t nlen,
     d->sig[sl] = 0;
 }
 
+/* Count arguments in the parenthesised argument list starting at open.
+ * Returns -1 when the count is not confident (nested calls, unmatched
+ * parens, commas inside strings already blanked by clean_line). */
+static int count_args(const char *clean, size_t open) {
+    if (clean[open] != '(') return -1;
+    size_t i = open + 1;
+    while (clean[i] == ' ' || clean[i] == '\t') i++;
+    if (clean[i] == ')') return 0;  /* empty arg list */
+    int depth = 1, argc = 1;
+    bool confident = true;
+    for (; clean[i] && depth > 0; i++) {
+        if (clean[i] == '(' || clean[i] == '[' || clean[i] == '{') depth++;
+        else if (clean[i] == ')' || clean[i] == ']' || clean[i] == '}') depth--;
+        else if (clean[i] == ',' && depth == 1) argc++;
+    }
+    if (depth != 0) confident = false;   /* unmatched parens */
+    return confident ? argc : -1;
+}
+
 static void add_ref(ParseResult *pr, const char *name, size_t nlen, int line,
-                    const char *qual, size_t qlen) {
+                    const char *qual, size_t qlen, int argc) {
     if (pr->nrefs == pr->crefs) {
         pr->crefs = pr->crefs ? pr->crefs * 2 : 128;
         pr->refs = xrealloc(pr->refs, sizeof(SymRef) * (size_t)pr->crefs);
@@ -306,6 +325,7 @@ static void add_ref(ParseResult *pr, const char *name, size_t nlen, int line,
     r->name[nlen] = 0;
     r->line = line;
     r->ref_kind = 'c';
+    r->argc = argc;
     if (qual && qlen) {
         if (qlen >= sizeof r->qual) qlen = sizeof r->qual - 1;
         memcpy(r->qual, qual, qlen);
@@ -316,7 +336,8 @@ static void add_ref(ParseResult *pr, const char *name, size_t nlen, int line,
 }
 
 static void add_import(ParseResult *pr, const char *name, size_t nlen,
-                       const char *module, size_t mlen, int line) {
+                       const char *module, size_t mlen, int line,
+                       bool system) {
     if (nlen == 0) return;
     if (pr->nimports == pr->cimports) {
         pr->cimports = pr->cimports ? pr->cimports * 2 : 8;
@@ -331,6 +352,7 @@ static void add_import(ParseResult *pr, const char *name, size_t nlen,
     if (mlen) memcpy(im->module, module, mlen);
     im->module[mlen] = 0;
     im->line = line;
+    im->system = system;
 }
 
 void route_add(ParseResult *pr, const char *framework, const char *method,
@@ -572,7 +594,7 @@ static void imp_js(const char *line, int lineno, ParseResult *pr) {
                     const char *nm;
                     size_t nn;
                     seg_name(it, p, &nm, &nn);
-                    if (nn) add_import(pr, nm, nn, mod, ml, lineno);
+                    if (nn) add_import(pr, nm, nn, mod, ml, lineno, false);
                     it = p + 1;
                     if (p >= from) break;
                 }
@@ -588,7 +610,7 @@ static void imp_js(const char *line, int lineno, ParseResult *pr) {
         const char *mod;
         size_t ml;
         if (cl && quoted_span(p, &mod, &ml) && ml && mod + ml < cl)
-            add_import(pr, "*", 1, mod, ml, lineno);
+            add_import(pr, "*", 1, mod, ml, lineno, false);
     }
 }
 
@@ -609,7 +631,7 @@ static void imp_py(const char *line, int lineno, ParseResult *pr) {
                 const char *nm;
                 size_t nn;
                 seg_name(it, p, &nm, &nn);
-                if (nn) add_import(pr, nm, nn, m, (size_t)(q - m), lineno);
+                if (nn) add_import(pr, nm, nn, m, (size_t)(q - m), lineno, false);
                 it = p + 1;
                 if (p >= end) break;
             }
@@ -621,7 +643,7 @@ static void imp_py(const char *line, int lineno, ParseResult *pr) {
             const char *q = m;
             while (idchar(*q) || *q == '.') q++;
             if (q == m) break;
-            add_import(pr, "*", 1, m, (size_t)(q - m), lineno);
+            add_import(pr, "*", 1, m, (size_t)(q - m), lineno, false);
             p = skip_sp(q);
             if (kw_at(p, "as")) {
                 p = skip_sp(p + 2);
@@ -641,7 +663,7 @@ static void imp_go(const char *line, int lineno, ParseResult *pr, int *state) {
     if (*state) {                                  /* inside import ( ... ) */
         if (*s == ')') { *state = 0; return; }
         if (quoted_span(s, &mod, &ml) && ml)
-            add_import(pr, "*", 1, mod, ml, lineno);
+            add_import(pr, "*", 1, mod, ml, lineno, false);
         return;
     }
     if (!kw_at(s, "import")) return;
@@ -649,12 +671,12 @@ static void imp_go(const char *line, int lineno, ParseResult *pr, int *state) {
     if (*p == '(') {
         *state = 1;
         if (quoted_span(p, &mod, &ml) && ml)
-            add_import(pr, "*", 1, mod, ml, lineno);
+            add_import(pr, "*", 1, mod, ml, lineno, false);
         if (strchr(p, ')')) *state = 0;            /* one-line block */
         return;
     }
     if (quoted_span(p, &mod, &ml) && ml)
-        add_import(pr, "*", 1, mod, ml, lineno);
+        add_import(pr, "*", 1, mod, ml, lineno, false);
 }
 
 static void imp_inc(const char *line, int lineno, ParseResult *pr) {
@@ -663,10 +685,15 @@ static void imp_inc(const char *line, int lineno, ParseResult *pr) {
     s = skip_sp(s + 1);
     if (strncmp(s, "include", 7) != 0) return;
     s = skip_sp(s + 7);
-    if (*s != '"') return;                         /* <...> system: skip */
-    const char *e = strchr(s + 1, '"');
-    if (e && e > s + 1)
-        add_import(pr, "*", 1, s + 1, (size_t)(e - s - 1), lineno);
+    if (*s == '"') {
+        const char *e = strchr(s + 1, '"');
+        if (e && e > s + 1)
+            add_import(pr, "*", 1, s + 1, (size_t)(e - s - 1), lineno, false);
+    } else if (*s == '<') {
+        const char *e = strchr(s + 1, '>');
+        if (e && e > s + 1)
+            add_import(pr, "*", 1, s + 1, (size_t)(e - s - 1), lineno, true);
+    }
 }
 
 static void imp_rust(const char *line, int lineno, ParseResult *pr) {
@@ -689,7 +716,7 @@ static void imp_rust(const char *line, int lineno, ParseResult *pr) {
         for (const char *q = it; ; q++) {
             if (q >= ge || *q == ',') {
                 seg_name(it, q, &nm, &nn);
-                if (nn) add_import(pr, nm, nn, p, (size_t)(me - p), lineno);
+                if (nn) add_import(pr, nm, nn, p, (size_t)(me - p), lineno, false);
                 it = q + 1;
                 if (q >= ge) break;
             }
@@ -701,8 +728,8 @@ static void imp_rust(const char *line, int lineno, ParseResult *pr) {
         if (q[0] == ':' && q[1] == ':') last = q;
     seg_name(last ? last + 2 : p, end, &nm, &nn);
     if (!nn) return;
-    if (last) add_import(pr, nm, nn, p, (size_t)(last - p), lineno);
-    else      add_import(pr, nm, nn, nm, nn, lineno);
+    if (last) add_import(pr, nm, nn, p, (size_t)(last - p), lineno, false);
+    else      add_import(pr, nm, nn, nm, nn, lineno, false);
 }
 
 static void imp_dot(const LangSpec *L, const char *line, int lineno,
@@ -719,12 +746,12 @@ static void imp_dot(const LangSpec *L, const char *line, int lineno,
     for (const char *r = p; r < q; r++)
         if (*r == '.') dot = r;
     if (star) {
-        if (dot) add_import(pr, "*", 1, p, (size_t)(dot - p), lineno);
+        if (dot) add_import(pr, "*", 1, p, (size_t)(dot - p), lineno, false);
     } else if (dot) {
         add_import(pr, dot + 1, (size_t)(q - dot - 1), p, (size_t)(dot - p),
-                   lineno);
+                   lineno, false);
     } else {
-        add_import(pr, p, (size_t)(q - p), "", 0, lineno);
+        add_import(pr, p, (size_t)(q - p), "", 0, lineno, false);
     }
 }
 
@@ -879,6 +906,32 @@ void lang_parse(const char *lang, const char *path, const char *src,
                         while (cl && (clean[cl-1] == ' ' || clean[cl-1] == '\t')) cl--;
                         if (cl && clean[cl-1] == ';') skip = true;
                     }
+                    /* C/C++: aggregate/enum patterns match uses as readily as
+                       definitions.  `struct stat st;` is a use, not a def.
+                       Accept only: body brace, typedef name, forward decl `;`
+                       directly after the tag. */
+                    if (!skip && cfam_protos &&
+                        (strcmp(L->pats[p].kind, "struct") == 0 ||
+                         strcmp(L->pats[p].kind, "enum") == 0 ||
+                         strcmp(L->pats[p].kind, "class") == 0 ||
+                         strcmp(L->pats[p].kind, "typedef") == 0)) {
+                        const char *after = cursor + m[g].rm_eo;
+                        while (*after == ' ' || *after == '\t') after++;
+                        bool has_body  = *after == '{' || *after == ':';
+                        bool has_semi  = *after == ';';  /* forward decl */
+                        bool has_typedef = false;
+                        /* typedef struct X { ... } Y; — the typedef keyword
+                           at line start already matched group 1 */
+                        if (m[0].rm_so == 0 || (cursor == clean && m[0].rm_so <= 1)) {
+                            const char *t = clean;
+                            while (*t == ' ' || *t == '\t') t++;
+                            if (strncmp(t, "typedef", 7) == 0 &&
+                                !idchar(t[7]))
+                                has_typedef = true;
+                        }
+                        if (!has_body && !has_semi && !has_typedef)
+                            skip = true;
+                    }
                     if (!skip)
                         add_def(pr, nm, nn, L->pats[p].kind, lineno, orig);
                 }
@@ -922,7 +975,8 @@ void lang_parse(const char *lang, const char *path, const char *src,
                                 qn = e - st;
                             }
                         }
-                        add_ref(pr, clean + i, j - i, lineno, qs, qn);
+                        int argc = count_args(clean, k);
+                        add_ref(pr, clean + i, j - i, lineno, qs, qn, argc);
                     }
                 }
                 i = j;

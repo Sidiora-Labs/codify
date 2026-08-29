@@ -491,24 +491,22 @@ static int resolve_best(Cg *cg, long from_fid, const char *from_path,
  * With several same-named defs, keep only refs whose own file resolves to
  * this def, so a fixture's `find` no longer claims unrelated callers. */
 static int callers_of(Cg *cg, const SymRow *def, SymRow *out, int cap) {
-    SymRow *cands = xmalloc(sizeof(SymRow) * RESOLVE_MAX_DEFS);
-    int ncand = defs_named(cg, def->name, cands, RESOLVE_MAX_DEFS);
     int n = 0;
-    if (ncand <= 1 || ncand >= RESOLVE_MAX_DEFS) {
-        free(cands);
-        /* min(kind='soft') over the group: an edge is soft only when every
-         * ref behind it is — one parsed call and it stays a call (req 4.5) */
+
+    /* Primary path: refs that resolved to this symbol at index time.
+     * This replaces the old resolve_best per-query disambiguation. */
+    {
         char sql[512];
         snprintf(sql, sizeof sql,
             "SELECT " SYM_COLS ", MIN(r.kind='soft')"
             " FROM refs r JOIN symbols s ON s.id=r.sym_id "
             "JOIN files f ON f.id=s.file_id "
-            "WHERE r.name=?1 AND s.name<>?1 %s"
+            "WHERE r.target_id=?1 %s"
             "AND s.kind IN ('function','method') "
             "GROUP BY s.id ORDER BY f.path,s.line LIMIT ?2",
             cg->no_soft ? "AND r.kind<>'soft' " : "");
         sqlite3_stmt *st = cg_prep(cg, sql);
-        sqlite3_bind_text(st, 1, def->name, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(st, 1, def->id);
         sqlite3_bind_int(st, 2, cap);
         while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
             sym_from_stmt(st, &out[n]);
@@ -516,57 +514,35 @@ static int callers_of(Cg *cg, const SymRow *def, SymRow *out, int cap) {
             n++;
         }
         sqlite3_finalize(st);
-        return n;
     }
-    struct { long fid; bool picks; } memo[64];
-    int nmemo = 0;
-    char sql[512];
-    snprintf(sql, sizeof sql,
-        "SELECT r.file_id, rf.path, " SYM_COLS ", r.kind='soft'"
-        " FROM refs r JOIN files rf ON rf.id=r.file_id "
-        "JOIN symbols s ON s.id=r.sym_id "
-        "JOIN files f ON f.id=s.file_id "
-        "WHERE r.name=?1 AND s.name<>?1 %s"
-        "AND s.kind IN ('function','method') "
-        "ORDER BY f.path,s.line,s.id",
-        cg->no_soft ? "AND r.kind<>'soft' " : "");
-    sqlite3_stmt *st = cg_prep(cg, sql);
-    sqlite3_bind_text(st, 1, def->name, -1, SQLITE_STATIC);
-    while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
-        long fid = sqlite3_column_int64(st, 0);
-        const char *fpath = (const char *)sqlite3_column_text(st, 1);
-        bool rsoft = sqlite3_column_int(st, 9) != 0;
-        bool picks = false, cached = false;
-        for (int i = 0; i < nmemo; i++)
-            if (memo[i].fid == fid) {
-                picks = memo[i].picks;
-                cached = true;
-                break;
-            }
-        if (!cached) {
-            int b = resolve_best(cg, fid, fpath, cands, ncand);
-            picks = cands[b].id == def->id;
-            if (nmemo < 64) {
-                memo[nmemo].fid = fid;
-                memo[nmemo].picks = picks;
-                nmemo++;
-            }
+
+    /* Fallback: refs that did not resolve (target_id IS NULL) — name
+     * equality, same as v0.6. Soft edges also come through here. */
+    if (n < cap) {
+        char sql[512];
+        snprintf(sql, sizeof sql,
+            "SELECT " SYM_COLS ", MIN(r.kind='soft')"
+            " FROM refs r JOIN symbols s ON s.id=r.sym_id "
+            "JOIN files f ON f.id=s.file_id "
+            "WHERE r.name=?1 AND r.target_id IS NULL AND s.name<>?1 %s"
+            "AND s.kind IN ('function','method') "
+            "GROUP BY s.id ORDER BY f.path,s.line LIMIT ?2",
+            cg->no_soft ? "AND r.kind<>'soft' " : "");
+        sqlite3_stmt *st = cg_prep(cg, sql);
+        sqlite3_bind_text(st, 1, def->name, -1, SQLITE_STATIC);
+        sqlite3_bind_int(st, 2, cap - n);
+        while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
+            SymRow r;
+            sym_from_stmt(st, &r);
+            r.soft = sqlite3_column_int(st, 7) != 0;
+            bool dup = false;
+            for (int i = 0; i < n; i++)
+                if (out[i].id == r.id) { dup = true; break; }
+            if (!dup) out[n++] = r;
         }
-        if (!picks) continue;
-        SymRow r;
-        sym_from_stmt_at(st, 2, &r);
-        r.soft = rsoft;
-        bool dup = false;
-        for (int i = 0; i < n; i++)
-            if (out[i].id == r.id) {
-                if (!rsoft) out[i].soft = false;   /* a call outranks prose */
-                dup = true;
-                break;
-            }
-        if (!dup) out[n++] = r;
+        sqlite3_finalize(st);
     }
-    sqlite3_finalize(st);
-    free(cands);
+
     return n;
 }
 
@@ -581,48 +557,78 @@ static int sym_path_line_cmp(const void *a, const void *b) {
 /* callees: names referenced inside symbol id, each resolved to the def the
  * referencing file most plausibly targets — not the repo-wide lowest rowid */
 static int callees_of(Cg *cg, long sym_id, SymRow *out, int cap) {
-    long from_fid = 0;
-    char from_path[1024] = "";
-    sqlite3_stmt *st = cg_prep(cg,
-        "SELECT f.id, f.path FROM symbols s JOIN files f ON f.id=s.file_id "
-        "WHERE s.id=?");
-    sqlite3_bind_int64(st, 1, sym_id);
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        from_fid = sqlite3_column_int64(st, 0);
-        snprintf(from_path, sizeof from_path, "%s",
-                 (const char *)sqlite3_column_text(st, 1));
-    }
-    sqlite3_finalize(st);
-
-    SymRow *cands = xmalloc(sizeof(SymRow) * RESOLVE_MAX_DEFS);
     int n = 0;
-    char sql[256];
-    snprintf(sql, sizeof sql,
-        "SELECT r.name, MIN(r.kind='soft') FROM refs r WHERE r.sym_id=? %s"
-        "GROUP BY r.name ORDER BY r.name",
-        cg->no_soft ? "AND r.kind<>'soft' " : "");
-    st = cg_prep(cg, sql);
-    sqlite3_bind_int64(st, 1, sym_id);
-    while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
-        const char *nm = (const char *)sqlite3_column_text(st, 0);
-        bool soft = sqlite3_column_int(st, 1) != 0;
-        int nc = defs_named(cg, nm, cands, RESOLVE_MAX_DEFS);
-        int kept = 0;
-        for (int i = 0; i < nc; i++)         /* never resolve to ourselves */
-            if (cands[i].id != sym_id) cands[kept++] = cands[i];
-        if (kept == 0) continue;
-        int b = resolve_best(cg, from_fid, from_path, cands, kept);
-        bool dup = false;
-        for (int i = 0; i < n; i++)
-            if (out[i].id == cands[b].id) {
-                if (!soft) out[i].soft = false;    /* a call outranks prose */
-                dup = true;
-                break;
-            }
-        if (!dup) { cands[b].soft = soft; out[n++] = cands[b]; }
+
+    /* Primary path: refs inside this symbol that already have a target_id
+     * resolved at index time. */
+    {
+        char sql[512];
+        snprintf(sql, sizeof sql,
+            "SELECT " SYM_COLS ", MIN(r.kind='soft')"
+            " FROM refs r JOIN symbols s ON s.id=r.target_id "
+            "JOIN files f ON f.id=s.file_id "
+            "WHERE r.sym_id=?1 AND r.target_id IS NOT NULL "
+            "AND r.target_id<>?1 %s"
+            "GROUP BY s.id ORDER BY f.path,s.line LIMIT ?2",
+            cg->no_soft ? "AND r.kind<>'soft' " : "");
+        sqlite3_stmt *st = cg_prep(cg, sql);
+        sqlite3_bind_int64(st, 1, sym_id);
+        sqlite3_bind_int(st, 2, cap);
+        while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
+            sym_from_stmt(st, &out[n]);
+            out[n].soft = sqlite3_column_int(st, 7) != 0;
+            n++;
+        }
+        sqlite3_finalize(st);
     }
-    sqlite3_finalize(st);
-    free(cands);
+
+    /* Fallback: unresolved refs (target_id IS NULL) — name equality
+     * with the old defs_named + resolve_best path. */
+    if (n < cap) {
+        long from_fid = 0;
+        char from_path[1024] = "";
+        sqlite3_stmt *q = cg_prep(cg,
+            "SELECT f.id, f.path FROM symbols s JOIN files f ON f.id=s.file_id "
+            "WHERE s.id=?");
+        sqlite3_bind_int64(q, 1, sym_id);
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            from_fid = sqlite3_column_int64(q, 0);
+            snprintf(from_path, sizeof from_path, "%s",
+                     (const char *)sqlite3_column_text(q, 1));
+        }
+        sqlite3_finalize(q);
+
+        SymRow *cands = xmalloc(sizeof(SymRow) * RESOLVE_MAX_DEFS);
+        char sql[256];
+        snprintf(sql, sizeof sql,
+            "SELECT r.name, MIN(r.kind='soft') FROM refs r "
+            "WHERE r.sym_id=? AND r.target_id IS NULL %s"
+            "GROUP BY r.name ORDER BY r.name",
+            cg->no_soft ? "AND r.kind<>'soft' " : "");
+        sqlite3_stmt *st = cg_prep(cg, sql);
+        sqlite3_bind_int64(st, 1, sym_id);
+        while (n < cap && sqlite3_step(st) == SQLITE_ROW) {
+            const char *nm = (const char *)sqlite3_column_text(st, 0);
+            bool soft = sqlite3_column_int(st, 1) != 0;
+            int nc = defs_named(cg, nm, cands, RESOLVE_MAX_DEFS);
+            int kept = 0;
+            for (int i = 0; i < nc; i++)
+                if (cands[i].id != sym_id) cands[kept++] = cands[i];
+            if (kept == 0) continue;
+            int b = resolve_best(cg, from_fid, from_path, cands, kept);
+            bool dup = false;
+            for (int i = 0; i < n; i++)
+                if (out[i].id == cands[b].id) {
+                    if (!soft) out[i].soft = false;
+                    dup = true;
+                    break;
+                }
+            if (!dup) { cands[b].soft = soft; out[n++] = cands[b]; }
+        }
+        sqlite3_finalize(st);
+        free(cands);
+    }
+
     qsort(out, (size_t)n, sizeof(SymRow), sym_path_line_cmp);
     return n;
 }
@@ -636,29 +642,30 @@ static int ref_count(Cg *cg, const char *name) {
     return n;
 }
 
-/* refs that plausibly target this def, not every same-named ref repo-wide:
- * per referencing file, count only when resolution picks this def */
+/* refs that plausibly target this def: count resolved refs (target_id)
+ * plus unresolved refs that fall back to name equality. */
 static int ref_count_resolved(Cg *cg, const SymRow *def) {
+    int total = 0;
+    /* resolved refs targeting this symbol */
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT COUNT(*) FROM refs WHERE target_id=?");
+    sqlite3_bind_int64(st, 1, def->id);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        total = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+
+    /* unresolved refs by name (fallback) */
     SymRow *cands = xmalloc(sizeof(SymRow) * RESOLVE_MAX_DEFS);
     int nc = defs_named(cg, def->name, cands, RESOLVE_MAX_DEFS);
-    if (nc <= 1 || nc >= RESOLVE_MAX_DEFS) {
-        free(cands);
-        return ref_count(cg, def->name);
+    if (nc <= 1) {
+        /* sole definition: all unresolved name-matched refs are ours */
+        st = cg_prep(cg,
+            "SELECT COUNT(*) FROM refs WHERE name=? AND target_id IS NULL");
+        sqlite3_bind_text(st, 1, def->name, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) == SQLITE_ROW)
+            total += sqlite3_column_int(st, 0);
+        sqlite3_finalize(st);
     }
-    sqlite3_stmt *st = cg_prep(cg,
-        "SELECT r.file_id, rf.path, COUNT(*) FROM refs r "
-        "JOIN files rf ON rf.id=r.file_id "
-        "WHERE r.name=? GROUP BY r.file_id ORDER BY r.file_id");
-    sqlite3_bind_text(st, 1, def->name, -1, SQLITE_STATIC);
-    int total = 0;
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        long fid = sqlite3_column_int64(st, 0);
-        const char *fpath = (const char *)sqlite3_column_text(st, 1);
-        int cnt = sqlite3_column_int(st, 2);
-        if (cands[resolve_best(cg, fid, fpath, cands, nc)].id == def->id)
-            total += cnt;
-    }
-    sqlite3_finalize(st);
     free(cands);
     return total;
 }

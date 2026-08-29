@@ -46,7 +46,32 @@ has "$out" "src/util.ts"
 out="$("$CG" recall survivor)"
 has "$out" "schema upgrade survivor"
 
-# (e) multi-def caller disambiguation: 'record' is defined in src/audit.ts,
+# (e) C definition-site precision: struct/enum uses are not definitions,
+# prototypes collapse with definitions, system includes are recorded
+out="$("$CG" symbol Config)"
+has "$out" "Config"
+out="$("$CG" symbol Opaque)"
+has "$out" "Opaque"
+out="$("$CG" symbol Node)"
+has "$out" "Node"
+out="$("$CG" symbol Level)"
+has "$out" "Level"
+# struct stat st; must NOT create a definition of stat — only a reference.
+# The symbols table should have no row named 'stat' from helpers.c.
+stat_defs="$(sqlite3 .codegraph/graph.db \
+  "SELECT COUNT(*) FROM symbols WHERE name='stat' AND file_id IN \
+   (SELECT id FROM files WHERE path='src/helpers.c')")"
+[ "$stat_defs" -eq 0 ] || fail "struct stat st created a spurious definition"
+# prototype + definition = one symbol
+out="$("$CG" search helpers_init)"
+has "$out" "src/helpers.c"
+# system includes recorded
+out="$(sqlite3 .codegraph/graph.db \
+  "SELECT module FROM imports WHERE system=1 AND file_id IN \
+   (SELECT id FROM files WHERE path='src/helpers.c') LIMIT 1")"
+has "$out" "stdio.h"
+
+# (f) multi-def caller disambiguation: 'record' is defined in src/audit.ts,
 # src/metrics.ts and src/replay/local.ts; impact resolves to the path-ASC
 # first def (audit.ts) and keeps only callers whose imports name it —
 # including the extension-bearing '../audit.js' import, which must beat the
@@ -57,7 +82,7 @@ has "$out" "writeReport"
 has "$out" "replayAudit"
 hasnt "$out" "bumpGauge"
 
-# (f) empty v1 DB: a version mismatch with zero files rows must still rebuild
+# (g) empty v1 DB: a version mismatch with zero files rows must still rebuild
 # the derived tables — otherwise the old refs shape survives the version
 # stamp and the first sync dies on the missing qual column
 mkdir -p "$TMP/empty/docs"

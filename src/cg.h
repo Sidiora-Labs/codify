@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.6.0"
+#define CG_VERSION  "0.7.0"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -100,12 +100,14 @@ typedef struct {
     int line;
     char qual[64];     /* immediate receiver of a.b( / a->b( / A::b(; "" none */
     char ref_kind;     /* 'c' = call */
+    int argc;          /* argument count at call site; -1 = uncountable */
 } SymRef;
 
 typedef struct {
     char *name;        /* imported name, "*" = whole module (owned) */
     char *module;      /* module/path as written (owned) */
     int line;
+    bool system;       /* true for <header.h> system includes */
 } ImportDef;
 
 typedef struct {
@@ -182,6 +184,51 @@ typedef struct {
 } IndexStats;
 
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);
+
+/* import resolution and ref resolution (resolve.c) — runs post-scan */
+void resolve_imports(Cg *cg);
+void resolve_refs(Cg *cg);
+
+/* grounding findings (resolve.c) — query-time, never stored */
+typedef struct {
+    char path[512];
+    int line;
+    char name[128];
+    char kind[16];      /* "call" or "import" */
+    char near[128];     /* near-miss suggestion, "" if none */
+    char detail[256];   /* human-readable explanation */
+} GroundFinding;
+
+int ground_findings(Cg *cg, const char *path, GroundFinding **out);
+void ground_findings_free(GroundFinding *v, int n);
+bool file_calibrated(Cg *cg, long file_id, const char *lang);
+
+/* contract findings: arity and kind checks */
+typedef struct {
+    char path[512];
+    int line;
+    char name[128];
+    char kind[32];      /* "arity" or "kind-mismatch" or "dead-handler" */
+    char detail[256];
+} ContractFinding;
+
+int contract_findings(Cg *cg, const char *path, ContractFinding **out);
+void contract_findings_free(ContractFinding *v, int n);
+
+/* hygiene findings: unused symbols and imports, delta by default */
+typedef struct {
+    char path[512];
+    int line;
+    char name[128];
+    char kind[16];      /* "unused-sym" or "unused-import" */
+    char detail[256];
+} HygieneFinding;
+
+int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out);
+int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit);
+void hygiene_findings_free(HygieneFinding *v, int n);
+bool is_entrypoint(Cg *cg, long sym_id, const char *name, const char *kind,
+                   const char *path);
 
 /* ---------------- graph queries ---------------- */
 int cmd_search (Cg *cg, const char *q, int limit, bool json);

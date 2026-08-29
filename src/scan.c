@@ -188,14 +188,14 @@ static void stmts_init(Cg *cg, Stmts *s) {
                                 " VALUES(?,?,?,?,?,?)");
     s->ins_symfts = cg_prep(cg, "INSERT INTO symbol_fts(rowid,name,kind,path,sig)"
                                 " VALUES(?,?,?,?,?)");
-    s->ins_ref    = cg_prep(cg, "INSERT INTO refs(file_id,name,line,sym_id,qual,kind)"
-                                " VALUES(?,?,?,?,?,?)");
+    s->ins_ref    = cg_prep(cg, "INSERT INTO refs(file_id,name,line,sym_id,qual,kind,argc)"
+                                " VALUES(?,?,?,?,?,?,?)");
     s->ins_route  = cg_prep(cg, "INSERT INTO routes(file_id,framework,method,pattern,handler,line)"
                                 " VALUES(?,?,?,?,?,?)");
     s->ins_body   = cg_prep(cg, "INSERT INTO body_fts(rowid,path,body) VALUES(?,?,?)");
     s->del_imports= cg_prep(cg, "DELETE FROM imports WHERE file_id=?");
-    s->ins_import = cg_prep(cg, "INSERT INTO imports(file_id,name,module,line)"
-                                " VALUES(?,?,?,?)");
+    s->ins_import = cg_prep(cg, "INSERT INTO imports(file_id,name,module,line,system)"
+                                " VALUES(?,?,?,?,?)");
     s->del_cmtfts = cg_prep(cg, "DELETE FROM comment_fts WHERE rowid IN"
                                 " (SELECT id FROM comments WHERE file_id=?)");
     s->del_cmts   = cg_prep(cg, "DELETE FROM comments WHERE file_id=?");
@@ -334,6 +334,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             else
                 sqlite3_bind_null(s->ins_ref, 5);
             sqlite3_bind_text(s->ins_ref, 6, "call", -1, SQLITE_STATIC);
+            sqlite3_bind_int(s->ins_ref, 7, pr->refs[i].argc);
             step_reset(s->ins_ref);
             st->refs++;
         }
@@ -437,6 +438,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             sqlite3_bind_text (s->ins_import, 3, pr->imports[i].module, -1,
                                SQLITE_STATIC);
             sqlite3_bind_int  (s->ins_import, 4, pr->imports[i].line);
+            sqlite3_bind_int  (s->ins_import, 5, pr->imports[i].system ? 1 : 0);
             step_reset(s->ins_import);
         }
     }
@@ -691,8 +693,11 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     }
 
     stmts_fin(&s);
-    if (st->files_indexed + st->files_removed > 0)
+    if (st->files_indexed + st->files_removed > 0) {
         anchor_edges(cg, st);
+        resolve_imports(cg);
+        resolve_refs(cg);
+    }
     cg_exec(cg, "COMMIT");
 
     st->ms = now_ms() - t0;

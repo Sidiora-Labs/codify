@@ -40,6 +40,21 @@ static bool import_row(const ParseResult *result, const char *name,
     return false;
 }
 
+static bool system_import(const ParseResult *result, const char *module) {
+    for (int i = 0; i < result->nimports; i++)
+        if (strcmp(result->imports[i].module, module) == 0 &&
+            result->imports[i].system)
+            return true;
+    return false;
+}
+
+static int def_count(const ParseResult *result, const char *name) {
+    int n = 0;
+    for (int i = 0; i < result->ndefs; i++)
+        if (strcmp(result->defs[i].name, name) == 0) n++;
+    return n;
+}
+
 int main(void) {
     lang_global_init();
     ParseResult parsed;
@@ -193,13 +208,16 @@ int main(void) {
     ok(import_row(&parsed, "*", "encoding/json"), "go import block: aliased");
     parse_result_free(&parsed);
 
-    /* ---- imports: c local includes only ---- */
+    /* ---- imports: c includes (local and system) ---- */
     const char ic[] =
         "#include \"util.h\"\n"
         "#include <stdio.h>\n";
     lang_parse("c", "src/i.c", ic, sizeof ic - 1, &parsed);
     ok(import_row(&parsed, "*", "util.h"), "c local include recorded");
-    ok(parsed.nimports == 1, "c system include ignored");
+    ok(import_row(&parsed, "*", "stdio.h"), "c system include recorded");
+    ok(parsed.nimports == 2, "c both includes counted");
+    ok(!parsed.imports[0].system, "c local include not flagged system");
+    ok(system_import(&parsed, "stdio.h"), "c system include flagged system");
     parse_result_free(&parsed);
 
     /* ---- imports: rust ---- */
@@ -288,6 +306,126 @@ int main(void) {
         "    return q\n";
     lang_parse("python", "src/q.py", pystr, sizeof pystr - 1, &parsed);
     ok(parsed.ncmts == 0, "python: a plain triple-quoted string is not a doc");
+    parse_result_free(&parsed);
+
+    /* ---- C/C++ definition sites vs use sites ---- */
+
+    /* struct use: `struct stat st;` is a variable declaration, not a def */
+    const char cuse[] =
+        "int f(void) {\n"
+        "    struct stat st;\n"
+        "    struct dirent *e;\n"
+        "    union sigval sv;\n"
+        "    enum state s = OK;\n"
+        "    return 0;\n"
+        "}\n";
+    lang_parse("c", "src/use.c", cuse, sizeof cuse - 1, &parsed);
+    ok(definition(&parsed, "stat") == NULL,
+       "c: struct stat st is a use, not a def");
+    ok(definition(&parsed, "dirent") == NULL,
+       "c: struct dirent *e is a use, not a def");
+    ok(definition(&parsed, "sigval") == NULL,
+       "c: union sigval sv is a use, not a def");
+    ok(definition(&parsed, "state") == NULL,
+       "c: enum state s = OK is a use, not a def");
+    ok(definition(&parsed, "f") != NULL,
+       "c: the function itself is still recorded");
+    parse_result_free(&parsed);
+
+    /* struct definition: body brace */
+    const char cdef[] =
+        "struct Point {\n"
+        "    int x, y;\n"
+        "};\n"
+        "union Data {\n"
+        "    int i;\n"
+        "    float f;\n"
+        "};\n"
+        "enum Color { RED, GREEN, BLUE };\n";
+    lang_parse("c", "src/def.c", cdef, sizeof cdef - 1, &parsed);
+    ok(definition(&parsed, "Point") != NULL,
+       "c: struct with body brace is a def");
+    ok(definition(&parsed, "Data") != NULL,
+       "c: union with body brace is a def");
+    ok(definition(&parsed, "Color") != NULL,
+       "c: enum with body brace is a def");
+    ok(def_count(&parsed, "Point") == 1,
+       "c: struct body recorded exactly once");
+    parse_result_free(&parsed);
+
+    /* typedef struct — the typedef keyword signals a def */
+    const char ctdef[] =
+        "typedef struct Pair {\n"
+        "    int a, b;\n"
+        "} Pair;\n"
+        "typedef enum { A, B } AB;\n"
+        "typedef unsigned long size_t;\n";
+    lang_parse("c", "src/tdef.c", ctdef, sizeof ctdef - 1, &parsed);
+    ok(definition(&parsed, "Pair") != NULL,
+       "c: typedef struct is a def");
+    ok(definition(&parsed, "AB") != NULL,
+       "c: typedef enum with body is a def");
+    ok(definition(&parsed, "size_t") != NULL,
+       "c: plain typedef is a def");
+    parse_result_free(&parsed);
+
+    /* forward declaration: `struct Foo;` */
+    const char cfwd[] =
+        "struct Opaque;\n"
+        "enum Forward;\n";
+    lang_parse("c", "src/fwd.c", cfwd, sizeof cfwd - 1, &parsed);
+    ok(definition(&parsed, "Opaque") != NULL,
+       "c: forward decl struct is a def");
+    ok(definition(&parsed, "Forward") != NULL,
+       "c: forward decl enum is a def");
+    parse_result_free(&parsed);
+
+    /* C++ class: use vs definition */
+    const char cppuse[] =
+        "void f(class Widget *w) {\n"
+        "    struct stat st;\n"
+        "}\n";
+    lang_parse("cpp", "src/use.cpp", cppuse, sizeof cppuse - 1, &parsed);
+    ok(definition(&parsed, "Widget") == NULL,
+       "cpp: class in param is a use, not a def");
+    ok(definition(&parsed, "stat") == NULL,
+       "cpp: struct stat st is a use in C++ too");
+    parse_result_free(&parsed);
+
+    const char cppdef[] =
+        "class Widget {\n"
+        "    int x;\n"
+        "};\n"
+        "struct Pod {\n"
+        "    int y;\n"
+        "};\n";
+    lang_parse("cpp", "src/def.cpp", cppdef, sizeof cppdef - 1, &parsed);
+    ok(definition(&parsed, "Widget") != NULL,
+       "cpp: class with body is a def");
+    ok(definition(&parsed, "Pod") != NULL,
+       "cpp: struct with body is a def");
+    parse_result_free(&parsed);
+
+    /* C prototype vs definition: prototype (;) suppressed, definition kept */
+    const char cproto[] =
+        "int compute(int x);\n"
+        "int compute(int x) { return x * 2; }\n";
+    lang_parse("c", "src/proto.c", cproto, sizeof cproto - 1, &parsed);
+    ok(def_count(&parsed, "compute") == 1,
+       "c: prototype + definition yields one symbol");
+    ok(definition(&parsed, "compute") != NULL &&
+       definition(&parsed, "compute")->line == 2,
+       "c: the definition line wins, not the prototype");
+    parse_result_free(&parsed);
+
+    /* C++ class inheritance: `class Foo : public Bar {` has body */
+    const char cppinherit[] =
+        "class Derived : public Base {\n"
+        "    int z;\n"
+        "};\n";
+    lang_parse("cpp", "src/inh.cpp", cppinherit, sizeof cppinherit - 1, &parsed);
+    ok(definition(&parsed, "Derived") != NULL,
+       "cpp: class with : inheritance and body is a def");
     parse_result_free(&parsed);
 
     return t_done("lang");
