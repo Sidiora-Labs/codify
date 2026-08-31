@@ -22,7 +22,7 @@
 ## Host adapters
 
 - [ ] 2. Universal integration
-  - [ ] 2.1 Detect, plan, apply, and diagnose agent integrations
+  - [x] 2.1 Detect, plan, apply, and diagnose agent integrations
     - Define a capability registry for every currently supported MCP host plus native instruction, skill, hook, session, and cloud capabilities.
     - Implement read-only detect, plan, and doctor commands with explicit target paths and actionable findings.
     - Implement idempotent apply with backups for existing files and keep mcp-install and hook-install as compatibility entry points.

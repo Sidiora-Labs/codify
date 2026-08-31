@@ -49,7 +49,7 @@ assert d['mcpServers']['codify']['args'] == ['mcp'], d
 python3 -m json.tool .vscode/mcp.json >/dev/null || fail "vscode config invalid"
 python3 -m json.tool "$HOME/.codeium/windsurf/mcp_config.json" >/dev/null \
     || fail "windsurf config invalid"
-grep -q "mcp_servers.codegraph" "$HOME/.codex/config.toml" \
+grep -q "mcp_servers.codify" "$HOME/.codex/config.toml" \
     || fail "codex config missing"
 
 # merging into an existing config keeps the other server

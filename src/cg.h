@@ -371,8 +371,8 @@ void lsp_diagnostics(Cg *cg, const char *abs, StrBuf *out);
 bool lsp_path_in_task_scope(Cg *cg, const char *rel);
 
 /* ---------------- governance (govern.c) ---------------- */
-/* Walk every baselined doc anchor; report each stale one through cb (may
- * be NULL when only the count matters). Returns the stale count. Stale is
+/* Walk every baselined doc anchor; report each stale one through cb (which
+ * may be NULL when only the count matters). Returns the stale count. Stale is
  * derived, never stored: the baseline in comments.anchored_hash no longer
  * matches the bound symbol's current body bytes. */
 int anchor_stale(Cg *cg,
@@ -385,6 +385,11 @@ int cmd_brief(Cg *cg, bool json);                /* session state in one call */
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);
 int cmd_review(Cg *cg, bool json);
 int cmd_hook_install(Cg *cg);
+int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility);
+int integrate_plan(Cg *cg, bool json);
+int integrate_apply(Cg *cg, bool json);
+int integrate_doctor(Cg *cg, bool json);
+int integrate_apply_portable(Cg *cg, bool quiet);
 /* structured session handoff stored as a superseding task memory */
 int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,
                 const char *blocked, const char *note, bool json);

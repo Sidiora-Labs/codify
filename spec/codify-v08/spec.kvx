@@ -87,7 +87,7 @@ status  = "pending"
 
 [task.2.1]
 title      = "Detect, plan, apply, and diagnose agent integrations"
-status     = "pending"
+status     = "done"
 wave       = 3
 requires   = ["1.2"]
 symbols    = ["cmd_integrate", "integrate_plan", "integrate_doctor", "integrate_apply"]

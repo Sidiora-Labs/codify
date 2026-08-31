@@ -56,6 +56,8 @@ static void usage(void) {
 "  lsp                      run as a Language Server (stdio) for editors\n"
 "  mcp-install              auto-connect to Claude Code, Cursor, VS Code,\n"
 "                           Windsurf, Gemini CLI, Codex CLI\n"
+"  integrate [detect|plan|apply|doctor]\n"
+"                           configure and diagnose every agent host\n"
 "  changelog [-n N] [-o F]  changelog from snapshots with symbol-level diffs\n"
 "  agentmd [--write]        generate AGENTS.md + CLAUDE.md from the graph\n"
 "  check [--strict]         one CI gate: render, lint, evidence, tree\n"
@@ -420,6 +422,8 @@ int main(int argc, char **argv) {
         rc = cmd_mcp(&cg, &si);
     } else if (strcmp(cmd, "mcp-install") == 0) {
         rc = cmd_mcp_install(&cg);
+    } else if (strcmp(cmd, "integrate") == 0) {
+        rc = cmd_integrate(&cg, argc >= 3 ? argv[2] : "detect", json, false);
     } else if (strcmp(cmd, "changelog") == 0) {
         int limit = atoi(opt(&argc, argv, "-n", "50"));
         const char *out = opt(&argc, argv, "-o", NULL);

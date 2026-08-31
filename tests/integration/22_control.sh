@@ -5,7 +5,7 @@
 
 mode="${1:-all}"
 case "$mode" in
-  all|state|liveness) ;;
+  all|state|liveness|integrate) ;;
   *) fail "unknown 22_control mode: $mode" ;;
 esac
 
@@ -193,8 +193,99 @@ has "$pulse_out" "task 3.1 exit 0 → status done"
 echo "22_control liveness ok"
 }
 
+run_integrate() {
+mkdir -p "$TMP/integrate/src" "$TMP/home"
+cd "$TMP/integrate"
+export HOME="$TMP/home"
+echo 'int main(void){return 0;}' > src/main.c
+"$CG" init >/dev/null
+
+detect="$("$CG" integrate detect --json)"
+python3 -c "
+import json
+d=json.loads(r'''$detect''')
+labels=[h['label'] for h in d['hosts']]
+assert labels == ['Codex','Claude Code','Copilot and VS Code','Cursor',
+ 'Gemini CLI','OpenCode','Zed','Windsurf','Cline','Continue'], labels
+assert all(set(['mcp','instructions','skills','hooks','sessions','cloud'])
+           <= set(h['capabilities']) for h in d['hosts']), d
+"
+
+# Plan names every host and portable asset but never creates a target.
+cat > .mcp.json <<'EOF'
+{
+  "mcpServers": {
+    "other": { "command": "other", "args": [] }
+  }
+}
+EOF
+cp .mcp.json "$TMP/original-mcp.json"
+plan="$("$CG" integrate plan --json)"
+python3 -c "
+import json
+d=json.loads(r'''$plan''')
+assert len(d['hosts']) == 10, d
+assert len(d['assets']) == 7, d
+assert next(h for h in d['hosts'] if h['id']=='claude-code')['action']=='merge'
+assert all(a['path'].startswith(r'$TMP/integrate/') for a in d['assets'])
+"
+[ ! -e .cursor/mcp.json ] || fail "integrate plan wrote a config"
+
+"$CG" integrate apply >/dev/null
+[ -f .mcp.json.codify.bak ] || fail "existing MCP config was not backed up"
+cmp "$TMP/original-mcp.json" .mcp.json.codify.bak \
+    || fail "MCP backup does not contain the original"
+python3 -c "
+import json
+d=json.load(open('.mcp.json'))
+assert 'other' in d['mcpServers'] and 'codify' in d['mcpServers'], d
+"
+[ -x .codify/hooks/event.sh ] || fail "portable event shim missing"
+for host in codex claude copilot cursor gemini; do
+  [ -x ".codify/hooks/$host.sh" ] || fail "$host hook shim missing"
+done
+[ -s .agents/skills/codify-workflow/SKILL.md ] \
+    || fail "portable Agent Skill missing"
+has "$(cat .agents/skills/codify-workflow/SKILL.md)" "cg spec trace"
+out="$("$CG" integrate apply)"
+has "$out" "already configured"
+out="$("$CG" integrate doctor --json)"
+has "$out" '"ok":true'
+
+# Doctor distinguishes malformed/incomplete/stale/protocol/ownership and a
+# missing executable, with paths and actionable labels in one pass.
+printf '%s\n' '{broken' > .cursor/mcp.json
+python3 - <<'PY'
+import json, os
+p='.gemini/settings.json'; d=json.load(open(p)); d['protocolVersion']='1900-01-01'; json.dump(d,open(p,'w'))
+p=os.path.join(os.environ['HOME'],'.continue/config.json'); d=json.load(open(p)); d['mcpServers']['codegraph']={'command':'old'}; json.dump(d,open(p,'w'))
+PY
+rm .zed/settings.json
+printf '%s\n' '# user owned skill' > .agents/skills/codify-workflow/SKILL.md
+rc=0
+out="$(CG_BINARY=/definitely/missing/cg "$CG" integrate doctor --json)" \
+    || rc=$?
+[ "$rc" -eq 1 ] || fail "doctor accepted broken integrations"
+python3 -c "
+import json
+d=json.loads(r'''$out'''); s=' '.join(d['findings'])
+for needle in ['missing or not executable','malformed','not configured',
+               'stale server name codegraph','unsupported protocol',
+               'conflicting generated-file ownership']:
+    assert needle in s, (needle,s)
+"
+
+mcp="$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | "$CG" mcp)"
+has "$mcp" '"name":"integrate"'
+
+echo "22_control integrate ok"
+}
+
 case "$mode" in
   state) run_state ;;
   liveness) run_liveness ;;
-  all) run_state; run_liveness ;;
+  integrate) run_integrate ;;
+  all) run_state; run_liveness; run_integrate ;;
 esac

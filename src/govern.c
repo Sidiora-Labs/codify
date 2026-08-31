@@ -819,7 +819,9 @@ int cmd_hook_install(Cg *cg)
         sb_free(&b);
     }
     free(existing);
-    return cmd_hook_install_git(cg, bin);
+    int portable_rc = integrate_apply_portable(cg, false);
+    int git_rc = cmd_hook_install_git(cg, bin);
+    return portable_rc != 0 ? portable_rc : git_rc;
 }
 
 /* Git hooks: refresh the graph after a commit lands, and report Codify's

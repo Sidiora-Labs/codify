@@ -88,6 +88,13 @@ static int t_routes(void *v) {
 }
 static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c->cg, true); }
 static int t_state(void *v)   { CallCtx *c = v; return cmd_state(c->cg, true); }
+static int t_integrate(void *v) {
+    CallCtx *c = v;
+    char *action = c->args ? json_get_string(c->args, "action") : NULL;
+    int rc = cmd_integrate(c->cg, action ? action : "detect", true, false);
+    free(action);
+    return rc;
+}
 static int t_changes(void *v) {
     CallCtx *c = v;
     int limit = c->args ? (int)json_get_int(c->args, "limit", 0) : 0;
@@ -409,6 +416,10 @@ static int t_resume(void *v) {
                  "\"token budget, default 8000\"}},\"required\":[\"name\"]}"
 #define S_FILTER "{\"type\":\"object\",\"properties\":{\"filter\":{\"type\":\"string\"}}}"
 #define S_EMPTY  "{\"type\":\"object\",\"properties\":{}}"
+#define S_INTEGRATE "{\"type\":\"object\",\"properties\":{" \
+                    "\"action\":{\"type\":\"string\",\"enum\":[" \
+                    "\"detect\",\"plan\",\"apply\",\"doctor\"]}}," \
+                    "\"required\":[\"action\"]}"
 #define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"
 #define S_MSG    "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}," \
                  "\"required\":[\"message\"]}"
@@ -541,6 +552,11 @@ static const struct {
       "Codify snapshot, spec declarations, this agent's live attempt, and "
       "stale declarations. Use this when diagnosing apparent task drift.",
       S_EMPTY, A_READ, "Agent control-plane state", t_state, false },
+    { "integrate",
+      "Detect capabilities, plan exact paths without writes, apply "
+      "recoverable agent integrations, or diagnose incomplete and stale "
+      "configuration across every supported coding host.",
+      S_INTEGRATE, A_WRITE, "Integrate coding agents", t_integrate, false },
     { "change_impact",
       "Impact radius of uncommitted edits: symbols in changed files plus "
       "their external callers. Run before committing.",
@@ -1082,6 +1098,10 @@ static void install_json(const char *path, const char *root_key,
 }
 
 int cmd_mcp_install(Cg *cg) {
+    return cmd_integrate(cg, "apply", false, true);
+
+    /* Legacy implementation retained below as a source reference while the
+     * compatibility entry point delegates to the recoverable registry. */
     char bin[4096];
     if (self_path(bin, sizeof bin) != 0)
         snprintf(bin, sizeof bin, "cg");
