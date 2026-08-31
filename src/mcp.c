@@ -95,6 +95,28 @@ static int t_integrate(void *v) {
     free(action);
     return rc;
 }
+static int t_event_ingest(void *v) {
+    CallCtx *c = v;
+    char *source = c->args ? json_get_string(c->args, "source") : NULL;
+    char *payload = c->args ? json_get_object(c->args, "payload") : NULL;
+    if (!payload && c->args) payload = json_get_string(c->args, "payload");
+    if (!payload) { free(source); printf("{\"error\":\"missing payload\"}\n"); return 1; }
+    int rc = runtime_event_ingest(c->cg, source ? source : "mcp", payload,
+                                  true);
+    free(source); free(payload);
+    return rc;
+}
+static int t_event_history(void *v) {
+    CallCtx *c = v;
+    int limit = c->args ? (int)json_get_int(c->args, "limit", 20) : 20;
+    char lim[24]; snprintf(lim, sizeof lim, "%d", limit);
+    char *a[] = { "history", "-n", lim };
+    return cmd_event(c->cg, 3, a, true);
+}
+static int t_progress(void *v) {
+    CallCtx *c = v;
+    return runtime_progress(c->cg, true);
+}
 static int t_changes(void *v) {
     CallCtx *c = v;
     int limit = c->args ? (int)json_get_int(c->args, "limit", 0) : 0;
@@ -420,6 +442,10 @@ static int t_resume(void *v) {
                     "\"action\":{\"type\":\"string\",\"enum\":[" \
                     "\"detect\",\"plan\",\"apply\",\"doctor\"]}}," \
                     "\"required\":[\"action\"]}"
+#define S_EVENT "{\"type\":\"object\",\"properties\":{" \
+                "\"source\":{\"type\":\"string\"}," \
+                "\"payload\":{\"type\":\"object\"}}," \
+                "\"required\":[\"payload\"]}"
 #define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"
 #define S_MSG    "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}," \
                  "\"required\":[\"message\"]}"
@@ -557,6 +583,19 @@ static const struct {
       "recoverable agent integrations, or diagnose incomplete and stale "
       "configuration across every supported coding host.",
       S_INTEGRATE, A_WRITE, "Integrate coding agents", t_integrate, false },
+    { "event_ingest",
+      "Normalize and persist one native agent lifecycle event with a stable "
+      "fingerprint, workspace revision, and explicit evidence delta.",
+      S_EVENT, A_WRITE, "Ingest lifecycle event", t_event_ingest, false },
+    { "event_history",
+      "Recent normalized lifecycle events across hosts, sessions, and "
+      "attempts, including activity and evidence deltas.",
+      S_LIMIT, A_READ, "Lifecycle event history", t_event_history, false },
+    { "progress_status",
+      "Latest runtime activity for the current attempt or session. "
+      "Heartbeats and output changes stay distinct from implementation "
+      "progress.",
+      S_EMPTY, A_READ, "Runtime progress status", t_progress, false },
     { "change_impact",
       "Impact radius of uncommitted edits: symbols in changed files plus "
       "their external callers. Run before committing.",

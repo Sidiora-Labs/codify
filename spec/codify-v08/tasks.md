@@ -28,7 +28,7 @@
     - Implement idempotent apply with backups for existing files and keep mcp-install and hook-install as compatibility entry points.
     - Generate one portable codify-workflow Agent Skill and cross-host hook shims without claiming unsupported host features.
     - _Requirements: 2.1, 2.2, 2.3, 2.4_
-  - [ ] 2.2 Normalize lifecycle events into progress records
+  - [x] 2.2 Normalize lifecycle events into progress records
     - Accept native lifecycle JSON on stdin, normalize common fields, hash a stable fingerprint, and persist it against session and attempt identity.
     - Compute workspace revision and evidence deltas without treating a heartbeat alone as implementation progress.
     - Expose progress status and event history in compact text and JSON forms suitable for hooks and MCP.

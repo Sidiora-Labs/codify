@@ -5,7 +5,7 @@
 
 mode="${1:-all}"
 case "$mode" in
-  all|state|liveness|integrate) ;;
+  all|state|liveness|integrate|events) ;;
   *) fail "unknown 22_control mode: $mode" ;;
 esac
 
@@ -283,9 +283,128 @@ has "$mcp" '"name":"integrate"'
 echo "22_control integrate ok"
 }
 
+run_events() {
+mkdir -p "$TMP/events/src" "$TMP/events-home"
+cd "$TMP/events"
+export HOME="$TMP/events-home"
+export CG_SESSION="session-1"
+export CG_ATTEMPT="attempt-1"
+export CG_TASK="demo/1.1"
+printf '%s\n' 'int alpha(void){return 1;}' > src/a.c
+"$CG" init >/dev/null
+
+# Native host names normalize into one durable envelope. The initial event is
+# activity but cannot claim implementation progress without prior evidence.
+first="$(printf '%s\n' \
+  '{"hook_event_name":"PostToolUse","session_id":"session-1","tool_name":"Edit","output":"line 1"}' \
+  | "$CG" event ingest --source claude --json)"
+python3 -c "
+import json
+d=json.loads(r'''$first''')
+assert d['source']=='claude' and d['kind']=='command', d
+assert d['session']=='session-1' and d['attempt_id']=='attempt-1', d
+assert d['task']=='demo/1.1' and d['activity'] is True, d
+assert d['evidence_delta']==0 and d['implementation_progress'] is False, d
+assert d['duplicate'] is False, d
+"
+first_id="$(printf '%s' "$first" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["id"])')"
+first_fingerprint="$(printf '%s' "$first" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["fingerprint"])')"
+first_revision="$(printf '%s' "$first" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["workspace_revision"])')"
+
+# Top-level key order and insignificant whitespace do not create a new event.
+duplicate="$(printf '%s\n' \
+  '{ "output": "line 1", "tool_name": "Edit", "session_id": "session-1", "hook_event_name": "PostToolUse" }' \
+  | "$CG" event ingest --source claude --json)"
+python3 -c "
+import json
+d=json.loads(r'''$duplicate''')
+assert d['duplicate'] is True, d
+assert d['id']==int('$first_id'), d
+assert d['fingerprint']=='$first_fingerprint', d
+"
+
+# A changed workspace revision is evidence. A non-heartbeat event can carry
+# that evidence as implementation progress.
+printf '%s\n' 'int alpha(void){return 2;}' > src/a.c
+changed="$(printf '%s\n' \
+  '{"event":"write","session":"session-1","output":"line 2"}' \
+  | "$CG" event ingest --source cursor --json)"
+python3 -c "
+import json
+d=json.loads(r'''$changed''')
+assert d['kind']=='write' and d['source']=='cursor', d
+assert d['workspace_revision']!='$first_revision', d
+assert d['evidence_delta']==1 and d['output_changed'] is True, d
+assert d['implementation_progress'] is True, d
+"
+
+# Heartbeats and changing output prove liveness, not implementation. They
+# remain useful recovery evidence without inflating completion claims.
+heartbeat="$(printf '%s\n' \
+  '{"type":"heartbeat","sessionId":"session-1","output":"still compiling"}' \
+  | "$CG" event ingest --source codex --json)"
+python3 -c "
+import json
+d=json.loads(r'''$heartbeat''')
+assert d['kind']=='heartbeat' and d['activity'] is True, d
+assert d['output_changed'] is True and d['evidence_delta']==0, d
+assert d['implementation_progress'] is False, d
+"
+
+history="$("$CG" event history --json)"
+python3 -c "
+import json
+d=json.loads(r'''$history''')
+assert d['count']==3, d
+assert d['events'][0]['kind']=='heartbeat', d
+assert all(e['session']=='session-1' for e in d['events']), d
+assert all(e['attempt_id']=='attempt-1' for e in d['events']), d
+assert all(e['task']=='demo/1.1' for e in d['events']), d
+"
+progress="$("$CG" event progress --json)"
+python3 -c "
+import json
+d=json.loads(r'''$progress''')
+assert d['activity'] is True and d['kind']=='heartbeat', d
+assert d['implementation_progress'] is False, d
+"
+
+# Invalid/truncated input never reaches durable history.
+expect_rc 1 sh -c "printf '%s\\n' '{broken' | '$CG' event ingest"
+[ "$("$CG" event history --json | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["count"])')" -eq 3 ] \
+  || fail "invalid lifecycle JSON was persisted"
+
+mcp="$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | "$CG" mcp)"
+has "$mcp" '"name":"event_ingest"'
+has "$mcp" '"name":"event_history"'
+has "$mcp" '"name":"progress_status"'
+
+# Portable hook shims are executable adapters into the same event stream.
+"$CG" integrate apply >/dev/null
+PATH="$(dirname "$CG"):$PATH" \
+  printf '%s\n' '{"event":"command","session":"shim-session"}' \
+  | PATH="$(dirname "$CG"):$PATH" .codify/hooks/claude.sh >/dev/null
+shim_history="$("$CG" event history --json)"
+python3 -c "
+import json
+d=json.loads(r'''$shim_history''')
+assert any(e['source']=='claude' and e['session']=='shim-session'
+           for e in d['events']), d
+"
+
+echo "22_control events ok"
+}
+
 case "$mode" in
   state) run_state ;;
   liveness) run_liveness ;;
   integrate) run_integrate ;;
-  all) run_state; run_liveness; run_integrate ;;
+  events) run_events ;;
+  all) run_state; run_liveness; run_integrate; run_events ;;
 esac

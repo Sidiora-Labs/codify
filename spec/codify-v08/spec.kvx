@@ -101,7 +101,7 @@ reqs       = ["2.1", "2.2", "2.3", "2.4"]
 
 [task.2.2]
 title      = "Normalize lifecycle events into progress records"
-status     = "pending"
+status     = "done"
 wave       = 4
 requires   = ["2.1"]
 symbols    = ["cmd_event", "runtime_event_ingest", "runtime_workspace_revision", "runtime_progress"]

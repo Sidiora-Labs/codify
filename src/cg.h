@@ -254,6 +254,11 @@ int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,
 int cmd_log     (Cg *cg, int limit, bool json);
 int cmd_status  (Cg *cg, bool json);
 int cmd_state   (Cg *cg, bool json);              /* Git/snapshot/spec/live */
+int cmd_event(Cg *cg, int argc, char **argv, bool json);
+int runtime_event_ingest(Cg *cg, const char *source, const char *payload,
+                         bool json);
+void runtime_workspace_revision(Cg *cg, char out[65]);
+int runtime_progress(Cg *cg, bool json);
 int cmd_diff    (Cg *cg, const char *a, const char *b);
 int cmd_checkout(Cg *cg, const char *id, bool force);
 int cmd_changes (Cg *cg, int limit, bool json); /* impact of uncommitted edits */

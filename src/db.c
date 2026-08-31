@@ -66,6 +66,24 @@ static const char *SCHEMA =
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_fence ON attempts(fence);"
     "CREATE INDEX IF NOT EXISTS idx_attempt_task ON attempts(task,state);"
     "CREATE INDEX IF NOT EXISTS idx_attempt_agent ON attempts(agent,state);"
+    /* normalized native hook events: durable activity/evidence history */
+    "CREATE TABLE IF NOT EXISTS runtime_events("
+    "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL,"
+    "  source TEXT NOT NULL, kind TEXT NOT NULL, session TEXT NOT NULL,"
+    "  attempt_id TEXT, task TEXT, fingerprint TEXT UNIQUE NOT NULL,"
+    "  revision TEXT NOT NULL, previous_revision TEXT,"
+    "  evidence_delta INTEGER NOT NULL, activity INTEGER NOT NULL,"
+    "  output_hash TEXT, output_changed INTEGER NOT NULL, payload TEXT);"
+    "CREATE INDEX IF NOT EXISTS idx_event_attempt "
+    "ON runtime_events(attempt_id,created);"
+    "CREATE INDEX IF NOT EXISTS idx_event_session "
+    "ON runtime_events(session,created);"
+    /* content hashes cached by nanosecond file metadata make lifecycle
+     * revisions exact without re-reading every file on every heartbeat */
+    "CREATE TABLE IF NOT EXISTS runtime_files("
+    "  path TEXT PRIMARY KEY, size INTEGER NOT NULL,"
+    "  mtime_ns INTEGER NOT NULL, ctime_ns INTEGER NOT NULL,"
+    "  hash TEXT NOT NULL);"
     /* per-file import rows; name '*' means a whole-module import */
     "CREATE TABLE IF NOT EXISTS imports("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
@@ -92,7 +110,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "11"
+#define SCHEMA_VERSION "12"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -222,8 +240,9 @@ int cg_open(Cg *cg, bool create) {
 /* Derived tables (everything the indexer rebuilds from source) are dropped
  * and recreated on every schema_version mismatch — even with an empty files
  * table, an old DB may carry the old refs shape. Agent memory, git history,
- * leases, and attempts are never touched: they are durable state a version
- * bump must not destroy. The DROPs are IF EXISTS, a no-op on a fresh DB. */
+ * leases, attempts, and runtime events are never touched: they are durable
+ * state a version bump must not destroy. The DROPs are IF EXISTS, a no-op on
+ * a fresh DB. */
 int cg_schema_upgrade(Cg *cg) {
     char *ver = cg_meta_get(cg, "schema_version");
     bool current = ver && strcmp(ver, SCHEMA_VERSION) == 0;
