@@ -51,6 +51,8 @@ assert all(t['requires'] == [] for t in d['tasks']), d
 out="$(CG_AGENT=a1 "$CG" spec claim-next --json)"
 has "$out" '"id":"2.1"'
 has "$out" '"agent":"a1"'
+has "$out" '"attempt_id":'
+has "$out" '"fence":'
 has "$out" '"expires_in_min":30'
 out="$("$CG" spec claim-next --agent a2 --json)"
 has "$out" '"id":"2.2"'
@@ -66,6 +68,10 @@ expect_rc 3 "$CG" spec claim-next --agent a5 --json
 
 out="$("$CG" spec status --json)"
 has "$out" '"mode":"parallel"'
+out="$(CG_AGENT=a1 "$CG" spec status --json)"
+has "$out" '"current":{"id":"2.1"'
+out="$(CG_AGENT=unassigned "$CG" spec status --json)"
+hasnt "$out" '"current":'
 
 echo "17_session claim-next ok"
 

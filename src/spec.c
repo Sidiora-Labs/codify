@@ -951,6 +951,142 @@ static int spec_in_progress_count(const Spec *s) {
     return count;
 }
 
+/* Expire dead attempts without rewriting the declared kvx task state. That
+ * separation is intentional: discovery is read-only; `spec reconcile
+ * --repair` is the explicit state-changing recovery path. */
+static void spec_attempt_sweep(Cg *g) {
+    cg_exec(g,
+        "UPDATE attempts SET state='expired',reason='heartbeat expired' "
+        "WHERE state='running' AND expires<=strftime('%s','now');"
+        "DELETE FROM leases WHERE expires<=strftime('%s','now')");
+}
+
+static long spec_attempt_next_fence(Cg *g) {
+    char *raw = cg_meta_get(g, "attempt_fence");
+    long fence = raw && raw[0] ? atol(raw) + 1 : 1;
+    free(raw);
+    char buf[32];
+    snprintf(buf, sizeof buf, "%ld", fence);
+    cg_meta_set(g, "attempt_fence", buf);
+    return fence;
+}
+
+static const char *spec_attempt_host(const char *host, char buf[256]) {
+    if (host && host[0]) return host;
+    host = getenv("CG_HOST");
+    if (host && host[0]) return host;
+    if (gethostname(buf, 255) == 0) {
+        buf[255] = 0;
+        return buf;
+    }
+    return "unknown";
+}
+
+static const char *spec_attempt_session(const char *session) {
+    if (session && session[0]) return session;
+    session = getenv("CG_SESSION");
+    return session ? session : "";
+}
+
+/* Begin one fenced execution attempt. Must run inside BEGIN IMMEDIATE so the
+ * fence and the task's single running attempt advance atomically. */
+static int spec_attempt_begin(Cg *g, const char *tag, const char *agent,
+                              const char *host, const char *session, long now,
+                              long ttl_min, SpecAttempt *out) {
+    memset(out, 0, sizeof *out);
+    out->fence = spec_attempt_next_fence(g);
+    out->heartbeat = now;
+    out->expires = now + ttl_min * 60;
+    snprintf(out->task, sizeof out->task, "%s", tag);
+    snprintf(out->agent, sizeof out->agent, "%s", agent);
+
+    char seed[1400], hash[65], hostbuf[256];
+    const char *resolved_host = spec_attempt_host(host, hostbuf);
+    const char *resolved_session = spec_attempt_session(session);
+    snprintf(seed, sizeof seed, "%s|%s|%ld|%ld|%ld", tag, agent,
+             out->fence, now, (long)getpid());
+    sha256_hex(seed, strlen(seed), hash);
+    snprintf(out->attempt_id, sizeof out->attempt_id, "%s", hash);
+
+    sqlite3_stmt *old = cg_prep(g,
+        "UPDATE attempts SET state='superseded',reason='new fenced attempt' "
+        "WHERE task=? AND state='running'");
+    sqlite3_bind_text(old, 1, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_step(old);
+    sqlite3_finalize(old);
+
+    sqlite3_stmt *ins = cg_prep(g,
+        "INSERT INTO attempts(attempt_id,task,agent,host,session,fence,state,"
+        "started,heartbeat,expires,reason) VALUES(?,?,?,?,?,?,'running',"
+        "?,?,?,NULL)");
+    sqlite3_bind_text(ins, 1, out->attempt_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 2, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 3, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 4, resolved_host, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 5, resolved_session, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(ins, 6, out->fence);
+    sqlite3_bind_int64(ins, 7, now);
+    sqlite3_bind_int64(ins, 8, now);
+    sqlite3_bind_int64(ins, 9, out->expires);
+    int rc = sqlite3_step(ins) == SQLITE_DONE ? 0 : -1;
+    sqlite3_finalize(ins);
+    return rc;
+}
+
+/* Renew only the exact live attempt generation. An old process cannot keep a
+ * reclaimed task alive because both its attempt id and fence stop matching. */
+static int spec_attempt_heartbeat(Cg *g, const char *tag, const char *agent,
+                                  const char *attempt_id, long fence,
+                                  long ttl_min, SpecAttempt *out) {
+    spec_attempt_sweep(g);
+    long now = (long)time(NULL);
+    sqlite3_stmt *up = cg_prep(g,
+        "UPDATE attempts SET heartbeat=?,expires=? WHERE attempt_id=? "
+        "AND task=? AND agent=? AND fence=? AND state='running' "
+        "AND expires>?");
+    sqlite3_bind_int64(up, 1, now);
+    sqlite3_bind_int64(up, 2, now + ttl_min * 60);
+    sqlite3_bind_text(up, 3, attempt_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(up, 4, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(up, 5, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(up, 6, fence);
+    sqlite3_bind_int64(up, 7, now);
+    sqlite3_step(up);
+    bool renewed = sqlite3_changes(g->db) == 1;
+    sqlite3_finalize(up);
+    if (!renewed) return 1;
+
+    sqlite3_stmt *lease = cg_prep(g,
+        "UPDATE leases SET expires=? WHERE task=? AND agent=?");
+    sqlite3_bind_int64(lease, 1, now + ttl_min * 60);
+    sqlite3_bind_text(lease, 2, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(lease, 3, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_step(lease);
+    sqlite3_finalize(lease);
+    if (out) {
+        memset(out, 0, sizeof *out);
+        snprintf(out->attempt_id, sizeof out->attempt_id, "%s", attempt_id);
+        snprintf(out->task, sizeof out->task, "%s", tag);
+        snprintf(out->agent, sizeof out->agent, "%s", agent);
+        out->fence = fence;
+        out->heartbeat = now;
+        out->expires = now + ttl_min * 60;
+    }
+    return 0;
+}
+
+static void spec_attempt_finish(Cg *g, const char *tag, const char *state,
+                                const char *reason) {
+    sqlite3_stmt *st = cg_prep(g,
+        "UPDATE attempts SET state=?,reason=? WHERE task=? "
+        "AND state='running'");
+    sqlite3_bind_text(st, 1, state, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, reason, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
 /* the in_progress task the agent's own live lease points at, if any;
  * returns a pointer borrowed from s->ids, NULL when there is none */
 static const char *spec_agent_leased(const Spec *s, const char *agent) {
@@ -958,9 +1094,11 @@ static const char *spec_agent_leased(const Spec *s, const char *agent) {
     Cg g;
     if (!memory_open_quiet(&g)) return NULL;
     const char *found = NULL;
+    spec_attempt_sweep(&g);
     sqlite3_stmt *st = cg_prep(&g,
-        "SELECT task FROM leases WHERE agent=? AND task LIKE ?||'/%' "
-        "AND expires > strftime('%s','now') ORDER BY task");
+        "SELECT task FROM attempts WHERE agent=? AND task LIKE ?||'/%' "
+        "AND state='running' AND expires > strftime('%s','now') "
+        "ORDER BY fence DESC");
     sqlite3_bind_text(st, 1, agent, -1, SQLITE_STATIC);
     sqlite3_bind_text(st, 2, s->feature, -1, SQLITE_STATIC);
     while (!found && sqlite3_step(st) == SQLITE_ROW) {
@@ -984,10 +1122,48 @@ static const char *spec_agent_leased(const Spec *s, const char *agent) {
  * agent the same one — the agent's own live lease disambiguates. */
 static const char *spec_current_for_agent(const Spec *s, const char *agent) {
     if (spec_parallel_mode(s)) {
-        const char *own = spec_agent_leased(s, agent);
-        if (own) return own;
+        return spec_agent_leased(s, agent);
     }
     return spec_current(s);
+}
+
+/* Borrowed task ids whose declaration says in_progress but which have no
+ * live execution attempt. Only parallel mode promises ownership-aware state;
+ * standard/prod keep the deliberate single-operator `spec start` workflow. */
+static int spec_stale_tasks(const Spec *s, const char ***out) {
+    *out = NULL;
+    if (!spec_parallel_mode(s)) return 0;
+    const char **ids = xmalloc(sizeof(char *) *
+                              (size_t)(s->nids > 0 ? s->nids : 1));
+    Cg g;
+    bool have_db = memory_open_quiet(&g);
+    if (have_db) spec_attempt_sweep(&g);
+    sqlite3_stmt *q = have_db ? cg_prep(&g,
+        "SELECT 1 FROM attempts WHERE task=? AND state='running' "
+        "AND expires>strftime('%s','now') LIMIT 1") : NULL;
+    int n = 0;
+    for (int i = 0; i < s->nids; i++) {
+        if (!task_is_leaf(s, s->ids[i])) continue;
+        char *status = task_status(s, s->ids[i]);
+        bool in_progress = strcmp(status, "in_progress") == 0;
+        free(status);
+        if (!in_progress) continue;
+        bool live = false;
+        if (q) {
+            char tag[700];
+            snprintf(tag, sizeof tag, "%s/%s", s->feature, s->ids[i]);
+            sqlite3_bind_text(q, 1, tag, -1, SQLITE_TRANSIENT);
+            live = sqlite3_step(q) == SQLITE_ROW;
+            sqlite3_reset(q);
+            sqlite3_clear_bindings(q);
+        }
+        if (!live) ids[n++] = s->ids[i];
+    }
+    if (q) sqlite3_finalize(q);
+    if (have_db) cg_close(&g);
+    if (!n) { free(ids); ids = NULL; }
+    *out = ids;
+    return n;
 }
 
 /* ---------------- memory hooks ---------------- */
@@ -1078,6 +1254,8 @@ static int spec_status_cmd(Spec *s, bool json) {
     }
     const char *cur = spec_current_for_agent(s, cg_agent_name(NULL));
     const char *next = spec_next_id(s);
+    const char **stale = NULL;
+    int nstale = spec_stale_tasks(s, &stale);
 
     if (json) {
         StrBuf b; sb_init(&b);
@@ -1097,9 +1275,18 @@ static int spec_status_cmd(Spec *s, bool json) {
         if (next) { sb_puts(&b, ",\"next\":"); json_task(s, next, &b); }
         sb_puts(&b, ",\"claims\":[");
         spec_live_leases(s, &b, true);
+        sb_puts(&b, "],\"stale\":[");
+        for (int i = 0; i < nstale; i++) {
+            if (i) sb_putc(&b, ',');
+            sb_puts(&b, "{\"id\":");
+            sb_json_str(&b, stale[i]);
+            sb_puts(&b, ",\"declared\":\"in_progress\","
+                        "\"live_attempt\":false}");
+        }
         sb_puts(&b, "]}\n");
         fputs(b.p, stdout);
         sb_free(&b);
+        free(stale);
         return 0;
     }
 
@@ -1128,6 +1315,12 @@ static int spec_status_cmd(Spec *s, bool json) {
         printf("in progress: %s — %s\n", cur, t);
         free(t);
     }
+    if (nstale > 0) {
+        printf("stale declarations (repair with `cg spec reconcile "
+               "--repair`):\n");
+        for (int i = 0; i < nstale; i++)
+            printf("  %-8s in_progress, no live attempt\n", stale[i]);
+    }
     if (next) {
         char sec[300];
         task_sec(sec, sizeof sec, next);
@@ -1147,6 +1340,7 @@ static int spec_status_cmd(Spec *s, bool json) {
         fputs(lb.p, stdout);
     }
     sb_free(&lb);
+    free(stale);
     return 0;
 }
 
@@ -1308,26 +1502,37 @@ static bool spec_touches_conflict(Spec *s, const char *id, char *other,
 static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) return 0;
-    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+    spec_attempt_sweep(&g);
     sqlite3_stmt *st = cg_prep(&g,
-        "SELECT task,agent,expires FROM leases WHERE task LIKE ?||'/%' "
-        "ORDER BY task");
+        "SELECT task,agent,attempt_id,fence,ifnull(host,''),"
+        "ifnull(session,''),expires FROM attempts "
+        "WHERE task LIKE ?||'/%' AND state='running' "
+        "AND expires>strftime('%s','now') ORDER BY task");
     sqlite3_bind_text(st, 1, s->feature, -1, SQLITE_STATIC);
     int n = 0;
     long now = (long)time(NULL);
     while (sqlite3_step(st) == SQLITE_ROW) {
         const char *task = (const char *)sqlite3_column_text(st, 0);
         const char *agent = (const char *)sqlite3_column_text(st, 1);
-        long exp = (long)sqlite3_column_int64(st, 2);
+        const char *attempt = (const char *)sqlite3_column_text(st, 2);
+        long fence = (long)sqlite3_column_int64(st, 3);
+        const char *host = (const char *)sqlite3_column_text(st, 4);
+        const char *session = (const char *)sqlite3_column_text(st, 5);
+        long exp = (long)sqlite3_column_int64(st, 6);
         const char *id = strrchr(task, '/');
         id = id ? id + 1 : task;
         if (json) {
             if (n) sb_putc(b, ',');
             sb_puts(b, "{\"id\":");     sb_json_str(b, id);
             sb_puts(b, ",\"agent\":");  sb_json_str(b, agent);
+            sb_puts(b, ",\"attempt_id\":"); sb_json_str(b, attempt);
+            sb_printf(b, ",\"fence\":%ld,\"host\":", fence);
+            sb_json_str(b, host);
+            sb_puts(b, ",\"session\":"); sb_json_str(b, session);
             sb_printf(b, ",\"expires_in_min\":%ld}", (exp - now + 59) / 60);
         } else {
-            sb_printf(b, "  %-8s claimed by %s (%ld min left)\n", id, agent,
+            sb_printf(b, "  %-8s claimed by %s (attempt %.12s, fence %ld, "
+                      "%ld min left)\n", id, agent, attempt, fence,
                       (exp - now + 59) / 60);
         }
         n++;
@@ -1394,8 +1599,13 @@ static int spec_wave_cmd(Spec *s, bool json) {
 }
 
 /* upsert one lease; runs inside whatever transaction the caller holds */
-static void spec_lease_upsert(Cg *g, const char *tag, const char *agent,
-                              long now, long ttl_min, const char *touches) {
+static int spec_lease_upsert(Cg *g, const char *tag, const char *agent,
+                             const char *host, const char *session, long now,
+                             long ttl_min, const char *touches,
+                             SpecAttempt *attempt) {
+    if (spec_attempt_begin(g, tag, agent, host, session, now, ttl_min,
+                           attempt) != 0)
+        return -1;
     sqlite3_stmt *ins = cg_prep(g,
         "INSERT INTO leases(task,agent,claimed,expires,touches) "
         "VALUES(?,?,?,?,?) ON CONFLICT(task) DO UPDATE SET "
@@ -1406,8 +1616,9 @@ static void spec_lease_upsert(Cg *g, const char *tag, const char *agent,
     sqlite3_bind_int64(ins, 3, now);
     sqlite3_bind_int64(ins, 4, now + ttl_min * 60);
     sqlite3_bind_text(ins, 5, touches, -1, SQLITE_TRANSIENT);
-    sqlite3_step(ins);
+    int rc = sqlite3_step(ins) == SQLITE_DONE ? 0 : -1;
     sqlite3_finalize(ins);
+    return rc;
 }
 
 /* A finished task's lease must die with it, or the next `spec ready` keeps
@@ -1418,6 +1629,7 @@ static void spec_release_lease(Spec *s, const char *id) {
     if (!memory_open_quiet(&g)) return;
     char tag[700];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    spec_attempt_finish(&g, tag, "completed", "task left active execution");
     sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
     sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
     sqlite3_step(st);
@@ -1425,12 +1637,126 @@ static void spec_release_lease(Spec *s, const char *id) {
     cg_close(&g);
 }
 
+static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
+                              const char *attempt_arg, long fence_arg,
+                              long ttl_min, bool json) {
+    if (!task_exists(s, id) || !task_is_leaf(s, id)) {
+        fprintf(stderr, "cg spec: no runnable [task.%s] in %s\n", id,
+                s->fpath);
+        return 1;
+    }
+    Cg g;
+    if (!memory_open_quiet(&g)) {
+        fprintf(stderr, "cg spec: heartbeat needs a Codify index here "
+                        "(run `cg init`)\n");
+        return 1;
+    }
+    char tag[700], attempt[65] = "";
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    long fence = 0;
+
+    cg_exec(&g, "BEGIN IMMEDIATE");
+    spec_attempt_sweep(&g);
+    sqlite3_stmt *q = cg_prep(&g,
+        "SELECT attempt_id,fence FROM attempts WHERE task=? AND agent=? "
+        "AND state='running' AND expires>strftime('%s','now') "
+        "ORDER BY fence DESC LIMIT 1");
+    sqlite3_bind_text(q, 1, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 2, agent, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW) {
+        snprintf(attempt, sizeof attempt, "%s",
+                 (const char *)sqlite3_column_text(q, 0));
+        fence = (long)sqlite3_column_int64(q, 1);
+    }
+    sqlite3_finalize(q);
+    if (!attempt[0] || (attempt_arg && attempt_arg[0] &&
+                       strcmp(attempt_arg, attempt) != 0) ||
+        (fence_arg > 0 && fence_arg != fence)) {
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
+                        "heartbeat rejected\n", id);
+        return 1;
+    }
+
+    SpecAttempt renewed;
+    int rc = spec_attempt_heartbeat(&g, tag, agent, attempt, fence,
+                                    ttl_min, &renewed);
+    if (rc != 0) {
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        fprintf(stderr, "cg spec: attempt %.12s is no longer live — "
+                        "heartbeat rejected\n", attempt);
+        return 1;
+    }
+    cg_exec(&g, "COMMIT");
+    cg_close(&g);
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"heartbeat\":");
+        sb_json_str(&b, renewed.attempt_id);
+        sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld}\n",
+                  renewed.fence, ttl_min);
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("heartbeat %s attempt %.12s fence %ld (%ld min)\n", id,
+               renewed.attempt_id, renewed.fence, ttl_min);
+    }
+    return 0;
+}
+
+static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {
+    const char **stale = NULL;
+    int n = spec_stale_tasks(s, &stale);
+    int repaired = 0;
+    if (repair) {
+        for (int i = 0; i < n; i++) {
+            char sec[300];
+            task_sec(sec, sizeof sec, stale[i]);
+            if (kvx_set_status(s->fpath, sec, "pending") != 0) {
+                fprintf(stderr, "cg spec: could not repair [%s]\n", sec);
+                free(stale);
+                return 1;
+            }
+            repaired++;
+        }
+        if (repaired && spec_render(s->root, false, true) != 0) {
+            fprintf(stderr, "cg spec: declarations repaired but generated "
+                            "projections could not be refreshed\n");
+            free(stale);
+            return 1;
+        }
+    }
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"stale\":[");
+        for (int i = 0; i < n; i++) {
+            if (i) sb_putc(&b, ',');
+            sb_json_str(&b, stale[i]);
+        }
+        sb_printf(&b, "],\"repaired\":%d}\n", repaired);
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else if (!n) {
+        printf("reconcile: no stale in-progress declarations\n");
+    } else {
+        printf("reconcile: %d stale declaration(s)%s:\n", n,
+               repair ? " repaired to pending" : "");
+        for (int i = 0; i < n; i++) printf("  %s\n", stale[i]);
+        if (!repair) printf("repair: cg spec reconcile --repair\n");
+    }
+    free(stale);
+    return 0;
+}
+
 /* A lease is a claim with an owner and an expiry, so a crashed agent's task
  * returns to the pool instead of blocking the wave forever. The whole claim
  * runs inside BEGIN IMMEDIATE so two racing agents cannot both pass the
  * owner check and silently steal each other's lease. */
 static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
-                          long ttl_min, bool release, bool force, bool json) {
+                          const char *host, const char *session, long ttl_min,
+                          bool release, bool force, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) {
         fprintf(stderr, "cg spec: claims need a Codify index here "
@@ -1445,7 +1771,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         /* owner check and delete must be one transaction, or a racing
          * agent's fresh lease can vanish under a vacuous release */
         cg_exec(&g, "BEGIN IMMEDIATE");
-        cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+        spec_attempt_sweep(&g);
         /* releasing someone else's lease is the steal this exists to stop */
         sqlite3_stmt *q = cg_prep(&g, "SELECT agent FROM leases WHERE task=?");
         sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
@@ -1462,6 +1788,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
             }
         }
         sqlite3_finalize(q);
+        spec_attempt_finish(&g, tag, "abandoned", "released by owner");
         sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
         sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
         sqlite3_step(st);
@@ -1478,7 +1805,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         cg_close(&g);
         return 0;
     }
-    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+    spec_attempt_sweep(&g);
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         cg_close(&g);
@@ -1527,7 +1854,15 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     char sec[300];
     task_sec(sec, sizeof sec, id);
     char *touches = join_list(s->f, sec, "touches");
-    spec_lease_upsert(&g, tag, agent, now, ttl_min, touches);
+    SpecAttempt attempt;
+    if (spec_lease_upsert(&g, tag, agent, host, session, now, ttl_min,
+                          touches, &attempt) != 0) {
+        fprintf(stderr, "cg spec: could not create attempt for %s\n", id);
+        free(touches);
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        return 1;
+    }
     cg_exec(&g, "COMMIT");
     cg_close(&g);
     free(touches);
@@ -1538,7 +1873,10 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         sb_json_str(&b, tag);
         sb_puts(&b, ",\"agent\":");
         sb_json_str(&b, agent);
-        sb_printf(&b, ",\"expires_in_min\":%ld}\n", ttl_min);
+        sb_puts(&b, ",\"attempt_id\":");
+        sb_json_str(&b, attempt.attempt_id);
+        sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld}\n",
+                  attempt.fence, ttl_min);
         fputs(b.p, stdout);
         sb_free(&b);
     } else
@@ -1649,8 +1987,8 @@ static int spec_ready_cmd(Spec *s, bool json) {
  * against plain `spec claim`. Empty frontier is exit 3, distinct from an
  * error, so an orchestrator's dispatch loop can tell "done for now" from
  * "broken". */
-static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
-                               bool json) {
+static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
+                               const char *session, long ttl_min, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) {
         fprintf(stderr, "cg spec: claims need a Codify index here "
@@ -1669,7 +2007,7 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
         s->f = fresh;
     }
 
-    cg_exec(&g, "DELETE FROM leases WHERE expires <= strftime('%s','now')");
+    spec_attempt_sweep(&g);
     cg_exec(&g, "BEGIN IMMEDIATE");
 
     /* lowest wave first, dotted order within, skipping anything whose
@@ -1716,7 +2054,16 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
     task_sec(sec, sizeof sec, id);
     char *touches = join_list(s->f, sec, "touches");
-    spec_lease_upsert(&g, tag, agent, (long)time(NULL), ttl_min, touches);
+    SpecAttempt attempt;
+    if (spec_lease_upsert(&g, tag, agent, host, session, (long)time(NULL),
+                          ttl_min, touches, &attempt) != 0) {
+        free(touches);
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
+        fprintf(stderr, "cg spec: could not create attempt for %s\n", id);
+        return 1;
+    }
     cg_exec(&g, "COMMIT");
     free(touches);
 
@@ -1726,6 +2073,7 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
         sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
         sqlite3_step(st);
         sqlite3_finalize(st);
+        spec_attempt_finish(&g, tag, "abandoned", "task status write failed");
         cg_close(&g);
         if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
         fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
@@ -1745,7 +2093,10 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
             json_task(s, id, &b);
             sb_puts(&b, ",\"lease\":{\"agent\":");
             sb_json_str(&b, agent);
-            sb_printf(&b, ",\"expires_in_min\":%ld}", ttl_min);
+            sb_puts(&b, ",\"attempt_id\":");
+            sb_json_str(&b, attempt.attempt_id);
+            sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld}",
+                      attempt.fence, ttl_min);
             Memory *mv = NULL;
             int nm = spec_task_memories(s, id, &mv);
             sb_puts(&b, ",\"memories\":[");
@@ -1768,7 +2119,10 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, long ttl_min,
         sb_json_str(&b, s->feature);
         sb_puts(&b, "},\"lease\":{\"agent\":");
         sb_json_str(&b, agent);
-        sb_printf(&b, ",\"expires_in_min\":%ld},\"reload\":false}\n", ttl_min);
+        sb_puts(&b, ",\"attempt_id\":");
+        sb_json_str(&b, attempt.attempt_id);
+        sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld},"
+                  "\"reload\":false}\n", attempt.fence, ttl_min);
         fputs(b.p, stdout);
         sb_free(&b);
         return 0;
@@ -2892,11 +3246,9 @@ char *spec_active_tag(void) {
     Spec s;
     char *out = NULL;
     if (spec_load(&s, NULL, NULL, true) == 0) {
-        /* exactly one in flight is unambiguous; with several, only the
-         * calling agent's own live lease can say which task is theirs */
-        const char *cur = spec_in_progress_count(&s) == 1
-            ? spec_current(&s)
-            : spec_agent_leased(&s, cg_agent_name(NULL));
+        /* Parallel ownership is never inferred from somebody else's lone
+         * in-progress declaration. Standard/prod retain their single task. */
+        const char *cur = spec_current_for_agent(&s, cg_agent_name(NULL));
         if (cur) {
             StrBuf b; sb_init(&b);
             sb_printf(&b, "%s/%s", s.feature, cur);
@@ -3015,17 +3367,19 @@ int spec_task_memories_tag(const char *requested, Memory **out) {
 
 int cmd_spec(int argc, char **argv, bool json) {
     const char *sub = argc > 0 ? argv[0] : "status";
-    bool check = false, force = false;
+    bool check = false, force = false, repair = false;
     const char *feature_ov = NULL, *root_ov = NULL;
     const char *pos[4];
     int npos = 0;
     TaskSpec ts;
     const char *agent = NULL;
-    long ttl = 30;
+    const char *host = NULL, *session = NULL, *attempt = NULL;
+    long ttl = 30, fence = 0;
     memset(&ts, 0, sizeof ts);
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) check = true;
         else if (strcmp(argv[i], "--force") == 0) force = true;
+        else if (strcmp(argv[i], "--repair") == 0) repair = true;
         else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc)
             feature_ov = argv[++i];
         else if (strcmp(argv[i], "--root") == 0 && i + 1 < argc)
@@ -3050,6 +3404,14 @@ int cmd_spec(int argc, char **argv, bool json) {
             ts.reqs = argv[++i];
         else if (strcmp(argv[i], "--agent") == 0 && i + 1 < argc)
             agent = argv[++i];
+        else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc)
+            host = argv[++i];
+        else if (strcmp(argv[i], "--session") == 0 && i + 1 < argc)
+            session = argv[++i];
+        else if (strcmp(argv[i], "--attempt") == 0 && i + 1 < argc)
+            attempt = argv[++i];
+        else if (strcmp(argv[i], "--fence") == 0 && i + 1 < argc)
+            fence = atol(argv[++i]);
         else if (strcmp(argv[i], "--ttl") == 0 && i + 1 < argc)
             ttl = atol(argv[++i]);
         else if (npos < 4) pos[npos++] = argv[i];
@@ -3105,7 +3467,8 @@ int cmd_spec(int argc, char **argv, bool json) {
         strcmp(sub, "trace") != 0 && strcmp(sub, "add") != 0 &&
         strcmp(sub, "lint") != 0 && strcmp(sub, "wave") != 0 &&
         strcmp(sub, "claim") != 0 && strcmp(sub, "release") != 0 &&
-        strcmp(sub, "ready") != 0 && strcmp(sub, "claim-next") != 0) {
+        strcmp(sub, "ready") != 0 && strcmp(sub, "claim-next") != 0 &&
+        strcmp(sub, "heartbeat") != 0 && strcmp(sub, "reconcile") != 0) {
         fprintf(stderr, "usage: cg spec [render [--check] | status | next | "
                 "new <feature> | add <id> --title T [--wave N] [--requires a,b]"
                 " [--symbols a,b] [--touches a,b] [--verify CMD] [--do \"a;b\"]"
@@ -3113,7 +3476,9 @@ int cmd_spec(int argc, char **argv, bool json) {
                 "implemented <id> | done <id> [--force] | trace [<id>] | "
                 "wave | ready | claim <id> [--agent N] [--ttl M] | "
                 "release <id> [--agent N] [--force] | "
-                "claim-next [--agent N] [--ttl M]] "
+                "claim-next [--agent N] [--ttl M] | heartbeat <id> "
+                "[--agent N] [--attempt ID] [--fence N] [--ttl M] | "
+                "reconcile [--repair]] "
                 "[-f <feature>]\n");
         return 1;
     }
@@ -3141,14 +3506,26 @@ int cmd_spec(int argc, char **argv, bool json) {
             rc = 1;
         } else {
             rc = spec_claim_cmd(&s, pos[0], cg_agent_name(agent),
+                                host, session,
                                 ttl > 0 ? ttl : 30,
                                 strcmp(sub, "release") == 0, force, json);
         }
     } else if (strcmp(sub, "ready") == 0) {
         rc = spec_ready_cmd(&s, json);
     } else if (strcmp(sub, "claim-next") == 0) {
-        rc = spec_claim_next_cmd(&s, cg_agent_name(agent),
+        rc = spec_claim_next_cmd(&s, cg_agent_name(agent), host, session,
                                  ttl > 0 ? ttl : 30, json);
+    } else if (strcmp(sub, "heartbeat") == 0) {
+        if (npos != 1) {
+            fprintf(stderr, "usage: cg spec heartbeat <id> [--agent NAME] "
+                            "[--attempt ID] [--fence N] [--ttl MIN]\n");
+            rc = 1;
+        } else {
+            rc = spec_heartbeat_cmd(&s, pos[0], cg_agent_name(agent), attempt,
+                                    fence, ttl > 0 ? ttl : 30, json);
+        }
+    } else if (strcmp(sub, "reconcile") == 0) {
+        rc = spec_reconcile_cmd(&s, repair, json);
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
     } else if (strcmp(sub, "trace") == 0) {

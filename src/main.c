@@ -74,6 +74,8 @@ static void usage(void) {
 "  spec ready               all eligible tasks across waves (parallel view)\n"
 "  spec claim-next          atomically claim the first conflict-free task;\n"
 "                           --agent <name>, --ttl <min>\n"
+"  spec heartbeat <id>      renew a live attempt; --attempt, --fence, --ttl\n"
+"  spec reconcile           report stale in-progress declarations; --repair\n"
 "  spec mode <prod|standard> configure implementation dependency semantics\n"
 "  spec start <id>          mark a task in_progress (honors workflow limit)\n"
 "  spec implemented <id>    graph-check coding work without verify_cmd;\n"

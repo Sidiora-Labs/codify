@@ -338,6 +338,14 @@ int   kvx_set_raw(const char *path, const char *section, const char *key,
                   const char *raw);
 
 int cmd_spec(int argc, char **argv, bool json);
+typedef struct {
+    char attempt_id[65];
+    char task[700];
+    char agent[256];
+    long fence;
+    long heartbeat;
+    long expires;
+} SpecAttempt;
 /* in_progress task of the cwd's spec repo as "feature/id" (malloc'd), or
  * NULL when there is no spec repo / no active task — never prints */
 char *spec_active_tag(void);

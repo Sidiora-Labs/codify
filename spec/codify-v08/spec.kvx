@@ -1,0 +1,164 @@
+# codify-v08 — vendor-neutral agent control plane.
+
+[meta]
+feature = "codify-v08"
+intro   = "Turn Codify's graph, spec, memory, MCP, ACP, and governance primitives into a vendor-neutral control plane that keeps coding agents truthful, live, grounded, progressing, and easy to integrate."
+
+[req.1]
+title = "Truthful task and agent state"
+story = "As a developer, I want Codify to distinguish declarations from live work so that stale task metadata can never impersonate an active agent."
+ac_1  = "WHEN an agent asks for current work in parallel mode THE spec engine SHALL return only a task backed by that agent's live owned attempt and SHALL report stale in_progress declarations separately."
+ac_2  = "WHEN a task attempt starts THE runtime SHALL assign an attempt id and monotonically fenced ownership token, persist heartbeats, and refuse stale owners after expiry or reassignment."
+ac_3  = "WHEN repository state is inspected THE output SHALL label Git state, Codify snapshot state, spec declaration state, and live runtime ownership independently."
+ac_4  = "WHEN declarations and live ownership disagree THE reconcile command SHALL diagnose the contradiction without mutation by default and SHALL repair only with an explicit flag."
+
+[req.2]
+title = "Portable agent integration"
+story = "As a developer, I want one safe Codify integration workflow across coding agents so that each host receives the right MCP, instructions, skills, and lifecycle hooks without hand-edited configuration."
+ac_1  = "WHEN integration is inspected THE adapter registry SHALL report host capabilities and configuration state for Codex, Claude Code, Copilot and VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline, and Continue."
+ac_2  = "WHEN integration is planned THE command SHALL show every intended path and action without writing, and apply SHALL be idempotent, preserve existing configuration, and create recoverable backups before modifying existing files."
+ac_3  = "WHEN portable assets are installed THE repository SHALL receive a concise Agent Skill plus compatible hook shims that route native lifecycle JSON into one Codify event command."
+ac_4  = "WHEN doctor runs THE command SHALL detect missing binaries, malformed or incomplete integration, stale server names, unsupported protocol versions, and conflicting generated-file ownership."
+
+[req.3]
+title = "Progress without drift or useless loops"
+story = "As a developer, I want Codify to measure novel work and intervene when an agent drifts or loops so that autonomous sessions remain productive and recoverable."
+ac_1  = "WHEN a lifecycle event arrives THE runtime SHALL normalize it into a session and attempt event with a stable fingerprint, workspace revision, and explainable evidence delta."
+ac_2  = "WHEN repeated events produce no new artifact, evidence, resolved failure, or criteria coverage THE progress engine SHALL classify the pattern and return a bounded recovery action rather than blindly continuing."
+ac_3  = "WHEN a long command is active THE runtime SHALL treat heartbeats and changing output as activity without falsely claiming implementation progress."
+ac_4  = "WHEN progress stalls THE escalation SHALL move through warn, re-plan, bounded experiment, handoff or waiting_input, and optional stop while remaining advisory unless policy explicitly enables enforcement."
+
+[req.4]
+title = "Fast revisioned work packets"
+story = "As a coding agent, I want one compact task-aware context call and delta updates so that I spend tokens implementing instead of repeatedly rediscovering repository state."
+ac_1  = "WHEN work opens THE packet SHALL include objective, criteria, allowed scope, independently labeled state, relevant memories, focused code context, tests, and the last failure or progress event."
+ac_2  = "WHEN the caller supplies a prior revision THE update SHALL return only state, evidence, and workspace changes since that revision."
+ac_3  = "WHEN work closes THE packet SHALL pair every acceptance criterion with recorded evidence or an explicit unverified result."
+
+[req.5]
+title = "Modern interoperable protocols"
+story = "As an integration author, I want Codify to negotiate current protocols honestly and expose the control plane through stable structured surfaces."
+ac_1  = "WHEN MCP initializes THE server SHALL negotiate the current supported stable revision, advertise only capabilities it implements, and keep the first 512 instruction characters self-contained."
+ac_2  = "WHEN an MCP client lists tools THE control-plane state, reconcile, event, progress, and work-packet operations SHALL have stable schemas and accurate read/write annotations."
+ac_3  = "WHEN agent assets are rendered THEIR ownership SHALL be deterministic so spec render and agent context generation cannot overwrite one another."
+ac_4  = "WHEN the feature qualifies THE integration suite SHALL simulate stale tasks, lease expiry and fencing, heartbeat renewal, repeated no-progress events, install planning and repair, MCP negotiation, and work-packet deltas."
+
+[design]
+overview = "Keep the one-binary, local-only architecture. Add persistent attempts and normalized events beside leases in SQLite; derive liveness from heartbeats rather than task strings; use fencing tokens for ownership. Build a static host capability registry that generates MCP, Agent Skill, and hook integration safely. Feed hook JSON to a common event ingester whose deterministic fingerprints and workspace revisions drive an explainable progress classifier. Compose task packets from the existing spec, graph, memory, impact, and test primitives. Preserve detailed CLI and MCP commands while adding a smaller control-plane facade."
+
+[tasks]
+heading = "Implementation Plan: codify-v08 Agent Control Plane"
+
+[task.1]
+title   = "Truth and liveness"
+section = "Runtime authority"
+status  = "pending"
+
+[task.1.1]
+title      = "Separate live attempts from declared task state"
+status     = "done"
+wave       = 1
+symbols    = ["spec_current_for_agent", "spec_attempt_begin", "spec_attempt_heartbeat", "spec_reconcile_cmd"]
+touches    = ["src/db.c", "src/spec.c", "src/cg.h", "src/main.c", "tests/integration/17_session.sh", "tests/integration/22_control.sh", "spec/codify-v08/*", "spec/workflow.kvx"]
+verify_cmd = "CG=$PWD/cg tests/integration/17_session.sh && CG=$PWD/cg tests/integration/22_control.sh state"
+do_1       = "Add durable attempt records with owner, host, session, heartbeat, expiry, state, attempt id, and monotonically increasing fencing token."
+do_2       = "Create attempts during claim and claim-next, renew them through heartbeat, complete or abandon them with task lifecycle changes, and reject stale fenced owners."
+do_3       = "Stop falling back to another agent's first in_progress task in parallel mode and expose stale declaration diagnostics."
+do_4       = "Add a read-only reconcile result plus explicit repair that returns orphaned in_progress tasks to pending without touching qualified work."
+reqs       = ["1.1", "1.2", "1.4"]
+
+[task.1.2]
+title      = "Report independent state and keep orchestrated attempts alive"
+status     = "pending"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["cmd_state", "orch_heartbeat", "orch_task_status"]
+touches    = ["src/runtime.c", "src/orchestrate.c", "src/main.c", "src/mcp.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/integration/22_control.sh", "spec/codify-v08/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/18_orchestrate.sh && CG=$PWD/cg tests/integration/22_control.sh liveness"
+do_1       = "Add cg state with separately labeled Git, Codify snapshot, spec declaration, live ownership, and stale-state output in text and JSON."
+do_2       = "Carry attempt and fence identity into child environments and renew orchestrator leases before expiry."
+do_3       = "Make completion and abandonment owner-aware so an expired process cannot mutate a reassigned task."
+reqs       = ["1.2", "1.3"]
+
+[task.2]
+title   = "Universal integration"
+section = "Host adapters"
+status  = "pending"
+
+[task.2.1]
+title      = "Detect, plan, apply, and diagnose agent integrations"
+status     = "pending"
+wave       = 3
+requires   = ["1.2"]
+symbols    = ["cmd_integrate", "integrate_plan", "integrate_doctor", "integrate_apply"]
+touches    = ["src/integrate.c", "src/main.c", "src/mcp.c", "src/govern.c", "src/cg.h", "tests/integration/03_agentic.sh", "tests/integration/22_control.sh", "spec/codify-v08/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/03_agentic.sh && CG=$PWD/cg tests/integration/22_control.sh integrate"
+do_1       = "Define a capability registry for every currently supported MCP host plus native instruction, skill, hook, session, and cloud capabilities."
+do_2       = "Implement read-only detect, plan, and doctor commands with explicit target paths and actionable findings."
+do_3       = "Implement idempotent apply with backups for existing files and keep mcp-install and hook-install as compatibility entry points."
+do_4       = "Generate one portable codify-workflow Agent Skill and cross-host hook shims without claiming unsupported host features."
+reqs       = ["2.1", "2.2", "2.3", "2.4"]
+
+[task.2.2]
+title      = "Normalize lifecycle events into progress records"
+status     = "pending"
+wave       = 4
+requires   = ["2.1"]
+symbols    = ["cmd_event", "runtime_event_ingest", "runtime_workspace_revision", "runtime_progress"]
+touches    = ["src/runtime.c", "src/db.c", "src/main.c", "src/mcp.c", "src/cg.h", "tests/integration/22_control.sh", "spec/codify-v08/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/22_control.sh events"
+do_1       = "Accept native lifecycle JSON on stdin, normalize common fields, hash a stable fingerprint, and persist it against session and attempt identity."
+do_2       = "Compute workspace revision and evidence deltas without treating a heartbeat alone as implementation progress."
+do_3       = "Expose progress status and event history in compact text and JSON forms suitable for hooks and MCP."
+reqs       = ["3.1", "3.3"]
+
+[task.3]
+title   = "Grounded progress"
+section = "Recovery and speed"
+status  = "pending"
+
+[task.3.1]
+title      = "Detect stalls and deliver revisioned work packets"
+status     = "pending"
+wave       = 5
+requires   = ["2.2"]
+symbols    = ["runtime_classify_progress", "cmd_work", "work_open", "work_update", "work_close"]
+touches    = ["src/runtime.c", "src/govern.c", "src/graph.c", "src/mcp.c", "src/main.c", "src/cg.h", "tests/integration/22_control.sh", "spec/codify-v08/*"]
+verify_cmd = "CG=$PWD/cg tests/integration/22_control.sh progress && CG=$PWD/cg tests/integration/22_control.sh work"
+do_1       = "Classify repeated failure, repeated observation, patch oscillation, and no-evidence windows with explicit reasons and configurable advisory thresholds."
+do_2       = "Return a bounded recovery ladder that never loops its own continuation and distinguishes waiting from stalled work."
+do_3       = "Compose work open from task criteria, scope, state, memories, relevant graph context, tests, and last runtime evidence."
+do_4       = "Issue opaque revisions and make work update return only changed state and evidence since the supplied revision; pair criteria with evidence on close."
+reqs       = ["3.2", "3.4", "4.1", "4.2", "4.3"]
+
+[task.4]
+title   = "Interoperability and qualification"
+section = "Protocol and release"
+status  = "pending"
+
+[task.4.1]
+title      = "Modernize MCP and resolve generated agent ownership"
+status     = "pending"
+wave       = 6
+requires   = ["3.1"]
+symbols    = ["cmd_mcp", "cmd_agentmd", "mcp_tool_annotations"]
+touches    = ["src/mcp.c", "src/agent.c", "src/main.c", "src/cg.h", "README.md", "docs/ARCHITECTURE.md", "CHANGELOG.md", "tests/integration/04_mcp.sh", "tests/integration/12_authoring.sh", "tests/integration/22_control.sh", "spec/codify-v08/*", "spec/workflow.kvx", "AGENTS.md", "CLAUDE.md"]
+verify_cmd = "CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/12_authoring.sh && CG=$PWD/cg tests/integration/22_control.sh protocol"
+do_1       = "Negotiate MCP 2025-11-25 while retaining older supported revisions and advertise list-change support only when notifications are implemented."
+do_2       = "Expose state, reconcile, event, progress, and work operations through MCP with honest annotations and compact schemas."
+do_3       = "Give generated workflow instructions and generated graph context distinct deterministic owners and paths."
+do_4       = "Document the control-plane model, adapter tiers, advisory policy, recovery semantics, and local-only boundary."
+reqs       = ["5.1", "5.2", "5.3"]
+
+[task.4.2]
+title      = "Qualify the control plane end to end"
+status     = "pending"
+wave       = 7
+requires   = ["4.1"]
+symbols    = ["cmd_state", "cmd_integrate", "cmd_event", "cmd_work"]
+touches    = ["tests/*", "README.md", "docs/*", "CHANGELOG.md", "src/cg.h", "spec/codify-v08/*"]
+verify_cmd = "make test && cg spec render --check && cg spec lint && cg check"
+do_1       = "Exercise stale tasks, repair, expiry, fencing, heartbeat renewal, repeated no-progress events, planning, apply idempotence, doctor, MCP negotiation, and work deltas in clean temporary repositories."
+do_2       = "Run the complete unit and integration suite with no fakes, forced completion, or weakened checks."
+do_3       = "Trace every task to its symbols, touched paths, snapshots, and qualification evidence before release."
+reqs       = ["5.4"]

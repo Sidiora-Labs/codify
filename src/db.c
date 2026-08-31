@@ -56,6 +56,16 @@ static const char *SCHEMA =
     "CREATE TABLE IF NOT EXISTS leases("
     "  task TEXT PRIMARY KEY, agent TEXT NOT NULL, claimed INTEGER NOT NULL,"
     "  expires INTEGER NOT NULL, touches TEXT);"
+    /* attempts are the authoritative live execution record. A task's kvx
+     * status says what was declared; this table says who is actually alive. */
+    "CREATE TABLE IF NOT EXISTS attempts("
+    "  attempt_id TEXT PRIMARY KEY, task TEXT NOT NULL, agent TEXT NOT NULL,"
+    "  host TEXT, session TEXT, fence INTEGER NOT NULL, state TEXT NOT NULL,"
+    "  started INTEGER NOT NULL, heartbeat INTEGER NOT NULL,"
+    "  expires INTEGER NOT NULL, reason TEXT);"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_fence ON attempts(fence);"
+    "CREATE INDEX IF NOT EXISTS idx_attempt_task ON attempts(task,state);"
+    "CREATE INDEX IF NOT EXISTS idx_attempt_agent ON attempts(agent,state);"
     /* per-file import rows; name '*' means a whole-module import */
     "CREATE TABLE IF NOT EXISTS imports("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
@@ -82,7 +92,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "10"
+#define SCHEMA_VERSION "11"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -212,8 +222,8 @@ int cg_open(Cg *cg, bool create) {
 /* Derived tables (everything the indexer rebuilds from source) are dropped
  * and recreated on every schema_version mismatch — even with an empty files
  * table, an old DB may carry the old refs shape. Agent memory, git history,
- * and leases are never touched: they are the durable state a version bump
- * must not destroy. The DROPs are IF EXISTS, a no-op on a fresh DB. */
+ * leases, and attempts are never touched: they are durable state a version
+ * bump must not destroy. The DROPs are IF EXISTS, a no-op on a fresh DB. */
 int cg_schema_upgrade(Cg *cg) {
     char *ver = cg_meta_get(cg, "schema_version");
     bool current = ver && strcmp(ver, SCHEMA_VERSION) == 0;
