@@ -604,11 +604,13 @@ printf '%s\n' 'int main(void){return 0;}' > src/main.c
 "$CG" init >/dev/null
 
 req() { printf '%s\n' "$1" | "$CG" mcp 2>/dev/null; }
+version="$("$CG" --version)"
 current="$(req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}')"
 python3 -c "
 import json
 d=json.loads(r'''$current''')['result']
 assert d['protocolVersion']=='2025-11-25', d
+assert d['serverInfo']['version']==r'''$version''', d
 assert d['capabilities']['tools']['listChanged'] is False, d
 assert d['capabilities']['resources']['listChanged'] is False, d
 assert d['capabilities']['resources']['subscribe'] is False, d

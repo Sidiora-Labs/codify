@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.7.0"
+#define CG_VERSION  "0.8.0"
 #define CG_MCP_VERSION "2025-11-25"
 #define CG_AGENT_CONTEXT ".codify/agent-context.md"
 

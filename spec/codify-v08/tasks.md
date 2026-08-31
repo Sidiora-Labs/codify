@@ -53,7 +53,7 @@
     - Give generated workflow instructions and generated graph context distinct deterministic owners and paths.
     - Document the control-plane model, adapter tiers, advisory policy, recovery semantics, and local-only boundary.
     - _Requirements: 5.1, 5.2, 5.3_
-  - [ ] 4.2 Qualify the control plane end to end
+  - [x] 4.2 Qualify the control plane end to end
     - Exercise stale tasks, repair, expiry, fencing, heartbeat renewal, repeated no-progress events, planning, apply idempotence, doctor, MCP negotiation, and work deltas in clean temporary repositories.
     - Run the complete unit and integration suite with no fakes, forced completion, or weakened checks.
     - Trace every task to its symbols, touched paths, snapshots, and qualification evidence before release.

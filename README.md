@@ -22,6 +22,8 @@ Pure C11. One binary. One SQLite database. Nothing leaves your machine.
 
 Codify (invoked as `cg`) is an agent workflow engine in a single binary. It maintains the four things a project needs beyond the code itself — what the code **is**, how it got **here**, what happens **next**, and what was **learned** along the way — and serves all four to humans and AI agents alike.
 
+Version 0.8.0 adds a local agent control plane: truthful task/runtime state, fenced attempts, capability-aware integration for ten coding-agent hosts, normalized lifecycle evidence, bounded stall recovery, and revisioned work packets.
+
 **What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes. And beyond what a parser sees, comments are indexed as first-class nodes — the intent layer: purpose, contracts, dangers, and the couplings that live only in prose.
 
 **How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits, and `cg changelog` writes symbol-level release notes by itself.

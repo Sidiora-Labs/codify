@@ -146,6 +146,14 @@ evidence, and workspace deltas rather than replaying the full packet. Close
 pairs criteria with durable manual or lifecycle evidence and names every
 remaining criterion as unverified.
 
+Release qualification keeps these contracts executable. The isolated
+`22_control` suite covers stale declaration repair, lease expiry and fencing,
+heartbeat renewal, semantic event deduplication, bounded no-progress recovery,
+integration planning/apply/doctor idempotence, current and legacy MCP
+negotiation, and revisioned work deltas. `make test` runs that suite with the
+unit tests and every other integration fixture before `cg check` verifies the
+rendered spec, task evidence, claims, and tree state.
+
 ## Spec engine (`kvx.c`, `spec.c`)
 
 `kvx.c` parses the Ion `.kvx` format (ordered sections, `key = "value"`,

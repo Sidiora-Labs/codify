@@ -152,12 +152,12 @@ reqs       = ["5.1", "5.2", "5.3"]
 
 [task.4.2]
 title      = "Qualify the control plane end to end"
-status     = "pending"
+status     = "done"
 wave       = 7
 requires   = ["4.1"]
 symbols    = ["cmd_state", "cmd_integrate", "cmd_event", "cmd_work"]
 touches    = ["tests/*", "README.md", "docs/*", "CHANGELOG.md", "src/cg.h", "spec/codify-v08/*"]
-verify_cmd = "make test && cg spec render --check && cg spec lint && cg check"
+verify_cmd = "make test && $PWD/cg spec render --check && $PWD/cg spec lint && $PWD/cg check"
 do_1       = "Exercise stale tasks, repair, expiry, fencing, heartbeat renewal, repeated no-progress events, planning, apply idempotence, doctor, MCP negotiation, and work deltas in clean temporary repositories."
 do_2       = "Run the complete unit and integration suite with no fakes, forced completion, or weakened checks."
 do_3       = "Trace every task to its symbols, touched paths, snapshots, and qualification evidence before release."
