@@ -37,6 +37,7 @@ static void usage(void) {
 "  git-sync [-n N]          ingest git history for provenance and ranking\n"
 "  log [-n N]               commit history\n"
 "  status                   working tree vs HEAD\n"
+"  state                    Git, snapshot, spec, live ownership, staleness\n"
 "  diff [A] [B]             HEAD vs worktree | A vs worktree | A vs B\n"
 "  checkout <id> [--force]  restore a snapshot\n"
 "  changes                  impact radius of uncommitted edits\n"
@@ -361,6 +362,8 @@ int main(int argc, char **argv) {
         rc = cmd_log(&cg, limit > 0 ? limit : 20, json);
     } else if (strcmp(cmd, "status") == 0) {
         rc = cmd_status(&cg, json);
+    } else if (strcmp(cmd, "state") == 0) {
+        rc = cmd_state(&cg, json);
     } else if (strcmp(cmd, "diff") == 0) {
         rc = cmd_diff(&cg, argc >= 3 ? argv[2] : NULL,
                       argc >= 4 ? argv[3] : NULL);

@@ -42,6 +42,8 @@ cat > "$TMP/driver.sh" <<EOF
 PF="\$1"; TASK="\$2"; ROOT="\$3"; AGENT="\$4"
 [ -s "\$PF" ] || exit 9
 [ -n "\$AGENT" ] || exit 9
+[ -n "\${CG_ATTEMPT:-}" ] || exit 9
+[ "\${CG_FENCE:-0}" -gt 0 ] || exit 9
 cd "\$ROOT" || exit 9
 case "\$TASK" in
   2.1) : > src/out-a.txt ;;

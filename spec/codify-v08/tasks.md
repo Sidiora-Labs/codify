@@ -13,7 +13,7 @@
     - Stop falling back to another agent's first in_progress task in parallel mode and expose stale declaration diagnostics.
     - Add a read-only reconcile result plus explicit repair that returns orphaned in_progress tasks to pending without touching qualified work.
     - _Requirements: 1.1, 1.2, 1.4_
-  - [ ] 1.2 Report independent state and keep orchestrated attempts alive
+  - [x] 1.2 Report independent state and keep orchestrated attempts alive
     - Add cg state with separately labeled Git, Codify snapshot, spec declaration, live ownership, and stale-state output in text and JSON.
     - Carry attempt and fence identity into child environments and renew orchestrator leases before expiry.
     - Make completion and abandonment owner-aware so an expired process cannot mutate a reassigned task.

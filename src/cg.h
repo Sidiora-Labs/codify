@@ -253,6 +253,7 @@ int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,
                             const char *spec_tag, bool amend);
 int cmd_log     (Cg *cg, int limit, bool json);
 int cmd_status  (Cg *cg, bool json);
+int cmd_state   (Cg *cg, bool json);              /* Git/snapshot/spec/live */
 int cmd_diff    (Cg *cg, const char *a, const char *b);
 int cmd_checkout(Cg *cg, const char *id, bool force);
 int cmd_changes (Cg *cg, int limit, bool json); /* impact of uncommitted edits */

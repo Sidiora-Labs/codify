@@ -101,9 +101,9 @@ static int orch_call_spec(void *v) {
 
 static int orch_spec(char **out, bool json, int argc, ...) {
     va_list ap;
-    char *argv[8];
+    char *argv[12];
     va_start(ap, argc);
-    for (int i = 0; i < argc && i < 8; i++) argv[i] = va_arg(ap, char *);
+    for (int i = 0; i < argc && i < 12; i++) argv[i] = va_arg(ap, char *);
     va_end(ap);
     OrchSpecCall c = { argc, argv, json };
     return cg_capture(out, orch_call_spec, &c);
@@ -236,9 +236,11 @@ static int orch_spec_root(char *out, size_t cap) {
     }
 }
 
-/* the authoritative answer on child exit: what does spec.kvx say now? */
+/* Child success needs both authorities: the declaration must be qualified and
+ * the exact fenced attempt we launched must be the one recorded completed. */
 static char *orch_task_status(const char *specroot, const char *feature,
-                              const char *id) {
+                              const char *id, const char *attempt,
+                              long fence) {
     char path[4600];
     snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", specroot, feature);
     Kvx *k = kvx_parse(path);
@@ -247,16 +249,44 @@ static char *orch_task_status(const char *specroot, const char *feature,
     snprintf(sec, sizeof sec, "task.%s", id);
     char *st = kvx_str(k, sec, "status");
     kvx_free(k);
+    if (st && (strcmp(st, "done") == 0 ||
+               strcmp(st, "implemented") == 0) && attempt && attempt[0]) {
+        Cg g;
+        bool completed = false;
+        if (memory_open_quiet(&g)) {
+            char tag[700];
+            snprintf(tag, sizeof tag, "%s/%s", feature, id);
+            sqlite3_stmt *q = cg_prep(&g,
+                "SELECT 1 FROM attempts WHERE attempt_id=? AND task=? "
+                "AND fence=? AND state='completed' LIMIT 1");
+            sqlite3_bind_text(q, 1, attempt, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(q, 2, tag, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(q, 3, fence);
+            completed = sqlite3_step(q) == SQLITE_ROW;
+            sqlite3_finalize(q);
+            cg_close(&g);
+        }
+        if (!completed) {
+            free(st);
+            return xstrdup("stale_owner");
+        }
+    }
     return st;
 }
 
-/* an attempt that did not finish: free the lease and put the task back in
- * the pool so another slot (or a retry) can pick it up */
+/* An attempt that did not finish may return work to the pool only while its
+ * exact attempt id and fence still own the task. A refused fenced release
+ * means a replacement exists and its declaration must remain untouched. */
 static void orch_abandon(const char *specroot, const char *feature,
-                         const char *id, const char *agent) {
+                         const char *id, const char *agent,
+                         const char *attempt, long fence) {
     char *out = NULL;
-    int rr = orch_spec(&out, false, 4, (char *)"release", (char *)id,
-                       (char *)"--agent", (char *)agent);
+    char fencebuf[32];
+    snprintf(fencebuf, sizeof fencebuf, "%ld", fence);
+    int rr = orch_spec(&out, false, 8, (char *)"release", (char *)id,
+                       (char *)"--agent", (char *)agent,
+                       (char *)"--attempt", (char *)attempt,
+                       (char *)"--fence", fencebuf);
     free(out);
     /* a refused release means the lease expired and another agent adopted
      * the task — its in_progress is theirs, not ours to reset */
@@ -310,7 +340,9 @@ static int orch_write_prompt(const char *cgroot, const char *feature,
 }
 
 static pid_t orch_spawn(char **av, const char *root, const char *promptfile,
-                        const char *logpath, const char *agent) {
+                        const char *logpath, const char *agent,
+                        const char *feature, const char *task,
+                        const char *attempt, long fence) {
     pid_t pid = fork();
     if (pid != 0) {
         /* both sides setpgid to close the fork/exec race; after the exec
@@ -330,6 +362,13 @@ static pid_t orch_spawn(char **av, const char *root, const char *promptfile,
     if (lg > 2) close(lg);
     if (chdir(root) != 0) _exit(127);
     setenv("CG_AGENT", agent, 1);
+    char tasktag[256];
+    snprintf(tasktag, sizeof tasktag, "%s/%s", feature, task);
+    setenv("CG_TASK", tasktag, 1);
+    setenv("CG_ATTEMPT", attempt, 1);
+    char fencebuf[32];
+    snprintf(fencebuf, sizeof fencebuf, "%ld", fence);
+    setenv("CG_FENCE", fencebuf, 1);
     execvp(av[0], av);
     _exit(127);
 }
@@ -419,7 +458,26 @@ typedef struct {
     char  id[64];
     char  feature[128];
     char  agent[80];
+    char  attempt[65];
+    long  fence;
+    long  last_heartbeat;
 } OrchSlot;
+
+static int orch_heartbeat(OrchSlot *slot, long ttl_min) {
+    char fencebuf[32], ttlbuf[32];
+    snprintf(fencebuf, sizeof fencebuf, "%ld", slot->fence);
+    snprintf(ttlbuf, sizeof ttlbuf, "%ld", ttl_min);
+    char *out = NULL;
+    int rc = orch_spec(&out, true, 10, (char *)"heartbeat", slot->id,
+                       (char *)"--agent", slot->agent,
+                       (char *)"--attempt", slot->attempt,
+                       (char *)"--fence", fencebuf,
+                       (char *)"--ttl", ttlbuf);
+    if (rc != 0 && out && out[0]) fprintf(stderr, "%s", out);
+    free(out);
+    if (rc == 0) slot->last_heartbeat = (long)time(NULL);
+    return rc;
+}
 
 static int orch_live(const OrchSlot *slots, int n) {
     int c = 0;
@@ -572,7 +630,8 @@ int cmd_spec_run(int argc, char **argv) {
                 if (orch_reap(slots[i].pid) != 0) continue;
                 slots[i].live = false;
                 orch_abandon(specroot, slots[i].feature, slots[i].id,
-                             slots[i].agent);
+                             slots[i].agent, slots[i].attempt,
+                             slots[i].fence);
             }
             fprintf(stderr, "cg spec run: interrupted — children terminated,"
                     " leases released\n");
@@ -590,7 +649,8 @@ int cmd_spec_run(int argc, char **argv) {
             int crc = WIFEXITED(st) ? WEXITSTATUS(st)
                                     : 128 + WTERMSIG(st);
             char *tstat = orch_task_status(specroot, slots[i].feature,
-                                           slots[i].id);
+                                           slots[i].id, slots[i].attempt,
+                                           slots[i].fence);
             bool okdone = tstat && (strcmp(tstat, "done") == 0 ||
                                     strcmp(tstat, "implemented") == 0);
             printf("[run] task %s exit %d → status %s\n", slots[i].id, crc,
@@ -598,11 +658,44 @@ int cmd_spec_run(int argc, char **argv) {
             fflush(stdout);
             if (!okdone) {
                 orch_abandon(specroot, slots[i].feature, slots[i].id,
-                             slots[i].agent);
+                             slots[i].agent, slots[i].attempt,
+                             slots[i].fence);
                 orch_note_failure(slots[i].feature, slots[i].id, crc);
                 failures++;
             }
             free(tstat);
+        }
+
+        /* A running child keeps the exact fenced attempt alive. Heartbeat
+         * loss means ownership was lost; stop that process before it can
+         * write under a replacement attempt. */
+        long heartbeat_every = cfg.ttl > 0 ? cfg.ttl / 3 : 20;
+        if (heartbeat_every < 1) heartbeat_every = 1;
+        long heartbeat_now = (long)time(NULL);
+        for (int i = 0; i < nslots; i++) {
+            if (!slots[i].live ||
+                heartbeat_now - slots[i].last_heartbeat < heartbeat_every)
+                continue;
+            if (orch_heartbeat(&slots[i], ttl_min) == 0) continue;
+            char *tstat = orch_task_status(specroot, slots[i].feature,
+                                           slots[i].id, slots[i].attempt,
+                                           slots[i].fence);
+            bool finished = tstat && (strcmp(tstat, "done") == 0 ||
+                                      strcmp(tstat, "implemented") == 0);
+            free(tstat);
+            if (finished) {
+                slots[i].last_heartbeat = heartbeat_now;
+                continue;
+            }
+            fprintf(stderr, "cg spec run: task %s lost fenced ownership — "
+                            "terminating stale agent %s\n", slots[i].id,
+                    slots[i].agent);
+            if (kill(-slots[i].pid, SIGTERM) != 0)
+                kill(slots[i].pid, SIGTERM);
+            orch_reap(slots[i].pid);
+            slots[i].live = false;
+            orch_note_failure(slots[i].feature, slots[i].id, -2);
+            failures++;
         }
         if (!stopping && failures > maxfail) {
             fprintf(stderr, "cg spec run: %d failure(s) exceed --max-fail "
@@ -638,15 +731,23 @@ int cmd_spec_run(int argc, char **argv) {
                 break;
             }
             char *tobj = out ? json_get_object(out, "task") : NULL;
+            char *lobj = out ? json_get_object(out, "lease") : NULL;
             char *id = tobj ? json_get_string(tobj, "id") : NULL;
             char *feat = tobj ? json_get_string(tobj, "feature") : NULL;
+            char *attempt = lobj ? json_get_string(lobj, "attempt_id") : NULL;
+            long fence = lobj ? json_get_int(lobj, "fence", 0) : 0;
             free(tobj);
+            free(lobj);
             free(out);
-            if (!id || !id[0]) {
+            if (!id || !id[0] || !attempt || !attempt[0] || fence <= 0) {
                 fprintf(stderr, "cg spec run: could not parse claim-next "
-                        "output\n");
+                        "attempt identity\n");
+                if (id && id[0])
+                    orch_abandon(specroot, feat && feat[0] ? feat : feature,
+                                 id, agent, attempt ? attempt : "", fence);
                 free(id);
                 free(feat);
+                free(attempt);
                 stopping = true;
                 rc = 1;
                 break;
@@ -658,11 +759,12 @@ int cmd_spec_run(int argc, char **argv) {
                                   sizeof prompt) != 0) {
                 fprintf(stderr, "cg spec run: could not write prompt for "
                         "task %s\n", id);
-                orch_abandon(specroot, tfeat, id, agent);
+                orch_abandon(specroot, tfeat, id, agent, attempt, fence);
                 orch_note_failure(tfeat, id, -1);
                 failures++;
                 free(id);
                 free(feat);
+                free(attempt);
                 continue;
             }
             char *av[ORCH_MAX_ARGV];
@@ -671,9 +773,10 @@ int cmd_spec_run(int argc, char **argv) {
             if (ac < 0) {
                 fprintf(stderr, "cg spec run: cannot build a %s command "
                         "line\n", cfg.driver);
-                orch_abandon(specroot, tfeat, id, agent);
+                orch_abandon(specroot, tfeat, id, agent, attempt, fence);
                 free(id);
                 free(feat);
+                free(attempt);
                 stopping = true;
                 rc = 1;
                 break;
@@ -681,16 +784,18 @@ int cmd_spec_run(int argc, char **argv) {
             char logpath[4700];
             snprintf(logpath, sizeof logpath,
                      "%s/.codegraph/agents/%s-%s.log", cgroot, tfeat, id);
-            pid_t pid = orch_spawn(av, cgroot, prompt, logpath, agent);
+            pid_t pid = orch_spawn(av, cgroot, prompt, logpath, agent,
+                                   tfeat, id, attempt, fence);
             orch_argv_free(av);
             if (pid < 0) {
                 fprintf(stderr, "cg spec run: fork failed: %s\n",
                         strerror(errno));
-                orch_abandon(specroot, tfeat, id, agent);
+                orch_abandon(specroot, tfeat, id, agent, attempt, fence);
                 orch_note_failure(tfeat, id, -1);
                 failures++;
                 free(id);
                 free(feat);
+                free(attempt);
                 continue;
             }
             slots[i].pid = pid;
@@ -698,12 +803,17 @@ int cmd_spec_run(int argc, char **argv) {
             snprintf(slots[i].id, sizeof slots[i].id, "%s", id);
             snprintf(slots[i].feature, sizeof slots[i].feature, "%s", tfeat);
             snprintf(slots[i].agent, sizeof slots[i].agent, "%s", agent);
+            snprintf(slots[i].attempt, sizeof slots[i].attempt, "%s",
+                     attempt);
+            slots[i].fence = fence;
+            slots[i].last_heartbeat = (long)time(NULL);
             printf("[run] task %s → %s (agent %s, log "
                    ".codegraph/agents/%s-%s.log)\n", id, cfg.driver, agent,
                    tfeat, id);
             fflush(stdout);
             free(id);
             free(feat);
+            free(attempt);
         }
 
         int live = orch_live(slots, nslots);

@@ -1087,6 +1087,87 @@ static void spec_attempt_finish(Cg *g, const char *tag, const char *state,
     sqlite3_finalize(st);
 }
 
+static bool spec_attempt_owned(Cg *g, const char *tag, const char *agent,
+                               const char *attempt_id, long fence) {
+    if (!attempt_id || !attempt_id[0] || fence <= 0) return false;
+    spec_attempt_sweep(g);
+    sqlite3_stmt *st = cg_prep(g,
+        "SELECT 1 FROM attempts WHERE attempt_id=? AND task=? AND agent=? "
+        "AND fence=? AND state='running' "
+        "AND expires>strftime('%s','now') LIMIT 1");
+    sqlite3_bind_text(st, 1, attempt_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, fence);
+    bool owned = sqlite3_step(st) == SQLITE_ROW;
+    sqlite3_finalize(st);
+    return owned;
+}
+
+static void spec_release_lease(Spec *s, const char *id);
+
+/* Manual local lifecycle commands remain usable without an attempt. Once an
+ * orchestrator supplies either credential, both become mandatory and the
+ * exact live owner generation must match before task state may change. */
+static int spec_require_owner(Spec *s, const char *id, const char *agent,
+                              const char *attempt_id, long fence) {
+    bool supplied = (attempt_id && attempt_id[0]) || fence > 0;
+    if (!supplied) return 0;
+    Cg g;
+    if (!memory_open_quiet(&g)) return 1;
+    char tag[700];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    bool owned = spec_attempt_owned(&g, tag, agent, attempt_id, fence);
+    cg_close(&g);
+    if (!owned) {
+        fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
+                        "lifecycle mutation rejected\n", id);
+        return 1;
+    }
+    return 0;
+}
+
+/* Fence the final cross-store mutation. Holding SQLite's write lock while
+ * rewriting the single KVX status line prevents a claim/reassignment from
+ * slipping between the final owner check and completion. */
+static int spec_set_status_owned(Spec *s, const char *id, const char *status,
+                                 const char *agent, const char *attempt_id,
+                                 long fence) {
+    char sec[300];
+    task_sec(sec, sizeof sec, id);
+    bool fenced = (attempt_id && attempt_id[0]) || fence > 0;
+    if (!fenced) {
+        if (kvx_set_status(s->fpath, sec, status) != 0) return -1;
+        spec_release_lease(s, id);
+        return 0;
+    }
+    Cg g;
+    if (!memory_open_quiet(&g)) return -1;
+    char tag[700];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    cg_exec(&g, "BEGIN IMMEDIATE");
+    if (!spec_attempt_owned(&g, tag, agent, attempt_id, fence)) {
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        fprintf(stderr, "cg spec: attempt ownership changed while %s was "
+                        "running — lifecycle mutation rejected\n", id);
+        return 1;
+    }
+    if (kvx_set_status(s->fpath, sec, status) != 0) {
+        cg_exec(&g, "ROLLBACK");
+        cg_close(&g);
+        return -1;
+    }
+    spec_attempt_finish(&g, tag, "completed", "task left active execution");
+    sqlite3_stmt *del = cg_prep(&g, "DELETE FROM leases WHERE task=?");
+    sqlite3_bind_text(del, 1, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_step(del);
+    sqlite3_finalize(del);
+    cg_exec(&g, "COMMIT");
+    cg_close(&g);
+    return 0;
+}
+
 /* the in_progress task the agent's own live lease points at, if any;
  * returns a pointer borrowed from s->ids, NULL when there is none */
 static const char *spec_agent_leased(const Spec *s, const char *agent) {
@@ -1750,12 +1831,13 @@ static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {
     return 0;
 }
 
-/* A lease is a claim with an owner and an expiry, so a crashed agent's task
- * returns to the pool instead of blocking the wave forever. The whole claim
- * runs inside BEGIN IMMEDIATE so two racing agents cannot both pass the
- * owner check and silently steal each other's lease. */
+/* A claim creates both its compatibility lease and authoritative fenced
+ * attempt. BEGIN IMMEDIATE makes ownership/fence advancement atomic; release
+ * accepts exact credentials so a crashed or delayed worker cannot abandon a
+ * replacement attempt that happens to reuse the same agent name. */
 static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
                           const char *host, const char *session, long ttl_min,
+                          const char *attempt_arg, long fence_arg,
                           bool release, bool force, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) {
@@ -1788,6 +1870,14 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
             }
         }
         sqlite3_finalize(q);
+        if (((attempt_arg && attempt_arg[0]) || fence_arg > 0) &&
+            !spec_attempt_owned(&g, tag, agent, attempt_arg, fence_arg)) {
+            fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
+                            "release rejected\n", id);
+            cg_exec(&g, "ROLLBACK");
+            cg_close(&g);
+            return 1;
+        }
         spec_attempt_finish(&g, tag, "abandoned", "released by owner");
         sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
         sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
@@ -2228,7 +2318,8 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool json) {
 
 static int spec_verify_task(Spec *s, const char *id);
 
-static int spec_implemented_cmd(Spec *s, const char *id, bool json) {
+static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,
+                                const char *attempt, long fence, bool json) {
     if (!spec_prod_mode(s)) {
         fprintf(stderr, "cg spec: `implemented` requires Prod mode; run "
                 "`cg spec mode prod` first\n");
@@ -2238,6 +2329,7 @@ static int spec_implemented_cmd(Spec *s, const char *id, bool json) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
+    if (spec_require_owner(s, id, agent, attempt, fence) != 0) return 1;
     if (!task_is_leaf(s, id)) {
         fprintf(stderr, "cg spec: task %s is a group heading (no wave)\n", id);
         return 1;
@@ -2267,7 +2359,9 @@ static int spec_implemented_cmd(Spec *s, const char *id, bool json) {
         return 1;
     }
 
-    if (kvx_set_status(s->fpath, sec, "implemented") != 0) {
+    int src = spec_set_status_owned(s, id, "implemented", agent, attempt,
+                                    fence);
+    if (src != 0) {
         fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
                 sec, s->fpath);
         return 1;
@@ -2277,7 +2371,6 @@ static int spec_implemented_cmd(Spec *s, const char *id, bool json) {
                 "projections could not be refreshed\n", id);
         return 1;
     }
-    spec_release_lease(s, id);   /* coding is over; free the claim */
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
@@ -2315,11 +2408,14 @@ static int spec_implemented_cmd(Spec *s, const char *id, bool json) {
     return 0;
 }
 
-static int spec_done_cmd(Spec *s, const char *id, bool force, bool json) {
+static int spec_done_cmd(Spec *s, const char *id, const char *agent,
+                         const char *attempt, long fence, bool force,
+                         bool json) {
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
+    if (spec_require_owner(s, id, agent, attempt, fence) != 0) return 1;
     char *st = task_status(s, id);
     bool was_implemented = strcmp(st, "implemented") == 0;
     if (was_implemented && force) {
@@ -2388,14 +2484,13 @@ static int spec_done_cmd(Spec *s, const char *id, bool force, bool json) {
         forced_past = true;
     }
 
-    if (kvx_set_status(s->fpath, sec, "done") != 0) {
+    int src = spec_set_status_owned(s, id, "done", agent, attempt, fence);
+    if (src != 0) {
         fprintf(stderr, "cg spec: could not rewrite status of [%s] in %s\n",
                 sec, s->fpath);
         return 1;
     }
     spec_render(s->root, false, true);
-    spec_release_lease(s, id);   /* the task is over; free the claim */
-
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
@@ -3246,9 +3341,12 @@ char *spec_active_tag(void) {
     Spec s;
     char *out = NULL;
     if (spec_load(&s, NULL, NULL, true) == 0) {
-        /* Parallel ownership is never inferred from somebody else's lone
-         * in-progress declaration. Standard/prod retain their single task. */
-        const char *cur = spec_current_for_agent(&s, cg_agent_name(NULL));
+        /* Parallel ownership is never inferred from somebody else's task.
+         * Outside parallel mode, preserve the long-standing rule that only
+         * exactly one in-progress declaration is safe to auto-tag. */
+        const char *cur = spec_parallel_mode(&s)
+            ? spec_agent_leased(&s, cg_agent_name(NULL))
+            : spec_in_progress_count(&s) == 1 ? spec_current(&s) : NULL;
         if (cur) {
             StrBuf b; sb_init(&b);
             sb_printf(&b, "%s/%s", s.feature, cur);
@@ -3416,7 +3514,6 @@ int cmd_spec(int argc, char **argv, bool json) {
             ttl = atol(argv[++i]);
         else if (npos < 4) pos[npos++] = argv[i];
     }
-
     if (strcmp(sub, "new") == 0) {
         if (npos != 1) {
             fprintf(stderr, "usage: cg spec new <feature>\n");
@@ -3488,6 +3585,25 @@ int cmd_spec(int argc, char **argv, bool json) {
         spec_close(&s);
         return 1;
     }
+    /* Inherited ownership is scoped to the exact feature/id. This keeps an
+     * orchestrated task's environment from authorizing same-numbered tasks
+     * in nested repositories or verification fixtures. Explicit CLI
+     * --attempt/--fence values remain available for administrative calls. */
+    const char *env_task = getenv("CG_TASK");
+    bool env_matches = false;
+    if (env_task && env_task[0] && npos > 0) {
+        char expected[700];
+        snprintf(expected, sizeof expected, "%s/%s", s.feature, pos[0]);
+        env_matches = strcmp(env_task, expected) == 0;
+    }
+    if (env_matches && (!attempt || !attempt[0])) {
+        const char *env_attempt = getenv("CG_ATTEMPT");
+        if (env_attempt && env_attempt[0]) attempt = env_attempt;
+    }
+    if (env_matches && fence <= 0) {
+        const char *env_fence = getenv("CG_FENCE");
+        if (env_fence && env_fence[0]) fence = atol(env_fence);
+    }
     int rc;
     if (strcmp(sub, "status") == 0) {
         rc = spec_status_cmd(&s, json);
@@ -3508,6 +3624,7 @@ int cmd_spec(int argc, char **argv, bool json) {
             rc = spec_claim_cmd(&s, pos[0], cg_agent_name(agent),
                                 host, session,
                                 ttl > 0 ? ttl : 30,
+                                attempt, fence,
                                 strcmp(sub, "release") == 0, force, json);
         }
     } else if (strcmp(sub, "ready") == 0) {
@@ -3541,11 +3658,13 @@ int cmd_spec(int argc, char **argv, bool json) {
             fprintf(stderr, "usage: cg spec implemented <id>\n");
             rc = 1;
         } else {
-            rc = spec_implemented_cmd(&s, pos[0], json);
+            rc = spec_implemented_cmd(&s, pos[0], cg_agent_name(agent),
+                                      attempt, fence, json);
         }
     } else {
         if (npos < 1) { fprintf(stderr, "usage: cg spec done <id>\n"); rc = 1; }
-        else rc = spec_done_cmd(&s, pos[0], force, json);
+        else rc = spec_done_cmd(&s, pos[0], cg_agent_name(agent), attempt,
+                                fence, force, json);
     }
     spec_close(&s);
     return rc;

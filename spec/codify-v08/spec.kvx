@@ -69,11 +69,11 @@ reqs       = ["1.1", "1.2", "1.4"]
 
 [task.1.2]
 title      = "Report independent state and keep orchestrated attempts alive"
-status     = "pending"
+status     = "done"
 wave       = 2
 requires   = ["1.1"]
 symbols    = ["cmd_state", "orch_heartbeat", "orch_task_status"]
-touches    = ["src/runtime.c", "src/orchestrate.c", "src/main.c", "src/mcp.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/integration/22_control.sh", "spec/codify-v08/*"]
+touches    = ["src/runtime.c", "src/orchestrate.c", "src/spec.c", "src/main.c", "src/mcp.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/integration/22_control.sh", "spec/codify-v08/*"]
 verify_cmd = "CG=$PWD/cg tests/integration/18_orchestrate.sh && CG=$PWD/cg tests/integration/22_control.sh liveness"
 do_1       = "Add cg state with separately labeled Git, Codify snapshot, spec declaration, live ownership, and stale-state output in text and JSON."
 do_2       = "Carry attempt and fence identity into child environments and renew orchestrator leases before expiry."

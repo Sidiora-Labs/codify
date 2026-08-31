@@ -87,6 +87,7 @@ static int t_routes(void *v) {
     return rc;
 }
 static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c->cg, true); }
+static int t_state(void *v)   { CallCtx *c = v; return cmd_state(c->cg, true); }
 static int t_changes(void *v) {
     CallCtx *c = v;
     int limit = c->args ? (int)json_get_int(c->args, "limit", 0) : 0;
@@ -535,6 +536,11 @@ static const struct {
       "Working-tree status vs the last Codify snapshot (added/modified/"
       "deleted files).",
       S_EMPTY, A_READ, "Working tree status", t_status, false },
+    { "state",
+      "Truthful state across independent authorities: Git working tree, "
+      "Codify snapshot, spec declarations, this agent's live attempt, and "
+      "stale declarations. Use this when diagnosing apparent task drift.",
+      S_EMPTY, A_READ, "Agent control-plane state", t_state, false },
     { "change_impact",
       "Impact radius of uncommitted edits: symbols in changed files plus "
       "their external callers. Run before committing.",
