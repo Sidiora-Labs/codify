@@ -2110,6 +2110,33 @@ static int tests_for_symbol(Cg *cg, const char *name, StrBuf *b, bool json,
     return n;
 }
 
+/* Choose the first declared task symbol the current graph can actually
+ * resolve. Work packets use this instead of title search so their one context
+ * call starts at a real definition; title is the deterministic fallback. */
+char *graph_task_focus(Cg *cg, const char *task_packet) {
+    char *symbols = task_packet ? json_get_raw(task_packet, "symbols") : NULL;
+    if (symbols) {
+        for (const char *p = symbols; *p; p++) {
+            if (*p != '"') continue;
+            const char *s = ++p;
+            while (*p && !(*p == '"' && p[-1] != '\\')) p++;
+            size_t n = (size_t)(p - s);
+            if (!n || n >= 256) continue;
+            char name[256];
+            memcpy(name, s, n); name[n] = 0;
+            sqlite3_stmt *st = cg_prep(cg,
+                "SELECT 1 FROM symbols WHERE name=? LIMIT 1");
+            sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+            bool found = sqlite3_step(st) == SQLITE_ROW;
+            sqlite3_finalize(st);
+            if (found) { free(symbols); return xstrdup(name); }
+        }
+        free(symbols);
+    }
+    char *title = task_packet ? json_get_string(task_packet, "title") : NULL;
+    return title ? title : xstrdup("task");
+}
+
 /* Which tests exercise this change? With a name, that symbol; without one,
  * every symbol defined in a file that differs from the last snapshot. */
 int cmd_test_impact(Cg *cg, const char *name, bool json) {

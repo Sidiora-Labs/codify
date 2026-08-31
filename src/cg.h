@@ -235,6 +235,7 @@ int cmd_search (Cg *cg, const char *q, int limit, bool json);
 int cmd_symbol (Cg *cg, const char *name, bool json);
 int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);
 int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);
+char *graph_task_focus(Cg *cg, const char *task_packet); /* malloc'd query */
 /* the tier below bodies: purpose lines and docs, wide and cheap */
 int cmd_survey(Cg *cg, const char *scope, int budget, bool json);
 /* anchor health: stale docs plus the coordination-ranked backfill list */
@@ -258,6 +259,14 @@ int cmd_event(Cg *cg, int argc, char **argv, bool json);
 int runtime_event_ingest(Cg *cg, const char *source, const char *payload,
                          bool json);
 void runtime_workspace_revision(Cg *cg, char out[65]);
+typedef struct {
+    char classification[40], reason[256], action[40], next_action[40];
+    int no_evidence_events, repeated_failures, signal_events, stage;
+    long latest_event_id, age_seconds;
+    bool activity, stalled, waiting, enforced, patch_oscillation;
+} RuntimeProgress;
+int runtime_classify_progress(Cg *cg, const char *attempt,
+                              const char *session, RuntimeProgress *out);
 int runtime_progress(Cg *cg, bool json);
 int cmd_diff    (Cg *cg, const char *a, const char *b);
 int cmd_checkout(Cg *cg, const char *id, bool force);
@@ -400,6 +409,11 @@ int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,
                 const char *blocked, const char *note, bool json);
 /* task packet + latest handoff + task memories + tree/lease state */
 int cmd_resume(Cg *cg, const char *task, bool json, bool prompt);
+int cmd_work(Cg *cg, int argc, char **argv, bool json);
+int work_open(Cg *cg, const char *task, bool json);
+int work_update(Cg *cg, const char *revision, bool json);
+int work_close(Cg *cg, const char *task, int nevidence, char **evidence,
+               bool json);
 
 /* ---------------- orchestrator (orchestrate.c) ---------------- */
 /* `cg spec run` — claim conflict-free tasks and drive one agent per slot;

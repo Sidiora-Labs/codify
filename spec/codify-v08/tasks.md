@@ -37,7 +37,7 @@
 ## Recovery and speed
 
 - [ ] 3. Grounded progress
-  - [ ] 3.1 Detect stalls and deliver revisioned work packets
+  - [x] 3.1 Detect stalls and deliver revisioned work packets
     - Classify repeated failure, repeated observation, patch oscillation, and no-evidence windows with explicit reasons and configurable advisory thresholds.
     - Return a bounded recovery ladder that never loops its own continuation and distinguishes waiting from stalled work.
     - Compose work open from task criteria, scope, state, memories, relevant graph context, tests, and last runtime evidence.

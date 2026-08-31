@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fnmatch.h>
+#include <time.h>
+#include <ctype.h>
 
 /* run a cg subcommand in-process and capture its stdout */
 static int run_capture(char **out, int (*fn)(void *), void *ctx) {
@@ -1157,4 +1159,399 @@ int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)
     free(packet);
     free(tag);
     return 0;
+}
+
+/* ---------------- revisioned work packets ---------------- */
+
+typedef struct { Cg *cg; const char *query; } WorkCapture;
+static int work_call_state(void *v) {
+    return cmd_state(((WorkCapture *)v)->cg, true);
+}
+static int work_call_progress(void *v) {
+    return runtime_progress(((WorkCapture *)v)->cg, true);
+}
+static int work_call_context(void *v) {
+    WorkCapture *c = v;
+    return cmd_context(c->cg, c->query, 2400, 4, true);
+}
+static int work_call_tests(void *v) {
+    WorkCapture *c = v;
+    return cmd_test_impact(c->cg, c->query, true);
+}
+
+static void work_raw_json(StrBuf *b, const char *raw) {
+    if (!raw) { sb_puts(b, "null"); return; }
+    while (*raw && isspace((unsigned char)*raw)) raw++;
+    size_t n = strlen(raw);
+    while (n && isspace((unsigned char)raw[n - 1])) n--;
+    if (n) sb_printf(b, "%.*s", (int)n, raw);
+    else sb_puts(b, "null");
+}
+
+static long work_last_event(Cg *cg, const char *task) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT ifnull(MAX(id),0) FROM runtime_events WHERE task=?");
+    sqlite3_bind_text(st, 1, task, -1, SQLITE_TRANSIENT);
+    long id = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return id;
+}
+
+static void work_event_json(Cg *cg, StrBuf *b, const char *task, long after,
+                            bool latest_only) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT id,created,source,kind,session,ifnull(attempt_id,''),"
+        "fingerprint,revision,evidence_delta,output_changed "
+        "FROM runtime_events WHERE task=? AND id>? ORDER BY id DESC LIMIT ?");
+    sqlite3_bind_text(st, 1, task, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, after);
+    sqlite3_bind_int(st, 3, latest_only ? 1 : 30);
+    int n = 0;
+    if (!latest_only) sb_putc(b, '[');
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (!latest_only && n) sb_putc(b, ',');
+        sb_printf(b, "{\"id\":%ld,\"created\":%ld,\"source\":",
+                  (long)sqlite3_column_int64(st, 0),
+                  (long)sqlite3_column_int64(st, 1));
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 2));
+        sb_puts(b, ",\"kind\":");
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 3));
+        sb_puts(b, ",\"session\":");
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 4));
+        sb_puts(b, ",\"attempt_id\":");
+        const char *attempt = (const char *)sqlite3_column_text(st, 5);
+        if (attempt[0]) sb_json_str(b, attempt); else sb_puts(b, "null");
+        sb_puts(b, ",\"fingerprint\":");
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 6));
+        sb_puts(b, ",\"workspace_revision\":");
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 7));
+        sb_printf(b, ",\"evidence_delta\":%d,\"output_changed\":%s}",
+                  sqlite3_column_int(st, 8),
+                  sqlite3_column_int(st, 9) ? "true" : "false");
+        n++;
+    }
+    sqlite3_finalize(st);
+    if (!latest_only) sb_putc(b, ']');
+    else if (!n) sb_puts(b, "null");
+}
+
+static void work_memories_json(Cg *cg, StrBuf *b, const char *task) {
+    Memory *mem = NULL;
+    int n = spec_task_memories_tag(task, &mem);
+    sb_putc(b, '[');
+    for (int i = 0; i < n; i++) {
+        if (i) sb_putc(b, ',');
+        brief_cap_body(&mem[i]);
+        memory_json(&mem[i], b);
+    }
+    sb_putc(b, ']');
+    memory_free(mem, n);
+    (void)cg;
+}
+
+static void work_revision_create(Cg *cg, const char *task, long event_id,
+                                 const char *workspace, const char *state_hash,
+                                 const char *parent, char revision[65]) {
+    char seed[1600];
+    snprintf(seed, sizeof seed, "%s|%ld|%s|%s|%s|%ld|%ld", task, event_id,
+             workspace, state_hash, parent ? parent : "", now_ms(),
+             (long)getpid());
+    sha256_hex(seed, strlen(seed), revision);
+    cg_exec(cg, "BEGIN IMMEDIATE");
+    sqlite3_stmt *st = cg_prep(cg,
+        "INSERT INTO work_packets(revision,created,task,event_id,"
+        "workspace_revision,state_hash) VALUES(?,?,?,?,?,?)");
+    sqlite3_bind_text(st, 1, revision, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, (long)time(NULL));
+    sqlite3_bind_text(st, 3, task, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, event_id);
+    sqlite3_bind_text(st, 5, workspace, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 6, state_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st); sqlite3_finalize(st);
+    st = cg_prep(cg,
+        "INSERT INTO work_files(revision,path,hash) "
+        "SELECT ?,path,hash FROM runtime_files");
+    sqlite3_bind_text(st, 1, revision, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st); sqlite3_finalize(st);
+    cg_exec(cg, "COMMIT");
+}
+
+int work_open(Cg *cg, const char *task, bool json) {
+    char *tag = spec_resolve_task(task, cg_agent_name(NULL));
+    if (!tag) {
+        fprintf(stderr, "cg work open: no resolvable task; pass --task <id>\n");
+        return 1;
+    }
+    char *packet = spec_task_packet(tag);
+    if (!packet) { free(tag); return 1; }
+    char *title = json_get_string(packet, "title");
+    char *criteria = json_get_raw(packet, "acceptance_criteria");
+    char *scope = json_get_raw(packet, "touches");
+    char *verify = json_get_string(packet, "verify_cmd");
+    SysInfo si; IndexStats index_stats;
+    sysinfo_detect(&si);
+    cg_index(cg, &si, false, &index_stats, true);
+    char *focus = graph_task_focus(cg, packet);
+
+    WorkCapture call = { cg, focus };
+    char *state = NULL, *context = NULL, *tests = NULL, *progress = NULL;
+    run_capture(&state, work_call_state, &call);
+    run_capture(&context, work_call_context, &call);
+    run_capture(&tests, work_call_tests, &call);
+    run_capture(&progress, work_call_progress, &call);
+    char state_hash[65], workspace[65], revision[65];
+    sha256_hex(state ? state : "", state ? strlen(state) : 0, state_hash);
+    runtime_workspace_revision(cg, workspace);
+    long event_id = work_last_event(cg, tag);
+    work_revision_create(cg, tag, event_id, workspace, state_hash, NULL,
+                         revision);
+
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"revision\":"); sb_json_str(&b, revision);
+        sb_puts(&b, ",\"task_id\":"); sb_json_str(&b, tag);
+        sb_puts(&b, ",\"objective\":");
+        sb_json_str(&b, title ? title : tag);
+        sb_puts(&b, ",\"criteria\":"); work_raw_json(&b, criteria);
+        sb_puts(&b, ",\"allowed_scope\":"); work_raw_json(&b, scope);
+        sb_puts(&b, ",\"state\":"); work_raw_json(&b, state);
+        sb_puts(&b, ",\"memories\":"); work_memories_json(cg, &b, tag);
+        sb_puts(&b, ",\"context\":"); work_raw_json(&b, context);
+        sb_puts(&b, ",\"tests\":{\"verify_command\":");
+        if (verify) sb_json_str(&b, verify); else sb_puts(&b, "null");
+        sb_puts(&b, ",\"impact\":"); work_raw_json(&b, tests);
+        sb_puts(&b, "},\"last_event\":");
+        work_event_json(cg, &b, tag, 0, true);
+        sb_puts(&b, ",\"progress\":"); work_raw_json(&b, progress);
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout); sb_free(&b);
+    } else {
+        printf("work %.12s — %s\n", revision, title ? title : tag);
+        printf("task: %s\nverify: %s\n", tag, verify ? verify : "not declared");
+        printf("update: cg work update %s\n", revision);
+    }
+    free(tag); free(packet); free(title); free(criteria); free(scope);
+    free(verify); free(focus); free(state); free(context); free(tests);
+    free(progress);
+    return 0;
+}
+
+static void work_workspace_delta(Cg *cg, StrBuf *b, const char *revision,
+                                 int *count) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT r.path,CASE WHEN w.path IS NULL THEN 'added' ELSE 'modified' END "
+        "FROM runtime_files r LEFT JOIN work_files w "
+        "ON w.revision=? AND w.path=r.path "
+        "WHERE w.path IS NULL OR w.hash<>r.hash UNION ALL "
+        "SELECT w.path,'deleted' FROM work_files w LEFT JOIN runtime_files r "
+        "ON r.path=w.path WHERE w.revision=? AND r.path IS NULL ORDER BY 1");
+    sqlite3_bind_text(st, 1, revision, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, revision, -1, SQLITE_TRANSIENT);
+    int n = 0; sb_putc(b, '[');
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (n++) sb_putc(b, ',');
+        sb_puts(b, "{\"path\":");
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 0));
+        sb_puts(b, ",\"change\":");
+        sb_json_str(b, (const char *)sqlite3_column_text(st, 1));
+        sb_putc(b, '}');
+    }
+    sqlite3_finalize(st); sb_putc(b, ']');
+    *count = n;
+}
+
+int work_update(Cg *cg, const char *revision, bool json) {
+    if (!revision || !revision[0]) {
+        fprintf(stderr, "cg work update: revision required\n"); return 1;
+    }
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT task,event_id,workspace_revision,state_hash FROM work_packets "
+        "WHERE revision=?");
+    sqlite3_bind_text(st, 1, revision, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_ROW) {
+        sqlite3_finalize(st);
+        fprintf(stderr, "cg work update: unknown revision '%s'\n", revision);
+        return 1;
+    }
+    char *task = xstrdup((const char *)sqlite3_column_text(st, 0));
+    long prior_event = sqlite3_column_int64(st, 1);
+    char prior_workspace[65], prior_state[65];
+    snprintf(prior_workspace, sizeof prior_workspace, "%s",
+             (const char *)sqlite3_column_text(st, 2));
+    snprintf(prior_state, sizeof prior_state, "%s",
+             (const char *)sqlite3_column_text(st, 3));
+    sqlite3_finalize(st);
+
+    WorkCapture call = { cg, NULL };
+    char *state = NULL;
+    run_capture(&state, work_call_state, &call);
+    char state_hash[65], workspace[65];
+    sha256_hex(state ? state : "", state ? strlen(state) : 0, state_hash);
+    runtime_workspace_revision(cg, workspace);
+    long event_id = work_last_event(cg, task);
+    bool state_changed = strcmp(prior_state, state_hash) != 0;
+    bool evidence_changed = event_id > prior_event;
+    bool workspace_changed = strcmp(prior_workspace, workspace) != 0;
+
+    StrBuf paths; sb_init(&paths);
+    int npaths = 0;
+    work_workspace_delta(cg, &paths, revision, &npaths);
+    workspace_changed = workspace_changed || npaths > 0;
+    bool unchanged = !state_changed && !evidence_changed && !workspace_changed;
+    char next_revision[65];
+    snprintf(next_revision, sizeof next_revision, "%s", revision);
+    if (!unchanged)
+        work_revision_create(cg, task, event_id, workspace, state_hash,
+                             revision, next_revision);
+
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"revision\":"); sb_json_str(&b, next_revision);
+        sb_puts(&b, ",\"since\":"); sb_json_str(&b, revision);
+        sb_printf(&b, ",\"unchanged\":%s,\"deltas\":{\"state\":",
+                  unchanged ? "true" : "false");
+        if (state_changed) work_raw_json(&b, state); else sb_puts(&b, "null");
+        sb_puts(&b, ",\"evidence\":");
+        work_event_json(cg, &b, task, prior_event, false);
+        sb_puts(&b, ",\"workspace\":"); sb_puts(&b, paths.p);
+        sb_puts(&b, "}}\n"); fputs(b.p, stdout); sb_free(&b);
+    } else if (unchanged) {
+        printf("work %.12s: no state, evidence, or workspace changes\n",
+               revision);
+    } else {
+        printf("work %.12s -> %.12s: %d workspace change(s)%s%s\n",
+               revision, next_revision, npaths,
+               evidence_changed ? ", new evidence" : "",
+               state_changed ? ", state changed" : "");
+    }
+    sb_free(&paths); free(task); free(state);
+    return 0;
+}
+
+static const char *work_supplied_evidence(const char *clause, int n,
+                                          char **evidence) {
+    size_t len = strlen(clause);
+    for (int i = 0; i < n; i++)
+        if (strncmp(evidence[i], clause, len) == 0 && evidence[i][len] == '=')
+            return evidence[i] + len + 1;
+    return NULL;
+}
+
+static char *work_recorded_evidence(Cg *cg, const char *task,
+                                    const char *clause) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT evidence FROM work_evidence WHERE task=? AND criterion=? "
+        "ORDER BY id DESC LIMIT 1");
+    sqlite3_bind_text(st, 1, task, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, clause, -1, SQLITE_TRANSIENT);
+    char *out = NULL;
+    if (sqlite3_step(st) == SQLITE_ROW)
+        out = xstrdup((const char *)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    if (out) return out;
+
+    /* Native hooks may record criterion coverage before close. Preserve the
+     * durable event identity as the proof rather than trusting an ephemeral
+     * agent summary. */
+    st = cg_prep(cg,
+        "SELECT id,kind,fingerprint,revision,ifnull(payload,'{}') "
+        "FROM runtime_events WHERE task=? ORDER BY id DESC LIMIT 100");
+    sqlite3_bind_text(st, 1, task, -1, SQLITE_TRANSIENT);
+    while (!out && sqlite3_step(st) == SQLITE_ROW) {
+        const char *payload = (const char *)sqlite3_column_text(st, 4);
+        char *covered = json_get_string(payload, "criterion");
+        if (covered && strcmp(covered, clause) == 0) {
+            char proof[512];
+            snprintf(proof, sizeof proof,
+                     "runtime event #%ld %s fingerprint %.12s revision %.12s",
+                     (long)sqlite3_column_int64(st, 0),
+                     (const char *)sqlite3_column_text(st, 1),
+                     (const char *)sqlite3_column_text(st, 2),
+                     (const char *)sqlite3_column_text(st, 3));
+            out = xstrdup(proof);
+        }
+        free(covered);
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+int work_close(Cg *cg, const char *requested, int nevidence, char **evidence,
+               bool json) {
+    char *task = spec_resolve_task(requested, cg_agent_name(NULL));
+    if (!task) {
+        fprintf(stderr, "cg work close: no resolvable task; pass --task <id>\n");
+        return 1;
+    }
+    char *packet = spec_task_packet(task);
+    char *criteria = packet ? json_get_raw(packet, "acceptance_criteria") : NULL;
+    StrBuf body; sb_init(&body);
+    if (json) { sb_puts(&body, "{\"task\":"); sb_json_str(&body, task); }
+    else printf("work close — %s\n", task);
+    if (json) sb_puts(&body, ",\"criteria\":[");
+    int count = 0, verified = 0;
+    const char *p = criteria ? criteria : "";
+    while ((p = strstr(p, "\"clause\":")) != NULL) {
+        char *obj = xstrdup(p - 1);
+        char *clause = json_get_string(obj, "clause");
+        char *text = json_get_string(obj, "text");
+        free(obj);
+        if (!clause) { p += 9; free(text); continue; }
+        const char *given = work_supplied_evidence(clause, nevidence, evidence);
+        char *prior = NULL;
+        if (!given) prior = work_recorded_evidence(cg, task, clause);
+        const char *proof = given ? given : prior;
+        if (given && given[0]) {
+            sqlite3_stmt *ins = cg_prep(cg,
+                "INSERT INTO work_evidence(created,task,criterion,evidence,"
+                "source) VALUES(strftime('%s','now'),?,?,?,'manual')");
+            sqlite3_bind_text(ins, 1, task, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(ins, 2, clause, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(ins, 3, given, -1, SQLITE_TRANSIENT);
+            sqlite3_step(ins); sqlite3_finalize(ins);
+        }
+        bool ok = proof && proof[0];
+        if (ok) verified++;
+        if (json) {
+            if (count) sb_putc(&body, ',');
+            sb_puts(&body, "{\"clause\":"); sb_json_str(&body, clause);
+            sb_puts(&body, ",\"text\":"); sb_json_str(&body, text ? text : "");
+            sb_puts(&body, ",\"result\":");
+            sb_json_str(&body, ok ? "verified" : "unverified");
+            sb_puts(&body, ",\"evidence\":");
+            if (ok) sb_json_str(&body, proof); else sb_puts(&body, "null");
+            sb_putc(&body, '}');
+        } else {
+            printf("  %s  %s — %s\n", ok ? "verified" : "unverified",
+                   clause, proof ? proof : (text ? text : "no evidence"));
+        }
+        count++; free(prior); free(clause); free(text); p += 9;
+    }
+    if (json) {
+        sb_printf(&body, "],\"verified\":%d,\"unverified\":%d}\n",
+                  verified, count - verified);
+        fputs(body.p, stdout);
+    }
+    sb_free(&body); free(criteria); free(packet); free(task);
+    return 0;
+}
+
+int cmd_work(Cg *cg, int argc, char **argv, bool json) {
+    const char *sub = argc > 0 ? argv[0] : "open";
+    const char *task = NULL, *revision = NULL;
+    char *evidence[64]; int nevidence = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--task") == 0 && i + 1 < argc) task = argv[++i];
+        else if (strcmp(argv[i], "--evidence") == 0 && i + 1 < argc &&
+                 nevidence < 64) evidence[nevidence++] = argv[++i];
+        else if (argv[i][0] != '-' && !revision) revision = argv[i];
+    }
+    if (strcmp(sub, "open") == 0) return work_open(cg, task, json);
+    if (strcmp(sub, "update") == 0) return work_update(cg, revision, json);
+    if (strcmp(sub, "close") == 0)
+        return work_close(cg, task, nevidence, evidence, json);
+    fprintf(stderr, "usage: cg work [open [--task ID] | update REVISION | "
+                    "close [--task ID] [--evidence CLAUSE=PROOF]]\n");
+    return 1;
 }

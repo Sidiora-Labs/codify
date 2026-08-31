@@ -119,11 +119,11 @@ status  = "pending"
 
 [task.3.1]
 title      = "Detect stalls and deliver revisioned work packets"
-status     = "pending"
+status     = "done"
 wave       = 5
 requires   = ["2.2"]
 symbols    = ["runtime_classify_progress", "cmd_work", "work_open", "work_update", "work_close"]
-touches    = ["src/runtime.c", "src/govern.c", "src/graph.c", "src/mcp.c", "src/main.c", "src/cg.h", "tests/integration/22_control.sh", "spec/codify-v08/*"]
+touches    = ["src/runtime.c", "src/govern.c", "src/graph.c", "src/db.c", "src/mcp.c", "src/main.c", "src/cg.h", "tests/integration/22_control.sh", "spec/codify-v08/*"]
 verify_cmd = "CG=$PWD/cg tests/integration/22_control.sh progress && CG=$PWD/cg tests/integration/22_control.sh work"
 do_1       = "Classify repeated failure, repeated observation, patch oscillation, and no-evidence windows with explicit reasons and configurable advisory thresholds."
 do_2       = "Return a bounded recovery ladder that never loops its own continuation and distinguishes waiting from stalled work."

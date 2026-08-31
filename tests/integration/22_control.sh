@@ -5,7 +5,7 @@
 
 mode="${1:-all}"
 case "$mode" in
-  all|state|liveness|integrate|events) ;;
+  all|state|liveness|integrate|events|progress|work) ;;
   *) fail "unknown 22_control mode: $mode" ;;
 esac
 
@@ -401,10 +401,205 @@ assert any(e['source']=='claude' and e['session']=='shim-session'
 echo "22_control events ok"
 }
 
+run_progress() {
+mkdir -p "$TMP/progress/src"
+cd "$TMP/progress"
+printf '%s\n' 'int alpha(void){return 1;}' > src/a.c
+"$CG" init >/dev/null
+export CG_TASK="progress/1.1"
+export CG_SESSION="failure-session"
+export CG_ATTEMPT="failure-attempt"
+export CG_PROGRESS_WARN_EVENTS=2
+export CG_PROGRESS_REPLAN_EVENTS=3
+export CG_PROGRESS_EXPERIMENT_EVENTS=4
+export CG_PROGRESS_HANDOFF_EVENTS=5
+export CG_PROGRESS_STOP_EVENTS=6
+
+# Repeated failures escalate through a finite ladder. Every event differs but
+# none changes an artifact or covers a criterion.
+for n in 1 2 3 4 5 6; do
+  if [ "$n" -le 2 ]; then
+    payload="{\"event\":\"command\",\"status\":\"failed\",\"output\":\"failure $n\"}"
+  else
+    payload="{\"event\":\"command\",\"output\":\"observation $n\"}"
+  fi
+  printf '%s\n' "$payload" | "$CG" event ingest --source test >/dev/null
+  out="$("$CG" event progress --json)"
+  case "$n" in
+    2) expected=warn ;;
+    3) expected=re_plan ;;
+    4) expected=bounded_experiment ;;
+    5) expected=handoff ;;
+    6) expected=stop ;;
+    *) expected= ;;
+  esac
+  if [ -n "$expected" ]; then
+    python3 -c "
+import json
+d=json.loads(r'''$out''')
+assert d['classification']=='repeated_failure', d
+assert d['recovery']['action']=='$expected', d
+assert len(d['recovery']['ladder'])==len(set(d['recovery']['ladder']))==6, d
+assert d['recovery']['ladder'][-1]=='stop', d
+"
+  fi
+done
+python3 -c "
+import json
+d=json.loads(r'''$out''')
+assert d['recovery']['next'] is None and d['recovery']['advisory'] is True, d
+"
+enforced="$(CG_PROGRESS_ENFORCE=1 "$CG" event progress --json)"
+python3 -c "
+import json
+d=json.loads(r'''$enforced''')
+assert d['recovery']['action']=='stop', d
+assert d['recovery']['advisory'] is False, d
+"
+
+# Explicit input waits are live but not stalled and cannot be mistaken for
+# another blind continuation.
+printf '%s\n' '{"event":"waiting_input","requires_user_input":true}' \
+  | "$CG" event ingest --source test >/dev/null
+waiting="$("$CG" event progress --json)"
+python3 -c "
+import json
+d=json.loads(r'''$waiting''')
+assert d['classification']=='waiting_input' and d['waiting'] is True, d
+assert d['stalled'] is False and d['recovery']['action']=='waiting_input', d
+"
+
+# A-B-A-B workspace revisions are churn, even though each individual patch
+# changed bytes. Detect the oscillation instead of rewarding it as progress.
+export CG_SESSION="oscillation-session"
+export CG_ATTEMPT="oscillation-attempt"
+for value in 1 2 1 2; do
+  printf 'int alpha(void){return %s;}\n' "$value" > src/a.c
+  printf '{"event":"write","output":"value %s"}\n' "$value" \
+    | "$CG" event ingest --source test >/dev/null
+done
+oscillation="$("$CG" event progress --json)"
+python3 -c "
+import json
+d=json.loads(r'''$oscillation''')
+assert d['classification']=='patch_oscillation', d
+assert d['patch_oscillation'] is True and d['recovery']['action']=='warn', d
+"
+
+# Pure observation loops receive their own reason, separate from failures.
+export CG_SESSION="observation-session"
+export CG_ATTEMPT="observation-attempt"
+printf '%s\n' '{"event":"command","output":"look one"}' \
+  | "$CG" event ingest --source test >/dev/null
+printf '%s\n' '{"event":"command","output":"look two"}' \
+  | "$CG" event ingest --source test >/dev/null
+observation="$("$CG" event progress --json)"
+python3 -c "
+import json
+d=json.loads(r'''$observation''')
+assert d['classification']=='repeated_observation', d
+assert d['no_evidence_events']==2 and d['recovery']['action']=='warn', d
+"
+
+echo "22_control progress ok"
+}
+
+run_work() {
+mkdir -p "$TMP/work/src"
+cd "$TMP/work"
+printf '%s\n' 'int alpha(void){return 1;}' > src/a.c
+git init -q
+"$CG" spec new work >/dev/null
+sed -i '/^ac_1/a ac_2 = "WHEN work changes THEN deltas stay compact."' \
+  spec/work/spec.kvx
+sed -i '/^\[task\.1\.1\]/a symbols = ["alpha"]' spec/work/spec.kvx
+sed -i 's/reqs       = \["1.1"\]/reqs       = ["1.1", "1.2"]/' \
+  spec/work/spec.kvx
+"$CG" spec render >/dev/null
+"$CG" init >/dev/null
+"$CG" spec start 1.1 >/dev/null
+claim="$("$CG" spec claim 1.1 --agent worker --session work-session --json)"
+export CG_AGENT=worker
+export CG_SESSION=work-session
+export CG_ATTEMPT="$(printf '%s' "$claim" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["attempt_id"])')"
+export CG_TASK=work/1.1
+"$CG" remember 'preserve the public alpha contract' --type constraint \
+  --task work/1.1 >/dev/null
+printf '%s\n' '{"event":"command","output":"initial evidence"}' \
+  | "$CG" event ingest --source test >/dev/null
+
+opened="$("$CG" work open --task 1.1 --json)"
+python3 -c "
+import json
+d=json.loads(r'''$opened''')
+assert len(d['revision'])==64 and d['task_id']=='work/1.1', d
+assert d['objective'] and len(d['criteria'])==2, d
+assert isinstance(d['allowed_scope'],list), d
+assert set(['git','codify_snapshot','spec_declaration','live_runtime','stale_state']) <= set(d['state']), d
+assert any('alpha contract' in m['body'] for m in d['memories']), d
+assert d['context']['query']=='alpha', d
+assert 'verify_command' in d['tests'] and 'impact' in d['tests'], d
+assert d['last_event']['session']=='work-session', d
+assert 'classification' in d['progress'], d
+"
+revision="$(printf '%s' "$opened" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["revision"])')"
+
+printf '%s\n' 'int alpha(void){return 2;}' > src/a.c
+printf '%s\n' '{"event":"write","criterion":"1.1","output":"alpha changed"}' \
+  | "$CG" event ingest --source test >/dev/null
+updated="$("$CG" work update "$revision" --json)"
+python3 -c "
+import json
+d=json.loads(r'''$updated''')
+assert d['revision']!='$revision' and d['since']=='$revision', d
+assert d['unchanged'] is False, d
+assert any(p['path']=='src/a.c' and p['change']=='modified'
+           for p in d['deltas']['workspace']), d
+assert len(d['deltas']['evidence'])==1, d
+assert 'objective' not in d and 'criteria' not in d and 'context' not in d, d
+"
+next_revision="$(printf '%s' "$updated" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["revision"])')"
+unchanged="$("$CG" work update "$next_revision" --json)"
+python3 -c "
+import json
+d=json.loads(r'''$unchanged''')
+assert d['revision']=='$next_revision' and d['unchanged'] is True, d
+assert d['deltas']=={'state':None,'evidence':[],'workspace':[]}, d
+"
+expect_rc 1 "$CG" work update definitely-not-a-revision
+
+closed="$("$CG" work close --task 1.1 \
+  --evidence '1.1=integration evidence recorded' --json)"
+python3 -c "
+import json
+d=json.loads(r'''$closed''')
+assert len(d['criteria'])==2, d
+assert d['verified']==1 and d['unverified']==1, d
+assert d['criteria'][0]['result']=='verified', d
+assert d['criteria'][1]['result']=='unverified' and d['criteria'][1]['evidence'] is None, d
+"
+reclosed="$("$CG" work close --task 1.1 --json)"
+has "$reclosed" 'integration evidence recorded'
+
+mcp="$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | "$CG" mcp)"
+has "$mcp" '"name":"work_open"'
+has "$mcp" '"name":"work_update"'
+has "$mcp" '"name":"work_close"'
+
+echo "22_control work ok"
+}
+
 case "$mode" in
   state) run_state ;;
   liveness) run_liveness ;;
   integrate) run_integrate ;;
   events) run_events ;;
-  all) run_state; run_liveness; run_integrate; run_events ;;
+  progress) run_progress ;;
+  work) run_work ;;
+  all) run_state; run_liveness; run_integrate; run_events; run_progress; run_work ;;
 esac

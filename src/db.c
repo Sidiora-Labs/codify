@@ -71,6 +71,7 @@ static const char *SCHEMA =
     "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL,"
     "  source TEXT NOT NULL, kind TEXT NOT NULL, session TEXT NOT NULL,"
     "  attempt_id TEXT, task TEXT, fingerprint TEXT UNIQUE NOT NULL,"
+    "  semantic_fingerprint TEXT,"
     "  revision TEXT NOT NULL, previous_revision TEXT,"
     "  evidence_delta INTEGER NOT NULL, activity INTEGER NOT NULL,"
     "  output_hash TEXT, output_changed INTEGER NOT NULL, payload TEXT);"
@@ -84,6 +85,22 @@ static const char *SCHEMA =
     "  path TEXT PRIMARY KEY, size INTEGER NOT NULL,"
     "  mtime_ns INTEGER NOT NULL, ctime_ns INTEGER NOT NULL,"
     "  hash TEXT NOT NULL);"
+    /* opaque work revisions preserve only the baselines needed for compact
+     * state/evidence/workspace deltas; packets never leave the local DB */
+    "CREATE TABLE IF NOT EXISTS work_packets("
+    "  revision TEXT PRIMARY KEY, created INTEGER NOT NULL,"
+    "  task TEXT NOT NULL, event_id INTEGER NOT NULL,"
+    "  workspace_revision TEXT NOT NULL, state_hash TEXT NOT NULL);"
+    "CREATE TABLE IF NOT EXISTS work_files("
+    "  revision TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL,"
+    "  PRIMARY KEY(revision,path));"
+    "CREATE INDEX IF NOT EXISTS idx_work_files_revision "
+    "ON work_files(revision);"
+    "CREATE TABLE IF NOT EXISTS work_evidence("
+    "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL,task TEXT NOT NULL,"
+    "  criterion TEXT NOT NULL,evidence TEXT NOT NULL,source TEXT NOT NULL);"
+    "CREATE INDEX IF NOT EXISTS idx_work_evidence_task "
+    "ON work_evidence(task,criterion,created);"
     /* per-file import rows; name '*' means a whole-module import */
     "CREATE TABLE IF NOT EXISTS imports("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL,"
@@ -110,7 +127,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "12"
+#define SCHEMA_VERSION "14"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -248,6 +265,15 @@ int cg_schema_upgrade(Cg *cg) {
     bool current = ver && strcmp(ver, SCHEMA_VERSION) == 0;
     free(ver);
     if (current) return 0;
+    /* v14 separates semantic event identity from occurrence identity. Ignore
+     * duplicate-column errors on fresh databases where SCHEMA already owns
+     * the current shape. */
+    sqlite3_exec(cg->db,
+        "ALTER TABLE runtime_events ADD COLUMN semantic_fingerprint TEXT",
+        NULL, NULL, NULL);
+    sqlite3_exec(cg->db,
+        "UPDATE runtime_events SET semantic_fingerprint=fingerprint "
+        "WHERE semantic_fingerprint IS NULL", NULL, NULL, NULL);
     /* meta rows mean an existing project DB, not a freshly created one */
     long nmeta = 0;
     sqlite3_stmt *st = NULL;

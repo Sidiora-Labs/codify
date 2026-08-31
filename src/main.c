@@ -40,6 +40,7 @@ static void usage(void) {
 "  state                    Git, snapshot, spec, live ownership, staleness\n"
 "  event ingest|history|progress\n"
 "                           normalized lifecycle evidence (stdin for ingest)\n"
+"  work open|update|close   compact task packet, revision deltas, evidence\n"
 "  diff [A] [B]             HEAD vs worktree | A vs worktree | A vs B\n"
 "  checkout <id> [--force]  restore a snapshot\n"
 "  changes                  impact radius of uncommitted edits\n"
@@ -370,6 +371,8 @@ int main(int argc, char **argv) {
         rc = cmd_state(&cg, json);
     } else if (strcmp(cmd, "event") == 0) {
         rc = cmd_event(&cg, argc - 2, argv + 2, json);
+    } else if (strcmp(cmd, "work") == 0) {
+        rc = cmd_work(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "diff") == 0) {
         rc = cmd_diff(&cg, argc >= 3 ? argv[2] : NULL,
                       argc >= 4 ? argv[3] : NULL);

@@ -117,6 +117,35 @@ static int t_progress(void *v) {
     CallCtx *c = v;
     return runtime_progress(c->cg, true);
 }
+static int t_work_open(void *v) {
+    CallCtx *c = v;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    int rc = work_open(c->cg, task, true);
+    free(task);
+    return rc;
+}
+static int t_work_update(void *v) {
+    CallCtx *c = v;
+    char *revision = c->args ? json_get_string(c->args, "revision") : NULL;
+    if (!revision) { printf("{\"error\":\"missing revision\"}\n"); return 1; }
+    int rc = work_update(c->cg, revision, true);
+    free(revision);
+    return rc;
+}
+static int t_work_close(void *v) {
+    CallCtx *c = v;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    char *raw = c->args ? json_get_string(c->args, "evidence") : NULL;
+    char *items[64]; int n = 0;
+    if (raw) {
+        char *save = NULL;
+        for (char *p = strtok_r(raw, ";", &save); p && n < 64;
+             p = strtok_r(NULL, ";", &save)) items[n++] = p;
+    }
+    int rc = work_close(c->cg, task, n, items, true);
+    free(task); free(raw);
+    return rc;
+}
 static int t_changes(void *v) {
     CallCtx *c = v;
     int limit = c->args ? (int)json_get_int(c->args, "limit", 0) : 0;
@@ -446,6 +475,15 @@ static int t_resume(void *v) {
                 "\"source\":{\"type\":\"string\"}," \
                 "\"payload\":{\"type\":\"object\"}}," \
                 "\"required\":[\"payload\"]}"
+#define S_WORK_OPEN "{\"type\":\"object\",\"properties\":{" \
+                    "\"task\":{\"type\":\"string\"}}}"
+#define S_WORK_UPDATE "{\"type\":\"object\",\"properties\":{" \
+                      "\"revision\":{\"type\":\"string\"}}," \
+                      "\"required\":[\"revision\"]}"
+#define S_WORK_CLOSE "{\"type\":\"object\",\"properties\":{" \
+                     "\"task\":{\"type\":\"string\"}," \
+                     "\"evidence\":{\"type\":\"string\"," \
+                     "\"description\":\"semicolon separated CLAUSE=PROOF pairs\"}}}"
 #define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"
 #define S_MSG    "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}," \
                  "\"required\":[\"message\"]}"
@@ -596,6 +634,19 @@ static const struct {
       "Heartbeats and output changes stay distinct from implementation "
       "progress.",
       S_EMPTY, A_READ, "Runtime progress status", t_progress, false },
+    { "work_open",
+      "Open one compact task-aware work packet with criteria, allowed scope, "
+      "independent state, memories, focused graph context, tests, and latest "
+      "runtime evidence. Returns an opaque revision for delta updates.",
+      S_WORK_OPEN, A_WRITE, "Open work packet", t_work_open, true },
+    { "work_update",
+      "Return only state, lifecycle evidence, and workspace paths changed "
+      "since an opaque work revision.",
+      S_WORK_UPDATE, A_WRITE, "Update work packet", t_work_update, false },
+    { "work_close",
+      "Pair every task criterion with recorded evidence or an explicit "
+      "unverified result. Evidence uses CLAUSE=PROOF pairs.",
+      S_WORK_CLOSE, A_WRITE, "Close work packet", t_work_close, false },
     { "change_impact",
       "Impact radius of uncommitted edits: symbols in changed files plus "
       "their external callers. Run before committing.",
