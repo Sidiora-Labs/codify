@@ -93,7 +93,8 @@ static bool json_balanced(const char *s) {
 }
 
 static bool protocol_supported(const char *v) {
-    return strcmp(v, "2025-06-18") == 0 || strcmp(v, "2025-03-26") == 0 ||
+    return strcmp(v, CG_MCP_VERSION) == 0 ||
+           strcmp(v, "2025-06-18") == 0 || strcmp(v, "2025-03-26") == 0 ||
            strcmp(v, "2024-11-05") == 0;
 }
 
@@ -267,6 +268,38 @@ static char *host_shim_body(const char *host) {
     return b.p;
 }
 
+typedef struct { Cg *cg; } IntegrateAgentmd;
+static int integrate_agentmd_call(void *v) {
+    return cmd_agentmd(((IntegrateAgentmd *)v)->cg, true);
+}
+
+/* Generate the graph projection only when its ownership marker is present or
+ * the path is empty. Capture cmd_agentmd's normal CLI report so JSON apply
+ * remains one valid document. Returns apply_asset-style status. */
+static int integrate_agent_context(Cg *cg) {
+    char path[4700];
+    snprintf(path, sizeof path, "%s/%s", cg->root, CG_AGENT_CONTEXT);
+    char *before = read_entire_file(path, NULL);
+    if (before && !strstr(before, "codify-owned: graph-agent-context")) {
+        free(before); return 2;
+    }
+    SysInfo si;
+    IndexStats st;
+    sysinfo_detect(&si);
+    if (cg_index(cg, &si, false, &st, true) != 0) {
+        free(before); return -1;
+    }
+    IntegrateAgentmd call = { cg };
+    char *report = NULL;
+    int rc = cg_capture(&report, integrate_agentmd_call, &call);
+    free(report);
+    if (rc != 0) { free(before); return -1; }
+    char *after = read_entire_file(path, NULL);
+    bool changed = !before || !after || strcmp(before, after) != 0;
+    free(before); free(after);
+    return changed ? 0 : 1;
+}
+
 int integrate_apply_portable(Cg *cg, bool quiet) {
     int errors = 0, changed = 0, rc;
     char path[4700];
@@ -285,8 +318,10 @@ int integrate_apply_portable(Cg *cg, bool quiet) {
         free(body);
         if (rc == 0) changed++; else if (rc < 0 || rc == 2) errors++;
     }
+    rc = integrate_agent_context(cg);
+    if (rc == 0) changed++; else if (rc < 0 || rc == 2) errors++;
     if (!quiet)
-        printf("  portable skill/hooks: %d change(s), %d conflict(s)\n",
+        printf("  portable assets: %d change(s), %d conflict(s)\n",
                changed, errors);
     return errors ? 1 : 0;
 }
@@ -324,10 +359,11 @@ int integrate_plan(Cg *cg, bool json) {
                       integrate_action(&s), path);
         }
     }
-    char skill[4700], event[4700];
+    char skill[4700], event[4700], context[4700];
     snprintf(skill, sizeof skill, "%s/.agents/skills/codify-workflow/SKILL.md",
              cg->root);
     snprintf(event, sizeof event, "%s/.codify/hooks/event.sh", cg->root);
+    snprintf(context, sizeof context, "%s/%s", cg->root, CG_AGENT_CONTEXT);
     if (json) {
         sb_puts(&b, "],\"assets\":[{\"path\":"); sb_json_str(&b, skill);
         sb_puts(&b, ",\"action\":");
@@ -345,6 +381,10 @@ int integrate_plan(Cg *cg, bool json) {
             sb_json_str(&b, asset_state(shim, "codify-owned:"));
             sb_putc(&b, '}');
         }
+        sb_puts(&b, ",{\"path\":"); sb_json_str(&b, context);
+        sb_puts(&b, ",\"action\":");
+        sb_json_str(&b, asset_state(context, "codify-owned: graph-agent-context"));
+        sb_putc(&b, '}');
         sb_puts(&b, "]}\n");
     } else {
         sb_printf(&b, "  %-20s %-9s %s\n", "Portable Agent Skill",
@@ -358,6 +398,9 @@ int integrate_plan(Cg *cg, bool json) {
             sb_printf(&b, "  %-20s %-9s %s\n", SHIM_HOSTS[i],
                       asset_state(shim, "codify-owned:"), shim);
         }
+        sb_printf(&b, "  %-20s %-9s %s\n", "Graph agent context",
+                  asset_state(context, "codify-owned: graph-agent-context"),
+                  context);
     }
     fputs(b.p, stdout); sb_free(&b);
     return 0;
@@ -403,6 +446,8 @@ int integrate_apply(Cg *cg, bool json) {
         free(body);
         if (arc == 0) changed++; else if (arc < 0 || arc == 2) errors++;
     }
+    arc = integrate_agent_context(cg);
+    if (arc == 0) changed++; else if (arc < 0 || arc == 2) errors++;
     if (json) sb_printf(&b, "],\"changed\":%d,\"errors\":%d}\n",
                         changed, errors);
     else sb_printf(&b, "portable assets: %s (%d change(s), %d conflict(s))\n",
@@ -456,9 +501,10 @@ int integrate_doctor(Cg *cg, bool json) {
                         "%s declares unsupported protocol %s",
                         ADAPTERS[i].label, s.protocol);
     }
-    char skill[4700], event[4700];
+    char skill[4700], event[4700], context[4700];
     snprintf(skill, sizeof skill, "%s/.agents/skills/codify-workflow/SKILL.md", cg->root);
     snprintf(event, sizeof event, "%s/.codify/hooks/event.sh", cg->root);
+    snprintf(context, sizeof context, "%s/%s", cg->root, CG_AGENT_CONTEXT);
     const char *ss = asset_state(skill, "codify-owned:");
     const char *es = asset_state(event, "codify-owned:");
     if (strcmp(ss, "create") == 0)
@@ -475,6 +521,14 @@ int integrate_doctor(Cg *cg, bool json) {
         doctor_find(&findings, &n, json,
                     "event hook has conflicting generated-file ownership: %s",
                     event);
+    const char *cs = asset_state(context, "codify-owned: graph-agent-context");
+    if (strcmp(cs, "create") == 0)
+        doctor_find(&findings, &n, json,
+                    "graph agent context is missing: %s", context);
+    else if (strcmp(cs, "conflict") == 0)
+        doctor_find(&findings, &n, json,
+                    "graph context has conflicting generated-file ownership: %s",
+                    context);
     for (int i = 0; SHIM_HOSTS[i]; i++) {
         char shim[4700];
         snprintf(shim, sizeof shim, "%s/.codify/hooks/%s.sh", cg->root,

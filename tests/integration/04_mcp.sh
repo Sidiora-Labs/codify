@@ -53,6 +53,8 @@ for t in ("search_code", "get_context", "impact_analysis", "survey",
           "vcs_commit",
           "spec_status", "spec_next", "spec_start", "spec_done",
           "spec_mode", "spec_implemented", "spec_render", "spec_trace",
+          "spec_reconcile", "state", "event_ingest", "event_history",
+          "progress_status", "work_open", "work_update", "work_close",
           "remember", "recall", "spec_ready", "spec_claim_next",
           "spec_release", "handoff", "resume"):
     assert t in tools, f"missing tool {t}"
@@ -152,10 +154,14 @@ python3 -c "
 import json
 d = json.loads(r'''$out''')['result']
 assert d['protocolVersion'] != '1999-01-01', ('echoed an unsupported version', d)
-assert d['protocolVersion'] == '2025-06-18', d
+assert d['protocolVersion'] == '2025-11-25', d
 for cap in ('tools', 'resources', 'prompts'):
     assert cap in d['capabilities'], (cap, d['capabilities'])
-assert 'instructions' in d, d
+assert d['capabilities']['tools']['listChanged'] is False, d
+assert d['capabilities']['resources']['listChanged'] is False, d
+assert len(d['instructions']) <= 512, len(d['instructions'])
+for word in ('work_open','work_update','state','progress_status','work_close'):
+    assert word in d['instructions'], (word,d['instructions'])
 "
 # a version we do speak is honoured
 out="$(req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}')"
@@ -178,8 +184,18 @@ assert by['vcs_commit']['annotations']['readOnlyHint'] is False
 for name in ('brief', 'review', 'why', 'get_source', 'test_impact',
              'check', 'guard', 'spec_wave', 'spec_new', 'spec_add',
              'spec_lint', 'spec_claim', 'git_sync', 'spec_ready',
-             'spec_claim_next', 'spec_release', 'handoff', 'resume'):
+             'spec_claim_next', 'spec_release', 'spec_reconcile', 'handoff',
+             'resume', 'state', 'event_ingest', 'event_history',
+             'progress_status', 'work_open', 'work_update', 'work_close'):
     assert name in by, ('missing tool', name)
+assert by['state']['annotations']['readOnlyHint'] is True
+assert by['event_history']['annotations']['readOnlyHint'] is True
+assert by['progress_status']['annotations']['readOnlyHint'] is True
+for name in ('spec_reconcile','event_ingest','work_open','work_update','work_close'):
+    assert by[name]['annotations']['readOnlyHint'] is False, name
+assert by['spec_reconcile']['inputSchema']['properties']['repair']['type']=='boolean'
+assert by['event_ingest']['inputSchema']['required']==['payload']
+assert by['work_update']['inputSchema']['required']==['revision']
 "
 
 out="$(req '{"jsonrpc":"2.0","id":3,"method":"prompts/list"}')"

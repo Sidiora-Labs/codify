@@ -23,6 +23,7 @@ one_binary      = "Everything ships in the single cg binary. No new runtime depe
 non_invasive    = "Codify observes and advises by default; it blocks only where the user asked it to."
 local_only      = "No network calls, no telemetry, no API keys. Ever."
 anchor_intent   = "Anchor what a reader could not derive from the code: purpose, contract, danger, pointer. Derivable comments are noise."
+generated_owners = "cg spec render owns AGENTS.md and CLAUDE.md; cg agentmd owns .codify/agent-context.md."
 
 [loop]
 step_1 = "cg brief — load repo state, active task, and prior decisions."

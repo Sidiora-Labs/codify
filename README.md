@@ -32,7 +32,7 @@ Codify (invoked as `cg`) is an agent workflow engine in a single binary. It main
 
 The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg why` walks a symbol back to the decisions behind it, and `cg spec trace` walks any task to its symbols, commits, and memories.
 
-**And it is present between the steps, not only at them.** `cg brief` starts a session, `cg guard` notices when an edit drifts outside what the task declared, `cg review` pairs a change with the criteria it claims to satisfy, and `cg check` gates all of it in CI as one command. A built-in MCP server exposes the whole thing — 39 tools, plus resources and prompts — to Claude Code, Cursor, and every other MCP-capable agent, while `cg lsp` serves the same graph to any editor that speaks LSP.
+**And it is present between the steps, not only at them.** `cg work open` starts with a compact task packet, `cg work update` returns only new state/evidence/workspace deltas, `cg event progress` classifies loops without mistaking activity for progress, and `cg guard` notices when an edit drifts outside declared scope. A built-in MCP server exposes 48 tools, resources, and prompts to every MCP-capable agent, while `cg integrate` plans, applies, and diagnoses each host's native configuration.
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
@@ -208,12 +208,23 @@ A superseded memory is never deleted — the reversal is history worth keeping. 
 
 | Command | Description |
 |---|---|
-| `cg mcp` | Run as an MCP stdio server: 39 tools, plus resources and prompts (see below) |
+| `cg mcp` | Run as an MCP stdio server: 48 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
-| `cg mcp-install` | Auto-connect to Claude Code (`.mcp.json`), Cursor, VS Code, Windsurf, Zed, OpenCode, Cline, Continue, Gemini CLI, and Codex CLI, merging into existing configs |
+| `cg integrate detect\|plan\|apply\|doctor` | Capability-aware setup for Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline, and Continue; planning is read-only, apply is idempotent and backed up |
+| `cg mcp-install` | Compatibility alias for `cg integrate apply` |
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |
 | `cg changelog [-n N] [-o FILE]` | Changelog from snapshots with symbol-level diffs: added and removed functions, new routes |
-| `cg agentmd [--write]` | Generate `AGENTS.md` and `CLAUDE.md`: languages, directory map, build tooling, entry points, routes, and the most-referenced symbols |
+| `cg agentmd [--write]` | Generate graph orientation at `.codify/agent-context.md`; root `AGENTS.md` and `CLAUDE.md` remain owned by `cg spec render` |
+
+### Agent control plane
+
+Codify keeps four independent authorities explicit: Git state, Codify snapshot state, declared spec state, and live fenced attempts. `cg state` shows them together without treating one as proof of another; `cg spec reconcile` diagnoses orphaned declarations and mutates only with `--repair`.
+
+Native host hooks feed JSON to `cg event ingest`. Each event gets a stable semantic identity, occurrence fingerprint, session/attempt identity, exact workspace revision, and evidence delta. `cg event progress` classifies repeated failure, repeated observation, A-B patch oscillation, and no-evidence windows. Recovery is finite—warn, re-plan, bounded experiment, handoff, waiting for input, optional stop—and advisory unless `CG_PROGRESS_ENFORCE=1` explicitly enables the terminal policy.
+
+`cg work open` composes the objective, criteria, allowed scope, independent state, memories, focused graph context, tests, and latest event into one packet. Its opaque revision feeds `cg work update`, which returns only changed state, evidence, and workspace paths. `cg work close` pairs every criterion with durable evidence or marks it unverified.
+
+The adapter registry reports native, portable, or unavailable capabilities for MCP, instructions, skills, hooks, sessions, and cloud execution. Portable assets live under `.agents/` and `.codify/`; existing host configs are merged with recoverable `.codify.bak` copies. Everything remains local: integrations execute the local `cg` binary, runtime records stay in `.codegraph/graph.db`, and Codify performs no network calls or telemetry.
 
 ### Governance
 
@@ -225,6 +236,9 @@ These four are what make Codify present at every step rather than only at the bo
 | `cg review` | The change paired with what it claims: changed symbols, callers now at risk, and the task's acceptance criteria |
 | `cg guard [paths] [--strict]` | Edits falling outside the scope the in-progress task declared in `touches` |
 | `cg check [--strict]` | The single CI gate: render staleness, spec lint, task evidence, claim consistency, worktree state |
+| `cg state` | Separately label Git, snapshot, spec declaration, live-attempt, and stale state |
+| `cg event ingest\|history\|progress` | Normalize host lifecycle JSON and classify novel evidence versus activity or loops |
+| `cg work open\|update\|close` | Open compact work context, retrieve revision deltas, and close criteria against evidence |
 | `cg handoff` | Record session state against a task before stopping: `--done "a;b"`, `--next "a;b"`, `--blocked "x"`, `-m <note>`, `--task <id>` (defaults to your current task). Stored as a structured memory; each handoff supersedes the previous one for the task |
 | `cg resume [--task <id>] [--prompt]` | Everything a fresh session needs to pick a task up: the task packet, the latest handoff (parsed back into done/next/blocked), task-scoped memories, uncommitted paths, lease state. `--prompt` renders it as a paste-ready block for a new agent session |
 

@@ -111,6 +111,20 @@ has "$out" "already in_progress"
 
 # ---- leases record an owner and refuse a second claimant
 "$CG" init >/dev/null
+
+# The spec renderer owns root workflow instructions; graph orientation has a
+# separate deterministic owner and path, so either generator can run first.
+cp AGENTS.md "$TMP/agents.before"
+cp CLAUDE.md "$TMP/claude.before"
+"$CG" agentmd --write >/dev/null
+cmp AGENTS.md "$TMP/agents.before" || fail "agentmd overwrote AGENTS.md"
+cmp CLAUDE.md "$TMP/claude.before" || fail "agentmd overwrote CLAUDE.md"
+[ -s .codify/agent-context.md ] || fail "agentmd context path missing"
+cp .codify/agent-context.md "$TMP/context.before"
+"$CG" spec render >/dev/null
+cmp .codify/agent-context.md "$TMP/context.before" \
+    || fail "spec render overwrote graph context"
+
 out="$("$CG" spec claim 2.2 --agent alice --ttl 5)"
 has "$out" "claimed 2.2 for alice"
 out="$("$CG" spec claim 2.2 --agent bob 2>&1 || true)"

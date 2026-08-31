@@ -47,7 +47,7 @@
 ## Protocol and release
 
 - [ ] 4. Interoperability and qualification
-  - [ ] 4.1 Modernize MCP and resolve generated agent ownership
+  - [x] 4.1 Modernize MCP and resolve generated agent ownership
     - Negotiate MCP 2025-11-25 while retaining older supported revisions and advertise list-change support only when notifications are implemented.
     - Expose state, reconcile, event, progress, and work operations through MCP with honest annotations and compact schemas.
     - Give generated workflow instructions and generated graph context distinct deterministic owners and paths.

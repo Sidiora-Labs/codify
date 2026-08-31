@@ -62,7 +62,7 @@ static void usage(void) {
 "  integrate [detect|plan|apply|doctor]\n"
 "                           configure and diagnose every agent host\n"
 "  changelog [-n N] [-o F]  changelog from snapshots with symbol-level diffs\n"
-"  agentmd [--write]        generate AGENTS.md + CLAUDE.md from the graph\n"
+"  agentmd [--write]        generate .codify/agent-context.md from the graph\n"
 "  check [--strict]         one CI gate: render, lint, evidence, tree\n"
 "  brief                    session state: task, changes, decisions\n"
 "  review                   changed symbols vs acceptance criteria + risk\n"

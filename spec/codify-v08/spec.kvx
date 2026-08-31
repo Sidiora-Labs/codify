@@ -138,11 +138,11 @@ status  = "pending"
 
 [task.4.1]
 title      = "Modernize MCP and resolve generated agent ownership"
-status     = "pending"
+status     = "done"
 wave       = 6
 requires   = ["3.1"]
 symbols    = ["cmd_mcp", "cmd_agentmd", "mcp_tool_annotations"]
-touches    = ["src/mcp.c", "src/agent.c", "src/main.c", "src/cg.h", "README.md", "docs/ARCHITECTURE.md", "CHANGELOG.md", "tests/integration/04_mcp.sh", "tests/integration/12_authoring.sh", "tests/integration/22_control.sh", "spec/codify-v08/*", "spec/workflow.kvx", "AGENTS.md", "CLAUDE.md"]
+touches    = ["src/mcp.c", "src/agent.c", "src/integrate.c", "src/main.c", "src/cg.h", "README.md", "docs/ARCHITECTURE.md", "CHANGELOG.md", "tests/integration/03_agentic.sh", "tests/integration/04_mcp.sh", "tests/integration/12_authoring.sh", "tests/integration/22_control.sh", "spec/codify-v08/*", "spec/workflow.kvx"]
 verify_cmd = "CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/12_authoring.sh && CG=$PWD/cg tests/integration/22_control.sh protocol"
 do_1       = "Negotiate MCP 2025-11-25 while retaining older supported revisions and advertise list-change support only when notifications are implemented."
 do_2       = "Expose state, reconcile, event, progress, and work operations through MCP with honest annotations and compact schemas."

@@ -192,6 +192,15 @@ static int t_spec_status(void *v) {
     char *a[] = { "status" };
     return run_spec(1, a, true);
 }
+static int t_spec_reconcile(void *v) {
+    CallCtx *c = v;
+    char *repair = c->args ? json_get_raw(c->args, "repair") : NULL;
+    bool mutate = repair && strcmp(repair, "true") == 0;
+    char *a[] = { "reconcile", "--repair" };
+    int rc = run_spec(mutate ? 2 : 1, a, true);
+    free(repair);
+    return rc;
+}
 static int t_spec_next(void *v) {
     (void)v;
     char *a[] = { "next" };
@@ -484,6 +493,9 @@ static int t_resume(void *v) {
                      "\"task\":{\"type\":\"string\"}," \
                      "\"evidence\":{\"type\":\"string\"," \
                      "\"description\":\"semicolon separated CLAUSE=PROOF pairs\"}}}"
+#define S_RECONCILE "{\"type\":\"object\",\"properties\":{" \
+                    "\"repair\":{\"type\":\"boolean\"," \
+                    "\"description\":\"explicitly return orphaned declarations to pending\"}}}"
 #define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"
 #define S_MSG    "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}," \
                  "\"required\":[\"message\"]}"
@@ -664,6 +676,11 @@ static const struct {
       "workflow mode, separate done/implemented totals, current in-progress "
       "task, and the next eligible task.",
       S_EMPTY, A_READ, "Task board", t_spec_status, false },
+    { "spec_reconcile",
+      "Diagnose declarations that claim in-progress work without a live "
+      "attempt. Read-only by default; repair must be explicitly true and "
+      "returns only orphaned declarations to pending.",
+      S_RECONCILE, A_WRITE, "Reconcile task state", t_spec_reconcile, false },
     { "spec_next",
       "The next eligible spec task — lowest wave whose `requires` are all "
       "done (or implemented in Prod mode) — with its implementation bullets "
@@ -810,11 +827,9 @@ static const struct {
       "text/plain" },
     { "codify://tasks", "spec/tasks.md", "Task board",
       "Rendered task list for the active feature.", "text/markdown" },
-    { "codify://agents", "AGENTS.md", "Agent brief",
-      "Generated orientation: languages, layout, entry points, key symbols.",
-      "text/markdown" },
-    { "codify://claude", "CLAUDE.md", "Claude brief",
-      "Generated orientation for Claude Code.", "text/markdown" },
+    { "codify://agent-context", CG_AGENT_CONTEXT, "Graph context",
+      "Generated orientation: languages, layout, entry points, key symbols. "
+      "Owned only by cg agentmd.", "text/markdown" },
     { NULL, NULL, NULL, NULL, NULL }
 };
 
@@ -856,7 +871,7 @@ static const struct { const char *name, *title, *desc, *body; } PROMPTS[] = {
     { "orient", "Orient in an unfamiliar repository",
       "Build a working picture of a codebase you have not seen before.",
       "Orient yourself in this repository before doing anything else:\n"
-      "1. Call `brief`, then read the `codify://agents` resource.\n"
+      "1. Call `brief`, then read `codify://agent-context` when present.\n"
       "2. Call `list_routes` to find the externally reachable surface.\n"
       "3. Call `get_context` for each area the task at hand touches.\n"
       "4. Call `recall` for decisions already made about those areas.\n"
@@ -969,7 +984,8 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
              * speak it, otherwise answer with our newest. Echoing blindly
              * claims support for revisions this server has never seen. */
             static const char *SUPPORTED[] = {
-                "2025-06-18", "2025-03-26", "2024-11-05", NULL
+                CG_MCP_VERSION, "2025-06-18", "2025-03-26", "2024-11-05",
+                NULL
             };
             const char *agreed = SUPPORTED[0];
             for (int i = 0; ver && SUPPORTED[i]; i++)
@@ -978,20 +994,21 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
             sb_puts(&r, "{\"protocolVersion\":");
             sb_json_str(&r, agreed);
             sb_puts(&r, ",\"capabilities\":{"
-                        "\"tools\":{\"listChanged\":true},"
-                        "\"resources\":{\"listChanged\":true,\"subscribe\":false},"
+                        "\"tools\":{\"listChanged\":false},"
+                        "\"resources\":{\"listChanged\":false,\"subscribe\":false},"
                         "\"prompts\":{\"listChanged\":false}},"
                         "\"serverInfo\":{\"name\":\"codify\",\"version\":\""
                         CG_VERSION "\"},"
-                        "\"instructions\":\"Codify serves this repository's "
-                        "code graph, snapshots, spec tasks, and memories. Start "
-                        "a session with `brief`. In unfamiliar areas call "
-                        "`survey` first, then `get_context`, then `why`. "
-                        "Before `spec_done` call `review`. Record decisions "
-                        "with `remember`. When you write code, anchor what a "
-                        "reader could not derive from it — purpose, contract, "
-                        "danger, pointer — as doc comments; `anchors` lists "
-                        "stale docs and where coverage pays next.\"}");
+                        "\"instructions\":\"Codify is this repository's "
+                        "local control plane. Start task work with `work_open`; "
+                        "keep its opaque revision and call `work_update` for "
+                        "deltas. Use `state` when authorities disagree and "
+                        "`progress_status` before continuing repeated work. "
+                        "Call `work_close` to pair every criterion with evidence "
+                        "or an unverified result, then `vcs_commit` and "
+                        "`spec_done`. Use `survey`, `get_context`, and `why` for "
+                        "code; `remember` for durable decisions. Never claim "
+                        "completion from activity alone.\"}");
             reply_result(id, r.p);
             sb_free(&r);
             free(ver); free(params);

@@ -5,7 +5,7 @@
 
 mode="${1:-all}"
 case "$mode" in
-  all|state|liveness|integrate|events|progress|work) ;;
+  all|state|liveness|integrate|events|progress|work|protocol) ;;
   *) fail "unknown 22_control mode: $mode" ;;
 esac
 
@@ -225,7 +225,7 @@ python3 -c "
 import json
 d=json.loads(r'''$plan''')
 assert len(d['hosts']) == 10, d
-assert len(d['assets']) == 7, d
+assert len(d['assets']) == 8, d
 assert next(h for h in d['hosts'] if h['id']=='claude-code')['action']=='merge'
 assert all(a['path'].startswith(r'$TMP/integrate/') for a in d['assets'])
 "
@@ -246,6 +246,8 @@ for host in codex claude copilot cursor gemini; do
 done
 [ -s .agents/skills/codify-workflow/SKILL.md ] \
     || fail "portable Agent Skill missing"
+[ -s .codify/agent-context.md ] || fail "graph agent context missing"
+has "$(cat .codify/agent-context.md)" "codify-owned: graph-agent-context"
 has "$(cat .agents/skills/codify-workflow/SKILL.md)" "cg spec trace"
 out="$("$CG" integrate apply)"
 has "$out" "already configured"
@@ -594,6 +596,66 @@ has "$mcp" '"name":"work_close"'
 echo "22_control work ok"
 }
 
+run_protocol() {
+mkdir -p "$TMP/protocol/src"
+cd "$TMP/protocol"
+printf '%s\n' 'int main(void){return 0;}' > src/main.c
+"$CG" spec new protocol >/dev/null
+"$CG" init >/dev/null
+
+req() { printf '%s\n' "$1" | "$CG" mcp 2>/dev/null; }
+current="$(req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}')"
+python3 -c "
+import json
+d=json.loads(r'''$current''')['result']
+assert d['protocolVersion']=='2025-11-25', d
+assert d['capabilities']['tools']['listChanged'] is False, d
+assert d['capabilities']['resources']['listChanged'] is False, d
+assert d['capabilities']['resources']['subscribe'] is False, d
+assert d['capabilities']['prompts']['listChanged'] is False, d
+assert len(d['instructions'])<=512, len(d['instructions'])
+for name in ['work_open','work_update','state','progress_status','work_close']:
+    assert name in d['instructions'], (name,d['instructions'])
+"
+fallback="$(req '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}')"
+has "$fallback" '"protocolVersion":"2025-11-25"'
+legacy="$(req '{"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}')"
+has "$legacy" '"protocolVersion":"2024-11-05"'
+
+listed="$(req '{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}')"
+python3 -c "
+import json
+tools=json.loads(r'''$listed''')['result']['tools']; by={t['name']:t for t in tools}
+reads=['state','event_history','progress_status']
+writes=['spec_reconcile','event_ingest','work_open','work_update','work_close']
+for name in reads+writes: assert name in by, name
+for name in reads: assert by[name]['annotations']['readOnlyHint'] is True, name
+for name in writes: assert by[name]['annotations']['readOnlyHint'] is False, name
+assert by['spec_reconcile']['inputSchema']['properties']['repair']['type']=='boolean'
+assert by['work_update']['inputSchema']['required']==['revision']
+"
+
+# Reconcile is diagnostic until its repair flag is explicit over MCP.
+"$CG" spec mode parallel >/dev/null
+"$CG" spec start 1.1 >/dev/null
+diagnose="$(req '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"spec_reconcile","arguments":{}}}')"
+python3 -c "
+import json
+r=json.loads(r'''$diagnose''')['result']; d=json.loads(r['content'][0]['text'])
+assert r['isError'] is False and d['stale']==['1.1'] and d['repaired']==0, (r,d)
+"
+has "$("$CG" spec status --json)" '"in_progress":1'
+repair="$(req '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"spec_reconcile","arguments":{"repair":true}}}')"
+python3 -c "
+import json
+r=json.loads(r'''$repair''')['result']; d=json.loads(r['content'][0]['text'])
+assert r['isError'] is False and d['repaired']==1, (r,d)
+"
+has "$("$CG" spec status --json)" '"in_progress":0'
+
+echo "22_control protocol ok"
+}
+
 case "$mode" in
   state) run_state ;;
   liveness) run_liveness ;;
@@ -601,5 +663,6 @@ case "$mode" in
   events) run_events ;;
   progress) run_progress ;;
   work) run_work ;;
-  all) run_state; run_liveness; run_integrate; run_events; run_progress; run_work ;;
+  protocol) run_protocol ;;
+  all) run_state; run_liveness; run_integrate; run_events; run_progress; run_work; run_protocol ;;
 esac

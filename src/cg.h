@@ -21,6 +21,8 @@
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
 #define CG_VERSION  "0.7.0"
+#define CG_MCP_VERSION "2025-11-25"
+#define CG_AGENT_CONTEXT ".codify/agent-context.md"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -439,6 +441,6 @@ int  git_commit_mirror(Cg *cg, const char *message);
 int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */
 int cmd_mcp_install(Cg *cg);                       /* wire into agent configs */
 int cmd_changelog(Cg *cg, int limit, const char *outfile);
-int cmd_agentmd(Cg *cg, bool write_files);         /* AGENTS.md + CLAUDE.md */
+int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */
 
 #endif

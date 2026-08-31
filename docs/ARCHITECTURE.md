@@ -40,13 +40,16 @@ files ───────────────────────► j
   so symbol rowids stay stable.
 - **`db.c`** owns the schema: `files`, `symbols`, `refs` (with `qual` and
   `kind`), `imports`, `routes`, `meta`, `memories`, `memory_superseded`,
-  `git_commits`, `git_churn`, `leases`,
+  `git_commits`, `git_churn`, `leases`, fenced `attempts`, normalized
+  `runtime_events`, incremental `runtime_files`, revision baselines in
+  `work_packets` / `work_files`, and criterion-linked `work_evidence`,
   plus three FTS5 tables — trigram over symbol names (substring search),
   unicode61 over file bodies (word search), and unicode61 over memory
   bodies. The schema is versioned in `meta.schema_version`
   (`cg_schema_upgrade`): on a mismatch the derived tables — everything the
   indexer rebuilds from source — are dropped and recreated for the next
-  sync, while memories, git history, and leases are never touched.
+  sync, while memories, git history, attempts, runtime history, and work
+  evidence are never touched.
   It also resolves the project root, which is load-bearing:
   `cg_find_root_at` stops the upward walk at a `.git`/`go.mod`/
   `package.json`-style boundary, at `$HOME`, and at a mount change, so a
@@ -85,19 +88,63 @@ platforms stub out behind the same interface.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
-`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 37
+`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 48
 tools, each carrying read-only/destructive annotations so a client can
 auto-approve reads instead of prompting on every search. It also serves
-resources (the workflow file, the rendered board, the generated agent
-briefs, and every feature spec) and prompts (the workflow loop itself,
+resources (the workflow file, rendered board, graph context, and every
+feature spec) and prompts (the workflow loop itself,
 so Codify's opinion travels to any client). `initialize` negotiates a
-protocolVersion the server actually speaks rather than echoing the
-client's. CLI command output is captured via `dup2` + tmpfile
+protocolVersion the server actually speaks, including `2025-11-25`, rather
+than echoing the client's. List-change capabilities remain false because
+the server emits no list-change notifications. CLI command output is captured via `dup2` + tmpfile
 (`cg_capture`), so the CLI and MCP surfaces share one implementation.
 `json.c` is a minimal scanner (no DOM) used for JSON-RPC parsing and
 `package.json` introspection. `cg mcp-install` splices the server into
 agent configs without a full JSON parser by inserting after the root
 key's opening brace.
+
+`integrate.c` is the vendor-neutral adapter registry. Every host declares
+MCP, instruction, skill, hook, session, and cloud capabilities as native,
+portable, or unavailable. Detect and plan are read-only; apply merges the
+canonical `codify` server, backs up existing files, and installs portable
+Agent Skill and lifecycle shims; doctor reports incomplete, malformed,
+stale, unsupported, or conflicting ownership.
+
+Generated assets have one writer each. `cg spec render` owns root workflow
+instructions (`AGENTS.md`, `CLAUDE.md`, and IDE pointers). `cg agentmd`
+owns only `.codify/agent-context.md`, a deterministic graph projection.
+Running either generator therefore cannot overwrite the other's source or
+projection.
+
+## Agent control plane (`runtime.c`, `govern.c`)
+
+Declared task status is not runtime liveness. Claims create durable attempt
+ids and monotonically increasing fencing tokens; heartbeats renew only the
+matching generation, and completion refuses an expired or superseded owner.
+`cg state` labels Git, Codify snapshots, spec declarations, live attempts,
+and stale contradictions independently. Reconciliation diagnoses by default
+and repairs only with an explicit flag.
+
+Lifecycle adapters feed one JSON object to `cg event ingest`. The runtime
+normalizes common host fields, preserves session/attempt/task identity, and
+records both a semantic fingerprint and a transition-sensitive occurrence
+fingerprint. Workspace revisions are content manifests cached by nanosecond
+metadata, so heartbeats avoid re-reading unchanged files without missing
+same-second edits. Activity, changed output, evidence deltas, and
+implementation progress remain separate facts.
+
+The progress classifier inspects a bounded event window for repeated
+failure, repeated observation, patch oscillation, and no-evidence activity.
+It emits one step from a finite recovery ladder (warn, re-plan, bounded
+experiment, handoff, waiting input, stop), never a recursive continuation.
+Policy is advisory unless enforcement is explicitly enabled.
+
+Work packets join the spec, independent state, task memories, graph context,
+test impact, and runtime evidence once. Each local opaque revision snapshots
+only the hashes needed for later comparison; updates contain state,
+evidence, and workspace deltas rather than replaying the full packet. Close
+pairs criteria with durable manual or lifecycle evidence and names every
+remaining criterion as unverified.
 
 ## Spec engine (`kvx.c`, `spec.c`)
 

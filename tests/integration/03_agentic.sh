@@ -26,14 +26,16 @@ has "$out" "slugify"
 "$CG" changelog -o CHANGELOG.md >/dev/null
 [ -s CHANGELOG.md ] || fail "changelog -o wrote nothing"
 
-# agentmd: AGENTS.md + CLAUDE.md from the graph
+# agentmd owns graph context without colliding with workflow instruction files
 "$CG" agentmd --write >/dev/null
-[ -s AGENTS.md ] || fail "AGENTS.md not written"
-[ -s CLAUDE.md ] || fail "CLAUDE.md not written"
-out="$(cat AGENTS.md)"
+[ -s .codify/agent-context.md ] || fail "agent context not written"
+[ ! -e AGENTS.md ] || fail "agentmd unexpectedly owns AGENTS.md"
+[ ! -e CLAUDE.md ] || fail "agentmd unexpectedly owns CLAUDE.md"
+out="$(cat .codify/agent-context.md)"
 has "$out" "typescript"
 has "$out" "/users"          # route table
 has "$out" "cg context"      # agent cheat sheet
+has "$out" 'owned by `cg agentmd`'
 
 # mcp-install: project + user configs, sandboxed HOME
 export HOME="$TMP/home"
