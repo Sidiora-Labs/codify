@@ -194,8 +194,8 @@
         },
         "codify.acp.codexCommand": {
           "type": "string",
-          "default": "codex-acp",
-          "description": "Command that starts the Codex ACP adapter (quote-aware; e.g. npx -y @zed-industries/codex-acp)."
+          "default": "npx -y @agentclientprotocol/codex-acp@1.7.0",
+          "description": "Command that starts the Codex ACP adapter (quote-aware). The verified default uses the maintained Agent Client Protocol adapter."
         },
         "codify.acp.customCommand": {
           "type": "string",

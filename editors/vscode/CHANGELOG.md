@@ -14,6 +14,7 @@ The VS Code Agent view is now a fuller ACP client rather than a thin chat surfac
 - ACP protocol and DOM fixtures cover early session updates, mode/config round trips, agent-command namespacing, Markdown, activity state, and responsive layout contracts
 - A persistent Past sessions selector merges workspace history with ACP session/list and restores through session/load or session/resume with Codify MCP reinjected
 - The Agent header displays the running extension version; the current build packages under the authoritative `SidioraLabs.codify` Marketplace identity
+- Codex sessions default to the qualified `@agentclientprotocol/codex-acp` 1.7.0 adapter; the formerly documented Zed npx launcher is compatibility-redirected so current models such as `gpt-5.6-sol` receive complete metadata
 
 ## 2026-08-29 — Codify 0.7.0
 

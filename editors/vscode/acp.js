@@ -16,6 +16,8 @@ const path = require('path');
 
 const PROTOCOL_VERSION = 1;
 const STDERR_TAIL_MAX = 8192;
+const DEFAULT_CODEX_ACP_COMMAND =
+    'npx -y @agentclientprotocol/codex-acp@1.7.0';
 
 /* ---------------- protocol core (headless-safe) ---------------- */
 
@@ -229,6 +231,23 @@ function splitCommand(s) {
     return out;
 }
 
+/* Codify previously documented Zed's adapter. Its embedded Codex build can
+ * advertise a newly released model while lacking that model's metadata. Keep
+ * explicit custom commands intact, but redirect that exact legacy npx package
+ * to the app-server adapter release qualified with the current panel. */
+function normalizeCodexAdapterCommand(value) {
+    const command = String(value || '').trim() || DEFAULT_CODEX_ACP_COMMAND;
+    const argv = splitCommand(command);
+    const legacyPackage = argv.find((arg) =>
+        arg === '@zed-industries/codex-acp' ||
+        arg.startsWith('@zed-industries/codex-acp@'));
+    const legacyCommand = argv[0] === 'npx' && legacyPackage ? command : '';
+    return {
+        command: legacyCommand ? DEFAULT_CODEX_ACP_COMMAND : command,
+        legacyCommand,
+    };
+}
+
 /* ---------------- PANEL: everything below needs VS Code ---------------- */
 
 let deps;                    /* {cg, cgJson, refresh, workspaceRoot, startTerminal} */
@@ -256,10 +275,14 @@ function adapterCommand(override) {
         ? 'claude' : 'codex';
     const custom = (config().get('acp.customCommand') || '').trim();
     if (custom) return { driver: 'custom', argv: splitCommand(custom) };
-    const cmd = driver === 'claude'
-        ? (config().get('acp.claudeCommand') || 'claude-code-acp')
-        : (config().get('acp.codexCommand') || 'codex-acp');
-    return { driver, argv: splitCommand(cmd) };
+    if (driver === 'claude') {
+        const cmd = config().get('acp.claudeCommand') || 'claude-code-acp';
+        return { driver, argv: splitCommand(cmd), legacyCommand: '' };
+    }
+    const selected = normalizeCodexAdapterCommand(
+        config().get('acp.codexCommand'));
+    return { driver, argv: splitCommand(selected.command),
+        legacyCommand: selected.legacyCommand };
 }
 
 function sessionRecord(row, driver) {
@@ -542,8 +565,14 @@ async function endOfSession(sess, why) {
 /* Start and initialize one adapter process without assuming whether the next
  * operation creates, lists, loads, or resumes a session. */
 async function connectAgent(sess, driverOverride) {
-    const { driver, argv } = adapterCommand(driverOverride);
+    const { driver, argv, legacyCommand } = adapterCommand(driverOverride);
     sess.driver = driver === 'claude' ? 'claude' : 'codex';
+    if (legacyCommand && !sess.probe) {
+        panelPost(sess, { type: 'notice', text:
+            'Using @agentclientprotocol/codex-acp 1.7.0 because the legacy ' +
+            '@zed-industries/codex-acp launcher lacks current Codex model metadata. ' +
+            'Update codify.acp.codexCommand to remove this compatibility redirect.' });
+    }
     sess.client = new AcpClient({
         command: argv[0],
         args: argv.slice(1),
@@ -1336,7 +1365,7 @@ function register(ctx, d) {
 }
 
 module.exports = {
-    AcpClient, splitCommand, register,
+    AcpClient, splitCommand, normalizeCodexAdapterCommand, register,
     /* exported for the headless fs-bridge tests */
     workspacePath, readTextFile, writeTextFile, sessionUpdate,
 };

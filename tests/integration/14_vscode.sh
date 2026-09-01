@@ -32,6 +32,14 @@ if (pkg.version !== '1.0.0') {
 if (!/version: extensionVersion\(\)/.test(src)) {
     throw new Error('agent view does not receive the installed extension version');
 }
+const codexAdapter = pkg.contributes.configuration.properties['codify.acp.codexCommand'];
+if (!codexAdapter || codexAdapter.default !==
+    'npx -y @agentclientprotocol/codex-acp@1.7.0') {
+    throw new Error(`unexpected Codex ACP default: ${codexAdapter && codexAdapter.default}`);
+}
+if (/zed-industries\/codex-acp/.test(codexAdapter.description || '')) {
+    throw new Error('manifest still recommends the legacy Codex ACP adapter');
+}
 
 const declared = pkg.contributes.commands.map((c) => c.command);
 const registered = [...src.matchAll(/'(codify\.[A-Za-z.]+)':/g)].map((m) => m[1]);

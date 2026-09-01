@@ -33,7 +33,7 @@ A "Codify" container in the activity bar, with two views.
 
 ## The agent view
 
-The Codify sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or `codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **Codify's own MCP server injected** (`cg mcp`), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A driver picker in the header switches between codex and claude for the next chat; the **＋ New Agent Chat** button on the view resets to a fresh session.
+The Codify sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **Codify's own MCP server injected** (`cg mcp`), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A driver picker in the header switches between codex and claude for the next chat; the **＋ New Agent Chat** button on the view resets to a fresh session.
 
 The **Past sessions** selector merges compact workspace history remembered by the extension with the adapter's ACP `session/list` results. Selecting one uses `session/load` for transcript replay, or `session/resume` when the adapter only supports context restoration; that limitation is stated inline. Refresh asks the selected adapter again. Adapters without session lifecycle support leave locally known entries visible but never claim that history was restored.
 
@@ -125,6 +125,7 @@ Beyond syntax highlighting:
 ## Requirements
 
 - `cg` on `PATH`, or set `codify.binaryPath`.
+- `npx` for the default Codex ACP launcher, or set `codify.acp.codexCommand` to an installed ACP adapter.
 - For the task board: a workspace containing `spec/workflow.kvx`.
 - For code navigation: a workspace with `.codegraph/` — run `cg init`.
 
@@ -141,7 +142,7 @@ Neither is required for the other. kvx highlighting works everywhere.
 | `codify.agent.driver` | `codex` | Which agent drives task sessions: `codex` or `claude` |
 | `codify.agent.interface` | `panel` | How a session opens: the ACP agent panel or a seeded terminal |
 | `codify.acp.claudeCommand` | `claude-code-acp` | Command that starts the Claude Code ACP adapter (quote-aware) |
-| `codify.acp.codexCommand` | `codex-acp` | Command that starts the Codex ACP adapter (quote-aware) |
+| `codify.acp.codexCommand` | `npx -y @agentclientprotocol/codex-acp@1.7.0` | Command that starts the Codex ACP adapter (quote-aware). The former `npx … @zed-industries/codex-acp` value is compatibility-redirected because its embedded Codex lacks current model metadata. |
 | `codify.acp.customCommand` | *(empty)* | Any ACP-speaking agent command; overrides both adapter settings |
 | `codify.agent.codexPath` | `codex` | Path to the Codex CLI (terminal sessions) |
 | `codify.agent.claudePath` | `claude` | Path to the Claude Code CLI |

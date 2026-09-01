@@ -8,8 +8,8 @@ const fs = require('fs');
 const path = require('path');
 
 const [, , ACP_JS, FAKE, TMP] = process.argv;
-const { AcpClient, splitCommand, workspacePath, readTextFile, writeTextFile,
-    sessionUpdate } =
+const { AcpClient, splitCommand, normalizeCodexAdapterCommand,
+    workspacePath, readTextFile, writeTextFile, sessionUpdate } =
     require(path.resolve(ACP_JS));
 
 let step = '';
@@ -272,6 +272,27 @@ function splitSanity() {
     ok('splitCommand handles quoting');
 }
 
+function adapterCommandSanity() {
+    step = 'adapter-command';
+    const legacy = normalizeCodexAdapterCommand(
+        'npx -y @zed-industries/codex-acp');
+    assert(legacy.command ===
+        'npx -y @agentclientprotocol/codex-acp@1.7.0',
+    `legacy adapter redirected: ${legacy.command}`);
+    assert(legacy.legacyCommand === 'npx -y @zed-industries/codex-acp',
+        'legacy command is retained for the visible compatibility notice');
+
+    const custom = normalizeCodexAdapterCommand('/opt/agents/codex-acp --stdio');
+    assert(custom.command === '/opt/agents/codex-acp --stdio' &&
+        !custom.legacyCommand, 'explicit custom adapter is preserved');
+
+    const fallback = normalizeCodexAdapterCommand('');
+    assert(fallback.command ===
+        'npx -y @agentclientprotocol/codex-acp@1.7.0',
+    `empty setting uses the verified adapter: ${fallback.command}`);
+    ok('Codex adapter defaults and legacy-package redirect');
+}
+
 function updateMappingSanity() {
     step = 'session-update-mapping';
     const shown = [];
@@ -297,6 +318,7 @@ function updateMappingSanity() {
 
 (async () => {
     splitSanity();
+    adapterCommandSanity();
     bridgeSanity();
     updateMappingSanity();
     await happyPath();
