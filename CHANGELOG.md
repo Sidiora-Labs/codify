@@ -9,7 +9,7 @@ _Maintained from local Codify snapshots (`cg log`); symbol-level changes are der
 - `cg lsp` and `cg watch` take a short lock wait, defer their own index when the database is busy, and keep answering from the last completed index; they never exit on a lock
 - `cg spec status` and other read-only paths no longer take a write lock to sweep expired attempts unless one exists; `cg spec done` warns and checks against the last index instead of failing qualification on a busy database
 - Remaining deferred `BEGIN` transactions in memory and git import are `BEGIN IMMEDIATE`, removing the `SQLITE_BUSY_SNAPSHOT` failure mode
-- VS Code extension 1.1.0: the Agent view gains a labelled provider picker with a configure gear, a one-click Codify toolbar with task actions (`implemented`, `done`, `handoff`), kind-coloured tool cards with elapsed time and raw input, nested sub-agent cards, a per-turn tool timeline, a now line, turn summaries, and a context-usage bar
+- VS Code extension 1.2.0: the Agent view gains a labelled provider picker with a configure gear, a one-click Codify toolbar with task actions (`implemented`, `done`, `handoff`), kind-coloured tool cards with elapsed time and raw input, nested sub-agent cards, a per-turn tool timeline, a now line, turn summaries, and a context-usage bar; replayed harness text (caveats, local commands, compaction summaries) renders as collapsed notes rather than user bubbles, session titles are cleaned and continuations labelled, and the timeline never wraps over the toolbar
 
 ## 2026-08-31 — Codify 0.8.0 agent control plane
 

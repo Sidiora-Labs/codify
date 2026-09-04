@@ -130,7 +130,15 @@
     padding-left: 6px; white-space: nowrap;
   }
   #activitybar .attention { color: var(--vscode-charts-yellow, #d29922); }
-  #tooltimeline { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+  #activitybar { overflow: hidden; }
+  #tooltimeline {
+    display: inline-flex; gap: 3px; align-items: center; flex-wrap: nowrap;
+    flex: 0 1 auto; min-width: 0; max-width: 100%; height: 11px; overflow: hidden;
+  }
+  #tooltimeline .more {
+    flex: none; font-size: 0.8em; color: var(--vscode-descriptionForeground);
+    padding-right: 2px; white-space: nowrap;
+  }
   .tdot {
     width: 9px; height: 9px; border-radius: 50%; padding: 0; border: none; cursor: pointer;
     background: var(--vscode-descriptionForeground); opacity: 0.55; transition: transform 0.12s ease;
@@ -380,6 +388,19 @@
     padding: 2px 0;
   }
   .sysline.err { color: var(--vscode-errorForeground, #f85149); text-align: left; }
+  details.harness {
+    align-self: center; max-width: 92%;
+    font-size: 0.86em; color: var(--vscode-descriptionForeground);
+    border: 1px dashed var(--vscode-panel-border, rgba(128,128,128,0.35));
+    border-radius: 8px; padding: 3px 10px;
+  }
+  details.harness summary { cursor: pointer; user-select: none; }
+  details.harness pre {
+    margin: 6px 0 4px; max-height: 240px; overflow: auto; font-size: 0.92em;
+    white-space: pre-wrap; border-radius: 5px; padding: 6px 8px;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.12));
+  }
+  .sysline.cmdnote { font-family: var(--vscode-editor-font-family); }
   .sysline.turnsum {
     display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
     padding: 4px 8px; border-radius: 12px; margin: 0 auto;
@@ -975,6 +996,25 @@
         add(d);
     }
 
+    /* Text the agent harness put in the user role (compaction summaries,
+     * local commands, caveats) is context, not something the user said: show
+     * it as a quiet collapsed note so the transcript stays honest but calm. */
+    function harnessNote(kind, text) {
+        clearWelcome();
+        breakBlocks();
+        if (kind === 'caveat' && !text.trim()) return;
+        if (kind === 'command') {
+            sysline('local command · /' + text.replace(/^\//, ''), false, 'cmdnote');
+            return;
+        }
+        var d = el('details', 'harness ' + kind);
+        d.appendChild(el('summary', null, kind === 'compaction' ?
+            '↻ context compacted — the earlier conversation was summarized for the agent' :
+            kind === 'system' ? 'system context sent to the agent' : 'harness note'));
+        d.appendChild(el('pre', null, text));
+        add(d);
+    }
+
     function agentStream(text) {
         clearWelcome();
         if (!agentMsg) {
@@ -1140,9 +1180,27 @@
         return text.length > 2000 ? text.slice(0, 2000) + '\n…' : text;
     }
 
+    var TIMELINE_MAX = 48;
     function timelineDot(call, card) {
         var dot = timelineDots.get(call.toolCallId);
         if (!dot) {
+            /* one row only: older dots fold into a "+N" count on the left */
+            var dots = toolTimeline.querySelectorAll('.tdot');
+            if (dots.length >= TIMELINE_MAX) {
+                var more = toolTimeline.querySelector('.more');
+                if (!more) {
+                    more = el('span', 'more');
+                    toolTimeline.insertBefore(more, toolTimeline.firstChild);
+                }
+                var oldest = dots[0];
+                oldest.remove();
+                timelineDots.forEach(function (d, id) {
+                    if (d === oldest) timelineDots.delete(id);
+                });
+                more.dataset.n = String((Number(more.dataset.n) || 0) + 1);
+                more.textContent = '+' + more.dataset.n;
+                more.title = more.dataset.n + ' earlier tool calls';
+            }
             dot = el('button', 'tdot');
             dot.type = 'button';
             dot.addEventListener('click', function () {
@@ -1735,6 +1793,7 @@
         } else if (m.type === 'chunk') {
             if (m.role === 'agent') agentStream(m.text);
             else if (m.role === 'thought') thoughtStream(m.text);
+            else if (m.harness) harnessNote(m.harness, m.text || '');
             else userMsg(m.text, !!m.cmd);
         } else if (m.type === 'tool') toolCard(m.call);
         else if (m.type === 'plan') plan(m.entries || []);

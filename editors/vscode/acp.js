@@ -325,11 +325,51 @@ function rememberViewDriver(value) {
     }
 }
 
+/* Text an agent harness injects into the user role rather than the user
+ * typing it: Claude Code's local-command caveat and <command-name> blocks,
+ * and the "This session is being continued" summary it sends after context
+ * compaction. Replayed transcripts and session/list titles both carry it.
+ * Returns { kind, text } — kind '' means ordinary user text. */
+const COMPACTION_RE = /^\s*This session is being continued from a previous conversation/;
+function classifyUserText(raw) {
+    let text = String(raw || '');
+    let kind = '';
+    const caveat = text.match(/^\s*<local-command-caveat>[\s\S]*?<\/local-command-caveat>\s*/);
+    if (caveat) { text = text.slice(caveat[0].length); kind = 'caveat'; }
+    const cmd = text.match(/^\s*<command-name>([\s\S]*?)<\/command-name>[\s\S]*?(?:<command-args>([\s\S]*?)<\/command-args>)?/);
+    if (cmd) {
+        const args = (cmd[2] || '').trim();
+        return { kind: 'command', text: cmd[1].trim() + (args ? ' ' + args : '') };
+    }
+    if (COMPACTION_RE.test(text)) return { kind: 'compaction', text };
+    if (/^\s*<system-reminder>/.test(text)) return { kind: 'system', text };
+    return { kind, text };
+}
+
+/* A history title a person can pick from: harness prefixes stripped, a
+ * compaction summary reduced to its "Primary Request" sentence and marked as
+ * a continuation, everything on one line and bounded. */
+function sessionTitle(raw) {
+    const c = classifyUserText(raw);
+    let text = c.text;
+    if (c.kind === 'command') text = '/' + text.replace(/^\//, '');
+    else if (c.kind === 'compaction') {
+        const m = text.match(/Primary Request and Intent:?\s*([\s\S]*?)(?:\n\s*\n|\n\s*2\.)/);
+        let gist = m ? m[1] : '';
+        gist = gist.replace(/^\s*(The user|User)\s+(wants|asked|needs|requested)\s+(to\s+)?/i, '')
+            .replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+        text = '↻ continued' + (gist ? ': ' + gist : ' session');
+    } else if (c.kind === 'system') text = '';
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text.length > 80) text = text.slice(0, 77).replace(/\s+\S*$/, '') + '…';
+    return text;
+}
+
 function sessionRecord(row, driver) {
     if (!row || !row.sessionId) return undefined;
     return {
         sessionId: String(row.sessionId),
-        title: row.title == null ? '' : String(row.title),
+        title: row.title == null ? '' : sessionTitle(row.title),
         updatedAt: row.updatedAt || new Date().toISOString(),
         cwd: row.cwd || (deps && deps.workspaceRoot && deps.workspaceRoot()) || '',
         driver: driverId(driver),
@@ -522,7 +562,9 @@ function sessionUpdate(sess, params) {
         if (text && sess.localEcho && sess.localEcho.indexOf(text) === 0) {
             sess.localEcho = sess.localEcho.slice(text.length);
         } else if (text) {
-            panelPost(sess, { type: 'chunk', role: 'user', text });
+            const c = classifyUserText(text);
+            panelPost(sess, c.kind ? { type: 'chunk', role: 'user', text: c.text, harness: c.kind }
+                : { type: 'chunk', role: 'user', text });
         }
         break;
     }
@@ -556,9 +598,9 @@ function sessionUpdate(sess, params) {
         break;
     case 'session_info_update':
         sess.sessionInfo = Object.assign({}, sess.sessionInfo || {});
-        if (u.title !== undefined) sess.sessionInfo.title = u.title;
+        if (u.title !== undefined) sess.sessionInfo.title = sessionTitle(u.title);
         if (u.updatedAt !== undefined) sess.sessionInfo.updatedAt = u.updatedAt;
-        panelPost(sess, { type: 'session_info', title: u.title,
+        panelPost(sess, { type: 'session_info', title: sess.sessionInfo.title,
             updatedAt: u.updatedAt });
         rememberSession(sess, sess.sessionInfo);
         break;
@@ -1513,4 +1555,5 @@ module.exports = {
     AcpClient, splitCommand, normalizeCodexAdapterCommand, register, DRIVER_IDS,
     /* exported for the headless fs-bridge tests */
     workspacePath, readTextFile, writeTextFile, sessionUpdate,
+    classifyUserText, sessionTitle,
 };

@@ -26,8 +26,8 @@ const src = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8') +
 if (pkg.publisher !== 'SidioraLabs' || pkg.name !== 'codify') {
     throw new Error(`unexpected Marketplace identity: ${pkg.publisher}.${pkg.name}`);
 }
-if (pkg.version !== '1.1.0') {
-    throw new Error(`expected the visible 1.1.0 build, got ${pkg.version}`);
+if (pkg.version !== '1.2.0') {
+    throw new Error(`expected the visible 1.2.0 build, got ${pkg.version}`);
 }
 if (!/version: extensionVersion\(\)/.test(src)) {
     throw new Error('agent view does not receive the installed extension version');

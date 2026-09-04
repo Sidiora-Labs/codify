@@ -435,6 +435,36 @@ function subagents() {
     ok('sub-agents, tool timeline, now line, and turn summary');
 }
 
+/* ---- replayed harness text and the timeline row ---- */
+function replay() {
+    step = 'replay';
+    const p = load();
+    p.send({ type: 'init', idle: true, driver: 'claude', drivers: ['codex', 'claude'] });
+    p.send({ type: 'chunk', role: 'user', harness: 'caveat', text: '' });
+    p.send({ type: 'chunk', role: 'user', harness: 'command', text: 'clear' });
+    p.send({ type: 'chunk', role: 'user', harness: 'compaction',
+        text: 'This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. Primary Request and Intent: fix the lock' });
+    p.send({ type: 'chunk', role: 'user', text: 'real question' });
+    assert(p.log.querySelectorAll('.msg.user').length === 1,
+        'only what the user typed becomes a user bubble');
+    assert(/local command · \/clear/.test(p.log.querySelector('.sysline.cmdnote').textContent),
+        'a local command is a one-line note');
+    const note = p.log.querySelector('details.harness.compaction');
+    assert(note && /context compacted/.test(note.querySelector('summary').textContent),
+        'a compaction summary collapses into a labelled note');
+    assert(/fix the lock/.test(note.querySelector('pre').textContent),
+        'the summary text stays available inside the note');
+
+    for (let i = 0; i < 60; i++) {
+        p.send({ type: 'tool', call: { toolCallId: 'r' + i, title: 'Read ' + i,
+            kind: 'read', status: 'completed' } });
+    }
+    const tl = p.doc.getElementById('tooltimeline');
+    assert(tl.querySelectorAll('.tdot').length === 48, 'the timeline keeps one row of dots');
+    assert(tl.querySelector('.more').textContent === '+12', 'older calls fold into a count');
+    ok('replayed harness text and timeline row cap');
+}
+
 /* ---- the ready handshake ---- */
 function handshake() {
     step = 'handshake';
@@ -463,6 +493,7 @@ state();
 providers();
 toolbar();
 subagents();
+replay();
 handshake();
 responsiveContract();
 console.log('agent panel: all scenarios pass');
