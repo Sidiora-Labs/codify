@@ -21,7 +21,8 @@ const IDS = ['log', 'scroll', 'input', 'statusline', 'driver', 'taskchip',
     'livedot', 'sessionbar', 'sessiontitle', 'mcpstate', 'usage', 'modewrap',
     'mode', 'configs', 'activitybar', 'activitylabel', 'toolactivity',
     'planactivity', 'queueactivity', 'permitactivity', 'history',
-    'refreshhistory', 'buildversion'];
+    'refreshhistory', 'buildversion', 'configure', 'cgbar', 'taskactions',
+    'tooltimeline', 'agentactivity', 'nowline', 'usagebar', 'usagefill'];
 
 function load() {
     const m = HTML.match(/<script nonce="\$\{nonce\}">([\s\S]*?)<\/script>/);
@@ -314,6 +315,126 @@ function state() {
     ok('context bar, task attach, turn state, and reset');
 }
 
+/* ---- providers: labelled adapters, the gear, and switching ---- */
+function providers() {
+    step = 'providers';
+    const p = load();
+    p.send({ type: 'init', idle: true, driver: 'codex', drivers: ['codex', 'claude', 'custom'],
+        adapters: {
+            codex: { label: 'Codex', command: 'npx -y @agentclientprotocol/codex-acp@1.7.0' },
+            claude: { label: 'Claude Code', command: 'npx -y @zed-industries/claude-code-acp' },
+            custom: { label: 'Custom', command: 'my-agent --acp' },
+        } });
+    const driver = p.doc.getElementById('driver');
+    assert(driver.children.length === 3, 'every configured adapter is offered');
+    assert(driver.children[1].textContent === 'Claude Code',
+        'adapters are shown by label, not id');
+    assert(/codex-acp@1\.7\.0/.test(driver.title), 'the selected adapter command is visible');
+    driver.value = 'claude'; driver.dispatch('change');
+    assert(p.posted.some((x) => x.type === 'driver' && x.value === 'claude'),
+        'switching provider is sent to the extension');
+    p.doc.getElementById('configure').click();
+    assert(p.posted.some((x) => x.type === 'configure'),
+        'the gear opens the provider configuration');
+    p.send({ type: 'adapter', driver: 'custom',
+        adapters: { codex: { label: 'Codex', command: 'x' },
+            custom: { label: 'Custom', command: 'my-agent' } } });
+    assert(driver.value === 'custom' && driver.children.length === 2,
+        'adapter changes from the extension re-label the picker');
+    ok('provider picker, labels, and configure gear');
+}
+
+/* ---- the Codify toolbar and task actions ---- */
+function toolbar() {
+    step = 'toolbar';
+    const p = load();
+    p.send({ type: 'init', idle: true, driver: 'codex', drivers: ['codex', 'claude'] });
+    assert(p.doc.getElementById('taskactions').classList.contains('hidden'),
+        'task actions wait for an attached task');
+    const buttons = p.doc.body.querySelectorAll('.cgbtn');
+    const names = buttons.map((b) => b.dataset.cmd);
+    ['brief', 'next', 'status', 'review', 'check', 'guard', 'changes', 'remember',
+        'implemented', 'done', 'handoff'].forEach((n) =>
+        assert(names.includes(n), 'toolbar offers ' + n));
+    buttons.find((b) => b.dataset.cmd === 'brief').click();
+    assert(p.posted.some((x) => x.type === 'slash' && x.cmd === 'brief'),
+        'toolbar buttons run the Codify command');
+    buttons.find((b) => b.dataset.cmd === 'remember').click();
+    assert(p.input.value === '/remember ', 'remember pre-fills the composer for the note');
+
+    p.send({ type: 'task', task: { id: '5.2', title: 'Panel', status: 'in_progress' } });
+    assert(!p.doc.getElementById('taskactions').classList.contains('hidden'),
+        'task actions appear once a task is attached');
+    buttons.find((b) => b.dataset.cmd === 'done').click();
+    assert(p.posted.some((x) => x.type === 'slash' && x.cmd === 'done'),
+        'done asks the extension to qualify the task');
+    p.send({ type: 'cmdout', cmd: 'spec done 5.2', ok: false, open: true,
+        output: 'verify_cmd failed' });
+    const bad = p.log.querySelector('.card.cg');
+    assert(bad.classList.contains('bad') && !bad.classList.contains('closed'),
+        'a failed qualification is marked and left open');
+    p.send({ type: 'task', task: null });
+    assert(p.doc.getElementById('taskactions').classList.contains('hidden'),
+        'task actions hide when the task detaches');
+    ok('Codify toolbar and task actions');
+}
+
+/* ---- sub-agents, the tool timeline, and turn summaries ---- */
+function subagents() {
+    step = 'subagents';
+    const p = load();
+    p.send({ type: 'init', idle: true, driver: 'claude', drivers: ['codex', 'claude'] });
+    p.send({ type: 'turn', running: true });
+    assert(p.doc.getElementById('tooltimeline').classList.contains('hidden'),
+        'timeline is empty until a tool runs');
+    p.send({ type: 'tool', call: { toolCallId: 'a1', title: 'Task: explore the lexer',
+        kind: 'other', status: 'in_progress',
+        rawInput: { subagent_type: 'Explore', description: 'Find the lexer',
+            prompt: 'Where is the lexer?' } } });
+    const agent = p.log.querySelector('.card.agent');
+    assert(agent, 'a Task tool call renders as a sub-agent card');
+    assert(agent.querySelector('.kind').textContent === 'sub-agent', 'kind badge names it');
+    assert(/Where is the lexer/.test(agent.querySelector('.inp').textContent),
+        'the delegated prompt is shown');
+    assert(p.doc.getElementById('agentactivity').textContent === '1 sub-agent active',
+        'sub-agent activity is summarized');
+    assert(p.doc.getElementById('toolactivity').classList.contains('hidden'),
+        'sub-agents are not counted as plain tools');
+    assert(/Task: explore the lexer/.test(p.doc.getElementById('nowline').textContent),
+        'the now line says what is running');
+
+    p.send({ type: 'tool', call: { toolCallId: 'c1', title: 'Read lexer.c', kind: 'read',
+        status: 'completed', parentToolCallId: 'a1',
+        locations: [{ path: 'src/lexer.c' }] } });
+    assert(agent.querySelector('.children .card.tool'), 'child tool nests under its agent');
+    assert(agent.querySelector('.title .sub').textContent === '1 tool',
+        'the agent card counts its tools');
+    const dots = p.doc.getElementById('tooltimeline').querySelectorAll('.tdot');
+    assert(dots.length === 2, 'every call gets a timeline dot');
+    assert(dots[1].classList.contains('completed') && dots[0].classList.contains('agent'),
+        'dots carry status and agent shape');
+    const child = agent.querySelector('.children .card.tool');
+    assert(child.classList.contains('closed'), 'a finished child tool starts collapsed');
+    dots[1].click();
+    assert(!child.classList.contains('closed'), 'clicking a dot reveals its card');
+
+    p.send({ type: 'tool', call: { toolCallId: 'a1', status: 'completed' } });
+    assert(p.doc.getElementById('nowline').classList.contains('hidden'),
+        'the now line clears when nothing runs');
+    p.send({ type: 'tool', call: { toolCallId: 't9', title: 'boom', status: 'failed' } });
+    p.send({ type: 'turn', running: false, stopReason: 'end_turn' });
+    const sum = p.log.querySelector('.sysline.turnsum');
+    assert(sum, 'turn summary rendered');
+    assert(/turn complete/.test(sum.textContent) && /2 tools \(1 failed\)/.test(sum.textContent) &&
+        /1 sub-agent/.test(sum.textContent) && /1 file touched/.test(sum.textContent),
+    'summary counts tools, failures, sub-agents, and files');
+    p.send({ type: 'usage', used: 80, size: 100 });
+    assert(p.doc.getElementById('usagefill').style.width === '80%' &&
+        p.doc.getElementById('usagebar').classList.contains('high'),
+    'context usage draws as a bar');
+    ok('sub-agents, tool timeline, now line, and turn summary');
+}
+
 /* ---- the ready handshake ---- */
 function handshake() {
     step = 'handshake';
@@ -339,6 +460,9 @@ cards();
 composer();
 agentState();
 state();
+providers();
+toolbar();
+subagents();
 handshake();
 responsiveContract();
 console.log('agent panel: all scenarios pass');

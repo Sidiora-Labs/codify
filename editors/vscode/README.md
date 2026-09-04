@@ -33,19 +33,19 @@ A "Codify" container in the activity bar, with two views.
 
 ## The agent view
 
-The Codify sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **Codify's own MCP server injected** (`cg mcp`), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A driver picker in the header switches between codex and claude for the next chat; the **＋ New Agent Chat** button on the view resets to a fresh session.
+The Codify sidebar has an **Agent** view — a persistent chat with Claude Code or Codex, always there, no task required. The extension speaks the [Agent Client Protocol](https://agentclientprotocol.com) to the agent's ACP adapter (`claude-code-acp` or the maintained `@agentclientprotocol/codex-acp`). A lightweight connection on view open discovers past sessions; a working session starts when you send or restore one. Every working session runs in the workspace with **Codify's own MCP server injected** (`cg mcp`), so the agent has the full graph, spec, and memory toolset without any per-repo MCP config. A **provider picker** in the header switches between Codex, Claude Code, and a Custom ACP command for the next chat; the choice is remembered per workspace. The **⚙** gear next to it (also *Codify: Configure Agent Provider*) is a quick pick that switches provider, edits each adapter's launch command in place, or opens the `codify.acp` settings. The **＋ New Agent Chat** button on the view resets to a fresh session.
 
 The **Past sessions** selector merges compact workspace history remembered by the extension with the adapter's ACP `session/list` results. Selecting one uses `session/load` for transcript replay, or `session/resume` when the adapter only supports context restoration; that limitation is stated inline. Refresh asks the selected adapter again. Adapters without session lifecycle support leave locally known entries visible but never claim that history was restored.
 
 The session bar shows the connected adapter and injected `codify` MCP server. Agent-provided ACP modes and session options appear as native controls, so Codex and Claude Code can expose their own plan/agent mode, model, or reasoning choices without extension-specific wiring. The bar also follows agent-generated session titles and context-window usage. Agent-native slash commands join the composer palette; collisions are namespaced as `/agent-<name>` so commands such as Codify's `/review` always keep their meaning.
 
-The view streams replies and collapsed thinking, renders each tool call as an expandable card with status and diffs, tracks the plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. A compact activity line keeps the current turn, tool totals, plan progress, permissions, and queued follow-ups visible even when their detailed cards are collapsed. File reads and writes requested over ACP are workspace-scoped; paths outside the root are refused. **Stop** cancels the in-flight turn (`session/cancel`), while messages typed during work are visibly queued for the next turn.
+The view streams replies and collapsed thinking, renders each tool call as an expandable card — kind badge and colour, status tick, elapsed time, the raw input, locations, and diffs — tracks the plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. **Sub-agents** (Claude Code `Task` calls, ACP `agent` tool kinds, or any delegation-shaped call) get their own card showing the delegated prompt, and the tools they run nest underneath with a running count. A compact activity line keeps the current turn, tool totals, sub-agents, plan progress, permissions, and queued follow-ups visible even when their detailed cards are collapsed; beneath it a **tool timeline** draws one dot per call this turn (pulsing while running, green or red when finished; click one to jump to its card) and a **now line** names the call in flight. When the turn ends, a summary pill states whether it completed, how many tools ran and failed, how many sub-agents were used, how many files were touched, and how long it took. Context-window usage is drawn as a bar that turns amber past 70% and red past 90%. File reads and writes requested over ACP are workspace-scoped; paths outside the root are refused. **Stop** cancels the in-flight turn (`session/cancel`), while messages typed during work are visibly queued for the next turn.
 
 Replies render as safe markdown — headings, emphasis, nested and task lists, tables, quotes, inline code, and fenced code blocks with a copy button and the language on the rail. Any file path the agent mentions (`src/graph.c`, `editors/vscode/acp.js:42`) opens at that line, tool locations do the same, and web links open through VS Code rather than navigating the webview. The context bars, transcript, cards, permissions, and composer reflow for a narrow sidebar and use a centered reading width in a wide editor panel. The composer grows with your message, and `↑` recalls what you sent before.
 
 ### Codify commands in the chat
 
-Type `/` for the command palette. Each one runs the real `cg` verb in the workspace, shows the output as a collapsible card, and hands the same output to the agent as context with a short instruction — so the agent works from the graph rather than from a guess.
+A **Codify toolbar** sits above the transcript: brief, next, status, review, check, guard, changes, and remember are one click each, and once a task is attached, **implemented**, **done**, and **handoff** appear beside them. `done` runs the real `cg spec done` qualification; its output card is marked green or red and a refusal is left open and handed to the agent to fix. Type `/` for the command palette. Each one runs the real `cg` verb in the workspace, shows the output as a collapsible card, and hands the same output to the agent as context with a short instruction — so the agent works from the graph rather than from a guess.
 
 | Command | Runs |
 |---|---|
@@ -61,6 +61,9 @@ Type `/` for the command palette. Each one runs the real `cg` verb in the worksp
 | `/review` | `cg review` — changed symbols vs the task's acceptance criteria |
 | `/tests [symbol]` | `cg test-impact` — the tests that exercise it |
 | `/check` | `cg check` — the gate: render, lint, evidence, tree |
+| `/guard` | `cg guard` — the uncommitted edits against the attached task's declared scope |
+| `/implemented` | `cg spec implemented` — mark the attached task coded, qualification pending |
+| `/done` | `cg spec done` — qualify the attached task: verify_cmd and graph checks must pass |
 | `/remember <text>` | `cg remember` — save a decision to project memory |
 | `/handoff` | `cg handoff` — record where you stopped on the attached task |
 | `/open <path>` | Open a file in the editor |
@@ -139,11 +142,11 @@ Neither is required for the other. kvx highlighting works everywhere.
 | `codify.feature` | *(empty)* | Feature override, passed to every spec command as `-f` |
 | `codify.languageServer` | `true` | Run `cg lsp` for navigation, hover, code lens and diagnostics |
 | `codify.agentName` | *(empty)* | Default name used when claiming a task in parallel mode |
-| `codify.agent.driver` | `codex` | Which agent drives task sessions: `codex` or `claude` |
+| `codify.agent.driver` | `codex` | Which provider drives sessions: `codex`, `claude`, or `custom` (the Agent view's picker sets it for the next chat) |
 | `codify.agent.interface` | `panel` | How a session opens: the ACP agent panel or a seeded terminal |
 | `codify.acp.claudeCommand` | `claude-code-acp` | Command that starts the Claude Code ACP adapter (quote-aware) |
 | `codify.acp.codexCommand` | `npx -y @agentclientprotocol/codex-acp@1.7.0` | Command that starts the Codex ACP adapter (quote-aware). The former `npx … @zed-industries/codex-acp` value is compatibility-redirected because its embedded Codex lacks current model metadata. |
-| `codify.acp.customCommand` | *(empty)* | Any ACP-speaking agent command; overrides both adapter settings |
+| `codify.acp.customCommand` | *(empty)* | Any ACP-speaking agent command, offered as the Custom provider; used by default when set and no provider was picked |
 | `codify.agent.codexPath` | `codex` | Path to the Codex CLI (terminal sessions) |
 | `codify.agent.claudePath` | `claude` | Path to the Claude Code CLI |
 | `codify.agent.codexArgs` | *(empty)* | Extra arguments passed to codex when starting a session |
@@ -156,14 +159,14 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-1.0.0.vsix
-code --install-extension codify-1.0.0.vsix --force
+npx @vscode/vsce package        # produces codify-1.1.0.vsix
+code --install-extension codify-1.1.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify`. In a Remote SSH, WSL, or
 container window, install the VSIX on the **remote** extension host, not only
 the local UI side. The Agent header shows the running version (for example
-`v1.0.0`), so a stale host is immediately visible after reload.
+`v1.1.0`), so a stale host is immediately visible after reload.
 
 For development, open `editors/vscode/` in VS Code and press F5.
 

@@ -22,6 +22,9 @@
   }
   #root { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .hidden { display: none !important; }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .msg, .card, details.thought, .sysline { animation: rise 0.16s ease-out; }
 
   /* ---- context bar ---- */
   #ctxbar {
@@ -35,8 +38,8 @@
     width: 7px; height: 7px; border-radius: 50%; flex: none;
     background: var(--vscode-descriptionForeground);
   }
-  body.live .dot { background: var(--vscode-testing-iconPassed, #3fb950); }
-  body.running .dot { background: var(--vscode-charts-yellow, #d29922); }
+  body.live .dot { background: var(--vscode-testing-iconPassed, #3fb950); box-shadow: 0 0 0 3px rgba(63,185,80,0.18); }
+  body.running .dot { background: var(--vscode-charts-yellow, #d29922); box-shadow: 0 0 0 3px rgba(210,153,34,0.2); animation: pulse 1.4s ease-in-out infinite; }
   #ctxfeature {
     font-family: var(--vscode-editor-font-family);
     color: var(--vscode-descriptionForeground);
@@ -49,7 +52,8 @@
     white-space: nowrap;
   }
   #history { max-width: 190px; min-width: 105px; }
-  #refreshhistory { padding: 1px 5px; }
+  #refreshhistory, #configure { padding: 1px 5px; }
+  #driver { font-weight: 500; }
   .grow { flex: 1 1 auto; }
   .chip {
     display: inline-flex; align-items: center; gap: 5px;
@@ -98,6 +102,17 @@
     max-width: 220px; color: var(--vscode-foreground);
   }
   #mcpstate.connected { color: var(--vscode-testing-iconPassed, #3fb950); }
+  #usagebar {
+    display: inline-block; width: 64px; height: 5px; border-radius: 3px; flex: none;
+    background: var(--vscode-progressBar-background, rgba(128,128,128,0.25)); opacity: 0.55;
+    overflow: hidden; vertical-align: middle;
+  }
+  #usagefill {
+    display: block; height: 100%; width: 0; border-radius: 3px;
+    background: var(--vscode-textLink-foreground, #4a9eda); transition: width 0.3s ease;
+  }
+  #usagebar.high #usagefill { background: var(--vscode-charts-yellow, #d29922); }
+  #usagebar.full #usagefill { background: var(--vscode-testing-iconFailed, #f85149); }
   #configs { display: contents; }
   .configitem { display: inline-flex; align-items: center; gap: 4px; }
   .configitem select { max-width: 150px; }
@@ -115,6 +130,41 @@
     padding-left: 6px; white-space: nowrap;
   }
   #activitybar .attention { color: var(--vscode-charts-yellow, #d29922); }
+  #tooltimeline { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+  .tdot {
+    width: 9px; height: 9px; border-radius: 50%; padding: 0; border: none; cursor: pointer;
+    background: var(--vscode-descriptionForeground); opacity: 0.55; transition: transform 0.12s ease;
+  }
+  .tdot:hover { transform: scale(1.35); opacity: 1; }
+  .tdot.in_progress, .tdot.pending { background: var(--vscode-charts-yellow, #d29922); opacity: 1; animation: pulse 1.2s ease-in-out infinite; }
+  .tdot.completed { background: var(--vscode-testing-iconPassed, #3fb950); opacity: 0.9; }
+  .tdot.failed { background: var(--vscode-testing-iconFailed, #f85149); opacity: 1; }
+  .tdot.agent { border-radius: 2px; }
+  #nowline {
+    flex: 1 1 100%; color: var(--vscode-foreground); opacity: 0.85;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: var(--vscode-editor-font-family); font-size: 0.95em;
+  }
+
+  /* ---- Codify toolbar ---- */
+  #cgbar {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
+  }
+  .cgbtn {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; color: var(--vscode-foreground);
+    border: 1px solid transparent; border-radius: 6px; padding: 2px 7px;
+    font-family: inherit; font-size: 0.86em; cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  .cgbtn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.15)); border-color: var(--vscode-panel-border, rgba(128,128,128,0.3)); }
+  .cgbtn .g { color: var(--vscode-textLink-foreground, #4a9eda); font-size: 0.95em; }
+  #cgbar .sep { width: 1px; height: 14px; background: var(--vscode-panel-border, rgba(128,128,128,0.35)); margin: 0 3px; }
+  #taskactions { display: inline-flex; gap: 4px; }
+  #taskactions .cgbtn .g { color: var(--vscode-testing-iconPassed, #3fb950); }
+  #taskactions .cgbtn.done { border-color: var(--vscode-testing-iconPassed, #3fb950); }
 
   /* ---- transcript ---- */
   #scroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; position: relative; }
@@ -217,9 +267,11 @@
   /* ---- cards: tools, permissions, plan, cg output ---- */
   .card {
     border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
-    border-radius: 6px; overflow: hidden;
+    border-radius: 8px; overflow: hidden;
     background: var(--vscode-editorWidget-background, rgba(128,128,128,0.07));
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
+  .card:hover { box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
   .card .head {
     display: flex; align-items: center; gap: 7px; padding: 5px 9px;
     cursor: default; width: 100%; text-align: left;
@@ -229,8 +281,40 @@
   .card.collapsible .head { cursor: pointer; }
   .card.collapsible .head:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.12)); }
   .card .glyph {
-    flex: none; width: 14px; text-align: center;
-    color: var(--vscode-descriptionForeground); font-size: 0.95em;
+    flex: none; width: 20px; height: 20px; line-height: 20px; border-radius: 6px;
+    text-align: center; font-size: 0.85em;
+    color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.18));
+  }
+  .card.k-read .glyph, .card.k-search .glyph, .card.k-fetch .glyph { color: var(--vscode-textLink-foreground, #4a9eda); }
+  .card.k-edit .glyph, .card.k-move .glyph { color: var(--vscode-charts-yellow, #d29922); }
+  .card.k-delete .glyph { color: var(--vscode-testing-iconFailed, #f85149); }
+  .card.k-execute .glyph { color: var(--vscode-testing-iconPassed, #3fb950); }
+  .card.agent .glyph { color: var(--vscode-charts-purple, #a371f7); }
+  .card .kind {
+    flex: none; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--vscode-descriptionForeground);
+  }
+  .card .elapsed {
+    flex: none; font-size: 0.8em; color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family);
+  }
+  .card .elapsed:empty, .card .kind:empty { display: none; }
+  .status.in_progress::before, .status.pending::before { content: "◌ "; animation: pulse 1.2s ease-in-out infinite; }
+  .card.tool.completed .head .status::before { content: "✓"; color: var(--vscode-testing-iconPassed, #3fb950); }
+  .card.tool.failed .head .status::before { content: "✗"; color: var(--vscode-testing-iconFailed, #f85149); }
+  .card .inp { padding: 4px 10px 0; }
+  .card .inp summary {
+    cursor: pointer; font-size: 0.85em; color: var(--vscode-descriptionForeground); user-select: none;
+  }
+  .card .inp pre { font-size: 0.9em; margin: 4px 0 6px; border-radius: 5px;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.12)); }
+  .card.agent { border-left: 3px solid var(--vscode-charts-purple, #a371f7); }
+  .card .children { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 6px 14px; }
+  .card .children:empty { display: none; }
+  .card .children .card { animation: none; }
+  .card .agentnote {
+    padding: 4px 10px; font-size: 0.86em; color: var(--vscode-descriptionForeground);
   }
   .card .title {
     flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -296,6 +380,16 @@
     padding: 2px 0;
   }
   .sysline.err { color: var(--vscode-errorForeground, #f85149); text-align: left; }
+  .sysline.turnsum {
+    display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+    padding: 4px 8px; border-radius: 12px; margin: 0 auto;
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.25));
+    background: var(--vscode-editorWidget-background, rgba(128,128,128,0.06));
+  }
+  .sysline.turnsum .bad { color: var(--vscode-testing-iconFailed, #f85149); }
+  .sysline.turnsum .good { color: var(--vscode-testing-iconPassed, #3fb950); }
+  .card.cg.ok { border-left-color: var(--vscode-testing-iconPassed, #3fb950); }
+  .card.cg.bad { border-left-color: var(--vscode-testing-iconFailed, #f85149); }
 
   /* ---- welcome ---- */
   .welcome { padding: 6px 2px 2px; }
@@ -425,6 +519,8 @@
     .configitem select { flex: 1 1 auto; min-width: 0; max-width: none; }
     #log { padding: 10px 8px 5px; }
     .msg.user { max-width: 96%; }
+    .cgbtn .t { display: none; }
+    .cgbtn { padding: 2px 6px; }
     .card .head { padding: 6px 7px; }
     .card .title { white-space: normal; overflow-wrap: anywhere; }
     .crow { flex-wrap: wrap; }
@@ -436,7 +532,7 @@
     .md { font-size: 1.02em; }
   }
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
   }
 </style>
 </head>
@@ -454,13 +550,16 @@
     </select>
     <button id="refreshhistory" class="icon" aria-label="Refresh past sessions"
       title="Refresh past sessions">↻</button>
-    <select id="driver" title="Agent"></select>
+    <select id="driver" title="Agent provider for the next chat" aria-label="Agent provider"></select>
+    <button id="configure" class="icon" aria-label="Configure agent provider"
+      title="Configure agent provider and adapter commands">⚙</button>
   </header>
 
   <div id="sessionbar" class="hidden" aria-live="polite">
     <span id="sessiontitle"></span>
     <span id="mcpstate">MCP connecting</span>
     <span id="usage"></span>
+    <span id="usagebar" class="hidden"><span id="usagefill"></span></span>
     <label id="modewrap" class="configitem hidden">mode
       <select id="mode" title="Agent session mode"></select>
     </label>
@@ -473,6 +572,13 @@
     <span id="planactivity" class="metric hidden"></span>
     <span id="queueactivity" class="metric attention hidden"></span>
     <span id="permitactivity" class="metric attention hidden"></span>
+    <span id="agentactivity" class="metric hidden"></span>
+    <span id="tooltimeline" class="hidden" aria-label="Tool calls this turn"></span>
+    <span id="nowline" class="hidden"></span>
+  </div>
+
+  <div id="cgbar" role="toolbar" aria-label="Codify actions">
+    <span id="taskactions" class="hidden"></span>
   </div>
 
   <div id="scroll">
@@ -524,6 +630,14 @@
     var taskChip = document.getElementById('taskchip');
     var taskStatus = document.getElementById('taskstatus');
     var slashmenu = document.getElementById('slashmenu');
+    var agentActivity = document.getElementById('agentactivity');
+    var toolTimeline = document.getElementById('tooltimeline');
+    var nowLine = document.getElementById('nowline');
+    var usageBar = document.getElementById('usagebar');
+    var usageFill = document.getElementById('usagefill');
+    var taskActions = document.getElementById('taskactions');
+    var configureBtn = document.getElementById('configure');
+    var cgbar = document.getElementById('cgbar');
     var body = document.body;
 
     var tools = new Map();        /* toolCallId -> card */
@@ -533,17 +647,37 @@
     var history = [];
     var histIdx = -1;
     var agentCommands = [];
-    var activity = { live: false, running: false, queued: 0,
-        toolStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
+    var adapters = {};            /* driver id -> {label, command} */
+    var activity = { live: false, running: false, connected: false, queued: 0,
+        toolStatus: {}, agentStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
+    var turn = null;              /* per-turn tally for the summary line */
+    var timelineDots = new Map(); /* toolCallId -> dot */
 
     function metric(node, text) {
         node.textContent = text || '';
         node.classList.toggle('hidden', !text);
     }
 
+    function countStatuses(map) {
+        var statuses = Object.keys(map).map(function (id) { return map[id]; });
+        return {
+            n: statuses.length,
+            active: statuses.filter(function (s) {
+                return s === 'pending' || s === 'in_progress';
+            }).length,
+            completed: statuses.filter(function (s) { return s === 'completed'; }).length,
+            failed: statuses.filter(function (s) { return s === 'failed'; }).length,
+        };
+    }
+
     function updateActivity() {
         activityLabel.textContent = activity.running ? 'Agent working' :
-            !activity.live ? 'Ready' : 'Agent ready';
+            !activity.live ? 'Ready' : activity.connected ? 'Agent ready' : 'Connecting…';
+        var agents = countStatuses(activity.agentStatus);
+        metric(agentActivity, agents.active ?
+            agents.active + ' sub-agent' + (agents.active === 1 ? '' : 's') + ' active' :
+            agents.n ? agents.n + ' sub-agent' + (agents.n === 1 ? '' : 's') +
+                (agents.failed ? ', ' + agents.failed + ' failed' : '') : '');
         var statuses = Object.keys(activity.toolStatus).map(function (id) {
             return activity.toolStatus[id];
         });
@@ -573,7 +707,10 @@
         { n: 'review',   a: '',        d: 'Changed symbols vs acceptance criteria + risk' },
         { n: 'tests',    a: '[symbol]',d: 'Tests referencing a symbol, or your changes' },
         { n: 'check',    a: '',        d: 'The gate: render, lint, evidence, tree' },
+        { n: 'guard',    a: '',        d: 'Edits vs the attached task\'s declared scope' },
         { n: 'status',   a: '',        d: 'Board status for the active feature' },
+        { n: 'implemented', a: '',     d: 'Mark the attached task coded — qualification pending' },
+        { n: 'done',     a: '',        d: 'Qualify the attached task: verify_cmd + graph checks' },
         { n: 'remember', a: '<text>',  d: 'Save a decision to project memory' },
         { n: 'handoff',  a: '',        d: 'Record where you stopped on the attached task' },
         { n: 'open',     a: '<path>',  d: 'Open a file in the editor' },
@@ -844,7 +981,7 @@
             thoughtBlock = null;
             var wrap = el('div', 'msg agent');
             var who = el('div', 'who');
-            who.appendChild(el('span', null, driverSel.value || 'agent'));
+            who.appendChild(el('span', null, driverLabel(driverSel.value) || 'agent'));
             var actions = el('div', 'actions');
             var copy = el('button', 'icon', 'copy');
             copy.addEventListener('click', function () {
@@ -885,8 +1022,72 @@
         keep(function () { thoughtBlock.textContent += text; });
     }
 
-    function sysline(text, isErr) {
-        add(el('div', 'sysline' + (isErr ? ' err' : ''), text));
+    function sysline(text, isErr, extra) {
+        return add(el('div', 'sysline' + (isErr ? ' err' : '') + (extra ? ' ' + extra : ''), text));
+    }
+
+    function driverLabel(id) {
+        return (adapters[id] && adapters[id].label) || id || '';
+    }
+
+    function setDrivers(ids, current) {
+        if (Array.isArray(ids) && ids.length) {
+            driverSel.textContent = '';
+            ids.forEach(function (d) {
+                var o = el('option', null, driverLabel(d));
+                o.value = d;
+                o.title = (adapters[d] && adapters[d].command) || '';
+                driverSel.appendChild(o);
+            });
+        }
+        if (current) driverSel.value = current;
+        var a = adapters[driverSel.value];
+        driverSel.title = a ? driverLabel(driverSel.value) + ' · ' + a.command
+            : 'Agent provider for the next chat';
+    }
+
+    /* ---------------- per-turn transparency ---------------- */
+    function beginTurn() {
+        turn = { start: Date.now(), tools: 0, failed: 0, agents: 0, files: {} };
+        timelineDots.clear();
+        toolTimeline.textContent = '';
+        toolTimeline.classList.add('hidden');
+        activity.toolStatus = {}; activity.agentStatus = {};
+        setNow('');
+    }
+
+    function endTurn(stopReason) {
+        setNow('');
+        if (!turn) return;
+        var t = turn; turn = null;
+        if (!t.tools && !t.agents) return;
+        var secs = Math.max(0, Math.round((Date.now() - t.start) / 100) / 10);
+        var files = Object.keys(t.files).length;
+        var line = el('div', 'sysline turnsum');
+        line.appendChild(el('span', stopReason === 'end_turn' ? 'good' : 'bad',
+            stopReason === 'end_turn' ? '✓ turn complete' : '⚠ ' + (stopReason || 'stopped')));
+        line.appendChild(el('span', null, t.tools + ' tool' + (t.tools === 1 ? '' : 's') +
+            (t.failed ? ' (' + t.failed + ' failed)' : '')));
+        if (t.agents) line.appendChild(el('span', null, t.agents + ' sub-agent' + (t.agents === 1 ? '' : 's')));
+        if (files) line.appendChild(el('span', null, files + ' file' + (files === 1 ? '' : 's') + ' touched'));
+        line.appendChild(el('span', null, secs + 's'));
+        add(line);
+    }
+
+    function setNow(text) {
+        nowLine.textContent = text ? '▸ ' + text : '';
+        nowLine.classList.toggle('hidden', !text);
+    }
+
+    function refreshNow() {
+        var running = [];
+        tools.forEach(function (card) {
+            var st = card.dataset.status;
+            if (st === 'pending' || st === 'in_progress') running.push(card);
+        });
+        if (!running.length) { setNow(''); return; }
+        var last = running[running.length - 1];
+        setNow(last.querySelector('.title').textContent);
     }
 
     /* ---------------- cards ---------------- */
@@ -912,44 +1113,143 @@
 
     var KIND_GLYPH = {
         read: '▤', edit: '✎', delete: '⌫', move: '⇄', search: '⌕',
-        execute: '❯', think: '◇', fetch: '↧', other: '•',
+        execute: '❯', think: '◇', fetch: '↧', agent: '⧉', other: '•',
     };
+    var KIND_LABEL = {
+        read: 'read', edit: 'edit', delete: 'delete', move: 'move', search: 'search',
+        execute: 'run', think: 'think', fetch: 'fetch', agent: 'sub-agent', other: '',
+    };
+
+    /* A sub-agent is a tool call that runs an agent: ACP has no dedicated
+     * variant yet, so accept kind 'agent', the Task/Agent/spawn titles the
+     * Claude Code and Codex adapters use, or a delegation-shaped rawInput. */
+    function agentLike(call) {
+        if (call.kind === 'agent') return true;
+        if (/^(task|agent|sub-?agent|spawn[_ ]agent|delegate)\b/i.test(String(call.title || ''))) return true;
+        var ri = call.rawInput;
+        return !!(ri && typeof ri === 'object' &&
+            (ri.subagent_type || ri.agent_type || (ri.prompt && ri.description)));
+    }
+    function parentOf(call) {
+        var meta = call._meta || {};
+        return call.parentToolCallId || meta.parentToolCallId || meta.parent_tool_call_id || '';
+    }
+    function shortJson(v) {
+        var text;
+        try { text = typeof v === 'string' ? v : JSON.stringify(v, null, 2); } catch (_) { text = String(v); }
+        return text.length > 2000 ? text.slice(0, 2000) + '\n…' : text;
+    }
+
+    function timelineDot(call, card) {
+        var dot = timelineDots.get(call.toolCallId);
+        if (!dot) {
+            dot = el('button', 'tdot');
+            dot.type = 'button';
+            dot.addEventListener('click', function () {
+                card.classList.remove('closed');
+                card.scrollIntoView({ block: 'center' });
+            });
+            toolTimeline.appendChild(dot);
+            timelineDots.set(call.toolCallId, dot);
+            toolTimeline.classList.remove('hidden');
+        }
+        dot.title = card.querySelector('.title').textContent;
+        dot.className = 'tdot ' + (card.dataset.status || 'pending') +
+            (card.classList.contains('agent') ? ' agent' : '');
+    }
 
     function toolCard(call) {
         clearWelcome();
         breakBlocks();
-        if (call.toolCallId) {
-            activity.toolStatus[call.toolCallId] = call.status ||
-                activity.toolStatus[call.toolCallId] || 'pending';
-            updateActivity();
-        }
+        var isAgent = agentLike(call);
         var card = tools.get(call.toolCallId);
         if (!card) {
-            card = makeCard('tool collapsible closed',
-                KIND_GLYPH[call.kind] || KIND_GLYPH.other, call.title || 'tool call');
+            var kind = isAgent ? 'agent' : (call.kind || 'other');
+            card = makeCard('tool collapsible' + (isAgent ? ' agent' : ' closed') + ' k-' + kind,
+                KIND_GLYPH[kind] || KIND_GLYPH.other, call.title || (isAgent ? 'sub-agent' : 'tool call'));
+            var head = card.querySelector('.head');
+            head.insertBefore(el('span', 'kind', KIND_LABEL[kind] || ''), head.querySelector('.status'));
+            head.insertBefore(el('span', 'elapsed', ''), head.querySelector('.status'));
+            card.dataset.started = String(Date.now());
+            var bodyEl0 = card.querySelector('.body');
+            bodyEl0.appendChild(el('div', 'children'));
+            bodyEl0.appendChild(el('div', 'out'));
             tools.set(call.toolCallId, card);
-            add(card);
+            var parent = parentOf(call) && tools.get(parentOf(call));
+            if (parent) {
+                parent.querySelector('.children').appendChild(card);
+                parent.dataset.children = String((Number(parent.dataset.children) || 0) + 1);
+                var psub = parent.querySelector('.title .sub');
+                if (!psub) { psub = el('span', 'sub'); parent.querySelector('.title').appendChild(psub); }
+                psub.textContent = parent.dataset.children + ' tool' + (parent.dataset.children === '1' ? '' : 's');
+            } else {
+                add(card);
+            }
+            if (turn) { if (isAgent) turn.agents++; else turn.tools++; }
         }
-        if (call.kind) card.querySelector('.glyph').textContent =
-            KIND_GLYPH[call.kind] || KIND_GLYPH.other;
+        if (call.kind && !isAgent) {
+            card.querySelector('.glyph').textContent = KIND_GLYPH[call.kind] || KIND_GLYPH.other;
+            card.querySelector('.kind').textContent = KIND_LABEL[call.kind] || '';
+        }
         if (call.title) {
             var tnode = card.querySelector('.title');
+            var keepSub = tnode.querySelector('.sub');
             tnode.textContent = call.title;
+            if (keepSub) tnode.appendChild(keepSub);
         }
         if (call.status) {
+            card.dataset.status = call.status;
             var st = card.querySelector('.status');
             st.textContent = call.status === 'completed' ? '' : call.status;
             st.className = 'status ' + call.status;
             card.classList.toggle('failed', call.status === 'failed');
-            if (call.status === 'failed') card.classList.remove('closed');
+            card.classList.toggle('completed', call.status === 'completed');
+            if (call.status === 'failed') {
+                card.classList.remove('closed');
+                if (turn && !card.dataset.failedCounted) {
+                    card.dataset.failedCounted = '1'; turn.failed++;
+                }
+            }
+            if (call.status === 'completed' || call.status === 'failed') {
+                var ms = Date.now() - Number(card.dataset.started || Date.now());
+                card.querySelector('.elapsed').textContent = ms >= 100 ?
+                    (Math.round(ms / 100) / 10) + 's' : '';
+                if (isAgent && call.status === 'completed') card.classList.add('closed');
+            }
+        } else if (!card.dataset.status) {
+            card.dataset.status = 'pending';
         }
+        if (call.toolCallId) {
+            (isAgent ? activity.agentStatus : activity.toolStatus)[call.toolCallId] = card.dataset.status;
+            updateActivity();
+            timelineDot(call, card);
+        }
+        refreshNow();
+
+        var bodyEl = card.querySelector('.body');
+        if (call.rawInput !== undefined && !card.querySelector('.inp')) {
+            var inp = el('details', 'inp');
+            var ri = call.rawInput;
+            var isPrompt = isAgent && ri && typeof ri === 'object' && ri.prompt;
+            inp.appendChild(el('summary', null, isPrompt ? 'prompt' : 'input'));
+            inp.appendChild(el('pre', 'wrap', isPrompt ? String(ri.prompt) : shortJson(ri)));
+            bodyEl.insertBefore(inp, bodyEl.firstChild);
+            if (isPrompt && ri.description) {
+                bodyEl.insertBefore(el('div', 'agentnote', String(ri.description)), inp);
+            }
+        }
+
         var payload = [];
         if (Array.isArray(call.content)) payload = call.content;
         var locs = Array.isArray(call.locations) ? call.locations : [];
+        if (turn) {
+            locs.forEach(function (l) { if (l && l.path) turn.files[l.path] = 1; });
+            payload.forEach(function (it) { if (it && it.type === 'diff' && it.path) turn.files[it.path] = 1; });
+        }
         if (!payload.length && !locs.length) return;
 
-        var bodyEl = card.querySelector('.body');
-        bodyEl.textContent = '';
+        var out = card.querySelector('.out');
+        out.textContent = '';
         if (locs.length) {
             var row = el('div', 'locs');
             locs.forEach(function (l) {
@@ -962,7 +1262,7 @@
                 });
                 row.appendChild(b);
             });
-            bodyEl.appendChild(row);
+            out.appendChild(row);
         }
         payload.forEach(function (item) {
             if (!item) return;
@@ -974,17 +1274,17 @@
                         vsc.postMessage({ type: 'open', path: item.path });
                     });
                     lr.appendChild(lb);
-                    bodyEl.appendChild(lr);
+                    out.appendChild(lr);
                 }
-                if (item.oldText) bodyEl.appendChild(el('pre', 'del', item.oldText));
-                if (item.newText) bodyEl.appendChild(el('pre', 'add', item.newText));
+                if (item.oldText) out.appendChild(el('pre', 'del', item.oldText));
+                if (item.newText) out.appendChild(el('pre', 'add', item.newText));
             } else if (item.type === 'content' && item.content &&
                        item.content.type === 'text') {
                 var toolMd = el('div', 'md');
                 renderMd(toolMd, item.content.text);
-                bodyEl.appendChild(toolMd);
+                out.appendChild(toolMd);
             } else if (item.type === 'terminal') {
-                bodyEl.appendChild(el('pre', 'wrap', item.output || '(terminal)'));
+                out.appendChild(el('pre', 'wrap', item.output || '(terminal)'));
             }
         });
     }
@@ -1042,7 +1342,8 @@
     function cmdCard(m) {
         clearWelcome();
         breakBlocks();
-        var card = makeCard('cg collapsible' + (m.open ? '' : ' closed'), '⌘',
+        var card = makeCard('cg collapsible' + (m.open ? '' : ' closed') +
+            (m.ok === false ? ' bad' : ' ok'), '⌘',
             'cg ' + m.cmd, m.ok === false ? 'failed' : '');
         var bodyEl = card.querySelector('.body');
         bodyEl.appendChild(el('pre', 'wrap', m.output || '(no output)'));
@@ -1206,6 +1507,50 @@
     });
     driverSel.addEventListener('change', function () {
         vsc.postMessage({ type: 'driver', value: driverSel.value });
+        setDrivers(null, driverSel.value);
+    });
+    configureBtn.addEventListener('click', function () {
+        vsc.postMessage({ type: 'configure' });
+    });
+    /* The Codify toolbar: one click per cg command, so the loop (brief →
+     * next → review/check/guard → done) never needs the slash palette. Task
+     * actions live in #taskactions and show only while a task is attached. */
+    var CG_ACTIONS = [
+        { n: 'brief',   g: '◈', d: 'cg brief — session state into the chat' },
+        { n: 'next',    g: '▹', d: 'cg spec next — next eligible task' },
+        { n: 'status',  g: '☷', d: 'cg spec status — the board' },
+        { n: 'review',  g: '⚖', d: 'cg review — change vs acceptance criteria' },
+        { n: 'check',   g: '✔', d: 'cg check — the gate' },
+        { n: 'guard',   g: '⛨', d: 'cg guard — edits vs task scope' },
+        { n: 'changes', g: '◬', d: 'cg changes — blast radius of uncommitted edits' },
+        { n: 'remember', g: '✎', d: 'cg remember — save a decision', fill: true },
+        { n: 'implemented', g: '◐', task: true,
+            d: 'cg spec implemented — mark coded, qualification pending' },
+        { n: 'done', g: '●', task: true, cls: 'done',
+            d: 'cg spec done — qualify: verify_cmd and graph checks must pass' },
+        { n: 'handoff', g: '⇥', task: true, d: 'cg handoff — record where you stopped' },
+    ];
+    CG_ACTIONS.forEach(function (a, i) {
+        var b = el('button', 'cgbtn' + (a.cls ? ' ' + a.cls : ''));
+        b.type = 'button';
+        b.title = a.d;
+        b.dataset.cmd = a.n;
+        b.appendChild(el('span', 'g', a.g));
+        b.appendChild(el('span', 't', a.n));
+        b.addEventListener('click', function () {
+            if (a.fill) {
+                input.value = '/' + a.n + ' ';
+                input.focus(); autosize();
+                return;
+            }
+            runSlash(a.n, '');
+        });
+        if (a.task) {
+            if (!taskActions.children.length) taskActions.appendChild(el('span', 'sep'));
+            taskActions.appendChild(b);
+        } else {
+            cgbar.insertBefore(b, taskActions);
+        }
     });
     historySel.addEventListener('change', function () {
         var option = historySel.children[historySel.selectedIndex];
@@ -1290,7 +1635,11 @@
             taskChip.classList.add('attached');
             taskStatus.textContent = task.status || '';
             taskStatus.className = 'pill ' + (task.status || '');
+            taskActions.classList.remove('hidden');
+            body.classList.add('tasked');
         } else {
+            taskActions.classList.add('hidden');
+            body.classList.remove('tasked');
             taskChip.textContent = 'no task';
             taskChip.title = 'Attach a spec task to this chat';
             taskChip.classList.remove('attached');
@@ -1307,8 +1656,11 @@
         modeWrap.classList.add('hidden'); sessionbar.classList.add('hidden');
         sessionTitle.textContent = ''; usage.textContent = '';
         mcpState.textContent = 'MCP connecting'; mcpState.classList.remove('connected');
-        activity = { live: false, running: false, queued: 0,
-            toolStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
+        usageBar.classList.add('hidden'); usageFill.style.width = '0';
+        activity = { live: false, running: false, connected: false, queued: 0,
+            toolStatus: {}, agentStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
+        turn = null; timelineDots.clear(); toolTimeline.textContent = '';
+        toolTimeline.classList.add('hidden'); setNow('');
         updateActivity();
         statusline.textContent = '';
         body.classList.remove('running', 'live');
@@ -1320,15 +1672,8 @@
     window.addEventListener('message', function (ev) {
         var m = ev.data || {};
         if (m.type === 'init') {
-            if (Array.isArray(m.drivers) && m.drivers.length) {
-                driverSel.textContent = '';
-                m.drivers.forEach(function (d) {
-                    var o = el('option', null, d);
-                    o.value = d;
-                    driverSel.appendChild(o);
-                });
-            }
-            if (m.driver) driverSel.value = m.driver;
+            if (m.adapters) adapters = m.adapters;
+            setDrivers(m.drivers, m.driver);
             if (m.version) buildVersion.textContent = 'v' + m.version;
             if (m.feature) document.getElementById('ctxfeature').textContent = m.feature;
             setTask(m.task);
@@ -1338,13 +1683,19 @@
                 m.feature ? m.feature + (m.mode ? ' · ' + m.mode : '') : 'codify';
         } else if (m.type === 'task') {
             setTask(m.task);
+        } else if (m.type === 'adapter') {
+            if (m.adapters) adapters = m.adapters;
+            setDrivers(Object.keys(adapters), m.driver);
         } else if (m.type === 'session') {
             body.classList.toggle('live', !!m.live);
             driverSel.disabled = !!m.live;
             sessionbar.classList.toggle('hidden', !m.live);
-            activity.live = !!m.live; updateActivity();
+            activity.live = !!m.live;
+            if (!m.live) activity.connected = false;
+            updateActivity();
         } else if (m.type === 'connection') {
             sessionbar.classList.remove('hidden');
+            activity.connected = true; updateActivity();
             var info = m.agent || {};
             sessionTitle.textContent = info.title || info.name || '';
             mcpState.textContent = (m.mcpServers || []).length
@@ -1362,10 +1713,15 @@
             var pct = m.size ? Math.min(100, Math.round(m.used * 100 / m.size)) : 0;
             usage.textContent = m.size ? 'context ' + pct + '%' : '';
             usage.title = m.size ? m.used + ' / ' + m.size + ' tokens' : '';
+            usageBar.classList.toggle('hidden', !m.size);
+            usageBar.title = usage.title;
+            usageFill.style.width = pct + '%';
+            usageBar.classList.toggle('high', pct >= 70 && pct < 90);
+            usageBar.classList.toggle('full', pct >= 90);
         } else if (m.type === 'sessions') {
             setSessions(m.sessions || [], m.note, !!m.loading);
         } else if (m.type === 'reset') {
-            if (m.driver) driverSel.value = m.driver;
+            if (m.driver) setDrivers(null, m.driver);
             setTask(null);
             resetTranscript();
         } else if (m.type === 'session_end') {
@@ -1395,8 +1751,10 @@
         else if (m.type === 'turn') {
             body.classList.toggle('running', !!m.running);
             activity.running = !!m.running; updateActivity();
-            if (!m.running) {
+            if (m.running) beginTurn();
+            else {
                 breakBlocks();
+                endTurn(m.stopReason || 'end_turn');
                 if (m.stopReason && m.stopReason !== 'end_turn') {
                     sysline('turn ended: ' + m.stopReason);
                 }

@@ -59,7 +59,7 @@
     - Trace every task to its symbols, touched paths, snapshots, and qualification evidence before release.
     - _Requirements: 5.4_
   - [x] 5.1 Keep the graph database writable while the LSP indexes
-  - [ ] 5.2 Agent panel: provider switching, Codify controls, tool and subagent views
+  - [-] 5.2 Agent panel: provider switching, Codify controls, tool and subagent views
 
 ## Task Dependency Graph
 

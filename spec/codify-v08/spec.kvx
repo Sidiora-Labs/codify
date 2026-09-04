@@ -172,6 +172,7 @@ verify_cmd = "CG=$PWD/cg tests/integration/23_dblock.sh && CG=$PWD/cg tests/inte
 
 [task.5.2]
 title = "Agent panel: provider switching, Codify controls, tool and subagent views"
-status = "pending"
+status = "in_progress"
 wave = 8
-touches = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "editors/vscode/package.json", "editors/vscode/extension.js", "editors/vscode/agents.js", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "tests/fixtures/acp/panel-test.js", "tests/fixtures/acp/dom-shim.js", "tests/fixtures/acp/fake-agent.js", "tests/fixtures/acp/test-client.js", "tests/integration/19_acp.sh", "tests/integration/14_vscode.sh"]
+touches = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "editors/vscode/package.json", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "tests/fixtures/acp/panel-test.js", "tests/fixtures/acp/dom-shim.js", "tests/integration/19_acp.sh", "tests/integration/14_vscode.sh"]
+verify_cmd = "CG=$PWD/cg tests/integration/19_acp.sh && CG=$PWD/cg tests/integration/14_vscode.sh"

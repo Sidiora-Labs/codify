@@ -77,5 +77,8 @@ has "$out" "markdown, code blocks, and clickable file paths"
 has "$out" "tool cards, diffs, plan progress, and permission round-trip"
 has "$out" "slash palette, arguments, history, and unknown commands"
 has "$out" "context bar, task attach, turn state, and reset"
+has "$out" "provider picker, labels, and configure gear"
+has "$out" "Codify toolbar and task actions"
+has "$out" "sub-agents, tool timeline, now line, and turn summary"
 
 echo "PASS 19_acp.sh"

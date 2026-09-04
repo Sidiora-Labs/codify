@@ -62,6 +62,13 @@ class El {
     }
     get childElementCount() { return this.children.length; }
     appendChild(c) { c.parent = this; this.children.push(c); return c; }
+    insertBefore(c, ref) {
+        c.parent = this;
+        const i = ref ? this.children.indexOf(ref) : -1;
+        if (i < 0) this.children.push(c); else this.children.splice(i, 0, c);
+        return c;
+    }
+    get firstChild() { return this.children[0] || null; }
     removeChild(c) {
         this.children = this.children.filter((x) => x !== c);
         return c;

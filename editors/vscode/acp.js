@@ -256,12 +256,13 @@ const panels = new Map();    /* task id -> editor-panel session */
 let permitSeq = 0;
 const SESSION_HISTORY_KEY = 'codify.acp.sessionHistory.v1';
 const SESSION_HISTORY_MAX = 60;
+const VIEW_DRIVER_KEY = 'codify.acp.viewDriver.v1';
 let sessionHistory = [];
 
 /* The sidebar chat view — resolved once, lives as long as the window. */
 let agentView = null;        /* vscode.WebviewView */
 let viewSession = null;      /* the session bound to the sidebar view */
-let viewDriver = '';         /* header picker override; '' -> settings */
+let viewDriver = '';         /* header picker choice; '' -> settings */
 let historyProbeStarted = false;
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
@@ -270,19 +271,58 @@ function firstLine(s) {
     return String(s || '').trim().split('\n')[0] || 'no output';
 }
 
-function adapterCommand(override) {
-    const driver = (override || config().get('agent.driver')) === 'claude'
-        ? 'claude' : 'codex';
+const DRIVER_IDS = ['codex', 'claude', 'custom'];
+function driverId(v) { return DRIVER_IDS.indexOf(v) >= 0 ? v : 'codex'; }
+
+/* Every adapter the picker can offer, with the command each would run. The
+ * custom entry exists only while codify.acp.customCommand is set, so the
+ * picker never offers a provider that cannot start. */
+function adapterCatalog() {
     const custom = (config().get('acp.customCommand') || '').trim();
-    if (custom) return { driver: 'custom', argv: splitCommand(custom) };
+    const codex = normalizeCodexAdapterCommand(config().get('acp.codexCommand'));
+    const list = [
+        { id: 'codex', label: 'Codex', command: codex.command },
+        { id: 'claude', label: 'Claude Code',
+            command: config().get('acp.claudeCommand') || 'claude-code-acp' },
+    ];
+    if (custom) list.push({ id: 'custom', label: 'Custom', command: custom });
+    return list;
+}
+
+function adapterMap() {
+    const out = {};
+    adapterCatalog().forEach((a) => { out[a.id] = { label: a.label, command: a.command }; });
+    return out;
+}
+
+/* Which adapter the next session runs. Precedence: an explicit argument, the
+ * header picker's remembered choice, then codify.agent.driver. A configured
+ * custom command wins only when nothing explicit was chosen — the picker's
+ * Codex/Claude entries must mean what they say — or when "custom" itself is
+ * the choice. */
+function adapterCommand(override) {
+    const custom = (config().get('acp.customCommand') || '').trim();
+    const explicit = override || viewDriver;
+    let driver = driverId(explicit || config().get('agent.driver'));
+    if (driver === 'custom' && !custom) driver = 'codex';
+    if (custom && (driver === 'custom' || !explicit)) {
+        return { driver: 'custom', argv: splitCommand(custom), legacyCommand: '' };
+    }
     if (driver === 'claude') {
         const cmd = config().get('acp.claudeCommand') || 'claude-code-acp';
         return { driver, argv: splitCommand(cmd), legacyCommand: '' };
     }
     const selected = normalizeCodexAdapterCommand(
         config().get('acp.codexCommand'));
-    return { driver, argv: splitCommand(selected.command),
+    return { driver: 'codex', argv: splitCommand(selected.command),
         legacyCommand: selected.legacyCommand };
+}
+
+function rememberViewDriver(value) {
+    viewDriver = driverId(value);
+    if (extensionCtx && extensionCtx.workspaceState) {
+        extensionCtx.workspaceState.update(VIEW_DRIVER_KEY, viewDriver);
+    }
 }
 
 function sessionRecord(row, driver) {
@@ -292,7 +332,7 @@ function sessionRecord(row, driver) {
         title: row.title == null ? '' : String(row.title),
         updatedAt: row.updatedAt || new Date().toISOString(),
         cwd: row.cwd || (deps && deps.workspaceRoot && deps.workspaceRoot()) || '',
-        driver: driver === 'claude' ? 'claude' : 'codex',
+        driver: driverId(driver),
     };
 }
 
@@ -563,10 +603,12 @@ async function endOfSession(sess, why) {
 }
 
 /* Start and initialize one adapter process without assuming whether the next
- * operation creates, lists, loads, or resumes a session. */
+ * operation creates, lists, loads, or resumes a session. The driver recorded
+ * on the session is whichever adapter actually launched — codex, claude, or
+ * custom — so history restores through the same one. */
 async function connectAgent(sess, driverOverride) {
     const { driver, argv, legacyCommand } = adapterCommand(driverOverride);
-    sess.driver = driver === 'claude' ? 'claude' : 'codex';
+    sess.driver = driverId(driver);
     if (legacyCommand && !sess.probe) {
         panelPost(sess, { type: 'notice', text:
             'Using @agentclientprotocol/codex-acp 1.7.0 because the legacy ' +
@@ -687,6 +729,8 @@ const CG_CMDS = {
         ask: 'Review this against the acceptance criteria and flag the risk.' },
     check:   { argv: () => ['check'], zero: true,
         ask: 'Fix whatever this gate reports.' },
+    guard:   { argv: () => ['guard'], zero: true,
+        ask: 'Are these edits inside the task scope? Address any drift.' },
     changes: { argv: () => ['changes'], zero: true,
         ask: 'What is the blast radius of these edits?' },
     tests:   { argv: (a) => (a ? ['test-impact', a] : ['test-impact']),
@@ -760,6 +804,33 @@ async function attachTask(sess, id) {
     deps.refresh();
 }
 
+/* Task lifecycle straight from the chat: the same cg verbs the board's
+ * inline actions run, shown as a card and reflected on the task pill. The
+ * agent is told the outcome so a refused `done` becomes its next step rather
+ * than a surprise. */
+async function taskLifecycle(sess, verb, send) {
+    const id = sess && sess.taskId;
+    if (!id) {
+        surfacePost(sess, { type: 'status',
+            text: `/${verb} needs an attached task — use /task <id> first` });
+        return;
+    }
+    const argv = ['spec', verb, id];
+    const r = await deps.cg(argv);
+    const out = ((r.stdout || '') + (r.code === 0 ? '' : '\n' + (r.stderr || ''))).trim();
+    surfacePost(sess, { type: 'chunk', role: 'user', text: `/${verb}`, cmd: true });
+    surfacePost(sess, { type: 'cmdout', cmd: argv.join(' '), ok: r.code === 0,
+        output: out || '(no output)', open: r.code !== 0 });
+    const status = await taskStatus(id);
+    if (status) surfacePost(sess, { type: 'task_status', status });
+    deps.refresh();
+    if (r.code !== 0 && send) {
+        await send(`\`cg ${argv.join(' ')}\` was refused:\n\n\`\`\`\n${out}\n\`\`\`\n\n` +
+            'Fix what it reports, then say when it is ready to run again.',
+        `/${verb}`);
+    }
+}
+
 async function pickTaskId(placeHolder) {
     const trace = await deps.cgJson(['spec', 'trace']);
     const items = ((trace && trace.tasks) || [])
@@ -774,7 +845,8 @@ async function pickTaskId(placeHolder) {
 }
 
 /* Webview messages any session surface understands: native ACP controls and
- * commands, workspace locations, and validated external links. */
+ * commands, workspace locations, validated external links, and the provider
+ * configure gear (which never needs a session). */
 function handleSessionMessage(sess, msg) {
     if (!msg) return false;
     if (msg.type === 'send' && msg.text) {
@@ -833,6 +905,7 @@ function handleSessionMessage(sess, msg) {
         if (sess.initMsg) panelPost(sess, sess.initMsg);
         return true;
     }
+    if (msg.type === 'configure') { cmdConfigure(); return true; }
     if (msg.type === 'slash') {
         sessionSlash(sess, String(msg.cmd || ''), String(msg.args || ''));
         return true;
@@ -840,7 +913,9 @@ function handleSessionMessage(sess, msg) {
     return false;
 }
 
-/* Slash commands against a live session (sidebar or editor panel). */
+/* Slash commands against a live session (sidebar or editor panel). The task
+ * lifecycle verbs (/done, /implemented) run the real qualification and hand a
+ * refusal back to the agent rather than silently marking the task. */
 async function sessionSlash(sess, cmd, args) {
     if (CG_CMDS[cmd]) {
         await runCgSlash(sess, cmd, args,
@@ -874,6 +949,10 @@ async function sessionSlash(sess, cmd, args) {
         else surfacePost(sess, { type: 'status', text: 'no task is attached to this chat' });
         return;
     }
+    if (cmd === 'done' || cmd === 'implemented') {
+        await taskLifecycle(sess, cmd, (text, echo) => sendPrompt(sess, text, echo));
+        return;
+    }
     if (cmd === 'new') { await resetViewSession(); return; }
     surfacePost(sess, { type: 'status', text: `unknown command /${cmd}` });
 }
@@ -891,7 +970,7 @@ function newSession(webview, extra) {
 
 /* Editor-panel session on a task. The sidebar view is the default surface;
  * editor panels carry concurrent task sessions beside it and receive the same
- * visible build identity as the sidebar. */
+ * visible build identity and labelled adapter catalog as the sidebar. */
 async function openAgentPanel(id, agent, promptText, claimed) {
     const { driver } = adapterCommand();
     const task = await taskRow(id);
@@ -913,7 +992,7 @@ async function openAgentPanel(id, agent, promptText, claimed) {
 
     sess.initMsg = { type: 'init', idle: false, version: extensionVersion(),
         task: { id, title: task.title || '', status: task.status || '' },
-        agent, driver, drivers: [driver], feature: id };
+        agent, driver, drivers: [driver], adapters: adapterMap(), feature: id };
     panelPost(sess, sess.initMsg);
 
     try {
@@ -1057,7 +1136,9 @@ async function listPastSessions(quiet) {
 }
 
 /* Restore a selected session with full replay when possible, otherwise use
- * ACP resume and state clearly that the previous transcript was not replayed. */
+ * ACP resume and state clearly that the previous transcript was not replayed.
+ * The session's own driver becomes the remembered view driver so a later chat
+ * continues with the same provider. */
 async function restorePastSession(sessionId, driver) {
     const known = sessionHistory.find((r) => r.sessionId === sessionId &&
         (!driver || r.driver === driver));
@@ -1066,7 +1147,7 @@ async function restorePastSession(sessionId, driver) {
         return;
     }
     if (viewSession) await resetViewSession();
-    viewDriver = known.driver === 'claude' ? 'claude' : 'codex';
+    rememberViewDriver(known.driver);
     postView({ type: 'reset', driver: viewDriver });
 
     const sess = newSession(agentView.webview, {
@@ -1196,7 +1277,8 @@ async function postViewInit() {
         task = { id: sess.taskId, title: row.title || '', status: row.status || '' };
     }
     postView({ type: 'init', idle: viewIdle(), version: extensionVersion(),
-        driver: currentDriver(), drivers: ['codex', 'claude'],
+        driver: currentDriver(), drivers: adapterCatalog().map((a) => a.id),
+        adapters: adapterMap(),
         feature: b.feature + (b.mode ? ' · ' + b.mode : ''), task });
     postView({ type: 'sessions', sessions: sessionHistory });
     if (sess && sess.client) postView({ type: 'session', live: true });
@@ -1207,7 +1289,8 @@ async function postViewInit() {
 }
 
 /* Slash commands with no session yet: the cg output becomes the opening
- * prompt, so /brief starts the agent already briefed. */
+ * prompt, so /brief starts the agent already briefed. Task verbs need an
+ * attached task and say so instead of starting a session. */
 async function idleSlash(cmd, args) {
     if (CG_CMDS[cmd]) {
         await runCgSlash(null, cmd, args,
@@ -1233,11 +1316,73 @@ async function idleSlash(cmd, args) {
     }
     if (cmd === 'open') { if (args) openLocation(args); return; }
     if (cmd === 'new') { postView({ type: 'reset', driver: currentDriver() }); return; }
-    if (cmd === 'handoff') {
+    if (cmd === 'handoff' || cmd === 'done' || cmd === 'implemented') {
         postView({ type: 'status', text: 'no task is attached to this chat' });
         return;
     }
     postView({ type: 'status', text: `unknown command /${cmd}` });
+}
+
+/* The picker chose a provider. "custom" with nothing configured asks for the
+ * command right there instead of silently falling back. */
+async function chooseDriver(value) {
+    const id = driverId(value);
+    if (id === 'custom' && !(config().get('acp.customCommand') || '').trim()) {
+        const cmd = await vscode.window.showInputBox({
+            prompt: 'Command that starts your ACP agent (quote-aware)',
+            placeHolder: 'e.g. my-acp-agent --stdio',
+            ignoreFocusOut: true,
+        });
+        if (!cmd || !cmd.trim()) {
+            postView({ type: 'adapter', driver: currentDriver(), adapters: adapterMap() });
+            return;
+        }
+        await config().update('acp.customCommand', cmd.trim(),
+            vscode.ConfigurationTarget.Global);
+    }
+    rememberViewDriver(id);
+    postView({ type: 'adapter', driver: currentDriver(), adapters: adapterMap() });
+    listPastSessions(true);
+}
+
+/* One quick pick for everything the agent view can be configured with:
+ * which provider, each adapter's command, and the settings page itself. */
+async function cmdConfigure() {
+    const cur = currentDriver();
+    const cat = adapterCatalog();
+    const items = cat.map((a) => ({
+        label: `${a.id === cur ? '$(check) ' : ''}Use ${a.label}`,
+        description: a.command, id: a.id, act: 'use',
+    }));
+    if (!cat.some((a) => a.id === 'custom')) {
+        items.push({ label: 'Use a custom ACP agent…', act: 'use', id: 'custom',
+            description: 'any command that speaks ACP on stdio' });
+    }
+    items.push({ label: 'Edit Codex adapter command…', act: 'edit',
+        key: 'acp.codexCommand', description: 'codify.acp.codexCommand' });
+    items.push({ label: 'Edit Claude Code adapter command…', act: 'edit',
+        key: 'acp.claudeCommand', description: 'codify.acp.claudeCommand' });
+    items.push({ label: 'Edit custom agent command…', act: 'edit',
+        key: 'acp.customCommand', description: 'codify.acp.customCommand (empty removes it)' });
+    items.push({ label: '$(settings-gear) Open Codify agent settings', act: 'settings' });
+    const pick = await vscode.window.showQuickPick(items,
+        { placeHolder: `Agent provider: ${cur} — choose or configure` });
+    if (!pick) return;
+    if (pick.act === 'use') { await chooseDriver(pick.id); return; }
+    if (pick.act === 'settings') {
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'codify.acp');
+        return;
+    }
+    const value = await vscode.window.showInputBox({
+        prompt: `codify.${pick.key}`, value: config().get(pick.key) || '',
+        ignoreFocusOut: true,
+    });
+    if (value === undefined) return;
+    await config().update(pick.key, value.trim(), vscode.ConfigurationTarget.Global);
+    if (pick.key === 'acp.customCommand' && !value.trim() && viewDriver === 'custom') {
+        rememberViewDriver(config().get('agent.driver'));
+    }
+    postView({ type: 'adapter', driver: currentDriver(), adapters: adapterMap() });
 }
 
 function registerAgentView(ctx) {
@@ -1249,11 +1394,8 @@ function registerAgentView(ctx) {
             view.webview.onDidReceiveMessage((msg) => {
                 if (!msg) return;
                 if (msg.type === 'ready') { postViewInit(); return; }
-                if (msg.type === 'driver') {
-                    viewDriver = msg.value === 'claude' ? 'claude' : 'codex';
-                    listPastSessions(true);
-                    return;
-                }
+                if (msg.type === 'driver') { chooseDriver(msg.value); return; }
+                if (msg.type === 'configure') { cmdConfigure(); return; }
                 if (msg.type === 'refresh_sessions') { listPastSessions(false); return; }
                 if (msg.type === 'load_session' && msg.sessionId) {
                     restorePastSession(String(msg.sessionId), String(msg.driver || ''));
@@ -1345,6 +1487,7 @@ function registerAcpCommands(ctx) {
     const cmds = {
         'codify.agent.openPanel': cmdOpenPanel,
         'codify.agent.newChat': cmdNewChat,
+        'codify.agent.configure': cmdConfigure,
     };
     for (const [name, fn] of Object.entries(cmds)) {
         ctx.subscriptions.push(vscode.commands.registerCommand(name, fn));
@@ -1356,6 +1499,8 @@ function register(ctx, d) {
     extensionCtx = ctx;
     const stored = ctx.workspaceState && ctx.workspaceState.get(SESSION_HISTORY_KEY, []);
     sessionHistory = Array.isArray(stored) ? stored.filter((r) => r && r.sessionId) : [];
+    const pickedDriver = ctx.workspaceState && ctx.workspaceState.get(VIEW_DRIVER_KEY, '');
+    viewDriver = pickedDriver ? driverId(pickedDriver) : '';
     registerAcpCommands(ctx);
     registerAgentView(ctx);
     return {
@@ -1365,7 +1510,7 @@ function register(ctx, d) {
 }
 
 module.exports = {
-    AcpClient, splitCommand, normalizeCodexAdapterCommand, register,
+    AcpClient, splitCommand, normalizeCodexAdapterCommand, register, DRIVER_IDS,
     /* exported for the headless fs-bridge tests */
     workspacePath, readTextFile, writeTextFile, sessionUpdate,
 };
