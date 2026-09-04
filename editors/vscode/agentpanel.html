@@ -471,7 +471,7 @@
     display: block; width: 100%; resize: none; border: none; outline: none;
     background: transparent; color: var(--vscode-input-foreground);
     font-family: inherit; font-size: inherit; line-height: 1.5;
-    padding: 2px 3px; max-height: 190px; min-height: 22px; overflow-y: auto;
+    padding: 4px 3px; max-height: 240px; min-height: 48px; overflow-y: auto;
   }
   textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
   .crow { display: flex; align-items: center; gap: 6px; padding-top: 4px; }
@@ -611,7 +611,7 @@
     <div id="statusline"></div>
     <div id="slashmenu"></div>
     <div class="composer">
-      <textarea id="input" rows="1"
+      <textarea id="input" rows="2"
         placeholder="Ask the agent, or / for Codify commands"></textarea>
       <div class="crow">
         <span class="hint" id="hint"><kbd>/</kbd> commands · <kbd>Enter</kbd> send</span>
@@ -1492,7 +1492,7 @@
     /* ---------------- composer ---------------- */
     function autosize() {
         input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 190) + 'px';
+        input.style.height = Math.max(48, Math.min(input.scrollHeight, 240)) + 'px';
     }
 
     function runSlash(cmd, args) {
