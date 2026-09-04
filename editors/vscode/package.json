@@ -2,7 +2,7 @@
   "name": "codify",
   "displayName": "Codify",
   "description": "The whole agent workflow in your editor: code graph navigation, a live task board with verified completion, scope diagnostics, and project memory — all from the cg binary.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "SidioraLabs",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/sidiora-labs/codify" },

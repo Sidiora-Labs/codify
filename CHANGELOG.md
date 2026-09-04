@@ -2,7 +2,7 @@
 
 _Maintained from local Codify snapshots (`cg log`); symbol-level changes are derived from the code graph._
 
-## 2026-09-04 — Codify 0.8.1 writable graph under the editor
+## 2026-09-04 — Codify 0.8.5 writable graph under the editor
 
 - The indexer writes in short chunked `BEGIN IMMEDIATE` transactions with parsing outside the lock, so `cg lsp`, `cg watch`, and `cg mcp` no longer hold the graph database for a whole index while an agent tries to record task state
 - CLI writes wait `CG_BUSY_TIMEOUT_MS` (default 30 s) for the lock; a lock that never frees now yields exit 75 with a message naming the holder class, stating that nothing changed, and that the same command is safe to retry
