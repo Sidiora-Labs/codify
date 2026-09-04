@@ -160,9 +160,28 @@ typedef struct {
     sqlite3 *db;
     char root[4096];       /* project root (dir containing .codegraph) */
     bool no_soft;          /* --no-soft: exclude prose-derived soft edges */
+    /* How long a write may wait for another cg process to release the
+     * database before giving up. CLI commands wait the full default so an
+     * agent's `cg spec done` survives an editor re-index; long-running
+     * servers (lsp, watch) set a short wait and defer their own index
+     * instead, because they must never hold agents up. */
+    long lock_wait_ms;
 } Cg;
 
+/* Exit status when the database stayed busy past lock_wait_ms. Distinct from
+ * the generic 2 so an orchestrator can retry instead of treating the task as
+ * broken; 75 is EX_TEMPFAIL from sysexits. */
+#define CG_EXIT_BUSY 75
+
 int  cg_open(Cg *cg, bool create);                 /* finds root upward */
+/* Take the write lock (BEGIN IMMEDIATE), waiting up to cg->lock_wait_ms.
+ * Returns 0 holding the lock, -1 when the database stayed busy — without
+ * exiting, so a server can defer. Any other SQL failure still exits. */
+int  cg_begin_write(Cg *cg);
+long cg_lock_wait_default(void);                   /* CG_BUSY_TIMEOUT_MS */
+/* The message a person or agent should see when a write gave up on a busy
+ * database: names the likely holder and says nothing was changed. */
+void cg_busy_report(const char *what);
 void cg_close(Cg *cg);
 int  cg_find_root(char *out, size_t cap);          /* 0 ok */
 /* resolve from an explicit directory (LSP/MCP roots, hooks) */
@@ -183,8 +202,13 @@ typedef struct {
     long files_seen, files_indexed, files_removed, files_skipped;
     long symbols, refs, routes, anchors, soft, bytes;
     long ms;
+    /* the database stayed busy past lock_wait_ms; the graph is whatever the
+     * last index left (any chunks written before the stall are kept) */
+    bool busy;
 } IndexStats;
 
+/* Returns 0, or -1 with st->busy set when another process held the write
+ * lock for the whole wait. Never exits on a busy database. */
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);
 
 /* import resolution and ref resolution (resolve.c) — runs post-scan */

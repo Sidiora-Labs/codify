@@ -2,6 +2,14 @@
 
 _Maintained from local Codify snapshots (`cg log`); symbol-level changes are derived from the code graph._
 
+## 2026-09-04 — Codify 0.8.1 writable graph under the editor
+
+- The indexer writes in short chunked `BEGIN IMMEDIATE` transactions with parsing outside the lock, so `cg lsp`, `cg watch`, and `cg mcp` no longer hold the graph database for a whole index while an agent tries to record task state
+- CLI writes wait `CG_BUSY_TIMEOUT_MS` (default 30 s) for the lock; a lock that never frees now yields exit 75 with a message naming the holder class, stating that nothing changed, and that the same command is safe to retry
+- `cg lsp` and `cg watch` take a short lock wait, defer their own index when the database is busy, and keep answering from the last completed index; they never exit on a lock
+- `cg spec status` and other read-only paths no longer take a write lock to sweep expired attempts unless one exists; `cg spec done` warns and checks against the last index instead of failing qualification on a busy database
+- Remaining deferred `BEGIN` transactions in memory and git import are `BEGIN IMMEDIATE`, removing the `SQLITE_BUSY_SNAPSHOT` failure mode
+
 ## 2026-08-31 — Codify 0.8.0 agent control plane
 
 - Separates spec declarations, fenced live attempts, Git state, and Codify snapshots; stale ownership is diagnosable and explicitly repairable

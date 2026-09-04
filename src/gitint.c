@@ -20,7 +20,9 @@ bool git_available(const Cg *cg) {
 }
 
 /* Read `git log` in one pass: a header line per commit, then the paths it
- * touched. --no-renames keeps paths comparable with the graph's own. */
+ * touched. --no-renames keeps paths comparable with the graph's own. The
+ * import is one BEGIN IMMEDIATE transaction: taken up front, or reported
+ * busy, never upgraded mid-way. */
 int cmd_git_sync(Cg *cg, int limit, bool json) {
     if (!git_available(cg)) {
         if (json) printf("{\"git\":false,\"commits\":0,\"paths\":0}\n");
@@ -39,7 +41,7 @@ int cmd_git_sync(Cg *cg, int limit, bool json) {
         return 1;
     }
 
-    cg_exec(cg, "BEGIN");
+    cg_exec(cg, "BEGIN IMMEDIATE");
     sqlite3_stmt *ins = cg_prep(cg,
         "INSERT INTO git_commits(hash,author,date,subject) VALUES(?,?,?,?) "
         "ON CONFLICT(hash) DO NOTHING");

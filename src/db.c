@@ -240,8 +240,12 @@ int cg_open(Cg *cg, bool create) {
         return -1;
     }
     /* WAL lets readers run while one writer indexes, and the busy timeout
-     * makes concurrent cg processes wait instead of failing outright. */
-    sqlite3_busy_timeout(cg->db, 5000);
+     * makes concurrent cg processes wait instead of failing outright. The
+     * wait is long on purpose: an agent's lifecycle command must outlast an
+     * editor language server re-indexing the whole tree. CG_BUSY_TIMEOUT_MS
+     * overrides it (tests use a short one). */
+    cg->lock_wait_ms = cg_lock_wait_default();
+    sqlite3_busy_timeout(cg->db, (int)cg->lock_wait_ms);
     sqlite3_exec(cg->db, "PRAGMA journal_mode=WAL;PRAGMA synchronous=NORMAL",
                  NULL, NULL, NULL);
     char *err = NULL;
@@ -316,13 +320,59 @@ sqlite3_stmt *cg_prep(Cg *cg, const char *sql) {
     return st;
 }
 
+static bool busy_rc(int rc) {
+    int base = rc & 0xff;
+    return base == SQLITE_BUSY || base == SQLITE_LOCKED;
+}
+
+void cg_busy_report(const char *what) {
+    fprintf(stderr,
+        "cg: the graph database is busy — another cg process (usually an "
+        "editor's `cg lsp`, `cg watch`, or a parallel agent) held the write "
+        "lock for the whole wait.\n"
+        "    %s was not applied; nothing changed. Re-run the same command — "
+        "it is safe to retry.\n"
+        "    (waited %ldms; set CG_BUSY_TIMEOUT_MS to wait longer)\n",
+        what && what[0] ? what : "The write", cg_lock_wait_default());
+}
+
+long cg_lock_wait_default(void) {
+    const char *env = getenv("CG_BUSY_TIMEOUT_MS");
+    long ms = env && env[0] ? atol(env) : 30000;
+    return ms > 0 ? ms : 30000;
+}
+
+int cg_begin_write(Cg *cg) {
+    /* Both bounds matter: the busy handler polls with growing sleeps, so a
+     * short wait would return early and a long one would stall a server. */
+    long wait = cg->lock_wait_ms > 0 ? cg->lock_wait_ms : cg_lock_wait_default();
+    sqlite3_busy_timeout(cg->db, (int)wait);
+    char *err = NULL;
+    int rc = sqlite3_exec(cg->db, "BEGIN IMMEDIATE", NULL, NULL, &err);
+    sqlite3_busy_timeout(cg->db, (int)cg_lock_wait_default());
+    if (rc == SQLITE_OK) return 0;
+    if (busy_rc(rc)) { sqlite3_free(err); return -1; }
+    fprintf(stderr, "cg: sql error: %s\n  in: BEGIN IMMEDIATE\n", err ? err : "?");
+    sqlite3_free(err);
+    exit(2);
+}
+
+/* A busy database is not a bug in the command that hit it. Say so, and exit
+ * with a status an agent can read as "retry", not "broken" — a bare
+ * "database is locked" sends agents off to debug SQLite instead of finishing
+ * their task. */
 void cg_exec(Cg *cg, const char *sql) {
     char *err = NULL;
-    if (sqlite3_exec(cg->db, sql, NULL, NULL, &err) != SQLITE_OK) {
-        fprintf(stderr, "cg: sql error: %s\n  in: %s\n", err ? err : "?", sql);
+    int rc = sqlite3_exec(cg->db, sql, NULL, NULL, &err);
+    if (rc == SQLITE_OK) return;
+    if (busy_rc(rc)) {
         sqlite3_free(err);
-        exit(2);
+        cg_busy_report("This command");
+        exit(CG_EXIT_BUSY);
     }
+    fprintf(stderr, "cg: sql error: %s\n  in: %s\n", err ? err : "?", sql);
+    sqlite3_free(err);
+    exit(2);
 }
 
 void cg_meta_set(Cg *cg, const char *k, const char *v) {

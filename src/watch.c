@@ -81,16 +81,24 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
     printf("watching %s (%d dirs, debounce %dms, %d workers) — ctrl-c to stop\n",
            cg->root, w.n, debounce_ms, si->workers);
 
-    /* catch up on anything that changed while we weren't looking */
-    IndexStats st;
-    cg_index(cg, si, false, &st, true);
-    if (st.files_indexed || st.files_removed)
-        printf("sync: %ld updated, %ld removed (%ldms)\n",
-               st.files_indexed, st.files_removed, st.ms);
-
+    /* A watcher lives as long as the LSP does and must yield the same way:
+     * short lock wait, and a busy database turns into a retry after the
+     * debounce instead of a stall or an exit. */
+    cg->lock_wait_ms = 2000;
     char buf[16384];
     bool pending = false;
     long deadline = 0;
+
+    /* catch up on anything that changed while we weren't looking */
+    IndexStats st;
+    if (cg_index(cg, si, false, &st, true) != 0 && st.busy) {
+        printf("sync deferred: database busy, retrying in %dms\n", debounce_ms);
+        pending = true;
+        deadline = now_ms() + debounce_ms;
+    } else if (st.files_indexed || st.files_removed) {
+        printf("sync: %ld updated, %ld removed (%ldms)\n",
+               st.files_indexed, st.files_removed, st.ms);
+    }
     for (;;) {
         int timeout = -1;
         if (pending) {
@@ -124,8 +132,12 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
         }
         if (pending && now_ms() >= deadline) {
             pending = false;
-            cg_index(cg, si, false, &st, true);
-            if (st.files_indexed || st.files_removed)
+            if (cg_index(cg, si, false, &st, true) != 0 && st.busy) {
+                printf("sync deferred: database busy, retrying in %dms\n",
+                       debounce_ms);
+                pending = true;
+                deadline = now_ms() + debounce_ms;
+            } else if (st.files_indexed || st.files_removed)
                 printf("sync: %ld updated, %ld removed, %ld symbols (%ldms)\n",
                        st.files_indexed, st.files_removed, st.symbols, st.ms);
         }

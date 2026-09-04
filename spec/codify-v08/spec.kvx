@@ -162,3 +162,16 @@ do_1       = "Exercise stale tasks, repair, expiry, fencing, heartbeat renewal, 
 do_2       = "Run the complete unit and integration suite with no fakes, forced completion, or weakened checks."
 do_3       = "Trace every task to its symbols, touched paths, snapshots, and qualification evidence before release."
 reqs       = ["5.4"]
+
+[task.5.1]
+title = "Keep the graph database writable while the LSP indexes"
+status = "done"
+wave = 8
+touches = ["src/db.c", "src/scan.c", "src/lsp.c", "src/spec.c", "src/cg.h", "src/main.c", "src/watch.c", "src/memory.c", "src/gitint.c", "tests/integration/23_dblock.sh", "docs/ARCHITECTURE.md", "CHANGELOG.md", "README.md", "src/integrate.c"]
+verify_cmd = "CG=$PWD/cg tests/integration/23_dblock.sh && CG=$PWD/cg tests/integration/13_lsp.sh"
+
+[task.5.2]
+title = "Agent panel: provider switching, Codify controls, tool and subagent views"
+status = "pending"
+wave = 8
+touches = ["editors/vscode/acp.js", "editors/vscode/agentpanel.html", "editors/vscode/package.json", "editors/vscode/extension.js", "editors/vscode/agents.js", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "tests/fixtures/acp/panel-test.js", "tests/fixtures/acp/dom-shim.js", "tests/fixtures/acp/fake-agent.js", "tests/fixtures/acp/test-client.js", "tests/integration/19_acp.sh", "tests/integration/14_vscode.sh"]

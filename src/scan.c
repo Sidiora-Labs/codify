@@ -13,6 +13,10 @@
 #define MAX_FILE_BYTES (8L * 1024 * 1024)   /* larger files: skip entirely */
 #define MAX_FTS_BYTES  (2L * 1024 * 1024)   /* larger: no body full-text */
 #define RING_CAP 256
+/* files written per write transaction: small enough that a waiting agent
+ * command gets the lock within a fraction of a second, large enough that a
+ * full index is not dominated by commit overhead */
+#define INDEX_CHUNK 96
 
 typedef struct { char *rel; long size, mtime; char dbhash[65]; } Walked;
 typedef struct { char *path; long id, size, mtime; char hash[65]; } DbFile;
@@ -574,6 +578,21 @@ static void anchor_edges(Cg *cg, IndexStats *st) {
     sqlite3_finalize(is_route);
 }
 
+/* Write one parsed chunk under the lock. Returns -1 when the lock never came;
+ * the chunk is then dropped (its files stay unhashed in the DB and are
+ * re-parsed by the next run), and every result is freed either way. */
+static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
+                       IndexStats *st) {
+    int rc = cg_begin_write(cg);
+    for (int i = 0; i < n; i++) {
+        if (rc == 0) write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st);
+        if (chunk[i].parsed) parse_result_free(&chunk[i].pr);
+        free(chunk[i].body);
+    }
+    if (rc == 0) cg_exec(cg, "COMMIT");
+    return rc;
+}
+
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     long t0 = now_ms();
     memset(st, 0, sizeof *st);
@@ -642,21 +661,36 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
         }
     }
 
-    cg_exec(cg, "BEGIN");
+    /* The write lock is the scarce resource: while one process holds it,
+     * every other cg command that mutates state — an agent's `cg spec done`
+     * above all — waits. Parsing is the slow part and needs no lock, so
+     * workers parse ahead into a buffer and the main thread takes the lock
+     * only to write one chunk at a time. Between chunks the lock is free
+     * and waiting writers get through; a lease or status write lands in
+     * the gap instead of after the whole tree. Chunks already committed
+     * stay valid if a later one has to be abandoned. */
     Stmts s;
     stmts_init(cg, &s);
+    bool stalled = false;
 
-    sqlite3_stmt *del_file = cg_prep(cg, "DELETE FROM files WHERE id=?");
-    for (int i = 0; i < nremoved; i++) {
-        purge_file_children(&s, removed_ids[i]);
-        sqlite3_bind_int64(del_file, 1, removed_ids[i]);
-        step_reset(del_file);
-        st->files_removed++;
+    if (nremoved > 0) {
+        if (cg_begin_write(cg) != 0) {
+            stalled = true;
+        } else {
+            sqlite3_stmt *del_file = cg_prep(cg, "DELETE FROM files WHERE id=?");
+            for (int i = 0; i < nremoved; i++) {
+                purge_file_children(&s, removed_ids[i]);
+                sqlite3_bind_int64(del_file, 1, removed_ids[i]);
+                step_reset(del_file);
+                st->files_removed++;
+            }
+            sqlite3_finalize(del_file);
+            cg_exec(cg, "COMMIT");
+        }
     }
-    sqlite3_finalize(del_file);
     free(removed_ids);
 
-    if (jobs.n > 0) {
+    if (jobs.n > 0 && !stalled) {
         Pipe pipe;
         memset(&pipe, 0, sizeof pipe);
         pipe.root = cg->root;
@@ -675,16 +709,26 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
         for (int i = 0; i < nw; i++)
             pthread_create(&th[i], NULL, worker, &pipe);
 
+        Done chunk[INDEX_CHUNK];
+        int nchunk = 0;
         Done d;
         while (ring_pop(&pipe, &d)) {
-            if (d.idx < 0) {
-                st->files_skipped++;
-            } else {
-                write_done(cg, &s, &jobs.v[d.idx], &d, st);
+            if (d.idx < 0) { st->files_skipped++; continue; }
+            if (stalled) {                 /* drain so the workers can exit */
                 if (d.parsed) parse_result_free(&d.pr);
                 free(d.body);
+                continue;
+            }
+            chunk[nchunk++] = d;
+            if (nchunk == INDEX_CHUNK) {
+                if (flush_chunk(cg, &s, jobs.v, chunk, nchunk, st) != 0)
+                    stalled = true;
+                nchunk = 0;
             }
         }
+        if (nchunk && !stalled &&
+            flush_chunk(cg, &s, jobs.v, chunk, nchunk, st) != 0)
+            stalled = true;
         for (int i = 0; i < nw; i++)
             pthread_join(th[i], NULL);
         pthread_mutex_destroy(&pipe.mu);
@@ -693,22 +737,42 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     }
 
     stmts_fin(&s);
-    if (st->files_indexed + st->files_removed > 0) {
-        anchor_edges(cg, st);
-        resolve_imports(cg);
-        resolve_refs(cg);
+    /* Chunks committed before a stall carry unresolved refs and edges. The
+     * pending flag makes the next successful index finish that work even
+     * when no file has changed since. */
+    char *pending = cg_meta_get(cg, "index_pending_resolve");
+    bool need_resolve = st->files_indexed + st->files_removed > 0 ||
+                        (pending && pending[0] == '1');
+    free(pending);
+    if (!stalled && need_resolve) {
+        if (cg_begin_write(cg) != 0) {
+            stalled = true;
+        } else {
+            anchor_edges(cg, st);
+            resolve_imports(cg);
+            resolve_refs(cg);
+            cg_meta_set(cg, "index_pending_resolve", "0");
+            cg_exec(cg, "COMMIT");
+        }
     }
-    cg_exec(cg, "COMMIT");
+    st->busy = stalled;
 
     st->ms = now_ms() - t0;
 
+    /* a stalled run leaves the bookkeeping alone: every write below would
+     * wait on the same lock, and the numbers would describe a partial pass */
     char buf[64];
-    snprintf(buf, sizeof buf, "%ld", st->ms);
-    cg_meta_set(cg, "last_index_ms", buf);
-    snprintf(buf, sizeof buf, "%ld", (long)wl.n);
-    cg_meta_set(cg, "project_files", buf);
-    snprintf(buf, sizeof buf, "%ld", st->bytes);
-    cg_meta_set(cg, "last_index_bytes", buf);
+    if (stalled) {
+        if (st->files_indexed > 0)
+            cg_meta_set(cg, "index_pending_resolve", "1");
+    } else {
+        snprintf(buf, sizeof buf, "%ld", st->ms);
+        cg_meta_set(cg, "last_index_ms", buf);
+        snprintf(buf, sizeof buf, "%ld", (long)wl.n);
+        cg_meta_set(cg, "project_files", buf);
+        snprintf(buf, sizeof buf, "%ld", st->bytes);
+        cg_meta_set(cg, "last_index_bytes", buf);
+    }
 
     for (int i = 0; i < wl.n; i++) free(wl.v[i].rel);
     free(wl.v);
@@ -717,7 +781,11 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     for (int i = 0; i < ndbf; i++) free(dbf[i].path);
     free(dbf);
 
-    if (!quiet) {
+    if (!quiet && stalled) {
+        fprintf(stderr, "cg: index stalled — the database stayed busy; "
+                        "%ld file%s written before the stall are kept\n",
+                st->files_indexed, st->files_indexed == 1 ? "" : "s");
+    } else if (!quiet) {
         printf("indexed %ld file%s (%ld unchanged, %ld removed, %ld skipped) "
                "in %ldms — %ld symbols, %ld refs, %ld routes, %ld comments, "
                "%ld soft [%d workers]\n",
@@ -727,5 +795,5 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
                st->symbols, st->refs, st->routes, st->anchors, st->soft,
                si->workers);
     }
-    return 0;
+    return stalled ? -1 : 0;
 }

@@ -58,6 +58,8 @@
     - Run the complete unit and integration suite with no fakes, forced completion, or weakened checks.
     - Trace every task to its symbols, touched paths, snapshots, and qualification evidence before release.
     - _Requirements: 5.4_
+  - [x] 5.1 Keep the graph database writable while the LSP indexes
+  - [ ] 5.2 Agent panel: provider switching, Codify controls, tool and subagent views
 
 ## Task Dependency Graph
 
@@ -70,7 +72,8 @@
     { "id": 4,  "tasks": ["2.2"] },
     { "id": 5,  "tasks": ["3.1"] },
     { "id": 6,  "tasks": ["4.1"] },
-    { "id": 7,  "tasks": ["4.2"] }
+    { "id": 7,  "tasks": ["4.2"] },
+    { "id": 8,  "tasks": ["5.1", "5.2"] }
   ]
 }
 ```

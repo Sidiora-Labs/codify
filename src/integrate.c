@@ -275,7 +275,9 @@ static int integrate_agentmd_call(void *v) {
 
 /* Generate the graph projection only when its ownership marker is present or
  * the path is empty. Capture cmd_agentmd's normal CLI report so JSON apply
- * remains one valid document. Returns apply_asset-style status. */
+ * remains one valid document. Returns apply_asset-style status. A busy
+ * database is not a failure: the projection renders from the last completed
+ * index and the next apply catches up. */
 static int integrate_agent_context(Cg *cg) {
     char path[4700];
     snprintf(path, sizeof path, "%s/%s", cg->root, CG_AGENT_CONTEXT);
@@ -286,7 +288,9 @@ static int integrate_agent_context(Cg *cg) {
     SysInfo si;
     IndexStats st;
     sysinfo_detect(&si);
-    if (cg_index(cg, &si, false, &st, true) != 0) {
+    /* A busy database is not a failure here: the projection is rendered from
+     * the last completed index and the next apply catches up. */
+    if (cg_index(cg, &si, false, &st, true) != 0 && !st.busy) {
         free(before); return -1;
     }
     IntegrateAgentmd call = { cg };

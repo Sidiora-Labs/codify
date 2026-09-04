@@ -17,8 +17,35 @@
 #include <fnmatch.h>
 
 /* LSP SymbolKind: 12 = Function. The graph's kinds are heuristic, so one
- * honest value beats a wrong-looking taxonomy. */
+ * honest value beats a wrong-looking taxonomy (the lock-wait constants
+ * below are the server's other deliberate choice). */
 #define LSP_KIND_FN 12
+
+/* The server refreshes the graph on open/save, but it is the one cg process
+ * that lives for hours beside agents, so it must never be the reason an
+ * agent's `cg spec done` waits. It takes a short lock wait, and when the
+ * database is busy it defers its own index rather than holding anything
+ * up; the deferred index is retried on the next message after RETRY. */
+#define LSP_LOCK_WAIT_MS 1500
+#define LSP_INDEX_RETRY_MS 3000
+static bool index_pending;
+static long index_retry_at;
+
+static void lsp_index(Cg *cg, const SysInfo *si) {
+    IndexStats st;
+    if (cg_index(cg, si, false, &st, true) != 0 && st.busy) {
+        if (!index_pending)
+            fprintf(stderr, "cg lsp: index deferred — the database is busy "
+                            "(another cg process is writing); answers come "
+                            "from the last index until it is retried\n");
+        index_pending = true;
+        index_retry_at = now_ms() + LSP_INDEX_RETRY_MS;
+        return;
+    }
+    if (index_pending)
+        fprintf(stderr, "cg lsp: deferred index completed\n");
+    index_pending = false;
+}
 
 /* ---------------- framing ---------------- */
 
@@ -301,7 +328,9 @@ static bool request_word(Cg *cg, const char *params, char *word, size_t wcap,
 int cmd_lsp(Cg *cg, const SysInfo *si) {
     char *body;
     bool shutting_down = false;
+    cg->lock_wait_ms = LSP_LOCK_WAIT_MS;
     while ((body = lsp_read())) {
+        if (index_pending && now_ms() >= index_retry_at) lsp_index(cg, si);
         char *method = json_get_string(body, "method");
         char *id = json_get_raw(body, "id");
         char *params = json_get_object(body, "params");
@@ -325,8 +354,7 @@ int cmd_lsp(Cg *cg, const SysInfo *si) {
                 CG_VERSION "\"}}");
         } else if (strcmp(method, "initialized") == 0) {
             /* first sync so answers are current from the first keystroke */
-            IndexStats st;
-            cg_index(cg, si, false, &st, true);
+            lsp_index(cg, si);
         } else if (strcmp(method, "shutdown") == 0 && id) {
             shutting_down = true;
             lsp_reply(id, "null");
@@ -340,8 +368,7 @@ int cmd_lsp(Cg *cg, const SysInfo *si) {
             if (uri) {
                 char abs[4096];
                 uri_to_path(uri, abs, sizeof abs);
-                IndexStats st;
-                cg_index(cg, si, false, &st, true);   /* keep the graph fresh */
+                lsp_index(cg, si);                    /* keep the graph fresh */
                 publish_diagnostics(cg, uri, abs);
             }
             free(td); free(uri);

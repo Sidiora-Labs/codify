@@ -268,9 +268,11 @@ int main(int argc, char **argv) {
         bool full = flag(&argc, argv, "--full");
         IndexStats st;
         rc = cg_index(&cg, &si, full, &st, false);
+        if (rc != 0 && st.busy) { cg_busy_report("The index"); rc = CG_EXIT_BUSY; }
     } else if (strcmp(cmd, "sync") == 0) {
         IndexStats st;
         rc = cg_index(&cg, &si, false, &st, false);
+        if (rc != 0 && st.busy) { cg_busy_report("The sync"); rc = CG_EXIT_BUSY; }
     } else if (strcmp(cmd, "search") == 0) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         if (argc < 3) { fprintf(stderr, "usage: cg search <query>\n"); rc = 1; }

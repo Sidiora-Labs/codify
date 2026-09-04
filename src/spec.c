@@ -953,8 +953,18 @@ static int spec_in_progress_count(const Spec *s) {
 
 /* Expire dead attempts without rewriting the declared kvx task state. That
  * separation is intentional: discovery is read-only; `spec reconcile
- * --repair` is the explicit state-changing recovery path. */
+ * --repair` is the explicit state-changing recovery path. Read-only commands
+ * (status, trace — the editor board polls them) call this too, so the write
+ * lock is taken only when something has actually expired; otherwise every
+ * board refresh would compete with the agents' own writes. */
 static void spec_attempt_sweep(Cg *g) {
+    sqlite3_stmt *q = cg_prep(g,
+        "SELECT EXISTS(SELECT 1 FROM attempts WHERE state='running' "
+        "AND expires<=strftime('%s','now')) "
+        "OR EXISTS(SELECT 1 FROM leases WHERE expires<=strftime('%s','now'))");
+    bool any = sqlite3_step(q) == SQLITE_ROW && sqlite3_column_int(q, 0) != 0;
+    sqlite3_finalize(q);
+    if (!any) return;
     cg_exec(g,
         "UPDATE attempts SET state='expired',reason='heartbeat expired' "
         "WHERE state='running' AND expires<=strftime('%s','now');"
@@ -1679,7 +1689,8 @@ static int spec_wave_cmd(Spec *s, bool json) {
     return 0;
 }
 
-/* upsert one lease; runs inside whatever transaction the caller holds */
+/* upsert one lease; runs inside whatever transaction the caller holds —
+ * always a BEGIN IMMEDIATE one, so the write never fails on lock upgrade */
 static int spec_lease_upsert(Cg *g, const char *tag, const char *agent,
                              const char *host, const char *session, long now,
                              long ttl_min, const char *touches,
@@ -1705,16 +1716,26 @@ static int spec_lease_upsert(Cg *g, const char *tag, const char *agent,
 /* A finished task's lease must die with it, or the next `spec ready` keeps
  * reporting a conflict against work that is already over. Quiet no-op when
  * the repo has no .codegraph. */
+/* Best effort: the status is already in the kvx file, so a busy database
+ * must not undo a `done`. The lease expires on its own; say so rather than
+ * leave a silent stale lease for the next parallel agent to trip over. */
 static void spec_release_lease(Spec *s, const char *id) {
     Cg g;
     if (!memory_open_quiet(&g)) return;
     char tag[700];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    if (cg_begin_write(&g) != 0) {
+        fprintf(stderr, "cg spec: lease for %s not released (database busy); "
+                        "it expires on its own\n", id);
+        cg_close(&g);
+        return;
+    }
     spec_attempt_finish(&g, tag, "completed", "task left active execution");
     sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
     sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
     sqlite3_step(st);
     sqlite3_finalize(st);
+    cg_exec(&g, "COMMIT");
     cg_close(&g);
 }
 
@@ -2540,7 +2561,10 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
 
 /* ---------------- graph-verified completion + trace ---------------- */
 
-/* open + quietly refresh the cwd's Codify project; false when absent */
+/* open + quietly refresh the cwd's Codify project; false when absent. A
+ * database still busy after the full lock wait means another process is
+ * indexing: the checks then run on the last completed index, with a warning,
+ * rather than failing qualification on a lock. */
 static bool spec_graph_open(Cg *g) {
     char root[4096];
     if (cg_find_root(root, sizeof root) != 0) return false;
@@ -2548,7 +2572,10 @@ static bool spec_graph_open(Cg *g) {
     SysInfo si;
     sysinfo_detect(&si);
     IndexStats st;
-    cg_index(g, &si, false, &st, true);
+    if (cg_index(g, &si, false, &st, true) != 0 && st.busy)
+        fprintf(stderr, "cg spec: graph refresh skipped — the database is "
+                        "busy (another cg process is indexing); checks use "
+                        "the last completed index\n");
     return true;
 }
 

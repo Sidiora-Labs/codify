@@ -9,8 +9,8 @@ dependencies beyond libsqlite3. C11 + POSIX. Every module is a single
 ```
         walk (ignore rules)            pthread workers            single writer
 files ───────────────────────► jobs ──────────────────► parsed ───────────────► SQLite
-                                        (regex-based                 (one
-                                         language specs)              transaction)
+                                        (regex-based                 (short chunked
+                                         language specs)              transactions)
 ```
 
 - **`sysinfo.c`** sizes the pipeline before anything runs: effective cores =
@@ -20,7 +20,14 @@ files ───────────────────────► j
   16-core workstation and a 512 MB container.
 - **`scan.c`** walks the tree, diffs (mtime, size) against the `files`
   table, fans changed files out to a worker pool through a bounded ring
-  buffer, and writes results back on the main thread in one transaction.
+  buffer, and writes results back on the main thread in short chunked
+  transactions (`INDEX_CHUNK` files per `BEGIN IMMEDIATE`). Parsing happens
+  outside the lock, so the write lock is held for milliseconds at a time
+  and every other `cg` process gets a turn between chunks. When the lock
+  cannot be taken within the caller's wait, the index stops at a chunk
+  boundary, records `index_pending_resolve` so the next run finishes edge
+  resolution, and returns busy instead of exiting — the LSP and the
+  watcher defer and retry; CLI commands report it (see below).
 - **`lang.c` / `routes.c`** are table-driven: a language is a comment/string
   spec plus POSIX ERE definition patterns; a framework route is one regex
   row. Adding a language or framework is adding a table entry. Extraction
@@ -80,11 +87,39 @@ LCS at line level. `cg changes` joins the working-tree diff against the
 graph to list touched symbols and their external callers. `cg commit`
 tags its message with the in-progress spec task when one exists.
 
+## Database locking (`db.c`)
+
+The graph is one SQLite file in WAL mode, shared by every `cg` process in
+a checkout: the editor's `cg lsp`, `cg watch`, `cg mcp`, and each agent's
+CLI calls. Only one writer exists at a time, so the rules are about who
+waits and for how long.
+
+- Every write transaction is `BEGIN IMMEDIATE`, taken through
+  `cg_begin_write`, so a writer either has the lock or knows it does not;
+  a deferred `BEGIN` that upgrades mid-transaction would fail with
+  `SQLITE_BUSY_SNAPSHOT` and lose the work.
+- CLI commands wait `CG_BUSY_TIMEOUT_MS` (default 30 s) for the lock. An
+  agent updating task state during an editor index therefore waits a
+  moment and succeeds. Only after the whole wait does `cg_exec` print an
+  actionable message — which process class holds the lock, that nothing
+  was applied, that the same command is safe to retry — and exit 75
+  (`CG_EXIT_BUSY`, EX_TEMPFAIL) rather than a generic "database is locked".
+- Long-lived servers (`cg lsp`, `cg watch`) set a short `lock_wait_ms`
+  and never exit on busy: their index is deferred and retried later, and
+  they keep answering from the last completed index meanwhile.
+- Read-only paths must not take the write lock: `spec_attempt_sweep`
+  checks for expired attempts before it opens a write, so editor board
+  polling of `cg spec status` does not compete with agents' writes.
+- `spec done` refreshes the graph before its checks; if the database is
+  still busy after the full wait it warns and checks against the last
+  index rather than failing qualification on a lock.
+
 ## Watcher (`watch.c`)
 
 Recursive inotify with dynamic directory registration and a debounce
-loop; each quiet period triggers an incremental index. Non-Linux
-platforms stub out behind the same interface.
+loop; each quiet period triggers an incremental index. A busy database
+turns into a retry after the next debounce. Non-Linux platforms stub
+out behind the same interface.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
@@ -281,6 +316,12 @@ definition, references, hover, document and workspace symbols, and code
 lens straight from the graph — no compiler, no toolchain, no project
 configuration. Reading reuses `json.c`, the same scanner the MCP server
 uses; LSP's zero-based positions are converted at the boundary.
+
+The server refreshes the graph on `initialized`, `didOpen`, and `didSave`
+with a 1.5 s lock wait; when another process holds the lock it logs one
+"index deferred" line to stderr, keeps serving from the last index, and
+retries on the next message after 3 s. It never blocks an agent's write
+for long, and it never dies on a lock.
 
 Diagnostics are the reason it exists as much as navigation: an
 unparseable kvx file and an edit outside the active task's `touches` are

@@ -355,7 +355,8 @@ int cmd_recall_near(Cg *cg, const char *path, int limit, bool json) {
 
 /* Automatic outcome memories accumulate: every `spec done`, every refusal.
  * Compaction keeps the newest of each identical body and drops exact repeats,
- * so recall stays about signal rather than volume. */
+ * so recall stays about signal rather than volume. Deletes run in one
+ * BEGIN IMMEDIATE transaction so the lock is taken up front, not mid-way. */
 int cmd_memory_compact(Cg *cg, bool dry_run, bool json) {
     sqlite3_stmt *st = cg_prep(cg,
         "SELECT COUNT(*) FROM memories m WHERE EXISTS ("
@@ -367,7 +368,7 @@ int cmd_memory_compact(Cg *cg, bool dry_run, bool json) {
     sqlite3_finalize(st);
 
     if (!dry_run && dupes) {
-        cg_exec(cg, "BEGIN");
+        cg_exec(cg, "BEGIN IMMEDIATE");
         cg_exec(cg,
             "DELETE FROM memory_fts WHERE rowid IN ("
             "  SELECT m.id FROM memories m WHERE EXISTS ("
