@@ -58,6 +58,9 @@ for t in ("search_code", "get_context", "impact_analysis", "survey",
           "remember", "recall", "spec_ready", "spec_claim_next",
           "spec_release", "handoff", "resume"):
     assert t in tools, f"missing tool {t}"
+for t in ("docs_status", "docs_plan", "docs_packet", "docs_check",
+          "docs_trace", "docs_close"):
+    assert t in tools, f"missing documentation tool {t}"
 for t in by_id[2]["result"]["tools"]:
     assert t["description"], f"tool {t['name']} has no description"
     assert "inputSchema" in t, f"tool {t['name']} has no schema"
@@ -188,6 +191,13 @@ for name in ('brief', 'review', 'why', 'get_source', 'test_impact',
              'resume', 'state', 'event_ingest', 'event_history',
              'progress_status', 'work_open', 'work_update', 'work_close'):
     assert name in by, ('missing tool', name)
+for name in ('docs_status','docs_plan','docs_packet','docs_check',
+             'docs_trace','docs_close'):
+    assert name in by, ('missing documentation tool', name)
+for name in ('docs_status','docs_plan','docs_trace'):
+    assert by[name]['annotations']['readOnlyHint'] is True, name
+for name in ('docs_packet','docs_check','docs_close'):
+    assert by[name]['annotations']['readOnlyHint'] is False, name
 assert by['state']['annotations']['readOnlyHint'] is True
 assert by['event_history']['annotations']['readOnlyHint'] is True
 assert by['progress_status']['annotations']['readOnlyHint'] is True

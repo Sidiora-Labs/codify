@@ -2,7 +2,7 @@
 
 [meta]
 name            = "Codify Workflow"
-active_feature  = "codify-v08"
+active_feature  = "codify-v09"
 source_of_truth = "spec/ (kvx). Generated files are pointers — regenerate, never hand-edit."
 
 [mode]

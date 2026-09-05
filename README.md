@@ -38,6 +38,8 @@ The layers reinforce each other: commits are auto-tagged with the task they impl
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
+**And documentation is the last verified task.** New feature specs enable an `@docs` closure stage by default. Once every ordinary task qualifies, Codify builds a bounded evidence packet from the spec, task-attributed snapshots, code graph, routes, memories, checks, and existing docs. The same configured agent connector updates user and developer documentation, while `cg docs check` checks declared claim references, local inline links, required graph-surface coverage, and configured target scope. `cg docs close` records a dedicated `[spec:<feature>/@docs]` snapshot and an incremental baseline for the next spec flow. These structural checks support review; they do not certify every sentence's meaning.
+
 There are no API keys, no background services, and no telemetry. Everything runs on your machine and stays there.
 
 ## Why Codify
@@ -268,10 +270,38 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 | `cg spec implemented <id>` | In Prod mode, run source graph checks without executing `verify_cmd`, then mark coding complete as `implemented` (unchecked; qualification pending; no `--force`) |
 | `cg spec done <id>` | From `in_progress` or `implemented`, run the task's `verify_cmd` and graph checks; mark it `done` only when qualification passes, otherwise preserve `implemented` |
 | `cg spec trace [<id>]` | Trace tasks to code: declared symbols resolved in the graph (location, kind, refs), touched paths matched against actual changes, the commits tagged with the task, and its memories |
+| `cg spec docs <status\|auto\|manual\|off\|start\|block\|reset>` | Inspect or configure the reserved `@docs` closure stage. New specs use `auto`; specs without a `[documentation]` section retain legacy completion behavior until explicitly enabled |
 
 `mode`, `start`, `implemented`, and `done` rewrite only the single `status = "..."` or mode setting line in the kvx file. Every other byte, comment, and blank line survives. The command then quietly re-renders so the checkboxes in `tasks.md` stay current; implemented tasks remain unchecked and carry `Implemented - qualification pending`. The kvx files remain the single source of truth, and `-f <feature>` overrides `[meta] active_feature`.
 
 `cg commit` automatically tags its message with the in-progress task, for example `... [spec:ion_spec/16.7]`, so `cg log` and `cg changelog` trace every snapshot back to the spec. The spec commands are also exposed as MCP tools, letting a connected agent plan (`spec_new`, `spec_add`, `spec_lint`), drive the standard loop (next, start, snapshot, done) or the Prod loop (next, start, snapshot, implemented, qualification, done), and work the parallel frontier (`spec_ready`, `spec_claim_next`, `spec_release`, `handoff`, `resume`) without leaving the protocol.
+
+### Documentation closure
+
+`@docs` is feature-level work rather than a synthetic numbered implementation task. In `auto` mode, `cg spec next` and `cg spec claim-next` return it after the last leaf task is qualified, so `cg spec run` launches it through the existing Codex, Claude, or custom driver with the same lease, fence, heartbeat, log, and failure recovery. `manual` keeps it visible for an explicitly started agent; `off` intentionally skips it. An older spec with no `[documentation]` section uses `legacy` behavior and can opt in with `cg spec docs auto` or `cg spec docs manual`.
+
+Documentation commands accept `-f <feature>` like the spec commands. When renaming a feature directory, completed tasks can retain their original snapshot attribution with `evidence_task = "original-feature/task-id"`; new snapshots still use the current feature name.
+
+```ini
+[documentation]
+mode      = "auto"
+status    = "pending"
+audiences = ["user", "developer"]
+targets   = ["README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md"]
+```
+
+| Command | Contract |
+|---|---|
+| `cg docs status` | Current mode, effective state, targets, and baseline mode |
+| `cg docs plan` | Read-only baseline or incremental plan, audience requirements, target scope, and existing documentation inventory |
+| `cg docs packet` | Write `.codegraph/docs/<feature>/packet.md`, `provenance.json`, `claims.kvx`, and `required.kvx` from bounded local evidence |
+| `cg docs check` | Validate target scope, document preservation, local links, audience mappings, claim evidence, commands, repository paths, symbols, routes, and required changed public surface |
+| `cg docs trace` | Connect documentation claims and snapshots to source task snapshots, provenance, and the last baseline |
+| `cg docs close` | Re-run the checks, create the attributed snapshot, close the fenced `@docs` attempt, and record the project-wide incremental baseline |
+
+The agent fills `claims.kvx`; Codify regenerates `required.kvx`. Every claim must name a configured document and local evidence. User guidance, developer guidance, release or migration notes, exclusions, and unresolved items remain separate fields so missing evidence cannot quietly become product prose. The checker never deletes or renames a canonical document, never accepts writes outside the configured targets, and revokes its verification marker after any failure.
+
+These checks establish structural grounding, not the truth of every sentence: agents must record factual claims and reviewers must assess their meaning. Local inline Markdown links are checked for existing repository destinations; external URLs, fragment anchors, reference-style links, and runtime behavior are not certified. Missing source evidence is labeled unavailable. Generated packets and markers live under `.codegraph/docs/`; project-owned Markdown or reStructuredText files remain the public output. All six operations are also exposed through MCP, and VS Code shows the closure item plus plan, packet, check, and trace actions.
 
 ### Parallel mode
 

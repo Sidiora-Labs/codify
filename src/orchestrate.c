@@ -116,6 +116,18 @@ static int orch_call_resume(void *v) {
     return cmd_resume(c->g, c->task, false, true);
 }
 
+static int orch_call_docs_packet(void *v) {
+    Cg *g = v;
+    char *argv[] = { (char *)"packet" };
+    return cmd_docs(g, 1, argv, false);
+}
+
+/* The reserved closure item uses the same connector and fenced attempt as a
+ * coding task, but its prompt comes from the documentation evidence packet. */
+static bool orch_docs_ready(const char *id) {
+    return id && strcmp(id, CG_DOC_TASK) == 0;
+}
+
 /* ---------------- driver command lines ---------------- */
 
 static int split_args(const char *s, char **av, int n, int cap) {
@@ -246,11 +258,13 @@ static char *orch_task_status(const char *specroot, const char *feature,
     Kvx *k = kvx_parse(path);
     if (!k) return NULL;
     char sec[300];
-    snprintf(sec, sizeof sec, "task.%s", id);
+    if (orch_docs_ready(id)) snprintf(sec, sizeof sec, "documentation");
+    else snprintf(sec, sizeof sec, "task.%s", id);
     char *st = kvx_str(k, sec, "status");
     kvx_free(k);
     if (st && (strcmp(st, "done") == 0 ||
-               strcmp(st, "implemented") == 0) && attempt && attempt[0]) {
+               (!orch_docs_ready(id) && strcmp(st, "implemented") == 0)) &&
+        attempt && attempt[0]) {
         Cg g;
         bool completed = false;
         if (memory_open_quiet(&g)) {
@@ -293,12 +307,17 @@ static void orch_abandon(const char *specroot, const char *feature,
     if (rr != 0) return;
     char path[4600], sec[300];
     snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", specroot, feature);
-    snprintf(sec, sizeof sec, "task.%s", id);
+    if (orch_docs_ready(id)) snprintf(sec, sizeof sec, "documentation");
+    else snprintf(sec, sizeof sec, "task.%s", id);
     char *st = NULL;
     Kvx *k = kvx_parse(path);
     if (k) { st = kvx_str(k, sec, "status"); kvx_free(k); }
-    if (st && strcmp(st, "in_progress") == 0 &&
-        kvx_set_status(path, sec, "pending") == 0) {
+    int src = -1;
+    if (st && strcmp(st, "in_progress") == 0)
+        src = orch_docs_ready(id)
+            ? kvx_set_string(path, sec, "status", "pending")
+            : kvx_set_status(path, sec, "pending");
+    if (src == 0) {
         out = NULL;
         orch_spec(&out, false, 1, (char *)"render");  /* keep mirrors fresh */
         free(out);
@@ -316,7 +335,9 @@ static void orch_note_failure(const char *feature, const char *id, int rc) {
     cg_close(&g);
 }
 
-/* the agent's briefing, straight from the resume --prompt machinery */
+/* The agent's briefing comes from resume for code tasks and from the grounded
+ * packet for @docs. The packet also tells the agent that `cg docs close`, not
+ * recursive orchestration or `spec done`, is the only valid exit. */
 static int orch_write_prompt(const char *cgroot, const char *feature,
                              const char *id, char *path, size_t cap) {
     char dir[4600];
@@ -328,13 +349,25 @@ static int orch_write_prompt(const char *cgroot, const char *feature,
     if (!memory_open_quiet(&g)) return -1;
     char *out = NULL;
     OrchResumeCall c = { &g, id };
-    int rc = cg_capture(&out, orch_call_resume, &c);
+    int rc = orch_docs_ready(id)
+        ? cg_capture(&out, orch_call_docs_packet, &g)
+        : cg_capture(&out, orch_call_resume, &c);
     cg_close(&g);
     if (rc != 0 || !out || !out[0]) {
         free(out);
         return -1;
     }
-    int wrc = write_entire_file(path, out, strlen(out));
+    StrBuf prompt; sb_init(&prompt);
+    if (orch_docs_ready(id)) {
+        sb_puts(&prompt, "You own Codify's final @docs closure. Use the evidence "
+                "packet below to update only the configured documentation targets. "
+                "Keep user, developer, and release coverage explicit; update the "
+                "claims ledger when needed; finish only with `cg docs close`. Do not "
+                "run `cg spec run` or `cg spec done @docs`.\n\n");
+    }
+    sb_puts(&prompt, out);
+    int wrc = write_entire_file(path, prompt.p, prompt.len);
+    sb_free(&prompt);
     free(out);
     return wrc;
 }

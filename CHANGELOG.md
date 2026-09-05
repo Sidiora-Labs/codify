@@ -2,6 +2,14 @@
 
 _Maintained from local Codify snapshots (`cg log`); symbol-level changes are derived from the code graph._
 
+## 2026-09-05 — Codify 0.9.0 Evidence-grounded documentation closure
+
+- New feature specs end with a reserved `@docs` stage by default, with explicit `auto`, `manual`, `off`, and backward-compatible `legacy` policy modes
+- `cg docs plan`, `packet`, `check`, `trace`, and `close` turn specs, task-tagged snapshots, graph symbols, routes, memories, checks, and existing docs into a bounded evidence packet plus claim and provenance ledgers
+- Documentation only closes after target-scope, preservation, local-link, audience, claim-evidence, command, path, symbol, route, and changed-public-surface checks pass; closure creates a `[spec:<feature>/@docs]` snapshot and incremental baseline
+- `cg spec run` dispatches `@docs` through the configured Codex, Claude, or custom connector with existing leases, fences, heartbeats, logs, and failure recovery; completion never recursively spawns another agent
+- MCP exposes separately annotated documentation status, plan, packet, check, trace, and close tools, while the VS Code task board and agent sessions expose the same lifecycle and guarded close path
+
 ## 2026-09-04 — Codify 0.8.5 writable graph under the editor
 
 - The indexer writes in short chunked `BEGIN IMMEDIATE` transactions with parsing outside the lock, so `cg lsp`, `cg watch`, and `cg mcp` no longer hold the graph database for a whole index while an agent tries to record task state

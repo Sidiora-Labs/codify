@@ -57,7 +57,7 @@ static int resolve_commit(const Cg *cg, const char *ref, char out[65]) {
     if (!ref || strcmp(ref, "HEAD") == 0) return head_read(cg, out);
     size_t n = strlen(ref);
     if (n == 64) { snprintf(out, 65, "%s", ref); return 0; }
-    if (n < 4) return -1;
+    if (n < 4 || n > 64) return -1;
     char dir[4900];
     snprintf(dir, sizeof dir, "%s/%s/%.2s", cg->root, CG_OBJECTS, ref);
     DIR *d = opendir(dir);
@@ -65,9 +65,11 @@ static int resolve_commit(const Cg *cg, const char *ref, char out[65]) {
     struct dirent *e;
     int found = 0;
     while ((e = readdir(d))) {
-        if (e->d_name[0] == '.') continue;
-        char full[130];
-        snprintf(full, sizeof full, "%.2s%s", ref, e->d_name);
+        if (strlen(e->d_name) != 62 ||
+            strspn(e->d_name, "0123456789abcdef") != 62) continue;
+        char full[65];
+        memcpy(full, ref, 2);
+        memcpy(full + 2, e->d_name, 63);
         if (strncmp(full, ref, n) == 0) {
             if (found++) { closedir(d); return -2; }   /* ambiguous */
             snprintf(out, 65, "%s", full);
@@ -116,7 +118,7 @@ static void snapshot_tree(const Cg *cg, Manifest *m, bool store) {
         char rel[4096];
         snprintf(rel, sizeof rel, "%s", stack[--sp].rel);
         char abs[4900];
-        snprintf(abs, sizeof abs, "%s/%s", cg->root, rel[0] ? rel : ".");
+        if (!path_format(abs, sizeof abs, "%s/%s", cg->root, rel[0] ? rel : ".")) continue;
         DIR *d = opendir(abs);
         if (!d) continue;
         struct dirent *e;
@@ -124,10 +126,12 @@ static void snapshot_tree(const Cg *cg, Manifest *m, bool store) {
             if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
                 continue;
             char crel[4096];
-            if (rel[0]) snprintf(crel, sizeof crel, "%s/%s", rel, e->d_name);
+            if (rel[0]) {
+                if (!path_format(crel, sizeof crel, "%s/%s", rel, e->d_name)) continue;
+            }
             else        snprintf(crel, sizeof crel, "%s", e->d_name);
             char cabs[4900];
-            snprintf(cabs, sizeof cabs, "%s/%s", cg->root, crel);
+            if (!path_format(cabs, sizeof cabs, "%s/%s", cg->root, crel)) continue;
             struct stat st;
             if (lstat(cabs, &st) != 0 || S_ISLNK(st.st_mode)) continue;
             if (ignore_match(&ig, crel, S_ISDIR(st.st_mode))) continue;

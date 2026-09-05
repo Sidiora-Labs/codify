@@ -10,6 +10,9 @@ cd "$TMP/proj"
 echo 'export function alpha(){}' > src/a.ts
 
 "$CG" spec new orch >/dev/null
+# This suite isolates numbered-task scheduling; @docs connector closure is
+# exercised end to end by 24_docs.sh.
+"$CG" spec docs off >/dev/null
 "$CG" spec start 1.1 >/dev/null
 "$CG" spec done 1.1 >/dev/null
 

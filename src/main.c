@@ -63,6 +63,8 @@ static void usage(void) {
 "                           configure and diagnose every agent host\n"
 "  changelog [-n N] [-o F]  changelog from snapshots with symbol-level diffs\n"
 "  agentmd [--write]        generate .codify/agent-context.md from the graph\n"
+"  docs status|plan|packet  grounded documentation closure evidence;\n"
+"                           generate is an alias for packet\n"
 "  check [--strict]         one CI gate: render, lint, evidence, tree\n"
 "  brief                    session state: task, changes, decisions\n"
 "  review                   changed symbols vs acceptance criteria + risk\n"
@@ -77,6 +79,8 @@ static void usage(void) {
 "  spec render [--check]    regenerate IDE pointer files + markdown mirror\n"
 "  spec [status]            task board for the active feature\n"
 "  spec next                next eligible task with its acceptance criteria\n"
+"  spec docs <action>       documentation closure: status, auto, manual,\n"
+"                           off, start, block, reset, done\n"
 "  spec ready               all eligible tasks across waves (parallel view)\n"
 "  spec claim-next          atomically claim the first conflict-free task;\n"
 "                           --agent <name>, --ttl <min>\n"
@@ -442,6 +446,8 @@ int main(int argc, char **argv) {
         IndexStats st;
         cg_index(&cg, &si, false, &st, true);   /* fresh graph first */
         rc = cmd_agentmd(&cg, write_files);
+    } else if (strcmp(cmd, "docs") == 0) {
+        rc = cmd_docs(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "handoff") == 0) {
         const char *task = opt(&argc, argv, "--task", NULL);
         const char *done = opt(&argc, argv, "--done", NULL);

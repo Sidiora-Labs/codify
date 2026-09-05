@@ -81,6 +81,10 @@ async function specMode() {
 }
 
 async function taskStatus(id) {
+    if (id === '@docs') {
+        const s = await deps.cgJson(['spec', 'status']);
+        return s && s.documentation && s.documentation.status;
+    }
     const t = await deps.cgJson(['spec', 'trace']);
     const row = t && t.tasks && t.tasks.find((x) => x.id === id);
     return row ? row.status : undefined;
@@ -116,8 +120,18 @@ function taskIdFrom(arg) {
 async function promptFileFor(id) {
     const root = deps.workspaceRoot();
     if (!root) return undefined;
-    const r = await deps.cg(['resume', '--task', id, '--prompt']);
+    const r = id === '@docs'
+        ? await deps.cg(['docs', 'packet'])
+        : await deps.cg(['resume', '--task', id, '--prompt']);
     let body = r.code === 0 ? r.stdout : '';
+    if (id === '@docs' && !body.trim())
+        throw new Error('Documentation evidence packet failed: ' + r.stderr);
+    if (id === '@docs' && body.trim()) {
+        body = 'You own Codify\'s final @docs closure. Update only configured ' +
+            'documentation targets from this evidence, keep user, developer, ' +
+            'and release coverage explicit, then finish with `cg docs close`. ' +
+            'Do not run `cg spec run` or `cg spec done @docs`.\n\n' + body;
+    }
     if (!body.trim()) {
         const b = await deps.cg(['brief']);
         body = `You are resuming Codify task ${id}.\n\n` +
@@ -213,7 +227,9 @@ async function startAgentSession(id, headless) {
         }
         claimed = true;
     }
-    const s = await deps.cg(['spec', 'start', id]);
+    const s = id === '@docs'
+        ? await deps.cg(['spec', 'docs', 'start'])
+        : await deps.cg(['spec', 'start', id]);
     if (s.code !== 0) {
         /* already in_progress is a normal pickup, not a stop */
         vscode.window.showWarningMessage(

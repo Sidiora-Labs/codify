@@ -3,7 +3,7 @@
  * classify origin as repo, manifest, system, or unknown.
  *
  * Runs once after the parallel parse, over the database, single-threaded.
- * The Makefile globs src/*.c, so there is no build change.
+ * The Makefile discovers C sources in src, so there is no build change.
  */
 #include "cg.h"
 #include <ctype.h>
@@ -52,7 +52,7 @@ static bool manifest_has(const Manifest *m, const char *module) {
 /* package.json: read dependencies and devDependencies keys */
 static void load_package_json(const char *root, Manifest *js) {
     char path[4096];
-    snprintf(path, sizeof path, "%s/package.json", root);
+    if (!path_format(path, sizeof path, "%s/package.json", root)) return;
     size_t len;
     char *data = read_entire_file(path, &len);
     if (!data) return;
@@ -76,7 +76,7 @@ static void load_package_json(const char *root, Manifest *js) {
 /* go.mod: require ( ... ) blocks and single require lines */
 static void load_go_mod(const char *root, Manifest *go) {
     char path[4096];
-    snprintf(path, sizeof path, "%s/go.mod", root);
+    if (!path_format(path, sizeof path, "%s/go.mod", root)) return;
     size_t len;
     char *data = read_entire_file(path, &len);
     if (!data) return;
@@ -119,7 +119,7 @@ static void load_go_mod(const char *root, Manifest *go) {
 /* requirements.txt / pyproject.toml: line-shaped dependency names */
 static void load_requirements_txt(const char *root, Manifest *py) {
     char path[4096];
-    snprintf(path, sizeof path, "%s/requirements.txt", root);
+    if (!path_format(path, sizeof path, "%s/requirements.txt", root)) return;
     size_t len;
     char *data = read_entire_file(path, &len);
     if (!data) return;
@@ -147,7 +147,7 @@ static void load_requirements_txt(const char *root, Manifest *py) {
 /* pyproject.toml: [project] dependencies = [...] — very simple extraction */
 static void load_pyproject_toml(const char *root, Manifest *py) {
     char path[4096];
-    snprintf(path, sizeof path, "%s/pyproject.toml", root);
+    if (!path_format(path, sizeof path, "%s/pyproject.toml", root)) return;
     size_t len;
     char *data = read_entire_file(path, &len);
     if (!data) return;
@@ -182,7 +182,7 @@ static void load_pyproject_toml(const char *root, Manifest *py) {
 /* Cargo.toml: [dependencies] section, key = "version" or key = { ... } */
 static void load_cargo_toml(const char *root, Manifest *rs) {
     char path[4096];
-    snprintf(path, sizeof path, "%s/Cargo.toml", root);
+    if (!path_format(path, sizeof path, "%s/Cargo.toml", root)) return;
     size_t len;
     char *data = read_entire_file(path, &len);
     if (!data) return;
@@ -255,7 +255,7 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
             if (up) *up = 0;
             m += 3;
         }
-        snprintf(resolved, sizeof resolved, "%s/%s", dir, m);
+        if (!path_format(resolved, sizeof resolved, "%s/%s", dir, m)) return -1;
     } else if (module[0] != '.' && module[0] != '/') {
         /* bare name — try as a path from root */
         snprintf(resolved, sizeof resolved, "%s", module);
@@ -296,7 +296,7 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
     if (exts) {
         for (int i = 0; exts[i] && fid < 0; i++) {
             char trial[4096];
-            snprintf(trial, sizeof trial, "%s%s", rp, exts[i]);
+            if (!path_format(trial, sizeof trial, "%s%s", rp, exts[i])) continue;
             sqlite3_bind_text(q, 1, trial, -1, SQLITE_STATIC);
             if (sqlite3_step(q) == SQLITE_ROW)
                 fid = sqlite3_column_int64(q, 0);
@@ -307,7 +307,7 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
     if (fid < 0 && exts == JS_EXTS) {
         for (int i = 0; JS_EXTS[i] && fid < 0; i++) {
             char trial[4096];
-            snprintf(trial, sizeof trial, "%s/index%s", rp, JS_EXTS[i]);
+            if (!path_format(trial, sizeof trial, "%s/index%s", rp, JS_EXTS[i])) continue;
             sqlite3_bind_text(q, 1, trial, -1, SQLITE_STATIC);
             if (sqlite3_step(q) == SQLITE_ROW)
                 fid = sqlite3_column_int64(q, 0);
@@ -323,13 +323,19 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
             pkgpath[j++] = (*c == '.') ? '/' : *c;
         pkgpath[j] = 0;
         char trial[4096];
-        snprintf(trial, sizeof trial, "%s/__init__.py", pkgpath);
+        if (!path_format(trial, sizeof trial, "%s/__init__.py", pkgpath)) {
+            sqlite3_finalize(q);
+            return -1;
+        }
         sqlite3_bind_text(q, 1, trial, -1, SQLITE_STATIC);
         if (sqlite3_step(q) == SQLITE_ROW)
             fid = sqlite3_column_int64(q, 0);
         sqlite3_reset(q);
         if (fid < 0) {
-            snprintf(trial, sizeof trial, "%s.py", pkgpath);
+            if (!path_format(trial, sizeof trial, "%s.py", pkgpath)) {
+                sqlite3_finalize(q);
+                return -1;
+            }
             sqlite3_bind_text(q, 1, trial, -1, SQLITE_STATIC);
             if (sqlite3_step(q) == SQLITE_ROW)
                 fid = sqlite3_column_int64(q, 0);
@@ -717,12 +723,6 @@ static int load_imports(Cg *cg, long file_id, ImpCache *out, int cap) {
     }
     sqlite3_finalize(q);
     return n;
-}
-
-static int path_depth(const char *p) {
-    int d = 0;
-    for (; *p; p++) if (*p == '/') d++;
-    return d;
 }
 
 void resolve_refs(Cg *cg) {

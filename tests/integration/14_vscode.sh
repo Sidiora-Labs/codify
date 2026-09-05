@@ -26,9 +26,18 @@ const src = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8') +
 if (pkg.publisher !== 'SidioraLabs' || pkg.name !== 'codify') {
     throw new Error(`unexpected Marketplace identity: ${pkg.publisher}.${pkg.name}`);
 }
-if (pkg.version !== '1.2.0') {
-    throw new Error(`expected the visible 1.2.0 build, got ${pkg.version}`);
+if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+    throw new Error(`invalid installed extension version: ${pkg.version}`);
 }
+const { AcpClient } = require(path.join(dir, 'acp.js'));
+const probe = new AcpClient();
+probe.start = async () => {};
+probe.request = async (method, params) => {
+    if (method !== 'initialize' || params.clientInfo.version !== pkg.version)
+        throw new Error('ACP handshake does not advertise the installed version');
+    return { protocolVersion: 1 };
+};
+probe.initialize().catch((e) => { console.error(e); process.exitCode = 1; });
 if (!/version: extensionVersion\(\)/.test(src)) {
     throw new Error('agent view does not receive the installed extension version');
 }

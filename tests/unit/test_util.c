@@ -4,6 +4,12 @@
 #include <unistd.h>
 
 int main(void) {
+    char joined[8];
+    ok(path_format(joined, sizeof joined, "%s/%s", "src", "api"), "exact fit path");
+    ok_str(joined, "src/api");
+    ok(!path_format(joined, sizeof joined, "%s/%s", "src", "apis"), "overflow rejected");
+    ok_str(joined, "");
+    ok(!path_format(NULL, 0, "%s", "path"), "zero capacity rejected");
     /* StrBuf */
     StrBuf b; sb_init(&b);
     sb_puts(&b, "hello");

@@ -51,6 +51,12 @@ if (/<[^>]+\sstyle=/.test(html)) throw new Error('inline style attribute in pane
 
 // every slash command the chat offers must be answerable by acp.js
 const acp = fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
+for (const command of ['docs', 'docplan', 'doccheck', 'doctrace']) {
+    if (!new RegExp(`(^|\\s)${command}:\\s*\\{`, 'm').test(acp))
+        throw new Error(`ACP is missing /${command}`);
+}
+if (!/id === '@docs'[\s\S]+docs', 'close'/.test(acp))
+    throw new Error('@docs completion does not use cg docs close');
 const offered = [...m[1].matchAll(/\{ n: '([a-z]+)'/g)].map((x) => x[1]);
 if (offered.length < 10) throw new Error('command palette looks empty');
 const cgCmds = acp.slice(acp.indexOf('const CG_CMDS'));

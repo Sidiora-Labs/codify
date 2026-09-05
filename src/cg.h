@@ -20,9 +20,11 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "0.8.0"
+#define CG_VERSION  "0.9.0"
 #define CG_MCP_VERSION "2025-11-25"
 #define CG_AGENT_CONTEXT ".codify/agent-context.md"
+#define CG_DOC_TASK "@docs"
+#define CG_DOCS_DIR ".codegraph/docs"
 
 /* ---------------- sysinfo: adapt to the machine ---------------- */
 typedef struct {
@@ -56,6 +58,8 @@ char *xstrdup(const char *s);
 char *read_entire_file(const char *path, size_t *out_len); /* NUL-terminated */
 int   write_entire_file(const char *path, const void *data, size_t len);
 int   mkdirs(const char *path);                 /* mkdir -p for dirs */
+bool path_format(char *out, size_t cap, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4))); /* false and empty on overflow */
 long  now_ms(void);
 bool  looks_binary(const char *data, size_t len);
 const char *path_ext(const char *path);
@@ -466,5 +470,7 @@ int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */
 int cmd_mcp_install(Cg *cg);                       /* wire into agent configs */
 int cmd_changelog(Cg *cg, int limit, const char *outfile);
 int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */
+int cmd_docs(Cg *cg, int argc, char **argv, bool json); /* documentation closure */
+int spec_docs_finish(Cg *cg, const char *feature); /* internal checked closure */
 
 #endif

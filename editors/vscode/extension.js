@@ -37,7 +37,7 @@ function workspaceRoot() {
 /* run cg with args; resolves {code, stdout, stderr} and never rejects */
 function cg(args) {
     const feature = config().get('feature');
-    const specish = args[0] === 'spec';
+    const specish = args[0] === 'spec' || args[0] === 'docs';
     const full = feature && specish ? [...args, '-f', feature] : args;
     return new Promise((resolve) => {
         cp.execFile(binary(), full,
@@ -103,7 +103,7 @@ class TaskProvider {
             if (!byWave.has(t.wave)) byWave.set(t.wave, []);
             byWave.get(t.wave).push(t);
         }
-        return [...byWave.keys()].sort((a, b) => a - b).map((w) => {
+        const nodes = [...byWave.keys()].sort((a, b) => a - b).map((w) => {
             const tasks = byWave.get(w);
             const done = tasks.filter((t) => t.status === 'done').length;
             const impl = tasks.filter((t) => t.status === 'implemented').length;
@@ -120,6 +120,18 @@ class TaskProvider {
                 done === tasks.length ? 'layers-dot' : 'layers');
             return it;
         });
+        const d = this.model.status.documentation;
+        if (d && d.configured && d.mode !== 'off') {
+            const task = { id: '@docs', title: 'Generate and verify project documentation',
+                status: d.status, wave: 'closure', virtual: true };
+            const it = new vscode.TreeItem('Documentation closure',
+                d.status === 'done' ? vscode.TreeItemCollapsibleState.Collapsed
+                                    : vscode.TreeItemCollapsibleState.Expanded);
+            it.kind = 'wave'; it.tasks = [task];
+            it.description = d.status; it.iconPath = new vscode.ThemeIcon('book');
+            nodes.push(it);
+        }
+        return nodes;
     }
 
     taskNode(t) {
@@ -339,7 +351,8 @@ async function afterMutation() {
 async function cmdStart(arg) {
     const id = taskIdFrom(arg) || await pickTask('pending');
     if (!id) return;
-    const r = await cg(['spec', 'start', id]);
+    const r = await cg(id === '@docs'
+        ? ['spec', 'docs', 'start'] : ['spec', 'start', id]);
     show(r.stdout + r.stderr);
     if (r.code !== 0) {
         vscode.window.showErrorMessage(`cg spec start ${id} refused — see the Codify output.`);
@@ -365,14 +378,14 @@ async function cmdDone(arg) {
     const r = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification,
           title: `Qualifying ${id} — running verify_cmd and graph checks` },
-        () => cg(['spec', 'done', id]));
+        () => cg(id === '@docs' ? ['docs', 'close'] : ['spec', 'done', id]));
     show(r.stdout + r.stderr);
     if (r.code !== 0) {
         /* The refusal is the feature. Offer the override, but name what it
          * means rather than presenting it as the obvious next click. */
         const pick = await vscode.window.showWarningMessage(
             `Task ${id} did NOT qualify. See the Codify output for which check failed.`,
-            'Show output', 'Force done anyway');
+            ...(id === '@docs' ? ['Show output'] : ['Show output', 'Force done anyway']));
         if (pick === 'Show output') out.show(true);
         if (pick === 'Force done anyway') {
             const confirm = await vscode.window.showWarningMessage(
@@ -384,6 +397,16 @@ async function cmdDone(arg) {
             }
         }
     }
+    afterMutation();
+}
+
+async function cmdDocs(action) {
+    const r = await cg(['docs', action]);
+    if (action === 'plan' || action === 'trace')
+        openReport(`docs-${action}`, `Documentation ${action}`, fence(r.stdout + r.stderr));
+    else show(r.stdout + r.stderr);
+    if (r.code !== 0) vscode.window.showWarningMessage(
+        `Documentation ${action} did not pass — see the Codify output.`);
     afterMutation();
 }
 
@@ -623,6 +646,9 @@ async function cmdActions() {
         { label: '$(beaker) Tests touching this change', cmd: 'codify.testImpact' },
         { label: '$(shield) Check edit scope', cmd: 'codify.guard' },
         { label: '$(verified) Check the repository', cmd: 'codify.check' },
+        { label: '$(book) Documentation plan', cmd: 'codify.docsPlan' },
+        { label: '$(check) Check documentation', cmd: 'codify.docsCheck' },
+        { label: '$(git-commit) Trace documentation', cmd: 'codify.docsTrace' },
         { label: '$(lightbulb) Remember a decision', cmd: 'codify.remember' },
         { label: '$(save) Snapshot the working tree', cmd: 'codify.snapshot' },
         { label: '$(add) New feature spec', cmd: 'codify.newFeature' },
@@ -682,6 +708,10 @@ async function activate(ctx) {
         'codify.brief': cmdBrief,
         'codify.review': cmdReview,
         'codify.check': cmdCheck,
+        'codify.docsPlan': () => cmdDocs('plan'),
+        'codify.docsPacket': () => cmdDocs('packet'),
+        'codify.docsCheck': () => cmdDocs('check'),
+        'codify.docsTrace': () => cmdDocs('trace'),
         'codify.guard': cmdGuard,
         'codify.why': cmdWhy,
         'codify.testImpact': cmdTestImpact,

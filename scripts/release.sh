@@ -15,7 +15,7 @@ strip cg
 file cg | grep -q "statically linked" || { echo "release: binary is not static" >&2; exit 1; }
 
 echo "== integration tests against the release binary"
-CG="$PWD/cg" tests/run.sh >/dev/null || { echo "release: tests failed" >&2; exit 1; }
+CG="$PWD/cg" tests/run.sh || { echo "release: tests failed; nothing published" >&2; exit 1; }
 
 ver="$(./cg --version)"
 echo "== publishing cg $ver to $WEBROOT"
@@ -29,7 +29,7 @@ install -m 644 scripts/uninstall.sh "$WEBROOT/uninstall"
 install -m 644 scripts/index.html   "$WEBROOT/index.html"
 
 # rebuild the normal (dynamic) dev binary so the working tree is back to default
-make >/dev/null
+make -B >/dev/null
 
 echo "== published:"
 ls -la "$WEBROOT"

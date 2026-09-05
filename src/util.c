@@ -1,4 +1,18 @@
 #include "cg.h"
+
+/* A truncated path may name a different file. Callers must skip or refuse
+ * that operation; never pass a partially constructed pathname to the OS. */
+bool path_format(char *out, size_t cap, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(out, cap, fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= cap) {
+        if (cap) out[0] = 0;
+        return false;
+    }
+    return true;
+}
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -276,7 +290,7 @@ static void ig_load_file(Ignore *ig, const char *path) {
  * directly. Either way the result is matched against the full rel path. */
 static void ig_load_nested(Ignore *ig, const char *root, const char *reldir) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/%s/.gitignore", root, reldir);
+    if (!path_format(path, sizeof path, "%s/%s/.gitignore", root, reldir)) return;
     int before = ig->n;
     ig_load_file(ig, path);
     int after = ig->n;

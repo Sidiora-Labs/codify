@@ -285,6 +285,13 @@ cmd, max, ttl, codex_args, claude_args); the custom template is read
 uninterpolated so kvx's own `${ENV}` expansion cannot eat the
 placeholders.
 
+The reserved `@docs` item enters this same loop after the numbered frontier is
+qualified. `claim-next` gives it a normal lease and fenced attempt, while its
+prompt is produced by `cg docs packet` instead of `cg resume`. The child must
+finish with `cg docs close`; a plain exit, direct `spec docs done`, or stale
+owner is incomplete and follows the existing release/retry path. No completion
+command recursively launches another orchestrator.
+
 Success is judged by the spec, not the exit code alone: after `waitpid`,
 the task's status is re-read — `done`/`implemented` count as success
 (the lease was auto-released by the completion), anything else releases
@@ -294,6 +301,35 @@ failures exceed `--max-fail`; SIGINT terminates the children, releases
 their leases, and exits 130. `--dry-run` prints waves, tasks, and the
 exact argv per task without claiming anything. Requires a `.codegraph/`
 and parallel or prod mode.
+
+## Documentation closure (`docs.c`)
+
+Documentation closure is a projection over existing authorities, not a second
+source of truth. Its inputs are the active kvx feature, qualification and trace
+output, task-tagged Codify snapshots and changelog, graph symbols and routes,
+anchors, memories, command results, and the repository's existing Markdown/RST
+inventory. Packet generation captures each source's exit status and labels
+unavailable evidence instead of filling the gap with an inference.
+
+Derived state is isolated at `.codegraph/docs/<feature>/`:
+
+- `packet.md` is the bounded agent brief.
+- `provenance.json` records evidence sources and baseline mode.
+- `claims.kvx` maps factual claims and audience coverage to public documents
+  and repository evidence; the agent may edit it.
+- `required.kvx` is regenerated from changed public symbols and routes.
+- `check.json` and `verified` are deterministic checker outputs.
+- `baseline.json` records the successfully closed workspace revision.
+
+The lifecycle is `waiting -> pending -> in_progress -> done`, with `blocked`
+and reset paths. Implementation qualification is never rolled back by a docs
+failure. Closure rechecks evidence and uses process-local authorization, not an
+editable closing marker. It records a snapshot explicitly tagged `<feature>/@docs`
+before completing the attempt under its ownership fence. A failed snapshot leaves
+the stage and attempt in progress. `.codegraph/docs/baseline.json` makes the next
+feature's plan incremental; per-feature baselines remain available for trace.
+The effective state remains
+`legacy` for old specs and `off` when project policy disables the stage.
 
 ## VS Code agent sessions (`editors/vscode/agents.js`)
 

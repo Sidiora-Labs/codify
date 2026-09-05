@@ -443,20 +443,38 @@ function writeTextFile(root, params) {
 }
 
 async function taskStatus(id) {
+    if (id === '@docs') {
+        const s = await deps.cgJson(['spec', 'status']);
+        return s && s.documentation && s.documentation.status;
+    }
     const t = await deps.cgJson(['spec', 'trace']);
     const row = t && t.tasks && t.tasks.find((x) => x.id === id);
     return row ? row.status : undefined;
 }
 
 async function taskRow(id) {
+    if (id === '@docs') {
+        const s = await deps.cgJson(['spec', 'status']);
+        return { id, title: 'Generate and verify project documentation',
+            status: s && s.documentation ? s.documentation.status : '' };
+    }
     const t = await deps.cgJson(['spec', 'trace']);
     return (t && t.tasks && t.tasks.find((x) => x.id === id)) || { id, title: '' };
 }
 
 /* Resume packet as a string; degrades like the terminal path. */
 async function resumePrompt(id) {
-    const r = await deps.cg(['resume', '--task', id, '--prompt']);
+    const r = id === '@docs'
+        ? await deps.cg(['docs', 'packet'])
+        : await deps.cg(['resume', '--task', id, '--prompt']);
+    if (id === '@docs' && r.code === 0 && r.stdout.trim()) {
+        return 'You own Codify\'s final @docs closure. Update only configured ' +
+            'documentation targets from this evidence, keep user, developer, ' +
+            'and release coverage explicit, then finish with `cg docs close`. ' +
+            'Do not run `cg spec run` or `cg spec done @docs`.\n\n' + r.stdout;
+    }
     if (r.code === 0 && r.stdout.trim()) return r.stdout;
+    if (id === '@docs') throw new Error('Documentation evidence packet failed: ' + r.stderr);
     const b = await deps.cg(['brief']);
     return `You are resuming Codify task ${id}.\n\n` +
         (b.stdout || '').trimEnd() + '\n\n' +
@@ -775,6 +793,14 @@ const CG_CMDS = {
         ask: 'Are these edits inside the task scope? Address any drift.' },
     changes: { argv: () => ['changes'], zero: true,
         ask: 'What is the blast radius of these edits?' },
+    docs:    { argv: () => ['docs', 'status'], zero: true,
+        ask: 'Summarise documentation closure and its next action.' },
+    docplan: { argv: () => ['docs', 'plan'], zero: true,
+        ask: 'Use this plan to explain which documents need work.' },
+    doccheck:{ argv: () => ['docs', 'check'], zero: true,
+        ask: 'Fix every failed documentation check before closure.' },
+    doctrace:{ argv: () => ['docs', 'trace'], zero: true,
+        ask: 'Explain how the documentation is grounded in project evidence.' },
     tests:   { argv: (a) => (a ? ['test-impact', a] : ['test-impact']),
         ask: 'Which of these should I run, and why?' },
     context: { argv: (a) => ['context', a], need: 'a query',
@@ -833,7 +859,9 @@ async function attachTask(sess, id) {
         sess.claimed = true;
     }
     sess.taskId = id;
-    const s = await deps.cg(['spec', 'start', id]);
+    const s = id === '@docs'
+        ? await deps.cg(['spec', 'docs', 'start'])
+        : await deps.cg(['spec', 'start', id]);
     if (s.code !== 0) {
         surfacePost(sess, { type: 'status',
             text: `spec start ${id}: ${firstLine(s.stderr || s.stdout)}` });
@@ -857,7 +885,9 @@ async function taskLifecycle(sess, verb, send) {
             text: `/${verb} needs an attached task — use /task <id> first` });
         return;
     }
-    const argv = ['spec', verb, id];
+    const argv = id === '@docs'
+        ? (verb === 'done' ? ['docs', 'close'] : ['spec', 'docs', verb])
+        : ['spec', verb, id];
     const r = await deps.cg(argv);
     const out = ((r.stdout || '') + (r.code === 0 ? '' : '\n' + (r.stderr || ''))).trim();
     surfacePost(sess, { type: 'chunk', role: 'user', text: `/${verb}`, cmd: true });
@@ -1084,7 +1114,9 @@ async function startPanelSession(id) {
         }
         claimed = true;
     }
-    const s = await deps.cg(['spec', 'start', id]);
+    const s = id === '@docs'
+        ? await deps.cg(['spec', 'docs', 'start'])
+        : await deps.cg(['spec', 'start', id]);
     if (s.code !== 0) {
         vscode.window.showWarningMessage(
             `Codify: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);
@@ -1280,7 +1312,9 @@ async function startTaskInView(id) {
         }
         claimed = true;
     }
-    const s = await deps.cg(['spec', 'start', id]);
+    const s = id === '@docs'
+        ? await deps.cg(['spec', 'docs', 'start'])
+        : await deps.cg(['spec', 'start', id]);
     if (s.code !== 0) {
         vscode.window.showWarningMessage(
             `Codify: spec start ${id}: ${firstLine(s.stderr || s.stdout)}`);

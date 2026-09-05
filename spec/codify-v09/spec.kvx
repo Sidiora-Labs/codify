@@ -1,0 +1,148 @@
+# documentation-closure — verified documentation as the terminal spec stage.
+
+[meta]
+feature = "codify-v09"
+intro   = "Make grounded user and developer documentation the automatic final stage of every Codify spec flow by reusing the configured agent connector, task-tagged snapshots, code graph, memories, and qualification evidence."
+
+[req.1]
+title = "Documentation is part of completion"
+story = "As a project owner, I want every feature to close with verified documentation so that completed code and published understanding cannot drift apart."
+ac_1  = "WHEN the final ordinary leaf task qualifies THE spec engine SHALL expose a reserved documentation stage instead of reporting the feature fully complete."
+ac_2  = "WHEN documentation qualifies THE feature SHALL report complete, and WHEN documentation fails THE implementation tasks SHALL remain qualified while the documentation stage remains pending or blocked."
+ac_3  = "WHEN a new feature spec is created THE documentation stage SHALL be enabled by default, with explicit manual and off modes available for project policy."
+ac_4  = "WHEN an existing feature has no documentation configuration THE engine SHALL preserve backward compatibility and provide an explicit enable or migration path."
+
+[req.2]
+title = "Evidence-grounded documentation packet"
+story = "As a coding agent, I want a compact authoritative documentation packet so that I can update project docs without inventing behavior."
+ac_1  = "WHEN documentation becomes eligible THE packet SHALL combine requirements, design, acceptance criteria, task traces, task-tagged snapshots, changed symbols, routes, entry points, memories, verification results, and the existing documentation inventory."
+ac_2  = "WHEN evidence is absent or contradictory THE packet SHALL identify the gap instead of converting an inference into a product claim."
+ac_3  = "WHEN the project has no completed documentation baseline THE planner SHALL request a full user and developer baseline, and subsequent closures SHALL request evidence-driven incremental updates."
+ac_4  = "WHEN a documentation section is generated THE derived provenance ledger SHALL map its claims to repository paths, symbols, tasks, or commits."
+
+[req.3]
+title = "Reuse the existing agent connector"
+story = "As a developer, I want documentation to use Codify's configured agent so that the feature adds no second agent runtime or provider integration."
+ac_1  = "WHEN cg spec run reaches the documentation stage THE orchestrator SHALL launch it through the configured Codex, Claude, or custom driver with the existing lease, fence, heartbeat, logging, and recovery behavior."
+ac_2  = "WHEN an interactive MCP or editor agent completes the final implementation task THE returned state SHALL make the documentation stage the next work item so the same connector can continue it."
+ac_3  = "WHEN documentation becomes eligible inside an agent-owned completion call THE engine SHALL enqueue the stage and SHALL NOT recursively spawn a nested agent from cg spec done."
+
+[req.4]
+title = "Complete user and developer outputs"
+story = "As a project user and maintainer, I want the right documentation views updated so that I can use, operate, extend, and verify the delivered feature."
+ac_1  = "WHEN documentation is planned THE output SHALL distinguish user guidance, developer guidance, release or migration notes, and project-specific exclusions."
+ac_2  = "WHEN canonical documents already exist THE agent SHALL update them within the configured target scope, SHALL preserve unrelated human material, and SHALL never delete or rename documents automatically."
+ac_3  = "WHEN canonical documents are missing THE planner SHALL select conventional README and docs paths without requiring a framework-specific dependency."
+
+[req.5]
+title = "Verification and provenance"
+story = "As a reviewer, I want deterministic documentation checks and traceability so that fluent prose cannot impersonate accuracy."
+ac_1  = "WHEN cg docs check runs THE command SHALL validate configured targets, local links, referenced repository paths, documented commands, symbol and route claims, changed-public-surface coverage, and required audience sections where evidence permits."
+ac_2  = "WHEN a check cannot prove a claim THE command SHALL fail or report it as explicitly unresolved according to policy and SHALL never mark the documentation stage done."
+ac_3  = "WHEN documentation qualifies THE engine SHALL create a task-attributed Codify snapshot and cg docs trace SHALL connect documentation outputs to source tasks, commits, symbols, and evidence."
+ac_4  = "WHEN the feature is used through MCP or VS Code THE documentation plan, status, generation packet, check, and trace SHALL remain truthful and visible."
+
+[design]
+overview = "Add a feature-level [documentation] state to the normative KVX rather than manufacturing a numeric task. Model it internally as the reserved @docs work item so existing work packets, leases, orchestrator drivers, MCP, and editor flows can reuse it. Add a dependency-free docs module that discovers canonical targets, freezes a pre-documentation evidence baseline from spec trace, snapshots, graph queries, routes, anchors, memories, and verification outcomes, and writes a derived claim ledger under .codegraph/docs. cg spec done only makes @docs eligible; the orchestrator or connected interactive agent performs the work. cg docs plan, packet, status, check, and trace expose the lifecycle. Deterministic checks gate closure, and successful closure receives its own task-attributed Codify snapshot. New specs enable auto mode by default; legacy specs remain compatible until explicitly enabled."
+
+[documentation]
+mode       = "off"
+status     = "pending"
+audiences  = ["user", "developer"]
+targets    = ["README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: Documentation Closure"
+
+[task.1]
+title   = "Lifecycle model"
+section = "Terminal documentation stage"
+status  = "pending"
+
+[task.1.1]
+evidence_task = "documentation-closure/1.1"
+title      = "Model documentation closure in the spec engine"
+status     = "done"
+wave       = 1
+symbols    = ["spec_docs_stage", "spec_docs_cmd", "spec_docs_set_status"]
+touches    = ["src/spec.c", "src/cg.h", "src/main.c", "tests/integration/24_docs.sh", "spec/documentation-closure/*", "spec/workflow.kvx"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/24_docs.sh lifecycle"
+do_1       = "Add documentation mode and state parsing, default it into newly scaffolded feature specs, and preserve legacy specs without implicit mutation."
+do_2       = "Expose @docs only after every ordinary leaf task is qualified and withhold feature-complete output until documentation is qualified."
+do_3       = "Add owner-aware transitions for documentation pending, in_progress, blocked, and done without recursively launching an agent from spec done."
+do_4       = "Cover standard, prod, parallel, disabled, legacy, failure, and JSON status behavior in temporary repositories."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "3.2", "3.3"]
+
+[task.2]
+title   = "Grounded generation"
+section = "Evidence and verification"
+status  = "pending"
+
+[task.2.1]
+evidence_task = "documentation-closure/2.1"
+title      = "Build documentation plans and evidence packets"
+status     = "done"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["cmd_docs", "docs_plan", "docs_packet", "docs_inventory"]
+touches    = ["src/docs.c", "src/cg.h", "src/main.c", "tests/integration/24_docs.sh", "spec/documentation-closure/*"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/24_docs.sh evidence"
+do_1       = "Add cg docs status, plan, and packet with text and JSON forms and no network dependency."
+do_2       = "Assemble requirements, task trace, tagged snapshot changes, graph symbols and routes, memories, checks, anchors, and documentation inventory into a bounded agent packet."
+do_3       = "Distinguish first-run baseline generation from incremental closure and label missing or contradictory evidence."
+do_4       = "Write a derived provenance manifest beneath .codegraph/docs without treating it as normative project content."
+reqs       = ["2.1", "2.2", "2.3", "2.4", "4.1", "4.3"]
+
+[task.2.2]
+evidence_task = "documentation-closure/2.2"
+title      = "Verify documentation and record provenance"
+status     = "done"
+wave       = 3
+requires   = ["2.1"]
+symbols    = ["docs_check", "docs_trace", "docs_close"]
+touches    = ["src/docs.c", "src/spec.c", "tests/integration/24_docs.sh", "spec/documentation-closure/*"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/24_docs.sh verify"
+do_1       = "Validate target scope, local links, repository paths, commands, symbol and route references, audience coverage, and changed public surfaces."
+do_2       = "Keep unsupported claims unresolved and refuse documentation completion on failed checks."
+do_3       = "Snapshot successful documentation closure with @docs attribution and expose a trace from output sections to source evidence."
+do_4       = "Never delete or rename documentation and preserve unrelated content outside the configured target scope."
+reqs       = ["4.2", "5.1", "5.2", "5.3"]
+
+[task.3]
+title   = "Connector delivery"
+section = "Agents and product surfaces"
+status  = "pending"
+
+[task.3.1]
+evidence_task = "documentation-closure/3.1"
+title      = "Dispatch documentation through existing connectors"
+status     = "done"
+wave       = 4
+requires   = ["2.2"]
+symbols    = ["orch_docs_ready", "t_docs", "taskLifecycle"]
+touches    = ["src/spec.c", "src/orchestrate.c", "src/mcp.c", "src/integrate.c", "editors/vscode/extension.js", "editors/vscode/agents.js", "editors/vscode/acp.js", "tests/integration/04_mcp.sh", "tests/integration/18_orchestrate.sh", "tests/integration/19_acp.sh", "tests/integration/24_docs.sh", "spec/documentation-closure/*"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/18_orchestrate.sh && CG=$PWD/cg tests/integration/19_acp.sh && CG=$PWD/cg tests/integration/24_docs.sh connector"
+do_1       = "Teach cg spec run to claim and launch @docs through the configured driver after ordinary work drains."
+do_2       = "Expose docs status, plan, packet, check, and trace over MCP with honest read and write annotations."
+do_3       = "Make connected editor sessions show documentation readiness, progress, failure, and qualification without adding a provider-specific runtime."
+do_4       = "Update portable workflow instructions so interactive agents continue into @docs when it becomes eligible."
+reqs       = ["3.1", "3.2", "3.3", "5.4"]
+
+[task.4]
+title   = "Qualification"
+section = "End-to-end closure"
+status  = "pending"
+
+[task.4.1]
+title      = "Qualify automatic documentation closure end to end"
+status     = "done"
+wave       = 5
+requires   = ["3.1"]
+symbols    = ["cmd_docs", "spec_docs_stage", "orch_docs_ready", "t_docs"]
+touches    = ["README.md", "docs/*", "CHANGELOG.md", "tests/*", "src/*", "editors/vscode/*", "scripts/release.sh", "spec/codify-v09/*", "spec/documentation-closure/*", "spec/workflow.kvx"]
+verify_cmd = "make test && $PWD/cg spec render --check && $PWD/cg spec lint && $PWD/cg check"
+do_1       = "Exercise baseline and incremental documentation, connector dispatch, failed verification, recovery, snapshot attribution, MCP schemas, and legacy compatibility in clean temporary projects."
+do_2       = "Document the commands, state machine, evidence model, connector behavior, safety policy, and limitations."
+do_3       = "Run the complete repository qualification without fakes, forced completion, unsupported claims, or weakening existing gates."
+do_4       = "Trace every task to its symbols, touched paths, snapshots, and verification evidence."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3", "4.1", "4.2", "4.3", "5.1", "5.2", "5.3", "5.4"]

@@ -92,6 +92,9 @@ echo 'export function alpha(){}' > src/a.ts
 git init -q
 
 "$CG" spec new live >/dev/null
+# This driver qualifies a heartbeat task, not documentation. Keep closure
+# visible but manual; 24_docs exercises auto dispatch with a docs-capable driver.
+"$CG" spec docs manual >/dev/null
 "$CG" spec start 1.1 >/dev/null
 "$CG" spec done 1.1 >/dev/null
 "$CG" spec mode parallel >/dev/null
@@ -189,6 +192,8 @@ wait "$runpid" || run_rc=$?
 pulse_out="$(cat "$TMP/pulse.log")"
 [ "$run_rc" -eq 0 ] || fail "heartbeat run exited $run_rc: $pulse_out"
 has "$pulse_out" "task 3.1 exit 0 → status done"
+has "$("$CG" spec next --json)" '"id":"@docs"'
+has "$("$CG" spec docs status --json)" '"status":"pending"'
 
 echo "22_control liveness ok"
 }

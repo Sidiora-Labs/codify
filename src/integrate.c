@@ -229,6 +229,10 @@ static const char *SKILL_BODY =
 "4. Run `cg review`, `cg guard`, and the task verification.\n"
 "5. Snapshot with `cg commit`, qualify with `cg spec done`, and prove with "
 "`cg spec trace`.\n"
+"6. When `cg spec next` returns `@docs`, build `cg docs packet`, update only "
+"the configured documentation targets and claims ledger, then finish with "
+"`cg docs close`. Never recursively run `cg spec run` from documentation "
+"closure.\n"
 "Never force completion or treat a snapshot, declaration, or heartbeat as "
 "qualification.\n";
 

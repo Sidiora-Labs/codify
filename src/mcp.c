@@ -267,6 +267,18 @@ static int t_spec_trace(void *v) {
     free(id);
     return rc;
 }
+
+static int t_docs(void *v, const char *action) {
+    CallCtx *c = v;
+    char *argv[] = { (char *)action };
+    return cmd_docs(c->cg, 1, argv, true);
+}
+static int t_docs_status(void *v) { return t_docs(v, "status"); }
+static int t_docs_plan(void *v)   { return t_docs(v, "plan"); }
+static int t_docs_packet(void *v) { return t_docs(v, "packet"); }
+static int t_docs_check(void *v)  { return t_docs(v, "check"); }
+static int t_docs_trace(void *v)  { return t_docs(v, "trace"); }
+static int t_docs_close(void *v)  { return t_docs(v, "close"); }
 static int t_remember(void *v) {
     CallCtx *c = v;
     char *text = c->args ? json_get_string(c->args, "text") : NULL;
@@ -714,6 +726,30 @@ static const struct {
       "(location, refs), touched paths matched against actual changes, and "
       "commits tagged with the task. One task by id, or all tasks.",
       S_TRACE, A_READ, "Trace task to code", t_spec_trace, false },   /* trace refreshes its own graph */
+    { "docs_status",
+      "Documentation closure state, configured audiences and targets, and "
+      "whether deterministic verification has passed.",
+      S_EMPTY, A_READ, "Documentation status", t_docs_status, false },
+    { "docs_plan",
+      "Read-only documentation plan: baseline mode, configured targets, and "
+      "the existing documentation inventory.",
+      S_EMPTY, A_READ, "Plan documentation", t_docs_plan, false },
+    { "docs_packet",
+      "Build the bounded evidence packet, provenance map, claims ledger, and "
+      "required-coverage ledger used by the documentation agent.",
+      S_EMPTY, A_WRITE, "Build documentation packet", t_docs_packet, false },
+    { "docs_check",
+      "Deterministically validate documentation scope, links, claims, "
+      "audience coverage, and required changed symbols and routes.",
+      S_EMPTY, A_WRITE, "Check documentation", t_docs_check, false },
+    { "docs_trace",
+      "Trace documentation claims to evidence, source task snapshots, the "
+      "documentation snapshot, and the incremental baseline.",
+      S_EMPTY, A_READ, "Trace documentation", t_docs_trace, false },
+    { "docs_close",
+      "Run documentation checks, close @docs through its fenced owner, create "
+      "the attributed snapshot, and advance the incremental baseline.",
+      S_EMPTY, A_WRITE, "Close documentation", t_docs_close, false },
     { "remember",
       "Save a durable project memory — a decision, constraint, outcome, "
       "preference, or fact worth knowing in later sessions — into Codify's "
@@ -913,7 +949,7 @@ static void mcp_list_resources(Cg *cg, StrBuf *r) {
             if (e->d_name[0] == '.') continue;
             char kv[4800];
             struct stat kst;
-            snprintf(kv, sizeof kv, "%s/%s/spec.kvx", specdir, e->d_name);
+            if (!path_format(kv, sizeof kv, "%s/%s/spec.kvx", specdir, e->d_name)) continue;
             if (stat(kv, &kst) != 0) continue;
             char uri[512], nm[300];
             snprintf(uri, sizeof uri, "codify://spec/%s", e->d_name);

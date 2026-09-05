@@ -79,6 +79,18 @@ has "$out" "src/check.ts"
 has "$out" "✓ src/*.ts"
 has "$out" "wip [spec:demo/2.1]"
 
+# Renaming a feature must not discard its exact historical snapshot identity.
+cp -r spec/demo spec/renamed
+python3 - <<'PY'
+from pathlib import Path
+p = Path('spec/renamed/spec.kvx')
+p.write_text(p.read_text().replace('[task.2.1]',
+    '[task.2.1]\nevidence_task = "demo/2.1"'))
+PY
+out="$("$CG" spec trace 2.1 -f renamed)"
+has "$out" "wip [spec:demo/2.1]"
+has "$out" "✓ src/*.ts"
+
 # unknown task id
 expect_rc 1 "$CG" spec trace 9.9
 

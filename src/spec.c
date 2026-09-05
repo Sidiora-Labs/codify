@@ -2,7 +2,7 @@
  * cg spec — C port of ion-agent's spec/specgen plus a task engine.
  *
  *   cg spec render [--check]   regenerate IDE pointer files + markdown mirror
- *                              from spec/*.kvx (byte-compatible with specgen)
+ *                              from spec KVX files (byte-compatible with specgen)
  *   cg spec [status]           task board for the active feature
  *   cg spec next               lowest-wave eligible task, with its ACs
  *   cg spec start <id>         mark in_progress (one at a time), refresh mirror
@@ -496,11 +496,11 @@ static int discover_features(const char *specdir, char ***out) {
     while ((e = readdir(d))) {
         if (e->d_name[0] == '.' || strcmp(e->d_name, "specgen") == 0) continue;
         char p[4600];
-        snprintf(p, sizeof p, "%s/%s/spec.kvx", specdir, e->d_name);
+        if (!path_format(p, sizeof p, "%s/%s/spec.kvx", specdir, e->d_name)) continue;
         struct stat st;
         if (stat(p, &st) != 0) continue;
         char dp[4600];
-        snprintf(dp, sizeof dp, "%s/%s", specdir, e->d_name);
+        if (!path_format(dp, sizeof dp, "%s/%s", specdir, e->d_name)) continue;
         if (stat(dp, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
         if (n == cap) { cap *= 2; v = xrealloc(v, sizeof(char *) * (size_t)cap); }
         v[n++] = xstrdup(e->d_name);
@@ -515,8 +515,11 @@ static int render_feature(const char *root, const char *specdir,
                           const char *fname, const char *banner,
                           bool mirror_kiro, Writer *w) {
     char fdir[4600], fpath[4700];
-    snprintf(fdir, sizeof fdir, "%s/%s", specdir, fname);
-    snprintf(fpath, sizeof fpath, "%s/spec.kvx", fdir);
+    if (!path_format(fdir, sizeof fdir, "%s/%s", specdir, fname) ||
+        !path_format(fpath, sizeof fpath, "%s/spec.kvx", fdir)) {
+        fprintf(stderr, "cg spec: feature path is too long\n");
+        return -1;
+    }
     Kvx *f = kvx_parse(fpath);
     if (!f) {
         fprintf(stderr, "cg spec: feature %s: cannot parse %s\n", fname, fpath);
@@ -723,6 +726,93 @@ static bool spec_prod_mode(const Spec *s) {
 
 static bool spec_parallel_mode(const Spec *s) {
     return spec_mode_is(s, "parallel");
+}
+
+static bool task_is_leaf(const Spec *s, const char *id);
+
+/* Documentation is a feature-level closure stage, not a made-up numbered
+ * implementation task. Missing configuration is deliberately "legacy": old
+ * specs keep their historical completion semantics until explicitly enabled. */
+static char *spec_docs_mode(const Spec *s) {
+    if (!kvx_has(s->f, "documentation")) return xstrdup("legacy");
+    char *mode = S(s->f, "documentation", "mode");
+    if (!mode[0]) { free(mode); return xstrdup("auto"); }
+    return mode;
+}
+
+static bool spec_all_tasks_qualified(const Spec *s) {
+    bool saw_leaf = false;
+    for (int i = 0; i < s->nids; i++) {
+        if (!task_is_leaf(s, s->ids[i])) continue;
+        saw_leaf = true;
+        char *st = task_status(s, s->ids[i]);
+        bool done = strcmp(st, "done") == 0;
+        free(st);
+        if (!done) return false;
+    }
+    return saw_leaf;
+}
+
+/* malloc'd effective state: legacy, off, waiting, pending, in_progress,
+ * blocked, or done. Invalid stored states degrade to pending, visibly. */
+static char *spec_docs_stage(const Spec *s) {
+    char *mode = spec_docs_mode(s);
+    if (strcmp(mode, "legacy") == 0 || strcmp(mode, "off") == 0)
+        return mode;
+    free(mode);
+    char *stored = S(s->f, "documentation", "status");
+    if (strcmp(stored, "done") == 0) return stored;
+    if (!spec_all_tasks_qualified(s)) {
+        free(stored);
+        return xstrdup("waiting");
+    }
+    if (strcmp(stored, "in_progress") == 0 ||
+        strcmp(stored, "blocked") == 0 ||
+        strcmp(stored, "pending") == 0) return stored;
+    free(stored);
+    return xstrdup("pending");
+}
+
+static bool spec_docs_ready(const Spec *s) {
+    char *stage = spec_docs_stage(s);
+    bool ready = strcmp(stage, "pending") == 0;
+    free(stage);
+    return ready;
+}
+
+static int spec_docs_set_status(Spec *s, const char *status) {
+    if (kvx_set_string(s->fpath, "documentation", "status", status) != 0)
+        return -1;
+    kvx_free(s->f);
+    s->f = kvx_parse(s->fpath);
+    return s->f ? 0 : -1;
+}
+
+static void json_docs_task(StrBuf *b, const Spec *s) {
+    char *mode = spec_docs_mode(s);
+    char *stage = spec_docs_stage(s);
+    sb_puts(b, "{\"id\":\"" CG_DOC_TASK "\",\"feature\":");
+    sb_json_str(b, s->feature);
+    sb_puts(b, ",\"title\":"
+               "\"Generate and verify project documentation\",\"status\":");
+    sb_json_str(b, stage);
+    sb_puts(b, ",\"mode\":");
+    sb_json_str(b, mode);
+    sb_puts(b, ",\"virtual\":true}");
+    free(mode);
+    free(stage);
+}
+
+static void print_docs_task(const Spec *s) {
+    char *mode = spec_docs_mode(s);
+    char *stage = spec_docs_stage(s);
+    printf("task %s — Generate and verify project documentation\n", CG_DOC_TASK);
+    printf("  status: %s   mode: %s\n", stage, mode);
+    printf("  - Build a grounded user and developer documentation packet\n");
+    printf("  - Update only configured documentation targets\n");
+    printf("  - Run deterministic checks and record provenance before closure\n");
+    free(mode);
+    free(stage);
 }
 
 static bool task_is_leaf(const Spec *s, const char *id) {
@@ -1122,11 +1212,23 @@ static void spec_release_lease(Spec *s, const char *id);
 static int spec_require_owner(Spec *s, const char *id, const char *agent,
                               const char *attempt_id, long fence) {
     bool supplied = (attempt_id && attempt_id[0]) || fence > 0;
-    if (!supplied) return 0;
+    bool docs = strcmp(id, CG_DOC_TASK) == 0;
+    if (!supplied && !docs) return 0;
     Cg g;
-    if (!memory_open_quiet(&g)) return 1;
+    if (!memory_open_quiet(&g)) return supplied ? 1 : 0;
     char tag[700];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    if (!supplied) {
+        sqlite3_stmt *st = cg_prep(&g, "SELECT 1 FROM attempts WHERE task=? "
+            "AND state='running' AND expires > strftime('%s','now') LIMIT 1");
+        sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
+        bool live = sqlite3_step(st) == SQLITE_ROW;
+        sqlite3_finalize(st);
+        cg_close(&g);
+        if (live) fprintf(stderr, "cg spec: live documentation attempt requires "
+                                 "its --attempt and --fence credentials\n");
+        return live ? 1 : 0;
+    }
     bool owned = spec_attempt_owned(&g, tag, agent, attempt_id, fence);
     cg_close(&g);
     if (!owned) {
@@ -1145,6 +1247,8 @@ static int spec_set_status_owned(Spec *s, const char *id, const char *status,
                                  long fence) {
     char sec[300];
     task_sec(sec, sizeof sec, id);
+    if (strcmp(id, CG_DOC_TASK) == 0)
+        snprintf(sec, sizeof sec, "documentation");
     bool fenced = (attempt_id && attempt_id[0]) || fence > 0;
     if (!fenced) {
         if (kvx_set_status(s->fpath, sec, status) != 0) return -1;
@@ -1345,6 +1449,9 @@ static int spec_status_cmd(Spec *s, bool json) {
     }
     const char *cur = spec_current_for_agent(s, cg_agent_name(NULL));
     const char *next = spec_next_id(s);
+    bool docs_next = !next && spec_docs_ready(s);
+    char *docs_mode = spec_docs_mode(s);
+    char *docs_stage = spec_docs_stage(s);
     const char **stale = NULL;
     int nstale = spec_stale_tasks(s, &stale);
 
@@ -1364,6 +1471,17 @@ static int spec_status_cmd(Spec *s, bool json) {
                   implemented, inprog, pending);
         if (cur) { sb_puts(&b, ",\"current\":"); json_task(s, cur, &b); }
         if (next) { sb_puts(&b, ",\"next\":"); json_task(s, next, &b); }
+        else if (docs_next) {
+            sb_puts(&b, ",\"next\":");
+            json_docs_task(&b, s);
+        }
+        sb_puts(&b, ",\"documentation\":{\"configured\":");
+        sb_puts(&b, strcmp(docs_mode, "legacy") == 0 ? "false" : "true");
+        sb_puts(&b, ",\"mode\":");
+        sb_json_str(&b, docs_mode);
+        sb_puts(&b, ",\"status\":");
+        sb_json_str(&b, docs_stage);
+        sb_printf(&b, ",\"ready\":%s}", docs_next ? "true" : "false");
         sb_puts(&b, ",\"claims\":[");
         spec_live_leases(s, &b, true);
         sb_puts(&b, "],\"stale\":[");
@@ -1378,6 +1496,8 @@ static int spec_status_cmd(Spec *s, bool json) {
         fputs(b.p, stdout);
         sb_free(&b);
         free(stale);
+        free(docs_mode);
+        free(docs_stage);
         return 0;
     }
 
@@ -1386,6 +1506,7 @@ static int spec_status_cmd(Spec *s, bool json) {
                          spec_prod_mode(s) ? "prod" : "standard");
     printf("tasks: %d — %d done, %d implemented, %d in progress, "
            "%d pending\n", leaves, done, implemented, inprog, pending);
+    printf("documentation: %s (%s)\n", docs_stage, docs_mode);
     if (leaves > 0) {
         int width = 30;
         int fill = leaves ? done * width / leaves : 0;
@@ -1419,7 +1540,15 @@ static int spec_status_cmd(Spec *s, bool json) {
         printf("next: %s — %s (wave %lu)\n", next, t,
                uint_or(s->f, sec, "wave", 0));
         free(t);
-    } else if (!cur && done == leaves && leaves > 0) {
+    } else if (docs_next) {
+        printf("next: %s — Generate and verify project documentation\n",
+               CG_DOC_TASK);
+    } else if (strcmp(docs_stage, "blocked") == 0) {
+        printf("documentation blocked — run `cg spec docs reset` to retry\n");
+    } else if (!cur && done == leaves && leaves > 0 &&
+               (strcmp(docs_stage, "done") == 0 ||
+                strcmp(docs_stage, "off") == 0 ||
+                strcmp(docs_stage, "legacy") == 0)) {
         printf("all tasks done\n");
     } else if (!next && (pending > 0 || implemented > 0)) {
         printf("next: none eligible (blocked on in-progress or unmet "
@@ -1432,6 +1561,8 @@ static int spec_status_cmd(Spec *s, bool json) {
     }
     sb_free(&lb);
     free(stale);
+    free(docs_mode);
+    free(docs_stage);
     return 0;
 }
 
@@ -1464,10 +1595,30 @@ static int spec_mode_cmd(Spec *s, const char *mode, bool json) {
 static int spec_next_cmd(Spec *s, bool json) {
     const char *next = spec_next_id(s);
     if (!next) {
+        if (spec_docs_ready(s)) {
+            if (json) {
+                StrBuf b; sb_init(&b);
+                sb_puts(&b, "{\"next\":");
+                json_docs_task(&b, s);
+                sb_puts(&b, "}\n");
+                fputs(b.p, stdout);
+                sb_free(&b);
+            } else {
+                print_docs_task(s);
+                printf("\nstart it: cg spec docs start\n");
+            }
+            return 0;
+        }
         if (json) { printf("{\"next\":null}\n"); return 0; }
         const char *cur = spec_current(s);
+        char *stage = spec_docs_stage(s);
         if (cur) printf("no eligible task — %s is in progress\n", cur);
+        else if (strcmp(stage, "in_progress") == 0)
+            printf("no eligible task — %s is in progress\n", CG_DOC_TASK);
+        else if (strcmp(stage, "blocked") == 0)
+            printf("no eligible task — documentation is blocked\n");
         else printf("no eligible task\n");
+        free(stage);
         return 0;
     }
     if (json) {
@@ -1493,6 +1644,167 @@ static int spec_next_cmd(Spec *s, bool json) {
     print_task(s, next);
     spec_print_memories(s, next);
     printf("\nstart it: cg spec start %s\n", next);
+    return 0;
+}
+
+static bool spec_docs_verified(const Spec *s) {
+    char path[4700];
+    snprintf(path, sizeof path, "%s/%s/%s/verified", s->root, CG_DOCS_DIR,
+             s->feature);
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0;
+}
+
+/* Process-local authority: writable derived files cannot authorize closure. */
+static Cg *docs_closing_cg;
+
+int spec_docs_finish(Cg *cg, const char *feature) {
+    char *args[] = { "docs", "done", "-f", (char *)feature };
+    docs_closing_cg = cg;
+    int rc = cmd_spec(4, args, false);
+    docs_closing_cg = NULL;
+    return rc;
+}
+
+/* Lifecycle surface for the reserved documentation work item. `done` is
+ * intentionally impossible until the deterministic docs checker has written
+ * its verification marker; fluent prose alone can never close the feature. */
+static int spec_docs_cmd(Spec *s, const char *action, const char *agent,
+                         const char *attempt, long fence, bool json) {
+    if (!action || !action[0]) action = "status";
+    if (strcmp(action, "auto") == 0 || strcmp(action, "manual") == 0 ||
+        strcmp(action, "off") == 0) {
+        if (kvx_set_string(s->fpath, "documentation", "mode", action) != 0 ||
+            (!kvx_has(s->f, "documentation") &&
+             kvx_set_string(s->fpath, "documentation", "status", "pending") != 0)) {
+            fprintf(stderr, "cg spec docs: cannot update %s\n", s->fpath);
+            return 1;
+        }
+        kvx_free(s->f);
+        s->f = kvx_parse(s->fpath);
+        if (!s->f) return 1;
+        if (!kvx_raw(s->f, "documentation", "status") &&
+            kvx_set_string(s->fpath, "documentation", "status", "pending") != 0)
+            return 1;
+        kvx_free(s->f);
+        s->f = kvx_parse(s->fpath);
+        spec_render(s->root, false, true);
+    } else if (strcmp(action, "start") == 0) {
+        char *mode = spec_docs_mode(s);
+        char *stage = spec_docs_stage(s);
+        bool enabled = strcmp(mode, "auto") == 0 || strcmp(mode, "manual") == 0;
+        bool startable = strcmp(stage, "pending") == 0 ||
+                         strcmp(stage, "blocked") == 0;
+        if (!enabled) {
+            fprintf(stderr, "cg spec docs: documentation is %s — run `cg spec "
+                            "docs auto` or `cg spec docs manual` first\n", mode);
+            free(mode); free(stage); return 1;
+        }
+        if (!spec_all_tasks_qualified(s)) {
+            fprintf(stderr, "cg spec docs: implementation tasks are not all "
+                            "qualified\n");
+            free(mode); free(stage); return 1;
+        }
+        if (!startable) {
+            fprintf(stderr, "cg spec docs: stage is %s, not pending or blocked\n",
+                    stage);
+            free(mode); free(stage); return 1;
+        }
+        free(mode); free(stage);
+        if (spec_require_owner(s, CG_DOC_TASK, agent, attempt, fence) != 0)
+            return 1;
+        if (spec_docs_set_status(s, "in_progress") != 0) return 1;
+        spec_render(s->root, false, true);
+    } else if (strcmp(action, "block") == 0 ||
+               strcmp(action, "reset") == 0 || strcmp(action, "done") == 0) {
+        char *stage = spec_docs_stage(s);
+        if (strcmp(action, "block") == 0 &&
+            strcmp(stage, "in_progress") != 0) {
+            fprintf(stderr, "cg spec docs: only in_progress documentation can "
+                            "be blocked (currently %s)\n", stage);
+            free(stage); return 1;
+        }
+        if (strcmp(action, "reset") == 0 &&
+            strcmp(stage, "blocked") != 0 &&
+            strcmp(stage, "in_progress") != 0) {
+            fprintf(stderr, "cg spec docs: only blocked or in_progress "
+                            "documentation can be reset (currently %s)\n", stage);
+            free(stage); return 1;
+        }
+        if (strcmp(action, "done") == 0) {
+            if (strcmp(stage, "in_progress") != 0) {
+                fprintf(stderr, "cg spec docs: stage is %s, not in_progress\n",
+                        stage);
+                free(stage); return 1;
+            }
+            if (!spec_docs_verified(s)) {
+                fprintf(stderr, "cg spec docs: no successful documentation "
+                                "verification — run `cg docs check`\n");
+                free(stage); return 1;
+            }
+            if (!docs_closing_cg) {
+                fprintf(stderr, "cg spec docs: completion is owned by `cg docs "
+                                "close` so verification and snapshot attribution "
+                                "remain coupled\n");
+                free(stage); return 1;
+            }
+        }
+        free(stage);
+        if (spec_require_owner(s, CG_DOC_TASK, agent, attempt, fence) != 0)
+            return 1;
+        const char *to = strcmp(action, "block") == 0 ? "blocked" :
+                         strcmp(action, "reset") == 0 ? "pending" : "done";
+        if (strcmp(to, "done") == 0) {
+            char tag[400], message[512];
+            snprintf(tag, sizeof tag, "%s/%s", s->feature, CG_DOC_TASK);
+            snprintf(message, sizeof message, "docs: close %s", s->feature);
+            /* Preserve the live attempt on snapshot failure. Recheck its fence
+             * under the status writer lock after the snapshot succeeds. */
+            if (cmd_commit_with_options(docs_closing_cg, message, true, tag, false) != 0)
+                return 1;
+            char **remaining = NULL;
+            int nr = vcs_changed_paths(docs_closing_cg, NULL, &remaining);
+            for (int i = 0; i < nr; i++) free(remaining[i]);
+            free(remaining);
+            if (nr != 0) {
+                fprintf(stderr, "cg docs: snapshot did not capture the checked tree; "
+                                "documentation remains in_progress\n");
+                return 1;
+            }
+            if (spec_set_status_owned(s, CG_DOC_TASK, to, agent, attempt, fence) != 0)
+                return 1;
+            kvx_free(s->f);
+            s->f = kvx_parse(s->fpath);
+            if (!s->f) return 1;
+        } else if (spec_docs_set_status(s, to) != 0) return 1;
+        spec_render(s->root, false, true);
+    } else if (strcmp(action, "status") != 0) {
+        fprintf(stderr, "usage: cg spec docs "
+                        "[status|auto|manual|off|start|block|reset|done]\n");
+        return 1;
+    }
+
+    char *mode = spec_docs_mode(s);
+    char *stage = spec_docs_stage(s);
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"task\":\"" CG_DOC_TASK "\",\"mode\":");
+        sb_json_str(&b, mode);
+        sb_puts(&b, ",\"status\":");
+        sb_json_str(&b, stage);
+        sb_printf(&b, ",\"ready\":%s,\"verified\":%s}\n",
+                  spec_docs_ready(s) ? "true" : "false",
+                  spec_docs_verified(s) ? "true" : "false");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("documentation: %s (%s)\n", stage, mode);
+        if (spec_docs_ready(s))
+            printf("next: %s — Generate and verify project documentation\n",
+                   CG_DOC_TASK);
+    }
+    free(mode);
+    free(stage);
     return 0;
 }
 
@@ -1522,7 +1834,16 @@ static bool spec_touches_conflict(Spec *s, const char *id, char *other,
                                   Cg *db) {
     char sec[300];
     task_sec(sec, sizeof sec, id);
-    char **mine; int nm = kvx_list(s->f, sec, "touches", &mine);
+    bool docs = strcmp(id, CG_DOC_TASK) == 0;
+    if (docs) snprintf(sec, sizeof sec, "documentation");
+    char **mine; int nm = kvx_list(s->f, sec, docs ? "targets" : "touches", &mine);
+    if (docs && nm == 0) {
+        free(mine);
+        mine = xmalloc(4 * sizeof *mine);
+        const char *defaults[] = { "README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md" };
+        for (int i = 0; i < 4; i++) mine[i] = xstrdup(defaults[i]);
+        nm = 4;
+    }
     if (nm == 0) { free(mine); return false; }
 
     bool clash = false;
@@ -1742,7 +2063,9 @@ static void spec_release_lease(Spec *s, const char *id) {
 static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
                               const char *attempt_arg, long fence_arg,
                               long ttl_min, bool json) {
-    if (!task_exists(s, id) || !task_is_leaf(s, id)) {
+    bool docs = strcmp(id, CG_DOC_TASK) == 0;
+    if ((!docs && (!task_exists(s, id) || !task_is_leaf(s, id))) ||
+        (docs && !kvx_has(s->f, "documentation"))) {
         fprintf(stderr, "cg spec: no runnable [task.%s] in %s\n", id,
                 s->fpath);
         return 1;
@@ -1917,7 +2240,8 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         return 0;
     }
     spec_attempt_sweep(&g);
-    if (!task_exists(s, id)) {
+    bool docs = strcmp(id, CG_DOC_TASK) == 0;
+    if (!docs && !task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         cg_close(&g);
         return 1;
@@ -1925,10 +2249,11 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     /* only claimable work: an eligible pending leaf, or a task already in
      * flight — claiming done work or a blocked task hides real state */
     {
-        char *st0 = task_status(s, id);
+        char *st0 = docs ? spec_docs_stage(s) : task_status(s, id);
         bool in_flight = strcmp(st0, "in_progress") == 0;
         free(st0);
-        if (!in_flight && !task_eligible(s, id)) {
+        bool claimable = docs ? spec_docs_ready(s) : task_eligible(s, id);
+        if (!in_flight && !claimable) {
             fprintf(stderr, "cg spec: %s is not claimable — it is finished, "
                     "a heading, or has unmet requires\n", id);
             cg_close(&g);
@@ -1952,7 +2277,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     sqlite3_finalize(q);
 
     char other[64] = "", pat[256] = "";
-    if (spec_parallel_mode(s) &&
+    if ((docs || spec_parallel_mode(s)) &&
         spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
                               &g)) {
         fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
@@ -1963,8 +2288,13 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     }
 
     char sec[300];
-    task_sec(sec, sizeof sec, id);
-    char *touches = join_list(s->f, sec, "touches");
+    if (docs) snprintf(sec, sizeof sec, "documentation");
+    else task_sec(sec, sizeof sec, id);
+    char *touches = join_list(s->f, sec, docs ? "targets" : "touches");
+    if (docs && !touches[0]) {
+        free(touches);
+        touches = xstrdup("README.md docs/** CONTRIBUTING.md CHANGELOG.md");
+    }
     SpecAttempt attempt;
     if (spec_lease_upsert(&g, tag, agent, host, session, now, ttl_min,
                           touches, &attempt) != 0) {
@@ -2149,7 +2479,25 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
         pick = s->ids[i];
         pickw = w;
     }
+    bool docs = false;
     if (!pick) {
+        char *mode = spec_docs_mode(s);
+        docs = strcmp(mode, "auto") == 0 && spec_docs_ready(s);
+        free(mode);
+        if (docs) {
+            char dtag[700];
+            snprintf(dtag, sizeof dtag, "%s/%s", s->feature, CG_DOC_TASK);
+            sqlite3_stmt *lq = cg_prep(&g,
+                "SELECT agent FROM leases WHERE task=? "
+                "AND expires > strftime('%s','now')");
+            sqlite3_bind_text(lq, 1, dtag, -1, SQLITE_TRANSIENT);
+            bool foreign = sqlite3_step(lq) == SQLITE_ROW &&
+                strcmp((const char *)sqlite3_column_text(lq, 0), agent) != 0;
+            sqlite3_finalize(lq);
+            if (foreign) docs = false;
+        }
+    }
+    if (!pick && !docs) {
         cg_exec(&g, "ROLLBACK");
         cg_close(&g);
         if (lockfd >= 0) { flock(lockfd, LOCK_UN); close(lockfd); }
@@ -2160,11 +2508,12 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
     }
 
     char id[64];
-    snprintf(id, sizeof id, "%s", pick);
+    snprintf(id, sizeof id, "%s", docs ? CG_DOC_TASK : pick);
     char tag[700], sec[300];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
-    task_sec(sec, sizeof sec, id);
-    char *touches = join_list(s->f, sec, "touches");
+    if (docs) snprintf(sec, sizeof sec, "documentation");
+    else task_sec(sec, sizeof sec, id);
+    char *touches = join_list(s->f, sec, docs ? "targets" : "touches");
     SpecAttempt attempt;
     if (spec_lease_upsert(&g, tag, agent, host, session, (long)time(NULL),
                           ttl_min, touches, &attempt) != 0) {
@@ -2178,7 +2527,10 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
     cg_exec(&g, "COMMIT");
     free(touches);
 
-    if (kvx_set_status(s->fpath, sec, "in_progress") != 0) {
+    int status_rc = docs
+        ? kvx_set_string(s->fpath, "documentation", "status", "in_progress")
+        : kvx_set_status(s->fpath, sec, "in_progress");
+    if (status_rc != 0) {
         /* never leave a lease on a task that did not actually start */
         sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
         sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
@@ -2201,7 +2553,8 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
         if (s->f) {
             StrBuf b; sb_init(&b);
             sb_puts(&b, "{\"task\":");
-            json_task(s, id, &b);
+            if (docs) json_docs_task(&b, s);
+            else json_task(s, id, &b);
             sb_puts(&b, ",\"lease\":{\"agent\":");
             sb_json_str(&b, agent);
             sb_puts(&b, ",\"attempt_id\":");
@@ -2209,7 +2562,7 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
             sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld}",
                       attempt.fence, ttl_min);
             Memory *mv = NULL;
-            int nm = spec_task_memories(s, id, &mv);
+            int nm = docs ? 0 : spec_task_memories(s, id, &mv);
             sb_puts(&b, ",\"memories\":[");
             for (int i = 0; i < nm; i++) {
                 if (i) sb_putc(&b, ',');
@@ -2240,8 +2593,11 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
     }
     printf("claimed %s for %s (expires in %ld min)\n\n", id, agent, ttl_min);
     if (s->f) {
-        print_task(s, id);
-        spec_print_memories(s, id);
+        if (docs) print_docs_task(s);
+        else {
+            print_task(s, id);
+            spec_print_memories(s, id);
+        }
     }
     return 0;
 }
@@ -2521,7 +2877,9 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
         sb_json_str(&b, id);
         sb_puts(&b, ",\"next\":");
         const char *jn = s->f ? spec_next_id(s) : NULL;
-        if (jn) sb_json_str(&b, jn); else sb_puts(&b, "null");
+        if (jn) sb_json_str(&b, jn);
+        else if (s->f && spec_docs_ready(s)) sb_json_str(&b, CG_DOC_TASK);
+        else sb_puts(&b, "null");
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -2545,7 +2903,11 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
             printf("next: %s — %s (wave %lu)\n", next, t,
                    uint_or(s->f, nsec, "wave", 0));
             free(t);
+        } else if (spec_docs_ready(s)) {
+            printf("next: %s — Generate and verify project documentation\n",
+                   CG_DOC_TASK);
         } else {
+            char *dstage = spec_docs_stage(s);
             int pend = 0;
             for (int i = 0; i < s->nids; i++) {
                 if (!task_is_leaf(s, s->ids[i])) continue;
@@ -2553,7 +2915,13 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                 if (strcmp(ts, "done") != 0) pend++;
                 free(ts);
             }
-            printf(pend ? "next: none eligible yet\n" : "all tasks done\n");
+            if (pend) printf("next: none eligible yet\n");
+            else if (strcmp(dstage, "in_progress") == 0)
+                printf("documentation in progress\n");
+            else if (strcmp(dstage, "blocked") == 0)
+                printf("documentation blocked\n");
+            else printf("all tasks done\n");
+            free(dstage);
         }
     }
     return 0;
@@ -2678,7 +3046,13 @@ static int graph_symbol(Cg *g, const char *name, char *path, size_t pcap,
 }
 
 static void task_tag(const Spec *s, const char *id, char *out, size_t cap) {
-    snprintf(out, cap, "[spec:%s/%s]", s->feature, id);
+    /* A moved spec can retain the exact task identity of already qualified
+     * history. Never rewrite immutable snapshots just to rename a directory. */
+    char sec[300]; task_sec(sec, sizeof sec, id);
+    char *evidence_task = S(s->f, sec, "evidence_task");
+    if (evidence_task[0]) snprintf(out, cap, "[spec:%s]", evidence_task);
+    else snprintf(out, cap, "[spec:%s/%s]", s->feature, id);
+    free(evidence_task);
 }
 
 static bool pattern_hit(const char *pat, char **paths, int np) {
@@ -3006,6 +3380,12 @@ static const char *FEATURE_TEMPLATE =
 "[design]\n"
 "overview = \"How this will be built.\"\n"
 "\n"
+"[documentation]\n"
+"mode      = \"auto\"\n"
+"status    = \"pending\"\n"
+"audiences = [\"user\", \"developer\"]\n"
+"targets   = [\"README.md\", \"docs/**\", \"CONTRIBUTING.md\", \"CHANGELOG.md\"]\n"
+"\n"
 "[tasks]\n"
 "heading = \"Implementation Plan: %s\"\n"
 "\n"
@@ -3257,6 +3637,22 @@ static int spec_lint_cmd(Spec *s, bool json) {
 
     /* every acceptance criterion id declared by [req.*] */
     char **reqsecs; int nreq = kvx_subsections(s->f, "req", &reqsecs);
+
+    if (kvx_has(s->f, "documentation")) {
+        char *mode = S(s->f, "documentation", "mode");
+        char *status = S(s->f, "documentation", "status");
+        if (strcmp(mode, "auto") != 0 && strcmp(mode, "manual") != 0 &&
+            strcmp(mode, "off") != 0)
+            lint_say(&l, true, CG_DOC_TASK, "unknown documentation mode \"%s\"",
+                     mode);
+        if (strcmp(status, "pending") != 0 &&
+            strcmp(status, "in_progress") != 0 &&
+            strcmp(status, "blocked") != 0 && strcmp(status, "done") != 0)
+            lint_say(&l, true, CG_DOC_TASK,
+                     "unknown documentation status \"%s\"", status);
+        free(mode);
+        free(status);
+    }
 
     for (int i = 0; i < s->nids; i++) {
         const char *id = s->ids[i];
@@ -3589,6 +3985,7 @@ int cmd_spec(int argc, char **argv, bool json) {
         strcmp(sub, "start") != 0 && strcmp(sub, "implemented") != 0 &&
         strcmp(sub, "done") != 0 && strcmp(sub, "mode") != 0 &&
         strcmp(sub, "trace") != 0 && strcmp(sub, "add") != 0 &&
+        strcmp(sub, "docs") != 0 &&
         strcmp(sub, "lint") != 0 && strcmp(sub, "wave") != 0 &&
         strcmp(sub, "claim") != 0 && strcmp(sub, "release") != 0 &&
         strcmp(sub, "ready") != 0 && strcmp(sub, "claim-next") != 0 &&
@@ -3602,7 +3999,8 @@ int cmd_spec(int argc, char **argv, bool json) {
                 "release <id> [--agent N] [--force] | "
                 "claim-next [--agent N] [--ttl M] | heartbeat <id> "
                 "[--agent N] [--attempt ID] [--fence N] [--ttl M] | "
-                "reconcile [--repair]] "
+                "reconcile [--repair] | docs [status|auto|manual|off|start|"
+                "block|reset|done]] "
                 "[-f <feature>]\n");
         return 1;
     }
@@ -3620,7 +4018,8 @@ int cmd_spec(int argc, char **argv, bool json) {
     bool env_matches = false;
     if (env_task && env_task[0] && npos > 0) {
         char expected[700];
-        snprintf(expected, sizeof expected, "%s/%s", s.feature, pos[0]);
+        snprintf(expected, sizeof expected, "%s/%s", s.feature,
+                 strcmp(sub, "docs") == 0 ? CG_DOC_TASK : pos[0]);
         env_matches = strcmp(env_task, expected) == 0;
     }
     if (env_matches && (!attempt || !attempt[0])) {
@@ -3670,12 +4069,17 @@ int cmd_spec(int argc, char **argv, bool json) {
         }
     } else if (strcmp(sub, "reconcile") == 0) {
         rc = spec_reconcile_cmd(&s, repair, json);
+    } else if (strcmp(sub, "docs") == 0) {
+        rc = spec_docs_cmd(&s, npos >= 1 ? pos[0] : "status",
+                           cg_agent_name(agent), attempt, fence, json);
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
     } else if (strcmp(sub, "trace") == 0) {
         rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, json);
     } else if (strcmp(sub, "start") == 0) {
         if (npos < 1) { fprintf(stderr, "usage: cg spec start <id>\n"); rc = 1; }
+        else if (strcmp(pos[0], CG_DOC_TASK) == 0)
+            rc = spec_docs_cmd(&s, "start", cg_agent_name(agent), attempt, fence, json);
         else rc = spec_start_cmd(&s, pos[0], force, json);
     } else if (strcmp(sub, "implemented") == 0) {
         if (force) {
