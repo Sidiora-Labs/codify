@@ -278,6 +278,8 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 
 ### Documentation closure
 
+For a complete walkthrough, ownership and recovery instructions, and checker limitations, read [Generate and maintain project documentation](docs/DOCUMENTATION.md). Maintainers can browse the [source reference](docs/SOURCE-REFERENCE.md); [fixture routes and test symbols](docs/TEST-REFERENCE.md) are listed separately and are not live Codify services.
+
 `@docs` is feature-level work rather than a synthetic numbered implementation task. In `auto` mode, `cg spec next` and `cg spec claim-next` return it after the last leaf task is qualified, so `cg spec run` launches it through the existing Codex, Claude, or custom driver with the same lease, fence, heartbeat, log, and failure recovery. `manual` keeps it visible for an explicitly started agent; `off` intentionally skips it. An older spec with no `[documentation]` section uses `legacy` behavior and can opt in with `cg spec docs auto` or `cg spec docs manual`.
 
 Documentation commands accept `-f <feature>` like the spec commands. When renaming a feature directory, completed tasks can retain their original snapshot attribution with `evidence_task = "original-feature/task-id"`; new snapshots still use the current feature name.

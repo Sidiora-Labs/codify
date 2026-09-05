@@ -4,6 +4,9 @@ _Maintained from local Codify snapshots (`cg log`); symbol-level changes are der
 
 ## 2026-09-05 — Codify 0.9.0 Evidence-grounded documentation closure
 
+- Codify's own feature now enables `auto` documentation closure. The repository gains a [documentation workflow guide](docs/DOCUMENTATION.md), a [source-navigation baseline](docs/SOURCE-REFERENCE.md), and a separate [test/fixture reference](docs/TEST-REFERENCE.md), with contributor instructions aligned to the actual build and qualification commands.
+- Migration remains opt-in for existing specs without documentation configuration: enable the active feature with `cg spec docs auto` or `cg spec docs manual`. This documentation pass does not change the configured default agent provider, certify provider authentication, or publish a release.
+
 - New feature specs end with a reserved `@docs` stage by default, with explicit `auto`, `manual`, `off`, and backward-compatible `legacy` policy modes
 - `cg docs plan`, `packet`, `check`, `trace`, and `close` turn specs, task-tagged snapshots, graph symbols, routes, memories, checks, and existing docs into a bounded evidence packet plus claim and provenance ledgers
 - Documentation only closes after target-scope, preservation, local-link, audience, claim-evidence, command, path, symbol, route, and changed-public-surface checks pass; closure creates a `[spec:<feature>/@docs]` snapshot and incremental baseline

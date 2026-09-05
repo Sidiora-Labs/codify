@@ -304,6 +304,10 @@ and parallel or prod mode.
 
 ## Documentation closure (`docs.c`)
 
+The [documentation walkthrough](DOCUMENTATION.md) covers operation and recovery. For exact indexed declarations, use the [source reference](SOURCE-REFERENCE.md); [test-only observations](TEST-REFERENCE.md) are kept separate from product interfaces.
+
+The main entry points are `docs_packet`, `docs_check`, and `docs_close` in `src/docs.c`. `spec_docs_stage` in `src/spec.c` computes effective state, while `spec_docs_finish` couples the successful snapshot with fenced completion. A `docs_check` claim proves the existence and mapping it checks, not the semantics of every sentence in a document.
+
 Documentation closure is a projection over existing authorities, not a second
 source of truth. Its inputs are the active kvx feature, qualification and trace
 output, task-tagged Codify snapshots and changelog, graph symbols and routes,
