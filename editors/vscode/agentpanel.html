@@ -356,6 +356,113 @@
     border-left: 2px solid var(--vscode-testing-iconPassed, #3fb950);
   }
 
+  /* ---- diffs (5.3): real add/remove rows, unified or side by side ---- */
+  .diff { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2)); }
+  .diff .dhead {
+    display: flex; align-items: center; gap: 8px; padding: 3px 8px;
+    color: var(--vscode-descriptionForeground); font-size: 0.82em;
+    font-family: var(--vscode-editor-font-family);
+  }
+  .diff .dhead .path {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--vscode-textLink-foreground, #4a9eda);
+    background: none; border: none; padding: 0; cursor: pointer; font: inherit;
+  }
+  .diff .dhead .path:hover { text-decoration: underline; }
+  .diff .plus { color: var(--vscode-testing-iconPassed, #3fb950); }
+  .diff .minus { color: var(--vscode-testing-iconFailed, #f85149); }
+  .dscroll { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+  table.dtable {
+    border-collapse: collapse; width: 100%;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size, 12px); line-height: 1.45;
+  }
+  table.dtable td { padding: 0 6px; vertical-align: top; white-space: pre; }
+  td.dno {
+    width: 1%; text-align: right; user-select: none;
+    color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground));
+    opacity: 0.7; border-right: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
+  }
+  td.dcode { width: 50%; }
+  tr.drow.add td.dcode, td.dcode.add {
+    background: var(--vscode-diffEditor-insertedTextBackground, rgba(63,185,80,0.14));
+  }
+  tr.drow.del td.dcode, td.dcode.del {
+    background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,0.14));
+  }
+  tr.drow.add td.dno { background: var(--vscode-diffEditor-insertedLineBackground, rgba(63,185,80,0.07)); }
+  tr.drow.del td.dno { background: var(--vscode-diffEditor-removedLineBackground, rgba(248,81,73,0.07)); }
+  tr.drow.gap td {
+    color: var(--vscode-descriptionForeground); text-align: center;
+    font-size: 0.85em; white-space: normal; opacity: 0.75;
+    background: var(--vscode-editorWidget-background, rgba(128,128,128,0.08));
+  }
+  .diff .dcut {
+    padding: 3px 8px; font-size: 0.82em;
+    color: var(--vscode-descriptionForeground);
+  }
+
+  /* ---- terminal output: monospace, ANSI already stripped ---- */
+  pre.term {
+    background: var(--vscode-terminal-background, var(--vscode-editor-background));
+    color: var(--vscode-terminal-foreground, var(--vscode-foreground));
+    border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
+    max-height: 360px; overflow: auto; white-space: pre;
+  }
+  .termhead {
+    display: flex; align-items: center; gap: 8px; padding: 3px 8px;
+    border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
+    color: var(--vscode-descriptionForeground); font-size: 0.82em;
+    font-family: var(--vscode-editor-font-family);
+  }
+  .termhead .rc.bad { color: var(--vscode-testing-iconFailed, #f85149); }
+  .termhead .rc.good { color: var(--vscode-testing-iconPassed, #3fb950); }
+
+  /* ---- errors in place ---- */
+  .card.err { border-left: 3px solid var(--vscode-testing-iconFailed, #f85149); }
+  .card.err .glyph { color: var(--vscode-testing-iconFailed, #f85149); }
+  .card.err .emsg {
+    padding: 6px 10px; word-break: break-word; line-height: 1.5;
+  }
+  .card.err .eraw { padding: 0 10px 4px; }
+  .card.err .eraw summary {
+    cursor: pointer; user-select: none; font-size: 0.85em;
+    color: var(--vscode-descriptionForeground);
+  }
+  .card.err .eraw pre {
+    margin: 4px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap;
+    border-radius: 5px; font-size: 0.9em;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.12));
+  }
+  .card.err .eacts { display: flex; gap: 6px; padding: 0 10px 8px; }
+
+  /* ---- session switcher card ---- */
+  .card.sess .row {
+    display: flex; align-items: baseline; gap: 8px; width: 100%;
+    background: none; border: none; color: inherit; cursor: pointer;
+    padding: 4px 10px; text-align: left; font: inherit;
+  }
+  .card.sess .row:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.15)); }
+  .card.sess .row .t {
+    flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card.sess .row .m {
+    flex: none; color: var(--vscode-descriptionForeground); font-size: 0.85em;
+  }
+  .card.sess .row.current .t { color: var(--vscode-textLink-foreground, #4a9eda); }
+  .card.sess .note {
+    padding: 4px 10px; color: var(--vscode-descriptionForeground); font-size: 0.88em;
+  }
+
+  /* ---- permission keys ---- */
+  .card.perm .why {
+    padding: 4px 10px 0; font-size: 0.88em;
+    color: var(--vscode-descriptionForeground);
+  }
+  .card.perm.cancelled { border-left-color: var(--vscode-descriptionForeground); }
+  #cost { white-space: nowrap; }
+  #cost:empty { display: none; }
+
   .card.perm { border-left: 3px solid var(--vscode-charts-yellow, #d29922); }
   .card.perm .opts { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px; }
   .card.perm.answered .opts { display: none; }
@@ -409,6 +516,10 @@
   }
   .sysline.turnsum .bad { color: var(--vscode-testing-iconFailed, #f85149); }
   .sysline.turnsum .good { color: var(--vscode-testing-iconPassed, #3fb950); }
+  .sysline.turnsum .cost, .sysline.turnsum .tok {
+    font-variant-numeric: tabular-nums;
+    color: var(--vscode-foreground, #ccc);
+  }
   .card.cg.ok { border-left-color: var(--vscode-testing-iconPassed, #3fb950); }
   .card.cg.bad { border-left-color: var(--vscode-testing-iconFailed, #f85149); }
 
@@ -489,6 +600,10 @@
   body.running #send { display: none; }
   #stop { display: none; }
   body.running #stop { display: inline-block; }
+  /* retry is reachable whenever there is something to re-send and the agent
+   * is not already working; cancel takes its place while it is */
+  #retry { display: none; }
+  body.hasretry:not(.running) #retry { display: inline-block; }
 
   /* ---- slash menu ---- */
   #slashmenu {
@@ -580,6 +695,7 @@
     <span id="sessiontitle"></span>
     <span id="mcpstate">MCP connecting</span>
     <span id="usage"></span>
+    <span id="cost" title="What this session has cost so far"></span>
     <span id="usagebar" class="hidden"><span id="usagefill"></span></span>
     <label id="modewrap" class="configitem hidden">mode
       <select id="mode" title="Agent session mode"></select>
@@ -614,10 +730,12 @@
       <textarea id="input" rows="2"
         placeholder="Ask the agent, or / for Codify commands"></textarea>
       <div class="crow">
-        <span class="hint" id="hint"><kbd>/</kbd> commands · <kbd>Enter</kbd> send</span>
+        <span class="hint" id="hint"><kbd>/</kbd> commands · <kbd>Enter</kbd> send · <kbd>Esc</kbd> cancel</span>
         <span class="grow"></span>
         <span id="spin">working…</span>
-        <button id="stop" class="secondary">Stop</button>
+        <button id="retry" class="secondary"
+          title="Send the last prompt again (/retry)">↻ Retry</button>
+        <button id="stop" class="secondary" title="Cancel this turn (Esc)">Stop</button>
         <button id="send">Send</button>
       </div>
     </div>
@@ -659,6 +777,8 @@
     var taskActions = document.getElementById('taskactions');
     var configureBtn = document.getElementById('configure');
     var cgbar = document.getElementById('cgbar');
+    var costLabel = document.getElementById('cost');
+    var retryBtn = document.getElementById('retry');
     var body = document.body;
 
     var tools = new Map();        /* toolCallId -> card */
@@ -673,6 +793,8 @@
         toolStatus: {}, agentStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
     var turn = null;              /* per-turn tally for the summary line */
     var timelineDots = new Map(); /* toolCallId -> dot */
+    var diffStyle = 'unified';    /* how a diff opens; each one can flip */
+    var sessionCost = null;       /* {cost, currency} for the session bar */
 
     function metric(node, text) {
         node.textContent = text || '';
@@ -736,6 +858,9 @@
         { n: 'handoff',  a: '',        d: 'Record where you stopped on the attached task' },
         { n: 'open',     a: '<path>',  d: 'Open a file in the editor' },
         { n: 'new',      a: '',        d: 'Start a fresh chat' },
+        { n: 'sessions', a: '',        d: 'List chats and switch between them' },
+        { n: 'cancel',   a: '',        d: 'Stop the turn in flight (Esc)' },
+        { n: 'retry',    a: '',        d: 'Send the last prompt again' },
         { n: 'help',     a: '',        d: 'Show these commands' },
     ];
     function allCommands() {
@@ -1096,22 +1221,70 @@
         setNow('');
     }
 
-    function endTurn(stopReason) {
+    /* What a turn cost, in the units the adapter reports. Only the adapters
+     * that price their turns send a cost, so an absent one means unknown, not
+     * free, and nothing is shown rather than a misleading zero. */
+    function fmtCost(v, currency) {
+        if (typeof v !== 'number' || !isFinite(v) || v <= 0) return '';
+        var sym = (currency || 'USD') === 'USD' ? '$' : '';
+        var s = v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(3) : v.toFixed(4);
+        s = s.replace(/(\.\d\d\d*?)0+$/, '$1');   /* $0.250 reads as $0.25 */
+        return sym + s + (sym ? '' : ' ' + currency);
+    }
+    function fmtTokens(n) {
+        if (typeof n !== 'number' || !isFinite(n) || n <= 0) return '';
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M tokens';
+        if (n >= 1000) return Math.round(n / 1000) + 'k tokens';
+        return n + ' tokens';
+    }
+
+    function endTurn(stopReason, ledger) {
         setNow('');
+        showSessionCost(ledger);
         if (!turn) return;
         var t = turn; turn = null;
-        if (!t.tools && !t.agents) return;
-        var secs = Math.max(0, Math.round((Date.now() - t.start) / 100) / 10);
+        var cost = ledger ? fmtCost(ledger.cost, ledger.currency) : '';
+        var toks = ledger ? fmtTokens(ledger.tokens) : '';
+        if (!t.tools && !t.agents && !cost && !toks) return;
+        var secs = ledger && ledger.ms ? Math.round(ledger.ms / 100) / 10 :
+            Math.max(0, Math.round((Date.now() - t.start) / 100) / 10);
         var files = Object.keys(t.files).length;
         var line = el('div', 'sysline turnsum');
         line.appendChild(el('span', stopReason === 'end_turn' ? 'good' : 'bad',
             stopReason === 'end_turn' ? '✓ turn complete' : '⚠ ' + (stopReason || 'stopped')));
-        line.appendChild(el('span', null, t.tools + ' tool' + (t.tools === 1 ? '' : 's') +
-            (t.failed ? ' (' + t.failed + ' failed)' : '')));
+        if (t.tools || !cost) {
+            line.appendChild(el('span', null, t.tools + ' tool' + (t.tools === 1 ? '' : 's') +
+                (t.failed ? ' (' + t.failed + ' failed)' : '')));
+        }
         if (t.agents) line.appendChild(el('span', null, t.agents + ' sub-agent' + (t.agents === 1 ? '' : 's')));
         if (files) line.appendChild(el('span', null, files + ' file' + (files === 1 ? '' : 's') + ' touched'));
+        if (toks) line.appendChild(el('span', 'tok', toks));
+        if (cost) {
+            var c = el('span', 'cost', cost);
+            c.title = 'What this turn cost' +
+                (ledger && ledger.sessionCost ?
+                    ' · session ' + fmtCost(ledger.sessionCost, ledger.currency) : '');
+            line.appendChild(c);
+        }
         line.appendChild(el('span', null, secs + 's'));
         add(line);
+    }
+
+    /* The running total lives in the session bar, so the price of the whole
+     * conversation is visible without scrolling back through turn summaries. */
+    function showSessionCost(ledger) {
+        if (ledger && (ledger.sessionCost || ledger.sessionTokens)) {
+            sessionCost = { cost: ledger.sessionCost, tokens: ledger.sessionTokens,
+                currency: ledger.currency, turns: ledger.turns };
+        }
+        if (!sessionCost) { metric(costLabel, ''); return; }
+        var cost = fmtCost(sessionCost.cost, sessionCost.currency);
+        var toks = fmtTokens(sessionCost.tokens);
+        metric(costLabel, cost || toks);
+        costLabel.title = 'Session: ' + (cost ? cost + ' · ' : '') +
+            (toks || 'no token count reported') +
+            (sessionCost.turns ? ' · ' + sessionCost.turns +
+                ' turn' + (sessionCost.turns === 1 ? '' : 's') : '');
     }
 
     function setNow(text) {
@@ -1128,6 +1301,131 @@
         if (!running.length) { setNow(''); return; }
         var last = running[running.length - 1];
         setNow(last.querySelector('.title').textContent);
+    }
+
+    /* ---------------- diffs and terminal output (5.3) ----------------
+     * The extension sends diffs as numbered rows and strips ANSI before it
+     * posts; this side only draws. The fallback below covers a message that
+     * arrives without rows (an older extension, a replayed transcript): the
+     * whole old block removed, the whole new block added — honest, if
+     * coarse — and the ANSI guard is repeated here so nothing can put
+     * escape sequences on screen. */
+    var ANSI_RE = /\u001b\[[0-9;?]*[ -\/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
+    function clean(text) {
+        return String(text == null ? '' : text).replace(ANSI_RE, '')
+            .replace(/\r\n/g, '\n').replace(/[^\n]*\r(?!\n)/g, '');
+    }
+
+    function fallbackRows(item) {
+        var rows = [], i;
+        var olds = String(item.oldText || '').split('\n');
+        var news = String(item.newText || '').split('\n');
+        if (olds.length && olds[olds.length - 1] === '') olds.pop();
+        if (news.length && news[news.length - 1] === '') news.pop();
+        for (i = 0; i < olds.length; i++) rows.push({ t: 'del', s: olds[i], o: i + 1, n: 0 });
+        for (i = 0; i < news.length; i++) rows.push({ t: 'add', s: news[i], o: 0, n: i + 1 });
+        return rows;
+    }
+
+    function diffCell(row, tr, which) {
+        var no = el('td', 'dno', which === 'old'
+            ? (row.o ? String(row.o) : '') : (row.n ? String(row.n) : ''));
+        var code = el('td', 'dcode' +
+            (which === 'old' && row.t === 'del' ? ' del' : '') +
+            (which === 'new' && row.t === 'add' ? ' add' : ''),
+        (which === 'old' ? (row.t === 'add' ? '' : row.s)
+            : (row.t === 'del' ? '' : row.s)));
+        tr.appendChild(no); tr.appendChild(code);
+    }
+
+    function diffTable(rows, split) {
+        var table = el('table', 'dtable');
+        rows.forEach(function (row) {
+            var tr = el('tr', 'drow ' + row.t);
+            if (row.t === 'gap') {
+                var td = el('td', null, '⋯ ' + row.s);
+                td.colSpan = split ? 4 : 3;
+                tr.appendChild(td);
+                table.appendChild(tr);
+                return;
+            }
+            if (split) {
+                diffCell(row, tr, 'old');
+                diffCell(row, tr, 'new');
+            } else {
+                tr.appendChild(el('td', 'dno', row.o ? String(row.o) : ''));
+                tr.appendChild(el('td', 'dno', row.n ? String(row.n) : ''));
+                tr.appendChild(el('td', 'dcode',
+                    (row.t === 'add' ? '+ ' : row.t === 'del' ? '- ' : '  ') + row.s));
+            }
+            table.appendChild(tr);
+        });
+        return table;
+    }
+
+    function diffBlock(item) {
+        var rows = Array.isArray(item.rows) && item.rows.length
+            ? item.rows : fallbackRows(item);
+        var added = item.added, removed = item.removed;
+        if (added === undefined || removed === undefined) {
+            added = rows.filter(function (r) { return r.t === 'add'; }).length;
+            removed = rows.filter(function (r) { return r.t === 'del'; }).length;
+        }
+        var box = el('div', 'diff');
+        var head = el('div', 'dhead');
+        if (item.path) {
+            var pb = el('button', 'path', item.path);
+            pb.title = 'Open ' + item.path;
+            pb.addEventListener('click', function () {
+                vsc.postMessage({ type: 'open', path: item.path });
+            });
+            head.appendChild(pb);
+        } else {
+            head.appendChild(el('span', 'path', 'diff'));
+        }
+        head.appendChild(el('span', 'plus', '+' + added));
+        head.appendChild(el('span', 'minus', '−' + removed));
+        head.appendChild(el('span', 'grow'));
+        var split = diffStyle === 'split';
+        var toggle = el('button', 'icon', split ? 'unified' : 'split');
+        var scroll = el('div', 'dscroll');
+        scroll.appendChild(diffTable(rows, split));
+        toggle.title = 'Switch between one column and old beside new';
+        toggle.addEventListener('click', function () {
+            split = !split;
+            toggle.textContent = split ? 'unified' : 'split';
+            keep(function () {
+                scroll.textContent = '';
+                scroll.appendChild(diffTable(rows, split));
+            });
+        });
+        head.appendChild(toggle);
+        box.appendChild(head);
+        box.appendChild(scroll);
+        if (item.truncated) {
+            box.appendChild(el('div', 'dcut',
+                '… ' + item.truncated + ' more row' + (item.truncated === 1 ? '' : 's') +
+                ' — open the file for the rest'));
+        }
+        return box;
+    }
+
+    function termBlock(text, meta) {
+        var wrap = el('div');
+        var m = meta || {};
+        if (m.command || m.exitCode !== undefined || m.terminalId) {
+            var head = el('div', 'termhead');
+            head.appendChild(el('span', null, m.command || m.terminalId || 'terminal'));
+            head.appendChild(el('span', 'grow'));
+            if (m.exitCode !== undefined && m.exitCode !== null) {
+                head.appendChild(el('span',
+                    'rc ' + (Number(m.exitCode) === 0 ? 'good' : 'bad'),
+                    'exit ' + m.exitCode));
+            }
+            wrap.appendChild(head);
+        }
+        wrap.appendChild(el('pre', 'term', clean(text) || '(no output)'));
+        return wrap;
     }
 
     /* ---------------- cards ---------------- */
@@ -1322,31 +1620,33 @@
             });
             out.appendChild(row);
         }
+        var executeLike = call.kind === 'execute' ||
+            card.classList.contains('k-execute');
         payload.forEach(function (item) {
             if (!item) return;
             if (item.type === 'diff') {
-                if (item.path) {
-                    var lr = el('div', 'locs');
-                    var lb = el('button', 'flink', item.path);
-                    lb.addEventListener('click', function () {
-                        vsc.postMessage({ type: 'open', path: item.path });
-                    });
-                    lr.appendChild(lb);
-                    out.appendChild(lr);
-                }
-                if (item.oldText) out.appendChild(el('pre', 'del', item.oldText));
-                if (item.newText) out.appendChild(el('pre', 'add', item.newText));
+                out.appendChild(diffBlock(item));
             } else if (item.type === 'content' && item.content &&
                        item.content.type === 'text') {
-                var toolMd = el('div', 'md');
-                renderMd(toolMd, item.content.text);
-                out.appendChild(toolMd);
+                /* what a command printed is terminal output, not prose:
+                 * monospace, unwrapped, and never re-interpreted as Markdown */
+                if (executeLike) {
+                    out.appendChild(termBlock(item.content.text, item));
+                } else {
+                    var toolMd = el('div', 'md');
+                    renderMd(toolMd, item.content.text);
+                    out.appendChild(toolMd);
+                }
             } else if (item.type === 'terminal') {
-                out.appendChild(el('pre', 'wrap', item.output || '(terminal)'));
+                out.appendChild(termBlock(item.output, item));
             }
         });
     }
 
+    /* The agent is blocked until one of these buttons is pressed, so the card
+     * says what is being asked and stays clickable. The extension settles any
+     * ask the turn or the adapter outlives, and reports that here, so no card
+     * is ever left waiting on something that can no longer answer. */
     function permission(msg) {
         clearWelcome();
         breakBlocks();
@@ -1356,10 +1656,13 @@
         card.dataset.pid = msg.pid;
         card.querySelector('.chev').remove();
         var bodyEl = card.querySelector('.body');
+        bodyEl.appendChild(el('div', 'why',
+            'The agent is waiting for your answer before it continues.'));
         var opts = el('div', 'opts');
         (msg.options || []).forEach(function (o) {
             var reject = o.kind && o.kind.indexOf('reject') === 0;
             var b = el('button', reject ? 'secondary' : '', o.name || o.optionId);
+            b.title = o.kind || '';
             b.addEventListener('click', function () {
                 vsc.postMessage({ type: 'permission', pid: msg.pid, optionId: o.optionId });
                 card.dataset.answer = o.name || o.optionId;
@@ -1367,10 +1670,76 @@
             opts.appendChild(b);
         });
         bodyEl.appendChild(opts);
+        if (msg.note) bodyEl.appendChild(el('div', 'why', msg.note));
         bodyEl.appendChild(el('div', 'answer', ''));
         add(card);
         var first = opts.querySelector('button');
         if (first && atBottom()) first.focus();
+    }
+
+    /* A failure belongs in the transcript next to the prompt that hit it:
+     * the readable line, the raw message one click away, and retry right
+     * there rather than in a notification that has already gone. */
+    function errorCard(m) {
+        clearWelcome();
+        breakBlocks();
+        var card = makeCard('err', '⚠', m.text || 'Something failed');
+        card.querySelector('.chev').remove();
+        var bodyEl = card.querySelector('.body');
+        bodyEl.appendChild(el('div', 'emsg', m.text || 'Something failed'));
+        var raw = m.raw || m.text || '';
+        if (raw && raw !== m.text) {
+            var d = el('details', 'eraw');
+            d.appendChild(el('summary', null, 'raw message'));
+            d.appendChild(el('pre', null, clean(raw)));
+            bodyEl.appendChild(d);
+        }
+        var acts = el('div', 'eacts');
+        if (m.retry !== false) {
+            var r = el('button', 'secondary', '↻ Retry');
+            r.addEventListener('click', function () { runSlash('retry', ''); });
+            acts.appendChild(r);
+        }
+        var copy = el('button', 'secondary', 'Copy');
+        copy.addEventListener('click', function () {
+            vsc.postMessage({ type: 'copy', text: raw });
+            copy.textContent = 'copied';
+            setTimeout(function () { copy.textContent = 'Copy'; }, 1200);
+        });
+        acts.appendChild(copy);
+        bodyEl.appendChild(acts);
+        add(card);
+    }
+
+    /* Switch sessions without leaving the transcript: the same rows as the
+     * header picker, plus a new chat. */
+    function sessionsCard(m) {
+        clearWelcome();
+        breakBlocks();
+        var rows = m.sessions || [];
+        var card = makeCard('sess collapsible', '☰', 'Sessions',
+            rows.length + (rows.length === 1 ? ' known' : ' known'));
+        var bodyEl = card.querySelector('.body');
+        if (m.note) bodyEl.appendChild(el('div', 'note', m.note));
+        rows.forEach(function (row) {
+            var b = el('button', 'row' + (row.sessionId === m.current ? ' current' : ''));
+            b.appendChild(el('span', 't', row.title || row.sessionId));
+            var when = row.updatedAt ? new Date(row.updatedAt) : null;
+            b.appendChild(el('span', 'm', (row.driver || 'agent') +
+                (when && !isNaN(when.getTime()) ? ' · ' + when.toLocaleDateString() : '')));
+            b.title = row.sessionId;
+            b.addEventListener('click', function () {
+                vsc.postMessage({ type: 'load_session', sessionId: row.sessionId,
+                    driver: row.driver || '' });
+            });
+            bodyEl.appendChild(b);
+        });
+        var fresh = el('button', 'row');
+        fresh.appendChild(el('span', 't', '+ New chat'));
+        fresh.appendChild(el('span', 'm', '/new'));
+        fresh.addEventListener('click', function () { runSlash('new', ''); });
+        bodyEl.appendChild(fresh);
+        add(card);
     }
 
     function plan(entries) {
@@ -1541,6 +1910,15 @@
             }
             if (ev.key === 'Escape') { body.classList.remove('slashing'); return; }
         }
+        /* Esc is the way out of a turn from the keyboard: the palette closes
+         * first if it is open, otherwise the turn in flight is cancelled. */
+        if (ev.key === 'Escape') {
+            if (body.classList.contains('running')) {
+                ev.preventDefault();
+                vsc.postMessage({ type: 'cancel' });
+            }
+            return;
+        }
         if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); submit(); return; }
         if (ev.key === 'ArrowUp' && !input.value && history.length) {
             ev.preventDefault();
@@ -1559,6 +1937,19 @@
     document.getElementById('send').addEventListener('click', submit);
     document.getElementById('stop').addEventListener('click', function () {
         vsc.postMessage({ type: 'cancel' });
+    });
+    retryBtn.addEventListener('click', function () { runSlash('retry', ''); });
+    /* Cancel must be reachable even when the focus has wandered out of the
+     * composer — a permission button, a diff, the transcript. */
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Escape' || ev.target === input) return;
+        if (body.classList.contains('slashing')) {
+            body.classList.remove('slashing'); return;
+        }
+        if (body.classList.contains('running')) {
+            ev.preventDefault();
+            vsc.postMessage({ type: 'cancel' });
+        }
     });
     taskChip.addEventListener('click', function () {
         vsc.postMessage({ type: 'slash', cmd: 'task', args: '' });
@@ -1719,9 +2110,10 @@
             toolStatus: {}, agentStatus: {}, planDone: 0, planTotal: 0, permits: 0 };
         turn = null; timelineDots.clear(); toolTimeline.textContent = '';
         toolTimeline.classList.add('hidden'); setNow('');
+        sessionCost = null; showSessionCost(null);
         updateActivity();
         statusline.textContent = '';
-        body.classList.remove('running', 'live');
+        body.classList.remove('running', 'live', 'hasretry');
         driverSel.disabled = false;
         welcome(sub);
         toBottom();
@@ -1731,6 +2123,7 @@
         var m = ev.data || {};
         if (m.type === 'init') {
             if (m.adapters) adapters = m.adapters;
+            if (m.diffStyle) diffStyle = m.diffStyle;
             setDrivers(m.drivers, m.driver);
             if (m.version) buildVersion.textContent = 'v' + m.version;
             if (m.feature) document.getElementById('ctxfeature').textContent = m.feature;
@@ -1776,6 +2169,11 @@
             usageFill.style.width = pct + '%';
             usageBar.classList.toggle('high', pct >= 70 && pct < 90);
             usageBar.classList.toggle('full', pct >= 90);
+            if (m.session) {
+                sessionCost = { cost: m.session.cost, tokens: m.session.tokens,
+                    currency: m.session.currency, turns: sessionCost && sessionCost.turns };
+                showSessionCost(null);
+            }
         } else if (m.type === 'sessions') {
             setSessions(m.sessions || [], m.note, !!m.loading);
         } else if (m.type === 'reset') {
@@ -1794,7 +2192,11 @@
             if (m.role === 'agent') agentStream(m.text);
             else if (m.role === 'thought') thoughtStream(m.text);
             else if (m.harness) harnessNote(m.harness, m.text || '');
-            else userMsg(m.text, !!m.cmd);
+            else {
+                /* a prompt has gone out, so there is now something to retry */
+                body.classList.add('hasretry');
+                userMsg(m.text, !!m.cmd);
+            }
         } else if (m.type === 'tool') toolCard(m.call);
         else if (m.type === 'plan') plan(m.entries || []);
         else if (m.type === 'permission') permission(m);
@@ -1813,11 +2215,16 @@
             if (m.running) beginTurn();
             else {
                 breakBlocks();
-                endTurn(m.stopReason || 'end_turn');
-                if (m.stopReason && m.stopReason !== 'end_turn') {
+                endTurn(m.stopReason || 'end_turn', m.ledger);
+                if (m.stopReason && m.stopReason !== 'end_turn' &&
+                    m.stopReason !== 'error') {
                     sysline('turn ended: ' + m.stopReason);
                 }
             }
+        } else if (m.type === 'error') {
+            errorCard(m);
+        } else if (m.type === 'sessionlist') {
+            sessionsCard(m);
         } else if (m.type === 'task_status') {
             taskStatus.textContent = m.status;
             taskStatus.className = 'pill ' + m.status;
