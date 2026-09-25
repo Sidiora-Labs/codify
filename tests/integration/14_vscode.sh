@@ -889,6 +889,124 @@ out="$("$CG" symbol memoryFilter --json)"
 has "$out" '"name":"memoryFilter"'
 has "$out" '"kind":"function"'
 
+# ---- the detail actions against the real payloads, under the fake Jev.
+#      Every action the panel offers is a cg command a person could type, so
+#      the shapes it reads are captured here and fed to the pure readers the
+#      panel uses — a drift in cg's JSON fails this test, not the user's click.
+cp -r "$FIXTURES/specrepo" "$TMP/memskills"
+cd "$TMP/memskills"
+"$CG" init >/dev/null
+export CG_JEV_CURL="$FIXTURES/jev/fake-curl.sh"
+export JEV_FAKE_DIR="$TMP/memjev"
+export JEV_FAKE_MODE=ok
+export CG_JEV_BACKOFF_MS=1
+export OPENROUTER_API_KEY=test
+"$CG" remember "Use the trigram index for symbol search" --type decision >/dev/null
+"$CG" remember "Never store secrets in memory" --type constraint \
+    --symbols memory_add --files src/memory.c >/dev/null
+
+# "Classify with Jev" on one memory, then on every unclassified one
+JEV_FAKE_CHOICE=skill "$CG" memory classify 1 --json > "$TMP/classify-one.json"
+JEV_FAKE_CHOICE=skill "$CG" memory classify --unclassified --json \
+    > "$TMP/classify-rest.json"
+"$CG" recall -n 500 --json > "$TMP/recall-classified.json"
+# "Open SKILL.md" before and after "Promote to skill"
+"$CG" skills list --json > "$TMP/skills-before.json"
+"$CG" skills promote 1 --json > "$TMP/promote.json"
+"$CG" skills promote 1 --json > "$TMP/promote-again.json"
+"$CG" skills list --json > "$TMP/skills-after.json"
+[ -f .agents/skills/use-the-trigram-index-for-symbol-search/SKILL.md ] \
+    || fail "promote wrote no SKILL.md"
+# "Supersede" and "Forget"
+"$CG" remember "Use the trigram index only for prefix search" --type decision \
+    --supersedes 1 >/dev/null
+"$CG" forget 2 >/dev/null
+"$CG" recall -n 500 --json > "$TMP/recall-after.json"
+# the two answers the panel must explain rather than swallow: a key Jev needs,
+# and a cg that predates the command
+env -u OPENROUTER_API_KEY "$CG" memory classify --all > "$TMP/nokey.out" 2>&1 \
+    || true
+"$CG" bogus-command > "$TMP/unknown.out" 2>&1 || true
+
+node - "$EXT" "$TMP" <<'JS'
+const fs = require('fs'), path = require('path');
+const [, , dir, tmp] = process.argv;
+const mem = require(path.join(dir, 'memories.js'));
+const read = (f) => JSON.parse(fs.readFileSync(path.join(tmp, f), 'utf8'));
+const text = (f) => ({ stderr: fs.readFileSync(path.join(tmp, f), 'utf8'), stdout: '' });
+
+// Classify with Jev: the notice names the class, how sure Jev is, and whether
+// the memory became a skill candidate
+const one = read('classify-one.json');
+if (one.ok !== true || one.classified !== 1) throw new Error('classify shape: ' + JSON.stringify(one));
+const note = mem.classifyNote(one, 1);
+for (const needle of ['#1', 'skill', '82% sure', 'candidate']) {
+    if (!note.includes(needle)) throw new Error(`classify note lost ${needle}: ${note}`);
+}
+const rest = read('classify-rest.json');
+if (!rest.candidates.includes(2)) throw new Error('classify --unclassified: ' + JSON.stringify(rest));
+if (!mem.classifyNote(rest, 2).includes('#2')) throw new Error('classify note picks the wrong row');
+if (!/#3\.$/.test(mem.classifyNote({ memories: [] }, 3))) {
+    throw new Error('a classify answer with no rows must still read as a sentence');
+}
+
+// recall now carries class and confidence; the filter bar reads both, and a
+// memory cg has not classified yet has class null, not a missing key
+const rows = read('recall-classified.json').memories;
+if (!rows.every((m) => 'class' in m)) throw new Error('recall rows lost class');
+if (mem.memoryFilter(rows, { class: 'skill' }).length !== rows.length) {
+    throw new Error('class filter misses classified rows');
+}
+if (mem.memoryFilter(rows, { class: mem.NONE }).length !== 0) {
+    throw new Error('classified rows must not count as unclassified');
+}
+const after = read('recall-after.json').memories;
+if (after.some((m) => m.id === 2)) throw new Error('forget left the memory behind');
+if (!after.some((m) => /prefix search/.test(m.body))) throw new Error('supersede wrote no replacement');
+if (!after.some((m) => m.id === 1)) throw new Error('supersede must keep the old memory as history');
+if (mem.memoryFilter(after, { class: mem.NONE }).some((m) => m.class)) {
+    throw new Error('unclassified filter caught a classified row');
+}
+
+// Open SKILL.md: the skills list is keyed by the memory id, and says which
+// step is still missing
+const before = read('skills-before.json');
+const s1 = mem.skillFor(before, 1);
+if (!s1 || s1.slug !== 'use-the-trigram-index-for-symbol-search') {
+    throw new Error('skillFor did not find memory 1: ' + JSON.stringify(before));
+}
+if (s1.promoted !== false || s1.path !== null) throw new Error('unpromoted skill has a path');
+if (mem.skillFor(before, 99)) throw new Error('skillFor invented a skill');
+if (mem.skillFor({ skills: [] }, 1)) throw new Error('an empty list is not a match');
+
+const promoted = read('promote.json');
+if (promoted.ok !== true || promoted.written !== true) throw new Error('promote shape');
+if (!promoted.path.endsWith('/SKILL.md') || !promoted.path.startsWith('.agents/skills/')) {
+    throw new Error('promote path: ' + promoted.path);
+}
+if (read('promote-again.json').written !== false) {
+    throw new Error('a second promote should report nothing was written');
+}
+const s1b = mem.skillFor(read('skills-after.json'), 1);
+if (!s1b.promoted || s1b.path !== promoted.path || s1b.stale !== false) {
+    throw new Error('promoted skill row: ' + JSON.stringify(s1b));
+}
+
+// the two failures the panel must name
+const nokey = text('nokey.out');
+if (!mem.jevKeyMissing(nokey)) throw new Error('a missing Jev key was not recognised');
+if (mem.unsupported(nokey)) throw new Error('a missing key is not an old cg build');
+const unknown = text('unknown.out');
+if (!mem.unsupported(unknown)) throw new Error('an unknown command was not recognised');
+if (mem.jevKeyMissing(unknown)) throw new Error('an unknown command is not a key problem');
+if (!mem.unsupported({ stderr: 'usage: cg skills list | promote <memory-id> | render\n' })) {
+    throw new Error('a usage answer is an old cg build');
+}
+console.log('memory actions match cg:', note);
+JS
+
+unset CG_JEV_CURL JEV_FAKE_DIR JEV_FAKE_MODE CG_JEV_BACKOFF_MS OPENROUTER_API_KEY
+
 fi   # memories
 # ---------------- fleet view (task 5.3) ----------------
 

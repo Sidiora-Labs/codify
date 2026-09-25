@@ -116,17 +116,49 @@ function newNonce() {
     return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+function output(r) {
+    return `${(r && r.stderr) || ''}\n${(r && r.stdout) || ''}`;
+}
+
 /* A cg call that answered with usage or "unknown command" is a build that
  * predates the feature, not a failure of the memory the user clicked. */
 function unsupported(r) {
-    const text = `${(r && r.stderr) || ''}\n${(r && r.stdout) || ''}`;
-    return /unknown command|unknown subcommand|^usage:|\nusage:/i.test(text);
+    return /unknown command|unknown subcommand|^usage:|\nusage:/i.test(output(r));
+}
+
+/* Jev is mandatory for the commands built on it and never silently degrades,
+ * so a missing key is a setup answer, not an error to decode. */
+function jevKeyMissing(r) {
+    return /OPENROUTER_API_KEY/.test(output(r));
 }
 
 function firstLine(r) {
-    const text = `${(r && r.stderr) || ''}\n${(r && r.stdout) || ''}`;
-    const line = text.split('\n').map((l) => l.trim()).find(Boolean);
+    const line = output(r).split('\n').map((l) => l.trim()).find(Boolean);
     return line || 'cg reported no detail';
+}
+
+/* `cg skills list --json` is keyed by the memory each skill came from: its
+ * `id` IS the memory id, `path` is null until it is promoted, and `stale`
+ * means the rendered file has drifted from the memory. A memory Jev never
+ * classed a skill is simply absent. Pure, so the test can drive it against
+ * the real payload. */
+function skillFor(skills, id) {
+    const list = Array.isArray(skills) ? skills
+        : (skills && (skills.skills || skills.list)) || [];
+    return list.find((s) => s && Number(s.id) === Number(id)) || null;
+}
+
+/* What Jev just decided about one memory, in one sentence. `candidate` is
+ * the field that matters: it is what `cg skills promote` draws from. */
+function classifyNote(data, id) {
+    const rows = (data && Array.isArray(data.memories)) ? data.memories : [];
+    const m = rows.find((x) => x && Number(x.id) === Number(id)) || rows[0];
+    if (!m || !m.class) return `Jev classified #${id}.`;
+    const pct = m.confidence === undefined || m.confidence === null
+        ? '' : ` (${Math.round(Number(m.confidence) * 100)}% sure)`;
+    const candidate = m.candidate
+        ? ' — a skill candidate, ready to promote.' : '.';
+    return `Jev classified #${id} as ${m.class}${pct}${candidate}`;
 }
 
 class MemoryBrowser {
@@ -363,10 +395,7 @@ class MemoryBrowser {
             if (r.code !== 0) { this.reportMissing(r, 'cg memory classify'); return; }
             let data = null;
             try { data = JSON.parse(r.stdout); } catch { data = null; }
-            const cls = data && (data.class || (data.memories && data.memories[0]
-                && data.memories[0].class));
-            this.notice(cls ? `Jev classified #${id} as ${cls}.`
-                : `Jev classified #${id}.`, 'info');
+            this.notice(classifyNote(data, id), 'info');
             await this.reloadAfterMutation();
         } finally { this.busy(id, false); }
     }
@@ -381,44 +410,67 @@ class MemoryBrowser {
         if (r.code !== 0) { this.reportMissing(r, 'cg memory classify'); return; }
         let data = null;
         try { data = JSON.parse(r.stdout); } catch { data = null; }
-        const n = data && (data.count !== undefined ? data.count
+        const n = data && (data.classified !== undefined ? data.classified
             : Array.isArray(data.memories) ? data.memories.length : undefined);
-        vscode.window.showInformationMessage(n === undefined
-            ? 'Memories classified.' : `Classified ${n} memories.`);
+        const candidates = (data && data.candidates) || [];
+        vscode.window.showInformationMessage(
+            (n === undefined ? 'Memories classified.' : `Classified ${n} memories.`) +
+            (candidates.length
+                ? ` ${candidates.length} skill candidate${candidates.length === 1 ? '' : 's'}.`
+                : ''));
         await this.reloadAfterMutation();
     }
 
+    /* Promotion answers with the path it wrote, so the offer to open it needs
+     * no second call — and `written: false` means the file was already
+     * current, which is worth saying rather than claiming a fresh render. */
     async promote(id) {
         if (id === undefined) return;
         this.busy(id, true, 'Promoting…');
         try {
-            const r = await this.deps.cg(['skills', 'promote', String(id)]);
+            const r = await this.deps.cg(['skills', 'promote', String(id), '--json']);
             if (r.code !== 0) { this.reportMissing(r, 'cg skills promote'); return; }
-            this.notice(`Memory #${id} promoted to a skill.`, 'info');
+            let data = null;
+            try { data = JSON.parse(r.stdout); } catch { data = null; }
+            const file = (data && data.path) || '';
+            this.notice(data && data.written === false
+                ? `Memory #${id} is already rendered at ${file}.`
+                : `Memory #${id} promoted to ${file || '.agents/skills'}.`, 'info');
             await this.reloadAfterMutation();
             const pick = await vscode.window.showInformationMessage(
-                `Memory #${id} is now a skill under .agents/skills.`, 'Open SKILL.md');
-            if (pick === 'Open SKILL.md') await this.openSkill(id);
+                `Memory #${id} is a skill at ${file || '.agents/skills'}.`,
+                'Open SKILL.md');
+            if (pick === 'Open SKILL.md') {
+                if (file) await this.openFile(file);
+                else await this.openSkill(id);
+            }
         } finally { this.busy(id, false); }
     }
 
-    /* The skill a memory became lives on disk; cg owns the path, so ask it
-     * rather than guessing the slug. */
+    /* The skill a memory became lives on disk; cg owns the slug and the path,
+     * so ask it rather than guessing — and say which step is missing when
+     * there is no file yet. */
     async openSkill(id) {
         const r = await this.deps.cg(['skills', 'list', '--json']);
         if (r.code !== 0) { this.reportMissing(r, 'cg skills list'); return; }
         let data = null;
         try { data = JSON.parse(r.stdout); } catch { data = null; }
-        const list = (data && (data.skills || data.list)) || [];
-        const hit = list.find((s) => s && Number(
-            s.memory !== undefined ? s.memory : s.memory_id) === Number(id));
-        const rel = hit && (hit.path || hit.file ||
-            (hit.slug ? path.join('.agents', 'skills', hit.slug, 'SKILL.md') : ''));
-        if (!rel) {
-            this.notice(`No skill is linked to memory #${id} yet — promote it first.`, 'warn');
+        const skill = skillFor(data, id);
+        if (!skill) {
+            this.notice(`Memory #${id} is not a skill candidate — classify it ` +
+                'with Jev first.', 'warn');
             return;
         }
-        await this.openFile(rel);
+        if (!skill.path) {
+            this.notice(`Memory #${id} is a skill candidate but has not been ` +
+                'promoted yet.', 'warn');
+            return;
+        }
+        if (skill.stale) {
+            this.notice(`${skill.path} has drifted from memory #${id} — ` +
+                '`cg skills render` refreshes it.', 'warn');
+        }
+        await this.openFile(skill.path);
     }
 
     /* An action on a memory the working set no longer holds: say so rather
@@ -430,6 +482,11 @@ class MemoryBrowser {
     reportMissing(r, label) {
         if (unsupported(r)) {
             this.notice(`${label} is not available in this cg build.`, 'warn');
+            return;
+        }
+        if (jevKeyMissing(r)) {
+            this.notice(`${label} needs a Jev key: set OPENROUTER_API_KEY and ` +
+                'check it with `cg jev doctor`.', 'warn');
             return;
         }
         this.notice(`${label} failed: ${firstLine(r)}`, 'error');
@@ -506,5 +563,6 @@ function register(ctx, deps) {
 
 module.exports = {
     MemoryBrowser, memoryFilter, register, panelHtml, filterSource,
+    skillFor, classifyNote, unsupported, jevKeyMissing,
     NONE, MEMORY_LIMIT,
 };
