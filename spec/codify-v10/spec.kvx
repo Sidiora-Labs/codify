@@ -158,7 +158,7 @@ reqs       = ["2.2", "2.3", "2.4", "2.5"]
 
 [task.2.3]
 title      = "Two-level orchestrator"
-status     = "pending"
+status     = "done"
 wave       = 5
 requires   = ["2.2", "3.2"]
 symbols    = ["orch_spawn_manager", "orch_spawn_worker", "orch_tree_status"]

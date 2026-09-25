@@ -46,7 +46,7 @@
     - cg fleet land <feature> merges the feature branch into local main, runs the test and lint gates, and refuses when either is red.
     - cg fleet pr <feature> opens the pull request against remote main through gh when available and prints the exact commands otherwise; cg fleet checkpoint merges open Codify PRs in order.
     - _Requirements: 2.2, 2.3, 2.4, 2.5_
-  - [ ] 2.3 Two-level orchestrator
+  - [x] 2.3 Two-level orchestrator
     - cg spec run --fleet spawns one feature manager per feature and wave workers under each manager, each in its own worktree with role, parent, branch, and base in the environment.
     - A manager completes only when its subtree is qualified and merged; a worker's resume prompt ends with merge-up, a manager's with land and pr.
     - Keep the single-level run intact for repositories without a hierarchy section.
