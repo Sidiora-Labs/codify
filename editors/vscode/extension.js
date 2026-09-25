@@ -19,6 +19,8 @@ const language = require('./language');
 const kvx = require('./kvx');
 const agents = require('./agents');
 const acp = require('./acp');
+/* --- memories (5.2) --- */
+const memorybrowser = require('./memories');
 const { createRefresher } = require('./refresh');
 
 let provider;
@@ -31,6 +33,11 @@ let diagnostics;
 let revalidate = () => {};
 let agentApi = { hasTerminal: () => false };
 let acpApi = { hasPanel: () => false };
+/* --- memories (5.2): the browser panel, dormant until it is opened --- */
+let memoryApi = {
+    open: () => {}, refresh: () => Promise.resolve(),
+    classifyAll: () => {}, promote: () => {}, supersede: () => {},
+};
 let refresher;
 let scopeTask;   /* task the open documents were last validated against */
 
@@ -371,6 +378,9 @@ async function runRefresh() {
               '--background', '--wait', '0']);
     await provider.refresh();
     await memories.refresh();
+    /* --- memories (5.2): the browser rides the one scheduler, never a timer
+     * of its own; it is a no-op while the panel is closed --- */
+    await memoryApi.refresh();
     await updateScope();
     /* what counts as "in scope" depends on which task is in progress, so
      * open documents are re-checked only when that changes */
@@ -696,6 +706,8 @@ async function cmdActions() {
         { label: '$(check) Check documentation', cmd: 'codify.docsCheck' },
         { label: '$(git-commit) Trace documentation', cmd: 'codify.docsTrace' },
         { label: '$(lightbulb) Remember a decision', cmd: 'codify.remember' },
+        /* --- memories (5.2) --- */
+        { label: '$(library) Browse project memories', cmd: 'codify.memories.browse' },
         { label: '$(save) Snapshot the working tree', cmd: 'codify.snapshot' },
         { label: '$(add) New feature spec', cmd: 'codify.newFeature' },
         { label: '$(diff-added) Add a task', cmd: 'codify.addTask' },
@@ -766,6 +778,11 @@ async function activate(ctx) {
         'codify.snapshot': cmdSnapshot,
         'codify.sync': cmdSync,
         'codify.hookInstall': cmdHookInstall,
+        /* --- memories (5.2) --- */
+        'codify.memories.browse': () => memoryApi.open(),
+        'codify.memories.classifyAll': () => memoryApi.classifyAll(),
+        'codify.memories.promote': (arg) => memoryApi.promote(arg),
+        'codify.memories.supersede': (arg) => memoryApi.supersede(arg),
     };
     for (const [name, fn] of Object.entries(cmds)) {
         ctx.subscriptions.push(vscode.commands.registerCommand(name, fn));
@@ -780,6 +797,10 @@ async function activate(ctx) {
     acpApi = acp.register(ctx, {
         cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
         startTerminal: agentApi.startTerminal,
+    });
+    /* --- memories (5.2) --- */
+    memoryApi = memorybrowser.register(ctx, {
+        cg, cgJson, workspaceRoot, refresh: () => afterMutation(),
     });
 
     /* Language features are best-effort: a workspace with no .codegraph, or

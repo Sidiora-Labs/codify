@@ -97,6 +97,10 @@
       { "command": "codify.testImpact", "title": "Codify: Tests Touching This Change", "icon": "$(beaker)" },
       { "command": "codify.remember", "title": "Codify: Remember a Decision", "icon": "$(lightbulb)" },
       { "command": "codify.forget", "title": "Codify: Forget This Memory", "icon": "$(trash)" },
+      { "command": "codify.memories.browse", "title": "Codify: Browse Project Memories", "icon": "$(library)" },
+      { "command": "codify.memories.classifyAll", "title": "Codify: Classify Memories with Jev", "icon": "$(sparkle)" },
+      { "command": "codify.memories.promote", "title": "Codify: Promote Memory to Skill", "icon": "$(mortar-board)" },
+      { "command": "codify.memories.supersede", "title": "Codify: Supersede Memory", "icon": "$(replace)" },
       { "command": "codify.snapshot", "title": "Codify: Snapshot the Working Tree", "icon": "$(save)" },
       { "command": "codify.sync", "title": "Codify: Sync the Index", "icon": "$(sync)" },
       { "command": "codify.hookInstall", "title": "Codify: Install Hooks" },
@@ -126,8 +130,10 @@
         { "command": "codify.agent.runWave", "when": "view == codifyTasks", "group": "2_work@5" },
         { "command": "codify.agent.newChat", "when": "view == codifyAgentView", "group": "navigation@1" },
         { "command": "codify.agent.configure", "when": "view == codifyAgentView", "group": "navigation@2" },
+        { "command": "codify.memories.browse", "when": "view == codifyMemories", "group": "navigation@0" },
         { "command": "codify.remember", "when": "view == codifyMemories", "group": "navigation@1" },
-        { "command": "codify.refresh", "when": "view == codifyMemories", "group": "navigation@2" }
+        { "command": "codify.refresh", "when": "view == codifyMemories", "group": "navigation@2" },
+        { "command": "codify.memories.classifyAll", "when": "view == codifyMemories", "group": "1_memory@1" }
       ],
       "view/item/context": [
         { "command": "codify.startTask", "when": "view == codifyTasks && viewItem == task-pending", "group": "inline@1" },
@@ -143,7 +149,9 @@
         { "command": "codify.agent.resume", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "3_agent@2" },
         { "command": "codify.agent.handoff", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "3_agent@3" },
         { "command": "codify.agent.stop", "when": "view == codifyTasks && viewItem =~ /^task-/", "group": "3_agent@4" },
-        { "command": "codify.forget", "when": "view == codifyMemories && viewItem == memory", "group": "inline" }
+        { "command": "codify.forget", "when": "view == codifyMemories && viewItem == memory", "group": "inline" },
+        { "command": "codify.memories.supersede", "when": "view == codifyMemories && viewItem == memory", "group": "1_memory@1" },
+        { "command": "codify.memories.promote", "when": "view == codifyMemories && viewItem == memory", "group": "1_memory@2" }
       ],
       "editor/context": [
         { "command": "codify.why", "when": "editorTextFocus && codify.hasSpec", "group": "codify@1" },

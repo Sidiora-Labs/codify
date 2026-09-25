@@ -2,11 +2,19 @@
 # VS Code extension: syntax, manifest coherence, and the LSP client driven
 # against the real cg binary. The client is plain Node, so it is testable
 # without VS Code — which is most of what could actually break.
+#   core     — syntax, manifest, refresh scheduler, LSP client
+#   memories — (task 5.2) the memory browser panel and its pure filter
+# Run one section: 14_vscode.sh memories
 . "$(dirname "$0")/../lib.sh"
+section="${1:-all}"
+
+want() { [ "$section" = all ] || [ "$section" = "$1" ]; }
 
 EXT="$(cd "$(dirname "$0")/../../editors/vscode" && pwd)"
 
 command -v node >/dev/null 2>&1 || { echo "14_vscode skipped (no node)"; exit 0; }
+
+if want core; then
 
 # ---- every source file parses
 for f in "$EXT"/*.js; do
@@ -264,4 +272,170 @@ const [, , , bin, root] = process.argv;
 })().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
 JS
 
-echo "14_vscode ok"
+fi   # core
+
+# ---- the memory browser (task 5.2): a CSP-strict webview whose filter is
+#      pure enough to drive from node, and whose symbols are in the graph
+if want memories; then
+
+node --check "$EXT/memories.js" || fail "syntax error in memories.js"
+
+# the manifest contributes the browser's commands and extension.js registers
+# them, so the panel is reachable from the palette and the Memory view
+node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+const ext = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
+const mem = fs.readFileSync(path.join(dir, 'memories.js'), 'utf8');
+
+const declared = pkg.contributes.commands.map((c) => c.command);
+for (const c of ['codify.memories.browse', 'codify.memories.classifyAll',
+                 'codify.memories.promote', 'codify.memories.supersede']) {
+    if (!declared.includes(c)) throw new Error(`manifest does not contribute ${c}`);
+    if (!new RegExp(`'${c.replace(/\./g, '\\.')}':`).test(ext)) {
+        throw new Error(`${c} is contributed but never registered`);
+    }
+}
+if (!/memorybrowser\.register\(/.test(ext)) {
+    throw new Error('extension.js never registers the memory browser');
+}
+// one refresh scheduler: the browser rides it and owns no timer or watcher
+if (!/await memoryApi\.refresh\(\)/.test(ext)) {
+    throw new Error('the memory browser is not refreshed from runRefresh');
+}
+if (/setInterval|setTimeout|createFileSystemWatcher/.test(mem)) {
+    throw new Error('memories.js runs a timer or watcher of its own');
+}
+if (pkg.dependencies || pkg.devDependencies) {
+    throw new Error('extension must stay dependency-free');
+}
+console.log('memory browser contributed:', declared.filter(
+    (c) => c.startsWith('codify.memories.')).length, 'commands');
+JS
+
+# the webview is CSP-strict: nonce'd inline style and script, nothing remote,
+# no eval, no inline handlers — and the rendered page has no placeholder left
+node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const file = path.join(dir, 'memorypanel.html');
+const html = fs.readFileSync(file, 'utf8');
+
+const meta = /<meta http-equiv="Content-Security-Policy"\s+content="([^"]*)"/.exec(html);
+if (!meta) throw new Error('memorypanel.html has no Content-Security-Policy meta tag');
+const csp = meta[1];
+for (const needle of ["default-src 'none'", "style-src 'nonce-${nonce}'",
+                      "script-src 'nonce-${nonce}'"]) {
+    if (!csp.includes(needle)) throw new Error(`CSP is missing ${needle}: ${csp}`);
+}
+if (/unsafe-inline|unsafe-eval/.test(csp)) throw new Error(`CSP is not strict: ${csp}`);
+if (/https?:\/\//.test(html)) throw new Error('memorypanel.html loads a remote URL');
+if (/\beval\s*\(|new Function\s*\(/.test(html)) throw new Error('memorypanel.html evals');
+if (/<[^>]*\son[a-z]+\s*=/i.test(html)) {
+    throw new Error('memorypanel.html uses an inline event handler (CSP blocks it)');
+}
+for (const m of html.matchAll(/<(script|style)\b([^>]*)>/g)) {
+    if (!/nonce="\$\{nonce\}"/.test(m[2])) {
+        throw new Error(`<${m[1]}> without the nonce placeholder`);
+    }
+}
+
+// the panel filters with the real memoryFilter, injected rather than copied
+const { panelHtml, filterSource } = require(path.join(dir, 'memories.js'));
+const page = panelHtml('N0NCE-123');
+if (/\$\{[a-zA-Z]+\}/.test(page)) {
+    throw new Error('rendered panel still carries a ${} placeholder');
+}
+if (!page.includes('nonce="N0NCE-123"')) throw new Error('the nonce was not applied');
+if (!page.includes(filterSource())) throw new Error('memoryFilter was not injected');
+
+// the inline script is the one JS the syntax sweep cannot see: compile it
+const inline = /<script nonce="[^"]*">([\s\S]*?)<\/script>/.exec(page);
+if (!inline) throw new Error('rendered panel has no inline script');
+new (require('vm').Script)(inline[1], { filename: 'memorypanel.html script' });
+console.log('memorypanel CSP ok');
+JS
+
+# the filter itself, under plain node against a recall-shaped fixture.
+# TZ is pinned because the date range is local-midnight to local-midnight.
+cat > "$TMP/memories.json" <<'JSON'
+{"count":4,"memories":[
+{"id":4,"created":1709640000,"type":"outcome","task":"codify-v10/2.2","branch":"wave/codify-v10/2","class":"noise","confidence":0.31,"body":"verify_cmd failed twice before it passed","source":"spec done"},
+{"id":3,"created":1708430400,"type":"fact","task":null,"body":"The graph lives in .codegraph beside the code","source":"manual"},
+{"id":2,"created":1706097600,"type":"constraint","body":"No new link-time dependencies: libsqlite3 and libc only","source":"manual"},
+{"id":1,"created":1704888000,"type":"decision","task":"codify-v10/5.2","branch":"main","class":"skill","confidence":0.82,"body":"Sessions rotate on login","symbols":"rotateSession,MemoryBrowser","files":"src/auth.ts","source":"manual"}
+]}
+JSON
+
+TZ=UTC node - "$EXT" "$TMP/memories.json" <<'JS'
+const fs = require('fs'), path = require('path'), vm = require('vm');
+const [, , dir, fixture] = process.argv;
+const { memoryFilter, filterSource, NONE } = require(path.join(dir, 'memories.js'));
+const all = JSON.parse(fs.readFileSync(fixture, 'utf8')).memories;
+
+const ids = (v) => v.map((m) => m.id);
+function eq(got, want, what) {
+    const a = JSON.stringify(ids(got)), b = JSON.stringify(want);
+    if (a !== b) throw new Error(`${what}: ${a} != ${b}`);
+}
+
+eq(memoryFilter(all, {}), [4, 3, 2, 1], 'no filter keeps recall order');
+eq(memoryFilter(all, null), [4, 3, 2, 1], 'a missing filter matches everything');
+eq(memoryFilter(null, { text: 'x' }), [], 'no memories is not a crash');
+
+// full text: body, symbols, files, source — case-insensitive, AND of terms
+eq(memoryFilter(all, { text: 'login' }), [1], 'body text');
+eq(memoryFilter(all, { text: 'ROTATESESSION' }), [1], 'symbol text, any case');
+eq(memoryFilter(all, { text: 'src/auth.ts' }), [1], 'file text');
+eq(memoryFilter(all, { text: 'spec done' }), [4], 'source text');
+eq(memoryFilter(all, { text: 'new link' }), [2], 'every term must hit');
+eq(memoryFilter(all, { text: 'login dependencies' }), [], 'terms are an AND');
+
+// the filter bar
+eq(memoryFilter(all, { type: 'constraint' }), [2], 'type');
+eq(memoryFilter(all, { class: 'skill' }), [1], 'Jev class');
+eq(memoryFilter(all, { class: NONE }), [3, 2], 'unclassified');
+eq(memoryFilter(all, { task: 'codify-v10/5.2' }), [1], 'task');
+eq(memoryFilter(all, { task: NONE }), [3, 2], 'no task, null or absent');
+eq(memoryFilter(all, { branch: 'main' }), [1], 'branch');
+eq(memoryFilter(all, { branch: NONE }), [3, 2], 'no branch');
+eq(memoryFilter(all, { from: '2024-02-01' }), [4, 3], 'from is inclusive');
+eq(memoryFilter(all, { to: '2024-01-24' }), [2, 1], 'to is inclusive');
+eq(memoryFilter(all, { from: '2024-02-20', to: '2024-02-20' }), [3], 'one day');
+eq(memoryFilter(all, { text: 'failed', type: 'outcome', branch: 'wave/codify-v10/2',
+    from: '2024-03-01' }), [4], 'every filter at once');
+eq(memoryFilter(all, { from: 'nonsense' }), [4, 3, 2, 1], 'a half-typed date filters nothing');
+
+// rows from an older cg carry no class, confidence or branch: they must still
+// list, and still disappear only when that field is what is being filtered on
+eq(memoryFilter([{ id: 9, created: 1704888000, type: 'fact', body: 'old row' }], {}),
+    [9], 'sparse row');
+eq(memoryFilter([{ id: 9, created: 1704888000, type: 'fact', body: 'old row' }],
+    { class: 'skill' }), [], 'sparse row excluded by a class filter');
+if (all.length !== 4) throw new Error('memoryFilter mutated its input');
+
+// the panel's copy is the same function
+const ctx = vm.createContext({});
+vm.runInContext(filterSource() + '\nthis.f = memoryFilter;', ctx);
+eq(ctx.f(all, { text: 'login' }), [1], 'the injected filter agrees');
+console.log('memoryFilter ok:', all.length, 'fixture memories');
+JS
+
+# ---- the symbols the task declares resolve in the graph
+mkdir -p "$TMP/memproj/editors/vscode"
+cp "$EXT/memories.js" "$TMP/memproj/editors/vscode/memories.js"
+cd "$TMP/memproj"
+"$CG" init >/dev/null
+"$CG" index >/dev/null
+out="$("$CG" symbol MemoryBrowser --json)"
+has "$out" '"name":"MemoryBrowser"'
+has "$out" '"kind":"class"'
+has "$out" 'editors/vscode/memories.js'
+out="$("$CG" symbol memoryFilter --json)"
+has "$out" '"name":"memoryFilter"'
+has "$out" '"kind":"function"'
+
+fi   # memories
+
+echo "14_vscode ok ($section)"
