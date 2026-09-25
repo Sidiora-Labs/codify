@@ -1090,11 +1090,13 @@ JS
     "$CG" spec status --json > "$TMP/json/spec.json"
     "$CG" branches --json > "$TMP/json/branches.json"
     "$CG" fleet plan --json > "$TMP/json/plan.json"
+    "$CG" fleet tree --json > "$TMP/json/tree.json"
 
     node - "$EXT" "$TMP/json" "$(date +%s)" <<'JS'
 const path = require('path'), fs = require('fs');
 const [, , dir, out, nowArg] = process.argv;
-const { fleetTree, relAge, mergeState } = require(path.join(dir, 'fleet.js'));
+const { fleetTree, relAge, mergeState, treeFacts } =
+    require(path.join(dir, 'fleet.js'));
 const now = Number(nowArg);
 const j = (n) => JSON.parse(fs.readFileSync(path.join(out, n), 'utf8'));
 const eq = (got, want, what) => {
@@ -1146,6 +1148,102 @@ eq(planned.live, false, 'wave 2 has no agent yet');
 eq(planned.age.text, 'never seen', 'wave 2 heartbeat');
 eq(String(planned.tasks.map((x) => x.id)), '3.1', 'wave 2 tasks');
 if (t.counts.live < 3) throw new Error('counts: ' + JSON.stringify(t.counts));
+eq(t.source, 'composed', 'without a tree the view composes one');
+
+// ---- `cg fleet tree` is cg's own walk of the hierarchy. Where it speaks it
+//      wins; what it does not cover — the waves nobody has started, their
+//      tasks, the branch registry — is still joined in.
+const tt = fleetTree(j('status.json'), j('spec.json'), j('branches.json'),
+    { plan: j('plan.json'), tree: j('tree.json'), now });
+eq(tt.source, 'tree', 'the real tree was used');
+eq(tt.feature, 'fleet', 'tree feature');
+eq(tt.main.agent, 'gideon', 'tree root');
+eq(tt.main.branch, 'main', 'tree root branch');
+if (!tt.main.worktree) throw new Error('the tree names no main worktree');
+const tm = tt.main.children[0];
+eq(tm.agent, 'fm-fleet', 'tree manager');
+eq(tm.parent, 'gideon', 'the manager reports to main');
+eq(tm.branch, 'feature/fleet', 'tree manager branch');
+eq(tm.base, 'main', 'tree manager base');
+if (!/feature-fleet$/.test(tm.worktree || '')) {
+    throw new Error('manager worktree: ' + tm.worktree);
+}
+// the numbers nothing else the view reads could produce
+eq(tm.progress.total, 4, 'tasks in the subtree');
+eq(tm.progress.done, 0, 'tasks done');
+eq(tm.progress.claimed, 1, 'tasks running');
+eq(tm.ahead, 0, 'commits ahead of main');
+eq(tm.merged, true, 'the feature branch is already in main');
+eq(tm.complete, false, 'the subtree is not finished');
+// the registered worker comes from the tree; the fields the agents registry
+// leaves empty until an attempt fills them in come from the claim and the plan
+const tw = tm.children.find((w) => w.agent === 'w-fleet-1');
+eq(tw.parent, 'fm-fleet', 'the worker reports to the manager');
+eq(tw.wave, 1, 'worker wave');
+eq(tw.state, 'running', 'attempt state');
+eq(tw.live, true, 'the worker is live');
+eq(tw.branch, 'wave/fleet/1', 'branch filled in from the claim');
+if (!/wave-fleet-1$/.test(tw.worktree || '')) {
+    throw new Error('worker worktree: ' + tw.worktree);
+}
+if ((tw.attempt || '').length < 16) throw new Error('attempt: ' + tw.attempt);
+eq(String(tw.tasks.map((x) => x.id)), '2.1,2.2', 'the wave keeps its tasks');
+// and the waves nobody has started are not in the tree — losing them would
+// hide the shape of the work still to come
+eq(String(tm.children.map((w) => w.wave)), '0,1,2', 'planned waves survive');
+eq(tm.children.find((w) => w.wave === 2).live, false, 'wave 2 has no agent');
+
+// ---- where the tree contradicts what we would have composed, it wins
+const won = fleetTree(
+    { hierarchy: { configured: true, main: 'main' },
+      agents: [{ agent: 'g', role: 'main', seen: now },
+               { agent: 'fm', role: 'feature', feature: 'x', seen: now }] },
+    { feature: 'x', claims: [] }, null,
+    { now,
+      plan: { feature: 'x',
+              feature_manager: { agent: 'fm', branch: 'feature/x' },
+              waves: [{ wave: 1, agent: 'w1', branch: 'wave/x/1',
+                        base: 'feature/x',
+                        tasks: [{ id: '1.1', status: 'pending' }] }] },
+      tree: { feature: 'x', enabled: true,
+              main: { agent: 'boss', role: 'main', branch: 'trunk',
+                      worktree: '/r' },
+              managers: [{ agent: 'fm', role: 'feature', parent: 'boss',
+                           feature: 'x', branch: 'release/x', base: 'trunk',
+                           worktree: '/w', seen: now,
+                           tasks: { total: 3, done: 2, claimed: 0 },
+                           ahead: 5, merged: false, complete: false,
+                           workers: [{ agent: 'w7', role: 'worker', parent: 'fm',
+                                       wave: -1, branch: '', base: '',
+                                       worktree: '', task: '9.9',
+                                       attempt: 'zz', state: 'failed',
+                                       heartbeat: now - 300,
+                                       seen: now - 300 }] }] } });
+eq(won.main.agent, 'boss', 'the tree names main');
+eq(won.main.branch, 'trunk', 'the tree names the main branch');
+const wm = won.main.children[0];
+eq(wm.branch, 'release/x', 'the tree branch beats the plan');
+eq(wm.base, 'trunk', 'the tree base beats the hierarchy');
+eq(wm.worktree, '/w', 'the tree worktree');
+eq(wm.progress.done, 2, 'tree progress');
+eq(wm.ahead, 5, 'commits ahead');
+eq(wm.merged, false, 'not merged');
+const ww = wm.children.find((x) => x.agent === 'w7');
+eq(ww.wave, null, 'a worker cg gives no wave of its own');
+eq(ww.state, 'failed', 'a finished attempt still shows its state');
+eq(ww.attempt, 'zz', 'attempt from the tree');
+eq(ww.age.stale, true, 'the tree heartbeat drives the age');
+eq(String(ww.tasks.map((x) => x.id)), '9.9', 'the task the tree reports');
+const w1 = wm.children.find((x) => x.agent === 'w1');
+eq(w1.live, false, 'the planned wave is still there');
+eq(String(w1.tasks.map((x) => x.id)), '1.1', 'and keeps its tasks');
+
+// a shape that is not the one cg prints is not read as one
+eq(treeFacts(null), null, 'no tree');
+eq(treeFacts({ main: { agent: 'g' } }), null, 'no managers');
+eq(treeFacts([{ main: {} }]), null, 'not an object');
+eq(treeFacts({ main: { agent: 'g' }, managers: [] }).managers.length, 0,
+   'an empty fleet is still a tree');
 
 // ---- merge state and stale heartbeats, over heads the registry holds
 const synth = fleetTree(
