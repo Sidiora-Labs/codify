@@ -160,7 +160,9 @@ a role is set, so solo sessions leave no trace. The branch lifecycle —
 `fleet_pr_open`, `fleet_checkpoint` — drives `git` and `gh` through the
 helpers in `gitint.c`, always against the shared project (the main
 worktree), and shares the spec engine's claim primitives rather than
-adding a second ownership system. Full contract: [hierarchy.md](hierarchy.md).
+adding a second ownership system. `cg fleet tree` is dispatched here but
+implemented as `orch_tree_status` in `orchestrate.c`, beside the run it
+reports on. Full contract: [hierarchy.md](hierarchy.md).
 
 ## Jev decisions (`jev.c`)
 
@@ -171,7 +173,30 @@ with a private `0600` config file so the key never reaches a command line
 nor the body a shell, retries `429`/`529` with doubling backoff, and
 appends one JSON line per call to `.codegraph/jev.log`. A missing
 `OPENROUTER_API_KEY` is an error, never a fallback; every answer is advice,
-and no answer changes an exit code. Full contract: [jev.md](jev.md).
+and no answer changes an exit code.
+
+Three callers live inside commands that must keep working without Jev, so
+they share one gate: `jev_advisory_ready` checks the key in a single place
+and `jev_advisory_failed` makes a broken call read like a missing one.
+`jev_triage_failure` classifies a red `verify_cmd` from the tail of its
+output (last 40 lines, 4 KiB), `jev_rank_findings` scores up to 50 `cg
+guard` findings in one request, and `jev_pr_readiness` scores a feature
+branch for the pull request body. A caller that only adds a line to its
+output can ignore the return value: the fields stay empty and it prints
+nothing. Full contract: [jev.md](jev.md).
+
+## Skills (`skills.c`)
+
+What happens to a memory Jev classed a `skill`. `cg skills promote` renders
+one memory as `.agents/skills/<slug>/SKILL.md` — the portable format every
+agent host reads — and `cg skills render` refreshes every file already
+written. Two invariants keep it honest. The file carries Codify's
+`codify-owned:` marker (the same convention `integrate.c` uses for every
+asset it writes) naming the memory it came from, and a file without that
+marker is never overwritten. And promotion lives in the file, not in the
+database: `memories.class` stays Jev's opinion of the note, so
+re-classifying never silently un-promotes a skill in use — it only makes
+the rendered copy stale.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
@@ -353,6 +378,22 @@ failures exceed `--max-fail`; SIGINT terminates the children, releases
 their leases, and exits 130. `--dry-run` prints waves, tasks, and the
 exact argv per task without claiming anything. Requires a `.codegraph/`
 and parallel or prod mode.
+
+### Two levels (`--fleet`)
+
+`cg spec run --fleet` wraps that loop in the hierarchy. `orch_spawn_manager`
+starts one feature manager in the feature worktree; `orch_spawn_worker`
+starts a wave worker per free slot in its own wave worktree, both through
+the same `[agents]` driver and the same prompt-on-stdin contract, with the
+role, parent, feature, wave, branch, and base exported into the child's
+environment and the branch already checked out. The manager is woken in
+rounds — 16 wakes by default, one second apart, `--max-rounds` to change
+it — and the run ends when the subtree
+is **merged**, not when a process exits: completion is read from the task
+list and the branch state. `orch_tree_status` renders the same join for
+`cg fleet tree` and `--status`. Without an enabled `[hierarchy]` the flag
+is refused before anything is spawned, and the single-level path above is
+untouched.
 
 ## Documentation closure (`docs.c`)
 

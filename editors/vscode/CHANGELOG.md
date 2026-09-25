@@ -13,6 +13,26 @@ The task board becomes a task tree you can work a fleet from.
 - Actions from the tree and the panel: start, complete, claim, release, run the verify command in a terminal (in the task's own worktree when the fleet gave it one), open the task's branch or worktree, and copy a resume prompt built from the task's own declaration
 - The detail panel is a zero-dependency, nonce-only CSP webview that repaints from the same refresh chain as the tree — no extra polling, no watchers
 
+A memory browser, so project memory is something you search rather than scroll.
+
+- **Codify: Browse Project Memories** opens a CSP-strict webview with full text across the memories and filters for type, Jev class, task, branch and date; the filtering is client-side over one `cg recall`, so it answers on every keystroke without re-querying
+- A detail pane whose symbols and files are links back into the code
+- Actions on a memory: supersede it with a newer note, forget it, classify the store with Jev (`cg memory classify`), promote a memory classed `skill` into `.agents/skills/<slug>/SKILL.md`, and open that file
+- Against an older `cg` that does not know `memory classify` or `skills`, the panel says so plainly instead of failing silently or hanging
+
+And a fleet view, for the hierarchy the terminal already had.
+
+- Main Gideon, feature managers and wave workers as one tree, each with its branch, worktree, current attempt, heartbeat age, and whether its branch is already merged into its base — joined from the agent registry, the live claims, and the branch registry
+- Actions on a node: begin, merge-up, land, open the pull request, checkpoint, refresh, and open an agent's worktree in a window
+- A refresh never runs `cg fleet pr`, because that command opens a pull request; open PRs are shown from what an explicit action reported. Merge state is only what the registry can prove — equal heads — and the view never invents a commit count it was not given
+- Every call goes through the one refresh scheduler and is raced against a timeout, so the view cannot sit on a spinner
+
+Agent chat, continued.
+
+- Tool cards render real diffs and terminal output (ANSI stripped), permission requests are answered inline as buttons rather than in a modal, and a turn can be cancelled or re-sent with **↻ Retry**
+- The session bar follows agent-generated titles, context-window usage, and a running cost for the adapters that price their turns — an absent cost means unknown, not free
+- Agent-native slash commands join the composer palette, namespaced as `/agent-<name>` on a collision so Codify's own keep their meaning
+
 ## 2026-09-25 — Codify 0.9.0 (v10) · extension 1.2.8
 
 The board no longer competes with the agents for the CPU.
@@ -22,8 +42,6 @@ The board no longer competes with the agents for the CPU.
 - The `.codegraph/graph.db` watcher is gone — the extension's own sync wrote it, so every refresh triggered the next; spec files stay watched and agent-side changes arrive through a 10-second poll while a session is tracked and a 60-second poll while the window is focused
 - Open documents are re-validated against the task scope only when the in-progress task changes, not on every refresh
 - The Marketplace identity is `SidioraLabs.codify-workflow`; the README, the install instructions, and the coherence test now say so
-
-Not in this build, and specified for v10: the grouped and filterable task tree with a detail webview (task 5.1), the memory browser with Jev classification and skill promotion (5.2), and the fleet view of managers, workers, branches and open pull requests (5.3). Until they land, drive the fleet from the terminal with `cg fleet`.
 
 ## 2026-09-04 — Codify 0.8.5 · extension 1.2.0
 

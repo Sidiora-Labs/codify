@@ -174,6 +174,41 @@ is refused before any merge is attempted. Re-running after a successful
 merge prints `nothing to merge: feature/fleet already contains
 wave/fleet/1`.
 
+A successful merge also brings the memories with it:
+
+```
+$ cg fleet merge-up 2.1
+merged wave/fleet/1 into feature/fleet: 1 commit (head 227a1f98) at …/feature-fleet
+  promoted 3 memories to feature/fleet
+```
+
+A note made on a wave branch is not yet a decision of the project, so it is
+recorded against that branch and promoted to the base when the code is —
+dropping any the base already holds, so merging twice never duplicates a
+decision. `--json` reports it as `memories_promoted`.
+
+### A tagged git commit counts as evidence
+
+`cg spec done` checks that the paths a task declared were actually
+touched. Uncommitted work in the tree satisfies that, which is the usual
+case — qualify, then commit, then `merge-up`.
+
+A fleet also produces the other case: the work is already committed and the
+worktree is clean. Codify's snapshot chain cannot attribute it, because
+every worker commits with **git** on its own branch while the snapshot
+chain is one line shared by all of them. So a plain git commit whose
+message carries the task tag is evidence too:
+
+```sh
+git commit -m "alpha: implement [spec:fleet/2.1]"
+# ...later, or from a resumed session...
+cg spec done 2.1          # ✓ touched src/*.ts
+```
+
+Git history is ingested before the check runs, so that commit does not need
+a `cg git-sync` first. This is what lets a worker be resumed, or its task
+qualified by its manager, after the change has already been committed.
+
 ### `cg fleet land <feature>`
 
 Merges the feature branch into **local** main, then runs the gates.
@@ -218,7 +253,7 @@ pull request (gh not found): run these to open feature/fleet against origin/main
      --title 'feature/fleet' --body-file '/path/proj/.codegraph/fleet/pr-fleet.md'
 ```
 
-The body is the feature's title and its task list:
+The body is the feature's title, its task list, and a readiness line:
 
 ```markdown
 Feature `fleet`, landed on `main` by Codify with the test and lint gates green.
@@ -227,7 +262,15 @@ Feature `fleet`, landed on `main` by Codify with the test and lint gates green.
 - 1.1 First task (done)
 - 2.1 Alpha work (done)
 - 3.1 Docs work (pending)
+
+Jev readiness: 0.95 (high) — 2/3 tasks qualified, 4 commits, gates not run in this command
 ```
+
+The readiness line is Jev's opinion of the state Codify can prove — branch,
+base, commits ahead, and what is qualified. It is advice: a low score says
+so and still opens the pull request, and with no `OPENROUTER_API_KEY` the
+line is simply absent (`jev: OPENROUTER_API_KEY is not set — pull request
+readiness skipped`). See [jev.md](jev.md#pull-request-readiness).
 
 ### `cg fleet checkpoint`
 
@@ -250,6 +293,7 @@ checkpoint (dry-run): merge the open feature/* pull requests lowest number first
 cg fleet roles              # the configured hierarchy
 cg fleet status             # who is alive in which role, on which task
 cg fleet plan [-f F]        # which manager owns the feature, which worker each wave
+cg fleet tree [-f F]        # the live tree: main → managers → workers
 cg fleet                    # same as status
 ```
 
@@ -268,7 +312,26 @@ wave 2    w-fleet-2            wave/fleet/2            ← feature/fleet  live: 
           3.1      pending      Docs work
 ```
 
-All three take `--json`.
+`cg fleet tree` is the same tree with what actually happened on it —
+progress, whether the feature branch is ahead of its base or already merged,
+and the state and heartbeat of every worker:
+
+```
+$ cg fleet tree
+fleet tree — codify-v10
+main     gideon           branch main
+  feature  fm-codify-v10    branch feature/codify-v10   base main
+           tasks 13/16 done, 0 running  ahead 0  incomplete  seen -
+    (no workers yet)
+```
+
+It refuses in a repository with no hierarchy — *this repository runs flat* —
+rather than inventing one. `--json` returns `main`, `managers[]` with
+`tasks {total, done, claimed}`, `ahead`, `merged` and `complete`, and
+`workers[]` with `wave`, `task`, `branch`, `base`, `worktree`, `state`,
+`attempt` and `heartbeat`.
+
+All the reports take `--json`.
 
 ## A worked example
 
@@ -309,17 +372,78 @@ for any other parallel-mode task — the fleet shares the same lease
 primitives, it does not add a second ownership system. See the parallel
 mode section of the [README](../README.md#parallel-mode).
 
-## Planned in v10 (not yet shipped)
+## Running the tree: `cg spec run --fleet`
 
-- **Task 2.3 — two-level orchestrator.** `cg spec run --fleet` spawning one
-  feature manager per feature and wave workers under each manager, each in
-  its own worktree with role, parent, branch, and base in the environment;
-  a manager completing only when its subtree is qualified and merged; a
-  worker's resume prompt ending with `merge-up`, a manager's with `land`
-  and `pr`. The single-level `cg spec run` stays intact for repositories
-  without a `[hierarchy]` section.
-- **Task 4.3 — PR readiness.** `cg fleet pr` asking Jev for a readiness
-  score and including it in the PR body. See [jev.md](jev.md).
+Everything above is the manual path. `cg spec run --fleet` drives the same
+commands as a two-level orchestrator: one feature manager per feature, wave
+workers under it, each spawned in its own worktree with its identity in the
+environment.
+
+```
+cg spec run --fleet [-f <feature>] [-n N] [--max-rounds R] [--status]
+                    [--dry-run] [--driver codex|claude|custom] [--max-fail K]
+```
+
+`-n` is the number of **worker** slots; the manager is always one more.
+`--dry-run` plans without claiming or creating anything:
+
+```
+$ cg spec run --fleet --dry-run -n 2
+fleet plan — driver claude, 2 worker slot(s), feature codify-v10 (dry run: nothing claimed)
+  manager fm-codify-v10 — codify-v10 on feature/codify-v10 (from main)
+    worktree /path/proj/.codegraph/worktrees/feature-codify-v10
+    claude -p --permission-mode acceptEdits
+    worker w-codify-v10-5 — 2.3 (wave 5) on wave/codify-v10/5 (from feature/codify-v10)
+      claude -p --permission-mode acceptEdits
+```
+
+A real run reports each spawn and each result, and ends on the merge rather
+than on a process exiting:
+
+```
+$ cg spec run --fleet -n 1
+[fleet] fleet — manager + 1 worker slot(s), driver custom, 16 wake(s)
+[fleet] manager fm-fleet on feature/fleet, log .codegraph/agents/fleet-manager.log
+[fleet] worker w-fleet-1 → 2.1 (wave 1) on wave/fleet/1, log .codegraph/agents/fleet-2.1.log
+[fleet] worker w-fleet-1 task 2.1 exit 0 → done
+[fleet] worker w-fleet-2 → 3.1 (wave 2) on wave/fleet/2
+[fleet] fleet complete — 4/4 task(s) qualified, feature/fleet merged into main, 0 failure(s)
+```
+
+Three things make that line trustworthy. The subtree is **complete because
+it merged**, not because the manager's process returned: the run checks the
+task list and the branch state. Each child is handed `CG_ROLE`,
+`CG_PARENT`, `CG_FEATURE`, `CG_WAVE`, `CG_BRANCH`, `CG_BASE` — and, for a
+worker, `CG_TASK`, `CG_ATTEMPT` and `CG_FENCE` — and runs with its branch
+already checked out in its own worktree. And the prompts end on the command
+that moves work upward: a worker's briefing closes with
+`cg fleet merge-up <id>`, a manager's with `cg fleet land <feature>` and
+`cg fleet pr <feature>`, so an agent that reads only the last line still
+does the right thing.
+
+`--status` prints `cg fleet tree` for the run instead of starting one.
+The manager is woken from a fixed budget — 16 wakes by default, a second
+apart — and `--max-rounds R` changes it, so a fleet that cannot finish
+stops instead of spinning:
+
+```
+$ cg spec run --fleet --max-rounds 2
+cg spec: no manager wake is left (--max-rounds)
+```
+
+That exits 1, and leaves no claims behind. A run with nothing left to do is
+complete without spawning anything.
+
+Both `--fleet` refusals happen before anything is created:
+
+```
+$ cg spec run --fleet
+cg spec: --fleet needs a [hierarchy] in spec/workflow.kvx — nothing was spawned
+```
+
+and, when the section exists with `enabled = false`, *--fleet needs an
+enabled [hierarchy]*. The single-level `cg spec run` is untouched by any of
+this and still works in a repository that runs flat.
 
 ## Limitations
 
@@ -331,3 +455,10 @@ mode section of the [README](../README.md#parallel-mode).
   qualified but was not committed looks unqualified. That is deliberate;
   `--force` exists for the exceptions.
 - `checkpoint` only recognises `feature/*` head branches as Codify's own.
+- `cg spec run --fleet` is two levels: main → feature manager → wave
+  workers. There is no third level, and one manager per run.
+- A worker slot is a wave, not a task. Two tasks in the same wave are done
+  by the same worker on the same branch, one after the other.
+- The orchestrator spawns agents through the `[agents]` driver, exactly as
+  the single-level `cg spec run` does. It does not talk to any agent
+  vendor's API itself.

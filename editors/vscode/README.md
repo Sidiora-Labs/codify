@@ -20,7 +20,7 @@ Turn it off with `codify.languageServer` if you want the task board alone.
 
 ## Task board
 
-A "Codify" container in the activity bar, with two views.
+A "Codify" container in the activity bar, with four views: **Tasks**, **Agent**, **Memory**, and **Fleet** (the last two collapsed until you open them).
 
 **Tasks** shows the active feature's plan the way Codify sees it:
 
@@ -51,7 +51,7 @@ The **Past sessions** selector merges compact workspace history remembered by th
 
 The session bar shows the connected adapter and injected `codify` MCP server. Agent-provided ACP modes and session options appear as native controls, so Codex and Claude Code can expose their own plan/agent mode, model, or reasoning choices without extension-specific wiring. The bar also follows agent-generated session titles and context-window usage. Agent-native slash commands join the composer palette; collisions are namespaced as `/agent-<name>` so commands such as Codify's `/review` always keep their meaning.
 
-The view streams replies and collapsed thinking, renders each tool call as an expandable card — kind badge and colour, status tick, elapsed time, the raw input, locations, and diffs — tracks the plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. **Sub-agents** (Claude Code `Task` calls, ACP `agent` tool kinds, or any delegation-shaped call) get their own card showing the delegated prompt, and the tools they run nest underneath with a running count. A compact activity line keeps the current turn, tool totals, sub-agents, plan progress, permissions, and queued follow-ups visible even when their detailed cards are collapsed; beneath it a **tool timeline** draws one dot per call this turn (pulsing while running, green or red when finished; click one to jump to its card) and a **now line** names the call in flight. When the turn ends, a summary pill states whether it completed, how many tools ran and failed, how many sub-agents were used, how many files were touched, and how long it took. Context-window usage is drawn as a bar that turns amber past 70% and red past 90%. File reads and writes requested over ACP are workspace-scoped; paths outside the root are refused. **Stop** cancels the in-flight turn (`session/cancel`), while messages typed during work are visibly queued for the next turn.
+The view streams replies and collapsed thinking, renders each tool call as an expandable card — kind badge and colour, status tick, elapsed time, the raw input, locations, and diffs — tracks the plan, and surfaces **permission requests as buttons** — allow once, always, reject — answered inline, never in a modal. **Sub-agents** (Claude Code `Task` calls, ACP `agent` tool kinds, or any delegation-shaped call) get their own card showing the delegated prompt, and the tools they run nest underneath with a running count. A compact activity line keeps the current turn, tool totals, sub-agents, plan progress, permissions, and queued follow-ups visible even when their detailed cards are collapsed; beneath it a **tool timeline** draws one dot per call this turn (pulsing while running, green or red when finished; click one to jump to its card) and a **now line** names the call in flight. When the turn ends, a summary pill states whether it completed, how many tools ran and failed, how many sub-agents were used, how many files were touched, and how long it took. Context-window usage is drawn as a bar that turns amber past 70% and red past 90%. File reads and writes requested over ACP are workspace-scoped; paths outside the root are refused. **Stop** cancels the in-flight turn (`session/cancel`), while messages typed during work are visibly queued for the next turn; **↻ Retry** (also `/retry`) re-sends the last prompt once the agent is idle. Terminal output from a tool is rendered as terminal text with ANSI already stripped, and the session bar carries a running **cost** for the adapters that price their turns — absent means unknown, not free.
 
 Text the harness injected into the user role during a replayed session (the local-command caveat, `<command-name>` blocks, and compaction summaries) never becomes a user bubble: commands appear as a one-line note, and a compaction summary collapses into a labelled note whose text can still be opened. Replies render as safe markdown — headings, emphasis, nested and task lists, tables, quotes, inline code, and fenced code blocks with a copy button and the language on the rail. Any file path the agent mentions (`src/graph.c`, `editors/vscode/acp.js:42`) opens at that line, tool locations do the same, and web links open through VS Code rather than navigating the webview. The context bars, transcript, cards, permissions, and composer reflow for a narrow sidebar and use a centered reading width in a wide editor panel. The composer grows with your message, and `↑` recalls what you sent before.
 
@@ -111,15 +111,25 @@ When a session's terminal closes — or a headless run exits — with the task n
 
 Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `cg` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
 
-## Planned in v10
+## Memory
 
-These surfaces are specified in `spec/codify-v10/spec.kvx` and are **not in this build**. Listed so the gap between this README and the extension is explicit:
+**Codify: Browse Project Memories** opens the memory browser: project memory as a place you can search rather than a list you scroll.
 
-- **Task 5.1 — task UI upgrade.** The tree grouped by feature, section and wave with status icons, owner, branch and blockers; filters for status, wave and owner from the view title; a task detail webview carrying acceptance criteria, do-steps, touches, symbols, verify command, trace and memories; and start, done, claim, release, open branch, run verify and copy resume prompt as actions.
-- **Task 5.2 — memory browser and skills.** A webview panel with full-text search and filters for type, class, task, branch and date, detail with linked symbols and files, and supersede, forget, classify with Jev, promote to skill, and open skill file.
-- **Task 5.3 — fleet view.** Main Gideon, feature managers and workers with their branches, attempts, heartbeats, merge state and open pull requests, with refresh and open-worktree actions — plus further agent-chat polish.
+The tree in the sidebar answers *what was decided lately*. The panel answers *what do we know about X* — full text across the memories, with filters for type, Jev class, task, branch and date, and a detail pane whose symbols and files are links back into the code. Filtering is client-side over one `cg recall`, so it is instant and does not re-query on every keystroke.
 
-Until then, the fleet is driven from the terminal: `cg fleet status`, `cg fleet plan`, `cg fleet begin|merge-up|land|pr|checkpoint`. See [docs/hierarchy.md](../../docs/hierarchy.md).
+From a memory: **supersede** it with a newer note, **forget** it, **classify** the store with Jev (`cg memory classify`), **promote** a memory classed `skill` into `.agents/skills/<slug>/SKILL.md`, and open that file. See [docs/jev.md](../../docs/jev.md#memory-classification-and-skills) for what the classes mean.
+
+The panel is a CSP-strict, nonce-only webview with no remote anything, and owns no timer and no watcher: it loads when it opens, after an action it ran itself, and from the same refresh chain as everything else. Against an older `cg` that does not know `memory classify` or `skills`, it says so plainly instead of failing silently.
+
+## Fleet
+
+The **Fleet** view draws the agent hierarchy live: Main Gideon on the main branch, a feature manager on `feature/<name>`, and wave workers on `wave/<feature>/<n>`, each with its branch, worktree, current attempt, heartbeat age, and whether its branch is already merged into its base.
+
+`cg` knows all of that across three commands — the agent registry, the live claims, and the branch registry — and the view joins them into one tree. Actions on a node: begin a task in the fleet, merge a wave branch up, land the feature, open its pull request, checkpoint the open ones, refresh, and open an agent's worktree in a window.
+
+Two refusals are deliberate. A refresh never runs `cg fleet pr`, because that command *opens* a pull request — open PRs are shown from what an explicit action reported, never discovered by polling. And merge state is only what the registry can prove: equal heads mean the base already contains the branch, and the view never invents a commit count it was not given. Every call goes through the one refresh scheduler and is raced against a timeout, so the view cannot sit on a spinner.
+
+The same thing from the terminal is `cg fleet tree`, `cg fleet status`, and `cg fleet plan`; see [docs/hierarchy.md](../../docs/hierarchy.md).
 
 ## The rest of the workflow
 
@@ -185,14 +195,14 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.2.8.vsix
-code --install-extension codify-workflow-1.2.8.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.3.0.vsix
+code --install-extension codify-workflow-1.3.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. In a Remote SSH,
 WSL, or container window, install the VSIX on the **remote** extension host,
 not only the local UI side. The Agent header shows the running version (for
-example `v1.2.8`), so a stale host is immediately visible after reload.
+example `v1.3.0`), so a stale host is immediately visible after reload.
 
 For development, open `editors/vscode/` in VS Code and press F5.
 
