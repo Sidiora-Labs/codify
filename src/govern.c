@@ -1248,6 +1248,36 @@ int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)
                 "\nwhen done: run the verify command, then `cg spec done %s`."
                 "\nbefore stopping: `cg handoff --task %s --done ... "
                 "--next ...` to hand off.\n", sid, sid);
+            /* In a fleet the work is not finished where it was written: a
+             * wave worker hands its branch up, a feature manager lands the
+             * feature and opens its pull request. The prompt ends on the
+             * command that does it, so the agent's last instruction is the
+             * one that moves the work upward. Outside a fleet (no CG_ROLE)
+             * nothing is added and the briefing reads as it always did. */
+            const char *role = cg_agent_role(NULL);
+            const char *branch = getenv("CG_BRANCH");
+            const char *parent = cg_agent_parent(NULL);
+            if (role && strcmp(role, "worker") == 0) {
+                sb_puts(&b, "\nfleet: you are a wave worker");
+                if (branch && branch[0]) sb_printf(&b, " on %s", branch);
+                if (parent) sb_printf(&b, ", reporting to %s", parent);
+                sb_printf(&b, ". Commit on your branch, then hand the wave "
+                          "up to your manager:\n  cg fleet merge-up %s\n", sid);
+            } else if (role && strcmp(role, "feature") == 0) {
+                const char *env = getenv("CG_FEATURE");
+                const char *slash = strchr(tag, '/');
+                char feat[256];
+                if (env && env[0]) snprintf(feat, sizeof feat, "%s", env);
+                else snprintf(feat, sizeof feat, "%.*s",
+                              slash ? (int)(slash - tag) : (int)strlen(tag),
+                              tag);
+                sb_printf(&b, "\nfleet: you are the feature manager for %s. "
+                          "Your subtree is complete only once every task is "
+                          "qualified and %s is merged:\n"
+                          "  cg fleet land %s\n  cg fleet pr %s\n", feat,
+                          branch && branch[0] ? branch : "the feature branch",
+                          feat, feat);
+            }
         }
         free(id); free(ti); free(stt); free(vc);
     }

@@ -1805,6 +1805,9 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     if (strcmp(sub, "roles") == 0) return fleet_roles(cg, json);
     if (strcmp(sub, "status") == 0) return fleet_status(cg, json);
     if (strcmp(sub, "plan") == 0) return fleet_plan(cg, feature, json);
+    /* the running shape of the fleet — main, its managers, their workers —
+     * belongs to the orchestrator that spawned them (orchestrate.c) */
+    if (strcmp(sub, "tree") == 0) return orch_tree_status(cg, feature, json);
     if (strcmp(sub, "begin") == 0 || strcmp(sub, "merge-up") == 0) {
         if (!pos) {
             fprintf(stderr, "usage: cg fleet %s <task-id> [-f <feature>]%s\n",
@@ -1822,8 +1825,9 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
         return fleet_pr_open(cg, pos ? pos : feature, dry, json);
     if (strcmp(sub, "checkpoint") == 0) return fleet_checkpoint(cg, dry, json);
     fprintf(stderr, "usage: cg fleet roles | status | plan [-f F] | "
-                    "begin <id> [-f F] [--agent A] | merge-up <id> [--force] "
-                    "[--keep] | land <feature> [--no-pr] | pr <feature> "
-                    "[--dry-run] | checkpoint [--dry-run]\n");
+                    "tree [-f F] | begin <id> [-f F] [--agent A] | "
+                    "merge-up <id> [--force] [--keep] | land <feature> "
+                    "[--no-pr] | pr <feature> [--dry-run] | checkpoint "
+                    "[--dry-run]\n");
     return 1;
 }
