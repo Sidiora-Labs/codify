@@ -145,7 +145,7 @@ assert 'changed' in d and 'symbols' in d, d
 out="$("$CG" hook install)"
 has "$out" "claude-code"
 [ -f .claude/settings.json ] || fail ".claude/settings.json not written"
-grep -q "sync" .claude/settings.json || fail "sync hook missing"
+grep -q "hook post-edit" .claude/settings.json || fail "post-edit hook missing"
 out="$("$CG" hook install)"
 has "$out" "already defines hooks"
 

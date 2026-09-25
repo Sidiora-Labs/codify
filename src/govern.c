@@ -776,6 +776,10 @@ static int write_exec(const char *path, const char *body) {
     return chmod(path, 0755);
 }
 
+/* One command per edit, not two: `hook post-edit` reads the tool payload,
+ * syncs the one file it names, and guards it, in a single process that
+ * coalesces into any index pass already running. Two commands meant two
+ * walkers per edit per agent — the storm the sync gate exists to end. */
 static const char *CLAUDE_SETTINGS_TEMPLATE =
 "{\n"
 "  \"hooks\": {\n"
@@ -783,8 +787,7 @@ static const char *CLAUDE_SETTINGS_TEMPLATE =
 "      {\n"
 "        \"matcher\": \"Edit|Write|MultiEdit|NotebookEdit\",\n"
 "        \"hooks\": [\n"
-"          { \"type\": \"command\", \"command\": \"%s sync\" },\n"
-"          { \"type\": \"command\", \"command\": \"%s guard\" }\n"
+"          { \"type\": \"command\", \"command\": \"%s hook post-edit\" }\n"
 "        ]\n"
 "      }\n"
 "    ]\n"
@@ -805,15 +808,15 @@ int cmd_hook_install(Cg *cg)
     char *existing = read_entire_file(path, NULL);
     if (existing && strstr(existing, "\"hooks\"")) {
         printf("  .  claude-code  %s already defines hooks - add manually:\n"
-               "        PostToolUse Edit|Write -> %s sync, %s guard\n",
-               path, bin, bin);
+               "        PostToolUse Edit|Write -> %s hook post-edit\n",
+               path, bin);
     } else if (existing) {
         printf("  !  claude-code  %s has no hooks block - add manually:\n"
-               "        PostToolUse Edit|Write -> %s sync\n", path, bin);
+               "        PostToolUse Edit|Write -> %s hook post-edit\n", path, bin);
     } else {
         mkdirs(dir);
         StrBuf b; sb_init(&b);
-        sb_printf(&b, CLAUDE_SETTINGS_TEMPLATE, bin, bin);
+        sb_printf(&b, CLAUDE_SETTINGS_TEMPLATE, bin);
         if (write_entire_file(path, b.p, b.len) == 0)
             printf("  ok claude-code  %s (created)\n", path);
         else
@@ -826,9 +829,9 @@ int cmd_hook_install(Cg *cg)
     return portable_rc != 0 ? portable_rc : git_rc;
 }
 
-/* Git hooks: refresh the graph after a commit lands, and report Codify's
- * findings before one does. The pre-commit gate ends in `|| true` so it can
- * never block a commit until the user decides it should. */
+/* Git hooks: refresh the graph in the background after a commit lands, and
+ * report Codify's findings before one does. The pre-commit gate ends in
+ * `|| true` so it can never block a commit until the user decides it should. */
 static int cmd_hook_install_git(Cg *cg, const char *bin)
 {
     char dir[4600], path[4700];
@@ -838,11 +841,13 @@ static int cmd_hook_install_git(Cg *cg, const char *bin)
         printf("  .  git          no .git/hooks here - skipped\n");
     } else {
         StrBuf b; sb_init(&b);
+        /* --background: a commit is not the moment to take every core, and
+         * a pass another process is already running is joined, not repeated */
         sb_printf(&b,
             "#!/bin/sh\n"
             "# installed by `cg hook install` - keeps the Codify graph and\n"
             "# git provenance current after every commit.\n"
-            "%s sync >/dev/null 2>&1 || true\n"
+            "%s sync --background >/dev/null 2>&1 || true\n"
             "%s git-sync -n 200 >/dev/null 2>&1 || true\n", bin, bin);
         snprintf(path, sizeof path, "%s/post-commit", dir);
         if (stat(path, &st) == 0)
@@ -871,6 +876,99 @@ static int cmd_hook_install_git(Cg *cg, const char *bin)
     }
     printf("\nhooks are advisory: `cg guard` reports scope drift without\n"
            "failing. Use `cg guard --strict` to enforce.\n");
+    return 0;
+}
+
+/* ---------------- post-edit hook ---------------- */
+
+/* Everything the agent host piped in, or nothing when there is no pipe. */
+static char *hook_read_stdin(void) {
+    if (isatty(STDIN_FILENO)) return NULL;
+    StrBuf b; sb_init(&b);
+    char chunk[4096];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof chunk, stdin)) > 0)
+        for (size_t i = 0; i < n; i++) sb_putc(&b, chunk[i]);
+    if (b.len == 0) { sb_free(&b); return NULL; }
+    return b.p;
+}
+
+/* The edited path in a Claude Code PostToolUse payload: tool_input.file_path
+ * for the edit tools, notebook_path for notebooks. NULL for anything else. */
+static char *hook_edited_path(const char *payload) {
+    if (!payload) return NULL;
+    char *ti = json_get_object(payload, "tool_input");
+    if (!ti) return NULL;
+    char *p = json_get_string(ti, "file_path");
+    if (!p || !p[0]) { free(p); p = json_get_string(ti, "notebook_path"); }
+    free(ti);
+    if (p && !p[0]) { free(p); p = NULL; }
+    return p;
+}
+
+typedef struct { Cg *cg; char *path; bool json; } HookGuard;
+
+static int hook_guard_call(void *u) {
+    HookGuard *h = u;
+    char *v[1] = { h->path };
+    return cmd_guard(h->cg, 1, v, h->json, false);
+}
+
+#define HOOK_MAX_LINES 24
+
+/* The hook every agent edit fires. One process does what `sync` + `guard`
+ * used to do in two, and only for the file that changed: a targeted pass
+ * on a background budget, coalesced into whichever pass is already running,
+ * then the scope check for that one path. A payload without a path — a
+ * Bash call, a truncated event, an empty pipe — still queues a whole-tree
+ * background sync inside the freshness window. Always exits 0: a hook that
+ * fails wedges the agent's tool loop, and nothing here is worth that. */
+int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
+    char *payload = hook_read_stdin();
+    char *path = hook_edited_path(payload);
+
+    IndexOpts o = {0};
+    o.background = true;
+    o.lock_wait_ms = 0;
+    o.quiet = true;
+    const char *paths[1] = { path };
+    if (path) { o.paths = paths; o.npaths = 1; }
+    else       o.max_age_ms = 5000;
+    IndexStats st;
+    cg_index_ex(cg, si, &o, &st);
+
+    if (path) {
+        HookGuard hg = { cg, path, json };
+        char *out = NULL;
+        cg_capture(&out, hook_guard_call, &hg);
+        if (out && json) {
+            fputs(out, stdout);
+        } else if (out) {
+            /* the transcript is the agent's working memory: cap what one
+             * edit can push into it, and point at the full report */
+            int lines = 0;
+            const char *p = out;
+            while (*p) {
+                const char *nl = strchr(p, '\n');
+                size_t ll = nl ? (size_t)(nl - p + 1) : strlen(p);
+                if (++lines > HOOK_MAX_LINES) {
+                    int rest = 0;
+                    for (const char *q = p; *q; q++) if (*q == '\n') rest++;
+                    printf("  … %d more line(s): run `cg guard %s`\n",
+                           rest + 1, path);
+                    break;
+                }
+                fwrite(p, 1, ll, stdout);
+                p += ll;
+            }
+        }
+        free(out);
+    } else if (json) {
+        printf("{\"guarded\":false,\"reason\":\"no edited path in payload\","
+               "\"synced\":%s}\n", st.coalesced ? "\"queued\"" : "true");
+    }
+    free(path);
+    free(payload);
     return 0;
 }
 

@@ -250,6 +250,16 @@ EOF
     "$CG" spec new gatespec >/dev/null
     out="$("$CG" spec status --json)"
     has "$out" '"feature":"gatespec"'
+
+    # (d) a polled report never touches the gate: trace --no-sync answers
+    #     from the last index while a plain trace joins the pass in flight
+    hold_gate 4
+    sleep 0.5
+    err="$("$CG" spec trace --no-sync 2>&1 >/dev/null)"
+    hasnt "$err" "indexing"
+    err="$(CG_BUSY_TIMEOUT_MS=300 "$CG" spec trace 2>&1 >/dev/null)"
+    has "$err" "another cg process is indexing"
+    wait
 fi
 
 echo "ok: 25_syncgate ($section)"

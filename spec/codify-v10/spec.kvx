@@ -72,10 +72,10 @@ status  = "pending"
 
 [task.1.1]
 title      = "Single-writer index gate with coalescing, freshness, and slots"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["cg_index_ex", "syncgate_acquire", "syncgate_release", "syncgate_mark_dirty", "syncgate_slot_acquire"]
-touches    = ["src/syncgate.c", "src/scan.c", "src/cg.h", "src/main.c", "src/sysinfo.c", "tests/integration/25_syncgate.sh"]
+touches    = ["src/syncgate.c", "src/scan.c", "src/cg.h", "src/main.c", "tests/integration/25_syncgate.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/25_syncgate.sh gate"
 do_1       = "Add IndexOpts and cg_index_ex; keep cg_index as the blocking full-strength wrapper."
 do_2       = "Take a non-blocking flock on .codegraph/index.lock; losers touch .codegraph/index.dirty and return coalesced; the winner drains the marker in bounded passes."
@@ -86,7 +86,7 @@ reqs       = ["1.1", "1.2", "1.3"]
 
 [task.1.2]
 title      = "Incremental post-scan resolution"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["resolve_refs_scoped", "resolve_imports_scoped", "anchor_edges_scoped", "index_scope_begin"]
 touches    = ["src/resolve.c", "src/scan.c", "src/cg.h", "tests/integration/25_syncgate.sh"]
@@ -98,7 +98,7 @@ reqs       = ["1.4"]
 
 [task.1.3]
 title      = "Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP"
-status     = "pending"
+status     = "in_progress"
 wave       = 2
 requires   = ["1.1"]
 symbols    = ["cmd_hook_post_edit", "runtime_workspace_revision"]

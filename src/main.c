@@ -76,6 +76,8 @@ static void usage(void) {
 "  resume [--task <id>]     task packet + latest handoff + memories + tree\n"
 "                           state; --prompt for a paste-ready block\n"
 "  hook install             wire agent + git hooks so the graph self-syncs\n"
+"  hook post-edit           the wired edit hook: sync + guard the edited\n"
+"                           file in one process (payload on stdin)\n"
 "\n"
 "spec workflow (Ion kvx specs — works in any repo with spec/workflow.kvx)\n"
 "  spec render [--check]    regenerate IDE pointer files + markdown mirror\n"
@@ -94,7 +96,8 @@ static void usage(void) {
 "                           mark qualification pending (Prod mode only)\n"
 "  spec done <id>           verify_cmd + graph checks (symbols/touches),\n"
 "                           then mark done; records an outcome memory\n"
-"  spec trace [<id>]        trace tasks to code: symbols in the graph,\n"
+"  spec trace [<id>] [--no-sync]\n"
+"                           trace tasks to code: symbols in the graph,\n"
 "                           touched paths, tagged commits\n"
 "  spec run [-n N]          orchestrate parallel/prod work: claim eligible\n"
 "                           tasks and drive one agent per slot; --driver\n"
@@ -183,6 +186,21 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
     return 0;
 }
 
+/* Read-mostly commands refresh the graph first, but a pass that started
+ * within the last few seconds and left no dirty note is reused rather than
+ * repeated: agents run review, brief, and agentmd back to back, and each
+ * used to walk the tree again. Waits for a pass in flight (the default
+ * lock wait) so the answer is never older than the edit it follows. */
+#define FRESH_WINDOW_MS 3000
+static void index_fresh(Cg *cg, const SysInfo *si) {
+    IndexOpts o = {0};
+    o.max_age_ms = FRESH_WINDOW_MS;
+    o.lock_wait_ms = -1;
+    o.quiet = true;
+    IndexStats st;
+    cg_index_ex(cg, si, &o, &st);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { usage(); return 1; }
     const char *cmd = argv[1];
@@ -264,6 +282,15 @@ int main(int argc, char **argv) {
         printf("initialized %s/%s [%s profile]\n", cg.root, CG_DIR, si.profile);
         cg_close(&cg);
         return 0;
+    }
+
+    /* an agent host fires the edit hook in whatever directory it runs in;
+     * outside a Codify project there is nothing to do, and a failing hook
+     * would be reported to the agent as an error on every edit */
+    if (strcmp(cmd, "hook") == 0 && argc >= 3 &&
+        strcmp(argv[2], "post-edit") == 0) {
+        char root[4096];
+        if (cg_find_root(root, sizeof root) != 0) return 0;
     }
 
     if (cg_open(&cg, false) != 0) return 1;
@@ -354,8 +381,7 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "brief") == 0) {
         rc = cmd_brief(&cg, json);
     } else if (strcmp(cmd, "review") == 0) {
-        IndexStats st;
-        cg_index(&cg, &si, false, &st, true);   /* review needs a fresh graph */
+        index_fresh(&cg, &si);                  /* review needs a fresh graph */
         rc = cmd_review(&cg, json);
     } else if (strcmp(cmd, "guard") == 0) {
         bool strict = flag(&argc, argv, "--strict");
@@ -363,7 +389,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "hook") == 0) {
         if (argc >= 3 && strcmp(argv[2], "install") == 0)
             rc = cmd_hook_install(&cg);
-        else { fprintf(stderr, "usage: cg hook install\n"); rc = 1; }
+        else if (argc >= 3 && strcmp(argv[2], "post-edit") == 0)
+            rc = cmd_hook_post_edit(&cg, &si, json);
+        else { fprintf(stderr, "usage: cg hook install | post-edit\n"); rc = 1; }
     } else if (strcmp(cmd, "check") == 0) {
         bool strict = flag(&argc, argv, "--strict");
         rc = cmd_check(&cg, json, strict);
@@ -473,8 +501,7 @@ int main(int argc, char **argv) {
         rc = cmd_changelog(&cg, limit > 0 ? limit : 50, out);
     } else if (strcmp(cmd, "agentmd") == 0) {
         bool write_files = flag(&argc, argv, "--write");
-        IndexStats st;
-        cg_index(&cg, &si, false, &st, true);   /* fresh graph first */
+        index_fresh(&cg, &si);                  /* fresh graph first */
         rc = cmd_agentmd(&cg, write_files);
     } else if (strcmp(cmd, "docs") == 0) {
         rc = cmd_docs(&cg, argc - 2, argv + 2, json);

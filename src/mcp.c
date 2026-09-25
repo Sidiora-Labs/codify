@@ -593,6 +593,11 @@ static int t_resume(void *v) {
 #define A_MUTATE "{\"readOnlyHint\":false,\"destructiveHint\":true," \
                 "\"idempotentHint\":false,\"openWorldHint\":false}"
 
+/* Short on purpose: it collapses a burst of tool calls, not an edit made
+ * by a host without hooks followed by a query a few seconds later. */
+#define MCP_FRESH_MS 1500
+#define MCP_GATE_WAIT_MS 1500
+
 static const struct {
     const char *name, *desc, *schema, *annotations, *title;
     int (*fn)(void *);
@@ -1077,9 +1082,20 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
             if (ti < 0) {
                 reply_error(id, -32602, "unknown tool");
             } else {
-                if (TOOLS[ti].sync_first) {          /* always fresh */
+                if (TOOLS[ti].sync_first) {
+                    /* fresh, not re-walked: agents call these tools in
+                     * bursts, so a pass from the last few seconds answers,
+                     * and a pass running elsewhere is joined by note. The
+                     * server shares the machine with the agent's own build,
+                     * so it never takes more than a quarter of the cores. */
+                    IndexOpts o = {0};
+                    o.max_age_ms = MCP_FRESH_MS;
+                    o.lock_wait_ms = MCP_GATE_WAIT_MS;
+                    o.workers_cap = si->cores_effective / 4 > 2
+                                  ? si->cores_effective / 4 : 2;
+                    o.quiet = true;
                     IndexStats st;
-                    cg_index(cg, si, false, &st, true);
+                    cg_index_ex(cg, si, &o, &st);
                 }
                 CallCtx ctx = { cg, si, args };
                 char *out = NULL;

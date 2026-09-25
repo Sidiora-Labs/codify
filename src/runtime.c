@@ -331,6 +331,10 @@ static int runtime_file_cmp(const void *a, const void *b) {
                   ((const RuntimeFile *)b)->path);
 }
 
+/* The stat walk is cheap; what was not is the write side — every file whose
+ * size or times moved was hashed and saved in its own autocommit, so a
+ * branch switch cost one fsync per file. One transaction batches them all.
+ * A caller already inside a transaction keeps its own. */
 void runtime_workspace_revision(Cg *cg, char out[65]) {
     Ignore ig;
     ignore_load(&ig, cg->root);
@@ -339,6 +343,8 @@ void runtime_workspace_revision(Cg *cg, char out[65]) {
     ignore_free(&ig);
     qsort(files.v, (size_t)files.n, sizeof(RuntimeFile), runtime_file_cmp);
 
+    bool own_tx = sqlite3_get_autocommit(cg->db) != 0 &&
+                  cg_begin_write(cg) == 0;
     cg_exec(cg, "CREATE TEMP TABLE IF NOT EXISTS runtime_seen("
                 "path TEXT PRIMARY KEY)");
     cg_exec(cg, "DELETE FROM runtime_seen");
@@ -390,6 +396,7 @@ void runtime_workspace_revision(Cg *cg, char out[65]) {
     sqlite3_finalize(find); sqlite3_finalize(save); sqlite3_finalize(seen);
     cg_exec(cg, "DELETE FROM runtime_files WHERE path NOT IN "
                 "(SELECT path FROM runtime_seen)");
+    if (own_tx) cg_exec(cg, "COMMIT");
     sha256_hex(manifest.p, manifest.len, out);
     sb_free(&manifest);
     for (int i = 0; i < files.n; i++) free(files.v[i].path);

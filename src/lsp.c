@@ -28,16 +28,31 @@
  * up; the deferred index is retried on the next message after RETRY. */
 #define LSP_LOCK_WAIT_MS 1500
 #define LSP_INDEX_RETRY_MS 3000
+#define LSP_FRESH_MS 3000
 static bool index_pending;
 static long index_retry_at;
 
-static void lsp_index(Cg *cg, const SysInfo *si) {
+/* abs names the one file that was opened or saved: the pass walks just
+ * that. NULL means the whole tree, within the freshness window. The gate
+ * is never waited on — a pass in another process gets a note instead —
+ * and the worker budget is a quarter of the cores, since the editor's
+ * language server must never be the reason an agent's build crawls. */
+static void lsp_index(Cg *cg, const SysInfo *si, const char *abs) {
+    IndexOpts o = {0};
+    o.lock_wait_ms = 0;
+    o.quiet = true;
+    o.workers_cap = si->cores_effective / 4 > 2 ? si->cores_effective / 4 : 2;
+    const char *paths[1] = { abs };
+    if (abs) { o.paths = paths; o.npaths = 1; }
+    else      o.max_age_ms = LSP_FRESH_MS;
     IndexStats st;
-    if (cg_index(cg, si, false, &st, true) != 0 && st.busy) {
+    if (cg_index_ex(cg, si, &o, &st) != 0 && st.busy) {
         if (!index_pending)
             fprintf(stderr, "cg lsp: index deferred — the database is busy "
                             "(another cg process is writing); answers come "
                             "from the last index until it is retried\n");
+        /* the retry walks whatever the note names, this path included */
+        if (abs) syncgate_mark_dirty(cg, paths, 1);
         index_pending = true;
         index_retry_at = now_ms() + LSP_INDEX_RETRY_MS;
         return;
@@ -330,7 +345,7 @@ int cmd_lsp(Cg *cg, const SysInfo *si) {
     bool shutting_down = false;
     cg->lock_wait_ms = LSP_LOCK_WAIT_MS;
     while ((body = lsp_read())) {
-        if (index_pending && now_ms() >= index_retry_at) lsp_index(cg, si);
+        if (index_pending && now_ms() >= index_retry_at) lsp_index(cg, si, NULL);
         char *method = json_get_string(body, "method");
         char *id = json_get_raw(body, "id");
         char *params = json_get_object(body, "params");
@@ -354,7 +369,7 @@ int cmd_lsp(Cg *cg, const SysInfo *si) {
                 CG_VERSION "\"}}");
         } else if (strcmp(method, "initialized") == 0) {
             /* first sync so answers are current from the first keystroke */
-            lsp_index(cg, si);
+            lsp_index(cg, si, NULL);
         } else if (strcmp(method, "shutdown") == 0 && id) {
             shutting_down = true;
             lsp_reply(id, "null");
@@ -368,7 +383,7 @@ int cmd_lsp(Cg *cg, const SysInfo *si) {
             if (uri) {
                 char abs[4096];
                 uri_to_path(uri, abs, sizeof abs);
-                lsp_index(cg, si);                    /* keep the graph fresh */
+                lsp_index(cg, si, abs);               /* just this file */
                 publish_diagnostics(cg, uri, abs);
             }
             free(td); free(uri);

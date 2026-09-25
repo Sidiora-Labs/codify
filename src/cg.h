@@ -487,6 +487,7 @@ int cmd_brief(Cg *cg, bool json);                /* session state in one call */
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);
 int cmd_review(Cg *cg, bool json);
 int cmd_hook_install(Cg *cg);
+int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json);
 int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility);
 int integrate_plan(Cg *cg, bool json);
 int integrate_apply(Cg *cg, bool json);

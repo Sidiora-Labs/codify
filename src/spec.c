@@ -2929,20 +2929,33 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
 
 /* ---------------- graph-verified completion + trace ---------------- */
 
-/* open + quietly refresh the cwd's Codify project; false when absent. A
- * database still busy after the full lock wait means another process is
- * indexing: the checks then run on the last completed index, with a warning,
- * rather than failing qualification on a lock. */
-static bool spec_graph_open(Cg *g) {
+/* open + quietly refresh the cwd's Codify project; false when absent.
+ * Qualification must see the worktree as it is — a symbol deleted a second
+ * after the last pass must fail `spec done`, and `cg check` reads trace —
+ * so unlike the read paths this takes no freshness window. It does wait
+ * for a pass in flight and joins it by note; a database still busy after
+ * the full lock wait means another process is indexing: the checks then
+ * run on the last completed index, with a warning, rather than failing on
+ * a lock. sync=false skips the refresh altogether: a report polled every
+ * few seconds (the editor board) answers from the last completed index,
+ * which hooks, the watcher, and the language server keep current. */
+static bool spec_graph_open(Cg *g, bool sync) {
     char root[4096];
     if (cg_find_root(root, sizeof root) != 0) return false;
     if (cg_open(g, false) != 0) return false;
+    if (!sync) return true;
     SysInfo si;
     sysinfo_detect(&si);
+    IndexOpts o = {0};
+    o.lock_wait_ms = -1;
+    o.quiet = true;
     IndexStats st;
-    if (cg_index(g, &si, false, &st, true) != 0 && st.busy)
+    if (cg_index_ex(g, &si, &o, &st) != 0 && st.busy)
         fprintf(stderr, "cg spec: graph refresh skipped — the database is "
                         "busy (another cg process is indexing); checks use "
+                        "the last completed index\n");
+    else if (st.coalesced)
+        fprintf(stderr, "cg spec: another cg process is indexing; checks use "
                         "the last completed index\n");
     return true;
 }
@@ -3082,7 +3095,7 @@ static int spec_verify_task(Spec *s, const char *id) {
     if (nsym + ntch == 0) { free(syms); free(tchs); return 0; }
 
     Cg g;
-    if (!spec_graph_open(&g)) {
+    if (!spec_graph_open(&g, true)) {
         fprintf(stderr, "cg spec: task %s declares symbols/touches but there "
                 "is no .codegraph project here — run `cg init` first\n", id);
         for (int i = 0; i < nsym; i++) free(syms[i]);
@@ -3262,13 +3275,13 @@ static void trace_task(Spec *s, Cg *g, bool have_graph, const char *id,
     free(title); free(status);
 }
 
-static int spec_trace_cmd(Spec *s, const char *id, bool json) {
+static int spec_trace_cmd(Spec *s, const char *id, bool sync, bool json) {
     if (id && !task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
     }
     Cg g;
-    bool have = spec_graph_open(&g);
+    bool have = spec_graph_open(&g, sync);
 
     if (id) {
         if (json) {
@@ -3888,7 +3901,7 @@ int spec_task_memories_tag(const char *requested, Memory **out) {
 
 int cmd_spec(int argc, char **argv, bool json) {
     const char *sub = argc > 0 ? argv[0] : "status";
-    bool check = false, force = false, repair = false;
+    bool check = false, force = false, repair = false, no_sync = false;
     const char *feature_ov = NULL, *root_ov = NULL;
     const char *pos[4];
     int npos = 0;
@@ -3901,6 +3914,7 @@ int cmd_spec(int argc, char **argv, bool json) {
         if (strcmp(argv[i], "--check") == 0) check = true;
         else if (strcmp(argv[i], "--force") == 0) force = true;
         else if (strcmp(argv[i], "--repair") == 0) repair = true;
+        else if (strcmp(argv[i], "--no-sync") == 0) no_sync = true;
         else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc)
             feature_ov = argv[++i];
         else if (strcmp(argv[i], "--root") == 0 && i + 1 < argc)
@@ -4075,7 +4089,7 @@ int cmd_spec(int argc, char **argv, bool json) {
     } else if (strcmp(sub, "next") == 0) {
         rc = spec_next_cmd(&s, json);
     } else if (strcmp(sub, "trace") == 0) {
-        rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, json);
+        rc = spec_trace_cmd(&s, npos >= 1 ? pos[0] : NULL, !no_sync, json);
     } else if (strcmp(sub, "start") == 0) {
         if (npos < 1) { fprintf(stderr, "usage: cg spec start <id>\n"); rc = 1; }
         else if (strcmp(pos[0], CG_DOC_TASK) == 0)

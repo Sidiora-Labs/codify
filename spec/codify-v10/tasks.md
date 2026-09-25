@@ -7,19 +7,19 @@
 ## One indexer, not fifty
 
 - [ ] 1. Smart auto sync
-  - [-] 1.1 Single-writer index gate with coalescing, freshness, and slots
+  - [x] 1.1 Single-writer index gate with coalescing, freshness, and slots
     - Add IndexOpts and cg_index_ex; keep cg_index as the blocking full-strength wrapper.
     - Take a non-blocking flock on .codegraph/index.lock; losers touch .codegraph/index.dirty and return coalesced; the winner drains the marker in bounded passes.
     - Skip the walk when meta.last_index_at is inside the caller's freshness window with nothing pending or dirty.
     - Cap workers by CG_INDEX_WORKERS and machine-wide slots under /tmp/codify-<uid>; background callers renice themselves.
     - Teach cg sync to take optional paths and report fresh, coalesced, and slot decisions in its output and --json.
     - _Requirements: 1.1, 1.2, 1.3_
-  - [-] 1.2 Incremental post-scan resolution
+  - [x] 1.2 Incremental post-scan resolution
     - Collect changed file ids and added or removed symbol names during the write phase into temp tables.
     - Resolve only refs in changed files plus refs anywhere that name a touched symbol; resolve imports of changed files; rebuild soft edges only for comments in changed files or naming touched symbols.
     - Keep the global pass for --full and for the pending-resolve recovery path, and keep resolution meta counters truthful by recomputing them from the table.
     - _Requirements: 1.4_
-  - [ ] 1.3 Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP
+  - [-] 1.3 Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP
     - Add cg hook post-edit reading the Claude Code hook payload from stdin and doing one targeted sync plus guard; update the Claude and git hook templates.
     - Route spec_graph_open, MCP sync_first, review, commit, and agentmd through cg_index_ex with a freshness window and bounded lock waits.
     - Batch runtime_workspace_revision into one write transaction under the index gate and skip the hash when the walk is unchanged.

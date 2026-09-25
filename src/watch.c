@@ -67,6 +67,46 @@ static const char *wd_rel(Watcher *w, int wd) {
     return NULL;
 }
 
+/* Paths that changed since the last pass. The watcher knows exactly what
+ * moved, so the pass walks only that; past WATCH_MAX_TARGETS distinct paths
+ * (a branch switch, a formatter over the tree) walking everything is the
+ * cheaper plan, and `whole` says so. */
+#define WATCH_MAX_TARGETS 256
+typedef struct { char **v; int n; bool whole; } Pending;
+
+static void pending_add(Pending *p, const char *rel) {
+    if (p->whole) return;
+    for (int i = 0; i < p->n; i++)
+        if (strcmp(p->v[i], rel) == 0) return;
+    if (p->n >= WATCH_MAX_TARGETS) { p->whole = true; return; }
+    p->v = xrealloc(p->v, sizeof *p->v * (size_t)(p->n + 1));
+    p->v[p->n++] = xstrdup(rel);
+}
+
+static void pending_clear(Pending *p) {
+    for (int i = 0; i < p->n; i++) free(p->v[i]);
+    free(p->v);
+    p->v = NULL;
+    p->n = 0;
+    p->whole = false;
+}
+
+/* One background pass over the pending paths (or the tree). The gate is
+ * never waited on: a pass another process is running gets the note and
+ * drains it, which is the same outcome a second walk would have bought. */
+static int watch_sync(Cg *cg, const SysInfo *si, const Pending *p,
+                      IndexStats *st) {
+    IndexOpts o = {0};
+    o.background = true;
+    o.lock_wait_ms = 0;
+    o.quiet = true;
+    if (!p->whole && p->n > 0) {
+        o.paths = (const char *const *)p->v;
+        o.npaths = p->n;
+    }
+    return cg_index_ex(cg, si, &o, st);
+}
+
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
     Watcher w;
     memset(&w, 0, sizeof w);
@@ -78,8 +118,8 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
     }
     ignore_load(&w.ig, cg->root);
     watch_add_dir(&w, "");
-    printf("watching %s (%d dirs, debounce %dms, %d workers) — ctrl-c to stop\n",
-           cg->root, w.n, debounce_ms, si->workers);
+    printf("watching %s (%d dirs, debounce %dms, background passes) — "
+           "ctrl-c to stop\n", cg->root, w.n, debounce_ms);
 
     /* A watcher lives as long as the LSP does and must yield the same way:
      * short lock wait, and a busy database turns into a retry after the
@@ -88,16 +128,20 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
     char buf[16384];
     bool pending = false;
     long deadline = 0;
+    Pending pend = {0};
 
     /* catch up on anything that changed while we weren't looking */
     IndexStats st;
-    if (cg_index(cg, si, false, &st, true) != 0 && st.busy) {
+    pend.whole = true;
+    if (watch_sync(cg, si, &pend, &st) != 0 && st.busy) {
         printf("sync deferred: database busy, retrying in %dms\n", debounce_ms);
         pending = true;
         deadline = now_ms() + debounce_ms;
-    } else if (st.files_indexed || st.files_removed) {
-        printf("sync: %ld updated, %ld removed (%ldms)\n",
-               st.files_indexed, st.files_removed, st.ms);
+    } else {
+        pending_clear(&pend);
+        if (st.files_indexed || st.files_removed)
+            printf("sync: %ld updated, %ld removed (%ldms)\n",
+                   st.files_indexed, st.files_removed, st.ms);
     }
     for (;;) {
         int timeout = -1;
@@ -125,6 +169,7 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
                     if ((e->mask & IN_ISDIR) &&
                         (e->mask & (IN_CREATE | IN_MOVED_TO)))
                         watch_add_dir(&w, crel);
+                    pending_add(&pend, crel);
                     pending = true;
                     deadline = now_ms() + debounce_ms;
                 }
@@ -132,14 +177,20 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
         }
         if (pending && now_ms() >= deadline) {
             pending = false;
-            if (cg_index(cg, si, false, &st, true) != 0 && st.busy) {
+            if (watch_sync(cg, si, &pend, &st) != 0 && st.busy) {
                 printf("sync deferred: database busy, retrying in %dms\n",
                        debounce_ms);
-                pending = true;
+                pending = true;                 /* keeps its paths */
                 deadline = now_ms() + debounce_ms;
-            } else if (st.files_indexed || st.files_removed)
-                printf("sync: %ld updated, %ld removed, %ld symbols (%ldms)\n",
-                       st.files_indexed, st.files_removed, st.symbols, st.ms);
+            } else {
+                pending_clear(&pend);
+                if (st.coalesced)
+                    printf("sync: handed to the cg process already indexing\n");
+                else if (st.files_indexed || st.files_removed)
+                    printf("sync: %ld updated, %ld removed, %ld symbols (%ldms)\n",
+                           st.files_indexed, st.files_removed, st.symbols,
+                           st.ms);
+            }
         }
     }
 }
