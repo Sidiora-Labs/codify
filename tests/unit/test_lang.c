@@ -428,5 +428,53 @@ int main(void) {
        "cpp: class with : inheritance and body is a def");
     parse_result_free(&parsed);
 
+    /* callees that are not bare unresolved names: shorthand methods,
+       parameters, locals used earlier on the line, expression receivers */
+    const char jsrecv[] =
+        "const shim = { preventDefault() {}, stop(e) { e.halt(); } };\n"
+        "function send(cb, list) {\n"
+        "    if (cb) cb(list);\n"
+        "    return list.filter(Boolean).map(String);\n"
+        "}\n"
+        "export function run(next) {\n"
+        "    next(1);\n"
+        "    orphan(2);\n"
+        "}\n";
+    lang_parse("javascript", "src/recv.js", jsrecv, sizeof jsrecv - 1, &parsed);
+    ok(!reference(&parsed, "preventDefault"),
+       "js: object shorthand method is not a call");
+    ok(!reference(&parsed, "stop"),
+       "js: shorthand method with a parameter is not a call");
+    const SymRef *cb = ref_of(&parsed, "cb");
+    ok(cb && strcmp(cb->qual, "(local)") == 0,
+       "js: a value tested earlier on the line is qualified (local)");
+    const SymRef *nx = ref_of(&parsed, "next");
+    ok(nx && strcmp(nx->qual, "(param)") == 0,
+       "js: parameters reset per function");
+    const SymRef *mp = ref_of(&parsed, "map");
+    ok(mp && strcmp(mp->qual, "(expr)") == 0,
+       "js: member call on an expression is qualified (expr)");
+    const SymRef *orphan = ref_of(&parsed, "orphan");
+    ok(orphan && orphan->qual[0] == 0,
+       "js: an undefined bare call stays unqualified");
+    parse_result_free(&parsed);
+
+    const char cparam[] =
+        "static int apply(int (*fn)(int), int v, cb_t done) {\n"
+        "    done(v);\n"
+        "    return fn(v) + lost(v);\n"
+        "}\n";
+    lang_parse("c", "src/param.c", cparam, sizeof cparam - 1, &parsed);
+    const SymRef *fnp = ref_of(&parsed, "fn");
+    ok(fnp && strcmp(fnp->qual, "(param)") == 0,
+       "c: a function-pointer parameter call is qualified (param)");
+    const SymRef *done = ref_of(&parsed, "done");
+    ok(done && strcmp(done->qual, "(param)") == 0,
+       "c: a typedef'd callback parameter is qualified (param)");
+    const SymRef *lost = ref_of(&parsed, "lost");
+    ok(lost && lost->qual[0] == 0,
+       "c: an unknown bare call stays unqualified");
+    parse_result_free(&parsed);
+
     return t_done("lang");
 }

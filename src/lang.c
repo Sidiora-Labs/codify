@@ -163,7 +163,9 @@ static const char *KEYWORDS[] = {
     "if","for","while","switch","return","catch","sizeof","typeof","throw",
     "else","elif","case","defer","select","except","raise","until","unless",
     "when","foreach","yield","await","typeid","alignof","decltype","using",
-    "delete","new","do","try","in","instanceof","assert",NULL
+    "delete","new","do","try","in","instanceof","assert",
+    "function","async","func","import","var","const","type","package",
+    "range","chan",NULL
 };
 
 static const char *RUST_KEYWORDS[] = {
@@ -264,6 +266,75 @@ static void cmt_flush(CmtAcc *a, ParseResult *pr) {
     add_cmt(pr, a->b.p, a->line, a->end, a->pure, a->below);
     sb_free(&a->b);
     memset(a, 0, sizeof *a);
+}
+
+#define PARAM_MAX 16
+#define PARAM_LEN 64
+
+static bool idstart(char c);
+static bool idchar(char c);
+
+/* The parameter names of a function definition whose name ends at `after`
+ * on the cleaned line: everything inside the balanced parens, split on
+ * top-level commas. C names the parameter last in its segment (`Cg *cg`,
+ * `const char *s`, `int (*cb)(int)`); every other language names it first
+ * (`send`, `x: T`, `i, j int`, `*args`, `...rest`). A definition with no
+ * parens on its line (a getter, a bare pattern hit) leaves the set alone.
+ * Returns true while the list is still open at the end of the line, and
+ * `cont` resumes it from the start of the next one. */
+static bool params_capture(const char *after, bool cfam, bool cont,
+                           char params[][PARAM_LEN], int *n) {
+    const char *p = after;
+    if (!cont) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '(') return false;
+        p++;
+        *n = 0;
+    }
+    int depth = 0;
+    const char *seg = p;
+    for (;; p++) {
+        char c = *p;
+        bool end = c == 0 || (depth == 0 && (c == ')' || c == ','));
+        if (!end) {
+            if (c == '(' || c == '[' || c == '{' || c == '<') depth++;
+            else if (c == ')' || c == ']' || c == '}' || c == '>') depth--;
+            continue;
+        }
+        /* one segment [seg, p) */
+        const char *ns = NULL, *ne = NULL;
+        const char *fp = cfam ? strstr(seg, "(*") : NULL;
+        if (fp && fp < p) {
+            ns = fp + 2;
+            ne = ns;
+            while (ne < p && idchar(*ne)) ne++;
+        } else {
+            const char *q = seg;
+            while (q < p) {
+                if (idstart(*q) && (q == seg || !idchar(q[-1]))) {
+                    const char *e = q;
+                    while (e < p && idchar(*e)) e++;
+                    size_t len = (size_t)(e - q);
+                    bool noise = (len == 3 && strncmp(q, "mut", 3) == 0) ||
+                                 (len == 4 && strncmp(q, "self", 4) == 0) ||
+                                 (len == 4 && strncmp(q, "this", 4) == 0);
+                    if (!noise) { ns = q; ne = e; if (!cfam) break; }
+                    q = e;
+                } else q++;
+            }
+        }
+        if (ns && ne && ne > ns && *n < PARAM_MAX) {
+            size_t len = (size_t)(ne - ns);
+            if (len >= PARAM_LEN) len = PARAM_LEN - 1;
+            memcpy(params[*n], ns, len);
+            params[*n][len] = 0;
+            (*n)++;
+        }
+        if (c == 0) return depth >= 0;   /* line ended inside the list */
+        if (c != ',') break;
+        seg = p + 1;
+    }
+    return false;
 }
 
 static void add_def(ParseResult *pr, const char *name, size_t nlen,
@@ -776,6 +847,12 @@ void lang_parse(const char *lang, const char *path, const char *src,
     const LangSpec *L = spec_for_path(path);
     if (!L) return;
     bool cfam_protos = strcmp(L->name, "c") == 0 || strcmp(L->name, "cpp") == 0;
+    /* parameters of the most recent function definition: a call to one of
+       them (`send(...)`, `cb(u)`) goes through a value, not a name the
+       graph could find. A nested definition replaces the set. */
+    char params[PARAM_MAX][PARAM_LEN];
+    int nparams = 0;
+    bool params_open = false;   /* the list continues on the next line */
 
     CleanState cs = {0};
     CmtRange cr = { -1, -1 };
@@ -887,6 +964,10 @@ void lang_parse(const char *lang, const char *path, const char *src,
 
         int defs_before = pr->ndefs;
 
+        if (params_open)
+            params_open = params_capture(clean, cfam_protos, true, params,
+                                         &nparams);
+
         for (int p = 0; p < L->npats; p++) {
             regmatch_t m[8];
             const char *cursor = clean;
@@ -932,8 +1013,14 @@ void lang_parse(const char *lang, const char *path, const char *src,
                         if (!has_body && !has_semi && !has_typedef)
                             skip = true;
                     }
-                    if (!skip)
+                    if (!skip) {
                         add_def(pr, nm, nn, L->pats[p].kind, lineno, orig);
+                        if (strcmp(L->pats[p].kind, "function") == 0 ||
+                            strcmp(L->pats[p].kind, "method") == 0)
+                            params_open = params_capture(nm + nn, cfam_protos,
+                                                         false, params,
+                                                         &nparams);
+                    }
                 }
                 if (m[0].rm_eo <= 0) break;
                 cursor += m[0].rm_eo;
@@ -957,6 +1044,47 @@ void lang_parse(const char *lang, const char *path, const char *src,
                         if (strlen(pr->defs[d].name) == j - i &&
                             strncmp(pr->defs[d].name, clean + i, j - i) == 0)
                             { is_def = true; break; }
+                    /* `get x()`, `set x()`, `async x()`, `static x()` in a
+                       class or object body define x; no pattern claims them
+                       as defs, but they are not calls either */
+                    if (!is_def) {
+                        size_t pe = i;
+                        while (pe > 0 && (clean[pe-1] == ' ' || clean[pe-1] == '\t')) pe--;
+                        size_t ps = pe;
+                        while (ps > 0 && idchar(clean[ps-1])) ps--;
+                        if (ps < pe && (pe - ps) >= 3) {
+                            static const char *DEFINERS[] = {
+                                "get","set","async","static","function",
+                                "def","fn","func",NULL };
+                            if (word_in(DEFINERS, clean + ps, pe - ps))
+                                is_def = true;
+                        }
+                    }
+                    /* C: names inside __attribute__((...)) are the compiler's
+                       vocabulary (format, nonnull, ...), not calls */
+                    if (!is_def && cfam_protos) {
+                        const char *at = strstr(clean, "__attribute__");
+                        if (at && (size_t)(at - clean) < i) is_def = true;
+                    }
+                    /* `{ close() {}, ...`, `  render(a) {`: a shorthand
+                       method in an object or class body — name(...) opening
+                       a block, with nothing but `{`, `,` or the line start
+                       before it. No brace-language call sits there. */
+                    if (!is_def && !cfam_protos) {
+                        size_t pe = i;
+                        while (pe > 0 && (clean[pe-1] == ' ' || clean[pe-1] == '\t')) pe--;
+                        if (pe == 0 || clean[pe-1] == '{' || clean[pe-1] == ',') {
+                            size_t c = k + 1;
+                            int depth = 1;
+                            while (c < cl && depth > 0) {
+                                if (clean[c] == '(') depth++;
+                                else if (clean[c] == ')') depth--;
+                                c++;
+                            }
+                            while (c < cl && (clean[c] == ' ' || clean[c] == '\t')) c++;
+                            if (depth == 0 && c < cl && clean[c] == '{') is_def = true;
+                        }
+                    }
                     if (!is_def) {
                         /* immediate receiver: recv.name( recv->name( R::name( */
                         size_t e = 0;
@@ -973,7 +1101,44 @@ void lang_parse(const char *lang, const char *path, const char *src,
                             if (st < e && idstart(clean[st])) {
                                 qs = clean + st;
                                 qn = e - st;
+                            } else {
+                                /* `).toString(`, `].sort(`, `?.run(`: a
+                                   member call on an expression. The
+                                   receiver is unnameable but it exists, so
+                                   the call is not a bare unresolved name */
+                                qs = "(expr)";
+                                qn = 6;
                             }
+                        }
+                        /* `if (cb) cb(u)`, `exists && exists(p)`, `(fn) =>
+                           fn()`: the same word used as a value earlier on
+                           the line is a local callable, not a definition to
+                           find. Only a bare occurrence counts — not one that
+                           is itself a call. */
+                        if (!qs) {
+                            for (size_t s = 0; s + (j - i) <= i; ) {
+                                if (idstart(clean[s]) && (s == 0 || !idchar(clean[s-1]))) {
+                                    size_t t = s + 1;
+                                    while (t < cl && idchar(clean[t])) t++;
+                                    if (t - s == j - i &&
+                                        strncmp(clean + s, clean + i, j - i) == 0) {
+                                        size_t u = t;
+                                        while (u < cl && (clean[u] == ' ' || clean[u] == '\t')) u++;
+                                        if (u >= cl || clean[u] != '(') {
+                                            qs = "(local)";
+                                            qn = 7;
+                                            break;
+                                        }
+                                    }
+                                    s = t;
+                                } else s++;
+                            }
+                        }
+                        if (!qs) {
+                            for (int q = 0; q < nparams && !qs; q++)
+                                if (strlen(params[q]) == j - i &&
+                                    strncmp(params[q], clean + i, j - i) == 0)
+                                    { qs = "(param)"; qn = 7; }
                         }
                         int argc = count_args(clean, k);
                         add_ref(pr, clean + i, j - i, lineno, qs, qn, argc);

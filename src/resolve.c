@@ -49,7 +49,8 @@ static bool manifest_has(const Manifest *m, const char *module) {
     return false;
 }
 
-/* package.json: read dependencies and devDependencies keys */
+/* package.json: every dependency section plus engines, the names a module
+ * may legitimately import without a file in the tree */
 static void load_package_json(const char *root, Manifest *js) {
     char path[4096];
     if (!path_format(path, sizeof path, "%s/package.json", root)) return;
@@ -57,8 +58,11 @@ static void load_package_json(const char *root, Manifest *js) {
     char *data = read_entire_file(path, &len);
     if (!data) return;
     js->loaded = true;
+    /* engines names the host that provides a module no dependency list
+     * will: a VS Code extension imports 'vscode' from its `engines.vscode` */
     const char *sections[] = { "dependencies", "devDependencies",
-                               "peerDependencies", NULL };
+                               "peerDependencies", "optionalDependencies",
+                               "engines", NULL };
     for (int s = 0; sections[s]; s++) {
         char *obj = json_get_object(data, sections[s]);
         if (!obj) continue;
@@ -445,6 +449,38 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
     return fid;
 }
 
+/* package.json files below the root, found by walking up from the importing
+ * file: a monorepo package or an extension under editors/ declares its own
+ * dependencies, and the root manifest never lists them. Each directory is
+ * probed once per pass, hit or miss. */
+#define NEAR_MAX 32
+typedef struct { char dir[1024]; Manifest m; bool exists; } NearManifest;
+
+static bool near_manifest_has(Cg *cg, NearManifest *near, int *nnear,
+                              const char *from_path, const char *pkg) {
+    char dir[1024];
+    snprintf(dir, sizeof dir, "%s", from_path);
+    for (;;) {
+        char *sl = strrchr(dir, '/');
+        if (!sl) return false;
+        *sl = 0;
+        NearManifest *nm = NULL;
+        for (int i = 0; i < *nnear && !nm; i++)
+            if (strcmp(near[i].dir, dir) == 0) nm = &near[i];
+        if (!nm) {
+            if (*nnear >= NEAR_MAX) return false;
+            nm = &near[(*nnear)++];
+            snprintf(nm->dir, sizeof nm->dir, "%s", dir);
+            memset(&nm->m, 0, sizeof nm->m);
+            char sub[4096];
+            if (path_format(sub, sizeof sub, "%s/%s", cg->root, dir))
+                load_package_json(sub, &nm->m);
+            nm->exists = nm->m.loaded;
+        }
+        if (nm->exists && manifest_has(&nm->m, pkg)) return true;
+    }
+}
+
 /* Node's core modules, with or without the node: scheme. */
 static bool node_core_module(const char *module) {
     static const char *CORE[] = {
@@ -474,7 +510,10 @@ static bool mod_matches(const char *module, const char *cand_path);
  * temp.scope_files). The scoped SELECT also yields every still-unresolved
  * repo import (direct=0); those are re-tried only when their module
  * plausibly names a file the change added, so a new util.ts satisfies an
- * old `import './util'` without a full pass. */
+ * old `import './util'` without a full pass. A JS/TS module is looked up
+ * in the root manifest and then in the nearest package.json above the
+ * importing file; Node's core modules and C's <...> headers are the
+ * runtime's and never searched. */
 static void resolve_imports_run(Cg *cg, bool scoped) {
     /* Load manifests once */
     Manifest js_m = {0}, go_m = {0}, py_m = {0}, rs_m = {0};
@@ -483,6 +522,8 @@ static void resolve_imports_run(Cg *cg, bool scoped) {
     load_requirements_txt(cg->root, &py_m);
     load_pyproject_toml(cg->root, &py_m);
     load_cargo_toml(cg->root, &rs_m);
+    NearManifest *near = xmalloc(sizeof *near * NEAR_MAX);
+    int nnear = 0;
 
     char **added = NULL;
     int nadded = 0;
@@ -557,22 +598,22 @@ static void resolve_imports_run(Cg *cg, bool scoped) {
                 bool in_manifest = false;
                 if (strcmp(lang, "javascript") == 0 ||
                     strcmp(lang, "typescript") == 0) {
-                    if (js_m.loaded) {
-                        char pkg[512];
-                        snprintf(pkg, sizeof pkg, "%s", module);
-                        if (pkg[0] == '@') {
-                            /* scoped: keep @scope/name */
-                            char *s2 = strchr(pkg + 1, '/');
-                            if (s2) {
-                                char *s3 = strchr(s2 + 1, '/');
-                                if (s3) *s3 = 0;
-                            }
-                        } else {
-                            char *s = strchr(pkg, '/');
-                            if (s) *s = 0;
+                    char pkg[512];
+                    snprintf(pkg, sizeof pkg, "%s", module);
+                    if (pkg[0] == '@') {
+                        /* scoped: keep @scope/name */
+                        char *s2 = strchr(pkg + 1, '/');
+                        if (s2) {
+                            char *s3 = strchr(s2 + 1, '/');
+                            if (s3) *s3 = 0;
                         }
-                        in_manifest = manifest_has(&js_m, pkg);
+                    } else {
+                        char *s = strchr(pkg, '/');
+                        if (s) *s = 0;
                     }
+                    in_manifest = (js_m.loaded && manifest_has(&js_m, pkg)) ||
+                                  near_manifest_has(cg, near, &nnear,
+                                                    from_path, pkg);
                 } else if (strcmp(lang, "go") == 0) {
                     in_manifest = go_m.loaded && manifest_has(&go_m, module);
                 } else if (strcmp(lang, "python") == 0) {
@@ -619,6 +660,8 @@ static void resolve_imports_run(Cg *cg, bool scoped) {
     manifest_free(&go_m);
     manifest_free(&py_m);
     manifest_free(&rs_m);
+    for (int i = 0; i < nnear; i++) manifest_free(&near[i].m);
+    free(near);
 }
 
 void resolve_imports(Cg *cg)        { resolve_imports_run(cg, false); }
@@ -762,6 +805,21 @@ static const char *JS_BUILTINS[] = {
     "fetch","Response","Request","Headers","URL","URLSearchParams",
     "TextEncoder","TextDecoder","Blob","File","FormData",
     "ReadableStream","WritableStream","TransformStream",
+    "ArrayBuffer","SharedArrayBuffer","DataView","Atomics","BigInt",
+    "Int8Array","Uint8Array","Uint8ClampedArray","Int16Array","Uint16Array",
+    "Int32Array","Uint32Array","Float32Array","Float64Array",
+    "BigInt64Array","BigUint64Array","WeakRef","FinalizationRegistry",
+    "Intl","AbortController","AbortSignal","Event","EventTarget",
+    "CustomEvent","atob","btoa","performance","crypto","navigator",
+    "setImmediate","clearImmediate","requestAnimationFrame",
+    "cancelAnimationFrame","requestIdleCallback","document","window",
+    "location","history","localStorage","sessionStorage","alert","confirm",
+    "prompt","getComputedStyle","matchMedia","MutationObserver",
+    "ResizeObserver","IntersectionObserver","WebSocket","XMLHttpRequest",
+    "Worker","MessageChannel","BroadcastChannel","Image","Audio","Option",
+    "Boolean","Function","AggregateError","EvalError","URIError",
+    "BigInt","escape","unescape","eval","isPrototypeOf","hasOwnProperty",
+    "toString","valueOf","toLocaleString","localeCompare",
     NULL
 };
 

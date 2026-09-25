@@ -72,11 +72,13 @@ const char *cg_agent_name(const char *flag);
 const char *cg_agent_role(const char *flag);
 const char *cg_agent_parent(const char *flag);
 
-/* ---------------- sha256 ---------------- */
+/* ---------------- sha256: content identity ---------------- */
 void sha256_hex(const void *data, size_t len, char out_hex[65]);
 /* sha256 of the raw bytes of lines [from..to], 1-based inclusive — the
  * drift identity behind comments.anchored_hash. Index time and query time
- * must compute it identically, so both go through here. */
+ * must compute it identically, so both go through here. In a header a
+ * declaration's span runs to the next declaration, so editing one doc
+ * comment re-baselines the one above it too. */
 void hash_lines(const char *data, size_t len, int from, int to,
                 char out_hex[65]);
 
@@ -96,7 +98,7 @@ void ignore_load(Ignore *ig, const char *root);
 bool ignore_match(const Ignore *ig, const char *rel, bool is_dir);
 void ignore_free(Ignore *ig);
 
-/* ---------------- language layer ---------------- */
+/* ---------------- language layer: what lang_parse hands back ---------------- */
 #define MAX_DEFS_PER_LINE 4
 
 typedef struct {
@@ -110,7 +112,10 @@ typedef struct {
 typedef struct {
     char *name;        /* callee-ish identifier (owned) */
     int line;
-    char qual[64];     /* immediate receiver of a.b( / a->b( / A::b(; "" none */
+    char qual[64];     /* immediate receiver of a.b( / a->b( / A::b(; "" none;
+                          "(expr)" / "(local)" / "(param)" when the callee is
+                          a member of an expression, a value used earlier on
+                          the line, or a parameter of the enclosing function */
     char ref_kind;     /* 'c' = call */
     int argc;          /* argument count at call site; -1 = uncountable */
 } SymRef;
