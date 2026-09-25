@@ -181,8 +181,16 @@ The refusal leaves the graph intact.
 
 ## Limitations
 
-- Queries today answer from the current branch's rows. The `--branch` and
-  `--all-branches` flags are task 3.2, above.
+- **Writes are scoped; reads are not yet.** A sync only touches its own
+  branch's rows, but the readers still query the file and symbol tables
+  without a branch filter. Once a second branch of the repository has been
+  indexed, a symbol that exists on both produces one hit per branch —
+  `cg search` prints the same `path:line` twice, `cg anchors` counts the
+  same symbol twice, and `cg check` reports the sum. `cg symbol` and
+  `cg context` show one copy, so they read correctly, just not
+  deliberately. Branch-filtered reads and the `--branch` /
+  `--all-branches` flags are task 3.2, above; until then, prefer a
+  repository with one indexed branch when a count has to be exact.
 - Each branch's rows are parsed independently on its first sync; content
   sharing by hash across branches is also task 3.2.
 - A worktree of a repository that was never initialized binds nothing —

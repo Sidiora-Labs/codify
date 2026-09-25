@@ -548,6 +548,7 @@ The database lock decides who *writes*. A separate gate decides who *walks*: `.c
 - Symbol extraction is heuristic. A comment-aware and string-aware pattern engine per language is tuned for recall on definitions and call sites. It is not a full type-checked resolver.
 - Snapshots store every non-ignored file up to 32 MB, including binaries. The graph indexes text files up to 8 MB.
 - A coalesced sync returns without a fresh graph: it queued its change for the process holding the gate and answers from the last completed index.
+- Sync writes are branch-scoped; queries are not yet. Once two branches of one repository are indexed into the shared graph, a symbol on both is counted and listed once per branch — `cg search` repeats the hit and `cg anchors`/`cg check` report the sum. Branch-filtered reads are task 3.2, below.
 - `cg fleet` drives `git` and `gh` as subprocesses. Without `gh`, `pr` and `checkpoint` print the commands instead of running them, and `checkpoint` only treats `feature/*` head branches as Codify's own.
 - Jev needs the network and `OPENROUTER_API_KEY`. Nothing in the core loop depends on it, and no Jev answer changes an exit code.
 
