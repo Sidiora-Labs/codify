@@ -13,6 +13,73 @@ for f in "$EXT"/*.js; do
     node --check "$f" || fail "syntax error in $f"
 done
 
+# ---- agent chat (5.3): the pure chat core, provable without VS Code
+# A named section, so it can be run on its own with `14_vscode.sh chat`;
+# with no argument the whole file runs, this section included.
+SECTION="${1:-}"
+if [ -z "$SECTION" ] || [ "$SECTION" = chat ]; then
+node - "$EXT" <<'JS'
+const path = require('path');
+const { AgentPanel, diffRows, stripAnsi } =
+    require(path.join(process.argv[2], 'agents.js'));
+const check = (cond, what) => { if (!cond) throw new Error(what); };
+
+// a real line diff: the common lines stay put, only the edit moves
+const d = diffRows('a\nb\nc\nd\n', 'a\nB\nc\nd\n');
+check(d.added === 1 && d.removed === 1, `one line changed, got +${d.added}/-${d.removed}`);
+check(d.rows.filter((r) => r.t === 'ctx').length === 3, 'unchanged lines kept as context');
+const del = d.rows.find((r) => r.t === 'del');
+const add = d.rows.find((r) => r.t === 'add');
+check(del.s === 'b' && del.o === 2 && del.n === 0, 'removed row keeps its old line number');
+check(add.s === 'B' && add.n === 2 && add.o === 0, 'added row keeps its new line number');
+
+// long unchanged runs collapse instead of flooding the panel
+const long = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n') + '\n';
+const tail = diffRows(long, long + 'tail\n');
+check(tail.rows.some((r) => r.t === 'gap'), 'unchanged runs collapse into a gap');
+check(tail.rows.length < 20, `a one-line change draws a small diff, got ${tail.rows.length}`);
+check(/\d+ unchanged/.test(tail.rows.find((r) => r.t === 'gap').s),
+    'the gap says how much it hides');
+
+// a runaway diff is bounded and says what it cut
+const huge = diffRows('x\n'.repeat(5000), 'y\n'.repeat(5000), 50);
+check(huge.rows.length === 50 && huge.truncated > 0, 'oversized diffs are cut with a count');
+check(diffRows('same\n', 'same\n').rows.every((r) => r.t !== 'add' && r.t !== 'del'),
+    'an unchanged file shows no edits');
+check(diffRows(null, 'new\n').added === 1, 'a created file is all additions');
+
+// escape sequences never reach the webview
+check(stripAnsi('\u001b[1;31mred\u001b[0m') === 'red', 'SGR colours stripped');
+check(stripAnsi('\u001b]0;title\u0007done') === 'done', 'OSC title sequences stripped');
+check(stripAnsi('plain') === 'plain', 'plain text is untouched');
+check(stripAnsi(undefined) === '', 'missing output is empty, not "undefined"');
+
+// the ledger: adapters that report totals and adapters that report deltas
+// must both produce a total that only grows
+const totals = new AgentPanel(() => {});
+totals.beginTurn();
+totals.recordUsage({ cost: 0.10, tokens: 1000 });
+check(totals.endTurn('end_turn').cost === 0.1, 'first turn costs what was reported');
+totals.beginTurn();
+totals.recordUsage({ cost: 0.30, tokens: 3000 });
+const t2 = totals.endTurn('end_turn');
+check(Math.abs(t2.cost - 0.2) < 1e-9, `running totals become per-turn deltas: ${t2.cost}`);
+check(t2.sessionCost === 0.3 && t2.turns === 2, 'session total tracks the adapter');
+const deltas = new AgentPanel(() => {});
+deltas.beginTurn(); deltas.recordUsage({ cost: 0.10 }); deltas.endTurn('end_turn');
+deltas.beginTurn(); deltas.recordUsage({ cost: 0.05 });
+check(Math.abs(deltas.endTurn('end_turn').sessionCost - 0.15) < 1e-9,
+    'per-message costs accumulate into the session total');
+check(new AgentPanel(() => {}).retryTarget() === null, 'nothing to retry before a prompt');
+
+console.log('chat core ok');
+JS
+    if [ "$SECTION" = chat ]; then
+        echo "14_vscode chat ok"
+        exit 0
+    fi
+fi
+
 # ---- the manifest and the code agree about which commands exist
 node - "$EXT" <<'JS'
 const fs = require('fs'), path = require('path');

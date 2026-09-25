@@ -10,8 +10,11 @@ const path = require('path');
 const [, , ACP_JS, FAKE, TMP] = process.argv;
 const { AcpClient, splitCommand, normalizeCodexAdapterCommand,
     workspacePath, readTextFile, writeTextFile, sessionUpdate,
-    classifyUserText, sessionTitle } =
+    classifyUserText, sessionTitle, renderableToolCall } =
     require(path.resolve(ACP_JS));
+/* the chat core lives beside acp.js and loads without VS Code on purpose */
+const { AgentPanel, diffRows, stripAnsi } =
+    require(path.join(path.dirname(path.resolve(ACP_JS)), 'agents.js'));
 
 let step = '';
 function ok(what) { console.log(`ok: ${what}`); }
@@ -346,12 +349,100 @@ function harnessTextSanity() {
     ok('harness text is classified and session titles are cleaned');
 }
 
+/* ---- 5.3: the chat core — evidence, permissions that cannot hang,
+ * retry, and the cost ledger ---- */
+async function chatCoreSanity() {
+    step = 'chat-core';
+    const call = renderableToolCall({ toolCallId: 'c1', kind: 'edit',
+        content: [
+            { type: 'diff', path: 'a.c', oldText: 'one\ntwo\n', newText: 'one\n2\n' },
+            { type: 'terminal', terminalId: 't', output: '\u001b[31mred\u001b[0m out' },
+            { type: 'content', content: { type: 'text', text: '\u001b[1mbold\u001b[0m' } },
+        ] });
+    assert(call.content[0].rows.some((r) => r.t === 'del' && r.s === 'two') &&
+        call.content[0].rows.some((r) => r.t === 'add' && r.s === '2'),
+    'a diff reaches the panel as add/remove rows');
+    assert(call.content[0].added === 1 && call.content[0].removed === 1,
+        'the diff counts what changed');
+    assert(call.content[0].rows[0].t === 'ctx' && call.content[0].rows[0].o === 1,
+        'context rows keep their original line numbers');
+    assert(call.content[1].output === 'red out' &&
+        call.content[2].content.text === 'bold',
+    'terminal and command output lose their ANSI control sequences');
+    assert(stripAnsi('\u001b]0;title\u0007ok') === 'ok',
+        'OSC sequences are stripped too');
+    const big = diffRows('a\n'.repeat(500), 'b\n'.repeat(500), 40);
+    assert(big.rows.length === 40 && big.truncated > 0,
+        'a huge diff is cut with a count of what is missing');
+
+    const posted = [];
+    const chat = new AgentPanel((m) => posted.push(m));
+
+    /* an ask with nothing to choose must not park the agent forever */
+    const none = await chat.ask({ toolCall: { title: 'Run make' }, options: [] });
+    assert(none.outcome.outcome === 'cancelled',
+        'a permission with no options resolves instead of hanging');
+    assert(posted.some((m) => m.type === 'permission_done'),
+        'the panel is told the unanswerable ask is over');
+
+    posted.length = 0;
+    const asked = chat.ask({ toolCall: { title: 'Write file' },
+        options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }] });
+    const shown = posted.find((m) => m.type === 'permission');
+    assert(shown && shown.options.length === 1, 'the ask reaches the panel with its options');
+    assert(chat.pending() === 1, 'the ask is tracked while it waits');
+    chat.answer(shown.pid, 'allow-once');
+    const picked = await asked;
+    assert(picked.outcome.outcome === 'selected' &&
+        picked.outcome.optionId === 'allow-once',
+    'the chosen option is what the agent receives');
+    assert(chat.pending() === 0, 'an answered ask is no longer outstanding');
+    chat.answer(shown.pid, 'allow-once');       /* a double click must be inert */
+    assert(chat.pending() === 0, 'answering twice changes nothing');
+
+    posted.length = 0;
+    const abandoned = chat.ask({ toolCall: { title: 'Delete everything' },
+        options: [{ optionId: 'allow-once', name: 'Allow once' }] });
+    chat.settle('cancelled with the turn');
+    const ended = await abandoned;
+    assert(ended.outcome.outcome === 'cancelled',
+        'cancelling the turn settles the permission it was waiting on');
+    assert(posted.some((m) => m.type === 'permission_done' &&
+        /cancelled/.test(m.answer)), 'the card says how the ask ended');
+    assert(chat.pending() === 0, 'nothing is left waiting after a cancel');
+
+    chat.remember('refactor the lexer', '/task 5.3');
+    assert(chat.retryTarget().text === 'refactor the lexer' &&
+        chat.retryTarget().echo === '/task 5.3',
+    'retry re-sends the prompt that was actually sent, with its echo');
+
+    chat.beginTurn();
+    chat.recordUsage({ used: 100, size: 1000, cost: 0.02, tokens: 500 });
+    const first = chat.endTurn('end_turn');
+    assert(first.cost === 0.02 && first.tokens === 500 && first.turns === 1,
+        'a turn reports its own cost and tokens');
+    chat.beginTurn();
+    chat.recordUsage({ used: 200, size: 1000, cost: 0.05, tokens: 900 });
+    const second = chat.endTurn('end_turn');
+    assert(Math.abs(second.cost - 0.03) < 1e-9 && second.tokens === 400,
+        'a running total is reported per turn as the increment');
+    assert(Math.abs(second.sessionCost - 0.05) < 1e-9 && second.sessionTokens === 900,
+        'the session total follows the adapter total');
+    chat.beginTurn();
+    chat.recordUsage({ used: 300, size: 1000, cost: 0.01 });
+    const third = chat.endTurn('end_turn');
+    assert(third.sessionCost >= 0.05, 'a session total never goes backwards');
+    assert(typeof third.ms === 'number' && third.ms >= 0, 'a turn is timed');
+    ok('chat core: rendered evidence, permissions that cannot hang, retry, cost ledger');
+}
+
 (async () => {
     harnessTextSanity();
     splitSanity();
     adapterCommandSanity();
     bridgeSanity();
     updateMappingSanity();
+    await chatCoreSanity();
     await happyPath();
     await rejectPath();
     await cancelPath();

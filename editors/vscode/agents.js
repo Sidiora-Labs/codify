@@ -11,7 +11,11 @@
  * handoff / spec run fail with a clear message or a fallback, never a hang.
  *
  * Plain JS, zero dependencies, no build step. */
-const vscode = require('vscode');
+/* The chat core at the bottom of this file must be provable without VS Code,
+ * so the module loads headlessly; every vscode use below sits inside a
+ * function the editor calls. */
+let vscode = null;
+try { vscode = require('vscode'); } catch (_) { /* headless: chat core only */ }
 const fs = require('fs');
 const path = require('path');
 
@@ -440,4 +444,255 @@ function register(ctx, d) {
     };
 }
 
-module.exports = { register };
+/* --- agent chat (5.3) ---
+ *
+ * The part of the chat surface that must hold together without VS Code and
+ * without an agent on the other end: what a retry re-sends, which permission
+ * asks are still outstanding, what the turn and the session have cost, and
+ * the two renderers the transcript cannot fake — a real line diff and ANSI
+ * removal. acp.js owns the protocol and the webview; this owns the promises
+ * a test can pin down. */
+
+/* CSI/OSC escapes plus the carriage returns a progress bar uses to overwrite
+ * its own line. A webview draws these as mojibake, and a transcript that
+ * shows mojibake is a transcript nobody trusts. */
+const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
+
+function stripAnsi(text) {
+    const s = String(text == null ? '' : text);
+    return s.replace(ANSI_RE, '')
+        .replace(/\r\n/g, '\n')
+        .replace(/[^\n]*\r(?!\n)/g, '')   /* keep only what the line ended as */
+        .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+}
+
+const DIFF_CELL_BUDGET = 250000;   /* LCS is O(n·m): past this, show blocks */
+const DIFF_CONTEXT = 3;            /* unchanged lines kept around a change */
+
+function diffLines(text) {
+    const s = String(text == null ? '' : text);
+    if (!s) return [];
+    const lines = s.split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines;
+}
+
+/* Longest common subsequence over whole lines, walked back into rows. */
+function lcsRows(a, b) {
+    const w = b.length + 1;
+    const table = new Uint32Array((a.length + 1) * w);
+    for (let i = a.length - 1; i >= 0; i--) {
+        for (let j = b.length - 1; j >= 0; j--) {
+            table[i * w + j] = a[i] === b[j]
+                ? table[(i + 1) * w + j + 1] + 1
+                : Math.max(table[(i + 1) * w + j], table[i * w + j + 1]);
+        }
+    }
+    const rows = [];
+    let i = 0, j = 0;
+    while (i < a.length && j < b.length) {
+        if (a[i] === b[j]) { rows.push({ t: 'ctx', s: a[i] }); i++; j++; }
+        else if (table[(i + 1) * w + j] >= table[i * w + j + 1]) {
+            rows.push({ t: 'del', s: a[i] }); i++;
+        } else { rows.push({ t: 'add', s: b[j] }); j++; }
+    }
+    while (i < a.length) { rows.push({ t: 'del', s: a[i] }); i++; }
+    while (j < b.length) { rows.push({ t: 'add', s: b[j] }); j++; }
+    return rows;
+}
+
+/* Collapse long runs of unchanged lines into one gap row, so a diff of a
+ * large file still reads as the change it is. */
+function trimContext(rows) {
+    const keep = rows.map((r) => r.t !== 'ctx');
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i].t === 'ctx') continue;
+        for (let k = Math.max(0, i - DIFF_CONTEXT); k <= Math.min(rows.length - 1, i + DIFF_CONTEXT); k++) {
+            keep[k] = true;
+        }
+    }
+    const out = [];
+    let skipped = 0;
+    for (let i = 0; i < rows.length; i++) {
+        if (keep[i]) {
+            if (skipped) { out.push({ t: 'gap', s: `${skipped} unchanged line${skipped === 1 ? '' : 's'}` }); skipped = 0; }
+            out.push(rows[i]);
+        } else { skipped++; }
+    }
+    if (skipped) out.push({ t: 'gap', s: `${skipped} unchanged line${skipped === 1 ? '' : 's'}` });
+    return out;
+}
+
+/* A diff the panel can draw without knowing how to diff: numbered rows with
+ * old and new line numbers, the add/remove tally, and how much was cut.
+ * Returns {rows, added, removed, truncated}. */
+function diffRows(oldText, newText, maxRows) {
+    const a = diffLines(oldText), b = diffLines(newText);
+    let head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head &&
+           a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    const am = a.slice(head, a.length - tail);
+    const bm = b.slice(head, b.length - tail);
+    const middle = am.length * bm.length > DIFF_CELL_BUDGET
+        ? am.map((s) => ({ t: 'del', s })).concat(bm.map((s) => ({ t: 'add', s })))
+        : lcsRows(am, bm);
+    const all = a.slice(0, head).map((s) => ({ t: 'ctx', s }))
+        .concat(middle, a.slice(a.length - tail).map((s) => ({ t: 'ctx', s })));
+
+    let o = 0, n = 0, added = 0, removed = 0;
+    for (const r of all) {
+        if (r.t === 'del') { r.o = ++o; r.n = 0; removed++; }
+        else if (r.t === 'add') { r.o = 0; r.n = ++n; added++; }
+        else { r.o = ++o; r.n = ++n; }
+    }
+    const trimmed = trimContext(all);
+    const cap = maxRows || 400;
+    const rows = trimmed.slice(0, cap);
+    return { rows, added, removed, truncated: Math.max(0, trimmed.length - cap) };
+}
+
+/* One chat surface's bookkeeping.
+ *
+ * It is a class so its two promises can be tested without an editor: every
+ * permission ask is answered exactly once — a cancelled turn or a dead
+ * adapter settles whatever is left, so the agent never waits on a card that
+ * can no longer be clicked — and the last prompt outlives a failed turn, so
+ * retry never asks the user to retype. Cost is accumulated here because only
+ * this side sees every turn of the session. */
+class AgentPanel {
+    constructor(post) {
+        this.post = typeof post === 'function' ? post : () => {};
+        this.permits = new Map();     /* pid -> resolve of the ACP request */
+        this.seq = 0;
+        this.last = null;             /* {text, echo} — what retry re-sends */
+        this.turn = null;             /* marks of the turn in flight */
+        this.session = { cost: 0, currency: '', tokens: 0, turns: 0,
+            context: 0, size: 0 };
+    }
+
+    /* ---- prompts and retry ---- */
+    remember(text, echo) {
+        if (String(text || '').trim()) this.last = { text: String(text), echo: echo || '' };
+        return this.last;
+    }
+    retryTarget() { return this.last; }
+
+    beginTurn() {
+        this.turn = { at: Date.now(), cost: this.session.cost,
+            tokens: this.session.tokens, context: this.session.context };
+        return this.turn;
+    }
+
+    /* The per-turn ledger the transcript prints under the turn summary. */
+    endTurn(stopReason) {
+        const t = this.turn;
+        this.turn = null;
+        this.session.turns++;
+        const cost = t ? round6(this.session.cost - t.cost) : 0;
+        const tokens = t ? Math.max(0, this.session.tokens - t.tokens) : 0;
+        const context = t ? Math.max(0, this.session.context - t.context) : 0;
+        return {
+            stopReason: stopReason || 'end_turn',
+            ms: t ? Date.now() - t.at : 0,
+            cost, tokens, context,
+            sessionCost: round6(this.session.cost),
+            sessionTokens: this.session.tokens,
+            currency: this.session.currency, turns: this.session.turns,
+        };
+    }
+
+    /* Adapters disagree about what a usage_update's cost and token count
+     * mean: Claude Code reports the session's running total, others report
+     * what the last message cost. A value at or above the running total is
+     * taken as the total; a smaller one is taken as an increment. Either way
+     * the session total only ever grows, so the number on screen is never a
+     * lie about money already spent. */
+    recordUsage(u) {
+        const usage = u || {};
+        const used = Number(usage.used);
+        const size = Number(usage.size);
+        if (isFinite(used)) this.session.context = used;
+        if (isFinite(size)) this.session.size = size;
+        const raw = usage.cost && typeof usage.cost === 'object'
+            ? usage.cost.amount : usage.cost;
+        const amount = Number(raw);
+        if (isFinite(amount) && amount > 0) {
+            this.session.cost = round6(amount >= this.session.cost
+                ? amount : this.session.cost + amount);
+        }
+        if (usage.cost && usage.cost.currency) this.session.currency = String(usage.cost.currency);
+        const tokens = Number(usage.tokens);
+        if (isFinite(tokens) && tokens > 0) {
+            this.session.tokens = tokens >= this.session.tokens
+                ? tokens : this.session.tokens + tokens;
+        }
+        return {
+            used: isFinite(used) ? used : this.session.context,
+            size: isFinite(size) ? size : this.session.size,
+            cost: round6(this.session.cost), currency: this.session.currency,
+            tokens: this.session.tokens,
+        };
+    }
+
+    /* ---- permission asks ---- */
+
+    /* Show the ask and resolve when the person answers. An ask with nothing
+     * to click is answered at once rather than drawn as a card that can
+     * never be clicked — an agent blocked on a dead prompt is the one
+     * failure this panel must not have. */
+    ask(params) {
+        const p = params || {};
+        const call = p.toolCall || {};
+        const options = Array.isArray(p.options) ? p.options : [];
+        const pid = ++this.seq;
+        const shown = {
+            type: 'permission', pid,
+            title: call.title || 'Permission request',
+            kind: call.kind || '', toolCallId: call.toolCallId || '',
+            options,
+        };
+        return new Promise((resolve) => {
+            if (!options.length) {
+                this.post(Object.assign({ note: 'the agent offered no choices' }, shown));
+                this.post({ type: 'permission_done', pid, answer: 'cancelled — no options offered' });
+                resolve({ outcome: { outcome: 'cancelled' } });
+                return;
+            }
+            this.permits.set(pid, resolve);
+            this.post(shown);
+        });
+    }
+
+    answer(pid, optionId) {
+        const resolve = this.permits.get(pid);
+        if (!resolve) return false;
+        this.permits.delete(pid);
+        resolve({ outcome: { outcome: 'selected', optionId: String(optionId) } });
+        this.post({ type: 'permission_done', pid: pid });
+        return true;
+    }
+
+    /* Nothing may be left waiting: a cancelled turn or a closed adapter
+     * settles every outstanding ask and says so on its card. */
+    settle(why) {
+        let n = 0;
+        for (const [pid, resolve] of this.permits) {
+            resolve({ outcome: { outcome: 'cancelled' } });
+            this.post({ type: 'permission_done', pid, answer: why || 'cancelled' });
+            n++;
+        }
+        this.permits.clear();
+        return n;
+    }
+
+    pending() { return this.permits.size; }
+}
+
+function round6(n) {
+    const v = Number(n);
+    return isFinite(v) ? Math.round(v * 1e6) / 1e6 : 0;
+}
+
+module.exports = { register, AgentPanel, diffRows, stripAnsi };

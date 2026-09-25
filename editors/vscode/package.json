@@ -208,6 +208,12 @@
           "default": "",
           "description": "Any ACP-speaking agent command, offered as the Custom provider in the Agent view. Selected explicitly with codify.agent.driver = custom, or used by default when it is set and no provider was picked."
         },
+        "codify.acp.diffStyle": {
+          "type": "string",
+          "enum": ["unified", "split"],
+          "default": "unified",
+          "description": "How a file edit opens in the agent chat: one unified column, or old and new side by side. Each diff can still be flipped in place."
+        },
         "codify.agent.codexPath": {
           "type": "string",
           "default": "codex",

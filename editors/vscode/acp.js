@@ -13,6 +13,9 @@ try { vscode = require('vscode'); } catch (_) { /* headless: protocol-only */ }
 const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
+/* --- agent chat (5.3) --- the surface's bookkeeping and the two renderers
+ * the transcript cannot fake; headless-safe, so the tests reach them. */
+const { AgentPanel, diffRows, stripAnsi } = require('./agents');
 
 const PROTOCOL_VERSION = 1;
 const STDERR_TAIL_MAX = 8192;
@@ -264,6 +267,7 @@ let agentView = null;        /* vscode.WebviewView */
 let viewSession = null;      /* the session bound to the sidebar view */
 let viewDriver = '';         /* header picker choice; '' -> settings */
 let historyProbeStarted = false;
+let lastIdlePrompt = null;   /* what /retry re-sends when no session survived */
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 
@@ -273,6 +277,13 @@ function firstLine(s) {
 
 const DRIVER_IDS = ['codex', 'claude', 'custom'];
 function driverId(v) { return DRIVER_IDS.indexOf(v) >= 0 ? v : 'codex'; }
+
+/* --- agent chat (5.3) --- how a tool call's diff opens: one column with
+ * add/remove rows, or old beside new. The panel can flip either diff. */
+function diffStyle() {
+    return String(config().get('acp.diffStyle') || '') === 'split'
+        ? 'split' : 'unified';
+}
 
 /* Every adapter the picker can offer, with the command each would run. The
  * custom entry exists only while codify.acp.customCommand is set, so the
@@ -506,6 +517,9 @@ function sendPrompt(sess, text, echo) {
     }
     sess.running = true;
     sess.localEcho = echo || text;
+    /* what /retry re-sends, kept before the turn can fail */
+    sess.chat.remember(text, echo);
+    sess.chat.beginTurn();
     panelPost(sess, { type: 'chunk', role: 'user',
         text: echo || text, cmd: !!echo });
     panelPost(sess, { type: 'turn', running: true });
@@ -516,8 +530,9 @@ function sendPrompt(sess, text, echo) {
         async (res) => {
             sess.running = false;
             sess.localEcho = '';
-            panelPost(sess, { type: 'turn', running: false,
-                stopReason: (res && res.stopReason) || 'end_turn' });
+            const stopReason = (res && res.stopReason) || 'end_turn';
+            panelPost(sess, { type: 'turn', running: false, stopReason,
+                ledger: sess.chat.endTurn(stopReason) });
             rememberSession(sess);
             deps.refresh();
             const status = await taskStatus(sess.taskId);
@@ -531,20 +546,22 @@ function sendPrompt(sess, text, echo) {
         (e) => {
             sess.running = false;
             sess.localEcho = '';
-            panelPost(sess, { type: 'turn', running: false, stopReason: 'error' });
+            panelPost(sess, { type: 'turn', running: false, stopReason: 'error',
+                ledger: sess.chat.endTurn('error') });
+            /* the failure belongs in the transcript, next to the prompt that
+             * hit it, with the raw message one click away and retry offered */
+            panelPost(sess, { type: 'error', text: firstLine(e.message),
+                raw: e.message, retry: true });
             panelPost(sess, { type: 'status', text: e.message });
         });
 }
 
 function cancelTurn(sess) {
-    if (!sess.running) return;
-    sess.client.notify('session/cancel', { sessionId: sess.sessionId });
-    /* outstanding permission asks die with the turn */
-    for (const [pid, resolve] of sess.permits) {
-        resolve({ outcome: { outcome: 'cancelled' } });
-        panelPost(sess, { type: 'permission_done', pid });
+    if (sess.running) {
+        sess.client.notify('session/cancel', { sessionId: sess.sessionId });
     }
-    sess.permits.clear();
+    /* outstanding permission asks die with the turn — never left waiting */
+    sess.chat.settle('cancelled with the turn');
 }
 
 function sessionRequest(sess, method, params) {
@@ -555,19 +572,45 @@ function sessionRequest(sess, method, params) {
         return writeTextFile(deps.workspaceRoot(), params);
     }
     if (method === 'session/request_permission') {
-        return new Promise((resolve) => {
-            const pid = ++permitSeq;
-            sess.permits.set(pid, resolve);
-            panelPost(sess, {
-                type: 'permission', pid,
-                title: (params.toolCall && params.toolCall.title) || 'Permission request',
-                options: params.options || [],
-            });
-        });
+        return sess.chat.ask(params);
     }
     const err = new Error(`unsupported method: ${method}`);
     err.code = -32601;
     throw err;
+}
+
+/* --- agent chat (5.3) --- */
+const DIFF_ROW_MAX = 400;      /* rows drawn per diff before it is cut */
+const TERMINAL_TAIL = 60000;   /* characters of terminal output kept */
+
+/* Tool evidence the panel can draw without knowing how to diff or what an
+ * escape sequence is: an ACP diff becomes numbered add/remove rows, terminal
+ * and command output loses its ANSI control sequences, and both are bounded
+ * so one runaway build log cannot freeze the webview. Pure in (call). */
+function renderableToolCall(call) {
+    if (!call || !Array.isArray(call.content)) return call;
+    const content = call.content.map((item) => {
+        if (!item || typeof item !== 'object') return item;
+        if (item.type === 'diff') {
+            const d = diffRows(item.oldText, item.newText, DIFF_ROW_MAX);
+            return Object.assign({}, item, { rows: d.rows, added: d.added,
+                removed: d.removed, truncated: d.truncated });
+        }
+        if (item.type === 'terminal') {
+            const out = stripAnsi(item.output || '');
+            return Object.assign({}, item, {
+                output: out.length > TERMINAL_TAIL ? out.slice(-TERMINAL_TAIL) : out });
+        }
+        if (item.type === 'content' && item.content &&
+            item.content.type === 'text') {
+            const text = stripAnsi(item.content.text);
+            return Object.assign({}, item, {
+                content: Object.assign({}, item.content, {
+                    text: text.length > TERMINAL_TAIL ? text.slice(-TERMINAL_TAIL) : text }) });
+        }
+        return item;
+    });
+    return Object.assign({}, call, { content });
 }
 
 function sessionUpdate(sess, params) {
@@ -596,7 +639,7 @@ function sessionUpdate(sess, params) {
         break;
     case 'tool_call':
     case 'tool_call_update':
-        panelPost(sess, { type: 'tool', call: u });
+        panelPost(sess, { type: 'tool', call: renderableToolCall(u) });
         break;
     case 'plan':
         panelPost(sess, { type: 'plan', entries: u.entries || [] });
@@ -622,9 +665,14 @@ function sessionUpdate(sess, params) {
             updatedAt: u.updatedAt });
         rememberSession(sess, sess.sessionInfo);
         break;
-    case 'usage_update':
-        panelPost(sess, { type: 'usage', used: u.used, size: u.size, cost: u.cost });
+    case 'usage_update': {
+        /* the session's running cost lives with the surface, so the number
+         * on screen survives turns, retries, and restored sessions */
+        const totals = sess.chat ? sess.chat.recordUsage(u) : undefined;
+        panelPost(sess, { type: 'usage', used: u.used, size: u.size,
+            cost: u.cost, session: totals });
         break;
+    }
     default:
         break; /* unknown variants are forward-compatible */
     }
@@ -682,9 +730,14 @@ async function connectAgent(sess, driverOverride) {
         onNotify: (m, p) => { if (m === 'session/update') sessionUpdate(sess, p); },
         onRequest: (m, p) => sessionRequest(sess, m, p),
         onClose: (reason) => {
+            /* a dead adapter cannot answer anything: settle first, so no
+             * permission card is left waiting on a process that is gone */
+            if (sess.chat) sess.chat.settle('the agent closed');
             if (sess.disposed || sess.closing || sess.probe) return;
             sess.closing = true;
             panelPost(sess, { type: 'status', text: `agent closed: ${reason}` });
+            panelPost(sess, { type: 'error', text: `agent closed: ${reason}`,
+                raw: reason, retry: false });
             panelPost(sess, { type: 'turn', running: false, stopReason: 'closed' });
             if (sess.panel ? panels.has(sess.taskId) : viewSession === sess) {
                 endOfSession(sess, reason);
@@ -955,16 +1008,16 @@ function handleSessionMessage(sess, msg) {
     }
     if (msg.type === 'cancel') { cancelTurn(sess); return true; }
     if (msg.type === 'permission') {
-        const resolve = sess.permits.get(msg.pid);
-        if (resolve) {
-            sess.permits.delete(msg.pid);
-            resolve({ outcome: { outcome: 'selected', optionId: msg.optionId } });
-            panelPost(sess, { type: 'permission_done', pid: msg.pid });
-        }
+        sess.chat.answer(msg.pid, msg.optionId);
         return true;
     }
     if (msg.type === 'handoff' && sess.taskId) {
         vscode.commands.executeCommand('codify.agent.handoff', sess.taskId);
+        return true;
+    }
+    if (msg.type === 'load_session' && msg.sessionId) {
+        /* only reaches here from an editor panel: the view handles its own */
+        switchSession(sess, String(msg.sessionId), String(msg.driver || ''));
         return true;
     }
     if (msg.type === 'open') { openLocation(msg.path, msg.line); return true; }
@@ -983,6 +1036,47 @@ function handleSessionMessage(sess, msg) {
         return true;
     }
     return false;
+}
+
+/* --- agent chat (5.3) --- cancel, retry, and session switching.
+ *
+ * Re-send the last prompt. A cancelled or failed turn leaves it on the
+ * surface's bookkeeping, so retry never asks the user to retype and never
+ * silently sends something else. */
+function retryLast(sess) {
+    const last = sess && sess.chat && sess.chat.retryTarget();
+    if (!last) {
+        surfacePost(sess, { type: 'status', text: 'nothing to retry yet' });
+        return false;
+    }
+    if (sess.running) {
+        surfacePost(sess, { type: 'status',
+            text: 'a turn is still running — /cancel it first' });
+        return false;
+    }
+    surfacePost(sess, { type: 'notice', text: '↻ retrying the last prompt' });
+    sendPrompt(sess, last.text, last.echo);
+    return true;
+}
+
+/* The sessions this workspace knows about, as a card in the transcript: the
+ * same rows as the header picker, switchable without leaving the chat. */
+async function showSessions(sess) {
+    const rows = agentView ? await listPastSessions(true) : sessionHistory;
+    surfacePost(sess, { type: 'sessionlist', sessions: rows,
+        current: (sess && sess.sessionId) || '',
+        note: rows.length ? '' : 'no past sessions for this workspace yet' });
+}
+
+/* Switch from an editor panel: the sidebar view owns restored sessions, so
+ * the request is forwarded there rather than duplicated. */
+async function switchSession(sess, sessionId, driver) {
+    if (!(await focusView())) {
+        surfacePost(sess, { type: 'status',
+            text: 'open the Codify Agent view to switch sessions' });
+        return;
+    }
+    await restorePastSession(sessionId, driver);
 }
 
 /* Slash commands against a live session (sidebar or editor panel). The task
@@ -1025,19 +1119,44 @@ async function sessionSlash(sess, cmd, args) {
         await taskLifecycle(sess, cmd, (text, echo) => sendPrompt(sess, text, echo));
         return;
     }
-    if (cmd === 'new') { await resetViewSession(); return; }
+    if (cmd === 'cancel') {
+        if (!sess.running && !sess.chat.pending()) {
+            surfacePost(sess, { type: 'status', text: 'nothing is running' });
+            return;
+        }
+        cancelTurn(sess);
+        surfacePost(sess, { type: 'notice', text: 'cancel sent to the agent' });
+        return;
+    }
+    if (cmd === 'retry') { retryLast(sess); return; }
+    if (cmd === 'sessions') { await showSessions(sess); return; }
+    if (cmd === 'new') {
+        /* the sidebar view owns the chat lifecycle; an editor panel says so
+         * rather than silently resetting a different surface */
+        if (sess.panel) {
+            surfacePost(sess, { type: 'status',
+                text: 'this is a task panel — start a new chat from the Codify Agent view' });
+            return;
+        }
+        await resetViewSession();
+        return;
+    }
     surfacePost(sess, { type: 'status', text: `unknown command /${cmd}` });
 }
 
 function newSession(webview, extra) {
-    return Object.assign({
+    const sess = Object.assign({
         taskId: undefined, agent: '', claimed: false, panel: undefined,
         webview, client: undefined, sessionId: undefined,
-        running: false, queue: [], permits: new Map(),
+        running: false, queue: [],
         commands: [], modes: undefined, configOptions: [], sessionInfo: undefined,
         localEcho: '',
         disposed: false, closing: false, initMsg: undefined,
     }, extra || {});
+    /* --- agent chat (5.3) --- one bookkeeper per surface: retry target,
+     * outstanding permission asks, and the cost ledger */
+    sess.chat = new AgentPanel((msg) => panelPost(sess, msg));
+    return sess;
 }
 
 /* Editor-panel session on a task. The sidebar view is the default surface;
@@ -1064,7 +1183,8 @@ async function openAgentPanel(id, agent, promptText, claimed) {
 
     sess.initMsg = { type: 'init', idle: false, version: extensionVersion(),
         task: { id, title: task.title || '', status: task.status || '' },
-        agent, driver, drivers: [driver], adapters: adapterMap(), feature: id };
+        agent, driver, drivers: [driver], adapters: adapterMap(), feature: id,
+        diffStyle: diffStyle() };
     panelPost(sess, sess.initMsg);
 
     try {
@@ -1072,6 +1192,8 @@ async function openAgentPanel(id, agent, promptText, claimed) {
     } catch (e) {
         const why = connectFailureHint(sess, e);
         panelPost(sess, { type: 'status', text: why });
+        panelPost(sess, { type: 'error', text: `${sess.driver || 'agent'} failed to start`,
+            raw: why, retry: false });
         panels.delete(id);
         if (claimed) await deps.cg(['spec', 'release', id, '--agent', agent]);
         deps.refresh();
@@ -1267,6 +1389,7 @@ async function startChatSession(firstText, taskOpts, echo) {
     const sess = newSession(agentView.webview,
         Object.assign({ agent: `vscode-chat-${++permitSeq}` }, taskOpts || {}));
     viewSession = sess;
+    lastIdlePrompt = { text: firstText, echo: echo || '' };
     const driver = currentDriver();
     postView({ type: 'status', text: `starting ${driver} agent…` });
     postView({ type: 'session', live: true });
@@ -1279,6 +1402,10 @@ async function startChatSession(firstText, taskOpts, echo) {
             await deps.cg(['spec', 'release', sess.taskId, '--agent', sess.agent]);
         }
         postView({ type: 'status', text: why });
+        /* in the transcript, with the raw reason and a retry that re-sends
+         * the prompt the dead adapter never received */
+        postView({ type: 'error', text: `${driver} failed to start`, raw: why,
+            retry: true });
         postView({ type: 'session', live: false });
         deps.refresh();
         const items = sess.taskId && deps.startTerminal
@@ -1354,7 +1481,7 @@ async function postViewInit() {
     }
     postView({ type: 'init', idle: viewIdle(), version: extensionVersion(),
         driver: currentDriver(), drivers: adapterCatalog().map((a) => a.id),
-        adapters: adapterMap(),
+        adapters: adapterMap(), diffStyle: diffStyle(),
         feature: b.feature + (b.mode ? ' · ' + b.mode : ''), task });
     postView({ type: 'sessions', sessions: sessionHistory });
     if (sess && sess.client) postView({ type: 'session', live: true });
@@ -1392,6 +1519,19 @@ async function idleSlash(cmd, args) {
     }
     if (cmd === 'open') { if (args) openLocation(args); return; }
     if (cmd === 'new') { postView({ type: 'reset', driver: currentDriver() }); return; }
+    if (cmd === 'sessions') { await showSessions(null); return; }
+    if (cmd === 'cancel') { postView({ type: 'status', text: 'nothing is running' }); return; }
+    if (cmd === 'retry') {
+        /* an adapter that failed to start took the prompt with it: the idle
+         * view keeps the last one so retry starts the session over */
+        if (!lastIdlePrompt) {
+            postView({ type: 'status', text: 'nothing to retry yet' });
+            return;
+        }
+        postView({ type: 'notice', text: '↻ retrying the last prompt' });
+        await startChatSession(lastIdlePrompt.text, undefined, lastIdlePrompt.echo);
+        return;
+    }
     if (cmd === 'handoff' || cmd === 'done' || cmd === 'implemented') {
         postView({ type: 'status', text: 'no task is attached to this chat' });
         return;
@@ -1590,4 +1730,6 @@ module.exports = {
     /* exported for the headless fs-bridge tests */
     workspacePath, readTextFile, writeTextFile, sessionUpdate,
     classifyUserText, sessionTitle,
+    /* --- agent chat (5.3) --- */
+    renderableToolCall,
 };

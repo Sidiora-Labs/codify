@@ -24,6 +24,7 @@ has "$out" "happy path"
 has "$out" "harness text is classified and session titles are cleaned"
 has "$out" "fs bridge: workspace-scoped reads and writes"
 has "$out" "cancel resolves the in-flight turn as cancelled"
+has "$out" "chat core: rendered evidence, permissions that cannot hang, retry, cost ledger"
 has "$out" "protocol version mismatch fails loudly"
 has "$out" "agent death rejects pending requests"
 
@@ -70,6 +71,20 @@ for (const c of offered) {
 // the chat must ask for its state rather than race the extension's first post
 if (!/type: 'ready'/.test(m[1])) throw new Error('panel never sends the ready handshake');
 if (!/'ready'/.test(acp)) throw new Error('acp.js ignores the ready handshake');
+
+// 5.3: cancel is always reachable, and nothing waits on a dead permission
+if (!/ev\.key === 'Escape'[\s\S]{0,400}?type: 'cancel'/.test(m[1]))
+    throw new Error('Esc does not cancel the turn in flight');
+if ((acp.match(/\.chat\.settle\(/g) || []).length < 2)
+    throw new Error('acp.js must settle permissions on both cancel and adapter close');
+if (!/renderableToolCall/.test(acp))
+    throw new Error('tool evidence reaches the panel unrendered');
+for (const kind of ['error', 'sessionlist'])
+    if (!new RegExp(`m\\.type === '${kind}'`).test(m[1]))
+        throw new Error(`the panel ignores ${kind} messages`);
+for (const post of ['error', 'sessionlist'])
+    if (!new RegExp(`type: '${post}'`).test(acp))
+        throw new Error(`acp.js never posts ${post}`);
 console.log('panel chat ok:', offered.length, 'codify commands');
 JS
 
@@ -88,5 +103,7 @@ has "$out" "provider picker, labels, and configure gear"
 has "$out" "Codify toolbar and task actions"
 has "$out" "sub-agents, tool timeline, now line, and turn summary"
 has "$out" "replayed harness text and timeline row cap"
+has "$out" "diff tables, split and unified, terminal output with ANSI stripped"
+has "$out" "cancel, retry, inline errors, cost ledger, and session switching"
 
 echo "PASS 19_acp.sh"

@@ -22,7 +22,8 @@ const IDS = ['log', 'scroll', 'input', 'statusline', 'driver', 'taskchip',
     'mode', 'configs', 'activitybar', 'activitylabel', 'toolactivity',
     'planactivity', 'queueactivity', 'permitactivity', 'history',
     'refreshhistory', 'buildversion', 'configure', 'cgbar', 'taskactions',
-    'tooltimeline', 'agentactivity', 'nowline', 'usagebar', 'usagefill'];
+    'tooltimeline', 'agentactivity', 'nowline', 'usagebar', 'usagefill',
+    'cost', 'retry'];
 
 function load() {
     const m = HTML.match(/<script nonce="\$\{nonce\}">([\s\S]*?)<\/script>/);
@@ -115,8 +116,14 @@ function cards() {
     card = p.log.querySelector('.card.tool');
     assert(p.log.querySelectorAll('.card.tool').length === 1,
         'the update reuses the same card');
-    assert(card.querySelector('pre.del') && card.querySelector('pre.add'),
-        'diff rendered as removed + added');
+    /* the extension normally pre-computes the rows; a bare oldText/newText
+     * pair must still render rather than disappear */
+    assert(card.querySelector('table.dtable'), 'diff rendered as a real diff table');
+    assert(card.querySelector('tr.drow.del') && card.querySelector('tr.drow.add'),
+        'diff rows are marked added and removed');
+    assert(/\+1/.test(card.querySelector('.dhead').textContent) &&
+        /1/.test(card.querySelector('.dhead .minus').textContent),
+    'the diff header counts what changed');
     assert(p.doc.getElementById('toolactivity').textContent === '1 done',
         'completed tool summarized');
     card.querySelector('.locs .flink').click();
@@ -465,6 +472,152 @@ function replay() {
     ok('replayed harness text and timeline row cap');
 }
 
+/* ---- 5.3: diffs as diffs, terminal output as terminal output ---- */
+function evidence() {
+    step = 'evidence';
+    const p = load();
+    p.send({ type: 'init', idle: false, driver: 'claude', drivers: ['claude'],
+        diffStyle: 'split' });
+    p.send({ type: 'tool', call: { toolCallId: 'd1', title: 'Edit main.c',
+        kind: 'edit', status: 'completed',
+        content: [{ type: 'diff', path: 'src/main.c', added: 1, removed: 1,
+            truncated: 3,
+            rows: [{ t: 'ctx', s: 'int main(void) {', o: 1, n: 1 },
+                { t: 'del', s: '    return 1;', o: 2, n: 0 },
+                { t: 'add', s: '    return 0;', o: 0, n: 2 },
+                { t: 'gap', s: '12 unchanged lines' }] }] } });
+    const card = p.log.querySelector('.card.tool');
+    const rows = card.querySelectorAll('tr.drow');
+    assert(rows.length === 4, 'every row is drawn, collapsed context included');
+    assert(rows[1].classList.contains('del') && rows[2].classList.contains('add'),
+        'rows carry their add/remove colouring');
+    assert(rows[1].querySelectorAll('td').length === 4,
+        'the configured split style opens old beside new');
+    assert(rows[1].querySelector('td.dcode.del'), 'the removed side is the marked one');
+    assert(/12 unchanged lines/.test(rows[3].textContent),
+        'unchanged runs collapse into a gap row');
+    assert(/3 more rows/.test(card.querySelector('.dcut').textContent),
+        'a cut diff says how much it is not showing');
+    const toggle = card.querySelector('.dhead button.icon');
+    assert(toggle.textContent === 'unified', 'the toggle offers the other style');
+    toggle.click();
+    assert(card.querySelectorAll('tr.drow')[1].querySelectorAll('td').length === 3,
+        'a diff can be flipped to one column in place');
+    card.querySelector('.dhead button.path').click();
+    assert(p.posted.some((x) => x.type === 'open' && x.path === 'src/main.c'),
+        'the diff header opens the file it changed');
+
+    p.send({ type: 'tool', call: { toolCallId: 'x1', title: 'make test',
+        kind: 'execute', status: 'failed',
+        content: [{ type: 'content',
+            content: { type: 'text', text: '\u001b[31mFAIL\u001b[0m 19_acp.sh' } },
+        { type: 'terminal', terminalId: 'term-1', command: 'make test',
+            exitCode: 2, output: 'ok 1\nnot ok 2' }] } });
+    const run = p.log.querySelectorAll('.card.tool')[1];
+    const blocks = run.querySelectorAll('pre.term');
+    assert(blocks.length === 2, 'command output and terminals both render monospace');
+    assert(blocks[0].textContent === 'FAIL 19_acp.sh',
+        'ANSI escapes never reach the screen');
+    assert(!run.querySelector('.out .md'),
+        'command output is not re-interpreted as Markdown');
+    assert(/exit 2/.test(run.querySelector('.termhead').textContent) &&
+        run.querySelector('.termhead .rc.bad'), 'a non-zero exit is called out');
+    ok('diff tables, split and unified, terminal output with ANSI stripped');
+}
+
+/* ---- 5.3: failures in place, retry, cancel, cost, and session switching ---- */
+function chatControls() {
+    step = 'chat-controls';
+    const p = load();
+    p.send({ type: 'init', idle: false, driver: 'claude', drivers: ['claude'] });
+    assert(!p.doc.body.classList.contains('hasretry'),
+        'retry stays hidden until something has been sent');
+
+    p.send({ type: 'chunk', role: 'user', text: 'refactor the lexer' });
+    p.send({ type: 'turn', running: true });
+    assert(p.doc.body.classList.contains('hasretry'),
+        'a sent prompt makes retry reachable');
+
+    /* Esc cancels from the composer and from anywhere else */
+    p.input.dispatch('keydown', { key: 'Escape' });
+    assert(p.posted.some((x) => x.type === 'cancel'), 'Esc cancels the turn');
+    p.posted.length = 0;
+    p.doc.dispatch('keydown', { key: 'Escape' });
+    assert(p.posted.some((x) => x.type === 'cancel'),
+        'Esc still cancels when the focus has left the composer');
+
+    /* a permission that dies with the turn is settled, not left spinning */
+    p.send({ type: 'permission', pid: 4, title: 'Run make test', options: [] });
+    const perm = p.log.querySelector('.card.perm');
+    assert(/waiting for your answer/.test(perm.textContent),
+        'the permission card says the agent is blocked on it');
+    p.send({ type: 'permission_done', pid: 4, answer: 'cancelled with the turn' });
+    assert(perm.classList.contains('answered') &&
+        /cancelled with the turn/.test(perm.querySelector('.answer').textContent),
+    'a settled permission reports how it ended');
+    assert(p.doc.getElementById('permitactivity').classList.contains('hidden'),
+        'no permission is left outstanding after a cancel');
+
+    p.send({ type: 'turn', running: false, stopReason: 'error',
+        ledger: { stopReason: 'error', ms: 4200, cost: 0.0123, tokens: 25400,
+            sessionCost: 0.25, sessionTokens: 120000, currency: 'USD', turns: 3 } });
+    const sum = p.log.querySelector('.sysline.turnsum');
+    assert(/\$0\.012/.test(sum.textContent) && /25k tokens/.test(sum.textContent),
+        'the turn says what it cost and how many tokens it used');
+    assert(/4\.2s/.test(sum.textContent), 'the turn says how long it took');
+    assert(p.doc.getElementById('cost').textContent === '$0.25',
+        'the session total sits in the session bar');
+    assert(/3 turns/.test(p.doc.getElementById('cost').title),
+        'the session total explains itself on hover');
+
+    p.send({ type: 'error', text: 'adapter exited: code 1',
+        raw: 'adapter exited: code 1\n  at spawn()', retry: true });
+    const err = p.log.querySelector('.card.err');
+    assert(err, 'a failure renders in the transcript, not only in a notification');
+    assert(/adapter exited/.test(err.querySelector('.emsg').textContent),
+        'the readable message is shown');
+    assert(/at spawn/.test(err.querySelector('.eraw pre').textContent),
+        'the raw message stays available');
+    err.querySelectorAll('.eacts button')[0].click();
+    assert(p.posted.some((x) => x.type === 'slash' && x.cmd === 'retry'),
+        'retry is reachable from the failure itself');
+    err.querySelectorAll('.eacts button')[1].click();
+    assert(p.posted.some((x) => x.type === 'copy' && /at spawn/.test(x.text)),
+        'the raw message can be copied');
+    p.doc.getElementById('retry').click();
+    assert(p.posted.filter((x) => x.type === 'slash' && x.cmd === 'retry').length === 2,
+        'the toolbar retry re-sends the last prompt too');
+
+    p.send({ type: 'sessionlist', current: 'sess_now', sessions: [
+        { sessionId: 'sess_now', title: 'This chat', driver: 'claude' },
+        { sessionId: 'sess_old', title: 'Earlier work', driver: 'codex',
+            updatedAt: '2026-08-28T12:00:00Z' }] });
+    const list = p.log.querySelector('.card.sess');
+    const rows = list.querySelectorAll('.row');
+    assert(rows.length === 3, 'every known session plus a new chat is offered');
+    assert(rows[0].classList.contains('current'), 'the live session is marked');
+    rows[1].click();
+    assert(p.posted.some((x) => x.type === 'load_session' &&
+        x.sessionId === 'sess_old' && x.driver === 'codex'),
+    'picking a session asks the extension to switch to it');
+    rows[2].click();
+    assert(p.posted.some((x) => x.type === 'slash' && x.cmd === 'new'),
+        'a fresh chat is one click away');
+
+    /* the palette must offer the turn controls it documents */
+    p.input.value = '/'; p.input.dispatch('input');
+    const names = p.doc.getElementById('slashmenu').querySelectorAll('.sitem')
+        .map((s) => s.textContent);
+    ['/cancel', '/retry', '/sessions'].forEach((n) =>
+        assert(names.some((t) => t.indexOf(n) === 0), 'palette offers ' + n));
+
+    p.send({ type: 'reset' });
+    assert(p.doc.getElementById('cost').textContent === '' &&
+        !p.doc.body.classList.contains('hasretry'),
+    'a new chat starts with a clean ledger and nothing to retry');
+    ok('cancel, retry, inline errors, cost ledger, and session switching');
+}
+
 /* ---- the ready handshake ---- */
 function handshake() {
     step = 'handshake';
@@ -494,6 +647,8 @@ providers();
 toolbar();
 subagents();
 replay();
+evidence();
+chatControls();
 handshake();
 responsiveContract();
 console.log('agent panel: all scenarios pass');

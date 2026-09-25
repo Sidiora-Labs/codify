@@ -111,11 +111,20 @@ class El {
 
 const doc = {
     _byId: new Map(),
+    listeners: {},
     activeElement: null,
     createElement(tag) { return new El(tag); },
     createTextNode(t) { const e = new El('#text'); e.textContent = t; return e; },
     getElementById(id) { return doc._byId.get(id) || null; },
-    addEventListener() {},
+    /* document-level keys matter: the panel binds Escape here so cancel works
+     * even when the focus has left the composer */
+    addEventListener(ev, fn) {
+        (doc.listeners[ev] = doc.listeners[ev] || []).push(fn);
+    },
+    dispatch(ev, arg) {
+        (doc.listeners[ev] || []).forEach((fn) => fn(
+            Object.assign({ preventDefault() {}, target: doc.body }, arg || {})));
+    },
     body: null,
 };
 
@@ -125,6 +134,7 @@ const doc = {
 function bootstrap(ids) {
     doc.body = new El('body');
     doc._byId.clear();
+    doc.listeners = {};
     for (const id of ids) {
         const e = new El(id === 'input' ? 'textarea' :
             (id === 'driver' || id === 'mode' || id === 'history') ? 'select' : 'div');
