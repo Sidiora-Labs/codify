@@ -287,7 +287,13 @@ static bool docs_route_exists(Cg *cg, const char *value, const char *path) {
 
 /* Seed the private claims ledger with every changed graph entry point and
  * route attributed to this feature. The documentation agent supplies the
- * document mapping and may append additional claims; the checker proves them. */
+ * document mapping and may append additional claims; the checker proves them.
+ *
+ * Every query here is branch-scoped. A fleet's worktrees each index the same
+ * paths into one graph, so an unscoped join would derive a path's surface once
+ * per branch, carrying line numbers from trees the documentation is not about.
+ * The GROUP BY behind the scope is the fallback for a busy registry that left
+ * no branch id to scope to: one row per observation either way. */
 static int docs_claims_template(DocsProject *p, const char *path) {
     struct stat st;
     bool claims_exist = stat(path, &st) == 0;
@@ -306,13 +312,18 @@ static int docs_claims_template(DocsProject *p, const char *path) {
         "snapshots; do not edit.\n\n");
     char needle[400];
     snprintf(needle, sizeof needle, "[spec:%s/", p->feature);
+    char scope[64], sql[640];
+    branch_scope_sql(p->cg, "f", scope, sizeof scope);
     char **paths = NULL;
     int np = 0;
     if (p->incremental) np = vcs_changed_paths(p->cg, needle, &paths);
     else {
         /* The first closure covers the whole indexed project, not merely the
          * feature that happened to introduce documentation generation. */
-        sqlite3_stmt *files = cg_prep(p->cg, "SELECT path FROM files ORDER BY path");
+        snprintf(sql, sizeof sql,
+            "SELECT DISTINCT f.path FROM files f WHERE 1=1 %s ORDER BY f.path",
+            scope);
+        sqlite3_stmt *files = cg_prep(p->cg, sql);
         while (sqlite3_step(files) == SQLITE_ROW) {
             paths = xrealloc(paths, (size_t)(np + 1) * sizeof *paths);
             paths[np++] = xstrdup((const char *)sqlite3_column_text(files, 0));
@@ -321,9 +332,11 @@ static int docs_claims_template(DocsProject *p, const char *path) {
     }
     int nclaim = 0;
     for (int i = 0; i < np; i++) {
-        sqlite3_stmt *ss = cg_prep(p->cg,
-            "SELECT s.id,s.name,s.kind,s.line FROM symbols s JOIN files f "
-            "ON f.id=s.file_id WHERE f.path=?1 ORDER BY s.line");
+        snprintf(sql, sizeof sql,
+            "SELECT MIN(s.id),s.name,s.kind,s.line FROM symbols s JOIN files f "
+            "ON f.id=s.file_id WHERE f.path=?1 %s"
+            "GROUP BY s.name,s.kind,s.line ORDER BY s.line", scope);
+        sqlite3_stmt *ss = cg_prep(p->cg, sql);
         sqlite3_bind_text(ss, 1, paths[i], -1, SQLITE_TRANSIENT);
         while (sqlite3_step(ss) == SQLITE_ROW) {
             long id = sqlite3_column_int64(ss, 0);
@@ -344,9 +357,11 @@ static int docs_claims_template(DocsProject *p, const char *path) {
             sb_puts(&required, "\n\n");
         }
         sqlite3_finalize(ss);
-        sqlite3_stmt *rs = cg_prep(p->cg,
-            "SELECT method,pattern,line FROM routes r JOIN files f ON "
-            "f.id=r.file_id WHERE f.path=?1 ORDER BY line");
+        snprintf(sql, sizeof sql,
+            "SELECT r.method,r.pattern,r.line FROM routes r JOIN files f ON "
+            "f.id=r.file_id WHERE f.path=?1 %s"
+            "GROUP BY r.method,r.pattern,r.line ORDER BY r.line", scope);
+        sqlite3_stmt *rs = cg_prep(p->cg, sql);
         sqlite3_bind_text(rs, 1, paths[i], -1, SQLITE_TRANSIENT);
         while (sqlite3_step(rs) == SQLITE_ROW) {
             const char *method = (const char *)sqlite3_column_text(rs, 0);
