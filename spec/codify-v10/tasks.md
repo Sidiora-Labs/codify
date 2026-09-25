@@ -19,13 +19,13 @@
     - Resolve only refs in changed files plus refs anywhere that name a touched symbol; resolve imports of changed files; rebuild soft edges only for comments in changed files or naming touched symbols.
     - Keep the global pass for --full and for the pending-resolve recovery path, and keep resolution meta counters truthful by recomputing them from the table.
     - _Requirements: 1.4_
-  - [-] 1.3 Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP
+  - [x] 1.3 Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP
     - Add cg hook post-edit reading the Claude Code hook payload from stdin and doing one targeted sync plus guard; update the Claude and git hook templates.
     - Route spec_graph_open, MCP sync_first, review, commit, and agentmd through cg_index_ex with a freshness window and bounded lock waits.
     - Batch runtime_workspace_revision into one write transaction under the index gate and skip the hash when the walk is unchanged.
     - Make watch and lsp honor the gate so they coalesce instead of racing hooks.
     - _Requirements: 1.1, 1.2, 1.5_
-  - [ ] 1.4 Extension refresh coalescing and identity fix
+  - [-] 1.4 Extension refresh coalescing and identity fix
     - Collapse afterMutation, watcher, and poll refreshes into one in-flight promise with a trailing debounce.
     - Stop watching graph.db for the extension's own writes; watch spec files and the dirty marker instead; poll at a low cadence.
     - Run spec trace only on demand and route every refresh through cg sync with a freshness window.

@@ -5,6 +5,11 @@
  * other feature shells out to the same `cg` commands a person would type, so
  * there is one implementation of the workflow, not two.
  *
+ * Those shell-outs are budgeted: every board refresh goes through one
+ * scheduler (refresh.js) that runs a single short chain of cg calls at a
+ * time, so a fleet of agents editing the repo can never turn the editor into
+ * a second source of cg processes.
+ *
  * Plain JS, zero dependencies, no build step. */
 const vscode = require('vscode');
 const cp = require('child_process');
@@ -14,6 +19,7 @@ const language = require('./language');
 const kvx = require('./kvx');
 const agents = require('./agents');
 const acp = require('./acp');
+const { createRefresher } = require('./refresh');
 
 let provider;
 let memories;
@@ -25,6 +31,17 @@ let diagnostics;
 let revalidate = () => {};
 let agentApi = { hasTerminal: () => false };
 let acpApi = { hasPanel: () => false };
+let refresher;
+let scopeTask;   /* task the open documents were last validated against */
+
+/* A burst of triggers becomes one refresh; two refreshes are never closer
+ * than the floor unless a command asked for one; a whole-tree pass is only
+ * taken when none ran in the window. The idle poll exists for claims and
+ * evidence written by agents outside this window, which touch no spec file. */
+const REFRESH_DEBOUNCE_MS = 400;
+const REFRESH_MIN_GAP_MS = 2000;
+const REFRESH_FRESH_MS = 3000;
+const IDLE_POLL_MS = 60000;
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 function binary() { return config().get('binaryPath') || 'cg'; }
@@ -71,12 +88,13 @@ class TaskProvider {
         if (!status) {
             this.model = null;
         } else {
-            const trace = await cgJson(['spec', 'trace']);
+            /* the refresh already synced with a freshness window; trace must
+             * answer from that index, not walk the tree a second time */
+            const trace = await cgJson(['spec', 'trace', '--no-sync']);
             this.model = { status, trace: trace || { graph: false, tasks: [] } };
         }
         this._em.fire();
         updateStatusBar(this.model);
-        updateScope();
         vscode.commands.executeCommand('setContext', 'codify.hasSpec', !!this.model);
         vscode.commands.executeCommand('setContext', 'codify.parallel',
             !!this.model && this.model.status.mode === 'parallel');
@@ -342,10 +360,37 @@ function taskIdFrom(arg) {
     return undefined;
 }
 
-async function afterMutation() {
+/* ---------------- refresh ---------------- */
+
+/* The work one refresh does, in order and never in parallel. The sync is
+ * cheap when a whole-tree pass ran inside the window and otherwise one
+ * low-priority pass through the index gate that never waits on it; every
+ * report after it answers from that index. */
+async function runRefresh() {
+    await cg(['sync', '--max-age', String(REFRESH_FRESH_MS),
+              '--background', '--wait', '0']);
     await provider.refresh();
     await memories.refresh();
-    revalidate();          /* scope depends on which task is in progress */
+    await updateScope();
+    /* what counts as "in scope" depends on which task is in progress, so
+     * open documents are re-checked only when that changes */
+    const cur = provider.model && provider.model.status.current;
+    const id = cur ? cur.id : undefined;
+    if (id !== scopeTask) {
+        scopeTask = id;
+        revalidate();
+    }
+}
+
+/* Every trigger goes through the scheduler. delay 0 is a command that just
+ * changed something and wants the board to show it; anything else is a
+ * hint that debounces and keeps the floor between runs. */
+function scheduleRefresh(delayMs) {
+    return refresher ? refresher.schedule(delayMs) : Promise.resolve();
+}
+
+function afterMutation() {
+    return scheduleRefresh(0);
 }
 
 async function cmdStart(arg) {
@@ -614,6 +659,7 @@ async function cmdSync() {
     const r = await cg(['sync']);
     show(r.stdout + r.stderr);
     revalidate();
+    scheduleRefresh(0);
 }
 
 async function cmdHookInstall() {
@@ -727,7 +773,9 @@ async function activate(ctx) {
 
     kvx.register(ctx, cgJson, workspaceRoot);
     agentApi = agents.register(ctx, {
-        cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
+        cg, cgJson, workspaceRoot,
+        refresh: () => afterMutation(),
+        poll: () => scheduleRefresh(),
     });
     acpApi = acp.register(ctx, {
         cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
@@ -750,16 +798,30 @@ async function activate(ctx) {
         }
     }
 
+    refresher = createRefresher(runRefresh, {
+        debounceMs: REFRESH_DEBOUNCE_MS, minGapMs: REFRESH_MIN_GAP_MS,
+    });
+    ctx.subscriptions.push({ dispose: () => refresher.dispose() });
+
+    /* Spec files are the one thing every status change writes. The graph
+     * database is deliberately not watched: this extension's own sync
+     * writes it, and a watcher on it turned each refresh into the next.
+     * Claims and evidence written by agents outside this window reach the
+     * board through the polls instead. */
     const watcher = vscode.workspace.createFileSystemWatcher('**/spec/**/*.kvx');
-    let timer;
-    const bump = () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => afterMutation(), 300);
-    };
+    const bump = () => scheduleRefresh();
     watcher.onDidChange(bump); watcher.onDidCreate(bump); watcher.onDidDelete(bump);
     ctx.subscriptions.push(watcher);
 
-    afterMutation();
+    const idle = setInterval(() => {
+        if (vscode.window.state.focused) scheduleRefresh();
+    }, IDLE_POLL_MS);
+    ctx.subscriptions.push(
+        { dispose: () => clearInterval(idle) },
+        vscode.window.onDidChangeWindowState((s) => { if (s.focused) scheduleRefresh(); }),
+    );
+
+    scheduleRefresh(0);
 }
 
 function deactivate() {

@@ -23,8 +23,16 @@ const src = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8') +
     fs.readFileSync(path.join(dir, 'agents.js'), 'utf8') +
     fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
 
-if (pkg.publisher !== 'SidioraLabs' || pkg.name !== 'codify') {
+if (pkg.publisher !== 'SidioraLabs' || pkg.name !== 'codify-workflow') {
     throw new Error(`unexpected Marketplace identity: ${pkg.publisher}.${pkg.name}`);
+}
+const readme = fs.readFileSync(path.join(dir, 'README.md'), 'utf8');
+if (!readme.includes('`SidioraLabs.codify-workflow`')) {
+    throw new Error('README does not name the Marketplace identity SidioraLabs.codify-workflow');
+}
+const changelog = fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');
+if (!changelog.includes(`extension ${pkg.version}`)) {
+    throw new Error(`CHANGELOG has no entry for extension ${pkg.version}`);
 }
 if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
     throw new Error(`invalid installed extension version: ${pkg.version}`);
@@ -85,7 +93,81 @@ if (!/registerWebviewViewProvider\(\s*'codifyAgentView'/.test(src)) {
 if (pkg.dependencies || pkg.devDependencies) {
     throw new Error('extension must stay dependency-free');
 }
+
+// every refresh goes through one scheduler: no watcher on the database the
+// extension itself writes, trace answers from the last index, and the
+// poll is slow
+const ext = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
+const ag = fs.readFileSync(path.join(dir, 'agents.js'), 'utf8');
+if (/graph\.db/.test(ag) || /createFileSystemWatcher\([^)]*graph\.db/.test(ext)) {
+    throw new Error('the extension watches graph.db, which its own sync writes');
+}
+if (!/\['spec', 'trace', '--no-sync'\]/.test(ext)) {
+    throw new Error('the board refresh runs spec trace without --no-sync');
+}
+if (!/\['sync', '--max-age'/.test(ext)) {
+    throw new Error('the board refresh does not sync with a freshness window');
+}
+if (!/function scheduleRefresh\(/.test(ext) || !/async function runRefresh\(/.test(ext)) {
+    throw new Error('refresh scheduler entry points missing');
+}
+const activePoll = /ACTIVE_POLL_MS = (\d+)/.exec(ag);
+if (!activePoll || Number(activePoll[1]) < 10000) {
+    throw new Error('agent poll is faster than 10 s');
+}
 console.log('manifest coherent:', declared.length, 'commands');
+JS
+
+# ---- the refresh scheduler keeps one chain in flight
+node - "$EXT" <<'JS'
+const path = require('path');
+const { createRefresher } = require(path.join(process.argv[2], 'refresh.js'));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+(async () => {
+    // a burst debounces into one run
+    let runs = 0;
+    let r = createRefresher(async () => { runs += 1; await sleep(50); },
+        { debounceMs: 30, minGapMs: 100 });
+    const burst = [];
+    for (let i = 0; i < 10; i++) burst.push(r.schedule());
+    await Promise.all(burst);
+    if (runs !== 1) throw new Error(`burst ran ${runs} times, expected 1`);
+
+    // a request during a run queues exactly one trailing run
+    runs = 0;
+    const first = r.schedule(0);
+    await sleep(10);
+    if (!r.inFlight) throw new Error('urgent request did not start at once');
+    const during = [r.schedule(0), r.schedule(), r.schedule(0)];
+    await first;
+    await Promise.all(during);
+    if (runs !== 2) throw new Error(`trailing runs: ${runs}, expected 2`);
+
+    // the floor keeps hinted runs apart; an urgent one ignores it
+    const stamps = [];
+    r = createRefresher(async () => { stamps.push(Date.now()); },
+        { debounceMs: 10, minGapMs: 200 });
+    await r.schedule();
+    await r.schedule();
+    if (stamps[1] - stamps[0] < 180) {
+        throw new Error(`floor ignored: ${stamps[1] - stamps[0]}ms apart`);
+    }
+    await r.schedule(0);
+    if (stamps[2] - stamps[1] > 100) {
+        throw new Error(`urgent run waited ${stamps[2] - stamps[1]}ms`);
+    }
+
+    // a failing refresh never wedges the scheduler
+    let n = 0;
+    r = createRefresher(async () => { n += 1; if (n === 1) throw new Error('boom'); },
+        { debounceMs: 5, minGapMs: 5 });
+    await r.schedule(0);
+    await r.schedule(0);
+    if (n !== 2 || r.inFlight) throw new Error('scheduler wedged after a failure');
+    r.dispose();
+    console.log('refresh scheduler ok');
+})().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
 JS
 
 # ---- the LSP client speaks to the real server

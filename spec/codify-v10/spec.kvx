@@ -98,7 +98,7 @@ reqs       = ["1.4"]
 
 [task.1.3]
 title      = "Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["1.1"]
 symbols    = ["cmd_hook_post_edit", "runtime_workspace_revision"]
@@ -112,11 +112,11 @@ reqs       = ["1.1", "1.2", "1.5"]
 
 [task.1.4]
 title      = "Extension refresh coalescing and identity fix"
-status     = "pending"
+status     = "in_progress"
 wave       = 2
 requires   = ["1.1"]
 symbols    = ["scheduleRefresh", "runRefresh"]
-touches    = ["editors/vscode/extension.js", "editors/vscode/client.js", "editors/vscode/package.json", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "tests/integration/14_vscode.sh"]
+touches    = ["editors/vscode/extension.js", "editors/vscode/agents.js", "editors/vscode/refresh.js", "editors/vscode/package.json", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "tests/integration/14_vscode.sh", "README.md", "docs/ARCHITECTURE.md"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh"
 do_1       = "Collapse afterMutation, watcher, and poll refreshes into one in-flight promise with a trailing debounce."
 do_2       = "Stop watching graph.db for the extension's own writes; watch spec files and the dirty marker instead; poll at a low cadence."

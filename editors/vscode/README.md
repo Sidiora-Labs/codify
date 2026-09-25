@@ -93,7 +93,11 @@ The rest of the lifecycle:
 | Run Wave with Agents | Opens a terminal running `cg spec run -n <codify.agent.parallelism> --driver <driver>` — the built-in orchestrator works the whole eligible frontier |
 | Stop Agent Session | Closes the session's terminal (or terminates the headless task) |
 
-When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. While any tracked session exists, the board refreshes on a 3-second poll in addition to watching `.codegraph/graph.db`, so work done by agents outside the editor shows up without a manual refresh. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
+When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. While any tracked session exists, the board polls every 10 seconds, so work done by agents outside the editor shows up without a manual refresh. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
+
+## How the board stays fresh
+
+Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `cg` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
 
 ## The rest of the workflow
 
@@ -159,14 +163,14 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-1.2.0.vsix
-code --install-extension codify-1.2.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.2.8.vsix
+code --install-extension codify-workflow-1.2.8.vsix --force
 ```
 
-The Marketplace identity is `SidioraLabs.codify`. In a Remote SSH, WSL, or
-container window, install the VSIX on the **remote** extension host, not only
-the local UI side. The Agent header shows the running version (for example
-`v1.2.0`), so a stale host is immediately visible after reload.
+The Marketplace identity is `SidioraLabs.codify-workflow`. In a Remote SSH,
+WSL, or container window, install the VSIX on the **remote** extension host,
+not only the local UI side. The Agent header shows the running version (for
+example `v1.2.8`), so a stale host is immediately visible after reload.
 
 For development, open `editors/vscode/` in VS Code and press F5.
 

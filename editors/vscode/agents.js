@@ -3,8 +3,9 @@
  * A session is: claim the task (parallel mode), mark it started, seed a
  * prompt from `cg resume --task <id> --prompt`, and hand that prompt to the
  * configured driver in a terminal (or a headless VS Code task). The board
- * stays fresh while sessions run via a graph.db watcher plus a slow poll
- * that exists only while there is something to watch.
+ * stays fresh while sessions run through a poll that exists only while
+ * there is something to watch; it goes through the extension's single
+ * refresh scheduler, so it can never stack up behind a slow one.
  *
  * Every cg verb is called defensively: older binaries without resume /
  * handoff / spec run fail with a clear message or a fallback, never a hang.
@@ -14,10 +15,15 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 
-let deps;                    /* {cg, cgJson, refresh, workspaceRoot} */
+let deps;                    /* {cg, cgJson, refresh, poll, workspaceRoot} */
 const sessions = new Map();  /* key (task id or wave:N) -> {terminal?, execution?, agent, wave?} */
 let pollTimer;
 let seq = 0;                 /* agent-name counter for this window */
+
+/* An agent's claim or `spec done` lands in the graph and the spec file;
+ * the spec watcher catches the latter at once, and this cadence is for the
+ * rest. Ten seconds is what a person notices; faster only burns cg calls. */
+const ACTIVE_POLL_MS = 10000;
 
 function config() { return vscode.workspace.getConfiguration('codify'); }
 
@@ -62,8 +68,8 @@ function ensurePolling() {
     if (pollTimer) return;
     pollTimer = setInterval(() => {
         if (!sessions.size) { stopPollingIfIdle(); return; }
-        deps.refresh();
-    }, 3000);
+        (deps.poll || deps.refresh)();
+    }, ACTIVE_POLL_MS);
 }
 
 function stopPollingIfIdle() {
@@ -417,19 +423,8 @@ function register(ctx, d) {
         deps.refresh();
     }));
 
-    /* the graph is the ground truth an external agent mutates; watching it
-     * keeps the board honest without the agent telling us anything */
-    const watcher = vscode.workspace.createFileSystemWatcher('**/.codegraph/graph.db');
-    let dbTimer;
-    const bump = () => {
-        clearTimeout(dbTimer);
-        dbTimer = setTimeout(() => deps.refresh(), 1000);
-    };
-    watcher.onDidChange(bump);
-    watcher.onDidCreate(bump);
-    ctx.subscriptions.push(watcher, {
+    ctx.subscriptions.push({
         dispose: () => {
-            clearTimeout(dbTimer);
             if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined; }
         },
     });

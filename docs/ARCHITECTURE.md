@@ -342,12 +342,19 @@ zero-dependency plain JS as the rest of `editors/vscode/`. It claims a
 task (`spec claim` + `spec start`), writes a prompt file from
 `cg resume --task <id> --prompt`, and launches the configured driver in
 a named terminal or as a headless VS Code task; closing a terminal whose
-task is unfinished offers to release the claim. A `graph.db` watcher
-plus a slow poll — active only while sessions exist — keeps the task
-board fresh, decorating tasks with the lease-holding agent and a
-terminal marker. Every `cg` verb is called defensively, so an older
-binary fails with a message rather than a hang; the manifest-coherence
-test keeps declared and registered commands in lockstep.
+task is unfinished offers to release the claim. A 10-second poll —
+active only while sessions exist — keeps the task board fresh,
+decorating tasks with the lease-holding agent and a terminal marker.
+Every refresh in the extension, this poll included, goes through one
+scheduler (`editors/vscode/refresh.js`): a single chain of `cg` calls at
+a time (`sync --max-age --background --wait 0`, `spec status`,
+`spec trace --no-sync`, `recall`, `guard`), bursts debounced into one
+run, a floor between runs, and at most one trailing run queued. The
+extension does not watch `graph.db`, because its own sync writes it and
+a watcher there made every refresh trigger the next. Every `cg` verb is
+called defensively, so an older binary fails with a message rather than
+a hang; the manifest-coherence test keeps declared and registered
+commands in lockstep.
 
 ## Language server (`lsp.c`)
 
