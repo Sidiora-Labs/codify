@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# VS Code extension: syntax, manifest coherence, and the LSP client driven
-# against the real cg binary. The client is plain Node, so it is testable
-# without VS Code — which is most of what could actually break.
+# VS Code extension: syntax, manifest coherence, the task UI, and the LSP
+# client driven against the real cg binary. Everything the extension can be
+# tested on without VS Code — which is most of what could actually break.
+#   manifest — identity, declared vs registered commands, menus, views, deps
+#   refresh  — the one scheduler keeps a single chain in flight
+#   tasks    — (task 5.1) task tree, filter, detail panel, indexed symbols
+#   lsp      — the hand-written client against the real `cg lsp`
+# Run one section: 14_vscode.sh tasks
 . "$(dirname "$0")/../lib.sh"
+section="${1:-all}"
+
+want() { [ "$section" = all ] || [ "$section" = "$1" ]; }
 
 EXT="$(cd "$(dirname "$0")/../../editors/vscode" && pwd)"
 
@@ -13,15 +21,17 @@ for f in "$EXT"/*.js; do
     node --check "$f" || fail "syntax error in $f"
 done
 
+if want manifest; then
 # ---- the manifest and the code agree about which commands exist
 node - "$EXT" <<'JS'
 const fs = require('fs'), path = require('path');
 const dir = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-// commands are registered from extension.js, agents.js, and acp.js
+// commands are registered from extension.js, agents.js, acp.js, and tasks.js
 const src = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8') +
     fs.readFileSync(path.join(dir, 'agents.js'), 'utf8') +
-    fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
+    fs.readFileSync(path.join(dir, 'acp.js'), 'utf8') +
+    fs.readFileSync(path.join(dir, 'tasks.js'), 'utf8');
 
 if (pkg.publisher !== 'SidioraLabs' || pkg.name !== 'codify-workflow') {
     throw new Error(`unexpected Marketplace identity: ${pkg.publisher}.${pkg.name}`);
@@ -99,10 +109,11 @@ if (pkg.dependencies || pkg.devDependencies) {
 // poll is slow
 const ext = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
 const ag = fs.readFileSync(path.join(dir, 'agents.js'), 'utf8');
-if (/graph\.db/.test(ag) || /createFileSystemWatcher\([^)]*graph\.db/.test(ext)) {
+const board = ext + fs.readFileSync(path.join(dir, 'tasks.js'), 'utf8');
+if (/graph\.db/.test(ag) || /createFileSystemWatcher\([^)]*graph\.db/.test(board)) {
     throw new Error('the extension watches graph.db, which its own sync writes');
 }
-if (!/\['spec', 'trace', '--no-sync'\]/.test(ext)) {
+if (!/\['spec', 'trace', '--no-sync'\]/.test(board)) {
     throw new Error('the board refresh runs spec trace without --no-sync');
 }
 if (!/\['sync', '--max-age'/.test(ext)) {
@@ -111,13 +122,20 @@ if (!/\['sync', '--max-age'/.test(ext)) {
 if (!/function scheduleRefresh\(/.test(ext) || !/async function runRefresh\(/.test(ext)) {
     throw new Error('refresh scheduler entry points missing');
 }
+// the task views must not start a second clock of their own
+if (/setInterval|createFileSystemWatcher/.test(
+        fs.readFileSync(path.join(dir, 'tasks.js'), 'utf8'))) {
+    throw new Error('tasks.js schedules refreshes outside the one scheduler');
+}
 const activePoll = /ACTIVE_POLL_MS = (\d+)/.exec(ag);
 if (!activePoll || Number(activePoll[1]) < 10000) {
     throw new Error('agent poll is faster than 10 s');
 }
 console.log('manifest coherent:', declared.length, 'commands');
 JS
+fi
 
+if want refresh; then
 # ---- the refresh scheduler keeps one chain in flight
 node - "$EXT" <<'JS'
 const path = require('path');
@@ -169,8 +187,383 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     console.log('refresh scheduler ok');
 })().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
 JS
+fi
 
+if want tasks; then
+# ---- the task UI: manifest surface, the pure half under plain node, and the
+# three symbols the graph must be able to resolve
+
+node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+const declared = pkg.contributes.commands.map((c) => c.command);
+
+// the task view is contributed and owned by tasks.js
+const views = Object.values(pkg.contributes.views).flat().map((v) => v.id);
+if (!views.includes('codifyTasks')) throw new Error('missing view: codifyTasks');
+const tasksSrc = fs.readFileSync(path.join(dir, 'tasks.js'), 'utf8');
+if (!/createTreeView\(\s*'codifyTasks'/.test(tasksSrc)) {
+    throw new Error('codifyTasks is declared but tasks.js never creates it');
+}
+if (!/require\('\.\/tasks'\)/.test(fs.readFileSync(path.join(dir, 'extension.js'), 'utf8'))) {
+    throw new Error('extension.js does not load tasks.js');
+}
+
+// every task-UI command is declared, and the view title and item menus reach
+// the filters and the actions
+const need = ['codify.tasks.detail', 'codify.tasks.filter',
+    'codify.tasks.filterStatus', 'codify.tasks.filterWave',
+    'codify.tasks.filterOwner', 'codify.tasks.search',
+    'codify.tasks.clearFilters', 'codify.tasks.verify',
+    'codify.tasks.openBranch', 'codify.tasks.copyPrompt'];
+for (const c of need) {
+    if (!declared.includes(c)) throw new Error(`command not contributed: ${c}`);
+    if (!new RegExp(`'${c.replace(/\./g, '\\.')}':`).test(tasksSrc)) {
+        throw new Error(`command not registered in tasks.js: ${c}`);
+    }
+}
+const title = pkg.contributes.menus['view/title']
+    .filter((m) => /codifyTasks/.test(m.when)).map((m) => m.command);
+for (const c of ['codify.tasks.filter', 'codify.tasks.filterStatus',
+                 'codify.tasks.filterWave', 'codify.tasks.filterOwner',
+                 'codify.tasks.search', 'codify.tasks.clearFilters']) {
+    if (!title.includes(c)) throw new Error(`filter missing from the view title: ${c}`);
+}
+const item = pkg.contributes.menus['view/item/context']
+    .filter((m) => /codifyTasks/.test(m.when)).map((m) => m.command);
+for (const c of ['codify.startTask', 'codify.doneTask', 'codify.claimTask',
+                 'codify.releaseTask', 'codify.tasks.openBranch',
+                 'codify.tasks.verify', 'codify.tasks.copyPrompt',
+                 'codify.tasks.detail']) {
+    if (!item.includes(c)) throw new Error(`action missing from the task menu: ${c}`);
+}
+// the upgrade ships as its own version
+if (pkg.version === '1.2.8') throw new Error('extension version was not bumped');
+console.log('task manifest ok:', need.length, 'commands');
+JS
+
+# the module loads without vscode, exports the three symbols, and its filter
+# and grouping logic answer correctly on a fixture
+cat > "$TMP/spec.kvx" <<'KVX'
+[meta]
+feature = "demo"
+intro   = "A two-section demo feature."
+
+[req.1]
+title = "First requirement"
+ac_1  = "WHEN a task renders THE row SHALL name its owner."
+
+[task.1]
+title   = "Indexing"
+section = "One indexer"
+status  = "pending"
+
+[task.1.1]
+title      = "Gate"          # done, nobody holds it
+status     = "done"
+wave       = 1
+symbols    = ["gate_open"]
+touches    = ["src/gate.c"]
+verify_cmd = "make test"
+reqs       = ["1.1"]
+do_1       = "Take the lock."
+do_2       = "Drain the marker."
+
+[task.1.2]
+title    = "Callers"
+status   = "in_progress"
+wave     = 2
+requires = ["1.1"]
+
+[task.2]
+title   = "Editor"
+section = "Editor surface"
+status  = "pending"
+
+[task.2.1]
+title    = "Tree"
+status   = "pending"
+wave     = 2
+requires = ["1.2"]
+KVX
+
+node - "$EXT" "$TMP/spec.kvx" <<'JS'
+const fs = require('fs'), path = require('path');
+const t = require(path.join(process.argv[2], 'tasks.js'));
+
+for (const name of ['TaskTreeProvider', 'taskFilter', 'taskDetail']) {
+    if (typeof t[name] !== 'function') {
+        throw new Error(`tasks.js does not export ${name}`);
+    }
+}
+
+const spec = t.readSpec(fs.readFileSync(process.argv[3], 'utf8'));
+if (spec.feature !== 'demo') throw new Error('meta.feature: ' + spec.feature);
+if (spec.clauses['1.1'] !== 'WHEN a task renders THE row SHALL name its owner.') {
+    throw new Error('ac_1 did not become clause 1.1');
+}
+const gate = spec.byId.get('1.1');
+if (gate.section !== 'One indexer') throw new Error('section not inherited: ' + gate.section);
+if (gate.do.length !== 2 || gate.do[0] !== 'Take the lock.') {
+    throw new Error('do steps: ' + JSON.stringify(gate.do));
+}
+if (gate.verify_cmd !== 'make test') throw new Error('verify_cmd: ' + gate.verify_cmd);
+if (!spec.byId.get('1').group) throw new Error('a task without a wave is a heading');
+
+// live state: trace carries the graph evidence, status the claims
+const trace = { feature: 'demo', graph: true, tasks: [
+    { id: '1.1', title: 'Gate', status: 'done', wave: 1,
+      symbols: [{ name: 'gate_open', found: true, path: 'src/gate.c', line: 4,
+                  kind: 'function', refs: 2 }],
+      touches: [{ pattern: 'src/gate.c', changed: true }],
+      commits: [{ id: 'abc123def456789', date: 1, message: 'gate' }],
+      memories: [{ id: 1, type: 'decision', body: 'one writer', created: 1 }] },
+    { id: '1.2', title: 'Callers', status: 'in_progress', wave: 2,
+      symbols: [], touches: [], commits: [], memories: [] },
+    { id: '2.1', title: 'Tree', status: 'pending', wave: 2,
+      symbols: [], touches: [], commits: [], memories: [] },
+]};
+const status = { feature: 'demo', spec: 'spec/demo/spec.kvx', mode: 'parallel',
+    tasks: 3, done: 1, next: { id: '2.1' }, claims: [
+        { id: '1.2', agent: 'w-demo-2', role: 'worker', parent: 'fm-demo',
+          branch: 'wave/demo/2', worktree: '/tmp/wt/demo-2',
+          attempt_id: 'ff00ff00ff00', expires_in_min: 21 },
+    ]};
+const plan = { waves: [{ wave: 1, branch: 'wave/demo/1' },
+                       { wave: 2, branch: 'wave/demo/2' }] };
+
+const rows = t.mergeTasks(spec, trace, status, plan);
+if (rows.length !== 3) throw new Error('rows: ' + rows.length);
+const byId = new Map(rows.map((r) => [r.id, r]));
+if (byId.get('1.1').section !== 'One indexer' ||
+    byId.get('2.1').section !== 'Editor surface') {
+    throw new Error('sections did not survive the merge');
+}
+if (byId.get('1.2').agent !== 'w-demo-2' || byId.get('1.2').role !== 'worker' ||
+    byId.get('1.2').branch !== 'wave/demo/2' ||
+    byId.get('1.2').worktree !== '/tmp/wt/demo-2') {
+    throw new Error('claim owner/branch/worktree not merged onto the row');
+}
+if (byId.get('2.1').waveBranch !== 'wave/demo/2') {
+    throw new Error('wave branch from the fleet plan is missing');
+}
+// 2.1 requires 1.2, which is in_progress: blocked. 1.2 requires 1.1 (done).
+if (byId.get('2.1').blockers.length !== 1 ||
+    byId.get('2.1').blockers[0].id !== '1.2') {
+    throw new Error('blockers: ' + JSON.stringify(byId.get('2.1').blockers));
+}
+if (byId.get('1.2').blockers.length !== 0) {
+    throw new Error('a done require must not block');
+}
+
+const ids = (f) => t.taskFilter(rows, f).map((r) => r.id).join(',');
+if (ids({}) !== '1.1,1.2,2.1') throw new Error('unfiltered: ' + ids({}));
+if (ids({ status: 'done' }) !== '1.1') throw new Error('status: ' + ids({ status: 'done' }));
+if (ids({ status: 'open' }) !== '1.2,2.1') throw new Error('open: ' + ids({ status: 'open' }));
+if (ids({ status: 'blocked' }) !== '2.1') throw new Error('blocked: ' + ids({ status: 'blocked' }));
+if (ids({ wave: 2 }) !== '1.2,2.1') throw new Error('wave: ' + ids({ wave: 2 }));
+if (ids({ wave: '1' }) !== '1.1') throw new Error('wave as string: ' + ids({ wave: '1' }));
+if (ids({ owner: 'w-demo-2' }) !== '1.2') throw new Error('owner: ' + ids({ owner: 'w-demo-2' }));
+if (ids({ owner: 'unclaimed' }) !== '1.1,2.1') throw new Error('unclaimed: ' + ids({ owner: 'unclaimed' }));
+if (ids({ text: 'gate_open' }) !== '1.1') throw new Error('symbol search: ' + ids({ text: 'gate_open' }));
+if (ids({ text: 'src/gate.c' }) !== '1.1') throw new Error('path search: ' + ids({ text: 'src/gate.c' }));
+if (ids({ text: 'EDITOR' }) !== '2.1') throw new Error('section search is case-insensitive');
+if (ids({ status: 'done', wave: 2 }) !== '') throw new Error('filters must combine');
+if (ids({ status: 'nonsense' }) !== '') throw new Error('an unknown status matches nothing');
+if (t.filterLabel({ status: 'pending', wave: 2, owner: 'w-demo-2', text: 'x' })
+    !== 'pending · wave 2 · w-demo-2 · "x"') {
+    throw new Error('filter label: ' + t.filterLabel({ status: 'pending' }));
+}
+if (t.filterLabel({ status: 'all', wave: 'all', owner: 'all', text: '' }) !== '') {
+    throw new Error('an empty filter must leave the view title alone');
+}
+
+// the detail view decides what the panel may offer
+const v = t.detailView(byId.get('1.2'), spec);
+const act = new Map(v.actions.map((a) => [a.action, a]));
+for (const a of ['start', 'done', 'claim', 'release', 'branch', 'verify', 'prompt']) {
+    if (!act.has(a)) throw new Error('detail panel offers no ' + a);
+}
+if (!act.get('claim').disabled) throw new Error('a claimed task must not offer claim');
+if (act.get('release').disabled) throw new Error('a claimed task must offer release');
+if (act.get('branch').disabled) throw new Error('a task with a worktree must offer its branch');
+if (t.detailView(byId.get('1.1'), spec).criteria[0].text !==
+    spec.clauses['1.1']) {
+    throw new Error('acceptance criteria text is not resolved for the panel');
+}
+
+// the panel is CSP-strict: one nonce, no eval, no remote anything
+const html = t.detailHtml('N0NCE');
+const csp = /<meta http-equiv="Content-Security-Policy"[^>]*content="([^"]+)"/
+    .exec(html);
+if (!csp) throw new Error('detail panel has no CSP');
+if (!/default-src 'none'/.test(csp[1]) ||
+    !/script-src 'nonce-N0NCE'/.test(csp[1]) ||
+    !/style-src 'nonce-N0NCE'/.test(csp[1])) {
+    throw new Error('CSP is not nonce-only: ' + csp[1]);
+}
+if (/unsafe-inline|unsafe-eval|https?:/.test(csp[1])) {
+    throw new Error('CSP allows more than this panel: ' + csp[1]);
+}
+if (/<script(?![^>]*nonce="N0NCE")/.test(html)) throw new Error('un-nonced script tag');
+if (/src="http|href="http/.test(html)) throw new Error('panel loads a remote resource');
+if (/innerHTML/.test(html)) throw new Error('panel renders data through innerHTML');
+
+// the resume prompt is built from the task's own declaration
+const prompt = t.resumePrompt(byId.get('1.1'), { clauses: spec.clauses });
+for (const needle of ['# resume: demo/1.1', 'Take the lock.', 'src/gate.c',
+                      'gate_open', 'verify: make test', 'cg spec done 1.1',
+                      'cg handoff --task 1.1', spec.clauses['1.1']]) {
+    if (!prompt.includes(needle)) throw new Error('prompt lacks: ' + needle);
+}
+console.log('task model ok:', rows.length, 'rows');
+JS
+
+# the tree itself, driven against a stub vscode module: the grouping, the
+# row contents, and what the view title says when a filter is on
+node - "$EXT" "$TMP/spec.kvx" <<'JS'
+const path = require('path'), Module = require('module');
+const [, , dir, specfile] = process.argv;
+
+/* the sliver of the VS Code API the task tree touches */
+const items = [];
+class TreeItem {
+    constructor(label, state) { this.label = label; this.collapsibleState = state; }
+}
+const view = { dispose() {} };
+const stub = {
+    EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); }
+        fire() {} },
+    TreeItem,
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
+    ThemeColor: class { constructor(id) { this.id = id; } },
+    MarkdownString: class { constructor() { this.value = ''; }
+        appendMarkdown(s) { this.value += s; return this; } },
+    window: {
+        createTreeView: (id, opts) => { view.id = id; view.opts = opts; return view; },
+        onDidCloseTerminal: () => ({ dispose() {} }),
+    },
+    commands: { registerCommand: () => ({ dispose() {} }) },
+};
+const load = Module._load;
+Module._load = function (req) {
+    if (req === 'vscode') return stub;
+    return load.apply(this, arguments);
+};
+const t = require(path.join(dir, 'tasks.js'));
+
+const trace = { feature: 'demo', graph: true, tasks: [
+    { id: '1.1', title: 'Gate', status: 'done', wave: 1, symbols: [], touches: [] },
+    { id: '1.2', title: 'Callers', status: 'in_progress', wave: 2, symbols: [], touches: [] },
+    { id: '2.1', title: 'Tree', status: 'pending', wave: 2, symbols: [], touches: [] },
+]};
+const status = { feature: 'demo', spec: path.basename(specfile), mode: 'parallel',
+    tasks: 3, done: 1, next: { id: '2.1' }, documentation: { configured: false },
+    claims: [{ id: '1.2', agent: 'w-demo-2', role: 'worker',
+               branch: 'wave/demo/2', worktree: '/tmp/wt/demo-2',
+               expires_in_min: 21 }] };
+const plan = { waves: [{ wave: 2, branch: 'wave/demo/2' }] };
+const answers = { 'spec status': status, 'spec trace': trace, 'fleet plan': plan };
+
+const ctx = { subscriptions: [], workspaceState: { get: () => null, update() {} } };
+const provider = t.register(ctx, {
+    cg: async () => ({ code: 0, stdout: '', stderr: '' }),
+    cgJson: async (args) => answers[args.slice(0, 2).join(' ')] || null,
+    workspaceRoot: () => path.dirname(specfile),
+    show: () => {},
+    state: ctx.workspaceState,
+    sessionBadge: () => '',
+});
+
+(async () => {
+    await provider.refresh();
+    if (provider.rows.length !== 3) throw new Error('rows: ' + provider.rows.length);
+
+    const roots = provider.getChildren();
+    if (roots.length !== 1 || roots[0].label !== 'demo') {
+        throw new Error('root is not the feature: ' + JSON.stringify(roots.map(r => r.label)));
+    }
+    if (!/1\/3 done/.test(roots[0].description)) {
+        throw new Error('feature progress: ' + roots[0].description);
+    }
+    const sections = provider.getChildren(roots[0]);
+    if (sections.map((s) => s.label).join(',') !== 'One indexer,Editor surface') {
+        throw new Error('sections: ' + sections.map((s) => s.label).join(','));
+    }
+    const waves = provider.getChildren(sections[0]);
+    if (waves.map((w) => w.label).join(',') !== 'Wave 1,Wave 2') {
+        throw new Error('waves: ' + waves.map((w) => w.label).join(','));
+    }
+    const editorWaves = provider.getChildren(sections[1]);
+    if (editorWaves.length !== 1 || !/wave\/demo\/2/.test(editorWaves[0].description)) {
+        throw new Error('the wave does not name its branch: ' + editorWaves[0].description);
+    }
+    const leaves = provider.getChildren(waves[0]);
+    if (leaves.length !== 1 || leaves[0].label !== '1.1  Gate') {
+        throw new Error('task row: ' + JSON.stringify(leaves.map((l) => l.label)));
+    }
+    if (leaves[0].contextValue !== 'task-done') {
+        throw new Error('contextValue: ' + leaves[0].contextValue);
+    }
+    if (leaves[0].command.command !== 'codify.tasks.detail') {
+        throw new Error('a task row does not open its detail panel');
+    }
+    const owner = provider.getChildren(waves[1])[0];
+    if (!owner || !/w-demo-2/.test(owner.description) ||
+        !/wave\/demo\/2/.test(owner.description) ||
+        !/in progress/.test(owner.description)) {
+        throw new Error('owner, branch or status missing from the row: ' +
+            (owner && owner.description));
+    }
+    const blocked = provider.getChildren(editorWaves[0])[0];
+    if (!/blocked by 1\.2/.test(blocked.description)) {
+        throw new Error('blockers missing from the row: ' + blocked.description);
+    }
+
+    // a filter narrows the tree and says so in the view title
+    provider.setFilter({ status: 'done' });
+    if (view.description !== 'done') {
+        throw new Error('view title does not show the filter: ' + view.description);
+    }
+    const only = provider.getChildren(provider.getChildren(
+        provider.getChildren(provider.getChildren()[0])[0])[0]);
+    if (only.length !== 1 || only[0].label !== '1.1  Gate') {
+        throw new Error('filtered tree: ' + JSON.stringify(only.map((i) => i.label)));
+    }
+    provider.setFilter({ status: 'implemented' });
+    const none = provider.getChildren();
+    if (none.length !== 1 || !/No task matches/.test(none[0].label)) {
+        throw new Error('an empty filter needs an empty state, got ' +
+            JSON.stringify(none.map((n) => n.label)));
+    }
+    provider.setFilter({ status: 'all' });
+    if (view.description !== undefined) {
+        throw new Error('clearing the filter leaves the title dirty');
+    }
+    console.log('task tree ok:', sections.length, 'sections');
+})().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
+JS
+
+# ---- cg resolves the three declared symbols in the extension source
+rm -rf "$TMP/ext"
+mkdir -p "$TMP/ext/editors/vscode"
+cp "$EXT"/*.js "$TMP/ext/editors/vscode/"
+cd "$TMP/ext"
+"$CG" init >/dev/null
+for sym in TaskTreeProvider taskFilter taskDetail; do
+    out="$("$CG" symbol "$sym")"
+    has "$out" "$sym"
+    has "$out" "editors/vscode/tasks.js"
+done
+cd "$TMP"
+echo "task symbols indexed"
+fi
+
+if want lsp; then
 # ---- the LSP client speaks to the real server
+rm -rf "$TMP/proj"
 cp -r "$FIXTURES/sample" "$TMP/proj"
 cd "$TMP/proj"
 "$CG" init >/dev/null
@@ -263,5 +656,6 @@ const [, , , bin, root] = process.argv;
     console.log('lsp framing ok (' + all.length + ' symbols in one frame)');
 })().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
 JS
+fi
 
 echo "14_vscode ok"

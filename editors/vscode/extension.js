@@ -19,6 +19,7 @@ const language = require('./language');
 const kvx = require('./kvx');
 const agents = require('./agents');
 const acp = require('./acp');
+const tasks = require('./tasks');
 const { createRefresher } = require('./refresh');
 
 let provider;
@@ -72,167 +73,6 @@ async function cgJson(args) {
     /* exit codes carry meaning (lint returns 2, check returns 1); parse the
      * payload regardless and let the caller decide what the code means */
     try { return JSON.parse(r.stdout); } catch { return null; }
-}
-
-/* ---------------- task board ---------------- */
-
-class TaskProvider {
-    constructor() {
-        this._em = new vscode.EventEmitter();
-        this.onDidChangeTreeData = this._em.event;
-        this.model = null;   /* {status, trace} or null */
-    }
-
-    async refresh() {
-        const status = await cgJson(['spec', 'status']);
-        if (!status) {
-            this.model = null;
-        } else {
-            /* the refresh already synced with a freshness window; trace must
-             * answer from that index, not walk the tree a second time */
-            const trace = await cgJson(['spec', 'trace', '--no-sync']);
-            this.model = { status, trace: trace || { graph: false, tasks: [] } };
-        }
-        this._em.fire();
-        updateStatusBar(this.model);
-        vscode.commands.executeCommand('setContext', 'codify.hasSpec', !!this.model);
-        vscode.commands.executeCommand('setContext', 'codify.parallel',
-            !!this.model && this.model.status.mode === 'parallel');
-    }
-
-    getTreeItem(el) { return el; }
-
-    getChildren(el) {
-        if (!this.model) return [];
-        if (!el) return this.waveNodes();
-        if (el.kind === 'wave') return el.tasks.map((t) => this.taskNode(t));
-        if (el.kind === 'task') return this.detailNodes(el.task);
-        return [];
-    }
-
-    claimFor(id) {
-        const claims = (this.model.status.claims) || [];
-        return claims.find((c) => c.id === id);
-    }
-
-    waveNodes() {
-        const byWave = new Map();
-        for (const t of this.model.trace.tasks) {
-            if (!byWave.has(t.wave)) byWave.set(t.wave, []);
-            byWave.get(t.wave).push(t);
-        }
-        const nodes = [...byWave.keys()].sort((a, b) => a - b).map((w) => {
-            const tasks = byWave.get(w);
-            const done = tasks.filter((t) => t.status === 'done').length;
-            const impl = tasks.filter((t) => t.status === 'implemented').length;
-            const it = new vscode.TreeItem(`Wave ${w}`,
-                done === tasks.length
-                    ? vscode.TreeItemCollapsibleState.Collapsed
-                    : vscode.TreeItemCollapsibleState.Expanded);
-            it.kind = 'wave';
-            it.tasks = tasks;
-            it.description = impl
-                ? `${done}/${tasks.length} done · ${impl} implemented`
-                : `${done}/${tasks.length} done`;
-            it.iconPath = new vscode.ThemeIcon(
-                done === tasks.length ? 'layers-dot' : 'layers');
-            return it;
-        });
-        const d = this.model.status.documentation;
-        if (d && d.configured && d.mode !== 'off') {
-            const task = { id: '@docs', title: 'Generate and verify project documentation',
-                status: d.status, wave: 'closure', virtual: true };
-            const it = new vscode.TreeItem('Documentation closure',
-                d.status === 'done' ? vscode.TreeItemCollapsibleState.Collapsed
-                                    : vscode.TreeItemCollapsibleState.Expanded);
-            it.kind = 'wave'; it.tasks = [task];
-            it.description = d.status; it.iconPath = new vscode.ThemeIcon('book');
-            nodes.push(it);
-        }
-        return nodes;
-    }
-
-    taskNode(t) {
-        const hasDetail = (t.symbols && t.symbols.length) ||
-            (t.touches && t.touches.length) || (t.commits && t.commits.length) ||
-            (t.memories && t.memories.length);
-        const it = new vscode.TreeItem(`${t.id}  ${t.title}`, hasDetail
-            ? vscode.TreeItemCollapsibleState.Collapsed
-            : vscode.TreeItemCollapsibleState.None);
-        it.kind = 'task';
-        it.task = t;
-        it.id = `task:${t.id}`;
-        it.contextValue = `task-${t.status}`;
-        const next = this.model.status.next && this.model.status.next.id === t.id;
-        const claim = this.claimFor(t.id);
-        const term = agentApi.hasTerminal(t.id) ? ' $(terminal)'
-            : acpApi.hasPanel(t.id) ? ' $(comment-discussion)' : '';
-        it.description = claim ? `${t.status} · $(person) ${claim.agent}${term}`
-            : term ? `${t.status}${term}`
-            : t.status === 'in_progress' ? 'in progress'
-            : t.status === 'implemented' ? 'qualification pending'
-            : next ? 'next' : t.status;
-        it.iconPath =
-            t.status === 'done' ? new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('testing.iconPassed'))
-            : t.status === 'implemented' ? new vscode.ThemeIcon('circle-large-filled', new vscode.ThemeColor('charts.purple'))
-            : t.status === 'in_progress' ? new vscode.ThemeIcon('play-circle', new vscode.ThemeColor('charts.yellow'))
-            : next ? new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('charts.blue'))
-            : new vscode.ThemeIcon('circle-outline');
-        const lines = [`[task.${t.id}] ${t.title}`,
-            `status: ${t.status}   wave: ${t.wave}`];
-        if (claim) lines.push(`claimed by ${claim.agent} (${claim.expires_in_min} min left)`);
-        if (t.touches && t.touches.length) {
-            lines.push('touches: ' + t.touches.map((c) => c.pattern).join(' '));
-        }
-        it.tooltip = lines.join('\n');
-        it.command = { command: 'codify.openTask', title: 'Open task', arguments: [t.id] };
-        return it;
-    }
-
-    detailNodes(t) {
-        const ok = (b) => b
-            ? new vscode.ThemeIcon('check', new vscode.ThemeColor('testing.iconPassed'))
-            : new vscode.ThemeIcon('close', new vscode.ThemeColor('testing.iconFailed'));
-        const nodes = [];
-        for (const s of t.symbols || []) {
-            const it = new vscode.TreeItem(s.name);
-            it.iconPath = ok(s.found);
-            it.description = s.found
-                ? `${s.path}:${s.line}  ${s.kind}, ${s.refs} refs`
-                : 'not in graph';
-            it.contextValue = s.found ? 'symbol' : 'symbol-missing';
-            it.symbolName = s.name;
-            if (s.found) it.command = {
-                command: 'vscode.open', title: 'Open',
-                arguments: [
-                    vscode.Uri.file(path.join(workspaceRoot() || '', s.path)),
-                    { selection: new vscode.Range(s.line - 1, 0, s.line - 1, 0) },
-                ],
-            };
-            nodes.push(it);
-        }
-        for (const c of t.touches || []) {
-            const it = new vscode.TreeItem(c.pattern);
-            it.iconPath = ok(c.changed);
-            it.description = c.changed ? 'changed' : 'no matching change';
-            nodes.push(it);
-        }
-        for (const c of t.commits || []) {
-            const it = new vscode.TreeItem(c.id.slice(0, 12));
-            it.iconPath = new vscode.ThemeIcon('git-commit');
-            it.description = c.message;
-            it.tooltip = new Date(c.date * 1000).toLocaleString();
-            nodes.push(it);
-        }
-        for (const m of t.memories || []) {
-            const it = new vscode.TreeItem(m.body);
-            it.iconPath = new vscode.ThemeIcon('lightbulb');
-            it.description = m.type;
-            it.tooltip = `${m.type} — ${new Date(m.created * 1000).toLocaleString()}`;
-            nodes.push(it);
-        }
-        return nodes;
-    }
 }
 
 /* ---------------- memory view ---------------- */
@@ -335,13 +175,12 @@ function fence(text) {
 /* ---------------- commands ---------------- */
 
 async function pickTask(statusFilter) {
-    const trace = provider.model && provider.model.trace;
-    if (!trace) return undefined;
-    const items = trace.tasks
+    if (!provider.model) return undefined;
+    const items = provider.rows
         .filter((t) => !statusFilter || t.status === statusFilter)
         .map((t) => ({
             label: `${t.id}  ${t.title}`,
-            description: t.status,
+            description: t.agent ? `${t.status} · ${t.agent}` : t.status,
             detail: (t.touches || []).map((c) => c.pattern).join('  '),
             id: t.id,
         }));
@@ -688,6 +527,8 @@ async function cmdActions() {
         { label: '$(rocket) Session brief', cmd: 'codify.brief' },
         { label: '$(checklist) Next eligible task', cmd: 'codify.nextTask' },
         { label: '$(layers) Current wave', cmd: 'codify.wave' },
+        { label: '$(search) Search the task tree', cmd: 'codify.tasks.search' },
+        { label: '$(filter) Filter the task tree', cmd: 'codify.tasks.filter' },
         { label: '$(git-compare) Review the change', cmd: 'codify.review' },
         { label: '$(beaker) Tests touching this change', cmd: 'codify.testImpact' },
         { label: '$(shield) Check edit scope', cmd: 'codify.guard' },
@@ -714,7 +555,6 @@ async function cmdActions() {
 
 async function activate(ctx) {
     out = vscode.window.createOutputChannel('Codify');
-    provider = new TaskProvider();
     memories = new MemoryProvider();
     diagnostics = vscode.languages.createDiagnosticCollection('codify');
 
@@ -724,9 +564,24 @@ async function activate(ctx) {
     scopeItem.command = 'codify.guard';
     scopeItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 
+    /* The task tree, its filters and its detail panel live in tasks.js; the
+     * model it loads is the one every other command here reads. */
+    provider = tasks.register(ctx, {
+        cg, cgJson, workspaceRoot, show,
+        state: ctx.workspaceState,
+        /* a task with a live session should say so wherever it is drawn */
+        sessionBadge: (id) => agentApi.hasTerminal(id) ? ' $(terminal)'
+            : acpApi.hasPanel(id) ? ' $(comment-discussion)' : '',
+        onModel: (model) => {
+            updateStatusBar(model);
+            vscode.commands.executeCommand('setContext', 'codify.hasSpec', !!model);
+            vscode.commands.executeCommand('setContext', 'codify.parallel',
+                !!model && model.status.mode === 'parallel');
+        },
+    });
+
     ctx.subscriptions.push(
         out, statusItem, scopeItem, diagnostics,
-        vscode.window.registerTreeDataProvider('codifyTasks', provider),
         vscode.window.registerTreeDataProvider('codifyMemories', memories),
         vscode.workspace.registerTextDocumentContentProvider(SCHEME, {
             onDidChange: reportEmitter.event,

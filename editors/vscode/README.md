@@ -24,10 +24,22 @@ A "Codify" container in the activity bar, with two views.
 
 **Tasks** shows the active feature's plan the way Codify sees it:
 
-- Tasks grouped by dependency wave, with per-wave progress and status icons. The next eligible task is marked; `implemented` tasks are shown as *qualification pending* rather than done.
-- Expanding a task reveals its verification data from `cg spec trace`: declared symbols with resolved location, kind and reference count; touched-path patterns with whether a matching change exists; the commits tagged with the task; and the memories written under it.
+- Tasks group by **feature → section → wave** — the way the spec is written, and the way a fleet divides work. Each level carries its own progress, and a wave names the branch its worker takes (`wave/<feature>/<n>`, from `cg fleet plan`).
+- Each row says whether you can pick it up: status icon, the agent holding the lease with its role, the branch work is on, and the requires that are not met yet (*blocked by 3.2*). The next eligible task is marked; `implemented` tasks read as *qualification pending* rather than done.
+- **Filter** the tree by status (including *blocked* and *open*), wave or owner, and **search** it by id, title, section, owner, symbol or path. The active filter is shown in the view title with a count badge, and is remembered per workspace — a filter that hides work never hides silently.
 - Inline actions run the real workflow — start, mark implemented, complete. `cg spec done` is refused when `verify_cmd` or the graph checks fail, with the failing checks shown in the Codify output and a deliberately awkward, modal "Force done anyway" escape hatch.
-- In parallel mode, tasks show who holds their lease, and claim/release actions appear.
+- In parallel mode, tasks show who holds their lease, and claim/release actions appear. **Open Task Branch or Worktree** opens the worktree the fleet created for the task (in this window or a new one); with no worktree here it offers the branch name or the `git switch` line rather than checking out for you.
+
+### Task detail
+
+Clicking a task opens its detail panel beside the editor — one panel per task, repainted from the same refresh as the tree:
+
+- Its **acceptance criteria** (the `[req.*]` clauses its `reqs` name) and its **do-steps**, read from the spec file.
+- Its declared **symbols**, each with the location, kind and reference count the graph resolved — click one to jump to it, or to run `cg symbol` when the graph has not seen it yet — and its **touched paths**, each marked with whether a matching change exists.
+- Its **verify command**, with **Run verify** to run it in a terminal (in the task's own worktree when the fleet gave it one), the **commits** tagged with the task, and the **memories** written under it.
+- Buttons for start, complete, claim, release, open branch, trace, open in spec, and **Copy resume prompt** — a briefing built from the task's own declaration (steps, scope, criteria, verify command, lease) to paste into any agent.
+
+The panel is part of the zero-dependency promise: no bundler, no remote fonts or scripts, and a content security policy that allows exactly one nonce and nothing else.
 
 **Memory** lists recent decisions, constraints and facts, grouped by type, with the task each was written under. Add one from anywhere with **Codify: Remember a Decision** — if a file is open, it is anchored to that file automatically.
 

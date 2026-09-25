@@ -311,9 +311,11 @@ PY
 connector() {
     root="$repo_root"
     node --check "$root/editors/vscode/extension.js"
+    node --check "$root/editors/vscode/tasks.js"
     node --check "$root/editors/vscode/agents.js"
     node --check "$root/editors/vscode/acp.js"
-    has "$(cat "$root/editors/vscode/extension.js")" "id: '@docs'"
+    # the board (extension.js + its task tree in tasks.js) surfaces the closure
+    has "$(cat "$root/editors/vscode/extension.js" "$root/editors/vscode/tasks.js")" "id: '@docs'"
     has "$(cat "$root/editors/vscode/agents.js")" "['docs', 'packet']"
     has "$(cat "$root/editors/vscode/acp.js")" "['docs', 'close']"
 
