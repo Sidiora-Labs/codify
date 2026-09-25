@@ -427,7 +427,9 @@ Derived state is isolated at `.codegraph/docs/<feature>/`:
 - `provenance.json` records evidence sources and baseline mode.
 - `claims.kvx` maps factual claims and audience coverage to public documents
   and repository evidence; the agent may edit it.
-- `required.kvx` is regenerated from changed public symbols and routes.
+- `required.kvx` is regenerated from the changed public symbols and routes the
+  open branch holds, so a shared fleet graph does not derive a path's surface
+  once per worktree.
 - `check.json` and `verified` are deterministic checker outputs.
 - `baseline.json` records the successfully closed workspace revision.
 
