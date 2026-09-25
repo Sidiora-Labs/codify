@@ -103,6 +103,9 @@ static char *col_dup(sqlite3_stmt *st, int i) {
     return v ? xstrdup(v) : NULL;
 }
 
+/* Columns 0..7 are the original row; 8 and 9 (class, confidence) are read
+ * only when the statement selected them, so a query written before
+ * classification existed still fills a valid Memory. */
 static void mem_row(sqlite3_stmt *st, Memory *m) {
     m->id = (long)sqlite3_column_int64(st, 0);
     m->created = (long)sqlite3_column_int64(st, 1);
@@ -115,6 +118,24 @@ static void mem_row(sqlite3_stmt *st, Memory *m) {
     m->files = col_dup(st, 6);
     m->source = col_dup(st, 7);
     if (!m->source) m->source = xstrdup("");
+    m->cls = NULL;
+    m->confidence = 0;
+    if (sqlite3_column_count(st) > 9) {
+        m->cls = col_dup(st, 8);
+        if (sqlite3_column_type(st, 9) != SQLITE_NULL)
+            m->confidence = sqlite3_column_double(st, 9);
+    }
+}
+
+bool memory_get(Cg *cg, long id, Memory *out) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT id,created,type,task,body,symbols,files,source,class,"
+        "confidence FROM memories WHERE id=?");
+    sqlite3_bind_int64(st, 1, id);
+    bool found = sqlite3_step(st) == SQLITE_ROW;
+    if (found) mem_row(st, out);
+    sqlite3_finalize(st);
+    return found;
 }
 
 /* Decisions get reversed. A superseded memory is still true history, so it
@@ -130,7 +151,8 @@ int memory_query(Cg *cg, const char *query, const char *task,
     if (fq) {
         st = cg_prep(cg,
             "SELECT m.id,m.created,m.type,m.task,m.body,m.symbols,m.files,"
-            "m.source FROM memory_fts f JOIN memories m ON m.id = f.rowid"
+            "m.source,m.class,m.confidence"
+            " FROM memory_fts f JOIN memories m ON m.id = f.rowid"
             " WHERE memory_fts MATCH ?1 AND (?2 IS NULL OR m.task = ?2)"
             " AND (?3 IS NULL OR m.type = ?3)"
             " ORDER BY" SUPERSEDED_RANK ", bm25(memory_fts),"
@@ -139,7 +161,8 @@ int memory_query(Cg *cg, const char *query, const char *task,
     } else {
         st = cg_prep(cg,
             "SELECT m.id,m.created,m.type,m.task,m.body,m.symbols,m.files,"
-            "m.source FROM memories m WHERE (?2 IS NULL OR m.task = ?2)"
+            "m.source,m.class,m.confidence"
+            " FROM memories m WHERE (?2 IS NULL OR m.task = ?2)"
             " AND (?3 IS NULL OR m.type = ?3)"
             " ORDER BY" SUPERSEDED_RANK ", m.created DESC, m.id DESC LIMIT ?4");
     }
@@ -162,6 +185,8 @@ int memory_query(Cg *cg, const char *query, const char *task,
 void memory_clear(Memory *m) {
     free(m->type); free(m->task); free(m->body);
     free(m->symbols); free(m->files); free(m->source);
+    free(m->cls);
+    memset(m, 0, sizeof *m);
 }
 
 void memory_free(Memory *v, int n) {
@@ -181,6 +206,12 @@ void memory_json(const Memory *m, StrBuf *b) {
     if (m->files)   { sb_puts(b, ",\"files\":");   sb_json_str(b, m->files); }
     sb_puts(b, ",\"source\":");
     sb_json_str(b, m->source);
+    /* class is always present so a reader can tell "not classified yet"
+     * (null) from "classified as noise" without a second query */
+    sb_puts(b, ",\"class\":");
+    if (m->cls) sb_json_str(b, m->cls);
+    else sb_puts(b, "null");
+    if (m->cls) sb_printf(b, ",\"confidence\":%.2f", m->confidence);
     sb_putc(b, '}');
 }
 
@@ -193,7 +224,8 @@ void memory_print_brief(const Memory *m, const char *indent) {
         while (n && (m->body[n] & 0xC0) == 0x80) n--;  /* keep UTF-8 whole */
         cut = true;
     }
-    printf("%s#%ld [%s] %.*s%s\n", indent, m->id, m->type, (int)n, m->body,
+    printf("%s#%ld [%s%s%s] %.*s%s\n", indent, m->id, m->type,
+           m->cls ? "/" : "", m->cls ? m->cls : "", (int)n, m->body,
            cut || m->body[n] ? "..." : "");
 }
 
@@ -251,6 +283,8 @@ int cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
             if (localtime_r(&t, &tmv))
                 strftime(when, sizeof when, "%Y-%m-%d", &tmv);
             printf("#%ld  [%s]  %s", v[i].id, v[i].type, when);
+            if (v[i].cls)
+                printf("  class %s %.2f", v[i].cls, v[i].confidence);
             if (v[i].task) printf("  (task %s)", v[i].task);
             if (strcmp(v[i].source, "manual") != 0) printf("  %s", v[i].source);
             printf("\n");
@@ -319,7 +353,7 @@ int memory_supersede(Cg *cg, long old_id, long new_id) {
 int cmd_recall_near(Cg *cg, const char *path, int limit, bool json) {
     sqlite3_stmt *st = cg_prep(cg,
         "SELECT DISTINCT m.id,m.created,m.type,m.task,m.body,m.symbols,"
-        "m.files,m.source FROM memories m "
+        "m.files,m.source,m.class,m.confidence FROM memories m "
         "WHERE ifnull(m.files,'') LIKE '%'||?1||'%' "
         "   OR EXISTS (SELECT 1 FROM symbols s JOIN files f ON f.id=s.file_id "
         "              WHERE f.path=?1 AND ifnull(m.symbols,'') "
@@ -398,4 +432,216 @@ int cmd_memory_compact(Cg *cg, bool dry_run, bool json) {
         printf("compact: removed %ld duplicate(s), %ld memories remain\n",
                dupes, left);
     return 0;
+}
+
+/* ---------------- classification (Jev) ----------------
+ *
+ * A note is not automatically worth keeping, and the ones worth keeping are
+ * not all the same kind of thing. `cg memory classify` asks Jev, per
+ * memory, which kind it is and how reusable it is, and writes the verdict
+ * on the row. The verdict is advice: nothing reads `class` as a gate, and a
+ * memory classed `noise` is still recalled. What it buys is a shortlist —
+ * the memories classed `skill` are the ones `cg skills promote` turns into
+ * a portable SKILL.md.
+ */
+
+/* The vocabulary. The request body sorts option keys, so this order is only
+ * the order a reader of the code sees them in. */
+static const char *const CLASS_KEYS[] = {
+    "skill", "decision", "constraint", "fact", "noise"
+};
+static const char *const CLASS_DESCS[] = {
+    "A reusable technique, recipe, or way of working — it would help on "
+    "other tasks, not only the one it came from.",
+    "A choice that was made, closing off the alternatives.",
+    "A rule that binds future work: something that must, or must not, be "
+    "done here.",
+    "A durable piece of knowledge about this project.",
+    "Noise: a restatement of the obvious, a status line, or a note that has "
+    "already expired.",
+};
+#define NCLASSES ((int)(sizeof CLASS_KEYS / sizeof CLASS_KEYS[0]))
+#define CLASSIFY_DEFAULT_LIMIT 50
+
+static void state_field(StrBuf *b, const char *key, const char *val) {
+    sb_printf(b, ",\"%s\":", key);
+    if (val && val[0]) sb_json_str(b, val);
+    else sb_puts(b, "null");
+}
+
+/* Everything Jev is allowed to judge the memory on — the note itself and
+ * where it was taken, never the rest of the database. */
+static char *classify_state(const Memory *m) {
+    StrBuf b; sb_init(&b);
+    sb_printf(&b, "{\"id\":%ld", m->id);
+    state_field(&b, "type", m->type);
+    state_field(&b, "task", m->task);
+    state_field(&b, "symbols", m->symbols);
+    state_field(&b, "files", m->files);
+    state_field(&b, "source", m->source);
+    state_field(&b, "body", m->body);
+    sb_putc(&b, '}');
+    return b.p;
+}
+
+/* One decision per memory: which class, and whether it is reusable beyond
+ * its own task. Fills m->cls / m->confidence; *reusable gets the noul (-1
+ * when Jev did not answer it). -1 with the reason already on stderr. */
+static int classify_one(Cg *cg, Memory *m, double *reusable) {
+    JevQuestion qs[2];
+    jev_question_choice(&qs[0], "class",
+        "A coding agent wrote this note while working in a repository. "
+        "Which one kind of note is it?", CLASS_KEYS, CLASS_DESCS, NCLASSES);
+    jev_question_noul(&qs[1], "reusable",
+        "This note would still be useful on a different task in a different "
+        "part of the repository.",
+        "it generalises beyond the task it came from",
+        "it only makes sense for that one task, file, or moment");
+    char *state = classify_state(m);
+    JevResult r;
+    int rc = jev_ask(cg, state, qs, 2, &r);
+    free(state);
+    jev_question_free(&qs[0]);
+    jev_question_free(&qs[1]);
+    if (rc != JEV_OK) {
+        char what[96];
+        snprintf(what, sizeof what, "classifying memory #%ld", m->id);
+        jev_report_error(&r, what);
+        jev_result_free(&r);
+        return -1;
+    }
+    const JevAnswer *cls = jev_answer(&r, "class");
+    const JevAnswer *reuse = jev_answer(&r, "reusable");
+    if (!cls || !cls->choice || !cls->choice[0]) {
+        fprintf(stderr, "cg: jev gave no class for memory #%ld\n", m->id);
+        jev_result_free(&r);
+        return -1;
+    }
+    free(m->cls);
+    m->cls = xstrdup(cls->choice);
+    m->confidence = cls->confidence;
+    *reusable = reuse ? reuse->value : -1;
+    jev_result_free(&r);
+    return 0;
+}
+
+static void classify_store(Cg *cg, const Memory *m) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "UPDATE memories SET class=?,confidence=? WHERE id=?");
+    sqlite3_bind_text(st, 1, m->cls, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(st, 2, m->confidence);
+    sqlite3_bind_int64(st, 3, m->id);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+/* -1 when the selector is unusable (the reason is on stderr) */
+static int classify_select(Cg *cg, const char *sel, int limit, Memory **out) {
+    *out = NULL;
+    long id = 0;
+    bool all = sel && strcmp(sel, "--all") == 0;
+    if (sel && sel[0] && !all && strcmp(sel, "--unclassified") != 0) {
+        const char *p = sel[0] == '#' ? sel + 1 : sel;
+        id = atol(p);
+        if (id <= 0) {
+            fprintf(stderr, "usage: cg memory classify "
+                    "[<id>|--all|--unclassified] [-n N]\n");
+            return -1;
+        }
+    }
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT id,created,type,task,body,symbols,files,source,class,"
+        "confidence FROM memories"
+        " WHERE (?1 = 0 OR id = ?1) AND (?1 > 0 OR ?2 = 1 OR class IS NULL)"
+        " ORDER BY id LIMIT ?3");
+    sqlite3_bind_int64(st, 1, id);
+    sqlite3_bind_int(st, 2, all ? 1 : 0);
+    sqlite3_bind_int(st, 3, limit);
+    int n = 0, cap = 8;
+    Memory *v = xmalloc(sizeof(Memory) * (size_t)cap);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (n == cap) { cap *= 2; v = xrealloc(v, sizeof(Memory) * (size_t)cap); }
+        mem_row(st, &v[n++]);
+    }
+    sqlite3_finalize(st);
+    if (id > 0 && n == 0) {
+        fprintf(stderr, "cg: no memory #%ld\n", id);
+        free(v);
+        return -1;
+    }
+    *out = v;
+    return n;
+}
+
+int cmd_memory_classify(Cg *cg, const char *sel, int limit, bool json) {
+    if (limit <= 0) limit = CLASSIFY_DEFAULT_LIMIT;
+    Memory *v = NULL;
+    int n = classify_select(cg, sel, limit, &v);
+    if (n < 0) return 1;
+    bool all = sel && strcmp(sel, "--all") == 0;
+    if (n == 0) {
+        if (json)
+            printf("{\"ok\":true,\"classified\":0,\"memories\":[],"
+                   "\"candidates\":[]}\n");
+        else
+            printf("no memories to classify%s\n",
+                   all ? "" : " — every memory already has a class "
+                              "(--all reclassifies)");
+        free(v);
+        return 0;
+    }
+    StrBuf rows; sb_init(&rows);
+    StrBuf cand; sb_init(&cand);
+    int done = 0, ncand = 0, rc = 0;
+    for (int i = 0; i < n; i++) {
+        double reusable = -1;
+        if (classify_one(cg, &v[i], &reusable) != 0) { rc = 1; break; }
+        classify_store(cg, &v[i]);
+        /* a skill Jev itself calls task-bound is not a candidate: the whole
+         * point of a skill is that it travels */
+        bool candidate = strcmp(v[i].cls, "skill") == 0 &&
+                         (reusable < 0 || reusable >= 0.5);
+        if (candidate) {
+            sb_printf(&cand, "%s%ld", ncand ? "," : "", v[i].id);
+            ncand++;
+        }
+        if (json) {
+            if (done) sb_putc(&rows, ',');
+            memory_json(&v[i], &rows);
+            rows.len--;                 /* reopen to add this ask's answers */
+            rows.p[rows.len] = 0;
+            if (reusable >= 0) sb_printf(&rows, ",\"reusable\":%.2f", reusable);
+            sb_printf(&rows, ",\"candidate\":%s}", candidate ? "true" : "false");
+        } else {
+            size_t blen = strcspn(v[i].body, "\n");
+            bool cut = blen > 56;
+            if (cut) {
+                blen = 56;
+                while (blen && (v[i].body[blen] & 0xC0) == 0x80) blen--;
+            }
+            sb_printf(&rows, "  #%-4ld %-12s %-10s %.2f", v[i].id, v[i].type,
+                      v[i].cls, v[i].confidence);
+            if (reusable >= 0) sb_printf(&rows, "  reusable %.2f", reusable);
+            sb_printf(&rows, "  %.*s%s\n", (int)blen, v[i].body,
+                      cut ? "..." : "");
+        }
+        done++;
+    }
+    if (json) {
+        printf("{\"ok\":%s,\"classified\":%d,\"memories\":[%s],"
+               "\"candidates\":[%s]}\n", rc ? "false" : "true", done,
+               rows.p, cand.p);
+    } else if (done || !rc) {      /* a failure already said why on stderr */
+        printf("classified %d memor%s:\n", done, done == 1 ? "y" : "ies");
+        fputs(rows.p, stdout);
+        if (ncand)
+            printf("skill candidates: %s — promote with "
+                   "`cg skills promote <id>`\n", cand.p);
+        else
+            printf("skill candidates: none\n");
+    }
+    sb_free(&rows);
+    sb_free(&cand);
+    memory_free(v, n);
+    return rc;
 }

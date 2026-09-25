@@ -550,6 +550,16 @@ int integrate_doctor(Cg *cg, bool json) {
                         "%s hook shim has conflicting ownership: %s",
                         SHIM_HOSTS[i], shim);
     }
+    /* Skills promoted from memories are generated assets like any other, so
+     * doctor is where their drift shows up: a rendered SKILL.md whose memory
+     * was forgotten, or that no longer matches the note it came from. */
+    char **sf = NULL;
+    int nsf = skill_findings(cg, &sf);
+    for (int i = 0; i < nsf; i++) {
+        doctor_find(&findings, &n, json, "%s", sf[i]);
+        free(sf[i]);
+    }
+    free(sf);
     if (json) {
         printf("{\"ok\":%s,\"findings\":[%s]}\n", n ? "false" : "true",
                findings.p);

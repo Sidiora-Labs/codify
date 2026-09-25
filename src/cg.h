@@ -407,6 +407,11 @@ int vcs_commits_for_path(Cg *cg, const char *path, int limit, char ***ids,
 typedef struct {
     long id, created;                    /* created = unix seconds */
     char *type, *task, *body, *symbols, *files, *source;  /* task.. nullable */
+    /* Jev's verdict from `cg memory classify`: skill|fact|decision|
+     * constraint|noise, NULL until the memory has been classified, with the
+     * confidence it was given. Advice, never a gate. */
+    char *cls;
+    double confidence;
 } Memory;
 
 /* insert one memory; returns its id, -1 on failure */
@@ -673,6 +678,31 @@ int  jev_ask_raw(Cg *cg, const char *body, JevResult *out);
 const JevAnswer *jev_answer(const JevResult *r, const char *name);
 void jev_result_free(JevResult *r);
 int  cmd_jev(Cg *cg, int argc, char **argv, bool json);
+
+/* ---------------- skills: classified memory -> SKILL.md (skills.c) ----
+ * A memory is a note; a skill is a note worth carrying into other tasks.
+ * `cg memory classify` asks Jev which is which and writes the verdict on
+ * the row; `cg skills promote` renders a candidate as a portable
+ * .agents/skills/<slug>/SKILL.md carrying Codify's ownership marker and the
+ * id of the memory it came from. Promotion is recorded by that generated
+ * file, not by the class column: the column stays Jev's opinion. */
+/* Report a failed Jev call on stderr as "cg: <what>: <error>" and return 1,
+ * so every Jev-backed command fails the same way. Defined in jev.c. */
+int  jev_report_error(const JevResult *r, const char *what);
+/* One memory by id; false when there is no such row. Fields are owned by
+ * the caller (memory_clear). */
+bool memory_get(Cg *cg, long id, Memory *out);
+/* Classify memories with Jev and store class + confidence. sel is NULL or
+ * "--unclassified" (rows with no class yet), "--all", or a memory id. */
+int  cmd_memory_classify(Cg *cg, const char *sel, int limit, bool json);
+/* Render one memory as .agents/skills/<slug>/SKILL.md; path_out receives the
+ * repo-relative path. 0 wrote it, 1 already identical, 2 the file exists and
+ * is not Codify's, -1 the write failed. */
+int  skill_render(Cg *cg, const Memory *m, char *path_out, size_t cap);
+/* Generated skills that no longer agree with the memories they came from:
+ * one malloc'd sentence each (the vector is malloc'd too). */
+int  skill_findings(Cg *cg, char ***out);
+int  cmd_skills(Cg *cg, int argc, char **argv, bool json);
 
 bool git_available(const Cg *cg);
 /* Where tree's HEAD points, read from the git files themselves so opening

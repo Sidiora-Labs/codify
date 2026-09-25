@@ -60,6 +60,9 @@ static void usage(void) {
 "                           --near <file> for anchored retrieval\n"
 "  memory compact           drop duplicate memories (--dry-run to preview)\n"
 "  forget <id>              delete a memory\n"
+"  memory classify [<id>|--all|--unclassified] [-n N]\n"
+"                           ask Jev what each memory is (skill, decision,\n"
+"                           constraint, fact, noise) and store the class\n"
 "\n"
 "agentic\n"
 "  mcp                      run as an MCP server (stdio) for coding agents\n"
@@ -137,6 +140,12 @@ static void usage(void) {
 "           --option K=D ...] [--score N I --level L ...]\n"
 "                           ask Jev directly; answers as text or --json\n"
 "  jev log [-n N]           the last N calls from .codegraph/jev.log\n"
+"  skills list              memories classed as skills, and which of them\n"
+"                           have been rendered under .agents/skills\n"
+"  skills promote <id>      render one memory as .agents/skills/<slug>/\n"
+"                           SKILL.md, Codify-owned and linked to the memory\n"
+"  skills render            refresh every generated SKILL.md from its\n"
+"                           memory; names the ones whose memory is gone\n"
 "\n"
 "most query commands accept --json for machine-readable output\n",
         CG_VERSION);
@@ -559,10 +568,17 @@ int main(int argc, char **argv) {
         if (argc >= 3 && strcmp(argv[2], "compact") == 0) {
             bool dry = flag(&argc, argv, "--dry-run");
             rc = cmd_memory_compact(&cg, dry, json);
+        } else if (argc >= 3 && strcmp(argv[2], "classify") == 0) {
+            int limit = atoi(opt(&argc, argv, "-n", "0"));
+            rc = cmd_memory_classify(&cg, argc >= 4 ? argv[3] : NULL, limit,
+                                     json);
         } else {
-            fprintf(stderr, "usage: cg memory compact [--dry-run]\n");
+            fprintf(stderr, "usage: cg memory compact [--dry-run] | "
+                    "classify [<id>|--all|--unclassified] [-n N]\n");
             rc = 1;
         }
+    } else if (strcmp(cmd, "skills") == 0) {
+        rc = cmd_skills(&cg, argc, argv, json);
     } else if (strcmp(cmd, "forget") == 0) {
         if (argc < 3) { fprintf(stderr, "usage: cg forget <id>\n"); rc = 1; }
         else rc = cmd_forget(&cg, argv[2]);

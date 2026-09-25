@@ -49,8 +49,12 @@ static const char *SCHEMA =
     "  path UNINDEXED, body, tokenize='unicode61');"
     /* agent memory: deliberate notes, linked to spec tasks by "feature/id".
      * branch is where the note was taken (NULL for the main tree); class and
-     * confidence are Jev's verdict on whether the note is a skill, a fact, a
-     * decision, or noise — advisory, filled by `cg memory classify`. */
+     * confidence are Jev's verdict, filled by `cg memory classify`, over a
+     * fixed vocabulary — skill, decision, constraint, fact, noise — with
+     * NULL meaning "not classified yet". Both are advisory: nothing gates on
+     * them, and a promoted skill is recorded by the generated SKILL.md that
+     * names the memory, never by this column, so re-classifying a memory
+     * cannot silently un-promote a skill. */
     "CREATE TABLE IF NOT EXISTS memories("
     "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL, type TEXT NOT NULL,"
     "  task TEXT, body TEXT NOT NULL, symbols TEXT, files TEXT,"

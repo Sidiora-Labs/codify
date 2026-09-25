@@ -409,7 +409,9 @@ int cmd_brief(Cg *cg, bool json)
         if (nm) {
             sb_puts(&b, "recent decisions:\n");
             for (int i = 0; i < nm; i++)
-                sb_printf(&b, "  [%s] %s\n", mem[i].type, mem[i].body);
+                sb_printf(&b, "  [%s%s%s] %s\n", mem[i].type,
+                          mem[i].cls ? "/" : "", mem[i].cls ? mem[i].cls : "",
+                          mem[i].body);
         }
     }
     fputs(b.p, stdout);

@@ -13,6 +13,9 @@
 #   noanswers a 200 JSON object without answers
 # Records land in JEV_FAKE_DIR: request.N.json (the body cg wrote) and
 # call.N.txt (argv, url, bearer token, mode).
+# JEV_FAKE_CHOICE=<key> makes every choice answer pick that option when the
+# question offers it; unset (or an option that is not offered) keeps the
+# default, the first option as the canonical body sorted them.
 set -u
 if [ "${1:-}" = "--version" ]; then
     echo "curl 8.5.0-fake (x86_64-pc-linux-gnu) libcurl/8.5.0"
@@ -56,9 +59,10 @@ case "$mode" in
 esac
 
 python3 - "$dir/request.$n.json" "$n" <<'EOF'
-import json, sys
+import json, os, sys
 req = json.load(open(sys.argv[1]))
 n = int(sys.argv[2])
+forced = os.environ.get("JEV_FAKE_CHOICE", "")
 answers = {}
 for name, q in req["questions"].items():
     t = q["type"]
@@ -66,9 +70,10 @@ for name, q in req["questions"].items():
         answers[name] = {"type": "noul", "noul": 0.95}
     elif t == "choice":
         keys = list(q["criteria"])
-        probs = {k: (0.88 if i == 0 else round(0.12 / (len(keys) - 1), 4))
-                 for i, k in enumerate(keys)}
-        answers[name] = {"type": "choice", "choice": keys[0],
+        pick = forced if forced in keys else keys[0]
+        probs = {k: (0.88 if k == pick else round(0.12 / (len(keys) - 1), 4))
+                 for k in keys}
+        answers[name] = {"type": "choice", "choice": pick,
                          "probabilities": probs, "confidence": 0.82}
     else:
         levels = q["criteria"]

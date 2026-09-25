@@ -1113,3 +1113,12 @@ int cmd_jev(Cg *cg, int argc, char **argv, bool json) {
     fprintf(stderr, "usage: cg jev doctor [--probe] | ask ... | log [-n N]\n");
     return 1;
 }
+
+/* Jev is mandatory for the features built on it, so a failed call has to
+ * read the same everywhere: what was being decided, then why it failed.
+ * Returns 1 so a caller can `return jev_report_error(...)`. */
+int jev_report_error(const JevResult *r, const char *what) {
+    fprintf(stderr, "cg: %s: %s\n", what,
+            r && r->error[0] ? r->error : "jev call failed");
+    return 1;
+}
