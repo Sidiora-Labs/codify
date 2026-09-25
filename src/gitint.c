@@ -357,13 +357,11 @@ int cmd_branches(Cg *cg, int argc, char **argv, bool json) {
 /* Read `git log` in one pass: a header line per commit, then the paths it
  * touched. --no-renames keeps paths comparable with the graph's own. The
  * import is one BEGIN IMMEDIATE transaction: taken up front, or reported
- * busy, never upgraded mid-way. */
-int cmd_git_sync(Cg *cg, int limit, bool json) {
-    if (!git_available(cg)) {
-        if (json) printf("{\"git\":false,\"commits\":0,\"paths\":0}\n");
-        else printf("no git repository here — nothing to ingest\n");
-        return 0;
-    }
+ * busy, never upgraded mid-way. Counts are optional; -1 when git cannot be
+ * run. This is also the evidence `cg spec done` reads for `touches`, so it
+ * runs quietly from there. */
+int git_ingest(Cg *cg, int limit, long *ncommits_out, long *npaths_out,
+               long *seen_out) {
     StrBuf cmd; sb_init(&cmd);
     sb_printf(&cmd,
         "git -C '%s' log --no-merges --no-renames -n %d "
@@ -371,10 +369,7 @@ int cmd_git_sync(Cg *cg, int limit, bool json) {
         cg->root, limit);
     FILE *f = popen(cmd.p, "r");
     sb_free(&cmd);
-    if (!f) {
-        fprintf(stderr, "cg: cannot run git\n");
-        return 1;
-    }
+    if (!f) return -1;
 
     cg_exec(cg, "BEGIN IMMEDIATE");
     sqlite3_stmt *ins = cg_prep(cg,
@@ -421,7 +416,23 @@ int cmd_git_sync(Cg *cg, int limit, bool json) {
     sqlite3_finalize(chu);
     cg_exec(cg, "COMMIT");
     pclose(f);
+    if (ncommits_out) *ncommits_out = ncommits;
+    if (npaths_out) *npaths_out = npaths;
+    if (seen_out) *seen_out = seen;
+    return 0;
+}
 
+int cmd_git_sync(Cg *cg, int limit, bool json) {
+    if (!git_available(cg)) {
+        if (json) printf("{\"git\":false,\"commits\":0,\"paths\":0}\n");
+        else printf("no git repository here — nothing to ingest\n");
+        return 0;
+    }
+    long ncommits = 0, npaths = 0, seen = 0;
+    if (git_ingest(cg, limit, &ncommits, &npaths, &seen) != 0) {
+        fprintf(stderr, "cg: cannot run git\n");
+        return 1;
+    }
     if (json)
         printf("{\"git\":true,\"commits\":%ld,\"paths\":%ld,\"scanned\":%ld}\n",
                ncommits, npaths, seen);

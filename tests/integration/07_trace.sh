@@ -209,4 +209,34 @@ assert t["symbols"][0]["found"] is True, t
 assert t["touches"][0]["changed"] is True, t
 '
 
+# ---- a git commit tagged with the task is evidence too: in a fleet every
+# worker commits with git on its own branch, and the snapshot chain is one
+# line shared by all of them, so a snapshot alone cannot attribute the
+# change. The snapshot here is untagged and the worktree clean against it —
+# only the git commit names the task. ----
+cp -r "$FIXTURES/specrepo" "$TMP/gitrepo"
+cd "$TMP/gitrepo"
+git init -q
+git config user.email test@example.com
+git config user.name test
+printf '.codegraph/\n' > .gitignore
+git add -A && git commit -qm base
+"$CG" init >/dev/null
+"$CG" spec start 1.2 >/dev/null
+touch verify.marker
+"$CG" spec done 1.2 >/dev/null
+mkdir -p src
+cat > src/check.ts <<'EOF'
+export function checkMode(stale: number): number {
+  return stale > 0 ? 2 : 0;
+}
+EOF
+git add -A && git commit -qm "check mode, committed by a worker [spec:demo/2.1]"
+out="$("$CG" commit -m "snapshot with no task in progress" 2>&1)"
+hasnt "$out" "[spec:demo/2.1]"
+"$CG" spec start 2.1 >/dev/null
+out="$("$CG" spec done 2.1 2>&1)"
+has "$out" "✓ touched src/*.ts"
+has "$out" "done 2.1 — Check mode"
+
 echo ok

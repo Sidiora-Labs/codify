@@ -1209,6 +1209,24 @@ int vcs_changed_paths(Cg *cg, const char *needle, char ***out) {
             free(c.message);
         }
     }
+
+    /* plus every path a git commit tagged with needle touched, as
+     * `cg git-sync` imported it. The snapshot chain is one line per
+     * .codegraph, so where several worktrees share a graph the snapshot
+     * before a worker's is usually another worker's tree; git's per-branch
+     * history is the evidence that survives a fleet. */
+    if (needle) {
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT DISTINCT c.path FROM git_churn c "
+            "JOIN git_commits g ON g.hash = c.hash "
+            "WHERE instr(g.subject, ?1) > 0");
+        sqlite3_bind_text(st, 1, needle, -1, SQLITE_STATIC);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *path = (const char *)sqlite3_column_text(st, 0);
+            if (path && path[0]) ps_add(&p, path);
+        }
+        sqlite3_finalize(st);
+    }
     *out = p.v;
     return p.n;
 }

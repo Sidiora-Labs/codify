@@ -3244,6 +3244,9 @@ static int spec_verify_task(Spec *s, const char *id) {
         char tag[600];
         task_tag(s, id, tag, sizeof tag);
         char **paths;
+        /* a worker's tagged git commits count as evidence, so read the
+         * branch's recent log first; a failure here only leaves them out */
+        if (git_available(&g)) git_ingest(&g, 500, NULL, NULL, NULL);
         int np = vcs_changed_paths(&g, tag, &paths);
         for (int i = 0; i < ntch; i++) {
             if (pattern_hit(tchs[i], paths, np)) {

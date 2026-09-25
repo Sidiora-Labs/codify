@@ -845,6 +845,9 @@ int  git_worktree_add(const char *tree, const char *path, const char *branch,
                       StrBuf *err);
 /* paths still conflicted in tree's index (malloc'd each); returns count */
 int  git_conflicted_paths(const char *tree, char ***out);
+/* import git log into git_commits/git_churn (the evidence behind `touches`
+ * and churn ranking); counts are optional, -1 when git cannot be run */
+int  git_ingest(Cg *cg, int limit, long *ncommits, long *npaths, long *seen);
 int  cmd_git_sync(Cg *cg, int limit, bool json);
 int  git_churn_for_path(Cg *cg, const char *path);
 int  git_commit_mirror(Cg *cg, const char *message);
