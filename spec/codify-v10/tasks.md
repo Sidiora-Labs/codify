@@ -60,7 +60,7 @@
     - Resolve a worktree to the shared .codegraph through git rev-parse --git-common-dir when no nearer project exists; cg init inside a worktree of an initialized repo joins instead of refusing.
     - Resolve the current branch at open time into Cg and register it; cg branches lists tracked branches with worktree, head, and file counts.
     - _Requirements: 3.1, 3.2_
-  - [-] 3.2 Branch-scoped indexing, queries, memory, brief, and fleet watch
+  - [x] 3.2 Branch-scoped indexing, queries, memory, brief, and fleet watch
     - The indexer writes rows under the current branch and reuses parsed content by hash across branches.
     - search, symbol, context, survey, impact, and recall default to the current branch and accept --branch and --all-branches, labelling hits by branch.
     - Memories carry a branch; cg fleet merge-up promotes them to the base; brief names branch, base, role, and other live branches.
