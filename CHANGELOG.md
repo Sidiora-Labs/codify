@@ -2,6 +2,69 @@
 
 _Maintained from local Codify snapshots (`cg log`); symbol-level changes are derived from the code graph._
 
+## 0.9.0 (v10) — fleet-safe sync, hierarchy, unified graph, Jev
+
+Codify under a fleet of agents: one indexer instead of fifty, a tree of agents with a branch flow, one graph for every branch and worktree, and typed decisions where a heuristic would have guessed.
+
+**Sync — one indexer, not fifty** (tasks 1.1–1.4)
+
+- A single-writer index gate: the first caller `flock`s `.codegraph/index.lock` and walks; every other caller appends its paths to `.codegraph/index.dirty` and returns `coalesced` without walking, parsing, or resolving
+- The gate holder drains the dirty note before releasing, in at most three bounded passes, so a file written during a pass is picked up by that pass rather than a fourth process; a note past 256 KiB collapses to a whole-tree marker
+- A freshness window keyed by `meta.last_index_at:<branch>` skips the walk when the last pass is young enough and nothing is pending or dirty — 3 s for read-mostly CLI commands and the LSP, 1.5 s for MCP tool calls, 3 s for the VS Code refresh
+- Machine-wide parse slots under `/tmp/codify-<uid>` cap threads across concurrent projects; a pass with no free slot runs on two threads instead of the whole machine (`CG_INDEX_SLOTS`, `CG_INDEX_WORKERS`, `CG_SLOT_DIR`), and background passes renice themselves once
+- `cg sync` takes optional paths for a targeted pass and reports `fresh`, `coalesced`, `busy`, `scoped`, `targeted`, `passes`, and `workers` in text and `--json`; `cg index [--full]` remains the blocking form that always walks
+- Post-scan resolution is scoped to the change: refs in changed files plus refs anywhere naming a touched symbol, imports of changed files plus unresolved imports a new file satisfies, soft edges only for comments in changed files or naming touched symbols — `--full` and the stall-recovery path keep the global rebuild, and resolution counters are recomputed rather than incremented
+- `cg hook post-edit` replaces the two-process hook: one `cg` reads the host payload on stdin, syncs the edited path in the background, and guards it, capping its transcript output at 24 lines with a pointer to the full report; the Claude and git hook templates were rewritten to use it
+- `cg spec`, `cg mcp`, `cg review`, `cg commit`, `cg agentmd`, the runtime workspace revision, `cg watch`, and `cg lsp` all route through the gate with a freshness window and bounded lock waits; `cg spec trace --no-sync` answers from the last index without touching the gate
+- VS Code 1.2.8: one refresh scheduler with a trailing debounce and a two-second floor, the `graph.db` watcher removed (its own sync wrote it), spec files watched instead, slow polls, and the Marketplace identity aligned on `SidioraLabs.codify-workflow`
+
+**Fleet — Main Gideon, feature managers, wave workers** (tasks 2.1, 2.2)
+
+- `spec/workflow.kvx` gains `[hierarchy]` and `[role.main|feature|worker]`: branch templates, base branch, remote, worktree root, test and lint gates, PR and checkpoint policy — every key falling back to a built-in default, and an unrecognised `[role.*]` reported rather than ignored
+- Agent identity extends to `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, and `CG_WAVE`; roles surface in `cg brief`, in spec status and claims, and in an agents registry that a solo session (no `CG_ROLE`) never writes to
+- `cg fleet roles|status|plan` report the configured tree, who is alive in which role on which task, and which manager owns a feature and which worker each wave
+- `cg fleet begin <id>` creates or reuses the wave branch and worktree cut from the feature branch, claims the task, and prints the exact environment line for the worker; it is idempotent and `--agent` hands the task to a replacement
+- `cg fleet merge-up <id>` merges a wave branch into the feature branch only when the branch tip says the task qualified, reports conflicts by path with the feature worktree left untouched, and `--keep` leaves the merge in place to resolve
+- `cg fleet land <feature>` merges into local main behind the test and lint gates and resets main on red, with the failing gate's log named; green opens the pull request when the policy is `auto`, and `--no-pr` skips it
+- `cg fleet pr <feature>` pushes and opens the PR through `gh`, reports an already-open one instead of duplicating it, and prints runnable push and `gh` commands when `gh` is absent; `CG_GH` names the binary and `--dry-run` calls nothing
+- `cg fleet checkpoint` merges the open `feature/*` pull requests lowest number first, stopping at the first that will not merge and skipping non-feature branches by name
+- Schema v16 records `branch`, `worktree`, and `parent` on every attempt, so a claim answers which branch its work was done on after the session is gone; `spec_claim` is shared with the fleet rather than duplicated
+
+**Graph — one graph for every branch and worktree** (task 3.1)
+
+- Schema v15 adds a `branches(id, name, worktree, head, base, updated)` registry and `files.branch_id` with `UNIQUE(branch_id, path)`, so a sync on one branch never adds or removes another's rows
+- A linked worktree resolves to the repository's shared `.codegraph` through git's common directory; `cg init` there joins the project instead of refusing or creating a second database
+- Branch identity is read from git's own files — `HEAD`, refs, `packed-refs`, `gitdir`, `commondir` — without spawning `git`, because a fleet opens the graph thousands of times
+- Freshness marks and the index gate are per branch (`last_index_at:<id>`, `index.<id>.lock`), so a fresh worktree is never told the graph is already current and two worktrees can walk in parallel
+- `cg branches` lists every tracked branch with worktree, head, base, and file count; `cg root --json` and `cg info` name the shared project, the worktree flag, and the branch
+- A schema upgrade keeps the branch and agent registries, memories, history, leases, and attempts, and drops only what the indexer rebuilds; an older `cg` refuses a newer database by name instead of downgrading it into a re-index loop
+
+**Jev — typed decisions** (task 4.1)
+
+- A client for TypeSafe's System One model (`typesafe/jev-1.13` over OpenRouter): canonical request bodies with sorted question names and criteria keys, `noul`, `choice`, and `score` answers parsed with probabilities and confidence
+- The transport is the system `curl` through a private `0600` config file, so the key never reaches a command line and the body never reaches a shell; `429`, `529`, and connection failures back off and retry, anything else fails at once
+- Every call appends one JSON line to `.codegraph/jev.log` with request id, model served, token counts, cost, latency, and attempts
+- `cg jev doctor [--probe]`, `cg jev ask`, and `cg jev log` give an operator the health check, a direct question, and the spend
+- A missing `OPENROUTER_API_KEY` is an error naming the variable, never a silent fallback; `CG_JEV_MODEL`, `CG_JEV_ENDPOINT`, `CG_JEV_CURL`, `CG_JEV_TIMEOUT`, `CG_JEV_ATTEMPTS`, and `CG_JEV_BACKOFF_MS` override the defaults
+- The `local_only` principle became `local_first`: the core loop still makes no network call, Jev is mandatory for the features built on it, and its answers are never authoritative
+
+**Documentation** (task 6.1)
+
+- New pages: [the sync gate](docs/sync.md), [the fleet hierarchy](docs/hierarchy.md), [the unified multi-branch graph](docs/branches.md), and [Jev decisions](docs/jev.md), each with commands, real output, and limitations
+- The README covers fleet mode, the branch registry, Jev, and the refresh scheduler; the extension README states which v10 surfaces are not yet in the build
+
+### In progress
+
+Specified in `spec/codify-v10/spec.kvx` and **not** in this release:
+
+- **2.3 Two-level orchestrator** — `cg spec run --fleet` spawning feature managers and wave workers under them
+- **3.2 Branch-scoped indexing, queries, memory, brief, and fleet watch** — `--branch` and `--all-branches`, content reuse by hash, branch-carrying and branch-promoted memories, `cg watch --fleet`
+- **4.2 Memory classification and skills** — `cg memory classify` and `cg skills list|promote|render` into `.agents/skills/<slug>/SKILL.md`
+- **4.3 Failure triage and guard ranking** — Jev triage of a failed `verify_cmd`, Jev-ranked guard findings, a PR readiness score
+- **5.1 Task UI upgrade** — grouped and filterable task tree with a detail webview
+- **5.2 Memory browser and skills** — searchable, filterable memory panel with classify and promote actions
+- **5.3 Fleet view and agent chat polish** — managers, workers, branches, attempts, heartbeats, merge state, open PRs
+
 ## 2026-09-05 — Codify 0.9.0 Evidence-grounded documentation closure
 
 - Codify's own feature now enables `auto` documentation closure. The repository gains a [documentation workflow guide](docs/DOCUMENTATION.md), a [source-navigation baseline](docs/SOURCE-REFERENCE.md), and a separate [test/fixture reference](docs/TEST-REFERENCE.md), with contributor instructions aligned to the actual build and qualification commands.

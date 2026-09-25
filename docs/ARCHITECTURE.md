@@ -45,24 +45,32 @@ files ───────────────────────► j
   functions is no longer credited to the one above it. A rescan whose
   content hash is unchanged (touch, branch switch) updates size/mtime only,
   so symbol rowids stay stable.
-- **`db.c`** owns the schema: `files`, `symbols`, `refs` (with `qual` and
-  `kind`), `imports`, `routes`, `meta`, `memories`, `memory_superseded`,
-  `git_commits`, `git_churn`, `leases`, fenced `attempts`, normalized
-  `runtime_events`, incremental `runtime_files`, revision baselines in
-  `work_packets` / `work_files`, and criterion-linked `work_evidence`,
-  plus three FTS5 tables — trigram over symbol names (substring search),
-  unicode61 over file bodies (word search), and unicode61 over memory
-  bodies. The schema is versioned in `meta.schema_version`
-  (`cg_schema_upgrade`): on a mismatch the derived tables — everything the
-  indexer rebuilds from source — are dropped and recreated for the next
-  sync, while memories, git history, attempts, runtime history, and work
-  evidence are never touched.
+- **`db.c`** owns the schema: `branches`, `files` (scoped by `branch_id`,
+  `UNIQUE(branch_id, path)`), `symbols`, `refs` (with `qual` and `kind`),
+  `imports`, `routes`, `meta`, `memories` (with `branch`, `class`,
+  `confidence`), `memory_superseded`, `git_commits`, `git_churn`,
+  `leases`, fenced `attempts` (with `branch`, `worktree`, `parent`),
+  the `agents` registry, normalized `runtime_events`, incremental
+  `runtime_files`, revision baselines in `work_packets` / `work_files`,
+  and criterion-linked `work_evidence`, plus three FTS5 tables — trigram
+  over symbol names (substring search), unicode61 over file bodies (word
+  search), and unicode61 over memory bodies. The schema is versioned in
+  `meta.schema_version` (`cg_schema_upgrade`, currently v16): on a mismatch
+  the derived tables — everything the indexer rebuilds from source — are
+  dropped and recreated for the next sync, while the branch and agent
+  registries, memories, git history, attempts, runtime history, and work
+  evidence are never touched. A database written by a *newer* `cg` is
+  refused rather than downgraded, so an old editor binary and a new CLI
+  cannot take turns re-indexing the tree.
   It also resolves the project root, which is load-bearing:
   `cg_find_root_at` stops the upward walk at a `.git`/`go.mod`/
   `package.json`-style boundary, at `$HOME`, and at a mount change, so a
   stray `.codegraph` in an ancestor can never silently capture a project
-  beneath it. `CODIFY_ROOT` overrides the walk; `cg root` prints the
-  answer.
+  beneath it. `cg_find_project_at` returns both halves — the tree to
+  operate on and the shared project that owns the database — which differ
+  only inside a linked git worktree, where the shared project is found
+  through git's common directory. `CODIFY_ROOT` overrides the walk;
+  `cg root` prints the answer.
 - **`graph.c`** implements the query commands (`search`, `symbol`,
   `impact`, `context`, `routes`) with `--json` variants. Ranking fuses
   exact, prefix, substring, and token tiers (`find_symbols_all` — no
@@ -114,12 +122,56 @@ waits and for how long.
   still busy after the full wait it warns and checks against the last
   index rather than failing qualification on a lock.
 
+## Sync gate (`syncgate.c`)
+
+Database locking decides who *writes*; the gate decides who *walks*.
+`.codegraph/index.lock` is `flock`'d by the one process running an index
+pass; a loser appends the paths it wanted to `.codegraph/index.dirty`
+(guarded by its own small lock, renamed per-pid before it is drained) and
+returns `coalesced` without walking. The holder drains the note in at most
+three bounded passes before releasing. A freshness window keyed by
+`meta.last_index_at:<branch>` lets a caller skip the walk entirely, and
+machine-wide `slot.N` files under `/tmp/codify-<uid>` ration parse threads
+across concurrent projects — a pass without a slot runs on two threads
+rather than claiming the machine. A linked worktree gets its own lock and
+note keyed by branch id. `IndexOpts` (freshness, lock wait, worker cap,
+background, target paths) and `IndexStats` (`fresh`, `coalesced`, `busy`,
+`scoped`, `passes`, `workers`) are the whole interface between callers and
+`cg_index_ex`. Full contract: [sync.md](sync.md).
+
 ## Watcher (`watch.c`)
 
 Recursive inotify with dynamic directory registration and a debounce
-loop; each quiet period triggers an incremental index. A busy database
-turns into a retry after the next debounce. Non-Linux platforms stub
-out behind the same interface.
+loop; each quiet period triggers an incremental index through the sync
+gate, so the watcher coalesces with hooks rather than racing them. A busy
+database turns into a retry after the next debounce. Non-Linux platforms
+stub out behind the same interface.
+
+## Fleet (`fleet.c`)
+
+The hierarchy that turns one repository into a tree of agents. `hier_load`
+reads `[hierarchy]` and `[role.main|feature|worker]` from
+`spec/workflow.kvx` over built-in defaults; `hier_expand` fills `{main}`,
+`{remote}`, `{feature}`, and `{wave}` in the branch and agent templates.
+Identity comes from the environment (`CG_AGENT`, `CG_ROLE`, `CG_PARENT`,
+`CG_FEATURE`, `CG_WAVE`) and is recorded in the `agents` registry only when
+a role is set, so solo sessions leave no trace. The branch lifecycle —
+`fleet_worker_begin`, `fleet_merge_up`, `fleet_feature_land`,
+`fleet_pr_open`, `fleet_checkpoint` — drives `git` and `gh` through the
+helpers in `gitint.c`, always against the shared project (the main
+worktree), and shares the spec engine's claim primitives rather than
+adding a second ownership system. Full contract: [hierarchy.md](hierarchy.md).
+
+## Jev decisions (`jev.c`)
+
+The one remote call. `jev_ask` builds a canonical request body (sorted
+question names and criteria keys, compact, state verbatim) for `noul`,
+`choice`, and `score` questions, runs the system `curl` through `popen`
+with a private `0600` config file so the key never reaches a command line
+nor the body a shell, retries `429`/`529` with doubling backoff, and
+appends one JSON line per call to `.codegraph/jev.log`. A missing
+`OPENROUTER_API_KEY` is an error, never a fallback; every answer is advice,
+and no answer changes an exit code. Full contract: [jev.md](jev.md).
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
