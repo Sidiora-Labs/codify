@@ -64,7 +64,7 @@ step_3 = "cg spec start <id> — claim it."
 step_4 = "cg survey <area> for the wide picture, then cg context <area> — the code you need in one call."
 step_5 = "Implement. Anchor what a reader could not derive. cg remember any decision worth keeping."
 step_6 = "cg review — the change against its criteria; cg guard for grounding, contract, and hygiene findings; cg anchors --stale for docs your edits outdated."
-step_7 = "cg commit -m <msg> — snapshot, auto-tagged with the task."
+step_7 = "cg commit -m <msg> — snapshot, auto-tagged with the task. A git commit tagged [spec:<feature>/<id>] counts as the same evidence, which is how a fleet worker on its own branch attributes its work."
 step_8 = "cg spec done <id> — qualification runs; done means proven."
 
 [memory]

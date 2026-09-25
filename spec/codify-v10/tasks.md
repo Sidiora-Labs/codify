@@ -106,7 +106,7 @@
 ## End-to-end
 
 - [ ] 6. Qualification
-  - [ ] 6.1 Qualify v10 end to end
+  - [x] 6.1 Qualify v10 end to end
     - Run the whole suite, spec render check, lint, and check in a clean tree.
     - Document the sync gate, hierarchy, unified graph, Jev, and extension surfaces with commands and limitations.
     - Trace every task to its symbols, touched paths, snapshots, and verification evidence.

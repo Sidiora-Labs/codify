@@ -293,7 +293,7 @@ status  = "pending"
 
 [task.6.1]
 title      = "Qualify v10 end to end"
-status     = "pending"
+status     = "done"
 wave       = 7
 requires   = ["1.4", "2.3", "3.2", "4.3", "5.2", "5.3"]
 symbols    = ["cg_index_ex", "cmd_fleet", "cg_branch_resolve", "jev_ask", "cmd_memory_classify"]
