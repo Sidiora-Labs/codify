@@ -121,7 +121,8 @@ function output(r) {
 }
 
 /* A cg call that answered with usage or "unknown command" is a build that
- * predates the feature, not a failure of the memory the user clicked. */
+ * predates the feature, not a failure of the memory the user clicked — the
+ * panel says so instead of surfacing the usage text as an error. */
 function unsupported(r) {
     return /unknown command|unknown subcommand|^usage:|\nusage:/i.test(output(r));
 }
@@ -401,7 +402,9 @@ class MemoryBrowser {
     }
 
     /* Every memory Jev has not seen yet, in one call, behind a progress
-     * notification because this one talks to the network. */
+     * notification because this one talks to the network. The skill
+     * candidates it comes back with are reported in the same breath —
+     * classifying is what makes a memory promotable. */
     async classifyAll() {
         const r = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification,

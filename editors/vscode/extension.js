@@ -217,7 +217,8 @@ function taskIdFrom(arg) {
 /* The work one refresh does, in order and never in parallel. The sync is
  * cheap when a whole-tree pass ran inside the window and otherwise one
  * low-priority pass through the index gate that never waits on it; every
- * report after it answers from that index. */
+ * panel after it — tasks, memories, fleet — answers from that one index
+ * rather than polling on a timer of its own. */
 async function runRefresh() {
     await cg(['sync', '--max-age', String(REFRESH_FRESH_MS),
               '--background', '--wait', '0']);
@@ -540,7 +541,8 @@ async function cmdOpenTask(id) {
     }
 }
 
-/* One menu instead of a dozen memorised command names. */
+/* One menu instead of a list of memorised command names: the single palette
+ * entry that makes every other Codify command discoverable. */
 async function cmdActions() {
     const s = provider.model && provider.model.status;
     const items = [

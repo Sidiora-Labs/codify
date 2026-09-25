@@ -253,8 +253,11 @@ static void norm_dots(char *p) {
     strcpy(p, out);
 }
 
-/* Try to find a repository file matching an import module string.
- * Returns the file_id or -1 if not found. */
+/* The repo file an import module string names, searched on this tree's branch
+ * only: exact path; for C, beside the including file and then the one header
+ * of that name anywhere in the tree; then relative to the importer, each
+ * language's extensions, index and package files, and last a basename suffix
+ * match. Returns the file_id, or -1 when nothing plausibly matches. */
 static long find_repo_file(Cg *cg, const char *module, const char *from_path,
                            const char *lang) {
     /* exact match first. Every lookup here is scoped to the branch this
@@ -466,11 +469,12 @@ static bool node_core_module(const char *module) {
 
 static bool mod_matches(const char *module, const char *cand_path);
 
-/* scoped: only imports the change scope reaches (importing file, target
- * file, or dangling target in temp.scope_files). The SELECT also yields
- * every still-unresolved repo import (direct=0); those are re-tried only
- * when their module plausibly names a file the change added, so a new
- * util.ts satisfies an old `import './util'` without a full pass. */
+/* Every import on the open branch, or — scoped — only the ones the change
+ * reaches (importing file, target file, or dangling target in
+ * temp.scope_files). The scoped SELECT also yields every still-unresolved
+ * repo import (direct=0); those are re-tried only when their module
+ * plausibly names a file the change added, so a new util.ts satisfies an
+ * old `import './util'` without a full pass. */
 static void resolve_imports_run(Cg *cg, bool scoped) {
     /* Load manifests once */
     Manifest js_m = {0}, go_m = {0}, py_m = {0}, rs_m = {0};
@@ -970,11 +974,12 @@ static int load_imports(Cg *cg, long file_id, ImpCache *out, int cap) {
     return n;
 }
 
-/* scoped: refs in changed files, plus refs anywhere that name a symbol the
- * change added or removed (a purge gives a file's symbols new rowids, so
- * every caller of them must be re-pointed; a new definition can change
- * which candidate a same-dir or unique tier picks elsewhere). Counters
- * are then recomputed from the table, not from the partial pass. */
+/* Every call ref on the open branch, or — scoped — refs in changed files
+ * plus refs anywhere that name a symbol the change added or removed (a purge
+ * gives a file's symbols new rowids, so every caller of them must be
+ * re-pointed; a new definition can change which candidate a same-dir or
+ * unique tier picks elsewhere). Counters are then recomputed from the table,
+ * not from the partial pass. */
 static void resolve_refs_run(Cg *cg, bool scoped) {
     sqlite3_stmt *sel = cg_prep(cg, scoped ?
         "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
@@ -1203,8 +1208,9 @@ static bool near_miss(Cg *cg, const char *name, char *out, size_t cap) {
     return out[0] != 0;
 }
 
-/* Calibration: does this file's accounted-ref share pass the floor?
- * A file with too many unknown refs has a parser problem, not code problems. */
+/* Calibration gate: is this file's share of accounted refs close enough to
+ * the median for its language on this branch? A file with too many unknown
+ * refs has a parser problem, and findings from it would be noise. */
 bool file_calibrated(Cg *cg, long file_id, const char *lang) {
     /* count total and unknown refs for this file */
     sqlite3_stmt *q = cg_prep(cg,
@@ -1556,7 +1562,8 @@ static int hygiene_file(Cg *cg, const char *path, long file_id,
     return *n;
 }
 
-/* Delta hygiene: only for a single file (the changed file) */
+/* Delta hygiene: one changed file, on the open branch. A path the graph has
+ * never indexed yields no findings rather than an error. */
 int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out) {
     *out = NULL;
     int n = 0, cap = 0;
@@ -1573,7 +1580,8 @@ int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out) {
     return n;
 }
 
-/* Full-repo hygiene sweep */
+/* The same sweep over the open branch, path-ordered, stopping at the first
+ * file that carries the count past limit */
 int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit) {
     *out = NULL;
     int n = 0, cap = 0;

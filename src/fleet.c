@@ -1025,7 +1025,8 @@ int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
  * feature manager's worktree. Refused until the branch tip says the task
  * qualified — a merge of unproven work is what the hierarchy exists to
  * prevent. A conflict leaves the feature worktree as it was (or, with
- * --keep, mid-merge for the manager to resolve). */
+ * --keep, mid-merge for the manager to resolve). On success the wave's
+ * memories move up with its code, so the base keeps what was learned. */
 int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
                    bool keep, bool json) {
     Lifecycle c;
@@ -1226,9 +1227,10 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                         bool json);
 
 /* cg fleet land <feature>: the feature branch into local main, behind the
- * gates. Red means main is reset to where it was — landing is all or
- * nothing, and a half-landed main is the one state nobody can reason
- * about. Green opens the pull request when the policy says auto. */
+ * test and lint gates. Red means main is reset to where it was — landing is
+ * all or nothing, and a half-landed main is the one state nobody can reason
+ * about. Green opens the pull request when the policy says auto, and prints
+ * the exact commands when it says manual. */
 int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
     Lifecycle c;
     if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
@@ -1433,9 +1435,10 @@ static int run_in(const char *tree, const char *cmd, StrBuf *out) {
     return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
 }
 
-/* the pull request body: the feature's title, its task list, and Jev's
- * read on whether the branch is ready, written to .codegraph/fleet so the
- * printed gh command is runnable as-is */
+/* the pull request body: the feature's title, its task list, and Jev's read
+ * on whether the branch is ready, written to .codegraph/fleet so the printed
+ * gh command is runnable as-is. With no Jev answer the body simply leaves the
+ * readiness line out — it never blocks the pull request */
 static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
                           char *title, size_t tcap, char *bodypath,
                           size_t bcap) {
@@ -1503,8 +1506,10 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
     sb_free(&b);
 }
 
-/* Open the feature's pull request against <remote>/<main>, or print the
- * exact commands when gh is absent or the caller asked for a dry run.
+/* Open the feature's pull request against <remote>/<main>: push the branch,
+ * then create it with the generated body. A pull request already open on the
+ * branch is reported rather than duplicated. When gh is absent or the caller
+ * asked for a dry run, the two exact commands are printed instead of run.
  * jb receives one JSON object (when json), else text goes to stdout. */
 static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                         bool json) {

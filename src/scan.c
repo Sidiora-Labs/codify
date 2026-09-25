@@ -14,7 +14,8 @@
 #define MAX_FTS_BYTES  (2L * 1024 * 1024)   /* larger: no body full-text */
 #define RING_CAP 256
 /* files written per write transaction: small enough that a waiting agent
- * command gets the lock within a fraction of a second, large enough that a
+ * command gets the write lock within a fraction of a second and a stalled
+ * pass keeps every chunk it wrote before the stall, large enough that a
  * full index is not dominated by commit overhead */
 #define INDEX_CHUNK 96
 
@@ -983,8 +984,9 @@ static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
  * targets, only rows under those paths are diffed, so files elsewhere are
  * never mistaken for removals. Only the open branch's rows are diffed and
  * written: a sibling worktree's slice of the graph is invisible here, so
- * its files can never look removed. Adds to st; returns 0, or -1 when the
- * database stayed busy (a stall). */
+ * its files can never look removed — though a file byte-identical to one
+ * already parsed there is copied rather than parsed again. Adds to st;
+ * returns 0, or -1 when the database stayed busy (a stall). */
 static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                       char **targets, int ntargets, IndexStats *st) {
     Ignore ig;

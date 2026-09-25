@@ -262,7 +262,8 @@ void memory_json(const Memory *m, StrBuf *b) {
     sb_putc(b, '}');
 }
 
-/* one-line form for hints under a task: first line of the body, truncated */
+/* one-line form for hints under a task: id, type, Jev's class, and the first
+ * line of the body, cut on a character boundary so UTF-8 survives */
 void memory_print_brief(const Memory *m, const char *indent) {
     size_t n = strcspn(m->body, "\n");
     bool cut = false;
@@ -398,9 +399,9 @@ int memory_supersede(Cg *cg, long old_id, long new_id) {
     return 0;
 }
 
-/* Memories anchored to a file, or to a symbol defined in it. Retrieval by
- * proximity complements full text: "what was decided about this file" is a
- * different question from "what mentions this word". */
+/* Memories anchored to a file, or to a symbol defined in it, superseded ones
+ * last. Retrieval by proximity complements full text: "what was decided about
+ * this file" is a different question from "what mentions this word". */
 int cmd_recall_near(Cg *cg, const char *path, int limit, bool json) {
     char scope[256];
     const char *sb = mem_scope(cg, scope, sizeof scope);
@@ -589,7 +590,9 @@ static void classify_store(Cg *cg, const Memory *m) {
     sqlite3_finalize(st);
 }
 
-/* -1 when the selector is unusable (the reason is on stderr) */
+/* Rows for a classify selector: a memory id, --all, or anything else (the
+ * unclassified ones). *out is malloc'd and each Memory is the caller's to
+ * clear. -1 when the selector is unusable — the reason is on stderr. */
 static int classify_select(Cg *cg, const char *sel, int limit, Memory **out) {
     *out = NULL;
     long id = 0;
@@ -705,7 +708,8 @@ int cmd_memory_classify(Cg *cg, const char *sel, int limit, bool json) {
  * branch is about to disappear, and what it learned has to outlive it —
  * otherwise the next agent on the base repeats the reasoning. Rows the base
  * already holds word for word are dropped instead of duplicated. Returns the
- * number promoted, or -1 if `from` is not a branch name. */
+ * number moved, 0 when from and to are the same branch, -1 when either name
+ * is empty. */
 int memory_promote_branch(Cg *cg, const char *from, const char *to) {
     if (!from || !from[0] || !to || !to[0]) return -1;
     if (strcmp(from, to) == 0) return 0;

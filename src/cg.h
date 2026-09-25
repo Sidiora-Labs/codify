@@ -200,9 +200,10 @@ typedef struct {
     long scope_branch;
 } Cg;
 
-/* Exit status when the database stayed busy past lock_wait_ms. Distinct from
- * the generic 2 so an orchestrator can retry instead of treating the task as
- * broken; 75 is EX_TEMPFAIL from sysexits. */
+/* Exit status when the database stayed busy past lock_wait_ms: nothing was
+ * written, so the command is safe to run again. Distinct from the generic 2
+ * so an orchestrator retries instead of treating the task as broken; 75 is
+ * EX_TEMPFAIL from sysexits. */
 #define CG_EXIT_BUSY 75
 
 int  cg_open(Cg *cg, bool create);                 /* finds root upward */
@@ -221,8 +222,10 @@ void cg_close(Cg *cg);
 int  cg_find_root(char *out, size_t cap);
 /* resolve from an explicit directory (LSP/MCP roots, hooks) */
 int  cg_find_root_at(const char *start, char *out, size_t cap);
-/* Both halves: the tree to operate on and the shared project. They differ
- * only for a linked worktree that joined an initialized repository. */
+/* Both halves: root is the tree to operate on, shared the project whose
+ * .codegraph holds the graph. They differ only for a linked worktree that
+ * joined an initialized main worktree. Returns 0, or -1 when no project
+ * owns <start>. */
 int  cg_find_project_at(const char *start, char *root, char *shared,
                         size_t cap);
 /* meta key scoped to the open branch ("last_index_at:3"): freshness and
@@ -423,13 +426,16 @@ int cmd_checkout(Cg *cg, const char *id, bool force);
 int cmd_changes (Cg *cg, int limit, bool json); /* impact of uncommitted edits */
 
 /* history probes for `cg spec trace` / graph-verified task completion */
-/* commits whose message contains needle; fills malloc'd arrays, returns n */
+/* commits whose message contains needle, newest first, over the whole
+ * snapshot chain from HEAD; ids, msgs and dates are malloc'd for the
+ * caller. Returns n. */
 int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,
                      long **dates);
 /* unique repo-relative paths changed in worktree-vs-HEAD, plus by commits
  * whose message contains needle (needle may be NULL); returns count */
 int vcs_changed_paths(Cg *cg, const char *needle, char ***out);
-/* commits whose snapshot changed <path>, newest first — provenance for why */
+/* commits whose snapshot changed <path>, newest first — provenance for why.
+ * ids and msgs, their strings, and dates are all malloc'd for the caller. */
 int vcs_commits_for_path(Cg *cg, const char *path, int limit, char ***ids,
                          char ***msgs, long **dates);
 
@@ -737,14 +743,16 @@ int  jev_question_score(JevQuestion *q, const char *name,
                         const char *instructions, const char *const *levels,
                         int n);
 void jev_question_free(JevQuestion *q);
-/* The canonical request body: sorted question names and criteria keys,
- * compact, state verbatim. */
+/* The canonical request body: question names and criteria keys sorted, state
+ * verbatim but trimmed. The same ask serializes to the same bytes every
+ * time, which is what makes jev.log comparable across runs. */
 void jev_request_json(const char *model, const char *state_json,
                       const JevQuestion *qs, int nq, StrBuf *out);
 /* Ask Jev. Returns JEV_OK with answers, or JEV_E* with out->error filled
- * (key or curl missing; the request failed after retries on 429 and 529;
- * the response could not be read). Every call is logged to
- * <shared>/.codegraph/jev.log; cg may be NULL (no project, no log). */
+ * (key or curl missing; the request kept failing across retries; the
+ * response could not be read). Transport failures and 429/529 back off and
+ * retry. Every call is logged to <shared>/.codegraph/jev.log; cg may be
+ * NULL (no project, no log). Release out with jev_result_free either way. */
 int  jev_ask(Cg *cg, const char *state_json, const JevQuestion *qs, int nq,
              JevResult *out);
 /* Same, with a complete {"model","questions","state"} body; a missing
@@ -816,7 +824,7 @@ bool git_available(const Cg *cg);
 /* Where tree's HEAD points, read from the git files themselves so opening
  * the graph never spawns a process. branch gets the short ref name, or
  * "(detached)"; sha gets the commit when it could be found, else "".
- * false when tree is not a git worktree. */
+ * false when tree is not a git worktree, with both left empty. */
 bool git_head(const char *tree, char *branch, size_t bcap, char *sha,
               size_t scap);
 /* For a linked worktree (tree/.git is a file), the main worktree it
@@ -826,8 +834,9 @@ bool git_worktree_main(const char *tree, char *main_out, size_t cap);
  * branch never seen before. 0 ok; -1 when the registry could not be
  * written, leaving branch_id 0. */
 int  cg_branch_resolve(Cg *cg);
-/* Upsert one branch row; base NULL keeps the stored base. Returns its id,
- * or -1 when the write failed. */
+/* Upsert one branch row, keyed by name, so re-registering a branch moves its
+ * worktree and head instead of adding a row; base NULL keeps the stored base.
+ * Returns its id, or -1 when the write failed. */
 long branch_register(Cg *cg, const char *name, const char *worktree,
                      const char *head, const char *base);
 int  cmd_branches(Cg *cg, int argc, char **argv, bool json);
@@ -836,10 +845,12 @@ int  cmd_branches(Cg *cg, int argc, char **argv, bool json);
  * git could not be started. */
 int  git_run(const char *tree, const char *args, StrBuf *out);
 bool git_branch_exists(const char *tree, const char *branch);
-/* Make sure <path> is a worktree of <tree> on <branch>: reuse it when it is
- * there, else add it, creating the branch from <base> when it does not
- * exist yet. *created says whether the worktree was added; *branch_created
- * whether the branch was. Returns 0, or -1 with git's words in err. */
+/* Make sure <path> is a worktree of <tree> on <branch>: an existing <path>
+ * is reused as it stands — nothing here checks it is really on <branch>, so
+ * the caller must — else it is added, creating the branch from <base> when
+ * it does not exist yet. *created says whether the worktree was added;
+ * *branch_created whether the branch was. Returns 0, or -1 with git's words
+ * in err. */
 int  git_worktree_add(const char *tree, const char *path, const char *branch,
                       const char *base, bool *created, bool *branch_created,
                       StrBuf *err);

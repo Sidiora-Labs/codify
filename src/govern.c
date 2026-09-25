@@ -402,8 +402,9 @@ static void brief_branches(Cg *cg, StrBuf *b, bool json) {
 
 /* Everything a session needs before its first real decision, in one call.
  * Without this an agent spends four or five round trips reassembling state
- * it had yesterday. Inside a fleet the brief also says who this agent is
- * and whom it reports to, so a spawned worker never has to guess. */
+ * it had yesterday. In a shared graph the brief also names the branches
+ * indexed beside this one, and inside a fleet who this agent is and whom it
+ * reports to, so a spawned worker never has to guess. */
 int cmd_brief(Cg *cg, bool json)
 {
     StrBuf b; sb_init(&b);
@@ -710,9 +711,10 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
 
 /* ---------------- review ---------------- */
 
-/* The missing step between "implemented" and "done": the change, paired with
- * the criteria it claims to satisfy and the callers it puts at risk. One call
- * gives a reviewing agent everything it needs without reading the diff twice. */
+/* The missing step between "implemented" and "done": the change, the criteria
+ * it claims to satisfy, the callers outside it that are now at risk, and the
+ * grounding, contract, and hygiene findings it introduced. One call, over the
+ * branch in front of you, so a reviewing agent never reads the diff twice. */
 int cmd_review(Cg *cg, bool json)
 {
     bool is_current = false;
@@ -1207,7 +1209,9 @@ static void resume_json_field(StrBuf *b, const char *name, const char *v) {
 
 /* The other half of handoff: everything a fresh session needs to pick a task
  * back up — the task packet, the latest live handoff, task-scoped memories,
- * the dirty paths, and who (if anyone) holds the lease. */
+ * the dirty paths, and who (if anyone) holds the lease. With prompt, the text
+ * form closes on the commands that finish the work, including the hand-up
+ * this agent's fleet role calls for. */
 int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)
 {
     char *tag = spec_resolve_task(task, cg_agent_name(NULL));

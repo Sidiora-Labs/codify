@@ -3124,8 +3124,9 @@ static int qualified_path_score(const char *qualified, const char *path) {
     return score;
 }
 
-/* Resolve one graph name. Qualified fallback refuses an unresolved tie
- * instead of silently attributing the task to an arbitrary definition. */
+/* Resolve one graph name on the branch being qualified. A qualified name
+ * refuses an unresolved tie instead of silently attributing the task to an
+ * arbitrary definition; an unqualified one takes the first row. */
 static int graph_symbol_named(Cg *g, const char *lookup,
                               const char *qualified, char *path, size_t pcap,
                               int *line, char *kind, size_t kcap, int *refs) {
@@ -3207,8 +3208,9 @@ static bool pattern_hit(const char *pat, char **paths, int np) {
     return false;
 }
 
-/* check a task's declared `symbols` and `touches` against the code graph
- * and snapshot history; prints one line per check, returns failures */
+/* check a task's declared `symbols` and `touches` against the code graph and
+ * the change evidence — the worktree, Codify snapshots, and the git commits
+ * tagged with the task; prints one line per check, returns the failures */
 static int spec_verify_task(Spec *s, const char *id) {
     char sec[300];
     task_sec(sec, sizeof sec, id);

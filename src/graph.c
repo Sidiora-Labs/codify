@@ -303,10 +303,11 @@ static void doc_render(StrBuf *b, const SymDoc *d) {
     if (d->cut) sb_puts(b, "  ┊ … (doc truncated)\n");
 }
 
-/* Walk every baselined doc anchor; report the stale ones. Stale is
- * derived on the spot — the stored baseline against the current bytes —
- * so nothing here can go out of date. Rows come ordered by path, which
- * lets one file read serve all of a file's anchors. */
+/* Walk every baselined doc anchor; report the stale ones. Stale is derived
+ * on the spot — the stored baseline against the file's bytes right now — so
+ * nothing here can go out of date. Rows arrive grouped by branch and then
+ * by path, so one tree lookup and one file read serve every anchor in a
+ * file. */
 int anchor_stale(Cg *cg,
                  void (*cb)(void *u, const char *path, int line,
                             const char *sym, int sym_line),
@@ -369,7 +370,7 @@ static void doc_json(StrBuf *b, const SymDoc *d) {
     if (d->cut)   sb_puts(b, ",\"doc_truncated\":true");
 }
 
-/* exact-name definitions, deterministically ordered */
+/* exact-name definitions on the branch in scope, deterministically ordered */
 static int defs_named(Cg *cg, const char *name, SymRow *out, int cap) {
     sqlite3_stmt *st = prep_scoped(cg,
         "SELECT " SYM_COLS " FROM symbols s JOIN files f ON f.id=s.file_id "
@@ -384,7 +385,8 @@ static int defs_named(Cg *cg, const char *name, SymRow *out, int cap) {
     return n;
 }
 
-/* find symbols matching a name: exact first, then trigram/LIKE */
+/* name -> symbols in tiers: an exact definition short-circuits the rest,
+ * else trigram FTS, or LIKE for a query too short to trigram */
 static int find_symbols(Cg *cg, const char *q, SymRow *out, int cap) {
     int n = defs_named(cg, q, out, cap);
     if (n > 0) return n;
@@ -420,9 +422,10 @@ static int find_symbols(Cg *cg, const char *q, SymRow *out, int cap) {
     return n;
 }
 
-/* every tier, no exact short-circuit: exact hits first, then trigram/LIKE
- * additions deduped by id. The fusion path scores tiers against each other
- * instead of letting one exact hit suppress every substring candidate. */
+/* every tier, no exact short-circuit: exact hits first, then trigram or
+ * LIKE additions deduped by id and fully ordered, so two runs hand the
+ * fusion path the same input. It scores tiers against each other instead
+ * of letting one exact hit suppress every substring candidate. */
 static int find_symbols_all(Cg *cg, const char *q, SymRow *out, int cap) {
     int n = defs_named(cg, q, out, cap);
     if (n >= cap) return n;
@@ -584,9 +587,10 @@ static int resolve_best(Cg *cg, long from_fid, const char *from_path,
     return best;
 }
 
-/* callers of def: enclosing function/method symbols of refs to its name.
- * With several same-named defs, keep only refs whose own file resolves to
- * this def, so a fixture's `find` no longer claims unrelated callers. */
+/* callers of def: the enclosing function or method of every ref that
+ * targets it. Refs resolved at index time are trusted first, so with
+ * several same-named defs a fixture's `find` no longer claims unrelated
+ * callers; only refs that never resolved fall back to name equality. */
 static int callers_of(Cg *cg, const SymRow *def, SymRow *out, int cap) {
     int n = 0;
 
@@ -653,8 +657,9 @@ static int sym_path_line_cmp(const void *a, const void *b) {
     return strcmp(x->name, y->name);
 }
 
-/* callees: names referenced inside symbol id, each resolved to the def the
- * referencing file most plausibly targets — not the repo-wide lowest rowid */
+/* callees: the defs referenced inside symbol id. Index-time targets come
+ * first; a name that never resolved is pointed at the def this file most
+ * plausibly meant — not the repo-wide lowest rowid. */
 static int callees_of(Cg *cg, long sym_id, SymRow *out, int cap) {
     int n = 0;
 
@@ -746,8 +751,9 @@ static int ref_count(Cg *cg, const char *name) {
     return n;
 }
 
-/* refs that plausibly target this def: count resolved refs (target_id)
- * plus unresolved refs that fall back to name equality. */
+/* refs that plausibly target this def: every ref resolved to it, plus —
+ * only when it is the sole definition of the name — the refs that never
+ * resolved, which no rival def could claim either. */
 static int ref_count_resolved(Cg *cg, const SymRow *def) {
     int total = 0;
     /* resolved refs targeting this symbol */
@@ -966,7 +972,8 @@ static void json_sym(Cg *cg, StrBuf *b, const SymRow *r) {
     sb_putc(b, '}');
 }
 
-/* compact repeat form: enough to jump to the code without restating it */
+/* compact repeat form: enough to jump to the code without restating it.
+ * The branch is named only when the answer spans branches. */
 static void json_sym_compact(Cg *cg, StrBuf *b, const SymRow *r) {
     char at[1100], bn[256];
     snprintf(at, sizeof at, "%s:%d", r->path, r->line);
@@ -994,8 +1001,9 @@ static void seen_add(SeenSet *s, const char *name) {
         snprintf(s->v[s->n++], sizeof s->v[0], "%s", name);
 }
 
-/* first line of the file containing tok, case-insensitive; 0 when absent —
- * body FTS matches whole files, agents need a line to jump to */
+/* first line containing tok, read from that branch's own worktree,
+ * case-insensitive; 0 when absent — body FTS matches whole files, and an
+ * agent needs a line to jump to */
 static int body_first_line(Cg *cg, long branch_id, const char *rel,
                            const char *tok) {
     char tree[4096], abs[4900];
@@ -1207,8 +1215,9 @@ static int impact_bfs(Cg *cg, const SymRow *root, int depth, bool up,
     return n;
 }
 
-/* one BFS direction as compact JSON nodes, byte-budgeted with an
- * omission marker so agents always see how much was cut */
+/* one BFS direction as compact JSON nodes, byte-budgeted: at the cap the
+ * array ends with {"omitted":N}, so an agent always knows how much of the
+ * radius it is not being shown */
 static void impact_json_dir(Cg *cg, StrBuf *b, const char *key, const INode *v,
                             int n, size_t cap) {
     if (n == 0) return;                     /* omit empty arrays entirely */
@@ -1655,12 +1664,12 @@ static void anch_stale_cb(void *u, const char *path, int line,
     a->n++;
 }
 
-/* Anchor health for the repository: how much is covered, which docs have
- * gone stale, and — the point of the command — which uncovered symbols to
- * anchor first. Ranking is a coordination score, fan-out x extent x
- * distinct referencing files, deliberately not raw inbound reference
- * count: that metric ranks the sb_puts tail highest, and those are
- * exactly the symbols that need no anchor. */
+/* Anchor health for the branch in scope: how much is covered, which docs
+ * have gone stale, and — the point of the command — which uncovered
+ * symbols to anchor first. Ranking is a coordination score, fan-out x
+ * extent x distinct referencing files, deliberately not raw inbound
+ * reference count: that metric ranks the sb_puts tail highest, and those
+ * are exactly the symbols that need no anchor. */
 int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json) {
     long nsym = 0, nanch = 0, nunc = 0;
     sqlite3_stmt *q = prep_scoped(cg,
@@ -2119,11 +2128,10 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
 
 /* ---------------- show: one symbol, not its whole file ---------------- */
 
-/* Agents burn context reading a 2000-line file to see one function. `cg show`
- * returns exactly the symbol body the graph already knows the bounds of. */
-/* Resolve "path:line" to the symbol whose body encloses that line. Editors
- * and agents hold a cursor, not a name, so this is the position-first door
- * into the graph — the same lookup `cg lsp` answers over the wire. */
+/* Resolve "path:line" to the innermost symbol whose body encloses that
+ * line. Editors and agents hold a cursor, not a name, so this is the
+ * position-first door into the graph — the same lookup `cg lsp` answers
+ * over the wire. */
 static int symbols_at_position(Cg *cg, const char *path, int line,
                                SymRow *out, int cap) {
     sqlite3_stmt *st = prep_scoped(cg,
@@ -2149,6 +2157,9 @@ int graph_symbol_at(Cg *cg, const char *path, int line, char *name,
     return 0;
 }
 
+/* Agents burn context reading a 2000-line file to see one function. `cg show`
+ * returns exactly the symbol body the graph already knows the bounds of, and
+ * takes a "path:line" cursor as readily as a name. */
 int cmd_show(Cg *cg, const char *name, bool full, bool json) {
     SymRow rows[8];
     int n = 0;
@@ -2367,9 +2378,10 @@ int cmd_test_impact(Cg *cg, const char *name, bool json) {
 /* ---------------- why: provenance for a symbol ---------------- */
 
 /* Codify already stores what the code is, what changed it, which task owned
- * that change, and what was decided along the way. `cg why` is the join:
- * symbol -> definition -> commits that touched its file -> spec tasks tagged
- * on those commits -> memories anchored to the symbol or those tasks. */
+ * that change, and what was decided along the way; no single table holds the
+ * answer. `cg why` is the join: symbol -> definition -> commits that touched
+ * its file -> the spec tasks tagged on those commits -> memories anchored to
+ * the symbol or to those tasks. */
 int cmd_why(Cg *cg, const char *name, bool json) {
     SymRow rows[4];
     int n = find_symbols(cg, name, rows, 4);
