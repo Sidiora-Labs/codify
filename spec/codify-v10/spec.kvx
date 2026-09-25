@@ -112,7 +112,7 @@ reqs       = ["1.1", "1.2", "1.5"]
 
 [task.1.4]
 title      = "Extension refresh coalescing and identity fix"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["1.1"]
 symbols    = ["scheduleRefresh", "runRefresh"]
@@ -131,11 +131,11 @@ status  = "pending"
 
 [task.2.1]
 title      = "Roles, hierarchy config, and identity"
-status     = "pending"
+status     = "in_progress"
 wave       = 3
 requires   = ["1.3"]
 symbols    = ["hier_load", "cg_agent_role", "cg_agent_parent", "cmd_fleet"]
-touches    = ["src/fleet.c", "src/util.c", "src/cg.h", "src/main.c", "src/spec.c", "spec/workflow.kvx", "tests/integration/26_fleet.sh"]
+touches    = ["src/fleet.c", "src/util.c", "src/cg.h", "src/main.c", "src/spec.c", "src/db.c", "src/govern.c", "spec/workflow.kvx", "tests/integration/26_fleet.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/26_fleet.sh roles"
 do_1       = "Parse [hierarchy] and [role.*] from workflow.kvx: role names, branch templates, base branch, remote, test and lint gates, PR policy."
 do_2       = "Extend agent identity with CG_ROLE and CG_PARENT and surface them in spec status, claims, attempts, and brief."

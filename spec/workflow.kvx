@@ -16,6 +16,38 @@ driver = "claude"
 max    = 10
 ttl    = 3600
 
+# The fleet: one repository, a tree of agents. Main Gideon owns the task
+# list and merges pull requests; a feature manager owns one feature branch
+# and reports to Gideon; a wave worker owns one wave on a branch cut from the
+# feature branch. Work merges upward: wave into feature, feature into local
+# main, main out through a pull request once both gates are green.
+[hierarchy]
+enabled    = true
+main       = "main"
+remote     = "origin"
+worktrees  = ".codegraph/worktrees"
+test_gate  = "make test"
+lint_gate  = "make cg CFLAGS='-O2 -Werror'"
+pr         = "auto"
+checkpoint = "manual"
+
+[role.main]
+title  = "Main Gideon"
+agent  = "gideon"
+branch = "{main}"
+
+[role.feature]
+title  = "Feature Manager"
+agent  = "fm-{feature}"
+branch = "feature/{feature}"
+base   = "{main}"
+
+[role.worker]
+title  = "Wave Worker"
+agent  = "w-{feature}-{wave}"
+branch = "wave/{feature}/{wave}"
+base   = "feature/{feature}"
+
 [principle]
 task_driven     = "Work is driven by the active feature's task list, in wave order."
 verified_done   = "A task is done only when its verify_cmd and graph checks pass. Trust the work, not the report."

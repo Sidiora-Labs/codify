@@ -221,6 +221,23 @@ const char *cg_agent_name(const char *flag) {
     return "agent";
 }
 
+/* The fleet half of identity. A role (main, feature, worker) and the agent
+ * this one reports to travel in the environment exactly as the name does,
+ * because the orchestrator sets them once per spawned process and every cg
+ * call that process makes must agree. NULL, not "", when unset: outside a
+ * fleet there is no role, and code that records identity keys off that. */
+const char *cg_agent_role(const char *flag) {
+    if (flag && flag[0]) return flag;
+    const char *env = getenv("CG_ROLE");
+    return env && env[0] ? env : NULL;
+}
+
+const char *cg_agent_parent(const char *flag) {
+    if (flag && flag[0]) return flag;
+    const char *env = getenv("CG_PARENT");
+    return env && env[0] ? env : NULL;
+}
+
 /* ---------------- ignore rules ---------------- */
 
 static const char *DEFAULT_IGNORES[] = {

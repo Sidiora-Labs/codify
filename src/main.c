@@ -103,6 +103,11 @@ static void usage(void) {
 "                           tasks and drive one agent per slot; --driver\n"
 "                           codex|claude|custom, --dry-run, --max-fail K,\n"
 "                           --agent-prefix P\n"
+"  fleet roles              the hierarchy from [hierarchy] and [role.*]:\n"
+"                           branch templates, base, remote, gates, PR policy\n"
+"  fleet status             who is alive in which role, on which task\n"
+"  fleet plan [-f F]        which manager owns the feature and which worker\n"
+"                           owns each wave, planned and live\n"
 "\n"
 "most query commands accept --json for machine-readable output\n",
         CG_VERSION);
@@ -380,6 +385,8 @@ int main(int argc, char **argv) {
         rc = cmd_watch(&cg, &si, deb > 0 ? deb : 300);
     } else if (strcmp(cmd, "brief") == 0) {
         rc = cmd_brief(&cg, json);
+    } else if (strcmp(cmd, "fleet") == 0) {
+        rc = cmd_fleet(&cg, argc, argv, json);
     } else if (strcmp(cmd, "review") == 0) {
         index_fresh(&cg, &si);                  /* review needs a fresh graph */
         rc = cmd_review(&cg, json);

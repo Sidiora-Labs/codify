@@ -25,7 +25,7 @@
     - Batch runtime_workspace_revision into one write transaction under the index gate and skip the hash when the walk is unchanged.
     - Make watch and lsp honor the gate so they coalesce instead of racing hooks.
     - _Requirements: 1.1, 1.2, 1.5_
-  - [-] 1.4 Extension refresh coalescing and identity fix
+  - [x] 1.4 Extension refresh coalescing and identity fix
     - Collapse afterMutation, watcher, and poll refreshes into one in-flight promise with a trailing debounce.
     - Stop watching graph.db for the extension's own writes; watch spec files and the dirty marker instead; poll at a low cadence.
     - Run spec trace only on demand and route every refresh through cg sync with a freshness window.
@@ -35,7 +35,7 @@
 ## Main Gideon, feature managers, wave workers
 
 - [ ] 2. Hierarchical fleet workflow
-  - [ ] 2.1 Roles, hierarchy config, and identity
+  - [-] 2.1 Roles, hierarchy config, and identity
     - Parse [hierarchy] and [role.*] from workflow.kvx: role names, branch templates, base branch, remote, test and lint gates, PR policy.
     - Extend agent identity with CG_ROLE and CG_PARENT and surface them in spec status, claims, attempts, and brief.
     - Add cg fleet status, cg fleet roles, and cg fleet plan that shows which manager owns which feature and which worker owns which wave.

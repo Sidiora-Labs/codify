@@ -1089,7 +1089,8 @@ static const char *spec_attempt_session(const char *session) {
 }
 
 /* Begin one fenced execution attempt. Must run inside BEGIN IMMEDIATE so the
- * fence and the task's single running attempt advance atomically. */
+ * fence, the task's single running attempt, and the agent's fleet identity
+ * advance atomically. */
 static int spec_attempt_begin(Cg *g, const char *tag, const char *agent,
                               const char *host, const char *session, long now,
                               long ttl_min, SpecAttempt *out) {
@@ -1114,6 +1115,9 @@ static int spec_attempt_begin(Cg *g, const char *tag, const char *agent,
     sqlite3_bind_text(old, 1, tag, -1, SQLITE_TRANSIENT);
     sqlite3_step(old);
     sqlite3_finalize(old);
+    /* the fleet registry rides the same transaction as the attempt, so a
+     * worker's role and parent are visible the moment its claim is */
+    fleet_identity_record(g);
 
     sqlite3_stmt *ins = cg_prep(g,
         "INSERT INTO attempts(attempt_id,task,agent,host,session,fence,state,"
@@ -1134,7 +1138,9 @@ static int spec_attempt_begin(Cg *g, const char *tag, const char *agent,
 }
 
 /* Renew only the exact live attempt generation. An old process cannot keep a
- * reclaimed task alive because both its attempt id and fence stop matching. */
+ * reclaimed task alive because both its attempt id and fence stop matching.
+ * A renewal also refreshes the agent's fleet registry row, so "seen" tracks
+ * the heartbeat and a silent worker ages out with its attempt. */
 static int spec_attempt_heartbeat(Cg *g, const char *tag, const char *agent,
                                   const char *attempt_id, long fence,
                                   long ttl_min, SpecAttempt *out) {
@@ -1155,6 +1161,7 @@ static int spec_attempt_heartbeat(Cg *g, const char *tag, const char *agent,
     bool renewed = sqlite3_changes(g->db) == 1;
     sqlite3_finalize(up);
     if (!renewed) return 1;
+    fleet_identity_record(g);
 
     sqlite3_stmt *lease = cg_prep(g,
         "UPDATE leases SET expires=? WHERE task=? AND agent=?");
@@ -1915,11 +1922,15 @@ static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
     Cg g;
     if (!memory_open_quiet(&g)) return 0;
     spec_attempt_sweep(&g);
+    /* the agents registry says which fleet role holds the attempt; an
+     * agent outside a fleet simply has no role */
     sqlite3_stmt *st = cg_prep(&g,
-        "SELECT task,agent,attempt_id,fence,ifnull(host,''),"
-        "ifnull(session,''),expires FROM attempts "
-        "WHERE task LIKE ?||'/%' AND state='running' "
-        "AND expires>strftime('%s','now') ORDER BY task");
+        "SELECT t.task,t.agent,t.attempt_id,t.fence,ifnull(t.host,''),"
+        "ifnull(t.session,''),t.expires,ifnull(a.role,''),"
+        "ifnull(a.parent,'') FROM attempts t "
+        "LEFT JOIN agents a ON a.agent=t.agent "
+        "WHERE t.task LIKE ?||'/%' AND t.state='running' "
+        "AND t.expires>strftime('%s','now') ORDER BY t.task");
     sqlite3_bind_text(st, 1, s->feature, -1, SQLITE_STATIC);
     int n = 0;
     long now = (long)time(NULL);
@@ -1931,20 +1942,33 @@ static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
         const char *host = (const char *)sqlite3_column_text(st, 4);
         const char *session = (const char *)sqlite3_column_text(st, 5);
         long exp = (long)sqlite3_column_int64(st, 6);
+        const char *role = (const char *)sqlite3_column_text(st, 7);
+        const char *parent = (const char *)sqlite3_column_text(st, 8);
         const char *id = strrchr(task, '/');
         id = id ? id + 1 : task;
         if (json) {
             if (n) sb_putc(b, ',');
             sb_puts(b, "{\"id\":");     sb_json_str(b, id);
             sb_puts(b, ",\"agent\":");  sb_json_str(b, agent);
+            sb_puts(b, ",\"role\":");
+            if (role[0]) sb_json_str(b, role); else sb_puts(b, "null");
+            sb_puts(b, ",\"parent\":");
+            if (parent[0]) sb_json_str(b, parent); else sb_puts(b, "null");
             sb_puts(b, ",\"attempt_id\":"); sb_json_str(b, attempt);
             sb_printf(b, ",\"fence\":%ld,\"host\":", fence);
             sb_json_str(b, host);
             sb_puts(b, ",\"session\":"); sb_json_str(b, session);
             sb_printf(b, ",\"expires_in_min\":%ld}", (exp - now + 59) / 60);
         } else {
+            char who[400];
+            if (role[0] && parent[0])
+                snprintf(who, sizeof who, "%s [%s under %s]", agent, role, parent);
+            else if (role[0])
+                snprintf(who, sizeof who, "%s [%s]", agent, role);
+            else
+                snprintf(who, sizeof who, "%s", agent);
             sb_printf(b, "  %-8s claimed by %s (attempt %.12s, fence %ld, "
-                      "%ld min left)\n", id, agent, attempt, fence,
+                      "%ld min left)\n", id, who, attempt, fence,
                       (exp - now + 59) / 60);
         }
         n++;

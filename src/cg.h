@@ -65,6 +65,9 @@ bool  looks_binary(const char *data, size_t len);
 const char *path_ext(const char *path);
 /* agent identity: flag > $CG_AGENT > "agent"; never NULL, not malloc'd */
 const char *cg_agent_name(const char *flag);
+/* fleet identity: flag > $CG_ROLE / $CG_PARENT; NULL when unset */
+const char *cg_agent_role(const char *flag);
+const char *cg_agent_parent(const char *flag);
 
 /* ---------------- sha256 ---------------- */
 void sha256_hex(const void *data, size_t len, char out_hex[65]);
@@ -519,6 +522,37 @@ int orch_driver_argv(const char *driver, const char *extra_args,
                      const char *agent, char **av, int cap);
 
 /* ---------------- git interop (gitint.c) ---------------- */
+/* ---------------- fleet: hierarchy, identity, reports (fleet.c) -------- */
+enum { FLEET_MAIN = 0, FLEET_FEATURE = 1, FLEET_WORKER = 2, FLEET_ROLES = 3 };
+typedef struct {
+    char *name;        /* main | feature | worker */
+    char *title;       /* what the role is called in reports and prompts */
+    char *agent;       /* agent-name template: {feature}, {wave} */
+    char *branch;      /* branch template: {main}, {feature}, {wave} */
+    char *base;        /* branch the role's branch is cut from and merges into */
+} FleetRole;
+typedef struct {
+    bool configured;   /* [hierarchy] present in spec/workflow.kvx */
+    bool enabled;      /* configured and not switched off */
+    char *main_branch; /* the main role's local integration branch */
+    char *remote;      /* where pull requests go */
+    char *worktrees;   /* root for per-branch worktrees, relative to the repo */
+    char *test_gate;   /* shell command that must exit 0 before a PR opens */
+    char *lint_gate;   /* same; "" means no lint gate is configured */
+    char *pr;          /* auto: open on green; manual: print the commands */
+    char *checkpoint;  /* manual | auto: when open PRs merge */
+    FleetRole roles[FLEET_ROLES];
+    char *unknown[8];  /* [role.X] names that are none of the three */
+    int nunknown;
+} Hierarchy;
+bool hier_load(const Kvx *wf, Hierarchy *h);   /* defaults, then overrides */
+void hier_free(Hierarchy *h);
+void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
+                 long wave, char *out, size_t cap);
+int  fleet_identity_record(Cg *g);           /* no-op without CG_ROLE */
+void fleet_brief(Cg *cg, StrBuf *b, bool json);
+int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);
+
 bool git_available(const Cg *cg);
 int  cmd_git_sync(Cg *cg, int limit, bool json);
 int  git_churn_for_path(Cg *cg, const char *path);

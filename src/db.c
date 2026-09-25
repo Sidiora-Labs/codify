@@ -66,6 +66,14 @@ static const char *SCHEMA =
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_fence ON attempts(fence);"
     "CREATE INDEX IF NOT EXISTS idx_attempt_task ON attempts(task,state);"
     "CREATE INDEX IF NOT EXISTS idx_attempt_agent ON attempts(agent,state);"
+    /* agents: who is alive in which fleet role. One row per agent name,
+     * refreshed on every claim, start, heartbeat, and fleet report; the
+     * branch columns are filled by the branch lifecycle. Durable state,
+     * never dropped by a schema upgrade. */
+    "CREATE TABLE IF NOT EXISTS agents("
+    "  agent TEXT PRIMARY KEY, role TEXT, parent TEXT, feature TEXT,"
+    "  wave INTEGER, host TEXT, session TEXT, branch TEXT, worktree TEXT,"
+    "  base TEXT, seen INTEGER NOT NULL);"
     /* normalized native hook events: durable activity/evidence history */
     "CREATE TABLE IF NOT EXISTS runtime_events("
     "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL,"

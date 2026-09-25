@@ -345,7 +345,8 @@ static int brief_memories(Cg *cg, const char *task_json, Memory **out) {
 
 /* Everything a session needs before its first real decision, in one call.
  * Without this an agent spends four or five round trips reassembling state
- * it had yesterday. */
+ * it had yesterday. Inside a fleet the brief also says who this agent is
+ * and whom it reports to, so a spawned worker never has to guess. */
 int cmd_brief(Cg *cg, bool json)
 {
     StrBuf b; sb_init(&b);
@@ -378,9 +379,12 @@ int cmd_brief(Cg *cg, bool json)
             if (i) sb_putc(&b, ',');
             memory_json(&mem[i], &b);
         }
-        sb_puts(&b, "]}\n");
+        sb_puts(&b, "]");
+        fleet_brief(cg, &b, true);
+        sb_puts(&b, "}\n");
     } else {
         sb_printf(&b, "project: %s\n", cg->root);
+        fleet_brief(cg, &b, false);
         if (!have_spec) {
             sb_puts(&b, "spec: none — `cg spec new <feature>` to start one\n");
         } else if (task) {
