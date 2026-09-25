@@ -88,6 +88,17 @@ window before scheduling a sync.
 
 Reference issues with `Fixes #123` where applicable.
 
+## Release notes
+
+The changelog is generated from these subject lines, so the prefix matters. Start a subject with the area it touches — `feat:`, `fix:`, `docs:`, `guard:`, `spec:`, `graph:`, `fleet:`, and the rest — because that prefix becomes the group heading; a subject with no prefix lands under `Other`. `cg commit` appends the in-progress task as `[spec:<feature>/<id>]`, and that becomes the task reference printed beside the commit link, so leave it on the subject line. `cliff.toml` at the repository root is the reference configuration for all of it. `cg changelog` must produce exactly what git-cliff produces from that file:
+
+```sh
+cargo install git-cliff      # once
+diff <(git cliff) <(./cg changelog)
+```
+
+An empty diff is the bar. If you change the groups or the bullet shape, change `cliff.toml` and the renderer together.
+
 ## Pull request process
 
 1. Fork, branch from `main`, and make your change.

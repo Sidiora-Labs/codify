@@ -91,6 +91,14 @@ Codify under a fleet of agents: one indexer instead of fifty, a tree of agents w
 - Agent chat: real diffs and terminal output in tool cards, inline permission buttons, cancel and retry, session switching, agent-native slash commands namespaced on a collision, and a running cost for the adapters that price their turns
 - Every new panel is a zero-dependency, nonce-only CSP webview that repaints from the extension's one refresh chain — no extra polling, no watchers, and every call raced against a timeout
 
+**Changelog — generated from git**
+
+- `cg changelog` renders release notes from git history instead of the snapshot chain: a release per tag dated by the tagged commit (UTC), `[Unreleased]` for everything after the last tag, groups taken from the commit-subject prefix, and the `[spec:<feature>/<task>]` that `cg commit` appends carried onto the bullet as a task reference
+- Commit and compare links come from `git remote get-url origin`, normalised to `https://github.com/<owner>/<repo>`; a repository with no remote gets the same notes with bare short hashes and no footer links
+- `-n N` caps the release sections (`[Unreleased]` counts as one), `-o FILE` writes relative to the repository root, `--unreleased` renders only the pending section, and `--tag NAME` titles that section as a release dated today
+- `cliff.toml` at the repository root is the reference configuration, so `git cliff` and `cg changelog` are checkable against each other with a single `diff` — same header, same group names in the same order, same bullet shape, no git-cliff at runtime
+- `--snapshots`, and any project without a `.git`, keeps the old renderer with its symbol-level diffs, which is what the documentation packet and a git-less project still use
+
 **Documentation** (task 6.1)
 
 - New pages: [the sync gate](docs/sync.md), [the fleet hierarchy](docs/hierarchy.md), [the unified multi-branch graph](docs/branches.md), and [Jev decisions](docs/jev.md), each with commands, real output, and limitations
