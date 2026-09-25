@@ -343,6 +343,63 @@ static int brief_memories(Cg *cg, const char *task_json, Memory **out) {
     return nm;
 }
 
+/* Where this session stands in a fleet's branch layout: the branch it is
+ * on, what that branch was cut from, and the other branches the shared
+ * graph is currently holding rows for. An agent that does not know it is
+ * one of several worktrees writes as if it owned the tree. */
+static void brief_branches(Cg *cg, StrBuf *b, bool json) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT b.name,ifnull(b.worktree,''),ifnull(b.base,''),b.id,"
+        "(SELECT count(*) FROM files f WHERE f.branch_id=b.id) "
+        "FROM branches b ORDER BY b.name");
+    char base[256] = "", wt[4096] = "";
+    StrBuf others; sb_init(&others);
+    int nother = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *name = (const char *)sqlite3_column_text(st, 0);
+        long id = (long)sqlite3_column_int64(st, 3);
+        if (!name) continue;
+        if (id == cg->branch_id) {
+            snprintf(wt, sizeof wt, "%s",
+                     (const char *)sqlite3_column_text(st, 1));
+            snprintf(base, sizeof base, "%s",
+                     (const char *)sqlite3_column_text(st, 2));
+            continue;
+        }
+        if (json) {
+            if (nother) sb_putc(&others, ',');
+            sb_puts(&others, "{\"name\":");
+            sb_json_str(&others, name);
+            sb_puts(&others, ",\"worktree\":");
+            sb_json_str(&others, (const char *)sqlite3_column_text(st, 1));
+            sb_printf(&others, ",\"files\":%ld}",
+                      (long)sqlite3_column_int64(st, 4));
+        } else {
+            sb_printf(&others, "%s%s", nother ? ", " : "", name);
+        }
+        nother++;
+    }
+    sqlite3_finalize(st);
+    if (json) {
+        sb_puts(b, ",\"branch\":");
+        sb_json_str(b, cg->branch);
+        sb_puts(b, ",\"base\":");
+        if (base[0]) sb_json_str(b, base); else sb_puts(b, "null");
+        sb_printf(b, ",\"worktree\":%s", cg->worktree ? "true" : "false");
+        sb_puts(b, ",\"other_branches\":[");
+        if (nother) sb_puts(b, others.p);
+        sb_putc(b, ']');
+    } else {
+        sb_printf(b, "branch: %s", cg->branch);
+        if (base[0]) sb_printf(b, " (from %s)", base);
+        if (cg->worktree && wt[0]) sb_printf(b, " — worktree %s", wt);
+        sb_putc(b, '\n');
+        if (nother)
+            sb_printf(b, "other branches: %s\n", others.p);
+    }
+    sb_free(&others);
+}
+
 /* Everything a session needs before its first real decision, in one call.
  * Without this an agent spends four or five round trips reassembling state
  * it had yesterday. Inside a fleet the brief also says who this agent is
@@ -380,10 +437,12 @@ int cmd_brief(Cg *cg, bool json)
             memory_json(&mem[i], &b);
         }
         sb_puts(&b, "]");
+        brief_branches(cg, &b, true);
         fleet_brief(cg, &b, true);
         sb_puts(&b, "}\n");
     } else {
         sb_printf(&b, "project: %s\n", cg->root);
+        brief_branches(cg, &b, false);
         fleet_brief(cg, &b, false);
         if (!have_spec) {
             sb_puts(&b, "spec: none — `cg spec new <feature>` to start one\n");
@@ -690,10 +749,14 @@ int cmd_review(Cg *cg, bool json)
     else      sb_puts(&b, "\nsymbols you changed:\n");
 
     for (int i = 0; i < np; i++) {
+        /* this branch's rows only: the same path is indexed once per
+         * worktree, and a review is about the tree in front of you */
         sqlite3_stmt *st = cg_prep(cg,
             "SELECT s.name,s.kind,s.line FROM symbols s "
-            "JOIN files f ON f.id=s.file_id WHERE f.path=? ORDER BY s.line");
+            "JOIN files f ON f.id=s.file_id WHERE f.path=? AND f.branch_id=?2 "
+            "ORDER BY s.line");
         sqlite3_bind_text(st, 1, paths[i], -1, SQLITE_STATIC);
+        sqlite3_bind_int64(st, 2, cg->branch_id);
         while (sqlite3_step(st) == SQLITE_ROW) {
             const char *nm = (const char *)sqlite3_column_text(st, 0);
             const char *kd = (const char *)sqlite3_column_text(st, 1);
@@ -709,9 +772,10 @@ int cmd_review(Cg *cg, bool json)
                 "SELECT DISTINCT c.name, cf.path FROM refs r "
                 "JOIN symbols c ON c.id=r.sym_id "
                 "JOIN files cf ON cf.id=c.file_id "
-                "WHERE r.name=? AND c.name<>? LIMIT 6");
+                "WHERE r.name=? AND c.name<>? AND cf.branch_id=?3 LIMIT 6");
             sqlite3_bind_text(cq, 1, sym, -1, SQLITE_STATIC);
             sqlite3_bind_text(cq, 2, sym, -1, SQLITE_STATIC);
+            sqlite3_bind_int64(cq, 3, cg->branch_id);
             int ext = 0;
             while (sqlite3_step(cq) == SQLITE_ROW) {
                 const char *cp = (const char *)sqlite3_column_text(cq, 1);

@@ -189,11 +189,11 @@ reqs       = ["3.1", "3.2"]
 
 [task.3.2]
 title      = "Branch-scoped indexing, queries, memory, brief, and fleet watch"
-status     = "pending"
+status     = "done"
 wave       = 4
 requires   = ["3.1"]
 symbols    = ["branch_scope_sql", "memory_promote_branch", "watch_fleet"]
-touches    = ["src/scan.c", "src/graph.c", "src/memory.c", "src/govern.c", "src/watch.c", "src/main.c", "src/cg.h", "src/db.c", "tests/integration/27_branches.sh"]
+touches    = ["src/scan.c", "src/graph.c", "src/memory.c", "src/govern.c", "src/watch.c", "src/main.c", "src/cg.h", "src/db.c", "src/resolve.c", "src/spec.c", "src/fleet.c", "tests/integration/27_branches.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/27_branches.sh queries && CG=$PWD/cg tests/integration/08_memory.sh && CG=$PWD/cg tests/integration/16_retrieval.sh"
 do_1       = "The indexer writes rows under the current branch and reuses parsed content by hash across branches."
 do_2       = "search, symbol, context, survey, impact, and recall default to the current branch and accept --branch and --all-branches, labelling hits by branch."

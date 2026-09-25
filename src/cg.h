@@ -192,6 +192,12 @@ typedef struct {
      * servers (lsp, watch) set a short wait and defer their own index
      * instead, because they must never hold agents up. */
     long lock_wait_ms;
+    /* Which branch's rows a read command may see: 0 — the open branch, the
+     * default an agent gets without asking; -1 — every tracked branch
+     * (--all-branches), where hits are labelled with the branch they came
+     * from; >0 — the one branch --branch <name> resolved to. The indexer
+     * ignores it: writes always land under branch_id. */
+    long scope_branch;
 } Cg;
 
 /* Exit status when the database stayed busy past lock_wait_ms. Distinct from
@@ -250,6 +256,9 @@ typedef struct {
     int  workers;          /* parse threads the pass actually used */
     int  passes;           /* walks run, including dirty-marker drains */
     bool scoped;           /* resolution ran over the change scope only */
+    /* files whose rows were copied from an identical twin on another
+     * branch instead of parsed again (see branch reuse in scan.c) */
+    long files_reused;
 } IndexStats;
 
 /* How a caller wants its index pass run. Zero-initialised means: walk now,
@@ -368,6 +377,27 @@ bool graph_path_is_test(const char *path);
 /* name of the symbol enclosing path:line; 0 ok, -1 when nothing encloses it */
 int  graph_symbol_at(Cg *cg, const char *path, int line, char *name, size_t cap);
 
+/* Branch scope for queries. A query answers for one branch — the one this
+ * tree is on — unless the caller widened it, because an agent asking what
+ * calls a function means on its branch, not on somebody else's. */
+/* The predicate that keeps a query on the branch in scope, written for the
+ * caller's files alias: " AND f.branch_id=3 ", or "" when every branch is in
+ * scope. Spliced into the statement text rather than bound, so the planner
+ * still sees a constant and each scope gets its own prepared statement. */
+const char *branch_scope_sql(const Cg *cg, const char *alias, char *out,
+                             size_t cap);
+/* Resolve --branch <name> / --all-branches into cg->scope_branch. 0 ok,
+ * -1 when the name is no branch the graph has rows for. */
+int  cg_scope_set(Cg *cg, const char *name, bool all);
+/* The branch a hit came from, for labelling results. Empty while one
+ * branch is in scope, so callers can label unconditionally and the
+ * default output is unchanged. */
+const char *branch_hit_label(Cg *cg, long branch_id, char *out, size_t cap);
+/* The tree a branch's bytes live in — the worktree it was last indexed
+ * from — so a hit on another branch quotes that branch's file and not this
+ * one's. Falls back to cg->root. */
+const char *branch_tree(Cg *cg, long branch_id, char *out, size_t cap);
+
 /* ---------------- vcs ---------------- */
 int cmd_commit  (Cg *cg, const char *msg, bool quiet);
 int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,
@@ -412,6 +442,9 @@ typedef struct {
      * confidence it was given. Advice, never a gate. */
     char *cls;
     double confidence;
+    /* the branch the decision was made on; NULL for memories written
+     * before branches existed, which every branch still sees */
+    char *branch;
 } Memory;
 
 /* insert one memory; returns its id, -1 on failure */
@@ -435,9 +468,19 @@ int  cmd_forget(Cg *cg, const char *idstr);
 int  memory_supersede(Cg *cg, long old_id, long new_id);
 int  cmd_recall_near(Cg *cg, const char *path, int limit, bool json);
 int  cmd_memory_compact(Cg *cg, bool dry_run, bool json);
+/* Move a merged branch's memories onto the branch it merged into, so a
+ * decision keeps the code it was made for company once the wave lands.
+ * A memory the base already carries is left where it is. Returns how many
+ * moved, -1 when the write failed. */
+int  memory_promote_branch(Cg *cg, const char *from, const char *to);
 
 /* ---------------- watcher ---------------- */
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms);
+/* cg watch --fleet: one process following every worktree in the branch
+ * registry, so a fleet keeps every branch's slice of the graph current
+ * without one watcher per agent. New worktrees are picked up as the
+ * registry learns them; vanished ones are dropped. */
+int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms);
 
 /* ---------------- minimal JSON reading (for MCP + package.json) ------- */
 char *json_get_string(const char *obj, const char *key);  /* malloc, unescaped */

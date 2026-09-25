@@ -1168,16 +1168,25 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     sb_free(&out);
     git_head(fpath, on, sizeof on, head, sizeof head);
     branch_register(cg, base, fpath, head, c.h.main_branch);
+    /* the code moved up; so must what was learned writing it, or the next
+     * agent on the base rediscovers it from scratch */
+    int promoted = memory_promote_branch(cg, branch, base);
+    if (promoted < 0) promoted = 0;
     if (json) {
         sb_printf(&b, "{\"merged\":true,\"commits\":%ld,\"branch\":", n);
         sb_json_str(&b, branch);
         sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
         sb_puts(&b, ",\"worktree\":"); sb_json_str(&b, fpath);
         sb_puts(&b, ",\"head\":"); json_str_or_null(&b, head);
+        sb_printf(&b, ",\"memories_promoted\":%d", promoted);
         sb_puts(&b, "}\n");
-    } else
+    } else {
         sb_printf(&b, "merged %s into %s: %ld commit%s (head %.8s) at %s\n",
                   branch, base, n, n == 1 ? "" : "s", head, fpath);
+        if (promoted)
+            sb_printf(&b, "  promoted %d memor%s to %s\n", promoted,
+                      promoted == 1 ? "y" : "ies", base);
+    }
     fputs(b.p, stdout);
     sb_free(&b);
     lifecycle_close(&c);

@@ -18,7 +18,13 @@
  * full index is not dominated by commit overhead */
 #define INDEX_CHUNK 96
 
-typedef struct { char *rel; long size, mtime; char dbhash[65]; } Walked;
+/* twin_*: the same path already parsed on another branch. When the content
+ * hash the worker computes equals twin_hash, the parse is skipped and the
+ * twin's rows are copied — the whole point of one graph for many branches. */
+typedef struct {
+    char *rel; long size, mtime; char dbhash[65];
+    long twin_id, twin_lines; char twin_hash[65];
+} Walked;
 typedef struct { char *path; long id, size, mtime; char hash[65]; } DbFile;
 
 typedef struct {
@@ -28,6 +34,8 @@ typedef struct {
     size_t body_len;
     ParseResult pr;
     bool parsed;
+    long reuse_from;         /* file id whose rows this one copies (0 = none) */
+    long reuse_lines;
 } Done;
 
 /* ---------------- directory walk ---------------- */
@@ -43,6 +51,9 @@ static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {
     wl->v[wl->n].size = size;
     wl->v[wl->n].mtime = mtime;
     wl->v[wl->n].dbhash[0] = 0;
+    wl->v[wl->n].twin_hash[0] = 0;
+    wl->v[wl->n].twin_id = 0;
+    wl->v[wl->n].twin_lines = 0;
     wl->n++;
 }
 
@@ -149,6 +160,17 @@ static void *worker(void *arg) {
             continue;
         }
         sha256_hex(data, len, d.hash);
+        /* identical bytes to a twin on another branch: the parse would
+         * rebuild rows the graph already holds, so hand the writer the
+         * twin's id instead and skip the expensive part outright */
+        if (p->jobs[i].twin_hash[0] &&
+            strcmp(p->jobs[i].twin_hash, d.hash) == 0) {
+            d.reuse_from  = p->jobs[i].twin_id;
+            d.reuse_lines = p->jobs[i].twin_lines;
+            free(data);
+            ring_push(p, &d);
+            continue;
+        }
         const char *lang = lang_for_path(p->jobs[i].rel);
         if (lang) {
             lang_parse(lang, p->jobs[i].rel, data, len, &d.pr);
@@ -177,7 +199,10 @@ typedef struct {
                  /* change scope for incremental resolution (temp tables
                   * created by index_scope_begin before these are prepared) */
                  *scope_file, *scope_name, *scope_syms, *scope_routes,
-                 *scope_path;
+                 *scope_path,
+                 /* branch reuse: copy a twin's rows instead of parsing */
+                 *cp_syms, *cp_symfts, *cp_refs, *cp_cmts, *cp_cmtfts,
+                 *cp_routes, *cp_imports, *cp_body;
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
@@ -229,6 +254,46 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->scope_routes = cg_prep(cg, "INSERT OR IGNORE INTO temp.scope_names(name)"
                                 " SELECT pattern FROM routes WHERE file_id=?");
     s->scope_path = cg_prep(cg, "SELECT path FROM files WHERE id=?");
+
+    /* ?1 = the row being written, ?2 = its byte-identical twin, ?3 = path.
+     * Symbol ids differ per branch, so refs and comments re-point at the
+     * copy by (name,line) — unique within a file, and identical bytes gave
+     * both files the same set. Soft refs are left out: anchor_edges rebuilds
+     * them for every file in scope after the walk. */
+    s->cp_syms = cg_prep(cg,
+        "INSERT INTO symbols(file_id,name,kind,line,end_line,sig) "
+        "SELECT ?1,name,kind,line,end_line,sig FROM symbols WHERE file_id=?2 "
+        "ORDER BY id");
+    s->cp_symfts = cg_prep(cg,
+        "INSERT INTO symbol_fts(rowid,name,kind,path,sig) "
+        "SELECT id,name,kind,?3,sig FROM symbols WHERE file_id=?1");
+    s->cp_refs = cg_prep(cg,
+        "INSERT INTO refs(file_id,name,line,sym_id,qual,kind,argc) "
+        "SELECT ?1,r.name,r.line,"
+        "(SELECT n.id FROM symbols n JOIN symbols o ON o.id=r.sym_id "
+        " WHERE n.file_id=?1 AND n.name=o.name AND n.line=o.line LIMIT 1),"
+        "r.qual,r.kind,r.argc FROM refs r "
+        "WHERE r.file_id=?2 AND r.kind<>'soft'");
+    s->cp_cmts = cg_prep(cg,
+        "INSERT INTO comments(file_id,line,end_line,kind,sym_id,body,"
+        "anchored_hash) SELECT ?1,c.line,c.end_line,c.kind,"
+        "(SELECT n.id FROM symbols n JOIN symbols o ON o.id=c.sym_id "
+        " WHERE n.file_id=?1 AND n.name=o.name AND n.line=o.line LIMIT 1),"
+        "c.body,c.anchored_hash FROM comments c WHERE c.file_id=?2");
+    /* the same rule write_done applies when it fills comment_fts */
+    s->cp_cmtfts = cg_prep(cg,
+        "INSERT INTO comment_fts(rowid,body) SELECT id,body FROM comments "
+        "WHERE file_id=?1 AND (kind IN ('file','doc') OR end_line>line)");
+    s->cp_routes = cg_prep(cg,
+        "INSERT INTO routes(file_id,framework,method,pattern,handler,line) "
+        "SELECT ?1,framework,method,pattern,handler,line FROM routes "
+        "WHERE file_id=?2");
+    s->cp_imports = cg_prep(cg,
+        "INSERT INTO imports(file_id,name,module,line,system) "
+        "SELECT ?1,name,module,line,system FROM imports WHERE file_id=?2");
+    s->cp_body = cg_prep(cg,
+        "INSERT INTO body_fts(rowid,path,body) SELECT ?1,?3,body "
+        "FROM body_fts WHERE rowid=?2");
 }
 
 static void step_reset(sqlite3_stmt *st);
@@ -286,6 +351,31 @@ static void purge_file_children(Stmts *s, long file_id) {
     sqlite3_bind_int64(s->del_cmts,   1, file_id); step_reset(s->del_cmts);
 }
 
+/* Copy every child row of `from` onto `file_id` — the branch-reuse path.
+ * Truthful because the two files hold the same bytes: the parse, the doc
+ * baselines (hash_lines over identical lines) and the body index would all
+ * come out the same, so only the ids differ. */
+static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
+                            const char *rel, IndexStats *st) {
+    sqlite3_stmt *in_order[] = { s->cp_syms, s->cp_symfts, s->cp_refs,
+                                 s->cp_cmts, s->cp_cmtfts, s->cp_routes,
+                                 s->cp_imports, s->cp_body };
+    long *count[] = { &st->symbols, NULL, &st->refs, &st->anchors, NULL,
+                      &st->routes, NULL, NULL };
+    for (size_t i = 0; i < sizeof in_order / sizeof *in_order; i++) {
+        sqlite3_bind_int64(in_order[i], 1, file_id);
+        sqlite3_bind_int64(in_order[i], 2, from);
+        sqlite3_bind_text (in_order[i], 3, rel, -1, SQLITE_STATIC);
+        step_reset(in_order[i]);
+        if (count[i]) *count[i] += sqlite3_changes(cg->db);
+    }
+    /* names the copy defines must re-enter the change scope, exactly as
+     * scope_name does for each freshly parsed definition */
+    sqlite3_bind_int64(s->scope_syms, 1, file_id);   step_reset(s->scope_syms);
+    sqlite3_bind_int64(s->scope_routes, 1, file_id); step_reset(s->scope_routes);
+    st->files_reused++;
+}
+
 static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
                        IndexStats *st) {
     const char *lang = lang_for_path(w->rel);
@@ -295,7 +385,8 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     sqlite3_bind_int64(s->up_file, 3, w->size);
     sqlite3_bind_int64(s->up_file, 4, w->mtime);
     sqlite3_bind_text (s->up_file, 5, d->hash, -1, SQLITE_STATIC);
-    sqlite3_bind_int64(s->up_file, 6, d->pr.nlines);
+    sqlite3_bind_int64(s->up_file, 6, d->reuse_from ? d->reuse_lines
+                                                    : d->pr.nlines);
     sqlite3_bind_int64(s->up_file, 7, cg->branch_id);
     step_reset(s->up_file);
 
@@ -314,6 +405,14 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return;
 
     scope_record_file(s, file_id, w->dbhash[0] == 0);
+
+    if (d->reuse_from) {
+        purge_file_children(s, file_id);
+        index_copy_rows(cg, s, file_id, d->reuse_from, w->rel, st);
+        st->files_indexed++;
+        st->bytes += w->size;
+        return;
+    }
 
     /* Drift baselines about to be purged with the rows: a doc whose text
      * is unchanged must keep the body hash it was written against, so a
@@ -851,6 +950,35 @@ static void targets_free(char **t, int n) {
     free(t);
 }
 
+/* Mark every job that another branch has already parsed byte for byte.
+ * Only the path and the stored hash are read here; the worker confirms the
+ * hash against the bytes on disk before anything is reused, so a twin that
+ * went stale between the two is simply parsed as usual. A single-branch
+ * project never pays for the lookup, and --full keeps its promise of a
+ * genuine reparse. */
+static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
+    if (o->full || jobs->n == 0) return;
+    if (count_sql(cg, "SELECT count(*) FROM branches") < 2) return;
+    sqlite3_stmt *q = cg_prep(cg,
+        "SELECT id,hash,lines FROM files "
+        "WHERE path=?1 AND branch_id<>?2 AND hash IS NOT NULL LIMIT 1");
+    sqlite3_bind_int64(q, 2, cg->branch_id);      /* survives reset */
+    for (int i = 0; i < jobs->n; i++) {
+        sqlite3_bind_text(q, 1, jobs->v[i].rel, -1, SQLITE_STATIC);
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            const char *h = (const char *)sqlite3_column_text(q, 1);
+            if (h && h[0]) {
+                jobs->v[i].twin_id = sqlite3_column_int64(q, 0);
+                jobs->v[i].twin_lines = sqlite3_column_int64(q, 2);
+                snprintf(jobs->v[i].twin_hash, sizeof jobs->v[i].twin_hash,
+                         "%s", h);
+            }
+        }
+        sqlite3_reset(q);
+    }
+    sqlite3_finalize(q);
+}
+
 /* One walk+diff+parse+write pass. targets NULL means the whole tree; with
  * targets, only rows under those paths are diffed, so files elsewhere are
  * never mistaken for removals. Only the open branch's rows are diffed and
@@ -922,6 +1050,8 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
             di++;
         }
     }
+
+    index_find_twins(cg, &jobs, o);
 
     /* The write lock is the scarce resource: while one process holds it,
      * every other cg command that mutates state — an agent's `cg spec done`
@@ -1046,12 +1176,16 @@ static void index_report(const IndexStats *st, const IndexOpts *o) {
     } else if (st->fresh) {
         printf("graph is fresh (indexed %ldms ago)\n", st->ms);
     } else {
-        printf("indexed %ld file%s (%ld unchanged, %ld removed, %ld skipped) "
+        char reused[64];
+        reused[0] = 0;
+        if (st->files_reused)
+            snprintf(reused, sizeof reused, ", %ld reused", st->files_reused);
+        printf("indexed %ld file%s (%ld unchanged, %ld removed, %ld skipped%s) "
                "in %ldms — %ld symbols, %ld refs, %ld routes, %ld comments, "
                "%ld soft [%d workers%s]\n",
                st->files_indexed, st->files_indexed == 1 ? "" : "s",
                st->files_seen - st->files_indexed - st->files_skipped,
-               st->files_removed, st->files_skipped, st->ms,
+               st->files_removed, st->files_skipped, reused, st->ms,
                st->symbols, st->refs, st->routes, st->anchors, st->soft,
                st->workers, st->passes > 1 ? ", drained" : "");
     }
