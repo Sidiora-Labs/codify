@@ -29,6 +29,16 @@ Codify under a fleet of agents: one indexer instead of fifty, a tree of agents w
 - `cg fleet pr <feature>` pushes and opens the PR through `gh`, reports an already-open one instead of duplicating it, and prints runnable push and `gh` commands when `gh` is absent; `CG_GH` names the binary and `--dry-run` calls nothing
 - `cg fleet checkpoint` merges the open `feature/*` pull requests lowest number first, stopping at the first that will not merge and skipping non-feature branches by name
 - Schema v16 records `branch`, `worktree`, and `parent` on every attempt, so a claim answers which branch its work was done on after the session is gone; `spec_claim` is shared with the fleet rather than duplicated
+- A plain git commit whose message carries `[spec:<feature>/<id>]` counts as touched-path evidence for `cg spec done`, with git history ingested before the check runs — a worker commits on its own branch while the snapshot chain is one line shared by the whole fleet, so a snapshot alone cannot attribute the change
+
+**Orchestration — the fleet runs itself** (task 2.3)
+
+- `cg spec run --fleet` drives two levels instead of one: a feature manager on the feature branch, wave workers under it, each spawned in its own worktree with `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE`, `CG_BRANCH`, `CG_BASE` — and, for a worker, `CG_TASK`, `CG_ATTEMPT`, `CG_FENCE` — with its branch already checked out
+- A subtree is complete because it **merged**, not because a process exited: the run reads the task list and the branch state before it says so
+- The generated briefings end on the command that moves work upward — `cg fleet merge-up <id>` for a worker, `cg fleet land` and `cg fleet pr` for a manager — so an agent that reads only the last line still does the right thing
+- `--dry-run` plans the whole tree without claiming or creating anything, `--status` prints `cg fleet tree`, `--max-rounds R` caps the manager's wakes so a fleet that cannot finish exits 1 with no claims left behind, and `-n` counts worker slots with the manager always one more
+- `--fleet` is refused before anything is spawned when there is no `[hierarchy]`, or when it is `enabled = false`; the single-level `cg spec run` is untouched
+- `cg fleet tree [--json]` joins the agent registry, the live claims, and the branch registry into one tree: progress per manager, ahead/merged/complete, and every worker's wave, task, branch, worktree, state, attempt, and heartbeat
 
 **Graph — one graph for every branch and worktree** (task 3.1)
 
@@ -56,15 +66,6 @@ Codify under a fleet of agents: one indexer instead of fifty, a tree of agents w
 - `cg jev doctor [--probe]`, `cg jev ask`, and `cg jev log` give an operator the health check, a direct question, and the spend
 - A missing `OPENROUTER_API_KEY` is an error naming the variable, never a silent fallback; `CG_JEV_MODEL`, `CG_JEV_ENDPOINT`, `CG_JEV_CURL`, `CG_JEV_TIMEOUT`, `CG_JEV_ATTEMPTS`, and `CG_JEV_BACKOFF_MS` override the defaults
 - The `local_only` principle became `local_first`: the core loop still makes no network call, Jev is mandatory for the features built on it, and its answers are never authoritative
-
-**Orchestration — the fleet runs itself** (task 2.3)
-
-- `cg spec run --fleet` drives two levels instead of one: a feature manager on the feature branch, wave workers under it, each spawned in its own worktree with `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE`, `CG_BRANCH`, `CG_BASE` — and, for a worker, `CG_TASK`, `CG_ATTEMPT`, `CG_FENCE` — with its branch already checked out
-- A subtree is complete because it **merged**, not because a process exited: the run reads the task list and the branch state before it says so
-- The generated briefings end on the command that moves work upward — `cg fleet merge-up <id>` for a worker, `cg fleet land` and `cg fleet pr` for a manager — so an agent that reads only the last line still does the right thing
-- `--dry-run` plans the whole tree without claiming or creating anything, `--status` prints `cg fleet tree`, `--max-rounds R` caps the manager's wakes so a fleet that cannot finish exits 1 with no claims left behind, and `-n` counts worker slots with the manager always one more
-- `--fleet` is refused before anything is spawned when there is no `[hierarchy]`, or when it is `enabled = false`; the single-level `cg spec run` is untouched
-- `cg fleet tree [--json]` joins the agent registry, the live claims, and the branch registry into one tree: progress per manager, ahead/merged/complete, and every worker's wave, task, branch, worktree, state, attempt, and heartbeat
 
 **Memory — classified, and promoted into skills** (task 4.2)
 
