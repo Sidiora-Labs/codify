@@ -150,6 +150,100 @@ bool git_head(const char *tree, char *branch, size_t bcap, char *sha,
     return true;
 }
 
+/* ---------------- spawning git (the lifecycle commands only) ---------------- */
+
+int git_run(const char *tree, const char *args, StrBuf *out) {
+    StrBuf cmd; sb_init(&cmd);
+    sb_puts(&cmd, "git -C ");
+    sb_shquote(&cmd, tree);
+    sb_putc(&cmd, ' ');
+    sb_puts(&cmd, args);
+    sb_puts(&cmd, " 2>&1");
+    FILE *f = popen(cmd.p, "r");
+    sb_free(&cmd);
+    if (!f) return -1;
+    char buf[4097];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf - 1, f)) > 0) {
+        buf[n] = 0;
+        if (out) sb_puts(out, buf);
+    }
+    int st = pclose(f);
+    if (st == -1) return -1;
+    if (WIFEXITED(st)) return WEXITSTATUS(st);
+    return 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
+}
+
+bool git_branch_exists(const char *tree, const char *branch) {
+    StrBuf a; sb_init(&a);
+    sb_puts(&a, "rev-parse --verify --quiet ");
+    StrBuf ref; sb_init(&ref);
+    sb_printf(&ref, "refs/heads/%s", branch);
+    sb_shquote(&a, ref.p);
+    sb_free(&ref);
+    int rc = git_run(tree, a.p, NULL);
+    sb_free(&a);
+    return rc == 0;
+}
+
+int git_worktree_add(const char *tree, const char *path, const char *branch,
+                     const char *base, bool *created, bool *branch_created,
+                     StrBuf *err) {
+    *created = false;
+    *branch_created = false;
+    struct stat st;
+    char p[4600];
+    snprintf(p, sizeof p, "%s/.git", path);
+    if (stat(p, &st) == 0) return 0;                /* already a worktree */
+    /* a stale registration (directory removed by hand) blocks `add` */
+    git_run(tree, "worktree prune", NULL);
+    bool have = git_branch_exists(tree, branch);
+    StrBuf a; sb_init(&a);
+    if (have) {
+        sb_puts(&a, "worktree add ");
+        sb_shquote(&a, path);
+        sb_putc(&a, ' ');
+        sb_shquote(&a, branch);
+    } else {
+        sb_puts(&a, "worktree add -b ");
+        sb_shquote(&a, branch);
+        sb_putc(&a, ' ');
+        sb_shquote(&a, path);
+        sb_putc(&a, ' ');
+        sb_shquote(&a, base);
+    }
+    int rc = git_run(tree, a.p, err);
+    sb_free(&a);
+    if (rc != 0) return -1;
+    *created = true;
+    *branch_created = !have;
+    return 0;
+}
+
+int git_conflicted_paths(const char *tree, char ***out) {
+    *out = NULL;
+    StrBuf o; sb_init(&o);
+    if (git_run(tree, "diff --name-only --diff-filter=U", &o) != 0) {
+        sb_free(&o);
+        return 0;
+    }
+    int n = 0, cap = 0;
+    for (char *line = o.p; line && *line; ) {
+        char *e = strchr(line, '\n');
+        if (e) *e = 0;
+        if (*line) {
+            if (n == cap) {
+                cap = cap ? cap * 2 : 8;
+                *out = xrealloc(*out, (size_t)cap * sizeof **out);
+            }
+            (*out)[n++] = xstrdup(line);
+        }
+        line = e ? e + 1 : NULL;
+    }
+    sb_free(&o);
+    return n;
+}
+
 /* ---------------- branch registry ---------------- */
 
 long branch_register(Cg *cg, const char *name, const char *worktree,

@@ -169,3 +169,29 @@ int json_object_keys(const char *obj, char **keys, int cap) {
         if (*p == '}' || !*p) return n;
     }
 }
+
+int json_array_items(const char *arr, char ***out) {
+    *out = NULL;
+    const char *p = arr;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p != '[') return 0;
+    p++;
+    int n = 0, cap = 0;
+    for (;;) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (*p == ',') { p++; continue; }
+        if (*p == ']' || !*p) return n;
+        const char *s = p;
+        p = skip_value(p);
+        if (p == s) return n;                       /* no progress: malformed */
+        if (n == cap) {
+            cap = cap ? cap * 2 : 8;
+            *out = xrealloc(*out, (size_t)cap * sizeof **out);
+        }
+        size_t len = (size_t)(p - s);
+        char *item = xmalloc(len + 1);
+        memcpy(item, s, len);
+        item[len] = 0;
+        (*out)[n++] = item;
+    }
+}

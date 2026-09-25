@@ -2,7 +2,7 @@
 # the unified multi-branch graph.
 #   schema   — (task 3.1) branches registry, files scoped by branch, a linked
 #              worktree joins the shared .codegraph, per-branch freshness and
-#              gates, schema v15 upgrade keeps the registry
+#              gates, schema v16 upgrade keeps the registry
 #   queries  — (task 3.2) branch-scoped search/context/memory, --all-branches
 # Run one section: 27_branches.sh schema
 . "$(dirname "$0")/../lib.sh"
@@ -128,7 +128,7 @@ db.execute("UPDATE meta SET value='14' WHERE key='schema_version'")
 db.commit()
 EOF
     err="$("$CG" branches 2>&1 >/dev/null)"
-    has "$err" "schema upgraded to v15"
+    has "$err" "schema upgraded to v16"
     out="$("$CG" branches --json)"
     echo "$out" | pyjson "
 b = {x['name']: x for x in d['branches']}
@@ -155,7 +155,7 @@ EOF
     python3 - "$TMP/proj/.codegraph/graph.db" <<'EOF'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
-db.execute("UPDATE meta SET value='15' WHERE key='schema_version'")
+db.execute("UPDATE meta SET value='16' WHERE key='schema_version'")
 db.commit()
 EOF
     has "$("$CG" branches)" "* main"

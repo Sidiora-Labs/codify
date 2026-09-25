@@ -40,7 +40,7 @@
     - Extend agent identity with CG_ROLE and CG_PARENT and surface them in spec status, claims, attempts, and brief.
     - Add cg fleet status, cg fleet roles, and cg fleet plan that shows which manager owns which feature and which worker owns which wave.
     - _Requirements: 2.1, 2.6_
-  - [ ] 2.2 Branch lifecycle: worktrees, merge-up, gates, PR, checkpoint
+  - [x] 2.2 Branch lifecycle: worktrees, merge-up, gates, PR, checkpoint
     - cg fleet begin <id> creates or reuses the wave worktree and branch from the feature branch and records branch, worktree, and parent on the attempt.
     - cg fleet merge-up <id> merges the wave branch into the feature branch after qualification and reports conflicts by path for the feature manager.
     - cg fleet land <feature> merges the feature branch into local main, runs the test and lint gates, and refuses when either is red.
@@ -70,7 +70,7 @@
 ## Classification, triage, ranking
 
 - [ ] 4. Jev decisions
-  - [-] 4.1 Jev client over curl
+  - [x] 4.1 Jev client over curl
     - Build canonical request JSON, run curl through popen with CG_JEV_CURL override, parse noul, choice, and score answers, retry 429 and 529 with backoff, log to .codegraph/jev.log.
     - Fail clearly when OPENROUTER_API_KEY is missing; honor CG_JEV_MODEL and CG_JEV_ENDPOINT.
     - Add cg jev doctor and cg jev ask for operators; rewrite the local_only principle to local_first.

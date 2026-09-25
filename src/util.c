@@ -80,6 +80,39 @@ void sb_json_str(StrBuf *b, const char *s) {
     }
     sb_putc(b, '"');
 }
+/* Single quotes are the only sh quoting that keeps every byte literal; an
+ * embedded quote is closed, escaped, and reopened. Used wherever a path or
+ * message the user chose reaches popen/system. */
+void sb_shquote(StrBuf *b, const char *s) {
+    sb_putc(b, '\'');
+    for (; *s; s++) {
+        if (*s == '\'') sb_puts(b, "'\\''");
+        else sb_putc(b, *s);
+    }
+    sb_putc(b, '\'');
+}
+
+bool cg_find_exe(const char *name, char *out, size_t cap) {
+    if (strchr(name, '/')) {
+        if (access(name, X_OK) != 0) return false;
+        snprintf(out, cap, "%s", name);
+        return true;
+    }
+    const char *path = getenv("PATH");
+    if (!path || !path[0]) path = "/usr/local/bin:/usr/bin:/bin";
+    const char *p = path;
+    while (*p) {
+        const char *e = strchr(p, ':');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        if (len > 0 && len < cap - strlen(name) - 2) {
+            snprintf(out, cap, "%.*s/%s", (int)len, p, name);
+            if (access(out, X_OK) == 0) return true;
+        }
+        if (!e) break;
+        p = e + 1;
+    }
+    return false;
+}
 
 char *read_entire_file(const char *path, size_t *out_len) {
     /* chunked read: works for regular files AND /proc//sys files that

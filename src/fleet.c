@@ -11,9 +11,12 @@
  * config, the identity every agent carries in its environment (CG_AGENT,
  * CG_ROLE, CG_PARENT, CG_FEATURE, CG_WAVE), the registry of who is alive
  * in which role, and the reports — roles, status, plan — that a manager
- * reads to know what its subtree is doing. The branch lifecycle and the
- * two-level orchestrator build on it. */
+ * reads to know what its subtree is doing — and the branch lifecycle
+ * itself: begin (worktree + claim), merge-up, land behind the gates, the
+ * pull request, and the checkpoint. The two-level orchestrator builds on
+ * all of it. */
 #include "cg.h"
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -705,17 +708,1122 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
     return 0;
 }
 
+/* ---------------- branch lifecycle ---------------- */
+
+/* Every lifecycle command works on the shared project (the main worktree):
+ * that is where spec/ is authoritative, where worktrees are cut from, and
+ * where main lives. A worker may run these from its own worktree; the
+ * branch it is on is irrelevant to what they do. */
+typedef struct {
+    Kvx *wf;
+    Hierarchy h;
+    char *feature;
+    char wfpath[4700];
+    char specpath[4700];       /* spec/<feature>/spec.kvx on the main tree */
+    const char *tree;          /* cg->shared */
+} Lifecycle;
+
+static void lifecycle_close(Lifecycle *c) {
+    free(c->feature);
+    hier_free(&c->h);
+    kvx_free(c->wf);
+}
+
+static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
+    memset(c, 0, sizeof *c);
+    c->tree = cg->shared;
+    snprintf(c->wfpath, sizeof c->wfpath, "%s/spec/workflow.kvx", c->tree);
+    c->wf = kvx_parse(c->wfpath);
+    if (!c->wf) {
+        fprintf(stderr, "cg fleet: no spec/workflow.kvx at %s\n", c->tree);
+        return 1;
+    }
+    hier_load(c->wf, &c->h);
+    c->feature = feature_ov ? xstrdup(feature_ov)
+                            : kvx_str(c->wf, "meta", "active_feature");
+    if (!c->feature || !c->feature[0]) {
+        fprintf(stderr, "cg fleet: no active_feature in %s (use -f)\n",
+                c->wfpath);
+        lifecycle_close(c);
+        return 1;
+    }
+    snprintf(c->specpath, sizeof c->specpath, "%s/spec/%s/spec.kvx", c->tree,
+             c->feature);
+    if (!git_available(cg)) {
+        fprintf(stderr, "cg fleet: %s has no git repository — the branch "
+                        "lifecycle needs git\n", c->tree);
+        lifecycle_close(c);
+        return 1;
+    }
+    return 0;
+}
+
+/* a branch's worktree: <worktrees>/<branch with / as ->, under the main
+ * tree unless the configured root is absolute */
+static void worktree_path(const Lifecycle *c, const char *branch, char *out,
+                          size_t cap) {
+    char name[512];
+    size_t i = 0;
+    for (const char *p = branch; *p && i + 1 < sizeof name; p++)
+        name[i++] = *p == '/' ? '-' : *p;
+    name[i] = 0;
+    if (c->h.worktrees[0] == '/')
+        snprintf(out, cap, "%s/%s", c->h.worktrees, name);
+    else
+        snprintf(out, cap, "%s/%s/%s", c->tree, c->h.worktrees, name);
+}
+
+/* wave and status of [task.<id>] in one spec file; false when absent or
+ * a heading. status defaults to pending like the rest of the workflow. */
+static bool task_wave_status(const char *specpath, const char *id, long *wave,
+                             char *status, size_t cap) {
+    Kvx *f = kvx_parse(specpath);
+    if (!f) return false;
+    char sec[300];
+    snprintf(sec, sizeof sec, "task.%s", id);
+    bool ok = kvx_raw(f, sec, "wave") != NULL;
+    if (ok) {
+        *wave = kvx_long(f, sec, "wave", 0);
+        char *st = kvx_str(f, sec, "status");
+        snprintf(status, cap, "%s", st && st[0] ? st : "pending");
+        free(st);
+    }
+    kvx_free(f);
+    return ok;
+}
+
+/* the status of a task as committed on <branch>: the tip's spec file,
+ * not the main tree's — a worker qualifies on its own branch */
+static bool task_status_on_branch(const Lifecycle *c, const char *branch,
+                                  const char *id, char *status, size_t cap) {
+    StrBuf a; sb_init(&a);
+    StrBuf spec; sb_init(&spec);
+    sb_printf(&spec, "%s:spec/%s/spec.kvx", branch, c->feature);
+    sb_puts(&a, "show ");
+    sb_shquote(&a, spec.p);
+    sb_free(&spec);
+    StrBuf out; sb_init(&out);
+    int rc = git_run(c->tree, a.p, &out);
+    sb_free(&a);
+    if (rc != 0) { sb_free(&out); return false; }
+    char dir[4700], tmp[4800];
+    snprintf(dir, sizeof dir, "%s/%s/fleet", c->tree, CG_DIR);
+    mkdirs(dir);
+    snprintf(tmp, sizeof tmp, "%s/tip-%ld.kvx", dir, (long)getpid());
+    bool ok = write_entire_file(tmp, out.p, out.len) == 0;
+    sb_free(&out);
+    long wave;
+    if (ok) ok = task_wave_status(tmp, id, &wave, status, cap);
+    unlink(tmp);
+    return ok;
+}
+
+static bool tree_clean(const char *tree) {
+    StrBuf o; sb_init(&o);
+    int rc = git_run(tree, "status --porcelain --untracked-files=no", &o);
+    bool clean = rc == 0 && o.len == 0;
+    sb_free(&o);
+    return clean;
+}
+
+static long commits_between(const char *tree, const char *base,
+                            const char *branch) {
+    StrBuf a; sb_init(&a);
+    StrBuf range; sb_init(&range);
+    sb_printf(&range, "%s..%s", base, branch);
+    sb_puts(&a, "rev-list --count ");
+    sb_shquote(&a, range.p);
+    sb_free(&range);
+    StrBuf o; sb_init(&o);
+    int rc = git_run(tree, a.p, &o);
+    sb_free(&a);
+    long n = rc == 0 ? atol(o.p) : -1;
+    sb_free(&o);
+    return n;
+}
+
+/* create <branch> at <from> without checking it out; false on failure */
+static bool ensure_branch(const char *tree, const char *branch,
+                          const char *from, bool *created, StrBuf *err) {
+    *created = false;
+    if (git_branch_exists(tree, branch)) return true;
+    StrBuf a; sb_init(&a);
+    sb_puts(&a, "branch ");
+    sb_shquote(&a, branch);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, from);
+    int rc = git_run(tree, a.p, err);
+    sb_free(&a);
+    *created = rc == 0;
+    return rc == 0;
+}
+
+/* one-line excerpt of git's complaint for an error message */
+static void excerpt(const StrBuf *b, char *out, size_t cap) {
+    size_t n = 0;
+    for (const char *p = b->p; p && *p && n + 1 < cap; p++) {
+        if (*p == '\n') { if (n && out[n - 1] != ' ') out[n++] = ' '; }
+        else out[n++] = *p;
+    }
+    while (n && out[n - 1] == ' ') n--;
+    out[n] = 0;
+}
+
+static void json_str_or_null(StrBuf *b, const char *s) {
+    if (s && s[0]) sb_json_str(b, s); else sb_puts(b, "null");
+}
+
+static void put_conflicts(StrBuf *b, char **paths, int n, bool json) {
+    if (json) {
+        sb_puts(b, ",\"conflicts\":[");
+        for (int i = 0; i < n; i++) {
+            if (i) sb_putc(b, ',');
+            sb_json_str(b, paths[i]);
+        }
+        sb_putc(b, ']');
+    } else {
+        sb_printf(b, "conflicts in %d path(s):\n", n);
+        for (int i = 0; i < n; i++) sb_printf(b, "  %s\n", paths[i]);
+    }
+}
+
+static void free_list(char **v, int n) {
+    for (int i = 0; i < n; i++) free(v[i]);
+    free(v);
+}
+
+/* cg fleet begin <id>: the worker's branch and worktree, then its claim.
+ * Idempotent — a second begin reuses both and renews the claim, so a
+ * manager can hand the same task to a replacement worker. */
+int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
+                       const char *agent_flag, bool json) {
+    Lifecycle c;
+    if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    long wave = 0;
+    char status[64];
+    if (!task_wave_status(c.specpath, id, &wave, status, sizeof status)) {
+        fprintf(stderr, "cg fleet: no [task.%s] with a wave in %s\n", id,
+                c.specpath);
+        lifecycle_close(&c);
+        return 1;
+    }
+    if (strcmp(status, "done") == 0) {
+        fprintf(stderr, "cg fleet: %s is done — nothing to begin\n", id);
+        lifecycle_close(&c);
+        return 1;
+    }
+    const FleetRole *rw = &c.h.roles[FLEET_WORKER];
+    const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
+    char agent[256], branch[512], base[512], parent[256];
+    if (agent_flag && agent_flag[0]) snprintf(agent, sizeof agent, "%s", agent_flag);
+    else hier_expand(&c.h, rw->agent, c.feature, wave, agent, sizeof agent);
+    hier_expand(&c.h, rw->branch, c.feature, wave, branch, sizeof branch);
+    hier_expand(&c.h, rw->base, c.feature, wave, base, sizeof base);
+    hier_expand(&c.h, rf->agent, c.feature, -1, parent, sizeof parent);
+
+    StrBuf err; sb_init(&err);
+    bool base_created = false;
+    if (!ensure_branch(c.tree, base, c.h.main_branch, &base_created, &err)) {
+        char ex[300];
+        excerpt(&err, ex, sizeof ex);
+        fprintf(stderr, "cg fleet: cannot create %s from %s: %s\n", base,
+                c.h.main_branch, ex);
+        sb_free(&err); lifecycle_close(&c);
+        return 1;
+    }
+    char path[4800], wtroot[4800];
+    worktree_path(&c, branch, path, sizeof path);
+    snprintf(wtroot, sizeof wtroot, "%s", path);
+    char *slash = strrchr(wtroot, '/');
+    if (slash) { *slash = 0; mkdirs(wtroot); }
+    bool wt_created = false, br_created = false;
+    if (git_worktree_add(c.tree, path, branch, base, &wt_created, &br_created,
+                         &err) != 0) {
+        char ex[300];
+        excerpt(&err, ex, sizeof ex);
+        fprintf(stderr, "cg fleet: cannot add worktree %s for %s: %s\n", path,
+                branch, ex);
+        sb_free(&err); lifecycle_close(&c);
+        return 1;
+    }
+    sb_free(&err);
+    char head_branch[256], head[65];
+    if (!git_head(path, head_branch, sizeof head_branch, head, sizeof head))
+        head[0] = 0;
+    branch_register(cg, branch, path, head, base);
+
+    /* the claim carries the worker's identity: the attempt, the agents
+     * registry, and the worker's own first commands all see the same names */
+    char wavebuf[24];
+    snprintf(wavebuf, sizeof wavebuf, "%ld", wave);
+    setenv("CG_AGENT", agent, 1);
+    setenv("CG_ROLE", "worker", 1);
+    setenv("CG_PARENT", parent, 1);
+    setenv("CG_FEATURE", c.feature, 1);
+    setenv("CG_WAVE", wavebuf, 1);
+    SpecAttempt at;
+    long ttl = 30;
+    if (spec_claim(cg, c.tree, c.feature, id, agent, ttl, &at) != 0) {
+        fprintf(stderr, "cg fleet: %s was not claimed — %s and %s stay for "
+                        "a retry\n", id, branch, path);
+        lifecycle_close(&c);
+        return 1;
+    }
+    char tag[300];
+    snprintf(tag, sizeof tag, "%s/%s", c.feature, id);
+    spec_attempt_set_branch(cg, tag, branch, path, parent);
+
+    StrBuf b; sb_init(&b);
+    if (json) {
+        sb_puts(&b, "{\"task\":");        sb_json_str(&b, id);
+        sb_puts(&b, ",\"feature\":");     sb_json_str(&b, c.feature);
+        sb_printf(&b, ",\"wave\":%ld,\"agent\":", wave);
+        sb_json_str(&b, agent);
+        sb_puts(&b, ",\"role\":\"worker\",\"parent\":");
+        sb_json_str(&b, parent);
+        sb_puts(&b, ",\"branch\":");      sb_json_str(&b, branch);
+        sb_puts(&b, ",\"base\":");        sb_json_str(&b, base);
+        sb_printf(&b, ",\"branch_created\":%s,\"base_created\":%s",
+                  br_created ? "true" : "false",
+                  base_created ? "true" : "false");
+        sb_puts(&b, ",\"worktree\":");    sb_json_str(&b, path);
+        sb_printf(&b, ",\"worktree_created\":%s,\"head\":",
+                  wt_created ? "true" : "false");
+        json_str_or_null(&b, head);
+        sb_puts(&b, ",\"attempt\":{\"attempt_id\":");
+        sb_json_str(&b, at.attempt_id);
+        sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld}", at.fence, ttl);
+        sb_puts(&b, ",\"env\":{\"CG_AGENT\":"); sb_json_str(&b, agent);
+        sb_puts(&b, ",\"CG_ROLE\":\"worker\",\"CG_PARENT\":");
+        sb_json_str(&b, parent);
+        sb_puts(&b, ",\"CG_FEATURE\":"); sb_json_str(&b, c.feature);
+        sb_printf(&b, ",\"CG_WAVE\":\"%ld\"}}\n", wave);
+    } else {
+        sb_printf(&b, "begin %s — wave %ld of %s\n", id, wave, c.feature);
+        sb_printf(&b, "  agent:    %s (worker, reports to %s)\n", agent, parent);
+        sb_printf(&b, "  branch:   %s from %s (%s)", branch, base,
+                  br_created ? "created" : "reused");
+        if (base_created) sb_printf(&b, "   [%s cut from %s]", base, c.h.main_branch);
+        sb_putc(&b, '\n');
+        sb_printf(&b, "  worktree: %s (%s)\n", path,
+                  wt_created ? "created" : "reused");
+        sb_printf(&b, "  claim:    attempt %.12s, fence %ld, %ld min\n",
+                  at.attempt_id, at.fence, ttl);
+        sb_printf(&b, "next: cd %s && CG_AGENT=%s CG_ROLE=worker CG_PARENT=%s "
+                  "CG_FEATURE=%s CG_WAVE=%ld cg spec start %s\n", path, agent,
+                  parent, c.feature, wave, id);
+    }
+    fputs(b.p, stdout);
+    sb_free(&b);
+    lifecycle_close(&c);
+    return 0;
+}
+
+/* cg fleet merge-up <id>: the wave branch into the feature branch, in the
+ * feature manager's worktree. Refused until the branch tip says the task
+ * qualified — a merge of unproven work is what the hierarchy exists to
+ * prevent. A conflict leaves the feature worktree as it was (or, with
+ * --keep, mid-merge for the manager to resolve). */
+int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
+                   bool keep, bool json) {
+    Lifecycle c;
+    if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    long wave = 0;
+    char status[64];
+    if (!task_wave_status(c.specpath, id, &wave, status, sizeof status)) {
+        fprintf(stderr, "cg fleet: no [task.%s] with a wave in %s\n", id,
+                c.specpath);
+        lifecycle_close(&c);
+        return 1;
+    }
+    const FleetRole *rw = &c.h.roles[FLEET_WORKER];
+    char branch[512], base[512];
+    hier_expand(&c.h, rw->branch, c.feature, wave, branch, sizeof branch);
+    hier_expand(&c.h, rw->base, c.feature, wave, base, sizeof base);
+    if (!git_branch_exists(c.tree, branch)) {
+        fprintf(stderr, "cg fleet: no branch %s for %s — run cg fleet begin "
+                        "%s first\n", branch, id, id);
+        lifecycle_close(&c);
+        return 1;
+    }
+    char tip[64] = "";
+    if (!task_status_on_branch(&c, branch, id, tip, sizeof tip))
+        snprintf(tip, sizeof tip, "%s", status);
+    if (strcmp(tip, "done") != 0 && !force) {
+        fprintf(stderr, "cg fleet: %s is %s on %s, not done — qualify it "
+                        "(cg spec done %s) and commit, or --force\n", id, tip,
+                branch, id);
+        lifecycle_close(&c);
+        return 1;
+    }
+
+    StrBuf err; sb_init(&err);
+    bool base_created = false;
+    if (!ensure_branch(c.tree, base, c.h.main_branch, &base_created, &err)) {
+        char ex[300];
+        excerpt(&err, ex, sizeof ex);
+        fprintf(stderr, "cg fleet: cannot create %s: %s\n", base, ex);
+        sb_free(&err); lifecycle_close(&c);
+        return 1;
+    }
+    char fpath[4800], wtroot[4800];
+    worktree_path(&c, base, fpath, sizeof fpath);
+    snprintf(wtroot, sizeof wtroot, "%s", fpath);
+    char *slash = strrchr(wtroot, '/');
+    if (slash) { *slash = 0; mkdirs(wtroot); }
+    bool wt_created = false, br_created = false;
+    if (git_worktree_add(c.tree, fpath, base, c.h.main_branch, &wt_created,
+                         &br_created, &err) != 0) {
+        char ex[300];
+        excerpt(&err, ex, sizeof ex);
+        fprintf(stderr, "cg fleet: cannot add worktree %s for %s: %s\n", fpath,
+                base, ex);
+        sb_free(&err); lifecycle_close(&c);
+        return 1;
+    }
+    sb_free(&err);
+    char on[256], head[65];
+    if (!git_head(fpath, on, sizeof on, head, sizeof head) ||
+        strcmp(on, base) != 0) {
+        fprintf(stderr, "cg fleet: %s is on %s, not %s — check it out there "
+                        "first\n", fpath, on, base);
+        lifecycle_close(&c);
+        return 1;
+    }
+    if (!tree_clean(fpath)) {
+        fprintf(stderr, "cg fleet: %s has uncommitted changes on %s — commit "
+                        "or stash them first\n", fpath, base);
+        lifecycle_close(&c);
+        return 1;
+    }
+    long n = commits_between(c.tree, base, branch);
+    StrBuf b; sb_init(&b);
+    if (n == 0) {
+        if (json) {
+            sb_puts(&b, "{\"merged\":false,\"commits\":0,\"branch\":");
+            sb_json_str(&b, branch);
+            sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
+            sb_puts(&b, ",\"worktree\":"); sb_json_str(&b, fpath);
+            sb_puts(&b, ",\"head\":"); json_str_or_null(&b, head);
+            sb_puts(&b, "}\n");
+        } else
+            sb_printf(&b, "nothing to merge: %s already contains %s\n", base,
+                      branch);
+        fputs(b.p, stdout);
+        sb_free(&b);
+        lifecycle_close(&c);
+        return 0;
+    }
+    StrBuf a; sb_init(&a);
+    StrBuf msg; sb_init(&msg);
+    sb_printf(&msg, "merge %s into %s [spec:%s/%s]", branch, base, c.feature, id);
+    sb_puts(&a, "merge --no-ff --no-edit -m ");
+    sb_shquote(&a, msg.p);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, branch);
+    sb_free(&msg);
+    StrBuf out; sb_init(&out);
+    int rc = git_run(fpath, a.p, &out);
+    sb_free(&a);
+    if (rc != 0) {
+        char **paths = NULL;
+        int np = git_conflicted_paths(fpath, &paths);
+        if (!keep) git_run(fpath, "merge --abort", NULL);
+        if (json) {
+            sb_puts(&b, "{\"merged\":false,\"branch\":");
+            sb_json_str(&b, branch);
+            sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
+            sb_puts(&b, ",\"worktree\":"); sb_json_str(&b, fpath);
+            put_conflicts(&b, paths, np, true);
+            sb_printf(&b, ",\"kept\":%s", keep ? "true" : "false");
+            if (!np) {
+                sb_puts(&b, ",\"error\":");
+                char ex[400];
+                excerpt(&out, ex, sizeof ex);
+                sb_json_str(&b, ex);
+            }
+            sb_puts(&b, "}\n");
+        } else {
+            sb_printf(&b, "cg fleet: %s does not merge into %s\n", branch, base);
+            if (np) put_conflicts(&b, paths, np, false);
+            else {
+                char ex[400];
+                excerpt(&out, ex, sizeof ex);
+                sb_printf(&b, "  %s\n", ex);
+            }
+            if (keep)
+                sb_printf(&b, "merge left in place at %s — resolve, commit, "
+                              "then cg fleet merge-up %s again\n", fpath, id);
+            else
+                sb_puts(&b, "merge aborted\n");
+        }
+        fputs(b.p, stdout);
+        sb_free(&b); sb_free(&out);
+        free_list(paths, np);
+        lifecycle_close(&c);
+        return 1;
+    }
+    sb_free(&out);
+    git_head(fpath, on, sizeof on, head, sizeof head);
+    branch_register(cg, base, fpath, head, c.h.main_branch);
+    if (json) {
+        sb_printf(&b, "{\"merged\":true,\"commits\":%ld,\"branch\":", n);
+        sb_json_str(&b, branch);
+        sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
+        sb_puts(&b, ",\"worktree\":"); sb_json_str(&b, fpath);
+        sb_puts(&b, ",\"head\":"); json_str_or_null(&b, head);
+        sb_puts(&b, "}\n");
+    } else
+        sb_printf(&b, "merged %s into %s: %ld commit%s (head %.8s) at %s\n",
+                  branch, base, n, n == 1 ? "" : "s", head, fpath);
+    fputs(b.p, stdout);
+    sb_free(&b);
+    lifecycle_close(&c);
+    return 0;
+}
+
+/* run one gate in the main tree, its output kept in a log file the
+ * refusal message points at. Returns the exit status. */
+static int run_gate(const char *tree, const char *cmd, const char *logpath,
+                    long *ms) {
+    StrBuf c; sb_init(&c);
+    sb_puts(&c, "cd ");
+    sb_shquote(&c, tree);
+    sb_puts(&c, " && (");
+    sb_puts(&c, cmd);
+    sb_puts(&c, ") 2>&1");
+    long t0 = now_ms();
+    FILE *f = popen(c.p, "r");
+    sb_free(&c);
+    if (!f) { *ms = 0; return -1; }
+    StrBuf out; sb_init(&out);
+    char buf[4097];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf - 1, f)) > 0) {
+        buf[n] = 0;
+        sb_puts(&out, buf);
+    }
+    int st = pclose(f);
+    *ms = now_ms() - t0;
+    write_entire_file(logpath, out.p, out.len);
+    sb_free(&out);
+    if (st == -1) return -1;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+}
+
+static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
+                        bool json);
+
+/* cg fleet land <feature>: the feature branch into local main, behind the
+ * gates. Red means main is reset to where it was — landing is all or
+ * nothing, and a half-landed main is the one state nobody can reason
+ * about. Green opens the pull request when the policy says auto. */
+int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
+    Lifecycle c;
+    if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
+    char branch[512];
+    hier_expand(&c.h, rf->branch, c.feature, -1, branch, sizeof branch);
+    if (!git_branch_exists(c.tree, branch)) {
+        fprintf(stderr, "cg fleet: no branch %s — nothing has been merged up "
+                        "for %s yet\n", branch, c.feature);
+        lifecycle_close(&c);
+        return 1;
+    }
+    char on[256], pre[65];
+    if (!git_head(c.tree, on, sizeof on, pre, sizeof pre) ||
+        strcmp(on, c.h.main_branch) != 0) {
+        fprintf(stderr, "cg fleet: %s is on %s, not %s — land runs on the "
+                        "main worktree checked out at %s\n", c.tree, on,
+                c.h.main_branch, c.h.main_branch);
+        lifecycle_close(&c);
+        return 1;
+    }
+    if (!tree_clean(c.tree)) {
+        fprintf(stderr, "cg fleet: %s has uncommitted changes on %s — commit "
+                        "or stash them before landing\n", c.tree, c.h.main_branch);
+        lifecycle_close(&c);
+        return 1;
+    }
+    long n = commits_between(c.tree, c.h.main_branch, branch);
+    StrBuf b; sb_init(&b);
+    if (n == 0) {
+        if (json) {
+            sb_puts(&b, "{\"landed\":false,\"commits\":0,\"feature\":");
+            sb_json_str(&b, c.feature);
+            sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+            sb_puts(&b, ",\"main\":"); sb_json_str(&b, c.h.main_branch);
+            sb_puts(&b, ",\"head\":"); json_str_or_null(&b, pre);
+            sb_puts(&b, "}\n");
+        } else
+            sb_printf(&b, "nothing to land: %s already contains %s\n",
+                      c.h.main_branch, branch);
+        fputs(b.p, stdout);
+        sb_free(&b);
+        lifecycle_close(&c);
+        return 0;
+    }
+    StrBuf a; sb_init(&a);
+    StrBuf msg; sb_init(&msg);
+    sb_printf(&msg, "land %s into %s [spec:%s]", branch, c.h.main_branch,
+              c.feature);
+    sb_puts(&a, "merge --no-ff --no-edit -m ");
+    sb_shquote(&a, msg.p);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, branch);
+    sb_free(&msg);
+    StrBuf out; sb_init(&out);
+    int rc = git_run(c.tree, a.p, &out);
+    sb_free(&a);
+    if (rc != 0) {
+        char **paths = NULL;
+        int np = git_conflicted_paths(c.tree, &paths);
+        git_run(c.tree, "merge --abort", NULL);
+        if (json) {
+            sb_puts(&b, "{\"landed\":false,\"feature\":");
+            sb_json_str(&b, c.feature);
+            sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+            sb_puts(&b, ",\"main\":"); sb_json_str(&b, c.h.main_branch);
+            put_conflicts(&b, paths, np, true);
+            sb_puts(&b, "}\n");
+        } else {
+            sb_printf(&b, "cg fleet: %s does not merge into %s\n", branch,
+                      c.h.main_branch);
+            if (np) put_conflicts(&b, paths, np, false);
+            else {
+                char ex[400];
+                excerpt(&out, ex, sizeof ex);
+                sb_printf(&b, "  %s\n", ex);
+            }
+            sb_puts(&b, "merge aborted\n");
+        }
+        fputs(b.p, stdout);
+        sb_free(&b); sb_free(&out);
+        free_list(paths, np);
+        lifecycle_close(&c);
+        return 1;
+    }
+    sb_free(&out);
+
+    /* the gates, in the order the workflow names them: test, then lint */
+    char logdir[4700];
+    snprintf(logdir, sizeof logdir, "%s/%s/fleet", c.tree, CG_DIR);
+    mkdirs(logdir);
+    const char *names[2] = { "test", "lint" };
+    const char *cmds[2] = { c.h.test_gate, c.h.lint_gate };
+    long gate_ms[2] = { 0, 0 };
+    int gate_rc[2] = { 0, 0 };
+    bool gate_ran[2] = { false, false };
+    char logs[2][4800];
+    int red = -1;
+    for (int g = 0; g < 2 && red < 0; g++) {
+        if (!cmds[g] || !cmds[g][0]) { logs[g][0] = 0; continue; }
+        snprintf(logs[g], sizeof logs[g], "%s/land-%s-%s.log", logdir,
+                 c.feature, names[g]);
+        gate_ran[g] = true;
+        gate_rc[g] = run_gate(c.tree, cmds[g], logs[g], &gate_ms[g]);
+        if (gate_rc[g] != 0) red = g;
+    }
+    char head[65];
+    if (red >= 0) {
+        StrBuf r; sb_init(&r);
+        sb_puts(&r, "reset --hard ");
+        sb_shquote(&r, pre);
+        git_run(c.tree, r.p, NULL);
+        sb_free(&r);
+    } else {
+        git_head(c.tree, on, sizeof on, head, sizeof head);
+        branch_register(cg, c.h.main_branch, c.tree, head, NULL);
+    }
+    if (json) {
+        sb_printf(&b, "{\"landed\":%s,\"feature\":", red < 0 ? "true" : "false");
+        sb_json_str(&b, c.feature);
+        sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+        sb_puts(&b, ",\"main\":"); sb_json_str(&b, c.h.main_branch);
+        sb_printf(&b, ",\"commits\":%ld,\"head\":", n);
+        json_str_or_null(&b, red < 0 ? head : pre);
+        sb_puts(&b, ",\"gates\":{");
+        for (int g = 0; g < 2; g++) {
+            if (g) sb_putc(&b, ',');
+            sb_printf(&b, "\"%s\":", names[g]);
+            if (!gate_ran[g]) { sb_puts(&b, "null"); continue; }
+            sb_puts(&b, "{\"cmd\":"); sb_json_str(&b, cmds[g]);
+            sb_printf(&b, ",\"ok\":%s,\"exit\":%d,\"ms\":%ld,\"log\":",
+                      gate_rc[g] == 0 ? "true" : "false", gate_rc[g],
+                      gate_ms[g]);
+            sb_json_str(&b, logs[g]);
+            sb_putc(&b, '}');
+        }
+        sb_putc(&b, '}');
+        if (red >= 0) {
+            sb_puts(&b, ",\"reset_to\":"); sb_json_str(&b, pre);
+            sb_puts(&b, "}\n");
+        }
+    } else if (red >= 0) {
+        sb_printf(&b, "landing refused: %s gate `%s` failed (exit %d) — %s "
+                      "reset to %.8s\n  log: %s\n", names[red], cmds[red],
+                  gate_rc[red], c.h.main_branch, pre, logs[red]);
+    } else {
+        sb_printf(&b, "landed %s into %s: %ld commit%s, gates green (head "
+                      "%.8s)\n", branch, c.h.main_branch, n, n == 1 ? "" : "s",
+                  head);
+        for (int g = 0; g < 2; g++)
+            if (gate_ran[g])
+                sb_printf(&b, "  %s: `%s` ok in %ld ms\n", names[g], cmds[g],
+                          gate_ms[g]);
+    }
+    fputs(b.p, stdout);
+    fflush(stdout);
+    sb_free(&b);
+    if (red >= 0) { lifecycle_close(&c); return 1; }
+
+    /* the pull request: opened on green when the policy is auto, printed
+     * as commands when it is manual, skipped on --no-pr */
+    int rc2 = 0;
+    if (json) {
+        StrBuf jb; sb_init(&jb);
+        if (no_pr) sb_puts(&jb, "null");
+        else rc2 = pr_open_core(cg, &c, strcmp(c.h.pr, "auto") != 0, &jb, true);
+        printf(",\"pr\":%s}\n", jb.p);
+        sb_free(&jb);
+    } else if (!no_pr) {
+        rc2 = pr_open_core(cg, &c, strcmp(c.h.pr, "auto") != 0, NULL, false);
+    }
+    lifecycle_close(&c);
+    return rc2 == 0 ? 0 : 1;
+}
+
+/* gh, when the operator has it: CG_GH names it outright, else PATH */
+static bool find_gh(char *out, size_t cap) {
+    const char *ov = getenv("CG_GH");
+    return cg_find_exe(ov && ov[0] ? ov : "gh", out, cap);
+}
+
+/* run `cd <tree> && <cmd>`; output appended to out, exit status returned */
+static int run_in(const char *tree, const char *cmd, StrBuf *out) {
+    StrBuf c; sb_init(&c);
+    sb_puts(&c, "cd ");
+    sb_shquote(&c, tree);
+    sb_puts(&c, " && ");
+    sb_puts(&c, cmd);
+    sb_puts(&c, " 2>&1");
+    FILE *f = popen(c.p, "r");
+    sb_free(&c);
+    if (!f) return -1;
+    char buf[4097];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf - 1, f)) > 0) {
+        buf[n] = 0;
+        if (out) sb_puts(out, buf);
+    }
+    int st = pclose(f);
+    if (st == -1) return -1;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
+}
+
+/* the pull request body: the feature's title and its task list, written
+ * to .codegraph/fleet so the printed gh command is runnable as-is */
+static void write_pr_body(const Lifecycle *c, char *title, size_t tcap,
+                          char *bodypath, size_t bcap) {
+    Kvx *f = kvx_parse(c->specpath);
+    char *t = f ? kvx_str(f, "meta", "title") : NULL;
+    if (t && t[0]) snprintf(title, tcap, "%s", t);
+    else snprintf(title, tcap, "feature/%s", c->feature);
+    free(t);
+    StrBuf b; sb_init(&b);
+    sb_printf(&b, "Feature `%s`, landed on `%s` by Codify with the test and "
+                  "lint gates green.\n\n## Tasks\n", c->feature, c->h.main_branch);
+    if (f) {
+        char **ids = NULL;
+        int nids = kvx_subsections(f, "task", &ids);
+        kvx_sort_dotted(ids, nids);
+        for (int i = 0; i < nids; i++) {
+            char sec[300];
+            snprintf(sec, sizeof sec, "task.%s", ids[i]);
+            if (!kvx_raw(f, sec, "wave")) { free(ids[i]); continue; }
+            char *tt = kvx_str(f, sec, "title");
+            char *st = kvx_str(f, sec, "status");
+            sb_printf(&b, "- %s %s (%s)\n", ids[i], tt ? tt : "",
+                      st && st[0] ? st : "pending");
+            free(tt); free(st); free(ids[i]);
+        }
+        free(ids);
+    }
+    kvx_free(f);
+    char dir[4700];
+    snprintf(dir, sizeof dir, "%s/%s/fleet", c->tree, CG_DIR);
+    mkdirs(dir);
+    snprintf(bodypath, bcap, "%s/pr-%s.md", dir, c->feature);
+    write_entire_file(bodypath, b.p, b.len);
+    sb_free(&b);
+}
+
+/* Open the feature's pull request against <remote>/<main>, or print the
+ * exact commands when gh is absent or the caller asked for a dry run.
+ * jb receives one JSON object (when json), else text goes to stdout. */
+static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
+                        bool json) {
+    (void)cg;
+    const FleetRole *rf = &c->h.roles[FLEET_FEATURE];
+    char branch[512], title[300], bodypath[4800], gh[4096];
+    hier_expand(&c->h, rf->branch, c->feature, -1, branch, sizeof branch);
+    write_pr_body(c, title, sizeof title, bodypath, sizeof bodypath);
+    bool have_gh = find_gh(gh, sizeof gh);
+
+    StrBuf push; sb_init(&push);
+    sb_puts(&push, "git -C "); sb_shquote(&push, c->tree);
+    sb_puts(&push, " push -u "); sb_shquote(&push, c->h.remote);
+    sb_putc(&push, ' '); sb_shquote(&push, branch);
+    StrBuf create; sb_init(&create);
+    sb_puts(&create, "cd "); sb_shquote(&create, c->tree);
+    sb_puts(&create, " && "); sb_shquote(&create, have_gh ? gh : "gh");
+    sb_puts(&create, " pr create --base "); sb_shquote(&create, c->h.main_branch);
+    sb_puts(&create, " --head "); sb_shquote(&create, branch);
+    sb_puts(&create, " --title "); sb_shquote(&create, title);
+    sb_puts(&create, " --body-file "); sb_shquote(&create, bodypath);
+
+    StrBuf b; sb_init(&b);
+    int rc = 0;
+    if (dry_run || !have_gh) {
+        const char *why = dry_run ? "dry-run" : "gh not found";
+        if (json) {
+            sb_puts(&b, "{\"opened\":false,\"reason\":");
+            sb_json_str(&b, why);
+            sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+            sb_puts(&b, ",\"base\":"); sb_json_str(&b, c->h.main_branch);
+            sb_puts(&b, ",\"remote\":"); sb_json_str(&b, c->h.remote);
+            sb_puts(&b, ",\"commands\":["); sb_json_str(&b, push.p);
+            sb_putc(&b, ','); sb_json_str(&b, create.p);
+            sb_puts(&b, "]}");
+        } else {
+            sb_printf(&b, "pull request (%s): run these to open %s against "
+                          "%s/%s:\n  %s\n  %s\n", why, branch, c->h.remote,
+                      c->h.main_branch, push.p, create.p);
+        }
+    } else {
+        /* one open PR per branch: gh would refuse anyway, but say why */
+        StrBuf q; sb_init(&q);
+        sb_shquote(&q, gh);
+        sb_puts(&q, " pr list --head "); sb_shquote(&q, branch);
+        sb_puts(&q, " --base "); sb_shquote(&q, c->h.main_branch);
+        sb_puts(&q, " --state open --json number,url");
+        StrBuf out; sb_init(&out);
+        char **items = NULL;
+        int ni = run_in(c->tree, q.p, &out) == 0
+               ? json_array_items(out.p, &items) : 0;
+        sb_free(&q);
+        if (ni > 0) {
+            char *url = json_get_string(items[0], "url");
+            long num = json_get_int(items[0], "number", 0);
+            if (json) {
+                sb_printf(&b, "{\"opened\":false,\"already_open\":true,"
+                              "\"number\":%ld,\"url\":", num);
+                json_str_or_null(&b, url);
+                sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+                sb_puts(&b, ",\"base\":"); sb_json_str(&b, c->h.main_branch);
+                sb_putc(&b, '}');
+            } else
+                sb_printf(&b, "already open: #%ld %s (%s → %s)\n", num,
+                          url ? url : "", branch, c->h.main_branch);
+            free(url);
+        } else {
+            sb_free(&out); sb_init(&out);
+            int prc = run_in(c->tree, push.p + 0, &out);
+            /* push.p starts with "git -C <tree>", which run_in's cd makes
+             * redundant but harmless */
+            if (prc != 0) {
+                char ex[400];
+                excerpt(&out, ex, sizeof ex);
+                fprintf(stderr, "cg fleet: push of %s to %s failed: %s\n",
+                        branch, c->h.remote, ex);
+                rc = 1;
+                if (json) {
+                    sb_puts(&b, "{\"opened\":false,\"pushed\":false,\"error\":");
+                    sb_json_str(&b, ex);
+                    sb_putc(&b, '}');
+                }
+            } else {
+                sb_free(&out); sb_init(&out);
+                /* the create command already cds; strip that for run_in */
+                const char *cmd = strstr(create.p, " && ");
+                cmd = cmd ? cmd + 4 : create.p;
+                int crc = run_in(c->tree, cmd, &out);
+                if (crc != 0) {
+                    char ex[400];
+                    excerpt(&out, ex, sizeof ex);
+                    fprintf(stderr, "cg fleet: gh pr create failed: %s\n", ex);
+                    rc = 1;
+                    if (json) {
+                        sb_puts(&b, "{\"opened\":false,\"pushed\":true,"
+                                    "\"error\":");
+                        sb_json_str(&b, ex);
+                        sb_putc(&b, '}');
+                    }
+                } else {
+                    /* gh prints the new PR's URL as its last line */
+                    char url[600] = "";
+                    for (char *line = out.p, *e; line && *line; line = e ? e + 1 : NULL) {
+                        e = strchr(line, '\n');
+                        size_t len = e ? (size_t)(e - line) : strlen(line);
+                        if (len && len < sizeof url) {
+                            memcpy(url, line, len);
+                            url[len] = 0;
+                        }
+                    }
+                    if (json) {
+                        sb_puts(&b, "{\"opened\":true,\"url\":");
+                        sb_json_str(&b, url);
+                        sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+                        sb_puts(&b, ",\"base\":"); sb_json_str(&b, c->h.main_branch);
+                        sb_puts(&b, ",\"remote\":"); sb_json_str(&b, c->h.remote);
+                        sb_puts(&b, ",\"pushed\":true}");
+                    } else
+                        sb_printf(&b, "opened %s (%s → %s)\n", url, branch,
+                                  c->h.main_branch);
+                }
+            }
+        }
+        sb_free(&out);
+        free_list(items, ni);
+    }
+    if (json) sb_puts(jb, b.p);
+    else fputs(b.p, stdout);
+    sb_free(&b); sb_free(&push); sb_free(&create);
+    return rc;
+}
+
+int fleet_pr_open(Cg *cg, const char *feature_ov, bool dry_run, bool json) {
+    Lifecycle c;
+    if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
+    char branch[512];
+    hier_expand(&c.h, rf->branch, c.feature, -1, branch, sizeof branch);
+    if (!git_branch_exists(c.tree, branch)) {
+        fprintf(stderr, "cg fleet: no branch %s to open a pull request "
+                        "from\n", branch);
+        lifecycle_close(&c);
+        return 1;
+    }
+    int rc;
+    if (json) {
+        StrBuf jb; sb_init(&jb);
+        rc = pr_open_core(cg, &c, dry_run, &jb, true);
+        if (jb.len) printf("%s\n", jb.p);
+        sb_free(&jb);
+    } else
+        rc = pr_open_core(cg, &c, dry_run, NULL, false);
+    lifecycle_close(&c);
+    return rc;
+}
+
+typedef struct { long number; char *head, *title, *url; } OpenPr;
+
+/* cg fleet checkpoint: merge the open Codify pull requests — the ones on
+ * feature branches — lowest number first, and stop at the first that will
+ * not merge so the order stays what a reader expects. Local main then
+ * fast-forwards to the remote when it is clean. */
+int fleet_checkpoint(Cg *cg, bool dry_run, bool json) {
+    Lifecycle c;
+    if (lifecycle_open(cg, NULL, &c) != 0) return 1;
+    const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
+    /* what makes a PR ours: its head matches the feature-branch template
+     * up to {feature} (feature/ by default) */
+    char prefix[512];
+    snprintf(prefix, sizeof prefix, "%s", rf->branch);
+    char *brace = strstr(prefix, "{feature}");
+    if (brace) *brace = 0;
+    char gh[4096];
+    bool have_gh = find_gh(gh, sizeof gh);
+    StrBuf b; sb_init(&b);
+    if (dry_run || !have_gh) {
+        const char *why = dry_run ? "dry-run" : "gh not found";
+        StrBuf l; sb_init(&l);
+        sb_printf(&l, "gh pr list --base '%s' --state open --json "
+                      "number,headRefName,title,url", c.h.main_branch);
+        if (json) {
+            sb_puts(&b, "{\"merged\":[],\"skipped\":[],\"reason\":");
+            sb_json_str(&b, why);
+            sb_puts(&b, ",\"prefix\":"); sb_json_str(&b, prefix);
+            sb_puts(&b, ",\"commands\":["); sb_json_str(&b, l.p);
+            sb_puts(&b, ",\"gh pr merge <number> --merge\"]}\n");
+        } else
+            sb_printf(&b, "checkpoint (%s): merge the open %s* pull requests "
+                          "lowest number first:\n  %s\n  gh pr merge <number> "
+                          "--merge\n", why, prefix, l.p);
+        sb_free(&l);
+        fputs(b.p, stdout);
+        sb_free(&b);
+        lifecycle_close(&c);
+        return 0;
+    }
+    StrBuf q; sb_init(&q);
+    sb_shquote(&q, gh);
+    sb_puts(&q, " pr list --base "); sb_shquote(&q, c.h.main_branch);
+    sb_puts(&q, " --state open --json number,headRefName,title,url");
+    StrBuf out; sb_init(&out);
+    int lrc = run_in(c.tree, q.p, &out);
+    sb_free(&q);
+    if (lrc != 0) {
+        char ex[400];
+        excerpt(&out, ex, sizeof ex);
+        fprintf(stderr, "cg fleet: gh pr list failed: %s\n", ex);
+        sb_free(&out); sb_free(&b);
+        lifecycle_close(&c);
+        return 1;
+    }
+    char **items = NULL;
+    int ni = json_array_items(out.p, &items);
+    sb_free(&out);
+    OpenPr *prs = xmalloc(sizeof(OpenPr) * (size_t)(ni > 0 ? ni : 1));
+    OpenPr *skip = xmalloc(sizeof(OpenPr) * (size_t)(ni > 0 ? ni : 1));
+    int np = 0, ns = 0;
+    for (int i = 0; i < ni; i++) {
+        OpenPr p;
+        p.number = json_get_int(items[i], "number", 0);
+        p.head = json_get_string(items[i], "headRefName");
+        p.title = json_get_string(items[i], "title");
+        p.url = json_get_string(items[i], "url");
+        if (!p.head) p.head = xstrdup("");
+        if (!p.title) p.title = xstrdup("");
+        if (!p.url) p.url = xstrdup("");
+        bool ours = prefix[0] ? strncmp(p.head, prefix, strlen(prefix)) == 0
+                              : strcmp(p.head, rf->branch) == 0;
+        if (ours) prs[np++] = p; else skip[ns++] = p;
+    }
+    free_list(items, ni);
+    for (int i = 1; i < np; i++) {              /* ascending by number */
+        OpenPr t = prs[i];
+        int j = i;
+        while (j > 0 && prs[j - 1].number > t.number) { prs[j] = prs[j - 1]; j--; }
+        prs[j] = t;
+    }
+    int nok = 0, failed = -1;
+    char failmsg[400] = "";
+    for (int i = 0; i < np && failed < 0; i++) {
+        StrBuf m; sb_init(&m);
+        sb_shquote(&m, gh);
+        sb_printf(&m, " pr merge %ld --merge", prs[i].number);
+        StrBuf mo; sb_init(&mo);
+        int mrc = run_in(c.tree, m.p, &mo);
+        sb_free(&m);
+        if (mrc == 0) nok++;
+        else { failed = i; excerpt(&mo, failmsg, sizeof failmsg); }
+        sb_free(&mo);
+    }
+    /* local main follows the remote when nothing here is in the way */
+    bool updated = false;
+    char head[65] = "", on[256];
+    if (nok > 0 && git_head(c.tree, on, sizeof on, head, sizeof head) &&
+        strcmp(on, c.h.main_branch) == 0 && tree_clean(c.tree)) {
+        StrBuf f; sb_init(&f);
+        sb_puts(&f, "fetch "); sb_shquote(&f, c.h.remote);
+        sb_putc(&f, ' '); sb_shquote(&f, c.h.main_branch);
+        if (git_run(c.tree, f.p, NULL) == 0 &&
+            git_run(c.tree, "merge --ff-only FETCH_HEAD", NULL) == 0) {
+            updated = true;
+            git_head(c.tree, on, sizeof on, head, sizeof head);
+            branch_register(cg, c.h.main_branch, c.tree, head, NULL);
+        }
+        sb_free(&f);
+    }
+    int remaining = failed >= 0 ? np - failed - 1 : 0;
+    if (json) {
+        sb_puts(&b, "{\"merged\":[");
+        for (int i = 0; i < np && (failed < 0 || i <= failed); i++) {
+            if (i) sb_putc(&b, ',');
+            sb_printf(&b, "{\"number\":%ld,\"branch\":", prs[i].number);
+            sb_json_str(&b, prs[i].head);
+            sb_puts(&b, ",\"title\":"); sb_json_str(&b, prs[i].title);
+            sb_puts(&b, ",\"url\":"); sb_json_str(&b, prs[i].url);
+            sb_printf(&b, ",\"ok\":%s", i == failed ? "false" : "true");
+            if (i == failed) { sb_puts(&b, ",\"error\":"); sb_json_str(&b, failmsg); }
+            sb_putc(&b, '}');
+        }
+        sb_puts(&b, "],\"skipped\":[");
+        for (int i = 0; i < ns; i++) {
+            if (i) sb_putc(&b, ',');
+            sb_printf(&b, "{\"number\":%ld,\"branch\":", skip[i].number);
+            sb_json_str(&b, skip[i].head);
+            sb_puts(&b, ",\"title\":"); sb_json_str(&b, skip[i].title);
+            sb_puts(&b, ",\"url\":"); sb_json_str(&b, skip[i].url);
+            sb_putc(&b, '}');
+        }
+        sb_printf(&b, "],\"remaining\":%d,\"local_main\":{\"updated\":%s,"
+                      "\"head\":", remaining, updated ? "true" : "false");
+        json_str_or_null(&b, head);
+        sb_puts(&b, "}}\n");
+    } else {
+        for (int i = 0; i < np && (failed < 0 || i <= failed); i++) {
+            if (i == failed)
+                sb_printf(&b, "could not merge #%ld %s — %s\n", prs[i].number,
+                          prs[i].head, failmsg);
+            else
+                sb_printf(&b, "merged #%ld %s — %s (%s)\n", prs[i].number,
+                          prs[i].head, prs[i].title, prs[i].url);
+        }
+        for (int i = 0; i < ns; i++)
+            sb_printf(&b, "skipped #%ld %s — not a %s* branch\n",
+                      skip[i].number, skip[i].head, prefix);
+        sb_printf(&b, "checkpoint: %d merged, %d skipped", nok, ns);
+        if (remaining) sb_printf(&b, ", %d remaining", remaining);
+        if (!np && !ns) sb_puts(&b, " — no open pull requests");
+        sb_putc(&b, '\n');
+        if (nok > 0)
+            sb_printf(&b, "local %s: %s\n", c.h.main_branch,
+                      updated ? "fast-forwarded" : "not updated (checkout "
+                      "or working tree in the way, or the remote is ahead "
+                      "differently)");
+        if (nok > 0 && updated) {
+            b.len--;                            /* fold the head in */
+            sb_printf(&b, " to %.8s\n", head);
+        }
+    }
+    fputs(b.p, stdout);
+    sb_free(&b);
+    for (int i = 0; i < np; i++) { free(prs[i].head); free(prs[i].title); free(prs[i].url); }
+    for (int i = 0; i < ns; i++) { free(skip[i].head); free(skip[i].title); free(skip[i].url); }
+    free(prs); free(skip);
+    lifecycle_close(&c);
+    return failed >= 0 ? 1 : 0;
+}
+
 /* ---------------- dispatch ---------------- */
 
 int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     const char *sub = argc >= 3 ? argv[2] : "status";
-    const char *feature = NULL;
+    const char *feature = NULL, *agent = NULL, *pos = NULL;
+    bool force = false, keep = false, no_pr = false, dry = false;
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) feature = argv[++i];
+        else if (strcmp(argv[i], "--agent") == 0 && i + 1 < argc) agent = argv[++i];
+        else if (strcmp(argv[i], "--force") == 0) force = true;
+        else if (strcmp(argv[i], "--keep") == 0) keep = true;
+        else if (strcmp(argv[i], "--no-pr") == 0) no_pr = true;
+        else if (strcmp(argv[i], "--dry-run") == 0) dry = true;
+        else if (argv[i][0] != '-' && !pos) pos = argv[i];
     }
     if (strcmp(sub, "roles") == 0) return fleet_roles(cg, json);
     if (strcmp(sub, "status") == 0) return fleet_status(cg, json);
     if (strcmp(sub, "plan") == 0) return fleet_plan(cg, feature, json);
-    fprintf(stderr, "usage: cg fleet roles | status | plan [-f <feature>]\n");
+    if (strcmp(sub, "begin") == 0 || strcmp(sub, "merge-up") == 0) {
+        if (!pos) {
+            fprintf(stderr, "usage: cg fleet %s <task-id> [-f <feature>]%s\n",
+                    sub, strcmp(sub, "begin") == 0 ? " [--agent A]"
+                                                   : " [--force] [--keep]");
+            return 1;
+        }
+        return strcmp(sub, "begin") == 0
+             ? fleet_worker_begin(cg, pos, feature, agent, json)
+             : fleet_merge_up(cg, pos, feature, force, keep, json);
+    }
+    if (strcmp(sub, "land") == 0)
+        return fleet_feature_land(cg, pos ? pos : feature, no_pr, json);
+    if (strcmp(sub, "pr") == 0)
+        return fleet_pr_open(cg, pos ? pos : feature, dry, json);
+    if (strcmp(sub, "checkpoint") == 0) return fleet_checkpoint(cg, dry, json);
+    fprintf(stderr, "usage: cg fleet roles | status | plan [-f F] | "
+                    "begin <id> [-f F] [--agent A] | merge-up <id> [--force] "
+                    "[--keep] | land <feature> [--no-pr] | pr <feature> "
+                    "[--dry-run] | checkpoint [--dry-run]\n");
     return 1;
 }
