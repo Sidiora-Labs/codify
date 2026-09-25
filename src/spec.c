@@ -2858,6 +2858,41 @@ static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,
     return 0;
 }
 
+/* Run a task's verify command where the operator can watch it and keep its
+ * tail for triage: a failure explains itself in its last lines, and there
+ * is no second chance to capture them. Returns a wait status like
+ * system(); stdin stays the caller's, stderr is folded into stdout so the
+ * tail reads in the order it was printed. */
+static int spec_run_verify(const char *root, const char *cmd, char *tail,
+                           size_t cap) {
+    tail[0] = 0;
+    StrBuf c; sb_init(&c);
+    sb_printf(&c, "cd '%s' && (%s) 2>&1", root, cmd);
+    FILE *f = popen(c.p, "r");
+    sb_free(&c);
+    if (!f) return -1;
+    char buf[4096];
+    size_t n, len = 0, keep = cap - 1;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) {
+        fwrite(buf, 1, n, stdout);
+        fflush(stdout);
+        if (n >= keep) {
+            memcpy(tail, buf + n - keep, keep);
+            len = keep;
+        } else {
+            if (len + n > keep) {
+                size_t drop = len + n - keep;
+                memmove(tail, tail + drop, len - drop);
+                len -= drop;
+            }
+            memcpy(tail + len, buf, n);
+            len += n;
+        }
+        tail[len] = 0;
+    }
+    return pclose(f);
+}
+
 static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                          const char *attempt, long fence, bool force,
                          bool json) {
@@ -2890,10 +2925,8 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
     if (vc[0]) {
         printf("verify: %s\n", vc);
         fflush(stdout);
-        StrBuf cmd; sb_init(&cmd);
-        sb_printf(&cmd, "cd '%s' && (%s)", s->root, vc);
-        int rc = system(cmd.p);
-        sb_free(&cmd);
+        char tail[4096];
+        int rc = spec_run_verify(s->root, vc, tail, sizeof tail);
         if (rc != 0) {
             int code = (rc > 0 && (rc & 0x7f) == 0) ? (rc >> 8) & 0xff : rc;
             fprintf(stderr, "cg spec: verify_cmd failed (exit %d) — task %s "
@@ -2904,6 +2937,16 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
                 StrBuf mb; sb_init(&mb);
                 sb_printf(&mb, "blocked: %s — verify_cmd failed (exit %d)",
                           t, code);
+                /* Jev says what kind of failure it was and what to do about
+                 * it; the exit code above already decided the verdict */
+                JevTriage tri;
+                Cg g;
+                bool opened = memory_open_quiet(&g);
+                if (jev_triage_failure(opened ? &g : NULL, tail, &tri) == JEV_OK) {
+                    printf("jev triage: %s\n", tri.line);
+                    sb_printf(&mb, " [jev: %s → %s]", tri.category, tri.action);
+                }
+                if (opened) cg_close(&g);
                 spec_note_outcome(s, id, mb.p);
                 sb_free(&mb); free(t); free(vc);
                 return 1;

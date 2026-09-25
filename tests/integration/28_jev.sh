@@ -276,4 +276,195 @@ assert d["ok"] is False and d["probe"]["ok"] is False and "status 500" in d["pro
     hasnt "$(cat "$FIXTURES/../../spec/workflow.kvx")" "local_only"
 fi
 
+if want advisory; then
+    # Jev inside deterministic commands: it classifies, ranks, and flags,
+    # and the exit codes stay exactly what they were without it.
+    cp -r "$FIXTURES/grounding" "$TMP/adv"
+    cd "$TMP/adv"
+    cat > fail.sh <<'EOF'
+i=1
+while [ $i -le 60 ]; do echo "line $i"; i=$((i + 1)); done
+echo "FAIL: expected 3, got 4" >&2
+exit 1
+EOF
+    "$CG" spec new adv >/dev/null
+    "$CG" spec add 2.1 --title "Advisory work" --wave 1 --touches 'src/**' \
+          --reqs 1.1 --verify 'sh fail.sh' >/dev/null
+    "$CG" init >/dev/null
+    "$CG" spec start 1.1 >/dev/null && "$CG" spec done 1.1 >/dev/null
+    "$CG" spec start 2.1 >/dev/null
+    export JEV_FAKE_DIR="$TMP/advfake"
+    export JEV_FAKE_MODE=ok
+    unset OPENROUTER_API_KEY CG_JEV_CURL || true
+    # the body of the outcome memory the last `spec done` recorded
+    outcome() { "$CG" recall --task adv/2.1 --type outcome | sed -n '2p'; }
+
+    # ---- (1) no key: done still fails on its own verdict, and says once
+    #      that triage was skipped
+    expect_rc 1 "$CG" spec done 2.1
+    out="$("$CG" spec done 2.1 2>&1 || true)"
+    has "$out" "verify_cmd failed (exit 1)"
+    has "$out" "jev: OPENROUTER_API_KEY is not set — failure triage skipped"
+    hasnt "$out" "jev triage:"
+    [ "$(printf '%s\n' "$out" | grep -c 'OPENROUTER_API_KEY is not set')" -eq 1 ] \
+        || fail "the missing key is reported once, not per question"
+    has "$(outcome)" "blocked: Advisory work — verify_cmd failed (exit 1)"
+    hasnt "$(outcome)" "[jev:"
+    [ ! -e .codegraph/jev.log ] || fail "a skipped call must not be logged"
+
+    # ---- (2) with Jev: category and next action, printed and remembered
+    export OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcd
+    export CG_JEV_CURL="$FAKE"
+    reset_fake
+    out="$(JEV_FAKE_CHOICE='failure_category=test_failure,next_action=fix_test' \
+        "$CG" spec done 2.1 2>&1 || true)"
+    has "$out" "verify_cmd failed (exit 1)"
+    has "$out" "jev triage: test_failure (confidence 0.82) → fix_test (confidence 0.82)"
+    has "$(outcome)" \
+        "blocked: Advisory work — verify_cmd failed (exit 1) [jev: test_failure → fix_test]"
+    has "$("$CG" spec status)" "1 in progress"       # advice never marks it done
+    [ "$(wc -l < .codegraph/jev.log)" -eq 1 ] || fail "triage is one call"
+
+    # the questions are asked about the tail of the output, not the head
+    python3 - "$JEV_FAKE_DIR/request.1.json" <<'EOF' || fail "triage request"
+import json, sys
+d = json.load(open(sys.argv[1]))
+qs = d["questions"]
+assert set(qs) == {"failure_category", "next_action"}, qs
+assert qs["failure_category"]["type"] == "choice", qs
+assert set(qs["failure_category"]["criteria"]) == {
+    "test_failure", "build_error", "missing_dependency", "flaky",
+    "environment", "spec_mismatch"}, qs
+assert set(qs["next_action"]["criteria"]) == {
+    "fix_code", "fix_test", "rerun", "install_dependency", "revise_spec",
+    "ask_human"}, qs
+tail = d["state"]["output_tail"].split("\n")
+assert len(tail) == 40, tail          # the last 40 lines of 61, and no more
+assert "line 60" in tail, tail        # stdout and stderr both, in one stream
+assert "FAIL: expected 3, got 4" in tail, tail
+assert "line 1" not in tail and "line 20" not in tail, tail
+EOF
+
+    # ---- (3) the answer is Jev's, not a constant
+    out="$(JEV_FAKE_CHOICE='failure_category=flaky,next_action=rerun' \
+        "$CG" spec done 2.1 2>&1 || true)"
+    has "$out" "jev triage: flaky (confidence 0.82) → rerun (confidence 0.82)"
+    has "$(outcome)" "[jev: flaky → rerun]"
+
+    # ---- (4) a failed call reads like a missing key: one line, same verdict
+    expect_rc 1 env JEV_FAKE_MODE=500 "$CG" spec done 2.1
+    out="$(JEV_FAKE_MODE=500 "$CG" spec done 2.1 2>&1 || true)"
+    has "$out" "verify_cmd failed (exit 1)"
+    has "$out" "jev: failure triage skipped — jev request failed (status 500)"
+    # three outcomes for the task — plain, test_failure, flaky — and the
+    # failed call invented none of its own
+    "$CG" recall --task adv/2.1 --type outcome --json | pyjson '
+bodies = [m["body"] for m in d["memories"]]
+assert len(bodies) == 3, bodies
+assert sum("[jev:" in b for b in bodies) == 2, bodies
+' || fail "a failed triage must not reach the outcome memory"
+
+    # ---- (5) guard ranks its findings, and ranks them in one call
+    unset OPENROUTER_API_KEY
+    out="$("$CG" guard src/typo.ts 2>&1)"
+    has "$out" "jev: OPENROUTER_API_KEY is not set — finding rank skipped"
+    has "$out" "warn  src/typo.ts:5: helpr() is not defined"
+    has "$out" "guard: 2 finding(s) (advisory)"
+    hasnt "$out" "[jev "
+    "$CG" guard src/typo.ts --json 2>/dev/null | pyjson '
+assert d["jev_ranked"] is False and len(d["findings"]) == 2, d
+assert [f["jev_score"] for f in d["findings"]] == [None, None], d
+assert d["findings"][0]["kind"] == "grounding", d
+' || fail "guard JSON without a key"
+
+    export OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcd
+    reset_fake
+    # f0 is the grounding finding, f1 the hygiene one: severity reverses them
+    export JEV_FAKE_SCORE='f0=0.2,f1=3.8'
+    out="$("$CG" guard src/typo.ts)"
+    has "$out" "guard: 2 finding(s) (advisory, most severe first)"
+    first="$(printf '%s\n' "$out" | grep 'warn ' | head -1)"
+    has "$first" "src/typo.ts:3: function 'doWork' has no inbound reference  [jev 3.80 Blocking]"
+    last="$(printf '%s\n' "$out" | grep 'warn ' | tail -1)"
+    has "$last" "src/typo.ts:5: helpr() is not defined"
+    has "$last" "[jev 0.20 Noise]"
+    [ "$(ls "$JEV_FAKE_DIR" | grep -c '^request\.')" -eq 1 ] \
+        || fail "guard must rank in one call"
+    python3 - "$JEV_FAKE_DIR/request.1.json" <<'EOF' || fail "rank request"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert list(d["questions"]) == ["f0", "f1"], d
+assert all(q["type"] == "score" for q in d["questions"].values()), d
+assert len(d["questions"]["f0"]["criteria"]) == 5, d
+st = d["state"]
+assert st["total"] == 2 and len(st["findings"]) == 2, st
+assert st["findings"][0]["kind"] == "grounding", st
+assert st["findings"][0]["path"] == "src/typo.ts" and st["findings"][0]["line"] == 5, st
+EOF
+    "$CG" guard src/typo.ts --json | pyjson '
+assert d["jev_ranked"] is True, d
+f = d["findings"]
+assert f[0]["kind"] == "hygiene" and f[0]["jev_score"] == 3.8, f
+assert f[0]["jev_level"] == "Blocking", f
+assert f[1]["kind"] == "grounding" and f[1]["jev_score"] == 0.2, f
+' || fail "guard JSON with jev_score"
+
+    # ---- (6) the rank is advice: pass and fail stay deterministic
+    expect_rc 0 "$CG" guard src/typo.ts            # blocking severity, still 0
+    expect_rc 0 "$CG" guard src/typo.ts --strict   # in scope, so strict passes
+    expect_rc 1 "$CG" guard package.json --strict  # out of scope, as before
+    out="$(JEV_FAKE_MODE=500 "$CG" guard src/typo.ts 2>&1)"
+    has "$out" "jev: finding rank skipped — jev request failed (status 500)"
+    has "$out" "guard: 2 finding(s) (advisory)"
+    hasnt "$out" "[jev "
+    unset JEV_FAKE_SCORE
+
+    # ---- (7) the pull request carries a readiness score
+    unset OPENROUTER_API_KEY
+    rm -rf "$TMP/prproj"
+    mkdir -p "$TMP/prproj/src"
+    cd "$TMP/prproj"
+    git init -q -b main . 2>/dev/null || git init -q .
+    git config user.email t@t; git config user.name t
+    echo 'export function alpha(){}' > src/a.ts
+    "$CG" spec new adv >/dev/null
+    "$CG" spec add 2.1 --title "Advisory work" --wave 1 --touches 'src/*.ts' \
+          --reqs 1.1 >/dev/null
+    "$CG" init >/dev/null
+    printf '.codegraph/\n' > .gitignore
+    git add -A >/dev/null; git commit -qm base >/dev/null
+    git branch feature/adv
+    body="$TMP/prproj/.codegraph/fleet/pr-adv.md"
+
+    out="$(CG_GH=/nonexistent/gh "$CG" fleet pr adv --dry-run 2>&1)"
+    has "$out" "jev: OPENROUTER_API_KEY is not set — pull request readiness skipped"
+    has "$out" "pull request (dry-run)"
+    has "$(cat "$body")" "## Tasks"
+    hasnt "$(cat "$body")" "Jev readiness"
+
+    export OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcd
+    reset_fake
+    CG_GH=/nonexistent/gh "$CG" fleet pr adv --dry-run >/dev/null
+    has "$(cat "$body")" "Jev readiness: 0.95 (high) — 0/2 tasks qualified, 0 commits, gates not run in this command"
+    python3 - "$JEV_FAKE_DIR/request.1.json" <<'EOF' || fail "readiness request"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert list(d["questions"]) == ["readiness"], d
+assert d["questions"]["readiness"]["type"] == "noul", d
+st = d["state"]
+assert st["feature"] == "adv" and st["branch"] == "feature/adv", st
+assert st["base"] == "main" and st["commits_ahead"] == 0, st
+assert st["tasks"]["total"] == 2 and st["tasks"]["done"] == 0, st
+assert [t["id"] for t in st["tasks"]["list"]] == ["1.1", "2.1"], st
+assert st["gates"] == "not run in this command", st
+EOF
+    # a low answer says so, and never stops the pull request
+    CG_GH=/nonexistent/gh JEV_FAKE_NOUL=0.3 "$CG" fleet pr adv --dry-run >/dev/null
+    has "$(cat "$body")" "Jev readiness: 0.30 (low)"
+    out="$(CG_GH=/nonexistent/gh JEV_FAKE_MODE=500 "$CG" fleet pr adv --dry-run 2>&1)"
+    has "$out" "jev: pull request readiness skipped — jev request failed (status 500)"
+    has "$out" "pull request (dry-run)"
+    hasnt "$(cat "$body")" "Jev readiness"
+fi
+
 echo "ok 28_jev ($section)"

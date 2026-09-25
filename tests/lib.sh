@@ -2,6 +2,9 @@
 set -euo pipefail
 
 : "${CG:?CG env var must point to the cg binary}"
+# No test may reach the network. Jev's key is dropped for every test here;
+# 28_jev.sh exports its own against the fake curl in fixtures/jev.
+unset OPENROUTER_API_KEY
 FIXTURES="$(cd "$(dirname "$0")/../fixtures" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

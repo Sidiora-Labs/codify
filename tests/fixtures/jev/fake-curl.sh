@@ -13,6 +13,9 @@
 #   noanswers a 200 JSON object without answers
 # Records land in JEV_FAKE_DIR: request.N.json (the body cg wrote) and
 # call.N.txt (argv, url, bearer token, mode).
+# JEV_FAKE_CHOICE, JEV_FAKE_SCORE, and JEV_FAKE_NOUL steer the answers
+# ("VALUE" for every question of that type, or "name=VALUE,name=VALUE" by
+# question name) when a test needs a particular one.
 set -u
 if [ "${1:-}" = "--version" ]; then
     echo "curl 8.5.0-fake (x86_64-pc-linux-gnu) libcurl/8.5.0"
@@ -56,26 +59,56 @@ case "$mode" in
 esac
 
 python3 - "$dir/request.$n.json" "$n" <<'EOF'
-import json, sys
+import json, os, sys
 req = json.load(open(sys.argv[1]))
 n = int(sys.argv[2])
+
+# JEV_FAKE_CHOICE / JEV_FAKE_SCORE / JEV_FAKE_NOUL steer one question each,
+# so a caller that needs a particular answer can ask for it:
+#   "fix_test"                every question of that type answers so
+#   "next_action=fix_test,failure_category=flaky"   by question name
+# Anything unnamed keeps the default (first sorted key, score 1.06, noul
+# 0.95), which is what the client tests were written against.
+def overrides(var):
+    spec, default = {}, None
+    for part in os.environ.get(var, "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            k, v = part.split("=", 1)
+            spec[k.strip()] = v.strip()
+        else:
+            default = part
+    return spec, default
+
+def pick(var, name, fallback):
+    spec, default = overrides(var)
+    return spec.get(name, default if default is not None else fallback)
+
 answers = {}
 for name, q in req["questions"].items():
     t = q["type"]
     if t == "noul":
-        answers[name] = {"type": "noul", "noul": 0.95}
+        answers[name] = {"type": "noul",
+                         "noul": float(pick("JEV_FAKE_NOUL", name, 0.95))}
     elif t == "choice":
         keys = list(q["criteria"])
-        probs = {k: (0.88 if i == 0 else round(0.12 / (len(keys) - 1), 4))
-                 for i, k in enumerate(keys)}
-        answers[name] = {"type": "choice", "choice": keys[0],
+        want = pick("JEV_FAKE_CHOICE", name, keys[0])
+        if want not in keys:
+            want = keys[0]
+        probs = {k: (0.88 if k == want else round(0.12 / (len(keys) - 1), 4))
+                 for k in keys}
+        answers[name] = {"type": "choice", "choice": want,
                          "probabilities": probs, "confidence": 0.82}
     else:
         levels = q["criteria"]
+        score = float(pick("JEV_FAKE_SCORE", name, 1.06))
         legend = {str(i): l for i, l in enumerate(levels)}
-        probs = {str(i): (0.94 if i == 1 else round(0.06 / (len(levels) - 1), 4))
+        near = min(range(len(levels)), key=lambda i: abs(i - score))
+        probs = {str(i): (0.94 if i == near else round(0.06 / (len(levels) - 1), 4))
                  for i in range(len(levels))}
-        answers[name] = {"type": "score", "score": 1.06, "legend": legend,
+        answers[name] = {"type": "score", "score": score, "legend": legend,
                          "probabilities": probs, "confidence": 0.91}
 doc = {"model": req["model"] + "-20260917", "answers": answers,
        "usage": {"input_tokens": 427, "output_tokens": 73, "cost": 0.000017934},
