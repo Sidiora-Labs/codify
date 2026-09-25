@@ -99,6 +99,16 @@ When a session's terminal closes — or a headless run exits — with the task n
 
 Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `cg` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
 
+## Planned in v10
+
+These surfaces are specified in `spec/codify-v10/spec.kvx` and are **not in this build**. Listed so the gap between this README and the extension is explicit:
+
+- **Task 5.1 — task UI upgrade.** The tree grouped by feature, section and wave with status icons, owner, branch and blockers; filters for status, wave and owner from the view title; a task detail webview carrying acceptance criteria, do-steps, touches, symbols, verify command, trace and memories; and start, done, claim, release, open branch, run verify and copy resume prompt as actions.
+- **Task 5.2 — memory browser and skills.** A webview panel with full-text search and filters for type, class, task, branch and date, detail with linked symbols and files, and supersede, forget, classify with Jev, promote to skill, and open skill file.
+- **Task 5.3 — fleet view.** Main Gideon, feature managers and workers with their branches, attempts, heartbeats, merge state and open pull requests, with refresh and open-worktree actions — plus further agent-chat polish.
+
+Until then, the fleet is driven from the terminal: `cg fleet status`, `cg fleet plan`, `cg fleet begin|merge-up|land|pr|checkpoint`. See [docs/hierarchy.md](../../docs/hierarchy.md).
+
 ## The rest of the workflow
 
 Click the status bar item, or run **Codify: Actions…**, for one menu covering the whole loop:

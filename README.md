@@ -22,7 +22,7 @@ Pure C11. One binary. One SQLite database. Nothing leaves your machine.
 
 Codify (invoked as `cg`) is an agent workflow engine in a single binary. It maintains the four things a project needs beyond the code itself — what the code **is**, how it got **here**, what happens **next**, and what was **learned** along the way — and serves all four to humans and AI agents alike.
 
-Version 0.8.0 adds a local agent control plane: truthful task/runtime state, fenced attempts, capability-aware integration for ten coding-agent hosts, normalized lifecycle evidence, bounded stall recovery, and revisioned work packets.
+Version 0.9.0 (v10) makes it safe under a fleet: one coalescing indexer instead of fifty, a Main Gideon / feature manager / wave worker hierarchy with branch, merge, PR and checkpoint flow, one unified graph across every branch and worktree of a repository, and Jev decisions — the single remote call in an otherwise local tool.
 
 **What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes. And beyond what a parser sees, comments are indexed as first-class nodes — the intent layer: purpose, contracts, dangers, and the couplings that live only in prose.
 
@@ -38,9 +38,13 @@ The layers reinforce each other: commits are auto-tagged with the task they impl
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
+**And it survives a fleet.** Indexing is a shared resource, not a per-process habit: the first `cg` that wants a pass runs it, the rest leave a note and coalesce into it, a freshness window skips the walk entirely, and machine-wide parse slots keep concurrent projects inside the core budget ([docs/sync.md](docs/sync.md)). Above that, `spec/workflow.kvx` can declare a hierarchy — a main agent owning the task list, a feature manager per feature, wave workers under each — and `cg fleet` drives the branch flow: worktree, merge-up, land behind the test and lint gates, pull request, checkpoint ([docs/hierarchy.md](docs/hierarchy.md)). All of them share one graph and one memory: every branch and linked worktree of the repository indexes into the same `.codegraph/`, scoped by branch ([docs/branches.md](docs/branches.md)).
+
+**And it asks for a decision when one is needed.** `cg jev` reaches TypeSafe's System One model for typed judgements — true/false, one-of, ranked — used to classify, triage, and rank. It is the one remote call Codify makes: mandatory for the features built on it, never for the core loop, and never authoritative ([docs/jev.md](docs/jev.md)).
+
 **And documentation is the last verified task.** New feature specs enable an `@docs` closure stage by default. Once every ordinary task qualifies, Codify builds a bounded evidence packet from the spec, task-attributed snapshots, code graph, routes, memories, checks, and existing docs. The same configured agent connector updates user and developer documentation, while `cg docs check` checks declared claim references, local inline links, required graph-surface coverage, and configured target scope. `cg docs close` records a dedicated `[spec:<feature>/@docs]` snapshot and an incremental baseline for the next spec flow. These structural checks support review; they do not certify every sentence's meaning.
 
-There are no API keys, no background services, and no telemetry. Everything runs on your machine and stays there.
+There are no background services and no telemetry. The graph, memory, snapshots, and the whole task loop run on your machine and stay there. The one exception is named and opt-in: Jev decisions need `OPENROUTER_API_KEY`, and only the commands built on them ever make that call.
 
 ## Why Codify
 
@@ -56,7 +60,7 @@ There are no API keys, no background services, and no telemetry. Everything runs
 
 **Search is instant and layered.** An FTS5 trigram index over symbol names gives case-insensitive substring matching with no warm-up, backed by a word index over full file bodies for everything else.
 
-**The index never goes stale.** `cg watch` listens for native OS events (inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows, all behind one platform layer) and auto-syncs with debouncing. MCP tool calls also sync before reading, so a connected agent always queries fresh data.
+**The index never goes stale — and never storms.** `cg watch` listens for native OS events (inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows, all behind one platform layer) and auto-syncs with debouncing. MCP tool calls also sync before reading, so a connected agent always queries fresh data. Under fifty agents that would be fifty indexers, so it is not: one process holds the gate and walks, the others leave a dirty note and coalesce into it, a caller whose freshness window is already satisfied skips the walk, and machine-wide slots cap the parse threads across every project at once.
 
 **It adapts to the hardware it runs on.** At startup, `cg` sizes its worker pool and SQLite caches from what the system actually provides: container-aware core counts (the intersection of cgroup v1/v2 CPU quota, the affinity mask, and online CPUs), honest available RAM (`MemAvailable` intersected with cgroup memory limits), and measured per-project cost. A 16-core workstation gets the full parallel pipeline. A 2-core VPS gets one tuned to finish reliably. Run `cg info` to see exactly how the pipeline was sized.
 
@@ -164,8 +168,9 @@ cg init
 
 | Command | Description |
 |---|---|
-| `cg init` | Create `.codegraph/` and build the initial index |
-| `cg sync` / `cg index [--full]` | Incremental or full reindex |
+| `cg init [--nested]` | Create `.codegraph/` and build the initial index; inside a linked git worktree of an initialized repository, join the shared graph under this branch instead |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named. `cg index [--full]` is the blocking form that always walks |
+| `cg branches` | Every branch indexed into the shared graph, with its worktree, head, base, and file count |
 | `cg search <q> [-n N]` | Symbol and full-text search |
 | `cg symbol <name>` | Definition, snippet, and reference count |
 | `cg impact <name> [-d N] [--budget N]` | Transitive callers and callees, fitted to a token budget (default 8000) |
@@ -177,8 +182,8 @@ cg init
 | `cg why <symbol>` | Provenance: the commits that changed it, the tasks they implemented, the decisions recorded |
 | `cg test-impact [symbol]` | Tests referencing a symbol — or every symbol in your uncommitted changes |
 | `cg watch [--debounce MS]` | Auto-sync on native filesystem events |
-| `cg root` | The project root `cg` resolves to from here |
-| `cg info` | Machine profile, pipeline sizing, and the bound project root |
+| `cg root` | The project root `cg` resolves to from here; `--json` adds the shared project, the worktree flag, and the branch |
+| `cg info` | Machine profile, pipeline sizing, the bound project root, and the branch |
 
 ### Version control
 
@@ -217,6 +222,7 @@ A superseded memory is never deleted — the reversal is history worth keeping. 
 | `cg integrate detect\|plan\|apply\|doctor` | Capability-aware setup for Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline, and Continue; planning is read-only, apply is idempotent and backed up |
 | `cg mcp-install` | Compatibility alias for `cg integrate apply` |
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |
+| `cg hook post-edit` | The wired edit hook itself: reads the host's payload on stdin and does one targeted background sync plus a guard of the edited path — one process per edit, not two full syncs |
 | `cg changelog [-n N] [-o FILE]` | Changelog from snapshots with symbol-level diffs: added and removed functions, new routes |
 | `cg agentmd [--write]` | Generate graph orientation at `.codify/agent-context.md`; root `AGENTS.md` and `CLAUDE.md` remain owned by `cg spec render` |
 
@@ -337,6 +343,69 @@ touches = ["src/*.ts"]       # a matching path must actually have changed
 
 The workflow also feeds the memory layer on its own. Every completion writes a terse outcome memory — including refused ones, so a later session can see that a task was blocked and why. `cg spec next` and `cg spec start` print the memories relevant to the task (linked by id, or matching its title), and `cg spec trace` includes them in the chain. An agent driving the loop builds up project memory without ever being asked to.
 
+### Fleet mode: a hierarchy of agents
+
+Parallel mode keeps twenty agents from editing the same files. Fleet mode gives them a shape. `spec/workflow.kvx` declares a hierarchy — a **main** agent that owns the task list and merges pull requests, one **feature manager** per feature owning its branch, and **wave workers** implementing one wave each on a branch cut from the feature branch — and work flows upward through verified merges.
+
+```ini
+[hierarchy]
+enabled    = true
+main       = "main"
+remote     = "origin"
+worktrees  = ".codegraph/worktrees"
+test_gate  = "make test"
+lint_gate  = "make cg CFLAGS='-O2 -Werror'"
+pr         = "auto"          # auto | manual
+checkpoint = "manual"
+
+[role.worker]                # [role.main] and [role.feature] likewise;
+branch = "wave/{feature}/{wave}"   # every key falls back to a default
+base   = "feature/{feature}"
+```
+
+| Command | Description |
+|---|---|
+| `cg fleet roles` | The hierarchy as configured: branch templates, base, remote, gates, PR policy. A repo with no `[hierarchy]` section shows the defaults it *would* use, marked not configured |
+| `cg fleet status` | Who is alive in which role, on which task, under which parent |
+| `cg fleet plan [-f F]` | Which manager owns the feature and which worker owns each wave, planned branches beside live agents |
+| `cg fleet begin <id>` | Create or reuse the wave branch and worktree, cut from the feature branch, and claim the task for its worker. Idempotent; `--agent` names a replacement |
+| `cg fleet merge-up <id>` | Merge a **qualified** wave branch into the feature branch. Refused while the branch tip says the task is not `done`; conflicts are listed by path and the merge aborted, or left in place with `--keep` |
+| `cg fleet land <feature>` | Merge the feature branch into local main and run the test and lint gates. Red resets main to where it was; green opens the PR when the policy says `auto`. `--no-pr` skips it |
+| `cg fleet pr <feature>` | Push and open the pull request against `<remote>/<main>` through `gh`, or print the exact commands when `gh` is absent. `--dry-run` calls nothing; an already-open PR is reported, not duplicated |
+| `cg fleet checkpoint` | Merge the open `feature/*` pull requests lowest number first, stopping at the first that will not merge |
+
+An agent's place in the tree lives in its environment — `CG_AGENT`, `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE` (and `CG_GH` to name the `gh` binary) — and `cg fleet begin` prints the exact line to export. With no `CG_ROLE` nothing is registered, so a solo session is unchanged. With it, `cg brief` names the role and parent, claims carry the branch, and the attempt ledger records branch, worktree, and parent for good.
+
+The full flow, the refusal messages, and a worked two-wave example are in [docs/hierarchy.md](docs/hierarchy.md).
+
+### One graph for every branch
+
+A fleet works on many branches in many worktrees of one repository, and Codify indexes all of them into one `.codegraph/`. A linked worktree resolves to the shared project through git's common directory, so `cg init` there **joins** rather than demanding a second database:
+
+```sh
+$ cd .codegraph/worktrees/wave-fleet-1 && cg init
+joined /path/proj as worktree /path/proj/.codegraph/worktrees/wave-fleet-1 on branch wave/fleet/1
+
+$ cg branches
+* main             203 files  bde2b2a9  /path/proj                         9s ago
+  feature/fleet      0 files  227a1f98  …/worktrees/feature-fleet   2m ago  base main
+  wave/fleet/1      13 files  b5d899dd  …/worktrees/wave-fleet-1    1m ago  base feature/fleet
+```
+
+File rows are scoped by branch (`UNIQUE(branch_id, path)`), so a sync on one branch never adds or removes another's rows; freshness and the index gate are per branch too, so two worktrees walk in parallel without either being told the graph is already fresh. Schema v16 carries the branch registry plus the branch, worktree, and parent on every attempt. Branch identity is read from git's own files — no process is spawned to learn a branch name, which matters when a fleet opens the graph thousands of times. Details and the migration rules are in [docs/branches.md](docs/branches.md).
+
+### Jev decisions
+
+Some questions are not deterministic — *is this failure flaky or real, is this memory a reusable skill or noise, which of these findings matters most.* `cg jev` asks TypeSafe's System One model (`typesafe/jev-1.13`, over OpenRouter) for a typed answer: a `noul` (probability true), a `choice` of up to 255 labelled options, or an ordinal `score`. It never generates text.
+
+| Command | Description |
+|---|---|
+| `cg jev doctor [--probe]` | Key, curl, endpoint, model, and log health; `--probe` sends one tiny decision |
+| `cg jev ask [<request.json>\|-]` | Ask directly: `--state S`, `--noul N I`, `--choice N I --option K=D …`, `--score N I --level L …`, or a complete request body |
+| `cg jev log [-n N]` | The last N calls from `.codegraph/jev.log`, with request id, model, tokens, cost, and latency |
+
+This is the one remote call Codify makes, and the principle says so: the graph, memory and workflow stay local, Jev is **mandatory** for the features built on it — a missing `OPENROUTER_API_KEY` is a clear error, never a quiet fallback — and **never authoritative**: it narrows, ranks, and flags, while `verify_cmd` and the graph checks decide. The key never reaches a command line (`curl` is driven through a private `0600` config file), `429` and `529` back off and retry, and every call is logged. See [docs/jev.md](docs/jev.md).
+
 ## Driving agents
 
 Everything above serves an agent that already exists. Codify can also be the thing that starts them: from the terminal with `cg spec run`, or from VS Code one task at a time.
@@ -416,16 +485,19 @@ vim.lsp.start({ name = "codify", cmd = { "cg", "lsp" },
 - **Agent sessions from the task board.** Start a Claude Code or Codex session on a task — in the ACP agent panel by default, or a terminal, or headless — hand off, resume, run a whole wave, and stop sessions, with live lease decorations on the board. See [Driving agents](#driving-agents).
 - **A memory view**, and one Actions menu covering brief, review, test-impact, why, check, guard, snapshot, spec authoring, and hook installation. Reports open as rendered markdown.
 - **kvx editing.** Go-to-definition on a `requires` entry jumps to that task; completion offers the keys a task actually understands; the outline lists every requirement and task.
+- **One refresh scheduler.** Every trigger — a spec file changing, a turn ending, a command finishing, a poll — funnels through a single chain of `cg` calls: bursts debounce into one run, a two-second floor sits between runs, and at most one trailing run queues behind a chain in flight. Each chain syncs once inside a three-second freshness window at background priority and never waits on another process's pass. The extension does **not** watch `graph.db` — its own sync writes it, and that watcher used to turn every refresh into the next.
 
 The extension has no dependencies and no build step — including its Language Server client, which is written by hand for exactly that reason.
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-0.4.0.vsix
-code --install-extension codify-0.4.0.vsix
+npx @vscode/vsce package        # produces codify-workflow-1.2.8.vsix
+code --install-extension codify-workflow-1.2.8.vsix --force
 ```
 
-See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.
+The Marketplace identity is `SidioraLabs.codify-workflow`. See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.
+
+**Planned in v10, not yet shipped:** a task tree grouped by feature, section and wave with owner, branch and blockers plus status/wave/owner filters and a detail webview (task 5.1); a memory browser with full-text search, type/class/task/branch/date filters and supersede, forget, classify and promote-to-skill actions (5.2); a fleet view showing Main Gideon, managers and workers with their branches, attempts, heartbeats, merge state and open PRs, alongside further agent-chat polish (5.3).
 
 ## Development
 
@@ -443,14 +515,23 @@ Repository layout:
 src/                 one .c file per module; src/cg.h is the only header
 src/govern.c         brief, review, guard, check, handoff, resume — the governance layer
 src/orchestrate.c    cg spec run — drives agent processes over claimed tasks
+src/syncgate.c       the single-writer index gate and machine-wide parse slots
+src/fleet.c          roles, hierarchy config, and the branch lifecycle
+src/jev.c            typed decisions over curl — the one remote call
 src/lsp.c            language server over the graph
-src/gitint.c         git history ingestion, churn, commit mirroring
+src/gitint.c         git history ingestion, churn, branch identity, commit mirroring
 tests/unit/          kvx grammar, SHA-256 vectors, JSON scanner, StrBuf/IO
-tests/integration/   graph, vcs, agentic, MCP protocol, spec engine, watcher
-tests/fixtures/      sample polyglot project and a spec repo with golden outputs
+tests/integration/   graph, vcs, agentic, MCP protocol, spec engine, watcher,
+                     sync gate, fleet, branches, jev
+tests/fixtures/      sample polyglot project, a spec repo with golden outputs,
+                     and stand-ins for curl and gh
 editors/vscode/      VS Code extension: kvx language + task board (plain JS)
 scripts/             install/uninstall scripts served at codify.centra.ag + release publisher
 docs/ARCHITECTURE.md how the pieces fit together
+docs/sync.md         the sync gate, freshness, slots, incremental resolution
+docs/hierarchy.md    roles, branch flow, gates, PRs, checkpoints
+docs/branches.md     the unified multi-branch graph and schema v16
+docs/jev.md          typed decisions: types, transport, configuration, limits
 ```
 
 The spec-render goldens were generated by the original Go specgen, so rendering parity is locked in by `make test`. CI builds and runs the full suite on every push via `.github/workflows/ci.yml`.
@@ -459,11 +540,28 @@ The spec-render goldens were generated by the original Go specgen, so rendering 
 
 The graph is one SQLite file in WAL mode and every `cg` process in a checkout writes to it — the editor's `cg lsp`, `cg watch`, `cg mcp`, and each agent's commands. Writers take the lock in short bursts (the indexer commits every few dozen files and parses outside the lock), and a CLI command waits up to `CG_BUSY_TIMEOUT_MS` (default 30000) for its turn, so `cg spec start`/`done` during an editor index simply waits a moment. If the lock never frees, the command exits 75 with a message that says nothing was applied and the same command is safe to retry — no debugging required, run it again. `cg lsp` and `cg watch` never hold an agent up: they defer their own index while the database is busy and keep answering from the last completed one.
 
+The database lock decides who *writes*. A separate gate decides who *walks*: `.codegraph/index.lock` is held by the one process running an index pass, and every other caller leaves its paths in `.codegraph/index.dirty` and returns immediately, coalesced. The holder drains that note before it releases, so an edit made during a pass is picked up by that pass rather than by a fourth process. Above the project, parse threads are rationed machine-wide through slot files under `/tmp/codify-<uid>` (`CG_INDEX_SLOTS`, `CG_INDEX_WORKERS`, `CG_SLOT_DIR`), so ten projects indexing at once do not each claim every core. A linked worktree gets its own lock and note beside the main tree's. [docs/sync.md](docs/sync.md) has the full contract.
+
 ## Notes and limitations
 
 - Ignore rules combine sensible defaults (VCS directories, `node_modules`, build output, binaries) with a `.cgignore` file using one glob per line.
 - Symbol extraction is heuristic. A comment-aware and string-aware pattern engine per language is tuned for recall on definitions and call sites. It is not a full type-checked resolver.
 - Snapshots store every non-ignored file up to 32 MB, including binaries. The graph indexes text files up to 8 MB.
+- A coalesced sync returns without a fresh graph: it queued its change for the process holding the gate and answers from the last completed index.
+- `cg fleet` drives `git` and `gh` as subprocesses. Without `gh`, `pr` and `checkpoint` print the commands instead of running them, and `checkpoint` only treats `feature/*` head branches as Codify's own.
+- Jev needs the network and `OPENROUTER_API_KEY`. Nothing in the core loop depends on it, and no Jev answer changes an exit code.
+
+### Planned in v10
+
+Named here so the gap between the documentation and the binary is explicit. Each is a task in `spec/codify-v10/spec.kvx`:
+
+| Task | Not yet shipped |
+|---|---|
+| 2.3 | `cg spec run --fleet`: a two-level orchestrator spawning feature managers and wave workers under them |
+| 3.2 | Branch-scoped queries (`--branch`, `--all-branches`), content reuse by hash across branches, memories carrying and being promoted with their branch, `cg brief` naming the branch and other live work, `cg watch --fleet` |
+| 4.2 | `cg memory classify` and `cg skills list\|promote\|render` — Jev classes stored on the memory, skill candidates rendered as portable `SKILL.md` |
+| 4.3 | Jev failure triage on a red `verify_cmd`, Jev-ranked `cg guard` findings, a readiness score in the PR body |
+| 5.1–5.3 | VS Code: the grouped and filterable task tree, the memory browser, and the fleet view |
 
 ## Community
 
