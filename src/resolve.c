@@ -229,10 +229,13 @@ static void strip_ext(char *buf, size_t cap, const char *path) {
  * Returns the file_id or -1 if not found. */
 static long find_repo_file(Cg *cg, const char *module, const char *from_path,
                            const char *lang) {
-    /* exact match first */
+    /* exact match first. Every lookup here is scoped to the branch this
+     * tree is on: the same path exists once per branch in the shared
+     * graph, and an import must resolve to the file the tree actually has. */
     sqlite3_stmt *exact = cg_prep(cg,
-        "SELECT id FROM files WHERE path=? LIMIT 1");
+        "SELECT id FROM files WHERE path=? AND branch_id=?2 LIMIT 1");
     sqlite3_bind_text(exact, 1, module, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(exact, 2, cg->branch_id);
     long fid = -1;
     if (sqlite3_step(exact) == SQLITE_ROW)
         fid = sqlite3_column_int64(exact, 0);
@@ -283,7 +286,9 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
     else if (strcmp(lang, "go") == 0)
         exts = GO_EXTS;
 
-    sqlite3_stmt *q = cg_prep(cg, "SELECT id FROM files WHERE path=? LIMIT 1");
+    sqlite3_stmt *q = cg_prep(cg,
+        "SELECT id FROM files WHERE path=? AND branch_id=?2 LIMIT 1");
+    sqlite3_bind_int64(q, 2, cg->branch_id);      /* survives reset */
 
     /* try exact resolved */
     sqlite3_bind_text(q, 1, rp, -1, SQLITE_STATIC);
@@ -352,7 +357,8 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
         bool mod_has_ext = mdot && !strchr(mdot, '/');
         if (!mod_has_ext) {
             sqlite3_stmt *suffix = cg_prep(cg,
-                "SELECT id, path FROM files ORDER BY path");
+                "SELECT id, path FROM files WHERE branch_id=?1 ORDER BY path");
+            sqlite3_bind_int64(suffix, 1, cg->branch_id);
             while (sqlite3_step(suffix) == SQLITE_ROW) {
                 const char *cp = (const char *)sqlite3_column_text(suffix, 1);
                 char cne[4096];
@@ -412,11 +418,13 @@ static void resolve_imports_run(Cg *cg, bool scoped) {
         "  (i.target_file_id IS NOT NULL AND "
         "   i.target_file_id NOT IN (SELECT id FROM files))) AS direct "
         "FROM imports i JOIN files f ON f.id = i.file_id "
-        "WHERE direct OR (i.target_file_id IS NULL AND i.system=0) "
+        "WHERE f.branch_id=?1 AND "
+        "(direct OR (i.target_file_id IS NULL AND i.system=0)) "
         "ORDER BY i.id" :
         "SELECT i.id, i.module, i.system, f.path, f.lang, 1 "
         "FROM imports i JOIN files f ON f.id = i.file_id "
-        "ORDER BY i.id");
+        "WHERE f.branch_id=?1 ORDER BY i.id");
+    sqlite3_bind_int64(sel, 1, cg->branch_id);
     sqlite3_stmt *upd = cg_prep(cg,
         "UPDATE imports SET target_file_id=?, origin=? WHERE id=?");
 
@@ -696,8 +704,10 @@ typedef struct { long id; long file_id; char path[512]; } Cand;
 static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {
     sqlite3_stmt *q = cg_prep(cg,
         "SELECT s.id, s.file_id, f.path FROM symbols s "
-        "JOIN files f ON f.id=s.file_id WHERE s.name=? ORDER BY f.path, s.line");
+        "JOIN files f ON f.id=s.file_id WHERE s.name=? AND f.branch_id=?2 "
+        "ORDER BY f.path, s.line");
     sqlite3_bind_text(q, 1, name, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(q, 2, cg->branch_id);
     int n = 0;
     while (n < cap && sqlite3_step(q) == SQLITE_ROW) {
         out[n].id = sqlite3_column_int64(q, 0);
@@ -776,12 +786,14 @@ static void resolve_refs_run(Cg *cg, bool scoped) {
     sqlite3_stmt *sel = cg_prep(cg, scoped ?
         "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
         "FROM refs r JOIN files f ON f.id=r.file_id "
-        "WHERE r.kind='call' AND (r.file_id IN (SELECT id FROM temp.scope_files)"
+        "WHERE r.kind='call' AND f.branch_id=?1 "
+        "AND (r.file_id IN (SELECT id FROM temp.scope_files)"
         " OR r.name IN (SELECT name FROM temp.scope_names)) "
         "ORDER BY r.file_id, r.id" :
         "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
         "FROM refs r JOIN files f ON f.id=r.file_id "
-        "WHERE r.kind='call' ORDER BY r.file_id, r.id");
+        "WHERE r.kind='call' AND f.branch_id=?1 ORDER BY r.file_id, r.id");
+    sqlite3_bind_int64(sel, 1, cg->branch_id);
     sqlite3_stmt *upd = cg_prep(cg,
         "UPDATE refs SET target_id=?, verdict=?, conf=? WHERE id=?");
 
@@ -1016,10 +1028,11 @@ bool file_calibrated(Cg *cg, long file_id, const char *lang) {
         "  (SELECT COUNT(*) FROM refs r2 WHERE r2.file_id=f.id AND r2.kind='call') AS t, "
         "  (SELECT SUM(CASE WHEN r3.verdict='unknown' THEN 1 ELSE 0 END) "
         "   FROM refs r3 WHERE r3.file_id=f.id AND r3.kind='call') AS u "
-        "FROM files f WHERE f.lang=? AND "
+        "FROM files f WHERE f.lang=? AND f.branch_id=?2 AND "
         "  (SELECT COUNT(*) FROM refs r4 WHERE r4.file_id=f.id AND r4.kind='call') > 0 "
         "ORDER BY f.id");
     sqlite3_bind_text(med, 1, lang, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(med, 2, cg->branch_id);
     int nfiles = 0;
     double *shares = NULL;
     int cshares = 0;
@@ -1059,10 +1072,12 @@ int ground_findings(Cg *cg, const char *path, GroundFinding **out) {
     int n = 0, cap = 0;
     *out = NULL;
 
-    /* determine file_id and lang */
+    /* determine file_id and lang, on this branch: the same path on a
+     * sibling worktree is a different row with different findings */
     sqlite3_stmt *fq = cg_prep(cg,
-        "SELECT id, lang FROM files WHERE path=?");
+        "SELECT id, lang FROM files WHERE path=? AND branch_id=?2");
     sqlite3_bind_text(fq, 1, path, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(fq, 2, cg->branch_id);
     long file_id = -1;
     char lang[32] = "";
     if (sqlite3_step(fq) == SQLITE_ROW) {
@@ -1157,8 +1172,10 @@ int contract_findings(Cg *cg, const char *path, ContractFinding **out) {
     int n = 0, cap = 0;
     *out = NULL;
 
-    sqlite3_stmt *fq = cg_prep(cg, "SELECT id FROM files WHERE path=?");
+    sqlite3_stmt *fq = cg_prep(cg,
+        "SELECT id FROM files WHERE path=? AND branch_id=?2");
     sqlite3_bind_text(fq, 1, path, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(fq, 2, cg->branch_id);
     long file_id = -1;
     if (sqlite3_step(fq) == SQLITE_ROW)
         file_id = sqlite3_column_int64(fq, 0);
@@ -1346,8 +1363,10 @@ static int hygiene_file(Cg *cg, const char *path, long file_id,
 int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out) {
     *out = NULL;
     int n = 0, cap = 0;
-    sqlite3_stmt *fq = cg_prep(cg, "SELECT id FROM files WHERE path=?");
+    sqlite3_stmt *fq = cg_prep(cg,
+        "SELECT id FROM files WHERE path=? AND branch_id=?2");
     sqlite3_bind_text(fq, 1, path, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(fq, 2, cg->branch_id);
     long file_id = -1;
     if (sqlite3_step(fq) == SQLITE_ROW)
         file_id = sqlite3_column_int64(fq, 0);
@@ -1361,7 +1380,9 @@ int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out) {
 int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit) {
     *out = NULL;
     int n = 0, cap = 0;
-    sqlite3_stmt *q = cg_prep(cg, "SELECT id, path FROM files ORDER BY path");
+    sqlite3_stmt *q = cg_prep(cg,
+        "SELECT id, path FROM files WHERE branch_id=?1 ORDER BY path");
+    sqlite3_bind_int64(q, 1, cg->branch_id);
     while (sqlite3_step(q) == SQLITE_ROW && n < limit) {
         long fid = sqlite3_column_int64(q, 0);
         const char *path = (const char *)sqlite3_column_text(q, 1);

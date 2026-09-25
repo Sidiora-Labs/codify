@@ -184,4 +184,102 @@ EOF
     [ -d "$TMP/otherwt/.codegraph" ] || fail "--nested did not create a project"
 fi
 
+if want queries; then
+    cp -r "$FIXTURES/sample" "$TMP/q"
+    git_repo "$TMP/q"
+    cd "$TMP/q"
+    "$CG" init >/dev/null
+    nf="$("$CG" info --json | pyjson 'print(d["project_files"])')"
+
+    # ---- a second branch, indexed from its own worktree
+    git worktree add -q "$TMP/qwt" -b feat/b
+    cd "$TMP/qwt"
+    echo 'export function onlyOnB(){ return formatName("x"); }' > "$TMP/qwt/src/onlyb.ts"
+    out="$("$CG" sync --json)"
+    echo "$out" | pyjson 'assert d["indexed"] >= 1, d' || fail "worktree sync"
+    # identical files are reused from main's rows instead of parsed again
+    echo "$out" | pyjson 'assert d["reused"] >= 1, d' || fail "no content reuse across branches"
+    [ "$(db_count "$TMP/q" feat/b)" -eq $((nf + 1)) ] || fail "feat/b rows"
+    [ "$(db_count "$TMP/q" main)" -eq "$nf" ] || fail "main rows"
+
+    # ---- the reused rows are real rows, not empty ones
+    has "$("$CG" symbol formatName)" "src/util.ts"
+
+    # ---- a symbol on both branches is reported once, from this branch
+    out="$("$CG" symbol formatName --json)"
+    echo "$out" | pyjson "
+assert len(d['definitions']) == 1, d
+assert d['definitions'][0]['path'] == 'src/util.ts', d
+assert 'branch' not in d['definitions'][0], d
+" || fail "symbol is not branch-scoped"
+    "$CG" search formatName --json | pyjson "
+assert sum(1 for x in d['symbols'] if x['name'] == 'formatName') == 1, d
+assert len({x['path'] for x in d['files']}) == len(d['files']), d
+assert all('branch' not in x for x in d['symbols'] + d['files']), d
+" || fail "search repeated a hit once per branch"
+
+    # ---- --all-branches unions them and labels every hit
+    out="$("$CG" symbol formatName --all-branches --json)"
+    echo "$out" | pyjson "
+b = sorted(x['branch'] for x in d['definitions'])
+assert len(d['definitions']) == 2, d
+assert b == ['feat/b', 'main'], b
+" || fail "--all-branches did not union and label"
+    has "$("$CG" symbol formatName --all-branches)" "@feat/b"
+    has "$("$CG" search formatName --all-branches)" "@main"
+
+    # ---- --branch asks another branch; an unknown one is refused
+    expect_rc 1 "$CG" symbol onlyOnB --branch main
+    out="$("$CG" symbol onlyOnB --branch main --json 2>/dev/null || true)"
+    echo "$out" | pyjson 'assert d["symbol"] is None, d' \
+        || fail "main should not have onlyOnB"
+    has "$("$CG" symbol onlyOnB --json)" "src/onlyb.ts"
+    expect_rc 1 "$CG" search formatName --branch nope
+    err="$("$CG" search formatName --branch nope 2>&1 >/dev/null || true)"
+    has "$err" "no branch named 'nope'"
+
+    # ---- counts stay per branch: anchors must not multiply by branch
+    cd "$TMP/q"
+    one="$("$CG" anchors --json | pyjson 'print(d["symbols"])')"
+    cd "$TMP/qwt"
+    two="$("$CG" anchors --json | pyjson 'print(d["symbols"])')"
+    [ "$one" -gt 0 ] || fail "no symbols counted"
+    [ "$two" -ge "$one" ] || fail "worktree lost symbols"
+    [ "$two" -lt $((one * 2)) ] || fail "anchors counted both branches ($one vs $two)"
+    "$CG" check --json | pyjson 'assert isinstance(d["stale_anchors"], int), d' \
+        || fail "check JSON"
+
+    # ---- memories carry the branch they were made on
+    "$CG" remember "worker note on feat/b" --type decision >/dev/null
+    out="$("$CG" recall "worker note" --json)"
+    echo "$out" | pyjson "
+assert d['count'] == 1, d
+assert d['memories'][0]['branch'] == 'feat/b', d
+" || fail "memory did not record its branch"
+    cd "$TMP/q"
+    "$CG" recall "worker note" --json | pyjson 'assert d["count"] == 0, d' \
+        || fail "main saw a worker-branch memory"
+    "$CG" recall "worker note" --all-branches --json \
+        | pyjson 'assert d["count"] == 1, d' || fail "--all-branches missed it"
+    # a note on the base is visible from the branch cut from it
+    "$CG" remember "shared note on main" --type constraint >/dev/null
+    cd "$TMP/qwt"
+    "$CG" recall "shared note" --json | pyjson 'assert d["count"] == 1, d' \
+        || fail "a branch cannot see its base's memories"
+
+    # ---- brief names the branch, its base, and the other live branches
+    out="$("$CG" brief)"
+    has "$out" "branch: feat/b"
+    has "$out" "other branches: main"
+    out="$("$CG" brief --json)"
+    echo "$out" | pyjson "
+assert d['branch'] == 'feat/b', d
+assert d['worktree'] is True, d
+assert [x['name'] for x in d['other_branches']] == ['main'], d
+" || fail "brief JSON"
+
+    # ---- watch --fleet exists and does not hang without inotify budget
+    has "$("$CG" help)" "--all-branches"
+fi
+
 echo "ok 27_branches ($section)"

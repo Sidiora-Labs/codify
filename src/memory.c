@@ -33,10 +33,12 @@ long memory_add(Cg *cg, const char *type, const char *task, const char *body,
     if (source && strcmp(source, "auto") == 0) {
         sqlite3_stmt *dup = cg_prep(cg,
             "SELECT id FROM memories WHERE body=? AND type=? "
-            "AND ifnull(task,'')=ifnull(?,'') ORDER BY id DESC LIMIT 1");
+            "AND ifnull(task,'')=ifnull(?,'') "
+            "AND ifnull(branch,'')=ifnull(?4,'') ORDER BY id DESC LIMIT 1");
         sqlite3_bind_text(dup, 1, body, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(dup, 2, type, -1, SQLITE_TRANSIENT);
         bind_opt(dup, 3, task);
+        bind_opt(dup, 4, cg->branch);
         long found = -1;
         if (sqlite3_step(dup) == SQLITE_ROW)
             found = (long)sqlite3_column_int64(dup, 0);
@@ -51,9 +53,11 @@ long memory_add(Cg *cg, const char *type, const char *task, const char *body,
             return found;
         }
     }
+    /* the branch the decision was actually made on: a worker's notes stay
+     * its own until `cg fleet merge-up` promotes them to the base */
     sqlite3_stmt *st = cg_prep(cg,
-        "INSERT INTO memories(created,type,task,body,symbols,files,source)"
-        " VALUES(?,?,?,?,?,?,?)");
+        "INSERT INTO memories(created,type,task,body,symbols,files,source,"
+        "branch) VALUES(?,?,?,?,?,?,?,?)");
     sqlite3_bind_int64(st, 1, (sqlite3_int64)time(NULL));
     sqlite3_bind_text(st, 2, type, -1, SQLITE_TRANSIENT);
     bind_opt(st, 3, task);
@@ -61,6 +65,7 @@ long memory_add(Cg *cg, const char *type, const char *task, const char *body,
     bind_opt(st, 5, symbols);
     bind_opt(st, 6, files);
     sqlite3_bind_text(st, 7, source, -1, SQLITE_TRANSIENT);
+    bind_opt(st, 8, cg->branch);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) return -1;
@@ -115,7 +120,40 @@ static void mem_row(sqlite3_stmt *st, Memory *m) {
     m->files = col_dup(st, 6);
     m->source = col_dup(st, 7);
     if (!m->source) m->source = xstrdup("");
+    m->branch = col_dup(st, 8);
 }
+
+/* The branch a recall answers for, or NULL when it answers for all of them.
+ * Empty (no registry yet, graph opened busy) also means all: filtering on a
+ * name nothing carries would hide every memory the project has. */
+static const char *mem_scope(Cg *cg, char *out, size_t cap) {
+    out[0] = 0;
+    if (!cg || cg->scope_branch < 0) return NULL;
+    if (cg->scope_branch > 0) {
+        sqlite3_stmt *st = cg_prep(cg, "SELECT name FROM branches WHERE id=?");
+        sqlite3_bind_int64(st, 1, cg->scope_branch);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            const char *n = (const char *)sqlite3_column_text(st, 0);
+            snprintf(out, cap, "%s", n ? n : "");
+        }
+        sqlite3_finalize(st);
+    } else {
+        snprintf(out, cap, "%s", cg->branch);
+    }
+    return out[0] ? out : NULL;
+}
+
+/* A branch sees its own decisions, everything the branches it came from
+ * decided (the base chain the registry records), and rows written before
+ * memories carried a branch at all. Bind the scope name to ?5; NULL there
+ * turns the whole clause off, which is what --all-branches wants. */
+#define MEM_BRANCH_CTE \
+    "WITH RECURSIVE anc(name) AS (SELECT ?5 UNION " \
+    "SELECT b.base FROM branches b JOIN anc a ON b.name=a.name " \
+    "WHERE b.base IS NOT NULL) "
+#define MEM_BRANCH_WHERE \
+    " AND (?5 IS NULL OR m.branch IS NULL " \
+    "      OR m.branch IN (SELECT name FROM anc)) "
 
 /* Decisions get reversed. A superseded memory is still true history, so it
  * is never deleted — it just sorts last, so the current decision is what a
@@ -126,27 +164,30 @@ static void mem_row(sqlite3_stmt *st, Memory *m) {
 int memory_query(Cg *cg, const char *query, const char *task,
                  const char *type, int limit, Memory **out) {
     char *fq = query && query[0] ? fts_query(query) : NULL;
+    char scope[256];
+    const char *sb = mem_scope(cg, scope, sizeof scope);
     sqlite3_stmt *st;
     if (fq) {
-        st = cg_prep(cg,
+        st = cg_prep(cg, MEM_BRANCH_CTE
             "SELECT m.id,m.created,m.type,m.task,m.body,m.symbols,m.files,"
-            "m.source FROM memory_fts f JOIN memories m ON m.id = f.rowid"
+            "m.source,m.branch FROM memory_fts f JOIN memories m ON m.id = f.rowid"
             " WHERE memory_fts MATCH ?1 AND (?2 IS NULL OR m.task = ?2)"
-            " AND (?3 IS NULL OR m.type = ?3)"
+            " AND (?3 IS NULL OR m.type = ?3)" MEM_BRANCH_WHERE
             " ORDER BY" SUPERSEDED_RANK ", bm25(memory_fts),"
             " m.created DESC, m.id DESC LIMIT ?4");
         sqlite3_bind_text(st, 1, fq, -1, SQLITE_TRANSIENT);
     } else {
-        st = cg_prep(cg,
+        st = cg_prep(cg, MEM_BRANCH_CTE
             "SELECT m.id,m.created,m.type,m.task,m.body,m.symbols,m.files,"
-            "m.source FROM memories m WHERE (?2 IS NULL OR m.task = ?2)"
-            " AND (?3 IS NULL OR m.type = ?3)"
+            "m.source,m.branch FROM memories m WHERE (?2 IS NULL OR m.task = ?2)"
+            " AND (?3 IS NULL OR m.type = ?3)" MEM_BRANCH_WHERE
             " ORDER BY" SUPERSEDED_RANK ", m.created DESC, m.id DESC LIMIT ?4");
     }
     free(fq);
     bind_opt(st, 2, task);
     bind_opt(st, 3, type);
     sqlite3_bind_int(st, 4, limit > 0 ? limit : 10);
+    bind_opt(st, 5, sb);
 
     int n = 0, cap = 8;
     Memory *v = xmalloc(sizeof(Memory) * (size_t)cap);
@@ -161,7 +202,7 @@ int memory_query(Cg *cg, const char *query, const char *task,
 
 void memory_clear(Memory *m) {
     free(m->type); free(m->task); free(m->body);
-    free(m->symbols); free(m->files); free(m->source);
+    free(m->symbols); free(m->files); free(m->source); free(m->branch);
 }
 
 void memory_free(Memory *v, int n) {
@@ -181,6 +222,9 @@ void memory_json(const Memory *m, StrBuf *b) {
     if (m->files)   { sb_puts(b, ",\"files\":");   sb_json_str(b, m->files); }
     sb_puts(b, ",\"source\":");
     sb_json_str(b, m->source);
+    sb_puts(b, ",\"branch\":");
+    if (m->branch) sb_json_str(b, m->branch);
+    else sb_puts(b, "null");
     sb_putc(b, '}');
 }
 
@@ -252,6 +296,10 @@ int cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
                 strftime(when, sizeof when, "%Y-%m-%d", &tmv);
             printf("#%ld  [%s]  %s", v[i].id, v[i].type, when);
             if (v[i].task) printf("  (task %s)", v[i].task);
+            /* only when it is somebody else's: a note from the branch you
+             * are standing on needs no label */
+            if (v[i].branch && strcmp(v[i].branch, cg->branch) != 0)
+                printf("  @%s", v[i].branch);
             if (strcmp(v[i].source, "manual") != 0) printf("  %s", v[i].source);
             printf("\n");
             for (const char *p = v[i].body; *p; ) {
@@ -317,17 +365,20 @@ int memory_supersede(Cg *cg, long old_id, long new_id) {
  * proximity complements full text: "what was decided about this file" is a
  * different question from "what mentions this word". */
 int cmd_recall_near(Cg *cg, const char *path, int limit, bool json) {
-    sqlite3_stmt *st = cg_prep(cg,
+    char scope[256];
+    const char *sb = mem_scope(cg, scope, sizeof scope);
+    sqlite3_stmt *st = cg_prep(cg, MEM_BRANCH_CTE
         "SELECT DISTINCT m.id,m.created,m.type,m.task,m.body,m.symbols,"
-        "m.files,m.source FROM memories m "
-        "WHERE ifnull(m.files,'') LIKE '%'||?1||'%' "
+        "m.files,m.source,m.branch FROM memories m "
+        "WHERE (ifnull(m.files,'') LIKE '%'||?1||'%' "
         "   OR EXISTS (SELECT 1 FROM symbols s JOIN files f ON f.id=s.file_id "
         "              WHERE f.path=?1 AND ifnull(m.symbols,'') "
-        "                    LIKE '%'||s.name||'%') "
+        "                    LIKE '%'||s.name||'%')) " MEM_BRANCH_WHERE
         "ORDER BY (SELECT COUNT(*) FROM memory_superseded x WHERE x.id=m.id), "
         "         m.created DESC LIMIT ?2");
     sqlite3_bind_text(st, 1, path, -1, SQLITE_STATIC);
     sqlite3_bind_int(st, 2, limit > 0 ? limit : 10);
+    bind_opt(st, 5, sb);
 
     StrBuf b; sb_init(&b);
     if (json) sb_puts(&b, "{\"memories\":[");
@@ -398,4 +449,40 @@ int cmd_memory_compact(Cg *cg, bool dry_run, bool json) {
         printf("compact: removed %ld duplicate(s), %ld memories remain\n",
                dupes, left);
     return 0;
+}
+
+/* Hand a merged branch's decisions to the branch that absorbed its code.
+ * `cg fleet merge-up` calls this the moment the merge lands: the worker's
+ * branch is about to disappear, and what it learned has to outlive it —
+ * otherwise the next agent on the base repeats the reasoning. Rows the base
+ * already holds word for word are dropped instead of duplicated. Returns the
+ * number promoted, or -1 if `from` is not a branch name. */
+int memory_promote_branch(Cg *cg, const char *from, const char *to) {
+    if (!from || !from[0] || !to || !to[0]) return -1;
+    if (strcmp(from, to) == 0) return 0;
+    sqlite3_stmt *st = cg_prep(cg,
+        "DELETE FROM memory_fts WHERE rowid IN ("
+        "  SELECT m.id FROM memories m WHERE m.branch=?1 AND EXISTS("
+        "    SELECT 1 FROM memories o WHERE o.branch=?2 AND o.body=m.body "
+        "    AND o.type=m.type AND ifnull(o.task,'')=ifnull(m.task,'')))");
+    sqlite3_bind_text(st, 1, from, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, to, -1, SQLITE_STATIC);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    st = cg_prep(cg,
+        "DELETE FROM memories WHERE branch=?1 AND EXISTS("
+        "  SELECT 1 FROM memories o WHERE o.branch=?2 AND o.body=memories.body "
+        "  AND o.type=memories.type "
+        "  AND ifnull(o.task,'')=ifnull(memories.task,''))");
+    sqlite3_bind_text(st, 1, from, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, to, -1, SQLITE_STATIC);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+
+    st = cg_prep(cg, "UPDATE memories SET branch=?2 WHERE branch=?1");
+    sqlite3_bind_text(st, 1, from, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, to, -1, SQLITE_STATIC);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    return sqlite3_changes(cg->db);
 }

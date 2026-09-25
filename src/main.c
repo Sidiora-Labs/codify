@@ -138,7 +138,9 @@ static void usage(void) {
 "                           ask Jev directly; answers as text or --json\n"
 "  jev log [-n N]           the last N calls from .codegraph/jev.log\n"
 "\n"
-"most query commands accept --json for machine-readable output\n",
+"most query commands accept --json for machine-readable output\n"
+"query commands answer for the branch you are on; --branch <name> asks\n"
+"another one and --all-branches asks them all, labelling each hit\n",
         CG_VERSION);
 }
 
@@ -254,6 +256,8 @@ int main(int argc, char **argv) {
     const char *cmd = argv[1];
     bool json = flag(&argc, argv, "--json");
     bool no_soft = flag(&argc, argv, "--no-soft");
+    bool all_branches = flag(&argc, argv, "--all-branches");
+    const char *scope_branch = opt(&argc, argv, "--branch", NULL);
 
     if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
         strcmp(cmd, "-h") == 0) {
@@ -370,6 +374,15 @@ int main(int argc, char **argv) {
 
     if (cg_open(&cg, false) != 0) return 1;
     cg.no_soft = no_soft;
+    /* Reads answer for the branch the caller is standing on unless it says
+     * otherwise; --all-branches unions every tracked branch and labels each
+     * hit. Writes are never redirected — the indexer always writes here. */
+    if (cg_scope_set(&cg, scope_branch, all_branches) != 0) {
+        fprintf(stderr, "cg: no branch named '%s' in this graph "
+                        "(cg branches lists them)\n", scope_branch);
+        cg_close(&cg);
+        return 1;
+    }
     int rc = 0;
 
     if (strcmp(cmd, "index") == 0) {
@@ -394,11 +407,13 @@ int main(int argc, char **argv) {
         rc = cg_index_ex(&cg, &si, &o, &st);
         if (json) {
             printf("{\"indexed\":%ld,\"removed\":%ld,\"seen\":%ld,"
-                   "\"skipped\":%ld,\"ms\":%ld,\"workers\":%d,\"passes\":%d,"
+                   "\"skipped\":%ld,\"reused\":%ld,"
+                   "\"ms\":%ld,\"workers\":%d,\"passes\":%d,"
                    "\"fresh\":%s,\"coalesced\":%s,\"busy\":%s,"
                    "\"scoped\":%s,\"targeted\":%s}\n",
                    st.files_indexed, st.files_removed, st.files_seen,
-                   st.files_skipped, st.ms, st.workers, st.passes,
+                   st.files_skipped, st.files_reused,
+                   st.ms, st.workers, st.passes,
                    st.fresh ? "true" : "false",
                    st.coalesced ? "true" : "false",
                    st.busy ? "true" : "false",
@@ -452,7 +467,9 @@ int main(int argc, char **argv) {
                         budget > 0 ? budget : 16000, json);
     } else if (strcmp(cmd, "watch") == 0) {
         int deb = atoi(opt(&argc, argv, "--debounce", "300"));
-        rc = cmd_watch(&cg, &si, deb > 0 ? deb : 300);
+        bool fleet = flag(&argc, argv, "--fleet");
+        rc = fleet ? watch_fleet(&cg, &si, deb > 0 ? deb : 300)
+                   : cmd_watch(&cg, &si, deb > 0 ? deb : 300);
     } else if (strcmp(cmd, "brief") == 0) {
         rc = cmd_brief(&cg, json);
     } else if (strcmp(cmd, "fleet") == 0) {
