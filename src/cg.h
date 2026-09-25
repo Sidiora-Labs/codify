@@ -209,15 +209,73 @@ typedef struct {
     /* the database stayed busy past lock_wait_ms; the graph is whatever the
      * last index left (any chunks written before the stall are kept) */
     bool busy;
+    /* the walk was skipped: the last pass is younger than the caller's
+     * freshness window and nothing is pending or marked dirty */
+    bool fresh;
+    /* another process held the index gate; this caller left a dirty note
+     * for it instead of walking, and returned without indexing */
+    bool coalesced;
+    int  workers;          /* parse threads the pass actually used */
+    int  passes;           /* walks run, including dirty-marker drains */
+    bool scoped;           /* resolution ran over the change scope only */
 } IndexStats;
 
+/* How a caller wants its index pass run. Zero-initialised means: walk now,
+ * wait cg->lock_wait_ms for the gate, full machine budget, foreground. */
+typedef struct {
+    bool full;             /* reparse every file (cg index --full) */
+    /* skip the walk when meta.last_index_at is younger than this and no
+     * resolve is pending and no dirty note exists; 0 = always walk */
+    long max_age_ms;
+    /* how long to wait for another process's index pass to finish before
+     * coalescing into it: 0 = never, -1 = cg->lock_wait_ms */
+    long lock_wait_ms;
+    int  workers_cap;      /* 0 = sysinfo's choice */
+    bool background;       /* hook/watch/editor: renice, quarter of the cores */
+    bool quiet;
+    /* targeted sync: only these root-relative paths (files or dirs) are
+     * stat'd, parsed, or removed; a targeted pass never claims the whole
+     * tree is fresh */
+    const char *const *paths;
+    int npaths;
+} IndexOpts;
+
 /* Returns 0, or -1 with st->busy set when another process held the write
- * lock for the whole wait. Never exits on a busy database. */
+ * lock for the whole wait. Never exits on a busy database. A coalesced or
+ * fresh pass returns 0 with the matching flag set and no files indexed. */
+int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);
+/* Blocking full-strength wrapper: waits for the gate, always walks. */
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);
+
+/* syncgate.c — the single-writer index gate and machine-wide parse slots */
+int  syncgate_acquire(const Cg *cg, long wait_ms);     /* fd or -1 */
+void syncgate_release(int fd);
+void syncgate_mark_dirty(const Cg *cg, const char *const *paths, int npaths);
+bool syncgate_is_dirty(const Cg *cg);
+char *syncgate_take_dirty(const Cg *cg);               /* malloc'd or NULL */
+int  syncgate_slot_count(const SysInfo *si);
+int  syncgate_slot_acquire(const SysInfo *si);         /* fd or -1 */
+void syncgate_slot_release(int fd);
+int  syncgate_worker_budget(const SysInfo *si, const IndexOpts *o, int jobs,
+                            int *slot_fd);
+void syncgate_background_nice(void);
 
 /* import resolution and ref resolution (resolve.c) — runs post-scan */
 void resolve_imports(Cg *cg);
 void resolve_refs(Cg *cg);
+/* Incremental variants: only rows the change scope reaches — imports and
+ * refs in changed files, refs anywhere naming a symbol the change added or
+ * removed, unresolved imports a new file could satisfy. Valid between
+ * index_scope_begin and index_scope_end on the same connection. */
+void resolve_imports_scoped(Cg *cg);
+void resolve_refs_scoped(Cg *cg);
+/* change scope (scan.c): temp tables scope_files(id,added) and
+ * scope_names(name) that the write phase fills */
+void index_scope_begin(Cg *cg);
+void index_scope_end(Cg *cg);
+/* true when the scope is small next to the graph, so the scoped passes
+ * beat rebuilding everything */
+bool index_scope_bounded(Cg *cg);
 
 /* grounding findings (resolve.c) — query-time, never stored */
 typedef struct {

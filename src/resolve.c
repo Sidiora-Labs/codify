@@ -373,7 +373,14 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
 
 /* ---- main resolution entry point ---- */
 
-void resolve_imports(Cg *cg) {
+static bool mod_matches(const char *module, const char *cand_path);
+
+/* scoped: only imports the change scope reaches (importing file, target
+ * file, or dangling target in temp.scope_files). The SELECT also yields
+ * every still-unresolved repo import (direct=0); those are re-tried only
+ * when their module plausibly names a file the change added, so a new
+ * util.ts satisfies an old `import './util'` without a full pass. */
+static void resolve_imports_run(Cg *cg, bool scoped) {
     /* Load manifests once */
     Manifest js_m = {0}, go_m = {0}, py_m = {0}, rs_m = {0};
     load_package_json(cg->root, &js_m);
@@ -382,9 +389,32 @@ void resolve_imports(Cg *cg) {
     load_pyproject_toml(cg->root, &py_m);
     load_cargo_toml(cg->root, &rs_m);
 
-    /* Walk all imports and resolve each */
-    sqlite3_stmt *sel = cg_prep(cg,
-        "SELECT i.id, i.module, i.system, f.path, f.lang "
+    char **added = NULL;
+    int nadded = 0;
+    if (scoped) {
+        sqlite3_stmt *a = cg_prep(cg,
+            "SELECT f.path FROM temp.scope_files s JOIN files f ON f.id=s.id "
+            "WHERE s.added=1");
+        while (sqlite3_step(a) == SQLITE_ROW) {
+            const char *p = (const char *)sqlite3_column_text(a, 0);
+            if (!p) continue;
+            added = xrealloc(added, sizeof *added * (size_t)(nadded + 1));
+            added[nadded++] = xstrdup(p);
+        }
+        sqlite3_finalize(a);
+    }
+
+    /* Walk the imports in scope and resolve each */
+    sqlite3_stmt *sel = cg_prep(cg, scoped ?
+        "SELECT i.id, i.module, i.system, f.path, f.lang, "
+        " (i.file_id IN (SELECT id FROM temp.scope_files) OR "
+        "  i.target_file_id IN (SELECT id FROM temp.scope_files) OR "
+        "  (i.target_file_id IS NOT NULL AND "
+        "   i.target_file_id NOT IN (SELECT id FROM files))) AS direct "
+        "FROM imports i JOIN files f ON f.id = i.file_id "
+        "WHERE direct OR (i.target_file_id IS NULL AND i.system=0) "
+        "ORDER BY i.id" :
+        "SELECT i.id, i.module, i.system, f.path, f.lang, 1 "
         "FROM imports i JOIN files f ON f.id = i.file_id "
         "ORDER BY i.id");
     sqlite3_stmt *upd = cg_prep(cg,
@@ -396,7 +426,14 @@ void resolve_imports(Cg *cg) {
         int sys      = sqlite3_column_int(sel, 2);
         const char *from_path = (const char *)sqlite3_column_text(sel, 3);
         const char *lang = (const char *)sqlite3_column_text(sel, 4);
+        int direct   = sqlite3_column_int(sel, 5);
         if (!module || !from_path || !lang) continue;
+        if (!direct) {
+            bool maybe = false;
+            for (int i = 0; i < nadded && !maybe; i++)
+                maybe = mod_matches(module, added[i]);
+            if (!maybe) continue;
+        }
 
         const char *origin = NULL;
         long target_fid = -1;
@@ -472,12 +509,17 @@ void resolve_imports(Cg *cg) {
 
     sqlite3_finalize(sel);
     sqlite3_finalize(upd);
+    for (int i = 0; i < nadded; i++) free(added[i]);
+    free(added);
 
     manifest_free(&js_m);
     manifest_free(&go_m);
     manifest_free(&py_m);
     manifest_free(&rs_m);
 }
+
+void resolve_imports(Cg *cg)        { resolve_imports_run(cg, false); }
+void resolve_imports_scoped(Cg *cg) { resolve_imports_run(cg, true); }
 
 /* ---- builtin tables ---- */
 
@@ -725,8 +767,18 @@ static int load_imports(Cg *cg, long file_id, ImpCache *out, int cap) {
     return n;
 }
 
-void resolve_refs(Cg *cg) {
-    sqlite3_stmt *sel = cg_prep(cg,
+/* scoped: refs in changed files, plus refs anywhere that name a symbol the
+ * change added or removed (a purge gives a file's symbols new rowids, so
+ * every caller of them must be re-pointed; a new definition can change
+ * which candidate a same-dir or unique tier picks elsewhere). Counters
+ * are then recomputed from the table, not from the partial pass. */
+static void resolve_refs_run(Cg *cg, bool scoped) {
+    sqlite3_stmt *sel = cg_prep(cg, scoped ?
+        "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
+        "FROM refs r JOIN files f ON f.id=r.file_id "
+        "WHERE r.kind='call' AND (r.file_id IN (SELECT id FROM temp.scope_files)"
+        " OR r.name IN (SELECT name FROM temp.scope_names)) "
+        "ORDER BY r.file_id, r.id" :
         "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
         "FROM refs r JOIN files f ON f.id=r.file_id "
         "WHERE r.kind='call' ORDER BY r.file_id, r.id");
@@ -861,6 +913,21 @@ void resolve_refs(Cg *cg) {
     sqlite3_finalize(sel);
     sqlite3_finalize(upd);
 
+    if (scoped) {
+        internal_c = external_c = unknown_c = 0;
+        sqlite3_stmt *c = cg_prep(cg,
+            "SELECT verdict, count(*) FROM refs WHERE kind='call' "
+            "GROUP BY verdict");
+        while (sqlite3_step(c) == SQLITE_ROW) {
+            const char *v = (const char *)sqlite3_column_text(c, 0);
+            long n = sqlite3_column_int64(c, 1);
+            if (v && strcmp(v, "internal") == 0) internal_c += n;
+            else if (v && strcmp(v, "external") == 0) external_c += n;
+            else unknown_c += n;
+        }
+        sqlite3_finalize(c);
+    }
+
     /* record resolution stats in meta */
     char buf[64];
     snprintf(buf, sizeof buf, "%ld", internal_c);
@@ -879,6 +946,9 @@ void resolve_refs(Cg *cg) {
         cg_meta_set(cg, "resolve_unknown_pct", buf);
     }
 }
+
+void resolve_refs(Cg *cg)        { resolve_refs_run(cg, false); }
+void resolve_refs_scoped(Cg *cg) { resolve_refs_run(cg, true); }
 
 /* ---- grounding findings ---- */
 

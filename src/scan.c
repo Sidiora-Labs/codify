@@ -173,7 +173,11 @@ typedef struct {
                  *del_routes, *del_body, *ins_sym, *ins_symfts, *ins_ref,
                  *ins_route, *ins_body, *del_imports, *ins_import,
                  *del_cmts, *del_cmtfts, *ins_cmt, *ins_cmtfts,
-                 *sel_docs;
+                 *sel_docs,
+                 /* change scope for incremental resolution (temp tables
+                  * created by index_scope_begin before these are prepared) */
+                 *scope_file, *scope_name, *scope_syms, *scope_routes,
+                 *scope_path;
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
@@ -211,6 +215,48 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->sel_docs   = cg_prep(cg, "SELECT body, anchored_hash FROM comments"
                                 " WHERE file_id=? AND kind='doc'"
                                 " AND anchored_hash IS NOT NULL");
+    s->scope_file = cg_prep(cg, "INSERT INTO temp.scope_files(id,added)"
+                                " VALUES(?,?) ON CONFLICT(id) DO UPDATE SET"
+                                " added=max(added,excluded.added)");
+    s->scope_name = cg_prep(cg, "INSERT OR IGNORE INTO temp.scope_names(name)"
+                                " VALUES(?)");
+    s->scope_syms = cg_prep(cg, "INSERT OR IGNORE INTO temp.scope_names(name)"
+                                " SELECT name FROM symbols WHERE file_id=?");
+    s->scope_routes = cg_prep(cg, "INSERT OR IGNORE INTO temp.scope_names(name)"
+                                " SELECT pattern FROM routes WHERE file_id=?");
+    s->scope_path = cg_prep(cg, "SELECT path FROM files WHERE id=?");
+}
+
+static void step_reset(sqlite3_stmt *st);
+
+/* Record a file whose rows are about to change: its id, every symbol name
+ * and route pattern it defined (a ref or a prose mention of those must be
+ * re-resolved), and its basename (prose naming the file). Names it defines
+ * after the rewrite are added by scope_name as they are inserted. */
+static void scope_record_file(Stmts *s, long file_id, bool added) {
+    sqlite3_bind_int64(s->scope_file, 1, file_id);
+    sqlite3_bind_int  (s->scope_file, 2, added ? 1 : 0);
+    step_reset(s->scope_file);
+    sqlite3_bind_int64(s->scope_syms, 1, file_id);   step_reset(s->scope_syms);
+    sqlite3_bind_int64(s->scope_routes, 1, file_id); step_reset(s->scope_routes);
+    sqlite3_bind_int64(s->scope_path, 1, file_id);
+    if (sqlite3_step(s->scope_path) == SQLITE_ROW) {
+        const char *p = (const char *)sqlite3_column_text(s->scope_path, 0);
+        const char *base = p ? strrchr(p, '/') : NULL;
+        base = base ? base + 1 : p;
+        if (base && base[0]) {
+            sqlite3_bind_text(s->scope_name, 1, base, -1, SQLITE_TRANSIENT);
+            step_reset(s->scope_name);
+        }
+    }
+    sqlite3_reset(s->scope_path);
+    sqlite3_clear_bindings(s->scope_path);
+}
+
+static void scope_name(Stmts *s, const char *name) {
+    if (!name || !name[0]) return;
+    sqlite3_bind_text(s->scope_name, 1, name, -1, SQLITE_STATIC);
+    step_reset(s->scope_name);
 }
 
 static void stmts_fin(Stmts *s) {
@@ -261,6 +307,8 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
      * them, stable symbol rowids. */
     if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return;
 
+    scope_record_file(s, file_id, w->dbhash[0] == 0);
+
     /* Drift baselines about to be purged with the rows: a doc whose text
      * is unchanged must keep the body hash it was written against, so a
      * body edit shows up as a stale anchor instead of silently
@@ -309,6 +357,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             sqlite3_bind_text (s->ins_symfts, 4, w->rel, -1, SQLITE_STATIC);
             sqlite3_bind_text (s->ins_symfts, 5, pr->defs[i].sig, -1, SQLITE_STATIC);
             step_reset(s->ins_symfts);
+            scope_name(s, pr->defs[i].name);
             st->symbols++;
         }
         /* enclosing symbol for each ref: innermost def whose span contains
@@ -433,6 +482,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
                 sqlite3_bind_null(s->ins_route, 5);
             sqlite3_bind_int(s->ins_route, 6, pr->routes[i].line);
             step_reset(s->ins_route);
+            scope_name(s, pr->routes[i].pattern);
             st->routes++;
         }
         for (int i = 0; i < pr->nimports; i++) {
@@ -492,14 +542,106 @@ static bool probe(sqlite3_stmt *st, const char *tok, char *out, size_t cap) {
     return hit;
 }
 
+/* ---------------- change scope ---------------- */
+
+void index_scope_begin(Cg *cg) {
+    cg_exec(cg,
+        "CREATE TEMP TABLE IF NOT EXISTS scope_files("
+        "  id INTEGER PRIMARY KEY, added INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TEMP TABLE IF NOT EXISTS scope_names(name TEXT PRIMARY KEY);"
+        "CREATE TEMP TABLE IF NOT EXISTS scope_afiles(id INTEGER PRIMARY KEY);"
+        "DELETE FROM scope_files; DELETE FROM scope_names;"
+        "DELETE FROM scope_afiles;");
+}
+
+void index_scope_end(Cg *cg) {
+    cg_exec(cg, "DELETE FROM scope_files; DELETE FROM scope_names;"
+                "DELETE FROM scope_afiles;");
+}
+
+static long count_sql(Cg *cg, const char *sql) {
+    sqlite3_stmt *q = cg_prep(cg, sql);
+    long n = sqlite3_step(q) == SQLITE_ROW ? sqlite3_column_int64(q, 0) : 0;
+    sqlite3_finalize(q);
+    return n;
+}
+
+bool index_scope_bounded(Cg *cg) {
+    long nf = count_sql(cg, "SELECT count(*) FROM temp.scope_files");
+    long total = count_sql(cg, "SELECT count(*) FROM files");
+    return nf > 0 && (nf <= 64 || nf * 4 < total);
+}
+
+/* Which files' anchor comments must be rebuilt: the changed files, plus
+ * any file whose prose mentions a name the change touched (a doc that
+ * cites a symbol just added gains an edge; one citing a removed symbol
+ * loses it). Names become FTS phrases the way unicode61 tokenises them. */
+static void scope_anchor_files(Cg *cg) {
+    cg_exec(cg, "INSERT OR IGNORE INTO temp.scope_afiles(id) "
+                "SELECT id FROM temp.scope_files");
+    sqlite3_stmt *names = cg_prep(cg, "SELECT name FROM temp.scope_names");
+    sqlite3_stmt *hit = cg_prep(cg,
+        "INSERT OR IGNORE INTO temp.scope_afiles(id) "
+        "SELECT DISTINCT c.file_id FROM comment_fts f "
+        "JOIN comments c ON c.id=f.rowid WHERE comment_fts MATCH ?");
+    StrBuf q;
+    sb_init(&q);
+    int batch = 0;
+    while (sqlite3_step(names) == SQLITE_ROW) {
+        const char *n = (const char *)sqlite3_column_text(names, 0);
+        if (!n) continue;
+        /* phrase = the alnum runs of the name, in order */
+        char phrase[600];
+        size_t j = 0;
+        bool intok = false;
+        int ntok = 0;
+        for (const char *p = n; *p && j + 2 < sizeof phrase; p++) {
+            bool a = isalnum((unsigned char)*p) || ((unsigned char)*p >= 0x80);
+            if (a) { if (!intok) { if (j) phrase[j++] = ' '; ntok++; }
+                     phrase[j++] = *p; intok = true; }
+            else intok = false;
+        }
+        phrase[j] = 0;
+        if (ntok == 0 || j < 3) continue;
+        sb_printf(&q, "%s\"%s\"", batch ? " OR " : "", phrase);
+        if (++batch == 48) {
+            sqlite3_bind_text(hit, 1, q.p, -1, SQLITE_TRANSIENT);
+            sqlite3_step(hit);
+            sqlite3_reset(hit);
+            sb_free(&q); sb_init(&q);
+            batch = 0;
+        }
+    }
+    if (batch) {
+        sqlite3_bind_text(hit, 1, q.p, -1, SQLITE_TRANSIENT);
+        sqlite3_step(hit);
+        sqlite3_reset(hit);
+    }
+    sb_free(&q);
+    sqlite3_finalize(names);
+    sqlite3_finalize(hit);
+}
+
 /* Rebuild refs kind='soft' from anchor comments (kind file and doc).
  * Runs once after the scan completes so existence checks see the whole
  * tree — checking at write time would make edges depend on file order.
  * A token becomes an edge only when it resolves to a symbol, a file, or
- * a route that exists; everything else is silence (req 4.4). */
-static void anchor_edges(Cg *cg, IndexStats *st) {
-    cg_exec(cg, "DELETE FROM refs WHERE kind='soft'");
-    sqlite3_stmt *sel = cg_prep(cg,
+ * a route that exists; everything else is silence (req 4.4).
+ * scoped: only the files scope_anchor_files picked are rescanned, and
+ * st->soft is recounted from the table so the report stays truthful. */
+static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {
+    if (scoped) {
+        scope_anchor_files(cg);
+        cg_exec(cg, "DELETE FROM refs WHERE kind='soft' AND file_id IN "
+                    "(SELECT id FROM temp.scope_afiles)");
+    } else {
+        cg_exec(cg, "DELETE FROM refs WHERE kind='soft'");
+    }
+    sqlite3_stmt *sel = cg_prep(cg, scoped ?
+        "SELECT c.file_id, c.line, c.sym_id, c.body, coalesce(s.name,'') "
+        "FROM comments c LEFT JOIN symbols s ON s.id=c.sym_id "
+        "WHERE c.kind IN ('file','doc') AND c.file_id IN "
+        "(SELECT id FROM temp.scope_afiles) ORDER BY c.file_id, c.line" :
         "SELECT c.file_id, c.line, c.sym_id, c.body, coalesce(s.name,'') "
         "FROM comments c LEFT JOIN symbols s ON s.id=c.sym_id "
         "WHERE c.kind IN ('file','doc') ORDER BY c.file_id, c.line");
@@ -576,6 +718,16 @@ static void anchor_edges(Cg *cg, IndexStats *st) {
     sqlite3_finalize(is_sym);
     sqlite3_finalize(is_path);
     sqlite3_finalize(is_route);
+    if (scoped)
+        st->soft = count_sql(cg, "SELECT count(*) FROM refs WHERE kind='soft'");
+}
+
+static void anchor_edges(Cg *cg, IndexStats *st) {
+    anchor_edges_run(cg, st, false);
+}
+
+static void anchor_edges_scoped(Cg *cg, IndexStats *st) {
+    anchor_edges_run(cg, st, true);
 }
 
 /* Write one parsed chunk under the lock. Returns -1 when the lock never came;
@@ -593,36 +745,131 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
     return rc;
 }
 
-int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
-    long t0 = now_ms();
-    memset(st, 0, sizeof *st);
-    lang_global_init();
+/* ---------------- targeted walks ---------------- */
 
-    char pragma[128];
-    snprintf(pragma, sizeof pragma, "PRAGMA cache_size=-%d;", si->db_cache_kb);
-    cg_exec(cg, pragma);
-    snprintf(pragma, sizeof pragma, "PRAGMA mmap_size=%ld;", si->mmap_bytes);
-    cg_exec(cg, pragma);
+/* Normalise a caller's path to root-relative form: absolute paths under the
+ * root are stripped, "./" and trailing slashes dropped. Returns false for a
+ * path outside the project. */
+static bool target_rel(const char *root, const char *in, char *out, size_t cap) {
+    const char *p = in;
+    size_t rl = strlen(root);
+    if (p[0] == '/') {
+        if (strncmp(p, root, rl) != 0 || (p[rl] != '/' && p[rl] != 0))
+            return false;
+        p += rl;
+        while (*p == '/') p++;
+    }
+    while (strncmp(p, "./", 2) == 0) p += 2;
+    size_t n = strlen(p);
+    while (n > 0 && p[n - 1] == '/') n--;
+    if (n >= cap) return false;
+    memcpy(out, p, n);
+    out[n] = 0;
+    return true;
+}
 
+/* true when a DB row path is one of the targets or lives under a target dir */
+static bool targets_cover(char **t, int nt, const char *path) {
+    for (int i = 0; i < nt; i++) {
+        if (t[i][0] == 0) return true;            /* the root itself */
+        size_t n = strlen(t[i]);
+        if (strncmp(path, t[i], n) == 0 && (path[n] == 0 || path[n] == '/'))
+            return true;
+    }
+    return false;
+}
+
+/* Walk only the targets: a directory target recurses like the full walk, a
+ * file target is stat'd alone. Ignore rules apply to both so an agent
+ * editing something under node_modules cannot pull it into the graph. */
+static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,
+                         WalkList *wl) {
+    for (int i = 0; i < nt; i++) {
+        if (t[i][0] == 0) { walk_dir(root, "", ig, wl); continue; }
+        char abs[4900];
+        snprintf(abs, sizeof abs, "%s/%s", root, t[i]);
+        struct stat st;
+        if (lstat(abs, &st) != 0 || S_ISLNK(st.st_mode)) continue;
+        bool isdir = S_ISDIR(st.st_mode);
+        /* every ancestor must pass the ignore rules too */
+        bool ignored = false;
+        char anc[4096];
+        snprintf(anc, sizeof anc, "%s", t[i]);
+        for (char *s = anc + 1; *s; s++) {
+            if (*s != '/') continue;
+            *s = 0;
+            if (ignore_match(ig, anc, true)) { ignored = true; break; }
+            *s = '/';
+        }
+        if (ignored || ignore_match(ig, t[i], isdir)) continue;
+        if (isdir) walk_dir(root, t[i], ig, wl);
+        else if (S_ISREG(st.st_mode) && st.st_size <= MAX_FILE_BYTES)
+            walk_push(wl, t[i], (long)st.st_size, (long)st.st_mtime);
+    }
+}
+
+/* Turn a dirty note (one path per line, "*" = everything) into a target
+ * list. Returns the count; *whole is set when any line asks for the tree. */
+static int note_targets(const char *root, const char *note, char ***out,
+                        bool *whole) {
+    *whole = false;
+    char **v = NULL;
+    int n = 0;
+    const char *p = note;
+    while (p && *p) {
+        const char *e = strchr(p, '\n');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        if (len == 1 && p[0] == '*') *whole = true;
+        else if (len > 0 && len < 4096) {
+            char raw[4096], rel[4096];
+            memcpy(raw, p, len);
+            raw[len] = 0;
+            if (target_rel(root, raw, rel, sizeof rel)) {
+                v = xrealloc(v, sizeof *v * (size_t)(n + 1));
+                v[n++] = xstrdup(rel);
+            }
+        }
+        p = e ? e + 1 : NULL;
+    }
+    *out = v;
+    return n;
+}
+
+static void targets_free(char **t, int n) {
+    for (int i = 0; i < n; i++) free(t[i]);
+    free(t);
+}
+
+/* One walk+diff+parse+write pass. targets NULL means the whole tree; with
+ * targets, only rows under those paths are diffed, so files elsewhere are
+ * never mistaken for removals. Adds to st; returns 0, or -1 when the
+ * database stayed busy (a stall). */
+static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
+                      char **targets, int ntargets, IndexStats *st) {
     Ignore ig;
     ignore_load(&ig, cg->root);
     WalkList wl = {0};
-    walk_dir(cg->root, "", &ig, &wl);
+    if (targets) walk_targets(cg->root, &ig, targets, ntargets, &wl);
+    else         walk_dir(cg->root, "", &ig, &wl);
     ignore_free(&ig);
     qsort(wl.v, (size_t)wl.n, sizeof(Walked), walked_cmp);
-    st->files_seen = wl.n;
+    if (!targets && wl.n > st->files_seen) st->files_seen = wl.n;
+    if (targets) st->files_seen += wl.n;
 
-    /* current DB view */
+    /* current DB view — for a targeted pass only the rows the targets
+     * cover, so nothing outside them can look removed */
     DbFile *dbf = NULL;
     int ndbf = 0, cdbf = 0;
     sqlite3_stmt *sel = cg_prep(cg, "SELECT id,path,size,mtime,hash FROM files");
     while (sqlite3_step(sel) == SQLITE_ROW) {
+        const char *path = (const char *)sqlite3_column_text(sel, 1);
+        if (targets && !targets_cover(targets, ntargets, path)) continue;
         if (ndbf == cdbf) {
             cdbf = cdbf ? cdbf * 2 : 256;
             dbf = xrealloc(dbf, sizeof(DbFile) * (size_t)cdbf);
         }
         dbf[ndbf].id    = sqlite3_column_int64(sel, 0);
-        dbf[ndbf].path  = xstrdup((const char *)sqlite3_column_text(sel, 1));
+        dbf[ndbf].path  = xstrdup(path);
         dbf[ndbf].size  = sqlite3_column_int64(sel, 2);
         dbf[ndbf].mtime = sqlite3_column_int64(sel, 3);
         const char *h = (const char *)sqlite3_column_text(sel, 4);
@@ -641,12 +888,12 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
         int c = (wi >= wl.n) ? 1 : (di >= ndbf) ? -1
               : strcmp(wl.v[wi].rel, dbf[di].path);
         if (c == 0) {
-            if (full || wl.v[wi].size != dbf[di].size ||
+            if (o->full || wl.v[wi].size != dbf[di].size ||
                 wl.v[wi].mtime != dbf[di].mtime) {
                 walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size, wl.v[wi].mtime);
                 /* remember the stored hash so unchanged content can skip the
                  * purge+reinsert; --full keeps its force-reparse meaning */
-                if (!full)
+                if (!o->full)
                     snprintf(jobs.v[jobs.n - 1].dbhash,
                              sizeof jobs.v[jobs.n - 1].dbhash, "%s",
                              dbf[di].hash);
@@ -679,6 +926,7 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
         } else {
             sqlite3_stmt *del_file = cg_prep(cg, "DELETE FROM files WHERE id=?");
             for (int i = 0; i < nremoved; i++) {
+                scope_record_file(&s, removed_ids[i], false);
                 purge_file_children(&s, removed_ids[i]);
                 sqlite3_bind_int64(del_file, 1, removed_ids[i]);
                 step_reset(del_file);
@@ -701,9 +949,10 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
         pthread_cond_init(&pipe.can_push, NULL);
         pthread_cond_init(&pipe.can_pop, NULL);
 
-        int nw = si->workers;
-        if (nw > jobs.n) nw = jobs.n;
-        if (nw < 1) nw = 1;
+        int slot = -1;
+        int nw = syncgate_worker_budget(si, o, jobs.n, &slot);
+        if (nw > 16) nw = 16;
+        if (nw > st->workers) st->workers = nw;
         pipe.producers_left = nw;
         pthread_t th[16];
         for (int i = 0; i < nw; i++)
@@ -734,29 +983,186 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
         pthread_mutex_destroy(&pipe.mu);
         pthread_cond_destroy(&pipe.can_push);
         pthread_cond_destroy(&pipe.can_pop);
+        syncgate_slot_release(slot);
     }
 
     stmts_fin(&s);
+
+    for (int i = 0; i < wl.n; i++) free(wl.v[i].rel);
+    free(wl.v);
+    for (int i = 0; i < jobs.n; i++) free(jobs.v[i].rel);
+    free(jobs.v);
+    for (int i = 0; i < ndbf; i++) free(dbf[i].path);
+    free(dbf);
+    return stalled ? -1 : 0;
+}
+
+/* The graph is fresh for a caller when the last whole-tree walk started
+ * inside its window and nothing has been queued since: no resolve left
+ * behind by a stall, no dirty note from a coalesced caller. */
+static bool index_is_fresh(Cg *cg, long max_age_ms) {
+    if (max_age_ms <= 0) return false;
+    if (syncgate_is_dirty(cg)) return false;
+    char *p = cg_meta_get(cg, "index_pending_resolve");
+    bool pending = p && p[0] == '1';
+    free(p);
+    if (pending) return false;
+    char *at = cg_meta_get(cg, "last_index_at");
+    long t = at ? atol(at) : 0;
+    free(at);
+    if (t <= 0) return false;
+    long age = now_ms() - t;
+    return age >= 0 && age < max_age_ms;
+}
+
+static void index_report(const IndexStats *st, const IndexOpts *o) {
+    if (o->quiet) return;
+    if (st->busy) {
+        fprintf(stderr, "cg: index stalled — the database stayed busy; "
+                        "%ld file%s written before the stall are kept\n",
+                st->files_indexed, st->files_indexed == 1 ? "" : "s");
+    } else if (st->coalesced) {
+        printf("index in progress in another cg process — change queued for it\n");
+    } else if (st->fresh) {
+        printf("graph is fresh (indexed %ldms ago)\n", st->ms);
+    } else {
+        printf("indexed %ld file%s (%ld unchanged, %ld removed, %ld skipped) "
+               "in %ldms — %ld symbols, %ld refs, %ld routes, %ld comments, "
+               "%ld soft [%d workers%s]\n",
+               st->files_indexed, st->files_indexed == 1 ? "" : "s",
+               st->files_seen - st->files_indexed - st->files_skipped,
+               st->files_removed, st->files_skipped, st->ms,
+               st->symbols, st->refs, st->routes, st->anchors, st->soft,
+               st->workers, st->passes > 1 ? ", drained" : "");
+    }
+}
+
+int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
+    long t0 = now_ms();
+    memset(st, 0, sizeof *st);
+    lang_global_init();
+    if (o->background) syncgate_background_nice();
+
+    if (index_is_fresh(cg, o->max_age_ms)) {
+        char *at = cg_meta_get(cg, "last_index_at");
+        st->fresh = true;
+        st->ms = at ? now_ms() - atol(at) : 0;
+        free(at);
+        index_report(st, o);
+        return 0;
+    }
+
+    long wait = o->lock_wait_ms < 0 ? cg->lock_wait_ms : o->lock_wait_ms;
+    int gate = syncgate_acquire(cg, wait);
+    if (gate < 0) {
+        /* someone else is walking: leave the note and go. Its drain picks
+         * the note up before it releases; if it already passed that point
+         * the note keeps the graph from looking fresh until the next pass. */
+        syncgate_mark_dirty(cg, o->paths, o->npaths);
+        st->coalesced = true;
+        st->ms = now_ms() - t0;
+        index_report(st, o);
+        return 0;
+    }
+
+    /* what earlier losers queued while we waited */
+    char *note = syncgate_take_dirty(cg);
+    if (!note && index_is_fresh(cg, o->max_age_ms)) {
+        char *at = cg_meta_get(cg, "last_index_at");
+        st->fresh = true;
+        st->ms = at ? now_ms() - atol(at) : 0;
+        free(at);
+        syncgate_release(gate);
+        index_report(st, o);
+        return 0;
+    }
+
+    char pragma[128];
+    snprintf(pragma, sizeof pragma, "PRAGMA cache_size=-%d;", si->db_cache_kb);
+    cg_exec(cg, pragma);
+    snprintf(pragma, sizeof pragma, "PRAGMA mmap_size=%ld;", si->mmap_bytes);
+    cg_exec(cg, pragma);
+
+    /* first pass: the caller's targets plus whatever the note names */
+    char **targets = NULL;
+    int ntargets = 0;
+    bool whole = o->npaths <= 0;
+    if (!whole) {
+        for (int i = 0; i < o->npaths; i++) {
+            char rel[4096];
+            if (!target_rel(cg->root, o->paths[i], rel, sizeof rel)) continue;
+            targets = xrealloc(targets, sizeof *targets * (size_t)(ntargets + 1));
+            targets[ntargets++] = xstrdup(rel);
+        }
+        if (note) {
+            char **nt = NULL;
+            bool nwhole = false;
+            int nn = note_targets(cg->root, note, &nt, &nwhole);
+            if (nwhole) whole = true;
+            for (int i = 0; i < nn; i++) {
+                targets = xrealloc(targets, sizeof *targets * (size_t)(ntargets + 1));
+                targets[ntargets++] = nt[i];
+            }
+            free(nt);
+        }
+    }
+    free(note);
+
+    index_scope_begin(cg);
+    long whole_at = 0;
+    bool stalled = false;
+    /* every named path was outside the project: nothing to walk, and no
+     * reason to fall back to the whole tree the caller did not ask for */
+    for (int pass = 0; pass < 3 && (whole || ntargets > 0); pass++) {
+        long ps = now_ms();
+        st->passes++;
+        if (whole) whole_at = ps;
+        if (index_pass(cg, si, o, whole ? NULL : targets, ntargets, st) != 0) {
+            stalled = true;
+            break;
+        }
+        targets_free(targets, ntargets);
+        targets = NULL; ntargets = 0;
+        /* a note left while we walked: an agent wrote during the pass.
+         * Drain it now rather than leave it for a fourth process. Three
+         * passes bound the loop; anything after that stays queued. */
+        if (pass == 2) break;
+        char *more = syncgate_take_dirty(cg);
+        if (!more) break;
+        ntargets = note_targets(cg->root, more, &targets, &whole);
+        free(more);
+        if (!whole && ntargets == 0) break;
+    }
+    targets_free(targets, ntargets);
+
     /* Chunks committed before a stall carry unresolved refs and edges. The
      * pending flag makes the next successful index finish that work even
      * when no file has changed since. */
     char *pending = cg_meta_get(cg, "index_pending_resolve");
     bool need_resolve = st->files_indexed + st->files_removed > 0 ||
                         (pending && pending[0] == '1');
+    bool recover = pending && pending[0] == '1';
     free(pending);
     if (!stalled && need_resolve) {
         if (cg_begin_write(cg) != 0) {
             stalled = true;
         } else {
-            anchor_edges(cg, st);
-            resolve_imports(cg);
-            resolve_refs(cg);
+            if (o->full || recover || !index_scope_bounded(cg)) {
+                anchor_edges(cg, st);
+                resolve_imports(cg);
+                resolve_refs(cg);
+            } else {
+                st->scoped = true;
+                anchor_edges_scoped(cg, st);
+                resolve_imports_scoped(cg);
+                resolve_refs_scoped(cg);
+            }
             cg_meta_set(cg, "index_pending_resolve", "0");
             cg_exec(cg, "COMMIT");
         }
     }
+    index_scope_end(cg);
     st->busy = stalled;
-
     st->ms = now_ms() - t0;
 
     /* a stalled run leaves the bookkeeping alone: every write below would
@@ -768,32 +1174,27 @@ int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
     } else {
         snprintf(buf, sizeof buf, "%ld", st->ms);
         cg_meta_set(cg, "last_index_ms", buf);
-        snprintf(buf, sizeof buf, "%ld", (long)wl.n);
-        cg_meta_set(cg, "project_files", buf);
         snprintf(buf, sizeof buf, "%ld", st->bytes);
         cg_meta_set(cg, "last_index_bytes", buf);
+        if (whole_at > 0) {
+            /* the walk's start, not its end: a file written while the walk
+             * ran may have been passed already, and must not hide behind
+             * a freshness window that begins after it */
+            snprintf(buf, sizeof buf, "%ld", whole_at);
+            cg_meta_set(cg, "last_index_at", buf);
+            snprintf(buf, sizeof buf, "%ld", st->files_seen);
+            cg_meta_set(cg, "project_files", buf);
+        }
     }
-
-    for (int i = 0; i < wl.n; i++) free(wl.v[i].rel);
-    free(wl.v);
-    for (int i = 0; i < jobs.n; i++) free(jobs.v[i].rel);
-    free(jobs.v);
-    for (int i = 0; i < ndbf; i++) free(dbf[i].path);
-    free(dbf);
-
-    if (!quiet && stalled) {
-        fprintf(stderr, "cg: index stalled — the database stayed busy; "
-                        "%ld file%s written before the stall are kept\n",
-                st->files_indexed, st->files_indexed == 1 ? "" : "s");
-    } else if (!quiet) {
-        printf("indexed %ld file%s (%ld unchanged, %ld removed, %ld skipped) "
-               "in %ldms — %ld symbols, %ld refs, %ld routes, %ld comments, "
-               "%ld soft [%d workers]\n",
-               st->files_indexed, st->files_indexed == 1 ? "" : "s",
-               st->files_seen - st->files_indexed - st->files_skipped,
-               st->files_removed, st->files_skipped, st->ms,
-               st->symbols, st->refs, st->routes, st->anchors, st->soft,
-               si->workers);
-    }
+    syncgate_release(gate);
+    index_report(st, o);
     return stalled ? -1 : 0;
+}
+
+int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {
+    IndexOpts o = {0};
+    o.full = full;
+    o.lock_wait_ms = -1;
+    o.quiet = quiet;
+    return cg_index_ex(cg, si, &o, st);
 }

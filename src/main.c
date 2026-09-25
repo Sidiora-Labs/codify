@@ -13,8 +13,10 @@ static void usage(void) {
 "graph\n"
 "  init [--nested]          create .codegraph/ here and build the index\n"
 "  root                     print the project root cg resolves to\n"
-"  index [--full]           (re)index the project\n"
-"  sync                     incremental index (changed files only)\n"
+"  index [--full]           (re)index the project now (waits for the gate)\n"
+"  sync [paths] [--max-age MS] [--background] [--wait MS]\n"
+"                           incremental index; coalesces into a pass\n"
+"                           already running, skips when fresh\n"
 "  search <query> [-n N]    find code by name (FTS5 trigram + full text)\n"
 "  symbol <name>            definition(s), snippet, reference count\n"
 "  impact <name> [-d N]     callers/callees to depth N (default 3)\n"
@@ -274,9 +276,37 @@ int main(int argc, char **argv) {
         rc = cg_index(&cg, &si, full, &st, false);
         if (rc != 0 && st.busy) { cg_busy_report("The index"); rc = CG_EXIT_BUSY; }
     } else if (strcmp(cmd, "sync") == 0) {
+        /* sync is what hooks, watchers, and editors call after every edit,
+         * so it coalesces by default: a short wait for a pass already
+         * running, then a dirty note instead of a second walk. cg index is
+         * the blocking form for a person who wants the pass to happen now. */
+        IndexOpts o = {0};
+        o.max_age_ms   = atol(opt(&argc, argv, "--max-age", "0"));
+        o.background   = flag(&argc, argv, "--background");
+        o.lock_wait_ms = atol(opt(&argc, argv, "--wait",
+                                  o.background ? "0" : "2000"));
+        o.quiet = json;
+        o.paths = (const char *const *)(argv + 2);
+        o.npaths = argc - 2;
         IndexStats st;
-        rc = cg_index(&cg, &si, false, &st, false);
-        if (rc != 0 && st.busy) { cg_busy_report("The sync"); rc = CG_EXIT_BUSY; }
+        rc = cg_index_ex(&cg, &si, &o, &st);
+        if (json) {
+            printf("{\"indexed\":%ld,\"removed\":%ld,\"seen\":%ld,"
+                   "\"skipped\":%ld,\"ms\":%ld,\"workers\":%d,\"passes\":%d,"
+                   "\"fresh\":%s,\"coalesced\":%s,\"busy\":%s,"
+                   "\"scoped\":%s,\"targeted\":%s}\n",
+                   st.files_indexed, st.files_removed, st.files_seen,
+                   st.files_skipped, st.ms, st.workers, st.passes,
+                   st.fresh ? "true" : "false",
+                   st.coalesced ? "true" : "false",
+                   st.busy ? "true" : "false",
+                   st.scoped ? "true" : "false",
+                   o.npaths > 0 ? "true" : "false");
+        }
+        if (rc != 0 && st.busy) {
+            if (!json) cg_busy_report("The sync");
+            rc = CG_EXIT_BUSY;
+        }
     } else if (strcmp(cmd, "search") == 0) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         if (argc < 3) { fprintf(stderr, "usage: cg search <query>\n"); rc = 1; }

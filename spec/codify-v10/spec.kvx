@@ -1,0 +1,305 @@
+# codify-v10 — fleet-safe sync, hierarchical fleet workflow, unified multi-branch graph, Jev decisions, full-feature editor.
+
+[meta]
+feature = "codify-v10"
+intro   = "Make Codify safe under a fleet of agents (one coalescing indexer instead of fifty), model the Main Gideon / feature manager / wave worker hierarchy with branch, merge, PR, and checkpoint flow, track every branch and worktree of a repository as one unified graph and memory, add mandatory Jev decisions for classification and triage, and turn the VS Code extension into a full-feature interface."
+
+[req.1]
+title = "Smart auto sync without process storms"
+story = "As an operator running a fleet of agents, I want indexing to stay cheap and single-writer so that fifty concurrent cg processes never saturate the CPU again."
+ac_1  = "WHEN several cg processes need the index at the same time THE first SHALL run the pass and the others SHALL coalesce into it by leaving a dirty marker instead of walking, parsing, or resolving themselves."
+ac_2  = "WHEN the index was refreshed within a caller's freshness window and nothing is pending THE sync SHALL skip the walk entirely and report the graph as fresh."
+ac_3  = "WHEN an index pass runs from a hook, watcher, or editor refresh THE worker count SHALL be capped by machine-wide index slots so that concurrent projects cannot multiply parse threads beyond the core budget."
+ac_4  = "WHEN a change touches a handful of files THE post-scan resolution SHALL rescope references, imports, and anchor edges to the changed files and the symbol names they added or removed instead of rewriting the whole graph."
+ac_5  = "WHEN a Claude Code edit hook fires THE installed hook SHALL run one cg process that syncs the edited path and guards it, not two full syncs."
+ac_6  = "WHEN the VS Code extension refreshes THE extension SHALL coalesce concurrent refreshes into one in-flight pass, SHALL NOT re-trigger on its own database writes, and SHALL NOT index on every poll."
+
+[req.2]
+title = "Hierarchical fleet workflow"
+story = "As the fleet owner, I want a Main Gideon that owns the task list and merges PRs, feature managers that own one feature and its branch, and wave workers that implement one wave on their own branch, so that work flows upward through verified merges."
+ac_1  = "WHEN the workflow declares the hierarchy THE roles main, feature, and worker SHALL be readable from workflow.kvx with their branch naming, base branch, remote, and gate commands."
+ac_2  = "WHEN a worker starts a wave task THE tool SHALL create or reuse a worktree on a wave branch cut from the feature branch and record the branch, worktree, and parent in the attempt ledger."
+ac_3  = "WHEN a worker's task qualifies THE tool SHALL merge the wave branch into the feature branch, and WHEN the merge conflicts THE feature manager SHALL receive a conflict report naming the paths."
+ac_4  = "WHEN every task of a feature is qualified and the feature branch is merged into local main THE tool SHALL run the configured test and lint gates and open a pull request against remote main only when both are green."
+ac_5  = "WHEN a checkpoint is reached THE tool SHALL merge the open Codify pull requests on remote main in order and report what merged and what did not."
+ac_6  = "WHEN cg spec run drives the fleet THE orchestrator SHALL spawn feature managers per feature and wave workers under each manager with role, parent, branch, and base branch in their environment."
+
+[req.3]
+title = "Unified multi-branch graph and memory"
+story = "As an agent in the fleet, I want one graph and one memory for the whole repository across every branch and worktree so that I see the complete picture of what every other worker is doing in real time."
+ac_1  = "WHEN cg runs inside a git worktree of an already initialized repository THE tool SHALL resolve the shared project through the git common directory and use the one shared graph instead of demanding a second init."
+ac_2  = "WHEN files are indexed THE rows SHALL be scoped to the branch they were seen on, and unchanged files across branches SHALL share content by hash rather than by re-parsing."
+ac_3  = "WHEN a query runs without a branch flag THE result SHALL come from the current branch, and WHEN --all-branches is given THE result SHALL union every tracked branch and label each hit with its branch."
+ac_4  = "WHEN a memory is written on a branch THE memory SHALL carry that branch, and WHEN the branch merges into its base THE memory SHALL be promoted to the base so decisions follow the code."
+ac_5  = "WHEN cg watch runs in fleet mode THE watcher SHALL follow every registered worktree and keep each branch's slice of the graph current."
+ac_6  = "WHEN cg brief runs THE output SHALL name the branch, its base, the role, and the other branches with live work."
+
+[req.4]
+title = "Jev decisions are part of Codify"
+story = "As the owner of an internal tool, I want Jev decisions built into Codify as a required capability so that memories become skills, failures get triaged, and findings get ranked without a chat model."
+ac_1  = "WHEN a Jev-backed command runs THE client SHALL send state and questions to the configured decision endpoint through curl, parse noul, choice, and score answers, retry on 429 and 529, and log request id, model, and cost."
+ac_2  = "WHEN OPENROUTER_API_KEY is missing THE command SHALL fail with a clear message naming the variable, never silently degrade."
+ac_3  = "WHEN cg memory classify runs THE tool SHALL ask Jev to class each memory as skill, decision, constraint, fact, or noise with confidence, store the class, and list the skill candidates."
+ac_4  = "WHEN a skill candidate is promoted THE tool SHALL render it as a portable SKILL.md under .agents/skills with the Codify ownership marker and keep the source memory linked."
+ac_5  = "WHEN a task's verify command fails THE failure SHALL be triaged by Jev into a category and a next action that is recorded with the outcome memory."
+ac_6  = "WHEN guard reports findings THE findings SHALL be ranked by Jev severity, and the deterministic checks SHALL remain the only authority for pass or fail."
+
+[req.5]
+title = "Full-feature VS Code interface"
+story = "As a developer, I want the extension to be the place I run the fleet from: an upgraded task UI, a real memory browser with filters and Jev classification, and a polished agent chat."
+ac_1  = "WHEN the tasks view renders THE tree SHALL group by feature, section, and wave with status, owner, branch, and blockers, SHALL filter by status, wave, and owner, and SHALL offer start, done, claim, release, and open-branch actions."
+ac_2  = "WHEN the memory browser opens THE panel SHALL search full text, filter by type, class, task, branch, and date, show detail with linked symbols and files, and offer supersede, forget, classify, and promote to skill."
+ac_3  = "WHEN the fleet view renders THE panel SHALL show Main Gideon, feature managers, and workers with their branches, attempts, heartbeats, merge state, and open pull requests."
+ac_4  = "WHEN the agent chat runs THE panel SHALL stream text and tool calls, render diffs and terminal output, show permission requests inline, support cancel, retry, session switch, and slash commands, and surface errors and cost."
+ac_5  = "WHEN the extension packages THE marketplace identity, changelog, icon, and tests SHALL agree with each other."
+
+[design]
+overview = "Sync: a new syncgate module owns a single-writer index gate around cg_index. The gate takes a non-blocking flock on .codegraph/index.lock; a loser touches .codegraph/index.dirty and returns coalesced; the winner drains the dirty marker in bounded passes before releasing. A freshness window keyed by meta.last_index_at lets hooks, MCP, and spec commands skip the walk. Machine-wide slots under /tmp/codify-<uid> cap parse threads across projects, and hook syncs run at low priority. Post-scan resolution is scoped to changed file ids and touched symbol names through temp tables; --full keeps the global pass. Hooks collapse to one cg hook post-edit process. The extension coalesces refreshes and ignores its own graph.db writes. Hierarchy: workflow.kvx gains a [hierarchy] section and per-role [role.*] sections; identity gains role and parent; a new fleet module wraps git worktree, merge, gate, gh pr, and checkpoint flows over popen; the orchestrator grows a two-level slot tree. Unified graph: schema v15 adds branches, files.branch_id, memories.branch, and a content table keyed by hash; root discovery resolves worktrees to the git common dir; queries default to the current branch. Jev: a jev module builds canonical requests, runs curl, parses answers, retries, and logs cost; memory classify, failure triage, and guard ranking are its first consumers; the local_only principle becomes local_first. Extension: task tree, memory browser, fleet view, and agent chat are rebuilt on the same zero-dependency, CSP-strict webview base."
+
+[documentation]
+mode       = "auto"
+status     = "pending"
+audiences  = ["user", "developer"]
+targets    = ["README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: Codify v10"
+
+[task.1]
+title   = "Smart auto sync"
+section = "One indexer, not fifty"
+status  = "pending"
+
+[task.1.1]
+title      = "Single-writer index gate with coalescing, freshness, and slots"
+status     = "in_progress"
+wave       = 1
+symbols    = ["cg_index_ex", "syncgate_acquire", "syncgate_release", "syncgate_mark_dirty", "syncgate_slot_acquire"]
+touches    = ["src/syncgate.c", "src/scan.c", "src/cg.h", "src/main.c", "src/sysinfo.c", "tests/integration/25_syncgate.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/25_syncgate.sh gate"
+do_1       = "Add IndexOpts and cg_index_ex; keep cg_index as the blocking full-strength wrapper."
+do_2       = "Take a non-blocking flock on .codegraph/index.lock; losers touch .codegraph/index.dirty and return coalesced; the winner drains the marker in bounded passes."
+do_3       = "Skip the walk when meta.last_index_at is inside the caller's freshness window with nothing pending or dirty."
+do_4       = "Cap workers by CG_INDEX_WORKERS and machine-wide slots under /tmp/codify-<uid>; background callers renice themselves."
+do_5       = "Teach cg sync to take optional paths and report fresh, coalesced, and slot decisions in its output and --json."
+reqs       = ["1.1", "1.2", "1.3"]
+
+[task.1.2]
+title      = "Incremental post-scan resolution"
+status     = "pending"
+wave       = 1
+symbols    = ["resolve_refs_scoped", "resolve_imports_scoped", "anchor_edges_scoped", "index_scope_begin"]
+touches    = ["src/resolve.c", "src/scan.c", "src/cg.h", "tests/integration/25_syncgate.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/25_syncgate.sh incremental && CG=$PWD/cg tests/integration/15_accuracy.sh"
+do_1       = "Collect changed file ids and added or removed symbol names during the write phase into temp tables."
+do_2       = "Resolve only refs in changed files plus refs anywhere that name a touched symbol; resolve imports of changed files; rebuild soft edges only for comments in changed files or naming touched symbols."
+do_3       = "Keep the global pass for --full and for the pending-resolve recovery path, and keep resolution meta counters truthful by recomputing them from the table."
+reqs       = ["1.4"]
+
+[task.1.3]
+title      = "Cheap callers: post-edit hook, spec, MCP, runtime, watch, and LSP"
+status     = "pending"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["cmd_hook_post_edit", "runtime_workspace_revision"]
+touches    = ["src/govern.c", "src/spec.c", "src/mcp.c", "src/runtime.c", "src/watch.c", "src/lsp.c", "src/main.c", "src/cg.h", "tests/integration/25_syncgate.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/25_syncgate.sh callers && CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/22_control.sh"
+do_1       = "Add cg hook post-edit reading the Claude Code hook payload from stdin and doing one targeted sync plus guard; update the Claude and git hook templates."
+do_2       = "Route spec_graph_open, MCP sync_first, review, commit, and agentmd through cg_index_ex with a freshness window and bounded lock waits."
+do_3       = "Batch runtime_workspace_revision into one write transaction under the index gate and skip the hash when the walk is unchanged."
+do_4       = "Make watch and lsp honor the gate so they coalesce instead of racing hooks."
+reqs       = ["1.1", "1.2", "1.5"]
+
+[task.1.4]
+title      = "Extension refresh coalescing and identity fix"
+status     = "pending"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["scheduleRefresh", "runRefresh"]
+touches    = ["editors/vscode/extension.js", "editors/vscode/client.js", "editors/vscode/package.json", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md", "tests/integration/14_vscode.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh"
+do_1       = "Collapse afterMutation, watcher, and poll refreshes into one in-flight promise with a trailing debounce."
+do_2       = "Stop watching graph.db for the extension's own writes; watch spec files and the dirty marker instead; poll at a low cadence."
+do_3       = "Run spec trace only on demand and route every refresh through cg sync with a freshness window."
+do_4       = "Align the marketplace identity, README, changelog, and test with codify-workflow."
+reqs       = ["1.6", "5.5"]
+
+[task.2]
+title   = "Hierarchical fleet workflow"
+section = "Main Gideon, feature managers, wave workers"
+status  = "pending"
+
+[task.2.1]
+title      = "Roles, hierarchy config, and identity"
+status     = "pending"
+wave       = 3
+requires   = ["1.3"]
+symbols    = ["hier_load", "cg_agent_role", "cg_agent_parent", "cmd_fleet"]
+touches    = ["src/fleet.c", "src/util.c", "src/cg.h", "src/main.c", "src/spec.c", "spec/workflow.kvx", "tests/integration/26_fleet.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/26_fleet.sh roles"
+do_1       = "Parse [hierarchy] and [role.*] from workflow.kvx: role names, branch templates, base branch, remote, test and lint gates, PR policy."
+do_2       = "Extend agent identity with CG_ROLE and CG_PARENT and surface them in spec status, claims, attempts, and brief."
+do_3       = "Add cg fleet status, cg fleet roles, and cg fleet plan that shows which manager owns which feature and which worker owns which wave."
+reqs       = ["2.1", "2.6"]
+
+[task.2.2]
+title      = "Branch lifecycle: worktrees, merge-up, gates, PR, checkpoint"
+status     = "pending"
+wave       = 4
+requires   = ["2.1"]
+symbols    = ["fleet_worker_begin", "fleet_merge_up", "fleet_feature_land", "fleet_pr_open", "fleet_checkpoint"]
+touches    = ["src/fleet.c", "src/gitint.c", "src/spec.c", "src/cg.h", "src/main.c", "tests/integration/26_fleet.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/26_fleet.sh branches"
+do_1       = "cg fleet begin <id> creates or reuses the wave worktree and branch from the feature branch and records branch, worktree, and parent on the attempt."
+do_2       = "cg fleet merge-up <id> merges the wave branch into the feature branch after qualification and reports conflicts by path for the feature manager."
+do_3       = "cg fleet land <feature> merges the feature branch into local main, runs the test and lint gates, and refuses when either is red."
+do_4       = "cg fleet pr <feature> opens the pull request against remote main through gh when available and prints the exact commands otherwise; cg fleet checkpoint merges open Codify PRs in order."
+reqs       = ["2.2", "2.3", "2.4", "2.5"]
+
+[task.2.3]
+title      = "Two-level orchestrator"
+status     = "pending"
+wave       = 5
+requires   = ["2.2", "3.2"]
+symbols    = ["orch_spawn_manager", "orch_spawn_worker", "orch_tree_status"]
+touches    = ["src/orchestrate.c", "src/govern.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/integration/26_fleet.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/18_orchestrate.sh && CG=$PWD/cg tests/integration/26_fleet.sh orchestrate"
+do_1       = "cg spec run --fleet spawns one feature manager per feature and wave workers under each manager, each in its own worktree with role, parent, branch, and base in the environment."
+do_2       = "A manager completes only when its subtree is qualified and merged; a worker's resume prompt ends with merge-up, a manager's with land and pr."
+do_3       = "Keep the single-level run intact for repositories without a hierarchy section."
+reqs       = ["2.6", "2.2"]
+
+[task.3]
+title   = "Unified multi-branch graph"
+section = "One graph for every branch and worktree"
+status  = "pending"
+
+[task.3.1]
+title      = "Schema v15, shared root through the git common dir, branch registry"
+status     = "pending"
+wave       = 3
+requires   = ["1.2"]
+symbols    = ["cg_branch_resolve", "branch_register", "cmd_branches"]
+touches    = ["src/db.c", "src/cg.h", "src/gitint.c", "src/main.c", "src/scan.c", "tests/integration/27_branches.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/27_branches.sh schema && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/09_root.sh"
+do_1       = "Add branches(id, name, worktree, head, base, updated) and files.branch_id with UNIQUE(branch_id, path); migrate existing rows to the current branch."
+do_2       = "Resolve a worktree to the shared .codegraph through git rev-parse --git-common-dir when no nearer project exists; cg init inside a worktree of an initialized repo joins instead of refusing."
+do_3       = "Resolve the current branch at open time into Cg and register it; cg branches lists tracked branches with worktree, head, and file counts."
+reqs       = ["3.1", "3.2"]
+
+[task.3.2]
+title      = "Branch-scoped indexing, queries, memory, brief, and fleet watch"
+status     = "pending"
+wave       = 4
+requires   = ["3.1"]
+symbols    = ["branch_scope_sql", "memory_promote_branch", "watch_fleet"]
+touches    = ["src/scan.c", "src/graph.c", "src/memory.c", "src/govern.c", "src/watch.c", "src/main.c", "src/cg.h", "src/db.c", "tests/integration/27_branches.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/27_branches.sh queries && CG=$PWD/cg tests/integration/08_memory.sh && CG=$PWD/cg tests/integration/16_retrieval.sh"
+do_1       = "The indexer writes rows under the current branch and reuses parsed content by hash across branches."
+do_2       = "search, symbol, context, survey, impact, and recall default to the current branch and accept --branch and --all-branches, labelling hits by branch."
+do_3       = "Memories carry a branch; cg fleet merge-up promotes them to the base; brief names branch, base, role, and other live branches."
+do_4       = "cg watch --fleet follows every registered worktree through one process."
+reqs       = ["3.2", "3.3", "3.4", "3.5", "3.6"]
+
+[task.4]
+title   = "Jev decisions"
+section = "Classification, triage, ranking"
+status  = "pending"
+
+[task.4.1]
+title      = "Jev client over curl"
+status     = "pending"
+wave       = 3
+symbols    = ["jev_ask", "jev_question_noul", "jev_question_choice", "jev_question_score", "cmd_jev"]
+touches    = ["src/jev.c", "src/cg.h", "src/main.c", "spec/workflow.kvx", "tests/integration/28_jev.sh", "tests/fixtures/jev/fake-curl.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/28_jev.sh client"
+do_1       = "Build canonical request JSON, run curl through popen with CG_JEV_CURL override, parse noul, choice, and score answers, retry 429 and 529 with backoff, log to .codegraph/jev.log."
+do_2       = "Fail clearly when OPENROUTER_API_KEY is missing; honor CG_JEV_MODEL and CG_JEV_ENDPOINT."
+do_3       = "Add cg jev doctor and cg jev ask for operators; rewrite the local_only principle to local_first."
+reqs       = ["4.1", "4.2"]
+
+[task.4.2]
+title      = "Memory classification and skills"
+status     = "pending"
+wave       = 4
+requires   = ["4.1", "3.1"]
+symbols    = ["cmd_memory_classify", "cmd_skills", "skill_render"]
+touches    = ["src/memory.c", "src/integrate.c", "src/db.c", "src/jev.c", "src/main.c", "src/cg.h", "src/mcp.c", "tests/integration/28_jev.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/28_jev.sh skills && CG=$PWD/cg tests/integration/08_memory.sh"
+do_1       = "Add memories.class and memories.confidence; cg memory classify asks Jev per memory and stores the answer; recall and brief expose the class."
+do_2       = "cg skills list, promote <id>, and render write .agents/skills/<slug>/SKILL.md with the ownership marker and a link back to the memory."
+do_3       = "Expose classify, skills, and promote over MCP."
+reqs       = ["4.3", "4.4"]
+
+[task.4.3]
+title      = "Failure triage and guard ranking"
+status     = "pending"
+wave       = 5
+requires   = ["4.1", "2.2"]
+symbols    = ["jev_triage_failure", "jev_rank_findings"]
+touches    = ["src/spec.c", "src/govern.c", "src/jev.c", "src/fleet.c", "src/cg.h", "tests/integration/28_jev.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/28_jev.sh advisory"
+do_1       = "When verify_cmd fails in cg spec done, classify the tail of its output into a category and next action and record both on the outcome memory."
+do_2       = "cg guard ranks its findings with a Jev score and prints them in that order; pass or fail stays deterministic."
+do_3       = "cg fleet pr asks Jev for a readiness score and includes it in the PR body."
+reqs       = ["4.5", "4.6"]
+
+[task.5]
+title   = "Full-feature VS Code interface"
+section = "Tasks, memories, fleet, chat"
+status  = "pending"
+
+[task.5.1]
+title      = "Task UI upgrade"
+status     = "pending"
+wave       = 5
+requires   = ["1.4", "2.1"]
+symbols    = ["TaskTreeProvider", "taskFilter", "taskDetail"]
+touches    = ["editors/vscode/extension.js", "editors/vscode/tasks.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh tasks"
+do_1       = "Group by feature, section, and wave with status icons, owner, branch, and blockers; filter by status, wave, and owner from the view title."
+do_2       = "Task detail webview with acceptance criteria, do-steps, touches, symbols, verify command, trace, and memories."
+do_3       = "Actions: start, done, claim, release, open branch, run verify, copy resume prompt."
+reqs       = ["5.1"]
+
+[task.5.2]
+title      = "Memory browser and skills"
+status     = "pending"
+wave       = 5
+requires   = ["1.4", "4.2"]
+symbols    = ["MemoryBrowser", "memoryFilter"]
+touches    = ["editors/vscode/extension.js", "editors/vscode/memories.js", "editors/vscode/memorypanel.html", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh memories"
+do_1       = "Webview panel with full-text search and filters for type, class, task, branch, and date; detail with linked symbols and files."
+do_2       = "Actions: supersede, forget, classify with Jev, promote to skill, open skill file."
+reqs       = ["5.2"]
+
+[task.5.3]
+title      = "Fleet view and agent chat polish"
+status     = "pending"
+wave       = 6
+requires    = ["5.1", "2.3"]
+symbols    = ["FleetView", "AgentPanel"]
+touches    = ["editors/vscode/extension.js", "editors/vscode/fleet.js", "editors/vscode/agentpanel.html", "editors/vscode/agents.js", "editors/vscode/acp.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh", "tests/integration/19_acp.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh fleet && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "Fleet view: Main Gideon, managers, workers, branches, attempts, heartbeats, merge state, open PRs, with refresh and open-worktree actions."
+do_2       = "Agent chat: streaming text and tool calls, diff and terminal rendering, inline permission requests, cancel, retry, session switch, slash commands, error and cost display."
+reqs       = ["5.3", "5.4"]
+
+[task.6]
+title   = "Qualification"
+section = "End-to-end"
+status  = "pending"
+
+[task.6.1]
+title      = "Qualify v10 end to end"
+status     = "pending"
+wave       = 7
+requires   = ["1.4", "2.3", "3.2", "4.3", "5.2", "5.3"]
+symbols    = ["cg_index_ex", "cmd_fleet", "cg_branch_resolve", "jev_ask", "cmd_memory_classify"]
+touches    = ["README.md", "docs/*", "CHANGELOG.md", "tests/*", "src/*", "editors/vscode/*", "spec/codify-v10/*", "spec/workflow.kvx"]
+verify_cmd = "make test && $PWD/cg spec render --check && $PWD/cg spec lint && $PWD/cg check"
+do_1       = "Run the whole suite, spec render check, lint, and check in a clean tree."
+do_2       = "Document the sync gate, hierarchy, unified graph, Jev, and extension surfaces with commands and limitations."
+do_3       = "Trace every task to its symbols, touched paths, snapshots, and verification evidence."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "5.1", "5.2", "5.3", "5.4", "5.5"]
