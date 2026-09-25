@@ -579,6 +579,71 @@ int  fleet_identity_record(Cg *g);           /* no-op without CG_ROLE */
 void fleet_brief(Cg *cg, StrBuf *b, bool json);
 int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);
 
+/* ---------------- jev: System One decisions (jev.c) ----------------
+ * Jev is TypeSafe AI's decision model, reached through OpenRouter with
+ * OPENROUTER_API_KEY. It answers a fixed set of typed questions about a
+ * state: noul (probability a statement is true), choice (one of up to 255
+ * labelled options), score (an ordinal level). It never generates text and
+ * its answers are advice — verify_cmd and the graph checks stay the
+ * authority. The key is mandatory for every feature built on it: a missing
+ * key is an error, not a silent fallback. */
+enum { JEV_NOUL, JEV_CHOICE, JEV_SCORE };
+enum { JEV_OK = 0, JEV_ECONFIG = 1, JEV_EREQUEST = 2, JEV_EPARSE = 3 };
+typedef struct {
+    char *name, *instructions;
+    int type;
+    char **keys;     /* choice: option keys; noul: "true"/"false"; score: NULL */
+    char **descs;    /* option or criterion text; score: the levels in order */
+    int n;
+} JevQuestion;
+typedef struct {
+    char *name;
+    int type;
+    double value;         /* noul: probability true; score: the score */
+    char *choice;         /* choice: the selected option key */
+    double confidence;    /* noul: distance from undecided */
+    char *probabilities;  /* raw JSON object, NULL when absent */
+    char *legend;         /* score: raw JSON object level -> text */
+} JevAnswer;
+typedef struct {
+    char *model, *requested_model, *id;
+    long input_tokens, output_tokens;
+    double cost;
+    int status, attempts;
+    long ms;
+    JevAnswer *answers; int n;
+    char error[640];      /* set when jev_ask returns non-zero */
+} JevResult;
+/* Build one question; -1 when the cardinality is invalid (choice needs 2
+ * to 255 options, score at least 2 levels). when_true/when_false may be
+ * NULL. Strings are copied. */
+int  jev_question_noul(JevQuestion *q, const char *name,
+                       const char *instructions, const char *when_true,
+                       const char *when_false);
+int  jev_question_choice(JevQuestion *q, const char *name,
+                         const char *instructions, const char *const *keys,
+                         const char *const *descs, int n);
+int  jev_question_score(JevQuestion *q, const char *name,
+                        const char *instructions, const char *const *levels,
+                        int n);
+void jev_question_free(JevQuestion *q);
+/* The canonical request body: sorted question names and criteria keys,
+ * compact, state verbatim. */
+void jev_request_json(const char *model, const char *state_json,
+                      const JevQuestion *qs, int nq, StrBuf *out);
+/* Ask Jev. Returns JEV_OK with answers, or JEV_E* with out->error filled
+ * (key or curl missing; the request failed after retries on 429 and 529;
+ * the response could not be read). Every call is logged to
+ * <shared>/.codegraph/jev.log; cg may be NULL (no project, no log). */
+int  jev_ask(Cg *cg, const char *state_json, const JevQuestion *qs, int nq,
+             JevResult *out);
+/* Same, with a complete {"model","questions","state"} body; a missing
+ * model is filled in from the configuration. */
+int  jev_ask_raw(Cg *cg, const char *body, JevResult *out);
+const JevAnswer *jev_answer(const JevResult *r, const char *name);
+void jev_result_free(JevResult *r);
+int  cmd_jev(Cg *cg, int argc, char **argv, bool json);
+
 bool git_available(const Cg *cg);
 /* Where tree's HEAD points, read from the git files themselves so opening
  * the graph never spawns a process. branch gets the short ref name, or

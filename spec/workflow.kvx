@@ -53,7 +53,7 @@ task_driven     = "Work is driven by the active feature's task list, in wave ord
 verified_done   = "A task is done only when its verify_cmd and graph checks pass. Trust the work, not the report."
 one_binary      = "Everything ships in the single cg binary. No new runtime dependencies."
 non_invasive    = "Codify observes and advises by default; it blocks only where the user asked it to."
-local_only      = "No network calls, no telemetry, no API keys. Ever."
+local_first     = "The graph, memory, and workflow run with no network and no telemetry. Jev decisions are the one remote call: mandatory for the features built on them, never for the core loop, and never authoritative — they narrow, rank, and flag; verify_cmd and graph checks decide."
 anchor_intent   = "Anchor what a reader could not derive from the code: purpose, contract, danger, pointer. Derivable comments are noise."
 generated_owners = "cg spec render owns AGENTS.md and CLAUDE.md; cg agentmd owns .codify/agent-context.md."
 

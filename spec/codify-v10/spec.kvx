@@ -176,7 +176,7 @@ status  = "pending"
 
 [task.3.1]
 title      = "Schema v15, shared root through the git common dir, branch registry"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 requires   = ["1.2"]
 symbols    = ["cg_branch_resolve", "branch_register", "cmd_branches"]
@@ -208,7 +208,7 @@ status  = "pending"
 
 [task.4.1]
 title      = "Jev client over curl"
-status     = "pending"
+status     = "in_progress"
 wave       = 3
 symbols    = ["jev_ask", "jev_question_noul", "jev_question_choice", "jev_question_score", "cmd_jev"]
 touches    = ["src/jev.c", "src/cg.h", "src/main.c", "spec/workflow.kvx", "tests/integration/28_jev.sh", "tests/fixtures/jev/fake-curl.sh"]

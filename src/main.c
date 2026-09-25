@@ -6,7 +6,7 @@
 static void usage(void) {
     printf(
 "Codify %s — the agent workflow tool: code graph + version control,\n"
-"100%% local, from small projects to large codebases\n"
+"local-first, from small projects to large codebases\n"
 "\n"
 "usage: cg <command> [args]\n"
 "\n"
@@ -113,6 +113,15 @@ static void usage(void) {
 "  fleet status             who is alive in which role, on which task\n"
 "  fleet plan [-f F]        which manager owns the feature and which worker\n"
 "                           owns each wave, planned and live\n"
+"\n"
+"jev (TypeSafe System One decisions via OpenRouter; OPENROUTER_API_KEY\n"
+"     is mandatory; CG_JEV_MODEL, CG_JEV_ENDPOINT, CG_JEV_CURL override)\n"
+"  jev doctor [--probe]     key, curl, endpoint, model, and log health;\n"
+"                           --probe sends one tiny decision\n"
+"  jev ask [<request.json>|-] [--state S] [--noul N I] [--choice N I\n"
+"           --option K=D ...] [--score N I --level L ...]\n"
+"                           ask Jev directly; answers as text or --json\n"
+"  jev log [-n N]           the last N calls from .codegraph/jev.log\n"
 "\n"
 "most query commands accept --json for machine-readable output\n",
         CG_VERSION);
@@ -329,6 +338,19 @@ int main(int argc, char **argv) {
         strcmp(argv[2], "post-edit") == 0) {
         char root[4096];
         if (cg_find_root(root, sizeof root) != 0) return 0;
+    }
+
+    /* jev doctor is how an operator finds out why Jev is unavailable, so
+     * it must answer outside a project too; ask and log just lose the
+     * .codegraph/jev.log there */
+    if (strcmp(cmd, "jev") == 0) {
+        Cg *pcg = NULL;
+        char root[4096];
+        if (cg_find_root(root, sizeof root) == 0 && cg_open(&cg, false) == 0)
+            pcg = &cg;
+        int rc = cmd_jev(pcg, argc, argv, json);
+        if (pcg) cg_close(pcg);
+        return rc;
     }
 
     if (cg_open(&cg, false) != 0) return 1;

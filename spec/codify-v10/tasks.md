@@ -55,7 +55,7 @@
 ## One graph for every branch and worktree
 
 - [ ] 3. Unified multi-branch graph
-  - [-] 3.1 Schema v15, shared root through the git common dir, branch registry
+  - [x] 3.1 Schema v15, shared root through the git common dir, branch registry
     - Add branches(id, name, worktree, head, base, updated) and files.branch_id with UNIQUE(branch_id, path); migrate existing rows to the current branch.
     - Resolve a worktree to the shared .codegraph through git rev-parse --git-common-dir when no nearer project exists; cg init inside a worktree of an initialized repo joins instead of refusing.
     - Resolve the current branch at open time into Cg and register it; cg branches lists tracked branches with worktree, head, and file counts.
@@ -70,7 +70,7 @@
 ## Classification, triage, ranking
 
 - [ ] 4. Jev decisions
-  - [ ] 4.1 Jev client over curl
+  - [-] 4.1 Jev client over curl
     - Build canonical request JSON, run curl through popen with CG_JEV_CURL override, parse noul, choice, and score answers, retry 429 and 529 with backoff, log to .codegraph/jev.log.
     - Fail clearly when OPENROUTER_API_KEY is missing; honor CG_JEV_MODEL and CG_JEV_ENDPOINT.
     - Add cg jev doctor and cg jev ask for operators; rewrite the local_only principle to local_first.
