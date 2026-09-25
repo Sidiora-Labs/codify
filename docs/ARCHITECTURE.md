@@ -318,6 +318,19 @@ real git commit carrying the same `[spec:feature/id]` tag, and
 and anchoring) alongside `.cgignore`. Adopting Codify is therefore never
 all-or-nothing.
 
+## Changelog (`changelog.c`)
+
+`src/changelog.c` is the git-history changelog renderer: `cg changelog`
+reads tags and commits through the same `git` pipes `gitint.c` uses,
+groups each subject by its `area:` prefix, turns a trailing
+`[spec:<feature>/<task>]` into a task reference, and builds commit and
+compare links from `git remote get-url origin`. Its output is checked
+for parity against `cliff.toml`, the git-cliff configuration at the
+repository root — `diff <(git cliff) <(cg changelog)` is the test — but
+git-cliff is a reference, never a runtime dependency. The snapshot
+renderer in `vcs.c` stays as the `--snapshots` mode and as the fallback
+for a project with no `.git`.
+
 ## Governance (`govern.c`)
 
 The commands that put Codify inside the loop rather than at its ends:

@@ -26,7 +26,7 @@ Version 0.9.0 (v10) makes it safe under a fleet: one coalescing indexer instead 
 
 **What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes. And beyond what a parser sees, comments are indexed as first-class nodes — the intent layer: purpose, contracts, dangers, and the couplings that live only in prose.
 
-**How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits, and `cg changelog` writes symbol-level release notes by itself.
+**How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits. `cg changelog` writes the release notes: from git history by default — a release per tag, groups from the commit-subject prefix, each task reference carried through — and from the snapshot chain with symbol-level diffs when you pass `--snapshots` or the project has no git at all.
 
 **What happens next.** A spec engine turns plain-text kvx spec files into a working plan: a task board with dependency waves, acceptance criteria attached to every task — and a `done` that is verified, not asserted. `cg spec new` and `cg spec add` create the plan, `cg spec lint` proves it is executable, and the loop runs it. In Prod mode, `implemented` records coding completion and source evidence without claiming qualification; only `done` means executable qualification and graph checks passed. In parallel mode, several agents work at once, bounded by the disjointness of the paths each task declares.
 
@@ -200,6 +200,42 @@ Snapshots are content-addressed with SHA-256 and blobs are deduplicated.
 
 Codify's snapshots do not replace git. `.gitignore` is honoured alongside `.cgignore`, `cg git-sync` reads your real history, and `cg commit --git` writes to both, so adopting Codify is never all-or-nothing.
 
+### Changelog
+
+`cg changelog` renders release notes from git history. A release is a tag, dated by the tagged commit's committer date in UTC; everything after the last tag is `[Unreleased]`; a group is the commit-subject prefix; and the `[spec:<feature>/<task>]` that `cg commit` appends becomes a task reference on the bullet. Commit links are built from `git remote get-url origin` — with no remote, a bullet reads `- Add gauge (1a2b3c4, task demo/1.2)` and the footer links are omitted.
+
+```markdown
+# Changelog
+
+All notable changes to this project are recorded here, generated from git history.
+A release is a tag; a group is the commit-subject prefix; a task reference is
+the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
+
+## [Unreleased]
+
+### Features
+- Add gauge ([1a2b3c4](https://github.com/acme/demo/commit/1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d))
+
+### Bug fixes
+- **parser:** Handle empty input ([9f8e7d6](https://github.com/acme/demo/commit/9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c), task demo/1.2)
+
+## [0.1.0] - 2026-09-25
+
+### Other
+- Plain subject without prefix ([65a1b20](https://github.com/acme/demo/commit/65a1b2033e4f5a6b7c8d9e0f1a2b3c4d5e6f7081))
+
+[Unreleased]: https://github.com/acme/demo/compare/0.1.0...HEAD
+[0.1.0]: https://github.com/acme/demo/releases/tag/0.1.0
+```
+
+`cliff.toml` at the repository root is the reference configuration: it owns the header, the group names and the order they are listed in, and the shape of a bullet. [git-cliff](https://git-cliff.org) and `cg changelog` must produce the same file, which is one command to check:
+
+```sh
+diff <(git cliff) <(cg changelog)
+```
+
+`-n N` caps the release sections (`[Unreleased]` counts as one), `-o FILE` writes the file relative to the repository root and prints the path, `--unreleased` renders only the pending section and its footer line, and `--tag NAME` titles that section as a release dated today. `--snapshots` — and any project without a `.git` — falls back to the snapshot renderer, whose output is a symbol-level diff per snapshot rather than a tag history. This repository's own generated notes are `docs/CHANGELOG-git.md`; `CHANGELOG.md` stays hand-curated and task-ordered.
+
 ### Memory
 
 Durable agent notes, stored in the same SQLite database as the graph. Memories written while a spec task is in progress link themselves to it, and `cg spec done` records outcomes automatically. Never store secrets in them.
@@ -227,7 +263,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 | `cg mcp-install` | Compatibility alias for `cg integrate apply` |
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |
 | `cg hook post-edit` | The wired edit hook itself: reads the host's payload on stdin and does one targeted background sync plus a guard of the edited path — one process per edit, not two full syncs |
-| `cg changelog [-n N] [-o FILE]` | Changelog from snapshots with symbol-level diffs: added and removed functions, new routes |
+| `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots]` | Release notes from git history: a release per tag, `[Unreleased]` for what follows it, groups from the commit-subject prefix, `[spec:<feature>/<task>]` rendered as a task reference — the same file `git cliff` produces from `cliff.toml` (see [Changelog](#changelog)). `--snapshots`, or a project with no `.git`, renders from the snapshot chain instead, with symbol-level diffs: added and removed functions, new routes |
 | `cg agentmd [--write]` | Generate graph orientation at `.codify/agent-context.md`; root `AGENTS.md` and `CLAUDE.md` remain owned by `cg spec render` |
 
 ### Agent control plane
