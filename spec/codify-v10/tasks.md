@@ -94,7 +94,7 @@
     - Task detail webview with acceptance criteria, do-steps, touches, symbols, verify command, trace, and memories.
     - Actions: start, done, claim, release, open branch, run verify, copy resume prompt.
     - _Requirements: 5.1_
-  - [ ] 5.2 Memory browser and skills
+  - [x] 5.2 Memory browser and skills
     - Webview panel with full-text search and filters for type, class, task, branch, and date; detail with linked symbols and files.
     - Actions: supersede, forget, classify with Jev, promote to skill, open skill file.
     - _Requirements: 5.2_

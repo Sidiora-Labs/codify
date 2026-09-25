@@ -264,7 +264,7 @@ reqs       = ["5.1"]
 
 [task.5.2]
 title      = "Memory browser and skills"
-status     = "pending"
+status     = "done"
 wave       = 5
 requires   = ["1.4", "4.2"]
 symbols    = ["MemoryBrowser", "memoryFilter"]
