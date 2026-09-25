@@ -56,6 +56,12 @@
           "name": "Memory",
           "contextualTitle": "Codify Memory",
           "visibility": "collapsed"
+        },
+        {
+          "id": "codifyFleet",
+          "name": "Fleet",
+          "contextualTitle": "Codify Fleet",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -67,6 +73,10 @@
       {
         "view": "codifyMemories",
         "contents": "No project memories yet.\nMemories are decisions, constraints, and facts worth knowing in a later session. They live in .codegraph beside the code graph.\n[Remember a decision](command:codify.remember)"
+      },
+      {
+        "view": "codifyFleet",
+        "contents": "No fleet here yet.\nA fleet is Main Gideon, one manager per feature, and one worker per wave — each on its own branch and worktree. It appears once spec/workflow.kvx has a [hierarchy] section.\n[Begin a task in the fleet](command:codify.fleet.begin)\n[Refresh](command:codify.fleet.refresh)"
       }
     ],
     "commands": [
@@ -108,7 +118,14 @@
       { "command": "codify.agent.handoff", "title": "Codify: Hand Off Task" },
       { "command": "codify.agent.resume", "title": "Codify: Resume Task in Agent Session" },
       { "command": "codify.agent.runWave", "title": "Codify: Run Wave with Agents" },
-      { "command": "codify.agent.stop", "title": "Codify: Stop Agent Session", "icon": "$(stop-circle)" }
+      { "command": "codify.agent.stop", "title": "Codify: Stop Agent Session", "icon": "$(stop-circle)" },
+      { "command": "codify.fleet.refresh", "title": "Codify: Refresh the Fleet", "icon": "$(refresh)" },
+      { "command": "codify.fleet.openWorktree", "title": "Codify: Open Agent Worktree", "icon": "$(folder-opened)" },
+      { "command": "codify.fleet.begin", "title": "Codify: Begin Task in the Fleet", "icon": "$(play)" },
+      { "command": "codify.fleet.mergeUp", "title": "Codify: Merge a Wave Branch Up", "icon": "$(git-merge)" },
+      { "command": "codify.fleet.land", "title": "Codify: Land the Feature", "icon": "$(rocket)" },
+      { "command": "codify.fleet.openPr", "title": "Codify: Open the Feature Pull Request", "icon": "$(git-pull-request)" },
+      { "command": "codify.fleet.checkpoint", "title": "Codify: Checkpoint the Open Pull Requests", "icon": "$(milestone)" }
     ],
     "menus": {
       "view/title": [
@@ -127,7 +144,12 @@
         { "command": "codify.agent.newChat", "when": "view == codifyAgentView", "group": "navigation@1" },
         { "command": "codify.agent.configure", "when": "view == codifyAgentView", "group": "navigation@2" },
         { "command": "codify.remember", "when": "view == codifyMemories", "group": "navigation@1" },
-        { "command": "codify.refresh", "when": "view == codifyMemories", "group": "navigation@2" }
+        { "command": "codify.refresh", "when": "view == codifyMemories", "group": "navigation@2" },
+        { "command": "codify.fleet.refresh", "when": "view == codifyFleet", "group": "navigation@1" },
+        { "command": "codify.fleet.begin", "when": "view == codifyFleet", "group": "navigation@2" },
+        { "command": "codify.fleet.land", "when": "view == codifyFleet", "group": "1_fleet@1" },
+        { "command": "codify.fleet.openPr", "when": "view == codifyFleet", "group": "1_fleet@2" },
+        { "command": "codify.fleet.checkpoint", "when": "view == codifyFleet", "group": "1_fleet@3" }
       ],
       "view/item/context": [
         { "command": "codify.startTask", "when": "view == codifyTasks && viewItem == task-pending", "group": "inline@1" },
@@ -143,7 +165,15 @@
         { "command": "codify.agent.resume", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "3_agent@2" },
         { "command": "codify.agent.handoff", "when": "view == codifyTasks && viewItem == task-in_progress", "group": "3_agent@3" },
         { "command": "codify.agent.stop", "when": "view == codifyTasks && viewItem =~ /^task-/", "group": "3_agent@4" },
-        { "command": "codify.forget", "when": "view == codifyMemories && viewItem == memory", "group": "inline" }
+        { "command": "codify.forget", "when": "view == codifyMemories && viewItem == memory", "group": "inline" },
+        { "command": "codify.fleet.openWorktree", "when": "view == codifyFleet && viewItem =~ /-worktree/", "group": "inline@1" },
+        { "command": "codify.fleet.begin", "when": "view == codifyFleet && viewItem =~ /^fleet-task-(pending|in_progress)$/", "group": "inline@1" },
+        { "command": "codify.fleet.mergeUp", "when": "view == codifyFleet && viewItem =~ /^fleet-(worker|task-)/", "group": "1_fleet@1" },
+        { "command": "codify.fleet.begin", "when": "view == codifyFleet && viewItem =~ /^fleet-worker/", "group": "1_fleet@2" },
+        { "command": "codify.fleet.land", "when": "view == codifyFleet && viewItem =~ /^fleet-(main|manager)/", "group": "1_fleet@1" },
+        { "command": "codify.fleet.openPr", "when": "view == codifyFleet && viewItem =~ /^fleet-manager/", "group": "1_fleet@2" },
+        { "command": "codify.fleet.checkpoint", "when": "view == codifyFleet && viewItem =~ /^fleet-main/", "group": "1_fleet@3" },
+        { "command": "codify.fleet.openWorktree", "when": "view == codifyFleet && viewItem =~ /-worktree/", "group": "2_open@1" }
       ],
       "editor/context": [
         { "command": "codify.why", "when": "editorTextFocus && codify.hasSpec", "group": "codify@1" },

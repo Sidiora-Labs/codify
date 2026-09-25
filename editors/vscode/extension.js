@@ -20,6 +20,12 @@ const kvx = require('./kvx');
 const agents = require('./agents');
 const acp = require('./acp');
 const { createRefresher } = require('./refresh');
+// --- fleet (5.3) ---
+const fleet = require('./fleet');
+/* The fleet view joins three cg reports of its own; it runs inside the one
+ * refresh chain below and only while the view is visible. */
+let fleetApi = { refresh: async () => {} };
+// --- end fleet (5.3) ---
 
 let provider;
 let memories;
@@ -371,6 +377,10 @@ async function runRefresh() {
               '--background', '--wait', '0']);
     await provider.refresh();
     await memories.refresh();
+    // --- fleet (5.3) ---
+    /* the board's spec status is handed over rather than asked for twice */
+    await fleetApi.refresh(provider.model && provider.model.status);
+    // --- end fleet (5.3) ---
     await updateScope();
     /* what counts as "in scope" depends on which task is in progress, so
      * open documents are re-checked only when that changes */
@@ -781,6 +791,11 @@ async function activate(ctx) {
         cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
         startTerminal: agentApi.startTerminal,
     });
+    // --- fleet (5.3) ---
+    fleetApi = fleet.register(ctx, {
+        cg, cgJson, workspaceRoot, show, refresh: () => afterMutation(),
+    });
+    // --- end fleet (5.3) ---
 
     /* Language features are best-effort: a workspace with no .codegraph, or
      * no cg on PATH, still gets the spec tooling above. */
