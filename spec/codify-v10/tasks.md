@@ -98,7 +98,7 @@
     - Webview panel with full-text search and filters for type, class, task, branch, and date; detail with linked symbols and files.
     - Actions: supersede, forget, classify with Jev, promote to skill, open skill file.
     - _Requirements: 5.2_
-  - [ ] 5.3 Fleet view and agent chat polish
+  - [x] 5.3 Fleet view and agent chat polish
     - Fleet view: Main Gideon, managers, workers, branches, attempts, heartbeats, merge state, open PRs, with refresh and open-worktree actions.
     - Agent chat: streaming text and tool calls, diff and terminal rendering, inline permission requests, cancel, retry, session switch, slash commands, error and cost display.
     - _Requirements: 5.3, 5.4_

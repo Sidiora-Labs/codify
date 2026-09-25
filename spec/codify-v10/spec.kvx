@@ -276,7 +276,7 @@ reqs       = ["5.2"]
 
 [task.5.3]
 title      = "Fleet view and agent chat polish"
-status     = "pending"
+status     = "done"
 wave       = 6
 requires    = ["5.1", "2.3"]
 symbols    = ["FleetView", "AgentPanel"]
