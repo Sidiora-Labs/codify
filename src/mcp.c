@@ -465,6 +465,34 @@ static int t_resume(void *v) {
     free(task);
     return rc;
 }
+/* Jev-backed: these three fail loudly without OPENROUTER_API_KEY, and the
+ * reason travels to the client as the call's error text. */
+static int t_memory_classify(void *v) {
+    CallCtx *c = v;
+    char *sel = c->args ? json_get_string(c->args, "select") : NULL;
+    int limit = c->args ? (int)json_get_int(c->args, "limit", 0) : 0;
+    int saved = fold_stderr();
+    int rc = cmd_memory_classify(c->cg, sel, limit, true);
+    unfold_stderr(saved);
+    free(sel);
+    return rc;
+}
+static int t_skills_list(void *v) {
+    CallCtx *c = v;
+    char *a[] = { "cg", "skills", "list" };
+    return cmd_skills(c->cg, 3, a, true);
+}
+static int t_skills_promote(void *v) {
+    CallCtx *c = v;
+    char *id = c->args ? json_get_string(c->args, "id") : NULL;
+    if (!id) { printf("{\"error\":\"missing id\"}\n"); return 1; }
+    char *a[] = { "cg", "skills", "promote", id };
+    int saved = fold_stderr();
+    int rc = cmd_skills(c->cg, 4, a, true);
+    unfold_stderr(saved);
+    free(id);
+    return rc;
+}
 
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
@@ -582,6 +610,14 @@ static int t_resume(void *v) {
 #define S_RESUME "{\"type\":\"object\",\"properties\":{" \
                  "\"task\":{\"type\":\"string\",\"description\":" \
                  "\"feature/id or id; defaults to your current task\"}}}"
+#define S_CLASSIFY "{\"type\":\"object\",\"properties\":{" \
+                 "\"select\":{\"type\":\"string\",\"description\":" \
+                 "\"a memory id, --all, or --unclassified (the default)\"}," \
+                 "\"limit\":{\"type\":\"integer\",\"description\":" \
+                 "\"most memories to classify in one call (default 50)\"}}}"
+#define S_PROMOTE "{\"type\":\"object\",\"properties\":{" \
+                 "\"id\":{\"type\":\"string\",\"description\":" \
+                 "\"memory id to render as a SKILL.md\"}},\"required\":[\"id\"]}"
 
 /* Tool annotations let a client decide what it may run without asking. A
  * read-only tool can be auto-approved; without the hint every search prompts
@@ -852,6 +888,23 @@ static const struct {
       "scoped memories, uncommitted paths, and the lease holder. Call at "
       "session start when continuing earlier work.",
       S_RESUME, A_READ, "Resume a task", t_resume, false },
+    { "memory_classify",
+      "Ask Jev what each memory is — skill, decision, constraint, fact, or "
+      "noise — with a confidence, store the verdict on the row, and return "
+      "the skill candidates. Needs OPENROUTER_API_KEY. Advisory: the class "
+      "never decides anything on its own.",
+      S_CLASSIFY, A_WRITE, "Classify memories", t_memory_classify, false },
+    { "skills_list",
+      "Memories classed as skills and which of them have been rendered "
+      "under .agents/skills, with the generated path and whether it has "
+      "drifted from the memory.",
+      S_EMPTY, A_READ, "List skills", t_skills_list, false },
+    { "skills_promote",
+      "Render one memory as a portable .agents/skills/<slug>/SKILL.md "
+      "carrying Codify's ownership marker and a link back to the memory. "
+      "Never overwrites a file Codify did not generate.",
+      S_PROMOTE, A_WRITE, "Promote a memory to a skill", t_skills_promote,
+      false },
 };
 #define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))
 

@@ -1353,3 +1353,12 @@ int jev_pr_readiness(Cg *cg, const char *state_json, JevReadiness *out) {
     jev_result_free(&r);
     return JEV_OK;
 }
+
+/* Jev is mandatory for the features built on it, so a failed call has to
+ * read the same everywhere: what was being decided, then why it failed.
+ * Returns 1 so a caller can `return jev_report_error(...)`. */
+int jev_report_error(const JevResult *r, const char *what) {
+    fprintf(stderr, "cg: %s: %s\n", what,
+            r && r->error[0] ? r->error : "jev call failed");
+    return 1;
+}

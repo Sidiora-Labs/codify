@@ -75,7 +75,7 @@
     - Fail clearly when OPENROUTER_API_KEY is missing; honor CG_JEV_MODEL and CG_JEV_ENDPOINT.
     - Add cg jev doctor and cg jev ask for operators; rewrite the local_only principle to local_first.
     - _Requirements: 4.1, 4.2_
-  - [ ] 4.2 Memory classification and skills
+  - [x] 4.2 Memory classification and skills
     - Add memories.class and memories.confidence; cg memory classify asks Jev per memory and stores the answer; recall and brief expose the class.
     - cg skills list, promote <id>, and render write .agents/skills/<slug>/SKILL.md with the ownership marker and a link back to the memory.
     - Expose classify, skills, and promote over MCP.
