@@ -89,7 +89,7 @@
 ## Tasks, memories, fleet, chat
 
 - [ ] 5. Full-feature VS Code interface
-  - [ ] 5.1 Task UI upgrade
+  - [-] 5.1 Task UI upgrade
     - Group by feature, section, and wave with status icons, owner, branch, and blockers; filter by status, wave, and owner from the view title.
     - Task detail webview with acceptance criteria, do-steps, touches, symbols, verify command, trace, and memories.
     - Actions: start, done, claim, release, open branch, run verify, copy resume prompt.

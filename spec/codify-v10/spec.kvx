@@ -251,7 +251,7 @@ status  = "pending"
 
 [task.5.1]
 title      = "Task UI upgrade"
-status     = "pending"
+status     = "in_progress"
 wave       = 5
 requires   = ["1.4", "2.1"]
 symbols    = ["TaskTreeProvider", "taskFilter", "taskDetail"]
