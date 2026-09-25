@@ -2,7 +2,7 @@
 
 These are test-only graph observations, not supported product APIs or live Codify HTTP endpoints. In particular, `GET /api/tasks`, `GET /users`, and `POST /users` come from fixture applications. They test extraction; Codify does not start those applications.
 
-The baseline contains 145 observations in 31 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
+The baseline contains 149 observations in 31 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
 
 For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testing instructions](../CONTRIBUTING.md#tests) explain how to exercise fixtures in temporary repositories.
 
@@ -51,11 +51,12 @@ For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testi
 | `walk` | symbol | 94 | <code>const walk = (n) =&gt; {</code> |
 | `querySelector` | symbol | 101 | <code>querySelector(sel) { return this.querySelectorAll(sel)[0] &#124;&#124; null; }</code> |
 | `dump` | symbol | 103 | <code>dump(depth) {</code> |
-| `createElement` | symbol | 115 | <code>createElement(tag) { return new El(tag); },</code> |
-| `createTextNode` | symbol | 116 | <code>createTextNode(t) { const e = new El('#text'); e.textContent = t; return e; },</code> |
-| `getElementById` | symbol | 117 | <code>getElementById(id) { return doc._byId.get(id) &#124;&#124; null; },</code> |
-| `addEventListener` | symbol | 118 | <code>addEventListener() {},</code> |
-| `bootstrap` | symbol | 125 | <code>function bootstrap(ids) {</code> |
+| `createElement` | symbol | 116 | <code>createElement(tag) { return new El(tag); },</code> |
+| `createTextNode` | symbol | 117 | <code>createTextNode(t) { const e = new El('#text'); e.textContent = t; return e; },</code> |
+| `getElementById` | symbol | 118 | <code>getElementById(id) { return doc._byId.get(id) &#124;&#124; null; },</code> |
+| `addEventListener` | symbol | 121 | <code>addEventListener(ev, fn) {</code> |
+| `dispatch` | symbol | 124 | <code>dispatch(ev, arg) {</code> |
+| `bootstrap` | symbol | 135 | <code>function bootstrap(ids) {</code> |
 
 ## tests/fixtures/acp/fake-agent.js
 
@@ -82,20 +83,22 @@ For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testi
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `ok` | symbol | 14 | <code>function ok(what) { console.log(&#96;ok: ${what}&#96;); }</code> |
-| `load` | symbol | 27 | <code>function load() {</code> |
-| `send` | symbol | 44 | <code>const send = (msg) =&gt; listeners.forEach((fn) =&gt; fn({ data: msg }));</code> |
-| `markdown` | symbol | 50 | <code>function markdown() {</code> |
-| `cards` | symbol | 99 | <code>function cards() {</code> |
-| `composer` | symbol | 160 | <code>function composer() {</code> |
-| `agentState` | symbol | 201 | <code>function agentState() {</code> |
-| `state` | symbol | 256 | <code>function state() {</code> |
-| `providers` | symbol | 319 | <code>function providers() {</code> |
-| `toolbar` | symbol | 348 | <code>function toolbar() {</code> |
-| `subagents` | symbol | 383 | <code>function subagents() {</code> |
-| `replay` | symbol | 439 | <code>function replay() {</code> |
-| `handshake` | symbol | 469 | <code>function handshake() {</code> |
-| `responsiveContract` | symbol | 477 | <code>function responsiveContract() {</code> |
+| `ok` | symbol | 14 | <code>function ok(what) { console.log(`ok: ${what}`); }</code> |
+| `load` | symbol | 28 | <code>function load() {</code> |
+| `send` | symbol | 45 | <code>const send = (msg) =&gt; listeners.forEach((fn) =&gt; fn({ data: msg }));</code> |
+| `markdown` | symbol | 51 | <code>function markdown() {</code> |
+| `cards` | symbol | 101 | <code>function cards() {</code> |
+| `composer` | symbol | 168 | <code>function composer() {</code> |
+| `agentState` | symbol | 209 | <code>function agentState() {</code> |
+| `state` | symbol | 264 | <code>function state() {</code> |
+| `providers` | symbol | 327 | <code>function providers() {</code> |
+| `toolbar` | symbol | 356 | <code>function toolbar() {</code> |
+| `subagents` | symbol | 391 | <code>function subagents() {</code> |
+| `replay` | symbol | 447 | <code>function replay() {</code> |
+| `evidence` | symbol | 477 | <code>function evidence() {</code> |
+| `chatControls` | symbol | 530 | <code>function chatControls() {</code> |
+| `handshake` | symbol | 623 | <code>function handshake() {</code> |
+| `responsiveContract` | symbol | 631 | <code>function responsiveContract() {</code> |
 
 ## tests/fixtures/acp/test-client.js
 
@@ -103,23 +106,24 @@ For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testi
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `ok` | symbol | 17 | <code>function ok(what) { console.log(&#96;ok: ${what}&#96;); }</code> |
-| `sleep` | symbol | 21 | <code>function sleep(ms) { return new Promise((r) =&gt; setTimeout(r, ms)); }</code> |
-| `fsHandlers` | symbol | 24 | <code>function fsHandlers(root, answers) {</code> |
-| `newClient` | symbol | 42 | <code>function newClient(extra, onNotify, onRequest, onClose) {</code> |
-| `happyPath` | symbol | 52 | <code>async function happyPath() {</code> |
-| `rejectPath` | symbol | 145 | <code>async function rejectPath() {</code> |
-| `cancelPath` | symbol | 168 | <code>async function cancelPath() {</code> |
-| `versionMismatch` | symbol | 190 | <code>async function versionMismatch() {</code> |
-| `spawnFailure` | symbol | 201 | <code>async function spawnFailure() {</code> |
-| `malformedFrame` | symbol | 210 | <code>async function malformedFrame() {</code> |
-| `agentDeath` | symbol | 225 | <code>async function agentDeath() {</code> |
-| `bridgeSanity` | symbol | 240 | <code>function bridgeSanity() {</code> |
-| `splitSanity` | symbol | 268 | <code>function splitSanity() {</code> |
-| `adapterCommandSanity` | symbol | 276 | <code>function adapterCommandSanity() {</code> |
-| `updateMappingSanity` | symbol | 297 | <code>function updateMappingSanity() {</code> |
-| `emit` | symbol | 303 | <code>const emit = (update) =&gt; sessionUpdate(sess, { sessionId: 's', update });</code> |
-| `harnessTextSanity` | symbol | 320 | <code>function harnessTextSanity() {</code> |
+| `ok` | symbol | 20 | <code>function ok(what) { console.log(`ok: ${what}`); }</code> |
+| `sleep` | symbol | 24 | <code>function sleep(ms) { return new Promise((r) =&gt; setTimeout(r, ms)); }</code> |
+| `fsHandlers` | symbol | 27 | <code>function fsHandlers(root, answers) {</code> |
+| `newClient` | symbol | 45 | <code>function newClient(extra, onNotify, onRequest, onClose) {</code> |
+| `happyPath` | symbol | 55 | <code>async function happyPath() {</code> |
+| `rejectPath` | symbol | 148 | <code>async function rejectPath() {</code> |
+| `cancelPath` | symbol | 171 | <code>async function cancelPath() {</code> |
+| `versionMismatch` | symbol | 193 | <code>async function versionMismatch() {</code> |
+| `spawnFailure` | symbol | 204 | <code>async function spawnFailure() {</code> |
+| `malformedFrame` | symbol | 213 | <code>async function malformedFrame() {</code> |
+| `agentDeath` | symbol | 228 | <code>async function agentDeath() {</code> |
+| `bridgeSanity` | symbol | 243 | <code>function bridgeSanity() {</code> |
+| `splitSanity` | symbol | 271 | <code>function splitSanity() {</code> |
+| `adapterCommandSanity` | symbol | 279 | <code>function adapterCommandSanity() {</code> |
+| `updateMappingSanity` | symbol | 300 | <code>function updateMappingSanity() {</code> |
+| `emit` | symbol | 306 | <code>const emit = (update) =&gt; sessionUpdate(sess, { sessionId: 's', update });</code> |
+| `harnessTextSanity` | symbol | 323 | <code>function harnessTextSanity() {</code> |
+| `chatCoreSanity` | symbol | 354 | <code>async function chatCoreSanity() {</code> |
 
 ## tests/fixtures/anchors/core.c
 
