@@ -96,7 +96,8 @@ function markdown() {
     ok('markdown, code blocks, and clickable file paths');
 }
 
-/* ---- tool evidence plus the persistent activity summary ---- */
+/* ---- tool cards, diffs, plan progress, permissions, and the activity
+ * summary that stays visible once their cards collapse ---- */
 function cards() {
     step = 'cards';
     const p = load();

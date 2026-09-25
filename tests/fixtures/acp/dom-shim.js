@@ -128,9 +128,10 @@ const doc = {
     body: null,
 };
 
-/* The panel's static markup, including ACP session, history, and build
- * controls, as ids the script expects. Selects need their real tag for control
- * round trips. */
+/* The panel's static markup as the bare ids the script expects. A tag only
+ * matters where the script reads a value back: the prompt box is a textarea
+ * and the driver, mode, and history pickers are selects, so their control
+ * round trips behave as they do in the real webview. */
 function bootstrap(ids) {
     doc.body = new El('body');
     doc._byId.clear();

@@ -506,9 +506,10 @@ function panelHtml(webview) {
         .replace(/\$\{nonce\}/g, nonce);
 }
 
-/* One prompt turn. Turns are serialized, queued input is reported to the
- * activity bar, localEcho absorbs mirrored user_message_chunk updates, and a
- * successful turn refreshes the compact workspace session registry. */
+/* One prompt turn. Only one is ever in flight — the rest queue, and the count
+ * shows in the panel's activity strip. localEcho absorbs the
+ * user_message_chunk the adapter mirrors back, and a finished turn re-reads
+ * the task's status and re-records the session so history can restore it. */
 function sendPrompt(sess, text, echo) {
     if (sess.running) {
         sess.queue.push({ text, echo });
@@ -713,7 +714,8 @@ async function endOfSession(sess, why) {
 /* Start and initialize one adapter process without assuming whether the next
  * operation creates, lists, loads, or resumes a session. The driver recorded
  * on the session is whichever adapter actually launched — codex, claude, or
- * custom — so history restores through the same one. */
+ * custom — so history restores through the same one. A probe session stays
+ * quiet throughout: it exists only to find out whether the adapter runs. */
 async function connectAgent(sess, driverOverride) {
     const { driver, argv, legacyCommand } = adapterCommand(driverOverride);
     sess.driver = driverId(driver);
@@ -971,7 +973,8 @@ async function pickTaskId(placeHolder) {
 
 /* Webview messages any session surface understands: native ACP controls and
  * commands, workspace locations, validated external links, and the provider
- * configure gear (which never needs a session). */
+ * configure gear (which never needs a session). False means "not mine" — the
+ * surface that owns the webview handles what is left. */
 function handleSessionMessage(sess, msg) {
     if (!msg) return false;
     if (msg.type === 'send' && msg.text) {
@@ -1081,7 +1084,8 @@ async function switchSession(sess, sessionId, driver) {
 
 /* Slash commands against a live session (sidebar or editor panel). The task
  * lifecycle verbs (/done, /implemented) run the real qualification and hand a
- * refusal back to the agent rather than silently marking the task. */
+ * refusal back to the agent rather than silently marking the task. Anything
+ * unrecognised is answered here, never forwarded to the agent as a prompt. */
 async function sessionSlash(sess, cmd, args) {
     if (CG_CMDS[cmd]) {
         await runCgSlash(sess, cmd, args,
@@ -1160,8 +1164,10 @@ function newSession(webview, extra) {
 }
 
 /* Editor-panel session on a task. The sidebar view is the default surface;
- * editor panels carry concurrent task sessions beside it and receive the same
- * visible build identity and labelled adapter catalog as the sidebar. */
+ * editor panels carry concurrent task sessions beside it, with the same
+ * visible build identity and labelled adapter catalog. A failed start gives
+ * back the claim it was handed and offers the terminal fallback, so no task
+ * is left claimed by a session that does not exist. */
 async function openAgentPanel(id, agent, promptText, claimed) {
     const { driver } = adapterCommand();
     const task = await taskRow(id);
@@ -1384,7 +1390,8 @@ async function restorePastSession(sessionId, driver) {
 
 /* Chat in the sidebar: the adapter spawns lazily on the first message —
  * a workspace session with Codify's MCP tools, no task and no claim unless
- * taskOpts says so. */
+ * taskOpts says so. The opening prompt is kept before the spawn, so /retry
+ * can re-send what an adapter that never started took with it. */
 async function startChatSession(firstText, taskOpts, echo) {
     const sess = newSession(agentView.webview,
         Object.assign({ agent: `vscode-chat-${++permitSeq}` }, taskOpts || {}));
@@ -1491,9 +1498,10 @@ async function postViewInit() {
     }
 }
 
-/* Slash commands with no session yet: the cg output becomes the opening
- * prompt, so /brief starts the agent already briefed. Task verbs need an
- * attached task and say so instead of starting a session. */
+/* Slash commands with no session yet: a cg command's output becomes the
+ * opening prompt, so /brief starts the agent already briefed. Task verbs need
+ * an attached task and say so instead of starting a session; /retry replays
+ * the prompt a failed start swallowed. */
 async function idleSlash(cmd, args) {
     if (CG_CMDS[cmd]) {
         await runCgSlash(null, cmd, args,
