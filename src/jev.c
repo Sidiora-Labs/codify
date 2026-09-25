@@ -238,37 +238,6 @@ void jev_request_json(const char *model, const char *state_json,
 
 /* ---------------- transport ---------------- */
 
-static bool find_exe(const char *name, char *out, size_t cap) {
-    if (strchr(name, '/')) {
-        if (access(name, X_OK) != 0) return false;
-        snprintf(out, cap, "%s", name);
-        return true;
-    }
-    const char *path = getenv("PATH");
-    if (!path || !path[0]) path = "/usr/local/bin:/usr/bin:/bin";
-    const char *p = path;
-    while (*p) {
-        const char *e = strchr(p, ':');
-        size_t len = e ? (size_t)(e - p) : strlen(p);
-        if (len > 0 && len < cap - strlen(name) - 2) {
-            snprintf(out, cap, "%.*s/%s", (int)len, p, name);
-            if (access(out, X_OK) == 0) return true;
-        }
-        if (!e) break;
-        p = e + 1;
-    }
-    return false;
-}
-
-static void sb_shquote(StrBuf *b, const char *s) {
-    sb_putc(b, '\'');
-    for (; *s; s++) {
-        if (*s == '\'') sb_puts(b, "'\\''");
-        else sb_putc(b, *s);
-    }
-    sb_putc(b, '\'');
-}
-
 /* curl's config-file quoting: backslash and double quote escaped */
 static void sb_cfgquote(StrBuf *b, const char *s) {
     sb_putc(b, '"');
@@ -543,7 +512,7 @@ int jev_ask_raw(Cg *cg, const char *body_in, JevResult *out) {
         return JEV_ECONFIG;
     }
     char curl[4096];
-    if (!find_exe(c.curl, curl, sizeof curl)) {
+    if (!cg_find_exe(c.curl, curl, sizeof curl)) {
         snprintf(out->error, sizeof out->error,
                  "curl not found (looked for \"%.200s\"); install curl or set "
                  "CG_JEV_CURL to its path", c.curl);
@@ -966,7 +935,7 @@ static int jev_doctor(Cg *cg, bool probe, bool json) {
     JevConfig c;
     jev_config(&c);
     char curl[4096], ver[64] = "";
-    bool have_curl = find_exe(c.curl, curl, sizeof curl);
+    bool have_curl = cg_find_exe(c.curl, curl, sizeof curl);
     if (have_curl) curl_version(curl, ver, sizeof ver);
     char hint[64] = "";
     if (c.key) key_hint(c.key, hint, sizeof hint);

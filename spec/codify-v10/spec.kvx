@@ -144,7 +144,7 @@ reqs       = ["2.1", "2.6"]
 
 [task.2.2]
 title      = "Branch lifecycle: worktrees, merge-up, gates, PR, checkpoint"
-status     = "pending"
+status     = "in_progress"
 wave       = 4
 requires   = ["2.1"]
 symbols    = ["fleet_worker_begin", "fleet_merge_up", "fleet_feature_land", "fleet_pr_open", "fleet_checkpoint"]
@@ -208,7 +208,7 @@ status  = "pending"
 
 [task.4.1]
 title      = "Jev client over curl"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 symbols    = ["jev_ask", "jev_question_noul", "jev_question_choice", "jev_question_score", "cmd_jev"]
 touches    = ["src/jev.c", "src/cg.h", "src/main.c", "spec/workflow.kvx", "tests/integration/28_jev.sh", "tests/fixtures/jev/fake-curl.sh"]

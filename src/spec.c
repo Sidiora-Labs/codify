@@ -1137,6 +1137,21 @@ static int spec_attempt_begin(Cg *g, const char *tag, const char *agent,
     return rc;
 }
 
+int spec_attempt_set_branch(Cg *g, const char *tag, const char *branch,
+                            const char *worktree, const char *parent) {
+    sqlite3_stmt *up = cg_prep(g,
+        "UPDATE attempts SET branch=?,worktree=?,parent=? "
+        "WHERE task=? AND state='running'");
+    sqlite3_bind_text(up, 1, branch, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(up, 2, worktree, -1, SQLITE_TRANSIENT);
+    if (parent && parent[0]) sqlite3_bind_text(up, 3, parent, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(up, 3);
+    sqlite3_bind_text(up, 4, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_step(up);
+    sqlite3_finalize(up);
+    return sqlite3_changes(g->db) > 0 ? 0 : 1;
+}
+
 /* Renew only the exact live attempt generation. An old process cannot keep a
  * reclaimed task alive because both its attempt id and fence stop matching.
  * A renewal also refreshes the agent's fleet registry row, so "seen" tracks
@@ -1927,7 +1942,8 @@ static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
     sqlite3_stmt *st = cg_prep(&g,
         "SELECT t.task,t.agent,t.attempt_id,t.fence,ifnull(t.host,''),"
         "ifnull(t.session,''),t.expires,ifnull(a.role,''),"
-        "ifnull(a.parent,'') FROM attempts t "
+        "ifnull(a.parent,''),ifnull(t.branch,''),ifnull(t.worktree,'') "
+        "FROM attempts t "
         "LEFT JOIN agents a ON a.agent=t.agent "
         "WHERE t.task LIKE ?||'/%' AND t.state='running' "
         "AND t.expires>strftime('%s','now') ORDER BY t.task");
@@ -1944,6 +1960,8 @@ static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
         long exp = (long)sqlite3_column_int64(st, 6);
         const char *role = (const char *)sqlite3_column_text(st, 7);
         const char *parent = (const char *)sqlite3_column_text(st, 8);
+        const char *branch = (const char *)sqlite3_column_text(st, 9);
+        const char *wt = (const char *)sqlite3_column_text(st, 10);
         const char *id = strrchr(task, '/');
         id = id ? id + 1 : task;
         if (json) {
@@ -1954,6 +1972,10 @@ static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
             if (role[0]) sb_json_str(b, role); else sb_puts(b, "null");
             sb_puts(b, ",\"parent\":");
             if (parent[0]) sb_json_str(b, parent); else sb_puts(b, "null");
+            sb_puts(b, ",\"branch\":");
+            if (branch[0]) sb_json_str(b, branch); else sb_puts(b, "null");
+            sb_puts(b, ",\"worktree\":");
+            if (wt[0]) sb_json_str(b, wt); else sb_puts(b, "null");
             sb_puts(b, ",\"attempt_id\":"); sb_json_str(b, attempt);
             sb_printf(b, ",\"fence\":%ld,\"host\":", fence);
             sb_json_str(b, host);
@@ -1967,6 +1989,10 @@ static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {
                 snprintf(who, sizeof who, "%s [%s]", agent, role);
             else
                 snprintf(who, sizeof who, "%s", agent);
+            if (branch[0]) {
+                size_t l = strlen(who);
+                snprintf(who + l, sizeof who - l, " on %.200s", branch);
+            }
             sb_printf(b, "  %-8s claimed by %s (attempt %.12s, fence %ld, "
                       "%ld min left)\n", id, who, attempt, fence,
                       (exp - now + 59) / 60);
@@ -2199,6 +2225,93 @@ static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {
     return 0;
 }
 
+/* Take one claim on an open graph: eligibility, ownership, touch conflicts,
+ * then the lease and fenced attempt in one BEGIN IMMEDIATE. Prints the
+ * refusal to stderr and returns 1; 0 with *out filled on success. Shared by
+ * `cg spec claim` and `cg fleet begin`. */
+static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
+                           const char *host, const char *session, long ttl_min,
+                           SpecAttempt *out) {
+    char tag[256];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+    long now = (long)time(NULL);
+    spec_attempt_sweep(g);
+    bool docs = strcmp(id, CG_DOC_TASK) == 0;
+    if (!docs && !task_exists(s, id)) {
+        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
+        return 1;
+    }
+    /* only claimable work: an eligible pending leaf, or a task already in
+     * flight — claiming done work or a blocked task hides real state */
+    {
+        char *st0 = docs ? spec_docs_stage(s) : task_status(s, id);
+        bool in_flight = strcmp(st0, "in_progress") == 0;
+        free(st0);
+        bool claimable = docs ? spec_docs_ready(s) : task_eligible(s, id);
+        if (!in_flight && !claimable) {
+            fprintf(stderr, "cg spec: %s is not claimable — it is finished, "
+                    "a heading, or has unmet requires\n", id);
+                return 1;
+        }
+    }
+
+    cg_exec(g, "BEGIN IMMEDIATE");
+    sqlite3_stmt *q = cg_prep(g, "SELECT agent,expires FROM leases WHERE task=?");
+    sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
+    if (sqlite3_step(q) == SQLITE_ROW) {
+        const char *owner = (const char *)sqlite3_column_text(q, 0);
+        if (strcmp(owner, agent) != 0) {
+            fprintf(stderr, "cg spec: %s is already claimed by %s\n", id, owner);
+            sqlite3_finalize(q);
+            cg_exec(g, "ROLLBACK");
+                return 1;
+        }
+    }
+    sqlite3_finalize(q);
+
+    char other[64] = "", pat[256] = "";
+    if ((docs || spec_parallel_mode(s)) &&
+        spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
+                              g)) {
+        fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
+                "also claims — pick a disjoint task\n", id, pat, other);
+        cg_exec(g, "ROLLBACK");
+        return 1;
+    }
+
+    char sec[300];
+    if (docs) snprintf(sec, sizeof sec, "documentation");
+    else task_sec(sec, sizeof sec, id);
+    char *touches = join_list(s->f, sec, docs ? "targets" : "touches");
+    if (docs && !touches[0]) {
+        free(touches);
+        touches = xstrdup("README.md docs/** CONTRIBUTING.md CHANGELOG.md");
+    }
+    if (spec_lease_upsert(g, tag, agent, host, session, now, ttl_min,
+                          touches, out) != 0) {
+        fprintf(stderr, "cg spec: could not create attempt for %s\n", id);
+        free(touches);
+        cg_exec(g, "ROLLBACK");
+        return 1;
+    }
+    cg_exec(g, "COMMIT");
+    free(touches);
+
+    return 0;
+}
+
+int spec_claim(Cg *g, const char *root, const char *feature, const char *id,
+               const char *agent, long ttl_min, SpecAttempt *out) {
+    Spec s;
+    if (spec_load(&s, root, feature, false) != 0) {
+        spec_close(&s);
+        return 1;
+    }
+    int rc = spec_claim_take(g, &s, id, agent, NULL, NULL, ttl_min, out);
+    spec_close(&s);
+    return rc;
+}
+
 /* A claim creates both its compatibility lease and authoritative fenced
  * attempt. BEGIN IMMEDIATE makes ownership/fence advancement atomic; release
  * accepts exact credentials so a crashed or delayed worker cannot abandon a
@@ -2263,74 +2376,10 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         cg_close(&g);
         return 0;
     }
-    spec_attempt_sweep(&g);
-    bool docs = strcmp(id, CG_DOC_TASK) == 0;
-    if (!docs && !task_exists(s, id)) {
-        fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
-        cg_close(&g);
-        return 1;
-    }
-    /* only claimable work: an eligible pending leaf, or a task already in
-     * flight — claiming done work or a blocked task hides real state */
-    {
-        char *st0 = docs ? spec_docs_stage(s) : task_status(s, id);
-        bool in_flight = strcmp(st0, "in_progress") == 0;
-        free(st0);
-        bool claimable = docs ? spec_docs_ready(s) : task_eligible(s, id);
-        if (!in_flight && !claimable) {
-            fprintf(stderr, "cg spec: %s is not claimable — it is finished, "
-                    "a heading, or has unmet requires\n", id);
-            cg_close(&g);
-            return 1;
-        }
-    }
-
-    cg_exec(&g, "BEGIN IMMEDIATE");
-    sqlite3_stmt *q = cg_prep(&g, "SELECT agent,expires FROM leases WHERE task=?");
-    sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
-    if (sqlite3_step(q) == SQLITE_ROW) {
-        const char *owner = (const char *)sqlite3_column_text(q, 0);
-        if (strcmp(owner, agent) != 0) {
-            fprintf(stderr, "cg spec: %s is already claimed by %s\n", id, owner);
-            sqlite3_finalize(q);
-            cg_exec(&g, "ROLLBACK");
-            cg_close(&g);
-            return 1;
-        }
-    }
-    sqlite3_finalize(q);
-
-    char other[64] = "", pat[256] = "";
-    if ((docs || spec_parallel_mode(s)) &&
-        spec_touches_conflict(s, id, other, sizeof other, pat, sizeof pat,
-                              &g)) {
-        fprintf(stderr, "cg spec: %s touches %s, which in-progress task %s "
-                "also claims — pick a disjoint task\n", id, pat, other);
-        cg_exec(&g, "ROLLBACK");
-        cg_close(&g);
-        return 1;
-    }
-
-    char sec[300];
-    if (docs) snprintf(sec, sizeof sec, "documentation");
-    else task_sec(sec, sizeof sec, id);
-    char *touches = join_list(s->f, sec, docs ? "targets" : "touches");
-    if (docs && !touches[0]) {
-        free(touches);
-        touches = xstrdup("README.md docs/** CONTRIBUTING.md CHANGELOG.md");
-    }
     SpecAttempt attempt;
-    if (spec_lease_upsert(&g, tag, agent, host, session, now, ttl_min,
-                          touches, &attempt) != 0) {
-        fprintf(stderr, "cg spec: could not create attempt for %s\n", id);
-        free(touches);
-        cg_exec(&g, "ROLLBACK");
-        cg_close(&g);
-        return 1;
-    }
-    cg_exec(&g, "COMMIT");
+    int trc = spec_claim_take(&g, s, id, agent, host, session, ttl_min, &attempt);
     cg_close(&g);
-    free(touches);
+    if (trc != 0) return 1;
 
     if (json) {
         StrBuf b; sb_init(&b);

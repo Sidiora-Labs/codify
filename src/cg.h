@@ -51,6 +51,9 @@ void  sb_putc(StrBuf *b, char c);
 void  sb_puts(StrBuf *b, const char *s);
 void  sb_printf(StrBuf *b, const char *fmt, ...);
 void  sb_json_str(StrBuf *b, const char *s);   /* emits "escaped" incl quotes */
+void  sb_shquote(StrBuf *b, const char *s);    /* 'single-quoted' for sh -c */
+/* resolve a program name through PATH (or check a path); false when absent */
+bool  cg_find_exe(const char *name, char *out, size_t cap);
 
 void *xmalloc(size_t n);
 void *xrealloc(void *p, size_t n);
@@ -437,6 +440,9 @@ long  json_get_int(const char *obj, const char *key, long dflt);
 char *json_get_raw(const char *obj, const char *key);     /* raw token, malloc */
 char *json_get_object(const char *obj, const char *key);  /* balanced {...}   */
 int   json_object_keys(const char *obj, char **keys, int cap); /* malloc'd each */
+/* the raw items of a JSON array (malloc'd each, and the vector); 0 when
+ * arr is not an array */
+int   json_array_items(const char *arr, char ***out);
 
 /* run fn with stdout captured into *out (malloc'd); returns fn's rc */
 int cg_capture(char **out, int (*fn)(void *), void *ctx);
@@ -470,6 +476,11 @@ int   kvx_set_raw(const char *path, const char *section, const char *key,
                   const char *raw);
 
 int cmd_spec(int argc, char **argv, bool json);
+/* Record where a task's live attempt is being worked: its branch, the
+ * worktree holding it, and the manager it reports to. 0 when a running
+ * attempt for tag ("feature/id") was updated, 1 when there was none. */
+int spec_attempt_set_branch(Cg *g, const char *tag, const char *branch,
+                            const char *worktree, const char *parent);
 typedef struct {
     char attempt_id[65];
     char task[700];
@@ -478,6 +489,12 @@ typedef struct {
     long heartbeat;
     long expires;
 } SpecAttempt;
+/* Claim task <id> of <feature> (NULL: the active one) in the spec repo at
+ * <root>, on an open graph, exactly as `cg spec claim` would: same
+ * eligibility, ownership, and touch-conflict refusals, printed to stderr.
+ * 0 with *out filled, 1 refused. */
+int spec_claim(Cg *g, const char *root, const char *feature, const char *id,
+               const char *agent, long ttl_min, SpecAttempt *out);
 /* in_progress task of the cwd's spec repo as "feature/id" (malloc'd), or
  * NULL when there is no spec repo / no active task — never prints */
 char *spec_active_tag(void);
@@ -577,6 +594,19 @@ void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
                  long wave, char *out, size_t cap);
 int  fleet_identity_record(Cg *g);           /* no-op without CG_ROLE */
 void fleet_brief(Cg *cg, StrBuf *b, bool json);
+/* The branch lifecycle (fleet.c). Every step is a git operation the
+ * hierarchy already names: a worker's wave branch and worktree, its merge
+ * into the feature branch, the feature's landing on local main behind the
+ * gates, the pull request, and the checkpoint that merges what is open.
+ * feature NULL means the workflow's active feature. All return the exit
+ * code to print. */
+int  fleet_worker_begin(Cg *cg, const char *id, const char *feature,
+                        const char *agent_flag, bool json);
+int  fleet_merge_up(Cg *cg, const char *id, const char *feature, bool force,
+                    bool keep, bool json);
+int  fleet_feature_land(Cg *cg, const char *feature, bool no_pr, bool json);
+int  fleet_pr_open(Cg *cg, const char *feature, bool dry_run, bool json);
+int  fleet_checkpoint(Cg *cg, bool dry_run, bool json);
 int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);
 
 /* ---------------- jev: System One decisions (jev.c) ----------------
@@ -663,6 +693,20 @@ int  cg_branch_resolve(Cg *cg);
 long branch_register(Cg *cg, const char *name, const char *worktree,
                      const char *head, const char *base);
 int  cmd_branches(Cg *cg, int argc, char **argv, bool json);
+/* Run `git -C <tree> <args>` (args already shell-quoted), stdout and
+ * stderr appended to out (may be NULL). Returns the exit status, -1 when
+ * git could not be started. */
+int  git_run(const char *tree, const char *args, StrBuf *out);
+bool git_branch_exists(const char *tree, const char *branch);
+/* Make sure <path> is a worktree of <tree> on <branch>: reuse it when it is
+ * there, else add it, creating the branch from <base> when it does not
+ * exist yet. *created says whether the worktree was added; *branch_created
+ * whether the branch was. Returns 0, or -1 with git's words in err. */
+int  git_worktree_add(const char *tree, const char *path, const char *branch,
+                      const char *base, bool *created, bool *branch_created,
+                      StrBuf *err);
+/* paths still conflicted in tree's index (malloc'd each); returns count */
+int  git_conflicted_paths(const char *tree, char ***out);
 int  cmd_git_sync(Cg *cg, int limit, bool json);
 int  git_churn_for_path(Cg *cg, const char *path);
 int  git_commit_mirror(Cg *cg, const char *message);

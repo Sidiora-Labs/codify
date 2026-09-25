@@ -47,11 +47,14 @@ static const char *SCHEMA =
     /* word FTS over file bodies */
     "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
     "  path UNINDEXED, body, tokenize='unicode61');"
-    /* agent memory: deliberate notes, linked to spec tasks by "feature/id" */
+    /* agent memory: deliberate notes, linked to spec tasks by "feature/id".
+     * branch is where the note was taken (NULL for the main tree); class and
+     * confidence are Jev's verdict on whether the note is a skill, a fact, a
+     * decision, or noise — advisory, filled by `cg memory classify`. */
     "CREATE TABLE IF NOT EXISTS memories("
     "  id INTEGER PRIMARY KEY, created INTEGER NOT NULL, type TEXT NOT NULL,"
     "  task TEXT, body TEXT NOT NULL, symbols TEXT, files TEXT,"
-    "  source TEXT NOT NULL);"
+    "  source TEXT NOT NULL, branch TEXT, class TEXT, confidence REAL);"
     "CREATE INDEX IF NOT EXISTS idx_mem_task ON memories(task);"
     /* a superseded memory stays readable but stops surfacing first */
     "CREATE TABLE IF NOT EXISTS memory_superseded("
@@ -69,12 +72,15 @@ static const char *SCHEMA =
     "  task TEXT PRIMARY KEY, agent TEXT NOT NULL, claimed INTEGER NOT NULL,"
     "  expires INTEGER NOT NULL, touches TEXT);"
     /* attempts are the authoritative live execution record. A task's kvx
-     * status says what was declared; this table says who is actually alive. */
+     * status says what was declared; this table says who is actually alive.
+     * branch, worktree, and parent are where and for whom a fleet worker
+     * runs it; `cg fleet begin` fills them, plain claims leave them NULL. */
     "CREATE TABLE IF NOT EXISTS attempts("
     "  attempt_id TEXT PRIMARY KEY, task TEXT NOT NULL, agent TEXT NOT NULL,"
     "  host TEXT, session TEXT, fence INTEGER NOT NULL, state TEXT NOT NULL,"
     "  started INTEGER NOT NULL, heartbeat INTEGER NOT NULL,"
-    "  expires INTEGER NOT NULL, reason TEXT);"
+    "  expires INTEGER NOT NULL, reason TEXT, branch TEXT, worktree TEXT,"
+    "  parent TEXT);"
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_fence ON attempts(fence);"
     "CREATE INDEX IF NOT EXISTS idx_attempt_task ON attempts(task,state);"
     "CREATE INDEX IF NOT EXISTS idx_attempt_agent ON attempts(agent,state);"
@@ -147,7 +153,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "15"
+#define SCHEMA_VERSION "16"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -368,6 +374,19 @@ int cg_schema_upgrade(Cg *cg) {
     sqlite3_exec(cg->db,
         "UPDATE runtime_events SET semantic_fingerprint=fingerprint "
         "WHERE semantic_fingerprint IS NULL", NULL, NULL, NULL);
+    /* v16 widens two durable tables in place: attempts learn the branch a
+     * fleet worker runs on, memories learn their branch and Jev's class.
+     * Same duplicate-column tolerance as above. */
+    static const char *V16[] = {
+        "ALTER TABLE attempts ADD COLUMN branch TEXT",
+        "ALTER TABLE attempts ADD COLUMN worktree TEXT",
+        "ALTER TABLE attempts ADD COLUMN parent TEXT",
+        "ALTER TABLE memories ADD COLUMN branch TEXT",
+        "ALTER TABLE memories ADD COLUMN class TEXT",
+        "ALTER TABLE memories ADD COLUMN confidence REAL",
+    };
+    for (size_t i = 0; i < sizeof V16 / sizeof *V16; i++)
+        sqlite3_exec(cg->db, V16[i], NULL, NULL, NULL);
     /* meta rows mean an existing project DB, not a freshly created one */
     long nmeta = 0;
     sqlite3_stmt *st = NULL;
