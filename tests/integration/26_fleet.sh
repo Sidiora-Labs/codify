@@ -606,4 +606,206 @@ assert d['local_main']['updated'] is True and len(d['local_main']['head']) == 40
     expect_rc 1 "$CG" fleet merge-up
 fi
 
+if want orchestrate; then
+    setup_repo
+    proj="$(pwd -P)"
+    wt="$proj/.codegraph/worktrees"
+    calls="$TMP/fleet-calls.txt"
+    : > "$calls"
+
+    # ---- no [hierarchy]: there is no second level, so nothing is spawned
+    expect_rc 1 "$CG" spec run --fleet
+    err="$("$CG" spec run --fleet 2>&1 >/dev/null || true)"
+    has "$err" "--fleet needs a [hierarchy] in spec/workflow.kvx"
+    has "$err" "nothing was spawned"
+    expect_rc 1 "$CG" fleet tree
+    err="$("$CG" fleet tree 2>&1 >/dev/null || true)"
+    has "$err" "this repository runs flat"
+
+    cat >> spec/workflow.kvx <<EOF
+
+[hierarchy]
+enabled   = false
+test_gate = "true"
+pr        = "manual"
+
+[agents]
+driver = "custom"
+cmd    = "sh $TMP/fleet-driver.sh \${PROMPT_FILE} \${TASK} \${ROOT} \${AGENT}"
+max    = 2
+ttl    = 600
+EOF
+
+    # ---- configured but switched off: still nothing spawned
+    expect_rc 1 "$CG" spec run --fleet
+    err="$("$CG" spec run --fleet 2>&1 >/dev/null || true)"
+    has "$err" "--fleet needs an enabled [hierarchy]"
+    [ ! -e "$wt" ] || fail "a refused fleet run created worktrees"
+    # the single-level run is untouched by the fleet flags
+    out="$("$CG" spec run --dry-run)"
+    has "$out" "dry run: nothing claimed"
+    has "$out" "wave 1:"
+    python3 - <<'EOF'
+p = "spec/workflow.kvx"
+s = open(p).read().replace("enabled   = false\n", "", 1)
+open(p, "w").write(s)
+EOF
+
+    # a driver that is the agent: it reports the identity it was handed,
+    # does the task on its own branch, and moves the work upward
+    cat > "$TMP/fleet-driver.sh" <<EOF
+#!/bin/sh
+PF="\$1"; TASK="\$2"; ROOT="\$3"; AGENT="\$4"
+[ -s "\$PF" ] || exit 9
+[ -n "\$AGENT" ] || exit 9
+[ -n "\${CG_ROLE:-}" ] || exit 9
+[ -n "\${CG_PARENT:-}" ] || exit 9
+[ -n "\${CG_FEATURE:-}" ] || exit 9
+[ -n "\${CG_BRANCH:-}" ] || exit 9
+[ -n "\${CG_BASE:-}" ] || exit 9
+cd "\$ROOT" || exit 9
+echo "\$CG_ROLE|\$AGENT|\$TASK|\$CG_PARENT|\$CG_FEATURE|\${CG_WAVE:--}|\$CG_BRANCH|\$CG_BASE|\$(basename "\$PWD")" >> "$TMP/fleet-calls.txt"
+[ "\$(git rev-parse --abbrev-ref HEAD)" = "\$CG_BRANCH" ] || exit 9
+if [ "\$CG_ROLE" = worker ]; then
+    [ -n "\${CG_ATTEMPT:-}" ] || exit 9
+    [ "\${CG_FENCE:-0}" -gt 0 ] || exit 9
+    grep -q "cg fleet merge-up \$TASK" "\$PF" || exit 9
+    "$CG" spec start "\$TASK" >/dev/null || exit 1
+    case "\$TASK" in
+      2.1) echo 'export function alpha(){ return 1 }' > src/a.ts ;;
+      2.2) echo 'export function beta(){ return 2 }' > lib/b.ts ;;
+      3.1) echo '# doc by the worker' > docs/d.md ;;
+    esac
+    "$CG" spec done "\$TASK" >/dev/null || exit 1
+    git add -A >/dev/null
+    git commit -qm "\$TASK [spec:\$CG_FEATURE/\$TASK]" >/dev/null || exit 1
+    exec "$CG" fleet merge-up "\$TASK" >/dev/null
+fi
+[ "\$CG_ROLE" = feature ] || exit 9
+[ -z "\${CG_TASK:-}" ] || exit 9
+[ -z "\${CG_ATTEMPT:-}" ] || exit 9
+grep -q "cg fleet land \$CG_FEATURE" "\$PF" || exit 9
+left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,sys; m = json.load(sys.stdin)["managers"][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+[ "\$left" -eq 0 ] || exit 0
+exec "$CG" fleet land "\$CG_FEATURE" --no-pr >/dev/null
+EOF
+    chmod +x "$TMP/fleet-driver.sh"
+    git add -A >/dev/null; git commit -qm "hierarchy and driver" >/dev/null
+
+    # ---- the plan: the manager on the feature branch, one worker per task
+    #      on its wave branch, and nothing claimed or created
+    out="$("$CG" spec run --fleet --dry-run -n 2)"
+    has "$out" "fleet plan — driver custom, 2 worker slot(s), feature fleet (dry run: nothing claimed)"
+    has "$out" "manager fm-fleet — fleet on feature/fleet (from main)"
+    has "$out" "worktree $wt/feature-fleet"
+    has "$out" "worker w-fleet-1 — 2.1 (wave 1) on wave/fleet/1 (from feature/fleet)"
+    has "$out" "worker w-fleet-1 — 2.2 (wave 1) on wave/fleet/1 (from feature/fleet)"
+    has "$out" "worker w-fleet-2 — 3.1 (wave 2) on wave/fleet/2 (from feature/fleet)"
+    has "$out" "/bin/sh -c"
+    has "$out" "fleet-driver.sh"
+    hasnt "$out" "1.1"
+    st="$("$CG" spec status --json)"
+    has "$st" '"claims":[]'
+    [ ! -e "$wt" ] || fail "the dry run created worktrees"
+    [ ! -s "$calls" ] || fail "the dry run spawned an agent"
+
+    # ---- the tree before anything ran: the shape is the hierarchy's
+    out="$("$CG" fleet tree)"
+    has "$out" "fleet tree — fleet"
+    has "$out" "main     gideon"
+    has "$out" "feature  fm-fleet"
+    has "$out" "branch feature/fleet"
+    has "$out" "tasks 1/4 done, 0 running  ahead 0  incomplete"
+    has "$out" "(no workers yet)"
+
+    # ---- the run: one manager, wave workers under it, each in its own
+    #      worktree with its identity in the environment
+    out="$("$CG" spec run --fleet -n 1)"
+    has "$out" "[fleet] fleet — manager + 1 worker slot(s), driver custom, 16 wake(s)"
+    has "$out" "[fleet] manager fm-fleet on feature/fleet"
+    has "$out" "log .codegraph/agents/fleet-manager.log"
+    has "$out" "[fleet] worker w-fleet-1 → 2.1 (wave 1) on wave/fleet/1, log .codegraph/agents/fleet-2.1.log"
+    has "$out" "[fleet] worker w-fleet-1 task 2.1 exit 0 → done"
+    has "$out" "[fleet] worker w-fleet-1 → 2.2 (wave 1) on wave/fleet/1"
+    has "$out" "[fleet] worker w-fleet-2 → 3.1 (wave 2) on wave/fleet/2"
+    has "$out" "[fleet] fleet complete — 4/4 task(s) qualified, feature/fleet merged into main, 0 failure(s)"
+
+    # every child was handed CG_ROLE, CG_PARENT, CG_FEATURE, CG_WAVE, the
+    # branch, the base, and the worktree to run in
+    out="$(cat "$calls")"
+    has "$out" "feature|fm-fleet|fleet|gideon|fleet|-|feature/fleet|main|feature-fleet"
+    has "$out" "worker|w-fleet-1|2.1|fm-fleet|fleet|1|wave/fleet/1|feature/fleet|wave-fleet-1"
+    has "$out" "worker|w-fleet-1|2.2|fm-fleet|fleet|1|wave/fleet/1|feature/fleet|wave-fleet-1"
+    has "$out" "worker|w-fleet-2|3.1|fm-fleet|fleet|2|wave/fleet/2|feature/fleet|wave-fleet-2"
+
+    # the briefings end on the command that moves the work upward
+    has "$(cat .codegraph/agents/fleet-2.1.prompt)" "you are a wave worker on wave/fleet/1, reporting to fm-fleet"
+    has "$(cat .codegraph/agents/fleet-2.1.prompt)" "cg fleet merge-up 2.1"
+    has "$(cat .codegraph/agents/fleet-manager.prompt)" "You are fm-fleet, the feature manager for fleet."
+    has "$(cat .codegraph/agents/fleet-manager.prompt)" "cg fleet land fleet"
+    has "$(cat .codegraph/agents/fleet-manager.prompt)" "cg fleet pr fleet"
+
+    # the subtree is complete because it merged, not because a process exited
+    has "$(git log --oneline -1)" "land feature/fleet into main [spec:fleet]"
+    has "$(cat src/a.ts)" "return 1"
+    has "$(cat lib/b.ts)" "return 2"
+    has "$(cat docs/d.md)" "by the worker"
+    st="$("$CG" spec status --json)"
+    has "$st" '"claims":[]'
+    has "$st" '"tasks":4,"done":4,"implemented":0,"in_progress":0,"pending":0'
+
+    # ---- the tree after the run: main -> manager -> workers
+    out="$("$CG" fleet tree)"
+    has "$out" "tasks 4/4 done, 0 running  ahead 0  complete"
+    has "$out" "worker w-fleet-1"
+    has "$out" "wave 1  task 2.2  completed"
+    has "$out" "worker w-fleet-2"
+    has "$out" "wave 2  task 3.1  completed"
+    out="$("$CG" spec run --fleet --status)"
+    has "$out" "fleet tree — fleet"
+    out="$("$CG" fleet tree --json)"
+    echo "$out" | pyjson '
+assert d["feature"] == "fleet" and d["enabled"] is True, d
+assert d["main"]["agent"] == "gideon" and d["main"]["branch"] == "main", d
+assert d["main"]["role"] == "main", d
+m = d["managers"][0]
+assert m["agent"] == "fm-fleet" and m["role"] == "feature" and m["parent"] == "gideon", m
+assert m["branch"] == "feature/fleet" and m["base"] == "main", m
+assert m["worktree"].endswith("/.codegraph/worktrees/feature-fleet"), m
+assert m["tasks"] == {"total": 4, "done": 4, "claimed": 0}, m
+assert m["ahead"] == 0 and m["merged"] is True and m["complete"] is True, m
+w = {x["agent"]: x for x in m["workers"]}
+assert set(w) == {"w-fleet-1", "w-fleet-2"}, w
+assert w["w-fleet-1"]["role"] == "worker" and w["w-fleet-1"]["parent"] == "fm-fleet", w
+assert w["w-fleet-1"]["wave"] == 1 and w["w-fleet-1"]["branch"] == "wave/fleet/1", w
+assert w["w-fleet-1"]["base"] == "feature/fleet", w
+assert w["w-fleet-1"]["worktree"].endswith("/wave-fleet-1"), w
+assert w["w-fleet-2"]["wave"] == 2 and w["w-fleet-2"]["task"] == "3.1", w
+assert w["w-fleet-2"]["state"] == "completed" and len(w["w-fleet-2"]["attempt"]) > 0, w
+assert w["w-fleet-2"]["heartbeat"] > 0, w
+' || fail "fleet tree JSON"
+
+    # ---- nothing left to do: the run is complete without spawning anything
+    : > "$calls"
+    out="$("$CG" spec run --fleet -n 1)"
+    has "$out" "complete — 4/4 task(s) qualified"
+    [ ! -s "$calls" ] || fail "a complete fleet still spawned an agent"
+
+    # ---- a fleet that cannot finish stops instead of spinning
+    "$CG" spec add 4.1 --title "Doomed" --wave 3 --touches 'src/never.txt' >/dev/null
+    git add -A >/dev/null; git commit -qm "add 4.1" >/dev/null
+    cat > "$TMP/fleet-driver.sh" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+    chmod +x "$TMP/fleet-driver.sh"
+    rc=0; out="$("$CG" spec run --fleet -n 1 --max-rounds 2 --max-fail 9 2>&1)" || rc=$?
+    [ "$rc" -eq 1 ] || fail "expected rc 1 when the wakes run out, got $rc"
+    has "$out" "no manager wake is left (--max-rounds)"
+    cnt="$(printf '%s' "$out" | grep -c '\[fleet\] manager fm-fleet on feature/fleet')"
+    [ "$cnt" -le 2 ] || fail "spawned $cnt managers with --max-rounds 2"
+    st="$("$CG" spec status --json)"
+    has "$st" '"claims":[]'
+fi
+
 echo "ok 26_fleet ($section)"

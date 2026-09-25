@@ -185,4 +185,19 @@ has "$st" '"claims":[]'
 hasnt "$st" '"status":"in_progress"'
 has "$st" '"tasks":7,"done":4,"implemented":0,"in_progress":0,"pending":3'
 
+# ---- --fleet in a repository without a [hierarchy]: refused, nothing
+#      spawned, and the single-level run above is unchanged by it
+rc=0; out="$("$CG" spec run --fleet 2>&1)" || rc=$?
+[ "$rc" -eq 1 ] || fail "expected rc 1 for --fleet without a hierarchy, got $rc"
+has "$out" "--fleet needs a [hierarchy] in spec/workflow.kvx"
+has "$out" "nothing was spawned"
+rc=0; out="$("$CG" spec run --fleet --status 2>&1)" || rc=$?
+[ "$rc" -eq 1 ] || fail "expected rc 1 for --fleet --status, got $rc"
+rc=0; out="$("$CG" fleet tree 2>&1)" || rc=$?
+[ "$rc" -eq 1 ] || fail "expected rc 1 for fleet tree without a hierarchy, got $rc"
+has "$out" "this repository runs flat"
+st="$("$CG" spec status --json)"
+has "$st" '"claims":[]'
+has "$st" '"tasks":7,"done":4,"implemented":0,"in_progress":0,"pending":3'
+
 echo "18_orchestrate OK"

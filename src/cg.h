@@ -614,6 +614,38 @@ int  fleet_pr_open(Cg *cg, const char *feature, bool dry_run, bool json);
 int  fleet_checkpoint(Cg *cg, bool dry_run, bool json);
 int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);
 
+/* The two-level fleet run (orchestrate.c). One node is one process
+ * `cg spec run --fleet` spawned: the identity it carries in its
+ * environment, and the branch and worktree it works in. */
+typedef struct {
+    char agent[128];      /* CG_AGENT */
+    char role[16];        /* CG_ROLE: "feature" | "worker" */
+    char parent[128];     /* CG_PARENT */
+    char feature[128];    /* CG_FEATURE */
+    long wave;            /* CG_WAVE; -1 for a feature manager */
+    char task[64];        /* the task a worker holds; "" for a manager */
+    char branch[256];     /* CG_BRANCH */
+    char base[256];       /* CG_BASE */
+    char worktree[4096];  /* the tree the child runs in */
+    char attempt[65];     /* the claim a worker carries; "" for a manager */
+    long fence;
+    int  pid;             /* -1 when nothing was forked (dry run) */
+} FleetNode;
+/* Spawn one feature manager for <feature>: its worktree on the feature
+ * branch (cut from main when new), a briefing built from the feature plan,
+ * and the driver exec'd there. 0 with *n filled, 1 when nothing ran. */
+int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
+                       const char *extra, const char *cmd_tmpl, bool dry_run,
+                       FleetNode *n);
+/* Spawn one wave worker for task <id>: the branch, worktree, and claim come
+ * from `cg fleet begin` (fleet_worker_begin), the prompt from resume. */
+int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
+                      const char *driver, const char *extra,
+                      const char *cmd_tmpl, bool dry_run, FleetNode *n);
+/* The tree main → feature managers → wave workers, with branches, attempts,
+ * heartbeats, and what the subtree still owes. feature NULL: the active one. */
+int orch_tree_status(Cg *cg, const char *feature, bool json);
+
 /* ---------------- jev: System One decisions (jev.c) ----------------
  * Jev is TypeSafe AI's decision model, reached through OpenRouter with
  * OPENROUTER_API_KEY. It answers a fixed set of typed questions about a
