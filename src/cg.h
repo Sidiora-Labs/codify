@@ -674,6 +674,39 @@ const JevAnswer *jev_answer(const JevResult *r, const char *name);
 void jev_result_free(JevResult *r);
 int  cmd_jev(Cg *cg, int argc, char **argv, bool json);
 
+/* Advisory Jev: the decisions that ride inside a deterministic command.
+ * Jev is mandatory for these features and never for the loop they live in
+ * — `cg spec done`, `cg guard`, and `cg fleet pr` reach their own verdict
+ * with or without an answer. One gate decides: without OPENROUTER_API_KEY
+ * (or when the call fails) each helper prints one warning naming what was
+ * skipped, leaves its output neutral, and returns non-zero. */
+bool jev_advisory_ready(const char *what);
+typedef struct {
+    char category[64];     /* test_failure, build_error, flaky, ... */
+    char action[64];       /* fix_code, fix_test, rerun, ask_human, ... */
+    double category_confidence, action_confidence;  /* -1 when unstated */
+    char line[240];        /* both, formatted for a human */
+} JevTriage;
+/* Classify a failed command: only the tail of output (40 lines / 4 KB) is
+ * sent, since that is where a failure says what it was. */
+int  jev_triage_failure(Cg *cg, const char *output, JevTriage *out);
+typedef struct {
+    char kind[24];         /* grounding | contract | hygiene */
+    char path[512];
+    int  line;
+    char detail[256];
+    double score;          /* Jev severity; -1 when it was not ranked */
+    char level[64];        /* the legend text for that score, "" if none */
+} JevFinding;
+/* Rank findings most severe first, in one call (one score question each),
+ * stably, so an unranked run keeps the order it was collected in. */
+int  jev_rank_findings(Cg *cg, JevFinding *v, int n);
+typedef struct {
+    double value;          /* probability the feature is ready to merge */
+    char band[16];         /* low | medium | high */
+} JevReadiness;
+int  jev_pr_readiness(Cg *cg, const char *state_json, JevReadiness *out);
+
 bool git_available(const Cg *cg);
 /* Where tree's HEAD points, read from the git files themselves so opening
  * the graph never spawns a process. branch gets the short ref name, or

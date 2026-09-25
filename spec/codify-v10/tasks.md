@@ -80,7 +80,7 @@
     - cg skills list, promote <id>, and render write .agents/skills/<slug>/SKILL.md with the ownership marker and a link back to the memory.
     - Expose classify, skills, and promote over MCP.
     - _Requirements: 4.3, 4.4_
-  - [ ] 4.3 Failure triage and guard ranking
+  - [x] 4.3 Failure triage and guard ranking
     - When verify_cmd fails in cg spec done, classify the tail of its output into a category and next action and record both on the outcome memory.
     - cg guard ranks its findings with a Jev score and prints them in that order; pass or fail stays deterministic.
     - cg fleet pr asks Jev for a readiness score and includes it in the PR body.

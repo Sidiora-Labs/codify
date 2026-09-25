@@ -721,6 +721,7 @@ typedef struct {
     char wfpath[4700];
     char specpath[4700];       /* spec/<feature>/spec.kvx on the main tree */
     const char *tree;          /* cg->shared */
+    int gates_ok;              /* 1 green in this command, -1 not run here */
 } Lifecycle;
 
 static void lifecycle_close(Lifecycle *c) {
@@ -732,6 +733,7 @@ static void lifecycle_close(Lifecycle *c) {
 static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     memset(c, 0, sizeof *c);
     c->tree = cg->shared;
+    c->gates_ok = -1;
     snprintf(c->wfpath, sizeof c->wfpath, "%s/spec/workflow.kvx", c->tree);
     c->wf = kvx_parse(c->wfpath);
     if (!c->wf) {
@@ -1332,6 +1334,7 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
         git_run(c.tree, r.p, NULL);
         sb_free(&r);
     } else {
+        c.gates_ok = 1;            /* the pull request may say so */
         git_head(c.tree, on, sizeof on, head, sizeof head);
         branch_register(cg, c.h.main_branch, c.tree, head, NULL);
     }
@@ -1421,10 +1424,12 @@ static int run_in(const char *tree, const char *cmd, StrBuf *out) {
     return WIFEXITED(st) ? WEXITSTATUS(st) : 128;
 }
 
-/* the pull request body: the feature's title and its task list, written
- * to .codegraph/fleet so the printed gh command is runnable as-is */
-static void write_pr_body(const Lifecycle *c, char *title, size_t tcap,
-                          char *bodypath, size_t bcap) {
+/* the pull request body: the feature's title, its task list, and Jev's
+ * read on whether the branch is ready, written to .codegraph/fleet so the
+ * printed gh command is runnable as-is */
+static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
+                          char *title, size_t tcap, char *bodypath,
+                          size_t bcap) {
     Kvx *f = kvx_parse(c->specpath);
     char *t = f ? kvx_str(f, "meta", "title") : NULL;
     if (t && t[0]) snprintf(title, tcap, "%s", t);
@@ -1433,6 +1438,8 @@ static void write_pr_body(const Lifecycle *c, char *title, size_t tcap,
     StrBuf b; sb_init(&b);
     sb_printf(&b, "Feature `%s`, landed on `%s` by Codify with the test and "
                   "lint gates green.\n\n## Tasks\n", c->feature, c->h.main_branch);
+    StrBuf tasks; sb_init(&tasks);
+    int ntask = 0, ndone = 0;
     if (f) {
         char **ids = NULL;
         int nids = kvx_subsections(f, "task", &ids);
@@ -1443,13 +1450,42 @@ static void write_pr_body(const Lifecycle *c, char *title, size_t tcap,
             if (!kvx_raw(f, sec, "wave")) { free(ids[i]); continue; }
             char *tt = kvx_str(f, sec, "title");
             char *st = kvx_str(f, sec, "status");
-            sb_printf(&b, "- %s %s (%s)\n", ids[i], tt ? tt : "",
-                      st && st[0] ? st : "pending");
+            const char *status = st && st[0] ? st : "pending";
+            sb_printf(&b, "- %s %s (%s)\n", ids[i], tt ? tt : "", status);
+            if (ntask) sb_putc(&tasks, ',');
+            sb_puts(&tasks, "{\"id\":");
+            sb_json_str(&tasks, ids[i]);
+            sb_puts(&tasks, ",\"status\":");
+            sb_json_str(&tasks, status);
+            sb_putc(&tasks, '}');
+            ntask++;
+            if (strcmp(status, "done") == 0) ndone++;
             free(tt); free(st); free(ids[i]);
         }
         free(ids);
     }
     kvx_free(f);
+    /* the state a readiness score is worth anything on: what is qualified,
+     * what the gates said, and how much work is actually being proposed */
+    long commits = commits_between(c->tree, c->h.main_branch, branch);
+    const char *gates = c->gates_ok > 0 ? "green"
+                      : c->gates_ok == 0 ? "red" : "not run in this command";
+    StrBuf state; sb_init(&state);
+    sb_puts(&state, "{\"feature\":"); sb_json_str(&state, c->feature);
+    sb_puts(&state, ",\"branch\":"); sb_json_str(&state, branch);
+    sb_puts(&state, ",\"base\":"); sb_json_str(&state, c->h.main_branch);
+    sb_printf(&state, ",\"tasks\":{\"total\":%d,\"done\":%d,\"open\":%d,"
+                      "\"list\":[%s]},\"gates\":", ntask, ndone, ntask - ndone,
+              tasks.p ? tasks.p : "");
+    sb_json_str(&state, gates);
+    sb_printf(&state, ",\"commits_ahead\":%ld}", commits);
+    sb_free(&tasks);
+    JevReadiness rd;
+    if (jev_pr_readiness(cg, state.p, &rd) == JEV_OK)
+        sb_printf(&b, "\nJev readiness: %.2f (%s) — %d/%d tasks qualified, "
+                      "%ld commit%s, gates %s\n", rd.value, rd.band, ndone,
+                  ntask, commits, commits == 1 ? "" : "s", gates);
+    sb_free(&state);
     char dir[4700];
     snprintf(dir, sizeof dir, "%s/%s/fleet", c->tree, CG_DIR);
     mkdirs(dir);
@@ -1463,11 +1499,11 @@ static void write_pr_body(const Lifecycle *c, char *title, size_t tcap,
  * jb receives one JSON object (when json), else text goes to stdout. */
 static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                         bool json) {
-    (void)cg;
     const FleetRole *rf = &c->h.roles[FLEET_FEATURE];
     char branch[512], title[300], bodypath[4800], gh[4096];
     hier_expand(&c->h, rf->branch, c->feature, -1, branch, sizeof branch);
-    write_pr_body(c, title, sizeof title, bodypath, sizeof bodypath);
+    write_pr_body(cg, c, branch, title, sizeof title, bodypath,
+                  sizeof bodypath);
     bool have_gh = find_gh(gh, sizeof gh);
 
     StrBuf push; sb_init(&push);

@@ -485,6 +485,22 @@ static void guard_stale_cb(void *u, const char *path, int line,
     g->n++;
 }
 
+/* one collected finding, waiting to be ranked */
+static void guard_collect(JevFinding **v, int *n, int *cap, const char *kind,
+                          const char *path, int line, const char *detail) {
+    if (*n == *cap) {
+        *cap = *cap ? *cap * 2 : 8;
+        *v = xrealloc(*v, sizeof **v * (size_t)*cap);
+    }
+    JevFinding *f = &(*v)[(*n)++];
+    memset(f, 0, sizeof *f);
+    snprintf(f->kind, sizeof f->kind, "%s", kind);
+    snprintf(f->path, sizeof f->path, "%s", path);
+    f->line = line;
+    snprintf(f->detail, sizeof f->detail, "%s", detail);
+    f->score = -1;
+}
+
 int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
 {
     bool is_current = false;
@@ -529,16 +545,66 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
     sb_init(&gs.js);
     anchor_stale(cg, guard_stale_cb, &gs);
 
+    /* grounding, contract, and hygiene findings for the changed paths,
+       collected before anything is printed so Jev can rank them in one
+       call — the rank is advice about order, never about pass or fail */
+    JevFinding *fv = NULL;
+    int nfindings = 0, fcap = 0;
+    for (int i = 0; i < npath; i++) {
+        const char *rel = pathv[i];
+        size_t rl2 = strlen(cg->root);
+        if (strncmp(rel, cg->root, rl2) == 0 && rel[rl2] == '/') rel += rl2 + 1;
+        GroundFinding *gf = NULL;
+        int ng = ground_findings(cg, rel, &gf);
+        for (int g = 0; g < ng; g++)
+            guard_collect(&fv, &nfindings, &fcap, "grounding", gf[g].path,
+                          gf[g].line, gf[g].detail);
+        ground_findings_free(gf, ng);
+        ContractFinding *cf = NULL;
+        int nc = contract_findings(cg, rel, &cf);
+        for (int c = 0; c < nc; c++)
+            guard_collect(&fv, &nfindings, &fcap, "contract", cf[c].path,
+                          cf[c].line, cf[c].detail);
+        contract_findings_free(cf, nc);
+        HygieneFinding *hf = NULL;
+        int nh = hygiene_findings(cg, rel, &hf);
+        for (int h = 0; h < nh; h++)
+            guard_collect(&fv, &nfindings, &fcap, "hygiene", hf[h].path,
+                          hf[h].line, hf[h].detail);
+        hygiene_findings_free(hf, nh);
+    }
+    bool ranked = nfindings > 0 && jev_rank_findings(cg, fv, nfindings) == JEV_OK;
+
     if (json) {
         printf("{\"guarded\":true,\"task\":");
         StrBuf j; sb_init(&j);
         sb_json_str(&j, id ? id : "");
         fputs(j.p, stdout);
         sb_free(&j);
+        StrBuf fj; sb_init(&fj);
+        for (int i = 0; i < nfindings; i++) {
+            if (i) sb_putc(&fj, ',');
+            sb_puts(&fj, "{\"kind\":");
+            sb_json_str(&fj, fv[i].kind);
+            sb_puts(&fj, ",\"path\":");
+            sb_json_str(&fj, fv[i].path);
+            sb_printf(&fj, ",\"line\":%d,\"detail\":", fv[i].line);
+            sb_json_str(&fj, fv[i].detail);
+            sb_puts(&fj, ",\"jev_score\":");
+            if (fv[i].score >= 0) sb_printf(&fj, "%.10g", fv[i].score);
+            else sb_puts(&fj, "null");
+            sb_puts(&fj, ",\"jev_level\":");
+            if (fv[i].level[0]) sb_json_str(&fj, fv[i].level);
+            else sb_puts(&fj, "null");
+            sb_putc(&fj, '}');
+        }
         printf(",\"out_of_scope\":[%s],\"count\":%d,"
-               "\"stale_anchors\":[%s],\"strict\":%s}\n",
+               "\"stale_anchors\":[%s],\"strict\":%s,\"findings\":[%s],"
+               "\"jev_ranked\":%s}\n",
                b.p ? b.p : "", bad, gs.js.p ? gs.js.p : "",
-               strict ? "true" : "false");
+               strict ? "true" : "false", fj.p ? fj.p : "",
+               ranked ? "true" : "false");
+        sb_free(&fj);
     } else if (bad) {
         printf("guard: %d path(s) outside the scope task %s declared:\n", bad,
                id ? id : "?");
@@ -556,42 +622,21 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)
                gs.n);
         fputs(gs.txt.p, stdout);
     }
-    /* grounding, contract, and hygiene findings for the changed paths */
-    int nfindings = 0;
-    for (int i = 0; i < npath; i++) {
-        const char *rel = pathv[i];
-        size_t rl2 = strlen(cg->root);
-        if (strncmp(rel, cg->root, rl2) == 0 && rel[rl2] == '/') rel += rl2 + 1;
-        GroundFinding *gf = NULL;
-        int ng = ground_findings(cg, rel, &gf);
-        for (int g = 0; g < ng; g++) {
-            nfindings++;
-            if (!json)
-                printf("  warn  %s:%d: %s\n", gf[g].path, gf[g].line,
-                       gf[g].detail);
+    if (!json) {
+        for (int i = 0; i < nfindings; i++) {
+            printf("  warn  %s:%d: %s", fv[i].path, fv[i].line, fv[i].detail);
+            if (fv[i].score >= 0) {
+                printf("  [jev %.2f", fv[i].score);
+                if (fv[i].level[0]) printf(" %s", fv[i].level);
+                putchar(']');
+            }
+            putchar('\n');
         }
-        ground_findings_free(gf, ng);
-        ContractFinding *cf = NULL;
-        int nc = contract_findings(cg, rel, &cf);
-        for (int c = 0; c < nc; c++) {
-            nfindings++;
-            if (!json)
-                printf("  warn  %s:%d: %s\n", cf[c].path, cf[c].line,
-                       cf[c].detail);
-        }
-        contract_findings_free(cf, nc);
-        HygieneFinding *hf = NULL;
-        int nh = hygiene_findings(cg, rel, &hf);
-        for (int h = 0; h < nh; h++) {
-            nfindings++;
-            if (!json)
-                printf("  warn  %s:%d: %s\n", hf[h].path, hf[h].line,
-                       hf[h].detail);
-        }
-        hygiene_findings_free(hf, nh);
+        if (nfindings)
+            printf("guard: %d finding(s) (advisory%s)\n", nfindings,
+                   ranked ? ", most severe first" : "");
     }
-    if (!json && nfindings)
-        printf("guard: %d finding(s) (advisory)\n", nfindings);
+    free(fv);
     sb_free(&gs.txt);
     sb_free(&gs.js);
     sb_free(&b);

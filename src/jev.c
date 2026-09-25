@@ -1113,3 +1113,243 @@ int cmd_jev(Cg *cg, int argc, char **argv, bool json) {
     fprintf(stderr, "usage: cg jev doctor [--probe] | ask ... | log [-n N]\n");
     return 1;
 }
+
+/* ---------------- advisory decisions ----------------
+ *
+ * Triage, rank, and readiness are the Jev steps that live inside commands
+ * which must keep working without them. So they share one gate and one
+ * shape of warning: the key is checked in a single place, a failed call
+ * reads like a missing key, and the caller's own verdict is untouched
+ * either way. A caller that only adds an advisory line to its output can
+ * ignore the return value and print nothing when the fields stay empty.
+ */
+
+#define JEV_TAIL_BYTES 4096
+#define JEV_TAIL_LINES 40
+#define JEV_MAX_RANK   50
+
+bool jev_advisory_ready(const char *what) {
+    const char *k = getenv("OPENROUTER_API_KEY");
+    if (k && k[0]) return true;
+    fprintf(stderr, "jev: OPENROUTER_API_KEY is not set — %s skipped\n", what);
+    return false;
+}
+
+static void jev_advisory_failed(const char *what, const JevResult *r) {
+    fprintf(stderr, "jev: %s skipped — %s\n", what,
+            r->error[0] ? r->error : "the answer was not usable");
+}
+
+/* The last JEV_TAIL_LINES lines, and at most JEV_TAIL_BYTES bytes, of a
+ * command's output: the part where a failure says what it was. */
+static void jev_tail(const char *s, StrBuf *out) {
+    size_t n = strlen(s);
+    const char *from = s;
+    if (n > JEV_TAIL_BYTES) from = s + n - JEV_TAIL_BYTES;
+    const char *p = s + n;
+    int lines = 0;
+    while (p > from) {
+        if (p[-1] == '\n' && p != s + n && ++lines >= JEV_TAIL_LINES) break;
+        p--;
+    }
+    if (lines >= JEV_TAIL_LINES) from = p;
+    while (*from == '\n' || *from == '\r') from++;
+    sb_puts(out, from);
+    while (out->len > 0 && (out->p[out->len - 1] == '\n' ||
+                            out->p[out->len - 1] == '\r' ||
+                            out->p[out->len - 1] == ' '))
+        out->p[--out->len] = 0;
+}
+
+static double answer_confidence(const JevAnswer *a) {
+    return (a && !isnan(a->confidence)) ? a->confidence : -1.0;
+}
+
+static void sb_confidence(StrBuf *b, double c) {
+    if (c >= 0) sb_printf(b, " (confidence %.2f)", c);
+}
+
+int jev_triage_failure(Cg *cg, const char *output, JevTriage *out) {
+    memset(out, 0, sizeof *out);
+    out->category_confidence = out->action_confidence = -1.0;
+    if (!jev_advisory_ready("failure triage")) return JEV_ECONFIG;
+    static const char *const cats[] = {
+        "test_failure", "build_error", "missing_dependency", "flaky",
+        "environment", "spec_mismatch" };
+    static const char *const catd[] = {
+        "A test ran and reported that the code does not do what it asserts.",
+        "The compiler, linker, or bundler refused the code.",
+        "A tool, package, or header the command needs is not installed.",
+        "The same command would probably pass on a second run: a timeout, a "
+            "race, a busy port, a flaky fixture.",
+        "The machine rather than the change: permissions, disk, network, a "
+            "missing environment variable.",
+        "The code is right and the task's own expectation or verify command "
+            "is wrong." };
+    static const char *const acts[] = {
+        "fix_code", "fix_test", "rerun", "install_dependency", "revise_spec",
+        "ask_human" };
+    static const char *const actd[] = {
+        "Change the implementation until the command passes.",
+        "Change the test or its fixture, because that is the part that is "
+            "wrong.",
+        "Run the same command again without changing anything.",
+        "Install the missing tool or package, then run the command again.",
+        "Change the task's verify command or its acceptance criteria.",
+        "Stop and ask a person: this needs a decision the agent cannot "
+            "make." };
+    JevQuestion qs[2];
+    jev_question_choice(&qs[0], "failure_category",
+        "The state carries the tail of a task's failed verify command. "
+        "Which kind of failure is it?", cats, catd, 6);
+    jev_question_choice(&qs[1], "next_action",
+        "What should the agent that owns this task do next about this "
+        "failure?", acts, actd, 6);
+    StrBuf tail; sb_init(&tail);
+    jev_tail(output ? output : "", &tail);
+    StrBuf state; sb_init(&state);
+    sb_puts(&state, "{\"failed_command\":\"verify_cmd\",\"output_tail\":");
+    sb_json_str(&state, tail.p);
+    sb_putc(&state, '}');
+    sb_free(&tail);
+    JevResult r;
+    int rc = jev_ask(cg, state.p, qs, 2, &r);
+    sb_free(&state);
+    jev_question_free(&qs[0]);
+    jev_question_free(&qs[1]);
+    const JevAnswer *cat = rc == JEV_OK ? jev_answer(&r, "failure_category") : NULL;
+    const JevAnswer *act = rc == JEV_OK ? jev_answer(&r, "next_action") : NULL;
+    if (!cat || !cat->choice || !act || !act->choice) {
+        if (rc == JEV_OK) {
+            rc = JEV_EPARSE;
+            snprintf(r.error, sizeof r.error,
+                     "jev answered without a category or a next action");
+        }
+        jev_advisory_failed("failure triage", &r);
+        jev_result_free(&r);
+        return rc;
+    }
+    snprintf(out->category, sizeof out->category, "%s", cat->choice);
+    snprintf(out->action, sizeof out->action, "%s", act->choice);
+    out->category_confidence = answer_confidence(cat);
+    out->action_confidence = answer_confidence(act);
+    StrBuf line; sb_init(&line);
+    sb_puts(&line, out->category);
+    sb_confidence(&line, out->category_confidence);
+    sb_puts(&line, " → ");
+    sb_puts(&line, out->action);
+    sb_confidence(&line, out->action_confidence);
+    snprintf(out->line, sizeof out->line, "%s", line.p);
+    sb_free(&line);
+    jev_result_free(&r);
+    return JEV_OK;
+}
+
+/* most severe first, stable: the unranked tail keeps its collected order */
+static void rank_sort(JevFinding *v, int n) {
+    for (int i = 1; i < n; i++) {
+        JevFinding t = v[i];
+        int j = i;
+        while (j > 0 && v[j - 1].score < t.score) { v[j] = v[j - 1]; j--; }
+        v[j] = t;
+    }
+}
+
+int jev_rank_findings(Cg *cg, JevFinding *v, int n) {
+    for (int i = 0; i < n; i++) { v[i].score = -1.0; v[i].level[0] = 0; }
+    if (n <= 0) return JEV_OK;
+    if (!jev_advisory_ready("finding rank")) return JEV_ECONFIG;
+    static const char *const levels[] = {
+        "Noise: correct as written, or so minor that acting on it wastes time.",
+        "Minor: worth tidying while the file is open anyway.",
+        "Worth fixing before this change lands.",
+        "Serious: probably a real defect this change introduced.",
+        "Blocking: the change is broken or unsafe until this is addressed." };
+    int nq = n < JEV_MAX_RANK ? n : JEV_MAX_RANK;
+    JevQuestion *qs = xmalloc(sizeof(JevQuestion) * (size_t)nq);
+    StrBuf state; sb_init(&state);
+    sb_puts(&state, "{\"findings\":[");
+    for (int i = 0; i < nq; i++) {
+        char name[16];
+        snprintf(name, sizeof name, "f%d", i);
+        StrBuf ins; sb_init(&ins);
+        sb_printf(&ins, "Finding %s: a %s finding at %s line %d — %s. How "
+                        "severe is it for the change under review?", name,
+                  v[i].kind, v[i].path, v[i].line, v[i].detail);
+        jev_question_score(&qs[i], name, ins.p, levels, 5);
+        sb_free(&ins);
+        if (i) sb_putc(&state, ',');
+        sb_puts(&state, "{\"id\":");
+        sb_json_str(&state, name);
+        sb_puts(&state, ",\"kind\":"); sb_json_str(&state, v[i].kind);
+        sb_puts(&state, ",\"path\":"); sb_json_str(&state, v[i].path);
+        sb_printf(&state, ",\"line\":%d,\"detail\":", v[i].line);
+        sb_json_str(&state, v[i].detail);
+        sb_putc(&state, '}');
+    }
+    sb_printf(&state, "],\"total\":%d}", n);
+    JevResult r;
+    int rc = jev_ask(cg, state.p, qs, nq, &r);
+    sb_free(&state);
+    for (int i = 0; i < nq; i++) jev_question_free(&qs[i]);
+    free(qs);
+    if (rc != JEV_OK) {
+        jev_advisory_failed("finding rank", &r);
+        jev_result_free(&r);
+        return rc;
+    }
+    for (int i = 0; i < nq; i++) {
+        char name[16];
+        snprintf(name, sizeof name, "f%d", i);
+        const JevAnswer *a = jev_answer(&r, name);
+        if (!a || isnan(a->value)) continue;
+        v[i].score = a->value;
+        if (!a->legend) continue;
+        char key[32];
+        snprintf(key, sizeof key, "%ld", lround(a->value));
+        char *lvl = json_get_string(a->legend, key);
+        if (!lvl) continue;
+        /* the legend repeats the whole criterion; its first clause is the
+         * label a reader wants beside the number */
+        char *cut = strpbrk(lvl, ":.");
+        if (cut) *cut = 0;
+        snprintf(v[i].level, sizeof v[i].level, "%s", lvl);
+        free(lvl);
+    }
+    jev_result_free(&r);
+    rank_sort(v, n);
+    return JEV_OK;
+}
+
+int jev_pr_readiness(Cg *cg, const char *state_json, JevReadiness *out) {
+    memset(out, 0, sizeof *out);
+    out->value = -1.0;
+    snprintf(out->band, sizeof out->band, "unknown");
+    if (!jev_advisory_ready("pull request readiness")) return JEV_ECONFIG;
+    JevQuestion q;
+    jev_question_noul(&q, "readiness",
+        "The state describes a feature branch waiting on a pull request: "
+        "its tasks and their statuses, the gate results, and the commits it "
+        "carries. Is it ready to merge?",
+        "Every task is qualified and the gates are green.",
+        "Tasks are unfinished, a gate is red or unknown, or there is nothing "
+        "to merge.");
+    JevResult r;
+    int rc = jev_ask(cg, state_json, &q, 1, &r);
+    jev_question_free(&q);
+    const JevAnswer *a = rc == JEV_OK ? jev_answer(&r, "readiness") : NULL;
+    if (!a || isnan(a->value)) {
+        if (rc == JEV_OK) {
+            rc = JEV_EPARSE;
+            snprintf(r.error, sizeof r.error, "jev answered without a value");
+        }
+        jev_advisory_failed("pull request readiness", &r);
+        jev_result_free(&r);
+        return rc;
+    }
+    out->value = a->value;
+    snprintf(out->band, sizeof out->band, "%s",
+             a->value >= 0.75 ? "high" : a->value >= 0.4 ? "medium" : "low");
+    jev_result_free(&r);
+    return JEV_OK;
+}
