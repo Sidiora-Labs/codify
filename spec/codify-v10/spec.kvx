@@ -233,7 +233,7 @@ reqs       = ["4.3", "4.4"]
 
 [task.4.3]
 title      = "Failure triage and guard ranking"
-status     = "in_progress"
+status     = "done"
 wave       = 5
 requires   = ["4.1", "2.2"]
 symbols    = ["jev_triage_failure", "jev_rank_findings"]
