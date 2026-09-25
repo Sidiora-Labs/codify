@@ -2315,7 +2315,9 @@ int spec_claim(Cg *g, const char *root, const char *feature, const char *id,
 /* A claim creates both its compatibility lease and authoritative fenced
  * attempt. BEGIN IMMEDIATE makes ownership/fence advancement atomic; release
  * accepts exact credentials so a crashed or delayed worker cannot abandon a
- * replacement attempt that happens to reuse the same agent name. */
+ * replacement attempt that happens to reuse the same agent name. Expiry is
+ * SQLite's clock (strftime 'now' in the sweep), never a timestamp taken here,
+ * so a lease cannot outlive its ttl by however long this call was blocked. */
 static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
                           const char *host, const char *session, long ttl_min,
                           const char *attempt_arg, long fence_arg,
@@ -2328,7 +2330,6 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
     }
     char tag[256];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
-    long now = (long)time(NULL);
 
     if (release) {
         /* owner check and delete must be one transaction, or a racing
