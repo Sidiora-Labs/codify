@@ -203,7 +203,18 @@ function taskNode(id, claim, planned) {
     };
 }
 
-/* Join the three reports into Main → managers → workers → tasks.
+/* Build Main → managers → workers → tasks, and say where it came from.
+ *
+ * `opts.tree` is `cg fleet tree --json`. When treeFacts() recognises it, it
+ * decides who exists, who reports to whom, which branch and worktree each
+ * agent owns, and the subtree numbers (progress, ahead, merged, complete)
+ * nothing else here could compute; the result is tagged source:'tree'. The
+ * other reports then only fill gaps the tree leaves: the waves nobody has
+ * started and their tasks (from the plan), the branch fields a worker's
+ * registry row carries only once an attempt fills them in (from the claim),
+ * and merge state (from the branch registry). With no usable tree the same
+ * join composes the whole hierarchy on its own and is tagged
+ * source:'composed', which is what an older cg gets.
  *
  * Every input is optional and none of them is trusted to be well formed: the
  * view has to render something honest when cg is an older build, when the
@@ -266,9 +277,13 @@ function fleetTree(status, specStatus, branches, opts) {
         return [...ids].sort(byDotted)
             .map((id) => taskNode(id, claimFor(id), plannedTask.get(id)));
     };
-    /* A wave worker owns its whole wave, not only the task it happens to hold
-     * a claim on: the unclaimed ones are the work still waiting for it. Tasks
-     * another agent claimed are left to show under that agent instead. */
+    /* Every task of `name`'s wave, from three angles that rarely agree: the
+     * plan's wave (the work the wave owns, claimed or not — the unclaimed ones
+     * are what is still waiting for it), the agent's own claims and registry
+     * row when it is live, and `held`, the task cg's tree says it is on right
+     * now, which survives even when the plan has moved past it and the claim
+     * is gone. A task another agent claimed is dropped here so it shows under
+     * that agent instead of twice. */
     const waveTasks = (name, planWave, live, held) => {
         const out = new Map();
         for (const t of arr(planWave && planWave.tasks)) {
@@ -519,9 +534,16 @@ function withTimeout(p, ms, onTimeout) {
 }
 
 /* The fleet as a TreeView: Main Gideon, the feature managers under it, the
- * wave workers under them, and each worker's tasks under that. The model is
- * rebuilt by the extension's one refresh scheduler and only while the view is
- * visible — a collapsed fleet costs nothing. */
+ * wave workers under them, and each worker's tasks and any pull request it
+ * reported under that.
+ *
+ * It owns no clock. One pass of its cg calls — fleet status, spec status (the
+ * board's, handed over rather than asked for twice), branches, fleet plan and,
+ * once per window, fleet tree — runs inside the extension's single refresh
+ * scheduler, and only while the view is visible, so a collapsed fleet costs
+ * nothing. Every one of those calls is raced against CALL_TIMEOUT_MS, and the
+ * loading, error and unconfigured states each render something the user can
+ * act on, so the view cannot sit on a spinner. */
 class FleetView {
     constructor(deps) {
         this.deps = deps;
@@ -615,8 +637,13 @@ class FleetView {
         return it;
     }
 
-    /* One agent — main, manager, or worker — with its branch, its heartbeat,
-     * and what the registry knows about merging it upward. */
+    /* One agent — main, manager, or worker — and, under it, the agents that
+     * report to it. The row reads the way the fleet is organised: who this is,
+     * the branch it owns, how much of its subtree is done, how long ago it was
+     * heard from, and whether its branch is still unmerged or its worktree has
+     * gone. Whether it is merged is cg's own verdict when the tree gave one
+     * and the branch registry's inference otherwise, and progress appears at
+     * all only when cg counted it. */
     nodeItem(n) {
         const kids = (n.children || []).map((c) => this.nodeItem(c))
             .concat((n.prs || []).map((p) => this.prItem(p)))
