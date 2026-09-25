@@ -35,7 +35,7 @@
 ## Main Gideon, feature managers, wave workers
 
 - [ ] 2. Hierarchical fleet workflow
-  - [-] 2.1 Roles, hierarchy config, and identity
+  - [x] 2.1 Roles, hierarchy config, and identity
     - Parse [hierarchy] and [role.*] from workflow.kvx: role names, branch templates, base branch, remote, test and lint gates, PR policy.
     - Extend agent identity with CG_ROLE and CG_PARENT and surface them in spec status, claims, attempts, and brief.
     - Add cg fleet status, cg fleet roles, and cg fleet plan that shows which manager owns which feature and which worker owns which wave.
@@ -55,7 +55,7 @@
 ## One graph for every branch and worktree
 
 - [ ] 3. Unified multi-branch graph
-  - [ ] 3.1 Schema v15, shared root through the git common dir, branch registry
+  - [-] 3.1 Schema v15, shared root through the git common dir, branch registry
     - Add branches(id, name, worktree, head, base, updated) and files.branch_id with UNIQUE(branch_id, path); migrate existing rows to the current branch.
     - Resolve a worktree to the shared .codegraph through git rev-parse --git-common-dir when no nearer project exists; cg init inside a worktree of an initialized repo joins instead of refusing.
     - Resolve the current branch at open time into Cg and register it; cg branches lists tracked branches with worktree, head, and file counts.

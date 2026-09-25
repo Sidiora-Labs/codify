@@ -17,6 +17,11 @@
  *                  projects indexing at once share the cores instead of each
  *                  taking all of them.
  *
+ * A linked worktree that joined the shared graph gets its own lock and
+ * note (index.<branch>.lock, index.<branch>.dirty) beside the main tree's:
+ * its paths are its own, and its walk is independent — the slots keep the
+ * total parse budget bounded across all of them.
+ *
  * Nothing here touches SQLite: the database lock still serializes writers
  * the way it always did. The gate only keeps the expensive part — walking
  * and parsing — from happening more than once for the same change.
@@ -33,8 +38,20 @@
 #define GATE_POLL_MS 40
 #define DIRTY_MAX_BYTES (256 * 1024)
 
+/* One gate per tree, all under the shared .codegraph. The main worktree
+ * keeps the plain names; a linked worktree's gate is keyed by its branch
+ * ("index.7.lock"), so two worktrees walk in parallel — the machine-wide
+ * slots still cap their workers — and a note left for one never names
+ * paths of the other. */
 static void gate_path(const Cg *cg, const char *name, char *out, size_t cap) {
-    snprintf(out, cap, "%s/%s/%s", cg->root, CG_DIR, name);
+    if (cg->worktree && cg->branch_id > 0) {
+        const char *dot = strchr(name, '.');
+        snprintf(out, cap, "%s/%s/%.*s.%ld%s", cg->shared, CG_DIR,
+                 (int)(dot ? dot - name : (long)strlen(name)), name,
+                 cg->branch_id, dot ? dot : "");
+    } else {
+        snprintf(out, cap, "%s/%s/%s", cg->shared, CG_DIR, name);
+    }
 }
 
 static void sleep_ms(long ms) {

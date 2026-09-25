@@ -165,7 +165,23 @@ void route_add(ParseResult *pr, const char *framework, const char *method,
 /* ---------------- database ---------------- */
 typedef struct {
     sqlite3 *db;
-    char root[4096];       /* project root (dir containing .codegraph) */
+    /* The tree cg operates on: files are read, walked, and git-queried
+     * here, and spec/ is read from here because it travels with the branch.
+     * Equals shared unless this is a linked git worktree of an initialized
+     * repository. */
+    char root[4096];
+    /* Where .codegraph lives: the database, object store, index gate, and
+     * docs packets. One per repository, shared by every worktree of it. */
+    char shared[4096];
+    bool worktree;         /* root != shared: a linked worktree joined in */
+    /* The branch root is on, resolved at open time from git's HEAD (no
+     * process spawned) and registered in branches. Every file row the
+     * indexer writes from this tree carries branch_id; "(detached)" and
+     * "(none)" stand in when there is no branch name. 0 only when the
+     * registry could not be written (database busy). */
+    long branch_id;
+    char branch[256];
+    char head[65];         /* commit HEAD points at, "" when unknown */
     bool no_soft;          /* --no-soft: exclude prose-derived soft edges */
     /* How long a write may wait for another cg process to release the
      * database before giving up. CLI commands wait the full default so an
@@ -190,9 +206,19 @@ long cg_lock_wait_default(void);                   /* CG_BUSY_TIMEOUT_MS */
  * database: names the likely holder and says nothing was changed. */
 void cg_busy_report(const char *what);
 void cg_close(Cg *cg);
-int  cg_find_root(char *out, size_t cap);          /* 0 ok */
+/* The shared project directory (the one holding .codegraph) for the
+ * current directory: the nearest ancestor, or — from a linked git worktree
+ * whose main worktree is initialized — that main worktree. 0 ok */
+int  cg_find_root(char *out, size_t cap);
 /* resolve from an explicit directory (LSP/MCP roots, hooks) */
 int  cg_find_root_at(const char *start, char *out, size_t cap);
+/* Both halves: the tree to operate on and the shared project. They differ
+ * only for a linked worktree that joined an initialized repository. */
+int  cg_find_project_at(const char *start, char *root, char *shared,
+                        size_t cap);
+/* meta key scoped to the open branch ("last_index_at:3"): freshness and
+ * file counts describe one branch's rows, not the whole database */
+void cg_bkey(const Cg *cg, const char *name, char *out, size_t cap);
 /* true when dir owns its subtree (.git, go.mod, package.json, ...) */
 bool cg_is_boundary(const char *dir);
 int  cmd_root(bool json);                          /* print the bound root */
@@ -554,6 +580,24 @@ void fleet_brief(Cg *cg, StrBuf *b, bool json);
 int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);
 
 bool git_available(const Cg *cg);
+/* Where tree's HEAD points, read from the git files themselves so opening
+ * the graph never spawns a process. branch gets the short ref name, or
+ * "(detached)"; sha gets the commit when it could be found, else "".
+ * false when tree is not a git worktree. */
+bool git_head(const char *tree, char *branch, size_t bcap, char *sha,
+              size_t scap);
+/* For a linked worktree (tree/.git is a file), the main worktree it
+ * belongs to: the directory holding the common .git. false otherwise. */
+bool git_worktree_main(const char *tree, char *main_out, size_t cap);
+/* Resolve cg->root's branch into cg (name, head, branch_id), registering a
+ * branch never seen before. 0 ok; -1 when the registry could not be
+ * written, leaving branch_id 0. */
+int  cg_branch_resolve(Cg *cg);
+/* Upsert one branch row; base NULL keeps the stored base. Returns its id,
+ * or -1 when the write failed. */
+long branch_register(Cg *cg, const char *name, const char *worktree,
+                     const char *head, const char *base);
+int  cmd_branches(Cg *cg, int argc, char **argv, bool json);
 int  cmd_git_sync(Cg *cg, int limit, bool json);
 int  git_churn_for_path(Cg *cg, const char *path);
 int  git_commit_mirror(Cg *cg, const char *message);

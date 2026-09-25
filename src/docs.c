@@ -114,7 +114,7 @@ static int docs_project_open(Cg *cg, DocsProject *p) {
         docs_project_close(p);
         return -1;
     }
-    snprintf(p->dir, sizeof p->dir, "%s/%s/%s", p->root, CG_DOCS_DIR,
+    snprintf(p->dir, sizeof p->dir, "%s/%s/%s", p->cg->shared, CG_DOCS_DIR,
              p->feature);
     p->mode = kvx_has(p->spec, "documentation")
         ? docs_str(p->spec, "documentation", "mode", "auto")
@@ -145,7 +145,7 @@ static int docs_project_open(Cg *cg, DocsProject *p) {
     }
     char baseline[4800];
     struct stat st;
-    snprintf(baseline, sizeof baseline, "%s/%s/baseline.json", p->root, CG_DOCS_DIR);
+    snprintf(baseline, sizeof baseline, "%s/%s/baseline.json", p->cg->shared, CG_DOCS_DIR);
     p->incremental = stat(baseline, &st) == 0 && S_ISREG(st.st_mode);
     return 0;
 }
@@ -958,7 +958,7 @@ static int docs_close(Cg *cg, bool json) {
     sb_printf(&baseline, ",\"closed_at_ms\":%ld}\n", now_ms());
     int baseline_rc = write_entire_file(baseline_path, baseline.p, baseline.len);
     snprintf(baseline_path, sizeof baseline_path, "%s/%s/baseline.json",
-             p.root, CG_DOCS_DIR);
+             p.cg->shared, CG_DOCS_DIR);
     if (write_entire_file(baseline_path, baseline.p, baseline.len) != 0 || baseline_rc != 0)
         fprintf(stderr, "cg docs: warning: snapshot closed, but incremental "
                         "baseline could not be persisted\n");

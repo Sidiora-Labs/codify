@@ -131,7 +131,7 @@ status  = "pending"
 
 [task.2.1]
 title      = "Roles, hierarchy config, and identity"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 requires   = ["1.3"]
 symbols    = ["hier_load", "cg_agent_role", "cg_agent_parent", "cmd_fleet"]
@@ -176,11 +176,11 @@ status  = "pending"
 
 [task.3.1]
 title      = "Schema v15, shared root through the git common dir, branch registry"
-status     = "pending"
+status     = "in_progress"
 wave       = 3
 requires   = ["1.2"]
 symbols    = ["cg_branch_resolve", "branch_register", "cmd_branches"]
-touches    = ["src/db.c", "src/cg.h", "src/gitint.c", "src/main.c", "src/scan.c", "tests/integration/27_branches.sh"]
+touches    = ["src/db.c", "src/cg.h", "src/gitint.c", "src/main.c", "src/scan.c", "src/syncgate.c", "src/vcs.c", "src/docs.c", "tests/integration/27_branches.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/27_branches.sh schema && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/09_root.sh"
 do_1       = "Add branches(id, name, worktree, head, base, updated) and files.branch_id with UNIQUE(branch_id, path); migrate existing rows to the current branch."
 do_2       = "Resolve a worktree to the shared .codegraph through git rev-parse --git-common-dir when no nearer project exists; cg init inside a worktree of an initialized repo joins instead of refusing."

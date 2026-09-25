@@ -15,7 +15,7 @@
 /* ---------------- object store ---------------- */
 
 static void obj_path(const Cg *cg, const char *hash, char *out, size_t cap) {
-    snprintf(out, cap, "%s/%s/%.2s/%s", cg->root, CG_OBJECTS, hash, hash + 2);
+    snprintf(out, cap, "%s/%s/%.2s/%s", cg->shared, CG_OBJECTS, hash, hash + 2);
 }
 
 static int obj_write(const Cg *cg, const void *data, size_t len, char hash[65]) {
@@ -25,7 +25,7 @@ static int obj_write(const Cg *cg, const void *data, size_t len, char hash[65]) 
     struct stat st;
     if (stat(p, &st) == 0) return 0;              /* dedup */
     char dir[4900];
-    snprintf(dir, sizeof dir, "%s/%s/%.2s", cg->root, CG_OBJECTS, hash);
+    snprintf(dir, sizeof dir, "%s/%s/%.2s", cg->shared, CG_OBJECTS, hash);
     if (mkdirs(dir) != 0) return -1;
     return write_entire_file(p, data, len);
 }
@@ -38,7 +38,7 @@ static char *obj_read(const Cg *cg, const char *hash, size_t *len) {
 
 static int head_read(const Cg *cg, char hash[65]) {
     char p[4900];
-    snprintf(p, sizeof p, "%s/%s", cg->root, CG_HEAD);
+    snprintf(p, sizeof p, "%s/%s", cg->shared, CG_HEAD);
     char *s = read_entire_file(p, NULL);
     if (!s) return -1;
     snprintf(hash, 65, "%.64s", s);
@@ -48,7 +48,7 @@ static int head_read(const Cg *cg, char hash[65]) {
 
 static void head_write(const Cg *cg, const char *hash) {
     char p[4900];
-    snprintf(p, sizeof p, "%s/%s", cg->root, CG_HEAD);
+    snprintf(p, sizeof p, "%s/%s", cg->shared, CG_HEAD);
     write_entire_file(p, hash, strlen(hash));
 }
 
@@ -59,7 +59,7 @@ static int resolve_commit(const Cg *cg, const char *ref, char out[65]) {
     if (n == 64) { snprintf(out, 65, "%s", ref); return 0; }
     if (n < 4 || n > 64) return -1;
     char dir[4900];
-    snprintf(dir, sizeof dir, "%s/%s/%.2s", cg->root, CG_OBJECTS, ref);
+    snprintf(dir, sizeof dir, "%s/%s/%.2s", cg->shared, CG_OBJECTS, ref);
     DIR *d = opendir(dir);
     if (!d) return -1;
     struct dirent *e;

@@ -6,9 +6,21 @@ static const char *SCHEMA =
     "PRAGMA journal_mode=WAL;"
     "PRAGMA synchronous=NORMAL;"
     "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);"
+    /* branches: every branch whose tree has been indexed into this
+     * database, one row each, with the worktree it was last seen in. The
+     * registry is durable state, never dropped by a schema upgrade: its ids
+     * are what file rows are scoped by. */
+    "CREATE TABLE IF NOT EXISTS branches("
+    "  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, worktree TEXT,"
+    "  head TEXT, base TEXT, updated INTEGER NOT NULL);"
+    /* a path exists once per branch; ids stay unique across branches so
+     * every child table keys by file id alone */
     "CREATE TABLE IF NOT EXISTS files("
-    "  id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL, lang TEXT,"
-    "  size INTEGER, mtime INTEGER, hash TEXT, lines INTEGER);"
+    "  id INTEGER PRIMARY KEY, branch_id INTEGER NOT NULL DEFAULT 0,"
+    "  path TEXT NOT NULL, lang TEXT,"
+    "  size INTEGER, mtime INTEGER, hash TEXT, lines INTEGER,"
+    "  UNIQUE(branch_id, path));"
+    "CREATE INDEX IF NOT EXISTS idx_file_path ON files(path);"
     "CREATE TABLE IF NOT EXISTS symbols("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),"
     "  name TEXT NOT NULL, kind TEXT, line INTEGER, end_line INTEGER, sig TEXT);"
@@ -135,7 +147,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "14"
+#define SCHEMA_VERSION "15"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -166,11 +178,22 @@ bool cg_is_boundary(const char *dir) {
     return false;
 }
 
-int cg_find_root_at(const char *start, char *out, size_t cap) {
+/* `.git` as a regular file marks a linked worktree (or a submodule); a
+ * directory is the main worktree's own repository. */
+static bool git_file_at(const char *dir) {
+    char p[4600];
+    struct stat st;
+    snprintf(p, sizeof p, "%s/.git", dir);
+    return stat(p, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+int cg_find_project_at(const char *start, char *root, char *shared,
+                       size_t cap) {
     const char *ov = getenv("CODIFY_ROOT");
     if (ov && ov[0]) {                       /* explicit override wins */
         if (!is_project_dir(ov)) return -1;
-        snprintf(out, cap, "%s", ov);
+        snprintf(root, cap, "%s", ov);
+        snprintf(shared, cap, "%s", ov);
         return 0;
     }
     char cwd[4096];
@@ -184,8 +207,23 @@ int cg_find_root_at(const char *start, char *out, size_t cap) {
 
     for (;;) {
         if (is_project_dir(cwd)) {           /* probe before any boundary */
-            snprintf(out, cap, "%s", cwd);
+            snprintf(root, cap, "%s", cwd);
+            snprintf(shared, cap, "%s", cwd);
             return 0;
+        }
+        /* A linked worktree stops the walk like any .git does, but its main
+         * worktree may be an initialized project: then this tree joins it,
+         * its files indexed under their own branch into the shared graph.
+         * Nothing is spawned — git's own worktree files name the main. */
+        if (git_file_at(cwd)) {
+            char main[4096];
+            if (git_worktree_main(cwd, main, sizeof main) &&
+                is_project_dir(main)) {
+                snprintf(root, cap, "%s", cwd);
+                snprintf(shared, cap, "%s", main);
+                return 0;
+            }
+            return -1;
         }
         if (cg_is_boundary(cwd)) return -1;  /* a different project owns this */
         if (home && home[0] && strcmp(cwd, home) == 0) return -1;
@@ -198,30 +236,49 @@ int cg_find_root_at(const char *start, char *out, size_t cap) {
     }
 }
 
+int cg_find_root_at(const char *start, char *out, size_t cap) {
+    char root[4096];
+    return cg_find_project_at(start, root, out, cap);
+}
+
 int cg_find_root(char *out, size_t cap) {
     char cwd[4096];
     if (!getcwd(cwd, sizeof cwd)) return -1;
     return cg_find_root_at(cwd, out, cap);
 }
 
+void cg_bkey(const Cg *cg, const char *name, char *out, size_t cap) {
+    snprintf(out, cap, "%s:%ld", name, cg->branch_id);
+}
+
 /* Report which project cg binds to here. The whole class of "it silently used
  * an ancestor" confusion is one command away from being diagnosed. */
 int cmd_root(bool json) {
-    char root[4096];
-    if (cg_find_root(root, sizeof root) != 0) {
+    char cwd[4096], root[4096], shared[4096];
+    if (!getcwd(cwd, sizeof cwd) ||
+        cg_find_project_at(cwd, root, shared, sizeof root) != 0) {
         if (json) printf("{\"root\":null}\n");
         else fprintf(stderr, "cg: no Codify project here or in any parent "
                              "directory (run `cg init`)\n");
         return 1;
     }
     if (json) {
+        char branch[256], sha[65];
+        bool git = git_head(root, branch, sizeof branch, sha, sizeof sha);
         StrBuf b; sb_init(&b);
         sb_puts(&b, "{\"root\":");
         sb_json_str(&b, root);
+        sb_puts(&b, ",\"shared\":");
+        sb_json_str(&b, shared);
+        sb_printf(&b, ",\"worktree\":%s,\"branch\":",
+                  strcmp(root, shared) ? "true" : "false");
+        if (git) sb_json_str(&b, branch); else sb_puts(&b, "null");
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
     } else {
+        /* the tree, not the shared project: scripts cd here and build
+         * file paths from it */
         printf("%s\n", root);
     }
     return 0;
@@ -231,18 +288,25 @@ int cg_open(Cg *cg, bool create) {
     memset(cg, 0, sizeof *cg);
     if (create) {
         if (!getcwd(cg->root, sizeof cg->root)) return -1;
+        snprintf(cg->shared, sizeof cg->shared, "%s", cg->root);
         char p[4600];
         snprintf(p, sizeof p, "%s/%s", cg->root, CG_OBJECTS);
         if (mkdirs(p) != 0) {
             fprintf(stderr, "cg: cannot create %s\n", p);
             return -1;
         }
-    } else if (cg_find_root(cg->root, sizeof cg->root) != 0) {
-        fprintf(stderr, "cg: not inside a Codify project (run `cg init`)\n");
-        return -1;
+    } else {
+        char cwd[4096];
+        if (!getcwd(cwd, sizeof cwd) ||
+            cg_find_project_at(cwd, cg->root, cg->shared,
+                               sizeof cg->root) != 0) {
+            fprintf(stderr, "cg: not inside a Codify project (run `cg init`)\n");
+            return -1;
+        }
     }
+    cg->worktree = strcmp(cg->root, cg->shared) != 0;
     char dbpath[4600];
-    snprintf(dbpath, sizeof dbpath, "%s/%s", cg->root, CG_DB);
+    snprintf(dbpath, sizeof dbpath, "%s/%s", cg->shared, CG_DB);
     if (sqlite3_open(dbpath, &cg->db) != SQLITE_OK) {
         fprintf(stderr, "cg: cannot open %s: %s\n", dbpath, sqlite3_errmsg(cg->db));
         return -1;
@@ -263,20 +327,38 @@ int cg_open(Cg *cg, bool create) {
         return -1;
     }
     if (cg_schema_upgrade(cg) != 0) return -1;
+    /* a branch never seen before is registered here, so the first cg call
+     * from a fresh worktree needs one small write; a busy database leaves
+     * branch_id 0 and the indexer retries before it writes rows */
+    cg_branch_resolve(cg);
     return 0;
 }
 
 /* Derived tables (everything the indexer rebuilds from source) are dropped
  * and recreated on every schema_version mismatch — even with an empty files
  * table, an old DB may carry the old refs shape. Agent memory, git history,
- * leases, attempts, and runtime events are never touched: they are durable
- * state a version bump must not destroy. The DROPs are IF EXISTS, a no-op on
- * a fresh DB. */
+ * leases, attempts, runtime events, and the branch and agent registries are
+ * never touched: they are durable state a version bump must not destroy.
+ * The DROPs are IF EXISTS, a no-op on a fresh DB. Per-branch freshness
+ * marks go with the rows they described, so the next sync walks. */
 int cg_schema_upgrade(Cg *cg) {
     char *ver = cg_meta_get(cg, "schema_version");
     bool current = ver && strcmp(ver, SCHEMA_VERSION) == 0;
+    /* An older cg (an editor's or MCP server's installed binary) must never
+     * "upgrade" a newer database: it would drop the graph, a newer cg would
+     * rebuild it, and the two would take turns re-indexing the whole tree
+     * on every open. Refuse, and name the fix. */
+    long stored = ver ? atol(ver) : 0;
     free(ver);
     if (current) return 0;
+    if (stored > atol(SCHEMA_VERSION)) {
+        fprintf(stderr,
+            "cg: %s/%s is schema v%ld, but this cg (%s) only knows v%s.\n"
+            "    A newer cg indexed it — install that build (make install) "
+            "or run it from its tree.\n",
+            cg->shared, CG_DB, stored, CG_VERSION, SCHEMA_VERSION);
+        return -1;
+    }
     /* v14 separates semantic event identity from occurrence identity. Ignore
      * duplicate-column errors on fresh databases where SCHEMA already owns
      * the current shape. */
@@ -299,7 +381,9 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS refs;DROP TABLE IF EXISTS routes;"
         "DROP TABLE IF EXISTS imports;DROP TABLE IF EXISTS symbol_fts;"
         "DROP TABLE IF EXISTS body_fts;DROP TABLE IF EXISTS comments;"
-        "DROP TABLE IF EXISTS comment_fts;";
+        "DROP TABLE IF EXISTS comment_fts;"
+        "DELETE FROM meta WHERE key LIKE 'last_index_%' "
+        "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
     char *err = NULL;
     if (sqlite3_exec(cg->db, DROPS, NULL, NULL, &err) != SQLITE_OK ||
         sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {

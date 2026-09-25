@@ -11,8 +11,13 @@ static void usage(void) {
 "usage: cg <command> [args]\n"
 "\n"
 "graph\n"
-"  init [--nested]          create .codegraph/ here and build the index\n"
-"  root                     print the project root cg resolves to\n"
+"  init [--nested]          create .codegraph/ here and build the index;\n"
+"                           in a linked git worktree, join the repository's\n"
+"                           shared graph under this branch instead\n"
+"  root                     print the tree cg operates on (--json adds the\n"
+"                           shared project, worktree flag, and branch)\n"
+"  branches                 every branch indexed into the shared graph, with\n"
+"                           worktree, head, and file count\n"
 "  index [--full]           (re)index the project now (waits for the gate)\n"
 "  sync [paths] [--max-age MS] [--background] [--wait MS]\n"
 "                           incremental index; coalesces into a pass\n"
@@ -140,13 +145,25 @@ static const char *opt(int *argc, char **argv, const char *name,
 }
 
 static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
-    char *ms = cg ? cg_meta_get(cg, "last_index_ms") : NULL;
-    char *nf = cg ? cg_meta_get(cg, "project_files") : NULL;
-    char *nb = cg ? cg_meta_get(cg, "last_index_bytes") : NULL;
+    char key[64];
+    char *ms = NULL, *nf = NULL, *nb = NULL;
+    if (cg) {
+        cg_bkey(cg, "last_index_ms", key, sizeof key);
+        ms = cg_meta_get(cg, key);
+        cg_bkey(cg, "project_files", key, sizeof key);
+        nf = cg_meta_get(cg, key);
+        cg_bkey(cg, "last_index_bytes", key, sizeof key);
+        nb = cg_meta_get(cg, key);
+    }
     if (json) {
         StrBuf b; sb_init(&b);
         sb_puts(&b, "{\"root\":");
         if (cg) sb_json_str(&b, cg->root); else sb_puts(&b, "null");
+        sb_puts(&b, ",\"shared\":");
+        if (cg) sb_json_str(&b, cg->shared); else sb_puts(&b, "null");
+        sb_printf(&b, ",\"worktree\":%s,\"branch\":",
+                  cg && cg->worktree ? "true" : "false");
+        if (cg) sb_json_str(&b, cg->branch); else sb_puts(&b, "null");
         sb_printf(&b,
             ",\"profile\":\"%s\",\"cores_online\":%d,\"cores_affinity\":%d,"
             "\"cores_cgroup_quota\":%.2f,\"cores_effective\":%d,"
@@ -168,6 +185,8 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
          * user notices that cg resolved to an ancestor they did not expect. */
         if (cg) printf("project root: %s\n", cg->root);
         else    printf("project root: (none — not inside a Codify project)\n");
+        if (cg && cg->worktree) printf("worktree of: %s\n", cg->shared);
+        if (cg) printf("branch: %s\n", cg->branch);
         printf("machine profile: %s\n", si->profile);
         printf("  cores: %d online, %d affinity", si->cores_online,
                si->cores_affinity);
@@ -270,6 +289,20 @@ int main(int argc, char **argv) {
                 "index.\n    Run cg init inside a project, or --force if you "
                 "meant it.\n");
             return 1;
+        }
+        /* A linked worktree of an initialized repository joins the shared
+         * graph: its files are indexed under their own branch, nothing is
+         * created here. --nested still makes it a separate project. */
+        char shared[4096];
+        if (!nested && cg_find_project_at(here, root, shared, sizeof root) == 0
+            && strcmp(root, here) == 0 && strcmp(shared, here) != 0) {
+            if (cg_open(&cg, false) != 0) return 1;
+            IndexStats st;
+            cg_index(&cg, &si, true, &st, false);
+            printf("joined %s as worktree %s on branch %s\n", cg.shared,
+                   cg.root, cg.branch);
+            cg_close(&cg);
+            return 0;
         }
         /* An ancestor project is legitimate in a monorepo, but it is far more
          * often a stray index that would silently capture this directory. */
@@ -387,6 +420,8 @@ int main(int argc, char **argv) {
         rc = cmd_brief(&cg, json);
     } else if (strcmp(cmd, "fleet") == 0) {
         rc = cmd_fleet(&cg, argc, argv, json);
+    } else if (strcmp(cmd, "branches") == 0) {
+        rc = cmd_branches(&cg, argc, argv, json);
     } else if (strcmp(cmd, "review") == 0) {
         index_fresh(&cg, &si);                  /* review needs a fresh graph */
         rc = cmd_review(&cg, json);

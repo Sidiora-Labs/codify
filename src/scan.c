@@ -181,11 +181,15 @@ typedef struct {
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
+    /* rows belong to the branch this tree is on; the same path on another
+     * branch is another row, so a worktree never overwrites its siblings */
     s->up_file = cg_prep(cg,
-        "INSERT INTO files(path,lang,size,mtime,hash,lines) VALUES(?,?,?,?,?,?) "
-        "ON CONFLICT(path) DO UPDATE SET lang=excluded.lang,size=excluded.size,"
-        "mtime=excluded.mtime,hash=excluded.hash,lines=excluded.lines");
-    s->sel_file   = cg_prep(cg, "SELECT id FROM files WHERE path=?");
+        "INSERT INTO files(path,lang,size,mtime,hash,lines,branch_id) "
+        "VALUES(?,?,?,?,?,?,?7) "
+        "ON CONFLICT(branch_id,path) DO UPDATE SET lang=excluded.lang,"
+        "size=excluded.size,mtime=excluded.mtime,hash=excluded.hash,"
+        "lines=excluded.lines");
+    s->sel_file   = cg_prep(cg, "SELECT id FROM files WHERE path=? AND branch_id=?2");
     s->del_symfts = cg_prep(cg, "DELETE FROM symbol_fts WHERE rowid IN "
                                 "(SELECT id FROM symbols WHERE file_id=?)");
     s->del_syms   = cg_prep(cg, "DELETE FROM symbols WHERE file_id=?");
@@ -292,9 +296,11 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     sqlite3_bind_int64(s->up_file, 4, w->mtime);
     sqlite3_bind_text (s->up_file, 5, d->hash, -1, SQLITE_STATIC);
     sqlite3_bind_int64(s->up_file, 6, d->pr.nlines);
+    sqlite3_bind_int64(s->up_file, 7, cg->branch_id);
     step_reset(s->up_file);
 
     sqlite3_bind_text(s->sel_file, 1, w->rel, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(s->sel_file, 2, cg->branch_id);
     long file_id = 0;
     if (sqlite3_step(s->sel_file) == SQLITE_ROW)
         file_id = sqlite3_column_int64(s->sel_file, 0);
@@ -568,7 +574,10 @@ static long count_sql(Cg *cg, const char *sql) {
 
 bool index_scope_bounded(Cg *cg) {
     long nf = count_sql(cg, "SELECT count(*) FROM temp.scope_files");
-    long total = count_sql(cg, "SELECT count(*) FROM files");
+    char sql[96];
+    snprintf(sql, sizeof sql, "SELECT count(*) FROM files WHERE branch_id=%ld",
+             cg->branch_id);
+    long total = count_sql(cg, sql);
     return nf > 0 && (nf <= 64 || nf * 4 < total);
 }
 
@@ -651,7 +660,9 @@ static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {
     sqlite3_stmt *is_sym = cg_prep(cg,
         "SELECT 1 FROM symbols WHERE name=? LIMIT 1");
     sqlite3_stmt *is_path = cg_prep(cg,
-        "SELECT path FROM files WHERE path=?1 OR path LIKE '%/'||?1 LIMIT 1");
+        "SELECT path FROM files WHERE branch_id=?2 AND "
+        "(path=?1 OR path LIKE '%/'||?1) LIMIT 1");
+    sqlite3_bind_int64(is_path, 2, cg->branch_id);   /* survives reset */
     sqlite3_stmt *is_route = cg_prep(cg,
         "SELECT pattern FROM routes WHERE pattern=?1 LIMIT 1");
     while (sqlite3_step(sel) == SQLITE_ROW) {
@@ -842,7 +853,9 @@ static void targets_free(char **t, int n) {
 
 /* One walk+diff+parse+write pass. targets NULL means the whole tree; with
  * targets, only rows under those paths are diffed, so files elsewhere are
- * never mistaken for removals. Adds to st; returns 0, or -1 when the
+ * never mistaken for removals. Only the open branch's rows are diffed and
+ * written: a sibling worktree's slice of the graph is invisible here, so
+ * its files can never look removed. Adds to st; returns 0, or -1 when the
  * database stayed busy (a stall). */
 static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                       char **targets, int ntargets, IndexStats *st) {
@@ -860,7 +873,9 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
      * cover, so nothing outside them can look removed */
     DbFile *dbf = NULL;
     int ndbf = 0, cdbf = 0;
-    sqlite3_stmt *sel = cg_prep(cg, "SELECT id,path,size,mtime,hash FROM files");
+    sqlite3_stmt *sel = cg_prep(cg,
+        "SELECT id,path,size,mtime,hash FROM files WHERE branch_id=?");
+    sqlite3_bind_int64(sel, 1, cg->branch_id);
     while (sqlite3_step(sel) == SQLITE_ROW) {
         const char *path = (const char *)sqlite3_column_text(sel, 1);
         if (targets && !targets_cover(targets, ntargets, path)) continue;
@@ -997,17 +1012,22 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     return stalled ? -1 : 0;
 }
 
-/* The graph is fresh for a caller when the last whole-tree walk started
- * inside its window and nothing has been queued since: no resolve left
- * behind by a stall, no dirty note from a coalesced caller. */
+/* The graph is fresh for a caller when the last whole-tree walk of its
+ * branch started inside its window and nothing has been queued since: no
+ * resolve left behind by a stall, no dirty note from a coalesced caller.
+ * Freshness is per branch, so a worktree just added is never told its
+ * unindexed branch is fresh because a sibling walked seconds ago. */
 static bool index_is_fresh(Cg *cg, long max_age_ms) {
     if (max_age_ms <= 0) return false;
     if (syncgate_is_dirty(cg)) return false;
-    char *p = cg_meta_get(cg, "index_pending_resolve");
+    char key[64];
+    cg_bkey(cg, "index_pending_resolve", key, sizeof key);
+    char *p = cg_meta_get(cg, key);
     bool pending = p && p[0] == '1';
     free(p);
     if (pending) return false;
-    char *at = cg_meta_get(cg, "last_index_at");
+    cg_bkey(cg, "last_index_at", key, sizeof key);
+    char *at = cg_meta_get(cg, key);
     long t = at ? atol(at) : 0;
     free(at);
     if (t <= 0) return false;
@@ -1043,8 +1063,18 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     lang_global_init();
     if (o->background) syncgate_background_nice();
 
+    /* rows are written under the branch; without a registered one (the
+     * database was busy at open) there is nothing correct to write */
+    if (cg->branch_id <= 0 && cg_branch_resolve(cg) != 0) {
+        st->busy = true;
+        st->ms = now_ms() - t0;
+        index_report(st, o);
+        return -1;
+    }
+    char key[64];
     if (index_is_fresh(cg, o->max_age_ms)) {
-        char *at = cg_meta_get(cg, "last_index_at");
+        cg_bkey(cg, "last_index_at", key, sizeof key);
+        char *at = cg_meta_get(cg, key);
         st->fresh = true;
         st->ms = at ? now_ms() - atol(at) : 0;
         free(at);
@@ -1068,7 +1098,8 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     /* what earlier losers queued while we waited */
     char *note = syncgate_take_dirty(cg);
     if (!note && index_is_fresh(cg, o->max_age_ms)) {
-        char *at = cg_meta_get(cg, "last_index_at");
+        cg_bkey(cg, "last_index_at", key, sizeof key);
+        char *at = cg_meta_get(cg, key);
         st->fresh = true;
         st->ms = at ? now_ms() - atol(at) : 0;
         free(at);
@@ -1138,7 +1169,9 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     /* Chunks committed before a stall carry unresolved refs and edges. The
      * pending flag makes the next successful index finish that work even
      * when no file has changed since. */
-    char *pending = cg_meta_get(cg, "index_pending_resolve");
+    char pkey[64];
+    cg_bkey(cg, "index_pending_resolve", pkey, sizeof pkey);
+    char *pending = cg_meta_get(cg, pkey);
     bool need_resolve = st->files_indexed + st->files_removed > 0 ||
                         (pending && pending[0] == '1');
     bool recover = pending && pending[0] == '1';
@@ -1157,7 +1190,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
                 resolve_imports_scoped(cg);
                 resolve_refs_scoped(cg);
             }
-            cg_meta_set(cg, "index_pending_resolve", "0");
+            cg_meta_set(cg, pkey, "0");
             cg_exec(cg, "COMMIT");
         }
     }
@@ -1170,21 +1203,28 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     char buf[64];
     if (stalled) {
         if (st->files_indexed > 0)
-            cg_meta_set(cg, "index_pending_resolve", "1");
+            cg_meta_set(cg, pkey, "1");
     } else {
         snprintf(buf, sizeof buf, "%ld", st->ms);
-        cg_meta_set(cg, "last_index_ms", buf);
+        cg_bkey(cg, "last_index_ms", key, sizeof key);
+        cg_meta_set(cg, key, buf);
         snprintf(buf, sizeof buf, "%ld", st->bytes);
-        cg_meta_set(cg, "last_index_bytes", buf);
+        cg_bkey(cg, "last_index_bytes", key, sizeof key);
+        cg_meta_set(cg, key, buf);
         if (whole_at > 0) {
             /* the walk's start, not its end: a file written while the walk
              * ran may have been passed already, and must not hide behind
              * a freshness window that begins after it */
             snprintf(buf, sizeof buf, "%ld", whole_at);
-            cg_meta_set(cg, "last_index_at", buf);
+            cg_bkey(cg, "last_index_at", key, sizeof key);
+            cg_meta_set(cg, key, buf);
             snprintf(buf, sizeof buf, "%ld", st->files_seen);
-            cg_meta_set(cg, "project_files", buf);
+            cg_bkey(cg, "project_files", key, sizeof key);
+            cg_meta_set(cg, key, buf);
         }
+        /* the registry says where this branch was last indexed from and
+         * at which commit; readers of cg branches see it move */
+        branch_register(cg, cg->branch, cg->root, cg->head, NULL);
     }
     syncgate_release(gate);
     index_report(st, o);
