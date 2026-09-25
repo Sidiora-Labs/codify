@@ -225,6 +225,34 @@ static void strip_ext(char *buf, size_t cap, const char *path) {
     if (dot && !strchr(dot, '/')) *dot = 0;
 }
 
+/* Collapse "./" and "seg/../" in a repo-relative path, in place. A ".."
+ * that would climb above the root is dropped: the files table never holds
+ * a path outside the tree, so such a lookup can only miss. */
+static void norm_dots(char *p) {
+    char out[4096];
+    size_t o = 0;
+    const char *s = p;
+    while (*s) {
+        const char *e = strchr(s, '/');
+        size_t n = e ? (size_t)(e - s) : strlen(s);
+        if (n == 0 || (n == 1 && s[0] == '.')) {
+            /* empty or "." segment: skip */
+        } else if (n == 2 && s[0] == '.' && s[1] == '.') {
+            while (o > 0 && out[o - 1] != '/') o--;
+            if (o > 0) o--;
+        } else {
+            if (o + n + 2 >= sizeof out) break;
+            if (o) out[o++] = '/';
+            memcpy(out + o, s, n);
+            o += n;
+        }
+        s += n;
+        if (*s == '/') s++;
+    }
+    out[o] = 0;
+    strcpy(p, out);
+}
+
 /* Try to find a repository file matching an import module string.
  * Returns the file_id or -1 if not found. */
 static long find_repo_file(Cg *cg, const char *module, const char *from_path,
@@ -241,6 +269,43 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
         fid = sqlite3_column_int64(exact, 0);
     sqlite3_finalize(exact);
     if (fid >= 0) return fid;
+
+    /* C's `#include "x.h"` searches beside the including file before any
+     * include path, so a bare "cg.h" from src/graph.c means src/cg.h —
+     * the root-relative trials below can only miss it. */
+    if (strcmp(lang, "c") == 0 || strcmp(lang, "cpp") == 0) {
+        const char *sl = strrchr(from_path, '/');
+        char beside[4096];
+        if (path_format(beside, sizeof beside, "%.*s%s%s",
+                        sl ? (int)(sl - from_path) : 0, from_path,
+                        sl ? "/" : "", module)) {
+            norm_dots(beside);
+            sqlite3_stmt *b = cg_prep(cg,
+                "SELECT id FROM files WHERE path=? AND branch_id=?2 LIMIT 1");
+            sqlite3_bind_text(b, 1, beside, -1, SQLITE_STATIC);
+            sqlite3_bind_int64(b, 2, cg->branch_id);
+            if (sqlite3_step(b) == SQLITE_ROW)
+                fid = sqlite3_column_int64(b, 0);
+            sqlite3_finalize(b);
+            if (fid >= 0) return fid;
+        }
+        /* Not beside the file: an -I directory the build adds. Without the
+         * build flags the only honest answer is a header of that name that
+         * exists once in the tree; two candidates stay unresolved. */
+        sqlite3_stmt *u = cg_prep(cg,
+            "SELECT id FROM files "
+            "WHERE branch_id=?2 AND substr(path, -length(?1) - 1) = '/' || ?1 "
+            "LIMIT 2");
+        sqlite3_bind_text(u, 1, module, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(u, 2, cg->branch_id);
+        long only = -1;
+        int hits = 0;
+        while (sqlite3_step(u) == SQLITE_ROW) {
+            if (hits++ == 0) only = sqlite3_column_int64(u, 0);
+        }
+        sqlite3_finalize(u);
+        if (hits == 1) return only;
+    }
 
     /* resolve relative to the importing file's directory */
     const char *slash = strrchr(from_path, '/');
@@ -377,6 +442,26 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
     return fid;
 }
 
+/* Node's core modules, with or without the node: scheme. */
+static bool node_core_module(const char *module) {
+    static const char *CORE[] = {
+        "assert","async_hooks","buffer","child_process","cluster","console",
+        "constants","crypto","dgram","diagnostics_channel","dns","domain",
+        "events","fs","fs/promises","http","http2","https","inspector",
+        "module","net","os","path","path/posix","path/win32","perf_hooks",
+        "process","punycode","querystring","readline","readline/promises",
+        "repl","stream","stream/promises","stream/web","string_decoder",
+        "sys","timers","timers/promises","tls","trace_events","tty","url",
+        "util","util/types","v8","vm","wasi","worker_threads","zlib",
+        "test","sea","sqlite", NULL
+    };
+    if (!module) return false;
+    if (strncmp(module, "node:", 5) == 0) module += 5;
+    for (int i = 0; CORE[i]; i++)
+        if (strcmp(CORE[i], module) == 0) return true;
+    return false;
+}
+
 /* ---- main resolution entry point ---- */
 
 static bool mod_matches(const char *module, const char *cand_path);
@@ -448,6 +533,12 @@ static void resolve_imports_run(Cg *cg, bool scoped) {
 
         if (sys) {
             /* system #include <header.h> */
+            origin = "system";
+        } else if ((strcmp(lang, "javascript") == 0 ||
+                    strcmp(lang, "typescript") == 0) &&
+                   node_core_module(module)) {
+            /* require('fs') is the runtime's, never a repo file or a
+             * manifest entry — a bare core name cannot mean ./fs */
             origin = "system";
         } else {
             /* try to resolve to a repo file */
@@ -531,51 +622,112 @@ void resolve_imports_scoped(Cg *cg) { resolve_imports_run(cg, true); }
 
 /* ---- builtin tables ---- */
 
-/* C and POSIX builtins, gated on the headers actually included.
+/* C and POSIX builtins, gated on the headers the file reaches — its own
+ * system includes plus those of every repo header it includes, since a
+ * tree whose .c files include one umbrella header sees libc only through
+ * it. A name ending in '*' is a prefix: a header that exports a family
+ * (sqlite3_*, pthread_*) is matched by family, not by an ever-short list.
  * Sized by measured frequency in this tree, not by completeness. */
 static const struct { const char *header; const char *names; } C_BUILTINS[] = {
     {"stdio.h",   "printf,fprintf,sprintf,snprintf,fopen,fclose,fread,fwrite,"
                   "fgets,fputs,puts,putchar,getchar,feof,ferror,fflush,fseek,"
                   "ftell,rewind,remove,rename,tmpfile,perror,sscanf,fscanf,"
-                  "vprintf,vfprintf,vsprintf,vsnprintf,stdin,stdout,stderr"},
+                  "vprintf,vfprintf,vsprintf,vsnprintf,stdin,stdout,stderr,"
+                  "popen,pclose,getline,getdelim,fileno,fdopen,setvbuf,fputc,"
+                  "fgetc,getc,putc,ungetc,dprintf,vdprintf,fseeko,ftello,"
+                  "clearerr,setbuf,tmpnam"},
     {"stdlib.h",  "malloc,calloc,realloc,free,exit,abort,atoi,atol,atof,"
                   "strtol,strtoul,strtod,strtoll,strtoull,qsort,bsearch,"
-                  "abs,labs,rand,srand,getenv,system,atexit"},
+                  "abs,labs,llabs,rand,srand,getenv,system,atexit,setenv,"
+                  "unsetenv,putenv,realpath,mkdtemp,mkstemp,qsort_r,_Exit,"
+                  "strtof,strtold,atoll,random,srandom,div,ldiv,mblen"},
     {"string.h",  "memcpy,memmove,memset,memcmp,memchr,strlen,strcpy,strncpy,"
                   "strcat,strncat,strcmp,strncmp,strchr,strrchr,strstr,strtok,"
-                  "strerror,strdup,strndup,strcasecmp,strncasecmp"},
+                  "strerror,strdup,strndup,strcasecmp,strncasecmp,strtok_r,"
+                  "strcspn,strspn,strpbrk,strsep,strnlen,memmem,strerror_r,"
+                  "memrchr,strcoll,strxfrm,stpcpy,stpncpy"},
+    {"strings.h", "strcasecmp,strncasecmp,bzero,bcopy,ffs,index,rindex"},
     {"stdint.h",  "int8_t,int16_t,int32_t,int64_t,uint8_t,uint16_t,uint32_t,"
                   "uint64_t,intptr_t,uintptr_t,size_t,ptrdiff_t"},
     {"stdbool.h", "true,false"},
     {"ctype.h",   "isalpha,isdigit,isalnum,isspace,isupper,islower,toupper,"
-                  "tolower,isprint,ispunct,isxdigit"},
-    {"math.h",    "sin,cos,tan,sqrt,pow,fabs,ceil,floor,round,log,log10,exp"},
-    {"assert.h",  "assert"},
+                  "tolower,isprint,ispunct,isxdigit,isblank,iscntrl,isgraph"},
+    {"math.h",    "sin,cos,tan,sqrt,pow,fabs,ceil,floor,round,log,log10,exp,"
+                  "isnan,isinf,isfinite,lround,lrint,llround,fmax,fmin,fmod,"
+                  "trunc,hypot,atan2,log2,exp2,cbrt,copysign,nan,ldexp,frexp"},
+    {"assert.h",  "assert,static_assert"},
     {"errno.h",   "errno"},
     {"unistd.h",  "read,write,close,lseek,unlink,rmdir,getcwd,chdir,fork,"
                   "exec,execl,execv,pipe,dup,dup2,sleep,usleep,access,isatty,"
-                  "sysconf,getpid,getppid"},
-    {"fcntl.h",   "open,fcntl,O_RDONLY,O_WRONLY,O_RDWR,O_CREAT,O_TRUNC"},
-    {"sys/stat.h","stat,fstat,lstat,mkdir,chmod,umask,S_ISDIR,S_ISREG"},
-    {"dirent.h",  "opendir,readdir,closedir"},
-    {"pthread.h", "pthread_create,pthread_join,pthread_mutex_init,"
-                  "pthread_mutex_lock,pthread_mutex_unlock,pthread_mutex_destroy,"
-                  "pthread_cond_init,pthread_cond_wait,pthread_cond_signal,"
-                  "pthread_cond_broadcast,pthread_cond_destroy"},
-    {"time.h",    "time,clock,difftime,mktime,strftime,localtime,gmtime"},
-    {"signal.h",  "signal,raise,kill,sigaction"},
+                  "sysconf,getpid,getppid,_exit,getuid,geteuid,getgid,getegid,"
+                  "readlink,symlink,link,ftruncate,fsync,fdatasync,execvp,"
+                  "execlp,execve,execvpe,setpgid,getpgid,setsid,getsid,"
+                  "gethostname,nice,pause,alarm,fchdir,ttyname,pread,pwrite,"
+                  "truncate,chown,fchown,pathconf,fpathconf,getlogin,setuid,"
+                  "setgid,vfork,dup3,pipe2,sync,swab,gettid"},
+    {"fcntl.h",   "open,fcntl,creat,openat,posix_fadvise,posix_fallocate,"
+                  "O_RDONLY,O_WRONLY,O_RDWR,O_CREAT,O_TRUNC,O_APPEND,O_EXCL,"
+                  "O_CLOEXEC,O_NONBLOCK,O_DIRECTORY"},
+    {"sys/stat.h","stat,fstat,lstat,mkdir,chmod,fchmod,umask,mkfifo,mknod,"
+                  "fstatat,mkdirat,utimensat,futimens,"
+                  "S_ISDIR,S_ISREG,S_ISLNK,S_ISFIFO,S_ISSOCK,S_ISCHR,S_ISBLK"},
+    {"sys/wait.h","wait,waitpid,waitid,wait3,wait4,WIFEXITED,WEXITSTATUS,"
+                  "WIFSIGNALED,WTERMSIG,WIFSTOPPED,WSTOPSIG,WCOREDUMP,"
+                  "WIFCONTINUED"},
+    {"sys/file.h","flock,LOCK_SH,LOCK_EX,LOCK_UN,LOCK_NB"},
+    {"sys/time.h","gettimeofday,settimeofday,setitimer,getitimer,utimes,"
+                  "timeradd,timersub,timercmp,timerclear,timerisset"},
+    {"sys/resource.h", "getrlimit,setrlimit,getpriority,setpriority,getrusage"},
+    {"sys/inotify.h", "inotify_init,inotify_init1,inotify_add_watch,"
+                  "inotify_rm_watch"},
+    {"sys/select.h", "select,pselect,FD_SET,FD_CLR,FD_ISSET,FD_ZERO"},
+    {"sys/mman.h", "mmap,munmap,mprotect,msync,madvise,mlock,munlock"},
+    {"sys/socket.h", "socket,bind,listen,accept,connect,send,recv,sendto,"
+                  "recvfrom,shutdown,setsockopt,getsockopt,getsockname,"
+                  "getpeername,socketpair"},
+    {"poll.h",    "poll,ppoll"},
+    {"fnmatch.h", "fnmatch"},
+    {"regex.h",   "regcomp,regexec,regerror,regfree"},
+    {"glob.h",    "glob,globfree"},
+    {"sched.h",   "sched_yield,sched_getaffinity,sched_setaffinity,"
+                  "sched_getcpu,CPU_COUNT,CPU_ISSET,CPU_SET,CPU_ZERO,CPU_CLR"},
+    {"stdatomic.h", "atomic_*,ATOMIC_*"},
+    {"dirent.h",  "opendir,readdir,closedir,rewinddir,dirfd,fdopendir,"
+                  "scandir,alphasort,readdir_r,telldir,seekdir"},
+    {"pthread.h", "pthread_*,PTHREAD_*"},
+    {"time.h",    "time,clock,difftime,mktime,strftime,localtime,gmtime,"
+                  "localtime_r,gmtime_r,timegm,strptime,nanosleep,"
+                  "clock_gettime,clock_getres,clock_nanosleep,asctime,ctime,"
+                  "ctime_r,asctime_r,timer_create,timer_settime,timer_delete"},
+    {"signal.h",  "signal,raise,kill,sigaction,sigemptyset,sigfillset,"
+                  "sigaddset,sigdelset,sigismember,sigprocmask,sigpending,"
+                  "sigsuspend,sigwait,killpg,pthread_sigmask,pthread_kill,"
+                  "sigqueue,sigaltstack,psignal,strsignal"},
     {"stdarg.h",  "va_start,va_end,va_arg,va_copy,va_list"},
-    {"sqlite3.h", "sqlite3_open,sqlite3_close,sqlite3_exec,sqlite3_prepare_v2,"
-                  "sqlite3_step,sqlite3_finalize,sqlite3_bind_text,"
-                  "sqlite3_bind_int,sqlite3_bind_int64,sqlite3_bind_null,"
-                  "sqlite3_bind_double,sqlite3_bind_blob,"
-                  "sqlite3_column_text,sqlite3_column_int,sqlite3_column_int64,"
-                  "sqlite3_column_double,sqlite3_column_blob,"
-                  "sqlite3_column_bytes,sqlite3_column_type,"
-                  "sqlite3_reset,sqlite3_errmsg,sqlite3_changes,"
-                  "sqlite3_last_insert_rowid,SQLITE_ROW,SQLITE_DONE,"
-                  "SQLITE_OK,SQLITE_STATIC,SQLITE_TRANSIENT"},
+    {"setjmp.h",  "setjmp,longjmp,sigsetjmp,siglongjmp"},
+    {"locale.h",  "setlocale,localeconv"},
+    {"limits.h",  ""},
+    {"float.h",   ""},
+    {"inttypes.h","strtoimax,strtoumax,imaxabs,imaxdiv"},
+    {"wchar.h",   "wcslen,wcscpy,wcscmp,mbrtowc,wcrtomb,mbstowcs,wcstombs"},
+    {"iconv.h",   "iconv_open,iconv,iconv_close"},
+    {"dlfcn.h",   "dlopen,dlsym,dlclose,dlerror"},
+    {"sqlite3.h", "sqlite3_*,SQLITE_*"},
     {NULL, NULL}
+};
+
+/* C names that read as calls but belong to the language or the compiler:
+ * casts and sizeof operands the parser sees as `int(...)`, attribute
+ * spellings, preprocessor operators. Never gated on a header. */
+static const char *C_ALWAYS[] = {
+    "int","char","long","short","unsigned","signed","void","double","float",
+    "bool","size_t","ssize_t","sizeof","alignof","_Alignof","offsetof",
+    "typeof","__typeof__","defined","__attribute__","__builtin_expect",
+    "__builtin_unreachable","__builtin_trap","__builtin_popcount",
+    "__builtin_popcountll","__builtin_clz","__builtin_ctz","__builtin_bswap32",
+    "__builtin_bswap64","_Static_assert","static_assert","__extension__",
+    "__asm__","asm","__has_include","__has_attribute","__has_builtin",
+    NULL
 };
 
 /* JS/Node builtins — always available, not header-gated */
@@ -646,32 +798,73 @@ static bool in_list(const char *const *list, const char *name) {
     return false;
 }
 
-/* Check if a name is a C builtin gated by the headers this file includes */
-static bool c_builtin(Cg *cg, long file_id, const char *name) {
-    /* load the system headers this file includes */
-    sqlite3_stmt *q = cg_prep(cg,
-        "SELECT module FROM imports WHERE file_id=? AND system=1");
-    sqlite3_bind_int64(q, 1, file_id);
-    bool found = false;
-    while (sqlite3_step(q) == SQLITE_ROW && !found) {
-        const char *hdr = (const char *)sqlite3_column_text(q, 0);
-        for (int i = 0; C_BUILTINS[i].header && !found; i++) {
-            if (strcmp(C_BUILTINS[i].header, hdr) != 0) continue;
-            /* scan comma-separated names */
-            const char *p = C_BUILTINS[i].names;
-            while (*p) {
-                const char *s = p;
-                while (*p && *p != ',') p++;
-                size_t n = (size_t)(p - s);
-                if (n == strlen(name) && strncmp(s, name, n) == 0)
-                    found = true;
-                if (*p == ',') p++;
-            }
+/* Does `name` appear in a comma-separated builtin list? An entry ending in
+ * '*' matches by prefix. */
+static bool in_names(const char *names, const char *name) {
+    size_t nl = strlen(name);
+    const char *p = names;
+    while (*p) {
+        const char *s = p;
+        while (*p && *p != ',') p++;
+        size_t n = (size_t)(p - s);
+        if (n > 0 && s[n - 1] == '*') {
+            if (nl >= n - 1 && strncmp(s, name, n - 1) == 0) return true;
+        } else if (n == nl && strncmp(s, name, n) == 0) {
+            return true;
         }
+        if (*p == ',') p++;
+    }
+    return false;
+}
+
+/* The system headers a file reaches: its own <...> includes plus those of
+ * every repo header it includes, followed through imports.target_file_id.
+ * Cached for the last file asked about, since refs resolve file by file and
+ * the walk would otherwise run once per call site. */
+#define C_HDR_MAX 64
+#define C_HDR_LEN 48
+static struct {
+    long file_id;
+    int n;
+    char hdr[C_HDR_MAX][C_HDR_LEN];
+} c_hdrs = { -1, 0, {{0}} };
+
+static void c_load_headers(Cg *cg, long file_id) {
+    c_hdrs.file_id = file_id;
+    c_hdrs.n = 0;
+    sqlite3_stmt *q = cg_prep(cg,
+        "WITH RECURSIVE reach(fid, depth) AS ("
+        "  SELECT ?1, 0 "
+        "  UNION "
+        "  SELECT i.target_file_id, reach.depth + 1 FROM imports i "
+        "  JOIN reach ON i.file_id = reach.fid "
+        "  WHERE i.system = 0 AND i.target_file_id IS NOT NULL "
+        "    AND reach.depth < 4) "
+        "SELECT DISTINCT i.module FROM imports i JOIN reach ON i.file_id = reach.fid "
+        "WHERE i.system = 1");
+    sqlite3_bind_int64(q, 1, file_id);
+    while (c_hdrs.n < C_HDR_MAX && sqlite3_step(q) == SQLITE_ROW) {
+        const char *hdr = (const char *)sqlite3_column_text(q, 0);
+        if (!hdr) continue;
+        snprintf(c_hdrs.hdr[c_hdrs.n++], C_HDR_LEN, "%s", hdr);
     }
     sqlite3_finalize(q);
-    return found;
 }
+
+/* Check if a name is a C builtin gated by the headers this file reaches */
+static bool c_builtin(Cg *cg, long file_id, const char *name) {
+    if (in_list(C_ALWAYS, name)) return true;
+    if (c_hdrs.file_id != file_id) c_load_headers(cg, file_id);
+    for (int h = 0; h < c_hdrs.n; h++)
+        for (int i = 0; C_BUILTINS[i].header; i++)
+            if (strcmp(C_BUILTINS[i].header, c_hdrs.hdr[h]) == 0 &&
+                in_names(C_BUILTINS[i].names, name))
+                return true;
+    return false;
+}
+
+/* Forget the cached header set: the imports it was built from changed. */
+static void c_builtin_reset(void) { c_hdrs.file_id = -1; c_hdrs.n = 0; }
 
 /* The four resolving languages */
 static bool is_resolving_lang(const char *lang) {
@@ -805,6 +998,10 @@ static void resolve_refs_run(Cg *cg, bool scoped) {
 
     /* counters per language for meta stats */
     long internal_c = 0, external_c = 0, unknown_c = 0;
+
+    /* imports were just re-resolved; a header set cached from an earlier
+     * pass in this process (watch, mcp, lsp) may name the wrong files */
+    c_builtin_reset();
 
     while (sqlite3_step(sel) == SQLITE_ROW) {
         long ref_id   = sqlite3_column_int64(sel, 0);

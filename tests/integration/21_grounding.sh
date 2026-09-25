@@ -90,4 +90,81 @@ resolve_internal="$(sqlite3 .codegraph/graph.db \
   "SELECT value FROM meta WHERE key='resolve_internal'")"
 [ -n "$resolve_internal" ] || fail "resolve_internal not in meta"
 
+# (h) C sees libc through the headers it includes, not only its own <...>
+# lines: a tree whose .c files include one umbrella header must not report
+# every free() as ungrounded. `#include "x.h"` resolves beside the file
+# first, then to a unique header of that name anywhere (an -I directory).
+mkdir -p "$TMP/cproj/src" "$TMP/cproj/tests"
+cd "$TMP/cproj"
+cat > src/app.h <<'EOF'
+#include <stdlib.h>
+#include <sqlite3.h>
+void app_run(void);
+EOF
+cat > src/app.c <<'EOF'
+#include "app.h"
+void app_run(void) {
+    char *p = malloc(4);
+    free(p);
+    sqlite3_stmt *st = 0;
+    sqlite3_finalize(st);
+    regcomp(0, 0, 0);
+    frobnicate(p);
+}
+EOF
+cat > tests/t.c <<'EOF'
+#include "app.h"
+#include "nowhere.h"
+int main(void) { app_run(); free(0); return 0; }
+EOF
+mkdir -p tools
+cat > tools/x.js <<'EOF'
+const fs = require('fs');
+const path = require('node:path');
+const left = require('left-pad');
+module.exports = { fs, path, left };
+EOF
+"$CG" init >/dev/null
+
+# the quoted include is a repo file beside app.c
+app_inc="$(sqlite3 .codegraph/graph.db \
+  "SELECT i.origin || ':' || f2.path FROM imports i
+   JOIN files f ON f.id=i.file_id JOIN files f2 ON f2.id=i.target_file_id
+   WHERE f.path='src/app.c' AND i.module='app.h'")"
+has "$app_inc" "repo:src/app.h"
+# ...and from tests/, the one header of that name in the tree
+t_inc="$(sqlite3 .codegraph/graph.db \
+  "SELECT i.origin || ':' || f2.path FROM imports i
+   JOIN files f ON f.id=i.file_id JOIN files f2 ON f2.id=i.target_file_id
+   WHERE f.path='tests/t.c' AND i.module='app.h'")"
+has "$t_inc" "repo:src/app.h"
+nowhere="$(sqlite3 .codegraph/graph.db \
+  "SELECT i.origin FROM imports i JOIN files f ON f.id=i.file_id
+   WHERE f.path='tests/t.c' AND i.module='nowhere.h'")"
+has "$nowhere" "unknown"
+
+verdict_of() {
+    sqlite3 .codegraph/graph.db \
+      "SELECT r.verdict || ':' || r.conf FROM refs r JOIN files f ON f.id=r.file_id
+       WHERE f.path='$1' AND r.name='$2' AND r.kind='call' LIMIT 1"
+}
+# libc and sqlite3 reached through app.h are builtins, by name and by family
+has "$(verdict_of src/app.c free)" "external:builtin"
+has "$(verdict_of src/app.c malloc)" "external:builtin"
+has "$(verdict_of src/app.c sqlite3_finalize)" "external:builtin"
+has "$(verdict_of tests/t.c free)" "external:builtin"
+has "$(verdict_of tests/t.c app_run)" "internal"
+# a header nobody includes still gates its names; an undefined call still fires
+has "$(verdict_of src/app.c regcomp)" "unknown"
+has "$(verdict_of src/app.c frobnicate)" "unknown"
+
+# Node core modules are the runtime's, with or without the node: scheme;
+# an undeclared package is still ungrounded
+js_origins="$(sqlite3 .codegraph/graph.db \
+  "SELECT i.module || '=' || i.origin FROM imports i JOIN files f ON f.id=i.file_id
+   WHERE f.path='tools/x.js' ORDER BY i.line")"
+has "$js_origins" "fs=system"
+has "$js_origins" "node:path=system"
+has "$js_origins" "left-pad=unknown"
+
 echo ok
