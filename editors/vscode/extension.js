@@ -23,6 +23,12 @@ const tasks = require('./tasks');
 /* --- memories (5.2) --- */
 const memorybrowser = require('./memories');
 const { createRefresher } = require('./refresh');
+// --- fleet (5.3) ---
+const fleet = require('./fleet');
+/* The fleet view joins three cg reports of its own; it runs inside the one
+ * refresh chain below and only while the view is visible. */
+let fleetApi = { refresh: async () => {} };
+// --- end fleet (5.3) ---
 
 let provider;
 let memories;
@@ -220,6 +226,10 @@ async function runRefresh() {
     /* --- memories (5.2): the browser rides the one scheduler, never a timer
      * of its own; it is a no-op while the panel is closed --- */
     await memoryApi.refresh();
+    // --- fleet (5.3) ---
+    /* the board's spec status is handed over rather than asked for twice */
+    await fleetApi.refresh(provider.model && provider.model.status);
+    // --- end fleet (5.3) ---
     await updateScope();
     /* what counts as "in scope" depends on which task is in progress, so
      * open documents are re-checked only when that changes */
@@ -657,6 +667,11 @@ async function activate(ctx) {
     memoryApi = memorybrowser.register(ctx, {
         cg, cgJson, workspaceRoot, refresh: () => afterMutation(),
     });
+    // --- fleet (5.3) ---
+    fleetApi = fleet.register(ctx, {
+        cg, cgJson, workspaceRoot, show, refresh: () => afterMutation(),
+    });
+    // --- end fleet (5.3) ---
 
     /* Language features are best-effort: a workspace with no .codegraph, or
      * no cg on PATH, still gets the spec tooling above. */
