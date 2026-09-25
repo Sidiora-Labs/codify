@@ -4,7 +4,7 @@ _Maintained from local Codify snapshots (`cg log`); symbol-level changes are der
 
 ## 0.9.0 (v10) — fleet-safe sync, hierarchy, unified graph, Jev
 
-Codify under a fleet of agents: one indexer instead of fifty, a tree of agents with a branch flow, one graph for every branch and worktree, and typed decisions where a heuristic would have guessed.
+Codify under a fleet of agents: one indexer instead of fifty, a tree of agents with a branch flow that runs itself, one graph for every branch and worktree, typed decisions where a heuristic would have guessed, and an editor that can drive all of it (extension 1.3.0).
 
 **Sync — one indexer, not fifty** (tasks 1.1–1.4)
 
@@ -39,6 +39,15 @@ Codify under a fleet of agents: one indexer instead of fifty, a tree of agents w
 - `cg branches` lists every tracked branch with worktree, head, base, and file count; `cg root --json` and `cg info` name the shared project, the worktree flag, and the branch
 - A schema upgrade keeps the branch and agent registries, memories, history, leases, and attempts, and drops only what the indexer rebuilds; an older `cg` refuses a newer database by name instead of downgrading it into a re-index loop
 
+**Graph — reads scoped to the branch you are on** (task 3.2)
+
+- `search`, `symbol`, `context`, `survey`, `impact`, `recall`, `anchors`, `check`, and `guard` answer for the current branch; `--branch <name>` asks another and `--all-branches` asks every branch in the graph, with an unknown name refused rather than guessed at
+- A hit is labelled `@branch` only when more than one branch is in scope, so single-branch output is unchanged, and `cg anchors` and `cg check` count your branch's symbols instead of the sum across every open worktree
+- The indexer keys parsed content by hash, so a file another branch has already parsed is reused: `, 40 reused` in `cg sync` text and `"reused"` in its JSON — a fresh worktree of a big repository costs a walk and a copy, not a full parse
+- A memory records the branch it was made on (`memories.branch`), and `cg fleet merge-up` promotes the wave branch's notes to the base, dropping any the base already holds — same body, type, and task — so merging twice never duplicates a decision (`promoted 3 memories to feature/fleet`, `memories_promoted` in `--json`)
+- `cg brief` opens with the branch, its worktree, and the other branches with work in the graph, so a session resumed in the wrong tree finds out on its first command
+- `cg watch --fleet` follows every registered worktree from one process, each with its own inotify descriptor and pending set, rescanning the registry so a worktree created by `cg fleet begin` is followed seconds later without a restart
+
 **Jev — typed decisions** (task 4.1)
 
 - A client for TypeSafe's System One model (`typesafe/jev-1.13` over OpenRouter): canonical request bodies with sorted question names and criteria keys, `noul`, `choice`, and `score` answers parsed with probabilities and confidence
@@ -48,22 +57,43 @@ Codify under a fleet of agents: one indexer instead of fifty, a tree of agents w
 - A missing `OPENROUTER_API_KEY` is an error naming the variable, never a silent fallback; `CG_JEV_MODEL`, `CG_JEV_ENDPOINT`, `CG_JEV_CURL`, `CG_JEV_TIMEOUT`, `CG_JEV_ATTEMPTS`, and `CG_JEV_BACKOFF_MS` override the defaults
 - The `local_only` principle became `local_first`: the core loop still makes no network call, Jev is mandatory for the features built on it, and its answers are never authoritative
 
+**Orchestration — the fleet runs itself** (task 2.3)
+
+- `cg spec run --fleet` drives two levels instead of one: a feature manager on the feature branch, wave workers under it, each spawned in its own worktree with `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE`, `CG_BRANCH`, `CG_BASE` — and, for a worker, `CG_TASK`, `CG_ATTEMPT`, `CG_FENCE` — with its branch already checked out
+- A subtree is complete because it **merged**, not because a process exited: the run reads the task list and the branch state before it says so
+- The generated briefings end on the command that moves work upward — `cg fleet merge-up <id>` for a worker, `cg fleet land` and `cg fleet pr` for a manager — so an agent that reads only the last line still does the right thing
+- `--dry-run` plans the whole tree without claiming or creating anything, `--status` prints `cg fleet tree`, `--max-rounds R` caps the manager's wakes so a fleet that cannot finish exits 1 with no claims left behind, and `-n` counts worker slots with the manager always one more
+- `--fleet` is refused before anything is spawned when there is no `[hierarchy]`, or when it is `enabled = false`; the single-level `cg spec run` is untouched
+- `cg fleet tree [--json]` joins the agent registry, the live claims, and the branch registry into one tree: progress per manager, ahead/merged/complete, and every worker's wave, task, branch, worktree, state, attempt, and heartbeat
+
+**Memory — classified, and promoted into skills** (task 4.2)
+
+- `cg memory classify [<id>|--all|--unclassified]` asks Jev what a note is — `skill`, `decision`, `constraint`, `fact`, `noise` — plus whether it is reusable beyond its own task, and stores the class and confidence on the memory (schema v16). One call per memory, and nothing is asked twice
+- The class travels with the memory: `class skill 0.82` in `cg recall`, `[decision/skill]` in `cg brief`, `class` and `confidence` in both `--json`
+- `cg skills list|promote <id>|render` turns the candidates into `.agents/skills/<slug>/SKILL.md` — the portable, vendor-neutral format every agent host reads — carrying Codify's ownership marker and a link back to the source memory
+- A file without that marker is never overwritten, promotion lives in the file rather than the database so re-classifying never silently un-promotes a skill, and `cg skills render` refreshes only the files whose memory has moved on and names the orphans (`cg integrate doctor` does too)
+- `memory_classify`, `skills_list`, and `skills_promote` are exposed over MCP, where a Jev failure is an `isError` result rather than noise on the protocol stream
+
+**Jev inside deterministic commands** (task 4.3)
+
+- A failing `verify_cmd` in `cg spec done` is triaged from the last 40 lines and 4 KiB of its output into a category (`test_failure`, `build_error`, `missing_dependency`, `flaky`, `environment`, `spec_mismatch`) and a next action (`fix_code`, `fix_test`, `rerun`, `install_dependency`, `revise_spec`, `ask_human`), printed as `jev triage:` and appended to the outcome memory the failure records
+- `cg guard` scores every finding in one call, prints them most severe first with `[jev 3.80 Blocking]`, and carries `jev_ranked`, `jev_score`, and `jev_level` in `--json`
+- `cg fleet pr` writes a `Jev readiness: 0.95 (high) — …` line into the pull request body, from the state Codify can prove; a low score says so and still opens the PR
+- All three share one gate and one shape of warning — `jev: OPENROUTER_API_KEY is not set — failure triage skipped`, once, on stderr — and none of them changes a verdict or an exit code: `cg guard --strict` fails on exactly what it failed on before, and a red `verify_cmd` stays red
+
+**VS Code — a task tree, a memory browser, a fleet view** (tasks 5.1, 5.2, 5.3; extension 1.3.0)
+
+- Tasks group feature → section → wave, each row carrying status, the agent holding the lease and its role, the branch, and the unmet requires; filter by status, wave, or owner and search by id, title, section, owner, symbol, or path, with the filter shown in the view title and surviving a reload
+- A task detail webview shows acceptance criteria, do-steps, declared symbols with their resolved location and reference count, touched paths, the verify command, tagged commits, and the memories written under the task; actions for start, complete, claim, release, run verify in the task's own worktree, open its branch, and copy a resume prompt
+- A memory browser: full text across project memory with filters for type, Jev class, task, branch, and date, a detail pane whose symbols and files link into the code, and supersede, forget, classify-with-Jev, promote-to-skill, and open-skill-file actions
+- A fleet view: Main Gideon, feature managers, and wave workers with branches, worktrees, attempts, heartbeats, and merge state, plus begin, merge-up, land, PR, checkpoint, refresh, and open-worktree. A refresh never runs `cg fleet pr`, and merge state is only what the registry can prove
+- Agent chat: real diffs and terminal output in tool cards, inline permission buttons, cancel and retry, session switching, agent-native slash commands namespaced on a collision, and a running cost for the adapters that price their turns
+- Every new panel is a zero-dependency, nonce-only CSP webview that repaints from the extension's one refresh chain — no extra polling, no watchers, and every call raced against a timeout
+
 **Documentation** (task 6.1)
 
 - New pages: [the sync gate](docs/sync.md), [the fleet hierarchy](docs/hierarchy.md), [the unified multi-branch graph](docs/branches.md), and [Jev decisions](docs/jev.md), each with commands, real output, and limitations
-- The README covers fleet mode, the branch registry, Jev, and the refresh scheduler; the extension README states which v10 surfaces are not yet in the build
-
-### In progress
-
-Specified in `spec/codify-v10/spec.kvx` and **not** in this release:
-
-- **2.3 Two-level orchestrator** — `cg spec run --fleet` spawning feature managers and wave workers under them
-- **3.2 Branch-scoped indexing, queries, memory, brief, and fleet watch** — `--branch` and `--all-branches`, content reuse by hash, branch-carrying and branch-promoted memories, `cg watch --fleet`
-- **4.2 Memory classification and skills** — `cg memory classify` and `cg skills list|promote|render` into `.agents/skills/<slug>/SKILL.md`
-- **4.3 Failure triage and guard ranking** — Jev triage of a failed `verify_cmd`, Jev-ranked guard findings, a PR readiness score
-- **5.1 Task UI upgrade** — grouped and filterable task tree with a detail webview
-- **5.2 Memory browser and skills** — searchable, filterable memory panel with classify and promote actions
-- **5.3 Fleet view and agent chat polish** — managers, workers, branches, attempts, heartbeats, merge state, open PRs
+- The README covers fleet mode and the orchestrator, the branch registry, Jev's advisory surfaces, memory classification and skills, and the refresh scheduler
 
 ## 2026-09-05 — Codify 0.9.0 Evidence-grounded documentation closure
 

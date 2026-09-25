@@ -86,6 +86,49 @@ The consequence is isolation: a sync run in a worktree adds and removes
 rows on **its** branch only. A file created on `wave/x` never appears in
 `main`'s rows, and a `main` sync never deletes `wave/x`'s.
 
+## Reading one branch, or all of them
+
+Every query command answers for the branch you are on. Two flags widen
+that:
+
+```
+--branch <name>     ask another branch instead
+--all-branches      ask every branch in the graph
+```
+
+They apply to `search`, `symbol`, `context`, `survey`, `impact`, `recall`,
+`anchors`, `check`, and `guard`. A hit is labelled with its branch **only
+when more than one branch is in scope**, so ordinary single-branch output
+is exactly what it always was:
+
+```
+$ cg search syncgate_acquire
+function   syncgate_acquire   src/syncgate.c:64  int syncgate_acquire(const Cg *cg, long wait_ms) {
+
+$ cg search syncgate_acquire --all-branches
+function   syncgate_acquire   src/syncgate.c:64 @main            int syncgate_acquire(…)
+function   syncgate_acquire   src/syncgate.c:64 @wave/fleet/1    int syncgate_acquire(…)
+```
+
+That matters for the counting commands too: `cg anchors` and `cg check`
+report your branch's symbols, not the sum across every worktree a fleet
+happens to have open.
+
+## Parsing once, not once per branch
+
+Ten worktrees of one repository are mostly the same bytes. The indexer
+keys parsed content by **hash**, so a file whose content another branch has
+already parsed is reused rather than re-parsed:
+
+```
+$ cg sync
+indexed 50 files (162 unchanged, 0 removed, 0 skipped, 40 reused) in 2086ms — …
+```
+
+`reused` appears in the text line and as `"reused"` in `--json`. A fresh
+worktree of a big repository therefore costs a walk and a copy, not a full
+parse.
+
 ## Per-branch freshness and gates
 
 Freshness bookkeeping is keyed by branch id (`cg_bkey` →
@@ -127,9 +170,9 @@ durable tables in place, with `ALTER TABLE`, so nothing is rebuilt:
 | `attempts` | `branch` | `cg fleet begin` — the wave branch the work runs on |
 | `attempts` | `worktree` | `cg fleet begin` — the checkout it runs in |
 | `attempts` | `parent` | the agent's `CG_PARENT` |
-| `memories` | `branch` | task 3.2 (planned) |
-| `memories` | `class` | `cg memory classify` — task 4.2 (planned) |
-| `memories` | `confidence` | `cg memory classify` — task 4.2 (planned) |
+| `memories` | `branch` | `cg remember` — the branch the note was made on |
+| `memories` | `class` | `cg memory classify` — Jev's class for the note |
+| `memories` | `confidence` | `cg memory classify` — how sure it was |
 
 Those first three are what make a claim answer *which branch was this done
 on* after the session is gone:
@@ -168,31 +211,70 @@ cg: /path/proj/.codegraph/graph.db is schema v99, but this cg (0.9.0) only knows
 
 The refusal leaves the graph intact.
 
-## Planned in v10 (not yet shipped)
+## Memory follows the code
 
-- **Task 3.2 — branch-scoped queries, memory, brief, and fleet watch.** The
-  indexer reusing parsed content by hash across branches; `search`,
-  `symbol`, `context`, `survey`, `impact`, and `recall` accepting
-  `--branch` and `--all-branches` and labelling each hit with its branch;
-  memories carrying their branch and `cg fleet merge-up` promoting them to
-  the base so decisions follow the code; `cg brief` naming the branch, its
-  base, the role, and the other branches with live work; `cg watch --fleet`
-  following every registered worktree through one process.
+A memory records the branch it was made on (`memories.branch`), because a
+decision taken on a wave branch is not yet a decision of the project. When
+that branch merges, the notes go with it:
+
+```
+$ cg fleet merge-up 2.1
+merged wave/fleet/1 into feature/fleet: 1 commit (head 227a1f98) at …/feature-fleet
+  promoted 3 memories to feature/fleet
+```
+
+`--json` carries the same as `memories_promoted`. Promotion moves a note to
+the base branch and drops it when the base already holds an identical one —
+same body, type, and task — so merging twice does not duplicate a decision.
+
+## Knowing where you are
+
+`cg brief` opens with the branch, the worktree it is in, and the other
+branches with work in the graph, so a session that resumes in the wrong
+tree finds out immediately:
+
+```
+$ cg brief
+project: /path/proj/.codegraph/worktrees/wave-fleet-1
+branch: wave/fleet/1 — worktree /path/proj/.codegraph/worktrees/wave-fleet-1
+other branches: main, feature/fleet, wave/fleet/2
+task: 2.1 — Alpha work  (in progress)
+```
+
+## `cg watch --fleet`
+
+One watcher process for every worktree the graph knows about, instead of
+one per tree:
+
+```
+$ cg watch --fleet
+watching every worktree of /path/proj (debounce 300ms, background passes) — ctrl-c to stop
+following main at /path/proj
+following wave/fleet/1 at /path/proj/.codegraph/worktrees/wave-fleet-1
+```
+
+Each tree gets its own inotify descriptor and pending set, and the registry
+is rescanned periodically, so a worktree added by `cg fleet begin` is
+followed seconds later without a restart. It needs inotify; a build without
+it says so rather than watching nothing.
 
 ## Limitations
 
-- **Writes are scoped; reads are not yet.** A sync only touches its own
-  branch's rows, but the readers still query the file and symbol tables
-  without a branch filter. Once a second branch of the repository has been
-  indexed, a symbol that exists on both produces one hit per branch —
-  `cg search` prints the same `path:line` twice, `cg anchors` counts the
-  same symbol twice, and `cg check` reports the sum. `cg symbol` and
-  `cg context` show one copy, so they read correctly, just not
-  deliberately. Branch-filtered reads and the `--branch` /
-  `--all-branches` flags are task 3.2, above; until then, prefer a
-  repository with one indexed branch when a count has to be exact.
-- Each branch's rows are parsed independently on its first sync; content
-  sharing by hash across branches is also task 3.2.
+- `--branch` names a branch **in the graph**, not in git. An unknown one is
+  refused rather than guessed at:
+
+  ```
+  cg: no branch named 'no-such-branch' in this graph (cg branches lists them)
+  ```
+
+  A branch nobody has run `cg` in has no rows of its own; `cg branches`
+  shows the file count per branch, which is where to look when a result
+  seems thin.
+- Content reuse is keyed by hash, so two branches holding the same file
+  share the parse but still get their own rows. The saving is CPU, not
+  storage.
+- `cg watch --fleet` needs inotify, which means Linux. Elsewhere the
+  per-tree `cg watch` is the way.
 - A worktree of a repository that was never initialized binds nothing —
   there is no shared project to join, and `cg init` creates one for that
   tree as usual.
