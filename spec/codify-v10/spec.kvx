@@ -144,7 +144,7 @@ reqs       = ["2.1", "2.6"]
 
 [task.2.2]
 title      = "Branch lifecycle: worktrees, merge-up, gates, PR, checkpoint"
-status     = "in_progress"
+status     = "done"
 wave       = 4
 requires   = ["2.1"]
 symbols    = ["fleet_worker_begin", "fleet_merge_up", "fleet_feature_land", "fleet_pr_open", "fleet_checkpoint"]
