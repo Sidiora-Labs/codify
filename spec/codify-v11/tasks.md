@@ -40,7 +40,7 @@
     - cg fleet up detaches a supervisor with a pid file; down drains, pause freezes spawning, resume continues; --resume reattaches live children by pid and start time.
     - Approval gates stop at land, pr, retry-exhausted, or drift and wait for cg fleet approve <id>.
     - _Requirements: 1.1, 1.6, 1.7_
-  - [ ] 3.2 Graph-grounded task packets and upstream deltas
+  - [-] 3.2 Graph-grounded task packets and upstream deltas
     - Build the worker packet: criteria, declared symbols' definitions, callers and callees, required tasks' introduced symbols on the feature branch, recall, and live sibling touches, fitted to the budget.
     - Build the manager packet: subtree state, conflicts, failed attempts with triage, approvals, and drift.
     - cg work update reports symbols merged upstream since the attempt began; add fixture tasks with gold symbols and a recall threshold.

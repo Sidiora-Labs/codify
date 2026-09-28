@@ -1386,6 +1386,14 @@ int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)
         else
             sb_puts(&b, "lease: none — claim with `cg spec claim <id>`\n");
         if (prompt) {
+            /* the briefing proper: what the work is judged against, and
+             * the code it lands in, so the agent starts oriented */
+            const char *bs = getenv("CG_PACKET_BUDGET");
+            int budget = bs && atoi(bs) > 0 ? atoi(bs) : 6000;
+            sb_putc(&b, '\n');
+            task_packet_build(cg, tag, budget, &b);
+        }
+        if (prompt) {
             const char *sid = id ? id : "?";
             sb_printf(&b,
                 "\nwhen done: run the verify command, then `cg spec done %s`."
@@ -1636,13 +1644,93 @@ static void work_workspace_delta(Cg *cg, StrBuf *b, const char *revision,
     *count = n;
 }
 
+static int packet_list(const char *packet, const char *key, char ***out);
+static void list_free(char **v, int n);
+static long packet_scope(Cg *cg);
+
+/* What merged into the branch this agent builds on since its packet was
+ * made: each other task handed up, and its declared symbols as they now
+ * stand — the interfaces a running worker must not code against stale. */
+static int work_upstream_delta(Cg *cg, const char *task, long since_s,
+                               StrBuf *json, StrBuf *text) {
+    const char *slash = strchr(task, '/');
+    char feature[256];
+    snprintf(feature, sizeof feature, "%.*s",
+             slash ? (int)(slash - task) : (int)strlen(task), task);
+    const char *base = getenv("CG_BASE");
+    char like[300];
+    snprintf(like, sizeof like, "%s/%%", feature);
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT subject,payload,at FROM events WHERE kind='fleet.merge' AND "
+        "subject LIKE ? AND subject<>? AND at>=? ORDER BY seq");
+    sqlite3_bind_text(st, 1, like, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, task, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, since_s * 1000);
+    long saved = packet_scope(cg);
+    int n = 0;
+    sb_putc(json, '[');
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *subj = (const char *)sqlite3_column_text(st, 0);
+        const char *p = (const char *)sqlite3_column_text(st, 1);
+        char *outcome = json_get_string(p, "outcome");
+        bool merged = outcome && strcmp(outcome, "merged") == 0;
+        free(outcome);
+        if (!merged) continue;
+        char *into = json_get_string(p, "base");
+        if (base && base[0] && into && strcmp(into, base) != 0) {
+            free(into);
+            continue;
+        }
+        char *from = json_get_string(p, "branch");
+        char *head = json_get_string(p, "head");
+        if (n++) sb_putc(json, ',');
+        sb_puts(json, "{\"task\":"); sb_json_str(json, subj);
+        sb_puts(json, ",\"branch\":"); sb_json_str(json, from ? from : "");
+        sb_puts(json, ",\"base\":"); sb_json_str(json, into ? into : "");
+        sb_puts(json, ",\"head\":");
+        if (head) sb_json_str(json, head); else sb_puts(json, "null");
+        sb_printf(json, ",\"at\":%lld,\"symbols\":[",
+                  (long long)sqlite3_column_int64(st, 2));
+        sb_printf(text, "  upstream: %s merged into %s", subj, into ? into : "?");
+        char *pk = spec_task_packet(subj);
+        char **syms = NULL;
+        int ns = packet_list(pk, "symbols", &syms);
+        for (int i = 0; i < ns; i++) {
+            StrBuf one; sb_init(&one);
+            int found = graph_symbol_brief(cg, syms[i], 0, 0, &one);
+            const char *nl = strchr(one.p, '\n');
+            if (i) sb_putc(json, ',');
+            sb_puts(json, "{\"name\":"); sb_json_str(json, syms[i]);
+            sb_puts(json, ",\"definition\":");
+            if (found) {
+                char *line = xmalloc(one.len + 1);
+                snprintf(line, one.len + 1, "%.*s",
+                         nl ? (int)(nl - one.p) : (int)one.len, one.p);
+                sb_json_str(json, line);
+                free(line);
+            } else sb_puts(json, "null");
+            sb_putc(json, '}');
+            sb_printf(text, "%s%s", i ? ", " : " — ", syms[i]);
+            sb_free(&one);
+        }
+        sb_puts(json, "]}");
+        sb_putc(text, '\n');
+        list_free(syms, ns);
+        free(pk); free(into); free(from); free(head);
+    }
+    sqlite3_finalize(st);
+    sb_putc(json, ']');
+    cg->scope_branch = saved;
+    return n;
+}
+
 int work_update(Cg *cg, const char *revision, bool json) {
     if (!revision || !revision[0]) {
         fprintf(stderr, "cg work update: revision required\n"); return 1;
     }
     sqlite3_stmt *st = cg_prep(cg,
-        "SELECT task,event_id,workspace_revision,state_hash FROM work_packets "
-        "WHERE revision=?");
+        "SELECT task,event_id,workspace_revision,state_hash,created FROM "
+        "work_packets WHERE revision=?");
     sqlite3_bind_text(st, 1, revision, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(st) != SQLITE_ROW) {
         sqlite3_finalize(st);
@@ -1656,6 +1744,7 @@ int work_update(Cg *cg, const char *revision, bool json) {
              (const char *)sqlite3_column_text(st, 2));
     snprintf(prior_state, sizeof prior_state, "%s",
              (const char *)sqlite3_column_text(st, 3));
+    long prior_created = sqlite3_column_int64(st, 4);
     sqlite3_finalize(st);
 
     WorkCapture call = { cg, NULL };
@@ -1673,7 +1762,10 @@ int work_update(Cg *cg, const char *revision, bool json) {
     int npaths = 0;
     work_workspace_delta(cg, &paths, revision, &npaths);
     workspace_changed = workspace_changed || npaths > 0;
-    bool unchanged = !state_changed && !evidence_changed && !workspace_changed;
+    StrBuf up_json, up_text; sb_init(&up_json); sb_init(&up_text);
+    int nup = work_upstream_delta(cg, task, prior_created, &up_json, &up_text);
+    bool unchanged = !state_changed && !evidence_changed && !workspace_changed &&
+                     !nup;
     char next_revision[65];
     snprintf(next_revision, sizeof next_revision, "%s", revision);
     if (!unchanged)
@@ -1690,16 +1782,20 @@ int work_update(Cg *cg, const char *revision, bool json) {
         sb_puts(&b, ",\"evidence\":");
         work_event_json(cg, &b, task, prior_event, false);
         sb_puts(&b, ",\"workspace\":"); sb_puts(&b, paths.p);
+        sb_puts(&b, ",\"upstream\":"); sb_puts(&b, up_json.p);
         sb_puts(&b, "}}\n"); fputs(b.p, stdout); sb_free(&b);
     } else if (unchanged) {
         printf("work %.12s: no state, evidence, or workspace changes\n",
                revision);
     } else {
-        printf("work %.12s -> %.12s: %d workspace change(s)%s%s\n",
+        printf("work %.12s -> %.12s: %d workspace change(s)%s%s%s\n",
                revision, next_revision, npaths,
                evidence_changed ? ", new evidence" : "",
-               state_changed ? ", state changed" : "");
+               state_changed ? ", state changed" : "",
+               nup ? ", upstream merges" : "");
+        if (nup) fputs(up_text.p, stdout);
     }
+    sb_free(&up_json); sb_free(&up_text);
     sb_free(&paths); free(task); free(state);
     return 0;
 }
@@ -1829,4 +1925,402 @@ int cmd_work(Cg *cg, int argc, char **argv, bool json) {
     fprintf(stderr, "usage: cg work [open [--task ID] | update REVISION | "
                     "close [--task ID] [--evidence CLAUSE=PROOF]]\n");
     return 1;
+}
+
+/* ---------------- task packets: the briefing an agent starts from ------ */
+
+/* list-valued fields of the spec packet as an array of malloc'd strings */
+static int packet_list(const char *packet, const char *key, char ***out) {
+    *out = NULL;
+    char *raw = packet ? json_get_raw(packet, key) : NULL;
+    char **items = NULL;
+    int n = raw ? json_array_items(raw, &items) : 0;
+    free(raw);
+    for (int i = 0; i < n; i++) {
+        char *v = json_string_value(items[i]);
+        free(items[i]);
+        items[i] = v ? v : xstrdup("");
+    }
+    *out = items;
+    return n;
+}
+
+static void list_free(char **v, int n) {
+    for (int i = 0; i < n; i++) free(v[i]);
+    free(v);
+}
+
+/* Read the packet against the branch the agent builds on: a worker's base
+ * is the feature branch, which holds what earlier waves merged. Only when
+ * that branch has been indexed; otherwise the open branch answers. */
+static long packet_scope(Cg *cg) {
+    long saved = cg->scope_branch;
+    const char *base = getenv("CG_BASE");
+    if (!base || !base[0]) return saved;
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT b.id FROM branches b WHERE b.name=? AND EXISTS("
+        "SELECT 1 FROM files f WHERE f.branch_id=b.id)");
+    sqlite3_bind_text(st, 1, base, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) cg->scope_branch = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return saved;
+}
+
+int packet_upstream_evidence(Cg *cg, const char *feature, const char *req,
+                             StrBuf *b) {
+    char tag[400];
+    snprintf(tag, sizeof tag, "%s/%s", feature, req);
+    char *pk = spec_task_packet(tag);
+    char *title = pk ? json_get_string(pk, "title") : NULL;
+    char *status = pk ? json_get_string(pk, "status") : NULL;
+    sb_printf(b, "- %s %s (%s)\n", req, title ? title : "", status ? status : "?");
+    char **syms = NULL;
+    int ns = packet_list(pk, "symbols", &syms);
+    int found = 0;
+    for (int i = 0; i < ns; i++) {
+        StrBuf one; sb_init(&one);
+        int n = graph_symbol_brief(cg, syms[i], 0, 0, &one);
+        if (n) {
+            /* the definition line only: an upstream symbol is context,
+             * not work, so its body stays out of the budget */
+            const char *nl = strchr(one.p, '\n');
+            sb_printf(b, "  %.*s\n", nl ? (int)(nl - one.p) : (int)one.len, one.p);
+            found++;
+        } else {
+            sb_printf(b, "  - `%s` — declared but not in the graph yet\n", syms[i]);
+        }
+        sb_free(&one);
+    }
+    /* what the task's commits say it did */
+    char like[420];
+    snprintf(like, sizeof like, "%%[spec:%s]%%", tag);
+    sqlite3_stmt *st = cg_prep(cg, "SELECT substr(hash,1,8),subject FROM "
+                                   "git_commits WHERE subject LIKE ? ORDER BY "
+                                   "date DESC LIMIT 3");
+    sqlite3_bind_text(st, 1, like, -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW)
+        sb_printf(b, "  commit %s %s\n", (const char *)sqlite3_column_text(st, 0),
+                  (const char *)sqlite3_column_text(st, 1));
+    sqlite3_finalize(st);
+    list_free(syms, ns);
+    free(title); free(status); free(pk);
+    return found;
+}
+
+typedef struct { const char *name; StrBuf b; bool must; } PacketPart;
+
+/* budget in tokens, estimated at four bytes each; parts are added in
+ * priority order and a part that no longer fits is named, not dropped
+ * silently */
+static int packet_assemble(PacketPart *parts, int n, int budget, StrBuf *out) {
+    long cap = (long)budget * 4;
+    StrBuf omitted; sb_init(&omitted);
+    for (int i = 0; i < n; i++) {
+        if (!parts[i].b.len) continue;
+        if (parts[i].must || (long)(out->len + parts[i].b.len) <= cap) {
+            sb_puts(out, parts[i].b.p);
+            continue;
+        }
+        /* the lines that still fit, then a marker */
+        long room = cap - (long)out->len;
+        const char *p = parts[i].b.p;
+        const char *cut = NULL;
+        for (const char *q = p; *q && q - p < room - 80; q++)
+            if (*q == '\n') cut = q + 1;
+        if (cut && cut > p + 40) {
+            for (const char *q = p; q < cut; q++) sb_putc(out, *q);
+            sb_printf(out, "  … (%s trimmed to fit the budget)\n\n", parts[i].name);
+        } else {
+            sb_printf(&omitted, "%s%s", omitted.len ? ", " : "", parts[i].name);
+        }
+    }
+    if (omitted.len)
+        sb_printf(out, "(omitted to fit a %d-token budget: %s — ask Codify: "
+                  "cg context, cg recall, cg fleet tree)\n", budget, omitted.p);
+    sb_free(&omitted);
+    return (int)((out->len + 3) / 4);
+}
+
+int task_packet_build(Cg *cg, const char *tag, int budget, StrBuf *out) {
+    char *pk = spec_task_packet(tag);
+    if (!pk) return 0;
+    long saved = packet_scope(cg);
+    const char *slash = strchr(tag, '/');
+    char feature[256];
+    snprintf(feature, sizeof feature, "%.*s",
+             slash ? (int)(slash - tag) : (int)strlen(tag), tag);
+    char *id = json_get_string(pk, "id");
+    char *title = json_get_string(pk, "title");
+    char *verify = json_get_string(pk, "verify_cmd");
+    char **dos = NULL, **syms = NULL, **touches = NULL, **reqs = NULL;
+    int ndo = packet_list(pk, "do", &dos);
+    int nsym = packet_list(pk, "symbols", &syms);
+    int nt = packet_list(pk, "touches", &touches);
+    int nreq = packet_list(pk, "requires", &reqs);
+
+    enum { P_TASK, P_CODE, P_UP, P_SIB, P_MEM, P_MAP, P_N };
+    PacketPart parts[P_N] = {
+        { "task", {0}, true }, { "code", {0}, false },
+        { "prerequisites", {0}, false }, { "siblings", {0}, false },
+        { "decisions", {0}, false }, { "file map", {0}, false },
+    };
+    for (int i = 0; i < P_N; i++) sb_init(&parts[i].b);
+
+    /* the task itself: never trimmed */
+    StrBuf *t = &parts[P_TASK].b;
+    sb_printf(t, "## Task %s — %s\n\n", id ? id : tag, title ? title : "");
+    char *crit = json_get_raw(pk, "acceptance_criteria");
+    char **ci = NULL;
+    int nc = crit ? json_array_items(crit, &ci) : 0;
+    if (nc) sb_puts(t, "Acceptance criteria — the work is judged against these:\n");
+    for (int i = 0; i < nc; i++) {
+        char *cl = json_get_string(ci[i], "clause");
+        char *tx = json_get_string(ci[i], "text");
+        sb_printf(t, "- %s: %s\n", cl ? cl : "?", tx ? tx : "");
+        free(cl); free(tx); free(ci[i]);
+    }
+    free(ci); free(crit);
+    if (ndo) {
+        sb_puts(t, nc ? "\nSteps:\n" : "Steps:\n");
+        for (int i = 0; i < ndo; i++) sb_printf(t, "- %s\n", dos[i]);
+    }
+    sb_puts(t, "\nScope:\n");
+    if (nt) {
+        sb_puts(t, "- edit only:");
+        for (int i = 0; i < nt; i++) sb_printf(t, " %s", touches[i]);
+        sb_puts(t, "  (cg guard reports anything else)\n");
+    }
+    if (nsym) {
+        sb_puts(t, "- symbols to introduce or change:");
+        for (int i = 0; i < nsym; i++) sb_printf(t, " %s", syms[i]);
+        sb_putc(t, '\n');
+    }
+    if (verify) sb_printf(t, "- verified by: %s\n", verify);
+    sb_puts(t, "- done means `cg spec done` passes: verify_cmd, every declared "
+               "symbol in the graph, every declared path touched\n\n");
+
+    /* the code: declared symbols as they stand now */
+    if (nsym) {
+        StrBuf *c = &parts[P_CODE].b;
+        sb_puts(c, "### The code you will touch (from the graph)\n");
+        for (int i = 0; i < nsym; i++) {
+            if (!graph_symbol_brief(cg, syms[i], 12, 5, c))
+                sb_printf(c, "- `%s` — new: not in the graph yet; this task "
+                          "introduces it\n", syms[i]);
+        }
+        sb_putc(c, '\n');
+    }
+
+    /* what the prerequisites produced */
+    if (nreq) {
+        StrBuf *u = &parts[P_UP].b;
+        sb_puts(u, "### What your prerequisites produced\n");
+        for (int i = 0; i < nreq; i++)
+            packet_upstream_evidence(cg, feature, reqs[i], u);
+        sb_putc(u, '\n');
+    }
+
+    /* who else is working, and where */
+    {
+        StrBuf *s = &parts[P_SIB].b;
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT a.agent,a.task,ifnull(a.branch,''),ifnull(l.touches,'') "
+            "FROM attempts a LEFT JOIN leases l ON l.task=a.task WHERE "
+            "a.state='running' AND a.expires>strftime('%s','now') AND "
+            "a.task LIKE ?||'/%' AND a.task<>? ORDER BY a.task LIMIT 12");
+        sqlite3_bind_text(st, 1, feature, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, tag, -1, SQLITE_TRANSIENT);
+        int n = 0;
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            if (!n++) sb_puts(s, "### Working alongside you — leave their paths alone\n");
+            const char *br = (const char *)sqlite3_column_text(st, 2);
+            const char *tc = (const char *)sqlite3_column_text(st, 3);
+            sb_printf(s, "- %s on %s%s%s", (const char *)sqlite3_column_text(st, 0),
+                      (const char *)sqlite3_column_text(st, 1), br[0] ? " @" : "", br);
+            if (tc[0]) sb_printf(s, ": %s", tc);
+            sb_putc(s, '\n');
+        }
+        sqlite3_finalize(st);
+        if (n) sb_putc(s, '\n');
+    }
+
+    /* decisions: the task's own memories, then the project's on its terms */
+    {
+        StrBuf *m = &parts[P_MEM].b;
+        Memory *mem = NULL;
+        int nm = spec_task_memories_tag(tag, &mem);
+        long seen[16];
+        int nseen = 0, shown = 0;
+        for (int i = 0; i < nm && shown < 5; i++) {
+            if (!strcmp(mem[i].type, "handoff")) continue;
+            if (!shown++) sb_puts(m, "### Decisions and constraints\n");
+            sb_printf(m, "- [%s] %s\n", mem[i].type, mem[i].body);
+            if (nseen < 16) seen[nseen++] = mem[i].id;
+        }
+        memory_free(mem, nm);
+        StrBuf q; sb_init(&q);
+        sb_puts(&q, title ? title : "");
+        for (int i = 0; i < nsym; i++) { sb_putc(&q, ' '); sb_puts(&q, syms[i]); }
+        Memory *rel = NULL;
+        int nr = q.len ? memory_query(cg, q.p, NULL, NULL, 8, &rel) : 0;
+        for (int i = 0; i < nr && shown < 8; i++) {
+            bool dup = false;
+            for (int k = 0; k < nseen; k++) if (seen[k] == rel[i].id) dup = true;
+            if (dup || !strcmp(rel[i].type, "handoff") ||
+                !strcmp(rel[i].type, "outcome")) continue;
+            if (!shown++) sb_puts(m, "### Decisions and constraints\n");
+            sb_printf(m, "- [%s] %s\n", rel[i].type, rel[i].body);
+        }
+        memory_free(rel, nr);
+        sb_free(&q);
+        if (shown) sb_putc(m, '\n');
+    }
+
+    /* the map of the allowed paths */
+    if (nt) {
+        StrBuf *f = &parts[P_MAP].b;
+        sb_puts(f, "### Files in scope\n");
+        for (int i = 0; i < nt; i++)
+            if (!graph_glob_symbols(cg, touches[i], 8, 10, f))
+                sb_printf(f, "  - %s — new: no indexed file matches yet\n",
+                          touches[i]);
+        sb_putc(f, '\n');
+    }
+
+    int tokens = packet_assemble(parts, P_N, budget, out);
+    for (int i = 0; i < P_N; i++) sb_free(&parts[i].b);
+    list_free(dos, ndo); list_free(syms, nsym);
+    list_free(touches, nt); list_free(reqs, nreq);
+    free(id); free(title); free(verify); free(pk);
+    cg->scope_branch = saved;
+    return tokens;
+}
+
+int manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out) {
+    enum { M_TASKS, M_LIVE, M_FAIL, M_CONF, M_APPR, M_N };
+    PacketPart parts[M_N] = {
+        { "tasks", {0}, true }, { "live workers", {0}, false },
+        { "failed attempts", {0}, false }, { "conflicts", {0}, false },
+        { "approvals", {0}, true },
+    };
+    for (int i = 0; i < M_N; i++) sb_init(&parts[i].b);
+    char like[300];
+    snprintf(like, sizeof like, "%s/%%", feature);
+
+    /* the subtree, task by task */
+    {
+        StrBuf *t = &parts[M_TASKS].b;
+        char root[4096], path[4700];
+        if (cg_find_root(root, sizeof root) == 0) {
+            snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+            Kvx *k = kvx_parse(path);
+            char **ids = NULL;
+            int n = k ? kvx_subsections(k, "task", &ids) : 0;
+            kvx_sort_dotted(ids, n);
+            int done = 0, total = 0;
+            StrBuf rows; sb_init(&rows);
+            for (int i = 0; i < n; i++) {
+                char sec[300];
+                snprintf(sec, sizeof sec, "task.%s", ids[i]);
+                long wave = kvx_long(k, sec, "wave", -1);
+                if (wave < 0) { free(ids[i]); continue; }  /* a section header */
+                char *st = kvx_str(k, sec, "status");
+                char *ti = kvx_str(k, sec, "title");
+                total++;
+                if (st && !strcmp(st, "done")) done++;
+                sb_printf(&rows, "- %s (wave %ld) %s — %s\n", ids[i], wave,
+                          st ? st : "?", ti ? ti : "");
+                free(st); free(ti); free(ids[i]);
+            }
+            free(ids);
+            kvx_free(k);
+            sb_printf(t, "### Your subtree: %d of %d task(s) done\n%s\n", done,
+                      total, rows.p);
+            sb_free(&rows);
+        }
+    }
+    /* live workers */
+    {
+        StrBuf *l = &parts[M_LIVE].b;
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT agent,task,ifnull(branch,''),(strftime('%s','now')-heartbeat) "
+            "FROM attempts WHERE state='running' AND task LIKE ? AND "
+            "expires>strftime('%s','now') ORDER BY task");
+        sqlite3_bind_text(st, 1, like, -1, SQLITE_TRANSIENT);
+        int n = 0;
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            if (!n++) sb_puts(l, "### Live workers\n");
+            sb_printf(l, "- %s on %s @%s (heartbeat %llds ago)\n",
+                      (const char *)sqlite3_column_text(st, 0),
+                      (const char *)sqlite3_column_text(st, 1),
+                      (const char *)sqlite3_column_text(st, 2),
+                      (long long)sqlite3_column_int64(st, 3));
+        }
+        sqlite3_finalize(st);
+        if (n) sb_putc(l, '\n');
+    }
+    /* what failed, and what the triage said */
+    {
+        StrBuf *f = &parts[M_FAIL].b;
+        Memory *mem = NULL;
+        char q[300];
+        snprintf(q, sizeof q, "%s", feature);
+        int nm = memory_query(cg, NULL, NULL, "outcome", 40, &mem);
+        int n = 0;
+        for (int i = 0; i < nm && n < 6; i++) {
+            if (!mem[i].task || strncmp(mem[i].task, feature, strlen(feature)) ||
+                mem[i].task[strlen(feature)] != '/') continue;
+            if (!strstr(mem[i].body, "blocked") && !strstr(mem[i].body, "without "
+                "completing") && !strstr(mem[i].body, "failed") &&
+                !strstr(mem[i].body, "triage")) continue;
+            if (!n++) sb_puts(f, "### Failed attempts\n");
+            sb_printf(f, "- %s: %s\n", mem[i].task, mem[i].body);
+        }
+        memory_free(mem, nm);
+        if (n) sb_putc(f, '\n');
+    }
+    /* merges that did not go through */
+    {
+        StrBuf *c = &parts[M_CONF].b;
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT subject,payload FROM events WHERE kind='fleet.merge' AND "
+            "subject LIKE ? ORDER BY seq DESC LIMIT 50");
+        sqlite3_bind_text(st, 1, like, -1, SQLITE_TRANSIENT);
+        int n = 0;
+        while (sqlite3_step(st) == SQLITE_ROW && n < 5) {
+            const char *p = (const char *)sqlite3_column_text(st, 1);
+            char *oc = json_get_string(p, "outcome");
+            bool conflict = oc && strcmp(oc, "conflict") == 0;
+            free(oc);
+            if (!conflict) continue;
+            if (!n++) sb_puts(c, "### Merge conflicts to resolve\n");
+            char *confl = json_get_raw(p, "conflicts");
+            char *br = json_get_string(p, "branch");
+            sb_printf(c, "- %s (%s): %s\n", (const char *)sqlite3_column_text(st, 0),
+                      br ? br : "?", confl ? confl : "[]");
+            free(confl); free(br);
+        }
+        sqlite3_finalize(st);
+        if (n) sb_putc(c, '\n');
+    }
+    /* approvals that wait on a person */
+    {
+        StrBuf *a = &parts[M_APPR].b;
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT id,gate,state FROM fleet_approvals WHERE subject=? AND "
+            "state IN ('pending','rejected') ORDER BY id");
+        sqlite3_bind_text(st, 1, feature, -1, SQLITE_TRANSIENT);
+        int n = 0;
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            if (!n++) sb_puts(a, "### Approvals\n");
+            sb_printf(a, "- #%lld %s: %s\n", (long long)sqlite3_column_int64(st, 0),
+                      (const char *)sqlite3_column_text(st, 1),
+                      (const char *)sqlite3_column_text(st, 2));
+        }
+        sqlite3_finalize(st);
+        if (n) sb_putc(a, '\n');
+    }
+    int tokens = packet_assemble(parts, M_N, budget, out);
+    for (int i = 0; i < M_N; i++) sb_free(&parts[i].b);
+    return tokens;
 }

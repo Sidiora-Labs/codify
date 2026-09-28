@@ -2419,6 +2419,25 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
         strcmp(sub, "resume") == 0)
         return cmd_fleet_control(cg, sub, argc - 3, argv + 3, json);
     if (strcmp(sub, "runs") == 0) return cmd_fleet_runs(cg, json);
+    if (strcmp(sub, "brief") == 0) {
+        /* the feature manager's packet, as its next wake would read it */
+        char path[4700];
+        Kvx *wf = fleet_workflow(cg, path, sizeof path);
+        char *active = wf ? kvx_str(wf, "meta", "active_feature") : NULL;
+        const char *f = pos ? pos : feature ? feature : active;
+        if (!f || !f[0]) {
+            fprintf(stderr, "usage: cg fleet brief [feature]\n");
+            free(active); kvx_free(wf);
+            return 1;
+        }
+        StrBuf b; sb_init(&b);
+        const char *bs = getenv("CG_PACKET_BUDGET");
+        manager_packet_build(cg, f, bs && atoi(bs) > 0 ? atoi(bs) : 4000, &b);
+        fputs(b.p, stdout);
+        sb_free(&b);
+        free(active); kvx_free(wf);
+        return 0;
+    }
     if (strcmp(sub, "approvals") == 0 || strcmp(sub, "approve") == 0)
         return cmd_fleet_approvals(cg, argc, argv, json);
     if (strcmp(sub, "steer") == 0) {

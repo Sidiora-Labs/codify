@@ -165,4 +165,38 @@ bodyfirst=$(CG_BODY_FIRST=1 "$CG" context ledger --budget 300 --json | count_sym
 [ "$docfirst" -gt "$bodyfirst" ] \
     || fail "doc-first fits $docfirst symbols, body-first $bodyfirst — no gain"
 
+# (packets) the briefing a worker starts from must carry what the work
+# needs: each fixture task's gold symbols — the declared symbol and its
+# real callers and callees in codify's own source, recorded by hand from
+# the code — at a recall of at least 0.8, inside the default budget.
+cd "$TMP/self"
+"$CG" spec new evalpk >/dev/null
+"$CG" spec mode parallel >/dev/null
+"$CG" spec add 9.1 --title "Rank symbol search" --wave 1 \
+      --symbols find_symbols --touches 'src/graph.c' >/dev/null
+"$CG" spec add 9.2 --title "Status writes" --wave 1 \
+      --symbols kvx_set_status --touches 'src/kvx.c' >/dev/null
+"$CG" sync >/dev/null
+recall() {
+    local task="$1" gold="$2"
+    local out
+    out="$("$CG" resume --task "$task" --prompt)"
+    printf '%s' "$out" | python3 -c "
+import re, sys
+text = sys.stdin.read()
+packet = text.split('## Task', 1)[1].split('when done:', 1)[0]
+gold = '$gold'.split()
+hit = [g for g in gold if re.search(r'\b' + re.escape(g) + r'\b', packet)]
+recall = len(hit) / len(gold)
+tokens = len(packet) / 4
+assert recall >= 0.8, (recall, sorted(set(gold) - set(hit)))
+assert tokens <= 6000, tokens
+print(f'$task recall {recall:.2f} ({len(hit)}/{len(gold)}), ~{int(tokens)} tokens')
+"
+}
+recall 9.1 "find_symbols cmd_symbol cmd_impact cmd_show cmd_why fts_quote prep_scoped sym_from_stmt" \
+    || fail "packet recall for 9.1"
+recall 9.2 "kvx_set_status spec_set_status_owned spec_start_cmd spec_claim_next_cmd spec_reconcile_cmd strip_comment trim kvx_lock" \
+    || fail "packet recall for 9.2"
+
 echo ok

@@ -91,7 +91,8 @@ static void usage(void) {
 "  handoff [--task <id>]    record session state against a task: --done,\n"
 "                           --next, --blocked, -m <note>\n"
 "  resume [--task <id>]     task packet + latest handoff + memories + tree\n"
-"                           state; --prompt for a paste-ready block\n"
+"                           state; --prompt for a paste-ready briefing built\n"
+"                           from the graph, --budget N tokens (default 6000)\n"
 "  hook install             wire agent + git hooks so the graph self-syncs\n"
 "  hook post-edit           the wired edit hook: sync + guard the edited\n"
 "                           file in one process (payload on stdin)\n"
@@ -659,6 +660,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "resume") == 0) {
         const char *task = opt(&argc, argv, "--task", NULL);
         bool prompt = flag(&argc, argv, "--prompt");
+        const char *budget = opt(&argc, argv, "--budget", NULL);
+        if (budget) setenv("CG_PACKET_BUDGET", budget, 1);
+        if (prompt) index_fresh(&cg, &si);    /* a briefing shows code as it is */
         rc = cmd_resume(&cg, task, json, prompt);
     } else {
         fprintf(stderr, "cg: unknown command '%s' (try `cg help`)\n", cmd);

@@ -2484,3 +2484,170 @@ int cmd_why(Cg *cg, const char *name, bool json) {
     sb_free(&b);
     return 0;
 }
+
+/* ---------------- task packets ---------------- */
+
+static bool path_is_header(const char *path) {
+    const char *dot = strrchr(path, '.');
+    return dot && (!strcmp(dot, ".h") || !strcmp(dot, ".hpp") ||
+                   !strcmp(dot, ".hh"));
+}
+
+/* Edges as a reader wants them: a callee declared in a header shown where
+ * it is implemented, and — for callers — rows inside a header dropped,
+ * since a C header "calls" nothing: those are prototypes and comments the
+ * resolver attributed to a neighbouring declaration. Returns the count. */
+static const char *lang_family(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "";
+    static const char *C[] = { ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", NULL };
+    static const char *JS[] = { ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", NULL };
+    for (int i = 0; C[i]; i++) if (!strcmp(dot, C[i])) return "c";
+    for (int i = 0; JS[i]; i++) if (!strcmp(dot, JS[i])) return "js";
+    return dot;
+}
+
+static int edges_prefer_impl(Cg *cg, SymRow *e, int n, bool callers,
+                             const char *from_path) {
+    int k = 0;
+    const char *fam = lang_family(from_path);
+    for (int i = 0; i < n; i++) {
+        /* a name match across languages is a coincidence, not a call */
+        if (strcmp(lang_family(e[i].path), fam) != 0) continue;
+        if (path_is_header(e[i].path)) {
+            if (callers) continue;
+            SymRow d[4];
+            int nd = defs_named(cg, e[i].name, d, 4);
+            for (int j = 0; j < nd; j++)
+                if (!path_is_header(d[j].path)) { e[i] = d[j]; break; }
+        }
+        bool dup = false;
+        for (int j = 0; j < k && !dup; j++)
+            dup = !strcmp(e[j].name, e[i].name) && !strcmp(e[j].path, e[i].path);
+        if (!dup) e[k++] = e[i];
+    }
+    return k;
+}
+
+/* One declared symbol, as a task packet shows it: where it is defined,
+ * what its doc says it is for, its opening lines, and who sits on either
+ * side of it. Returns the number of definitions found; 0 means the symbol
+ * is not in the graph yet (the task introduces it). */
+int graph_symbol_brief(Cg *cg, const char *name, int snippet_lines,
+                       int max_edges, StrBuf *b) {
+    SymRow all[8], rows[3];
+    int na = defs_named(cg, name, all, 8), n = 0;
+    /* A C/C++ header's prototype is a declaration: when the implementation
+     * is also in the graph, the packet shows that and not the prototype. */
+    bool have_impl = false;
+    for (int i = 0; i < na; i++) {
+        const char *dot = strrchr(all[i].path, '.');
+        bool header = dot && (!strcmp(dot, ".h") || !strcmp(dot, ".hpp") ||
+                              !strcmp(dot, ".hh"));
+        if (!header) have_impl = true;
+    }
+    for (int i = 0; i < na && n < 3; i++) {
+        const char *dot = strrchr(all[i].path, '.');
+        bool header = dot && (!strcmp(dot, ".h") || !strcmp(dot, ".hpp") ||
+                              !strcmp(dot, ".hh"));
+        if (header && have_impl) continue;
+        rows[n++] = all[i];
+    }
+    for (int i = 0; i < n && i < 2; i++) {
+        SymRow *r = &rows[i];
+        sb_printf(b, "- `%s` (%s) %s:%d", r->name, r->kind, r->path, r->line);
+        if (r->end_line > r->line) sb_printf(b, "-%d", r->end_line);
+        sb_putc(b, '\n');
+        SymDoc d = {0};
+        if (symbol_doc(cg, r, &d) && d.body) {
+            const char *p = d.body;
+            while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+            const char *nl = strchr(p, '\n');
+            int ll = nl ? (int)(nl - p) : (int)strlen(p);
+            if (ll > 200) ll = 200;
+            sb_printf(b, "  purpose: %.*s%s\n", ll, p,
+                      d.stale ? " [doc is stale]" : "");
+        }
+        free(d.body);
+        if (snippet_lines > 0) {
+            int to = r->end_line > r->line ? r->end_line : r->line;
+            if (to > r->line + snippet_lines - 1) to = r->line + snippet_lines - 1;
+            char *snip = file_snippet_n(cg, r->branch_id, r->path, r->line, to,
+                                        snippet_lines);
+            if (snip) {
+                sb_puts(b, "  ```\n");
+                for (const char *p = snip; *p; ) {
+                    const char *nl = strchr(p, '\n');
+                    size_t ll = nl ? (size_t)(nl - p) : strlen(p);
+                    sb_printf(b, "  %.*s\n", (int)ll, p);
+                    p += ll + (nl ? 1 : 0);
+                }
+                sb_puts(b, "  ```\n");
+                free(snip);
+            }
+        }
+        if (max_edges > 0) {
+            SymRow e[24];
+            int cap = max_edges + 1 < 24 ? max_edges + 1 : 24;
+            int nc = callers_of(cg, r, e, 24);
+            nc = edges_prefer_impl(cg, e, nc, true, r->path);
+            if (nc > cap) nc = cap;
+            if (nc) {
+                sb_puts(b, "  called by:");
+                for (int k = 0; k < nc && k < max_edges; k++)
+                    sb_printf(b, "%s %s %s:%d", k ? "," : "", e[k].name,
+                              e[k].path, e[k].line);
+                if (nc > max_edges) sb_puts(b, ", …");
+                sb_putc(b, '\n');
+            } else {
+                sb_puts(b, "  called by: nothing in the graph\n");
+            }
+            int ne = callees_of(cg, r->id, e, 24);
+            ne = edges_prefer_impl(cg, e, ne, false, r->path);
+            if (ne > cap) ne = cap;
+            if (ne) {
+                sb_puts(b, "  calls:");
+                for (int k = 0; k < ne && k < max_edges; k++)
+                    sb_printf(b, "%s %s %s:%d", k ? "," : "", e[k].name,
+                              e[k].path, e[k].line);
+                if (ne > max_edges) sb_puts(b, ", …");
+                sb_putc(b, '\n');
+            }
+        }
+    }
+    if (n > 2) sb_printf(b, "  (+%d more definitions of %s)\n", n - 2, name);
+    return n;
+}
+
+/* The files a touch glob matches in the graph and what each defines —
+ * the map of where the task is allowed to work. Returns files listed. */
+int graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,
+                       StrBuf *b) {
+    char scope[64], sql[1024];
+    branch_scope_sql(cg, "f", scope, sizeof scope);
+    snprintf(sql, sizeof sql,
+             "SELECT f.path,(SELECT group_concat(name, ', ') FROM (SELECT "
+             "s.name FROM symbols s WHERE s.file_id=f.id ORDER BY s.line "
+             "LIMIT ?)),(SELECT COUNT(*) FROM symbols s WHERE s.file_id=f.id) "
+             "FROM files f WHERE f.path GLOB ?%s ORDER BY f.path LIMIT ?",
+             scope);
+    sqlite3_stmt *st = cg_prep(cg, sql);
+    sqlite3_bind_int(st, 1, max_syms);
+    sqlite3_bind_text(st, 2, glob, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, max_files + 1);
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (n == max_files) { sb_puts(b, "  - …\n"); break; }
+        const char *syms = (const char *)sqlite3_column_text(st, 1);
+        int total = sqlite3_column_int(st, 2);
+        sb_printf(b, "  - %s", (const char *)sqlite3_column_text(st, 0));
+        if (syms && syms[0]) {
+            sb_printf(b, ": %s", syms);
+            if (total > max_syms) sb_printf(b, " (+%d)", total - max_syms);
+        }
+        sb_putc(b, '\n');
+        n++;
+    }
+    sqlite3_finalize(st);
+    return n;
+}

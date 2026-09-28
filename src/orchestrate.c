@@ -1321,6 +1321,8 @@ static int orch_manager_prompt(Cg *cg, const FleetNode *n, const char *path) {
         sb_putc(&b, '\n');
     }
     free(plan);
+    const char *bs = getenv("CG_PACKET_BUDGET");
+    manager_packet_build(cg, n->feature, bs && atoi(bs) > 0 ? atoi(bs) : 4000, &b);
     sb_printf(&b,
         "Your subtree is complete only once every task of %s is qualified "
         "and %s is merged into %s:\n"

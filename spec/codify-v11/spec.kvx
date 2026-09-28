@@ -158,11 +158,11 @@ reqs       = ["1.1", "1.6", "1.7"]
 
 [task.3.2]
 title      = "Graph-grounded task packets and upstream deltas"
-status     = "pending"
+status     = "in_progress"
 wave       = 3
 requires   = ["1.1"]
 symbols    = ["task_packet_build", "packet_upstream_evidence", "work_upstream_delta"]
-touches    = ["src/govern.c", "src/graph.c", "src/orchestrate.c", "src/cg.h", "tests/integration/34_context.sh", "tests/integration/16_retrieval.sh"]
+touches    = ["src/govern.c", "src/graph.c", "src/orchestrate.c", "src/cg.h", "tests/integration/34_context.sh", "tests/integration/16_retrieval.sh", "src/main.c", "src/fleet.c"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/34_context.sh && CG=$PWD/cg tests/integration/16_retrieval.sh"
 do_1       = "Build the worker packet: criteria, declared symbols' definitions, callers and callees, required tasks' introduced symbols on the feature branch, recall, and live sibling touches, fitted to the budget."
 do_2       = "Build the manager packet: subtree state, conflicts, failed attempts with triage, approvals, and drift."

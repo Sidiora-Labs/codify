@@ -373,6 +373,24 @@ int cmd_symbol (Cg *cg, const char *name, bool json);
 int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);
 int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);
 char *graph_task_focus(Cg *cg, const char *task_packet); /* malloc'd query */
+/* a declared symbol for a task packet: definition, purpose, opening lines,
+ * callers and callees; returns definitions found (0: not in the graph yet) */
+int  graph_symbol_brief(Cg *cg, const char *name, int snippet_lines,
+                        int max_edges, StrBuf *b);
+/* files matching a touch glob and the symbols each defines */
+int  graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,
+                        StrBuf *b);
+/* The briefing an agent starts from, built from the spec and the graph and
+ * fitted to budget tokens (govern.c). Worker: the task's criteria, steps,
+ * scope, declared symbols in the code, what its prerequisites produced,
+ * live siblings' paths, and decisions. Returns the approximate tokens. */
+int  task_packet_build(Cg *cg, const char *tag, int budget, StrBuf *out);
+/* manager: subtree state, live workers, failures, conflicts, approvals */
+int  manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out);
+/* what a required task produced: its declared symbols as they now stand in
+ * the graph, and the commits tagged with it; returns symbols found */
+int  packet_upstream_evidence(Cg *cg, const char *feature, const char *req,
+                              StrBuf *b);
 /* the tier below bodies: purpose lines and docs, wide and cheap */
 int cmd_survey(Cg *cg, const char *scope, int budget, bool json);
 /* anchor health: stale docs plus the coordination-ranked backfill list */
