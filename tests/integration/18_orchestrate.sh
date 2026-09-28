@@ -3,7 +3,162 @@
 # a custom driver completes disjoint wave-1 tasks in parallel slots, and a
 # failing driver releases its lease, records an outcome memory, and stops
 # the run past --max-fail
+#   drivers — structured-output flags, model, and role capabilities in the
+#             argv; Claude stream-json and Codex --json read back into
+#             agent.* events; steering delivered by prompt and by the
+#             post-edit hook
+# Run only that section: 18_orchestrate.sh drivers
 . "$(dirname "$0")/../lib.sh"
+
+pyev() { python3 -c "import json,sys; ev=[json.loads(l) for l in sys.stdin if l.strip()]; $1"; }
+
+drivers_section() {
+    rm -rf "$TMP/drv"
+    mkdir -p "$TMP/drv"
+    cd "$TMP/drv"
+    git init -q -b main . 2>/dev/null || git init -q .
+    git config user.email t@t; git config user.name t
+    "$CG" spec new drv >/dev/null
+    "$CG" spec docs off >/dev/null
+    "$CG" spec mode parallel >/dev/null
+    for t in 2.1 2.2 2.3; do
+        "$CG" spec add $t --title "Task $t" --wave 1 --touches "out-$t.txt" \
+              --verify "test -f out-$t.txt" >/dev/null
+    done
+    "$CG" init >/dev/null
+
+    # ---- argv: structured flags by default, [agents] model, opt-out
+    cat >> spec/workflow.kvx <<EOF
+
+[agents]
+driver = "custom"
+cmd    = "CG=$CG $FIXTURES/fleet/fake-driver.sh \${PROMPT_FILE} \${TASK} \${ROOT} \${AGENT} \${MODEL}"
+model  = "m-test"
+max    = 1
+ttl    = 120
+EOF
+    out="$("$CG" spec run --dry-run --driver claude)"
+    has "$out" "claude -p --permission-mode acceptEdits --output-format stream-json --verbose --model m-test"
+    out="$("$CG" spec run --dry-run --driver codex)"
+    has "$out" "--skip-git-repo-check -C"
+    has "$out" " --json -m m-test"
+    printf '%s' "$out" | grep -Eq 'm-test -$' || fail "codex argv must still end with -"
+    out="$("$CG" spec run --dry-run)"
+    has "$out" "fake-driver.sh"
+    has "$out" "m-test"                             # ${MODEL} in the template
+    python3 - <<'EOF'
+p = "spec/workflow.kvx"
+s = open(p).read().replace('model  = "m-test"', 'model  = "m-test"\nstructured = false')
+open(p, "w").write(s)
+EOF
+    out="$("$CG" spec run --dry-run --driver claude)"
+    hasnt "$out" "stream-json"
+    out="$("$CG" spec run --dry-run --driver codex)"
+    hasnt "$out" " --json"
+    python3 - <<'EOF'
+p = "spec/workflow.kvx"
+s = open(p).read().replace('\nstructured = false', '')
+open(p, "w").write(s)
+EOF
+
+    # ---- a queued steer rides at the end of the next prompt, once
+    "$CG" fleet steer run-1 "prefer small commits" >/dev/null
+    out="$("$CG" fleet steer run-1 "and name the task" --json)"
+    echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["queued"] and d["agent"]=="run-1" and d["seq"]>0, d' \
+        || fail "steer json"
+    expect_rc 1 "$CG" fleet steer run-1
+
+    # ---- Claude stream-json, read back as agent.* events
+    h="$("$CG" events --head)"
+    out="$("$CG" spec run -n 1 2>&1)"
+    has "$out" "[run] task 2.1 exit 0 → status done"
+    has "$out" "[run] task 2.3 exit 0 → status done"
+    # run-1's first prompt (the scaffolded 1.1 runs first) carries both
+    # messages; no later prompt repeats them
+    steered="$(grep -l "## Messages from your operator" .codegraph/agents/drv-*.prompt)"
+    [ "$(printf '%s\n' "$steered" | grep -c .)" -eq 1 ] || fail "steered prompts: $steered"
+    has "$steered" "drv-1.1.prompt"
+    p="$(cat "$steered")"
+    has "$p" "- prefer small commits"
+    has "$p" "- and name the task"
+    out="$("$CG" events --since "$h" --kind agent. --json -n 500)"
+    echo "$out" | pyev '
+t1 = [e for e in ev if e["subject"] == "drv/2.1"]
+by = {}
+for e in t1: by.setdefault(e["kind"], []).append(e)
+s = by["agent.session"][0]
+assert s["node"] == "run-1" and s["payload"]["session"] == "sess-run-1", s
+assert s["payload"]["model"] == "m-test" and s["payload"]["role"] == "flat", s
+texts = [e["payload"]["text"] for e in by["agent.text"]]
+assert texts == ["Starting 2.1."], texts
+tools = [(e["payload"]["tool"], e["payload"]["detail"]) for e in by["agent.tool"]]
+assert tools == [("Bash", "touch out-2.1.txt"), ("Edit", "out-2.1.txt")], tools
+u = by["agent.usage"][-1]["payload"]
+assert u["tokens_in"] == 1850 and u["tokens_out"] == 50, u
+r = by["agent.result"][0]["payload"]
+assert r["subtype"] == "success" and r["is_error"] is False, r
+assert abs(r["cost_usd"] - 0.0123) < 1e-9 and r["turns"] == 3 and r["duration_ms"] == 55, r
+assert r["text"] == "Done: 2.1 qualified." and r["tokens_in"] == 1850, r
+# nothing from the stderr noise line, and every task was read
+assert {e["subject"] for e in ev} >= {"drv/2.1", "drv/2.2", "drv/2.3"}, ev
+' || fail "claude stream events"
+    out="$("$CG" events --since "$h" --kind "agent.steer*" --json -n 50)"
+    echo "$out" | pyev '
+d = [e for e in ev if e["kind"] == "agent.steer.delivered"]
+assert len(d) == 1 and d[0]["payload"]["via"] == "prompt" and d[0]["payload"]["messages"] == 2, ev
+' || fail "steer delivered by prompt"
+
+    # ---- Codex exec --json, and a failed attempt read as an error result
+    for t in 3.1 3.2; do
+        "$CG" spec add $t --title "Task $t" --wave 2 --touches "out-$t.txt" \
+              --verify "test -f out-$t.txt" >/dev/null
+    done
+    h="$("$CG" events --head)"
+    FAKE_DIALECT=codex FAKE_FAIL=3.2 "$CG" spec run -n 1 --max-fail 0 >/dev/null 2>&1 || true
+    out="$("$CG" events --since "$h" --kind agent. --json -n 500)"
+    echo "$out" | pyev '
+a = [e for e in ev if e["subject"] == "drv/3.1"]
+k = {}
+for e in a: k.setdefault(e["kind"], []).append(e["payload"])
+assert k["agent.session"][0]["session"].startswith("th-"), k
+assert k["agent.tool"][0]["tool"] == "command_execution", k
+assert k["agent.tool"][0]["detail"] == "touch out-3.1.txt", k
+assert len(k["agent.tool"]) == 1, k                     # started once, not twice
+assert k["agent.text"][0]["text"] == "Wrote out-3.1.txt for 3.1.", k
+u = k["agent.usage"][-1]
+assert u["tokens_in"] == 1500 and u["tokens_out"] == 45 and u["turns"] == 1, u
+f = [e["payload"] for e in ev if e["subject"] == "drv/3.2" and e["kind"] == "agent.result"]
+assert f and f[0]["is_error"] is True and f[0]["subtype"] == "error" and "scripted failure" in f[0]["text"], f
+' || fail "codex json events"
+
+    # ---- live delivery to a Claude Code session: the post-edit hook
+    "$CG" fleet steer w-live "stop touching out-2.1.txt" >/dev/null
+    payload='{"tool_name":"Edit","tool_input":{"file_path":"out-2.1.txt"}}'
+    out="$(echo "$payload" | CG_AGENT=w-live "$CG" hook post-edit)"
+    echo "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+h = d["hookSpecificOutput"]
+assert h["hookEventName"] == "PostToolUse", d
+assert "Messages from your operator" in h["additionalContext"], d
+assert "- stop touching out-2.1.txt" in h["additionalContext"], d
+' || fail "hook steer json: $out"
+    out="$(echo "$payload" | CG_AGENT=w-live "$CG" hook post-edit)"
+    hasnt "$out" "hookSpecificOutput"               # delivered once
+    out="$(echo "$payload" | CG_AGENT=someone-else "$CG" hook post-edit)"
+    hasnt "$out" "hookSpecificOutput"
+    out="$("$CG" events --kind agent.steer.delivered --json -n 5)"
+    echo "$out" | pyev '
+assert any(e["subject"] == "w-live" and e["payload"]["via"] == "hook" for e in ev), ev
+' || fail "steer delivered by hook"
+    cd "$TMP"
+}
+
+if [ "${1:-}" = drivers ]; then
+    drivers_section
+    echo "18_orchestrate drivers OK"
+    exit 0
+fi
 
 mkdir -p "$TMP/proj/src" "$TMP/proj/lib" "$TMP/proj/docs"
 cd "$TMP/proj"
@@ -199,5 +354,7 @@ has "$out" "this repository runs flat"
 st="$("$CG" spec status --json)"
 has "$st" '"claims":[]'
 has "$st" '"tasks":7,"done":4,"implemented":0,"in_progress":0,"pending":3'
+
+drivers_section
 
 echo "18_orchestrate OK"

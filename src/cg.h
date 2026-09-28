@@ -620,15 +620,54 @@ int work_close(Cg *cg, const char *task, int nevidence, char **evidence,
 /* `cg spec run` — claim conflict-free tasks and drive one agent per slot;
  * argv is everything after `run` */
 int cmd_spec_run(int argc, char **argv);
-/* build one driver command line: codex/claude take extra_args split on
- * whitespace (the prompt file arrives on stdin); custom renders cmd_tmpl
- * with ${PROMPT_FILE} ${TASK} ${ROOT} ${AGENT} substituted and runs it via
- * /bin/sh -c. av receives malloc'd entries plus a NULL terminator; returns
- * argc, or -1 for an unknown driver / custom without a template. */
-int orch_driver_argv(const char *driver, const char *extra_args,
-                     const char *cmd_tmpl, const char *root,
-                     const char *promptfile, const char *task,
-                     const char *agent, char **av, int cap);
+
+/* ---------------- agent drivers (drivers.c) ---------------- */
+typedef struct {
+    const char *driver;   /* codex | claude | custom */
+    const char *model;    /* "" or NULL: the driver's default */
+    const char *args;     /* extra argv, whitespace-split */
+    const char *cmd;      /* custom template */
+    bool structured;      /* claude stream-json / codex --json */
+} DriverSpec;
+/* One driver command line: codex/claude take args split on whitespace (the
+ * prompt file arrives on stdin); custom renders cmd with ${PROMPT_FILE}
+ * ${TASK} ${ROOT} ${AGENT} ${MODEL} and runs it via /bin/sh -c. av receives
+ * malloc'd entries plus a NULL terminator; returns argc, or -1 for an
+ * unknown driver or custom without a template. */
+int driver_argv(const DriverSpec *d, const char *root, const char *promptfile,
+                const char *task, const char *agent, char **av, int cap);
+typedef struct {
+    const char *kind;     /* text | tool | usage | result | session */
+    const char *text;     /* message text, tool detail, result text */
+    const char *tool, *subtype, *session;
+    long tokens_in, tokens_out, turns, duration_ms;
+    double cost;          /* USD; -1 when the line does not say */
+    bool is_error;
+} DriverEvent;
+typedef void (*DriverEventFn)(const DriverEvent *e, void *ud);
+/* one output line of Claude stream-json or Codex exec --json; returns the
+ * number of events produced (0 for anything else) */
+int driver_stream_parse(const char *line, DriverEventFn fn, void *ud);
+typedef struct {
+    char log[4700], agent[128], role[16], subject[300], session[128];
+    long off;             /* bytes of the log already read */
+    StrBuf partial;       /* an unfinished last line */
+    long tokens_in, tokens_out, turns, tools, texts;
+    double cost;          /* USD so far */
+    long last_ms;         /* wall ms of the last event: progress for stalls */
+    bool finished, failed;/* a result line arrived; it reported an error */
+} DriverTap;
+void driver_tap_init(DriverTap *t, const char *log, const char *agent,
+                     const char *role, const char *subject);
+/* read what the agent wrote since the last poll into agent.* events,
+ * attributed to the agent; returns how many */
+int  driver_tap_poll(DriverTap *t);
+void driver_tap_free(DriverTap *t);
+/* queue a message for a running agent (an agent.steer event) */
+long driver_steer(Cg *cg, const char *agent, const char *message);
+/* the messages not yet delivered to agent, as "- msg" lines, marked
+ * delivered via `via`; NULL when there are none */
+char *driver_steer_take(Cg *cg, const char *agent, const char *via);
 
 /* ---------------- event log (events.c) ---------------- */
 typedef struct {
@@ -643,6 +682,10 @@ int  events_install(Cg *cg);         /* triggers; called by cg_open */
  * Returns the new seq, -1 on failure. */
 long events_emit(Cg *cg, const char *kind, const char *subject,
                  const char *payload);
+/* same, attributed to node instead of CG_AGENT: the orchestrator reports
+ * what its children did */
+long events_emit_as(Cg *cg, const char *kind, const char *subject,
+                    const char *node, const char *payload);
 long events_emit_quiet(const char *kind, const char *subject,
                        const char *payload);    /* opens its own connection */
 void events_bind(Cg *cg);            /* see events_kvx_status */

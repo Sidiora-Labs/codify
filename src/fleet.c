@@ -2207,6 +2207,35 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     if (strcmp(sub, "pr") == 0)
         return fleet_pr_open(cg, pos ? pos : feature, dry, json);
     if (strcmp(sub, "checkpoint") == 0) return fleet_checkpoint(cg, dry, json);
+    if (strcmp(sub, "steer") == 0) {
+        /* cg fleet steer <agent> <message...> */
+        const char *agent = argc >= 4 ? argv[3] : NULL;
+        StrBuf m; sb_init(&m);
+        for (int i = 4; i < argc; i++) {
+            if (m.len) sb_putc(&m, ' ');
+            sb_puts(&m, argv[i]);
+        }
+        if (!agent || !m.len) {
+            fprintf(stderr, "usage: cg fleet steer <agent> <message>\n");
+            sb_free(&m);
+            return 1;
+        }
+        long seq = driver_steer(cg, agent, m.p);
+        if (json) {
+            StrBuf j; sb_init(&j);
+            sb_printf(&j, "{\"queued\":%s,\"agent\":", seq > 0 ? "true" : "false");
+            sb_json_str(&j, agent);
+            sb_printf(&j, ",\"seq\":%ld}\n", seq);
+            fputs(j.p, stdout);
+            sb_free(&j);
+        } else if (seq > 0)
+            printf("queued for %s (#%ld): delivered at its next edit (Claude "
+                   "Code, through the post-edit hook) or its next prompt\n",
+                   agent, seq);
+        else fprintf(stderr, "cg fleet: could not queue the message\n");
+        sb_free(&m);
+        return seq > 0 ? 0 : 1;
+    }
     fprintf(stderr, "usage: cg fleet roles | status | plan [-f F] | "
                     "tree [-f F] | begin <id> [-f F] [--agent A] | "
                     "merge-up <id> [--force] [--keep] | land <feature> "

@@ -115,6 +115,11 @@ static void events_prune(Cg *cg, long seq) {
 
 long events_emit(Cg *cg, const char *kind, const char *subject,
                  const char *payload) {
+    return events_emit_as(cg, kind, subject, getenv("CG_AGENT"), payload);
+}
+
+long events_emit_as(Cg *cg, const char *kind, const char *subject,
+                    const char *node, const char *payload) {
     if (!cg || !cg->db || !kind) return -1;
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(cg->db,
@@ -125,7 +130,7 @@ long events_emit(Cg *cg, const char *kind, const char *subject,
     sqlite3_bind_text(st, 2, kind, -1, SQLITE_TRANSIENT);
     bind_or_null(st, 3, subject);
     bind_or_null(st, 4, getenv("CG_RUN"));
-    bind_or_null(st, 5, getenv("CG_AGENT"));
+    bind_or_null(st, 5, node);
     bind_or_null(st, 6, cg->branch);
     bind_or_null(st, 7, payload);
     int rc = sqlite3_step(st);

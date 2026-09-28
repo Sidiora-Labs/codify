@@ -62,6 +62,10 @@ static char *orch_raw_str(const Kvx *k, const char *sec, const char *key) {
     return xstrdup(raw);
 }
 
+/* [agents] structured and model: how every driver is launched */
+static bool g_structured = true;
+static char g_model[128];
+
 static void orch_cfg_load(const Kvx *wf, OrchCfg *c) {
     memset(c, 0, sizeof *c);
     char *d = kvx_str(wf, "agents", "driver");
@@ -74,6 +78,10 @@ static void orch_cfg_load(const Kvx *wf, OrchCfg *c) {
     c->claude_args = kvx_str(wf, "agents", "claude_args");
     c->max = kvx_long(wf, "agents", "max", 2);
     c->ttl = kvx_long(wf, "agents", "ttl", 3600);
+    g_structured = kvx_bool(wf, "agents", "structured", true);
+    char *m = kvx_str(wf, "agents", "model");
+    snprintf(g_model, sizeof g_model, "%s", m ? m : "");
+    free(m);
 }
 
 static void orch_cfg_free(OrchCfg *c) {
@@ -130,89 +138,37 @@ static bool orch_docs_ready(const char *id) {
 
 /* ---------------- driver command lines ---------------- */
 
-static int split_args(const char *s, char **av, int n, int cap) {
-    if (!s) return n;
-    while (*s && n < cap - 1) {
-        while (*s && isspace((unsigned char)*s)) s++;
-        if (!*s) break;
-        const char *start = s;
-        while (*s && !isspace((unsigned char)*s)) s++;
-        char *tok = xmalloc((size_t)(s - start) + 1);
-        memcpy(tok, start, (size_t)(s - start));
-        tok[s - start] = 0;
-        av[n++] = tok;
+/* How each fleet role is launched, from [role.*] (task 1.2), unless the
+ * command line named a driver for the whole run. Filled by the fleet run;
+ * a flat run leaves it unset and uses [agents]. */
+static struct {
+    bool set;
+    char driver[16], model[128], args[1024];
+} g_role[FLEET_ROLES];
+static bool g_driver_explicit;
+
+static void orch_roles_load(const Hierarchy *h) {
+    for (int r = 0; r < FLEET_ROLES; r++) {
+        const RoleCaps *c = &h->roles[r].caps;
+        g_role[r].set = true;
+        snprintf(g_role[r].driver, sizeof g_role[r].driver, "%s", c->driver);
+        snprintf(g_role[r].model, sizeof g_role[r].model, "%s", c->model);
+        snprintf(g_role[r].args, sizeof g_role[r].args, "%s", c->args);
     }
-    return n;
 }
 
-/* ${PROMPT_FILE} ${TASK} ${ROOT} ${AGENT} — kvx's ${} interpolation style,
- * but a plain string replace against these four names only */
-static char *orch_subst(const char *tmpl, const char *promptfile,
-                        const char *task, const char *root,
-                        const char *agent) {
-    StrBuf b;
-    sb_init(&b);
-    for (const char *p = tmpl; *p;) {
-        if (p[0] == '$' && p[1] == '{') {
-            const char *end = strchr(p + 2, '}');
-            if (end) {
-                size_t n = (size_t)(end - (p + 2));
-                const char *v = NULL;
-                if (n == 11 && strncmp(p + 2, "PROMPT_FILE", n) == 0)
-                    v = promptfile;
-                else if (n == 4 && strncmp(p + 2, "TASK", n) == 0)
-                    v = task;
-                else if (n == 4 && strncmp(p + 2, "ROOT", n) == 0)
-                    v = root;
-                else if (n == 5 && strncmp(p + 2, "AGENT", n) == 0)
-                    v = agent;
-                if (v) {
-                    sb_puts(&b, v);
-                    p = end + 1;
-                    continue;
-                }
-            }
-        }
-        sb_putc(&b, *p++);
+/* role: FLEET_FEATURE or FLEET_WORKER for a fleet node, -1 for a flat slot */
+static int orch_argv(const char *driver, const char *extra, const char *cmd,
+                     int role, const char *root, const char *prompt,
+                     const char *task, const char *agent, char **av, int cap) {
+    DriverSpec d = { driver, g_model, extra, cmd, g_structured };
+    if (role >= 0 && role < FLEET_ROLES && g_role[role].set &&
+        !g_driver_explicit) {
+        d.driver = g_role[role].driver;
+        d.args = g_role[role].args;
+        if (g_role[role].model[0]) d.model = g_role[role].model;
     }
-    return b.p;
-}
-
-/* Build the argv that runs one task under one driver. Entries are malloc'd
- * and NULL-terminated; returns argc, or -1 for an unknown driver / a custom
- * driver without a cmd template. The prompt file always arrives on stdin;
- * only the custom template also sees it as ${PROMPT_FILE}. */
-int orch_driver_argv(const char *driver, const char *extra_args,
-                     const char *cmd_tmpl, const char *root,
-                     const char *promptfile, const char *task,
-                     const char *agent, char **av, int cap) {
-    int n = 0;
-    if (strcmp(driver, "codex") == 0) {
-        av[n++] = xstrdup("codex");
-        av[n++] = xstrdup("exec");
-        av[n++] = xstrdup("--sandbox");
-        av[n++] = xstrdup("workspace-write");
-        av[n++] = xstrdup("--skip-git-repo-check");
-        av[n++] = xstrdup("-C");
-        av[n++] = xstrdup(root);
-        n = split_args(extra_args, av, n, cap - 1);
-        av[n++] = xstrdup("-");
-    } else if (strcmp(driver, "claude") == 0) {
-        av[n++] = xstrdup("claude");
-        av[n++] = xstrdup("-p");
-        av[n++] = xstrdup("--permission-mode");
-        av[n++] = xstrdup("acceptEdits");
-        n = split_args(extra_args, av, n, cap);
-    } else if (strcmp(driver, "custom") == 0) {
-        if (!cmd_tmpl || !cmd_tmpl[0]) return -1;
-        av[n++] = xstrdup("/bin/sh");
-        av[n++] = xstrdup("-c");
-        av[n++] = orch_subst(cmd_tmpl, promptfile, task, root, agent);
-    } else {
-        return -1;
-    }
-    av[n] = NULL;
-    return n;
+    return driver_argv(&d, root, prompt, task, agent, av, cap);
 }
 
 static void orch_argv_free(char **av) {
@@ -361,6 +317,27 @@ static void orch_note_failure(const char *feature, const char *id, int rc) {
 /* The agent's briefing comes from resume for code tasks and from the grounded
  * packet for @docs. The packet also tells the agent that `cg docs close`, not
  * recursive orchestration or `spec done`, is the only valid exit. */
+/* Messages queued for this agent (cg fleet steer) that it has not seen
+ * yet ride at the end of its prompt: the last thing it reads before it
+ * starts is what the operator asked of it. */
+static void orch_prompt_steer(const char *path, const char *agent) {
+    Cg g;
+    if (!agent || !agent[0] || !memory_open_quiet(&g)) return;
+    char *msgs = driver_steer_take(&g, agent, "prompt");
+    cg_close(&g);
+    if (!msgs) return;
+    char *body = read_entire_file(path, NULL);
+    StrBuf b; sb_init(&b);
+    sb_puts(&b, body ? body : "");
+    sb_puts(&b, "\n\n## Messages from your operator\n\n"
+                "Take these into account before anything else:\n");
+    sb_puts(&b, msgs);
+    write_entire_file(path, b.p, b.len);
+    sb_free(&b);
+    free(body);
+    free(msgs);
+}
+
 static int orch_write_prompt(const char *cgroot, const char *feature,
                              const char *id, char *path, size_t cap) {
     char dir[4600];
@@ -490,8 +467,8 @@ static int orch_dry_run(const char *specroot, const char *cgroot,
                  cgroot, feature, id);
         snprintf(agent, sizeof agent, "%s-%d", prefix, e % nslots + 1);
         char *av[ORCH_MAX_ARGV];
-        int ac = orch_driver_argv(cfg->driver, extra, cfg->cmd, cgroot,
-                                  prompt, id, agent, av, ORCH_MAX_ARGV);
+        int ac = orch_argv(cfg->driver, extra, cfg->cmd, -1, cgroot,
+                           prompt, id, agent, av, ORCH_MAX_ARGV);
         if (ac > 0) {
             printf("    ");
             orch_argv_print(av);
@@ -517,6 +494,7 @@ typedef struct {
     char  attempt[65];
     long  fence;
     long  last_heartbeat;
+    DriverTap tap;        /* the agent's log, read into agent.* events */
 } OrchSlot;
 
 static int orch_heartbeat(OrchSlot *slot, long ttl_min) {
@@ -646,6 +624,7 @@ int cmd_spec_run(int argc, char **argv) {
     orch_cfg_load(wf, &cfg);
     kvx_free(wf);
     if (driver_ov) cfg.driver = driver_ov;
+    g_driver_explicit = driver_ov != NULL;
     if (strcmp(cfg.driver, "codex") != 0 &&
         strcmp(cfg.driver, "claude") != 0 &&
         strcmp(cfg.driver, "custom") != 0) {
@@ -720,6 +699,10 @@ int cmd_spec_run(int argc, char **argv) {
             break;
         }
 
+        /* what each live agent wrote since the last tick */
+        for (int i = 0; i < nslots; i++)
+            if (slots[i].live) driver_tap_poll(&slots[i].tap);
+
         /* reap finished slots; the spec file, not the exit code, decides */
         for (int i = 0; i < nslots; i++) {
             if (!slots[i].live) continue;
@@ -727,6 +710,8 @@ int cmd_spec_run(int argc, char **argv) {
             pid_t r = waitpid(slots[i].pid, &st, WNOHANG);
             if (r == 0) continue;
             slots[i].live = false;
+            driver_tap_poll(&slots[i].tap);
+            driver_tap_free(&slots[i].tap);
             int crc = WIFEXITED(st) ? WEXITSTATUS(st)
                                     : 128 + WTERMSIG(st);
             char *tstat = orch_task_status(specroot, slots[i].feature,
@@ -839,8 +824,10 @@ int cmd_spec_run(int argc, char **argv) {
             const char *tfeat = feat && feat[0] ? feat : feature;
 
             char prompt[4700];
-            if (orch_write_prompt(cgroot, tfeat, id, prompt,
-                                  sizeof prompt) != 0) {
+            int wprc = orch_write_prompt(cgroot, tfeat, id, prompt,
+                                         sizeof prompt);
+            if (wprc == 0) orch_prompt_steer(prompt, agent);
+            if (wprc != 0) {
                 fprintf(stderr, "cg spec run: could not write prompt for "
                         "task %s\n", id);
                 orch_abandon(specroot, tfeat, id, agent, attempt, fence);
@@ -852,8 +839,8 @@ int cmd_spec_run(int argc, char **argv) {
                 continue;
             }
             char *av[ORCH_MAX_ARGV];
-            int ac = orch_driver_argv(cfg.driver, extra, cfg.cmd, cgroot,
-                                      prompt, id, agent, av, ORCH_MAX_ARGV);
+            int ac = orch_argv(cfg.driver, extra, cfg.cmd, -1, cgroot,
+                               prompt, id, agent, av, ORCH_MAX_ARGV);
             if (ac < 0) {
                 fprintf(stderr, "cg spec run: cannot build a %s command "
                         "line\n", cfg.driver);
@@ -897,6 +884,11 @@ int cmd_spec_run(int argc, char **argv) {
             fflush(stdout);
             orch_event("orch.spawn", "flat", agent, tfeat, id, pid, -999,
                        NULL, NULL, logpath);
+            {
+                char subj[300];
+                snprintf(subj, sizeof subj, "%s/%s", tfeat, id);
+                driver_tap_init(&slots[i].tap, logpath, agent, "flat", subj);
+            }
             free(id);
             free(feat);
             free(attempt);
@@ -1365,9 +1357,8 @@ int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
                n->branch, n->base);
         printf("    worktree %s\n", n->worktree);
         char *av[ORCH_MAX_ARGV];
-        int ac = orch_driver_argv(driver, extra, cmd_tmpl, n->worktree,
-                                  prompt, feature, n->agent, av,
-                                  ORCH_MAX_ARGV);
+        int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_FEATURE, n->worktree,
+                           prompt, feature, n->agent, av, ORCH_MAX_ARGV);
         if (ac > 0) {
             printf("    ");
             orch_argv_print(av);
@@ -1401,9 +1392,10 @@ int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
                 n->agent);
         return 1;
     }
+    orch_prompt_steer(prompt, n->agent);
     char *av[ORCH_MAX_ARGV];
-    int ac = orch_driver_argv(driver, extra, cmd_tmpl, n->worktree, prompt,
-                              feature, n->agent, av, ORCH_MAX_ARGV);
+    int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_FEATURE, n->worktree,
+                       prompt, feature, n->agent, av, ORCH_MAX_ARGV);
     if (ac < 0) {
         fprintf(stderr, "cg spec run: cannot build a %s command line\n",
                 driver);
@@ -1485,8 +1477,8 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
         printf("    worker %s — %s (wave %ld) on %s (from %s)\n", n->agent,
                id, wave, n->branch, n->base);
         char *av[ORCH_MAX_ARGV];
-        int ac = orch_driver_argv(driver, extra, cmd_tmpl, n->worktree,
-                                  prompt, id, n->agent, av, ORCH_MAX_ARGV);
+        int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_WORKER, n->worktree,
+                           prompt, id, n->agent, av, ORCH_MAX_ARGV);
         if (ac > 0) {
             printf("      ");
             orch_argv_print(av);
@@ -1538,6 +1530,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     int prc = orch_write_prompt(cg->shared, feature, id, prompt,
                                 sizeof prompt);
     orch_env_restore(&saved);
+    if (prc == 0) orch_prompt_steer(prompt, n->agent);
     if (prc != 0) {
         fprintf(stderr, "cg spec run: could not write the briefing for task "
                 "%s\n", id);
@@ -1545,8 +1538,8 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
         return 1;
     }
     char *av[ORCH_MAX_ARGV];
-    int ac = orch_driver_argv(driver, extra, cmd_tmpl, n->worktree, prompt,
-                              id, n->agent, av, ORCH_MAX_ARGV);
+    int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_WORKER, n->worktree,
+                       prompt, id, n->agent, av, ORCH_MAX_ARGV);
     if (ac < 0) {
         fprintf(stderr, "cg spec run: cannot build a %s command line\n",
                 driver);
@@ -1775,6 +1768,7 @@ typedef struct {
     FleetNode n;
     bool live;
     long last_heartbeat;
+    DriverTap tap;
 } OrchFleetSlot;
 
 static int orch_live_fleet(const OrchFleetSlot *s, int n) {
@@ -1835,6 +1829,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     }
     Hierarchy h;
     Kvx *wf = orch_hier(g.shared, &h);
+    orch_roles_load(&h);
     char *active = wf ? kvx_str(wf, "meta", "active_feature") : NULL;
     char feature[128];
     snprintf(feature, sizeof feature, "%s",
@@ -1914,6 +1909,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     FleetNode mgr;
     memset(&mgr, 0, sizeof mgr);
     mgr.pid = -1;
+    DriverTap mgr_tap;
+    memset(&mgr_tap, 0, sizeof mgr_tap);
     bool mgr_live = false, stopping = false;
     bool first_turn = true, frontier_empty = false;
     long last_wake = 0;
@@ -1955,6 +1952,10 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
             break;
         }
 
+        for (int i = 0; i < nslots; i++)
+            if (slots[i].live) driver_tap_poll(&slots[i].tap);
+        if (mgr_live) driver_tap_poll(&mgr_tap);
+
         /* reap workers: the branch tip, not the exit code, decides */
         for (int i = 0; i < nslots; i++) {
             if (!slots[i].live) continue;
@@ -1962,6 +1963,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
             pid_t r = waitpid(slots[i].n.pid, &st, WNOHANG);
             if (r == 0) continue;
             slots[i].live = false;
+            driver_tap_poll(&slots[i].tap);
+            driver_tap_free(&slots[i].tap);
             int crc = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
             char *ts = orch_task_status(slots[i].n.worktree, feature,
                                         slots[i].n.task, slots[i].n.attempt,
@@ -2022,6 +2025,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
             pid_t r = waitpid(mgr.pid, &st, WNOHANG);
             if (r != 0) {
                 mgr_live = false;
+                driver_tap_poll(&mgr_tap);
                 int crc = WIFEXITED(st) ? WEXITSTATUS(st)
                                         : 128 + WTERMSIG(st);
                 printf("[fleet] manager %s exit %d\n", mgr.agent, crc);
@@ -2092,6 +2096,13 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
             fflush(stdout);
             orch_event("orch.spawn", "feature", mgr.agent, feature, NULL,
                        mgr.pid, -999, NULL, mgr.branch, NULL);
+            {
+                char lp[4700];
+                snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-manager.log",
+                         g.shared, feature);
+                driver_tap_free(&mgr_tap);
+                driver_tap_init(&mgr_tap, lp, mgr.agent, "feature", feature);
+            }
         }
 
         /* Refill worker slots from the frontier — never while the manager
@@ -2124,6 +2135,13 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                 fflush(stdout);
                 orch_event("orch.spawn", "worker", wn.agent, feature, id,
                            wn.pid, -999, NULL, wn.branch, NULL);
+                {
+                    char lp[4700], subj[300];
+                    snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-%s.log",
+                             g.shared, feature, id);
+                    snprintf(subj, sizeof subj, "%s/%s", feature, id);
+                    driver_tap_init(&slots[i].tap, lp, wn.agent, "worker", subj);
+                }
             }
             char probe[64];
             frontier_empty = !orch_next_task(v, n, tried, ntried, slots,
@@ -2141,6 +2159,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     sigaction(SIGTERM, &oldterm, NULL);
     sigaction(SIGHUP, &oldhup, NULL);
     for (int i = 0; i < ntried; i++) free(tried[i]);
+    for (int i = 0; i < nslots; i++) driver_tap_free(&slots[i].tap);
+    driver_tap_free(&mgr_tap);
     free(slots);
     cg_close(&g);
     return rc;

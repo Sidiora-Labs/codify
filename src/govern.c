@@ -1054,6 +1054,15 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
     IndexStats st;
     cg_index_ex(cg, si, &o, &st);
 
+    /* Operator messages for this agent (cg fleet steer) reach a Claude Code
+     * session here, at its next edit: PostToolUse additionalContext is
+     * appended to the tool result the model reads. That channel needs the
+     * whole of stdout to be one JSON object, so the guard report travels
+     * inside it; with nothing queued the output is the plain report. */
+    const char *me = getenv("CG_AGENT");
+    char *steer = !json && me && me[0] ? driver_steer_take(cg, me, "hook")
+                                       : NULL;
+    StrBuf text; sb_init(&text);
     if (path) {
         HookGuard hg = { cg, path, json };
         char *out = NULL;
@@ -1071,11 +1080,11 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
                 if (++lines > HOOK_MAX_LINES) {
                     int rest = 0;
                     for (const char *q = p; *q; q++) if (*q == '\n') rest++;
-                    printf("  … %d more line(s): run `cg guard %s`\n",
-                           rest + 1, path);
+                    sb_printf(&text, "  … %d more line(s): run `cg guard %s`\n",
+                              rest + 1, path);
                     break;
                 }
-                fwrite(p, 1, ll, stdout);
+                for (size_t i = 0; i < ll; i++) sb_putc(&text, p[i]);
                 p += ll;
             }
         }
@@ -1084,6 +1093,25 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
         printf("{\"guarded\":false,\"reason\":\"no edited path in payload\","
                "\"synced\":%s}\n", st.coalesced ? "\"queued\"" : "true");
     }
+    if (steer) {
+        StrBuf ctx; sb_init(&ctx);
+        sb_puts(&ctx, "Messages from your operator — take these into account "
+                      "before continuing:\n");
+        sb_puts(&ctx, steer);
+        if (text.len) { sb_putc(&ctx, '\n'); sb_puts(&ctx, text.p); }
+        StrBuf j; sb_init(&j);
+        sb_puts(&j, "{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\","
+                    "\"additionalContext\":");
+        sb_json_str(&j, ctx.p);
+        sb_puts(&j, "}}\n");
+        fputs(j.p, stdout);
+        sb_free(&j);
+        sb_free(&ctx);
+    } else {
+        fputs(text.p, stdout);
+    }
+    sb_free(&text);
+    free(steer);
     free(path);
     free(payload);
     return 0;

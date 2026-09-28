@@ -127,15 +127,15 @@ reqs       = ["5.2", "5.4"]
 
 [task.2.2]
 title      = "Drivers module with structured output capture"
-status     = "pending"
+status     = "in_progress"
 wave       = 2
 requires   = ["1.1", "1.2"]
 symbols    = ["driver_argv", "driver_stream_parse", "driver_steer"]
-touches    = ["src/drivers.c", "src/orchestrate.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/fixtures/fleet/fake-driver.sh"]
-verify_cmd = "make cg && CG=$PWD/cg tests/integration/18_orchestrate.sh drivers"
+touches    = ["src/drivers.c", "src/orchestrate.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/fixtures/fleet/fake-driver.sh", "src/govern.c", "src/fleet.c", "src/events.c", "tests/unit/test_drivers.c"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/18_orchestrate.sh drivers"
 do_1       = "Move argv building out of orchestrate.c; add stream-json for claude and exec --json for codex behind role caps."
 do_2       = "Parse text, tool calls, tokens, and cost into agent events and a per-node spend counter; keep the raw log."
-do_3       = "driver_steer delivers a message through the driver's stream input when supported and otherwise queues it for the next resume prompt."
+do_3       = "driver_steer queues a message as an agent.steer event; a Claude Code session receives it at its next edit through the post-edit hook (PostToolUse additionalContext), and any agent through its next prompt; cg fleet steer <agent> <message> is the command."
 reqs       = ["5.3", "6.4"]
 
 [task.3]
