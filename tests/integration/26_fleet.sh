@@ -9,6 +9,8 @@
 #               request through gh (faked) or as printed commands, and the
 #               checkpoint that merges open feature PRs in order
 #   orchestrate — (task 2.3) two-level spec run --fleet
+#   caps      — per-role capabilities: driver, model, args, max, wall,
+#               spend, retries, stall, approve; [agents] defaults; problems
 # Run one section: 26_fleet.sh roles
 . "$(dirname "$0")/../lib.sh"
 section="${1:-all}"
@@ -260,6 +262,102 @@ assert w[2]["live"] == [] and [t["id"] for t in w[2]["tasks"]] == ["3.1"], w[2]
 
     # a bad subcommand is usage
     expect_rc 1 "$CG" fleet bogus
+fi
+
+if want caps; then
+    setup_repo
+
+    # ---- no workflow capabilities: every role still has a full budget
+    out="$("$CG" fleet roles --json)"
+    echo "$out" | pyjson '
+c = {r["name"]: r["caps"] for r in d["roles"]}
+assert c["main"]["max"] == 1 and c["feature"]["max"] == 2, c
+assert c["worker"]["max"] == 2, c                  # [agents].max default
+assert c["worker"]["driver"] == "codex" and c["worker"]["model"] == "", c
+assert (c["main"]["wall_s"], c["feature"]["wall_s"], c["worker"]["wall_s"]) == (3600, 3600, 7200), c
+assert (c["main"]["retries"], c["feature"]["retries"], c["worker"]["retries"]) == (0, 1, 2), c
+assert (c["main"]["stall_s"], c["worker"]["stall_s"]) == (1800, 900), c
+assert all(x["spend_usd"] == 0 and x["approve"] == [] for x in c.values()), c
+assert d["problems"] == [], d["problems"]
+' || fail "default caps"
+
+    # ---- [agents] feeds the defaults; [role.*] overrides per role
+    cat >> spec/workflow.kvx <<'EOF'
+
+[agents]
+driver      = "claude"
+max         = 6
+claude_args = "--permission-mode acceptEdits"
+
+[hierarchy]
+enabled = true
+
+[role.main]
+model   = "opus"
+approve = ["pr", "drift"]
+
+[role.feature]
+max     = 3
+wall    = "45m"
+retries = 0
+
+[role.worker]
+driver  = "codex"
+args    = "--sandbox workspace-write"
+wall    = "3h"
+stall   = 600
+spend   = "$4.50"
+approve = "retry"
+EOF
+    out="$("$CG" fleet roles --json)"
+    echo "$out" | pyjson '
+c = {r["name"]: r["caps"] for r in d["roles"]}
+m, f, w = c["main"], c["feature"], c["worker"]
+assert m["driver"] == "claude" and m["model"] == "opus", m
+assert m["args"] == "--permission-mode acceptEdits", m      # from [agents].claude_args
+assert m["approve"] == ["pr", "drift"], m
+assert f["driver"] == "claude" and f["max"] == 3 and f["wall_s"] == 2700 and f["retries"] == 0, f
+assert w["driver"] == "codex" and w["args"] == "--sandbox workspace-write", w
+assert w["max"] == 6 and w["wall_s"] == 10800 and w["stall_s"] == 600, w
+assert abs(w["spend_usd"] - 4.5) < 1e-9 and w["approve"] == ["retry"], w
+assert d["problems"] == [], d["problems"]
+' || fail "configured caps"
+    out="$("$CG" fleet roles)"
+    has "$out" "driver  model"
+    has "$out" "opus"
+    has "$out" '$4.50'
+    has "$out" "pr,drift"
+    has "$out" "45m"
+    has "$out" "3h"
+    has "$out" "args worker   --sandbox workspace-write"
+    hasnt "$out" "warn:"
+
+    # ---- values that cannot be used are reported and the default kept
+    python3 - <<'EOF'
+p = "spec/workflow.kvx"
+s = open(p).read()
+s = s.replace('wall    = "3h"', 'wall    = "soon"')
+s = s.replace('driver  = "codex"', 'driver  = "gpt"')
+s = s.replace('approve = "retry"', 'approve = ["retry", "merge"]')
+s = s.replace('max     = 3', 'max     = 0')
+s = s.replace('model   = "opus"', 'model   = "opus"\nmax     = 4')
+open(p, "w").write(s)
+EOF
+    out="$("$CG" fleet roles --json)"
+    echo "$out" | pyjson '
+c = {r["name"]: r["caps"] for r in d["roles"]}
+w, f, m = c["worker"], c["feature"], c["main"]
+assert w["wall_s"] == 7200 and w["driver"] == "codex" and w["approve"] == ["retry"], w
+assert f["max"] == 2 and m["max"] == 1, (f, m)
+p = " | ".join(d["problems"])
+assert "wall = \"soon\" is not a duration" in p, p
+assert "driver = \"gpt\" is not codex, claude, or custom" in p, p
+assert "approve gate \"merge\" is not land, pr, retry, or drift" in p, p
+assert "[role.feature] max = \"0\" is not a usable count" in p, p
+assert "there is one main agent" in p, p
+' || fail "cap problems"
+    out="$("$CG" fleet roles)"
+    has "$out" 'warn: [role.worker] wall = "soon" is not a duration'
 fi
 
 if want branches; then

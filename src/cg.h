@@ -659,12 +659,29 @@ int  cmd_events(Cg *cg, int argc, char **argv, bool json);
 /* ---------------- git interop (gitint.c) ---------------- */
 /* ---------------- fleet: hierarchy, identity, reports (fleet.c) -------- */
 enum { FLEET_MAIN = 0, FLEET_FEATURE = 1, FLEET_WORKER = 2, FLEET_ROLES = 3 };
+/* approval gates a role stops at until `cg fleet approve` (opt-in) */
+enum { APPROVE_LAND = 1, APPROVE_PR = 2, APPROVE_RETRY = 4, APPROVE_DRIFT = 8 };
+/* What each role may spend and how it is run. Every field has a default
+ * (see hier_role_caps), so a supervisor never has to guess; 0 for wall or
+ * spend means no limit. */
+typedef struct {
+    char *driver;      /* codex | claude | custom */
+    char *model;       /* handed to the driver; "" is the driver's default */
+    char *args;        /* extra driver argv, whitespace-split */
+    long max;          /* agents of this role alive at once */
+    long wall;         /* seconds one attempt may run */
+    double spend;      /* USD one attempt may cost */
+    long retries;      /* attempts after the first, per task */
+    long stall;        /* seconds without progress before a nudge */
+    unsigned approve;  /* APPROVE_* bits */
+} RoleCaps;
 typedef struct {
     char *name;        /* main | feature | worker */
     char *title;       /* what the role is called in reports and prompts */
     char *agent;       /* agent-name template: {feature}, {wave} */
     char *branch;      /* branch template: {main}, {feature}, {wave} */
     char *base;        /* branch the role's branch is cut from and merges into */
+    RoleCaps caps;
 } FleetRole;
 typedef struct {
     bool configured;   /* [hierarchy] present in spec/workflow.kvx */
@@ -679,8 +696,15 @@ typedef struct {
     FleetRole roles[FLEET_ROLES];
     char *unknown[8];  /* [role.X] names that are none of the three */
     int nunknown;
+    char *problems[16]; /* capability values that could not be used as given */
+    int nproblems;
 } Hierarchy;
 bool hier_load(const Kvx *wf, Hierarchy *h);   /* defaults, then overrides */
+/* role capabilities from [agents] and [role.*]; hier_load calls it, whether
+ * or not the hierarchy is configured */
+void hier_role_caps(const Kvx *wf, Hierarchy *h);
+/* "90s", "30m", "2h", "1d", or plain seconds; -1 when unreadable */
+long hier_duration(const char *s);
 void hier_free(Hierarchy *h);
 void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
                  long wave, char *out, size_t cap);

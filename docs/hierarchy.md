@@ -67,6 +67,65 @@ feature  Feature Manager  fm-{feature}         feature/{feature}        {main}
 worker   Wave Worker      w-{feature}-{wave}   wave/{feature}/{wave}    feature/{feature}
 ```
 
+## Role capabilities
+
+Each `[role.*]` section can also say how its agents are run and what they
+may spend. Nothing here is required: every key has a default, and the
+defaults are chosen so that a multi-day run never inherits "unlimited" by
+accident.
+
+```ini
+[agents]
+driver      = "claude"        # the default driver for every role
+max         = 6               # the default worker concurrency
+claude_args = "--permission-mode acceptEdits"
+
+[role.main]
+model   = "opus"
+approve = ["pr", "drift"]     # stop here until `cg fleet approve`
+
+[role.feature]
+max  = 3                      # feature managers alive at once
+wall = "45m"
+
+[role.worker]
+driver  = "codex"
+args    = "--sandbox workspace-write"
+wall    = "3h"                # one attempt's wall-clock budget
+stall   = "10m"               # no progress for this long: nudge, then restart
+spend   = "$4.50"             # one attempt's cost budget
+retries = 2                   # attempts after the first
+```
+
+| Key | Meaning | main | feature | worker |
+|---|---|---|---|---|
+| `driver` | `codex`, `claude`, or `custom` | `[agents].driver`, else `codex` | same | same |
+| `model` | handed to the driver | driver default | same | same |
+| `args` | extra driver argv | `[agents].<driver>_args` | same | same |
+| `max` | agents of the role alive at once | 1 (always) | 2 | `[agents].max`, else 2 |
+| `wall` | wall-clock budget per attempt | 1h | 1h | 2h |
+| `spend` | USD budget per attempt | none | none | none |
+| `retries` | attempts after the first, per task | 0 | 1 | 2 |
+| `stall` | time without progress before a nudge | 30m | 30m | 15m |
+| `approve` | gates that wait for approval: `land`, `pr`, `retry`, `drift` | none | none | none |
+
+Durations take `90s`, `30m`, `2h`, `1d`, or plain seconds; `0` means no
+limit. `approve` may be a list or a single string. Blocking is opt-in:
+with no `approve`, nothing waits for a person.
+
+A value that cannot be used is reported, never silently dropped, and the
+default is kept:
+
+```
+warn: [role.worker] wall = "soon" is not a duration (90s, 30m, 2h, or seconds) — default kept
+warn: [role.worker] approve gate "merge" is not land, pr, retry, or drift — ignored
+```
+
+`cg fleet roles` prints the resolved capabilities under the role table, and
+`--json` carries them as `roles[].caps` with `wall_s`, `stall_s`, and
+`spend_usd`, plus a top-level `problems` list. The supervisor that enforces
+them arrives with `cg fleet up`; until then they are declared and shown.
+
 ## Identity
 
 An agent's place in the tree lives in its environment, not in a file:

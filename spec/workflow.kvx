@@ -21,6 +21,12 @@ ttl    = 3600
 # and reports to Gideon; a wave worker owns one wave on a branch cut from the
 # feature branch. Work merges upward: wave into feature, feature into local
 # main, main out through a pull request once both gates are green.
+#
+# Each [role.*] may also set what the role is run with and may spend:
+# driver (codex|claude|custom), model, args, max (alive at once), wall and
+# stall (90s, 30m, 2h), spend (USD per attempt), retries, and approve — a
+# list of land, pr, retry, drift that stop for `cg fleet approve`. Unset
+# keys take the defaults `cg fleet roles` prints.
 [hierarchy]
 enabled    = true
 main       = "main"

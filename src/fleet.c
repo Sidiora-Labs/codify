@@ -119,6 +119,164 @@ static void take_str(char **slot, const Kvx *k, const char *sec,
     *slot = v;
 }
 
+long hier_duration(const char *s) {
+    if (!s) return -1;
+    while (*s == ' ') s++;
+    if (!*s) return -1;
+    char *end = NULL;
+    double v = strtod(s, &end);
+    if (end == s || v < 0) return -1;
+    while (*end == ' ') end++;
+    long mul = 1;
+    if (*end == 's') { mul = 1; end++; }
+    else if (*end == 'm') { mul = 60; end++; }
+    else if (*end == 'h') { mul = 3600; end++; }
+    else if (*end == 'd') { mul = 86400; end++; }
+    while (*end == ' ') end++;
+    return *end ? -1 : (long)(v * mul + 0.5);
+}
+
+static void hier_problem(Hierarchy *h, const char *fmt, const char *role,
+                         const char *key, const char *value) {
+    if (h->nproblems >= (int)(sizeof h->problems / sizeof h->problems[0]))
+        return;
+    char buf[400];
+    snprintf(buf, sizeof buf, fmt, role, key, value);
+    h->problems[h->nproblems++] = xstrdup(buf);
+}
+
+static const struct { const char *name; unsigned bit; } APPROVALS[] = {
+    { "land", APPROVE_LAND }, { "pr", APPROVE_PR },
+    { "retry", APPROVE_RETRY }, { "drift", APPROVE_DRIFT },
+};
+
+/* the raw scalar, as written: numbers come back without quotes */
+static char *cap_raw(const Kvx *wf, const char *sec, const char *key) {
+    const char *raw = kvx_raw(wf, sec, key);
+    if (!raw) return NULL;
+    size_t n = strlen(raw);
+    if (n >= 2 && raw[0] == '"' && raw[n - 1] == '"') {
+        char *o = xmalloc(n - 1);
+        memcpy(o, raw + 1, n - 2);
+        o[n - 2] = 0;
+        return o;
+    }
+    return xstrdup(raw);
+}
+
+static void cap_duration(Hierarchy *h, const Kvx *wf, const char *sec,
+                         const char *role, const char *key, long *slot) {
+    char *v = cap_raw(wf, sec, key);
+    if (!v) return;
+    long d = hier_duration(v);
+    if (d < 0) hier_problem(h, "[role.%s] %s = \"%s\" is not a duration "
+                               "(90s, 30m, 2h, or seconds) — default kept",
+                            role, key, v);
+    else *slot = d;
+    free(v);
+}
+
+static void cap_count(Hierarchy *h, const Kvx *wf, const char *sec,
+                      const char *role, const char *key, long floor,
+                      long *slot) {
+    char *v = cap_raw(wf, sec, key);
+    if (!v) return;
+    char *end = NULL;
+    long n = strtol(v, &end, 10);
+    if (end == v || *end || n < floor)
+        hier_problem(h, "[role.%s] %s = \"%s\" is not a usable count — "
+                        "default kept", role, key, v);
+    else *slot = n;
+    free(v);
+}
+
+/* Defaults first, from [agents] where it says anything, then [role.*].
+ * A multi-day run must never inherit "unlimited" by accident, so every
+ * role gets a wall-clock and retry budget unless the workflow says 0. */
+void hier_role_caps(const Kvx *wf, Hierarchy *h) {
+    char *driver = wf ? kvx_str(wf, "agents", "driver") : NULL;
+    long wmax = wf ? kvx_long(wf, "agents", "max", 2) : 2;
+    if (wmax < 1) wmax = 1;
+    static const long MAXES[FLEET_ROLES]   = { 1, 2, 0 };
+    static const long WALLS[FLEET_ROLES]   = { 3600, 3600, 7200 };
+    static const long RETRIES[FLEET_ROLES] = { 0, 1, 2 };
+    static const long STALLS[FLEET_ROLES]  = { 1800, 1800, 900 };
+    for (int r = 0; r < FLEET_ROLES; r++) {
+        RoleCaps *c = &h->roles[r].caps;
+        const char *name = ROLE_NAMES[r];
+        char sec[64];
+        snprintf(sec, sizeof sec, "role.%s", name);
+        c->driver = xstrdup(driver && driver[0] ? driver : "codex");
+        if (wf) take_str(&c->driver, wf, sec, "driver");
+        if (strcmp(c->driver, "codex") && strcmp(c->driver, "claude") &&
+            strcmp(c->driver, "custom")) {
+            hier_problem(h, "[role.%s] %s = \"%s\" is not codex, claude, or "
+                            "custom — using codex", name, "driver", c->driver);
+            free(c->driver);
+            c->driver = xstrdup("codex");
+        }
+        c->model = xstrdup("");
+        if (wf) take_str(&c->model, wf, sec, "model");
+        char akey[64];
+        snprintf(akey, sizeof akey, "%s_args", c->driver);
+        c->args = wf ? kvx_str(wf, "agents", akey) : NULL;
+        if (!c->args) c->args = xstrdup("");
+        if (wf) take_str(&c->args, wf, sec, "args");
+        c->max = MAXES[r] ? MAXES[r] : wmax;
+        c->wall = WALLS[r];
+        c->retries = RETRIES[r];
+        c->stall = STALLS[r];
+        c->spend = 0;
+        c->approve = 0;
+        if (!wf) continue;
+        cap_count(h, wf, sec, name, "max", 1, &c->max);
+        cap_count(h, wf, sec, name, "retries", 0, &c->retries);
+        cap_duration(h, wf, sec, name, "wall", &c->wall);
+        cap_duration(h, wf, sec, name, "stall", &c->stall);
+        if (r == FLEET_MAIN && c->max != 1) {
+            char given[24];
+            snprintf(given, sizeof given, "%ld", c->max);
+            hier_problem(h, "[role.%s] %s = \"%s\" — there is one main agent, "
+                            "using 1", name, "max", given);
+            c->max = 1;
+        }
+        char *sp = cap_raw(wf, sec, "spend");
+        if (sp) {
+            const char *p = sp[0] == '$' ? sp + 1 : sp;
+            char *end = NULL;
+            double v = strtod(p, &end);
+            if (end == p || *end || v < 0)
+                hier_problem(h, "[role.%s] %s = \"%s\" is not a USD amount — "
+                                "no spend limit", name, "spend", sp);
+            else c->spend = v;
+            free(sp);
+        }
+        char **ap = NULL;
+        int na = kvx_list(wf, sec, "approve", &ap);
+        if (na <= 0) {
+            /* a single gate may be written as a plain string */
+            char *one = kvx_str(wf, sec, "approve");
+            if (one && one[0]) { ap = xmalloc(sizeof(char *)); ap[0] = one; na = 1; }
+            else free(one);
+        }
+        for (int i = 0; i < na; i++) {
+            bool known = false;
+            for (size_t k = 0; k < sizeof APPROVALS / sizeof *APPROVALS; k++)
+                if (strcmp(ap[i], APPROVALS[k].name) == 0) {
+                    c->approve |= APPROVALS[k].bit;
+                    known = true;
+                }
+            if (!known)
+                hier_problem(h, "[role.%s] %s gate \"%s\" is not land, pr, "
+                                "retry, or drift — ignored", name, "approve",
+                             ap[i]);
+            free(ap[i]);
+        }
+        free(ap);
+    }
+    free(driver);
+}
+
 /* Read [hierarchy] and [role.main|feature|worker] over the built-in
  * defaults, so a workflow that names only what differs still gets a whole
  * tree. Returns whether the hierarchy is enabled: a missing section means
@@ -126,6 +284,7 @@ static void take_str(char **slot, const Kvx *k, const char *sec,
  * they would use. wf may be NULL (no workflow file at all). */
 bool hier_load(const Kvx *wf, Hierarchy *h) {
     hier_defaults(h);
+    hier_role_caps(wf, h);
     if (!wf || !kvx_has(wf, "hierarchy")) return false;
     h->configured = true;
     h->enabled = kvx_bool(wf, "hierarchy", "enabled", true);
@@ -167,8 +326,11 @@ void hier_free(Hierarchy *h) {
         free(h->roles[r].name); free(h->roles[r].title);
         free(h->roles[r].agent); free(h->roles[r].branch);
         free(h->roles[r].base);
+        free(h->roles[r].caps.driver); free(h->roles[r].caps.model);
+        free(h->roles[r].caps.args);
     }
     for (int i = 0; i < h->nunknown; i++) free(h->unknown[i]);
+    for (int i = 0; i < h->nproblems; i++) free(h->problems[i]);
     memset(h, 0, sizeof *h);
 }
 
@@ -264,6 +426,27 @@ void fleet_brief(Cg *cg, StrBuf *b, bool json) {
 
 /* ---------------- cg fleet roles ---------------- */
 
+/* 7200 -> "2h", 90 -> "90s", 0 -> "—" */
+static void fmt_secs(long s, char *out, size_t cap) {
+    if (s <= 0) snprintf(out, cap, "—");
+    else if (s % 86400 == 0) snprintf(out, cap, "%ldd", s / 86400);
+    else if (s % 3600 == 0) snprintf(out, cap, "%ldh", s / 3600);
+    else if (s % 60 == 0) snprintf(out, cap, "%ldm", s / 60);
+    else snprintf(out, cap, "%lds", s);
+}
+
+static void approvals(unsigned bits, char *out, size_t cap, const char *sep) {
+    size_t o = 0;
+    out[0] = 0;
+    for (size_t k = 0; k < sizeof APPROVALS / sizeof *APPROVALS; k++) {
+        if (!(bits & APPROVALS[k].bit)) continue;
+        int n = snprintf(out + o, cap - o, "%s%s", o ? sep : "",
+                         APPROVALS[k].name);
+        if (n < 0 || (size_t)n >= cap - o) break;
+        o += (size_t)n;
+    }
+}
+
 static int fleet_roles(Cg *cg, bool json) {
     char path[4700];
     Kvx *wf = fleet_workflow(cg, path, sizeof path);
@@ -290,12 +473,27 @@ static int fleet_roles(Cg *cg, bool json) {
             sb_puts(&b, ",\"agent\":");   sb_json_str(&b, h.roles[r].agent);
             sb_puts(&b, ",\"branch\":");  sb_json_str(&b, h.roles[r].branch);
             sb_puts(&b, ",\"base\":");    sb_json_str(&b, h.roles[r].base);
-            sb_putc(&b, '}');
+            const RoleCaps *c = &h.roles[r].caps;
+            sb_puts(&b, ",\"caps\":{\"driver\":"); sb_json_str(&b, c->driver);
+            sb_puts(&b, ",\"model\":");  sb_json_str(&b, c->model);
+            sb_puts(&b, ",\"args\":");   sb_json_str(&b, c->args);
+            sb_printf(&b, ",\"max\":%ld,\"wall_s\":%ld,\"spend_usd\":%.2f,"
+                          "\"retries\":%ld,\"stall_s\":%ld,\"approve\":[",
+                      c->max, c->wall, c->spend, c->retries, c->stall);
+            char appr[64];
+            approvals(c->approve, appr, sizeof appr, "\",\"");
+            if (appr[0]) sb_printf(&b, "\"%s\"", appr);
+            sb_puts(&b, "]}}");
         }
         sb_puts(&b, "],\"unknown_roles\":[");
         for (int i = 0; i < h.nunknown; i++) {
             if (i) sb_putc(&b, ',');
             sb_json_str(&b, h.unknown[i]);
+        }
+        sb_puts(&b, "],\"problems\":[");
+        for (int i = 0; i < h.nproblems; i++) {
+            if (i) sb_putc(&b, ',');
+            sb_json_str(&b, h.problems[i]);
         }
         sb_puts(&b, "]}\n");
         fputs(b.p, stdout);
@@ -322,9 +520,30 @@ static int fleet_roles(Cg *cg, bool json) {
             printf("%-8s %-16s %-20s %-24s %s\n", h.roles[r].name,
                    h.roles[r].title, h.roles[r].agent, h.roles[r].branch,
                    h.roles[r].base[0] ? h.roles[r].base : "—");
+        printf("\n%-8s %-7s %-14s %4s %6s %8s %8s %6s  %s\n", "role",
+               "driver", "model", "max", "wall", "spend", "retries", "stall",
+               "approve");
+        for (int r = 0; r < FLEET_ROLES; r++) {
+            const RoleCaps *c = &h.roles[r].caps;
+            char wall[32], stall[32], spend[32], appr[64] = "";
+            fmt_secs(c->wall, wall, sizeof wall);
+            fmt_secs(c->stall, stall, sizeof stall);
+            if (c->spend > 0) snprintf(spend, sizeof spend, "$%.2f", c->spend);
+            else snprintf(spend, sizeof spend, "—");
+            approvals(c->approve, appr, sizeof appr, ",");
+            printf("%-8s %-7s %-14s %4ld %6s %8s %8ld %6s  %s\n",
+                   h.roles[r].name, c->driver, c->model[0] ? c->model : "—",
+                   c->max, wall, spend, c->retries, stall,
+                   appr[0] ? appr : "—");
+        }
+        for (int r = 0; r < FLEET_ROLES; r++)
+            if (h.roles[r].caps.args[0])
+                printf("args %-8s %s\n", h.roles[r].name, h.roles[r].caps.args);
         for (int i = 0; i < h.nunknown; i++)
             printf("warn: [role.%s] is not main, feature, or worker — "
                    "ignored\n", h.unknown[i]);
+        for (int i = 0; i < h.nproblems; i++)
+            printf("warn: %s\n", h.problems[i]);
     }
     hier_free(&h);
     kvx_free(wf);
