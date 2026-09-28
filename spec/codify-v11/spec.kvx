@@ -250,10 +250,10 @@ status  = "pending"
 
 [task.6.1]
 title      = "Start fleet flow and the live fleet view"
-status     = "in_progress"
+status     = "done"
 wave       = 6
 requires   = ["5.2", "4.1", "4.2"]
-symbols    = ["FleetStartFlow", "FleetLiveView"]
+symbols    = ["startPlan", "liveDecorate", "cmdStart"]
 touches    = ["editors/vscode/fleet.js", "editors/vscode/extension.js", "editors/vscode/kvx.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh start"
 do_1       = "CodeLens and view-title Start on a feature: plan preview with roles, agents, branches, parallel groups, collisions, budgets; confirm runs cg fleet up."

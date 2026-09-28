@@ -81,7 +81,7 @@
 ## Start, watch, steer, approve
 
 - [ ] 6. Editor surfaces
-  - [-] 6.1 Start fleet flow and the live fleet view
+  - [x] 6.1 Start fleet flow and the live fleet view
     - CodeLens and view-title Start on a feature: plan preview with roles, agents, branches, parallel groups, collisions, budgets; confirm runs cg fleet up.
     - Live tree with state, step, last output, tokens and cost, stall and retry badges; Stop, Pause, Resume; click opens the agent's transcript.
     - _Requirements: 6.2, 6.3_
