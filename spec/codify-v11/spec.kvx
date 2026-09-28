@@ -127,7 +127,7 @@ reqs       = ["5.2", "5.4"]
 
 [task.2.2]
 title      = "Drivers module with structured output capture"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["1.1", "1.2"]
 symbols    = ["driver_argv", "driver_stream_parse", "driver_steer"]

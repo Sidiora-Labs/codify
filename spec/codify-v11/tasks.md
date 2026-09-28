@@ -26,7 +26,7 @@
     - Wake on WAL change through inotify with a stat fallback and push events_since the subscriber's cursor; never take the write lock while idle.
     - Test push latency under 250 ms and that an idle serve leaves the index lock free.
     - _Requirements: 5.2, 5.4_
-  - [-] 2.2 Drivers module with structured output capture
+  - [x] 2.2 Drivers module with structured output capture
     - Move argv building out of orchestrate.c; add stream-json for claude and exec --json for codex behind role caps.
     - Parse text, tool calls, tokens, and cost into agent events and a per-node spend counter; keep the raw log.
     - driver_steer queues a message as an agent.steer event; a Claude Code session receives it at its next edit through the post-edit hook (PostToolUse additionalContext), and any agent through its next prompt; cg fleet steer <agent> <message> is the command.
