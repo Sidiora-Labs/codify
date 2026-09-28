@@ -232,7 +232,7 @@ reqs       = ["4.2", "4.4", "4.5"]
 
 [task.5.2]
 title      = "Extension on cg serve: one connection, incremental views, no polling"
-status     = "in_progress"
+status     = "done"
 wave       = 5
 requires   = ["2.1"]
 symbols    = ["ServeClient", "applyEvent"]
