@@ -1782,7 +1782,8 @@ int work_update(Cg *cg, const char *revision, bool json) {
         sb_puts(&b, ",\"evidence\":");
         work_event_json(cg, &b, task, prior_event, false);
         sb_puts(&b, ",\"workspace\":"); sb_puts(&b, paths.p);
-        sb_puts(&b, ",\"upstream\":"); sb_puts(&b, up_json.p);
+        /* deltas stay compact: upstream appears only when something merged */
+        if (nup) { sb_puts(&b, ",\"upstream\":"); sb_puts(&b, up_json.p); }
         sb_puts(&b, "}}\n"); fputs(b.p, stdout); sb_free(&b);
     } else if (unchanged) {
         printf("work %.12s: no state, evidence, or workspace changes\n",
