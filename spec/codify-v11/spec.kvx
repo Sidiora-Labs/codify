@@ -250,7 +250,7 @@ status  = "pending"
 
 [task.6.1]
 title      = "Start fleet flow and the live fleet view"
-status     = "pending"
+status     = "in_progress"
 wave       = 6
 requires   = ["5.2", "4.1", "4.2"]
 symbols    = ["FleetStartFlow", "FleetLiveView"]

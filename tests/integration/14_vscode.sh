@@ -12,6 +12,8 @@
 #   fleet    — (task 5.3) the fleet view: its manifest surface and the join
 #              behind FleetView, from JSON the real cg printed
 #   chat     — (task 5.3) the agent chat core: diff rows, ANSI, cost ledger
+#   start    — (v11 6.1) the Start flow's plan from real cg output, the
+#              live fleet view decorated from events, manifest and lens
 #   serve    — (v11 5.2) the cg serve client, the event reducer and row
 #              patch against the real cg, reconnect, fallback on an old cg
 # Run one section: 14_vscode.sh tasks
@@ -158,6 +160,147 @@ check(pkg.contributes.configuration.properties['codify.serve'], 'codify.serve is
 console.log('serve wiring ok');
 JS
     [ $? -eq 0 ] || fail "serve wiring"
+fi
+
+# ---- start (v11 6.1): the Start flow's plan and the live fleet view
+if want start; then
+    rm -rf "$TMP/st"; mkdir -p "$TMP/st/src"; cd "$TMP/st"
+    git init -q -b main . 2>/dev/null || git init -q .
+    git config user.email t@t; git config user.name t
+    echo 'export function alpha(){}' > src/a.ts
+    echo 'export function beta(){ return alpha() }' > src/b.ts
+    "$CG" spec new st >/dev/null
+    "$CG" spec docs off >/dev/null
+    "$CG" spec start 1.1 >/dev/null; "$CG" spec done 1.1 >/dev/null
+    "$CG" spec mode parallel >/dev/null
+    "$CG" spec add 2.1 --title "Alpha" --wave 1 --reqs 1.1 --symbols alpha --touches 'src/a.ts' >/dev/null
+    "$CG" spec add 2.2 --title "Beta" --wave 1 --reqs 1.1 --symbols beta --touches 'src/b.ts' >/dev/null
+    "$CG" init >/dev/null
+    printf '.codegraph/\n*.lock\n' > .gitignore
+    cat >> spec/workflow.kvx <<'EOF'
+
+[hierarchy]
+test_gate = "true"
+pr        = "manual"
+
+[role.worker]
+wall  = "2h"
+spend = "$3"
+approve = ["land"]
+EOF
+    git add -A >/dev/null; git commit -qm base >/dev/null
+    # events a supervisor would have written, so the decoration has something to fold
+    python3 - <<'EOF'
+import json, sqlite3, time
+db = sqlite3.connect(".codegraph/graph.db", isolation_level=None)
+now = int(time.time() * 1000)
+rows = [
+  ("orch.spawn", "st/2.1", "w-st-1", {"role": "worker", "agent": "w-st-1", "task": "2.1"}),
+  ("supervisor.stall", "st/2.1", None, {"agent": "w-st-1", "task": "2.1", "action": "nudge", "reason": "no progress"}),
+  ("supervisor.stall", "st/2.1", None, {"agent": "w-st-1", "task": "2.1", "action": "stop", "reason": "stalled — no progress for 40s after a nudge"}),
+  ("orch.spawn", "st/2.1", "w-st-1", {"role": "worker", "agent": "w-st-1", "task": "2.1"}),
+  ("supervisor.escalate", "st/2.1", None, {"task": "2.1", "level": 1, "to": "manager", "agent": "fm-st"}),
+  ("agent.tool", "st/2.1", "w-st-1", {"agent": "w-st-1", "tool": "Bash", "detail": "make test"}),
+  ("agent.usage", "st/2.1", "w-st-1", {"agent": "w-st-1", "tokens_in": 1200, "tokens_out": 80, "cost_usd": 0.42}),
+]
+for kind, subj, node, payload in rows:
+    db.execute("INSERT INTO events(at,kind,subject,node,payload) VALUES(?,?,?,?,?)", (now, kind, subj, node, json.dumps(payload)))
+db.execute("INSERT INTO fleet_approvals(gate,subject,state,requested,requested_by) VALUES('land','st','pending',?, 'fm-st')", (int(time.time()),))
+EOF
+    CG_AGENT=w-st-1 CG_ROLE=worker CG_PARENT=fm-st CG_FEATURE=st CG_WAVE=1 "$CG" spec claim 2.1 >/dev/null
+    node - "$EXT" "$CG" "$TMP/st" <<'JS'
+const path = require('path'), cp = require('child_process');
+const [dir, CG, cwd] = process.argv.slice(2);
+const { startPlan, liveDecorate, fleetTree } = require(path.join(dir, 'fleet.js'));
+const { liveModel, applyEvent } = require(path.join(dir, 'serve.js'));
+const check = (c, w) => { if (!c) throw new Error(w); };
+const run = (...a) => cp.spawnSync(CG, a, { cwd, encoding: 'utf8' });
+const json = (...a) => JSON.parse(run(...a).stdout);
+
+// ---- the plan a person confirms, from what cg really answers
+const roles = json('fleet', 'roles', '--json');
+const dry = run('spec', 'run', '--fleet', '--dry-run').stdout;
+const collisions = json('drift', 'collisions', '--json');
+const runs = json('fleet', 'runs', '--json').runs;
+const plan = startPlan({ roles, dryRun: dry, collisions, runs });
+check(plan.canStart === true, `plan should be startable: ${plan.warnings}`);
+check(plan.feature === 'st', `feature ${plan.feature}`);
+const md = plan.markdown;
+check(/\| worker \| w-\{feature\}-\{wave\} \| wave\/\{feature\}\/\{wave\} \| codex \| — \| 2 \| 2h \| \$3\.00 \| 2 \| 15m \| land \|/.test(md), 'worker row carries its budgets and gate: ' + md);
+check(/\| feature \| .* \| land \|/.test(md) === false, 'approve is per role: the worker declared land, not the manager');
+check(/manager fm-st — st on feature\/st/.test(md), 'the dry run is in the plan');
+check(/worker w-st-1 — 2\.1/.test(md) && /worker w-st-1 — 2\.2/.test(md), 'every worker spawn listed');
+check(/## Predicted collisions/.test(md), 'collisions section');
+check(/2\.1 and 2\.2: .*call one another/.test(md), 'the alpha/beta collision is predicted: ' + md);
+check(/cg fleet up -n 2 -f st/.test(md), 'the exact command');
+check(plan.slots === 2, `slots ${plan.slots}`);
+// a flat repository, or a live run, cannot start
+const flat = startPlan({ roles: Object.assign({}, roles, { configured: false }), dryRun: '', collisions: null, runs: [] });
+check(flat.canStart === false && /no \[hierarchy\]/.test(flat.warnings[0]), 'flat repo refused');
+const busy = startPlan({ roles, dryRun: dry, collisions, runs: [{ run: 'r1', feature: 'st', state: 'running', supervisor: true }] });
+check(busy.canStart === false && /stop it first/.test(busy.warnings[0]), 'a live supervisor refuses a second start');
+const crashed = startPlan({ roles, dryRun: dry, collisions, runs: [{ run: 'r1', feature: 'st', state: 'running', supervisor: false }] });
+check(crashed.canStart === true && /Resume/.test(crashed.warnings[0]), 'a crashed run is offered a resume');
+
+// ---- the live view: cg's tree, decorated from the events
+const status = json('fleet', 'status', '--json');
+const spec = json('spec', 'status', '--json');
+const branches = json('branches', '--json');
+const fplan = json('fleet', 'plan', '--json');
+const tree = json('fleet', 'tree', '--json');
+const model = fleetTree(status, spec, branches, { plan: fplan, tree, prs: {}, exists: () => true });
+const live = liveModel();
+const evs = run('events', '--kind', 'supervisor.,orch.spawn,agent.', '-n', '300', '--json').stdout
+    .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+for (const e of evs) applyEvent(live, e);
+check(live.agents['w-st-1'] && live.agents['w-st-1'].last === 'Bash make test', 'the agent\'s last step is in the live model');
+check(Math.abs(live.agents['w-st-1'].cost - 0.42) < 1e-9, 'its cost too');
+const t0 = Date.now();
+liveDecorate(model, { live, events: evs.filter((e) => /^(supervisor\.|orch\.)/.test(e.kind)),
+                      runs: json('fleet', 'runs', '--json'), approvals: json('fleet', 'approvals', '--json') });
+check(Date.now() - t0 < 300, 'decoration is instant');
+const find = (n, pred, out = []) => { if (!n) return out; if (pred(n)) out.push(n); for (const c of n.children || []) find(c, pred, out); return out; };
+const worker = find(model.main, (n) => n.agent === 'w-st-1')[0];
+check(worker, 'the claimed worker is in the tree: ' + JSON.stringify(model.main).slice(0, 400));
+check(worker.step === 'Bash make test', `step ${worker.step}`);
+check(Math.abs(worker.cost - 0.42) < 1e-9, `cost ${worker.cost}`);
+const t21 = (worker.tasks || []).find((t) => t.id === '2.1');
+check(t21, 'task 2.1 under its worker');
+check(t21.attempts === 2 && t21.nudged === true, `attempts ${t21.attempts} nudged ${t21.nudged}`);
+check(/stalled/.test(t21.stopped), `stopped ${t21.stopped}`);
+check(t21.escalated === 'manager', `escalated ${t21.escalated}`);
+check(model.approvals.length === 1 && model.approvals[0].gate === 'land' && model.approvals[0].requested_by === 'fm-st', 'the pending approval is on the model');
+check(model.run === null, 'no run yet');
+console.log('start flow ok');
+JS
+    [ $? -eq 0 ] || fail "start flow"
+
+    # ---- manifest and wiring
+    node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+const src = fs.readFileSync(path.join(dir, 'fleet.js'), 'utf8');
+const kvx = fs.readFileSync(path.join(dir, 'kvx.js'), 'utf8');
+const check = (c, w) => { if (!c) throw new Error(w); };
+const declared = pkg.contributes.commands.map((c) => c.command);
+for (const verb of ['start', 'stop', 'pause', 'resume', 'openTranscript', 'approve']) {
+    const c = `codify.fleet.${verb}`;
+    check(declared.includes(c), `not declared: ${c}`);
+    check(src.includes(`'${c}':`), `not registered: ${c}`);
+}
+const menus = Object.values(pkg.contributes.menus).flat();
+check(menus.some((m) => m.command === 'codify.fleet.start' && /!codify\.fleet\.running/.test(m.when)), 'Start shows when nothing runs');
+check(menus.some((m) => m.command === 'codify.fleet.stop' && /codify\.fleet\.running/.test(m.when)), 'Stop shows while running');
+check(menus.some((m) => m.command === 'codify.fleet.resume' && /codify\.fleet\.paused/.test(m.when)), 'Resume shows when paused');
+check(/registerCodeLensProvider\(KVX/.test(kvx) && /codify\.fleet\.start/.test(kvx), 'the spec gets a Start lens');
+check(/command: 'codify\.fleet\.openTranscript'/.test(src), 'a click on an agent opens its transcript');
+check(/approvalItem\(a\)/.test(src) && /fleet-approval/.test(src), 'approvals are rows');
+check(/\['fleet', 'up', '-n'/.test(src), 'Start runs cg fleet up');
+check(/'fleet', 'down'/.test(src) && /--drain/.test(src), 'Stop runs cg fleet down, with a drain');
+console.log('start wiring ok');
+JS
+    [ $? -eq 0 ] || fail "start wiring"
 fi
 
 # ---- agent chat (5.3): the pure chat core, provable without VS Code

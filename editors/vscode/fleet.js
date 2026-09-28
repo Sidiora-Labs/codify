@@ -25,6 +25,7 @@
  *
  * Plain JS, zero dependencies, no build step. */
 const fs = require('fs');
+const path = require('path');
 /* The join below is plain data work, and the tests drive it from a shell.
  * Importing vscode the way acp.js does keeps that possible. */
 let vscode = null;
@@ -487,6 +488,108 @@ function fleetTree(status, specStatus, branches, opts) {
     };
 }
 
+/* ---------------- the Start flow (headless-safe) ----------------
+ *
+ * What a person sees before the fleet starts: the roles and what each may
+ * spend, the agents and branches the plan would spawn (cg's own dry run),
+ * the tasks that would collide and so run one after the other, and what is
+ * already running. One markdown document, built from cg's JSON. */
+function startPlan(input) {
+    const i = input || {};
+    const roles = i.roles || {};
+    const lines = [];
+    const feature = i.feature || (i.dryRun && /feature (\S+)/.exec(i.dryRun) || [])[1] || '';
+    lines.push(`# Start the fleet${feature ? ` — ${feature}` : ''}`, '');
+    const warnings = [];
+    if (roles.configured === false) warnings.push('spec/workflow.kvx has no [hierarchy] — the fleet cannot start');
+    else if (roles.enabled === false) warnings.push('[hierarchy] is disabled (enabled = false)');
+    for (const p of roles.problems || []) warnings.push(p);
+    const open = (i.runs || []).filter((r) => ['running', 'paused', 'draining', 'stopping'].includes(r.state));
+    for (const r of open) warnings.push(`run ${r.run} (${r.feature}) is ${r.state}${r.supervisor ? ' with a live supervisor — stop it first' : ' with no supervisor — `Resume` continues it'}`);
+    if (warnings.length) {
+        lines.push('## Before you start', '');
+        for (const w of warnings) lines.push(`- ⚠ ${w}`);
+        lines.push('');
+    }
+    lines.push('## Roles', '', '| role | agent | branch | driver | model | max | wall | spend | retries | stall | approve |', '|---|---|---|---|---|---|---|---|---|---|---|');
+    const secs = (s) => !s ? '—' : s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`;
+    for (const r of roles.roles || []) {
+        const c = r.caps || {};
+        lines.push(`| ${r.name} | ${r.agent} | ${r.branch} | ${c.driver || ''} | ${c.model || '—'} | ${c.max ?? ''} | ${secs(c.wall_s)} | ${c.spend_usd ? '$' + c.spend_usd.toFixed(2) : '—'} | ${c.retries ?? ''} | ${secs(c.stall_s)} | ${(c.approve || []).join(', ') || '—'} |`);
+    }
+    lines.push('');
+    if (roles.test_gate || roles.lint_gate) {
+        lines.push(`Gates: test \`${roles.test_gate || '—'}\`, lint \`${roles.lint_gate || '—'}\`; pull requests ${roles.pr || 'auto'}.`, '');
+    }
+    lines.push('## What would be spawned', '');
+    if (i.dryRun && i.dryRun.trim()) {
+        lines.push('```', ...i.dryRun.trimEnd().split('\n'), '```', '');
+    } else {
+        lines.push('_cg spec run --fleet --dry-run printed nothing_', '');
+    }
+    const coll = (i.collisions && i.collisions.collisions) || [];
+    lines.push('## Predicted collisions', '');
+    if (!coll.length) lines.push('None — every open task may run beside the others.', '');
+    else {
+        lines.push('These run one after the other instead of at once:', '');
+        for (const c of coll) lines.push(`- ${c.a} and ${c.b}: ${c.why}`);
+        lines.push('');
+    }
+    const workers = (roles.roles || []).find((r) => r.name === 'worker');
+    const slots = i.slots || (workers && workers.caps && workers.caps.max) || 2;
+    lines.push('## Command', '', '```', `cg fleet up -n ${slots}${feature ? ` -f ${feature}` : ''}${i.all ? ' --all' : ''}`, '```', '',
+               'The supervisor runs detached: it survives this window, and `cg fleet up --resume` continues it after a crash. Stop, Pause and Resume are on the fleet view while it runs.');
+    return { markdown: lines.join('\n'), warnings, canStart: roles.configured !== false && roles.enabled !== false && !open.some((r) => r.supervisor), slots, feature };
+}
+
+/* What the events say about each live agent and task, folded onto the tree
+ * cg drew: the last thing it said or did, what it has spent, whether it was
+ * nudged, restarted, or stopped, and what waits for a person. `live` is the
+ * extension's live model (serve.js applyEvent); `events` the recent
+ * supervisor.* and orch.* rows; `approvals` cg fleet approvals --json. */
+function liveDecorate(model, input) {
+    if (!model) return model;
+    const i = input || {};
+    const agents = (i.live && i.live.agents) || {};
+    const byTask = new Map();
+    for (const ev of i.events || []) {
+        const p = ev.payload || {};
+        const key = ev.subject || '';
+        const b = byTask.get(key) || { attempts: 0, nudges: 0, stopped: null, escalated: null, blocked: false };
+        if (ev.kind === 'orch.spawn' && p.role === 'worker') b.attempts += 1;
+        if (ev.kind === 'supervisor.stall' && p.action === 'nudge') b.nudges += 1;
+        if ((ev.kind === 'supervisor.stall' || ev.kind === 'supervisor.budget') && p.action === 'stop') b.stopped = p.reason;
+        if (ev.kind === 'supervisor.escalate') b.escalated = p.to;
+        if (ev.kind === 'supervisor.blocked') b.blocked = true;
+        byTask.set(key, b);
+    }
+    const walk = (n) => {
+        if (!n) return;
+        const a = agents[n.agent];
+        if (a) {
+            if (a.last) n.step = String(a.last).split('\n')[0].slice(0, 80);
+            if (a.cost !== undefined) n.cost = a.cost;
+            if (a.tokens_in !== undefined) n.tokens = { in: a.tokens_in, out: a.tokens_out };
+        }
+        for (const t of n.tasks || []) {
+            const b = byTask.get(`${n.feature || (model.feature || '')}/${t.id}`);
+            if (b) {
+                t.attempts = b.attempts;
+                t.nudged = b.nudges > 0;
+                t.stopped = b.stopped;
+                t.escalated = b.escalated;
+                t.blocked = b.blocked;
+            }
+        }
+        for (const c of n.children || []) walk(c);
+    };
+    walk(model.main);
+    model.approvals = ((i.approvals && i.approvals.approvals) || []).filter((a) => a.state === 'pending');
+    model.runs = (i.runs && i.runs.runs) || [];
+    model.run = model.runs.find((r) => ['running', 'paused', 'draining', 'stopping'].includes(r.state)) || null;
+    return model;
+}
+
 /* Task ids are dotted numbers, and "10.1" sorts after "9.1" only if they are
  * compared segment by segment. */
 function byDotted(a, b) {
@@ -593,6 +696,18 @@ class FleetView {
                 try { return fs.existsSync(p); } catch { return true; }
             },
         });
+        /* v11: what the supervisor and the agents have been doing */
+        if (configured) {
+            const runs = await call(['fleet', 'runs']);
+            const approvals = await call(['fleet', 'approvals']);
+            let events = [];
+            const evr = await this.deps.cg(['events', '--kind', 'supervisor.,orch.spawn', '-n', '300', '--json']);
+            if (evr && evr.code === 0) {
+                events = evr.stdout.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+            }
+            liveDecorate(this.model, { live: this.deps.live && this.deps.live(), events, runs, approvals });
+            this.hasRuns = !!runs;
+        }
         this.state = 'ready';
         this._done();
     }
@@ -601,19 +716,27 @@ class FleetView {
         this._em.fire();
         const m = this.model;
         if (this.view) {
+            const run = m && m.run;
             this.view.description = m && m.hierarchy.configured
-                ? `${m.counts.live} live` +
-                  (m.counts.stale ? ` · ${m.counts.stale} stale` : '')
+                ? (run ? `${run.state}${run.supervisor ? '' : ' · no supervisor'} · ` : '') +
+                  `${m.counts.live} live` +
+                  (m.counts.stale ? ` · ${m.counts.stale} stale` : '') +
+                  (m.approvals && m.approvals.length ? ` · ${m.approvals.length} waiting for you` : '')
                 : undefined;
         }
         vscode.commands.executeCommand('setContext', 'codify.fleet',
             !!(m && m.hierarchy.configured));
+        vscode.commands.executeCommand('setContext', 'codify.fleet.running',
+            !!(m && m.run && m.run.supervisor && m.run.state !== 'paused'));
+        vscode.commands.executeCommand('setContext', 'codify.fleet.paused',
+            !!(m && m.run && (m.run.state === 'paused' || !m.run.supervisor)));
     }
 
     getTreeItem(el) { return el; }
 
     getChildren(el) {
         if (el) return el.childItems || [];
+
         if (this.state === 'loading') return [this.noticeItem(
             'Loading the fleet…', 'sync~spin', undefined)];
         if (this.state === 'error') return [this.noticeItem(
@@ -623,7 +746,12 @@ class FleetView {
         /* Nothing configured: the welcome view explains it better than a
          * placeholder row ever could, and it only shows on an empty tree. */
         if (!m || !m.hierarchy.configured) return [];
-        return [this.nodeItem(m.main)];
+        const top = [];
+        /* what waits for a person comes first: nothing below moves until
+         * it is decided */
+        for (const a of m.approvals || []) top.push(this.approvalItem(a));
+        top.push(this.nodeItem(m.main));
+        return top;
     }
 
     noticeItem(label, icon, command) {
@@ -668,8 +796,10 @@ class FleetView {
                 (n.progress.claimed ? ` · ${n.progress.claimed} running` : ''));
         }
         if (n.state && n.state !== 'idle' && n.state !== 'running') bits.push(n.state);
+        if (n.cost !== undefined && n.cost !== null) bits.push(`$${Number(n.cost).toFixed(2)}`);
         if (n.live) bits.push(n.age.text + (n.age.stale ? ' · stale' : ''));
         else bits.push('not started');
+        if (n.step) bits.push(`› ${n.step}`);
         /* cg's own verdict when it gave one, the registry's otherwise */
         if (n.merged === false || (n.merged === undefined &&
                                    n.merge && n.merge.state === 'unmerged')) {
@@ -682,6 +812,19 @@ class FleetView {
         it.contextValue = `fleet-${n.kind}` +
             (n.worktree ? '-worktree' : '') +
             (n.kind === 'worker' && n.tasks && n.tasks.length ? '-tasks' : '');
+        /* a click opens what the agent has said and done */
+        it.command = { command: 'codify.fleet.openTranscript', title: 'Open transcript',
+                       arguments: [{ node: n }] };
+        return it;
+    }
+
+    approvalItem(a) {
+        const it = new vscode.TreeItem(`#${a.id} ${a.gate} of ${a.subject}`);
+        it.id = `fleet:approval:${a.id}`;
+        it.description = `asked by ${a.requested_by || '?'} — click to decide`;
+        it.iconPath = new vscode.ThemeIcon('shield', new vscode.ThemeColor('list.warningForeground'));
+        it.contextValue = 'fleet-approval';
+        it.command = { command: 'codify.fleet.approve', title: 'Decide', arguments: [{ approval: a }] };
         return it;
     }
 
@@ -738,6 +881,16 @@ class FleetView {
         return md;
     }
 
+    taskBadges(t) {
+        const b = [];
+        if (t.attempts > 1) b.push(`attempt ${t.attempts}`);
+        if (t.nudged) b.push('nudged');
+        if (t.stopped) b.push(`stopped: ${t.stopped}`);
+        if (t.escalated) b.push(`escalated to ${t.escalated}`);
+        if (t.blocked) b.push('blocked');
+        return b;
+    }
+
     taskItem(t, owner) {
         const it = new vscode.TreeItem(t.title ? `${t.id}  ${t.title}` : t.id,
             vscode.TreeItemCollapsibleState.None);
@@ -749,8 +902,12 @@ class FleetView {
         if (t.expiresInMin !== null && t.expiresInMin !== undefined) {
             bits.push(`${t.expiresInMin} min left`);
         }
+        bits.push(...this.taskBadges(t));
         it.description = bits.join(' · ');
-        const [icon, color] = STATUS_ICON[t.status] || STATUS_ICON.pending;
+        const [icon0, color0] = STATUS_ICON[t.status] || STATUS_ICON.pending;
+        const icon = t.blocked ? 'error' : t.stopped || t.nudged ? 'warning' : icon0;
+        const color = t.blocked ? 'list.errorForeground'
+            : t.stopped || t.nudged ? 'list.warningForeground' : color0;
         it.iconPath = color
             ? new vscode.ThemeIcon(icon, new vscode.ThemeColor(color))
             : new vscode.ThemeIcon(icon);
@@ -1082,6 +1239,126 @@ async function cmdCheckpoint() {
     await deps.refresh();
 }
 
+/* ---------------- the Start flow ---------------- */
+
+const START_SCHEME = 'codify-fleet-plan';
+let planText = '';
+let planEmitter = null;   /* created in register: vscode is absent headless */
+
+async function cmdStart(arg) {
+    const feature = arg && typeof arg === 'string' ? arg
+        : arg && arg.feature ? arg.feature : undefined;
+    const { cg, cgJson } = deps;
+    const roles = await cgJson(['fleet', 'roles']);
+    const dry = await cg(['spec', 'run', '--fleet', '--dry-run',
+                          ...(feature ? ['-f', feature] : [])]);
+    const collisions = await cgJson(['drift', 'collisions', ...(feature ? ['-f', feature] : [])]);
+    const runs = await cgJson(['fleet', 'runs']);
+    const plan = startPlan({ roles, dryRun: dry.stdout + (dry.code ? dry.stderr : ''),
+                             collisions, runs: (runs && runs.runs) || [], feature });
+    planText = plan.markdown;
+    if (planEmitter) planEmitter.fire(vscode.Uri.parse(`${START_SCHEME}:/plan.md`));
+    const doc = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse(`${START_SCHEME}:/plan.md`));
+    await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+    if (arg && arg.previewOnly) return;
+    if (!plan.canStart) {
+        vscode.window.showWarningMessage(
+            `The fleet cannot start: ${plan.warnings[0] || 'see the plan'}`);
+        return;
+    }
+    const slots = await vscode.window.showInputBox({
+        prompt: 'Worker slots (agents writing code at once)',
+        value: String(plan.slots), validateInput: (v) => /^\d+$/.test(v) && Number(v) > 0 ? null : 'a positive number',
+    });
+    if (!slots) return;
+    const go = await vscode.window.showInformationMessage(
+        `Start the fleet${plan.feature ? ` for ${plan.feature}` : ''} with ${slots} worker slot(s)?`,
+        { modal: true, detail: 'A detached supervisor spawns the manager and workers and keeps them going until every task is qualified and merged. Stop, Pause and Resume are on the fleet view.' },
+        'Start');
+    if (go !== 'Start') return;
+    const r = await run(['fleet', 'up', '-n', slots, ...(plan.feature ? ['-f', plan.feature] : []), '--json'], 'fleet up');
+    const j = parse(r);
+    if (j && j.run) {
+        vscode.window.showInformationMessage(`Fleet up — run ${j.run}, supervisor pid ${j.pid}. Log: ${j.log}`);
+    } else {
+        vscode.window.showErrorMessage('cg fleet up refused — see the Codify output.');
+    }
+    view.force = true;
+    await deps.refresh();
+}
+
+async function fleetControl(verb, label) {
+    const r = await run(['fleet', verb, '--json'], `fleet ${verb}`);
+    const j = parse(r);
+    if (j && j.state) vscode.window.showInformationMessage(`Fleet ${label}: run ${j.run} is ${j.state}.`);
+    else if (r.code !== 0) vscode.window.showErrorMessage(`cg fleet ${verb} failed — see the Codify output.`);
+    view.force = true;
+    await deps.refresh();
+}
+
+async function cmdStop() {
+    const choice = await vscode.window.showWarningMessage(
+        'Stop the fleet?',
+        { modal: true, detail: 'Stop terminates the agents now and releases their claims; branches are kept. Drain lets the live agents finish first.' },
+        'Stop now', 'Drain');
+    if (!choice) return;
+    const args = ['fleet', 'down', '--json'];
+    if (choice === 'Drain') args.push('--drain');
+    const r = await run(args, 'fleet down');
+    const j = parse(r);
+    if (j) vscode.window.showInformationMessage(`Fleet: run ${j.run} is ${j.state}.`);
+    view.force = true;
+    await deps.refresh();
+}
+
+/* the agent's log: what it said and did, as the driver wrote it */
+async function cmdOpenTranscript(arg) {
+    const n = arg && arg.node ? arg.node : null;
+    const root = deps.workspaceRoot();
+    if (!n || !root) return;
+    const dir = path.join(root, '.codegraph', 'agents');
+    let candidates = [];
+    if (n.kind === 'main') candidates = ['main.log'];
+    else if (n.kind === 'manager') candidates = [`${n.feature}-manager.log`];
+    else {
+        const ids = (n.tasks || []).map((t) => t.id);
+        candidates = ids.map((id) => `${n.feature}-${id}.log`);
+    }
+    const found = candidates.map((f) => path.join(dir, f)).filter((p) => fs.existsSync(p));
+    if (!found.length) {
+        vscode.window.showInformationMessage(`${n.agent} has no transcript yet (${candidates.join(', ') || 'no task'}).`);
+        return;
+    }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(found[found.length - 1]));
+    await vscode.window.showTextDocument(doc, { preview: true });
+}
+
+async function cmdApprove(arg) {
+    let a = arg && arg.approval ? arg.approval : null;
+    if (!a) {
+        const j = await deps.cgJson(['fleet', 'approvals']);
+        const items = ((j && j.approvals) || []).map((x) => ({
+            label: `#${x.id} ${x.gate} of ${x.subject}`, description: `asked by ${x.requested_by || '?'}`, a: x }));
+        if (!items.length) { vscode.window.showInformationMessage('Nothing waits for approval.'); return; }
+        const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Approval to decide' });
+        if (!pick) return;
+        a = pick.a;
+    }
+    const choice = await vscode.window.showWarningMessage(
+        `Approval #${a.id}: ${a.gate} of ${a.subject}`,
+        { modal: true, detail: `Requested by ${a.requested_by || 'an agent'}. Approve lets it go ahead once; Reject stops it and the agent reports to its parent.` },
+        'Approve', 'Reject');
+    if (!choice) return;
+    const note = await vscode.window.showInputBox({ prompt: 'Note (optional)' });
+    const args = ['fleet', 'approve', String(a.id), '--json'];
+    if (choice === 'Reject') args.push('--reject');
+    if (note) args.push('-m', note);
+    await run(args, 'fleet approve');
+    view.force = true;
+    await deps.refresh();
+}
+
 /* ---------------- registration ---------------- */
 
 function register(ctx, d) {
@@ -1100,7 +1377,20 @@ function register(ctx, d) {
         if (e.visible) { view.force = true; deps.refresh(); }
     }));
 
+    planEmitter = new vscode.EventEmitter();
+    {
+        ctx.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(START_SCHEME, {
+            onDidChange: planEmitter.event,
+            provideTextDocumentContent: () => planText,
+        }));
+    }
     const cmds = {
+        'codify.fleet.start': cmdStart,
+        'codify.fleet.stop': cmdStop,
+        'codify.fleet.pause': () => fleetControl('pause', 'paused'),
+        'codify.fleet.resume': () => fleetControl('resume', 'resumed'),
+        'codify.fleet.openTranscript': cmdOpenTranscript,
+        'codify.fleet.approve': cmdApprove,
         'codify.fleet.refresh': cmdRefresh,
         'codify.fleet.openWorktree': cmdOpenWorktree,
         'codify.fleet.begin': cmdBegin,
@@ -1123,4 +1413,4 @@ function register(ctx, d) {
 }
 
 module.exports = { register, FleetView, fleetTree, relAge, mergeState,
-                   treeFacts, parentsFromTree };
+                   treeFacts, parentsFromTree, startPlan, liveDecorate };

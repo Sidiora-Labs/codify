@@ -687,6 +687,8 @@ async function activate(ctx) {
     // --- fleet (5.3) ---
     fleetApi = fleet.register(ctx, {
         cg, cgJson, workspaceRoot, show, refresh: () => afterMutation(),
+        /* the live model the serve events fold into: last step, cost */
+        live: () => live,
     });
     // --- end fleet (5.3) ---
 

@@ -132,6 +132,30 @@ function register(ctx, cgJson, workspaceRoot) {
             },
         }, '"'),
 
+        /* Start on the spec itself: the [meta] section of a feature spec
+         * gets a lens that previews the fleet plan and starts it. */
+        vscode.languages.registerCodeLensProvider(KVX, {
+            provideCodeLenses(doc) {
+                const m = /spec\/([^/]+)\/spec\.kvx$/.exec(doc.uri.fsPath || '');
+                if (!m) return [];
+                for (let i = 0; i < doc.lineCount; i++) {
+                    if (!/^\s*\[meta\]/.test(doc.lineAt(i).text)) continue;
+                    const range = new vscode.Range(i, 0, i, 0);
+                    return [
+                        new vscode.CodeLens(range, {
+                            title: '$(play) Start fleet', tooltip: 'Preview the plan, then start the fleet for this feature',
+                            command: 'codify.fleet.start', arguments: [{ feature: m[1] }],
+                        }),
+                        new vscode.CodeLens(range, {
+                            title: '$(list-tree) Fleet plan', tooltip: 'What cg would spawn for this feature',
+                            command: 'codify.fleet.start', arguments: [{ feature: m[1], previewOnly: true }],
+                        }),
+                    ];
+                }
+                return [];
+            },
+        }),
+
         vscode.languages.registerHoverProvider(KVX, {
             provideHover(doc, pos) {
                 const range = doc.getWordRangeAtPosition(pos, /[A-Za-z_0-9]+/);
