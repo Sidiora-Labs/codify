@@ -7,8 +7,8 @@
 ## Events and role capabilities
 
 - [ ] 1. Foundations
-  - [-] 1.1 Event log: schema v17, emit, read, follow
-    - Add the events table and migration; events_emit writes inside the caller's transaction so an event never outlives a rolled-back change.
+  - [x] 1.1 Event log: events table, triggers, emit, read, follow
+    - Add the events table (additive, no schema version bump: a bump drops and rebuilds every project's graph) and triggers on the durable tables; events_emit writes inside the caller's transaction so an event never outlives a rolled-back change.
     - Emit from spec transitions, claims, attempts, fleet begin, merge-up, land, pr, checkpoint, and the orchestrator's spawn and reap.
     - cg events [--since N] [--kind K] [--follow] [--json]; retention by count with a meta high-water mark.
     - _Requirements: 5.1, 5.5_

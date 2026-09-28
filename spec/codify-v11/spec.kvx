@@ -85,7 +85,7 @@ status  = "pending"
 
 [task.1.1]
 title      = "Event log: events table, triggers, emit, read, follow"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["events_emit", "events_since", "cmd_events"]
 touches    = ["src/events.c", "src/db.c", "src/cg.h", "src/main.c", "src/spec.c", "src/fleet.c", "src/orchestrate.c", "tests/integration/30_events.sh"]
