@@ -2310,57 +2310,68 @@ static void sup_end_attempt(Sup *s, OrchFleetSlot *sl, const char *kind,
     if (kill(-sl->n.pid, SIGTERM) != 0) kill(sl->n.pid, SIGTERM);
 }
 
-static void sup_supervise(Sup *s) {
-    long stall = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].stall : 900;
+/* true when the attempt was ended for spending its wall-clock or USD budget */
+static bool supervisor_budget_check(Sup *s, OrchFleetSlot *sl, long now) {
     long wall = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].wall : 7200;
     double spend = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].spend : 0;
+    char why[160];
+    if (wall > 0 && now - sl->started > wall * 1000) {
+        snprintf(why, sizeof why, "wall-clock budget of %lds spent", wall);
+        sup_end_attempt(s, sl, "supervisor.budget", why, wall);
+        return true;
+    }
+    if (spend > 0 && sl->tap.cost > spend) {
+        snprintf(why, sizeof why, "spend budget of $%.2f exceeded ($%.2f)",
+                 spend, sl->tap.cost);
+        sup_end_attempt(s, sl, "supervisor.budget", why,
+                        (long)(sl->tap.cost * 100));
+        return true;
+    }
+    return false;
+}
+
+/* One window without progress earns a nudge and one more window; a second
+ * ends the attempt with a handoff, and the retry takes it from there. */
+static void supervisor_stall_check(Sup *s, OrchFleetSlot *sl, long now) {
+    long stall = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].stall : 900;
     long cadence = stall > 0 ? stall * 250 : 30000;     /* a quarter window */
     if (cadence < 250) cadence = 250;
     if (cadence > 30000) cadence = 30000;
+    if (now - sl->checked >= cadence) {
+        sl->checked = now;
+        if (sup_progressed(s, sl)) sl->progress = now;
+    }
+    if (stall <= 0 || now - sl->progress < stall * 1000) return;
+    long idle = (now - sl->progress) / 1000;
+    if (sl->nudges == 0) {
+        char msg[400];
+        snprintf(msg, sizeof msg, "The supervisor has seen no progress on "
+                 "%s for %lds. Continue if you are working; if you are "
+                 "stuck, record why with `cg handoff --task %s --blocked "
+                 "\"...\"` and exit.", sl->n.task, idle, sl->n.task);
+        driver_steer(s->g, sl->n.agent, msg);
+        sup_note(s, "supervisor.stall", sl, "nudge", "no progress", idle);
+        printf("[fleet] worker %s on %s: no progress for %lds — nudged\n",
+               sl->n.agent, sl->n.task, idle);
+        fflush(stdout);
+        sl->nudges = 1;
+        sl->progress = now;                 /* one more window */
+    } else {
+        char why[160];
+        snprintf(why, sizeof why, "stalled — no progress for %lds after a "
+                 "nudge", idle);
+        sup_end_attempt(s, sl, "supervisor.stall", why, idle);
+    }
+}
+
+static void sup_supervise(Sup *s) {
     long now = wall_ms_now();
     for (int i = 0; i < s->nslots; i++) {
         OrchFleetSlot *sl = &s->slots[i];
         if (!sl->live || sl->why[0]) continue;
         if (!sl->started) sup_slot_begin(s->g, sl);   /* adopted */
-        if (wall > 0 && now - sl->started > wall * 1000) {
-            char why[160];
-            snprintf(why, sizeof why, "wall-clock budget of %lds spent", wall);
-            sup_end_attempt(s, sl, "supervisor.budget", why, wall);
-            continue;
-        }
-        if (spend > 0 && sl->tap.cost > spend) {
-            char why[160];
-            snprintf(why, sizeof why, "spend budget of $%.2f exceeded ($%.2f)",
-                     spend, sl->tap.cost);
-            sup_end_attempt(s, sl, "supervisor.budget", why,
-                            (long)(sl->tap.cost * 100));
-            continue;
-        }
-        if (now - sl->checked >= cadence) {
-            sl->checked = now;
-            if (sup_progressed(s, sl)) sl->progress = now;
-        }
-        if (stall <= 0 || now - sl->progress < stall * 1000) continue;
-        long idle = (now - sl->progress) / 1000;
-        if (sl->nudges == 0) {
-            char msg[400];
-            snprintf(msg, sizeof msg, "The supervisor has seen no progress on "
-                     "%s for %lds. Continue if you are working; if you are "
-                     "stuck, record why with `cg handoff --task %s --blocked "
-                     "\"...\"` and exit.", sl->n.task, idle, sl->n.task);
-            driver_steer(s->g, sl->n.agent, msg);
-            sup_note(s, "supervisor.stall", sl, "nudge", "no progress", idle);
-            printf("[fleet] worker %s on %s: no progress for %lds — nudged\n",
-                   sl->n.agent, sl->n.task, idle);
-            fflush(stdout);
-            sl->nudges = 1;
-            sl->progress = now;                 /* one more window */
-        } else {
-            char why[160];
-            snprintf(why, sizeof why, "stalled — no progress for %lds after a "
-                     "nudge", idle);
-            sup_end_attempt(s, sl, "supervisor.stall", why, idle);
-        }
+        if (supervisor_budget_check(s, sl, now)) continue;
+        supervisor_stall_check(s, sl, now);
     }
 }
 
@@ -2370,7 +2381,7 @@ static int sup_esc_find(Sup *s, const char *task) {
     return -1;
 }
 
-static void sup_escalate(Sup *s, const char *task, int level,
+static void supervisor_escalate(Sup *s, const char *task, int level,
                          const char *reason) {
     int k = sup_esc_find(s, task);
     if (k < 0) {
@@ -2421,11 +2432,12 @@ static void sup_escalate(Sup *s, const char *task, int level,
     fflush(stdout);
 }
 
-/* after a reap: a failed task out of attempts goes up a level */
-static void sup_after_failure(Sup *s, const char *task, const char *why) {
+/* after a reap: a failed task is retried while its attempts last (the
+ * refill hands it out again), and goes up a level once they are spent */
+static void supervisor_retry(Sup *s, const char *task, const char *why) {
     if (orch_attempts(s->tried, s->ntried, task) < g_max_attempts) return;
     if (sup_esc_find(s, task) >= 0) return;
-    sup_escalate(s, task, 1, why && why[0] ? why : "attempts exhausted");
+    supervisor_escalate(s, task, 1, why && why[0] ? why : "attempts exhausted");
 }
 
 /* a manager wake came and went and the task is still not qualified */
@@ -2434,7 +2446,7 @@ static void sup_escalations_check(Sup *s, const OrchTask *v, int n) {
         if (s->esc_level[k] != 1 || s->mgr_live) continue;
         if (s->wakes >= s->esc_wakes[k]) continue;     /* no wake since */
         if (orch_finished_id(v, n, s->esc_task[k])) continue;
-        sup_escalate(s, s->esc_task[k], 2, "the manager did not rescue it");
+        supervisor_escalate(s, s->esc_task[k], 2, "the manager did not rescue it");
     }
     s->n_unfinished = s->n_blocked = 0;
     for (int i = 0; i < n; i++) {
@@ -2572,7 +2584,7 @@ static int supervisor_tick(Sup *s) {
             orch_note_failure(feature, sl->n.task, crc > -900 ? crc : -1);
             s->failures++;
             sup_save(s);
-            sup_after_failure(s, sl->n.task, sl->why);
+            supervisor_retry(s, sl->n.task, sl->why);
         }
         sl->why[0] = 0;
         free(ts);
@@ -2606,7 +2618,7 @@ static int supervisor_tick(Sup *s) {
         orch_note_failure(feature, sl->n.task, -2);
         s->failures++;
         sup_save(s);
-        sup_after_failure(s, sl->n.task, "lost its fenced claim");
+        supervisor_retry(s, sl->n.task, "lost its fenced claim");
     }
 
     if (s->mgr_live) {
