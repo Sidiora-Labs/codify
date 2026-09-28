@@ -220,6 +220,11 @@
     "configuration": {
       "title": "Codify",
       "properties": {
+        "codify.serve": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep one `cg serve` connection open for every call and live events (no polling). Off, or with an older cg, the extension shells out and polls as before."
+        },
         "codify.binaryPath": {
           "type": "string",
           "default": "cg",

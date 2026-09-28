@@ -72,7 +72,7 @@
     - Before land, report acceptance criteria with no qualified task carrying evidence; block only when workflow.kvx opts in.
     - Surface drift in brief and fleet tree.
     - _Requirements: 4.2, 4.4, 4.5_
-  - [ ] 5.2 Extension on cg serve: one connection, incremental views, no polling
+  - [-] 5.2 Extension on cg serve: one connection, incremental views, no polling
     - ServeClient speaks JSON-RPC to one cg serve child with reconnect and version detection; fall back to execFile for old binaries.
     - Task, memory, and fleet models apply events incrementally; remove the poll timers when connected.
     - Headless test: event to view model update under 300 ms.

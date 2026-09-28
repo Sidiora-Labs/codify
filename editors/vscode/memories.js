@@ -558,6 +558,7 @@ function register(ctx, deps) {
     return {
         open: () => browser.open(),
         refresh: () => browser.refresh({ silent: true }),
+        touch: () => {},   /* the browser re-reads on the refresh that follows */
         classifyAll: () => browser.classifyAll(),
         promote: (arg) => browser.promoteFrom(arg),
         supersede: (arg) => browser.supersedeFrom(arg),

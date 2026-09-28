@@ -1115,6 +1115,9 @@ function register(ctx, d) {
 
     return {
         refresh: (specStatus) => view.refresh(specStatus),
+        /* a fleet event arrived: the next refresh redraws this view even
+         * while it is hidden, so it is right the moment it is opened */
+        touch: () => { view.force = true; },
         get visible() { return view.visible; },
     };
 }

@@ -232,13 +232,13 @@ reqs       = ["4.2", "4.4", "4.5"]
 
 [task.5.2]
 title      = "Extension on cg serve: one connection, incremental views, no polling"
-status     = "pending"
+status     = "in_progress"
 wave       = 5
 requires   = ["2.1"]
 symbols    = ["ServeClient", "applyEvent"]
-touches    = ["editors/vscode/client.js", "editors/vscode/extension.js", "editors/vscode/refresh.js", "editors/vscode/tasks.js", "editors/vscode/memories.js", "editors/vscode/fleet.js", "editors/vscode/agents.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
+touches    = ["editors/vscode/serve.js", "editors/vscode/extension.js", "editors/vscode/tasks.js", "editors/vscode/memories.js", "editors/vscode/fleet.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh serve"
-do_1       = "ServeClient speaks JSON-RPC to one cg serve child with reconnect and version detection; fall back to execFile for old binaries."
+do_1       = "ServeClient (editors/vscode/serve.js) speaks JSON-RPC to one cg serve child with reconnect and version detection; fall back to execFile for old binaries."
 do_2       = "Task, memory, and fleet models apply events incrementally; remove the poll timers when connected."
 do_3       = "Headless test: event to view model update under 300 ms."
 reqs       = ["6.1"]

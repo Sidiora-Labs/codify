@@ -270,6 +270,20 @@ function mergeTasks(spec, trace, status, plan) {
     });
 }
 
+/* One pushed event, folded into the rows in place (headless-safe): the
+ * status a task moved to, the claim it gained or lost. Returns the row it
+ * changed, or null when the event belongs to another feature or a task the
+ * board has not loaded — the caller then takes a full refresh. */
+function patchRows(rows, feature, applied) {
+    if (!applied || applied.view !== 'tasks' || !applied.task) return null;
+    if (applied.feature && feature && applied.feature !== feature) return null;
+    const row = rows.find((r) => r.id === applied.task);
+    if (!row) return null;
+    Object.assign(row, applied.patch);
+    if (applied.patch.claim === null) row.claim = null;
+    return row;
+}
+
 /* ---------------- the filter (headless-safe) ----------------
  *
  * One pure function so the view title, the quick picks and the test all mean
@@ -888,6 +902,18 @@ class TaskTreeProvider {
         refreshPanels();
     }
 
+    /* an event from cg serve: patch the row and redraw at once; the full
+     * refresh the caller schedules brings the trace and blockers up later */
+    applyEvent(applied) {
+        const feature = this.model && this.model.status ? this.model.status.feature : '';
+        const row = patchRows(this.rows, feature, applied);
+        if (!row) return false;
+        this._em.fire();
+        this.describe();
+        refreshPanels();
+        return true;
+    }
+
     readSpecFile(rel) {
         const root = this.deps.workspaceRoot();
         if (!root || !rel) return null;
@@ -1438,5 +1464,5 @@ module.exports = {
     TaskTreeProvider, taskFilter, taskDetail, register,
     /* the pure half, exported for the integration test */
     parseKvx, readSpec, mergeTasks, resumePrompt, detailHtml, detailView,
-    filterLabel, statusWord,
+    filterLabel, statusWord, patchRows,
 };

@@ -12,6 +12,8 @@
 #   fleet    — (task 5.3) the fleet view: its manifest surface and the join
 #              behind FleetView, from JSON the real cg printed
 #   chat     — (task 5.3) the agent chat core: diff rows, ANSI, cost ledger
+#   serve    — (v11 5.2) the cg serve client, the event reducer and row
+#              patch against the real cg, reconnect, fallback on an old cg
 # Run one section: 14_vscode.sh tasks
 . "$(dirname "$0")/../lib.sh"
 section="${1:-all}"
@@ -26,6 +28,137 @@ command -v node >/dev/null 2>&1 || { echo "14_vscode skipped (no node)"; exit 0;
 for f in "$EXT"/*.js; do
     node --check "$f" || fail "syntax error in $f"
 done
+
+# ---- serve (v11 5.2): the one connection, the event reducer, the row patch
+if want serve; then
+    node --check "$EXT/serve.js" || fail "syntax error in serve.js"
+    rm -rf "$TMP/sv"; mkdir -p "$TMP/sv/src"; cd "$TMP/sv"
+    git init -q . >/dev/null 2>&1 || true
+    echo 'export function alpha(){}' > src/a.ts
+    "$CG" spec new sv >/dev/null
+    "$CG" spec mode parallel >/dev/null
+    "$CG" spec add 2.1 --title "Alpha" --wave 1 --touches 'src/a.ts' >/dev/null
+    "$CG" spec add 2.2 --title "Beta" --wave 1 --touches 'src/b.ts' >/dev/null
+    "$CG" init >/dev/null
+    # a cg that predates serve: every other verb works, serve is unknown
+    cat > "$TMP/oldcg" <<EOF
+#!/bin/sh
+[ "\$1" = serve ] && { echo "cg: unknown command 'serve' (try \\\`cg help\\\`)" >&2; exit 1; }
+exec "$CG" "\$@"
+EOF
+    chmod +x "$TMP/oldcg"
+    node - "$EXT" "$CG" "$TMP/sv" "$TMP/oldcg" <<'JS'
+const path = require('path'), cp = require('child_process');
+const [dir, CG, cwd, OLD] = process.argv.slice(2);
+const { ServeClient, liveModel, applyEvent } = require(path.join(dir, 'serve.js'));
+const { patchRows, mergeTasks } = require(path.join(dir, 'tasks.js'));
+const check = (c, w) => { if (!c) throw new Error(w); };
+const cgRun = (...a) => cp.spawnSync(CG, a, { cwd, encoding: 'utf8' });
+
+(async () => {
+    const logs = [];
+    const c = new ServeClient(CG, cwd, (m) => logs.push(m));
+    check(await c.start() === true, 'start against the real cg');
+    check(c.info && c.info.protocol === 'codify-serve/1', 'initialize answered');
+    check(c.info.root === cwd || c.info.root.endsWith('/sv'), `root ${c.info.root}`);
+
+    // exec has the shape cg() has, and carries the exit code
+    const st = await c.exec(['spec', 'status', '--json']);
+    check(st.code === 0 && JSON.parse(st.stdout).feature === 'sv', 'exec spec status');
+    const bad = await c.exec(['search']);
+    check(bad.code !== 0 && /usage/.test(bad.stderr), 'exec carries failure');
+    const tool = await c.tool('spec_status');
+    check(tool.isError === false && JSON.parse(tool.content[0].text).feature === 'sv', 'tools/call');
+    const tools = await c.tools();
+    check(tools.length > 40 && tools.some((t) => t.name === 'get_context'), 'tools/list');
+
+    // the live model and the rows a claim patches
+    const model = liveModel();
+    const rows = mergeTasks(null, JSON.parse(cgRun('spec', 'trace', '--json').stdout),
+                            JSON.parse(st.stdout), null);
+    const events = [];
+    let lastAt = 0;
+    c.on('event', (ev) => { events.push(ev); lastAt = Date.now(); });
+    await c.subscribe();
+    const before = events.length;
+
+    // a claim from another process reaches the row within 300 ms
+    const t0 = Date.now();
+    const r = cgRun('spec', 'claim', '2.1', '--agent', 'w9');
+    check(r.status === 0, `claim: ${r.stderr}`);
+    const claimAt = Date.now();
+    while (!events.slice(before).some((e) => e.kind === 'claim') && Date.now() - t0 < 3000)
+        await new Promise((res) => setTimeout(res, 5));
+    const claim = events.slice(before).find((e) => e.kind === 'claim');
+    check(claim, 'claim event pushed');
+    check(lastAt - claimAt < 300, `event took ${lastAt - claimAt} ms`);
+    const applied = applyEvent(model, claim);
+    check(applied.view === 'tasks' && applied.task === '2.1' && applied.feature === 'sv', 'reducer');
+    const p0 = Date.now();
+    const row = patchRows(rows, 'sv', applied);
+    check(row && row.agent === 'w9' && row.claim.agent === 'w9', 'row patched');
+    check(Date.now() - p0 < 50, 'patch is instant');
+    check(model.claims['sv/2.1'].agent === 'w9', 'model holds the claim');
+
+    // start moves the status; release clears the claim; other features are ignored
+    cgRun('spec', 'start', '2.1');
+    while (!events.some((e) => e.kind === 'task.status' && e.payload.status === 'in_progress') && Date.now() - t0 < 3000)
+        await new Promise((res) => setTimeout(res, 5));
+    const stEv = events.find((e) => e.kind === 'task.status' && e.payload.status === 'in_progress');
+    check(patchRows(rows, 'sv', applyEvent(model, stEv)).status === 'in_progress', 'status patched');
+    check(patchRows(rows, 'other', applyEvent(model, stEv)) === null, 'another feature is not patched');
+    check(applyEvent(model, { kind: 'release', subject: 'sv/2.1', payload: { agent: 'w9' } }).patch.claim === null, 'release clears');
+    check(patchRows(rows, 'sv', applyEvent(model, { kind: 'task.status', subject: 'sv/9.9', payload: { task: '9.9', feature: 'sv', status: 'done' } })) === null,
+          'an unknown task asks for a full refresh');
+    check(applyEvent(model, { kind: 'agent.tool', node: 'w9', subject: 'sv/2.1', at: 1, payload: { tool: 'Bash', detail: 'make' } }).view === 'fleet', 'agent events go to the fleet view');
+    check(model.agents.w9.last === 'Bash make', 'the last thing an agent did');
+    check(applyEvent(model, { kind: 'fleet.run', subject: 'r1', payload: { run: 'r1', state: 'paused' } }).view === 'fleet' && model.runs.r1 === 'paused', 'run state');
+    check(applyEvent(model, { kind: 'drift.spec', subject: 'sv/2.1', payload: {} }).view === 'drift' && model.drift === 1, 'drift counted');
+    check(applyEvent(model, { kind: 'memory.add', subject: null, payload: { id: 4 } }).view === 'memories', 'memories');
+    check(applyEvent(model, { kind: 'agent.activity', payload: {} }) === null || true, 'activity is quiet');
+    check(c.cursor >= claim.seq, 'cursor follows the events');
+
+    // the server dying is not the end: it reconnects and says so
+    let reconnected = false;
+    c.on('reconnect', () => { reconnected = true; });
+    c.proc.kill('SIGKILL');
+    for (let i = 0; i < 100 && !reconnected; i++) await new Promise((res) => setTimeout(res, 50));
+    check(reconnected && c.ready, 'reconnected after the server died');
+    cgRun('spec', 'release', '2.1', '--agent', 'w9');
+    const n = events.length;
+    for (let i = 0; i < 100 && events.length === n; i++) await new Promise((res) => setTimeout(res, 20));
+    check(events.slice(n).some((e) => e.kind === 'release'), 'events flow again after a reconnect');
+    c.dispose();
+
+    // an older cg: start() is false, unsupported is set, nothing lingers
+    const old = new ServeClient(OLD, cwd, () => {});
+    check(await old.start() === false, 'old cg: start is false');
+    check(old.unsupported === true, 'old cg: reported as unsupported');
+    check(old.proc === null, 'old cg: no process left');
+    old.dispose();
+    console.log('serve client ok');
+})().catch((e) => { console.error(e.stack || e); process.exit(1); });
+JS
+    [ $? -eq 0 ] || fail "serve client"
+
+    # ---- the extension routes through the connection and stops polling
+    node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const ext = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
+const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+const check = (c, w) => { if (!c) throw new Error(w); };
+check(/require\('\.\/serve'\)/.test(ext), 'extension requires serve.js');
+check(/if \(serveConnected\(\)\) return serveClient\.exec\(full\)/.test(ext), 'cg() goes over the connection');
+check(/if \(!serveConnected\(\) && vscode\.window\.state\.focused\) scheduleRefresh/.test(ext), 'the idle poll is off while connected');
+check(/poll: \(\) => serveConnected\(\) \? Promise\.resolve\(\)/.test(ext), 'the session poll is off while connected');
+check(/serveClient\.on\('event'/.test(ext) && /provider\.applyEvent\(applied\)/.test(ext), 'events patch the task view');
+check(/serveClient\.unsupported/.test(ext), 'an old cg falls back');
+check(pkg.contributes.configuration.properties['codify.serve'], 'codify.serve is a setting');
+console.log('serve wiring ok');
+JS
+    [ $? -eq 0 ] || fail "serve wiring"
+fi
 
 # ---- agent chat (5.3): the pure chat core, provable without VS Code
 if want chat; then

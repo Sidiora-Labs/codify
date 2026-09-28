@@ -23,11 +23,13 @@ const tasks = require('./tasks');
 /* --- memories (5.2) --- */
 const memorybrowser = require('./memories');
 const { createRefresher } = require('./refresh');
+/* --- serve (v11 5.2): one connection for every call and every event --- */
+const { ServeClient, liveModel, applyEvent } = require('./serve');
 // --- fleet (5.3) ---
 const fleet = require('./fleet');
 /* The fleet view joins three cg reports of its own; it runs inside the one
  * refresh chain below and only while the view is visible. */
-let fleetApi = { refresh: async () => {} };
+let fleetApi = { refresh: async () => {}, touch: () => {} };
 // --- end fleet (5.3) ---
 
 let provider;
@@ -42,11 +44,17 @@ let agentApi = { hasTerminal: () => false };
 let acpApi = { hasPanel: () => false };
 /* --- memories (5.2): the browser panel, dormant until it is opened --- */
 let memoryApi = {
-    open: () => {}, refresh: () => Promise.resolve(),
+    open: () => {}, refresh: () => Promise.resolve(), touch: () => {},
     classifyAll: () => {}, promote: () => {}, supersede: () => {},
 };
 let refresher;
 let scopeTask;   /* task the open documents were last validated against */
+/* --- serve (v11 5.2) --- */
+let serveClient = null;
+const live = liveModel();
+function serveConnected() { return !!(serveClient && serveClient.ready); }
+/* a burst of pushed events becomes one catch-up refresh, soon */
+const EVENT_REFRESH_MS = 250;
 
 /* A burst of triggers becomes one refresh; two refreshes are never closer
  * than the floor unless a command asked for one; a whole-tree pass is only
@@ -65,11 +73,14 @@ function workspaceRoot() {
     return f && f.length ? f[0].uri.fsPath : undefined;
 }
 
-/* run cg with args; resolves {code, stdout, stderr} and never rejects */
+/* run cg with args; resolves {code, stdout, stderr} and never rejects.
+ * Over the serve connection when it is up — one long-lived process instead
+ * of one per call — and as before when it is not. */
 function cg(args) {
     const feature = config().get('feature');
     const specish = args[0] === 'spec' || args[0] === 'docs';
     const full = feature && specish ? [...args, '-f', feature] : args;
+    if (serveConnected()) return serveClient.exec(full);
     return new Promise((resolve) => {
         cp.execFile(binary(), full,
             { cwd: workspaceRoot(), maxBuffer: 16 * 1024 * 1024 },
@@ -220,8 +231,11 @@ function taskIdFrom(arg) {
  * panel after it — tasks, memories, fleet — answers from that one index
  * rather than polling on a timer of its own. */
 async function runRefresh() {
-    await cg(['sync', '--max-age', String(REFRESH_FRESH_MS),
-              '--background', '--wait', '0']);
+    /* connected, the sync is skipped: every write that matters arrives as
+     * an event, and the tools that need a fresh graph refresh it themselves */
+    if (!serveConnected())
+        await cg(['sync', '--max-age', String(REFRESH_FRESH_MS),
+                  '--background', '--wait', '0']);
     await provider.refresh();
     await memories.refresh();
     /* --- memories (5.2): the browser rides the one scheduler, never a timer
@@ -659,7 +673,8 @@ async function activate(ctx) {
     agentApi = agents.register(ctx, {
         cg, cgJson, workspaceRoot,
         refresh: () => afterMutation(),
-        poll: () => scheduleRefresh(),
+        /* connected, sessions' progress arrives as events, not by polling */
+        poll: () => serveConnected() ? Promise.resolve() : scheduleRefresh(),
     });
     acpApi = acp.register(ctx, {
         cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
@@ -696,6 +711,37 @@ async function activate(ctx) {
     });
     ctx.subscriptions.push({ dispose: () => refresher.dispose() });
 
+    /* --- serve (v11 5.2): the one connection. Every pushed event patches
+     * the view it belongs to at once and queues one catch-up refresh; an
+     * older cg without `serve` leaves the v10 behaviour in place. --- */
+    if (root && config().get('serve') !== false) {
+        serveClient = new ServeClient(binary(), root, (m) => out.appendLine(m));
+        ctx.subscriptions.push({ dispose: () => serveClient.dispose() });
+        if (await serveClient.start()) {
+            out.appendLine(`cg serve connected (events from #${serveClient.cursor})`);
+            serveClient.on('event', (ev) => {
+                const applied = applyEvent(live, ev);
+                if (!applied) return;
+                if (applied.view === 'tasks' && provider.applyEvent(applied)) {
+                    /* the row is right already; the trace, blockers and
+                     * status bar follow with the catch-up */
+                }
+                if (applied.view === 'fleet' || applied.fleet) fleetApi.touch();
+                if (applied.view === 'memories') memoryApi.touch();
+                scheduleRefresh(EVENT_REFRESH_MS);
+            });
+            serveClient.on('gap', () => scheduleRefresh(0));
+            serveClient.on('reconnect', () => scheduleRefresh(0));
+            serveClient.on('down', () => scheduleRefresh());
+            try { await serveClient.subscribe(); } catch (e) { out.appendLine(`subscribe: ${e.message}`); }
+        } else if (serveClient.unsupported) {
+            out.appendLine('this cg has no `serve` — polling as before (update cg for live views)');
+            serveClient = null;
+        } else {
+            serveClient = null;
+        }
+    }
+
     /* Spec files are the one thing every status change writes. The graph
      * database is deliberately not watched: this extension's own sync
      * writes it, and a watcher on it turned each refresh into the next.
@@ -706,12 +752,15 @@ async function activate(ctx) {
     watcher.onDidChange(bump); watcher.onDidCreate(bump); watcher.onDidDelete(bump);
     ctx.subscriptions.push(watcher);
 
+    /* the polls exist for a cg without `serve`; connected, events do this */
     const idle = setInterval(() => {
-        if (vscode.window.state.focused) scheduleRefresh();
+        if (!serveConnected() && vscode.window.state.focused) scheduleRefresh();
     }, IDLE_POLL_MS);
     ctx.subscriptions.push(
         { dispose: () => clearInterval(idle) },
-        vscode.window.onDidChangeWindowState((s) => { if (s.focused) scheduleRefresh(); }),
+        vscode.window.onDidChangeWindowState((s) => {
+            if (s.focused && !serveConnected()) scheduleRefresh();
+        }),
     );
 
     scheduleRefresh(0);
