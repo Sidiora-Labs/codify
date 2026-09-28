@@ -280,7 +280,7 @@ status  = "pending"
 
 [task.7.1]
 title      = "Fleet end-to-end fixture and supervisor restart soak"
-status     = "in_progress"
+status     = "done"
 wave       = 7
 requires   = ["5.1", "4.2", "4.1"]
 symbols    = ["supervisor_tick", "drift_interface_check"]
