@@ -189,7 +189,7 @@ reqs       = ["1.2", "1.3", "1.4"]
 
 [task.4.2]
 title      = "Stall detection, budgets, retries with triage, escalation"
-status     = "in_progress"
+status     = "done"
 wave       = 4
 requires   = ["3.1", "2.2"]
 symbols    = ["supervisor_stall_check", "supervisor_budget_check", "supervisor_retry", "supervisor_escalate"]
