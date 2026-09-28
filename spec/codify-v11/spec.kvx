@@ -117,7 +117,7 @@ title      = "cg serve: JSON-RPC over stdio with event subscriptions"
 status     = "in_progress"
 wave       = 2
 requires   = ["1.1"]
-symbols    = ["cmd_serve", "serve_dispatch", "serve_subscribe", "serve_wait_change"]
+symbols    = ["cmd_serve", "serve_dispatch", "serve_push", "mcp_call_tool", "cmd_tool"]
 touches    = ["src/serve.c", "src/mcp.c", "src/cg.h", "src/main.c", "src/json.c", "tests/integration/31_serve.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/31_serve.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
 do_1       = "Factor the MCP tool table into a dispatch both servers share; serve answers call, tools, subscribe, unsubscribe, and ping."

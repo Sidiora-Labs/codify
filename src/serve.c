@@ -210,7 +210,7 @@ static int batch_add(const EventRow *e, void *ud) {
     return 0;
 }
 
-static void push_sub(Cg *cg, Sub *s) {
+static void serve_push(Cg *cg, Sub *s) {
     long floor = events_pruned_through(cg);
     if (s->cursor < floor) {
         StrBuf g; sb_init(&g);
@@ -259,7 +259,7 @@ static char *raw_or(const char *obj, const char *key) {
     return obj ? json_get_raw(obj, key) : NULL;
 }
 
-static void handle(Server *sv, const char *line) {
+static void serve_dispatch(Server *sv, const char *line) {
     char *method = json_get_string(line, "method");
     char *id = json_get_raw(line, "id");
     if (!method) {
@@ -352,7 +352,7 @@ static void handle(Server *sv, const char *line) {
                       s->id, s->cursor, head);
             reply(id, r.p);
             sb_free(&r);
-            push_sub(cg, s);            /* the backlog since the cursor */
+            serve_push(cg, s);            /* the backlog since the cursor */
         }
     } else if (strcmp(method, "unsubscribe") == 0) {
         long which = params ? json_get_int(params, "subscription", -1) : -1;
@@ -500,7 +500,7 @@ int cmd_serve(Cg *cg, const SysInfo *si) {
             in.p[i] = 0;
             const char *l = in.p + start;
             while (*l == ' ' || *l == '\t' || *l == '\r') l++;
-            if (*l) handle(&sv, l);
+            if (*l) serve_dispatch(&sv, l);
             start = i + 1;
         }
         if (start) {
@@ -521,7 +521,7 @@ int cmd_serve(Cg *cg, const SysInfo *si) {
             long period = ino >= 0 ? SERVE_SAFETY_MS : SERVE_POLL_MS;
             bool due = now - last_check >= period;
             if ((dirty && now - last_push >= SERVE_MIN_GAP_MS) || due) {
-                for (int i = 0; i < sv.nsubs; i++) push_sub(cg, &sv.subs[i]);
+                for (int i = 0; i < sv.nsubs; i++) serve_push(cg, &sv.subs[i]);
                 last_push = last_check = now;
                 dirty = false;
             }
