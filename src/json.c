@@ -103,6 +103,18 @@ static char *unescape(const char *s, size_t n) {
     return b.p;
 }
 
+char *json_string_value(const char *raw) {
+    if (!raw) return NULL;
+    while (isspace((unsigned char)*raw)) raw++;
+    if (*raw != '"') return NULL;
+    const char *v = raw + 1, *e = v;
+    while (*e && *e != '"') {
+        if (*e == '\\' && e[1]) e++;
+        e++;
+    }
+    return unescape(v, (size_t)(e - v));
+}
+
 char *json_get_string(const char *obj, const char *key) {
     const char *v = find_key(obj, key);
     if (!v || *v != '"') return NULL;

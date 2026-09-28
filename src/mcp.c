@@ -1036,6 +1036,101 @@ static void mcp_list_prompts(StrBuf *r) {
     sb_puts(r, "]}");
 }
 
+/* ---------------- the tool table, shared ---------------- */
+
+void mcp_tools_json(StrBuf *r) {
+    sb_puts(r, "{\"tools\":[");
+    for (int i = 0; i < NTOOLS; i++) {
+        if (i) sb_putc(r, ',');
+        sb_puts(r, "{\"name\":");
+        sb_json_str(r, TOOLS[i].name);
+        sb_puts(r, ",\"title\":");
+        sb_json_str(r, TOOLS[i].title);
+        sb_puts(r, ",\"description\":");
+        sb_json_str(r, TOOLS[i].desc);
+        sb_printf(r, ",\"inputSchema\":%s,\"annotations\":", TOOLS[i].schema);
+        mcp_tool_annotations(i, r);
+        sb_putc(r, '}');
+    }
+    sb_puts(r, "]}");
+}
+
+int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
+                  const char *args_json, char **out) {
+    *out = NULL;
+    int ti = -1;
+    for (int i = 0; name && i < NTOOLS; i++)
+        if (strcmp(TOOLS[i].name, name) == 0) { ti = i; break; }
+    if (ti < 0) return -1;
+    if (TOOLS[ti].sync_first) {
+        /* fresh, not re-walked: agents call these tools in bursts, so a
+         * pass from the last few seconds answers, and a pass running
+         * elsewhere is joined by note. The server shares the machine with
+         * the agent's own build, so it never takes more than a quarter of
+         * the cores. */
+        IndexOpts o = {0};
+        o.max_age_ms = MCP_FRESH_MS;
+        o.lock_wait_ms = MCP_GATE_WAIT_MS;
+        o.workers_cap = si->cores_effective / 4 > 2 ? si->cores_effective / 4 : 2;
+        o.quiet = true;
+        IndexStats st;
+        cg_index_ex(cg, si, &o, &st);
+    }
+    CallCtx ctx = { cg, si, args_json && args_json[0] ? args_json : NULL };
+    int rc = cg_capture(out, TOOLS[ti].fn, &ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/* cg tool list | call <name> [json-args]: the MCP tools without a client.
+ * The editor's serve connection runs every tool call through this. */
+int cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json) {
+    if (argc >= 1 && strcmp(argv[0], "list") == 0) {
+        if (json) {
+            StrBuf r; sb_init(&r);
+            mcp_tools_json(&r);
+            puts(r.p);
+            sb_free(&r);
+        } else {
+            for (int i = 0; i < NTOOLS; i++)
+                printf("%-20s %s\n", TOOLS[i].name, TOOLS[i].title);
+        }
+        return 0;
+    }
+    if (argc >= 2 && strcmp(argv[0], "call") == 0) {
+        const char *args = argc >= 3 ? argv[2] : NULL;
+        char *stdin_args = NULL;
+        if (args && strcmp(args, "-") == 0) {
+            StrBuf b; sb_init(&b);
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof buf - 1, stdin)) > 0) {
+                buf[n] = 0;
+                sb_puts(&b, buf);
+            }
+            stdin_args = b.p;
+            args = stdin_args;
+        }
+        if (args && args[0] && args[strspn(args, " \t\r\n")] != '{') {
+            fprintf(stderr, "cg tool: arguments must be a JSON object\n");
+            free(stdin_args);
+            return 2;
+        }
+        char *out = NULL;
+        int rc = mcp_call_tool(cg, si, argv[1], args, &out);
+        free(stdin_args);
+        if (rc < 0) {
+            fprintf(stderr, "cg tool: unknown tool '%s' (cg tool list)\n",
+                    argv[1]);
+            return 2;
+        }
+        if (out) fputs(out, stdout);
+        free(out);
+        return rc;
+    }
+    fprintf(stderr, "usage: cg tool list [--json] | call <name> [json-args|-]\n");
+    return 2;
+}
+
 /* ---------------- server loop ---------------- */
 
 static void send_line(StrBuf *b) {
@@ -1108,59 +1203,26 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
             free(ver); free(params);
         } else if (strcmp(method, "tools/list") == 0 && id) {
             StrBuf r; sb_init(&r);
-            sb_puts(&r, "{\"tools\":[");
-            for (int i = 0; i < NTOOLS; i++) {
-                if (i) sb_putc(&r, ',');
-                sb_puts(&r, "{\"name\":");
-                sb_json_str(&r, TOOLS[i].name);
-                sb_puts(&r, ",\"title\":");
-                sb_json_str(&r, TOOLS[i].title);
-                sb_puts(&r, ",\"description\":");
-                sb_json_str(&r, TOOLS[i].desc);
-                sb_printf(&r, ",\"inputSchema\":%s,\"annotations\":",
-                          TOOLS[i].schema);
-                mcp_tool_annotations(i, &r);
-                sb_putc(&r, '}');
-            }
-            sb_puts(&r, "]}");
+            mcp_tools_json(&r);
             reply_result(id, r.p);
             sb_free(&r);
         } else if (strcmp(method, "tools/call") == 0 && id) {
             char *params = json_get_object(line, "params");
             char *name = params ? json_get_string(params, "name") : NULL;
             char *args = params ? json_get_object(params, "arguments") : NULL;
-            int ti = -1;
-            for (int i = 0; name && i < NTOOLS; i++)
-                if (strcmp(TOOLS[i].name, name) == 0) { ti = i; break; }
-            if (ti < 0) {
+            char *out = NULL;
+            int rc = mcp_call_tool(cg, si, name, args, &out);
+            if (rc < 0) {
                 reply_error(id, -32602, "unknown tool");
             } else {
-                if (TOOLS[ti].sync_first) {
-                    /* fresh, not re-walked: agents call these tools in
-                     * bursts, so a pass from the last few seconds answers,
-                     * and a pass running elsewhere is joined by note. The
-                     * server shares the machine with the agent's own build,
-                     * so it never takes more than a quarter of the cores. */
-                    IndexOpts o = {0};
-                    o.max_age_ms = MCP_FRESH_MS;
-                    o.lock_wait_ms = MCP_GATE_WAIT_MS;
-                    o.workers_cap = si->cores_effective / 4 > 2
-                                  ? si->cores_effective / 4 : 2;
-                    o.quiet = true;
-                    IndexStats st;
-                    cg_index_ex(cg, si, &o, &st);
-                }
-                CallCtx ctx = { cg, si, args };
-                char *out = NULL;
-                int rc = cg_capture(&out, TOOLS[ti].fn, &ctx);
                 StrBuf r; sb_init(&r);
                 sb_puts(&r, "{\"content\":[{\"type\":\"text\",\"text\":");
                 sb_json_str(&r, out ? out : "");
                 sb_printf(&r, "}],\"isError\":%s}", rc == 0 ? "false" : "true");
                 reply_result(id, r.p);
                 sb_free(&r);
-                free(out);
             }
+            free(out);
             free(params); free(name); free(args);
         } else if (strcmp(method, "resources/list") == 0 && id) {
             /* The plan and the generated agent brief are documents, not tool

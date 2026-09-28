@@ -71,6 +71,11 @@ static void usage(void) {
 "agentic\n"
 "  mcp                      run as an MCP server (stdio) for coding agents\n"
 "  lsp                      run as a Language Server (stdio) for editors\n"
+"  serve                    one JSON-RPC connection (stdio) for editors:\n"
+"                           every tool, any cg command, cancel, and pushed\n"
+"                           event subscriptions\n"
+"  tool list | call <name> [json]\n"
+"                           run one MCP tool without an MCP client\n"
 "  mcp-install              auto-connect to Claude Code, Cursor, VS Code,\n"
 "                           Windsurf, Gemini CLI, Codex CLI\n"
 "  integrate [detect|plan|apply|doctor]\n"
@@ -610,6 +615,10 @@ int main(int argc, char **argv) {
         rc = cmd_lsp(&cg, &si);
     } else if (strcmp(cmd, "mcp") == 0) {
         rc = cmd_mcp(&cg, &si);
+    } else if (strcmp(cmd, "serve") == 0) {
+        rc = cmd_serve(&cg, &si);
+    } else if (strcmp(cmd, "tool") == 0) {
+        rc = cmd_tool(&cg, &si, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "mcp-install") == 0) {
         rc = cmd_mcp_install(&cg);
     } else if (strcmp(cmd, "integrate") == 0) {

@@ -495,6 +495,7 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms);
 
 /* ---------------- minimal JSON reading (for MCP + package.json) ------- */
 char *json_get_string(const char *obj, const char *key);  /* malloc, unescaped */
+char *json_string_value(const char *raw);  /* "\"a\\nb\"" -> malloc "a\nb"; NULL if not a string */
 long  json_get_int(const char *obj, const char *key, long dflt);
 char *json_get_raw(const char *obj, const char *key);     /* raw token, malloc */
 char *json_get_object(const char *obj, const char *key);  /* balanced {...}   */
@@ -927,6 +928,16 @@ int  git_commit_mirror(Cg *cg, const char *message);
 
 /* ---------------- agentic layer ---------------- */
 int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */
+/* The MCP tool table, shared with cg tool and cg serve. mcp_call_tool
+ * returns 0 on success, 1 when the tool reported an error, -1 for an
+ * unknown tool; *out is the tool's text (malloc, may be NULL). */
+void mcp_tools_json(StrBuf *r);                    /* {"tools":[...]} */
+int  mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
+                   const char *args_json, char **out);
+int  cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json);
+/* cg serve: newline-delimited JSON-RPC over stdio for editors — every tool,
+ * any cg command, and pushed event subscriptions (serve.c) */
+int  cmd_serve(Cg *cg, const SysInfo *si);
 int cmd_mcp_install(Cg *cg);                       /* wire into agent configs */
 int cmd_changelog(Cg *cg, int limit, const char *outfile);
 int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */
