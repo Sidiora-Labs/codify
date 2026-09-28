@@ -735,6 +735,23 @@ long events_since(Cg *cg, long since, const char *kinds, int limit,
 void events_json(StrBuf *b, const EventRow *e);
 int  cmd_events(Cg *cg, int argc, char **argv, bool json);
 
+/* ---------------- drift (drift.c) ---------------- */
+/* A task's change against its declaration: paths outside its touches and
+ * public symbols changed but not declared. head NULL diffs base against the
+ * working tree; branch scopes the graph lookup. Writes a JSON report to out
+ * when given, emits drift.spec when asked and there are findings; returns
+ * the number of findings. Advice: nothing here fails a command. */
+int  drift_spec_check(Cg *cg, const char *tree, const char *base,
+                      const char *head, const char *tag, const char *branch,
+                      bool emit, StrBuf *out);
+void drift_print(const char *report_json);
+/* will tasks a and b of feature step on each other if run at once? */
+bool drift_collision_predict(Cg *cg, const char *feature, const char *a,
+                             const char *b, char *why, size_t cap);
+int  cmd_drift(Cg *cg, int argc, char **argv, bool json);
+/* direct callers and callees of name (malloc'd names); returns count */
+int  graph_neighbors(Cg *cg, const char *name, char ***out);
+
 /* ---------------- git interop (gitint.c) ---------------- */
 /* ---------------- fleet: hierarchy, identity, reports (fleet.c) -------- */
 enum { FLEET_MAIN = 0, FLEET_FEATURE = 1, FLEET_WORKER = 2, FLEET_ROLES = 3 };

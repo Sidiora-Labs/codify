@@ -3008,6 +3008,22 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
     } else {
         printf("done %s — %s\n", id, title);
     }
+    {
+        /* where the change parts from the declaration: advice, recorded as
+         * a drift.spec event, never a reason to refuse */
+        Cg dg;
+        if (memory_open_quiet(&dg)) {
+            char tag[400];
+            snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+            const char *base = getenv("CG_BASE");
+            StrBuf r; sb_init(&r);
+            int nd = drift_spec_check(&dg, s->root, base && base[0] ? base : "HEAD",
+                                      NULL, tag, NULL, true, &r);
+            if (nd && !json) drift_print(r.p);
+            sb_free(&r);
+            cg_close(&dg);
+        }
+    }
     if (s->f) {
         StrBuf mb; sb_init(&mb);
         sb_printf(&mb, "%s: %s", forced_past ? "done (forced past failed "

@@ -59,7 +59,7 @@
     - Stop on wall-clock or spend budget; retry up to the role's limit with the last result, the supervisor's reason, and the task's outcome memories (verify failures and their Jev triage) in the prompt.
     - Escalate to manager, then main, then mark blocked with the reason while the run continues.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
-  - [ ] 4.3 Spec drift and collision prediction
+  - [-] 4.3 Spec drift and collision prediction
     - On done and merge-up compare the attempt diff with declared symbols and touches and emit spec-drift events.
     - Predict collisions from touch globs and impact over declared symbols; the slot picker serializes predicted collisions.
     - _Requirements: 4.1, 4.3, 4.5_

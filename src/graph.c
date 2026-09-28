@@ -2651,3 +2651,32 @@ int graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,
     sqlite3_finalize(st);
     return n;
 }
+
+/* The names directly on either side of a symbol — its callers and callees,
+ * same filtering as the packets — for collision prediction. malloc'd
+ * array of malloc'd names; returns the count. */
+int graph_neighbors(Cg *cg, const char *name, char ***out) {
+    *out = NULL;
+    SymRow defs[4];
+    int nd = defs_named(cg, name, defs, 4);
+    int n = 0, cap = 0;
+    char **v = NULL;
+    for (int d = 0; d < nd; d++) {
+        if (path_is_header(defs[d].path) && nd > 1) continue;
+        SymRow e[24];
+        for (int dir = 0; dir < 2; dir++) {
+            int ne = dir == 0 ? callers_of(cg, &defs[d], e, 24)
+                              : callees_of(cg, defs[d].id, e, 24);
+            ne = edges_prefer_impl(cg, e, ne, dir == 0, defs[d].path);
+            for (int i = 0; i < ne; i++) {
+                bool dup = false;
+                for (int k = 0; k < n && !dup; k++) dup = !strcmp(v[k], e[i].name);
+                if (dup) continue;
+                if (n == cap) { cap = cap ? cap * 2 : 16; v = xrealloc(v, sizeof(char *) * (size_t)cap); }
+                v[n++] = xstrdup(e[i].name);
+            }
+        }
+    }
+    *out = v;
+    return n;
+}

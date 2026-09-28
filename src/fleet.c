@@ -1570,6 +1570,21 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
         lifecycle_close(&c);
         return 1;
     }
+    {
+        /* what the wave changed against what its task declared, before it
+         * reaches the feature branch; a person decides only where the
+         * workflow asked for it (approve = ["drift"]) */
+        char tag[400];
+        snprintf(tag, sizeof tag, "%s/%s", c.feature, id);
+        StrBuf r; sb_init(&r);
+        int nd = drift_spec_check(cg, c.tree, base, branch, tag, branch, true, &r);
+        if (nd) {
+            drift_print(r.p);
+            int gate = fleet_gate(cg, "drift", tag);
+            if (gate) { sb_free(&r); lifecycle_close(&c); return gate; }
+        }
+        sb_free(&r);
+    }
     long n = commits_between(c.tree, base, branch);
     StrBuf b; sb_init(&b);
     if (n == 0) {

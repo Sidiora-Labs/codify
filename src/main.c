@@ -88,6 +88,9 @@ static void usage(void) {
 "  brief                    session state: task, changes, decisions\n"
 "  review                   changed symbols vs acceptance criteria + risk\n"
 "  guard [paths] [--strict] edits outside the active task's declared scope\n"
+"  drift check <id> [--base REF] | collisions [-f F]\n"
+"                           a task's change against its declaration; which\n"
+"                           open tasks would collide if run at once\n"
 "  handoff [--task <id>]    record session state against a task: --done,\n"
 "                           --next, --blocked, -m <note>\n"
 "  resume [--task <id>]     task packet + latest handoff + memories + tree\n"
@@ -569,6 +572,8 @@ int main(int argc, char **argv) {
         rc = cmd_event(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "events") == 0) {
         rc = cmd_events(&cg, argc - 2, argv + 2, json);
+    } else if (strcmp(cmd, "drift") == 0) {
+        rc = cmd_drift(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "work") == 0) {
         rc = cmd_work(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "diff") == 0) {

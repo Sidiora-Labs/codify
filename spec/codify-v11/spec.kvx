@@ -202,11 +202,11 @@ reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5"]
 
 [task.4.3]
 title      = "Spec drift and collision prediction"
-status     = "pending"
+status     = "in_progress"
 wave       = 4
 requires   = ["3.2"]
 symbols    = ["drift_spec_check", "drift_collision_predict"]
-touches    = ["src/drift.c", "src/spec.c", "src/fleet.c", "src/orchestrate.c", "src/cg.h", "tests/integration/33_drift.sh"]
+touches    = ["src/drift.c", "src/spec.c", "src/fleet.c", "src/orchestrate.c", "src/cg.h", "tests/integration/33_drift.sh", "src/main.c", "src/graph.c"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/33_drift.sh spec"
 do_1       = "On done and merge-up compare the attempt diff with declared symbols and touches and emit spec-drift events."
 do_2       = "Predict collisions from touch globs and impact over declared symbols; the slot picker serializes predicted collisions."

@@ -1838,6 +1838,44 @@ static int orch_attempts(char **tried, int ntried, const char *id) {
 static int g_max_attempts = 1;
 
 
+/* Predicted collisions, cached per pair for the run: the graph is asked
+ * once, and a serialization is reported once. */
+static struct { char a[64], b[64]; bool hit; } g_coll[256];
+static int g_ncoll;
+static Cg *g_coll_cg;
+static const char *g_coll_feature;
+
+static bool orch_collides(const char *a, const char *b) {
+    if (!g_coll_cg || !g_coll_feature) return false;
+    for (int i = 0; i < g_ncoll; i++)
+        if ((!strcmp(g_coll[i].a, a) && !strcmp(g_coll[i].b, b)) ||
+            (!strcmp(g_coll[i].a, b) && !strcmp(g_coll[i].b, a)))
+            return g_coll[i].hit;
+    char why[300] = "";
+    bool hit = drift_collision_predict(g_coll_cg, g_coll_feature, a, b, why,
+                                       sizeof why);
+    if (g_ncoll < 256) {
+        snprintf(g_coll[g_ncoll].a, sizeof g_coll[0].a, "%s", a);
+        snprintf(g_coll[g_ncoll].b, sizeof g_coll[0].b, "%s", b);
+        g_coll[g_ncoll].hit = hit;
+        g_ncoll++;
+    }
+    if (hit) {
+        StrBuf p; sb_init(&p);
+        sb_puts(&p, "{\"task\":"); sb_json_str(&p, a);
+        sb_puts(&p, ",\"with\":"); sb_json_str(&p, b);
+        sb_puts(&p, ",\"why\":"); sb_json_str(&p, why);
+        sb_puts(&p, ",\"action\":\"serialized\"}");
+        char subj[300];
+        snprintf(subj, sizeof subj, "%s/%s", g_coll_feature, a);
+        events_emit(g_coll_cg, "drift.collision", subj, p.p);
+        sb_free(&p);
+        printf("[fleet] %s waits for %s — predicted collision: %s\n", a, b, why);
+        fflush(stdout);
+    }
+    return hit;
+}
+
 static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,
                            const OrchFleetSlot *slots, int nslots,
                            char *out, size_t cap) {
@@ -1848,6 +1886,9 @@ static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,
             if (!orch_finished_id(v, n, v[i].req[j])) skip = true;
         for (int s = 0; s < nslots && !skip; s++)
             if (slots[s].live && slots[s].n.wave == v[i].wave) skip = true;
+        for (int s = 0; s < nslots && !skip; s++)
+            if (slots[s].live && orch_collides(v[i].id, slots[s].n.task))
+                skip = true;
         if (skip) continue;
         snprintf(out, cap, "%s", v[i].id);
         return true;
@@ -2515,8 +2556,9 @@ static void orch_prompt_retry(const char *path, const char *feature,
  * do but wait); 2: one was rejected (the run stops); 0: neither */
 static int sup_approval(Sup *s, long *id) {
     sqlite3_stmt *st = cg_prep(s->g,
-        "SELECT id,state FROM fleet_approvals WHERE subject=? AND state IN "
-        "('pending','rejected') ORDER BY id DESC LIMIT 1");
+        "SELECT id,state FROM fleet_approvals WHERE (subject=?1 OR subject "
+        "LIKE ?1||'/%') AND state IN ('pending','rejected') ORDER BY id DESC "
+        "LIMIT 1");
     sqlite3_bind_text(st, 1, s->feature, -1, SQLITE_TRANSIENT);
     int r = 0;
     if (sqlite3_step(st) == SQLITE_ROW) {
@@ -2880,6 +2922,9 @@ static int supervisor_run(Cg *g, const char *feature, const char *fbranch,
     s.mgr.pid = -1;
     g_max_attempts = 1 + (int)(g_role[FLEET_WORKER].set
                                ? g_role[FLEET_WORKER].retries : 2);
+    g_coll_cg = g;
+    g_coll_feature = s.feature;
+    g_ncoll = 0;
     if (g_max_attempts < 1) g_max_attempts = 1;
     snprintf(s.feature, sizeof s.feature, "%s", feature);
     snprintf(s.fbranch, sizeof s.fbranch, "%s", fbranch);
