@@ -219,7 +219,7 @@ status  = "pending"
 
 [task.5.1]
 title      = "Interface drift across branches and requirement coverage"
-status     = "in_progress"
+status     = "done"
 wave       = 5
 requires   = ["4.3", "4.1"]
 symbols    = ["drift_interface_check", "coverage_check"]
