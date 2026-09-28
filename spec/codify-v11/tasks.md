@@ -12,7 +12,7 @@
     - Emit from spec transitions, claims, attempts, fleet begin, merge-up, land, pr, checkpoint, and the orchestrator's spawn and reap.
     - cg events [--since N] [--kind K] [--follow] [--json]; retention by count with a meta high-water mark.
     - _Requirements: 5.1, 5.5_
-  - [ ] 1.2 Role capabilities in workflow.kvx
+  - [-] 1.2 Role capabilities in workflow.kvx
     - Parse per-role driver, model, args, max, wall, spend, retries, stall, and approve keys with defaults from [agents].
     - Show resolved capabilities in cg fleet roles and its --json.
     - _Requirements: 1.5, 1.7_

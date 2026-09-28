@@ -97,13 +97,14 @@ reqs       = ["5.1", "5.5"]
 
 [task.1.2]
 title      = "Role capabilities in workflow.kvx"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["hier_role_caps", "RoleCaps"]
-touches    = ["src/fleet.c", "src/cg.h", "spec/workflow.kvx", "docs/hierarchy.md", "tests/integration/26_fleet.sh"]
-verify_cmd = "make cg && CG=$PWD/cg tests/integration/26_fleet.sh caps"
+touches    = ["src/fleet.c", "src/cg.h", "spec/workflow.kvx", "docs/hierarchy.md", "tests/integration/26_fleet.sh", "src/lang.c", "tests/unit/test_lang.c"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/26_fleet.sh caps"
 do_1       = "Parse per-role driver, model, args, max, wall, spend, retries, stall, and approve keys with defaults from [agents]."
 do_2       = "Show resolved capabilities in cg fleet roles and its --json."
+do_3       = "Index C typedef'd anonymous aggregates (typedef struct { ... } Name;), which the graph never recorded, so type symbols such as RoleCaps exist for graph checks and drift; stop the one-line typedef pattern from naming the first member."
 reqs       = ["1.5", "1.7"]
 
 [task.2]

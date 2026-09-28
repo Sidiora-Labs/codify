@@ -369,6 +369,33 @@ int main(void) {
        "c: plain typedef is a def");
     parse_result_free(&parsed);
 
+    /* anonymous aggregates: the name is only on the closing line */
+    const char canon[] =
+        "typedef struct {\n"               /* 1 */
+        "    char *driver;\n"
+        "    struct { int a; } inner;\n"
+        "    long max;\n"
+        "} RoleCaps;\n"                    /* 5 */
+        "typedef struct { char *p; size_t len, cap; } StrBuf;\n"
+        "typedef union {\n"
+        "    int i; float f;\n"
+        "} *NumPtr;\n"
+        "int after(void) { return 0; }\n"; /* 10 */
+    lang_parse("c", "src/anon.c", canon, sizeof canon - 1, &parsed);
+    const SymDef *rc = definition(&parsed, "RoleCaps");
+    ok(rc && rc->line == 1 && rc->end_line == 5 && strcmp(rc->kind, "typedef") == 0,
+       "c: anonymous multi-line typedef struct is a def spanning its body");
+    ok(definition(&parsed, "StrBuf") != NULL,
+       "c: one-line typedef struct with members is a def");
+    ok(definition(&parsed, "NumPtr") != NULL,
+       "c: pointer typedef of an anonymous union is a def");
+    ok(definition(&parsed, "p") == NULL && definition(&parsed, "driver") == NULL &&
+       definition(&parsed, "inner") == NULL,
+       "c: members of a typedef'd aggregate are not defs");
+    ok(definition(&parsed, "after") != NULL,
+       "c: definitions after a typedef aggregate are still found");
+    parse_result_free(&parsed);
+
     /* forward declaration: `struct Foo;` */
     const char cfwd[] =
         "struct Opaque;\n"

@@ -853,6 +853,8 @@ void lang_parse(const char *lang, const char *path, const char *src,
     char params[PARAM_MAX][PARAM_LEN];
     int nparams = 0;
     bool params_open = false;   /* the list continues on the next line */
+    /* an open `typedef struct|union|enum {` awaiting its closing name */
+    struct { int depth, line; const char *agg; } td = { -1, 0, NULL };
 
     CleanState cs = {0};
     CmtRange cr = { -1, -1 };
@@ -1012,6 +1014,12 @@ void lang_parse(const char *lang, const char *path, const char *src,
                         }
                         if (!has_body && !has_semi && !has_typedef)
                             skip = true;
+                        /* `typedef struct { const char *kind; } T;` — the
+                           one-line typedef pattern stops at the first member;
+                           the aggregate pass below names T instead */
+                        if (!skip && strcmp(L->pats[p].kind, "typedef") == 0 &&
+                            memchr(clean, '{', (size_t)(nm - clean)))
+                            skip = true;
                     }
                     if (!skip) {
                         add_def(pr, nm, nn, L->pats[p].kind, lineno, orig);
@@ -1146,6 +1154,60 @@ void lang_parse(const char *lang, const char *path, const char *src,
                 }
                 i = j;
             } else i++;
+        }
+
+        /* C: `typedef struct {` ... `} Name;` names the type only on the
+         * closing line, which no per-line pattern can tie back to the
+         * typedef. Track the open aggregate by brace depth and record the
+         * name at the line that opened it, so its scope is the body. */
+        if (cfam_protos && !in_str) {
+            const char *scan = NULL;   /* where to look for the closing brace */
+            if (td.depth < 0) {
+                const char *t = clean;
+                while (*t == ' ' || *t == '\t') t++;
+                if (strncmp(t, "typedef", 7) == 0 && !idchar(t[7])) {
+                    const char *k = t + 7;
+                    while (*k == ' ' || *k == '\t') k++;
+                    const char *agg = strncmp(k, "struct", 6) == 0 && !idchar(k[6]) ? "struct"
+                                    : strncmp(k, "union", 5) == 0 && !idchar(k[5]) ? "union"
+                                    : strncmp(k, "enum", 4) == 0 && !idchar(k[4]) ? "enum"
+                                    : NULL;
+                    const char *open = agg ? strchr(k, '{') : NULL;
+                    if (open) {
+                        /* the opening brace itself is counted by the scan */
+                        td.depth = 0;
+                        td.line = lineno;
+                        td.agg = agg;
+                        scan = open;
+                    }
+                }
+            } else {
+                scan = clean;
+            }
+            if (scan) {
+                int d = td.depth;
+                for (const char *c = scan; *c; c++) {
+                    if (*c == '{') { d++; continue; }
+                    if (*c != '}') continue;
+                    if (--d > 0) continue;
+                    const char *n = c + 1;
+                    while (*n == ' ' || *n == '\t' || *n == '*') n++;
+                    const char *e = n;
+                    while (idchar(*e)) e++;
+                    const char *after = e;
+                    while (*after == ' ' || *after == '\t') after++;
+                    if (e > n && idstart(*n) && !is_keyword(L, n, (size_t)(e - n)) &&
+                        (*after == ';' || *after == ',' || *after == '[')) {
+                        char sig[200];
+                        snprintf(sig, sizeof sig, "typedef %s { ... } %.*s",
+                                 td.agg, (int)(e - n), n);
+                        add_def(pr, n, (size_t)(e - n), "typedef", td.line, sig);
+                    }
+                    d = -1;
+                    break;
+                }
+                td.depth = d;
+            }
         }
 
         routes_scan_line(L->name, path, lineno, orig, pr);
