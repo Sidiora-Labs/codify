@@ -2074,7 +2074,7 @@ static void sup_tap_adopt(DriverTap *t, const char *log, const char *agent,
  * every node still marked live — adopted when its process is still the
  * one that was spawned, and otherwise handed to the next tick, which sees
  * it gone and judges it by its branch tip like any other exit. */
-static int sup_load(Sup *s) {
+static int fleet_run_resume(Sup *s) {
     sqlite3_stmt *st = cg_prep(s->g,
         "SELECT wakes_left,failures,first_turn,last_wake,slots,max_fail "
         "FROM fleet_runs WHERE run=?");
@@ -2457,6 +2457,33 @@ static bool run_latest_open(Cg *g, char *out, size_t cap, char *feature,
     return ok;
 }
 
+/* Record a new run: everything a later supervisor needs to continue it */
+static int fleet_run_open(Sup *s, const char *host) {
+    Cg *g = s->g;
+    const char *log = getenv("CG_SUPERVISOR_LOG");
+    sqlite3_stmt *st = cg_prep(g,
+        "INSERT INTO fleet_runs(run,feature,state,pid,pid_start,host,"
+        "driver,slots,max_fail,wakes_left,failures,first_turn,last_wake,"
+        "log,started,updated) VALUES(?,?,'running',?,?,?,?,?,?,?,0,1,0,?,"
+        "?,?)");
+    sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, s->feature, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, (int)getpid());
+    sqlite3_bind_int64(st, 4, proc_start_time(getpid()));
+    sqlite3_bind_text(st, 5, host, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 6, s->cfg->driver, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 7, s->nslots);
+    sqlite3_bind_int(st, 8, s->maxfail);
+    sqlite3_bind_int(st, 9, s->wakes);
+    if (log) sqlite3_bind_text(st, 10, log, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(st, 10);
+    sqlite3_bind_int64(st, 11, (long)time(NULL));
+    sqlite3_bind_int64(st, 12, (long)time(NULL));
+    int rc = sqlite3_step(st) == SQLITE_DONE ? 0 : -1;
+    sqlite3_finalize(st);
+    return rc;
+}
+
 static int supervisor_run(Cg *g, const char *feature, const char *fbranch,
                           const char *fwt, const char *mainbr,
                           const OrchCfg *cfg, const char *extra, int nslots,
@@ -2491,7 +2518,7 @@ static int supervisor_run(Cg *g, const char *feature, const char *fbranch,
     gethostname(host, sizeof host - 1);
     if (resumed) {
         snprintf(s.run, sizeof s.run, "%s", ro->resume);
-        if (sup_load(&s) != 0) {
+        if (fleet_run_resume(&s) != 0) {
             fprintf(stderr, "cg fleet: no run %s to resume\n", s.run);
             free(s.slots);
             close(lock);
@@ -2514,33 +2541,12 @@ static int supervisor_run(Cg *g, const char *feature, const char *fbranch,
             snprintf(s.run, sizeof s.run, "%s", ro->run_id);
         else
             run_id_new(feature, s.run, sizeof s.run);
-        const char *log = getenv("CG_SUPERVISOR_LOG");
-        sqlite3_stmt *st = cg_prep(g,
-            "INSERT INTO fleet_runs(run,feature,state,pid,pid_start,host,"
-            "driver,slots,max_fail,wakes_left,failures,first_turn,last_wake,"
-            "log,started,updated) VALUES(?,?,'running',?,?,?,?,?,?,?,0,1,0,?,"
-            "?,?)");
-        sqlite3_bind_text(st, 1, s.run, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 2, feature, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(st, 3, (int)getpid());
-        sqlite3_bind_int64(st, 4, proc_start_time(getpid()));
-        sqlite3_bind_text(st, 5, host, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 6, cfg->driver, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(st, 7, nslots);
-        sqlite3_bind_int(st, 8, maxfail);
-        sqlite3_bind_int(st, 9, s.wakes);
-        if (log) sqlite3_bind_text(st, 10, log, -1, SQLITE_TRANSIENT);
-        else sqlite3_bind_null(st, 10);
-        sqlite3_bind_int64(st, 11, (long)time(NULL));
-        sqlite3_bind_int64(st, 12, (long)time(NULL));
-        if (sqlite3_step(st) != SQLITE_DONE) {
-            sqlite3_finalize(st);
+        if (fleet_run_open(&s, host) != 0) {
             fprintf(stderr, "cg fleet: could not record run %s\n", s.run);
             free(s.slots);
             close(lock);
             return 1;
         }
-        sqlite3_finalize(st);
     }
     setenv("CG_RUN", s.run, 1);       /* every child's events carry it */
     sup_control(&s);
