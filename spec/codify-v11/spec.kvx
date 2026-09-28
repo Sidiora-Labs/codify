@@ -202,7 +202,7 @@ reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5"]
 
 [task.4.3]
 title      = "Spec drift and collision prediction"
-status     = "in_progress"
+status     = "done"
 wave       = 4
 requires   = ["3.2"]
 symbols    = ["drift_spec_check", "drift_collision_predict"]
