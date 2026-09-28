@@ -3732,6 +3732,7 @@ int cmd_fleet_up(Cg *cg, int argc, char **argv, bool json) {
     int np = 0;
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--foreground") == 0) fg = true;
+        else if (strcmp(argv[i], "--dry-run") == 0) { fg = true; pass[np++] = argv[i]; }
         else if (strcmp(argv[i], "--resume") == 0)
             resume = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "";
         else pass[np++] = argv[i];

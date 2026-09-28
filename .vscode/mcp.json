@@ -1,0 +1,5 @@
+{
+  "servers": {
+    "codify":{"type":"stdio","command":"/usr/local/bin/cg","args":["mcp"]}
+  }
+}

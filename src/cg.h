@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "1.0.0"
+#define CG_VERSION  "1.1.0"
 #define CG_MCP_VERSION "2025-11-25"
 #define CG_AGENT_CONTEXT ".codify/agent-context.md"
 #define CG_DOC_TASK "@docs"
@@ -1062,7 +1062,17 @@ int  cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json);
  * any cg command, and pushed event subscriptions (serve.c) */
 int  cmd_serve(Cg *cg, const SysInfo *si);
 int cmd_mcp_install(Cg *cg);                       /* wire into agent configs */
+/* the snapshot-chain renderer (vcs.c): the no-git fallback, and --snapshots */
 int cmd_changelog(Cg *cg, int limit, const char *outfile);
+/* release notes from git history (changelog.c); summarize: 1 on, -1 off,
+ * 0 when a key decides */
+typedef struct {
+    int limit;
+    const char *outfile, *tag;
+    bool unreleased;
+    int summarize;
+} ChangelogOpts;
+int cmd_changelog_git(Cg *cg, const ChangelogOpts *o);
 int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */
 int cmd_docs(Cg *cg, int argc, char **argv, bool json); /* documentation closure */
 int spec_docs_finish(Cg *cg, const char *feature); /* internal checked closure */

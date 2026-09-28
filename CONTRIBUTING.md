@@ -56,7 +56,7 @@ make test
 "$PWD/cg" check
 ```
 
-Use the checkout binary, not a potentially older `cg` on PATH. To run the documentation feature's focused tests, use `CG="$PWD/cg" tests/integration/24_docs.sh`. `make release` publishes to the configured web root; it is not a local-only test command.
+Use the checkout binary, not a potentially older `cg` on PATH. To run the documentation feature's focused tests, use `CG="$PWD/cg" tests/integration/24_docs.sh`. The fleet has its own: `26_fleet.sh` (lifecycle and roles), `30_events.sh`, `31_serve.sh`, `32_supervisor.sh`, `33_drift.sh`, `34_context.sh`, and `35_fleet_e2e.sh`, which runs two features through a scripted fake driver and a fake `gh` under failure — once straight and once with the supervisor killed and resumed. None of them needs a real agent CLI or the network. `make release` publishes to the configured web root; it is not a local-only test command.
 
 ## Documentation is part of completion
 
@@ -90,14 +90,17 @@ Reference issues with `Fixes #123` where applicable.
 
 ## Release notes
 
-The changelog is generated from these subject lines, so the prefix matters. Start a subject with the area it touches — `feat:`, `fix:`, `docs:`, `guard:`, `spec:`, `graph:`, `fleet:`, and the rest — because that prefix becomes the group heading; a subject with no prefix lands under `Other`. `cg commit` appends the in-progress task as `[spec:<feature>/<id>]`, and that becomes the task reference printed beside the commit link, so leave it on the subject line. `cliff.toml` at the repository root is the reference configuration for all of it. `cg changelog` must produce exactly what git-cliff produces from that file:
+The changelog is generated from these subject lines, so the prefix matters. Start a subject with the area it touches — `feat:`, `fix:`, `docs:`, `guard:`, `spec:`, `graph:`, `fleet:`, and the rest — because that prefix becomes the group heading; a subject with no prefix lands under `Other`. `cg commit` appends the in-progress task as `[spec:<feature>/<id>]`, and that becomes the task reference printed beside the commit link, so leave it on the subject line.
+
+A release is a tag or a commit that bumps `CG_VERSION` in `src/cg.h`. Bump the version in its own commit when a release is ready; everything after that commit belongs to the next version, and the working tree's version names the section being prepared. Regenerate the file with:
 
 ```sh
-cargo install git-cliff      # once
-diff <(git cliff) <(./cg changelog)
+./cg changelog -o CHANGELOG.md
 ```
 
-An empty diff is the bar. If you change the groups or the bullet shape, change `cliff.toml` and the renderer together.
+With `CENTRA_API_KEY` in your environment or in `.env` (which is gitignored), each release also gets a model-written `### Highlights` paragraph; summaries are cached under `.codegraph/changelog-cache/`, so only new releases cost a call. Without a key the file is the plain derived record. Review the highlights like any other prose: the model is told not to invent anything, but it is not checked.
+
+`cliff.toml` at the repository root is the matching git-cliff configuration. git-cliff knows only tags, so it agrees with `cg changelog` for a tags-only repository with no version file and no key; test `29_changelog.sh` checks the shared rules (groups, scopes, breaking marks, task references, links). If you change the groups or the bullet shape, change `cliff.toml` and the renderer together.
 
 ## Pull request process
 

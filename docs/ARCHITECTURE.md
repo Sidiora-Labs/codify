@@ -152,7 +152,10 @@ stub out behind the same interface.
 The hierarchy that turns one repository into a tree of agents. `hier_load`
 reads `[hierarchy]` and `[role.main|feature|worker]` from
 `spec/workflow.kvx` over built-in defaults; `hier_expand` fills `{main}`,
-`{remote}`, `{feature}`, and `{wave}` in the branch and agent templates.
+`{remote}`, `{feature}`, `{wave}`, and `{task}` in the branch and agent
+templates. `hier_role_caps` resolves each role's capabilities (driver,
+model, args, max, wall, spend, retries, stall, approve) into a `RoleCaps`,
+reporting unusable values instead of dropping them.
 Identity comes from the environment (`CG_AGENT`, `CG_ROLE`, `CG_PARENT`,
 `CG_FEATURE`, `CG_WAVE`) and is recorded in the `agents` registry only when
 a role is set, so solo sessions leave no trace. The branch lifecycle —
@@ -160,9 +163,76 @@ a role is set, so solo sessions leave no trace. The branch lifecycle —
 `fleet_pr_open`, `fleet_checkpoint` — drives `git` and `gh` through the
 helpers in `gitint.c`, always against the shared project (the main
 worktree), and shares the spec engine's claim primitives rather than
-adding a second ownership system. `cg fleet tree` is dispatched here but
+adding a second ownership system. `merge-up` and `land` take the
+feature's merge lock (`fleet_merge_lock`, an `flock` on
+`.codegraph/fleet/merge-<feature>.lock`), which is what lets a manager and
+its workers run at the same time. `fleet_gate` is the opt-in approval
+gate: for a fleet agent whose workflow lists the gate, it records a
+pending row in `fleet_approvals` and returns `CG_EXIT_APPROVAL` (4) until
+`cg fleet approve` decides it, and an approval is consumed by the one
+command it let through. `cg fleet tree` is dispatched here but
 implemented as `orch_tree_status` in `orchestrate.c`, beside the run it
 reports on. Full contract: [hierarchy.md](hierarchy.md).
+
+## Event log (`events.c`)
+
+One append-only `events` table (`seq`, `at`, `kind`, `subject`, `run`,
+`node`, `branch`, `payload`), added without a schema bump. Triggers on the
+durable tables emit inside the writer's own transaction, so an event never
+outlives a rolled-back change and an older binary emits without knowing
+it; they are installed on every open, after the schema upgrade, because
+two of them name columns only v16 adds. The kvx status hook reports task
+transitions, which live in `spec.kvx` rather than SQLite, and
+`events_emit` covers what has no row: merges, gates, pull requests,
+supervisor decisions, drift, agent output. `events_since` reads from a
+cursor with a kind filter (a trailing `.` or `*` is a prefix). Retention
+prunes by count (`CG_EVENTS_KEEP`, default 50000); `AUTOINCREMENT` keeps a
+sequence number from ever being reused, and `meta.events_pruned_through`
+tells a lagging reader it missed events. Full contract:
+[events.md](events.md).
+
+## Serve (`serve.c`)
+
+`cg serve` is the editor's one connection: newline-delimited JSON-RPC 2.0
+on stdio with `initialize`, `tools/list`, `tools/call`, `exec`, `cancel`,
+`subscribe`, `unsubscribe`, `ping`, and `shutdown`. It shares the MCP tool
+table with `cg mcp` rather than keeping a second list. Every call runs in a
+child — the binary re-executed in its own process group — so a long
+`verify_cmd` never delays an event push, calls run concurrently (up to
+32), and `cancel` is a signal. The server's own connection only reads: it
+waits on inotify over the database files (a 150 ms stat poll elsewhere,
+plus a one-second safety check), coalesces a burst of WAL writes, and
+pushes `events_since` each subscriber's cursor. Idle, it holds no lock and
+runs no index pass. `cg tool list|call` (`cmd_tool` in `mcp.c`) runs the
+same table from a shell.
+
+## Drivers (`drivers.c`)
+
+How an agent is launched and read back. `driver_argv` builds the argv from
+a `DriverSpec` — driver, model, extra args, custom template, and whether to
+ask for structured output, which is the default: `claude -p --output-format
+stream-json --verbose` and `codex exec --json`. A `DriverTap` follows the
+agent's log by byte offset and `driver_stream_parse` turns each complete
+JSON line into `agent.*` events (session, text, tool, usage, result), in
+either dialect, recognised per line. `driver_steer` queues a message as an
+`agent.steer` event; `driver_steer_take` hands the undelivered ones to the
+post-edit hook (Claude Code's `PostToolUse` `additionalContext`) or to the
+next prompt, advancing a per-agent cursor in `meta`.
+
+## Drift (`drift.c`)
+
+`drift_spec_check` compares a task's git diff with its declared `touches`
+and `symbols` (public symbols whose lines a hunk overlaps) and runs at
+`cg spec done` and `cg fleet merge-up`. `drift_collision_predict` flags two
+open tasks whose touch globs overlap or whose declared symbols are the
+same or call one another; the supervisor's slot picker serializes those
+pairs. `drift_interface_check` runs after a merge into a feature branch: it
+diffs the signatures of the merged symbols and finds references on other
+live branches through the unified graph, then steers the agents on them
+and their managers. `coverage_check` lists acceptance criteria with no
+qualified task, before `land`. All four record events and warn; only the
+`drift` and `coverage` approval gates block. Full contract:
+[drift.md](drift.md).
 
 ## Jev decisions (`jev.c`)
 
@@ -200,7 +270,7 @@ the rendered copy stale.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
-`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 48
+`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 57
 tools, each carrying read-only/destructive annotations so a client can
 auto-approve reads instead of prompting on every search. It also serves
 resources (the workflow file, rendered board, graph context, and every
@@ -320,16 +390,32 @@ all-or-nothing.
 
 ## Changelog (`changelog.c`)
 
-`src/changelog.c` is the git-history changelog renderer: `cg changelog`
-reads tags and commits through the same `git` pipes `gitint.c` uses,
-groups each subject by its `area:` prefix, turns a trailing
-`[spec:<feature>/<task>]` into a task reference, and builds commit and
-compare links from `git remote get-url origin`. Its output is checked
-for parity against `cliff.toml`, the git-cliff configuration at the
-repository root — `diff <(git cliff) <(cg changelog)` is the test — but
-git-cliff is a reference, never a runtime dependency. The snapshot
-renderer in `vcs.c` stays as the `--snapshots` mode and as the fallback
-for a project with no `.git`.
+`src/changelog.c` is the git-history changelog renderer. `cmd_changelog_git`
+reads tags and commits through `git` pipes, groups each subject by its
+`area:` prefix, turns a trailing `[spec:<feature>/<task>]` into a task
+reference, and builds commit and compare links from `git remote get-url
+origin` (with no remote, bullets carry the bare hash and the footer is
+omitted). Release boundaries are tags merged with version bumps:
+`boundaries_load` walks the history of the project's version file
+(`src/cg.h` `CG_VERSION`, `VERSION`, or `package.json`) and starts a
+release at every commit that changed the version. The newest section is
+named by the working tree's version when that is newer than the last
+boundary, by `--tag`, and only otherwise `[Unreleased]`. For a tags-only
+repository with no version file, the output matches `cliff.toml`, the
+git-cliff configuration at the repository root; git-cliff is a
+reference, never a runtime dependency.
+
+Optionally a model adds prose. With `CENTRA_API_KEY` (or
+`CG_CHANGELOG_KEY`) in the environment or the project's `.env`, each
+release gets a `### Highlights` block written from its grouped commits by
+an OpenAI-compatible endpoint (`CG_CHANGELOG_ENDPOINT`,
+`CG_CHANGELOG_MODEL`), called through `curl` with a private `0600` config
+file as Jev does. The bullets are never altered. Answers are cached under
+`.codegraph/changelog-cache/`, keyed by the release's commit range, the
+model, and the notes, so a rerun asks only about what is new; a failed
+call prints why on stderr and leaves the notes without prose. The
+snapshot renderer in `vcs.c` stays as the `--snapshots` mode and as the
+fallback for a project with no `.git`.
 
 ## Governance (`govern.c`)
 
@@ -392,21 +478,54 @@ their leases, and exits 130. `--dry-run` prints waves, tasks, and the
 exact argv per task without claiming anything. Requires a `.codegraph/`
 and parallel or prod mode.
 
-### Two levels (`--fleet`)
+### The supervisor (`--fleet`, `cg fleet up`)
 
-`cg spec run --fleet` wraps that loop in the hierarchy. `orch_spawn_manager`
-starts one feature manager in the feature worktree; `orch_spawn_worker`
-starts a wave worker per free slot in its own wave worktree, both through
-the same `[agents]` driver and the same prompt-on-stdin contract, with the
-role, parent, feature, wave, branch, and base exported into the child's
-environment and the branch already checked out. The manager is woken in
-rounds — 16 wakes by default, one second apart, `--max-rounds` to change
-it — and the run ends when the subtree
-is **merged**, not when a process exits: completion is read from the task
-list and the branch state. `orch_tree_status` renders the same join for
-`cg fleet tree` and `--status`. Without an enabled `[hierarchy]` the flag
-is refused before anything is spawned, and the single-level path above is
-untouched.
+`cg spec run --fleet` wraps that loop in the hierarchy, and `cg fleet up`
+runs it detached: `detach_supervisor` forks a `setsid` child running `cg
+spec run --fleet --run-id <id>` with its output in
+`.codegraph/fleet/supervisor-<run>.log`, and returns once the child has
+recorded the run. `supervisor_run` owns one or more features, each its own
+run; `supervisor_tick` is one pass over persisted state — reap, progress,
+budgets, retries, escalation, approvals, spawn. The `fleet_runs` and
+`fleet_nodes` tables hold everything a later supervisor needs (every node's
+role, parent, agent, task, branch, worktree, pid and start time, attempt,
+fence, retries, spend), so `--resume` adopts a child whose pid and
+`/proc` start time still match and judges any other by its branch tip.
+
+`orch_spawn_manager` starts a feature manager in the feature worktree and
+`orch_spawn_worker` a worker per free slot — per task when the worker
+template names `{task}`, per wave otherwise — each through the role's
+driver capabilities, with the role, parent, feature, wave, branch, base,
+and run exported and the branch already checked out. Workers and managers
+run concurrently; the merge lock in `fleet.c` serializes their merges.
+The main agent, when `[hierarchy] main_agent` asks for one, is a driver
+process woken at start, on a blocked task, and when a feature finishes.
+
+Supervision is four named checks: `supervisor_stall_check` (progress is an
+event by or about the agent, log growth, or a git status/HEAD change in its
+worktree; one idle window nudges through `driver_steer`, a second stops the
+attempt with a handoff), `supervisor_budget_check` (wall and spend),
+`supervisor_retry` (the next attempt's prompt carries the previous
+attempts' reasons, last output, and outcome memories), and
+`supervisor_escalate` (manager, then main, then blocked while the run
+continues). A run ends when the subtree is **merged**, not when a process
+exits, and a manager has a wake budget (16 by default, `--max-rounds`).
+`orch_tree_status` renders the same join for `cg fleet tree` and
+`--status`. Without an enabled `[hierarchy]` the flag is refused before
+anything is spawned, and the single-level path above is untouched.
+
+### Briefings (`govern.c`)
+
+`task_packet_build` composes a worker's briefing within a token budget
+from parts in priority order — the task with its criteria and scope, the
+declared symbols' definitions with callers and callees, what required
+tasks introduced on the feature branch (`packet_upstream_evidence`), live
+siblings' touches, decisions, and the file map — and `packet_assemble`
+drops lower parts first when the budget is short. `manager_packet_build`
+does the same for a feature manager: subtree state, live workers, failed
+attempts, conflicted merges, and pending approvals. `cg work update`
+gains an `upstream` delta (`work_upstream_delta`) naming the tasks merged
+into the attempt's base since it began and the symbols they brought.
 
 ## Documentation closure (`docs.c`)
 
@@ -464,6 +583,22 @@ called defensively, so an older binary fails with a message rather than
 a hang; the manifest-coherence test keeps declared and registered
 commands in lockstep.
 
+Against a `cg` that has `serve`, the polling above is off.
+`editors/vscode/serve.js` holds one `cg serve` child for the whole
+extension: every `cg` call goes down it as an `exec`, events come back as
+pushed notifications, and `applyEvent` folds each into a small live model
+the task, memory, and fleet views patch themselves from. It reconnects
+with a backoff and takes one full refresh after a reconnect, since events
+pushed while the pipe was down are gone. With `codify.serve` off, or an
+older binary, the extension shells out and polls as before. `fleet.js`
+builds the Start plan from `cg fleet roles`, a dry run, `cg drift
+collisions`, and `cg fleet runs`, and folds agent and supervisor events
+onto the tree. In the chat (`agents.js`), `ChatCapabilities` turns the
+served tool list into slash commands with arguments typed from each
+tool's input schema, `approvalCard` renders an approval request as an
+actionable card, and `Window` keeps a transcript at ten thousand entries
+responsive by keeping only the newest rows in the DOM.
+
 ## Language server (`lsp.c`)
 
 `cg lsp` speaks Content-Length framed JSON-RPC 2.0 on stdio and answers
@@ -501,5 +636,18 @@ many references it has, and the decisions recorded about it.
   LSP client against the real binary (`14_vscode`) — indexing accuracy:
   scope attribution, stable rowids on touch, schema migration
   (`15_accuracy`), ranking and budgets (`16_retrieval`), claim-next
-  atomicity plus handoff/resume round-trips (`17_session`), and the
-  orchestrator run end to end on a custom driver (`18_orchestrate`).
+  atomicity plus handoff/resume round-trips (`17_session`), the
+  orchestrator run end to end on a custom driver (`18_orchestrate`), the
+  ACP agent client (`19_acp`), the intent layer's anchors (`20_anchors`),
+  import resolution and manifest grounding (`21_grounding`), the control plane (`22_control`), database locking
+  (`23_dblock`), documentation closure (`24_docs`), the sync gate
+  (`25_syncgate`), the fleet lifecycle and role capabilities (`26_fleet`),
+  branch-scoped reads (`27_branches`), Jev against a fake curl
+  (`28_jev`), the git changelog and its highlights against a fake
+  endpoint (`29_changelog`), the event log (`30_events`), `cg serve`
+  push latency and idle locking (`31_serve`), the supervisor's runs,
+  resume, supervision, and approvals (`32_supervisor`), drift
+  (`33_drift`), worker and manager briefings and the upstream delta
+  (`34_context`), and the
+  fleet end to end under failure, straight and with the supervisor killed
+  and resumed (`35_fleet_e2e`).

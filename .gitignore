@@ -12,3 +12,4 @@ node_modules/
 docs/superpowers/
 # preserved local history of the vendored kvx subproject
 /kvx/.git-local/
+.env

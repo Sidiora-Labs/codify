@@ -8,14 +8,17 @@
 # Conventions it encodes: a release per tag, `[Unreleased]` for what follows
 # the last tag, groups from the subject prefix (`feat:`, `fix:`, `guard:`,
 # ...), and a trailing `[spec:<feature>/<task>]` turned into a task reference.
+# git-cliff sees tags only: `cg changelog` also starts a release at each
+# version bump and adds optional Highlights, so the two agree only for a
+# tags-only repository with no version file and no model key.
 
 [changelog]
 header = """
 # Changelog
 
 All notable changes to this project are recorded here, generated from git history.
-A release is a tag; a group is the commit-subject prefix; a task reference is
-the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
+A release is a tag or a version bump; a group is the commit-subject prefix; a task
+reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
 """
 body = """

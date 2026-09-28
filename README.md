@@ -22,11 +22,11 @@ Pure C11. One binary. One SQLite database. Nothing leaves your machine.
 
 Codify (invoked as `cg`) is an agent workflow engine in a single binary. It maintains the four things a project needs beyond the code itself — what the code **is**, how it got **here**, what happens **next**, and what was **learned** along the way — and serves all four to humans and AI agents alike.
 
-Version 0.9.0 (v10) makes it safe under a fleet: one coalescing indexer instead of fifty, a Main Gideon / feature manager / wave worker hierarchy with branch, merge, PR and checkpoint flow, one unified graph across every branch and worktree of a repository, and Jev decisions — the single remote call in an otherwise local tool.
+Version 1.1.0 (v11) turns the fleet into something you hand a spec to and leave running: `cg fleet up` starts a durable, crash-resumable supervisor that runs the main agent, a manager per feature, and workers per task at the same time, and manages every Codex or Claude Code process until its work is qualified and merged. Agents are briefed from the graph, drift is caught across branches before it merges, every state change lands in an event log, and `cg serve` pushes it all to the editor over one connection. It builds on the fleet foundations: one coalescing indexer instead of fifty, the Main Gideon / feature manager / worker hierarchy with branch, merge, PR and checkpoint flow, one unified graph across every branch and worktree, and Jev decisions — the single remote call in an otherwise local tool.
 
 **What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes. And beyond what a parser sees, comments are indexed as first-class nodes — the intent layer: purpose, contracts, dangers, and the couplings that live only in prose.
 
-**How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits. `cg changelog` writes the release notes: from git history by default — a release per tag, groups from the commit-subject prefix, each task reference carried through — and from the snapshot chain with symbol-level diffs when you pass `--snapshots` or the project has no git at all.
+**How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits. `cg changelog` writes the release notes: from git history by default — a release per tag or version bump, groups from the commit-subject prefix, each task reference carried through, and, with a key, a short model-written Highlights paragraph per release — and from the snapshot chain with symbol-level diffs when you pass `--snapshots` or the project has no git at all.
 
 **What happens next.** A spec engine turns plain-text kvx spec files into a working plan: a task board with dependency waves, acceptance criteria attached to every task — and a `done` that is verified, not asserted. `cg spec new` and `cg spec add` create the plan, `cg spec lint` proves it is executable, and the loop runs it. In Prod mode, `implemented` records coding completion and source evidence without claiming qualification; only `done` means executable qualification and graph checks passed. In parallel mode, several agents work at once, bounded by the disjointness of the paths each task declares.
 
@@ -38,13 +38,13 @@ The layers reinforce each other: commits are auto-tagged with the task they impl
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
-**And it survives a fleet.** Indexing is a shared resource, not a per-process habit: the first `cg` that wants a pass runs it, the rest leave a note and coalesce into it, a freshness window skips the walk entirely, and machine-wide parse slots keep concurrent projects inside the core budget ([docs/sync.md](docs/sync.md)). Above that, `spec/workflow.kvx` can declare a hierarchy — a main agent owning the task list, a feature manager per feature, wave workers under each — and `cg fleet` drives the branch flow: worktree, merge-up, land behind the test and lint gates, pull request, checkpoint. `cg spec run --fleet` runs that whole tree by itself — a feature manager and its wave workers, each spawned in its own worktree — and reports complete when the work **merged**, not when a process exited ([docs/hierarchy.md](docs/hierarchy.md)). All of them share one graph and one memory: every branch and linked worktree of the repository indexes into the same `.codegraph/`, scoped by branch ([docs/branches.md](docs/branches.md)).
+**And it survives a fleet.** Indexing is a shared resource, not a per-process habit: the first `cg` that wants a pass runs it, the rest leave a note and coalesce into it, a freshness window skips the walk entirely, and machine-wide parse slots keep concurrent projects inside the core budget ([docs/sync.md](docs/sync.md)). Above that, `spec/workflow.kvx` can declare a hierarchy — a main agent owning the task list, a feature manager per feature, wave workers under each — and `cg fleet` drives the branch flow: worktree, merge-up, land behind the test and lint gates, pull request, checkpoint. `cg fleet up` runs that whole tree by itself under a detached supervisor — several features at once, a manager and its workers alive together, each worker in its own worktree — nudging stalled agents, retrying failed ones with what went wrong, escalating what cannot be rescued, stopping at the approval gates you opted into, and reporting complete when the work **merged**, not when a process exited ([docs/hierarchy.md](docs/hierarchy.md)). Kill the supervisor and `cg fleet up --resume` adopts the agents still alive. Drift from the spec, colliding tasks, and interface changes other branches depend on are flagged before they merge ([docs/drift.md](docs/drift.md)), and every change is an event that `cg events --follow` and `cg serve` stream live ([docs/events.md](docs/events.md)). All of them share one graph and one memory: every branch and linked worktree of the repository indexes into the same `.codegraph/`, scoped by branch ([docs/branches.md](docs/branches.md)).
 
 **And it asks for a decision when one is needed.** `cg jev` reaches TypeSafe's System One model for typed judgements — true/false, one-of, ranked. `cg memory classify` uses it to say which notes are reusable skills, and `cg skills promote` renders those into portable `.agents/skills/<slug>/SKILL.md`; a failing `verify_cmd` gets a triage line, `cg guard` gets its findings ranked, and a pull request gets a readiness score. It is the one remote call Codify makes: mandatory for the features built on it, never for the core loop, and never authoritative — no answer of Jev's has ever changed an exit code ([docs/jev.md](docs/jev.md)).
 
 **And documentation is the last verified task.** New feature specs enable an `@docs` closure stage by default. Once every ordinary task qualifies, Codify builds a bounded evidence packet from the spec, task-attributed snapshots, code graph, routes, memories, checks, and existing docs. The same configured agent connector updates user and developer documentation, while `cg docs check` checks declared claim references, local inline links, required graph-surface coverage, and configured target scope. `cg docs close` records a dedicated `[spec:<feature>/@docs]` snapshot and an incremental baseline for the next spec flow. These structural checks support review; they do not certify every sentence's meaning.
 
-There are no background services and no telemetry. The graph, memory, snapshots, and the whole task loop run on your machine and stay there. The one exception is named and opt-in: Jev decisions need `OPENROUTER_API_KEY`, and only the commands built on them ever make that call.
+There are no background services you did not start and no telemetry — the fleet supervisor runs only after `cg fleet up`, and stops with `cg fleet down`. The graph, memory, snapshots, and the whole task loop run on your machine and stay there. Two exceptions are named and opt-in: Jev decisions need `OPENROUTER_API_KEY`, and only the commands built on them ever make that call; and `cg changelog` asks a model for release highlights only when `CENTRA_API_KEY` (or `CG_CHANGELOG_KEY`) is set.
 
 ## Why Codify
 
@@ -197,44 +197,42 @@ Snapshots are content-addressed with SHA-256 and blobs are deduplicated.
 | `cg checkout <id> [--force]` | Restore a snapshot |
 | `cg changes [--limit N]` | Impact radius of uncommitted edits: the symbols you touched plus their external callers — capped by default (40 symbols, 8 callers each) with `(+N more)` markers; `--limit` overrides |
 | `cg git-sync [-n N]` | Ingest git history — commits, authors, per-file churn — which then ranks search and context |
+| `cg events [--since N] [--kind K,..] [-n N] [--follow [--for S]] [--head]` | The event log: every task, claim, attempt, agent, fleet, supervisor, drift and approval change by sequence number. `--kind` takes a comma list where a trailing `.` is a prefix (`fleet.`); `--follow` streams; `--json` is one object per line. See [docs/events.md](docs/events.md) |
 
 Codify's snapshots do not replace git. `.gitignore` is honoured alongside `.cgignore`, `cg git-sync` reads your real history, and `cg commit --git` writes to both, so adopting Codify is never all-or-nothing.
 
 ### Changelog
 
-`cg changelog` renders release notes from git history. A release is a tag, dated by the tagged commit's committer date in UTC; everything after the last tag is `[Unreleased]`; a group is the commit-subject prefix; and the `[spec:<feature>/<task>]` that `cg commit` appends becomes a task reference on the bullet. Commit links are built from `git remote get-url origin` — with no remote, a bullet reads `- Add gauge (1a2b3c4, task demo/1.2)` and the footer links are omitted.
+`cg changelog` renders release notes from git history. A release starts at a tag **or** at the commit that changed the project's version — `CG_VERSION` in `src/cg.h`, a `VERSION` file, or `package.json` — so a project that never tags still gets one section per version. What came after the last one is named by the version the working tree carries when that is new (the release being prepared), by `--tag NAME`, and only otherwise `[Unreleased]`. A group is the commit-subject prefix, and the `[spec:<feature>/<task>]` that `cg commit` appends becomes a task reference on the bullet. Commit and compare links come from `git remote get-url origin`; with no remote, a bullet reads `- Add gauge (497c30a)` and the footer links are left out.
 
 ```markdown
-# Changelog
-
-All notable changes to this project are recorded here, generated from git history.
-A release is a tag; a group is the commit-subject prefix; a task reference is
-the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
-
-## [Unreleased]
+## [0.3.0] - 2026-09-28
 
 ### Features
-- Add gauge ([1a2b3c4](https://github.com/acme/demo/commit/1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d))
+- Add gauge ([497c30a](https://github.com/acme/demo/commit/497c30acbc9dc0daf869af07a993db74ea0da779))
+
+### Documentation
+- Explain gauges ([191d0c8](https://github.com/acme/demo/commit/191d0c811203dc1bba7b39f0b9095e5875a1ff7f))
+
+## [0.2.0] - 2026-09-28
 
 ### Bug fixes
-- **parser:** Handle empty input ([9f8e7d6](https://github.com/acme/demo/commit/9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c), task demo/1.2)
+- **parser:** Handle empty input ([682f9f8](https://github.com/acme/demo/commit/682f9f8c9bd6bb5813cfc2665c4e1265fba16933), task demo/1.2)
 
-## [0.1.0] - 2026-09-25
-
-### Other
-- Plain subject without prefix ([65a1b20](https://github.com/acme/demo/commit/65a1b2033e4f5a6b7c8d9e0f1a2b3c4d5e6f7081))
-
-[Unreleased]: https://github.com/acme/demo/compare/0.1.0...HEAD
-[0.1.0]: https://github.com/acme/demo/releases/tag/0.1.0
+[0.3.0]: https://github.com/acme/demo/compare/0.2.0...0.3.0
+[0.2.0]: https://github.com/acme/demo/compare/0.1.0...0.2.0
 ```
 
-`cliff.toml` at the repository root is the reference configuration: it owns the header, the group names and the order they are listed in, and the shape of a bullet. [git-cliff](https://git-cliff.org) and `cg changelog` must produce the same file, which is one command to check:
+**Highlights.** With `CENTRA_API_KEY` in the environment or the project's `.env` (or `CG_CHANGELOG_KEY`), each release also gets a `### Highlights` block: two to five sentences, and a few bullets for a large release, written by a model from that release's grouped commits. The derived bullets are never changed, and the prompt tells the model not to invent anything the commits do not say. The default endpoint is `https://gateway.centra.ag/v1/chat/completions` with the model `openrouter/ling-3.0-flash-sante:free(low)`; `CG_CHANGELOG_ENDPOINT` and `CG_CHANGELOG_MODEL` point it anywhere OpenAI-compatible. Answers are cached under `.codegraph/changelog-cache/` by the release's commits and the model, so regenerating the file asks only about releases that changed. `--summarize` insists (and says so when no key is found), `--no-summarize` keeps the model out, and a failed call prints `highlights for <release> skipped — <why>` on stderr and writes the notes without prose.
 
 ```sh
-diff <(git cliff) <(cg changelog)
+cg changelog -o CHANGELOG.md        # every release, highlights when a key is present
+cg changelog --unreleased           # only the newest section and its footer line
+cg changelog --tag 1.2.0            # name the newest section 1.2.0, dated today
+cg changelog --no-summarize -n 3    # the plain record, three newest releases
 ```
 
-`-n N` caps the release sections (`[Unreleased]` counts as one), `-o FILE` writes the file relative to the repository root and prints the path, `--unreleased` renders only the pending section and its footer line, and `--tag NAME` titles that section as a release dated today. `--snapshots` — and any project without a `.git` — falls back to the snapshot renderer, whose output is a symbol-level diff per snapshot rather than a tag history. This repository's own generated notes are `docs/CHANGELOG-git.md`; `CHANGELOG.md` stays hand-curated and task-ordered.
+`-n N` caps the release sections, and `-o FILE` writes the file relative to the repository root and reports how many highlights were written and how many came from the cache. `--snapshots` — and any project without a `.git` — falls back to the snapshot renderer, whose output is a symbol-level diff per snapshot rather than a release history. `cliff.toml` at the repository root is the matching [git-cliff](https://git-cliff.org) configuration; git-cliff only knows tags, so the two produce the same file only for a tags-only repository with no version file and no model key. This repository's `CHANGELOG.md` is generated with `cg changelog -o CHANGELOG.md`.
 
 ### Memory
 
@@ -259,11 +257,13 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 |---|---|
 | `cg mcp` | Run as an MCP stdio server: 57 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
+| `cg serve` | One JSON-RPC connection (stdio) for an editor: every MCP tool, any `cg` command (`exec`), `cancel`, and pushed event subscriptions from a sequence number, within milliseconds of the commit. Idle, it holds no lock and runs no index pass. See [docs/events.md](docs/events.md#cg-serve) |
+| `cg tool list \| call <name> [json]` | Run one MCP tool from a shell, without an MCP client |
 | `cg integrate detect\|plan\|apply\|doctor` | Capability-aware setup for Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline, and Continue; planning is read-only, apply is idempotent and backed up |
 | `cg mcp-install` | Compatibility alias for `cg integrate apply` |
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |
 | `cg hook post-edit` | The wired edit hook itself: reads the host's payload on stdin and does one targeted background sync plus a guard of the edited path — one process per edit, not two full syncs |
-| `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots]` | Release notes from git history: a release per tag, `[Unreleased]` for what follows it, groups from the commit-subject prefix, `[spec:<feature>/<task>]` rendered as a task reference — the same file `git cliff` produces from `cliff.toml` (see [Changelog](#changelog)). `--snapshots`, or a project with no `.git`, renders from the snapshot chain instead, with symbol-level diffs: added and removed functions, new routes |
+| `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots] [--summarize\|--no-summarize]` | Release notes from git history: a release per tag or version bump, the newest named by the working tree's version, groups from the commit-subject prefix, `[spec:<feature>/<task>]` rendered as a task reference, and model-written Highlights per release when `CENTRA_API_KEY` is set (see [Changelog](#changelog)). `--snapshots`, or a project with no `.git`, renders from the snapshot chain instead, with symbol-level diffs: added and removed functions, new routes |
 | `cg agentmd [--write]` | Generate graph orientation at `.codify/agent-context.md`; root `AGENTS.md` and `CLAUDE.md` remain owned by `cg spec render` |
 
 ### Agent control plane
@@ -285,6 +285,7 @@ These four are what make Codify present at every step rather than only at the bo
 | `cg brief` | Session state in one call: root, active task with its criteria, uncommitted paths, recent decisions |
 | `cg review` | The change paired with what it claims: changed symbols, callers now at risk, and the task's acceptance criteria |
 | `cg guard [paths] [--strict]` | Edits falling outside the scope the in-progress task declared in `touches` |
+| `cg drift check <id> [--base REF] \| collisions \| coverage \| summary [-f F]` | A task's change against its declared touches and symbols; open tasks that would collide if run at once; acceptance criteria with no qualified task; drift counts for a feature. Warns; see [docs/drift.md](docs/drift.md) |
 | `cg check [--strict]` | The single CI gate: render staleness, spec lint, task evidence, claim consistency, worktree state |
 | `cg state` | Separately label Git, snapshot, spec declaration, live-attempt, and stale state |
 | `cg event ingest\|history\|progress` | Normalize host lifecycle JSON and classify novel evidence versus activity or loops |
@@ -399,8 +400,13 @@ pr         = "auto"          # auto | manual
 checkpoint = "manual"
 
 [role.worker]                # [role.main] and [role.feature] likewise;
-branch = "wave/{feature}/{wave}"   # every key falls back to a default
-base   = "feature/{feature}"
+branch  = "task/{feature}/{task}"  # every key falls back to a default;
+base    = "feature/{feature}"      # {task} gives each task its own branch
+driver  = "codex"            # how its agents run, and what they may spend
+wall    = "3h"
+stall   = "10m"
+retries = 2
+approve = ["land"]           # opt-in: wait for `cg fleet approve`
 ```
 
 | Command | Description |
@@ -414,22 +420,42 @@ base   = "feature/{feature}"
 | `cg fleet land <feature>` | Merge the feature branch into local main and run the test and lint gates. Red resets main to where it was; green opens the PR when the policy says `auto`. `--no-pr` skips it |
 | `cg fleet pr <feature>` | Push and open the pull request against `<remote>/<main>` through `gh`, or print the exact commands when `gh` is absent. `--dry-run` calls nothing; an already-open PR is reported, not duplicated |
 | `cg fleet checkpoint` | Merge the open `feature/*` pull requests lowest number first, stopping at the first that will not merge |
+| `cg fleet up [-f F \| --all] [-n N] [--foreground] [--resume [RUN]] [--dry-run]` | Start a durable run under a detached supervisor: main, managers, and workers at once, supervised until every task is qualified and merged. `--resume` continues an unfinished run, adopting agents still alive |
+| `cg fleet down [--drain] \| pause \| resume [RUN]` | Stop (claims released, branches kept), let live work finish first, freeze spawning, or continue |
+| `cg fleet runs` | Runs, their state, and whether their supervisor is alive |
+| `cg fleet approvals [--all] \| approve <id> [--reject] [-m note]` | What waits at an opt-in gate (`land`, `pr`, `drift`, `coverage`), and the decision that releases it |
+| `cg fleet steer <agent> <message>` | A message for a running agent: its next edit (Claude Code, through the post-edit hook) or its next prompt |
+| `cg fleet brief <feature>` | The feature manager's briefing: subtree state, live workers, failed attempts, conflicts, approvals |
 
 An agent's place in the tree lives in its environment — `CG_AGENT`, `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE` (and `CG_GH` to name the `gh` binary) — and `cg fleet begin` prints the exact line to export. With no `CG_ROLE` nothing is registered, so a solo session is unchanged. With it, `cg brief` names the role and parent, claims carry the branch, and the attempt ledger records branch, worktree, and parent for good.
 
-`cg spec run --fleet` drives the whole tree instead of one level: a feature manager on the feature branch, wave workers under it, each spawned in its own worktree with its role, parent, branch and base in the environment.
+`cg fleet up` drives the whole tree by itself. A detached supervisor runs every feature you name (`--all`: every feature with work left, each starting once its `[meta] requires` are done), a feature manager and its workers alive together, each worker in its own worktree with its identity in the environment:
 
 ```
-$ cg spec run --fleet -n 1
-[fleet] fleet — manager + 1 worker slot(s), driver custom, 16 wake(s)
-[fleet] worker w-fleet-1 → 2.1 (wave 1) on wave/fleet/1, log .codegraph/agents/fleet-2.1.log
-[fleet] worker w-fleet-1 task 2.1 exit 0 → done
-[fleet] fleet complete — 4/4 task(s) qualified, feature/fleet merged into main, 0 failure(s)
+$ cg fleet up --foreground --all -n 3
+[fleet] alpha — manager + 3 worker slot(s), driver custom, 16 wake(s)
+[fleet] worker w-alpha-2.1 → 2.1 (wave 1) on task/alpha/2.1, log .codegraph/agents/alpha-2.1.log
+[fleet] worker w-alpha-2.2 → 2.2 (wave 1) on task/alpha/2.2, log .codegraph/agents/alpha-2.2.log
+[fleet] worker w-alpha-2.1 task 2.1 exit 1 → INCOMPLETE
+[fleet] worker w-alpha-2.1 → 2.1 (wave 1) on task/alpha/2.1, log .codegraph/agents/alpha-2.1.log
+[fleet] worker w-alpha-2.2 on 2.2: no progress for 2s — nudged
+[fleet] worker w-alpha-2.2 on 2.2: stalled — no progress for 2s after a nudge — stopping it
+[fleet] beta — manager + 3 worker slot(s), driver custom, 16 wake(s)
+[fleet] alpha complete — 4/4 task(s) qualified, feature/alpha merged into main, 2 failure(s)
+[fleet] beta complete — 2/2 task(s) qualified, feature/beta merged into main, 0 failure(s)
 ```
 
-The subtree is complete because it **merged**, not because a process exited, and each briefing ends on the command that moves work upward — `cg fleet merge-up <id>` for a worker, `cg fleet land`/`cg fleet pr` for a manager. `--dry-run` plans without claiming or creating anything, `--status` prints the tree, and `--max-rounds R` caps the manager's wakes so a fleet that cannot finish stops instead of spinning. Without an enabled `[hierarchy]` the flag is refused before anything is spawned, and the single-level `cg spec run` is untouched.
+What it does between those lines:
 
-The full flow, the refusal messages, and a worked two-wave example are in [docs/hierarchy.md](docs/hierarchy.md).
+- **Runs are durable.** The run and every node — role, parent, task, branch, worktree, pid, attempt, fence, retries, spend — live in the database. Kill the supervisor and `cg fleet up --resume` adopts the agents still alive (checked by pid and start time) and keeps the retry counts; `down`, `down --drain`, `pause` and `resume` stop, drain, freeze, or continue a run.
+- **Supervision.** Progress is work — events, log output, changes in the worktree — not a heartbeat. One stall window without it earns a nudge, a second stops the attempt with a handoff. `wall` and `spend` budgets stop an attempt; a failed task is retried with what went wrong in its prompt; when retries run out it escalates to the manager, then to main, then is marked blocked while the rest of the run continues.
+- **Three levels at once.** A feature merge lock replaces turn-taking, so managers and workers run together; with a `{task}` branch template the tasks of one wave run in parallel on their own branches, except the pairs predicted to collide. `[hierarchy] main_agent = true` runs Main Gideon as a process too.
+- **Briefings from the graph.** A worker's prompt carries its criteria, the current definitions of its declared symbols with callers and callees, what its prerequisites actually produced on the feature branch, and what its siblings are touching, fitted to a token budget; `cg work update` reports symbols merged upstream since the attempt began.
+- **Blocking is opt-in.** Gates listed in a role's `approve` stop `land`, `pr`, a drifted `merge-up`, or a land with uncovered criteria until `cg fleet approve`. Without them nothing waits for a person.
+
+A subtree is complete because it **merged**, not because a process exited. `cg spec run --fleet` is the same run in the foreground, `--dry-run` plans without claiming or creating anything, and without an enabled `[hierarchy]` the fleet is refused before anything is spawned; the single-level `cg spec run` is untouched.
+
+The full flow, supervision, approvals, briefings, and a worked example are in [docs/hierarchy.md](docs/hierarchy.md); drift in [docs/drift.md](docs/drift.md); the event log, `cg serve`, and steering in [docs/events.md](docs/events.md).
 
 ### One graph for every branch
 
@@ -471,7 +497,7 @@ Three commands ask a question of their own and print the answer beside their ver
 
 All three share one gate, so the failure mode is the same everywhere: `jev: OPENROUTER_API_KEY is not set — failure triage skipped`, once, on stderr, with the command's own verdict and exit code untouched. `cg guard --strict` still fails on exactly what it failed on before; a red `verify_cmd` is still red.
 
-This is the one remote call Codify makes, and the principle says so: the graph, memory and workflow stay local, Jev is **mandatory** for the features built on it — `cg memory classify` with no `OPENROUTER_API_KEY` is a clear error, never a quiet fallback — and **never authoritative**: it narrows, ranks, and flags, while `verify_cmd` and the graph checks decide. The key never reaches a command line (`curl` is driven through a private `0600` config file), `429` and `529` back off and retry, and every call is logged. See [docs/jev.md](docs/jev.md).
+Apart from the opt-in changelog highlights, this is the one remote call Codify makes, and the principle says so: the graph, memory and workflow stay local, Jev is **mandatory** for the features built on it — `cg memory classify` with no `OPENROUTER_API_KEY` is a clear error, never a quiet fallback — and **never authoritative**: it narrows, ranks, and flags, while `verify_cmd` and the graph checks decide. The key never reaches a command line (`curl` is driven through a private `0600` config file), `429` and `529` back off and retry, and every call is logged. See [docs/jev.md](docs/jev.md).
 
 ## Driving agents
 
@@ -513,11 +539,11 @@ Orchestration requires a `.codegraph/` index (leases live there) and `cg spec mo
 
 The Codify sidebar carries a persistent **Agent** chat view: the extension is an [Agent Client Protocol](https://agentclientprotocol.com) client that spawns Claude Code or Codex through its ACP adapter (`claude-code-acp` / `codex-acp`, or any ACP agent via `codify.acp.customCommand`) lazily on your first message — no task required, a driver picker in the header, New Chat to reset. The view renders streamed replies and thinking, tool calls as live status cards with diffs, the agent's plan, and permission requests as inline buttons. Every session gets **Codify's MCP server injected automatically** (`cg mcp`), so the agent has the graph, spec, and memory tools with zero per-repo config; the agent's ACP file reads and writes are served by the extension and confined to the workspace.
 
-The chat itself is a real chat: markdown replies with headings, tables and fenced code blocks that copy in a click, every file path the agent mentions clickable to that line, collapsed thinking, an autosizing composer with history, and a context bar carrying the feature, the attached task's live status, and the driver. Typing `/` opens a palette of **Codify's own verbs** — `/brief`, `/next`, `/context`, `/search`, `/impact`, `/why`, `/changes`, `/review`, `/tests`, `/check`, `/status`, `/remember`, `/handoff`, `/task`, `/open` — each of which runs the real `cg` command in the workspace, shows the output as a card, *and* hands it to the agent as context. Asking "what breaks if I change this?" and running `cg impact` are the same gesture.
+The chat itself is a real chat: markdown replies with headings, tables and fenced code blocks that copy in a click, every file path the agent mentions clickable to that line, collapsed thinking, an autosizing composer with history, and a context bar carrying the feature, the attached task's live status, and the driver. Typing `/` opens a palette of **Codify's own verbs** — `/brief`, `/next`, `/context`, `/search`, `/impact`, `/why`, `/changes`, `/review`, `/tests`, `/check`, `/status`, `/remember`, `/handoff`, `/task`, `/open` — each of which runs the real `cg` command in the workspace, shows the output as a card, *and* hands it to the agent as context. Asking "what breaks if I change this?" and running `cg impact` are the same gesture. Beyond those, **every tool `cg` serves is a slash command** — the palette is generated from the tool list, with argument hints and typing taken from each tool's schema (`/get_context auth flow`, `/spec_claim id=2.1 ttl=20`) — so the chat reaches everything Codify can do. And it reaches the fleet: `/fleet` shows the tree and runs, `/attach <agent>` follows a fleet agent's live transcript so that what you type next steers it, `/steer <agent> <message>` sends one message, and approval requests and escalations arrive as cards with Approve and Reject. Transcripts render windowed, so ten thousand entries stay responsive.
 
 **Start Agent Session on Task** drives the same chat with the board discipline: it claims the task, seeds the opening prompt from `cg resume --task <id> --prompt`, and runs the session in the view (or, when the view is busy, in an editor panel beside it — concurrent task sessions each get their own). Set `codify.agent.interface: "terminal"` for the classic seeded terminal instead — that path is also offered automatically when the adapter fails to start.
 
-**Run Agent Headless on Task** runs the claim + prompt as a background VS Code task (`codex exec --sandbox workspace-write` or `claude -p`) and reports the exit as a notification. **Run Wave with Agents** launches `cg spec run -n <codify.agent.parallelism>` in a terminal. **Hand Off Task** and **Resume Task in Agent Session** wrap `cg handoff` and `cg resume`, and **Stop Agent Session** ends a session — a panel or terminal closing with the task unfinished offers a handoff and releases the claim. While sessions run, the task board polls every 10 seconds through one refresh scheduler (never a watcher on `graph.db`, which the extension's own sync writes) and decorates each task with the agent holding its lease. See [editors/vscode/README.md](editors/vscode/README.md).
+**Run Agent Headless on Task** runs the claim + prompt as a background VS Code task (`codex exec --sandbox workspace-write` or `claude -p`) and reports the exit as a notification. **Run Wave with Agents** launches `cg spec run -n <codify.agent.parallelism>` in a terminal. **Hand Off Task** and **Resume Task in Agent Session** wrap `cg handoff` and `cg resume`, and **Stop Agent Session** ends a session — a panel or terminal closing with the task unfinished offers a handoff and releases the claim. Every view updates from events pushed over one `cg serve` connection, so there is no polling; against an older `cg` the board falls back to polling every 10 seconds while sessions run. Each task is decorated with the agent holding its lease. See [editors/vscode/README.md](editors/vscode/README.md).
 
 ## Editors
 
@@ -551,17 +577,18 @@ vim.lsp.start({ name = "codify", cmd = { "cg", "lsp" },
 - **A live task tree.** Tasks grouped feature → section → wave, the way the spec is written and the way a fleet divides work. Each row carries what decides whether you can pick it up: status, the agent holding the lease and its role, the branch, and the requires that are not met yet. Filter by status, wave or owner and search by id, title, section, owner, symbol or path; the active filter shows in the view title and survives a reload. A detail panel per task shows acceptance criteria, do-steps, declared symbols with their resolved location, touched paths, the verify command, tagged commits and the memories written under it. Start, complete, claim, release, run the verify command in the task's own worktree, open its branch, and copy a resume prompt.
 - **Agent sessions from the task board.** Start a Claude Code or Codex session on a task — in the ACP agent panel by default, or a terminal, or headless — hand off, resume, run a whole wave, and stop sessions, with live lease decorations on the board. See [Driving agents](#driving-agents).
 - **A memory browser.** Full text across project memory with filters for type, Jev class, task, branch and date, a detail pane whose symbols and files link back into the code, and supersede, forget, classify-with-Jev and promote-to-skill as actions.
-- **A fleet view.** Main Gideon, feature managers and wave workers as one tree with each branch, worktree, attempt, heartbeat and merge state, and begin, merge-up, land, PR, checkpoint and open-worktree as actions. A refresh never opens a pull request, and merge state is only what the branch registry can prove.
+- **Start the fleet, and watch it live.** **Start fleet** — a CodeLens on a feature's `spec.kvx`, the fleet view's title, or the command palette — previews the plan (roles and budgets, the agents and branches a dry run would spawn, predicted collisions, what is already running) and, on confirm, runs `cg fleet up`; Stop (now or drain), Pause and Resume sit on the view. The fleet tree shows Main Gideon, managers and workers with each branch, worktree, attempt, heartbeat and merge state, plus what each agent last said or did, its tokens and cost, and stall, retry and escalation badges; pending approvals are rows you decide from, and clicking an agent opens its transcript. Begin, merge-up, land, PR, checkpoint and open-worktree remain as actions. A refresh never opens a pull request, and merge state is only what the branch registry can prove.
+- **Live over one connection.** With a `cg` that has `serve`, the extension keeps one `cg serve` child for every call and every event, patches the views from pushed events, and turns its polls off. `codify.serve: false`, or an older binary, falls back to shelling out and polling.
 - **One Actions menu** covering brief, review, test-impact, why, check, guard, snapshot, spec authoring, and hook installation. Reports open as rendered markdown.
 - **kvx editing.** Go-to-definition on a `requires` entry jumps to that task; completion offers the keys a task actually understands; the outline lists every requirement and task.
-- **One refresh scheduler.** Every trigger — a spec file changing, a turn ending, a command finishing, a poll — funnels through a single chain of `cg` calls: bursts debounce into one run, a two-second floor sits between runs, and at most one trailing run queues behind a chain in flight. Each chain syncs once inside a three-second freshness window at background priority and never waits on another process's pass. The extension does **not** watch `graph.db` — its own sync writes it, and that watcher used to turn every refresh into the next.
+- **One refresh scheduler.** Every trigger — a pushed event, a spec file changing, a turn ending, a command finishing, a poll — funnels through a single chain of `cg` calls: bursts debounce into one run, a two-second floor sits between runs, and at most one trailing run queues behind a chain in flight. Each chain syncs once inside a three-second freshness window at background priority and never waits on another process's pass. The extension does **not** watch `graph.db` — its own sync writes it, and that watcher used to turn every refresh into the next.
 
 The extension has no dependencies and no build step — including its Language Server client, which is written by hand for exactly that reason.
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.3.0.vsix
-code --install-extension codify-workflow-1.3.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.4.0.vsix
+code --install-extension codify-workflow-1.4.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.
@@ -581,25 +608,36 @@ Repository layout:
 ```
 src/                 one .c file per module; src/cg.h is the only header
 src/govern.c         brief, review, guard, check, handoff, resume — the governance layer
-src/orchestrate.c    cg spec run — drives agent processes over claimed tasks,
-                     flat or as a two-level fleet (--fleet)
+src/orchestrate.c    cg spec run and the fleet supervisor (cg fleet up): durable
+                     runs, three levels at once, stalls, budgets, retries, escalation
 src/syncgate.c       the single-writer index gate and machine-wide parse slots
-src/fleet.c          roles, hierarchy config, the branch lifecycle, fleet tree
-src/jev.c            typed decisions over curl — the one remote call
+src/fleet.c          roles and capabilities, the branch lifecycle, merge lock,
+                     approval gates, fleet tree
+src/events.c         the append-only event log and cg events
+src/serve.c          cg serve — one JSON-RPC connection with pushed events
+src/drivers.c        agent launch argv, structured output read into events, steering
+src/drift.c          spec drift, collision prediction, interface drift, coverage
+src/changelog.c      release notes from git history, optional model highlights
+src/jev.c            typed decisions over curl
 src/skills.c         memories classed as skills, rendered as .agents/skills
 src/lsp.c            language server over the graph
 src/gitint.c         git history ingestion, churn, branch identity, commit mirroring
 tests/unit/          kvx grammar, SHA-256 vectors, JSON scanner, StrBuf/IO
 tests/integration/   graph, vcs, agentic, MCP protocol, spec engine, watcher,
-                     sync gate, fleet, branches, jev
+                     sync gate, fleet, branches, jev, changelog, events, serve,
+                     supervisor, drift, briefings, fleet end to end
 tests/fixtures/      sample polyglot project, a spec repo with golden outputs,
-                     and stand-ins for curl and gh
+                     stand-ins for curl, gh, and an OpenAI endpoint, and a
+                     scripted fleet driver
 editors/vscode/      VS Code extension (plain JS): kvx language, task tree,
-                     agent panel, memory browser, fleet view
+                     agent panel, memory browser, live fleet view, serve client
 scripts/             install/uninstall scripts served at codify.centra.ag + release publisher
 docs/ARCHITECTURE.md how the pieces fit together
 docs/sync.md         the sync gate, freshness, slots, incremental resolution
-docs/hierarchy.md    roles, branch flow, gates, PRs, checkpoints
+docs/hierarchy.md    roles, branch flow, the supervisor, supervision, approvals,
+                     briefings
+docs/drift.md        spec, collision, interface, and coverage drift
+docs/events.md       the event log, cg serve, drivers, steering
 docs/branches.md     the unified multi-branch graph and schema v16
 docs/jev.md          typed decisions: types, transport, configuration, limits
 ```
@@ -621,6 +659,9 @@ The database lock decides who *writes*. A separate gate decides who *walks*: `.c
 - Queries answer for the branch you are on. `--branch <name>` asks another and `--all-branches` asks them all; a hit is labelled `@branch` only when more than one branch is in scope, so single-branch output is unchanged.
 - `cg fleet` drives `git` and `gh` as subprocesses. Without `gh`, `pr` and `checkpoint` print the commands instead of running them, and `checkpoint` only treats `feature/*` head branches as Codify's own.
 - Jev needs the network and `OPENROUTER_API_KEY`. Nothing in the core loop depends on it, and no Jev answer changes an exit code.
+- The fleet supervisor is one per project and spawns agents through their CLIs; it does not authenticate them. A `spend` budget depends on the cost the driver reports, only Claude Code can be steered mid-turn, and the `retry` approval gate is accepted but not yet enforced. The rest is in [docs/hierarchy.md](docs/hierarchy.md#limitations).
+- Drift detection is line- and graph-level: behaviour changes inside unchanged lines, calls through a third function, and references the indexer cannot see are missed ([docs/drift.md](docs/drift.md#limitations)).
+- Changelog highlights need the network and a key; without one the notes are the plain derived record.
 
 ## Community
 

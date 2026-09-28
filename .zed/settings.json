@@ -1,0 +1,5 @@
+{
+  "context_servers": {
+    "codify":{"command":"/usr/local/bin/cg","args":["mcp"]}
+  }
+}

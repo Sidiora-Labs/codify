@@ -83,6 +83,21 @@ A **Codify toolbar** sits above the transcript: brief, next, status, review, che
 
 `/brief`, `/next`, `/review`, `/check` and `/task` are also one-click chips on the empty chat.
 
+**Every served tool is a slash command too.** The palette also lists every tool `cg` serves — the same table the MCP server exposes — generated from the tool list, so a Codify capability is reachable from the chat the day it ships. The argument hint and parsing come from each tool's input schema: one required text field takes the whole line (`/get_context auth flow`), otherwise `key=value` pairs are typed by the schema (`/spec_claim id=2.1 ttl=20`). Results render as cards. Where a built-in command and a tool share a name, the built-in wins.
+
+**The fleet, from the chat.**
+
+| Command | Does |
+|---|---|
+| `/fleet` | The fleet tree and its runs |
+| `/attach [agent]` | Follow a fleet agent's live transcript — its text, tool calls, supervisor and drift events stream into the chat — and what you type next steers it |
+| `/detach` | Stop following it |
+| `/steer <agent> <message>` | Send one message to a running agent: delivered at its next edit (Claude Code, through the post-edit hook) or its next prompt |
+| `/approvals` | What waits for a person, each as a card with Approve and Reject |
+| `/approve <id> [reject] [note]` | Decide one approval |
+
+Approval requests and escalations also arrive on their own as actionable cards, and an interface-drift finding appears as a notice naming the symbol and the agents that were told. Transcripts and event lists render windowed — only the newest rows stay in the page, older ones come back a page at a time — so a session with ten thousand entries stays responsive.
+
 ### Working tasks in the view
 
 The board *drives* the same chat. **Start Agent Session on Task** (task node or palette) runs the whole pickup into the Agent view:
@@ -105,11 +120,13 @@ The rest of the lifecycle:
 | Run Wave with Agents | Opens a terminal running `cg spec run -n <codify.agent.parallelism> --driver <driver>` — the built-in orchestrator works the whole eligible frontier |
 | Stop Agent Session | Closes the session's terminal (or terminates the headless task) |
 
-When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. While any tracked session exists, the board polls every 10 seconds, so work done by agents outside the editor shows up without a manual refresh. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
+When a session's terminal closes — or a headless run exits — with the task not yet `done` or `implemented`, the extension offers to release the claim so the task returns to the frontier. Work done by agents outside the editor shows up without a manual refresh: pushed over `cg serve`, or, without it, through a 10-second poll while any tracked session exists. Tasks with a live claim show `$(person)` plus the agent name; `$(terminal)` marks tasks with a tracked terminal session and `$(comment-discussion)` marks tasks with a live agent panel in this window.
 
 ## How the board stays fresh
 
-Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `cg` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
+**Live, with a current `cg`.** The extension keeps one `cg serve` child open for the whole window. Every `cg` call it makes goes down that one pipe, and every change in the repository — a task status, a claim, an agent's tool call, a merge, a stall, an approval — comes back up it as a pushed event. The task, memory, and fleet views patch themselves from those events, so the polls below are switched off while the connection is up; the headless test measures an event reaching the view model in under 300 ms. If the server goes away the extension reconnects with a backoff and takes one full refresh, because events pushed while the pipe was down are gone. Set `codify.serve` to `false`, or run a `cg` without `serve`, and the Codify output says so and everything below applies unchanged.
+
+**The fallback.** Every refresh — a spec file changing, an agent's turn ending, a command finishing, a poll — goes through one scheduler. It runs a single short chain of `cg` calls at a time (`sync --max-age 3000 --background --wait 0`, `spec status`, `spec trace --no-sync`, `recall`, `guard`), debounces bursts into one run, keeps at least two seconds between runs unless a command asked for one, and queues at most one trailing run behind a chain in flight. The sync is a no-op when a whole-tree pass ran in the last three seconds; otherwise it is one low-priority pass that never waits on another process's pass. The extension does not watch `.codegraph/graph.db`, because its own sync writes it and a watcher there turned each refresh into the next. Claims and evidence written by agents outside the editor, which touch no spec file, arrive through the 10-second poll while a session is tracked and a 60-second poll while the window is focused; regaining focus refreshes once.
 
 ## Memory
 
@@ -123,7 +140,20 @@ The panel is a CSP-strict, nonce-only webview with no remote anything, and owns 
 
 ## Fleet
 
-The **Fleet** view draws the agent hierarchy live: Main Gideon on the main branch, a feature manager on `feature/<name>`, and wave workers on `wave/<feature>/<n>`, each with its branch, worktree, current attempt, heartbeat age, and whether its branch is already merged into its base.
+### Start the fleet
+
+A feature's `spec.kvx` carries two CodeLenses on its `[meta]` line: **Start fleet** and **Fleet plan**. The same Start is on the Fleet view's title bar and in the palette (**Codify: Start the Fleet**). Before anything runs you see the plan, as a markdown document beside the editor, built from cg's own answers:
+
+- the roles and what each may do and spend (`cg fleet roles`): driver, model, concurrency, wall-clock, spend, retries, stall window, approval gates;
+- the agents and branches a dry run would spawn (`cg spec run --fleet --dry-run`);
+- the tasks predicted to collide, which will run one after the other (`cg drift collisions`);
+- anything already running (`cg fleet runs`).
+
+Confirm, pick the number of worker slots, and the extension runs `cg fleet up`: a detached supervisor spawns the manager and workers and keeps them going until every task is qualified and merged. **Stop** (now, or drain — let live agents finish first), **Pause**, and **Resume** are on the view. The whole contract is in [docs/hierarchy.md](../../docs/hierarchy.md#running-the-tree-cg-fleet-up).
+
+### The live tree
+
+The **Fleet** view draws the agent hierarchy live: Main Gideon on the main branch, a feature manager on `feature/<name>`, and workers on their wave or task branches, each with its branch, worktree, current attempt, heartbeat age, and whether its branch is already merged into its base. Folded onto each agent from the event stream: its current step and last output line, its tokens and cost, and badges when the supervisor nudged it, restarted it, retried the task, or escalated it. Pending approvals appear as rows — **Codify: Decide a Fleet Approval** approves or rejects one, with an optional note — and clicking an agent opens its transcript (the driver's log under `.codegraph/agents/`).
 
 `cg` knows all of that across three commands — the agent registry, the live claims, and the branch registry — and the view joins them into one tree. Actions on a node: begin a task in the fleet, merge a wave branch up, land the feature, open its pull request, checkpoint the open ones, refresh, and open an agent's worktree in a window.
 
@@ -175,6 +205,8 @@ Neither is required for the other. kvx highlighting works everywhere.
 | Setting | Default | Description |
 |---|---|---|
 | `codify.binaryPath` | `cg` | Path to the cg binary |
+| `codify.serve` | `true` | Keep one `cg serve` connection open for every call and live events (no polling). Off, or with an older cg, the extension shells out and polls |
+| `codify.acp.diffStyle` | `unified` | How a file edit opens in the agent chat: one unified column, or old and new side by side. Each diff can still be flipped in place |
 | `codify.feature` | *(empty)* | Feature override, passed to every spec command as `-f` |
 | `codify.languageServer` | `true` | Run `cg lsp` for navigation, hover, code lens and diagnostics |
 | `codify.agentName` | *(empty)* | Default name used when claiming a task in parallel mode |
@@ -195,14 +227,14 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.3.0.vsix
-code --install-extension codify-workflow-1.3.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.4.0.vsix
+code --install-extension codify-workflow-1.4.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. In a Remote SSH,
 WSL, or container window, install the VSIX on the **remote** extension host,
 not only the local UI side. The Agent header shows the running version (for
-example `v1.3.0`), so a stale host is immediately visible after reload.
+example `v1.4.0`), so a stale host is immediately visible after reload.
 
 For development, open `editors/vscode/` in VS Code and press F5.
 

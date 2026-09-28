@@ -98,7 +98,7 @@
     - Two features, a failing task, a stalling worker, a merge conflict, and an interface change through a scripted fake driver and fake gh; assert the recorded events and final merged state.
     - Kill the supervisor mid-run, restart with --resume, and assert the same end state.
     - _Requirements: 7.1, 7.2_
-  - [ ] 7.2 Qualify v11 end to end
+  - [-] 7.2 Qualify v11 end to end
     - Run the whole suite, spec render check, lint, and check in a clean tree.
     - Document the supervisor, roles, supervision, context packets, drift, serve, and the editor, with limitations.
     - _Requirements: 7.3_

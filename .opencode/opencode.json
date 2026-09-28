@@ -1,0 +1,5 @@
+{
+  "mcp": {
+    "codify":{"command":"/usr/local/bin/cg","args":["mcp"]}
+  }
+}

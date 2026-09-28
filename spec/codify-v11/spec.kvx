@@ -292,7 +292,7 @@ reqs       = ["7.1", "7.2"]
 
 [task.7.2]
 title      = "Qualify v11 end to end"
-status     = "pending"
+status     = "in_progress"
 wave       = 8
 requires   = ["7.1", "6.1", "6.2"]
 symbols    = ["cmd_serve", "cmd_fleet_up", "task_packet_build", "drift_spec_check", "events_emit"]

@@ -80,7 +80,12 @@ static void usage(void) {
 "                           Windsurf, Gemini CLI, Codex CLI\n"
 "  integrate [detect|plan|apply|doctor]\n"
 "                           configure and diagnose every agent host\n"
-"  changelog [-n N] [-o F]  changelog from snapshots with symbol-level diffs\n"
+"  changelog [-n N] [-o F] [--unreleased] [--tag V] [--snapshots]\n"
+"            [--summarize|--no-summarize]\n"
+"                           release notes from git history (a release per\n"
+"                           tag, groups per subject prefix, task refs); with\n"
+"                           CENTRA_API_KEY a model adds Highlights per\n"
+"                           release; --snapshots: the snapshot-chain form\n"
 "  agentmd [--write]        generate .codify/agent-context.md from the graph\n"
 "  docs status|plan|packet  grounded documentation closure evidence;\n"
 "                           generate is an alias for packet\n"
@@ -647,9 +652,18 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "integrate") == 0) {
         rc = cmd_integrate(&cg, argc >= 3 ? argv[2] : "detect", json, false);
     } else if (strcmp(cmd, "changelog") == 0) {
-        int limit = atoi(opt(&argc, argv, "-n", "50"));
-        const char *out = opt(&argc, argv, "-o", NULL);
-        rc = cmd_changelog(&cg, limit > 0 ? limit : 50, out);
+        ChangelogOpts o = {0};
+        o.limit = atoi(opt(&argc, argv, "-n", "50"));
+        if (o.limit <= 0) o.limit = 50;
+        o.outfile = opt(&argc, argv, "-o", NULL);
+        o.tag = opt(&argc, argv, "--tag", NULL);
+        o.unreleased = flag(&argc, argv, "--unreleased");
+        bool snaps = flag(&argc, argv, "--snapshots");
+        if (flag(&argc, argv, "--summarize")) o.summarize = 1;
+        if (flag(&argc, argv, "--no-summarize")) o.summarize = -1;
+        /* git history when there is one, the snapshot chain otherwise */
+        rc = !snaps && git_available(&cg) ? cmd_changelog_git(&cg, &o)
+                                          : cmd_changelog(&cg, o.limit, o.outfile);
     } else if (strcmp(cmd, "agentmd") == 0) {
         bool write_files = flag(&argc, argv, "--write");
         index_fresh(&cg, &si);                  /* fresh graph first */
