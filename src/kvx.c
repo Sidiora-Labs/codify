@@ -310,13 +310,27 @@ static void kvx_unlock(int fd) {
     if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
 }
 
+void (*kvx_status_hook)(const char *path, const char *section,
+                        const char *from, const char *to);
+
+/* the scalar after '=' with quotes and a trailing comment removed */
+static void old_scalar(const char *after_eq, char *out, size_t cap) {
+    char tmp[512];
+    snprintf(tmp, sizeof tmp, "%s", after_eq);
+    strip_comment(tmp, strlen(tmp));
+    char *t = trim(tmp);
+    size_t n = strlen(t);
+    if (n >= 2 && t[0] == '"' && t[n - 1] == '"') { t[n - 1] = 0; t++; }
+    snprintf(out, cap, "%s", t);
+}
+
 int kvx_set_status(const char *path, const char *section, const char *value) {
     int lk = kvx_lock(path);
     size_t len = 0;
     char *body = read_entire_file(path, &len);
     if (!body) { kvx_unlock(lk); return -1; }
     StrBuf out; sb_init(&out);
-    char cur[256] = "";
+    char cur[256] = "", from[256] = "";
     bool done = false, in_target = false;
     size_t pos = 0;
     while (pos < len) {
@@ -349,6 +363,7 @@ int kvx_set_status(const char *path, const char *section, const char *value) {
                 }
             }
             if (is_status) {
+                old_scalar(eq + 1, from, sizeof from);
                 size_t head = (size_t)(eq - line) + 1;
                 for (size_t i = 0; i < head; i++) sb_putc(&out, line[i]);
                 sb_printf(&out, " \"%s\"", value);
@@ -367,6 +382,7 @@ int kvx_set_status(const char *path, const char *section, const char *value) {
     int rc = write_entire_file(path, out.p, out.len);
     sb_free(&out);
     kvx_unlock(lk);
+    if (rc == 0 && kvx_status_hook) kvx_status_hook(path, section, from, value);
     return rc;
 }
 
@@ -398,7 +414,8 @@ static int kvx_set_value(const char *path, const char *section, const char *key,
     char *body = read_entire_file(path, &len);
     if (!body) { kvx_unlock(lk); return -1; }
 
-    bool section_found = false, in_target = false;
+    bool section_found = false, in_target = false, had = false;
+    char from[256] = "";
     size_t section_end = len;
     size_t key_start = SIZE_MAX, key_len = 0, key_eq = 0, key_tail = 0;
     size_t pos = 0;
@@ -447,6 +464,8 @@ static int kvx_set_value(const char *path, const char *section, const char *key,
                         key_len = ll;
                         key_eq = (size_t)(eq - line);
                         key_tail = comment;
+                        old_scalar(eq + 1, from, sizeof from);
+                        had = true;
                     }
                 }
             }
@@ -494,6 +513,8 @@ static int kvx_set_value(const char *path, const char *section, const char *key,
     int rc = write_entire_file(path, out.p, out.len);
     sb_free(&out);
     kvx_unlock(lk);
+    if (rc == 0 && !raw && kvx_status_hook && strcmp(key, "status") == 0)
+        kvx_status_hook(path, section, had ? from : NULL, value);
     return rc;
 }
 

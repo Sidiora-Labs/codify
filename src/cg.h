@@ -527,6 +527,12 @@ int   kvx_subsections(const Kvx *k, const char *prefix, char ***out); /* file or
 void  kvx_sort_dotted(char **ids, int n);
 /* surgically rewrite `status = "..."` inside [section]; preserves all else */
 int   kvx_set_status(const char *path, const char *section, const char *value);
+/* called after every successful status write (kvx_set_status, and
+ * kvx_set_string on a "status" key) with the value it replaced, or NULL.
+ * NULL hook by default, so kvx stays free of the database for unit tests;
+ * main installs events_kvx_status. */
+extern void (*kvx_status_hook)(const char *path, const char *section,
+                               const char *from, const char *to);
 /* surgically set a quoted scalar, adding the key/section when absent */
 int   kvx_set_string(const char *path, const char *section, const char *key,
                      const char *value);
@@ -622,6 +628,33 @@ int orch_driver_argv(const char *driver, const char *extra_args,
                      const char *cmd_tmpl, const char *root,
                      const char *promptfile, const char *task,
                      const char *agent, char **av, int cap);
+
+/* ---------------- event log (events.c) ---------------- */
+typedef struct {
+    long seq, at;                    /* at: ms since the epoch */
+    const char *kind, *subject, *run, *node, *branch, *payload;
+} EventRow;
+/* nonzero stops the walk */
+typedef int (*EventFn)(const EventRow *e, void *ud);
+int  events_install(Cg *cg);         /* triggers; called by cg_open */
+/* payload is a JSON object or NULL; run, node, and branch come from CG_RUN,
+ * CG_AGENT, and the connection. Joins the caller's transaction if any.
+ * Returns the new seq, -1 on failure. */
+long events_emit(Cg *cg, const char *kind, const char *subject,
+                 const char *payload);
+long events_emit_quiet(const char *kind, const char *subject,
+                       const char *payload);    /* opens its own connection */
+void events_bind(Cg *cg);            /* see events_kvx_status */
+void events_unbind(void);
+void events_kvx_status(const char *path, const char *section,
+                       const char *from, const char *to);
+long events_head(Cg *cg);
+long events_pruned_through(Cg *cg);
+/* events with seq > since, oldest first; returns the last seq visited */
+long events_since(Cg *cg, long since, const char *kinds, int limit,
+                  EventFn fn, void *ud);
+void events_json(StrBuf *b, const EventRow *e);
+int  cmd_events(Cg *cg, int argc, char **argv, bool json);
 
 /* ---------------- git interop (gitint.c) ---------------- */
 /* ---------------- fleet: hierarchy, identity, reports (fleet.c) -------- */

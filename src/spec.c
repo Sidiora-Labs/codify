@@ -1289,7 +1289,10 @@ static int spec_set_status_owned(Spec *s, const char *id, const char *status,
                         "running — lifecycle mutation rejected\n", id);
         return 1;
     }
-    if (kvx_set_status(s->fpath, sec, status) != 0) {
+    events_bind(&g);
+    int wrc = kvx_set_status(s->fpath, sec, status);
+    events_unbind();
+    if (wrc != 0) {
         cg_exec(&g, "ROLLBACK");
         cg_close(&g);
         return -1;
@@ -2601,9 +2604,11 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
     cg_exec(&g, "COMMIT");
     free(touches);
 
+    events_bind(&g);
     int status_rc = docs
         ? kvx_set_string(s->fpath, "documentation", "status", "in_progress")
         : kvx_set_status(s->fpath, sec, "in_progress");
+    events_unbind();
     if (status_rc != 0) {
         /* never leave a lease on a task that did not actually start */
         sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");

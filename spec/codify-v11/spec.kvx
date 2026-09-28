@@ -1,0 +1,302 @@
+# codify-v11 — autonomous fleet: a spec in, verified merged work out, watched live.
+
+[meta]
+feature = "codify-v11"
+intro   = "Turn the v10 fleet primitives into a system a team can hand a spec to and leave running for days: a durable, crash-resumable, three-level supervisor that runs features, managers, and workers concurrently and manages every Codex or Claude Code process until its work is merged; agents briefed from the graph instead of from prose; drift caught across branches before it merges; and an editor that shows all of it live over one push connection, with Start, steering, and approvals in the chat."
+
+[req.1]
+title = "Durable three-level fleet supervisor"
+story = "As the owner of a multi-day project, I want to press Start on a spec and have the main agent, a manager per feature, and workers per task created and supervised until every task is qualified and merged, surviving crashes and restarts, so that nobody has to babysit the processes."
+ac_1  = "WHEN cg fleet up starts a run THE supervisor SHALL persist the run, every node (role, parent, agent, task, branch, worktree, pid, attempt, fence, retries, spend), and every transition in the database, and WHEN the supervisor restarts with --resume THE run SHALL continue from that state without re-spawning live children or forgetting retry counts."
+ac_2  = "WHEN the run starts THE supervisor SHALL spawn a real main agent process, one feature manager per feature whose requires are met, and workers under each manager, so that several features progress at the same time."
+ac_3  = "WHEN a manager and its workers are live at once THE merge of a worker's branch into the feature worktree SHALL be serialized by a merge lock instead of by the two levels taking turns."
+ac_4  = "WHEN several tasks of one wave have disjoint declared touches and no predicted collision THE supervisor SHALL run them on separate task branches in parallel, bounded by the role's concurrency limit."
+ac_5  = "WHEN workflow.kvx declares [role.*] capabilities THE supervisor SHALL honour each role's driver, model, extra args, concurrency limit, wall-clock budget, and spend budget."
+ac_6  = "WHEN cg fleet down, pause, or resume runs THE supervisor SHALL drain, freeze, or continue the run gracefully, releasing claims on drain and keeping branches."
+ac_7  = "WHEN workflow.kvx declares an approval gate on land, pr, retry-exhausted, or drift THE supervisor SHALL stop at that point and emit an approval request instead of proceeding, and SHALL proceed only on an explicit approve."
+
+[req.2]
+title = "Supervision that notices, retries, and escalates"
+story = "As the fleet owner, I want a stuck, looping, or failing agent to be noticed and handled automatically so that one bad process cannot stall a multi-day run."
+ac_1  = "WHEN a live worker makes no progress (no new file change, commit, tool call, or spec transition) within the stall window THE supervisor SHALL send a nudge, and WHEN the next window also passes without progress THE supervisor SHALL terminate it and restart it with a handoff, instead of renewing its heartbeat forever."
+ac_2  = "WHEN a worker exceeds its wall-clock or spend budget THE supervisor SHALL stop it, record why, and treat the attempt as failed."
+ac_3  = "WHEN an attempt fails THE supervisor SHALL retry the task up to the role's retry limit with the Jev triage, the verify_cmd tail, and the previous attempt's summary in the new prompt."
+ac_4  = "WHEN retries are exhausted THE task SHALL be escalated to its manager, then to the main agent, and WHEN still unresolved it SHALL be marked blocked with the reason while the rest of the run continues."
+ac_5  = "WHEN any child exits THE outcome SHALL be decided by the task's status on the branch tip and the merge state, never by the exit code alone."
+
+[req.3]
+title = "Graph-grounded agent context"
+story = "As a worker agent, I want my briefing built from the graph (the code I will touch, what my upstream tasks actually produced, and what my siblings are changing) so that I start oriented instead of rediscovering the repository."
+ac_1  = "WHEN a worker is spawned THE prompt SHALL contain a task packet built from the graph within a token budget: the task's criteria, the current definitions of its declared symbols, their callers and callees, the symbols its required tasks actually introduced on the feature branch with signatures, relevant memories, and the touches of live sibling workers."
+ac_2  = "WHEN upstream work merges into the feature branch while a worker runs THE next cg work update SHALL report the merged symbols and changed signatures as a delta."
+ac_3  = "WHEN a manager is woken THE prompt SHALL contain the subtree state, open conflicts, failed attempts with triage, pending approvals, and drift findings for its feature."
+ac_4  = "WHEN the retrieval evaluation runs THE task packets for the fixture tasks SHALL reach the recorded recall threshold for their gold symbols and SHALL stay inside the budget."
+
+[req.4]
+title = "Drift caught across the fleet"
+story = "As a reviewer of a million-line project built by agents, I want every place the work drifts from the spec, or from another branch, flagged before it merges so that the drift never reaches main unnoticed."
+ac_1  = "WHEN a task is qualified or merged up THE diff SHALL be compared with the task's declared symbols and touches, and public symbols changed outside the declaration SHALL be reported as spec drift."
+ac_2  = "WHEN a merge into a feature branch changes the signature or removes a symbol that another live branch references THE affected workers and their managers SHALL receive an interface-drift event naming the symbol, the old and new signature, and the referencing sites."
+ac_3  = "WHEN the supervisor picks tasks to run in parallel THE tool SHALL predict collisions from declared touches and the call graph impact of declared symbols, and SHALL serialize predicted collisions instead of running them together."
+ac_4  = "WHEN a feature is about to land THE tool SHALL report every acceptance criterion that is not traced to a qualified task with evidence."
+ac_5  = "WHEN drift is found THE finding SHALL be recorded as an event and surfaced in brief, fleet tree, and the editor, SHALL warn by default, and SHALL block only where workflow.kvx opts in."
+
+[req.5]
+title = "Live event stream and cg serve"
+story = "As an interface built on Codify, I want one long-lived connection that answers any command and pushes every change as it happens so that nothing has to poll."
+ac_1  = "WHEN any fleet or spec state changes (task status, claim, attempt, spawn, exit, stall, retry, escalation, merge, gate, pull request, drift, approval) THE change SHALL be appended to an events table with a monotonic sequence number, kind, subject, and JSON payload."
+ac_2  = "WHEN a client runs cg serve THE server SHALL speak newline-delimited JSON-RPC over stdio, answer every tool the MCP server exposes, and push subscribed events from a given sequence number within 250 ms of their commit."
+ac_3  = "WHEN a child agent runs under a driver with structured output THE supervisor SHALL parse its stream (text, tool calls, tokens, cost) into agent events, and SHALL keep the raw log on disk."
+ac_4  = "WHEN cg serve is idle THE server SHALL NOT hold the write lock or run index passes."
+ac_5  = "WHEN cg events --follow runs THE command SHALL stream the same events as text or JSON for terminal users."
+
+[req.6]
+title = "Real-time editor that exposes the whole fleet"
+story = "As a developer, I want to start, watch, steer, and approve the whole fleet from the editor, with views that keep up in real time and a chat that reaches every capability Codify and its agents have."
+ac_1  = "WHEN the extension connects to a cg that supports serve THE extension SHALL use one serve connection for every call and event, SHALL update views incrementally from events within 300 ms, and SHALL NOT poll; WHEN the binary is older THE extension SHALL fall back to the v10 behaviour."
+ac_2  = "WHEN the user presses Start on a feature (CodeLens on the spec, view title, or chat) THE extension SHALL show the plan (roles, agents, branches, parallel groups, predicted collisions, budgets), and on confirm SHALL run cg fleet up, with Stop, Pause, and Resume available while it runs."
+ac_3  = "WHEN the fleet view renders THE tree SHALL show main, managers, and workers live with state, task, current step, last output line, tokens and cost, stall and retry indicators, and SHALL open an agent's live transcript on click."
+ac_4  = "WHEN the chat is used THE slash commands SHALL be generated from the served tool list so that every Codify capability is reachable, the chat SHALL attach to any fleet agent's live transcript and send it a steering message, and approval requests and escalations SHALL appear inline as actionable cards."
+ac_5  = "WHEN a transcript or event list holds ten thousand entries THE webview SHALL stay responsive through windowed rendering, measured headlessly."
+
+[req.7]
+title = "Qualified at fleet scale"
+story = "As the team trusting Codify with a multi-day run, I want proof that the whole life cycle works under failure, not just on the happy path."
+ac_1  = "WHEN the fleet end-to-end fixture runs with a scripted fake driver across two features with a failing task, a stalling worker, a merge conflict, and an interface change THE run SHALL finish with every task qualified and merged, the pull requests opened through a fake gh, the retry, stall restart, conflict report, and interface-drift event all recorded."
+ac_2  = "WHEN the supervisor is killed in the middle of that run and restarted with --resume THE run SHALL still complete with the same result."
+ac_3  = "WHEN v11 is released THE documentation SHALL describe the supervisor, roles, supervision, context packets, drift, serve, and the editor, with their limitations."
+
+[design]
+overview = "Events: an additive events(seq INTEGER PRIMARY KEY AUTOINCREMENT, at, kind, subject, run, node, branch, payload) table, fed by triggers on the durable tables, a kvx status hook, and explicit events_emit calls, with events_since for readers; every fleet, spec, and supervisor transition emits. Serve: a serve module reuses the MCP tool dispatch behind a JSON-RPC stdio loop with subscribe and unsubscribe; it wakes on the WAL file's change (inotify on Linux, stat fallback elsewhere) and reads events_since with a read transaction only. Drivers: a drivers module owns argv building (moved from orchestrate.c) and parses claude stream-json and codex exec --json into agent events; unknown drivers keep plain logs. Supervisor: fleet_runs and fleet_nodes tables hold the run; cg fleet up forks a detached supervisor that owns a tick loop (reap, progress, budgets, retries, escalation, approvals, spawn) and writes a pid file; --resume reattaches to live pids by checking /proc and the recorded start time. Slots become per task on task branches cut from the feature branch; merge-up takes a merge lock on the feature worktree. The main agent is a real driver process woken on feature completion, escalation, and checkpoint. Context: a task packet builder composes spec criteria, graph lookups (symbol definitions, callers, callees), required-task evidence resolved on the feature branch, recall, and live sibling touches, fitted to the context budget; work update gains an upstream delta. Drift: a drift module computes spec drift from the attempt diff against declared symbols and touches, collision prediction from touches plus impact over declared symbols, interface drift from cross-branch refs in the unified graph after each merge, and requirement coverage from trace. Extension: a client over cg serve replaces execFile and the poll timers; views apply events to local models; the fleet view and chat subscribe per agent; slash commands come from tools/list. Everything stays in the one binary on libc and libsqlite3."
+
+[documentation]
+mode       = "auto"
+status     = "pending"
+audiences  = ["user", "developer"]
+targets    = ["README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md", "editors/vscode/README.md", "editors/vscode/CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: Codify v11"
+
+[task.1]
+title   = "Foundations"
+section = "Events and role capabilities"
+status  = "pending"
+
+[task.1.1]
+title      = "Event log: events table, triggers, emit, read, follow"
+status     = "in_progress"
+wave       = 1
+symbols    = ["events_emit", "events_since", "cmd_events"]
+touches    = ["src/events.c", "src/db.c", "src/cg.h", "src/main.c", "src/spec.c", "src/fleet.c", "src/orchestrate.c", "tests/integration/30_events.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/30_events.sh && CG=$PWD/cg tests/integration/26_fleet.sh"
+do_1       = "Add the events table (additive, no schema version bump: a bump drops and rebuilds every project's graph) and triggers on the durable tables; events_emit writes inside the caller's transaction so an event never outlives a rolled-back change."
+do_2       = "Emit from spec transitions, claims, attempts, fleet begin, merge-up, land, pr, checkpoint, and the orchestrator's spawn and reap."
+do_3       = "cg events [--since N] [--kind K] [--follow] [--json]; retention by count with a meta high-water mark."
+reqs       = ["5.1", "5.5"]
+
+[task.1.2]
+title      = "Role capabilities in workflow.kvx"
+status     = "pending"
+wave       = 1
+symbols    = ["hier_role_caps", "RoleCaps"]
+touches    = ["src/fleet.c", "src/cg.h", "spec/workflow.kvx", "docs/hierarchy.md", "tests/integration/26_fleet.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/26_fleet.sh caps"
+do_1       = "Parse per-role driver, model, args, max, wall, spend, retries, stall, and approve keys with defaults from [agents]."
+do_2       = "Show resolved capabilities in cg fleet roles and its --json."
+reqs       = ["1.5", "1.7"]
+
+[task.2]
+title   = "Serve and drivers"
+section = "One connection, structured agent output"
+status  = "pending"
+
+[task.2.1]
+title      = "cg serve: JSON-RPC over stdio with event subscriptions"
+status     = "pending"
+wave       = 2
+requires   = ["1.1"]
+symbols    = ["cmd_serve", "serve_dispatch", "serve_subscribe", "serve_wait_change"]
+touches    = ["src/serve.c", "src/mcp.c", "src/cg.h", "src/main.c", "tests/integration/31_serve.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/31_serve.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "Factor the MCP tool table into a dispatch both servers share; serve answers call, tools, subscribe, unsubscribe, and ping."
+do_2       = "Wake on WAL change through inotify with a stat fallback and push events_since the subscriber's cursor; never take the write lock while idle."
+do_3       = "Test push latency under 250 ms and that an idle serve leaves the index lock free."
+reqs       = ["5.2", "5.4"]
+
+[task.2.2]
+title      = "Drivers module with structured output capture"
+status     = "pending"
+wave       = 2
+requires   = ["1.1", "1.2"]
+symbols    = ["driver_argv", "driver_stream_parse", "driver_steer"]
+touches    = ["src/drivers.c", "src/orchestrate.c", "src/cg.h", "tests/integration/18_orchestrate.sh", "tests/fixtures/fleet/fake-driver.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/18_orchestrate.sh drivers"
+do_1       = "Move argv building out of orchestrate.c; add stream-json for claude and exec --json for codex behind role caps."
+do_2       = "Parse text, tool calls, tokens, and cost into agent events and a per-node spend counter; keep the raw log."
+do_3       = "driver_steer delivers a message through the driver's stream input when supported and otherwise queues it for the next resume prompt."
+reqs       = ["5.3", "6.4"]
+
+[task.3]
+title   = "Supervisor and context"
+section = "Durable runs, grounded briefings"
+status  = "pending"
+
+[task.3.1]
+title      = "Durable runs: fleet up, down, pause, resume, reattach"
+status     = "pending"
+wave       = 3
+requires   = ["1.1", "1.2"]
+symbols    = ["fleet_run_open", "fleet_run_resume", "cmd_fleet_up", "supervisor_tick"]
+touches    = ["src/orchestrate.c", "src/fleet.c", "src/db.c", "src/cg.h", "src/main.c", "tests/integration/32_supervisor.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/32_supervisor.sh durable && CG=$PWD/cg tests/integration/18_orchestrate.sh"
+do_1       = "Add fleet_runs and fleet_nodes; move the fleet loop into supervisor_tick over persisted state; keep cg spec run --fleet as a foreground alias."
+do_2       = "cg fleet up detaches a supervisor with a pid file; down drains, pause freezes spawning, resume continues; --resume reattaches live children by pid and start time."
+do_3       = "Approval gates stop at land, pr, retry-exhausted, or drift and wait for cg fleet approve <id>."
+reqs       = ["1.1", "1.6", "1.7"]
+
+[task.3.2]
+title      = "Graph-grounded task packets and upstream deltas"
+status     = "pending"
+wave       = 3
+requires   = ["1.1"]
+symbols    = ["task_packet_build", "packet_upstream_evidence", "work_upstream_delta"]
+touches    = ["src/govern.c", "src/graph.c", "src/orchestrate.c", "src/cg.h", "tests/integration/34_context.sh", "tests/integration/16_retrieval.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/34_context.sh && CG=$PWD/cg tests/integration/16_retrieval.sh"
+do_1       = "Build the worker packet: criteria, declared symbols' definitions, callers and callees, required tasks' introduced symbols on the feature branch, recall, and live sibling touches, fitted to the budget."
+do_2       = "Build the manager packet: subtree state, conflicts, failed attempts with triage, approvals, and drift."
+do_3       = "cg work update reports symbols merged upstream since the attempt began; add fixture tasks with gold symbols and a recall threshold."
+reqs       = ["3.1", "3.2", "3.3", "3.4"]
+
+[task.4]
+title   = "Concurrency, supervision, drift"
+section = "Three levels at once"
+status  = "pending"
+
+[task.4.1]
+title      = "Three-level concurrent tree with task slots and a merge lock"
+status     = "pending"
+wave       = 4
+requires   = ["3.1", "2.2"]
+symbols    = ["orch_spawn_main", "fleet_merge_lock", "orch_task_slots"]
+touches    = ["src/orchestrate.c", "src/fleet.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/integration/26_fleet.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/32_supervisor.sh tree && CG=$PWD/cg tests/integration/26_fleet.sh"
+do_1       = "Spawn a real main agent; run every feature whose requires are met, each with its manager, concurrently."
+do_2       = "Slots become tasks on task branches cut from the feature branch; merge-up takes the feature worktree's merge lock so manager and workers run together."
+do_3       = "Respect each role's concurrency limit and the machine-wide slots."
+reqs       = ["1.2", "1.3", "1.4"]
+
+[task.4.2]
+title      = "Stall detection, budgets, retries with triage, escalation"
+status     = "pending"
+wave       = 4
+requires   = ["3.1", "2.2"]
+symbols    = ["supervisor_stall_check", "supervisor_budget_check", "supervisor_retry", "supervisor_escalate"]
+touches    = ["src/orchestrate.c", "src/runtime.c", "src/jev.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/fixtures/fleet/fake-driver.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/32_supervisor.sh supervise"
+do_1       = "Progress is file changes, commits, tool-call events, or spec transitions; no progress for one window nudges, two restarts with a handoff."
+do_2       = "Stop on wall-clock or spend budget; retry up to the role's limit with triage, verify tail, and the last summary in the prompt."
+do_3       = "Escalate to manager, then main, then mark blocked with the reason while the run continues."
+reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5"]
+
+[task.4.3]
+title      = "Spec drift and collision prediction"
+status     = "pending"
+wave       = 4
+requires   = ["3.2"]
+symbols    = ["drift_spec_check", "drift_collision_predict"]
+touches    = ["src/drift.c", "src/spec.c", "src/fleet.c", "src/orchestrate.c", "src/cg.h", "tests/integration/33_drift.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/33_drift.sh spec"
+do_1       = "On done and merge-up compare the attempt diff with declared symbols and touches and emit spec-drift events."
+do_2       = "Predict collisions from touch globs and impact over declared symbols; the slot picker serializes predicted collisions."
+reqs       = ["4.1", "4.3", "4.5"]
+
+[task.5]
+title   = "Cross-branch drift and the live editor core"
+section = "Interfaces, coverage, serve client"
+status  = "pending"
+
+[task.5.1]
+title      = "Interface drift across branches and requirement coverage"
+status     = "pending"
+wave       = 5
+requires   = ["4.3", "4.1"]
+symbols    = ["drift_interface_check", "coverage_check"]
+touches    = ["src/drift.c", "src/fleet.c", "src/graph.c", "src/govern.c", "src/cg.h", "tests/integration/33_drift.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/33_drift.sh interface"
+do_1       = "After each merge, diff signatures of changed symbols and find references on other live branches through the unified graph; notify those workers and managers."
+do_2       = "Before land, report acceptance criteria with no qualified task carrying evidence; block only when workflow.kvx opts in."
+do_3       = "Surface drift in brief and fleet tree."
+reqs       = ["4.2", "4.4", "4.5"]
+
+[task.5.2]
+title      = "Extension on cg serve: one connection, incremental views, no polling"
+status     = "pending"
+wave       = 5
+requires   = ["2.1"]
+symbols    = ["ServeClient", "applyEvent"]
+touches    = ["editors/vscode/client.js", "editors/vscode/extension.js", "editors/vscode/refresh.js", "editors/vscode/tasks.js", "editors/vscode/memories.js", "editors/vscode/fleet.js", "editors/vscode/agents.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh serve"
+do_1       = "ServeClient speaks JSON-RPC to one cg serve child with reconnect and version detection; fall back to execFile for old binaries."
+do_2       = "Task, memory, and fleet models apply events incrementally; remove the poll timers when connected."
+do_3       = "Headless test: event to view model update under 300 ms."
+reqs       = ["6.1"]
+
+[task.6]
+title   = "Editor surfaces"
+section = "Start, watch, steer, approve"
+status  = "pending"
+
+[task.6.1]
+title      = "Start fleet flow and the live fleet view"
+status     = "pending"
+wave       = 6
+requires   = ["5.2", "4.1", "4.2"]
+symbols    = ["FleetStartFlow", "FleetLiveView"]
+touches    = ["editors/vscode/fleet.js", "editors/vscode/extension.js", "editors/vscode/kvx.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh start"
+do_1       = "CodeLens and view-title Start on a feature: plan preview with roles, agents, branches, parallel groups, collisions, budgets; confirm runs cg fleet up."
+do_2       = "Live tree with state, step, last output, tokens and cost, stall and retry badges; Stop, Pause, Resume; click opens the agent's transcript."
+reqs       = ["6.2", "6.3"]
+
+[task.6.2]
+title      = "Capability-complete chat: generated tools, attach, steer, approvals"
+status     = "pending"
+wave       = 6
+requires   = ["5.2", "2.2", "3.1"]
+symbols    = ["ChatCapabilities", "attachAgent", "approvalCard"]
+touches    = ["editors/vscode/agentpanel.html", "editors/vscode/agents.js", "editors/vscode/acp.js", "editors/vscode/extension.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh", "tests/integration/19_acp.sh"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh chat && CG=$PWD/cg tests/integration/19_acp.sh"
+do_1       = "Slash commands generated from the served tool list with argument hints; results render as cards."
+do_2       = "Attach to any fleet agent's live transcript and steer it through driver_steer; approvals and escalations render as actionable cards."
+do_3       = "Windowed rendering for transcripts and event lists; headless test at ten thousand entries."
+reqs       = ["6.4", "6.5"]
+
+[task.7]
+title   = "Qualification"
+section = "Fleet scale, under failure"
+status  = "pending"
+
+[task.7.1]
+title      = "Fleet end-to-end fixture and supervisor restart soak"
+status     = "pending"
+wave       = 7
+requires   = ["5.1", "4.2", "4.1"]
+symbols    = ["supervisor_tick", "drift_interface_check"]
+touches    = ["tests/integration/35_fleet_e2e.sh", "tests/fixtures/fleet/*", "src/orchestrate.c", "src/fleet.c"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/35_fleet_e2e.sh"
+do_1       = "Two features, a failing task, a stalling worker, a merge conflict, and an interface change through a scripted fake driver and fake gh; assert the recorded events and final merged state."
+do_2       = "Kill the supervisor mid-run, restart with --resume, and assert the same end state."
+reqs       = ["7.1", "7.2"]
+
+[task.7.2]
+title      = "Qualify v11 end to end"
+status     = "pending"
+wave       = 8
+requires   = ["7.1", "6.1", "6.2"]
+symbols    = ["cmd_serve", "cmd_fleet_up", "task_packet_build", "drift_spec_check", "events_emit"]
+touches    = ["README.md", "docs/*", "CHANGELOG.md", "tests/*", "src/*", "editors/vscode/*", "spec/codify-v11/*", "spec/workflow.kvx"]
+verify_cmd = "make test && $PWD/cg spec render --check && $PWD/cg spec lint && $PWD/cg check"
+do_1       = "Run the whole suite, spec render check, lint, and check in a clean tree."
+do_2       = "Document the supervisor, roles, supervision, context packets, drift, serve, and the editor, with limitations."
+reqs       = ["7.3"]

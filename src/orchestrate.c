@@ -325,6 +325,29 @@ static void orch_abandon(const char *specroot, const char *feature,
     free(st);
 }
 
+/* exit_code < -900 means "not an exit" (a spawn); NULL strings are omitted */
+static void orch_event(const char *kind, const char *role, const char *agent,
+                       const char *feature, const char *task, long pid,
+                       int exit_code, const char *outcome, const char *branch,
+                       const char *log) {
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"role\":");
+    sb_json_str(&p, role ? role : "");
+#define OE(k, v) do { if (v) { sb_puts(&p, ",\"" k "\":"); \
+        sb_json_str(&p, v); } } while (0)
+    OE("agent", agent); OE("feature", feature); OE("task", task);
+    OE("outcome", outcome); OE("branch", branch); OE("log", log);
+#undef OE
+    if (pid > 0) sb_printf(&p, ",\"pid\":%ld", pid);
+    if (exit_code > -900) sb_printf(&p, ",\"exit\":%d", exit_code);
+    sb_putc(&p, '}');
+    char subj[600];
+    if (task && feature) snprintf(subj, sizeof subj, "%s/%s", feature, task);
+    else snprintf(subj, sizeof subj, "%s", feature ? feature : "");
+    events_emit_quiet(kind, subj[0] ? subj : NULL, p.p);
+    sb_free(&p);
+}
+
 static void orch_note_failure(const char *feature, const char *id, int rc) {
     Cg g;
     if (!memory_open_quiet(&g)) return;
@@ -714,6 +737,9 @@ int cmd_spec_run(int argc, char **argv) {
             printf("[run] task %s exit %d → status %s\n", slots[i].id, crc,
                    okdone ? tstat : "INCOMPLETE");
             fflush(stdout);
+            orch_event("orch.exit", "flat", slots[i].agent, slots[i].feature,
+                       slots[i].id, slots[i].pid, crc,
+                       okdone ? tstat : "incomplete", NULL, NULL);
             if (!okdone) {
                 orch_abandon(specroot, slots[i].feature, slots[i].id,
                              slots[i].agent, slots[i].attempt,
@@ -869,6 +895,8 @@ int cmd_spec_run(int argc, char **argv) {
                    ".codegraph/agents/%s-%s.log)\n", id, cfg.driver, agent,
                    tfeat, id);
             fflush(stdout);
+            orch_event("orch.spawn", "flat", agent, tfeat, id, pid, -999,
+                       NULL, NULL, logpath);
             free(id);
             free(feat);
             free(attempt);
@@ -1944,6 +1972,9 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                    slots[i].n.agent, slots[i].n.task, crc,
                    ok ? ts : "INCOMPLETE");
             fflush(stdout);
+            orch_event("orch.exit", "worker", slots[i].n.agent, feature,
+                       slots[i].n.task, slots[i].n.pid, crc,
+                       ok ? ts : "incomplete", slots[i].n.branch, NULL);
             if (!ok) {
                 orch_abandon(g.shared, feature, slots[i].n.task,
                              slots[i].n.agent, slots[i].n.attempt,
@@ -1979,6 +2010,9 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                 kill(slots[i].n.pid, SIGTERM);
             orch_reap(slots[i].n.pid);
             slots[i].live = false;
+            orch_event("orch.exit", "worker", slots[i].n.agent, feature,
+                       slots[i].n.task, slots[i].n.pid, -1,
+                       "lost_ownership", slots[i].n.branch, NULL);
             orch_note_failure(feature, slots[i].n.task, -2);
             failures++;
         }
@@ -1992,6 +2026,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                                         : 128 + WTERMSIG(st);
                 printf("[fleet] manager %s exit %d\n", mgr.agent, crc);
                 fflush(stdout);
+                orch_event("orch.exit", "feature", mgr.agent, feature, NULL,
+                           mgr.pid, crc, NULL, mgr.branch, NULL);
             }
         }
 
@@ -2004,12 +2040,16 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
             printf("[fleet] %s complete — %d/%d task(s) qualified, %s merged "
                    "into %s, %d failure(s)\n", feature, sub.done, sub.total,
                    fbranch, mainbr, failures);
+            orch_event("orch.complete", "feature", NULL, feature, NULL, 0,
+                       -999, "merged", fbranch, NULL);
             break;
         }
         if (!stopping && failures > maxfail) {
             fprintf(stderr, "cg spec run: %d failure(s) exceed --max-fail %d "
                     "— waiting for the fleet, then stopping\n", failures,
                     maxfail);
+            orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
+                       "max_fail", fbranch, NULL);
             stopping = true;
             rc = 1;
         }
@@ -2030,6 +2070,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                         "qualified, %ld commit(s) still on %s\n", feature,
                         sub.done, sub.total, sub.ahead < 0 ? 0 : sub.ahead,
                         fbranch);
+                orch_event("orch.stop", "feature", NULL, feature, NULL, 0,
+                           -999, "no_wakes_left", fbranch, NULL);
                 rc = 1;
                 break;
             }
@@ -2048,6 +2090,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                    ".codegraph/agents/%s-manager.log\n", mgr.agent,
                    mgr.branch, wakes, feature);
             fflush(stdout);
+            orch_event("orch.spawn", "feature", mgr.agent, feature, NULL,
+                       mgr.pid, -999, NULL, mgr.branch, NULL);
         }
 
         /* Refill worker slots from the frontier — never while the manager
@@ -2078,6 +2122,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                        ".codegraph/agents/%s-%s.log\n", wn.agent, id,
                        wn.wave, wn.branch, feature, id);
                 fflush(stdout);
+                orch_event("orch.spawn", "worker", wn.agent, feature, id,
+                           wn.pid, -999, NULL, wn.branch, NULL);
             }
             char probe[64];
             frontier_empty = !orch_next_task(v, n, tried, ntried, slots,

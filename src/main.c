@@ -47,6 +47,10 @@ static void usage(void) {
 "  state                    Git, snapshot, spec, live ownership, staleness\n"
 "  event ingest|history|progress\n"
 "                           normalized lifecycle evidence (stdin for ingest)\n"
+"  events [--since N] [--kind K,..] [-n N] [--follow [--for S]] [--head]\n"
+"                           the event log: every task, claim, attempt, agent,\n"
+"                           fleet, and orchestrator change by sequence\n"
+"                           number; --json is one object per line\n"
 "  work open|update|close   compact task packet, revision deltas, evidence\n"
 "  diff [A] [B]             HEAD vs worktree | A vs worktree | A vs B\n"
 "  checkout <id> [--force]  restore a snapshot\n"
@@ -262,6 +266,7 @@ static void index_fresh(Cg *cg, const SysInfo *si) {
 
 int main(int argc, char **argv) {
     if (argc < 2) { usage(); return 1; }
+    kvx_status_hook = events_kvx_status;
     const char *cmd = argv[1];
     bool json = flag(&argc, argv, "--json");
     bool no_soft = flag(&argc, argv, "--no-soft");
@@ -540,6 +545,8 @@ int main(int argc, char **argv) {
         rc = cmd_state(&cg, json);
     } else if (strcmp(cmd, "event") == 0) {
         rc = cmd_event(&cg, argc - 2, argv + 2, json);
+    } else if (strcmp(cmd, "events") == 0) {
+        rc = cmd_events(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "work") == 0) {
         rc = cmd_work(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "diff") == 0) {

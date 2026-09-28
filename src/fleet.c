@@ -894,6 +894,25 @@ static void free_list(char **v, int n) {
     free(v);
 }
 
+/* payload is a StrBuf holding the object's members without braces */
+static void fleet_event(Cg *cg, const char *kind, const char *subject,
+                        StrBuf *members) {
+    StrBuf p; sb_init(&p);
+    sb_printf(&p, "{%s}", members->p ? members->p : "");
+    events_emit(cg, kind, subject, p.p);
+    sb_free(&p);
+    sb_free(members);
+}
+
+static void ev_str(StrBuf *b, const char *key, const char *v) {
+    sb_printf(b, "%s\"%s\":", b->len ? "," : "", key);
+    if (v) sb_json_str(b, v); else sb_puts(b, "null");
+}
+
+static void ev_long(StrBuf *b, const char *key, long v) {
+    sb_printf(b, "%s\"%s\":%ld", b->len ? "," : "", key, v);
+}
+
 /* cg fleet begin <id>: the worker's branch and worktree, then its claim.
  * Idempotent — a second begin reuses both and renews the claim, so a
  * manager can hand the same task to a replacement worker. */
@@ -1017,8 +1036,44 @@ int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
     }
     fputs(b.p, stdout);
     sb_free(&b);
+    {
+        StrBuf e; sb_init(&e);
+        char subj[600];
+        snprintf(subj, sizeof subj, "%s/%s", c.feature, id);
+        ev_str(&e, "task", id); ev_str(&e, "feature", c.feature);
+        ev_long(&e, "wave", wave); ev_str(&e, "agent", agent);
+        ev_str(&e, "parent", parent); ev_str(&e, "branch", branch);
+        ev_str(&e, "base", base); ev_str(&e, "worktree", path);
+        ev_str(&e, "attempt", at.attempt_id); ev_long(&e, "fence", at.fence);
+        fleet_event(cg, "fleet.begin", subj, &e);
+    }
     lifecycle_close(&c);
     return 0;
+}
+
+static void ev_list(StrBuf *b, const char *key, char **v, int n) {
+    sb_printf(b, "%s\"%s\":[", b->len ? "," : "", key);
+    for (int i = 0; i < n; i++) {
+        if (i) sb_putc(b, ',');
+        sb_json_str(b, v[i]);
+    }
+    sb_putc(b, ']');
+}
+
+static void merge_event(Cg *cg, const Lifecycle *c, const char *id,
+                        const char *outcome, const char *branch,
+                        const char *base, const char *head, long commits,
+                        char **conflicts, int nconf, int promoted) {
+    StrBuf e; sb_init(&e);
+    char subj[600];
+    snprintf(subj, sizeof subj, "%s/%s", c->feature, id);
+    ev_str(&e, "task", id); ev_str(&e, "feature", c->feature);
+    ev_str(&e, "outcome", outcome); ev_str(&e, "branch", branch);
+    ev_str(&e, "base", base); ev_str(&e, "head", head && head[0] ? head : NULL);
+    ev_long(&e, "commits", commits);
+    ev_list(&e, "conflicts", conflicts, nconf);
+    ev_long(&e, "memories_promoted", promoted);
+    fleet_event(cg, "fleet.merge", subj, &e);
 }
 
 /* cg fleet merge-up <id>: the wave branch into the feature branch, in the
@@ -1114,6 +1169,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
                       branch);
         fputs(b.p, stdout);
         sb_free(&b);
+        merge_event(cg, &c, id, "nothing", branch, base, head, 0, NULL, 0, 0);
         lifecycle_close(&c);
         return 0;
     }
@@ -1162,6 +1218,8 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
         }
         fputs(b.p, stdout);
         sb_free(&b); sb_free(&out);
+        merge_event(cg, &c, id, "conflict", branch, base, head, n, paths, np,
+                    0);
         free_list(paths, np);
         lifecycle_close(&c);
         return 1;
@@ -1190,6 +1248,8 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     }
     fputs(b.p, stdout);
     sb_free(&b);
+    merge_event(cg, &c, id, "merged", branch, base, head, n, NULL, 0,
+                promoted);
     lifecycle_close(&c);
     return 0;
 }
@@ -1225,6 +1285,31 @@ static int run_gate(const char *tree, const char *cmd, const char *logpath,
 
 static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                         bool json);
+
+static void pr_event(Cg *cg, const Lifecycle *c, const char *outcome,
+                     const char *branch, const char *url, long number,
+                     const char *error) {
+    StrBuf e; sb_init(&e);
+    ev_str(&e, "feature", c->feature); ev_str(&e, "outcome", outcome);
+    ev_str(&e, "branch", branch); ev_str(&e, "base", c->h.main_branch);
+    ev_str(&e, "url", url && url[0] ? url : NULL);
+    if (number > 0) ev_long(&e, "number", number);
+    ev_str(&e, "error", error);
+    fleet_event(cg, "fleet.pr", c->feature, &e);
+}
+
+static void land_event(Cg *cg, const Lifecycle *c, const char *outcome,
+                       const char *branch, const char *head, long commits,
+                       char **conflicts, int nconf, const char *red_gate) {
+    StrBuf e; sb_init(&e);
+    ev_str(&e, "feature", c->feature); ev_str(&e, "outcome", outcome);
+    ev_str(&e, "branch", branch); ev_str(&e, "main", c->h.main_branch);
+    ev_str(&e, "head", head && head[0] ? head : NULL);
+    ev_long(&e, "commits", commits);
+    ev_list(&e, "conflicts", conflicts, nconf);
+    ev_str(&e, "failed_gate", red_gate);
+    fleet_event(cg, "fleet.land", c->feature, &e);
+}
 
 /* cg fleet land <feature>: the feature branch into local main, behind the
  * test and lint gates. Red means main is reset to where it was — landing is
@@ -1273,6 +1358,7 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
                       c.h.main_branch, branch);
         fputs(b.p, stdout);
         sb_free(&b);
+        land_event(cg, &c, "nothing", branch, pre, 0, NULL, 0, NULL);
         lifecycle_close(&c);
         return 0;
     }
@@ -1312,6 +1398,7 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
         }
         fputs(b.p, stdout);
         sb_free(&b); sb_free(&out);
+        land_event(cg, &c, "conflict", branch, pre, n, paths, np, NULL);
         free_list(paths, np);
         lifecycle_close(&c);
         return 1;
@@ -1336,6 +1423,13 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
         gate_ran[g] = true;
         gate_rc[g] = run_gate(c.tree, cmds[g], logs[g], &gate_ms[g]);
         if (gate_rc[g] != 0) red = g;
+        StrBuf e; sb_init(&e);
+        ev_str(&e, "feature", c.feature); ev_str(&e, "gate", names[g]);
+        ev_str(&e, "cmd", cmds[g]);
+        sb_printf(&e, ",\"ok\":%s", gate_rc[g] == 0 ? "true" : "false");
+        ev_long(&e, "exit", gate_rc[g]); ev_long(&e, "ms", gate_ms[g]);
+        ev_str(&e, "log", logs[g]);
+        fleet_event(cg, "fleet.gate", c.feature, &e);
     }
     char head[65];
     if (red >= 0) {
@@ -1389,6 +1483,8 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
     fputs(b.p, stdout);
     fflush(stdout);
     sb_free(&b);
+    land_event(cg, &c, red >= 0 ? "refused" : "landed", branch,
+               red >= 0 ? pre : head, n, NULL, 0, red >= 0 ? names[red] : NULL);
     if (red >= 0) { lifecycle_close(&c); return 1; }
 
     /* the pull request: opened on green when the policy is auto, printed
@@ -1575,6 +1671,7 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
             } else
                 sb_printf(&b, "already open: #%ld %s (%s → %s)\n", num,
                           url ? url : "", branch, c->h.main_branch);
+            pr_event(cg, c, "already_open", branch, url, num, NULL);
             free(url);
         } else {
             sb_free(&out); sb_init(&out);
@@ -1586,6 +1683,7 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                 excerpt(&out, ex, sizeof ex);
                 fprintf(stderr, "cg fleet: push of %s to %s failed: %s\n",
                         branch, c->h.remote, ex);
+                pr_event(cg, c, "push_failed", branch, NULL, 0, ex);
                 rc = 1;
                 if (json) {
                     sb_puts(&b, "{\"opened\":false,\"pushed\":false,\"error\":");
@@ -1602,6 +1700,7 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                     char ex[400];
                     excerpt(&out, ex, sizeof ex);
                     fprintf(stderr, "cg fleet: gh pr create failed: %s\n", ex);
+                    pr_event(cg, c, "create_failed", branch, NULL, 0, ex);
                     rc = 1;
                     if (json) {
                         sb_puts(&b, "{\"opened\":false,\"pushed\":true,"
@@ -1630,6 +1729,7 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                     } else
                         sb_printf(&b, "opened %s (%s → %s)\n", url, branch,
                                   c->h.main_branch);
+                    pr_event(cg, c, "opened", branch, url, 0, NULL);
                 }
             }
         }
@@ -1777,6 +1877,20 @@ int fleet_checkpoint(Cg *cg, bool dry_run, bool json) {
         sb_free(&f);
     }
     int remaining = failed >= 0 ? np - failed - 1 : 0;
+    {
+        StrBuf e; sb_init(&e);
+        sb_puts(&e, "\"merged\":[");
+        for (int i = 0, k = 0; i < np && (failed < 0 || i < failed); i++)
+            sb_printf(&e, "%s%ld", k++ ? "," : "", prs[i].number);
+        sb_putc(&e, ']');
+        if (failed >= 0) {
+            ev_long(&e, "failed", prs[failed].number);
+            ev_str(&e, "error", failmsg);
+        }
+        ev_long(&e, "skipped", ns); ev_long(&e, "remaining", remaining);
+        sb_printf(&e, ",\"local_main_updated\":%s", updated ? "true" : "false");
+        fleet_event(cg, "fleet.checkpoint", c.h.main_branch, &e);
+    }
     if (json) {
         sb_puts(&b, "{\"merged\":[");
         for (int i = 0; i < np && (failed < 0 || i <= failed); i++) {

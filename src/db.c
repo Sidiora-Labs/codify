@@ -109,6 +109,14 @@ static const char *SCHEMA =
     "ON runtime_events(attempt_id,created);"
     "CREATE INDEX IF NOT EXISTS idx_event_session "
     "ON runtime_events(session,created);"
+    /* the event log (events.c): every state change by sequence number, for
+     * followers that must not poll. Durable, never dropped by an upgrade;
+     * added without a version bump because nothing derived depends on it. */
+    "CREATE TABLE IF NOT EXISTS events("
+    "  seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL,"
+    "  kind TEXT NOT NULL, subject TEXT, run TEXT, node TEXT, branch TEXT,"
+    "  payload TEXT);"
+    "CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind,seq);"
     /* content hashes cached by nanosecond file metadata make lifecycle
      * revisions exact without re-reading every file on every heartbeat */
     "CREATE TABLE IF NOT EXISTS runtime_files("
@@ -337,6 +345,7 @@ int cg_open(Cg *cg, bool create) {
         return -1;
     }
     if (cg_schema_upgrade(cg) != 0) return -1;
+    events_install(cg);
     /* a branch never seen before is registered here, so the first cg call
      * from a fresh worktree needs one small write; a busy database leaves
      * branch_id 0 and the indexer retries before it writes rows */
