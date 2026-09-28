@@ -1902,6 +1902,7 @@ static bool orch_task_slots(const OrchTask *t, const OrchFleetSlot *slots,
                             int nslots) {
     for (int s = 0; s < nslots; s++) {
         if (!slots[s].live) continue;
+        if (strcmp(slots[s].n.task, t->id) == 0) return false;   /* already running */
         if (!g_per_task && slots[s].n.wave == t->wave) return false;
         if (orch_collides(t->id, slots[s].n.task)) return false;
     }
@@ -3308,7 +3309,7 @@ static int supervisor_run(Cg *g, char **features, int nfeat,
     sigaction(SIGHUP, &sa, &oldhup);
 
     int rc = 0, active = 0, done_count = 0;
-    bool first = true;
+    bool first = true, run_id_used = false;
     for (;;) {
         /* start what may start: prerequisites done, a feature slot free */
         for (int i = 0; i < nfeat; i++) {
@@ -3317,9 +3318,11 @@ static int supervisor_run(Cg *g, char **features, int nfeat,
             bool resuming = ro && ro->resume && i == 0;
             if (!resuming && !feature_ready(g, features[i], waiting, sizeof waiting))
                 continue;
+            /* the id `cg fleet up` chose names the first run that starts,
+             * which is the one it waits to see recorded */
+            const char *rid = ro && !run_id_used ? ro->run_id : NULL;
             if (sup_open(g, &sups[i], features[i], cfg, extra, nslots, maxfail,
-                         maxrounds, nfeat == 1 && ro ? ro->run_id : NULL,
-                         resuming ? ro->resume : NULL) != 0) {
+                         maxrounds, rid, resuming ? ro->resume : NULL) != 0) {
                 started[i] = finished[i] = true;
                 rc = 1;
                 done_count++;
@@ -3327,6 +3330,7 @@ static int supervisor_run(Cg *g, char **features, int nfeat,
             }
             setenv("CG_RUN", sups[i].run, 1);
             started[i] = true;
+            run_id_used = true;
             active++;
         }
         if (first) {
@@ -3337,6 +3341,10 @@ static int supervisor_run(Cg *g, char **features, int nfeat,
             if (!started[i] || finished[i]) continue;
             g_coll_feature = sups[i].feature;
             setenv("CG_RUN", sups[i].run, 1);   /* children carry their run */
+            /* the in-process spec calls this tick makes (release, heartbeat,
+             * status) are about this feature, whatever the workflow's
+             * active_feature says */
+            setenv("CG_FEATURE", sups[i].feature, 1);
             if (supervisor_tick(&sups[i]) == SUP_DONE) {
                 finished[i] = true;
                 active--;

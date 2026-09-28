@@ -280,11 +280,11 @@ status  = "pending"
 
 [task.7.1]
 title      = "Fleet end-to-end fixture and supervisor restart soak"
-status     = "pending"
+status     = "in_progress"
 wave       = 7
 requires   = ["5.1", "4.2", "4.1"]
 symbols    = ["supervisor_tick", "drift_interface_check"]
-touches    = ["tests/integration/35_fleet_e2e.sh", "tests/fixtures/fleet/*", "src/orchestrate.c", "src/fleet.c"]
+touches    = ["tests/integration/35_fleet_e2e.sh", "tests/fixtures/fleet/*", "src/orchestrate.c", "src/spec.c"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/35_fleet_e2e.sh"
 do_1       = "Two features, a failing task, a stalling worker, a merge conflict, and an interface change through a scripted fake driver and fake gh; assert the recorded events and final merged state."
 do_2       = "Kill the supervisor mid-run, restart with --resume, and assert the same end state."

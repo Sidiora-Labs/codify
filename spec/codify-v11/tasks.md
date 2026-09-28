@@ -94,7 +94,7 @@
 ## Fleet scale, under failure
 
 - [ ] 7. Qualification
-  - [ ] 7.1 Fleet end-to-end fixture and supervisor restart soak
+  - [-] 7.1 Fleet end-to-end fixture and supervisor restart soak
     - Two features, a failing task, a stalling worker, a merge conflict, and an interface change through a scripted fake driver and fake gh; assert the recorded events and final merged state.
     - Kill the supervisor mid-run, restart with --resume, and assert the same end state.
     - _Requirements: 7.1, 7.2_

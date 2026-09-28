@@ -4021,16 +4021,27 @@ char *spec_resolve_task(const char *requested, const char *agent) {
     return out;
 }
 
+/* "feature/id" names its feature; a bare id means the active one. Several
+ * features run at once under one supervisor, so the feature in the tag is
+ * authoritative — never the workflow's active_feature. */
+static int spec_load_tag(Spec *s, const char *requested, const char **id_out) {
+    const char *slash = strchr(requested, '/');
+    char feature[256] = "";
+    if (slash && (size_t)(slash - requested) < sizeof feature)
+        snprintf(feature, sizeof feature, "%.*s", (int)(slash - requested), requested);
+    *id_out = slash ? slash + 1 : requested;
+    return spec_load(s, NULL, feature[0] ? feature : NULL, true);
+}
+
 /* json_task of a resolved "feature/id", for callers outside the engine */
 char *spec_task_packet(const char *requested) {
     if (!requested || !requested[0]) return NULL;
     Spec s;
-    if (spec_load(&s, NULL, NULL, true) != 0) {
+    const char *id;
+    if (spec_load_tag(&s, requested, &id) != 0) {
         spec_close(&s);
         return NULL;
     }
-    const char *id = strchr(requested, '/');
-    id = id ? id + 1 : requested;
     char *out = NULL;
     if (task_exists(&s, id)) {
         StrBuf b; sb_init(&b);
@@ -4046,12 +4057,11 @@ int spec_task_memories_tag(const char *requested, Memory **out) {
     *out = NULL;
     if (!requested || !requested[0]) return 0;
     Spec s;
-    if (spec_load(&s, NULL, NULL, true) != 0) {
+    const char *id;
+    if (spec_load_tag(&s, requested, &id) != 0) {
         spec_close(&s);
         return 0;
     }
-    const char *id = strchr(requested, '/');
-    id = id ? id + 1 : requested;
     int n = task_exists(&s, id) ? spec_task_memories(&s, id, out) : 0;
     spec_close(&s);
     return n;
