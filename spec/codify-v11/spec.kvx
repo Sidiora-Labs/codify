@@ -145,7 +145,7 @@ status  = "pending"
 
 [task.3.1]
 title      = "Durable runs: fleet up, down, pause, resume, reattach"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 requires   = ["1.1", "1.2"]
 symbols    = ["fleet_run_open", "fleet_run_resume", "cmd_fleet_up", "supervisor_tick"]
