@@ -35,7 +35,7 @@
 ## Durable runs, grounded briefings
 
 - [ ] 3. Supervisor and context
-  - [ ] 3.1 Durable runs: fleet up, down, pause, resume, reattach
+  - [-] 3.1 Durable runs: fleet up, down, pause, resume, reattach
     - Add fleet_runs and fleet_nodes; move the fleet loop into supervisor_tick over persisted state; keep cg spec run --fleet as a foreground alias.
     - cg fleet up detaches a supervisor with a pid file; down drains, pause freezes spawning, resume continues; --resume reattaches live children by pid and start time.
     - Approval gates stop at land, pr, retry-exhausted, or drift and wait for cg fleet approve <id>.

@@ -117,6 +117,35 @@ static const char *SCHEMA =
     "  kind TEXT NOT NULL, subject TEXT, run TEXT, node TEXT, branch TEXT,"
     "  payload TEXT);"
     "CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind,seq);"
+    /* durable fleet runs (orchestrate.c): a supervisor's whole state, so a
+     * restarted supervisor continues the run instead of starting over.
+     * state is also the control channel — cg fleet pause/down write it and
+     * the supervisor reads it every tick. Durable, never dropped. */
+    "CREATE TABLE IF NOT EXISTS fleet_runs("
+    "  run TEXT PRIMARY KEY, feature TEXT NOT NULL, state TEXT NOT NULL,"
+    "  pid INTEGER, pid_start INTEGER, host TEXT, driver TEXT, slots INTEGER,"
+    "  max_fail INTEGER, wakes_left INTEGER,"
+    "  failures INTEGER NOT NULL DEFAULT 0,"
+    "  first_turn INTEGER NOT NULL DEFAULT 1,"
+    "  last_wake INTEGER NOT NULL DEFAULT 0, rc INTEGER, reason TEXT,"
+    "  log TEXT, started INTEGER NOT NULL, updated INTEGER NOT NULL);"
+    /* one row per process the supervisor spawned; state live|exited|killed.
+     * pid_start is the kernel's start time, so a reused pid is never
+     * mistaken for the agent it replaced. */
+    "CREATE TABLE IF NOT EXISTS fleet_nodes("
+    "  id INTEGER PRIMARY KEY, run TEXT NOT NULL, role TEXT NOT NULL,"
+    "  agent TEXT NOT NULL, parent TEXT, feature TEXT, task TEXT,"
+    "  wave INTEGER, branch TEXT, base TEXT, worktree TEXT, pid INTEGER,"
+    "  pid_start INTEGER, attempt TEXT, fence INTEGER, state TEXT NOT NULL,"
+    "  exit INTEGER, outcome TEXT, log TEXT, started INTEGER NOT NULL,"
+    "  ended INTEGER);"
+    "CREATE INDEX IF NOT EXISTS idx_fleet_nodes_run ON fleet_nodes(run,state);"
+    /* opt-in approval gates ([role.*] approve): pending until a person
+     * decides; an agent's land or pr waits on it */
+    "CREATE TABLE IF NOT EXISTS fleet_approvals("
+    "  id INTEGER PRIMARY KEY, run TEXT, gate TEXT NOT NULL,"
+    "  subject TEXT NOT NULL, state TEXT NOT NULL, requested INTEGER NOT NULL,"
+    "  requested_by TEXT, decided INTEGER, decided_by TEXT, note TEXT);"
     /* content hashes cached by nanosecond file metadata make lifecycle
      * revisions exact without re-reading every file on every heartbeat */
     "CREATE TABLE IF NOT EXISTS runtime_files("

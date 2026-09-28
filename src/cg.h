@@ -620,6 +620,23 @@ int work_close(Cg *cg, const char *task, int nevidence, char **evidence,
 /* `cg spec run` — claim conflict-free tasks and drive one agent per slot;
  * argv is everything after `run` */
 int cmd_spec_run(int argc, char **argv);
+/* Durable fleet runs. cg fleet up [--foreground] [--resume [RUN]] and the
+ * rest of `cg spec run --fleet`'s flags: detached, it re-executes cg as a
+ * supervisor in its own session and returns once the run is recorded.
+ * down/pause/resume write the run's state, which the supervisor reads
+ * every tick; with no supervisor alive, down cleans up itself. */
+int  cmd_fleet_up(Cg *cg, int argc, char **argv, bool json);
+int  cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,
+                       bool json);
+int  cmd_fleet_runs(Cg *cg, bool json);
+bool fleet_supervisor_alive(const char *shared);
+/* An opt-in approval gate ([role.*] approve). 0: go ahead; CG_EXIT_APPROVAL:
+ * a pending approval now waits (printed); 1: a person rejected it. Only
+ * agents wait — a command run by a person, with no CG_ROLE, is its own
+ * approval. */
+#define CG_EXIT_APPROVAL 4
+int  fleet_gate(Cg *cg, const char *gate, const char *subject);
+int  cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json);
 
 /* ---------------- agent drivers (drivers.c) ---------------- */
 typedef struct {

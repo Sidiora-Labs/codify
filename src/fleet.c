@@ -424,6 +424,203 @@ void fleet_brief(Cg *cg, StrBuf *b, bool json) {
     kvx_free(wf);
 }
 
+/* ---------------- approval gates ---------------- */
+
+static unsigned gate_bit(const char *gate) {
+    for (size_t k = 0; k < sizeof APPROVALS / sizeof *APPROVALS; k++)
+        if (strcmp(gate, APPROVALS[k].name) == 0) return APPROVALS[k].bit;
+    return 0;
+}
+
+static void approval_event(Cg *cg, const char *kind, long id, const char *gate,
+                           const char *subject, const char *state,
+                           const char *by, const char *note) {
+    StrBuf p; sb_init(&p);
+    sb_printf(&p, "{\"id\":%ld,\"gate\":", id);
+    sb_json_str(&p, gate);
+    sb_puts(&p, ",\"subject\":"); sb_json_str(&p, subject);
+    sb_puts(&p, ",\"state\":"); sb_json_str(&p, state);
+    sb_puts(&p, ",\"by\":");
+    if (by) sb_json_str(&p, by); else sb_puts(&p, "null");
+    sb_puts(&p, ",\"note\":");
+    if (note) sb_json_str(&p, note); else sb_puts(&p, "null");
+    sb_putc(&p, '}');
+    char subj[400];
+    snprintf(subj, sizeof subj, "%s:%s", gate, subject);
+    events_emit(cg, kind, subj, p.p);
+    sb_free(&p);
+}
+
+/* One approval covers one attempt: an approved gate is consumed by the
+ * land or pr it let through, so a land retried after red gates asks again
+ * rather than riding an approval given for different code. */
+int fleet_gate(Cg *cg, const char *gate, const char *subject) {
+    const char *role = getenv("CG_ROLE");
+    if (!role || !role[0]) return 0;
+    unsigned bit = gate_bit(gate);
+    char path[4700];
+    Kvx *wf = fleet_workflow(cg, path, sizeof path);
+    Hierarchy h;
+    hier_load(wf, &h);
+    unsigned want = 0;
+    for (int r = 0; r < FLEET_ROLES; r++) want |= h.roles[r].caps.approve;
+    hier_free(&h);
+    kvx_free(wf);
+    if (!bit || !(want & bit)) return 0;
+
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT id,state,ifnull(decided_by,''),ifnull(note,'') FROM "
+        "fleet_approvals WHERE gate=? AND subject=? AND state IN "
+        "('pending','approved','rejected') ORDER BY id DESC LIMIT 1");
+    sqlite3_bind_text(st, 1, gate, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, subject, -1, SQLITE_TRANSIENT);
+    long id = 0;
+    char state[16] = "", by[128] = "", note[512] = "";
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        id = sqlite3_column_int64(st, 0);
+        snprintf(state, sizeof state, "%s", (const char *)sqlite3_column_text(st, 1));
+        snprintf(by, sizeof by, "%s", (const char *)sqlite3_column_text(st, 2));
+        snprintf(note, sizeof note, "%s", (const char *)sqlite3_column_text(st, 3));
+    }
+    sqlite3_finalize(st);
+    if (!strcmp(state, "approved")) {
+        sqlite3_stmt *u = cg_prep(cg, "UPDATE fleet_approvals SET state='used' "
+                                      "WHERE id=?");
+        sqlite3_bind_int64(u, 1, id);
+        sqlite3_step(u);
+        sqlite3_finalize(u);
+        fprintf(stderr, "cg fleet: %s of %s approved%s%s (#%ld)\n", gate,
+                subject, by[0] ? " by " : "", by, id);
+        return 0;
+    }
+    if (!strcmp(state, "rejected")) {
+        fprintf(stderr, "cg fleet: %s of %s was rejected%s%s (#%ld)%s%s — stop "
+                "and report to your parent\n", gate, subject, by[0] ? " by " : "",
+                by, id, note[0] ? ": " : "", note);
+        return 1;
+    }
+    if (!id) {
+        const char *agent = getenv("CG_AGENT");
+        sqlite3_stmt *ins = cg_prep(cg,
+            "INSERT INTO fleet_approvals(run,gate,subject,state,requested,"
+            "requested_by) VALUES(?,?,?,'pending',?,?)");
+        const char *run = getenv("CG_RUN");
+        if (run && run[0]) sqlite3_bind_text(ins, 1, run, -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(ins, 1);
+        sqlite3_bind_text(ins, 2, gate, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(ins, 3, subject, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(ins, 4, (long)time(NULL));
+        if (agent) sqlite3_bind_text(ins, 5, agent, -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(ins, 5);
+        sqlite3_step(ins);
+        sqlite3_finalize(ins);
+        id = (long)sqlite3_last_insert_rowid(cg->db);
+        approval_event(cg, "approval.request", id, gate, subject, "pending",
+                       agent, NULL);
+    }
+    fprintf(stderr, "cg fleet: %s of %s waits for approval #%ld — a person runs "
+            "`cg fleet approve %ld` (or --reject); exit now and it is retried "
+            "on your next wake\n", gate, subject, id, id);
+    return CG_EXIT_APPROVAL;
+}
+
+int cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json) {
+    const char *sub = argc >= 3 ? argv[2] : "approvals";
+    if (strcmp(sub, "approve") == 0) {
+        long id = argc >= 4 ? atol(argv[3]) : 0;
+        bool reject = false;
+        const char *note = NULL;
+        for (int i = 4; i < argc; i++) {
+            if (strcmp(argv[i], "--reject") == 0) reject = true;
+            else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc) note = argv[++i];
+        }
+        if (id <= 0) {
+            fprintf(stderr, "usage: cg fleet approve <id> [--reject] [-m note]\n");
+            return 1;
+        }
+        sqlite3_stmt *q = cg_prep(cg, "SELECT gate,subject,state FROM "
+                                      "fleet_approvals WHERE id=?");
+        sqlite3_bind_int64(q, 1, id);
+        char gate[32] = "", subject[300] = "", state[16] = "";
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            snprintf(gate, sizeof gate, "%s", (const char *)sqlite3_column_text(q, 0));
+            snprintf(subject, sizeof subject, "%s", (const char *)sqlite3_column_text(q, 1));
+            snprintf(state, sizeof state, "%s", (const char *)sqlite3_column_text(q, 2));
+        }
+        sqlite3_finalize(q);
+        if (!gate[0]) {
+            fprintf(stderr, "cg fleet: no approval #%ld\n", id);
+            return 1;
+        }
+        if (!strcmp(state, "used")) {
+            fprintf(stderr, "cg fleet: approval #%ld was already used\n", id);
+            return 1;
+        }
+        const char *by = getenv("CG_AGENT");
+        if (!by || !by[0]) by = getenv("USER");
+        const char *to = reject ? "rejected" : "approved";
+        sqlite3_stmt *u = cg_prep(cg,
+            "UPDATE fleet_approvals SET state=?,decided=?,decided_by=?,note=? "
+            "WHERE id=?");
+        sqlite3_bind_text(u, 1, to, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(u, 2, (long)time(NULL));
+        if (by) sqlite3_bind_text(u, 3, by, -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(u, 3);
+        if (note) sqlite3_bind_text(u, 4, note, -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(u, 4);
+        sqlite3_bind_int64(u, 5, id);
+        sqlite3_step(u);
+        sqlite3_finalize(u);
+        approval_event(cg, "approval.decided", id, gate, subject, to, by, note);
+        if (json) printf("{\"id\":%ld,\"state\":\"%s\"}\n", id, to);
+        else printf("%s #%ld — %s of %s\n", to, id, gate, subject);
+        return 0;
+    }
+    bool all = false;
+    for (int i = 3; i < argc; i++) if (strcmp(argv[i], "--all") == 0) all = true;
+    sqlite3_stmt *st = cg_prep(cg, all
+        ? "SELECT id,gate,subject,state,ifnull(requested_by,''),requested,"
+          "ifnull(decided_by,''),ifnull(note,''),ifnull(run,'') FROM "
+          "fleet_approvals ORDER BY id DESC LIMIT 50"
+        : "SELECT id,gate,subject,state,ifnull(requested_by,''),requested,"
+          "ifnull(decided_by,''),ifnull(note,''),ifnull(run,'') FROM "
+          "fleet_approvals WHERE state='pending' ORDER BY id");
+    StrBuf b; sb_init(&b);
+    if (json) sb_puts(&b, "{\"approvals\":[");
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+#define C(i) ((const char *)sqlite3_column_text(st, i))
+        if (json) {
+            if (n) sb_putc(&b, ',');
+            sb_printf(&b, "{\"id\":%lld,\"gate\":", (long long)sqlite3_column_int64(st, 0));
+            sb_json_str(&b, C(1));
+            sb_puts(&b, ",\"subject\":"); sb_json_str(&b, C(2));
+            sb_puts(&b, ",\"state\":"); sb_json_str(&b, C(3));
+            sb_puts(&b, ",\"requested_by\":"); sb_json_str(&b, C(4));
+            sb_printf(&b, ",\"requested\":%lld,\"decided_by\":",
+                      (long long)sqlite3_column_int64(st, 5));
+            sb_json_str(&b, C(6));
+            sb_puts(&b, ",\"note\":"); sb_json_str(&b, C(7));
+            sb_puts(&b, ",\"run\":"); sb_json_str(&b, C(8));
+            sb_putc(&b, '}');
+        } else {
+            sb_printf(&b, "#%-4lld %-6s %-24s %-9s requested by %s%s%s\n",
+                      (long long)sqlite3_column_int64(st, 0), C(1), C(2), C(3),
+                      C(4)[0] ? C(4) : "?", C(6)[0] ? ", decided by " : "",
+                      C(6));
+        }
+#undef C
+        n++;
+    }
+    sqlite3_finalize(st);
+    if (json) sb_puts(&b, "]}\n");
+    else if (!n) sb_puts(&b, all ? "no approvals recorded\n"
+                                 : "nothing waits for approval\n");
+    fputs(b.p, stdout);
+    sb_free(&b);
+    return 0;
+}
+
 /* ---------------- cg fleet roles ---------------- */
 
 /* 7200 -> "2h", 90 -> "90s", 0 -> "—" */
@@ -1547,6 +1744,8 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
         lifecycle_close(&c);
         return 1;
     }
+    int gate = fleet_gate(cg, "land", c.feature);
+    if (gate) { lifecycle_close(&c); return gate; }
     char on[256], pre[65];
     if (!git_head(c.tree, on, sizeof on, pre, sizeof pre) ||
         strcmp(on, c.h.main_branch) != 0) {
@@ -1719,7 +1918,7 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
         rc2 = pr_open_core(cg, &c, strcmp(c.h.pr, "auto") != 0, NULL, false);
     }
     lifecycle_close(&c);
-    return rc2 == 0 ? 0 : 1;
+    return rc2 == 0 ? 0 : rc2 == CG_EXIT_APPROVAL ? CG_EXIT_APPROVAL : 1;
 }
 
 /* gh, when the operator has it: CG_GH names it outright, else PATH */
@@ -1828,6 +2027,14 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
  * jb receives one JSON object (when json), else text goes to stdout. */
 static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                         bool json) {
+    if (!dry_run) {
+        int gate = fleet_gate(cg, "pr", c->feature);
+        if (gate) {
+            if (json) sb_printf(jb, "{\"opened\":false,\"waiting\":%s}",
+                                gate == CG_EXIT_APPROVAL ? "\"approval\"" : "\"rejected\"");
+            return gate;
+        }
+    }
     const FleetRole *rf = &c->h.roles[FLEET_FEATURE];
     char branch[512], title[300], bodypath[4800], gh[4096];
     hier_expand(&c->h, rf->branch, c->feature, -1, branch, sizeof branch);
@@ -2207,6 +2414,13 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     if (strcmp(sub, "pr") == 0)
         return fleet_pr_open(cg, pos ? pos : feature, dry, json);
     if (strcmp(sub, "checkpoint") == 0) return fleet_checkpoint(cg, dry, json);
+    if (strcmp(sub, "up") == 0) return cmd_fleet_up(cg, argc - 3, argv + 3, json);
+    if (strcmp(sub, "down") == 0 || strcmp(sub, "pause") == 0 ||
+        strcmp(sub, "resume") == 0)
+        return cmd_fleet_control(cg, sub, argc - 3, argv + 3, json);
+    if (strcmp(sub, "runs") == 0) return cmd_fleet_runs(cg, json);
+    if (strcmp(sub, "approvals") == 0 || strcmp(sub, "approve") == 0)
+        return cmd_fleet_approvals(cg, argc, argv, json);
     if (strcmp(sub, "steer") == 0) {
         /* cg fleet steer <agent> <message...> */
         const char *agent = argc >= 4 ? argv[3] : NULL;

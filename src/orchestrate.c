@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -490,7 +491,7 @@ typedef struct {
     bool  live;
     char  id[64];
     char  feature[128];
-    char  agent[80];
+    char  agent[128];
     char  attempt[65];
     long  fence;
     long  last_heartbeat;
@@ -543,13 +544,18 @@ static int orch_reap(pid_t pid) {
 
 /* the two-level run, at the end of this file: one feature manager per
  * feature and wave workers under it, each in its own worktree */
+/* --run-id names a new run (cg fleet up picks it before detaching);
+ * --resume continues one: "" for the newest unfinished run */
+typedef struct { const char *run_id; const char *resume; } FleetRunOpts;
 static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                           const char *extra, int nslots, int maxfail,
-                          int maxrounds, bool dry, bool status);
+                          int maxrounds, bool dry, bool status,
+                          const FleetRunOpts *ro);
 
 int cmd_spec_run(int argc, char **argv) {
     int nflag = 0, maxfail = 2, maxrounds = 0;
     const char *driver_ov = NULL, *prefix = "run", *feature_ov = NULL;
+    const char *run_id = NULL, *resume = NULL;
     bool dry = false, fleet = false, tree = false;
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "-n") == 0 && i + 1 < argc)
@@ -570,11 +576,18 @@ int cmd_spec_run(int argc, char **argv) {
             feature_ov = argv[++i];
         else if (strcmp(argv[i], "--max-rounds") == 0 && i + 1 < argc)
             maxrounds = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--run-id") == 0 && i + 1 < argc)
+            run_id = argv[++i];
+        else if (strcmp(argv[i], "--resume") == 0) {
+            /* an optional run id: the next word unless it is a flag */
+            resume = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "";
+            fleet = true;
+        }
         else {
             fprintf(stderr, "usage: cg spec run [-n N] [--driver "
                     "codex|claude|custom] [--dry-run] [--max-fail K] "
                     "[--agent-prefix P] [--fleet [-f <feature>] "
-                    "[--max-rounds R] [--status]]\n");
+                    "[--max-rounds R] [--status] [--resume [RUN]]]\n");
             return 1;
         }
     }
@@ -651,8 +664,10 @@ int cmd_spec_run(int argc, char **argv) {
     /* the fleet run owns its own plan, slots, and shutdown; the flat run
      * below stays exactly what a repository without a hierarchy gets */
     if (fleet || tree) {
+        FleetRunOpts ro = { run_id, resume };
         int rc = orch_fleet_run(feature_ov ? feature_ov : feature, &cfg,
-                                extra, nslots, maxfail, maxrounds, dry, tree);
+                                extra, nslots, maxfail, maxrounds, dry, tree,
+                                &ro);
         orch_cfg_free(&cfg);
         free(feature);
         return rc;
@@ -1769,6 +1784,9 @@ typedef struct {
     bool live;
     long last_heartbeat;
     DriverTap tap;
+    long node;            /* fleet_nodes.id */
+    long pid_start;       /* kernel start time of n.pid; -1 unknown */
+    bool adopted;         /* spawned by an earlier supervisor: not our child */
 } OrchFleetSlot;
 
 static int orch_live_fleet(const OrchFleetSlot *s, int n) {
@@ -1818,15 +1836,784 @@ static int orch_node_heartbeat(const FleetNode *n, long ttl_min) {
     return orch_heartbeat(&s, ttl_min);
 }
 
+/* ---------------- durable runs: the supervisor ---------------- */
+
+/* The kernel's start time for pid (clock ticks since boot), so a pid the
+ * kernel has since handed to another process is not taken for the agent. */
+static long proc_start_time(pid_t pid) {
+#ifdef __linux__
+    char p[64];
+    snprintf(p, sizeof p, "/proc/%d/stat", (int)pid);
+    FILE *f = fopen(p, "r");
+    if (!f) return -1;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    char *rp = strrchr(buf, ')');       /* comm may hold spaces and parens */
+    if (!rp) return -1;
+    int field = 2;
+    char *save = NULL;
+    for (char *t = strtok_r(rp + 1, " ", &save); t; t = strtok_r(NULL, " ", &save)) {
+        if (++field == 3 && t[0] == 'Z') return -2;   /* a zombie is gone */
+        if (field == 22) return atol(t);
+    }
+    return -1;
+#else
+    (void)pid;
+    return -1;
+#endif
+}
+
+static bool proc_alive(pid_t pid, long start) {
+    if (pid <= 0) return false;
+    if (kill(pid, 0) != 0 && errno != EPERM) return false;
+    long now = proc_start_time(pid);
+    if (now == -2) return false;
+    return start <= 0 || now < 0 || now == start;
+}
+
+/* one supervisor per project: held for the supervisor's whole life */
+static int sup_lock_path(const char *shared, char *out, size_t cap) {
+    char dir[4600];
+    snprintf(dir, sizeof dir, "%s/%s/fleet", shared, CG_DIR);
+    mkdirs(dir);
+    return snprintf(out, cap, "%s/supervisor.lock", dir) < (int)cap ? 0 : -1;
+}
+
+static int sup_lock_take(const char *shared) {
+    char p[4700];
+    if (sup_lock_path(shared, p, sizeof p) != 0) return -1;
+    int fd = open(p, O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); return -1; }
+    return fd;
+}
+
+bool fleet_supervisor_alive(const char *shared) {
+    int fd = sup_lock_take(shared);
+    if (fd < 0) return true;
+    flock(fd, LOCK_UN);
+    close(fd);
+    return false;
+}
+
+typedef struct {
+    Cg *g;
+    char run[40], feature[128], fbranch[256], fwt[4600], mainbr[256];
+    const OrchCfg *cfg;
+    const char *extra;
+    int nslots, maxfail, failures, rc, wakes, ntried;
+    OrchFleetSlot *slots;
+    FleetNode mgr;
+    DriverTap mgr_tap;
+    bool mgr_live, mgr_adopted;
+    long mgr_node, mgr_start, last_wake, ttl_min, waiting_on;
+    bool stopping, paused, first_turn, frontier_empty;
+    char *tried[ORCH_MAX_TRIED];
+    char state[16];
+} Sup;
+
+enum { SUP_GO = 0, SUP_DONE = 1 };
+
+static void sup_event(Sup *s, const char *state, const char *reason) {
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"run\":"); sb_json_str(&p, s->run);
+    sb_puts(&p, ",\"feature\":"); sb_json_str(&p, s->feature);
+    sb_puts(&p, ",\"state\":"); sb_json_str(&p, state);
+    sb_puts(&p, ",\"reason\":");
+    if (reason) sb_json_str(&p, reason); else sb_puts(&p, "null");
+    sb_printf(&p, ",\"failures\":%d,\"wakes_left\":%d,\"pid\":%d}",
+              s->failures, s->wakes, (int)getpid());
+    events_emit(s->g, "fleet.run", s->run, p.p);
+    sb_free(&p);
+}
+
+static void sup_save(Sup *s) {
+    sqlite3_stmt *st = cg_prep(s->g,
+        "UPDATE fleet_runs SET wakes_left=?,failures=?,first_turn=?,"
+        "last_wake=?,updated=? WHERE run=?");
+    sqlite3_bind_int(st, 1, s->wakes);
+    sqlite3_bind_int(st, 2, s->failures);
+    sqlite3_bind_int(st, 3, s->first_turn ? 1 : 0);
+    sqlite3_bind_int64(st, 4, s->last_wake);
+    sqlite3_bind_int64(st, 5, (long)time(NULL));
+    sqlite3_bind_text(st, 6, s->run, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+static void sup_set_state(Sup *s, const char *state, const char *reason) {
+    sqlite3_stmt *st = cg_prep(s->g,
+        "UPDATE fleet_runs SET state=?,reason=?,rc=?,updated=? WHERE run=?");
+    sqlite3_bind_text(st, 1, state, -1, SQLITE_TRANSIENT);
+    if (reason) sqlite3_bind_text(st, 2, reason, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(st, 2);
+    sqlite3_bind_int(st, 3, s->rc);
+    sqlite3_bind_int64(st, 4, (long)time(NULL));
+    sqlite3_bind_text(st, 5, s->run, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    snprintf(s->state, sizeof s->state, "%s", state);
+    sup_event(s, state, reason);
+}
+
+/* the state a person asked for: running, paused, draining, or stopping */
+static void sup_control(Sup *s) {
+    sqlite3_stmt *st = cg_prep(s->g, "SELECT state FROM fleet_runs WHERE run=?");
+    sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        const char *v = (const char *)sqlite3_column_text(st, 0);
+        if (v) snprintf(s->state, sizeof s->state, "%s", v);
+    }
+    sqlite3_finalize(st);
+}
+
+static long sup_node_add(Sup *s, const FleetNode *n, const char *log,
+                         long pid_start) {
+    sqlite3_stmt *st = cg_prep(s->g,
+        "INSERT INTO fleet_nodes(run,role,agent,parent,feature,task,wave,"
+        "branch,base,worktree,pid,pid_start,attempt,fence,state,log,started) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'live',?,?)");
+    sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, n->role, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, n->agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, n->parent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, n->feature, -1, SQLITE_TRANSIENT);
+    if (n->task[0]) sqlite3_bind_text(st, 6, n->task, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(st, 6);
+    sqlite3_bind_int64(st, 7, n->wave);
+    sqlite3_bind_text(st, 8, n->branch, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 9, n->base, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 10, n->worktree, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 11, n->pid);
+    sqlite3_bind_int64(st, 12, pid_start);
+    sqlite3_bind_text(st, 13, n->attempt, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 14, n->fence);
+    sqlite3_bind_text(st, 15, log, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 16, (long)time(NULL));
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    return (long)sqlite3_last_insert_rowid(s->g->db);
+}
+
+/* exit < -900: not known (an adopted process, reaped by someone else) */
+static void sup_node_end(Sup *s, long id, const char *state, int exit,
+                         const char *outcome) {
+    if (id <= 0) return;
+    sqlite3_stmt *st = cg_prep(s->g,
+        "UPDATE fleet_nodes SET state=?,exit=?,outcome=?,ended=? WHERE id=?");
+    sqlite3_bind_text(st, 1, state, -1, SQLITE_TRANSIENT);
+    if (exit > -900) sqlite3_bind_int(st, 2, exit); else sqlite3_bind_null(st, 2);
+    if (outcome) sqlite3_bind_text(st, 3, outcome, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(st, 3);
+    sqlite3_bind_int64(st, 4, (long)time(NULL));
+    sqlite3_bind_int64(st, 5, id);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+/* Has the process ended? Our own children are reaped with waitpid; one an
+ * earlier supervisor spawned is not ours to wait for, so its pid and start
+ * time are checked instead — its exit status is then unknown (-999), which
+ * is fine: the branch tip, not the exit code, decides. */
+static bool sup_gone(pid_t pid, long start, bool adopted, int *crc) {
+    if (!adopted) {
+        int st;
+        pid_t r = waitpid(pid, &st, WNOHANG);
+        if (r == 0) return false;
+        *crc = r < 0 ? -999 : WIFEXITED(st) ? WEXITSTATUS(st)
+                                            : 128 + WTERMSIG(st);
+        return true;
+    }
+    if (proc_alive(pid, start)) return false;
+    *crc = -999;
+    return true;
+}
+
+static void sup_kill(pid_t pid, long start, bool adopted) {
+    if (kill(-pid, SIGTERM) != 0) kill(pid, SIGTERM);
+    if (!adopted) { orch_reap(pid); return; }
+    for (int i = 0; i < 30 && proc_alive(pid, start); i++) {
+        struct timespec ts = { 0, 100 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
+    if (proc_alive(pid, start) && kill(-pid, SIGKILL) != 0) kill(pid, SIGKILL);
+}
+
+/* Terminate everything the run has alive, release the workers' claims, and
+ * keep every branch: stopping is a pause of the work, not its deletion. */
+static void sup_terminate(Sup *s) {
+    if (s->mgr_live) {
+        sup_kill(s->mgr.pid, s->mgr_start, s->mgr_adopted);
+        s->mgr_live = false;
+        sup_node_end(s, s->mgr_node, "killed", -999, "stopped");
+    }
+    for (int i = 0; i < s->nslots; i++) {
+        OrchFleetSlot *sl = &s->slots[i];
+        if (!sl->live) continue;
+        sup_kill(sl->n.pid, sl->pid_start, sl->adopted);
+        sl->live = false;
+        driver_tap_poll(&sl->tap);
+        orch_abandon(s->g->shared, s->feature, sl->n.task, sl->n.agent,
+                     sl->n.attempt, sl->n.fence);
+        sup_node_end(s, sl->node, "killed", -999, "stopped");
+    }
+}
+
+static void sup_tap_adopt(DriverTap *t, const char *log, const char *agent,
+                          const char *role, const char *subject) {
+    driver_tap_init(t, log, agent, role, subject);
+    /* what the agent wrote before the crash was read (or lost) then;
+     * start at the end rather than replay it as new events */
+    struct stat st;
+    if (stat(log, &st) == 0) t->off = (long)st.st_size;
+}
+
+/* Reload a run a previous supervisor left: counters, what was tried, and
+ * every node still marked live — adopted when its process is still the
+ * one that was spawned, and otherwise handed to the next tick, which sees
+ * it gone and judges it by its branch tip like any other exit. */
+static int sup_load(Sup *s) {
+    sqlite3_stmt *st = cg_prep(s->g,
+        "SELECT wakes_left,failures,first_turn,last_wake,slots,max_fail "
+        "FROM fleet_runs WHERE run=?");
+    sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
+    int found = sqlite3_step(st) == SQLITE_ROW;
+    if (found) {
+        s->wakes = sqlite3_column_int(st, 0);
+        s->failures = sqlite3_column_int(st, 1);
+        s->first_turn = sqlite3_column_int(st, 2) != 0;
+        s->last_wake = sqlite3_column_int64(st, 3);
+        int ns = sqlite3_column_int(st, 4);
+        if (ns > 0 && ns <= ORCH_MAX_SLOTS) s->nslots = ns;
+        if (sqlite3_column_type(st, 5) != SQLITE_NULL)
+            s->maxfail = sqlite3_column_int(st, 5);
+    }
+    sqlite3_finalize(st);
+    if (!found) return -1;
+    st = cg_prep(s->g, "SELECT DISTINCT task FROM fleet_nodes WHERE run=? "
+                       "AND role='worker' AND task IS NOT NULL");
+    sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW && s->ntried < ORCH_MAX_TRIED)
+        s->tried[s->ntried++] = xstrdup((const char *)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    st = cg_prep(s->g,
+        "SELECT id,role,agent,ifnull(parent,''),ifnull(feature,''),"
+        "ifnull(task,''),ifnull(wave,-1),ifnull(branch,''),ifnull(base,''),"
+        "ifnull(worktree,''),ifnull(pid,-1),ifnull(pid_start,-1),"
+        "ifnull(attempt,''),ifnull(fence,0),ifnull(log,'') "
+        "FROM fleet_nodes WHERE run=? AND state='live' ORDER BY id");
+    sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
+    int slot = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        FleetNode n;
+        memset(&n, 0, sizeof n);
+        long id = sqlite3_column_int64(st, 0);
+#define COL(i) ((const char *)sqlite3_column_text(st, i))
+        snprintf(n.role, sizeof n.role, "%s", COL(1));
+        snprintf(n.agent, sizeof n.agent, "%s", COL(2));
+        snprintf(n.parent, sizeof n.parent, "%s", COL(3));
+        snprintf(n.feature, sizeof n.feature, "%s", COL(4));
+        snprintf(n.task, sizeof n.task, "%s", COL(5));
+        n.wave = sqlite3_column_int64(st, 6);
+        snprintf(n.branch, sizeof n.branch, "%s", COL(7));
+        snprintf(n.base, sizeof n.base, "%s", COL(8));
+        snprintf(n.worktree, sizeof n.worktree, "%s", COL(9));
+        n.pid = sqlite3_column_int(st, 10);
+        long start = sqlite3_column_int64(st, 11);
+        snprintf(n.attempt, sizeof n.attempt, "%s", COL(12));
+        n.fence = sqlite3_column_int64(st, 13);
+        char log[4700];
+        snprintf(log, sizeof log, "%s", COL(14));
+#undef COL
+        bool alive = proc_alive(n.pid, start);
+        if (strcmp(n.role, "feature") == 0) {
+            if (!alive) { sup_node_end(s, id, "exited", -999, "lost"); continue; }
+            s->mgr = n;
+            s->mgr_live = true;
+            s->mgr_adopted = true;
+            s->mgr_node = id;
+            s->mgr_start = start;
+            sup_tap_adopt(&s->mgr_tap, log, n.agent, "feature", s->feature);
+            printf("[fleet] adopted manager %s (pid %d)\n", n.agent, n.pid);
+            continue;
+        }
+        if (slot >= s->nslots) {
+            /* more live workers than slots: the extra ones keep running
+             * and are judged when they end, just not in a slot */
+            sup_node_end(s, id, "exited", -999, "unslotted");
+            continue;
+        }
+        OrchFleetSlot *sl = &s->slots[slot++];
+        sl->n = n;
+        sl->live = true;
+        sl->adopted = true;
+        sl->node = id;
+        sl->pid_start = start;
+        sl->last_heartbeat = 0;
+        char subj[300];
+        snprintf(subj, sizeof subj, "%s/%s", s->feature, n.task);
+        sup_tap_adopt(&sl->tap, log, n.agent, "worker", subj);
+        printf("[fleet] %s worker %s → %s (pid %d)\n",
+               alive ? "adopted" : "found ended", n.agent, n.task, n.pid);
+    }
+    sqlite3_finalize(st);
+    fflush(stdout);
+    return 0;
+}
+
+/* 1: an approval for this feature is pending (the manager has nothing to
+ * do but wait); 2: one was rejected (the run stops); 0: neither */
+static int sup_approval(Sup *s, long *id) {
+    sqlite3_stmt *st = cg_prep(s->g,
+        "SELECT id,state FROM fleet_approvals WHERE subject=? AND state IN "
+        "('pending','rejected') ORDER BY id DESC LIMIT 1");
+    sqlite3_bind_text(st, 1, s->feature, -1, SQLITE_TRANSIENT);
+    int r = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        *id = sqlite3_column_int64(st, 0);
+        r = strcmp((const char *)sqlite3_column_text(st, 1), "pending") == 0 ? 1 : 2;
+    }
+    sqlite3_finalize(st);
+    return r;
+}
+
+static int supervisor_tick(Sup *s) {
+    Cg *g = s->g;
+    const OrchCfg *cfg = s->cfg;
+    const char *feature = s->feature;
+
+    sup_control(s);
+    if (g_orch_int || strcmp(s->state, "stopping") == 0) {
+        bool sig = g_orch_int != 0;
+        sup_terminate(s);
+        fprintf(stderr, "cg spec run: %s — the fleet was terminated, worker "
+                "claims released, branches kept\n",
+                sig ? "interrupted" : "stopped (cg fleet down)");
+        if (sig) s->rc = 130;
+        sup_set_state(s, "stopped", sig ? "signal" : "down");
+        return SUP_DONE;
+    }
+    if (strcmp(s->state, "draining") == 0 && !s->stopping) {
+        printf("[fleet] draining — no new agents; waiting for the live ones\n");
+        fflush(stdout);
+        s->stopping = true;
+    }
+    s->paused = strcmp(s->state, "paused") == 0;
+
+    for (int i = 0; i < s->nslots; i++)
+        if (s->slots[i].live) driver_tap_poll(&s->slots[i].tap);
+    if (s->mgr_live) driver_tap_poll(&s->mgr_tap);
+
+    /* reap workers: the branch tip, not the exit code, decides */
+    for (int i = 0; i < s->nslots; i++) {
+        OrchFleetSlot *sl = &s->slots[i];
+        if (!sl->live) continue;
+        int crc;
+        if (!sup_gone(sl->n.pid, sl->pid_start, sl->adopted, &crc)) continue;
+        sl->live = false;
+        driver_tap_poll(&sl->tap);
+        driver_tap_free(&sl->tap);
+        char *ts = orch_task_status(sl->n.worktree, feature, sl->n.task,
+                                    sl->n.attempt, sl->n.fence);
+        bool ok = ts && (strcmp(ts, "done") == 0 ||
+                         strcmp(ts, "implemented") == 0);
+        char ex[16];
+        if (crc > -900) snprintf(ex, sizeof ex, "%d", crc);
+        else snprintf(ex, sizeof ex, "?");
+        printf("[fleet] worker %s task %s exit %s → %s\n", sl->n.agent,
+               sl->n.task, ex, ok ? ts : "INCOMPLETE");
+        fflush(stdout);
+        orch_event("orch.exit", "worker", sl->n.agent, feature, sl->n.task,
+                   sl->n.pid, crc > -900 ? crc : -1, ok ? ts : "incomplete",
+                   sl->n.branch, NULL);
+        sup_node_end(s, sl->node, "exited", crc, ok ? ts : "incomplete");
+        if (!ok) {
+            orch_abandon(g->shared, feature, sl->n.task, sl->n.agent,
+                         sl->n.attempt, sl->n.fence);
+            orch_note_failure(feature, sl->n.task, crc > -900 ? crc : -1);
+            s->failures++;
+            sup_save(s);
+        }
+        free(ts);
+    }
+
+    /* a live worker keeps its fenced attempt alive */
+    long every = cfg->ttl > 0 ? cfg->ttl / 3 : 20;
+    if (every < 1) every = 1;
+    long now = (long)time(NULL);
+    for (int i = 0; i < s->nslots; i++) {
+        OrchFleetSlot *sl = &s->slots[i];
+        if (!sl->live || now - sl->last_heartbeat < every) continue;
+        if (orch_node_heartbeat(&sl->n, s->ttl_min) == 0) {
+            sl->last_heartbeat = now;
+            continue;
+        }
+        char *ts = orch_task_status(sl->n.worktree, feature, sl->n.task,
+                                    sl->n.attempt, sl->n.fence);
+        bool done = ts && (strcmp(ts, "done") == 0 ||
+                           strcmp(ts, "implemented") == 0);
+        free(ts);
+        if (done) { sl->last_heartbeat = now; continue; }
+        fprintf(stderr, "cg spec run: worker %s lost fenced ownership of %s "
+                "— terminating it\n", sl->n.agent, sl->n.task);
+        sup_kill(sl->n.pid, sl->pid_start, sl->adopted);
+        sl->live = false;
+        driver_tap_free(&sl->tap);
+        orch_event("orch.exit", "worker", sl->n.agent, feature, sl->n.task,
+                   sl->n.pid, -1, "lost_ownership", sl->n.branch, NULL);
+        sup_node_end(s, sl->node, "killed", -999, "lost_ownership");
+        orch_note_failure(feature, sl->n.task, -2);
+        s->failures++;
+        sup_save(s);
+    }
+
+    if (s->mgr_live) {
+        int crc;
+        if (sup_gone(s->mgr.pid, s->mgr_start, s->mgr_adopted, &crc)) {
+            s->mgr_live = false;
+            driver_tap_poll(&s->mgr_tap);
+            char ex[16];
+            if (crc > -900) snprintf(ex, sizeof ex, "%d", crc);
+            else snprintf(ex, sizeof ex, "?");
+            printf("[fleet] manager %s exit %s\n", s->mgr.agent, ex);
+            fflush(stdout);
+            orch_event("orch.exit", "feature", s->mgr.agent, feature, NULL,
+                       s->mgr.pid, crc > -900 ? crc : -1, NULL, s->mgr.branch,
+                       NULL);
+            sup_node_end(s, s->mgr_node, "exited", crc, NULL);
+        }
+    }
+
+    /* A manager is done when its subtree is: every task qualified and
+     * the feature branch merged. The process exiting proves nothing. */
+    OrchSubtree sub;
+    orch_subtree(g, feature, s->fbranch, s->fwt, s->mainbr, &sub);
+    int live = orch_live_fleet(s->slots, s->nslots);
+    if (sub.complete && !s->mgr_live && live == 0) {
+        printf("[fleet] %s complete — %d/%d task(s) qualified, %s merged "
+               "into %s, %d failure(s)\n", feature, sub.done, sub.total,
+               s->fbranch, s->mainbr, s->failures);
+        orch_event("orch.complete", "feature", NULL, feature, NULL, 0, -999,
+                   "merged", s->fbranch, NULL);
+        sup_set_state(s, "complete", "merged");
+        return SUP_DONE;
+    }
+    if (!s->stopping && s->failures > s->maxfail) {
+        fprintf(stderr, "cg spec run: %d failure(s) exceed --max-fail %d — "
+                "waiting for the fleet, then stopping\n", s->failures,
+                s->maxfail);
+        orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
+                   "max_fail", s->fbranch, NULL);
+        s->stopping = true;
+        s->rc = 1;
+    }
+
+    /* The manager takes the first turn — it owns the feature branch, and
+     * its worktree is where every wave is handed up — and each turn after
+     * that once no worker is live and the frontier has nothing left to
+     * give: it is then the only one who can move the subtree. Every turn is
+     * spent from a fixed budget, so a fleet that cannot finish stops
+     * instead of spinning. Paused, nothing new starts. */
+    now = (long)time(NULL);
+    long appr = 0;
+    int ap = !s->mgr_live && live == 0 ? sup_approval(s, &appr) : 0;
+    if (ap == 2) {
+        fprintf(stderr, "cg spec run: approval #%ld for %s was rejected — "
+                "stopping the run (branches kept)\n", appr, feature);
+        s->rc = 1;
+        sup_set_state(s, "stopped", "rejected");
+        return SUP_DONE;
+    }
+    if (ap == 1 && s->waiting_on != appr) {
+        printf("[fleet] waiting for approval #%ld — cg fleet approve %ld\n",
+               appr, appr);
+        fflush(stdout);
+        s->waiting_on = appr;
+    }
+    if (!s->stopping && !s->paused && !s->mgr_live && !sub.complete &&
+        live == 0 && ap == 0 && (s->first_turn || s->frontier_empty) &&
+        now - s->last_wake >= ORCH_WAKE_BACKOFF) {
+        if (s->wakes <= 0) {
+            fprintf(stderr, "cg spec run: %s did not complete and no manager "
+                    "wake is left (--max-rounds) — %d/%d task(s) qualified, "
+                    "%ld commit(s) still on %s\n", feature, sub.done,
+                    sub.total, sub.ahead < 0 ? 0 : sub.ahead, s->fbranch);
+            orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
+                       "no_wakes_left", s->fbranch, NULL);
+            s->rc = 1;
+            sup_set_state(s, "failed", "no_wakes_left");
+            return SUP_DONE;
+        }
+        FleetNode mn;
+        if (orch_spawn_manager(g, feature, cfg->driver, s->extra, cfg->cmd,
+                               false, &mn) != 0) {
+            s->rc = 1;
+            sup_set_state(s, "failed", "manager_spawn");
+            return SUP_DONE;
+        }
+        s->mgr = mn;
+        s->mgr_live = true;
+        s->mgr_adopted = false;
+        s->mgr_start = proc_start_time(mn.pid);
+        s->last_wake = now;
+        s->first_turn = false;
+        s->wakes--;
+        printf("[fleet] manager %s on %s (%d wake(s) left), log "
+               ".codegraph/agents/%s-manager.log\n", s->mgr.agent,
+               s->mgr.branch, s->wakes, feature);
+        fflush(stdout);
+        orch_event("orch.spawn", "feature", s->mgr.agent, feature, NULL,
+                   s->mgr.pid, -999, NULL, s->mgr.branch, NULL);
+        char lp[4700];
+        snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-manager.log",
+                 g->shared, feature);
+        driver_tap_free(&s->mgr_tap);
+        driver_tap_init(&s->mgr_tap, lp, s->mgr.agent, "feature", feature);
+        s->mgr_node = sup_node_add(s, &s->mgr, lp, s->mgr_start);
+        sup_save(s);
+    }
+
+    /* Refill worker slots from the frontier — never while the manager runs,
+     * for the same reason: a worker handing its wave up merges into the
+     * manager's worktree, so the two levels take turns rather than race
+     * for it. */
+    if (!s->stopping && !s->paused && !s->mgr_live) {
+        OrchTask *v = NULL;
+        int n = orch_tasks_load(g, feature, s->fwt, &v);
+        for (int i = 0; i < s->nslots && s->ntried < ORCH_MAX_TRIED; i++) {
+            OrchFleetSlot *sl = &s->slots[i];
+            if (sl->live) continue;
+            char id[64];
+            if (!orch_next_task(v, n, s->tried, s->ntried, s->slots,
+                                s->nslots, id, sizeof id))
+                break;
+            s->tried[s->ntried++] = xstrdup(id);
+            FleetNode wn;
+            if (orch_spawn_worker(g, feature, id, cfg->driver, s->extra,
+                                  cfg->cmd, false, &wn) != 0) {
+                orch_note_failure(feature, id, -1);
+                s->failures++;
+                sup_save(s);
+                continue;
+            }
+            sl->n = wn;
+            sl->live = true;
+            sl->adopted = false;
+            sl->pid_start = proc_start_time(wn.pid);
+            sl->last_heartbeat = (long)time(NULL);
+            printf("[fleet] worker %s → %s (wave %ld) on %s, log "
+                   ".codegraph/agents/%s-%s.log\n", wn.agent, id, wn.wave,
+                   wn.branch, feature, id);
+            fflush(stdout);
+            orch_event("orch.spawn", "worker", wn.agent, feature, id, wn.pid,
+                       -999, NULL, wn.branch, NULL);
+            char lp[4700], subj[300];
+            snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-%s.log",
+                     g->shared, feature, id);
+            snprintf(subj, sizeof subj, "%s/%s", feature, id);
+            driver_tap_init(&sl->tap, lp, wn.agent, "worker", subj);
+            sl->node = sup_node_add(s, &wn, lp, sl->pid_start);
+        }
+        char probe[64];
+        s->frontier_empty = !orch_next_task(v, n, s->tried, s->ntried,
+                                            s->slots, s->nslots, probe,
+                                            sizeof probe);
+        orch_tasks_free(v, n);
+    }
+
+    if (s->stopping && !s->mgr_live && orch_live_fleet(s->slots, s->nslots) == 0) {
+        sup_set_state(s, "stopped", s->rc ? "max_fail" : "drained");
+        return SUP_DONE;
+    }
+    return SUP_GO;
+}
+
+static void run_id_new(const char *feature, char *out, size_t cap) {
+    char seed[400], hash[65];
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    snprintf(seed, sizeof seed, "%s|%ld|%ld|%d", feature, (long)ts.tv_sec,
+             ts.tv_nsec, (int)getpid());
+    sha256_hex(seed, strlen(seed), hash);
+    snprintf(out, cap, "%.12s", hash);
+}
+
+/* the newest run no supervisor finished: what --resume continues */
+static bool run_latest_open(Cg *g, char *out, size_t cap, char *feature,
+                            size_t fcap) {
+    sqlite3_stmt *st = cg_prep(g,
+        "SELECT run,feature FROM fleet_runs WHERE state IN "
+        "('running','paused','draining','stopping') ORDER BY started DESC, "
+        "rowid DESC LIMIT 1");
+    bool ok = sqlite3_step(st) == SQLITE_ROW;
+    if (ok) {
+        snprintf(out, cap, "%s", (const char *)sqlite3_column_text(st, 0));
+        if (feature) snprintf(feature, fcap, "%s",
+                              (const char *)sqlite3_column_text(st, 1));
+    }
+    sqlite3_finalize(st);
+    return ok;
+}
+
+static int supervisor_run(Cg *g, const char *feature, const char *fbranch,
+                          const char *fwt, const char *mainbr,
+                          const OrchCfg *cfg, const char *extra, int nslots,
+                          int maxfail, int maxrounds, const FleetRunOpts *ro) {
+    int lock = sup_lock_take(g->shared);
+    if (lock < 0) {
+        fprintf(stderr, "cg fleet: a supervisor is already running for this "
+                "project — see `cg fleet runs`, or stop it with `cg fleet "
+                "down`\n");
+        return 1;
+    }
+    Sup s;
+    memset(&s, 0, sizeof s);
+    s.g = g;
+    s.cfg = cfg;
+    s.extra = extra;
+    s.nslots = nslots;
+    s.maxfail = maxfail;
+    s.wakes = maxrounds > 0 ? maxrounds : ORCH_ROUNDS_DFLT;
+    s.first_turn = true;
+    s.ttl_min = cfg->ttl > 0 ? (cfg->ttl + 59) / 60 : 60;
+    s.mgr.pid = -1;
+    snprintf(s.feature, sizeof s.feature, "%s", feature);
+    snprintf(s.fbranch, sizeof s.fbranch, "%s", fbranch);
+    snprintf(s.fwt, sizeof s.fwt, "%s", fwt);
+    snprintf(s.mainbr, sizeof s.mainbr, "%s", mainbr);
+    s.slots = xmalloc(sizeof(OrchFleetSlot) * ORCH_MAX_SLOTS);
+    memset(s.slots, 0, sizeof(OrchFleetSlot) * ORCH_MAX_SLOTS);
+
+    bool resumed = ro && ro->resume;
+    char host[256] = "";
+    gethostname(host, sizeof host - 1);
+    if (resumed) {
+        snprintf(s.run, sizeof s.run, "%s", ro->resume);
+        if (sup_load(&s) != 0) {
+            fprintf(stderr, "cg fleet: no run %s to resume\n", s.run);
+            free(s.slots);
+            close(lock);
+            return 1;
+        }
+        sqlite3_stmt *st = cg_prep(g,
+            "UPDATE fleet_runs SET pid=?,pid_start=?,host=?,state="
+            "CASE WHEN state='stopping' THEN 'stopping' WHEN state='paused' "
+            "THEN 'paused' WHEN state='draining' THEN 'draining' ELSE "
+            "'running' END,updated=? WHERE run=?");
+        sqlite3_bind_int(st, 1, (int)getpid());
+        sqlite3_bind_int64(st, 2, proc_start_time(getpid()));
+        sqlite3_bind_text(st, 3, host, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 4, (long)time(NULL));
+        sqlite3_bind_text(st, 5, s.run, -1, SQLITE_TRANSIENT);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    } else {
+        if (ro && ro->run_id && ro->run_id[0])
+            snprintf(s.run, sizeof s.run, "%s", ro->run_id);
+        else
+            run_id_new(feature, s.run, sizeof s.run);
+        const char *log = getenv("CG_SUPERVISOR_LOG");
+        sqlite3_stmt *st = cg_prep(g,
+            "INSERT INTO fleet_runs(run,feature,state,pid,pid_start,host,"
+            "driver,slots,max_fail,wakes_left,failures,first_turn,last_wake,"
+            "log,started,updated) VALUES(?,?,'running',?,?,?,?,?,?,?,0,1,0,?,"
+            "?,?)");
+        sqlite3_bind_text(st, 1, s.run, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, feature, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 3, (int)getpid());
+        sqlite3_bind_int64(st, 4, proc_start_time(getpid()));
+        sqlite3_bind_text(st, 5, host, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 6, cfg->driver, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 7, nslots);
+        sqlite3_bind_int(st, 8, maxfail);
+        sqlite3_bind_int(st, 9, s.wakes);
+        if (log) sqlite3_bind_text(st, 10, log, -1, SQLITE_TRANSIENT);
+        else sqlite3_bind_null(st, 10);
+        sqlite3_bind_int64(st, 11, (long)time(NULL));
+        sqlite3_bind_int64(st, 12, (long)time(NULL));
+        if (sqlite3_step(st) != SQLITE_DONE) {
+            sqlite3_finalize(st);
+            fprintf(stderr, "cg fleet: could not record run %s\n", s.run);
+            free(s.slots);
+            close(lock);
+            return 1;
+        }
+        sqlite3_finalize(st);
+    }
+    setenv("CG_RUN", s.run, 1);       /* every child's events carry it */
+    sup_control(&s);
+    sup_event(&s, s.state[0] ? s.state : "running", resumed ? "resumed" : "started");
+
+    struct sigaction sa, oldint, oldterm, oldhup;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = orch_on_signal;
+    g_orch_int = 0;
+    sigaction(SIGINT, &sa, &oldint);
+    sigaction(SIGTERM, &sa, &oldterm);
+    sigaction(SIGHUP, &sa, &oldhup);
+
+    printf("[fleet] %s — manager + %d worker slot(s), driver %s, %d wake(s)\n",
+           feature, s.nslots, cfg->driver, s.wakes);
+    printf("[fleet] run %s%s — supervisor pid %d\n", s.run,
+           resumed ? " (resumed)" : "", (int)getpid());
+    fflush(stdout);
+
+    while (supervisor_tick(&s) == SUP_GO) {
+        struct timespec ts = { 0, 150 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+    }
+
+    sigaction(SIGINT, &oldint, NULL);
+    sigaction(SIGTERM, &oldterm, NULL);
+    sigaction(SIGHUP, &oldhup, NULL);
+    for (int i = 0; i < s.ntried; i++) free(s.tried[i]);
+    for (int i = 0; i < ORCH_MAX_SLOTS; i++) driver_tap_free(&s.slots[i].tap);
+    driver_tap_free(&s.mgr_tap);
+    free(s.slots);
+    flock(lock, LOCK_UN);
+    close(lock);
+    return s.rc;
+}
+
 static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                           const char *extra, int nslots, int maxfail,
-                          int maxrounds, bool dry, bool status) {
+                          int maxrounds, bool dry, bool status,
+                          const FleetRunOpts *ro) {
     Cg g;
     if (!memory_open_quiet(&g)) {
         fprintf(stderr, "cg spec run: --fleet needs a Codify index — run "
                 "`cg init` first\n");
         return 1;
     }
+    char resume_feature[128] = "", resume_run[40] = "";
+    FleetRunOpts ro_eff = ro ? *ro : (FleetRunOpts){ NULL, NULL };
+    if (ro && ro->resume) {
+        bool found;
+        if (ro->resume[0]) {
+            sqlite3_stmt *st = cg_prep(&g, "SELECT feature FROM fleet_runs "
+                                           "WHERE run=?");
+            sqlite3_bind_text(st, 1, ro->resume, -1, SQLITE_TRANSIENT);
+            found = sqlite3_step(st) == SQLITE_ROW;
+            if (found) snprintf(resume_feature, sizeof resume_feature, "%s",
+                                (const char *)sqlite3_column_text(st, 0));
+            sqlite3_finalize(st);
+            snprintf(resume_run, sizeof resume_run, "%s", ro->resume);
+        } else {
+            found = run_latest_open(&g, resume_run, sizeof resume_run,
+                                    resume_feature, sizeof resume_feature);
+        }
+        if (!found) {
+            fprintf(stderr, "cg fleet: nothing to resume — no unfinished run%s%s\n",
+                    ro->resume[0] ? " named " : "", ro->resume);
+            cg_close(&g);
+            return 1;
+        }
+        feature_ov = resume_feature;
+        ro_eff.resume = resume_run;
+    }
+    ro = &ro_eff;
     Hierarchy h;
     Kvx *wf = orch_hier(g.shared, &h);
     orch_roles_load(&h);
@@ -1903,265 +2690,388 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
 
     if (nslots > ORCH_MAX_SLOTS) nslots = ORCH_MAX_SLOTS;
     if (nslots < 1) nslots = 1;
-    long ttl_min = cfg->ttl > 0 ? (cfg->ttl + 59) / 60 : 60;
-    OrchFleetSlot *slots = xmalloc(sizeof(OrchFleetSlot) * (size_t)nslots);
-    memset(slots, 0, sizeof(OrchFleetSlot) * (size_t)nslots);
-    FleetNode mgr;
-    memset(&mgr, 0, sizeof mgr);
-    mgr.pid = -1;
-    DriverTap mgr_tap;
-    memset(&mgr_tap, 0, sizeof mgr_tap);
-    bool mgr_live = false, stopping = false;
-    bool first_turn = true, frontier_empty = false;
-    long last_wake = 0;
-    int wakes = maxrounds > 0 ? maxrounds : ORCH_ROUNDS_DFLT;
-    char *tried[ORCH_MAX_TRIED];
-    int ntried = 0, failures = 0, rc = 0;
-
-    struct sigaction sa, oldint, oldterm, oldhup;
-    memset(&sa, 0, sizeof sa);
-    sa.sa_handler = orch_on_signal;
-    g_orch_int = 0;
-    sigaction(SIGINT, &sa, &oldint);
-    sigaction(SIGTERM, &sa, &oldterm);
-    sigaction(SIGHUP, &sa, &oldhup);
-
-    printf("[fleet] %s — manager + %d worker slot(s), driver %s, %d wake(s)\n",
-           feature, nslots, cfg->driver, wakes);
-    fflush(stdout);
-
-    for (;;) {
-        if (g_orch_int) {
-            if (mgr_live && kill(-mgr.pid, SIGTERM) != 0)
-                kill(mgr.pid, SIGTERM);
-            for (int i = 0; i < nslots; i++)
-                if (slots[i].live && kill(-slots[i].n.pid, SIGTERM) != 0)
-                    kill(slots[i].n.pid, SIGTERM);
-            if (mgr_live && orch_reap(mgr.pid) == 0) mgr_live = false;
-            for (int i = 0; i < nslots; i++) {
-                if (!slots[i].live) continue;
-                if (orch_reap(slots[i].n.pid) != 0) continue;
-                slots[i].live = false;
-                orch_abandon(g.shared, feature, slots[i].n.task,
-                             slots[i].n.agent, slots[i].n.attempt,
-                             slots[i].n.fence);
-            }
-            fprintf(stderr, "cg spec run: interrupted — the fleet was "
-                    "terminated, worker claims released, branches kept\n");
-            rc = 130;
-            break;
-        }
-
-        for (int i = 0; i < nslots; i++)
-            if (slots[i].live) driver_tap_poll(&slots[i].tap);
-        if (mgr_live) driver_tap_poll(&mgr_tap);
-
-        /* reap workers: the branch tip, not the exit code, decides */
-        for (int i = 0; i < nslots; i++) {
-            if (!slots[i].live) continue;
-            int st;
-            pid_t r = waitpid(slots[i].n.pid, &st, WNOHANG);
-            if (r == 0) continue;
-            slots[i].live = false;
-            driver_tap_poll(&slots[i].tap);
-            driver_tap_free(&slots[i].tap);
-            int crc = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
-            char *ts = orch_task_status(slots[i].n.worktree, feature,
-                                        slots[i].n.task, slots[i].n.attempt,
-                                        slots[i].n.fence);
-            bool ok = ts && (strcmp(ts, "done") == 0 ||
-                             strcmp(ts, "implemented") == 0);
-            printf("[fleet] worker %s task %s exit %d → %s\n",
-                   slots[i].n.agent, slots[i].n.task, crc,
-                   ok ? ts : "INCOMPLETE");
-            fflush(stdout);
-            orch_event("orch.exit", "worker", slots[i].n.agent, feature,
-                       slots[i].n.task, slots[i].n.pid, crc,
-                       ok ? ts : "incomplete", slots[i].n.branch, NULL);
-            if (!ok) {
-                orch_abandon(g.shared, feature, slots[i].n.task,
-                             slots[i].n.agent, slots[i].n.attempt,
-                             slots[i].n.fence);
-                orch_note_failure(feature, slots[i].n.task, crc);
-                failures++;
-            }
-            free(ts);
-        }
-
-        /* a live worker keeps its fenced attempt alive */
-        long every = cfg->ttl > 0 ? cfg->ttl / 3 : 20;
-        if (every < 1) every = 1;
-        long now = (long)time(NULL);
-        for (int i = 0; i < nslots; i++) {
-            if (!slots[i].live || now - slots[i].last_heartbeat < every)
-                continue;
-            if (orch_node_heartbeat(&slots[i].n, ttl_min) == 0) {
-                slots[i].last_heartbeat = now;
-                continue;
-            }
-            char *ts = orch_task_status(slots[i].n.worktree, feature,
-                                        slots[i].n.task, slots[i].n.attempt,
-                                        slots[i].n.fence);
-            bool done = ts && (strcmp(ts, "done") == 0 ||
-                               strcmp(ts, "implemented") == 0);
-            free(ts);
-            if (done) { slots[i].last_heartbeat = now; continue; }
-            fprintf(stderr, "cg spec run: worker %s lost fenced ownership of "
-                    "%s — terminating it\n", slots[i].n.agent,
-                    slots[i].n.task);
-            if (kill(-slots[i].n.pid, SIGTERM) != 0)
-                kill(slots[i].n.pid, SIGTERM);
-            orch_reap(slots[i].n.pid);
-            slots[i].live = false;
-            orch_event("orch.exit", "worker", slots[i].n.agent, feature,
-                       slots[i].n.task, slots[i].n.pid, -1,
-                       "lost_ownership", slots[i].n.branch, NULL);
-            orch_note_failure(feature, slots[i].n.task, -2);
-            failures++;
-        }
-
-        if (mgr_live) {
-            int st;
-            pid_t r = waitpid(mgr.pid, &st, WNOHANG);
-            if (r != 0) {
-                mgr_live = false;
-                driver_tap_poll(&mgr_tap);
-                int crc = WIFEXITED(st) ? WEXITSTATUS(st)
-                                        : 128 + WTERMSIG(st);
-                printf("[fleet] manager %s exit %d\n", mgr.agent, crc);
-                fflush(stdout);
-                orch_event("orch.exit", "feature", mgr.agent, feature, NULL,
-                           mgr.pid, crc, NULL, mgr.branch, NULL);
-            }
-        }
-
-        /* A manager is done when its subtree is: every task qualified and
-         * the feature branch merged. The process exiting proves nothing. */
-        OrchSubtree sub;
-        orch_subtree(&g, feature, fbranch, fwt, mainbr, &sub);
-        int live = orch_live_fleet(slots, nslots);
-        if (sub.complete && !mgr_live && live == 0) {
-            printf("[fleet] %s complete — %d/%d task(s) qualified, %s merged "
-                   "into %s, %d failure(s)\n", feature, sub.done, sub.total,
-                   fbranch, mainbr, failures);
-            orch_event("orch.complete", "feature", NULL, feature, NULL, 0,
-                       -999, "merged", fbranch, NULL);
-            break;
-        }
-        if (!stopping && failures > maxfail) {
-            fprintf(stderr, "cg spec run: %d failure(s) exceed --max-fail %d "
-                    "— waiting for the fleet, then stopping\n", failures,
-                    maxfail);
-            orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
-                       "max_fail", fbranch, NULL);
-            stopping = true;
-            rc = 1;
-        }
-
-        /* The manager takes the first turn — it owns the feature branch,
-         * and its worktree is where every wave is handed up — and each
-         * turn after that once no worker is live and the frontier has
-         * nothing left to give: it is then the only one who can move the
-         * subtree. Every turn is spent from a fixed budget, so a fleet
-         * that cannot finish stops instead of spinning. */
-        now = (long)time(NULL);
-        if (!stopping && !mgr_live && !sub.complete && live == 0 &&
-            (first_turn || frontier_empty) &&
-            now - last_wake >= ORCH_WAKE_BACKOFF) {
-            if (wakes <= 0) {
-                fprintf(stderr, "cg spec run: %s did not complete and no "
-                        "manager wake is left (--max-rounds) — %d/%d task(s) "
-                        "qualified, %ld commit(s) still on %s\n", feature,
-                        sub.done, sub.total, sub.ahead < 0 ? 0 : sub.ahead,
-                        fbranch);
-                orch_event("orch.stop", "feature", NULL, feature, NULL, 0,
-                           -999, "no_wakes_left", fbranch, NULL);
-                rc = 1;
-                break;
-            }
-            FleetNode mn;
-            if (orch_spawn_manager(&g, feature, cfg->driver, extra, cfg->cmd,
-                                   false, &mn) != 0) {
-                rc = 1;
-                break;
-            }
-            mgr = mn;
-            mgr_live = true;
-            last_wake = now;
-            first_turn = false;
-            wakes--;
-            printf("[fleet] manager %s on %s (%d wake(s) left), log "
-                   ".codegraph/agents/%s-manager.log\n", mgr.agent,
-                   mgr.branch, wakes, feature);
-            fflush(stdout);
-            orch_event("orch.spawn", "feature", mgr.agent, feature, NULL,
-                       mgr.pid, -999, NULL, mgr.branch, NULL);
-            {
-                char lp[4700];
-                snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-manager.log",
-                         g.shared, feature);
-                driver_tap_free(&mgr_tap);
-                driver_tap_init(&mgr_tap, lp, mgr.agent, "feature", feature);
-            }
-        }
-
-        /* Refill worker slots from the frontier — never while the manager
-         * runs, for the same reason: a worker handing its wave up merges
-         * into the manager's worktree, so the two levels take turns rather
-         * than race for it. */
-        if (!stopping && !mgr_live) {
-            OrchTask *v = NULL;
-            int n = orch_tasks_load(&g, feature, fwt, &v);
-            for (int i = 0; i < nslots && ntried < ORCH_MAX_TRIED; i++) {
-                if (slots[i].live) continue;
-                char id[64];
-                if (!orch_next_task(v, n, tried, ntried, slots, nslots, id,
-                                    sizeof id))
-                    break;
-                tried[ntried++] = xstrdup(id);
-                FleetNode wn;
-                if (orch_spawn_worker(&g, feature, id, cfg->driver, extra,
-                                      cfg->cmd, false, &wn) != 0) {
-                    orch_note_failure(feature, id, -1);
-                    failures++;
-                    continue;
-                }
-                slots[i].n = wn;
-                slots[i].live = true;
-                slots[i].last_heartbeat = (long)time(NULL);
-                printf("[fleet] worker %s → %s (wave %ld) on %s, log "
-                       ".codegraph/agents/%s-%s.log\n", wn.agent, id,
-                       wn.wave, wn.branch, feature, id);
-                fflush(stdout);
-                orch_event("orch.spawn", "worker", wn.agent, feature, id,
-                           wn.pid, -999, NULL, wn.branch, NULL);
-                {
-                    char lp[4700], subj[300];
-                    snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-%s.log",
-                             g.shared, feature, id);
-                    snprintf(subj, sizeof subj, "%s/%s", feature, id);
-                    driver_tap_init(&slots[i].tap, lp, wn.agent, "worker", subj);
-                }
-            }
-            char probe[64];
-            frontier_empty = !orch_next_task(v, n, tried, ntried, slots,
-                                             nslots, probe, sizeof probe);
-            orch_tasks_free(v, n);
-        }
-
-        if (stopping && !mgr_live && orch_live_fleet(slots, nslots) == 0)
-            break;
-        struct timespec ts = { 0, 150 * 1000 * 1000 };
-        nanosleep(&ts, NULL);
-    }
-
-    sigaction(SIGINT, &oldint, NULL);
-    sigaction(SIGTERM, &oldterm, NULL);
-    sigaction(SIGHUP, &oldhup, NULL);
-    for (int i = 0; i < ntried; i++) free(tried[i]);
-    for (int i = 0; i < nslots; i++) driver_tap_free(&slots[i].tap);
-    driver_tap_free(&mgr_tap);
-    free(slots);
+    int rc = supervisor_run(&g, feature, fbranch, fwt, mainbr, cfg, extra,
+                            nslots, maxfail, maxrounds, ro);
     cg_close(&g);
     return rc;
+}
+
+/* ---------------- cg fleet up | down | pause | resume | runs ------------ */
+
+static void self_exe(char *out, size_t cap) {
+    ssize_t n = readlink("/proc/self/exe", out, cap - 1);
+    if (n > 0) out[n] = 0;
+    else snprintf(out, cap, "cg");
+}
+
+/* the run's state and whether its supervisor is alive, for the newest
+ * unfinished run (or `run` when named) */
+typedef struct { char run[40], feature[128], state[16]; int pid; bool alive; } RunRef;
+
+static bool run_ref(Cg *cg, const char *run, RunRef *r) {
+    memset(r, 0, sizeof *r);
+    sqlite3_stmt *st = run && run[0]
+        ? cg_prep(cg, "SELECT run,feature,state,ifnull(pid,0) FROM fleet_runs "
+                      "WHERE run=?")
+        : cg_prep(cg, "SELECT run,feature,state,ifnull(pid,0) FROM fleet_runs "
+                      "WHERE state IN ('running','paused','draining','stopping') "
+                      "ORDER BY started DESC, rowid DESC LIMIT 1");
+    if (run && run[0]) sqlite3_bind_text(st, 1, run, -1, SQLITE_TRANSIENT);
+    bool ok = sqlite3_step(st) == SQLITE_ROW;
+    if (ok) {
+        snprintf(r->run, sizeof r->run, "%s", (const char *)sqlite3_column_text(st, 0));
+        snprintf(r->feature, sizeof r->feature, "%s", (const char *)sqlite3_column_text(st, 1));
+        snprintf(r->state, sizeof r->state, "%s", (const char *)sqlite3_column_text(st, 2));
+        r->pid = sqlite3_column_int(st, 3);
+    }
+    sqlite3_finalize(st);
+    r->alive = ok && fleet_supervisor_alive(cg->shared);
+    return ok;
+}
+
+static void run_state_set(Cg *cg, const char *run, const char *state,
+                          const char *reason) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "UPDATE fleet_runs SET state=?,reason=ifnull(?,reason),updated=? "
+        "WHERE run=?");
+    sqlite3_bind_text(st, 1, state, -1, SQLITE_TRANSIENT);
+    if (reason) sqlite3_bind_text(st, 2, reason, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(st, 2);
+    sqlite3_bind_int64(st, 3, (long)time(NULL));
+    sqlite3_bind_text(st, 4, run, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"run\":"); sb_json_str(&p, run);
+    sb_puts(&p, ",\"state\":"); sb_json_str(&p, state);
+    sb_puts(&p, ",\"reason\":");
+    if (reason) sb_json_str(&p, reason); else sb_puts(&p, "null");
+    sb_puts(&p, ",\"by\":\"cli\"}");
+    events_emit(cg, "fleet.run", run, p.p);
+    sb_free(&p);
+}
+
+/* No supervisor to act on the request: stop what the run left alive
+ * ourselves — the same terminate-and-release a supervisor does. */
+static int run_cleanup(Cg *cg, const char *run, const char *feature) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT id,role,agent,ifnull(task,''),ifnull(pid,-1),"
+        "ifnull(pid_start,-1),ifnull(attempt,''),ifnull(fence,0) "
+        "FROM fleet_nodes WHERE run=? AND state='live'");
+    sqlite3_bind_text(st, 1, run, -1, SQLITE_TRANSIENT);
+    typedef struct { long id; char role[16], agent[128], task[64], attempt[65];
+                     int pid; long start, fence; } Live;
+    Live v[64];
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW && n < 64) {
+        Live *l = &v[n++];
+        l->id = sqlite3_column_int64(st, 0);
+        snprintf(l->role, sizeof l->role, "%s", (const char *)sqlite3_column_text(st, 1));
+        snprintf(l->agent, sizeof l->agent, "%s", (const char *)sqlite3_column_text(st, 2));
+        snprintf(l->task, sizeof l->task, "%s", (const char *)sqlite3_column_text(st, 3));
+        l->pid = sqlite3_column_int(st, 4);
+        l->start = sqlite3_column_int64(st, 5);
+        snprintf(l->attempt, sizeof l->attempt, "%s", (const char *)sqlite3_column_text(st, 6));
+        l->fence = sqlite3_column_int64(st, 7);
+    }
+    sqlite3_finalize(st);
+    int killed = 0;
+    for (int i = 0; i < n; i++) {
+        if (proc_alive(v[i].pid, v[i].start)) {
+            sup_kill(v[i].pid, v[i].start, true);
+            killed++;
+        }
+        if (strcmp(v[i].role, "worker") == 0 && v[i].task[0])
+            orch_abandon(cg->shared, feature, v[i].task, v[i].agent,
+                         v[i].attempt, v[i].fence);
+        sqlite3_stmt *u = cg_prep(cg, "UPDATE fleet_nodes SET state='killed',"
+                                      "outcome='stopped',ended=? WHERE id=?");
+        sqlite3_bind_int64(u, 1, (long)time(NULL));
+        sqlite3_bind_int64(u, 2, v[i].id);
+        sqlite3_step(u);
+        sqlite3_finalize(u);
+    }
+    return killed;
+}
+
+/* the run named by pos, or the newest unfinished one */
+static const char *pos_arg(int argc, char **argv) {
+    for (int i = 0; i < argc; i++) {
+        if (argv[i][0] != '-') return argv[i];
+        if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--wait") == 0) i++;
+    }
+    return NULL;
+}
+
+static int detach_supervisor(Cg *cg, char **pass, int npass,
+                             const char *run_id, const char *resume,
+                             bool json) {
+    char self[4096], logdir[4600], logpath[4800];
+    self_exe(self, sizeof self);
+    snprintf(logdir, sizeof logdir, "%s/%s/fleet", cg->shared, CG_DIR);
+    mkdirs(logdir);
+    const char *name = resume ? resume : run_id;
+    snprintf(logpath, sizeof logpath, "%s/supervisor-%s.log", logdir, name);
+    char **av = xmalloc(sizeof(char *) * (size_t)(npass + 8));
+    int n = 0;
+    av[n++] = self;
+    av[n++] = (char *)"spec";
+    av[n++] = (char *)"run";
+    av[n++] = (char *)"--fleet";
+    if (resume) { av[n++] = (char *)"--resume"; av[n++] = (char *)resume; }
+    else { av[n++] = (char *)"--run-id"; av[n++] = (char *)run_id; }
+    for (int i = 0; i < npass; i++) av[n++] = pass[i];
+    av[n] = NULL;
+    pid_t pid = fork();
+    if (pid < 0) { free(av); fprintf(stderr, "cg fleet: fork failed\n"); return 1; }
+    if (pid == 0) {
+        setsid();
+        int in = open("/dev/null", O_RDONLY);
+        int lg = open(logpath, O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (in >= 0) { dup2(in, 0); close(in); }
+        if (lg >= 0) { dup2(lg, 1); dup2(lg, 2); close(lg); }
+        setenv("CG_SUPERVISOR_LOG", logpath, 1);
+        if (chdir(cg->root) != 0) _exit(126);
+        execv(self, av);
+        _exit(127);
+    }
+    free(av);
+    /* back once the supervisor has recorded (or re-claimed) the run, or
+     * has already given up — then its log says why */
+    int exited = 0, st = 0;
+    bool ready = false;
+    for (int i = 0; i < 200 && !ready; i++) {
+        if (waitpid(pid, &st, WNOHANG) == pid) { exited = 1; break; }
+        sqlite3_stmt *q = cg_prep(cg, "SELECT pid FROM fleet_runs WHERE run=?");
+        sqlite3_bind_text(q, 1, name, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(q) == SQLITE_ROW && sqlite3_column_int(q, 0) == pid)
+            ready = true;
+        sqlite3_finalize(q);
+        if (!ready) {
+            struct timespec ts = { 0, 50 * 1000 * 1000 };
+            nanosleep(&ts, NULL);
+        }
+    }
+    if (!ready) {
+        char *tail = read_entire_file(logpath, NULL);
+        const char *t = tail ? tail : "";
+        size_t tl = strlen(t);
+        if (tl > 1200) t += tl - 1200;
+        fprintf(stderr, "cg fleet: the supervisor %s before recording run %s\n%s",
+                exited ? "exited" : "did not start", name, t);
+        free(tail);
+        return 1;
+    }
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"run\":"); sb_json_str(&b, name);
+        sb_printf(&b, ",\"pid\":%d,\"resumed\":%s,\"log\":", (int)pid,
+                  resume ? "true" : "false");
+        sb_json_str(&b, logpath);
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("fleet %s: run %s — supervisor pid %d\n",
+               resume ? "resumed" : "up", name, (int)pid);
+        printf("  log:    %s\n  follow: cg events --follow   status: cg fleet "
+               "runs   stop: cg fleet down\n", logpath);
+    }
+    return 0;
+}
+
+int cmd_fleet_up(Cg *cg, int argc, char **argv, bool json) {
+    bool fg = false;
+    const char *resume = NULL;
+    char **pass = xmalloc(sizeof(char *) * (size_t)(argc + 1));
+    int np = 0;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--foreground") == 0) fg = true;
+        else if (strcmp(argv[i], "--resume") == 0)
+            resume = (i + 1 < argc && argv[i + 1][0] != '-') ? argv[++i] : "";
+        else pass[np++] = argv[i];
+    }
+    int rc;
+    if (fg) {
+        char **av = xmalloc(sizeof(char *) * (size_t)(np + 4));
+        int n = 0;
+        av[n++] = (char *)"--fleet";
+        if (resume) { av[n++] = (char *)"--resume"; av[n++] = (char *)resume; }
+        for (int i = 0; i < np; i++) av[n++] = pass[i];
+        rc = cmd_spec_run(n, av);
+        free(av);
+    } else if (fleet_supervisor_alive(cg->shared)) {
+        RunRef r;
+        run_ref(cg, NULL, &r);
+        fprintf(stderr, "cg fleet: a supervisor is already running%s%s — see "
+                "`cg fleet runs`, or stop it with `cg fleet down`\n",
+                r.run[0] ? " run " : "", r.run);
+        rc = 1;
+    } else if (resume) {
+        RunRef r;
+        if (!run_ref(cg, resume, &r)) {
+            fprintf(stderr, "cg fleet: nothing to resume — no unfinished run%s%s\n",
+                    resume[0] ? " named " : "", resume);
+            rc = 1;
+        } else {
+            rc = detach_supervisor(cg, pass, np, NULL, r.run, json);
+        }
+    } else {
+        char run[40], feature[128] = "";
+        for (int i = 0; i + 1 < np; i++)
+            if (strcmp(pass[i], "-f") == 0) snprintf(feature, sizeof feature, "%s", pass[i + 1]);
+        run_id_new(feature, run, sizeof run);
+        rc = detach_supervisor(cg, pass, np, run, NULL, json);
+    }
+    free(pass);
+    return rc;
+}
+
+int cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,
+                      bool json) {
+    const char *named = pos_arg(argc, argv);
+    bool drain = false;
+    long wait_s = 30;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--drain") == 0) drain = true;
+        else if (strcmp(argv[i], "--wait") == 0 && i + 1 < argc) wait_s = atol(argv[++i]);
+    }
+    RunRef r;
+    if (!run_ref(cg, named, &r)) {
+        fprintf(stderr, "cg fleet %s: no %srun%s%s\n", verb,
+                named ? "" : "unfinished ", named ? " named " : "",
+                named ? named : "");
+        return 1;
+    }
+    const char *result = NULL;
+    int rc = 0;
+    if (strcmp(verb, "pause") == 0) {
+        run_state_set(cg, r.run, "paused", "pause");
+        result = r.alive ? "paused — live agents finish, nothing new starts"
+                         : "marked paused (no supervisor is running; `cg fleet "
+                           "resume` starts one)";
+    } else if (strcmp(verb, "resume") == 0) {
+        if (r.alive) {
+            if (strcmp(r.state, "running") == 0) result = "already running";
+            else {
+                run_state_set(cg, r.run, "running", "resume");
+                result = "running";
+            }
+        } else {
+            if (strcmp(r.state, "running") != 0)
+                run_state_set(cg, r.run, "running", "resume");
+            return detach_supervisor(cg, NULL, 0, NULL, r.run, json);
+        }
+    } else if (strcmp(verb, "down") == 0) {
+        if (!r.alive) {
+            int killed = run_cleanup(cg, r.run, r.feature);
+            run_state_set(cg, r.run, "stopped", "down (no supervisor)");
+            char buf[200];
+            snprintf(buf, sizeof buf, "stopped — no supervisor was running; "
+                     "%d agent(s) terminated, claims released, branches kept",
+                     killed);
+            result = buf;
+            if (json) printf("{\"run\":\"%s\",\"state\":\"stopped\",\"killed\":%d}\n",
+                             r.run, killed);
+            else printf("fleet down: run %s %s\n", r.run, result);
+            return 0;
+        }
+        run_state_set(cg, r.run, drain ? "draining" : "stopping",
+                      drain ? "down --drain" : "down");
+        /* wait for the supervisor to act on it; a drain can take as long
+         * as the slowest live agent, so it only waits when asked to */
+        long deadline = (long)time(NULL) + (drain && wait_s == 30 ? 0 : wait_s);
+        char st[16] = "";
+        for (;;) {
+            RunRef now;
+            run_ref(cg, r.run, &now);
+            snprintf(st, sizeof st, "%s", now.state);
+            if (!strcmp(st, "stopped") || !strcmp(st, "complete") ||
+                !strcmp(st, "failed") || (long)time(NULL) >= deadline)
+                break;
+            struct timespec ts = { 0, 100 * 1000 * 1000 };
+            nanosleep(&ts, NULL);
+        }
+        result = !strcmp(st, "stopped") ? "stopped — agents terminated, claims "
+                                          "released, branches kept"
+               : drain ? "draining — live agents finish, then the supervisor stops"
+               : "stop requested — the supervisor has not confirmed yet";
+        if (strcmp(st, "stopped") && !drain) rc = 1;
+    } else {
+        fprintf(stderr, "cg fleet: unknown control %s\n", verb);
+        return 1;
+    }
+    if (json) {
+        RunRef now;
+        run_ref(cg, r.run, &now);
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"run\":"); sb_json_str(&b, r.run);
+        sb_puts(&b, ",\"state\":"); sb_json_str(&b, now.state);
+        sb_printf(&b, ",\"supervisor\":%s}\n", now.alive ? "true" : "false");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    } else {
+        printf("fleet %s: run %s %s\n", verb, r.run, result);
+    }
+    return rc;
+}
+
+int cmd_fleet_runs(Cg *cg, bool json) {
+    bool alive = fleet_supervisor_alive(cg->shared);
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT r.run,r.feature,r.state,ifnull(r.pid,0),ifnull(r.failures,0),"
+        "ifnull(r.wakes_left,0),r.started,r.updated,ifnull(r.reason,''),"
+        "ifnull(r.log,''),(SELECT COUNT(*) FROM fleet_nodes n WHERE n.run=r.run "
+        "AND n.state='live'),(SELECT COUNT(*) FROM fleet_nodes n WHERE "
+        "n.run=r.run) FROM fleet_runs r ORDER BY r.started DESC, r.rowid DESC "
+        "LIMIT 20");
+    StrBuf b; sb_init(&b);
+    if (json) sb_puts(&b, "{\"runs\":[");
+    else sb_printf(&b, "%-12s %-18s %-9s %-10s %5s %5s %5s  %s\n", "run",
+                   "feature", "state", "supervisor", "live", "nodes", "fails",
+                   "reason");
+    int n = 0;
+    bool first_open = true;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *run = (const char *)sqlite3_column_text(st, 0);
+        const char *state = (const char *)sqlite3_column_text(st, 2);
+        bool open = !strcmp(state, "running") || !strcmp(state, "paused") ||
+                    !strcmp(state, "draining") || !strcmp(state, "stopping");
+        /* one supervisor per project: only the newest open run can be its */
+        bool sup = open && first_open && alive;
+        if (open) first_open = false;
+        if (json) {
+            if (n) sb_putc(&b, ',');
+            sb_puts(&b, "{\"run\":"); sb_json_str(&b, run);
+            sb_puts(&b, ",\"feature\":");
+            sb_json_str(&b, (const char *)sqlite3_column_text(st, 1));
+            sb_puts(&b, ",\"state\":"); sb_json_str(&b, state);
+            sb_printf(&b, ",\"supervisor\":%s,\"pid\":%d,\"failures\":%d,"
+                          "\"wakes_left\":%d,\"started\":%lld,\"updated\":%lld,"
+                          "\"live\":%d,\"nodes\":%d,\"reason\":",
+                      sup ? "true" : "false", sqlite3_column_int(st, 3),
+                      sqlite3_column_int(st, 4), sqlite3_column_int(st, 5),
+                      (long long)sqlite3_column_int64(st, 6),
+                      (long long)sqlite3_column_int64(st, 7),
+                      sqlite3_column_int(st, 10), sqlite3_column_int(st, 11));
+            sb_json_str(&b, (const char *)sqlite3_column_text(st, 8));
+            sb_puts(&b, ",\"log\":");
+            sb_json_str(&b, (const char *)sqlite3_column_text(st, 9));
+            sb_putc(&b, '}');
+        } else {
+            sb_printf(&b, "%-12s %-18s %-9s %-10s %5d %5d %5d  %s\n", run,
+                      (const char *)sqlite3_column_text(st, 1), state,
+                      sup ? "alive" : open ? "GONE" : "—",
+                      sqlite3_column_int(st, 10), sqlite3_column_int(st, 11),
+                      sqlite3_column_int(st, 4),
+                      (const char *)sqlite3_column_text(st, 8));
+        }
+        n++;
+    }
+    sqlite3_finalize(st);
+    if (json) sb_puts(&b, "]}\n");
+    else if (!n) sb_puts(&b, "no fleet runs yet — start one with `cg fleet up`\n");
+    fputs(b.p, stdout);
+    sb_free(&b);
+    return 0;
 }
