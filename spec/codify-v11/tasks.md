@@ -54,7 +54,7 @@
     - Slots become tasks on task branches cut from the feature branch; merge-up takes the feature worktree's merge lock so manager and workers run together.
     - Respect each role's concurrency limit and the machine-wide slots.
     - _Requirements: 1.2, 1.3, 1.4_
-  - [ ] 4.2 Stall detection, budgets, retries with triage, escalation
+  - [-] 4.2 Stall detection, budgets, retries with triage, escalation
     - Progress is file changes, commits, tool-call events, or spec transitions; no progress for one window nudges, two restarts with a handoff.
     - Stop on wall-clock or spend budget; retry up to the role's limit with triage, verify tail, and the last summary in the prompt.
     - Escalate to manager, then main, then mark blocked with the reason while the run continues.

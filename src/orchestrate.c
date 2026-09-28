@@ -145,8 +145,14 @@ static bool orch_docs_ready(const char *id) {
 static struct {
     bool set;
     char driver[16], model[128], args[1024];
+    long wall, stall, retries;
+    double spend;
 } g_role[FLEET_ROLES];
 static bool g_driver_explicit;
+/* the attempt a worker being spawned is on: 0 first, else a retry */
+static int g_retry_attempt;
+static void orch_prompt_retry(const char *path, const char *feature,
+                              const char *id, int attempt);
 
 static void orch_roles_load(const Hierarchy *h) {
     for (int r = 0; r < FLEET_ROLES; r++) {
@@ -155,6 +161,10 @@ static void orch_roles_load(const Hierarchy *h) {
         snprintf(g_role[r].driver, sizeof g_role[r].driver, "%s", c->driver);
         snprintf(g_role[r].model, sizeof g_role[r].model, "%s", c->model);
         snprintf(g_role[r].args, sizeof g_role[r].args, "%s", c->args);
+        g_role[r].wall = c->wall;
+        g_role[r].stall = c->stall;
+        g_role[r].retries = c->retries;
+        g_role[r].spend = c->spend;
     }
 }
 
@@ -1548,6 +1558,8 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
                                 sizeof prompt);
     orch_env_restore(&saved);
     if (prc == 0) orch_prompt_steer(prompt, n->agent);
+    if (prc == 0 && g_retry_attempt > 0)
+        orch_prompt_retry(prompt, feature, id, g_retry_attempt);
     if (prc != 0) {
         fprintf(stderr, "cg spec run: could not write the briefing for task "
                 "%s\n", id);
@@ -1789,6 +1801,12 @@ typedef struct {
     long node;            /* fleet_nodes.id */
     long pid_start;       /* kernel start time of n.pid; -1 unknown */
     bool adopted;         /* spawned by an earlier supervisor: not our child */
+    /* supervision (4.2): when this attempt began, when it last did
+     * anything, and the fingerprints that say whether it has since */
+    long started, progress, checked, seen_seq, log_size;
+    char tree_fp[65];
+    int nudges;
+    char why[160];        /* why the supervisor ended it, when it did */
 } OrchFleetSlot;
 
 static int orch_live_fleet(const OrchFleetSlot *s, int n) {
@@ -1809,14 +1827,23 @@ static bool orch_finished_id(const OrchTask *v, int n, const char *id) {
  * holding it, not already tried in this run, and no live worker on its
  * wave — a wave's branch and worktree are shared, so its tasks run one at
  * a time while different waves run side by side. */
+/* attempts this run has made at task id: tried[] keeps one entry per spawn */
+static int orch_attempts(char **tried, int ntried, const char *id) {
+    int c = 0;
+    for (int t = 0; t < ntried; t++) c += strcmp(tried[t], id) == 0;
+    return c;
+}
+
+/* max_attempts: a task tried this many times is not handed out again */
+static int g_max_attempts = 1;
+
+
 static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,
                            const OrchFleetSlot *slots, int nslots,
                            char *out, size_t cap) {
     for (int i = 0; i < n; i++) {
         if (v[i].finished || v[i].claimed) continue;
-        bool skip = false;
-        for (int t = 0; t < ntried && !skip; t++)
-            if (strcmp(tried[t], v[i].id) == 0) skip = true;
+        bool skip = orch_attempts(tried, ntried, v[i].id) >= g_max_attempts;
         for (int j = 0; j < v[i].nreq && !skip; j++)
             if (!orch_finished_id(v, n, v[i].req[j])) skip = true;
         for (int s = 0; s < nslots && !skip; s++)
@@ -1914,6 +1941,12 @@ typedef struct {
     bool stopping, paused, first_turn, frontier_empty;
     char *tried[ORCH_MAX_TRIED];
     char state[16];
+    /* escalations (4.2): a task out of retries goes to its manager (level
+     * 1), then — after a manager wake that did not rescue it — to main and
+     * is blocked (level 2) */
+    char esc_task[32][64];
+    int esc_level[32], nesc, n_unfinished, n_blocked;
+    int esc_wakes[32];
 } Sup;
 
 enum { SUP_GO = 0, SUP_DONE = 1 };
@@ -2094,8 +2127,8 @@ static int fleet_run_resume(Sup *s) {
     }
     sqlite3_finalize(st);
     if (!found) return -1;
-    st = cg_prep(s->g, "SELECT DISTINCT task FROM fleet_nodes WHERE run=? "
-                       "AND role='worker' AND task IS NOT NULL");
+    st = cg_prep(s->g, "SELECT task FROM fleet_nodes WHERE run=? "
+                       "AND role='worker' AND task IS NOT NULL ORDER BY id");
     sqlite3_bind_text(st, 1, s->run, -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW && s->ntried < ORCH_MAX_TRIED)
         s->tried[s->ntried++] = xstrdup((const char *)sqlite3_column_text(st, 0));
@@ -2165,6 +2198,307 @@ static int fleet_run_resume(Sup *s) {
     return 0;
 }
 
+/* ---------------- supervision: stalls, budgets, retries, escalation ---- */
+
+static long wall_ms_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void sup_slot_begin(Cg *g, OrchFleetSlot *sl) {
+    long now = wall_ms_now();
+    sl->started = sl->progress = now;
+    sl->checked = 0;
+    sl->seen_seq = events_head(g);
+    sl->log_size = 0;
+    sl->tree_fp[0] = 0;
+    sl->nudges = 0;
+    sl->why[0] = 0;
+}
+
+/* git's view of the worktree: status and HEAD, hashed */
+static void sup_tree_fp(const char *wt, char out[65]) {
+    StrBuf c; sb_init(&c);
+    sb_puts(&c, "git -C ");
+    sb_shquote(&c, wt);
+    sb_puts(&c, " status --porcelain -uall 2>/dev/null; git -C ");
+    sb_shquote(&c, wt);
+    sb_puts(&c, " rev-parse HEAD 2>/dev/null");
+    FILE *f = popen(c.p, "r");
+    sb_free(&c);
+    StrBuf o; sb_init(&o);
+    if (f) {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, f)) > 0)
+            for (size_t i = 0; i < n; i++) sb_putc(&o, buf[i]);
+        pclose(f);
+    }
+    sha256_hex(o.p, o.len, out);
+    sb_free(&o);
+}
+
+/* Progress is work, not liveness: an event from the agent or about its
+ * task (a tool call, a message, a hook, a claim, a status change), output
+ * in its log, or a change git can see in its worktree. The supervisor's
+ * own events and steering do not count. */
+static bool sup_progressed(Sup *s, OrchFleetSlot *sl) {
+    bool moved = false;
+    char subj[300];
+    snprintf(subj, sizeof subj, "%s/%s", s->feature, sl->n.task);
+    sqlite3_stmt *st = cg_prep(s->g,
+        "SELECT ifnull(MAX(seq),0) FROM events WHERE seq>? AND "
+        "(node=? OR subject=?) AND kind NOT LIKE 'supervisor.%' AND "
+        "kind NOT LIKE 'agent.steer%'");
+    sqlite3_bind_int64(st, 1, sl->seen_seq);
+    sqlite3_bind_text(st, 2, sl->n.agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, subj, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        long m = sqlite3_column_int64(st, 0);
+        if (m > sl->seen_seq) { sl->seen_seq = m; moved = true; }
+    }
+    sqlite3_finalize(st);
+    struct stat lst;
+    if (stat(sl->tap.log, &lst) == 0 && (long)lst.st_size != sl->log_size) {
+        if (sl->log_size || lst.st_size) moved = true;
+        sl->log_size = (long)lst.st_size;
+    }
+    char fp[65];
+    sup_tree_fp(sl->n.worktree, fp);
+    if (sl->tree_fp[0] && strcmp(fp, sl->tree_fp) != 0) moved = true;
+    snprintf(sl->tree_fp, sizeof sl->tree_fp, "%s", fp);
+    return moved;
+}
+
+static void sup_note(Sup *s, const char *kind, const OrchFleetSlot *sl,
+                     const char *action, const char *reason, long value) {
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"agent\":"); sb_json_str(&p, sl->n.agent);
+    sb_puts(&p, ",\"task\":"); sb_json_str(&p, sl->n.task);
+    sb_puts(&p, ",\"action\":"); sb_json_str(&p, action);
+    sb_puts(&p, ",\"reason\":"); sb_json_str(&p, reason);
+    sb_printf(&p, ",\"value\":%ld}", value);
+    char subj[300];
+    snprintf(subj, sizeof subj, "%s/%s", s->feature, sl->n.task);
+    events_emit(s->g, kind, subj, p.p);
+    sb_free(&p);
+}
+
+typedef struct { Cg *cg; const char *task, *blocked, *note; } HandoffCall;
+static int sup_handoff_call(void *v) {
+    HandoffCall *h = v;
+    return cmd_handoff(h->cg, h->task, NULL, "retry from this state",
+                       h->blocked, h->note, false);
+}
+
+/* end an attempt the supervisor gave up on; the reap that follows judges
+ * it by its branch tip like any other exit, and counts it */
+static void sup_end_attempt(Sup *s, OrchFleetSlot *sl, const char *kind,
+                            const char *why, long value) {
+    snprintf(sl->why, sizeof sl->why, "%s", why);
+    sup_note(s, kind, sl, "stop", why, value);
+    char tag[300];
+    snprintf(tag, sizeof tag, "%s/%s", s->feature, sl->n.task);
+    HandoffCall h = { s->g, tag, why, "recorded by the supervisor" };
+    char *out = NULL;
+    cg_capture(&out, sup_handoff_call, &h);
+    free(out);
+    printf("[fleet] worker %s on %s: %s — stopping it\n", sl->n.agent,
+           sl->n.task, why);
+    fflush(stdout);
+    if (kill(-sl->n.pid, SIGTERM) != 0) kill(sl->n.pid, SIGTERM);
+}
+
+static void sup_supervise(Sup *s) {
+    long stall = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].stall : 900;
+    long wall = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].wall : 7200;
+    double spend = g_role[FLEET_WORKER].set ? g_role[FLEET_WORKER].spend : 0;
+    long cadence = stall > 0 ? stall * 250 : 30000;     /* a quarter window */
+    if (cadence < 250) cadence = 250;
+    if (cadence > 30000) cadence = 30000;
+    long now = wall_ms_now();
+    for (int i = 0; i < s->nslots; i++) {
+        OrchFleetSlot *sl = &s->slots[i];
+        if (!sl->live || sl->why[0]) continue;
+        if (!sl->started) sup_slot_begin(s->g, sl);   /* adopted */
+        if (wall > 0 && now - sl->started > wall * 1000) {
+            char why[160];
+            snprintf(why, sizeof why, "wall-clock budget of %lds spent", wall);
+            sup_end_attempt(s, sl, "supervisor.budget", why, wall);
+            continue;
+        }
+        if (spend > 0 && sl->tap.cost > spend) {
+            char why[160];
+            snprintf(why, sizeof why, "spend budget of $%.2f exceeded ($%.2f)",
+                     spend, sl->tap.cost);
+            sup_end_attempt(s, sl, "supervisor.budget", why,
+                            (long)(sl->tap.cost * 100));
+            continue;
+        }
+        if (now - sl->checked >= cadence) {
+            sl->checked = now;
+            if (sup_progressed(s, sl)) sl->progress = now;
+        }
+        if (stall <= 0 || now - sl->progress < stall * 1000) continue;
+        long idle = (now - sl->progress) / 1000;
+        if (sl->nudges == 0) {
+            char msg[400];
+            snprintf(msg, sizeof msg, "The supervisor has seen no progress on "
+                     "%s for %lds. Continue if you are working; if you are "
+                     "stuck, record why with `cg handoff --task %s --blocked "
+                     "\"...\"` and exit.", sl->n.task, idle, sl->n.task);
+            driver_steer(s->g, sl->n.agent, msg);
+            sup_note(s, "supervisor.stall", sl, "nudge", "no progress", idle);
+            printf("[fleet] worker %s on %s: no progress for %lds — nudged\n",
+                   sl->n.agent, sl->n.task, idle);
+            fflush(stdout);
+            sl->nudges = 1;
+            sl->progress = now;                 /* one more window */
+        } else {
+            char why[160];
+            snprintf(why, sizeof why, "stalled — no progress for %lds after a "
+                     "nudge", idle);
+            sup_end_attempt(s, sl, "supervisor.stall", why, idle);
+        }
+    }
+}
+
+static int sup_esc_find(Sup *s, const char *task) {
+    for (int i = 0; i < s->nesc; i++)
+        if (strcmp(s->esc_task[i], task) == 0) return i;
+    return -1;
+}
+
+static void sup_escalate(Sup *s, const char *task, int level,
+                         const char *reason) {
+    int k = sup_esc_find(s, task);
+    if (k < 0) {
+        if (s->nesc >= 32) return;
+        k = s->nesc++;
+        snprintf(s->esc_task[k], sizeof s->esc_task[k], "%s", task);
+    }
+    s->esc_level[k] = level;
+    s->esc_wakes[k] = s->wakes;
+    char to[128];
+    if (level == 1)
+        snprintf(to, sizeof to, "%s", s->mgr.agent[0] ? s->mgr.agent : "manager");
+    else
+        snprintf(to, sizeof to, "%s", "main");
+    char subj[300];
+    snprintf(subj, sizeof subj, "%s/%s", s->feature, task);
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"task\":"); sb_json_str(&p, task);
+    sb_printf(&p, ",\"level\":%d,\"to\":", level);
+    sb_json_str(&p, level == 1 ? "manager" : "main");
+    sb_puts(&p, ",\"agent\":"); sb_json_str(&p, to);
+    sb_puts(&p, ",\"reason\":"); sb_json_str(&p, reason);
+    sb_putc(&p, '}');
+    events_emit(s->g, level == 2 ? "supervisor.blocked" : "supervisor.escalate",
+                subj, p.p);
+    sb_free(&p);
+    char msg[600];
+    if (level == 1) {
+        snprintf(msg, sizeof msg, "Task %s failed every attempt the budget "
+                 "allows (%s). Decide: fix it on the feature branch yourself, "
+                 "re-plan it, or record it as blocked with `cg handoff --task "
+                 "%s --blocked \"...\"` so the run can finish the rest.",
+                 task, reason, task);
+        driver_steer(s->g, to, msg);
+        printf("[fleet] %s out of retries — escalated to %s\n", task, to);
+    } else {
+        snprintf(msg, sizeof msg, "Task %s of %s is blocked: every attempt "
+                 "failed and the feature manager did not rescue it (%s).",
+                 task, s->feature, reason);
+        const char *main_agent = "gideon";
+        driver_steer(s->g, main_agent, msg);
+        char body[700];
+        snprintf(body, sizeof body, "blocked: %s — out of retries, escalated "
+                 "to the feature manager and main (%s)", task, reason);
+        memory_add(s->g, "outcome", subj, body, NULL, NULL, "auto");
+        printf("[fleet] %s blocked — escalated to main\n", task);
+    }
+    fflush(stdout);
+}
+
+/* after a reap: a failed task out of attempts goes up a level */
+static void sup_after_failure(Sup *s, const char *task, const char *why) {
+    if (orch_attempts(s->tried, s->ntried, task) < g_max_attempts) return;
+    if (sup_esc_find(s, task) >= 0) return;
+    sup_escalate(s, task, 1, why && why[0] ? why : "attempts exhausted");
+}
+
+/* a manager wake came and went and the task is still not qualified */
+static void sup_escalations_check(Sup *s, const OrchTask *v, int n) {
+    for (int k = 0; k < s->nesc; k++) {
+        if (s->esc_level[k] != 1 || s->mgr_live) continue;
+        if (s->wakes >= s->esc_wakes[k]) continue;     /* no wake since */
+        if (orch_finished_id(v, n, s->esc_task[k])) continue;
+        sup_escalate(s, s->esc_task[k], 2, "the manager did not rescue it");
+    }
+    s->n_unfinished = s->n_blocked = 0;
+    for (int i = 0; i < n; i++) {
+        if (v[i].finished) continue;
+        s->n_unfinished++;
+        int k = sup_esc_find(s, v[i].id);
+        if (k >= 0 && s->esc_level[k] == 2) s->n_blocked++;
+    }
+}
+
+/* What the last attempts at a task left behind, for the next one's prompt:
+ * why the supervisor stopped it, what the agent said last, and the
+ * recorded outcomes (verify failures and their triage among them). */
+static void orch_prompt_retry(const char *path, const char *feature,
+                              const char *id, int attempt) {
+    Cg g;
+    if (!memory_open_quiet(&g)) return;
+    char subj[300];
+    snprintf(subj, sizeof subj, "%s/%s", feature, id);
+    StrBuf b; sb_init(&b);
+    sb_printf(&b, "\n\n## Previous attempts\n\nThis is attempt %d at %s. "
+              "Do not repeat what failed:\n", attempt + 1, id);
+    sqlite3_stmt *st = cg_prep(&g,
+        "SELECT kind,payload FROM events WHERE subject=? AND (kind IN "
+        "('agent.result','supervisor.stall','supervisor.budget') OR "
+        "(kind='agent.text')) ORDER BY seq DESC LIMIT 12");
+    sqlite3_bind_text(st, 1, subj, -1, SQLITE_TRANSIENT);
+    int texts = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *k = (const char *)sqlite3_column_text(st, 0);
+        const char *p = (const char *)sqlite3_column_text(st, 1);
+        if (!strncmp(k, "supervisor.", 11)) {
+            char *r = json_get_string(p, "reason");
+            char *a = json_get_string(p, "action");
+            if (a && !strcmp(a, "stop")) sb_printf(&b, "- stopped by the supervisor: %s\n", r ? r : "?");
+            free(r); free(a);
+        } else if (!strcmp(k, "agent.result")) {
+            char *t = json_get_string(p, "text");
+            char *sub = json_get_string(p, "subtype");
+            sb_printf(&b, "- the agent finished with %s%s%s\n", sub ? sub : "?",
+                      t && t[0] ? ": " : "", t ? t : "");
+            free(t); free(sub);
+        } else if (texts < 2) {
+            char *t = json_get_string(p, "text");
+            if (t && t[0]) { sb_printf(&b, "- it said: %s\n", t); texts++; }
+            free(t);
+        }
+    }
+    sqlite3_finalize(st);
+    Memory *mem = NULL;
+    int nm = memory_query(&g, NULL, subj, "outcome", 3, &mem);
+    for (int i = 0; i < nm; i++) sb_printf(&b, "- outcome: %s\n", mem[i].body);
+    memory_free(mem, nm);
+    cg_close(&g);
+    char *body = read_entire_file(path, NULL);
+    StrBuf o; sb_init(&o);
+    sb_puts(&o, body ? body : "");
+    sb_puts(&o, b.p);
+    write_entire_file(path, o.p, o.len);
+    sb_free(&o);
+    sb_free(&b);
+    free(body);
+}
+
 /* 1: an approval for this feature is pending (the manager has nothing to
  * do but wait); 2: one was rejected (the run stops); 0: neither */
 static int sup_approval(Sup *s, long *id) {
@@ -2207,6 +2541,7 @@ static int supervisor_tick(Sup *s) {
     for (int i = 0; i < s->nslots; i++)
         if (s->slots[i].live) driver_tap_poll(&s->slots[i].tap);
     if (s->mgr_live) driver_tap_poll(&s->mgr_tap);
+    if (!s->paused) sup_supervise(s);
 
     /* reap workers: the branch tip, not the exit code, decides */
     for (int i = 0; i < s->nslots; i++) {
@@ -2227,17 +2562,19 @@ static int supervisor_tick(Sup *s) {
         printf("[fleet] worker %s task %s exit %s → %s\n", sl->n.agent,
                sl->n.task, ex, ok ? ts : "INCOMPLETE");
         fflush(stdout);
+        const char *outcome = ok ? ts : sl->why[0] ? sl->why : "incomplete";
         orch_event("orch.exit", "worker", sl->n.agent, feature, sl->n.task,
-                   sl->n.pid, crc > -900 ? crc : -1, ok ? ts : "incomplete",
-                   sl->n.branch, NULL);
-        sup_node_end(s, sl->node, "exited", crc, ok ? ts : "incomplete");
+                   sl->n.pid, crc > -900 ? crc : -1, outcome, sl->n.branch, NULL);
+        sup_node_end(s, sl->node, "exited", crc, outcome);
         if (!ok) {
             orch_abandon(g->shared, feature, sl->n.task, sl->n.agent,
                          sl->n.attempt, sl->n.fence);
             orch_note_failure(feature, sl->n.task, crc > -900 ? crc : -1);
             s->failures++;
             sup_save(s);
+            sup_after_failure(s, sl->n.task, sl->why);
         }
+        sl->why[0] = 0;
         free(ts);
     }
 
@@ -2269,6 +2606,7 @@ static int supervisor_tick(Sup *s) {
         orch_note_failure(feature, sl->n.task, -2);
         s->failures++;
         sup_save(s);
+        sup_after_failure(s, sl->n.task, "lost its fenced claim");
     }
 
     if (s->mgr_live) {
@@ -2334,6 +2672,21 @@ static int supervisor_tick(Sup *s) {
         fflush(stdout);
         s->waiting_on = appr;
     }
+    /* nothing left that anyone can move: every unfinished task is blocked
+     * after its manager and main were told — end, and say which */
+    if (!s->mgr_live && live == 0 && !sub.complete && s->frontier_empty &&
+        s->n_unfinished > 0 && s->n_unfinished == s->n_blocked) {
+        StrBuf r; sb_init(&r);
+        sb_puts(&r, "blocked:");
+        for (int k = 0; k < s->nesc; k++)
+            if (s->esc_level[k] == 2) sb_printf(&r, " %s", s->esc_task[k]);
+        printf("[fleet] %s cannot finish — %s\n", feature, r.p);
+        fflush(stdout);
+        s->rc = 1;
+        sup_set_state(s, "blocked", r.p);
+        sb_free(&r);
+        return SUP_DONE;
+    }
     if (!s->stopping && !s->paused && !s->mgr_live && !sub.complete &&
         live == 0 && ap == 0 && (s->first_turn || s->frontier_empty) &&
         now - s->last_wake >= ORCH_WAKE_BACKOFF) {
@@ -2391,10 +2744,13 @@ static int supervisor_tick(Sup *s) {
             if (!orch_next_task(v, n, s->tried, s->ntried, s->slots,
                                 s->nslots, id, sizeof id))
                 break;
+            g_retry_attempt = orch_attempts(s->tried, s->ntried, id);
             s->tried[s->ntried++] = xstrdup(id);
             FleetNode wn;
-            if (orch_spawn_worker(g, feature, id, cfg->driver, s->extra,
-                                  cfg->cmd, false, &wn) != 0) {
+            int wrc = orch_spawn_worker(g, feature, id, cfg->driver, s->extra,
+                                        cfg->cmd, false, &wn);
+            g_retry_attempt = 0;
+            if (wrc != 0) {
                 orch_note_failure(feature, id, -1);
                 s->failures++;
                 sup_save(s);
@@ -2405,6 +2761,7 @@ static int supervisor_tick(Sup *s) {
             sl->adopted = false;
             sl->pid_start = proc_start_time(wn.pid);
             sl->last_heartbeat = (long)time(NULL);
+            sup_slot_begin(g, sl);
             printf("[fleet] worker %s → %s (wave %ld) on %s, log "
                    ".codegraph/agents/%s-%s.log\n", wn.agent, id, wn.wave,
                    wn.branch, feature, id);
@@ -2422,6 +2779,7 @@ static int supervisor_tick(Sup *s) {
         s->frontier_empty = !orch_next_task(v, n, s->tried, s->ntried,
                                             s->slots, s->nslots, probe,
                                             sizeof probe);
+        sup_escalations_check(s, v, n);
         orch_tasks_free(v, n);
     }
 
@@ -2508,6 +2866,9 @@ static int supervisor_run(Cg *g, const char *feature, const char *fbranch,
     s.first_turn = true;
     s.ttl_min = cfg->ttl > 0 ? (cfg->ttl + 59) / 60 : 60;
     s.mgr.pid = -1;
+    g_max_attempts = 1 + (int)(g_role[FLEET_WORKER].set
+                               ? g_role[FLEET_WORKER].retries : 2);
+    if (g_max_attempts < 1) g_max_attempts = 1;
     snprintf(s.feature, sizeof s.feature, "%s", feature);
     snprintf(s.fbranch, sizeof s.fbranch, "%s", fbranch);
     snprintf(s.fwt, sizeof s.fwt, "%s", fwt);

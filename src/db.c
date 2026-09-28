@@ -117,6 +117,10 @@ static const char *SCHEMA =
     "  kind TEXT NOT NULL, subject TEXT, run TEXT, node TEXT, branch TEXT,"
     "  payload TEXT);"
     "CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind,seq);"
+    /* the supervisor asks "has this agent or its task done anything since
+     * seq N" for every live worker on a short cadence */
+    "CREATE INDEX IF NOT EXISTS idx_events_node ON events(node,seq);"
+    "CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject,seq);"
     /* durable fleet runs (orchestrate.c): a supervisor's whole state, so a
      * restarted supervisor continues the run instead of starting over.
      * state is also the control channel — cg fleet pause/down write it and

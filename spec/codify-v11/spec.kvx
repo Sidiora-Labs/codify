@@ -189,14 +189,14 @@ reqs       = ["1.2", "1.3", "1.4"]
 
 [task.4.2]
 title      = "Stall detection, budgets, retries with triage, escalation"
-status     = "pending"
+status     = "in_progress"
 wave       = 4
 requires   = ["3.1", "2.2"]
 symbols    = ["supervisor_stall_check", "supervisor_budget_check", "supervisor_retry", "supervisor_escalate"]
-touches    = ["src/orchestrate.c", "src/runtime.c", "src/jev.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/fixtures/fleet/fake-driver.sh"]
+touches    = ["src/orchestrate.c", "src/db.c", "tests/integration/32_supervisor.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/32_supervisor.sh supervise"
 do_1       = "Progress is file changes, commits, tool-call events, or spec transitions; no progress for one window nudges, two restarts with a handoff."
-do_2       = "Stop on wall-clock or spend budget; retry up to the role's limit with triage, verify tail, and the last summary in the prompt."
+do_2       = "Stop on wall-clock or spend budget; retry up to the role's limit with the last result, the supervisor's reason, and the task's outcome memories (verify failures and their Jev triage) in the prompt."
 do_3       = "Escalate to manager, then main, then mark blocked with the reason while the run continues."
 reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5"]
 

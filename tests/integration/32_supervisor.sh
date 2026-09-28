@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # supervisor: durable fleet runs that survive their supervisor.
+#   supervise — stalls nudged then stopped, retries with what failed,
+#             escalation to manager then main, blocked runs, budgets
 #   durable — cg fleet up (foreground and detached), runs, pause/resume,
 #             kill -9 of the supervisor then up --resume adopting the live
 #             worker, down with and without a supervisor, approval gates
@@ -64,6 +66,24 @@ PF="\$1"; TASK="\$2"; ROOT="\$3"; AGENT="\$4"
 cd "\$ROOT" || exit 9
 if [ "\$CG_ROLE" = worker ]; then
     echo \$\$ > "$TMP/go/pid-\$TASK"
+    n=1; while [ -f "$TMP/go/prompt-\$TASK-\$n" ]; do n=\$((n+1)); done
+    cp "\$PF" "$TMP/go/prompt-\$TASK-\$n"
+    if [ -f "$TMP/go/stall-\$TASK" ]; then sleep 120; exit 0; fi
+    if [ -f "$TMP/go/spend-\$TASK" ]; then
+        echo '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":5.0,"num_turns":1}'
+        sleep 120; exit 0
+    fi
+    if [ -f "$TMP/go/wall-\$TASK" ]; then
+        i=0; while [ \$i -lt 600 ]; do
+            echo "{\\"type\\":\\"assistant\\",\\"message\\":{\\"content\\":[{\\"type\\":\\"text\\",\\"text\\":\\"tick \$i\\"}]}}"
+            i=\$((i+1)); sleep 0.2
+        done; exit 0
+    fi
+    if [ -f "$TMP/go/failonce-\$TASK" ] && [ ! -f "$TMP/go/failed-\$TASK" ]; then
+        : > "$TMP/go/failed-\$TASK"
+        echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"compile error in alpha","total_cost_usd":0.01}'
+        exit 1
+    fi
     if [ -f "$TMP/go/gated" ]; then
         while [ ! -f "$TMP/go/go-\$TASK" ]; do sleep 0.1; done
     fi
@@ -225,6 +245,90 @@ assert a["state"] == "used" and a["note"] == "looks good", a
     has "$out" '"kind":"approval.decided"'
     # a person landing by hand is its own approval
     expect_rc 1 "$CG" fleet approve 9999
+fi
+
+if want supervise; then
+    evk() { "$CG" events --kind "$1" --json -n 500; }
+    count() { evk "$1" | python3 -c "import json,sys; print(sum(1 for l in sys.stdin if l.strip() and $2))"; }
+
+    # ---- a stalled worker is nudged, then stopped with a handoff, retried
+    #      once, escalated to its manager, then to main, and the run ends
+    #      blocked on it while the rest of the feature was done
+    EXTRA_ROLE='[role.worker]
+stall   = "1s"
+retries = 1' setup_repo
+    : > "$TMP/go/stall-2.1"
+    rc=0; out="$(timeout 120 "$CG" fleet up --foreground -n 1 2>&1)" || rc=$?
+    [ "$rc" -eq 1 ] || fail "a blocked run exits 1, got $rc: $out"
+    has "$out" "no progress for"
+    has "$out" "nudged"
+    has "$out" "stalled — no progress for"
+    has "$out" "2.1 out of retries — escalated to fm-fleet"
+    has "$out" "2.1 blocked — escalated to main"
+    has "$out" "fleet cannot finish — blocked: 2.1"
+    [ "$(run_state)" = blocked ] || fail "run state $(run_state)"
+    [ "$(run_field reason)" = "blocked: 2.1" ] || fail "reason $(run_field reason)"
+    [ "$(spawns 2.1)" = 2 ] || fail "2.1 should run exactly twice (1 retry), ran $(spawns 2.1)"
+    [ "$(count supervisor.stall 'json.loads(l)["payload"]["action"] == "nudge"')" = 2 ] || fail "one nudge per attempt"
+    [ "$(count supervisor.stall 'json.loads(l)["payload"]["action"] == "stop"')" = 2 ] || fail "one stop per attempt"
+    [ "$(count supervisor.escalate 'json.loads(l)["payload"]["agent"] == "fm-fleet"')" = 1 ] || fail "escalation to the manager"
+    [ "$(count supervisor.blocked 'json.loads(l)["payload"]["to"] == "main"')" = 1 ] || fail "escalation to main"
+    steer="$(evk agent.steer)"
+    has "$steer" '"subject":"w-fleet-1"'                 # the nudge
+    has "$steer" '"subject":"fm-fleet"'                  # the escalation
+    has "$steer" '"subject":"gideon"'                    # main
+    # the rest of the feature was not held up by the stuck task
+    has "$(git show feature/fleet:spec/fleet/spec.kvx | sed -n '/task.3.1/,/^$/p')" 'status = "done"'
+    # the stop left a handoff, and the retry's prompt says what happened
+    has "$("$CG" resume --task 2.1)" "blocked: stalled — no progress for"
+    p2="$(cat "$TMP/go/prompt-2.1-2")"
+    has "$p2" "## Previous attempts"
+    has "$p2" "This is attempt 2 at 2.1"
+    has "$p2" "stopped by the supervisor: stalled"
+    hasnt "$(cat "$TMP/go/prompt-2.1-1")" "## Previous attempts"
+    has "$("$CG" recall blocked --task fleet/2.1)" "out of retries, escalated"
+
+    # ---- a failed attempt is retried with what it said, and the run ends
+    #      complete
+    EXTRA_ROLE='[role.worker]
+retries = 2' setup_repo
+    : > "$TMP/go/failonce-2.1"
+    out="$(timeout 120 "$CG" fleet up --foreground -n 1 2>&1)" || fail "retry run: $out"
+    has "$out" "[fleet] fleet complete"
+    [ "$(run_state)" = complete ] || fail "run state $(run_state)"
+    [ "$(run_field failures)" = 1 ] || fail "failures $(run_field failures)"
+    [ "$(spawns 2.1)" = 2 ] || fail "2.1 ran $(spawns 2.1) times"
+    p2="$(cat "$TMP/go/prompt-2.1-2")"
+    has "$p2" "## Previous attempts"
+    has "$p2" "the agent finished with error_during_execution: compile error in alpha"
+    [ "$(count supervisor.escalate 'True')" = 0 ] || fail "a rescued retry must not escalate"
+
+    # ---- budgets: wall clock, then spend
+    EXTRA_ROLE='[role.worker]
+wall    = "2s"
+stall   = "1h"
+retries = 0' setup_repo
+    : > "$TMP/go/wall-2.1"
+    timeout 120 "$CG" fleet up --foreground -n 1 >/dev/null 2>&1 || true
+    evk supervisor.budget | python3 -c '
+import json, sys
+ev = [json.loads(l) for l in sys.stdin if l.strip()]
+assert len(ev) == 1 and ev[0]["subject"] == "fleet/2.1", ev
+assert ev[0]["payload"]["reason"] == "wall-clock budget of 2s spent", ev
+' || fail "wall budget"
+    [ "$(count supervisor.stall 'True')" = 0 ] || fail "a busy worker must not be called stalled"
+
+    EXTRA_ROLE='[role.worker]
+spend   = "$1"
+retries = 0' setup_repo
+    : > "$TMP/go/spend-2.1"
+    timeout 120 "$CG" fleet up --foreground -n 1 >/dev/null 2>&1 || true
+    evk supervisor.budget | python3 -c '
+import json, sys
+ev = [json.loads(l) for l in sys.stdin if l.strip()]
+assert len(ev) == 1, ev
+assert ev[0]["payload"]["reason"] == "spend budget of $1.00 exceeded ($5.00)", ev
+' || fail "spend budget"
 fi
 
 echo "supervisor OK"
