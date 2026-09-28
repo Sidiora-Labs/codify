@@ -158,7 +158,7 @@ reqs       = ["1.1", "1.6", "1.7"]
 
 [task.3.2]
 title      = "Graph-grounded task packets and upstream deltas"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 requires   = ["1.1"]
 symbols    = ["task_packet_build", "packet_upstream_evidence", "work_upstream_delta"]
