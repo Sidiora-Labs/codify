@@ -21,7 +21,7 @@
 ## One connection, structured agent output
 
 - [ ] 2. Serve and drivers
-  - [-] 2.1 cg serve: JSON-RPC over stdio with event subscriptions
+  - [x] 2.1 cg serve: JSON-RPC over stdio with event subscriptions
     - Factor the MCP tool table into a dispatch both servers share; serve answers call, tools, subscribe, unsubscribe, and ping.
     - Wake on WAL change through inotify with a stat fallback and push events_since the subscriber's cursor; never take the write lock while idle.
     - Test push latency under 250 ms and that an idle serve leaves the index lock free.

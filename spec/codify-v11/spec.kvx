@@ -114,7 +114,7 @@ status  = "pending"
 
 [task.2.1]
 title      = "cg serve: JSON-RPC over stdio with event subscriptions"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["1.1"]
 symbols    = ["cmd_serve", "serve_dispatch", "serve_push", "mcp_call_tool", "cmd_tool"]
