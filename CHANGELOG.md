@@ -1,6 +1,6 @@
 # Changelog
 
-_Maintained from local Codify snapshots (`cg log`); symbol-level changes are derived from the code graph._
+_Maintained from local Codify snapshots \(`cg log`).\ symbol-level changes are derived from the code graph._
 
 ## 0.9.0 (v10) — fleet-safe sync, hierarchy, unified graph, Jev
 
