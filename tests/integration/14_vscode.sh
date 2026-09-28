@@ -12,6 +12,8 @@
 #   fleet    — (task 5.3) the fleet view: its manifest surface and the join
 #              behind FleetView, from JSON the real cg printed
 #   chat     — (task 5.3) the agent chat core: diff rows, ANSI, cost ledger
+#   fleetchat — (v11 6.2) served tools as slash commands with typed args,
+#              approval cards, the transcript window at 10k entries
 #   start    — (v11 6.1) the Start flow's plan from real cg output, the
 #              live fleet view decorated from events, manifest and lens
 #   serve    — (v11 5.2) the cg serve client, the event reducer and row
@@ -301,6 +303,100 @@ check(/'fleet', 'down'/.test(src) && /--drain/.test(src), 'Stop runs cg fleet do
 console.log('start wiring ok');
 JS
     [ $? -eq 0 ] || fail "start wiring"
+fi
+
+# ---- chat capabilities (v11 6.2): served tools as commands, attach and
+#      steer, approvals as cards, a transcript that stays responsive
+if want fleetchat; then
+    rm -rf "$TMP/fc"; mkdir -p "$TMP/fc/src"; cd "$TMP/fc"
+    echo 'export function alpha(){ return 1 }' > src/a.ts
+    "$CG" spec new fc >/dev/null
+    "$CG" init >/dev/null
+    python3 - <<'EOF'
+import sqlite3, time
+db = sqlite3.connect(".codegraph/graph.db", isolation_level=None)
+db.execute("INSERT INTO fleet_approvals(gate,subject,state,requested,requested_by) VALUES('pr','fc','pending',?, 'fm-fc')", (int(time.time()),))
+EOF
+    node - "$EXT" "$CG" "$TMP/fc" <<'JS'
+const path = require('path'), cp = require('child_process'), fs = require('fs');
+const [dir, CG, cwd] = process.argv.slice(2);
+const { ChatCapabilities, approvalCard, Window } = require(path.join(dir, 'agents.js'));
+const check = (c, w) => { if (!c) throw new Error(w); };
+const run = (...a) => cp.spawnSync(CG, a, { cwd, encoding: 'utf8' });
+
+// ---- every served tool is a command, with a hint from its schema
+const caps = ChatCapabilities.fromListJson(run('tool', 'list', '--json').stdout);
+const cmds = caps.commands();
+check(cmds.length > 40, `only ${cmds.length} tool commands`);
+const ctx = cmds.find((c) => c.n === 'get_context');
+check(ctx && /<query>/.test(ctx.a) && ctx.tool === true && ctx.readOnly === true, `get_context: ${JSON.stringify(ctx)}`);
+const claim = cmds.find((c) => c.n === 'spec_claim');
+check(claim && /<id>/.test(claim.a) && /\[agent=…\]/.test(claim.a) && claim.readOnly === false, `spec_claim: ${JSON.stringify(claim)}`);
+check(caps.has('spec_status') && !caps.has('no_such'), 'has()');
+check(cmds.every((c, i, a) => i === 0 || a[i - 1].n <= c.n), 'sorted');
+
+// ---- arguments: the whole line for one text field, key=value otherwise, typed
+check(JSON.stringify(caps.args('get_context', 'auth flow here')) === '{"query":"auth flow here"}', 'free text → the required field');
+check(JSON.stringify(caps.args('spec_claim', 'id=2.1 agent=w1 ttl=20')) === '{"id":"2.1","agent":"w1","ttl":20}', 'pairs, typed: ' + JSON.stringify(caps.args('spec_claim', 'id=2.1 agent=w1 ttl=20')));
+check(JSON.stringify(caps.args('spec_claim', '2.1')) === '{"id":"2.1"}', 'a bare value fills the first required field');
+check(JSON.stringify(caps.args('impact_analysis', 'name=alpha depth=2')) === '{"name":"alpha","depth":2}', 'integers are numbers');
+check(JSON.stringify(caps.args('brief', '')) === '{}', 'no args');
+check(JSON.stringify(caps.args('remember', 'text="two words" type=decision')) === '{"text":"two words","type":"decision"}', 'quoted values');
+// and the arguments really drive the tool
+const sym = run('tool', 'call', 'get_symbol', JSON.stringify(caps.args('get_symbol', 'alpha')));
+check(sym.status === 0 && /alpha/.test(sym.stdout) && /src\/a\.ts/.test(sym.stdout), 'tool call with parsed args: ' + sym.stdout.slice(0, 200));
+
+// ---- the approval card says what the event said, and offers the decision
+const card = approvalCard({ kind: 'approval.request', payload: { id: 7, gate: 'land', subject: 'fc', state: 'pending', by: 'fm-fc' } });
+check(card.type === 'approval' && card.id === 7 && /land fc on main/.test(card.title), card.title);
+check(/asked by fm-fc/.test(card.detail), card.detail);
+check(card.options.map((o) => o.action).join(',') === 'approve,reject', 'two options');
+check(card.commands[0] === 'cg fleet approve 7' && /--reject/.test(card.commands[1]), 'the commands behind the buttons');
+check(approvalCard({ payload: { id: 8, gate: 'drift', subject: 'fc/2.1', state: 'approved' } }).options.length === 0, 'a decided approval has no buttons');
+// the real pending approval is what /approvals would draw
+const pending = JSON.parse(run('fleet', 'approvals', '--json').stdout).approvals;
+const real = approvalCard({ payload: { id: pending[0].id, gate: pending[0].gate, subject: pending[0].subject, state: pending[0].state, by: pending[0].requested_by } });
+check(/open the pull request for fc/.test(real.title) && real.options.length === 2, real.title);
+
+// ---- the window at ten thousand entries
+const w = new Window(400, 200);
+const t0 = Date.now();
+for (let i = 0; i < 10000; i++) w.push({ i });
+const took = Date.now() - t0;
+check(took < 200, `10000 pushes took ${took} ms`);
+check(w.shown.length === 400 && w.hiddenCount === 9600 && w.size === 10000, `window ${w.shown.length}/${w.hiddenCount}`);
+check(w.shown[0].i === 9600 && w.shown[399].i === 9999, 'the newest stay');
+const back = w.expand();
+check(back.length === 200 && back[0].i === 9400 && w.shown.length === 600 && w.shown[0].i === 9400, 'a page comes back in order');
+check(w.trimmed === 9600, 'trimmed count');
+console.log('chat capabilities ok');
+JS
+    [ $? -eq 0 ] || fail "chat capabilities"
+
+    # ---- wiring: the session and the panel
+    node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const acp = fs.readFileSync(path.join(dir, 'acp.js'), 'utf8');
+const html = fs.readFileSync(path.join(dir, 'agentpanel.html'), 'utf8');
+const ext = fs.readFileSync(path.join(dir, 'extension.js'), 'utf8');
+const check = (c, w) => { if (!c) throw new Error(w); };
+check(/tools: caps\.commands\(\)/.test(acp) && /\['tool', 'list', '--json'\]/.test(acp), 'init carries the served tools');
+check(/\['tool', 'call', name, JSON\.stringify\(a\)\]/.test(acp), 'a tool command runs cg tool call');
+check(/async function attachAgent/.test(acp) && /\['fleet', 'steer', agent, text\]/.test(acp), 'attach and steer');
+check(/if \(sess\.attached\) \{ steerAgent/.test(acp), 'a plain message steers the attached agent');
+check(/deps\.events\.on\(/.test(acp) && /setInterval\(async/.test(acp), 'events when served, cg events when not');
+check(/approval\.request/.test(acp) && /supervisor\.escalate/.test(acp), 'approvals and escalations reach the chat');
+check(/\['fleet', 'approve', String\(id\)\]/.test(acp), 'a button decides through cg fleet approve');
+check(/function approvalCard\(m\)/.test(html) && /type: 'approve'/.test(html), 'the panel draws the approval and posts the decision');
+check(/function escalationCard/.test(html) && /type: 'steer'/.test(html), 'an escalation offers to steer');
+check(/toolCommands = m\.tools/.test(html) && /concat\(tools\)/.test(html), 'served tools are in the slash menu');
+check(/WINDOW_KEEP = 400/.test(html) && /trimWindow\(\)/.test(html) && /earlier entries — show/.test(html), 'the transcript is windowed');
+check(/id="attachpill"/.test(html) && /function setAttached/.test(html), 'the attached pill');
+check(/events: \{\s*available:/.test(ext) && /eventFans/.test(ext), 'the extension fans events to the chat');
+console.log('chat wiring ok');
+JS
+    [ $? -eq 0 ] || fail "chat wiring"
 fi
 
 # ---- agent chat (5.3): the pure chat core, provable without VS Code

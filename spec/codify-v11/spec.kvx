@@ -262,12 +262,12 @@ reqs       = ["6.2", "6.3"]
 
 [task.6.2]
 title      = "Capability-complete chat: generated tools, attach, steer, approvals"
-status     = "pending"
+status     = "in_progress"
 wave       = 6
 requires   = ["5.2", "2.2", "3.1"]
 symbols    = ["ChatCapabilities", "attachAgent", "approvalCard"]
 touches    = ["editors/vscode/agentpanel.html", "editors/vscode/agents.js", "editors/vscode/acp.js", "editors/vscode/extension.js", "editors/vscode/package.json", "tests/integration/14_vscode.sh", "tests/integration/19_acp.sh"]
-verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh chat && CG=$PWD/cg tests/integration/19_acp.sh"
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh fleetchat && CG=$PWD/cg tests/integration/14_vscode.sh chat && CG=$PWD/cg tests/integration/19_acp.sh"
 do_1       = "Slash commands generated from the served tool list with argument hints; results render as cards."
 do_2       = "Attach to any fleet agent's live transcript and steer it through driver_steer; approvals and escalations render as actionable cards."
 do_3       = "Windowed rendering for transcripts and event lists; headless test at ten thousand entries."

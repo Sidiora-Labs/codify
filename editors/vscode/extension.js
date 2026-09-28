@@ -55,6 +55,7 @@ const live = liveModel();
 function serveConnected() { return !!(serveClient && serveClient.ready); }
 /* a burst of pushed events becomes one catch-up refresh, soon */
 const EVENT_REFRESH_MS = 250;
+const eventFans = [];   /* the chat's listeners on the serve events */
 
 /* A burst of triggers becomes one refresh; two refreshes are never closer
  * than the floor unless a command asked for one; a whole-tree pass is only
@@ -679,6 +680,12 @@ async function activate(ctx) {
     acpApi = acp.register(ctx, {
         cg, cgJson, refresh: () => afterMutation(), workspaceRoot,
         startTerminal: agentApi.startTerminal,
+        /* pushed events for the chat: attached transcripts, approvals,
+         * escalations; absent until the serve connection is up */
+        events: {
+            available: () => serveConnected(),
+            on: (fn) => { eventFans.push(fn); return () => { const i = eventFans.indexOf(fn); if (i >= 0) eventFans.splice(i, 1); }; },
+        },
     });
     /* --- memories (5.2) --- */
     memoryApi = memorybrowser.register(ctx, {
@@ -722,6 +729,7 @@ async function activate(ctx) {
         if (await serveClient.start()) {
             out.appendLine(`cg serve connected (events from #${serveClient.cursor})`);
             serveClient.on('event', (ev) => {
+                for (const fn of eventFans) { try { fn(ev); } catch (e) { out.appendLine(`event fan: ${e.message}`); } }
                 const applied = applyEvent(live, ev);
                 if (!applied) return;
                 if (applied.view === 'tasks' && provider.applyEvent(applied)) {

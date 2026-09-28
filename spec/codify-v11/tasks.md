@@ -85,7 +85,7 @@
     - CodeLens and view-title Start on a feature: plan preview with roles, agents, branches, parallel groups, collisions, budgets; confirm runs cg fleet up.
     - Live tree with state, step, last output, tokens and cost, stall and retry badges; Stop, Pause, Resume; click opens the agent's transcript.
     - _Requirements: 6.2, 6.3_
-  - [ ] 6.2 Capability-complete chat: generated tools, attach, steer, approvals
+  - [-] 6.2 Capability-complete chat: generated tools, attach, steer, approvals
     - Slash commands generated from the served tool list with argument hints; results render as cards.
     - Attach to any fleet agent's live transcript and steer it through driver_steer; approvals and escalations render as actionable cards.
     - Windowed rendering for transcripts and event lists; headless test at ten thousand entries.

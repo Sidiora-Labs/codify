@@ -670,6 +670,16 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
   }
+
+  .agentev { display: flex; gap: .5em; font-size: .92em; opacity: .9; padding: 1px 0; }
+  .agentev .who { color: var(--vscode-descriptionForeground); min-width: 7em; }
+  .agentev.agent-text .what { white-space: pre-wrap; }
+  .agentev.agent-tool .what { font-family: var(--vscode-editor-font-family); }
+  .pill.attach:empty { display: none; }
+  .pill.attach { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+  body.attached #input { border-color: var(--vscode-focusBorder); }
+  .sysline.hidden { cursor: pointer; text-decoration: underline; background: none; border: 0; color: inherit; }
+  .card.approval .options button.danger { color: var(--vscode-errorForeground); }
 </style>
 </head>
 <body>
@@ -680,6 +690,7 @@
     <span id="buildversion" title="Running Codify extension version"></span>
     <button class="chip" id="taskchip" title="Attach a spec task to this chat">no task</button>
     <span class="pill" id="taskstatus"></span>
+    <span class="pill attach" id="attachpill" title=""></span>
     <span class="grow"></span>
     <select id="history" aria-label="Past agent sessions" title="Past agent sessions">
       <option value="">Past sessions</option>
@@ -861,16 +872,26 @@
         { n: 'sessions', a: '',        d: 'List chats and switch between them' },
         { n: 'cancel',   a: '',        d: 'Stop the turn in flight (Esc)' },
         { n: 'retry',    a: '',        d: 'Send the last prompt again' },
+        { n: 'fleet',    a: '',        d: 'The fleet tree and its runs' },
+        { n: 'attach',   a: '[agent]', d: 'Follow a fleet agent live; your messages then steer it' },
+        { n: 'detach',   a: '',        d: 'Stop following the attached agent' },
+        { n: 'steer',    a: '<agent> <message>', d: 'Send a running agent a message for its next edit or prompt' },
+        { n: 'approvals', a: '',       d: 'What waits for a person, with Approve / Reject' },
+        { n: 'approve',  a: '<id> [reject] [note]', d: 'Decide one approval' },
         { n: 'help',     a: '',        d: 'Show these commands' },
     ];
+    /* every tool cg serves, as sent with init — the chat reaches whatever
+     * Codify can do without this file naming each verb */
+    var toolCommands = [];
     function allCommands() {
         var local = COMMANDS.slice();
         var localNames = local.map(function (c) { return c.n; });
+        var tools = toolCommands.filter(function (c) { return localNames.indexOf(c.n) < 0; });
         return local.concat(agentCommands.map(function (c) {
             var alias = localNames.indexOf(c.name) >= 0 ? 'agent-' + c.name : c.name;
             return { n: alias, a: c.input ? '<input>' : '',
                 d: c.description || 'Agent command', agent: true, actual: c.name };
-        }));
+        })).concat(tools);
     }
 
     function commandNamed(name) {
@@ -901,7 +922,40 @@
         if (txt !== undefined) e.textContent = txt;
         return e;
     }
-    function add(node) { keep(function () { log.appendChild(node); }); return node; }
+    /* The transcript stays responsive at ten thousand entries: the newest
+     * WINDOW_KEEP rows are in the DOM; older ones are detached and counted
+     * on a row at the top that brings a page of them back on click. */
+    var WINDOW_KEEP = 400, WINDOW_PAGE = 200, hiddenRows = [], hiddenRow = null;
+    function trimWindow() {
+        var rows = log.children.length - (hiddenRow ? 1 : 0) - (document.getElementById('welcome') ? 1 : 0);
+        if (rows <= WINDOW_KEEP + 50) return;
+        var excess = rows - WINDOW_KEEP;
+        var start = hiddenRow ? 1 : 0;
+        for (var i = 0; i < excess; i++) {
+            var n = log.children[start];
+            if (!n || n.id === 'welcome') break;
+            hiddenRows.push(n);
+            n.remove();
+        }
+        updateHiddenRow();
+    }
+    function updateHiddenRow() {
+        if (!hiddenRows.length) { if (hiddenRow) { hiddenRow.remove(); hiddenRow = null; } return; }
+        if (!hiddenRow) {
+            hiddenRow = el('button', 'sysline hidden');
+            hiddenRow.type = 'button';
+            hiddenRow.addEventListener('click', function () {
+                var n = Math.min(WINDOW_PAGE, hiddenRows.length);
+                var back = hiddenRows.splice(hiddenRows.length - n, n);
+                var anchor = hiddenRow.nextSibling;
+                back.forEach(function (node) { log.insertBefore(node, anchor); });
+                updateHiddenRow();
+            });
+            log.insertBefore(hiddenRow, log.firstChild);
+        }
+        hiddenRow.textContent = hiddenRows.length + ' earlier entries — show ' + Math.min(WINDOW_PAGE, hiddenRows.length) + ' more';
+    }
+    function add(node) { keep(function () { log.appendChild(node); trimWindow(); }); return node; }
     function clearWelcome() {
         var w = document.getElementById('welcome');
         if (w) w.remove();
@@ -1777,6 +1831,75 @@
         add(card);
     }
 
+    /* ---------------- fleet cards (v11 6.2) ---------------- */
+    function approvalCard(m) {
+        clearWelcome();
+        breakBlocks();
+        var card = makeCard('perm approval' + (m.state !== 'pending' ? ' answered' : ''), '⛨',
+            m.title || ('Approval #' + m.id), m.gate || '');
+        card.dataset.aid = String(m.id);
+        var bodyEl = card.querySelector('.body');
+        bodyEl.appendChild(el('p', null, m.detail || ''));
+        var row = el('div', 'options');
+        (m.options || []).forEach(function (o) {
+            var b = el('button', o.action === 'reject' ? 'danger' : 'primary', o.label);
+            b.addEventListener('click', function () {
+                var note = o.action === 'reject' ? window.prompt('Why? (optional)') : '';
+                vsc.postMessage({ type: 'approve', id: m.id, reject: o.action === 'reject', note: note || undefined });
+                card.classList.add('answered');
+                card.querySelector('.answer').textContent = 'sending…';
+            });
+            row.appendChild(b);
+        });
+        bodyEl.appendChild(row);
+        bodyEl.appendChild(el('div', 'answer', m.state !== 'pending' ? m.state : ''));
+        card.classList.remove('closed');
+        add(card);
+        activity.permits += m.state === 'pending' ? 1 : 0; updateActivity();
+    }
+    function escalationCard(m) {
+        clearWelcome();
+        var card = makeCard('cg bad', '⚠', m.text || 'escalation', m.kind === 'supervisor.blocked' ? 'blocked' : 'escalated');
+        var bodyEl = card.querySelector('.body');
+        bodyEl.appendChild(el('p', null, (m.reason || '') + (m.to ? ' — ' + m.to + ' has been told' : '')));
+        var row = el('div', 'options');
+        if (m.to) {
+            var b = el('button', 'primary', 'Steer ' + m.to);
+            b.addEventListener('click', function () {
+                var text = window.prompt('Message for ' + m.to);
+                if (text) vsc.postMessage({ type: 'steer', agent: m.to, text: text });
+            });
+            row.appendChild(b);
+        }
+        var t = el('button', null, 'Open task');
+        t.addEventListener('click', function () { runSlash('task', String(m.task || '').split('/').pop()); });
+        row.appendChild(t);
+        bodyEl.appendChild(row);
+        card.classList.remove('closed');
+        add(card);
+    }
+    var attachedTo = null;
+    function setAttached(agent, was) {
+        attachedTo = agent || null;
+        body.classList.toggle('attached', !!attachedTo);
+        var pill = document.getElementById('attachpill');
+        if (pill) {
+            pill.textContent = attachedTo ? '⇄ ' + attachedTo : '';
+            pill.title = attachedTo ? 'attached: your messages steer ' + attachedTo + ' — /detach to stop' : '';
+        }
+        if (attachedTo) sysline('attached to ' + attachedTo + ' — messages you send now steer it; /detach to stop');
+        else if (was) sysline('detached from ' + was);
+        input.placeholder = attachedTo ? 'Steer ' + attachedTo + '…' : 'Message the agent, or / for commands';
+    }
+    function agentEventRow(m) {
+        clearWelcome();
+        var cls = 'agentev ' + String(m.kind || '').replace(/\./g, '-');
+        var row = el('div', cls);
+        row.appendChild(el('span', 'who', m.agent || ''));
+        row.appendChild(el('span', 'what', m.text || ''));
+        add(row);
+    }
+
     /* ---------------- welcome ---------------- */
     function welcome(subtitle) {
         var w = el('div', 'welcome');
@@ -1890,7 +2013,7 @@
             if (offered && offered.agent) {
                 runAgentCommand(offered, m[2].trim()); return;
             }
-            if (offered) { runSlash(cmd, m[2].trim()); return; }
+            if (offered) { runSlash(cmd, m[2].trim()); return; }   /* incl. served tools */
             userMsg(raw, true);
             sysline('unknown command /' + cmd + ' — /help lists them', true);
             return;
@@ -2122,6 +2245,7 @@
     window.addEventListener('message', function (ev) {
         var m = ev.data || {};
         if (m.type === 'init') {
+            if (Array.isArray(m.tools)) toolCommands = m.tools;
             if (m.adapters) adapters = m.adapters;
             if (m.diffStyle) diffStyle = m.diffStyle;
             setDrivers(m.drivers, m.driver);
@@ -2209,6 +2333,15 @@
             }
             activity.permits = Math.max(0, activity.permits - 1); updateActivity();
         } else if (m.type === 'cmdout') cmdCard(m);
+        else if (m.type === 'approval') approvalCard(m);
+        else if (m.type === 'approval_done') {
+            var ac = log.querySelector('.approval[data-aid="' + m.id + '"]');
+            if (ac) { ac.classList.add('answered'); var an = ac.querySelector('.answer'); if (an) an.textContent = m.answer || 'decided'; }
+            activity.permits = Math.max(0, activity.permits - 1); updateActivity();
+        }
+        else if (m.type === 'escalation') escalationCard(m);
+        else if (m.type === 'attached') setAttached(m.agent, m.was);
+        else if (m.type === 'agent_event') agentEventRow(m);
         else if (m.type === 'turn') {
             body.classList.toggle('running', !!m.running);
             activity.running = !!m.running; updateActivity();

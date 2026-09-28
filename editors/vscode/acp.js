@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 /* --- agent chat (5.3) --- the surface's bookkeeping and the two renderers
  * the transcript cannot fake; headless-safe, so the tests reach them. */
-const { AgentPanel, diffRows, stripAnsi } = require('./agents');
+const { AgentPanel, diffRows, stripAnsi, ChatCapabilities, approvalCard } = require('./agents');
 
 const PROTOCOL_VERSION = 1;
 const STDERR_TAIL_MAX = 8192;
@@ -265,6 +265,16 @@ let sessionHistory = [];
 /* The sidebar chat view — resolved once, lives as long as the window. */
 let agentView = null;        /* vscode.WebviewView */
 let viewSession = null;      /* the session bound to the sidebar view */
+/* --- capabilities (v11 6.2): every served tool, as a slash command --- */
+let caps = new ChatCapabilities([]);
+let capsLoaded = false;
+async function loadCaps() {
+    if (capsLoaded) return caps;
+    const r = await deps.cg(['tool', 'list', '--json']);
+    if (r && r.code === 0) caps = ChatCapabilities.fromListJson(r.stdout);
+    capsLoaded = true;
+    return caps;
+}
 let viewDriver = '';         /* header picker choice; '' -> settings */
 let historyProbeStarted = false;
 let lastIdlePrompt = null;   /* what /retry re-sends when no session survived */
@@ -900,6 +910,143 @@ async function runCgSlash(sess, cmd, args, send) {
     await send(prompt, echo);
 }
 
+/* --- capabilities (v11 6.2) --- a served tool, run as a slash command:
+ * its result is a card, and — as with the built-in cg commands — handed to
+ * the agent to work from. */
+async function runToolSlash(sess, name, args, send) {
+    const a = caps.args(name, args);
+    const echo = `/${name}${args ? ' ' + args : ''}`;
+    const r = await deps.cg(['tool', 'call', name, JSON.stringify(a)]);
+    let out = (r.stdout || '').trim();
+    try { out = JSON.stringify(JSON.parse(out), null, 1); } catch (_) { /* text is fine */ }
+    if (r.code !== 0 && r.stderr) out += (out ? '\n' : '') + r.stderr.trim();
+    if (out.length > 12000) out = out.slice(0, 12000) + '\n… (truncated; the agent got the same)';
+    surfacePost(sess, { type: 'cmdout', cmd: `tool call ${name} ${JSON.stringify(a)}`,
+        ok: r.code === 0, output: out || '(no output)' });
+    if (!out || r.code !== 0) {
+        surfacePost(sess, { type: 'chunk', role: 'user', text: echo, cmd: true });
+        return;
+    }
+    await send(`\`${name}\` answered:\n\n\`\`\`\n${out}\n\`\`\`\n\nUse this to answer what I ask next.`, echo);
+}
+
+/* --- fleet (v11 6.2) --- attach this chat to a running fleet agent: its
+ * transcript arrives here as it happens (over cg serve's events, or by
+ * asking cg events while attached when there is no serve), and a plain
+ * message steers it instead of talking to this chat's own agent. */
+async function attachAgent(sess, name) {
+    let agent = (name || '').trim();
+    const status = await deps.cgJson(['fleet', 'status']);
+    const live = ((status && status.agents) || []).filter((a) => a && a.agent);
+    if (!agent) {
+        if (!live.length) { surfacePost(sess, { type: 'status', text: 'no fleet agent is alive to attach to' }); return; }
+        const pick = await vscode.window.showQuickPick(live.map((a) => ({
+            label: a.agent, description: `${a.role || ''}${a.tasks && a.tasks.length ? ' · ' + a.tasks.join(' ') : ''}`, agent: a.agent })),
+            { placeHolder: 'Attach to which agent?' });
+        if (!pick) return;
+        agent = pick.agent;
+    }
+    detachAgent(sess, true);
+    sess.attached = agent;
+    sess.attachCursor = 0;
+    surfacePost(sess, { type: 'chunk', role: 'user', text: `/attach ${agent}`, cmd: true });
+    surfacePost(sess, { type: 'attached', agent });
+    /* the recent past first, then whatever comes */
+    const back = await deps.cg(['events', '--kind', 'agent.,supervisor.,drift.', '-n', '40', '--json']);
+    const rows = (back.stdout || '').split('\n').filter(Boolean)
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+        .filter((e) => e && agentEventOf(e, agent));
+    for (const e of rows) { sess.attachCursor = Math.max(sess.attachCursor, e.seq); postAgentEvent(sess, e); }
+    if (deps.events && deps.events.available()) {
+        sess.attachOff = deps.events.on((e) => {
+            if (sess.attached === agent && agentEventOf(e, agent)) postAgentEvent(sess, e);
+        });
+    } else {
+        sess.attachTimer = setInterval(async () => {
+            if (sess.attached !== agent || sess.disposed) return;
+            const r = await deps.cg(['events', '--since', String(sess.attachCursor), '--kind', 'agent.,supervisor.,drift.', '-n', '200', '--json']);
+            for (const l of (r.stdout || '').split('\n')) {
+                if (!l) continue;
+                let e; try { e = JSON.parse(l); } catch { continue; }
+                sess.attachCursor = Math.max(sess.attachCursor, e.seq);
+                if (agentEventOf(e, agent)) postAgentEvent(sess, e);
+            }
+        }, 2000);
+    }
+}
+
+function agentEventOf(e, agent) {
+    const p = e.payload || {};
+    return e.node === agent || p.agent === agent || e.subject === agent;
+}
+
+function postAgentEvent(sess, e) {
+    const p = e.payload || {};
+    let text = '';
+    if (e.kind === 'agent.text') text = p.text || '';
+    else if (e.kind === 'agent.tool') text = `▸ ${p.tool}${p.detail ? ' ' + p.detail : ''}`;
+    else if (e.kind === 'agent.usage') text = `tokens ${p.tokens_in}/${p.tokens_out}${p.cost_usd ? ` · $${Number(p.cost_usd).toFixed(3)}` : ''}`;
+    else if (e.kind === 'agent.result') text = `finished: ${p.subtype}${p.text ? ' — ' + p.text : ''}${p.cost_usd ? ` ($${Number(p.cost_usd).toFixed(3)})` : ''}`;
+    else if (e.kind === 'agent.session') text = `session ${p.session}${p.model ? ' · ' + p.model : ''}`;
+    else if (e.kind === 'agent.steer') text = `steer → ${p.agent}: ${p.message}`;
+    else if (e.kind === 'agent.steer.delivered') text = `steer delivered via ${p.via}`;
+    else if (e.kind.startsWith('supervisor.')) text = `${e.kind.slice(11)}: ${p.action ? p.action + ' — ' : ''}${p.reason || p.to || ''}`;
+    else if (e.kind.startsWith('drift.')) text = `${e.kind}: ${p.symbol || p.task || ''}`;
+    else return;
+    surfacePost(sess, { type: 'agent_event', kind: e.kind, seq: e.seq, at: e.at, agent: e.node || p.agent, text });
+}
+
+function detachAgent(sess, quiet) {
+    if (sess.attachOff) { try { sess.attachOff(); } catch (_) { /* gone */ } sess.attachOff = null; }
+    if (sess.attachTimer) { clearInterval(sess.attachTimer); sess.attachTimer = null; }
+    const was = sess.attached;
+    sess.attached = null;
+    if (!quiet && was) surfacePost(sess, { type: 'attached', agent: null, was });
+}
+
+async function steerAgent(sess, agent, text) {
+    const r = await deps.cg(['fleet', 'steer', agent, text]);
+    surfacePost(sess, { type: 'chunk', role: 'user', text: `→ ${agent}: ${text}`, cmd: true });
+    surfacePost(sess, { type: 'notice', text: r.code === 0
+        ? `queued for ${agent} — delivered at its next edit or prompt`
+        : `steer failed: ${firstLine(r.stderr || r.stdout)}` });
+}
+
+async function listApprovals(sess) {
+    const j = await deps.cgJson(['fleet', 'approvals']);
+    const rows = (j && j.approvals) || [];
+    surfacePost(sess, { type: 'chunk', role: 'user', text: '/approvals', cmd: true });
+    if (!rows.length) { surfacePost(sess, { type: 'notice', text: 'nothing waits for approval' }); return; }
+    for (const a of rows) surfacePost(sess, approvalCard({ payload: { id: a.id, gate: a.gate, subject: a.subject, state: a.state, by: a.requested_by } }));
+}
+
+async function decideApproval(sess, id, reject, note) {
+    const args = ['fleet', 'approve', String(id)];
+    if (reject) args.push('--reject');
+    if (note) args.push('-m', note);
+    const r = await deps.cg(args);
+    surfacePost(sess, { type: 'approval_done', id, answer: r.code === 0 ? (reject ? 'rejected' : 'approved') : 'failed' });
+    surfacePost(sess, { type: 'notice', text: r.code === 0 ? (r.stdout || '').trim() : `approve failed: ${firstLine(r.stderr || r.stdout)}` });
+    deps.refresh();
+}
+
+/* Approval requests and escalations reach the sidebar chat as they happen,
+ * whichever agent raised them: the chat is where a person is looking. */
+function watchFleetEvents() {
+    if (!deps.events || !deps.events.available()) return;
+    deps.events.on((e) => {
+        const p = e.payload || {};
+        if (e.kind === 'approval.request') postView(approvalCard(e));
+        else if (e.kind === 'approval.decided') postView({ type: 'approval_done', id: p.id, answer: p.state });
+        else if (e.kind === 'supervisor.escalate' || e.kind === 'supervisor.blocked') {
+            postView({ type: 'escalation', kind: e.kind, task: e.subject, to: p.agent || p.to, reason: p.reason,
+                       text: `${e.subject} ${e.kind === 'supervisor.blocked' ? 'is blocked' : 'escalated to ' + (p.agent || p.to)}: ${p.reason || ''}` });
+        } else if (e.kind === 'drift.interface') {
+            postView({ type: 'notice', text: `interface drift: ${p.symbol} ${p.change} on ${p.base} — ${(p.agents || []).map((a) => a.agent).join(', ') || 'no live branch'} told` });
+        }
+    });
+}
+
 /* Attach a spec task to a live session: claim, start, and brief the agent
  * with the resume packet — the board discipline, mid-conversation. */
 async function attachTask(sess, id) {
@@ -978,9 +1125,20 @@ async function pickTaskId(placeHolder) {
 function handleSessionMessage(sess, msg) {
     if (!msg) return false;
     if (msg.type === 'send' && msg.text) {
+        /* attached to a fleet agent, a plain message steers it */
+        if (sess.attached) { steerAgent(sess, sess.attached, String(msg.text)); return true; }
         sendPrompt(sess, String(msg.text));
         return true;
     }
+    if (msg.type === 'approve' && msg.id) {
+        decideApproval(sess, msg.id, !!msg.reject, msg.note);
+        return true;
+    }
+    if (msg.type === 'steer' && msg.agent && msg.text) {
+        steerAgent(sess, String(msg.agent), String(msg.text));
+        return true;
+    }
+    if (msg.type === 'detach') { detachAgent(sess); return true; }
     if (msg.type === 'agent_command' && msg.name) {
         const input = String(msg.input || '').trim();
         const text = `/${String(msg.name)}${input ? ' ' + input : ''}`;
@@ -1092,6 +1250,35 @@ async function sessionSlash(sess, cmd, args) {
             (text, echo) => sendPrompt(sess, text, echo));
         return;
     }
+    if (cmd === 'attach') { await attachAgent(sess, args); return; }
+    if (cmd === 'detach') { detachAgent(sess); return; }
+    if (cmd === 'steer') {
+        const m = /^(\S+)\s+([\s\S]+)$/.exec(args || '');
+        if (!m) { surfacePost(sess, { type: 'status', text: '/steer <agent> <message>' }); return; }
+        await steerAgent(sess, m[1], m[2]);
+        return;
+    }
+    if (cmd === 'approvals' || cmd === 'approve') {
+        if (cmd === 'approve' && args) {
+            const m = /^(\d+)\s*(reject)?\s*([\s\S]*)$/.exec(args);
+            if (m) { await decideApproval(sess, Number(m[1]), !!m[2], m[3] || undefined); return; }
+        }
+        await listApprovals(sess);
+        return;
+    }
+    if (cmd === 'fleet') {
+        const r = await deps.cg(['fleet', 'tree']);
+        const runs = await deps.cg(['fleet', 'runs']);
+        surfacePost(sess, { type: 'chunk', role: 'user', text: '/fleet', cmd: true });
+        surfacePost(sess, { type: 'cmdout', cmd: 'fleet tree', ok: r.code === 0, open: true,
+            output: ((r.stdout || r.stderr).trim() + '\n\n' + (runs.stdout || '').trim()).trim() || '(no fleet)' });
+        return;
+    }
+    await loadCaps();
+    if (caps.has(cmd)) {
+        await runToolSlash(sess, cmd, args, (text, echo) => sendPrompt(sess, text, echo));
+        return;
+    }
     if (cmd === 'task') {
         const id = args || await pickTaskId('Attach which task to this chat?');
         if (id) await attachTask(sess, id);
@@ -1187,10 +1374,11 @@ async function openAgentPanel(id, agent, promptText, claimed) {
         if (panels.has(id)) endOfSession(sess, 'panel closed');
     });
 
+    await loadCaps();
     sess.initMsg = { type: 'init', idle: false, version: extensionVersion(),
         task: { id, title: task.title || '', status: task.status || '' },
         agent, driver, drivers: [driver], adapters: adapterMap(), feature: id,
-        diffStyle: diffStyle() };
+        diffStyle: diffStyle(), tools: caps.commands() };
     panelPost(sess, sess.initMsg);
 
     try {
@@ -1486,10 +1674,12 @@ async function postViewInit() {
         const row = await taskRow(sess.taskId);
         task = { id: sess.taskId, title: row.title || '', status: row.status || '' };
     }
+    await loadCaps();
     postView({ type: 'init', idle: viewIdle(), version: extensionVersion(),
         driver: currentDriver(), drivers: adapterCatalog().map((a) => a.id),
         adapters: adapterMap(), diffStyle: diffStyle(),
-        feature: b.feature + (b.mode ? ' · ' + b.mode : ''), task });
+        feature: b.feature + (b.mode ? ' · ' + b.mode : ''), task,
+        tools: caps.commands() });
     postView({ type: 'sessions', sessions: sessionHistory });
     if (sess && sess.client) postView({ type: 'session', live: true });
     if (!historyProbeStarted) {
@@ -1727,6 +1917,7 @@ function register(ctx, d) {
     viewDriver = pickedDriver ? driverId(pickedDriver) : '';
     registerAcpCommands(ctx);
     registerAgentView(ctx);
+    watchFleetEvents();
     return {
         hasPanel: (id) => panels.has(id) ||
             !!(viewSession && viewSession.taskId === id),

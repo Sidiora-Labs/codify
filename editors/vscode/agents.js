@@ -695,4 +695,122 @@ function round6(n) {
     return isFinite(v) ? Math.round(v * 1e6) / 1e6 : 0;
 }
 
-module.exports = { register, AgentPanel, diffRows, stripAnsi };
+
+/* ---------------- capabilities (v11 6.2), headless ----------------
+ *
+ * Every tool cg serves becomes a slash command, so the chat can reach
+ * whatever Codify can do without this file being taught each verb. The
+ * list comes from `cg tool list --json` (the MCP table); the argument hint
+ * and the parsing come from each tool's input schema. */
+class ChatCapabilities {
+    constructor(tools) {
+        this.tools = new Map();
+        for (const t of Array.isArray(tools) ? tools : []) {
+            if (t && t.name) this.tools.set(t.name, t);
+        }
+    }
+
+    static fromListJson(text) {
+        try { return new ChatCapabilities(JSON.parse(text).tools); } catch { return new ChatCapabilities([]); }
+    }
+
+    has(name) { return this.tools.has(name); }
+
+    /* the shape the panel's slash menu draws: name, argument hint, blurb */
+    commands() {
+        const out = [];
+        for (const t of this.tools.values()) {
+            const props = (t.inputSchema && t.inputSchema.properties) || {};
+            const req = new Set((t.inputSchema && t.inputSchema.required) || []);
+            const hint = Object.keys(props).map((k) => req.has(k) ? `<${k}>` : `[${k}=…]`).join(' ');
+            out.push({ n: t.name, a: hint, d: t.title || (t.description || '').split('.')[0], tool: true,
+                       readOnly: !!(t.annotations && t.annotations.readOnlyHint) });
+        }
+        return out.sort((a, b) => a.n.localeCompare(b.n));
+    }
+
+    /* "/get_context auth flow" -> {query: "auth flow"}; "/spec_claim id=2.1 ttl=20"
+     * -> {id: "2.1", ttl: 20}. One required text field takes the whole
+     * string; otherwise key=value pairs, typed by the schema. */
+    args(name, text) {
+        const t = this.tools.get(name);
+        const props = (t && t.inputSchema && t.inputSchema.properties) || {};
+        const req = (t && t.inputSchema && t.inputSchema.required) || [];
+        const str = String(text || '').trim();
+        const out = {};
+        const pairs = [...str.matchAll(/(\w+)=("([^"]*)"|(\S+))/g)];
+        if (pairs.length && pairs.every((m) => props[m[1]])) {
+            for (const m of pairs) out[m[1]] = ChatCapabilities.typed(props[m[1]], m[3] !== undefined ? m[3] : m[4]);
+            return out;
+        }
+        if (!str) return out;
+        const first = req[0] || Object.keys(props).find((k) => (props[k].type || 'string') === 'string');
+        if (first) out[first] = ChatCapabilities.typed(props[first], str);
+        return out;
+    }
+
+    static typed(schema, v) {
+        const t = (schema && schema.type) || 'string';
+        if (t === 'integer' || t === 'number') { const n = Number(v); return Number.isNaN(n) ? v : n; }
+        if (t === 'boolean') return v === 'true' || v === '1' || v === 'yes';
+        return v;
+    }
+}
+
+/* The card a person decides an approval on. Built here, from the event,
+ * so the panel only draws it — and the test can prove it says what the
+ * event said. */
+function approvalCard(ev) {
+    const p = (ev && ev.payload) || {};
+    const gate = p.gate || '?', subject = p.subject || '?';
+    const what = { land: `land ${subject} on main`, pr: `open the pull request for ${subject}`,
+                   drift: `merge ${subject} although it drifted from its declaration`,
+                   retry: `retry ${subject}`, coverage: `land ${subject} with uncovered acceptance criteria` }[gate]
+                || `${gate} of ${subject}`;
+    return {
+        type: 'approval', id: p.id, gate, subject, state: p.state || 'pending',
+        title: `Approval #${p.id}: ${what}`,
+        detail: `${p.by ? `asked by ${p.by}. ` : ''}Approve lets it go ahead once; reject stops it and the agent reports to its parent.`,
+        options: p.state === 'pending' ? [
+            { label: 'Approve', action: 'approve' }, { label: 'Reject', action: 'reject' }] : [],
+        commands: [`cg fleet approve ${p.id}`, `cg fleet approve ${p.id} --reject`],
+    };
+}
+
+/* A transcript that stays responsive at ten thousand entries: the panel
+ * draws only the newest `keep`; older rows leave the DOM and are counted,
+ * to be brought back a page at a time on request. The bookkeeping is here,
+ * pure, so its cost is measurable without a browser. */
+class Window {
+    constructor(keep, page) {
+        this.keep = keep || 400;
+        this.page = page || 200;
+        this.hidden = [];         /* oldest first */
+        this.shown = [];          /* oldest first, at most keep */
+        this.trimmed = 0;         /* how many push() removed from view */
+    }
+    push(item) {
+        this.shown.push(item);
+        if (this.shown.length > this.keep) {
+            const excess = this.shown.length - this.keep;
+            const gone = this.shown.splice(0, excess);
+            this.hidden.push(...gone);
+            this.trimmed += excess;
+            return gone;
+        }
+        return [];
+    }
+    /* the next page back, newest of the hidden first: returns them oldest
+     * first so they can be prepended in order */
+    expand() {
+        const n = Math.min(this.page, this.hidden.length);
+        const back = this.hidden.splice(this.hidden.length - n, n);
+        this.shown = back.concat(this.shown);
+        return back;
+    }
+    get hiddenCount() { return this.hidden.length; }
+    get size() { return this.shown.length + this.hidden.length; }
+}
+
+module.exports = { register, AgentPanel, diffRows, stripAnsi,
+                   ChatCapabilities, approvalCard, Window };
