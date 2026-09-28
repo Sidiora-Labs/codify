@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # supervisor: durable fleet runs that survive their supervisor.
+#   tree    — a wave's tasks at once on their own branches through the merge
+#             lock, workers beside the manager, the main agent, and several
+#             features under one supervisor honouring [meta] requires
 #   supervise — stalls nudged then stopped, retries with what failed,
 #             escalation to manager then main, blocked runs, budgets
 #   durable — cg fleet up (foreground and detached), runs, pause/resume,
@@ -329,6 +332,173 @@ ev = [json.loads(l) for l in sys.stdin if l.strip()]
 assert len(ev) == 1, ev
 assert ev[0]["payload"]["reason"] == "spend budget of $1.00 exceeded ($5.00)", ev
 ' || fail "spend budget"
+fi
+
+if want tree; then
+    # A driver that logs "start|end <role> <what> <ns>" and waits a little
+    # so overlap is observable; main records why it was woken.
+    tree_driver() {
+        cat > "$TMP/driver.sh" <<EOF
+#!/bin/sh
+PF="\$1"; TASK="\$2"; ROOT="\$3"; AGENT="\$4"
+cd "\$ROOT" || exit 9
+log() { echo "\$1 \$CG_ROLE \$2 \$(date +%s%N)" >> "$TMP/go/order"; }
+if [ "\$CG_ROLE" = main ]; then
+    n=1; while [ -f "$TMP/go/main-\$n" ]; do n=\$((n+1)); done
+    sed -n 's/^You were woken because: //p' "\$PF" > "$TMP/go/main-\$n"
+    exit 0
+fi
+if [ "\$CG_ROLE" = worker ]; then
+    log start "\$CG_FEATURE/\$TASK"
+    sleep 1.5
+    "$CG" spec start "\$TASK" >/dev/null 2>&1
+    echo "// \$TASK" >> "\$(cat "$TMP/go/file-\$CG_FEATURE-\$TASK")"
+    "$CG" spec done "\$TASK" >/dev/null || exit 1
+    git add -A >/dev/null
+    git commit -qm "\$TASK [spec:\$CG_FEATURE/\$TASK]" >/dev/null || exit 1
+    log end "\$CG_FEATURE/\$TASK"
+    exec "$CG" fleet merge-up "\$TASK" >/dev/null
+fi
+log start "\$CG_FEATURE"
+sleep 1
+left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,sys; m = json.load(sys.stdin)["managers"][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+log end "\$CG_FEATURE"
+[ "\$left" -eq 0 ] || exit 0
+exec "$CG" fleet land "\$CG_FEATURE" --no-pr >/dev/null
+EOF
+    }
+
+    # ---- one feature: a wave's two tasks at once on their own branches,
+    #      merged one at a time; workers beside the manager; the main agent
+    rm -rf "$TMP/proj" "$TMP/go"
+    mkdir -p "$TMP/proj/src" "$TMP/proj/lib" "$TMP/go"
+    cd "$TMP/proj"
+    git init -q -b main . 2>/dev/null || git init -q .
+    git config user.email t@t; git config user.name t
+    echo 'export function alpha(){}' > src/a.ts
+    echo 'export function beta(){}'  > lib/b.ts
+    "$CG" spec new fleet >/dev/null
+    "$CG" spec docs off >/dev/null
+    "$CG" spec start 1.1 >/dev/null; "$CG" spec done 1.1 >/dev/null
+    "$CG" spec mode parallel >/dev/null
+    "$CG" spec add 2.1 --title "Alpha" --wave 1 --reqs 1.1 --symbols alpha --touches 'src/a.ts' >/dev/null
+    "$CG" spec add 2.2 --title "Beta" --wave 1 --reqs 1.1 --symbols beta --touches 'lib/b.ts' >/dev/null
+    echo src/a.ts > "$TMP/go/file-fleet-2.1"; echo lib/b.ts > "$TMP/go/file-fleet-2.2"
+    "$CG" init >/dev/null
+    printf '.codegraph/\n*.lock\n' > .gitignore
+    cat >> spec/workflow.kvx <<EOF
+
+[hierarchy]
+test_gate  = "true"
+pr         = "manual"
+main_agent = true
+
+[role.worker]
+branch = "task/{feature}/{task}"
+agent  = "w-{feature}-{task}"
+
+[agents]
+driver = "custom"
+cmd    = "sh $TMP/driver.sh \${PROMPT_FILE} \${TASK} \${ROOT} \${AGENT}"
+max    = 2
+ttl    = 600
+EOF
+    tree_driver
+    git add -A >/dev/null; git commit -qm base >/dev/null
+    out="$(timeout 120 "$CG" fleet up --foreground -n 2 2>&1)" || fail "tree run: $out"
+    has "$out" "[fleet] fleet complete"
+    has "$out" "worker w-fleet-2.1 → 2.1 (wave 1) on task/fleet/2.1"
+    has "$out" "worker w-fleet-2.2 → 2.2 (wave 1) on task/fleet/2.2"
+    python3 - "$TMP/go/order" <<'EOF' || fail "overlap: $(cat "$TMP/go/order")"
+import sys
+ev = {}
+for line in open(sys.argv[1]):
+    kind, role, what, t = line.split()
+    ev.setdefault((kind, role, what), int(t))
+s21, e21 = ev[("start", "worker", "fleet/2.1")], ev[("end", "worker", "fleet/2.1")]
+s22, e22 = ev[("start", "worker", "fleet/2.2")], ev[("end", "worker", "fleet/2.2")]
+assert s22 < e21 and s21 < e22, "a wave's tasks must run at once on their own branches"
+sm, em = ev[("start", "feature", "fleet")], ev[("end", "feature", "fleet")]
+assert min(s21, s22) < em, "workers must not wait for the manager's first turn"
+EOF
+    branches="$(git branch --list 'task/*')"
+    has "$branches" "task/fleet/2.1"
+    has "$branches" "task/fleet/2.2"
+    log="$(git log --oneline feature/fleet)"
+    has "$log" "merge task/fleet/2.1 into feature/fleet [spec:fleet/2.1]"
+    has "$log" "merge task/fleet/2.2 into feature/fleet [spec:fleet/2.2]"
+    has "$(cat "$TMP/go/main-1")" "the run is starting"
+    has "$(cat "$TMP/go/main-"*)" "feature fleet ended complete"
+    "$CG" events --kind orch.spawn --json -n 100 | python3 -c '
+import json, sys
+ev = [json.loads(l) for l in sys.stdin if l.strip()]
+roles = {e["payload"]["role"] for e in ev}
+assert {"main", "feature", "worker"} <= roles, roles
+' || fail "three levels spawned"
+
+    # ---- several features: beta requires alpha, so it starts once alpha
+    #      is done; both complete under one supervisor
+    rm -rf "$TMP/proj" "$TMP/go"
+    mkdir -p "$TMP/proj/src" "$TMP/go"
+    cd "$TMP/proj"
+    git init -q -b main . 2>/dev/null || git init -q .
+    git config user.email t@t; git config user.name t
+    echo 'export function a1(){}' > src/a.ts
+    echo 'export function b1(){}' > src/b.ts
+    for f in alpha beta; do
+        "$CG" spec new $f >/dev/null
+        "$CG" spec docs off -f $f >/dev/null
+        "$CG" spec start 1.1 -f $f >/dev/null; "$CG" spec done 1.1 -f $f >/dev/null
+    done
+    "$CG" spec mode parallel >/dev/null
+    "$CG" spec add 2.1 --title "A work" --wave 1 --reqs 1.1 --touches 'src/a.ts' -f alpha >/dev/null
+    "$CG" spec add 2.1 --title "B work" --wave 1 --reqs 1.1 --touches 'src/b.ts' -f beta >/dev/null
+    echo src/a.ts > "$TMP/go/file-alpha-2.1"; echo src/b.ts > "$TMP/go/file-beta-2.1"
+    python3 - <<'EOF'
+p = "spec/beta/spec.kvx"
+s = open(p).read().replace("[meta]\n", '[meta]\nrequires = ["alpha"]\n', 1)
+open(p, "w").write(s)
+EOF
+    "$CG" init >/dev/null
+    printf '.codegraph/\n*.lock\n' > .gitignore
+    cat >> spec/workflow.kvx <<EOF
+
+[hierarchy]
+test_gate = "true"
+pr        = "manual"
+
+[agents]
+driver = "custom"
+cmd    = "sh $TMP/driver.sh \${PROMPT_FILE} \${TASK} \${ROOT} \${AGENT}"
+max    = 1
+ttl    = 600
+EOF
+    tree_driver
+    git add -A >/dev/null; git commit -qm base >/dev/null
+    out="$(timeout 180 "$CG" fleet up --foreground --all -n 1 2>&1)" || fail "all run: $out"
+    has "$out" "[fleet] alpha complete"
+    has "$out" "[fleet] beta complete"
+    "$CG" fleet runs --json | python3 -c '
+import json, sys
+r = {x["feature"]: x for x in json.load(sys.stdin)["runs"]}
+assert r["alpha"]["state"] == "complete" and r["beta"]["state"] == "complete", r
+assert r["alpha"]["run"] != r["beta"]["run"], r
+' || fail "one run per feature"
+    # beta's prerequisite is alpha done on main — that is, landed
+    "$CG" events --json -n 500 | python3 -c '
+import json, sys
+ev = [json.loads(l) for l in sys.stdin if l.strip()]
+landed_a = min(e["seq"] for e in ev if e["kind"] == "fleet.land" and e["payload"].get("feature") == "alpha" and e["payload"].get("outcome") == "landed")
+start_b = min(e["seq"] for e in ev if e["kind"] == "orch.spawn" and e["payload"].get("feature") == "beta")
+assert start_b > landed_a, (start_b, landed_a)
+' || { "$CG" events --json -n 500 | python3 -c '
+import json, sys
+for l in sys.stdin:
+    e = json.loads(l)
+    if e["kind"].startswith(("orch.", "fleet.land", "task.status", "fleet.merge", "fleet.run")):
+        print(e["seq"], e["kind"], e["subject"], (e["payload"] or {}).get("status") or (e["payload"] or {}).get("outcome") or (e["payload"] or {}).get("state") or "", e.get("branch"))
+' >&2; fail "beta must wait for alpha"; }
+    has "$(git log --oneline main)" "land feature/beta into main"
 fi
 
 echo "supervisor OK"

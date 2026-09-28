@@ -899,7 +899,13 @@ EOF
     chmod +x "$TMP/fleet-driver.sh"
     rc=0; out="$("$CG" spec run --fleet -n 1 --max-rounds 2 --max-fail 9 2>&1)" || rc=$?
     [ "$rc" -eq 1 ] || fail "expected rc 1 when the wakes run out, got $rc"
-    has "$out" "no manager wake is left (--max-rounds)"
+    # Manager and workers run at once, so the run stops one of two honest
+    # ways: the wakes ran out before the escalation reached the manager, or
+    # the manager was woken, did not rescue 4.1, and it was blocked.
+    case "$out" in
+      *"no manager wake is left (--max-rounds)"*|*"fleet cannot finish — blocked: 4.1"*) : ;;
+      *) fail "a fleet that cannot finish must say why it stopped: $out" ;;
+    esac
     cnt="$(printf '%s' "$out" | grep -c '\[fleet\] manager fm-fleet on feature/fleet')"
     [ "$cnt" -le 2 ] || fail "spawned $cnt managers with --max-rounds 2"
     st="$("$CG" spec status --json)"

@@ -16,6 +16,9 @@
  * pull request, and the checkpoint. The two-level orchestrator builds on
  * all of it. */
 #include "cg.h"
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -295,6 +298,7 @@ bool hier_load(const Kvx *wf, Hierarchy *h) {
     take_str(&h->lint_gate, wf, "hierarchy", "lint_gate");
     take_str(&h->pr, wf, "hierarchy", "pr");
     take_str(&h->checkpoint, wf, "hierarchy", "checkpoint");
+    h->main_agent = kvx_bool(wf, "hierarchy", "main_agent", false);
     char **names = NULL;
     int n = kvx_subsections(wf, "role", &names);
     for (int i = 0; i < n; i++) {
@@ -334,11 +338,21 @@ void hier_free(Hierarchy *h) {
     memset(h, 0, sizeof *h);
 }
 
-/* Expand {main}, {remote}, {feature}, and {wave} in a role template. A
- * wave below zero expands to nothing, so a feature-level template never
- * grows a stray number. Unknown braces are copied through. */
 void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
                  long wave, char *out, size_t cap) {
+    hier_expand_task(h, tmpl, feature, wave, NULL, out, cap);
+}
+
+bool hier_per_task(const Hierarchy *h) {
+    return strstr(h->roles[FLEET_WORKER].branch, "{task}") != NULL;
+}
+
+/* Expand {main}, {remote}, {feature}, {wave}, and {task} in a role
+ * template. A wave below zero expands to nothing, so a feature-level
+ * template never grows a stray number; {task} likewise without a task.
+ * Unknown braces are copied through. */
+void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,
+                      long wave, const char *task, char *out, size_t cap) {
     size_t o = 0;
     out[0] = 0;
     for (const char *p = tmpl; *p && o + 1 < cap; ) {
@@ -353,6 +367,8 @@ void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
             if (wave >= 0) snprintf(wbuf, sizeof wbuf, "%ld", wave);
             else wbuf[0] = 0;
             rep = wbuf; skip = 6;
+        } else if (strncmp(p, "{task}", 6) == 0) {
+            rep = task ? task : ""; skip = 6;
         }
         if (rep) {
             size_t n = strlen(rep);
@@ -1138,18 +1154,56 @@ typedef struct {
     char specpath[4700];       /* spec/<feature>/spec.kvx on the main tree */
     const char *tree;          /* cg->shared */
     int gates_ok;              /* 1 green in this command, -1 not run here */
+    int merge_fd;              /* the feature's merge lock while held; else -1 */
 } Lifecycle;
 
 static void lifecycle_close(Lifecycle *c) {
+    fleet_merge_unlock(c->merge_fd);
+    c->merge_fd = -1;
     free(c->feature);
     hier_free(&c->h);
     kvx_free(c->wf);
+}
+
+int fleet_merge_lock(const char *shared, const char *feature, long wait_ms) {
+    char dir[4600], path[4800];
+    snprintf(dir, sizeof dir, "%s/%s/fleet", shared, CG_DIR);
+    mkdirs(dir);
+    snprintf(path, sizeof path, "%s/merge-%s.lock", dir, feature);
+    int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    long waited = 0;
+    while (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        if (waited >= wait_ms) { close(fd); return -1; }
+        struct timespec ts = { 0, 50 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        waited += 50;
+    }
+    return fd;
+}
+
+void fleet_merge_unlock(int fd) {
+    if (fd < 0) return;
+    flock(fd, LOCK_UN);
+    close(fd);
+}
+
+/* take the feature's merge lock for the rest of this lifecycle command */
+static int lifecycle_merge_lock(Lifecycle *c) {
+    const char *env = getenv("CG_MERGE_LOCK_WAIT_MS");
+    long wait = env && env[0] ? atol(env) : 120000;
+    c->merge_fd = fleet_merge_lock(c->tree, c->feature, wait);
+    if (c->merge_fd >= 0) return 0;
+    fprintf(stderr, "cg fleet: another merge into %s's branch held the lock "
+            "for %lds — retry when it is done\n", c->feature, wait / 1000);
+    return 1;
 }
 
 static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     memset(c, 0, sizeof *c);
     c->tree = cg->shared;
     c->gates_ok = -1;
+    c->merge_fd = -1;
     snprintf(c->wfpath, sizeof c->wfpath, "%s/spec/workflow.kvx", c->tree);
     c->wf = kvx_parse(c->wfpath);
     if (!c->wf) {
@@ -1157,6 +1211,15 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
         return 1;
     }
     hier_load(c->wf, &c->h);
+    /* an agent's own feature (CG_FEATURE) before the workflow's active
+     * one: several features run at once under one supervisor */
+    const char *env_feature = getenv("CG_FEATURE");
+    if (!feature_ov && env_feature && env_feature[0]) {
+        char p[4700];
+        struct stat est;
+        snprintf(p, sizeof p, "%s/spec/%s/spec.kvx", c->tree, env_feature);
+        if (stat(p, &est) == 0) feature_ov = env_feature;
+    }
     c->feature = feature_ov ? xstrdup(feature_ov)
                             : kvx_str(c->wf, "meta", "active_feature");
     if (!c->feature || !c->feature[0]) {
@@ -1353,9 +1416,9 @@ int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
     const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
     char agent[256], branch[512], base[512], parent[256];
     if (agent_flag && agent_flag[0]) snprintf(agent, sizeof agent, "%s", agent_flag);
-    else hier_expand(&c.h, rw->agent, c.feature, wave, agent, sizeof agent);
-    hier_expand(&c.h, rw->branch, c.feature, wave, branch, sizeof branch);
-    hier_expand(&c.h, rw->base, c.feature, wave, base, sizeof base);
+    else hier_expand_task(&c.h, rw->agent, c.feature, wave, id, agent, sizeof agent);
+    hier_expand_task(&c.h, rw->branch, c.feature, wave, id, branch, sizeof branch);
+    hier_expand_task(&c.h, rw->base, c.feature, wave, id, base, sizeof base);
     hier_expand(&c.h, rf->agent, c.feature, -1, parent, sizeof parent);
 
     StrBuf err; sb_init(&err);
@@ -1502,6 +1565,7 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
                    bool keep, bool json) {
     Lifecycle c;
     if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    if (lifecycle_merge_lock(&c) != 0) { lifecycle_close(&c); return 1; }
     long wave = 0;
     char status[64];
     if (!task_wave_status(c.specpath, id, &wave, status, sizeof status)) {
@@ -1512,8 +1576,8 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     }
     const FleetRole *rw = &c.h.roles[FLEET_WORKER];
     char branch[512], base[512];
-    hier_expand(&c.h, rw->branch, c.feature, wave, branch, sizeof branch);
-    hier_expand(&c.h, rw->base, c.feature, wave, base, sizeof base);
+    hier_expand_task(&c.h, rw->branch, c.feature, wave, id, branch, sizeof branch);
+    hier_expand_task(&c.h, rw->base, c.feature, wave, id, base, sizeof base);
     if (!git_branch_exists(c.tree, branch)) {
         fprintf(stderr, "cg fleet: no branch %s for %s — run cg fleet begin "
                         "%s first\n", branch, id, id);
@@ -1750,6 +1814,7 @@ static void land_event(Cg *cg, const Lifecycle *c, const char *outcome,
 int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
     Lifecycle c;
     if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    if (lifecycle_merge_lock(&c) != 0) { lifecycle_close(&c); return 1; }
     const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
     char branch[512];
     hier_expand(&c.h, rf->branch, c.feature, -1, branch, sizeof branch);

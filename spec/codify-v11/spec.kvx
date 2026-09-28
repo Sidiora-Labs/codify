@@ -176,11 +176,11 @@ status  = "pending"
 
 [task.4.1]
 title      = "Three-level concurrent tree with task slots and a merge lock"
-status     = "pending"
+status     = "in_progress"
 wave       = 4
 requires   = ["3.1", "2.2"]
 symbols    = ["orch_spawn_main", "fleet_merge_lock", "orch_task_slots"]
-touches    = ["src/orchestrate.c", "src/fleet.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/integration/26_fleet.sh"]
+touches    = ["src/orchestrate.c", "src/fleet.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/integration/26_fleet.sh", "src/spec.c"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/32_supervisor.sh tree && CG=$PWD/cg tests/integration/26_fleet.sh"
 do_1       = "Spawn a real main agent; run every feature whose requires are met, each with its manager, concurrently."
 do_2       = "Slots become tasks on task branches cut from the feature branch; merge-up takes the feature worktree's merge lock so manager and workers run together."

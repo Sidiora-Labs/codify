@@ -789,6 +789,7 @@ typedef struct {
     char *lint_gate;   /* same; "" means no lint gate is configured */
     char *pr;          /* auto: open on green; manual: print the commands */
     char *checkpoint;  /* manual | auto: when open PRs merge */
+    bool main_agent;   /* run Main Gideon as a process (opt-in: it costs) */
     FleetRole roles[FLEET_ROLES];
     char *unknown[8];  /* [role.X] names that are none of the three */
     int nunknown;
@@ -802,6 +803,18 @@ void hier_role_caps(const Kvx *wf, Hierarchy *h);
 /* "90s", "30m", "2h", "1d", or plain seconds; -1 when unreadable */
 long hier_duration(const char *s);
 void hier_free(Hierarchy *h);
+/* hier_expand plus {task}: a worker branch template naming {task} gives
+ * every task its own branch and worktree, so a wave's tasks can run at
+ * once (hier_per_task); without it a wave shares one */
+void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,
+                      long wave, const char *task, char *out, size_t cap);
+bool hier_per_task(const Hierarchy *h);
+/* One merge into a feature branch at a time: merge-up and land hold it,
+ * so workers and their manager run together instead of taking turns.
+ * Returns a descriptor to release with fleet_merge_unlock, -1 when
+ * wait_ms passed with the lock still held. */
+int  fleet_merge_lock(const char *shared, const char *feature, long wait_ms);
+void fleet_merge_unlock(int fd);
 void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
                  long wave, char *out, size_t cap);
 int  fleet_identity_record(Cg *g);           /* no-op without CG_ROLE */

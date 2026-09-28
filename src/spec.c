@@ -673,6 +673,17 @@ static int spec_load(Spec *s, const char *root_ov, const char *feature_ov,
         if (!quiet) fprintf(stderr, "cg spec: cannot parse %s\n", s->wfpath);
         return -1;
     }
+    /* A fleet agent carries its feature in CG_FEATURE: with several
+     * features running at once, its `cg spec done 2.1` means its own 2.1,
+     * not the workflow's active feature's. */
+    const char *env_feature = getenv("CG_FEATURE");
+    char env_spec[4700];
+    if (!feature_ov && env_feature && env_feature[0]) {
+        struct stat est;
+        snprintf(env_spec, sizeof env_spec, "%s/spec/%s/spec.kvx", s->root,
+                 env_feature);
+        if (stat(env_spec, &est) == 0) feature_ov = env_feature;
+    }
     s->feature = feature_ov ? xstrdup(feature_ov)
                             : S(s->wf, "meta", "active_feature");
     if (!s->feature[0]) {
