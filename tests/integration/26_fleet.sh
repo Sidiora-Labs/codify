@@ -352,7 +352,7 @@ assert f["max"] == 2 and m["max"] == 1, (f, m)
 p = " | ".join(d["problems"])
 assert "wall = \"soon\" is not a duration" in p, p
 assert "driver = \"gpt\" is not codex, claude, or custom" in p, p
-assert "approve gate \"merge\" is not land, pr, retry, or drift" in p, p
+assert "approve gate \"merge\" is not land, pr, retry, drift, or coverage" in p, p
 assert "[role.feature] max = \"0\" is not a usable count" in p, p
 assert "there is one main agent" in p, p
 ' || fail "cap problems"

@@ -219,11 +219,11 @@ status  = "pending"
 
 [task.5.1]
 title      = "Interface drift across branches and requirement coverage"
-status     = "pending"
+status     = "in_progress"
 wave       = 5
 requires   = ["4.3", "4.1"]
 symbols    = ["drift_interface_check", "coverage_check"]
-touches    = ["src/drift.c", "src/fleet.c", "src/graph.c", "src/govern.c", "src/cg.h", "tests/integration/33_drift.sh"]
+touches    = ["src/drift.c", "src/fleet.c", "src/orchestrate.c", "src/govern.c", "src/main.c", "src/cg.h", "tests/integration/33_drift.sh", "tests/integration/26_fleet.sh"]
 verify_cmd = "make cg && CG=$PWD/cg tests/integration/33_drift.sh interface"
 do_1       = "After each merge, diff signatures of changed symbols and find references on other live branches through the unified graph; notify those workers and managers."
 do_2       = "Before land, report acceptance criteria with no qualified task carrying evidence; block only when workflow.kvx opts in."

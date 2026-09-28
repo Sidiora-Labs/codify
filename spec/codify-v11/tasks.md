@@ -67,7 +67,7 @@
 ## Interfaces, coverage, serve client
 
 - [ ] 5. Cross-branch drift and the live editor core
-  - [ ] 5.1 Interface drift across branches and requirement coverage
+  - [-] 5.1 Interface drift across branches and requirement coverage
     - After each merge, diff signatures of changed symbols and find references on other live branches through the unified graph; notify those workers and managers.
     - Before land, report acceptance criteria with no qualified task carrying evidence; block only when workflow.kvx opts in.
     - Surface drift in brief and fleet tree.

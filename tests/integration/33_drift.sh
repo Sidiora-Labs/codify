@@ -6,6 +6,10 @@
 #          approve = ["drift"] makes merge-up wait); cg drift check;
 #          collision prediction (touch overlap, call-graph neighbours) and
 #          the supervisor serializing a predicted collision
+#   interface — a merge that changes a signature other live branches
+#          reference: the event, steering to those agents and their
+#          managers; coverage of acceptance criteria before land (warn,
+#          or wait with approve = ["coverage"]); drift in brief and tree
 # Run one section: 33_drift.sh spec
 . "$(dirname "$0")/../lib.sh"
 section="${1:-all}"
@@ -216,6 +220,127 @@ import json, sys
 ev = [json.loads(l) for l in sys.stdin if l.strip()]
 assert any(e["payload"]["task"] == "3.3" and e["payload"]["with"] == "2.2" for e in ev), ev
 ' || fail "collision event"
+fi
+
+if want interface; then
+    setup_repo
+    proj="$(pwd -P)"
+    wt="$proj/.codegraph/worktrees"
+    cat >> spec/workflow.kvx <<'EOF'
+
+[hierarchy]
+test_gate = "true"
+pr        = "manual"
+
+[role.worker]
+branch = "task/{feature}/{task}"
+agent  = "w-{feature}-{task}"
+EOF
+    # a requirement nobody covers yet, and one a pending task claims
+    python3 - <<'EOF'
+p = "spec/drift/spec.kvx"
+s = open(p).read()
+s = s.replace("[design]", '[req.2]\ntitle = "Coverage"\nac_1  = "WHEN a covered thing THE tool SHALL do it."\nac_2  = "WHEN an uncovered thing THE tool SHALL also do it."\n\n[design]', 1)
+open(p, "w").write(s)
+EOF
+    "$CG" spec add 5.1 --title "Covers 2.1" --wave 4 --reqs 2.1 --touches 'src/z.ts' >/dev/null
+    git add -A >/dev/null; git commit -qm "hierarchy" >/dev/null
+
+    # ---- two workers on their own branches; 2.2's code calls alpha
+    "$CG" fleet begin 2.1 >/dev/null
+    "$CG" fleet begin 2.2 >/dev/null
+    cd "$wt/task-drift-2.2"
+    printf 'import { alpha } from "./a";\nexport function delta(): number {\n  return alpha() + 4;\n}\n' > src/d.ts
+    "$CG" sync >/dev/null
+    has "$("$CG" branches)" "task/drift/2.2"
+    cd "$wt/task-drift-2.1"
+    CG_AGENT=w-drift-2.1 CG_ROLE=worker CG_PARENT=fm-drift "$CG" spec start 2.1 >/dev/null
+    printf 'export function alpha(n: number): number {\n  return n;\n}\nfunction helperA(): number {\n  return 2;\n}\n' > src/a.ts
+    CG_AGENT=w-drift-2.1 "$CG" spec done 2.1 >/dev/null 2>&1
+    git add -A >/dev/null; git commit -qm "alpha takes n [spec:drift/2.1]" >/dev/null
+    cd "$proj"
+    h="$("$CG" events --head)"
+    out="$("$CG" fleet merge-up 2.1 2>&1)"
+    has "$out" "merged task/drift/2.1 into feature/drift"
+    has "$out" "drift: function alpha (src/a.ts) signature changed by this merge"
+    has "$out" "site(s) on other live branches were told"
+    "$CG" events --since "$h" --kind drift.interface --json -n 20 | python3 -c '
+import json, sys
+ev = [json.loads(l) for l in sys.stdin if l.strip()]
+assert len(ev) == 1, ev
+p = ev[0]["payload"]
+assert ev[0]["subject"] == "drift/2.1" and p["symbol"] == "alpha" and p["change"] == "signature", p
+assert p["old"].startswith("export function alpha(): number") and "alpha(n: number)" in p["new"], p
+assert p["base"] == "feature/drift" and p["from"] == "task/drift/2.1", p
+assert any(s["branch"] == "task/drift/2.2" and s["path"] == "src/d.ts" for s in p["sites"]), p
+ag = {a["agent"]: a for a in p["agents"]}
+assert "w-drift-2.2" in ag and ag["w-drift-2.2"]["parent"] == "fm-drift", p
+' || fail "drift.interface event"
+    steer="$("$CG" events --since "$h" --kind agent.steer --json -n 20)"
+    has "$steer" '"subject":"w-drift-2.2"'
+    has "$steer" '"subject":"fm-drift"'
+    has "$steer" "Interface drift on feature/drift"
+    has "$steer" "New signature: export function alpha(n: number)"
+    # helperA is private and delta was not changed: neither is drift
+    hasnt "$("$CG" events --since "$h" --kind drift.interface --json -n 20)" '"symbol":"helperA"'
+
+    # ---- brief and tree carry it
+    out="$("$CG" brief)"
+    has "$out" "drift on drift:"
+    has "$out" "interface: 1"
+    out="$("$CG" fleet tree)"
+    has "$out" "drift"
+    has "$out" "interface: 1"
+    "$CG" fleet tree --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+m = d["managers"][0]
+assert m["drift"]["interface"] == 1 and m["drift"]["spec"] >= 0, m["drift"]
+' || fail "fleet tree drift json"
+    "$CG" brief --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["drift"]["interface"] == 1, d["drift"]
+' || fail "brief drift json"
+    out="$("$CG" drift summary)"
+    has "$out" "interface: 1"
+
+    # ---- coverage: criteria with no qualified task, before land
+    out="$("$CG" drift coverage --json)"
+    echo "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+u = {x["clause"]: x for x in d["uncovered"]}
+assert "2.2" in u and u["2.2"]["task"] is None, u
+assert "2.1" in u and u["2.1"]["task"] == "5.1", u
+assert "1.1" not in u, u
+' || fail "coverage json: $out"
+    out="$("$CG" drift coverage 2>&1)"
+    has "$out" "acceptance criterion(s) of drift have no qualified task"
+    has "$out" "2.1 (5.1 not done)"
+    # land warns and proceeds (nobody opted in)
+    out="$("$CG" fleet land drift --no-pr 2>&1)"
+    has "$out" "coverage: 2 acceptance criterion(s) of drift have no qualified task"
+    has "$out" "landed feature/drift into main"
+    has "$("$CG" events --kind drift.coverage --json -n 5)" '"uncovered":2'
+    # an agent's land waits when the workflow asks for it
+    cat >> spec/workflow.kvx <<'EOF'
+
+[role.feature]
+approve = ["coverage"]
+EOF
+    git add -A >/dev/null; git commit -qm "coverage gate" >/dev/null
+    "$CG" fleet begin 2.2 >/dev/null 2>&1
+    cd "$wt/task-drift-2.2"
+    CG_AGENT=w-drift-2.2 CG_ROLE=worker "$CG" spec start 2.2 >/dev/null 2>&1
+    CG_AGENT=w-drift-2.2 "$CG" spec done 2.2 >/dev/null 2>&1
+    git add -A >/dev/null; git commit -qm "delta [spec:drift/2.2]" >/dev/null
+    cd "$proj"
+    "$CG" fleet merge-up 2.2 >/dev/null 2>&1 || true
+    rc=0; out="$(CG_ROLE=feature CG_AGENT=fm-drift "$CG" fleet land drift --no-pr 2>&1)" || rc=$?
+    [ "$rc" -eq 4 ] || fail "an agent's land with uncovered criteria waits (4), got $rc: $out"
+    has "$out" "coverage of drift waits for approval #"
+    has "$("$CG" fleet approvals)" "coverage"
 fi
 
 echo "drift OK"

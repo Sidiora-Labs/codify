@@ -405,6 +405,20 @@ static void brief_branches(Cg *cg, StrBuf *b, bool json) {
  * it had yesterday. In a shared graph the brief also names the branches
  * indexed beside this one, and inside a fleet who this agent is and whom it
  * reports to, so a spawned worker never has to guess. */
+/* the feature brief reports on: the task's, else the workflow's active */
+static char *brief_feature(Cg *cg, const char *task_json) {
+    char *f = task_json ? json_get_string(task_json, "feature") : NULL;
+    if (f && f[0]) return f;
+    free(f);
+    char path[4700];
+    snprintf(path, sizeof path, "%s/spec/workflow.kvx", cg->shared);
+    Kvx *k = kvx_parse(path);
+    f = k ? kvx_str(k, "meta", "active_feature") : NULL;
+    kvx_free(k);
+    if (f && !f[0]) { free(f); f = NULL; }
+    return f;
+}
+
 int cmd_brief(Cg *cg, bool json)
 {
     StrBuf b; sb_init(&b);
@@ -440,11 +454,30 @@ int cmd_brief(Cg *cg, bool json)
         sb_puts(&b, "]");
         brief_branches(cg, &b, true);
         fleet_brief(cg, &b, true);
+        {
+            char *feat = brief_feature(cg, task);
+            if (feat) {
+                sb_puts(&b, ",\"drift\":");
+                drift_summary(cg, feat, NULL, &b);
+                free(feat);
+            }
+        }
         sb_puts(&b, "}\n");
     } else {
         sb_printf(&b, "project: %s\n", cg->root);
         brief_branches(cg, &b, false);
         fleet_brief(cg, &b, false);
+        {
+            /* drift found so far on this feature: what a reader should
+             * know moved outside a declaration or under another branch */
+            char *feat = brief_feature(cg, task);
+            StrBuf dt; sb_init(&dt);
+            int nd = feat ? drift_summary(cg, feat, &dt, NULL) : 0;
+            if (nd) sb_printf(&b, "drift on %s: %d finding(s) — cg drift summary\n%s",
+                              feat, nd, dt.p);
+            sb_free(&dt);
+            free(feat);
+        }
         if (!have_spec) {
             sb_puts(&b, "spec: none — `cg spec new <feature>` to start one\n");
         } else if (task) {

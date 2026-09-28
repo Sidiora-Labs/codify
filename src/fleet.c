@@ -151,6 +151,7 @@ static void hier_problem(Hierarchy *h, const char *fmt, const char *role,
 static const struct { const char *name; unsigned bit; } APPROVALS[] = {
     { "land", APPROVE_LAND }, { "pr", APPROVE_PR },
     { "retry", APPROVE_RETRY }, { "drift", APPROVE_DRIFT },
+    { "coverage", APPROVE_COVERAGE },
 };
 
 /* the raw scalar, as written: numbers come back without quotes */
@@ -271,8 +272,8 @@ void hier_role_caps(const Kvx *wf, Hierarchy *h) {
                 }
             if (!known)
                 hier_problem(h, "[role.%s] %s gate \"%s\" is not land, pr, "
-                                "retry, or drift — ignored", name, "approve",
-                             ap[i]);
+                                "retry, drift, or coverage — ignored", name,
+                             "approve", ap[i]);
             free(ap[i]);
         }
         free(ap);
@@ -1650,6 +1651,8 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
         sb_free(&r);
     }
     long n = commits_between(c.tree, base, branch);
+    char pre_head[65];
+    snprintf(pre_head, sizeof pre_head, "%s", head);
     StrBuf b; sb_init(&b);
     if (n == 0) {
         if (json) {
@@ -1722,6 +1725,12 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
     sb_free(&out);
     git_head(fpath, on, sizeof on, head, sizeof head);
     branch_register(cg, base, fpath, head, c.h.main_branch);
+    /* what this merge moved under the other branches still being written */
+    {
+        char tag[400];
+        snprintf(tag, sizeof tag, "%s/%s", c.feature, id);
+        drift_interface_check(cg, fpath, base, pre_head, head, branch, tag, NULL);
+    }
     /* the code moved up; so must what was learned writing it, or the next
      * agent on the base rediscovers it from scratch */
     int promoted = memory_promote_branch(cg, branch, base);
@@ -1823,6 +1832,19 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
                         "for %s yet\n", branch, c.feature);
         lifecycle_close(&c);
         return 1;
+    }
+    {
+        /* every acceptance criterion traced to a qualified task, before
+         * anything lands; a person decides only where the workflow asked
+         * (approve = ["coverage"]) */
+        StrBuf r; sb_init(&r);
+        int nu = coverage_check(cg, c.feature, &r);
+        if (nu > 0) {
+            coverage_print(r.p, c.feature);
+            int cgate = fleet_gate(cg, "coverage", c.feature);
+            if (cgate) { sb_free(&r); lifecycle_close(&c); return cgate; }
+        }
+        sb_free(&r);
     }
     int gate = fleet_gate(cg, "land", c.feature);
     if (gate) { lifecycle_close(&c); return gate; }

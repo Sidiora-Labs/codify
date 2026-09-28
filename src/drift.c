@@ -410,6 +410,334 @@ int cmd_drift(Cg *cg, int argc, char **argv, bool json) {
         free(active);
         return 0;
     }
-    fprintf(stderr, "usage: cg drift check <id> [--base REF] | collisions [-f F]\n");
+    if (!strcmp(sub, "coverage")) {
+        const char *feature = NULL;
+        for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "-f")) feature = argv[i + 1];
+        char *active = feature ? NULL : drift_active_feature(cg);
+        if (!feature) feature = active;
+        if (!feature) { fprintf(stderr, "cg drift: no active feature\n"); return 1; }
+        StrBuf r; sb_init(&r);
+        int nu = coverage_check(cg, feature, &r);
+        if (nu < 0) { fprintf(stderr, "cg drift: no spec for %s\n", feature); free(active); return 1; }
+        if (json) printf("{\"feature\":\"%s\",\"uncovered\":%s}\n", feature, r.p);
+        else if (!nu) printf("coverage: every acceptance criterion of %s has a qualified task\n", feature);
+        else coverage_print(r.p, feature);
+        sb_free(&r);
+        free(active);
+        return 0;
+    }
+    if (!strcmp(sub, "summary")) {
+        const char *feature = NULL;
+        for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "-f")) feature = argv[i + 1];
+        char *active = feature ? NULL : drift_active_feature(cg);
+        if (!feature) feature = active;
+        if (!feature) { fprintf(stderr, "cg drift: no active feature\n"); return 1; }
+        StrBuf t, j; sb_init(&t); sb_init(&j);
+        int n = drift_summary(cg, feature, &t, &j);
+        if (json) printf("%s\n", j.p);
+        else if (!n) printf("no drift recorded for %s\n", feature);
+        else { printf("drift for %s:\n%s", feature, t.p); }
+        sb_free(&t); sb_free(&j);
+        free(active);
+        return 0;
+    }
+    fprintf(stderr, "usage: cg drift check <id> [--base REF] | collisions [-f F] "
+                    "| coverage [-f F] | summary [-f F]\n");
     return 1;
+}
+
+/* ---------------- interface drift across branches ---------------- */
+
+/* the file at a commit, parsed: definitions by name with their signature */
+static int blob_defs(const char *tree, const char *rev, const char *path,
+                     ParseResult *pr) {
+    memset(pr, 0, sizeof *pr);
+    StrBuf c; sb_init(&c);
+    sb_puts(&c, "git -C ");
+    sb_shquote(&c, tree);
+    sb_puts(&c, " show ");
+    StrBuf spec; sb_init(&spec);
+    sb_printf(&spec, "%s:%s", rev, path);
+    sb_shquote(&c, spec.p);
+    sb_free(&spec);
+    sb_puts(&c, " 2>/dev/null");
+    FILE *f = popen(c.p, "r");
+    sb_free(&c);
+    if (!f) return -1;
+    StrBuf src; sb_init(&src);
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0)
+        for (size_t i = 0; i < n; i++) sb_putc(&src, buf[i]);
+    int rc = pclose(f);
+    if (rc != 0) { sb_free(&src); return -1; }      /* absent at that rev */
+    lang_global_init();            /* the parser's regexes, compiled once */
+    routes_global_init();
+    lang_parse(NULL, path, src.p, src.len, pr);
+    sb_free(&src);
+    return 0;
+}
+
+static const SymDef *def_named(const ParseResult *pr, const char *name) {
+    for (int i = 0; i < pr->ndefs; i++)
+        if (!strcmp(pr->defs[i].name, name)) return &pr->defs[i];
+    return NULL;
+}
+
+/* Where other live branches reference name: the unified graph holds every
+ * branch's rows, so a worker's branch answers even while it is checked out
+ * elsewhere. Returns the sites as a JSON array and the agents on those
+ * branches (with their parents) as a JSON array of {agent,parent,branch}. */
+static int drift_ref_sites(Cg *cg, const char *name, long skip_branch,
+                           StrBuf *sites, StrBuf *agents) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT b.name,f.path,r.line,(SELECT a.agent||'|'||ifnull(a.parent,'') "
+        "FROM attempts a WHERE a.branch=b.name AND a.state='running' AND "
+        "a.expires>strftime('%s','now') LIMIT 1) "
+        "FROM refs r JOIN files f ON f.id=r.file_id JOIN branches b ON "
+        "b.id=f.branch_id WHERE r.name=? AND f.branch_id<>? AND EXISTS("
+        "SELECT 1 FROM attempts a WHERE a.branch=b.name AND a.state='running' "
+        "AND a.expires>strftime('%s','now')) ORDER BY b.name,f.path,r.line "
+        "LIMIT 40");
+    sqlite3_bind_text(st, 1, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, skip_branch);
+    int n = 0, na = 0;
+    char seen[16][300];
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *br = (const char *)sqlite3_column_text(st, 0);
+        const char *ag = (const char *)sqlite3_column_text(st, 3);
+        if (n++) sb_putc(sites, ',');
+        sb_puts(sites, "{\"branch\":"); sb_json_str(sites, br);
+        sb_puts(sites, ",\"path\":"); sb_json_str(sites, (const char *)sqlite3_column_text(st, 1));
+        sb_printf(sites, ",\"line\":%d}", sqlite3_column_int(st, 2));
+        if (!ag) continue;
+        bool dup = false;
+        for (int i = 0; i < na && !dup; i++) dup = !strcmp(seen[i], ag);
+        if (dup || na >= 16) continue;
+        snprintf(seen[na++], sizeof seen[0], "%s", ag);
+        const char *bar = strchr(ag, '|');
+        if (na > 1) sb_putc(agents, ',');
+        sb_puts(agents, "{\"agent\":");
+        char a[128];
+        snprintf(a, sizeof a, "%.*s", bar ? (int)(bar - ag) : (int)strlen(ag), ag);
+        sb_json_str(agents, a);
+        sb_puts(agents, ",\"parent\":");
+        if (bar && bar[1]) sb_json_str(agents, bar + 1); else sb_puts(agents, "null");
+        sb_puts(agents, ",\"branch\":"); sb_json_str(agents, br);
+        sb_putc(agents, '}');
+    }
+    sqlite3_finalize(st);
+    return n;
+}
+
+int drift_interface_check(Cg *cg, const char *tree, const char *base_branch,
+                          const char *pre, const char *post, const char *from,
+                          const char *tag, StrBuf *out) {
+    FileDiff *fd = NULL;
+    int nf = drift_diff(tree, pre, post, &fd);
+    long base_id = 0;
+    sqlite3_stmt *bq = cg_prep(cg, "SELECT id FROM branches WHERE name=?");
+    sqlite3_bind_text(bq, 1, base_branch, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(bq) == SQLITE_ROW) base_id = sqlite3_column_int64(bq, 0);
+    sqlite3_finalize(bq);
+    /* the merged branch's own rows are the change, not a reader of it */
+    long from_id = 0;
+    bq = cg_prep(cg, "SELECT id FROM branches WHERE name=?");
+    sqlite3_bind_text(bq, 1, from, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(bq) == SQLITE_ROW) from_id = sqlite3_column_int64(bq, 0);
+    sqlite3_finalize(bq);
+    int findings = 0;
+    if (out) sb_puts(out, "[");
+    for (int i = 0; i < nf; i++) {
+        if (drift_exempt(fd[i].path)) continue;
+        ParseResult before, after;
+        bool had = blob_defs(tree, pre, fd[i].path, &before) == 0;
+        bool has = blob_defs(tree, post, fd[i].path, &after) == 0;
+        if (!had) { if (has) parse_result_free(&after); continue; }
+        for (int d = 0; d < before.ndefs; d++) {
+            const SymDef *o = &before.defs[d];
+            if (!drift_public(fd[i].path, o->name, o->kind, o->sig)) continue;
+            const SymDef *nw = has ? def_named(&after, o->name) : NULL;
+            const char *change = !nw ? "removed"
+                               : strcmp(o->sig, nw->sig) ? "signature" : NULL;
+            if (!change) continue;
+            StrBuf sites, agents; sb_init(&sites); sb_init(&agents);
+            int ns = drift_ref_sites(cg, o->name, base_id, &sites, &agents);
+            /* the merged branch's own references are not other branches */
+            (void)from_id;
+            if (!ns) { sb_free(&sites); sb_free(&agents); continue; }
+            StrBuf p; sb_init(&p);
+            sb_puts(&p, "{\"symbol\":"); sb_json_str(&p, o->name);
+            sb_puts(&p, ",\"change\":"); sb_json_str(&p, change);
+            sb_puts(&p, ",\"path\":"); sb_json_str(&p, fd[i].path);
+            sb_puts(&p, ",\"old\":"); sb_json_str(&p, o->sig);
+            sb_puts(&p, ",\"new\":");
+            if (nw) sb_json_str(&p, nw->sig); else sb_puts(&p, "null");
+            sb_puts(&p, ",\"base\":"); sb_json_str(&p, base_branch);
+            sb_puts(&p, ",\"from\":"); sb_json_str(&p, from ? from : "");
+            sb_puts(&p, ",\"task\":"); sb_json_str(&p, tag ? tag : "");
+            sb_printf(&p, ",\"sites\":[%s],\"agents\":[%s]}", sites.p, agents.p);
+            events_emit(cg, "drift.interface", tag && tag[0] ? tag : o->name, p.p);
+            if (out) { if (findings) sb_putc(out, ','); sb_puts(out, p.p); }
+            findings++;
+            /* tell the people on those branches, and the managers they
+             * report to, what moved under them */
+            char **ag = NULL;
+            char arr[8192];
+            snprintf(arr, sizeof arr, "[%s]", agents.p);
+            int na = json_array_items(arr, &ag);
+            for (int k = 0; k < na; k++) {
+                char *agent = json_get_string(ag[k], "agent");
+                char *parent = json_get_string(ag[k], "parent");
+                char *branch = json_get_string(ag[k], "branch");
+                char msg[900];
+                snprintf(msg, sizeof msg, "Interface drift on %s: `%s` (%s) "
+                         "was %s by a merge into %s%s%s. Your branch %s "
+                         "references it — rebase or merge %s and adjust "
+                         "before you qualify.%s%s", base_branch, o->name,
+                         fd[i].path, change[0] == 'r' ? "removed" :
+                         "changed", base_branch, tag ? " for " : "",
+                         tag ? tag : "", branch ? branch : "?", base_branch,
+                         nw ? " New signature: " : "", nw ? nw->sig : "");
+                if (agent) driver_steer(cg, agent, msg);
+                if (parent && parent[0]) driver_steer(cg, parent, msg);
+                free(agent); free(parent); free(branch); free(ag[k]);
+            }
+            free(ag);
+            fprintf(stderr, "drift: %s %s (%s) %s by this merge; %d site(s) on "
+                    "other live branches were told\n", o->kind, o->name,
+                    fd[i].path, change[0] == 'r' ? "removed" : "signature changed",
+                    ns);
+            sb_free(&p); sb_free(&sites); sb_free(&agents);
+        }
+        parse_result_free(&before);
+        if (has) parse_result_free(&after);
+    }
+    if (out) sb_puts(out, "]");
+    for (int i = 0; i < nf; i++) { free(fd[i].path); free(fd[i].h); }
+    free(fd);
+    return findings;
+}
+
+/* ---------------- requirement coverage ---------------- */
+
+int coverage_check(Cg *cg, const char *feature, StrBuf *out) {
+    char path[4700];
+    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+    Kvx *k = kvx_parse(path);
+    if (!k) return -1;
+    char **tasks = NULL;
+    int nt = kvx_subsections(k, "task", &tasks);
+    char **reqs = NULL;
+    int nr = kvx_subsections(k, "req", &reqs);
+    kvx_sort_dotted(reqs, nr);
+    int uncovered = 0, total = 0;
+    if (out) sb_puts(out, "[");
+    for (int i = 0; i < nr; i++) {
+        char rsec[300];
+        snprintf(rsec, sizeof rsec, "req.%s", reqs[i]);
+        const char **keys = NULL;
+        int nk = kvx_keys(k, rsec, &keys);
+        for (int j = 0; j < nk; j++) {
+            if (strncmp(keys[j], "ac_", 3)) continue;
+            char clause[200];
+            snprintf(clause, sizeof clause, "%s.%s", reqs[i], keys[j] + 3);
+            total++;
+            const char *covering = NULL, *pending = NULL;
+            for (int t = 0; t < nt && !covering; t++) {
+                char tsec[300];
+                snprintf(tsec, sizeof tsec, "task.%s", tasks[t]);
+                char **cl = NULL;
+                int nc = kvx_list(k, tsec, "reqs", &cl);
+                bool names = false;
+                for (int c = 0; c < nc; c++) {
+                    if (!strcmp(cl[c], clause) || !strcmp(cl[c], reqs[i])) names = true;
+                    free(cl[c]);
+                }
+                free(cl);
+                if (!names) continue;
+                char *st = kvx_str(k, tsec, "status");
+                if (st && !strcmp(st, "done")) covering = tasks[t];
+                else pending = tasks[t];
+                free(st);
+            }
+            if (covering) continue;
+            uncovered++;
+            char *text = kvx_str(k, rsec, keys[j]);
+            if (out) {
+                if (uncovered > 1) sb_putc(out, ',');
+                sb_puts(out, "{\"clause\":"); sb_json_str(out, clause);
+                sb_puts(out, ",\"text\":"); sb_json_str(out, text ? text : "");
+                sb_puts(out, ",\"task\":");
+                if (pending) sb_json_str(out, pending); else sb_puts(out, "null");
+                sb_putc(out, '}');
+            }
+            free(text);
+        }
+        free((void *)keys);
+    }
+    if (out) sb_puts(out, "]");
+    for (int i = 0; i < nt; i++) free(tasks[i]);
+    free(tasks);
+    for (int i = 0; i < nr; i++) free(reqs[i]);
+    free(reqs);
+    kvx_free(k);
+    if (uncovered) {
+        StrBuf p; sb_init(&p);
+        sb_puts(&p, "{\"feature\":"); sb_json_str(&p, feature);
+        sb_printf(&p, ",\"uncovered\":%d,\"total\":%d}", uncovered, total);
+        events_emit(cg, "drift.coverage", feature, p.p);
+        sb_free(&p);
+    }
+    return uncovered;
+}
+
+void coverage_print(const char *report_json, const char *feature) {
+    char **items = NULL;
+    int n = json_array_items(report_json, &items);
+    if (!n) return;
+    fprintf(stderr, "coverage: %d acceptance criterion(s) of %s have no "
+            "qualified task:\n", n, feature);
+    for (int i = 0; i < n; i++) {
+        char *cl = json_get_string(items[i], "clause");
+        char *tx = json_get_string(items[i], "text");
+        char *tk = json_get_string(items[i], "task");
+        fprintf(stderr, "  %s%s%s%s: %.100s%s\n", cl ? cl : "?",
+                tk ? " (" : "", tk ? tk : "", tk ? " not done)" : "",
+                tx ? tx : "", tx && strlen(tx) > 100 ? "…" : "");
+        free(cl); free(tx); free(tk); free(items[i]);
+    }
+    free(items);
+}
+
+/* recent drift for a feature, one line per kind, for brief and fleet tree;
+ * returns the total */
+int drift_summary(Cg *cg, const char *feature, StrBuf *text, StrBuf *json) {
+    static const char *KINDS[] = { "drift.spec", "drift.interface",
+                                   "drift.collision", "drift.coverage", NULL };
+    char like[300];
+    snprintf(like, sizeof like, "%s/%%", feature);
+    int total = 0;
+    if (json) sb_putc(json, '{');
+    for (int i = 0; KINDS[i]; i++) {
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT COUNT(*),MAX(seq) FROM events WHERE kind=? AND (subject=? "
+            "OR subject LIKE ?)");
+        sqlite3_bind_text(st, 1, KINDS[i], -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, feature, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 3, like, -1, SQLITE_TRANSIENT);
+        int n = 0;
+        long last = 0;
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            n = sqlite3_column_int(st, 0);
+            last = sqlite3_column_int64(st, 1);
+        }
+        sqlite3_finalize(st);
+        if (json) sb_printf(json, "%s\"%s\":%d", i ? "," : "", KINDS[i] + 6, n);
+        if (!n) continue;
+        total += n;
+        if (text) sb_printf(text, "  %s: %d (latest #%ld)\n", KINDS[i] + 6, n, last);
+    }
+    if (json) sb_putc(json, '}');
+    return total;
 }

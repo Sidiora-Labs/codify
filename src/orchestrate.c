@@ -1747,9 +1747,11 @@ int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
         sb_json_str(&b, fwt);
         sb_printf(&b, ",\"seen\":%ld,\"tasks\":{\"total\":%d,\"done\":%d,"
                   "\"claimed\":%d},\"ahead\":%ld,\"merged\":%s,"
-                  "\"complete\":%s,\"workers\":[", mseen, sub.total, sub.done,
+                  "\"complete\":%s,\"drift\":", mseen, sub.total, sub.done,
                   sub.claimed, sub.ahead, sub.merged ? "true" : "false",
                   sub.complete ? "true" : "false");
+        drift_summary(cg, feature, NULL, &b);
+        sb_puts(&b, ",\"workers\":[");
         for (int i = 0; i < nw; i++) {
             if (i) sb_putc(&b, ',');
             sb_puts(&b, "{\"agent\":");
@@ -1784,6 +1786,12 @@ int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
                   "%s  seen %s\n", sub.done, sub.total, sub.claimed,
                   sub.ahead < 0 ? 0 : sub.ahead,
                   sub.complete ? "complete" : "incomplete", ago);
+        {
+            StrBuf dt; sb_init(&dt);
+            int nd = drift_summary(cg, feature, &dt, NULL);
+            if (nd) sb_printf(&b, "           drift %d finding(s):\n%s", nd, dt.p);
+            sb_free(&dt);
+        }
         if (!nw) sb_puts(&b, "    (no workers yet)\n");
         for (int i = 0; i < nw; i++) {
             orch_ago(w[i].heartbeat, ago, sizeof ago);

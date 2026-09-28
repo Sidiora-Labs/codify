@@ -749,6 +749,20 @@ void drift_print(const char *report_json);
 bool drift_collision_predict(Cg *cg, const char *feature, const char *a,
                              const char *b, char *why, size_t cap);
 int  cmd_drift(Cg *cg, int argc, char **argv, bool json);
+/* After a merge pre..post into base_branch (from `from`, for task tag):
+ * public symbols removed or re-signatured, that other live branches
+ * reference in the unified graph. Emits drift.interface per symbol and
+ * steers the agents on those branches and their parents. out (optional)
+ * receives a JSON array; returns findings. */
+int  drift_interface_check(Cg *cg, const char *tree, const char *base_branch,
+                           const char *pre, const char *post, const char *from,
+                           const char *tag, StrBuf *out);
+/* acceptance criteria of feature with no done task naming them; out
+ * (optional) receives a JSON array of {clause,text,task}; returns count */
+int  coverage_check(Cg *cg, const char *feature, StrBuf *out);
+void coverage_print(const char *report_json, const char *feature);
+/* counts of drift.* events for a feature; text lines and/or a JSON object */
+int  drift_summary(Cg *cg, const char *feature, StrBuf *text, StrBuf *json);
 /* direct callers and callees of name (malloc'd names); returns count */
 int  graph_neighbors(Cg *cg, const char *name, char ***out);
 
@@ -756,7 +770,8 @@ int  graph_neighbors(Cg *cg, const char *name, char ***out);
 /* ---------------- fleet: hierarchy, identity, reports (fleet.c) -------- */
 enum { FLEET_MAIN = 0, FLEET_FEATURE = 1, FLEET_WORKER = 2, FLEET_ROLES = 3 };
 /* approval gates a role stops at until `cg fleet approve` (opt-in) */
-enum { APPROVE_LAND = 1, APPROVE_PR = 2, APPROVE_RETRY = 4, APPROVE_DRIFT = 8 };
+enum { APPROVE_LAND = 1, APPROVE_PR = 2, APPROVE_RETRY = 4, APPROVE_DRIFT = 8,
+       APPROVE_COVERAGE = 16 };
 /* What each role may spend and how it is run. Every field has a default
  * (see hier_role_caps), so a supervisor never has to guess; 0 for wall or
  * spend means no limit. */
