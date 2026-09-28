@@ -12,9 +12,10 @@
     - Emit from spec transitions, claims, attempts, fleet begin, merge-up, land, pr, checkpoint, and the orchestrator's spawn and reap.
     - cg events [--since N] [--kind K] [--follow] [--json]; retention by count with a meta high-water mark.
     - _Requirements: 5.1, 5.5_
-  - [-] 1.2 Role capabilities in workflow.kvx
+  - [x] 1.2 Role capabilities in workflow.kvx
     - Parse per-role driver, model, args, max, wall, spend, retries, stall, and approve keys with defaults from [agents].
     - Show resolved capabilities in cg fleet roles and its --json.
+    - Index C typedef'd anonymous aggregates (typedef struct { ... } Name;), which the graph never recorded, so type symbols such as RoleCaps exist for graph checks and drift; stop the one-line typedef pattern from naming the first member.
     - _Requirements: 1.5, 1.7_
 
 ## One connection, structured agent output

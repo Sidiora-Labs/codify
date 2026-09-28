@@ -97,7 +97,7 @@ reqs       = ["5.1", "5.5"]
 
 [task.1.2]
 title      = "Role capabilities in workflow.kvx"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["hier_role_caps", "RoleCaps"]
 touches    = ["src/fleet.c", "src/cg.h", "spec/workflow.kvx", "docs/hierarchy.md", "tests/integration/26_fleet.sh", "src/lang.c", "tests/unit/test_lang.c"]
