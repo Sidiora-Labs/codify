@@ -49,7 +49,7 @@
 ## Three levels at once
 
 - [ ] 4. Concurrency, supervision, drift
-  - [-] 4.1 Three-level concurrent tree with task slots and a merge lock
+  - [x] 4.1 Three-level concurrent tree with task slots and a merge lock
     - Spawn a real main agent; run every feature whose requires are met, each with its manager, concurrently.
     - Slots become tasks on task branches cut from the feature branch; merge-up takes the feature worktree's merge lock so manager and workers run together.
     - Respect each role's concurrency limit and the machine-wide slots.

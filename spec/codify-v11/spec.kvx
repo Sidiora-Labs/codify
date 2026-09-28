@@ -176,7 +176,7 @@ status  = "pending"
 
 [task.4.1]
 title      = "Three-level concurrent tree with task slots and a merge lock"
-status     = "in_progress"
+status     = "done"
 wave       = 4
 requires   = ["3.1", "2.2"]
 symbols    = ["orch_spawn_main", "fleet_merge_lock", "orch_task_slots"]
