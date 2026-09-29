@@ -7,7 +7,7 @@
 ## Resume brief from agent transcripts
 
 - [ ] 1. Recap
-  - [-] 1.1 cg recap: transcripts in, System One decides, the chat model writes
+  - [x] 1.1 cg recap: transcripts in, System One decides, the chat model writes
     - Expose the changelog's gateway chat call as chat_model_config/chat_model_ask and the Jev client as jev_ask_at with its own key, model and endpoint.
     - Discover and parse Claude Code and Codex transcripts into statements; decide in small parallel chunks with a per-chunk cache; pick by probability within a budget; write the decided log.
     - Add the repository facts, the writer prompt, the output file, --decided and --facts, and the integration test against the fake curl and fake OpenAI endpoint.

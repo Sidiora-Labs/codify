@@ -33,7 +33,7 @@ status  = "pending"
 
 [task.1.1]
 title      = "cg recap: transcripts in, System One decides, the chat model writes"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["cmd_recap", "jev_ask_at", "chat_model_ask", "decide_all", "select_picks"]
 touches    = ["src/recap.c", "src/jev.c", "src/changelog.c", "src/cg.h", "src/main.c", "tests/integration/36_recap.sh", "tests/fixtures/recap/*", "README.md", "docs/ARCHITECTURE.md"]
