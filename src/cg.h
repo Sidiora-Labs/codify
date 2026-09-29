@@ -944,6 +944,13 @@ int  jev_ask(Cg *cg, const char *state_json, const JevQuestion *qs, int nq,
 /* Same, with a complete {"model","questions","state"} body; a missing
  * model is filled in from the configuration. */
 int  jev_ask_raw(Cg *cg, const char *body, JevResult *out);
+/* The same call against another System One endpoint: any /v1/systemone
+ * server (Solar Decide through the Centra gateway, for `cg recap`). key,
+ * model and endpoint replace the OPENROUTER_API_KEY/CG_JEV_* trio; curl,
+ * timeout and retries still come from CG_JEV_*. */
+int  jev_ask_at(Cg *cg, const char *key, const char *model,
+                const char *endpoint, const char *state_json,
+                const JevQuestion *qs, int nq, JevResult *out);
 const JevAnswer *jev_answer(const JevResult *r, const char *name);
 void jev_result_free(JevResult *r);
 int  cmd_jev(Cg *cg, int argc, char **argv, bool json);
@@ -1073,6 +1080,37 @@ typedef struct {
     int summarize;
 } ChangelogOpts;
 int cmd_changelog_git(Cg *cg, const ChangelogOpts *o);
+
+/* The gateway chat model (changelog.c): the one prose-writing model Codify
+ * talks to, opt-in through CENTRA_API_KEY (or CG_CHANGELOG_KEY) in the
+ * environment or the project's .env. `cg changelog` uses it for Highlights
+ * and `cg recap` for the brief. Same private-config curl discipline as Jev:
+ * the key never reaches a command line. */
+typedef struct {
+    char key[512], endpoint[512], model[128], curl[512];
+    bool have;               /* a key was found */
+} ChatModel;
+void  chat_model_config(const Cg *cg, ChatModel *m);
+/* one chat completion; malloc'd trimmed text, or NULL with err filled.
+ * max_tokens is the first budget; an answer cut short retries with 4x. */
+char *chat_model_ask(const Cg *cg, const ChatModel *m, const char *prompt,
+                     const char *title, long max_tokens, char *err, size_t errcap);
+/* KEY=value from <root>/.env, spaces in the name ignored; out empty if absent */
+void  env_file_key(const char *root, const char *want, char *out, size_t cap);
+
+/* cg recap (recap.c): a resume brief built from past Claude Code and Codex
+ * sessions — a System One model picks the statements, the chat model writes */
+typedef struct {
+    int sessions;            /* newest N sessions (default 6) */
+    int since_days;          /* only sessions younger than this (default 21) */
+    long budget;             /* chars of picked statements handed to the writer */
+    const char *outfile;     /* default .codify/recap.md; "-" for stdout */
+    const char *agents;      /* "claude,codex" */
+    bool decided_only;       /* stop after the System One pass, print the log */
+    bool facts_only;         /* print the repository facts block; no model */
+    bool json;
+} RecapOpts;
+int cmd_recap(Cg *cg, const RecapOpts *o);
 int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */
 int cmd_docs(Cg *cg, int argc, char **argv, bool json); /* documentation closure */
 int spec_docs_finish(Cg *cg, const char *feature); /* internal checked closure */

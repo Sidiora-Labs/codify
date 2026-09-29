@@ -499,10 +499,19 @@ static int count_questions(const char *body) {
     return n;
 }
 
+static int jev_ask_raw_cfg(Cg *cg, const JevConfig *cp, const char *body_in,
+                           JevResult *out);
+
 int jev_ask_raw(Cg *cg, const char *body_in, JevResult *out) {
-    memset(out, 0, sizeof *out);
     JevConfig c;
     jev_config(&c);
+    return jev_ask_raw_cfg(cg, &c, body_in, out);
+}
+
+static int jev_ask_raw_cfg(Cg *cg, const JevConfig *cp, const char *body_in,
+                           JevResult *out) {
+    memset(out, 0, sizeof *out);
+    JevConfig c = *cp;
     out->requested_model = xstrdup(c.model);
     if (!c.key) {
         snprintf(out->error, sizeof out->error,
@@ -626,6 +635,33 @@ int jev_ask(Cg *cg, const char *state_json, const JevQuestion *qs, int nq,
     StrBuf body; sb_init(&body);
     jev_request_json(c.model, state_json, qs, nq, &body);
     int rc = jev_ask_raw(cg, body.p, out);
+    sb_free(&body);
+    return rc;
+}
+
+int jev_ask_at(Cg *cg, const char *key, const char *model,
+               const char *endpoint, const char *state_json,
+               const JevQuestion *qs, int nq, JevResult *out) {
+    memset(out, 0, sizeof *out);
+    if (nq <= 0) {
+        snprintf(out->error, sizeof out->error, "jev: no questions to ask");
+        return JEV_ECONFIG;
+    }
+    if (!state_json || !json_value_ok(state_json)) {
+        snprintf(out->error, sizeof out->error, "jev: state is not JSON");
+        return JEV_ECONFIG;
+    }
+    JevConfig c;
+    jev_config(&c);
+    c.key = (key && key[0]) ? key : NULL;
+    /* a many-question request over a long state takes tens of seconds
+     * upstream; Jev's 30s default is for its one-question calls */
+    if (!getenv("CG_JEV_TIMEOUT")) c.timeout_s = 180;
+    snprintf(c.model, sizeof c.model, "%s", model);
+    snprintf(c.endpoint, sizeof c.endpoint, "%s", endpoint);
+    StrBuf body; sb_init(&body);
+    jev_request_json(c.model, state_json, qs, nq, &body);
+    int rc = jev_ask_raw_cfg(cg, &c, body.p, out);
     sb_free(&body);
     return rc;
 }

@@ -86,6 +86,14 @@ static void usage(void) {
 "                           tag, groups per subject prefix, task refs); with\n"
 "                           CENTRA_API_KEY a model adds Highlights per\n"
 "                           release; --snapshots: the snapshot-chain form\n"
+"  recap [--sessions N] [--since DAYS] [--budget CHARS] [-o F] [--decided]\n"
+"        [--agents claude,codex]\n"
+"                           resume brief from past Claude Code and Codex\n"
+"                           sessions: Solar Decide picks the statements,\n"
+"                           the gateway model writes .codify/recap.md;\n"
+"                           needs CENTRA_API_KEY; --decided stops at the\n"
+"                           picked statements (no prose); --facts prints\n"
+"                           the repository facts alone (no model)\n"
 "  agentmd [--write]        generate .codify/agent-context.md from the graph\n"
 "  docs status|plan|packet  grounded documentation closure evidence;\n"
 "                           generate is an alias for packet\n"
@@ -664,6 +672,17 @@ int main(int argc, char **argv) {
         /* git history when there is one, the snapshot chain otherwise */
         rc = !snaps && git_available(&cg) ? cmd_changelog_git(&cg, &o)
                                           : cmd_changelog(&cg, o.limit, o.outfile);
+    } else if (strcmp(cmd, "recap") == 0) {
+        RecapOpts o = {0};
+        o.sessions = atoi(opt(&argc, argv, "--sessions", "6"));
+        o.since_days = atoi(opt(&argc, argv, "--since", "21"));
+        o.budget = atol(opt(&argc, argv, "--budget", "24000"));
+        o.outfile = opt(&argc, argv, "-o", NULL);
+        o.agents = opt(&argc, argv, "--agents", NULL);
+        o.decided_only = flag(&argc, argv, "--decided");
+        o.facts_only = flag(&argc, argv, "--facts");
+        o.json = json;
+        rc = cmd_recap(&cg, &o);
     } else if (strcmp(cmd, "agentmd") == 0) {
         bool write_files = flag(&argc, argv, "--write");
         index_fresh(&cg, &si);                  /* fresh graph first */

@@ -1,0 +1,9 @@
+{"timestamp": "2026-09-21T10:00:00.000Z", "type": "session_meta", "payload": {"session_id": "c1", "cwd": "__ROOT__", "originator": "codex_cli", "cli_version": "0.148.0"}}
+{"timestamp": "2026-09-21T10:00:01.000Z", "type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "developer instructions that must never reach the model"}]}}
+{"timestamp": "2026-09-21T10:00:02.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>\n<cwd>x</cwd>\n</environment_context>"}]}}
+{"timestamp": "2026-09-21T10:00:03.000Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "# Files pasted by the user:\n\n## \"notes\": /tmp/notes.txt\n\n## My request:\nWire the gauge into the CLI help\n"}]}}
+{"timestamp": "2026-09-21T10:00:04.000Z", "type": "response_item", "payload": {"type": "reasoning", "summary": [], "encrypted_content": "opaque reasoning that must never reach the model"}}
+{"timestamp": "2026-09-21T10:00:05.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "The help text now lists gauge under widgets."}]}}
+{"timestamp": "2026-09-21T10:00:06.000Z", "type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "input": "const r = await tools.exec_command({cmd: \"make test\"});"}}
+{"timestamp": "2026-09-21T10:00:07.000Z", "type": "response_item", "payload": {"type": "custom_tool_call_output", "output": [{"type": "input_text", "text": "tool output that must never reach the model"}]}}
+{"timestamp": "2026-09-21T10:00:08.000Z", "type": "event_msg", "payload": {"type": "task_complete", "last_agent_message": "Done: gauge in help, tests green. Open: the docs page still needs a screenshot."}}

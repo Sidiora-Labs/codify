@@ -458,14 +458,14 @@ static void render_release(StrBuf *md, const Release *r, Entry *v, int n,
 
 /* ---------------- the model's highlights ---------------- */
 
-typedef struct {
-    char key[512], endpoint[512], model[128], curl[512];
-    bool have;
-} Summ;
+/* The gateway chat model is shared with `cg recap`, which writes its brief
+ * with the same model and key: ChatModel and its two entry points are
+ * declared in cg.h; Summ is the local name. */
+typedef ChatModel Summ;
 
 /* CENTRA_API_KEY from the environment, else from the project's .env — a
  * key name is read with its spaces removed, so "CENTRA_API _KEY=" works */
-static void env_file_key(const char *root, const char *want, char *out, size_t cap) {
+void env_file_key(const char *root, const char *want, char *out, size_t cap) {
     out[0] = 0;
     char p[4700];
     snprintf(p, sizeof p, "%s/.env", root);
@@ -494,7 +494,7 @@ static void env_file_key(const char *root, const char *want, char *out, size_t c
     free(body);
 }
 
-static void summ_config(const Cg *cg, Summ *s) {
+void chat_model_config(const Cg *cg, ChatModel *s) {
     memset(s, 0, sizeof *s);
     const char *e;
     e = getenv("CG_CHANGELOG_KEY");
@@ -512,6 +512,7 @@ static void summ_config(const Cg *cg, Summ *s) {
     snprintf(s->curl, sizeof s->curl, "%s", e && e[0] ? e : "curl");
     s->have = s->key[0] != 0;
 }
+#define summ_config chat_model_config
 
 static void cfgquote(StrBuf *b, const char *s) {
     sb_putc(b, '"');
@@ -550,11 +551,22 @@ static char *summ_ask(const Cg *cg, const Summ *s, const Release *r,
         "is not in the commits; no headings, no preamble, no marketing tone. "
         "Answer in Markdown.\n\n%s",
         r->name[0] ? r->name : "the unreleased changes", notes);
+    char *text = chat_model_ask(cg, s, prompt.p, "codify changelog", 1500,
+                                err, errcap);
+    sb_free(&prompt);
+    return text;
+}
+
+char *chat_model_ask(const Cg *cg, const ChatModel *s, const char *prompt_text,
+                     const char *title, long max_tokens, char *err, size_t errcap) {
+    err[0] = 0;
+    StrBuf prompt; sb_init(&prompt);
+    sb_puts(&prompt, prompt_text);
     /* Reasoning models spend the budget thinking before they answer, and a
      * budget they exhaust returns no content at all: ask for little
      * reasoning, allow room, and try once more with far more room when the
      * answer still comes back empty. */
-    long max_tokens = 1500;
+    long first_budget = max_tokens;
     StrBuf body; sb_init(&body);
 retry_bigger:
     body.len = 0; body.p[0] = 0;
@@ -575,8 +587,10 @@ retry_bigger:
     sb_printf(&auth, "Authorization: Bearer %s", s->key);
     sb_puts(&cf, "header = "); cfgquote(&cf, auth.p); sb_putc(&cf, '\n');
     sb_free(&auth);
-    sb_puts(&cf, "header = \"Content-Type: application/json\"\nheader = \"Accept: application/json\"\n"
-                 "header = \"X-Title: codify changelog\"\n");
+    sb_puts(&cf, "header = \"Content-Type: application/json\"\nheader = \"Accept: application/json\"\n");
+    StrBuf xt; sb_init(&xt); sb_printf(&xt, "X-Title: %s", title);
+    sb_puts(&cf, "header = "); cfgquote(&cf, xt.p); sb_putc(&cf, '\n');
+    sb_free(&xt);
     StrBuf at; sb_init(&at); sb_printf(&at, "@%s", bodyp);
     sb_puts(&cf, "data-binary = "); cfgquote(&cf, at.p); sb_putc(&cf, '\n');
     sb_free(&at);
@@ -621,9 +635,9 @@ retry_bigger:
             free(items); free(choices);
             if (!text) {
                 bool cut = strstr(out.p, "\"finish_reason\":\"length\"") != NULL;
-                if (cut && max_tokens < 6000) {
+                if (cut && max_tokens == first_budget) {
                     sb_free(&out);
-                    max_tokens = 6000;
+                    max_tokens = first_budget * 4;
                     goto retry_bigger;
                 }
                 snprintf(err, errcap, "no choices[0].message.content in the reply: %.120s", out.p);

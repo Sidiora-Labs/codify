@@ -44,7 +44,7 @@ The layers reinforce each other: commits are auto-tagged with the task they impl
 
 **And documentation is the last verified task.** New feature specs enable an `@docs` closure stage by default. Once every ordinary task qualifies, Codify builds a bounded evidence packet from the spec, task-attributed snapshots, code graph, routes, memories, checks, and existing docs. The same configured agent connector updates user and developer documentation, while `cg docs check` checks declared claim references, local inline links, required graph-surface coverage, and configured target scope. `cg docs close` records a dedicated `[spec:<feature>/@docs]` snapshot and an incremental baseline for the next spec flow. These structural checks support review; they do not certify every sentence's meaning.
 
-There are no background services you did not start and no telemetry — the fleet supervisor runs only after `cg fleet up`, and stops with `cg fleet down`. The graph, memory, snapshots, and the whole task loop run on your machine and stay there. Two exceptions are named and opt-in: Jev decisions need `OPENROUTER_API_KEY`, and only the commands built on them ever make that call; and `cg changelog` asks a model for release highlights only when `CENTRA_API_KEY` (or `CG_CHANGELOG_KEY`) is set.
+There are no background services you did not start and no telemetry — the fleet supervisor runs only after `cg fleet up`, and stops with `cg fleet down`. The graph, memory, snapshots, and the whole task loop run on your machine and stay there. Two exceptions are named and opt-in: Jev decisions need `OPENROUTER_API_KEY`, and only the commands built on them ever make that call; and `cg changelog` asks a model for release highlights, and `cg recap` has Solar Decide pick statements from past sessions and a model write the brief, only when `CENTRA_API_KEY` (or `CG_CHANGELOG_KEY`) is set.
 
 ## Why Codify
 
@@ -234,6 +234,22 @@ cg changelog --no-summarize -n 3    # the plain record, three newest releases
 
 `-n N` caps the release sections, and `-o FILE` writes the file relative to the repository root and reports how many highlights were written and how many came from the cache. `--snapshots` — and any project without a `.git` — falls back to the snapshot renderer, whose output is a symbol-level diff per snapshot rather than a release history. `cliff.toml` at the repository root is the matching [git-cliff](https://git-cliff.org) configuration; git-cliff only knows tags, so the two produce the same file only for a tags-only repository with no version file and no model key. This repository's `CHANGELOG.md` is generated with `cg changelog -o CHANGELOG.md`.
 
+### Recap
+
+`cg recap` writes the brief a fresh agent needs to pick a project back up: what the project is, what changed in the last weeks, what the recent sessions did, the facts that would otherwise be lost, and the next step. Its raw material is the transcripts Claude Code and Codex already keep on the machine (`~/.claude/projects/<cwd>/*.jsonl` and `~/.codex/sessions/**/rollout-*.jsonl`, matched to this repository by working directory), which are the only record of *why* between commits and far too long to hand over whole.
+
+Two models do two different jobs. Each transcript is cut into statements — a user request, one paragraph or bullet of the assistant's answer, a file edited, a command that committed or tested — and handed in small chunks to **Solar Decide**, Upstage's System One decision model, through the Centra gateway (`openrouter/upstage/solar-decide` at `https://gateway.centra.ag/v1/systemone`, the same request schema as Jev). For every statement it answers three typed questions with calibrated probabilities and no prose: which kind it is (goal, decision, constraint, fact, done, open thread, dead end, noise), whether it still held when the session ended, and whether a resuming agent needs it. The statements that clear the bar, ranked by the product of those probabilities and cut to `--budget` characters, form the **decided log**: every line quoted from a session, none written by a model. That log, with facts read from the repository (the active feature and its task statuses, the recent commits, the stored memories), goes to the gateway chat model `cg changelog` already uses, which writes the brief itself. The decided log is kept at `.codegraph/recap/decided.md` so any sentence in the brief can be checked against what was actually said.
+
+```bash
+cg recap                              # 6 newest sessions of the last 21 days → .codify/recap.md
+cg recap --sessions 10 --since 45     # wider window
+cg recap --decided                    # stop at the picked statements; print them, write no prose
+cg recap --facts                      # the repository facts alone; no key, no model
+cg recap -o - --agents codex          # to stdout, Codex sessions only
+```
+
+Both calls use `CENTRA_API_KEY` (or `CG_CHANGELOG_KEY`) from the environment or the project's `.env`; without it the command stops with a clear error, since neither half has a local stand-in. The endpoint bills every question against the whole state, so chunks are small (6 statements, `CG_RECAP_CHUNK`) and several run at once (`CG_RECAP_PARALLEL`, default 6); a 160-statement session takes about four minutes and a few cents. Decisions are cached per chunk under `.codegraph/recap-cache/`, so a rerun asks only about sessions that are new. What never reaches a model: thinking blocks, tool output, harness notifications and reminders, code fences, and sessions from other projects. `CG_RECAP_DECIDE_MODEL`, `CG_RECAP_DECIDE_ENDPOINT` and `CG_RECAP_MODEL` point either half elsewhere; `CG_RECAP_CLAUDE_DIR` and `CG_RECAP_CODEX_DIR` say where to look.
+
 ### Memory
 
 Durable agent notes, stored in the same SQLite database as the graph. Memories written while a spec task is in progress link themselves to it, and `cg spec done` records outcomes automatically. Never store secrets in them.
@@ -264,6 +280,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 | `cg hook install` | Wire agent and git hooks so the graph stays fresh and scope drift surfaces on its own |
 | `cg hook post-edit` | The wired edit hook itself: reads the host's payload on stdin and does one targeted background sync plus a guard of the edited path — one process per edit, not two full syncs |
 | `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots] [--summarize\|--no-summarize]` | Release notes from git history: a release per tag or version bump, the newest named by the working tree's version, groups from the commit-subject prefix, `[spec:<feature>/<task>]` rendered as a task reference, and model-written Highlights per release when `CENTRA_API_KEY` is set (see [Changelog](#changelog)). `--snapshots`, or a project with no `.git`, renders from the snapshot chain instead, with symbol-level diffs: added and removed functions, new routes |
+| `cg recap [--sessions N] [--since DAYS] [--budget CHARS] [-o FILE] [--agents claude,codex] [--decided] [--facts]` | Resume brief from past Claude Code and Codex sessions: Solar Decide (System One, via the Centra gateway) picks the statements a resuming agent needs, the gateway chat model writes `.codify/recap.md`; the picked statements stay in `.codegraph/recap/decided.md`. Needs `CENTRA_API_KEY` (see [Recap](#recap)) |
 | `cg agentmd [--write]` | Generate graph orientation at `.codify/agent-context.md`; root `AGENTS.md` and `CLAUDE.md` remain owned by `cg spec render` |
 
 ### Agent control plane
@@ -497,7 +514,7 @@ Three commands ask a question of their own and print the answer beside their ver
 
 All three share one gate, so the failure mode is the same everywhere: `jev: OPENROUTER_API_KEY is not set — failure triage skipped`, once, on stderr, with the command's own verdict and exit code untouched. `cg guard --strict` still fails on exactly what it failed on before; a red `verify_cmd` is still red.
 
-Apart from the opt-in changelog highlights, this is the one remote call Codify makes, and the principle says so: the graph, memory and workflow stay local, Jev is **mandatory** for the features built on it — `cg memory classify` with no `OPENROUTER_API_KEY` is a clear error, never a quiet fallback — and **never authoritative**: it narrows, ranks, and flags, while `verify_cmd` and the graph checks decide. The key never reaches a command line (`curl` is driven through a private `0600` config file), `429` and `529` back off and retry, and every call is logged. See [docs/jev.md](docs/jev.md).
+Apart from the opt-in changelog highlights and `cg recap`, this is the one remote call Codify makes, and the principle says so: the graph, memory and workflow stay local, Jev is **mandatory** for the features built on it — `cg memory classify` with no `OPENROUTER_API_KEY` is a clear error, never a quiet fallback — and **never authoritative**: it narrows, ranks, and flags, while `verify_cmd` and the graph checks decide. The key never reaches a command line (`curl` is driven through a private `0600` config file), `429` and `529` back off and retry, and every call is logged. See [docs/jev.md](docs/jev.md).
 
 ## Driving agents
 
@@ -618,6 +635,7 @@ src/serve.c          cg serve — one JSON-RPC connection with pushed events
 src/drivers.c        agent launch argv, structured output read into events, steering
 src/drift.c          spec drift, collision prediction, interface drift, coverage
 src/changelog.c      release notes from git history, optional model highlights
+src/recap.c          resume brief from agent transcripts: System One picks, chat model writes
 src/jev.c            typed decisions over curl
 src/skills.c         memories classed as skills, rendered as .agents/skills
 src/lsp.c            language server over the graph
@@ -625,7 +643,7 @@ src/gitint.c         git history ingestion, churn, branch identity, commit mirro
 tests/unit/          kvx grammar, SHA-256 vectors, JSON scanner, StrBuf/IO
 tests/integration/   graph, vcs, agentic, MCP protocol, spec engine, watcher,
                      sync gate, fleet, branches, jev, changelog, events, serve,
-                     supervisor, drift, briefings, fleet end to end
+                     supervisor, drift, briefings, fleet end to end, recap
 tests/fixtures/      sample polyglot project, a spec repo with golden outputs,
                      stand-ins for curl, gh, and an OpenAI endpoint, and a
                      scripted fleet driver

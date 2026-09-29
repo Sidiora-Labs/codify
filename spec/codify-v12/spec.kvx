@@ -1,0 +1,44 @@
+# codify-v12 — recap: the brief a fresh agent needs, built from what past sessions said.
+
+[meta]
+feature = "codify-v12"
+intro   = "Turn the transcripts Claude Code and Codex already keep on the machine into a compact resume brief: a System One decision model (Solar Decide through the Centra gateway) judges every statement of the recent sessions — its kind, whether it still holds, whether a resuming agent needs it — and the highest-probability statements, quoted verbatim, go with the repository's own facts to the gateway chat model that writes the brief. Nothing in the brief is invented: every sentence traces to a picked statement or a repository fact."
+
+[req.1]
+title = "Resume brief from agent transcripts"
+story = "As a person or agent picking a project back up, I want one short file that says what the project is, what the last weeks did, what the recent sessions got done and left open, and the facts I would otherwise have to rediscover, so that a new session starts where the last one stopped."
+ac_1  = "WHEN cg recap runs in a repository THE command SHALL find the Claude Code transcripts for that working directory and the Codex rollouts whose recorded cwd is the repository or under it, keep the newest --sessions within --since days, and ignore sessions of other projects."
+ac_2  = "WHEN a transcript is read THE command SHALL cut it into statements — a person's own words with harness wrappers, reminders, notifications and compaction summaries removed; each paragraph or bullet of an assistant message with headings, tables and code fences removed; files edited; commands that committed, built or tested — and SHALL never read thinking blocks or tool output."
+ac_3  = "WHEN statements are judged THE command SHALL ask the System One endpoint, per statement, a choice over goal, decision, constraint, fact, done, open_thread, dead_end and noise, a noul for still true at the end of the session, and a noul for needed to resume, in chunks that stay under the endpoint's 100-question limit, and SHALL cache each chunk's answers so a rerun asks only about new sessions."
+ac_4  = "WHEN statements are picked THE command SHALL score P(kind) × P(still true) × P(needed), drop noise and anything under 0.5 on either noul, fill --budget characters best first, and write the decided log — every picked statement with its probabilities, grouped by session oldest first — to .codegraph/recap/decided.md."
+ac_5  = "WHEN the brief is written THE command SHALL hand the decided log and the repository facts (active feature and task counts, HEAD, dirty count, the window's commits, stored memories) to the gateway chat model with the instruction to invent nothing and cite sessions, and SHALL write the result to -o (default .codify/recap.md) under a comment naming both models and the counts."
+ac_6  = "WHEN no CENTRA_API_KEY is available THE command SHALL stop with a clear error and make no call; --facts SHALL print the repository facts with no model at all; --decided SHALL stop after the decision pass."
+
+[design]
+overview = "src/recap.c. Discovery maps the root to Claude Code's project directory name and walks ~/.codex/sessions reading each rollout's first record. Parsing is line by line with the json.c readers. The decision call is jev_ask_at, the Jev client pointed at another key, model and endpoint, so request building, private-config curl, retries and jev.log are shared; the endpoint bills each question against the whole state, so chunks are six statements and forked workers fill the per-chunk cache in parallel before the parent's own pass reads it. The writer is chat_model_ask, the changelog's gateway call made public. No new dependency."
+
+[documentation]
+mode       = "auto"
+status     = "pending"
+audiences  = ["user", "developer"]
+targets    = ["README.md", "docs/ARCHITECTURE.md"]
+
+[tasks]
+heading = "Implementation Plan: Codify v12"
+
+[task.1]
+title   = "Recap"
+section = "Resume brief from agent transcripts"
+status  = "pending"
+
+[task.1.1]
+title      = "cg recap: transcripts in, System One decides, the chat model writes"
+status     = "in_progress"
+wave       = 1
+symbols    = ["cmd_recap", "jev_ask_at", "chat_model_ask", "decide_all", "select_picks"]
+touches    = ["src/recap.c", "src/jev.c", "src/changelog.c", "src/cg.h", "src/main.c", "tests/integration/36_recap.sh", "tests/fixtures/recap/*", "README.md", "docs/ARCHITECTURE.md"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/36_recap.sh && CG=$PWD/cg tests/integration/28_jev.sh && CG=$PWD/cg tests/integration/29_changelog.sh"
+do_1       = "Expose the changelog's gateway chat call as chat_model_config/chat_model_ask and the Jev client as jev_ask_at with its own key, model and endpoint."
+do_2       = "Discover and parse Claude Code and Codex transcripts into statements; decide in small parallel chunks with a per-chunk cache; pick by probability within a budget; write the decided log."
+do_3       = "Add the repository facts, the writer prompt, the output file, --decided and --facts, and the integration test against the fake curl and fake OpenAI endpoint."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6"]

@@ -417,6 +417,50 @@ call prints why on stderr and leaves the notes without prose. The
 snapshot renderer in `vcs.c` stays as the `--snapshots` mode and as the
 fallback for a project with no `.git`.
 
+## Recap (`recap.c`)
+
+`src/recap.c` builds a resume brief from the transcripts Claude Code and
+Codex keep locally. `find_claude` maps the root to
+`~/.claude/projects/<root with non-alphanumerics as "-">/*.jsonl`;
+`find_codex` walks `~/.codex/sessions` and keeps the rollouts whose
+`session_meta.cwd` is the root or under it. The newest `--sessions`
+within `--since` days are parsed line by line with the `json.c` readers
+(`parse_claude`, `parse_codex`) into statements: a user's own words
+(`user_words` unwraps `<user_query>`, drops reminders, notifications and
+compaction summaries), each paragraph or bullet of an assistant message
+(`assistant_words` skips headings, tables and code fences), files edited,
+and commands that committed, built, or tested. Thinking and tool output
+are never read. A session is capped (`sess_cap`) to its newest user
+requests plus the newest of the rest.
+
+The decision pass (`decide_all`) cuts each session into chunks of six
+statements and asks the System One endpoint three typed questions per
+statement — kind (choice over eight), still true (noul), needed to resume
+(noul) — with the chunk, the session's cleaned ending, and its title as
+the state. It goes through `jev_ask_at`, the Jev client pointed at
+another key, model and endpoint (`openrouter/upstage/solar-decide` at the
+Centra gateway's `/v1/systemone`), so the request builder, private-config
+curl, retries and `jev.log` are shared. The endpoint bills each question
+against the whole state and caps a request at 100 questions, so chunks
+stay small and `decide_parallel` forks workers that fill the cache
+(`.codegraph/recap-cache/<sha of state|model>.txt`, one line per
+statement) and exit; the parent's own pass then reads it. Forking rather
+than threading keeps jev's per-pid request files apart.
+
+`select_picks` scores a statement as P(kind) × P(still true) × P(needed),
+drops noise and anything under 0.5 on either noul, and fills `--budget`
+characters best first. `render_decided` writes the decided log —
+sessions oldest first as `[sN]`, each picked statement with its three
+probabilities — to `.codegraph/recap/decided.md`. `repo_facts` adds what
+the repository says on its own: the active feature and task counts from
+the kvx, HEAD, dirty count and the window's commits from git, and the
+newest decision, constraint, handoff and fact memories. `write_brief`
+hands FACTS and the DECIDED LOG to `chat_model_ask` (the changelog's
+gateway model) with the section list and the rule to invent nothing and
+cite `[sN]`; the brief lands at `-o` (default `.codify/recap.md`) under a
+comment naming both models and the counts. `--decided` stops before the
+writer; `--facts` runs no model at all.
+
 ## Governance (`govern.c`)
 
 The commands that put Codify inside the loop rather than at its ends:
@@ -650,4 +694,6 @@ many references it has, and the decisions recorded about it.
   (`33_drift`), worker and manager briefings and the upstream delta
   (`34_context`), and the
   fleet end to end under failure, straight and with the supervisor killed
-  and resumed (`35_fleet_e2e`).
+  and resumed (`35_fleet_e2e`), and the recap's transcript parsing,
+  decision pass, cache and writer against fixture transcripts and both
+  fakes (`36_recap`).
