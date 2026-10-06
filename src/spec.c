@@ -3168,7 +3168,8 @@ static int graph_symbol_named(Cg *g, const char *lookup,
         " (SELECT COUNT(*) FROM refs r JOIN files rf ON rf.id=r.file_id"
         "   WHERE r.name = s.name AND (?2<=0 OR rf.branch_id = ?2))"
         " FROM symbols s JOIN files f ON f.id = s.file_id"
-        " WHERE s.name = ?1 AND (?2<=0 OR f.branch_id = ?2) ORDER BY s.id");
+        " WHERE s.name = ?1 AND (?2<=0 OR f.branch_id = ?2)"
+        " ORDER BY s.decl, s.id");          /* the definition, then its prototype */
     if (!st) return 0;
     sqlite3_bind_text(st, 1, lookup, -1, SQLITE_STATIC);
     sqlite3_bind_int64(st, 2, g->branch_id);

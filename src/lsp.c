@@ -182,7 +182,8 @@ static bool word_at(const char *abs, int line0, int chr, char *out, size_t cap) 
 void lsp_hover(Cg *cg, const char *name, StrBuf *md) {
     sqlite3_stmt *st = cg_prep(cg,
         "SELECT s.kind,f.path,s.line,s.sig FROM symbols s "
-        "JOIN files f ON f.id=s.file_id WHERE s.name=? ORDER BY s.line LIMIT 3");
+        "JOIN files f ON f.id=s.file_id WHERE s.name=? "
+        "ORDER BY s.decl, s.line LIMIT 3");     /* definitions lead */
     sqlite3_bind_text(st, 1, name, -1, SQLITE_STATIC);
     int n = 0;
     while (sqlite3_step(st) == SQLITE_ROW) {
@@ -396,7 +397,8 @@ int cmd_lsp(Cg *cg, const SysInfo *si) {
                                        sizeof abs)) {
                 sqlite3_stmt *st = cg_prep(cg,
                     "SELECT f.path,s.line,s.end_line FROM symbols s "
-                    "JOIN files f ON f.id=s.file_id WHERE s.name=? LIMIT 20");
+                    "JOIN files f ON f.id=s.file_id WHERE s.name=? "
+                    "ORDER BY s.decl, s.id LIMIT 20");
                 sqlite3_bind_text(st, 1, word, -1, SQLITE_STATIC);
                 int n = 0;
                 while (sqlite3_step(st) == SQLITE_ROW) {

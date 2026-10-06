@@ -154,7 +154,8 @@ int cmd_agentmd(Cg *cg, bool write_files) {
     st = cg_prep(cg,
         "SELECT s.name, s.kind, f.path, s.line FROM symbols s "
         "JOIN files f ON f.id=s.file_id "
-        "WHERE s.name IN ('main','Main','__main__') ORDER BY f.path LIMIT 15");
+        "WHERE s.name IN ('main','Main','__main__') AND s.decl=0 "
+        "ORDER BY f.path LIMIT 15");
     while (sqlite3_step(st) == SQLITE_ROW) {
         sb_printf(&md, "- %s `%s` — `%s:%d`\n",
                   (const char *)sqlite3_column_text(st, 1),
@@ -200,7 +201,8 @@ int cmd_agentmd(Cg *cg, bool write_files) {
         "GROUP BY r.name ORDER BY c DESC LIMIT 15");
     sqlite3_stmt *loc = cg_prep(cg,
         "SELECT s.kind, f.path, s.line FROM symbols s "
-        "JOIN files f ON f.id=s.file_id WHERE s.name=? ORDER BY s.id LIMIT 1");
+        "JOIN files f ON f.id=s.file_id WHERE s.name=? "
+        "ORDER BY s.decl, s.id LIMIT 1");
     while (sqlite3_step(st) == SQLITE_ROW) {
         const char *name = (const char *)sqlite3_column_text(st, 0);
         int c = sqlite3_column_int(st, 1);

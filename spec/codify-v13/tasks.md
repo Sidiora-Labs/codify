@@ -7,7 +7,7 @@
 ## Indexing and retrieval that answer with the code
 
 - [ ] 1. Explore
-  - [ ] 1.1 Declarations, name words, path outlines, phrase ranking, and a spent budget
+  - [x] 1.1 Declarations, name words, path outlines, phrase ranking, and a spent budget
     - Index time: mark prototypes as declarations with their own end line, link them to their definition, and store the words of every symbol name in the search index.
     - Query time: definitions before declarations everywhere; cg context answers a file or directory path with an outline (context_path_outline); phrases are matched over names, doc comments, and bodies and ranked by combined evidence.
     - Spend the budget: expand further hits until it is used, show the matching line for file hits, report tokens used and omissions in --json.
