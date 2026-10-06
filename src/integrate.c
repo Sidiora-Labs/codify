@@ -284,7 +284,7 @@ static int integrate_agentmd_call(void *v) {
  * index and the next apply catches up. */
 static int integrate_agent_context(Cg *cg) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/%s", cg->root, CG_AGENT_CONTEXT);
+    config_context_path(cg->root, "agent-context.md", path, sizeof path);
     char *before = read_entire_file(path, NULL);
     if (before && !strstr(before, "codify-owned: graph-agent-context")) {
         free(before); return 2;
@@ -294,7 +294,8 @@ static int integrate_agent_context(Cg *cg) {
     sysinfo_detect(&si);
     /* A busy database is not a failure here: the projection is rendered from
      * the last completed index and the next apply catches up. */
-    if (cg_index(cg, &si, false, &st, true) != 0 && !st.busy) {
+    if (config_auto_sync(cg->root) &&
+        cg_index(cg, &si, false, &st, true) != 0 && !st.busy) {
         free(before); return -1;
     }
     IntegrateAgentmd call = { cg };
@@ -311,8 +312,8 @@ static int integrate_agent_context(Cg *cg) {
 int integrate_apply_portable(Cg *cg, bool quiet) {
     int errors = 0, changed = 0, rc;
     char path[4700];
-    snprintf(path, sizeof path, "%s/.agents/skills/codify-workflow/SKILL.md",
-             cg->root);
+    path_format(path, sizeof path, "%s/%s/codify-workflow/SKILL.md", cg->root,
+                config_skills_rel(cg->root));
     rc = apply_asset(path, SKILL_BODY, false);
     if (rc == 0) changed++; else if (rc < 0 || rc == 2) errors++;
     snprintf(path, sizeof path, "%s/.codify/hooks/event.sh", cg->root);
@@ -368,10 +369,10 @@ int integrate_plan(Cg *cg, bool json) {
         }
     }
     char skill[4700], event[4700], context[4700];
-    snprintf(skill, sizeof skill, "%s/.agents/skills/codify-workflow/SKILL.md",
-             cg->root);
+    path_format(skill, sizeof skill, "%s/%s/codify-workflow/SKILL.md", cg->root,
+                config_skills_rel(cg->root));
     snprintf(event, sizeof event, "%s/.codify/hooks/event.sh", cg->root);
-    snprintf(context, sizeof context, "%s/%s", cg->root, CG_AGENT_CONTEXT);
+    config_context_path(cg->root, "agent-context.md", context, sizeof context);
     if (json) {
         sb_puts(&b, "],\"assets\":[{\"path\":"); sb_json_str(&b, skill);
         sb_puts(&b, ",\"action\":");
@@ -439,8 +440,8 @@ int integrate_apply(Cg *cg, bool json) {
                          result, path);
     }
     char path[4700];
-    snprintf(path, sizeof path, "%s/.agents/skills/codify-workflow/SKILL.md",
-             cg->root);
+    path_format(path, sizeof path, "%s/%s/codify-workflow/SKILL.md", cg->root,
+                config_skills_rel(cg->root));
     int arc = apply_asset(path, SKILL_BODY, false);
     if (arc == 0) changed++; else if (arc < 0 || arc == 2) errors++;
     snprintf(path, sizeof path, "%s/.codify/hooks/event.sh", cg->root);
@@ -510,9 +511,10 @@ int integrate_doctor(Cg *cg, bool json) {
                         ADAPTERS[i].label, s.protocol);
     }
     char skill[4700], event[4700], context[4700];
-    snprintf(skill, sizeof skill, "%s/.agents/skills/codify-workflow/SKILL.md", cg->root);
+    path_format(skill, sizeof skill, "%s/%s/codify-workflow/SKILL.md", cg->root,
+                config_skills_rel(cg->root));
     snprintf(event, sizeof event, "%s/.codify/hooks/event.sh", cg->root);
-    snprintf(context, sizeof context, "%s/%s", cg->root, CG_AGENT_CONTEXT);
+    config_context_path(cg->root, "agent-context.md", context, sizeof context);
     const char *ss = asset_state(skill, "codify-owned:");
     const char *es = asset_state(event, "codify-owned:");
     if (strcmp(ss, "create") == 0)

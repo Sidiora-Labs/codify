@@ -51,8 +51,7 @@ static int spec_sub(char **out, bool json, int argc, ...) {
 static bool has_spec_repo(const char *root) {
     char p[4600];
     struct stat st;
-    snprintf(p, sizeof p, "%s/spec/workflow.kvx", root);
-    return stat(p, &st) == 0;
+    return config_workflow_path(root, p, sizeof p) && stat(p, &st) == 0;
 }
 
 /* Do two space-joined touch-pattern lists share any pair of patterns that
@@ -194,7 +193,29 @@ int cmd_check(Cg *cg, bool json, bool strict)
         if (!expired && !clash)
             sb_puts(&rep, "  ok    task claims are consistent\n");
     } else {
-        sb_puts(&rep, "  skip  no spec/workflow.kvx — nothing to gate\n");
+        sb_printf(&rep, "  skip  no %s/workflow.kvx — nothing to gate\n",
+                  config_spec_rel(cg->root));
+    }
+
+    /* codify.kvx problems never fail the gate: every command already runs
+     * on the defaults in their place. Silent when there is no file. */
+    int nconfig = 0;
+    if (config_load(cg->root)->present) {
+        StrBuf ct; sb_init(&ct);
+        nconfig = config_check(cg->root, &ct, NULL);
+        if (nconfig) {
+            warnings++;
+            sb_printf(&rep, "  warn  %d %s problem(s) — defaults used "
+                      "(cg config check):\n", nconfig, CG_CONFIG_FILE);
+            for (char *line = ct.p, *nl; line && *line; line = nl) {
+                nl = strchr(line, '\n');
+                if (nl) *nl++ = 0;
+                sb_printf(&rep, "        %s\n", line);
+            }
+        } else {
+            sb_printf(&rep, "  ok    %s is valid\n", CG_CONFIG_FILE);
+        }
+        sb_free(&ct);
     }
 
     /* uncommitted work is a warning, not a failure: CI may legitimately run
@@ -252,8 +273,10 @@ int cmd_check(Cg *cg, bool json, bool strict)
 
     if (json) {
         printf("{\"failures\":%d,\"warnings\":%d,\"stale_anchors\":%d,"
-               "\"findings\":%d,\"report\":", failures, warnings, stale,
-               nfindings);
+               "\"findings\":%d,", failures, warnings, stale, nfindings);
+        if (config_load(cg->root)->present)
+            printf("\"config_problems\":%d,", nconfig);
+        printf("\"report\":");
         StrBuf j; sb_init(&j);
         sb_json_str(&j, rep.p ? rep.p : "");
         fputs(j.p, stdout);
@@ -411,7 +434,7 @@ static char *brief_feature(Cg *cg, const char *task_json) {
     if (f && f[0]) return f;
     free(f);
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/workflow.kvx", cg->shared);
+    config_workflow_path(cg->shared, path, sizeof path);
     Kvx *k = kvx_parse(path);
     f = k ? kvx_str(k, "meta", "active_feature") : NULL;
     kvx_free(k);
@@ -438,6 +461,7 @@ int cmd_brief(Cg *cg, bool json)
         sb_printf(&b, ",\"has_spec\":%s", have_spec ? "true" : "false");
         sb_printf(&b, ",\"task_is_in_progress\":%s",
                   is_current ? "true" : "false");
+        if (!config_auto_sync(cg->root)) sb_puts(&b, ",\"auto_sync\":false");
         sb_puts(&b, ",\"task\":");
         sb_puts(&b, task ? task : "null");
         sb_puts(&b, ",\"uncommitted\":[");
@@ -465,6 +489,12 @@ int cmd_brief(Cg *cg, bool json)
         sb_puts(&b, "}\n");
     } else {
         sb_printf(&b, "project: %s\n", cg->root);
+        /* nothing refreshes the graph on its own now, so an agent must not
+         * take its answers for the code as it stands */
+        if (!config_auto_sync(cg->root))
+            sb_printf(&b, "sync: auto-sync is off ([sync] auto = false in "
+                      "%s) — the graph may be stale; run `cg sync` after "
+                      "edits\n", CG_CONFIG_FILE);
         brief_branches(cg, &b, false);
         fleet_brief(cg, &b, false);
         {
@@ -997,7 +1027,7 @@ static int cmd_hook_install_git(Cg *cg, const char *bin)
             "#!/bin/sh\n"
             "# installed by `cg hook install` - keeps the Codify graph and\n"
             "# git provenance current after every commit.\n"
-            "%s sync --background >/dev/null 2>&1 || true\n"
+            "%s sync --background --auto >/dev/null 2>&1 || true\n"
             "%s git-sync -n 200 >/dev/null 2>&1 || true\n", bin, bin);
         snprintf(path, sizeof path, "%s/post-commit", dir);
         if (stat(path, &st) == 0)
@@ -1085,7 +1115,7 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
     if (path) { o.paths = paths; o.npaths = 1; }
     else       o.max_age_ms = 5000;
     IndexStats st;
-    cg_index_ex(cg, si, &o, &st);
+    if (config_auto_sync(cg->root)) cg_index_ex(cg, si, &o, &st);
 
     /* Operator messages for this agent (cg fleet steer) reach a Claude Code
      * session here, at its next edit: PostToolUse additionalContext is
@@ -1607,7 +1637,8 @@ int work_open(Cg *cg, const char *task, bool json) {
     char *verify = json_get_string(packet, "verify_cmd");
     SysInfo si; IndexStats index_stats;
     sysinfo_detect(&si);
-    cg_index(cg, &si, false, &index_stats, true);
+    if (config_auto_sync(cg->root))
+        cg_index(cg, &si, false, &index_stats, true);
     char *focus = graph_task_focus(cg, packet);
 
     WorkCapture call = { cg, focus };
@@ -2246,7 +2277,7 @@ int manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out) {
         StrBuf *t = &parts[M_TASKS].b;
         char root[4096], path[4700];
         if (cg_find_root(root, sizeof root) == 0) {
-            snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+            config_feature_path(cg->shared, feature, path, sizeof path);
             Kvx *k = kvx_parse(path);
             char **ids = NULL;
             int n = k ? kvx_subsections(k, "task", &ids) : 0;

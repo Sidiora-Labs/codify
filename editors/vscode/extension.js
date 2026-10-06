@@ -226,6 +226,18 @@ function taskIdFrom(arg) {
 
 /* ---------------- refresh ---------------- */
 
+/* [sync] auto = false in codify.kvx turns the refresh's sync off with every
+ * other implicit sync. Asked once and again when the file changes; a cg
+ * without `config` answers nothing usable and the refresh keeps syncing. */
+let autoSync = null;
+async function autoSyncOn() {
+    if (autoSync === null) {
+        const r = await cg(['config', 'get', 'sync.auto']);
+        autoSync = !(r.code === 0 && r.stdout.trim() === 'false');
+    }
+    return autoSync;
+}
+
 /* The work one refresh does, in order and never in parallel. The sync is
  * cheap when a whole-tree pass ran inside the window and otherwise one
  * low-priority pass through the index gate that never waits on it; every
@@ -234,7 +246,7 @@ function taskIdFrom(arg) {
 async function runRefresh() {
     /* connected, the sync is skipped: every write that matters arrives as
      * an event, and the tools that need a fresh graph refresh it themselves */
-    if (!serveConnected())
+    if (!serveConnected() && await autoSyncOn())
         await cg(['sync', '--max-age', String(REFRESH_FRESH_MS),
                   '--background', '--wait', '0']);
     await provider.refresh();
@@ -756,9 +768,14 @@ async function activate(ctx) {
      * database is deliberately not watched: this extension's own sync
      * writes it, and a watcher on it turned each refresh into the next.
      * Claims and evidence written by agents outside this window reach the
-     * board through the polls instead. */
-    const watcher = vscode.workspace.createFileSystemWatcher('**/spec/**/*.kvx');
-    const bump = () => scheduleRefresh();
+     * board through the polls instead. Every .kvx rather than spec/: the
+     * spec directory is wherever codify.kvx puts it, and codify.kvx itself
+     * can turn the refresh's sync on or off. */
+    const watcher = vscode.workspace.createFileSystemWatcher('**/*.kvx');
+    const bump = (uri) => {
+        if (uri && path.basename(uri.fsPath) === 'codify.kvx') autoSync = null;
+        scheduleRefresh();
+    };
     watcher.onDidChange(bump); watcher.onDidCreate(bump); watcher.onDidDelete(bump);
     ctx.subscriptions.push(watcher);
 

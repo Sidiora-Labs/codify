@@ -235,8 +235,8 @@ int cmd_agentmd(Cg *cg, bool write_files) {
 
     if (write_files) {
         char dir[4700], path[4900];
-        snprintf(dir, sizeof dir, "%s/.codify", cg->root);
-        snprintf(path, sizeof path, "%s/%s", cg->root, CG_AGENT_CONTEXT);
+        config_context_dir(cg->root, dir, sizeof dir);
+        config_context_path(cg->root, "agent-context.md", path, sizeof path);
         if (mkdirs(dir) == 0 &&
             write_entire_file(path, md.p, md.len) == 0)
             printf("wrote %s\n", path);

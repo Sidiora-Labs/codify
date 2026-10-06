@@ -163,15 +163,17 @@ static Cg *g_bound;
 void events_bind(Cg *cg) { g_bound = cg; }
 void events_unbind(void) { g_bound = NULL; }
 
-/* ".../spec/<feature>/spec.kvx" -> feature */
+/* ".../<spec dir>/<feature>/spec.kvx" -> feature. Only the file name and
+ * its directory are read, because codify.kvx may put the spec directory
+ * anywhere in the tree. */
 static bool feature_of(const char *path, char *out, size_t cap) {
-    const char *p = NULL;
-    for (const char *s = strstr(path, "spec/"); s; s = strstr(s + 1, "spec/"))
-        if (s == path || s[-1] == '/') p = s;
-    if (!p) return false;
-    p += 5;
-    const char *e = strchr(p, '/');
-    if (!e || e == p || strcmp(e, "/spec.kvx") != 0) return false;
+    size_t len = strlen(path), tail = strlen("/spec.kvx");
+    if (len <= tail || strcmp(path + len - tail, "/spec.kvx") != 0)
+        return false;
+    const char *e = path + len - tail;
+    const char *p = e;
+    while (p > path && p[-1] != '/') p--;
+    if (p == e || p == path) return false;
     size_t n = (size_t)(e - p);
     if (n >= cap) return false;
     memcpy(out, p, n);

@@ -387,7 +387,7 @@ void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,
 /* ---------------- shared pieces ---------------- */
 
 static Kvx *fleet_workflow(const Cg *cg, char *path, size_t cap) {
-    snprintf(path, cap, "%s/spec/workflow.kvx", cg->root);
+    config_workflow_path(cg->root, path, cap);
     return kvx_parse(path);
 }
 
@@ -960,7 +960,7 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
         return 1;
     }
     char fpath[4700];
-    snprintf(fpath, sizeof fpath, "%s/spec/%s/spec.kvx", cg->root, feature);
+    config_feature_path(cg->root, feature, fpath, sizeof fpath);
     Kvx *f = kvx_parse(fpath);
     if (!f) {
         fprintf(stderr, "cg fleet: cannot parse %s\n", fpath);
@@ -1205,7 +1205,7 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     c->tree = cg->shared;
     c->gates_ok = -1;
     c->merge_fd = -1;
-    snprintf(c->wfpath, sizeof c->wfpath, "%s/spec/workflow.kvx", c->tree);
+    config_workflow_path(c->tree, c->wfpath, sizeof c->wfpath);
     c->wf = kvx_parse(c->wfpath);
     if (!c->wf) {
         fprintf(stderr, "cg fleet: no spec/workflow.kvx at %s\n", c->tree);
@@ -1218,7 +1218,7 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     if (!feature_ov && env_feature && env_feature[0]) {
         char p[4700];
         struct stat est;
-        snprintf(p, sizeof p, "%s/spec/%s/spec.kvx", c->tree, env_feature);
+        config_feature_path(c->tree, env_feature, p, sizeof p);
         if (stat(p, &est) == 0) feature_ov = env_feature;
     }
     c->feature = feature_ov ? xstrdup(feature_ov)
@@ -1229,8 +1229,7 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
         lifecycle_close(c);
         return 1;
     }
-    snprintf(c->specpath, sizeof c->specpath, "%s/spec/%s/spec.kvx", c->tree,
-             c->feature);
+    config_feature_path(c->tree, c->feature, c->specpath, sizeof c->specpath);
     if (!git_available(cg)) {
         fprintf(stderr, "cg fleet: %s has no git repository — the branch "
                         "lifecycle needs git\n", c->tree);
@@ -1280,7 +1279,8 @@ static bool task_status_on_branch(const Lifecycle *c, const char *branch,
                                   const char *id, char *status, size_t cap) {
     StrBuf a; sb_init(&a);
     StrBuf spec; sb_init(&spec);
-    sb_printf(&spec, "%s:spec/%s/spec.kvx", branch, c->feature);
+    sb_printf(&spec, "%s:%s/%s/spec.kvx", branch, config_spec_rel(c->tree),
+              c->feature);
     sb_puts(&a, "show ");
     sb_shquote(&a, spec.p);
     sb_free(&spec);

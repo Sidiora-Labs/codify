@@ -38,6 +38,7 @@ static long index_retry_at;
  * and the worker budget is a quarter of the cores, since the editor's
  * language server must never be the reason an agent's build crawls. */
 static void lsp_index(Cg *cg, const SysInfo *si, const char *abs) {
+    if (!config_auto_sync(cg->root)) return;
     IndexOpts o = {0};
     o.lock_wait_ms = 0;
     o.quiet = true;

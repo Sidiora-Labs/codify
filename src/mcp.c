@@ -983,13 +983,25 @@ static void mcp_tool_annotations(int i, StrBuf *b) {
 
 /* Build the resources/list payload: the fixed documents that exist, plus one
  * entry per feature spec found under spec/. */
+/* A resource's file in this tree. The table names the default layout;
+ * codify.kvx may have moved the spec and context directories. */
+static void mcp_resource_abs(Cg *cg, const char *rel, char *out, size_t cap) {
+    if (!strncmp(rel, "spec/", 5))
+        path_format(out, cap, "%s/%s/%s", cg->root, config_spec_rel(cg->root),
+                    rel + 5);
+    else if (!strcmp(rel, CG_AGENT_CONTEXT))
+        config_context_path(cg->root, "agent-context.md", out, cap);
+    else
+        path_format(out, cap, "%s/%s", cg->root, rel);
+}
+
 static void mcp_list_resources(Cg *cg, StrBuf *r) {
     sb_puts(r, "{\"resources\":[");
     int nr = 0;
     for (int i = 0; RESOURCES[i].uri; i++) {
         char abs[4700];
         struct stat rst;
-        snprintf(abs, sizeof abs, "%s/%s", cg->root, RESOURCES[i].rel);
+        mcp_resource_abs(cg, RESOURCES[i].rel, abs, sizeof abs);
         if (stat(abs, &rst) != 0) continue;
         if (nr++) sb_putc(r, ',');
         sb_puts(r, "{\"uri\":");         sb_json_str(r, RESOURCES[i].uri);
@@ -999,7 +1011,7 @@ static void mcp_list_resources(Cg *cg, StrBuf *r) {
         sb_putc(r, '}');
     }
     char specdir[4600];
-    snprintf(specdir, sizeof specdir, "%s/spec", cg->root);
+    config_spec_dir(cg->root, specdir, sizeof specdir);
     DIR *d = opendir(specdir);
     if (d) {
         struct dirent *e;
@@ -1062,7 +1074,7 @@ int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
     for (int i = 0; name && i < NTOOLS; i++)
         if (strcmp(TOOLS[i].name, name) == 0) { ti = i; break; }
     if (ti < 0) return -1;
-    if (TOOLS[ti].sync_first) {
+    if (TOOLS[ti].sync_first && config_auto_sync(cg->root)) {
         /* fresh, not re-walked: agents call these tools in bursts, so a
          * pass from the last few seconds answers, and a pass running
          * elsewhere is joined by note. The server shares the machine with
@@ -1245,7 +1257,7 @@ int cmd_mcp(Cg *cg, const SysInfo *si) {
                 reply_error(id, -32602, "unknown resource");
             } else {
                 char abs[4900];
-                snprintf(abs, sizeof abs, "%s/%s", cg->root, rel);
+                mcp_resource_abs(cg, rel, abs, sizeof abs);
                 char *body = read_entire_file(abs, NULL);
                 if (!body) {
                     reply_error(id, -32602, "resource not readable");

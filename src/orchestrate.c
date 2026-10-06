@@ -205,19 +205,7 @@ static void orch_argv_print(char **av) {
 /* ---------------- per-task plumbing ---------------- */
 
 static int orch_spec_root(char *out, size_t cap) {
-    char dir[4096];
-    if (!getcwd(dir, sizeof dir)) return -1;
-    for (;;) {
-        char probe[4600];
-        snprintf(probe, sizeof probe, "%s/spec/workflow.kvx", dir);
-        if (access(probe, F_OK) == 0) {
-            snprintf(out, cap, "%s", dir);
-            return 0;
-        }
-        char *slash = strrchr(dir, '/');
-        if (!slash || slash == dir) return -1;
-        *slash = 0;
-    }
+    return config_find_spec_root(NULL, out, cap);
 }
 
 /* Child success needs both authorities: the declaration must be qualified and
@@ -226,7 +214,7 @@ static char *orch_task_status(const char *specroot, const char *feature,
                               const char *id, const char *attempt,
                               long fence) {
     char path[4600];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", specroot, feature);
+    config_feature_path(specroot, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return NULL;
     char sec[300];
@@ -278,7 +266,7 @@ static void orch_abandon(const char *specroot, const char *feature,
      * the task — its in_progress is theirs, not ours to reset */
     if (rr != 0) return;
     char path[4600], sec[300];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", specroot, feature);
+    config_feature_path(specroot, feature, path, sizeof path);
     if (orch_docs_ready(id)) snprintf(sec, sizeof sec, "documentation");
     else snprintf(sec, sizeof sec, "task.%s", id);
     char *st = NULL;
@@ -428,7 +416,7 @@ static int orch_dry_run(const char *specroot, const char *cgroot,
                         const char *feature, const OrchCfg *cfg,
                         const char *extra, int nslots, const char *prefix) {
     char path[4600];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", specroot, feature);
+    config_feature_path(specroot, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) {
         fprintf(stderr, "cg spec run: cannot parse %s\n", path);
@@ -619,7 +607,7 @@ int cmd_spec_run(int argc, char **argv) {
         return 1;
     }
     char wfpath[4600];
-    snprintf(wfpath, sizeof wfpath, "%s/spec/workflow.kvx", specroot);
+    config_workflow_path(specroot, wfpath, sizeof wfpath);
     Kvx *wf = kvx_parse(wfpath);
     if (!wf) {
         fprintf(stderr, "cg spec run: cannot parse %s\n", wfpath);
@@ -981,7 +969,7 @@ int cmd_spec_run(int argc, char **argv) {
 
 static Kvx *orch_hier(const char *tree, Hierarchy *h) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/workflow.kvx", tree);
+    config_workflow_path(tree, path, sizeof path);
     Kvx *wf = kvx_parse(path);
     hier_load(wf, h);
     return wf;
@@ -1176,13 +1164,13 @@ static int orch_tasks_load(Cg *cg, const char *feature, const char *fwt,
                            OrchTask **out) {
     *out = NULL;
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+    config_feature_path(cg->shared, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return 0;
     Kvx *fk = NULL;
     if (fwt && fwt[0]) {
         char fp[4800];
-        snprintf(fp, sizeof fp, "%s/spec/%s/spec.kvx", fwt, feature);
+        config_feature_path(fwt, feature, fp, sizeof fp);
         fk = kvx_parse(fp);
     }
     char **ids = NULL;
@@ -1262,7 +1250,7 @@ static int orch_tasks_load(Cg *cg, const char *feature, const char *fwt,
 
 static long orch_task_wave(Cg *cg, const char *feature, const char *id) {
     char path[4700], sec[300];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+    config_feature_path(cg->shared, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return -1;
     snprintf(sec, sizeof sec, "task.%s", id);
@@ -2964,7 +2952,7 @@ static void sup_feature_paths(Cg *g, const char *feature, char *fbranch,
 /* every leaf task of the feature done on the main tree */
 static bool feature_done(Cg *g, const char *feature) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", g->shared, feature);
+    config_feature_path(g->shared, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return false;
     char **ids = NULL;
@@ -2988,7 +2976,7 @@ static bool feature_done(Cg *g, const char *feature) {
 /* [meta] requires of a feature, all done? names the first that is not */
 static bool feature_ready(Cg *g, const char *feature, char *waiting, size_t cap) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", g->shared, feature);
+    config_feature_path(g->shared, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return false;
     char **req = NULL;
@@ -3011,7 +2999,7 @@ static bool feature_ready(Cg *g, const char *feature, char *waiting, size_t cap)
 static int features_open(Cg *g, char ***out) {
     *out = NULL;
     char dir[4600];
-    snprintf(dir, sizeof dir, "%s/spec", g->shared);
+    config_spec_dir(g->shared, dir, sizeof dir);
     DIR *d = opendir(dir);
     if (!d) return 0;
     char **v = NULL;

@@ -19,9 +19,10 @@ static void usage(void) {
 "  branches                 every branch indexed into the shared graph, with\n"
 "                           worktree, head, and file count\n"
 "  index [--full]           (re)index the project now (waits for the gate)\n"
-"  sync [paths] [--max-age MS] [--background] [--wait MS]\n"
+"  sync [paths] [--max-age MS] [--background] [--wait MS] [--auto]\n"
 "                           incremental index; coalesces into a pass\n"
-"                           already running, skips when fresh\n"
+"                           already running, skips when fresh; --auto marks\n"
+"                           an implicit sync, skipped when [sync] auto=false\n"
 "  search <query> [-n N]    find code by name (FTS5 trigram + full text)\n"
 "  symbol <name>            definition(s), snippet, reference count\n"
 "  impact <name> [-d N]     callers/callees to depth N (default 3)\n"
@@ -38,6 +39,11 @@ static void usage(void) {
 "  why <symbol>             provenance: commits, tasks, and decisions\n"
 "  watch [--debounce MS]    auto-sync on file changes (native OS events)\n"
 "  info                     machine profile and how the pipeline was sized\n"
+"  config [--json]          every codify.kvx setting with its origin\n"
+"  config init | get <section.key> | set <section.key> <value> | check\n"
+"                           write the commented defaults (never over an\n"
+"                           existing file), read or surgically write one\n"
+"                           key, list unknown keys and unusable values\n"
 "\n"
 "version control\n"
 "  commit -m <msg>          snapshot; --task <id>, --amend, --git\n"
@@ -295,6 +301,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
  * lock wait) so the answer is never older than the edit it follows. */
 #define FRESH_WINDOW_MS 3000
 static void index_fresh(Cg *cg, const SysInfo *si) {
+    if (!config_auto_sync(cg->root)) return;
     IndexOpts o = {0};
     o.max_age_ms = FRESH_WINDOW_MS;
     o.lock_wait_ms = -1;
@@ -332,6 +339,11 @@ int main(int argc, char **argv) {
 
     if (strcmp(cmd, "root") == 0)
         return cmd_root(json);
+
+    /* codify.kvx belongs to the tree, not the graph: config answers in a
+     * spec-only repository and before cg init */
+    if (strcmp(cmd, "config") == 0)
+        return cmd_config(argc - 2, argv + 2, json);
 
     SysInfo si;
     sysinfo_detect(&si);
@@ -449,6 +461,9 @@ int main(int argc, char **argv) {
          * running, then a dirty note instead of a second walk. cg index is
          * the blocking form for a person who wants the pass to happen now. */
         IndexOpts o = {0};
+        /* --auto: a hook or editor asking, not a person; it honours
+         * [sync] auto like every other implicit sync */
+        bool implicit  = flag(&argc, argv, "--auto");
         o.max_age_ms   = atol(opt(&argc, argv, "--max-age", "0"));
         o.background   = flag(&argc, argv, "--background");
         o.lock_wait_ms = atol(opt(&argc, argv, "--wait",
@@ -457,6 +472,11 @@ int main(int argc, char **argv) {
         o.paths = (const char *const *)(argv + 2);
         o.npaths = argc - 2;
         IndexStats st;
+        if (implicit && !config_auto_sync(cg.root)) {
+            if (json) printf("{\"skipped\":\"auto-sync is off\"}\n");
+            cg_close(&cg);
+            return 0;
+        }
         rc = cg_index_ex(&cg, &si, &o, &st);
         if (json) {
             printf("{\"indexed\":%ld,\"removed\":%ld,\"seen\":%ld,"
@@ -565,7 +585,8 @@ int main(int argc, char **argv) {
         }
         else {
             IndexStats st;
-            cg_index(&cg, &si, false, &st, true);   /* graph stays fresh */
+            if (config_auto_sync(cg.root))
+                cg_index(&cg, &si, false, &st, true);   /* graph stays fresh */
             rc = cmd_commit_with_options(&cg, msg, false, tag, amend);
             if (rc == 0 && to_git) {
                 StrBuf gm; sb_init(&gm);

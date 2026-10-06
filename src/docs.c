@@ -85,10 +85,11 @@ static int docs_project_open(Cg *cg, DocsProject *p) {
     p->cg = cg;
     snprintf(p->root, sizeof p->root, "%s", cg->root);
     char wfpath[4700];
-    snprintf(wfpath, sizeof wfpath, "%s/spec/workflow.kvx", p->root);
+    config_workflow_path(p->root, wfpath, sizeof wfpath);
     p->wf = kvx_parse(wfpath);
     if (!p->wf) {
-        fprintf(stderr, "cg docs: no spec/workflow.kvx in %s\n", p->root);
+        fprintf(stderr, "cg docs: no %s/workflow.kvx in %s\n",
+                config_spec_rel(p->root), p->root);
         return -1;
     }
     char *feature = docs_feature_override ? xstrdup(docs_feature_override)
@@ -106,8 +107,7 @@ static int docs_project_open(Cg *cg, DocsProject *p) {
     }
     snprintf(p->feature, sizeof p->feature, "%s", feature);
     free(feature);
-    snprintf(p->spec_path, sizeof p->spec_path, "%s/spec/%s/spec.kvx",
-             p->root, p->feature);
+    config_feature_path(p->root, p->feature, p->spec_path, sizeof p->spec_path);
     p->spec = kvx_parse(p->spec_path);
     if (!p->spec) {
         fprintf(stderr, "cg docs: cannot parse %s\n", p->spec_path);
@@ -177,7 +177,8 @@ static void docs_inventory_walk(const char *root, const char *rel, int depth,
             if (strcmp(e->d_name, "node_modules") == 0 ||
                 strcmp(e->d_name, "target") == 0 ||
                 strcmp(e->d_name, "vendor") == 0 ||
-                strcmp(e->d_name, "spec") == 0) continue;
+                strcmp(e->d_name, "spec") == 0 ||
+                strcmp(child, config_spec_rel(root)) == 0) continue;
             docs_inventory_walk(root, child, depth + 1, text, json, count);
         } else if (S_ISREG(st.st_mode) && docs_suffix(e->d_name)) {
             sb_printf(text, "- %s (%ld bytes)\n", child, (long)st.st_size);
@@ -386,8 +387,9 @@ static int docs_claims_template(DocsProject *p, const char *path) {
     free(paths);
     if (nclaim == 0) {
         sb_puts(&b, "[claim.1]\ntype     = \"path\"\nvalue    = ");
-        char spec_rel[512];
-        snprintf(spec_rel, sizeof spec_rel, "spec/%s/spec.kvx", p->feature);
+        char spec_rel[1600];
+        snprintf(spec_rel, sizeof spec_rel, "%s/%s/spec.kvx",
+                 config_spec_rel(p->root), p->feature);
         sb_json_str(&b, spec_rel);
         sb_puts(&b, "\ndocument = \"\"\nevidence = ");
         sb_json_str(&b, spec_rel);
@@ -649,8 +651,9 @@ static void docs_check_say(DocsCheck *c, bool ok, const char *fmt, ...) {
 }
 
 static bool docs_allowed_system_path(const DocsProject *p, const char *path) {
-    char prefix[400];
-    snprintf(prefix, sizeof prefix, "spec/%s/", p->feature);
+    char prefix[1600];
+    snprintf(prefix, sizeof prefix, "%s/%s/", config_spec_rel(p->root),
+             p->feature);
     if (strncmp(path, prefix, strlen(prefix)) != 0) return false;
     const char *name = path + strlen(prefix);
     return strcmp(name, "spec.kvx") == 0 || strcmp(name, "requirements.md") == 0 ||

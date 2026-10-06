@@ -130,10 +130,15 @@ static int drift_diff(const char *tree, const char *base, const char *head,
 }
 
 /* Codify's own bookkeeping moves with every task and is nobody's drift */
-static bool drift_exempt(const char *path) {
-    return !strncmp(path, "spec/", 5) || !strcmp(path, "AGENTS.md") ||
-           !strcmp(path, "CLAUDE.md") || !strncmp(path, ".codify/", 8) ||
-           !strncmp(path, ".codegraph/", 11) || !strcmp(path, ".gitignore");
+static bool drift_exempt(const char *tree, const char *path) {
+    const char *ctx = config_context_rel(tree);
+    size_t nc = strlen(ctx);
+    return !strncmp(path, "spec/", 5) || config_in_spec(tree, path) ||
+           !strcmp(path, "AGENTS.md") || !strcmp(path, "CLAUDE.md") ||
+           !strncmp(path, ".codify/", 8) ||
+           (!strncmp(path, ctx, nc) && path[nc] == '/') ||
+           !strncmp(path, ".codegraph/", 11) || !strcmp(path, ".gitignore") ||
+           !strcmp(path, CG_CONFIG_FILE);
 }
 
 static bool drift_in_touches(const char *path, char **touches, int nt) {
@@ -190,7 +195,7 @@ int drift_spec_check(Cg *cg, const char *tree, const char *base,
     int nseen = 0, cseen = 0;
     for (int i = 0; i < nf; i++) {
         FileDiff *f = &fd[i];
-        if (drift_exempt(f->path)) continue;
+        if (drift_exempt(tree, f->path)) continue;
         if (nt && !drift_in_touches(f->path, touches, nt)) {
             sb_printf(&files, "%s", nfo++ ? "," : "");
             sb_json_str(&files, f->path);
@@ -322,7 +327,7 @@ bool drift_collision_predict(Cg *cg, const char *feature, const char *a,
 
 static char *drift_active_feature(Cg *cg) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/workflow.kvx", cg->shared);
+    config_workflow_path(cg->shared, path, sizeof path);
     Kvx *k = kvx_parse(path);
     char *f = k ? kvx_str(k, "meta", "active_feature") : NULL;
     kvx_free(k);
@@ -333,7 +338,7 @@ static char *drift_active_feature(Cg *cg) {
 static int drift_open_tasks(Cg *cg, const char *feature, char ***out) {
     *out = NULL;
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+    config_feature_path(cg->shared, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return 0;
     char **ids = NULL;
@@ -549,7 +554,7 @@ int drift_interface_check(Cg *cg, const char *tree, const char *base_branch,
     int findings = 0;
     if (out) sb_puts(out, "[");
     for (int i = 0; i < nf; i++) {
-        if (drift_exempt(fd[i].path)) continue;
+        if (drift_exempt(tree, fd[i].path)) continue;
         ParseResult before, after;
         bool had = blob_defs(tree, pre, fd[i].path, &before) == 0;
         bool has = blob_defs(tree, post, fd[i].path, &after) == 0;
@@ -623,7 +628,7 @@ int drift_interface_check(Cg *cg, const char *tree, const char *base_branch,
 
 int coverage_check(Cg *cg, const char *feature, StrBuf *out) {
     char path[4700];
-    snprintf(path, sizeof path, "%s/spec/%s/spec.kvx", cg->shared, feature);
+    config_feature_path(cg->shared, feature, path, sizeof path);
     Kvx *k = kvx_parse(path);
     if (!k) return -1;
     char **tasks = NULL;

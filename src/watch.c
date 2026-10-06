@@ -134,7 +134,18 @@ static int watch_sync(Cg *cg, const SysInfo *si, const Pending *p,
     return cg_index_ex(cg, si, &o, st);
 }
 
+/* With [sync] auto off a watcher has nothing to do; saying so and exiting
+ * beats idling silently while the graph goes stale. */
+static bool watch_auto_off(const char *root) {
+    if (config_auto_sync(root)) return false;
+    fprintf(stderr, "cg watch: auto-sync is off ([sync] auto = false in "
+                    "%s) — not watching; run `cg sync` after edits\n",
+            config_load(root)->file);
+    return true;
+}
+
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
+    if (watch_auto_off(cg->root)) return 0;
     Watcher w;
     memset(&w, 0, sizeof w);
     w.root = cg->root;
@@ -319,6 +330,7 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
     int n = 0;
     struct pollfd *pfd = NULL;
     long next_scan = 0;
+    if (watch_auto_off(cg->root)) return 0;
     cg->lock_wait_ms = 2000;
     printf("watching every worktree of %s (debounce %dms, background passes) "
            "— ctrl-c to stop\n", cg->shared, debounce_ms);
@@ -355,6 +367,11 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
         for (int i = 0; i < n; i++) {
             if (!v[i]->armed || now_ms() < v[i]->deadline) continue;
             v[i]->armed = false;
+            /* each worktree carries its own codify.kvx */
+            if (!config_auto_sync(v[i]->cg.root)) {
+                pending_clear(&v[i]->pend);
+                continue;
+            }
             IndexStats st;
             if (watch_sync(&v[i]->cg, si, &v[i]->pend, &st) != 0 && st.busy) {
                 v[i]->armed = true;             /* keeps its paths */

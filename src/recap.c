@@ -896,13 +896,13 @@ static void run_capture(const char *cmd, StrBuf *out) {
 static void repo_facts(Cg *cg, int since_days, StrBuf *b) {
     /* the spec: active feature, its intro, task status */
     char wp[4700];
-    snprintf(wp, sizeof wp, "%s/spec/workflow.kvx", cg->root);
+    config_workflow_path(cg->root, wp, sizeof wp);
     Kvx *w = kvx_parse(wp);
     char *feat = w ? kvx_str(w, "meta", "active_feature") : NULL;
     kvx_free(w);
     if (feat && feat[0]) {
         char sp[4700];
-        snprintf(sp, sizeof sp, "%s/spec/%s/spec.kvx", cg->root, feat);
+        config_feature_path(cg->root, feat, sp, sizeof sp);
         Kvx *k = kvx_parse(sp);
         if (k) {
             char *intro = kvx_str(k, "meta", "intro");
@@ -1136,12 +1136,14 @@ int cmd_recap(Cg *cg, const RecapOpts *o) {
                       decided_path);
             sb_puts(&out, brief);
             sb_putc(&out, '\n');
-            const char *of = o->outfile && o->outfile[0] ? o->outfile : ".codify/recap.md";
+            char defout[4700];
+            config_context_path(cg->root, "recap.md", defout, sizeof defout);
+            const char *of = o->outfile && o->outfile[0] ? o->outfile : defout;
             if (strcmp(of, "-") == 0) fputs(out.p, stdout);
             else {
                 char path[4700];
                 if (of[0] == '/') snprintf(path, sizeof path, "%s", of);
-                else snprintf(path, sizeof path, "%s/%s", cg->root, of);
+                else path_format(path, sizeof path, "%s/%s", cg->root, of);
                 char dir[4700]; snprintf(dir, sizeof dir, "%s", path);
                 char *sl = strrchr(dir, '/');
                 if (sl) { *sl = 0; mkdirs(dir); }

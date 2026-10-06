@@ -247,6 +247,51 @@ char *cg_meta_get(Cg *cg, const char *k);          /* malloc'd or NULL */
  * rebuilds them; memories/history/leases always survive. 0 ok */
 int  cg_schema_upgrade(Cg *cg);
 
+/* ---------------- project configuration (config.c): codify.kvx ---------------- */
+/* One optional file at the root of a tree. It travels with the branch like
+ * the spec directory does, so every accessor takes the tree it asks about:
+ * cg->root for the tree being worked on, cg->shared where a caller reads the
+ * main tree's spec. Loaded once per tree per process; a missing file or key
+ * is the built-in default. Paths are root-relative and normalized. */
+#define CG_CONFIG_FILE "codify.kvx"
+enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
+       CFG_PATH_CODEMAP, CFG_NKEYS };
+typedef struct {
+    char root[4096];
+    char file[4200];           /* <root>/codify.kvx */
+    bool present;              /* the file exists */
+    bool sync_auto;            /* [sync] auto: implicit syncs run */
+    char spec[1024], context[1024], skills[1024], codemap[1024];
+    bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
+    int  nproblems;            /* unusable values (already reported on stderr) */
+} CgConfig;
+/* never NULL; an unusable value is reported on stderr the first time */
+const CgConfig *config_load(const char *root);
+bool config_auto_sync(const char *root);
+const char *config_spec_rel(const char *root);     /* "spec" */
+const char *config_context_rel(const char *root);  /* ".codify" */
+const char *config_skills_rel(const char *root);   /* ".agents/skills" */
+const char *config_codemap_rel(const char *root);  /* "CODEMAP.md" */
+/* absolute joins; false (out empty) on overflow, like path_format */
+bool config_spec_dir(const char *root, char *out, size_t cap);
+bool config_workflow_path(const char *root, char *out, size_t cap);
+bool config_feature_path(const char *root, const char *feature, char *out,
+                         size_t cap);              /* <spec>/<f>/spec.kvx */
+bool config_context_dir(const char *root, char *out, size_t cap);
+bool config_context_path(const char *root, const char *name, char *out,
+                         size_t cap);              /* <context>/<name> */
+bool config_skills_dir(const char *root, char *out, size_t cap);
+bool config_codemap_path(const char *root, char *out, size_t cap);
+/* is the root-relative path under the configured spec directory? */
+bool config_in_spec(const char *root, const char *rel);
+/* nearest ancestor of start (NULL: cwd) holding <its spec>/workflow.kvx */
+int  config_find_spec_root(const char *start, char *out, size_t cap);
+/* unknown sections and keys, unusable values, an unparseable file: one line
+ * each into text, a {"file","present","ok","problems":[...]} object into
+ * json (either may be NULL); returns how many. Never prints. */
+int  config_check(const char *root, StrBuf *text, StrBuf *json);
+int  cmd_config(int argc, char **argv, bool json);
+
 /* ---------------- scan / index ---------------- */
 typedef struct {
     long files_seen, files_indexed, files_removed, files_skipped;
