@@ -547,6 +547,28 @@ int  cmd_memory_compact(Cg *cg, bool dry_run, bool json);
  * A memory the base already carries is left where it is. Returns how many
  * moved, -1 when the write failed. */
 int  memory_promote_branch(Cg *cg, const char *from, const char *to);
+/* Memory transport (docs/memory-transport.md). The content id is sha256 of
+ * type, 0x1F, task (NULL as empty), 0x1F, body: the same note has the same
+ * id in every graph, which is what import deduplicates and relinks by. */
+void memory_content_id(const char *type, const char *task, const char *body,
+                       char out[65]);
+typedef struct {
+    const char *outfile;        /* NULL or "-": stdout */
+    const char *task;           /* a tag, or a prefix ending before a '/' */
+    const char *type, *branch;  /* exact */
+    int since_days;             /* 0: all time */
+} MemExportOpts;
+typedef struct {
+    const char *file;           /* exactly one of file ("-" = stdin), */
+    const char *from;           /* another project's directory, */
+    const char *data;           /* or the JSONL text itself (MCP) */
+    const char *retask;         /* "OLD=NEW" task-tag prefix rewrite */
+    bool dry_run, keep_branch;
+} MemImportOpts;
+int  cmd_memory_export(Cg *cg, const MemExportOpts *o, bool json);
+/* One transaction; an unusable header stops it before any write. 0 ok
+ * (invalid lines are reported, not fatal), 1 error, CG_EXIT_BUSY. */
+int  cmd_memory_import(Cg *cg, const MemImportOpts *o, bool json);
 
 /* ---------------- watcher ---------------- */
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms);

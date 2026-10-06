@@ -302,6 +302,53 @@ static int t_recall(void *v) {
     free(q); free(task); free(type);
     return rc;
 }
+static int t_memory_export(void *v) {
+    CallCtx *c = v;
+    MemExportOpts o = {0};
+    char *path = c->args ? json_get_string(c->args, "path") : NULL;
+    char *task = c->args ? json_get_string(c->args, "task") : NULL;
+    char *type = c->args ? json_get_string(c->args, "type") : NULL;
+    char *branch = c->args ? json_get_string(c->args, "branch") : NULL;
+    o.outfile = path;
+    o.task = task;
+    o.type = type;
+    o.branch = branch;
+    o.since_days = c->args ? (int)json_get_int(c->args, "since", 0) : 0;
+    int saved = fold_stderr();
+    int rc = cmd_memory_export(c->cg, &o, true);
+    unfold_stderr(saved);
+    free(path); free(task); free(type); free(branch);
+    return rc;
+}
+static int t_memory_import(void *v) {
+    CallCtx *c = v;
+    MemImportOpts o = {0};
+    char *path = c->args ? json_get_string(c->args, "path") : NULL;
+    char *from = c->args ? json_get_string(c->args, "from") : NULL;
+    char *data = c->args ? json_get_string(c->args, "data") : NULL;
+    char *retask = c->args ? json_get_string(c->args, "retask") : NULL;
+    char *dry = c->args ? json_get_raw(c->args, "dry_run") : NULL;
+    char *keep = c->args ? json_get_raw(c->args, "keep_branch") : NULL;
+    if (path && strcmp(path, "-") == 0) {
+        /* stdin is this server's request stream */
+        printf("{\"error\":\"path - (stdin) is not available over MCP; "
+               "pass the export text as data\"}\n");
+        free(path); free(from); free(data); free(retask); free(dry);
+        free(keep);
+        return 1;
+    }
+    o.file = path;
+    o.from = from;
+    o.data = data;
+    o.retask = retask;
+    o.dry_run = dry && strcmp(dry, "true") == 0;
+    o.keep_branch = keep && strcmp(keep, "true") == 0;
+    int saved = fold_stderr();
+    int rc = cmd_memory_import(c->cg, &o, true);
+    unfold_stderr(saved);
+    free(path); free(from); free(data); free(retask); free(dry); free(keep);
+    return rc;
+}
 
 static int t_show(void *v) {
     CallCtx *c = v;
@@ -589,6 +636,27 @@ static int t_skills_promote(void *v) {
                  "\"free text; omit for most recent\"}," \
                  "\"task\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}}}"
+#define S_MEMEXPORT "{\"type\":\"object\",\"properties\":{" \
+                 "\"path\":{\"type\":\"string\",\"description\":" \
+                 "\"write the JSONL here instead of returning it\"}," \
+                 "\"task\":{\"type\":\"string\",\"description\":" \
+                 "\"a task tag, or a prefix such as a feature name\"}," \
+                 "\"type\":{\"type\":\"string\"}," \
+                 "\"branch\":{\"type\":\"string\"}," \
+                 "\"since\":{\"type\":\"integer\",\"description\":" \
+                 "\"only memories from the last N days\"}}}"
+#define S_MEMIMPORT "{\"type\":\"object\",\"properties\":{" \
+                 "\"path\":{\"type\":\"string\",\"description\":" \
+                 "\"an export file\"}," \
+                 "\"from\":{\"type\":\"string\",\"description\":" \
+                 "\"another Codify project's directory, read-only\"}," \
+                 "\"data\":{\"type\":\"string\",\"description\":" \
+                 "\"the export text itself\"}," \
+                 "\"dry_run\":{\"type\":\"boolean\"}," \
+                 "\"keep_branch\":{\"type\":\"boolean\",\"description\":" \
+                 "\"keep branch names this graph does not track\"}," \
+                 "\"retask\":{\"type\":\"string\",\"description\":" \
+                 "\"OLD=NEW task-tag prefix rewrite\"}}}"
 #define S_CLAIMNEXT "{\"type\":\"object\",\"properties\":{" \
                  "\"agent\":{\"type\":\"string\",\"description\":" \
                  "\"claiming agent name (default CG_AGENT or 'agent')\"}," \
@@ -803,6 +871,18 @@ static const struct {
       "session start and before starting a task to load prior decisions "
       "and outcomes.",
       S_RECALL, A_READ, "Search memories", t_recall, false },
+    { "memory_export",
+      "Export memories as JSONL — a header line, then one object per memory "
+      "keyed by a content id — to carry decisions to another project. "
+      "Filter by task (or prefix), type, branch, and age in days.",
+      S_MEMEXPORT, A_READ, "Export memories", t_memory_export, false },
+    { "memory_import",
+      "Import memories from an export (path or data) or straight from "
+      "another Codify project (from). Adds only what this graph lacks, by "
+      "content id, keeps creation time and class, restores supersession, "
+      "and reports imported, skipped, and invalid counts. dry_run writes "
+      "nothing.",
+      S_MEMIMPORT, A_WRITE, "Import memories", t_memory_import, false },
     { "get_source",
       "The body of one symbol, by name — not the whole file. Use instead of "
       "reading a file when you only need a single function.",

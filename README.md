@@ -268,6 +268,8 @@ Durable agent notes, stored in the same SQLite database as the graph. Memories w
 | `cg forget <id>` | Delete a memory |
 | `cg memory compact` | Collapse duplicate memories (`--dry-run` to preview) |
 | `cg memory classify [<id>\|--all\|--unclassified]` | Ask Jev what each note is — `skill`, `decision`, `constraint`, `fact`, `noise` — with a confidence, and store it on the memory. No argument does the unclassified ones; `-n N` caps the batch |
+| `cg memory export [-o FILE]` | Write memories as JSONL — a header line, then one object per memory keyed by a content id — to stdout or `FILE`; select with `--task` (a tag or prefix), `--type`, `--branch`, `--since DAYS` |
+| `cg memory import <FILE\|->` | Add the memories this graph does not hold yet, by content id, in one transaction: creation time, class, and supersession travel; `--dry-run` reports without writing, `--keep-branch` keeps branch names this graph does not track, `--retask OLD=NEW` rewrites a task-tag prefix. `--from DIR` reads another Codify project's graph read-only instead of a file. See [docs/memory-transport.md](docs/memory-transport.md) |
 | `cg skills list\|promote <id>\|render` | The memories classed `skill`, promoted into `.agents/skills/<slug>/SKILL.md`, and kept current with the note they came from |
 
 A superseded memory is never deleted — the reversal is history worth keeping. It simply stops leading the results, so a session meets the current decision first.

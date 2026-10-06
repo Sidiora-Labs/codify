@@ -73,6 +73,13 @@ static void usage(void) {
 "  memory classify [<id>|--all|--unclassified] [-n N]\n"
 "                           ask Jev what each memory is (skill, decision,\n"
 "                           constraint, fact, noise) and store the class\n"
+"  memory export [-o FILE] [--task T] [--type T] [--branch B] [--since DAYS]\n"
+"                           memories as JSONL: a header line, then one\n"
+"                           object per memory with its content id\n"
+"  memory import <FILE|-> | --from DIR [--dry-run] [--keep-branch]\n"
+"                [--retask OLD=NEW]\n"
+"                           add the memories this graph lacks, by content\n"
+"                           id; --from reads another project's graph\n"
 "\n"
 "agentic\n"
 "  mcp                      run as an MCP server (stdio) for coding agents\n"
@@ -442,7 +449,12 @@ int main(int argc, char **argv) {
     /* Reads answer for the branch the caller is standing on unless it says
      * otherwise; --all-branches unions every tracked branch and labels each
      * hit. Writes are never redirected — the indexer always writes here. */
-    if (cg_scope_set(&cg, scope_branch, all_branches) != 0) {
+    /* on memory export --branch names the branch a memory carries, which
+     * need not be one this graph tracks: a filter, not a read scope */
+    bool mem_export = strcmp(cmd, "memory") == 0 && argc > 2 &&
+                      strcmp(argv[2], "export") == 0;
+    if (cg_scope_set(&cg, mem_export ? NULL : scope_branch,
+                     all_branches) != 0) {
         fprintf(stderr, "cg: no branch named '%s' in this graph "
                         "(cg branches lists them)\n", scope_branch);
         cg_close(&cg);
@@ -658,9 +670,26 @@ int main(int argc, char **argv) {
             int limit = atoi(opt(&argc, argv, "-n", "0"));
             rc = cmd_memory_classify(&cg, argc >= 4 ? argv[3] : NULL, limit,
                                      json);
+        } else if (argc >= 3 && strcmp(argv[2], "export") == 0) {
+            MemExportOpts o = {0};
+            o.outfile = opt(&argc, argv, "-o", NULL);
+            o.task = opt(&argc, argv, "--task", NULL);
+            o.type = opt(&argc, argv, "--type", NULL);
+            o.branch = scope_branch;
+            o.since_days = atoi(opt(&argc, argv, "--since", "0"));
+            rc = cmd_memory_export(&cg, &o, json);
+        } else if (argc >= 3 && strcmp(argv[2], "import") == 0) {
+            MemImportOpts o = {0};
+            o.from = opt(&argc, argv, "--from", NULL);
+            o.retask = opt(&argc, argv, "--retask", NULL);
+            o.dry_run = flag(&argc, argv, "--dry-run");
+            o.keep_branch = flag(&argc, argv, "--keep-branch");
+            o.file = argc >= 4 ? argv[3] : NULL;
+            rc = cmd_memory_import(&cg, &o, json);
         } else {
             fprintf(stderr, "usage: cg memory compact [--dry-run] | "
-                    "classify [<id>|--all|--unclassified] [-n N]\n");
+                    "classify [<id>|--all|--unclassified] [-n N] | "
+                    "export [-o FILE] | import <FILE|-> | --from DIR\n");
             rc = 1;
         }
     } else if (strcmp(cmd, "skills") == 0) {
