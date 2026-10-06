@@ -2348,8 +2348,8 @@ static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {
             sym_from_stmt(st, &r);
             StrBuf it; sb_init(&it);
             if (json) json_sym(cg, &it, &r);
-            else sb_printf(&it, "  %-9s %-28s :%-5d %.140s\n", r.kind, r.name,
-                           r.line, r.sig);
+            else sb_printf(&it, "  %-9s %-28s :%-5d %.140s\n",
+                           r.decl ? "proto" : r.kind, r.name, r.line, r.sig);
             ctx_fit(&b, &it, rest, json, &ns, &os);
         }
         sqlite3_finalize(st);

@@ -100,7 +100,7 @@ When the context query names an indexed file (`src/store.h`,
 search. The outline holds:
 
 - the purpose line (the first line of the file's header comment)
-- every symbol with its kind, line and signature
+- every symbol with its kind, line and signature (a prototype reads `proto` in the text outline and carries `"decl":true` in `--json`)
 - the file's imports
 - its dependents: files whose calls resolve into it, plus files whose
   imports name it

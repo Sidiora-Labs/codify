@@ -1001,7 +1001,7 @@ static void load_entries(Map *m) {
     sqlite3_stmt *st = cm_prep(m, "f",
         "SELECT f.path, s.name, s.line, s.sig FROM symbols s JOIN files f "
         "ON f.id=s.file_id WHERE s.name IN ('main','Main','__main__') "
-        "AND NOT cm_test(f.path) AND NOT cm_skip(f.path)",
+        "AND s.decl=0 AND NOT cm_test(f.path) AND NOT cm_skip(f.path)",
         " ORDER BY f.path COLLATE BINARY, s.line");
     while (sqlite3_step(st) == SQLITE_ROW) {
         CmMain *e = VPUSH(m->mains, m->nmain, m->cmain);
@@ -1181,7 +1181,8 @@ static void load_modules(Map *m) {
         "  JOIN files rf ON rf.id=r.file_id WHERE r.kind='call'"
         "  AND r.target_id IS NOT NULL AND NOT cm_skip(rf.path)"
         "  GROUP BY r.target_id) c ON c.id=s.id"
-        " WHERE f.lang IS NOT NULL AND NOT cm_test(f.path)"
+        /* a prototype is its definition's other face, not a second symbol */
+        " WHERE s.decl=0 AND f.lang IS NOT NULL AND NOT cm_test(f.path)"
         " AND NOT cm_skip(f.path)",
         ") WHERE rn <= 48 ORDER BY m COLLATE BINARY, rn");
     while (sqlite3_step(st) == SQLITE_ROW) {
@@ -1416,14 +1417,15 @@ static void load_tests(Map *m) {
         "SELECT COUNT(DISTINCT r.target_id) FROM refs r JOIN files rf ON "
         "rf.id=r.file_id JOIN symbols s ON s.id=r.target_id JOIN files sf ON "
         "sf.id=s.file_id WHERE r.kind='call' AND s.kind IN ('function','method') "
-        "AND cm_test(rf.path) AND NOT cm_test(sf.path) AND NOT cm_skip(sf.path)",
+        "AND s.decl=0 AND cm_test(rf.path) AND NOT cm_test(sf.path) "
+        "AND NOT cm_skip(sf.path)",
         "");
     if (sqlite3_step(st) == SQLITE_ROW) m->covered = sqlite3_column_int64(st, 0);
     sqlite3_finalize(st);
     st = cm_prep(m, "f",
         "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id=s.file_id WHERE "
-        "s.kind IN ('function','method') AND f.lang IS NOT NULL AND "
-        "NOT cm_test(f.path) AND NOT cm_skip(f.path)", "");
+        "s.kind IN ('function','method') AND s.decl=0 AND f.lang IS NOT NULL "
+        "AND NOT cm_test(f.path) AND NOT cm_skip(f.path)", "");
     if (sqlite3_step(st) == SQLITE_ROW) m->coverable = sqlite3_column_int64(st, 0);
     sqlite3_finalize(st);
 

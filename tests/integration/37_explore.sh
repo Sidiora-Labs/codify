@@ -63,6 +63,7 @@ out="$("$CG" context src/store.h)"
 has "$out" "file src/store.h — 23 lines, 5 symbols"
 has "$out" "The memory store: an append-only list"
 has "$out" "memory_export                :11"
+has "$out" "  proto     memory_export"           # a prototype is labelled one
 has "$out" "memory_import                :16"
 has "$out" "store_close                  :19"
 has "$out" "store_count                  :21"
