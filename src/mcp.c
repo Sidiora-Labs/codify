@@ -540,6 +540,15 @@ static int t_skills_promote(void *v) {
     free(id);
     return rc;
 }
+static int t_codemap(void *v) {
+    CallCtx *c = v;
+    int budget = (int)json_get_int(c->args, "budget", 0);
+    char *js = c->args ? json_get_raw(c->args, "json") : NULL;
+    CodemapOpts o = { .budget = budget > 0 ? budget : 0, .outfile = "-",
+                      .json = js && strcmp(js, "true") == 0 };
+    free(js);
+    return cmd_codemap(c->cg, &o);
+}
 
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
@@ -686,6 +695,11 @@ static int t_skills_promote(void *v) {
 #define S_PROMOTE "{\"type\":\"object\",\"properties\":{" \
                  "\"id\":{\"type\":\"string\",\"description\":" \
                  "\"memory id to render as a SKILL.md\"}},\"required\":[\"id\"]}"
+#define S_CODEMAP "{\"type\":\"object\",\"properties\":{" \
+                  "\"budget\":{\"type\":\"integer\",\"description\":" \
+                  "\"token budget, default 8000\"},\"json\":{\"type\":" \
+                  "\"boolean\",\"description\":\"structured map instead " \
+                  "of markdown\"}}}"
 
 /* Tool annotations let a client decide what it may run without asking. A
  * read-only tool can be auto-approved; without the hint every search prompts
@@ -985,6 +999,12 @@ static const struct {
       "Never overwrites a file Codify did not generate.",
       S_PROMOTE, A_WRITE, "Promote a memory to a skill", t_skills_promote,
       false },
+    { "codemap",
+      "The repository map as CODEMAP.md would hold it: overview with build "
+      "and test commands, layout, entry points, modules with their most-"
+      "referenced symbols, directory dependencies, tests, and workflow "
+      "pointers. Writes nothing; read it first in an unfamiliar repo.",
+      S_CODEMAP, A_READ, "Repository map", t_codemap, true },
 };
 #define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))
 

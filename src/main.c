@@ -108,6 +108,11 @@ static void usage(void) {
 "                           picked statements (no prose); --facts prints\n"
 "                           the repository facts alone (no model)\n"
 "  agentmd [--write]        generate .codify/agent-context.md from the graph\n"
+"  codemap [-o FILE|-] [--budget N] [--force] [--check] [--json]\n"
+"                           write CODEMAP.md: the repository map from the\n"
+"                           graph (overview, layout, entry points, modules,\n"
+"                           dependencies, tests, workflow); --check exits 1\n"
+"                           when it is missing or stale\n"
 "  docs status|plan|packet  grounded documentation closure evidence;\n"
 "                           generate is an alias for packet\n"
 "  check [--strict]         one CI gate: render, lint, evidence, tree\n"
@@ -737,6 +742,19 @@ int main(int argc, char **argv) {
         bool write_files = flag(&argc, argv, "--write");
         index_fresh(&cg, &si);                  /* fresh graph first */
         rc = cmd_agentmd(&cg, write_files);
+    } else if (strcmp(cmd, "codemap") == 0) {
+        CodemapOpts o = {0};
+        o.outfile = opt(&argc, argv, "-o", NULL);
+        const char *budget = opt(&argc, argv, "--budget", NULL);
+        o.force = flag(&argc, argv, "--force");
+        o.check = flag(&argc, argv, "--check");
+        o.json = json;
+        if (budget) {
+            o.budget = atoi(budget);
+            if (o.budget <= 0) o.budget = -1;   /* cmd_codemap rejects it */
+        }
+        index_fresh(&cg, &si);                  /* fresh graph first */
+        rc = cmd_codemap(&cg, &o);
     } else if (strcmp(cmd, "docs") == 0) {
         rc = cmd_docs(&cg, argc - 2, argv + 2, json);
     } else if (strcmp(cmd, "handoff") == 0) {

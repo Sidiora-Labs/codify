@@ -257,6 +257,17 @@ cg recap -o - --agents codex          # to stdout, Codex sessions only
 
 Both calls use `CENTRA_API_KEY` (or `CG_CHANGELOG_KEY`) from the environment or the project's `.env`; without it the command stops with a clear error, since neither half has a local stand-in. The endpoint bills every question against the whole state, so chunks are small (6 statements, `CG_RECAP_CHUNK`) and several run at once (`CG_RECAP_PARALLEL`, default 6); a 160-statement session takes about four minutes and a few cents. Decisions are cached per chunk under `.codegraph/recap-cache/`, so a rerun asks only about sessions that are new. What never reaches a model: thinking blocks, tool output, harness notifications and reminders, code fences, and sessions from other projects. `CG_RECAP_DECIDE_MODEL`, `CG_RECAP_DECIDE_ENDPOINT` and `CG_RECAP_MODEL` point either half elsewhere; `CG_RECAP_CLAUDE_DIR` and `CG_RECAP_CODEX_DIR` say where to look.
 
+### Code map
+
+`cg codemap` writes `CODEMAP.md` at the repository root: the one file a new agent (or person) reads to know what the project is, how to build and test it, where things live, and which symbols the rest of the code leans on. It is built from the graph, never from a model. Purpose lines are the code's own file comments and READMEs, and a directory with neither gets none. Symbols are ranked by the calls that resolve to them. The same graph gives the same bytes, and the map never counts itself, so `cg codemap --check` works as a CI gate. `cg brief` names the map and says whether it is current; the MCP `codemap` tool returns it without writing. See [docs/codemap.md](docs/codemap.md).
+
+```bash
+cg codemap                  # write CODEMAP.md (8000-token budget)
+cg codemap --budget 3000    # tighter: least-referenced entries go first, each section counts what it left out
+cg codemap --check          # exit 1 when CODEMAP.md is missing or stale; writes nothing
+cg codemap -o - --json      # the same map as structured data
+```
+
 ### Memory
 
 Durable agent notes, stored in the same SQLite database as the graph. Memories written while a spec task is in progress link themselves to it, and `cg spec done` records outcomes automatically. Never store secrets in them.
@@ -291,6 +302,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 | `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots] [--summarize\|--no-summarize]` | Release notes from git history: a release per tag or version bump, the newest named by the working tree's version, groups from the commit-subject prefix, `[spec:<feature>/<task>]` rendered as a task reference, and model-written Highlights per release when `CENTRA_API_KEY` is set (see [Changelog](#changelog)). `--snapshots`, or a project with no `.git`, renders from the snapshot chain instead, with symbol-level diffs: added and removed functions, new routes |
 | `cg recap [--sessions N] [--since DAYS] [--budget CHARS] [-o FILE] [--agents claude,codex] [--decided] [--facts]` | Resume brief from past Claude Code and Codex sessions: Solar Decide (System One, via the Centra gateway) picks the statements a resuming agent needs, the gateway chat model writes `.codify/recap.md`; the picked statements stay in `.codegraph/recap/decided.md`. Needs `CENTRA_API_KEY` (see [Recap](#recap)) |
 | `cg agentmd [--write]` | Generate graph orientation at `.codify/agent-context.md`; root `AGENTS.md` and `CLAUDE.md` remain owned by `cg spec render` |
+| `cg codemap [-o FILE\|-] [--budget N] [--force] [--check] [--json]` | Write `CODEMAP.md`, the repository map an agent reads first: overview with build and test commands, layout, entry points, modules with their most-referenced symbols, directory dependencies, tests, workflow pointers. Byte-stable, fitted to a token budget (default 8000), never overwrites a file it did not generate; `--check` exits 1 when it is missing or stale (see [Code map](#code-map)) |
 
 ### Agent control plane
 
