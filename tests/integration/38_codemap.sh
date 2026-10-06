@@ -191,4 +191,17 @@ assert "## Modules" in text and "text_words" in text, text
 EOF
 [ ! -e CODEMAP.md ] || fail "the MCP tool wrote CODEMAP.md"
 
+# --- codify.kvx [paths] codemap moves the default; the directory is made ---
+"$CG" config set paths.codemap notes/maps/MAP.md >/dev/null
+"$CG" sync >/dev/null                   # codify.kvx is a new root file
+has "$("$CG" codemap)" "codemap: wrote notes/maps/MAP.md"
+[ -f notes/maps/MAP.md ] || fail "the map was not written to [paths] codemap"
+[ ! -e CODEMAP.md ] || fail "the map was also written to the old default"
+"$CG" codemap --check >/dev/null || fail "--check on the configured path"
+hasnt "$(cat notes/maps/MAP.md)" "notes/maps/MAP.md"
+"$CG" sync >/dev/null
+"$CG" codemap --check >/dev/null || fail "the configured map counted itself"
+has "$("$CG" brief)" "codemap: notes/maps/MAP.md (current)"
+"$CG" codemap -o - | cmp -s - notes/maps/MAP.md || fail "-o - differs from the configured file"
+
 echo "ok 38_codemap"

@@ -57,7 +57,7 @@ for t in ("search_code", "get_context", "impact_analysis", "survey",
           "progress_status", "work_open", "work_update", "work_close",
           "remember", "recall", "memory_export", "memory_import",
           "spec_ready", "spec_claim_next",
-          "spec_release", "handoff", "resume"):
+          "spec_release", "handoff", "resume", "codemap"):
     assert t in tools, f"missing tool {t}"
 for t in ("docs_status", "docs_plan", "docs_packet", "docs_check",
           "docs_trace", "docs_close"):

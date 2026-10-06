@@ -40,7 +40,7 @@ Version 1.1.0 (v11) turns the fleet into something you hand a spec to and leave 
 
 The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg why` walks a symbol back to the decisions behind it, and `cg spec trace` walks any task to its symbols, commits, and memories.
 
-**And it is present between the steps, not only at them.** `cg work open` starts with a compact task packet, `cg work update` returns only new state/evidence/workspace deltas, `cg event progress` classifies loops without mistaking activity for progress, and `cg guard` notices when an edit drifts outside declared scope. A built-in MCP server exposes 57 tools, resources, and prompts to every MCP-capable agent, while `cg integrate` plans, applies, and diagnoses each host's native configuration.
+**And it is present between the steps, not only at them.** `cg work open` starts with a compact task packet, `cg work update` returns only new state/evidence/workspace deltas, `cg event progress` classifies loops without mistaking activity for progress, and `cg guard` notices when an edit drifts outside declared scope. A built-in MCP server exposes 60 tools, resources, and prompts to every MCP-capable agent, while `cg integrate` plans, applies, and diagnoses each host's native configuration.
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
@@ -291,7 +291,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 
 | Command | Description |
 |---|---|
-| `cg mcp` | Run as an MCP stdio server: 57 tools, plus resources and prompts (see below) |
+| `cg mcp` | Run as an MCP stdio server: 60 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
 | `cg serve` | One JSON-RPC connection (stdio) for an editor: every MCP tool, any `cg` command (`exec`), `cancel`, and pushed event subscriptions from a sequence number, within milliseconds of the commit. Idle, it holds no lock and runs no index pass. See [docs/events.md](docs/events.md#cg-serve) |
 | `cg tool list \| call <name> [json]` | Run one MCP tool from a shell, without an MCP client |

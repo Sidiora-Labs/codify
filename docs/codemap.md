@@ -109,7 +109,10 @@ The first line is the marker:
 
 A `CODEMAP.md` that does not start with it belongs to someone else.
 `cg codemap` refuses to overwrite it (exit 1) unless `--force` is given.
-The default path is decided in one place, `codemap_default_path()`.
+The default path is `[paths] codemap` in `codify.kvx` when it is set
+(see [config.md](config.md)), else `CODEMAP.md` at the root; a directory the
+setting names is created on the first write. It is decided in one place,
+`codemap_default_path()`.
 
 ## Staleness in `cg brief`
 
