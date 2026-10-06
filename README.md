@@ -177,10 +177,10 @@ cg init
 | `cg init [--nested]` | Create `.codegraph/` and build the initial index; inside a linked git worktree of an initialized repository, join the shared graph under this branch instead |
 | `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named. `cg index [--full]` is the blocking form that always walks |
 | `cg branches` | Every branch indexed into the shared graph, with its worktree, head, base, and file count |
-| `cg search <q> [-n N]` | Symbol and full-text search |
+| `cg search <q> [-n N]` | Symbol and full-text search: a phrase matches names (`export memory` finds `memory_export` and `exportMemory`), doc comments and bodies, ranked in that order with source before tests; file hits show the matching line. Definitions answer, never their prototypes ([docs/retrieval.md](docs/retrieval.md)) |
 | `cg symbol <name>` | Definition, snippet, and reference count |
 | `cg impact <name> [-d N] [--budget N]` | Transitive callers and callees, fitted to a token budget (default 8000) |
-| `cg context <q> [--budget N] [-n K]` | One-call context bundle for agents: memories, symbols, entry points, routes — top K symbols (default 8), fitted to a token budget (default 4000) with explicit omitted counts |
+| `cg context <q> [--budget N] [-n K]` | One-call context bundle for agents: memories, symbols, entry points, routes — top K symbols (default 8), filled to a token budget (default 4000) with explicit omitted counts and, in `--json`, `tokens_used`. A file path gets the file's outline (purpose, symbols, imports, dependents); a directory gets its files |
 | `cg survey [path\|query] [--budget N]` | The tier below bodies: file purpose lines and symbol docs with signatures across ~100 files per call — never a body. Uncovered files and symbols are named, and anything cut by the budget (default 16000) is an explicit omitted count |
 | `cg anchors [--stale] [--uncovered]` | Anchor health: docs whose code moved on, and uncovered symbols ranked by coordination score (fan-out × extent × referencing files) — the backfill work list |
 | `cg routes [filter]` | URL pattern to handler table |
@@ -698,8 +698,10 @@ src/gitint.c         git history ingestion, churn, branch identity, commit mirro
 tests/unit/          kvx grammar, SHA-256 vectors, JSON scanner, StrBuf/IO
 tests/integration/   graph, vcs, agentic, MCP protocol, spec engine, watcher,
                      sync gate, fleet, branches, jev, changelog, events, serve,
-                     supervisor, drift, briefings, fleet end to end, recap
+                     supervisor, drift, briefings, fleet end to end, recap,
+                     explore
 tests/fixtures/      sample polyglot project, a spec repo with golden outputs,
+                     an explore project with gold queries,
                      stand-ins for curl, gh, and an OpenAI endpoint, and a
                      scripted fleet driver
 editors/vscode/      VS Code extension (plain JS): kvx language, task tree,
@@ -708,6 +710,7 @@ scripts/             install/uninstall scripts served at codify.centra.ag + rele
 docs/ARCHITECTURE.md how the pieces fit together
 docs/sync.md         the sync gate, freshness, slots, incremental resolution
 docs/config.md       codify.kvx: relocated spec/context/skills paths, auto-sync
+docs/retrieval.md    declarations, phrase ranking, path outlines, the budget
 docs/hierarchy.md    roles, branch flow, the supervisor, supervision, approvals,
                      briefings
 docs/drift.md        spec, collision, interface, and coverage drift

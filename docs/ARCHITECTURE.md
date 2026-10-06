@@ -53,9 +53,12 @@ files ───────────────────────► j
   the `agents` registry, normalized `runtime_events`, incremental
   `runtime_files`, revision baselines in `work_packets` / `work_files`,
   and criterion-linked `work_evidence`, plus three FTS5 tables — trigram
-  over symbol names (substring search), unicode61 over file bodies (word
-  search), and unicode61 over memory bodies. The schema is versioned in
-  `meta.schema_version` (`cg_schema_upgrade`, currently v16): on a mismatch
+  over symbol names and their split name words (substring and word
+  search), unicode61 over file bodies (word search), and unicode61 over
+  memory bodies. C/C++ prototypes are `symbols` rows with `decl=1` that
+  end at their own `;`; `refs.target_id` is indexed (see
+  [retrieval.md](retrieval.md)). The schema is versioned in
+  `meta.schema_version` (`cg_schema_upgrade`, currently v17): on a mismatch
   the derived tables — everything the indexer rebuilds from source — are
   dropped and recreated for the next sync, while the branch and agent
   registries, memories, git history, attempts, runtime history, and work

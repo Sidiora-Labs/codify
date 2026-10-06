@@ -1,0 +1,7 @@
+export memory	memory_export
+write memories as json lines	memory_export
+keep each memory not already stored	memory_import
+release the store	store_close
+download memory json file	exportMemory
+serialize notes to a dated archive	snapshot_notes
+delete the oldest archives	rotate_archives

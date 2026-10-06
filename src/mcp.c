@@ -722,13 +722,19 @@ static const struct {
     bool sync_first;
 } TOOLS[] = {
     { "search_code",
-      "Full-text + trigram search over symbols and file contents. Returns "
-      "matching symbols with locations and full-text file hits.",
+      "Full-text + trigram search over symbols and file contents. A phrase "
+      "matches names (snake_case and camelCase words), doc comments and "
+      "bodies, ranked in that order, source before tests. Returns "
+      "matching definitions with locations and file hits with the "
+      "matching line.",
       S_QUERY, A_READ, "Search code", t_search, true },
     { "get_context",
       "One-call surgical context for a query: top symbol definitions with "
       "code snippets, their callers and callees, entry points, and related "
-      "routes. Use this first when exploring unfamiliar code.",
+      "routes, filled to the token budget. A query naming an indexed file "
+      "returns its outline (purpose, every symbol with line and signature, "
+      "imports, dependents); a directory lists its files. Use this first "
+      "when exploring unfamiliar code.",
       S_CTX, A_READ, "Get context", t_context, true },
     { "survey",
       "Wide, cheap orientation over many files: each file's purpose line "
