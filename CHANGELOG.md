@@ -4,17 +4,20 @@ All notable changes to this project are recorded here, generated from git histor
 A release is a tag or a version bump; a group is the commit-subject prefix; a task
 reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
-## [Unreleased]
+## [v1.3.0] - 2026-10-06
 
 ### Highlights
 
-This release adds codemap generation from the graph, a project configuration system, memory export/import, and retrieval/index improvements. Codemap writes a byte-stable CODEMAP.md with build/test commands, layout, entry points, modules, dependencies, tests, and workflow pointers, exposed as an MCP tool. Config relocates spec/context/skills/codemap through a per-root cache, gates implicit sync with auto=false, and exposes cg config list/init/get/set/check. Memory supports JSONL export/import by content id and graph-to-graph via MCP tools. Retrieval ranks definitions before prototypes with phrase ranking over names, docs, and bodies.
+Codify v1.3.0 ships a full codemap generator (`cg codemap`) that writes a byte-stable CODEMAP.md from the graph, a `codify.kvx` project config with `cg config list/init/get/set/check`, memory import/export over JSONL, and a spec workflow that now covers explore through carry. The index resolves prototypes to definitions, ranks by phrase over names/docs/bodies, and fills context to its token budget; the recap agent resumes from Claude Code and Codex transcripts via a cached, parallel-decided log.
 
-- `cg codemap` writes CODEMAP.md from the graph; MCP tool; --force/--check
-- `cg config` list/init/get/set/check; codify.kvx paths relocation; sync auto=false
-- Memory export/import JSONL by content id, graph-to-graph, MCP tools
-- Prototypes resolve to definitions; schema v17; editor hover/go-to-definition
-- Recap resumes from Claude Code/Codex transcripts via Solar Decide
+- `cg codemap` writes CODEMAP.md (overview, build/test commands, layout, entry points, module symbols, directory deps, tests, workflow pointers) with `--force`/`--check`, byte-stable and budget-fitted
+- `codify.kvx` config relocates spec/context/skills/codemap through a per-root cache; `[sync] auto=false` gates implicit sync; `cg config list/init/get/set/check`
+- Memory export/import: JSONL by content id, graph-to-graph, MCP tools
+- Spec graph check, editor hover/go-to-definition, definitions before prototypes, phrase ranking, path outlines, context filled to budget with `tokens_used`
+- Recap resumes from Claude Code/Codex transcripts; Solar Decide judges statements in parallel cached chunks; `jev_ask_at` and `chat_model_ask` exposed
+
+### Documentation
+- Codify-v13 closed — architecture covers configuration, the code map and memory transport; reference tables, changelog and tool counts regenerated ([c455a26](https://github.com/Sidiora-Labs/codify/commit/c455a263dda6214893ccb0b767f15bf89ff0c2d9), task codify-v13/@docs)
 
 ### Spec workflow
 - 2.1 done ([6a80082](https://github.com/Sidiora-Labs/codify/commit/6a8008296e02461da674ee2d584b0c0e9a35a760), task codify-v13/2.1)
@@ -369,7 +372,7 @@ Initial release of Codify. The single-binary tool provides code graph, spec-driv
 ### Other
 - First commit ([2b6dede](https://github.com/Sidiora-Labs/codify/commit/2b6dede7c99e5856ef5464fc5d1c422b5ab77808))
 
-[Unreleased]: https://github.com/Sidiora-Labs/codify/compare/1.1.0...HEAD
+[v1.3.0]: https://github.com/Sidiora-Labs/codify/compare/1.1.0...v1.3.0
 [1.1.0]: https://github.com/Sidiora-Labs/codify/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/Sidiora-Labs/codify/compare/0.9.0...1.0.0
 [0.9.0]: https://github.com/Sidiora-Labs/codify/compare/0.8.5...0.9.0

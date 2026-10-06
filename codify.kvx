@@ -1,0 +1,9 @@
+# codify.kvx — project configuration for Codify. Every key is optional.
+[sync]
+auto = true                 # implicit syncs: hooks, read-command freshness, MCP/LSP/serve/watch
+
+[paths]
+spec    = "spec"            # workflow.kvx, feature specs, rendered mirrors
+context = ".codify"         # agent-context.md, recap.md
+skills  = ".agents/skills"  # generated SKILL.md files
+codemap = "CODEMAP.md"      # written by cg codemap
