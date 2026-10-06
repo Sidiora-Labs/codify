@@ -981,8 +981,6 @@ static void mcp_tool_annotations(int i, StrBuf *b) {
     sb_puts(b, TOOLS[i].annotations);
 }
 
-/* Build the resources/list payload: the fixed documents that exist, plus one
- * entry per feature spec found under spec/. */
 /* A resource's file in this tree. The table names the default layout;
  * codify.kvx may have moved the spec and context directories. */
 static void mcp_resource_abs(Cg *cg, const char *rel, char *out, size_t cap) {
@@ -995,6 +993,8 @@ static void mcp_resource_abs(Cg *cg, const char *rel, char *out, size_t cap) {
         path_format(out, cap, "%s/%s", cg->root, rel);
 }
 
+/* Build the resources/list payload: the fixed documents that exist, plus one
+ * entry per feature spec found under the spec directory. */
 static void mcp_list_resources(Cg *cg, StrBuf *r) {
     sb_puts(r, "{\"resources\":[");
     int nr = 0;

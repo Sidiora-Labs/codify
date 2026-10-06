@@ -35,7 +35,7 @@
 ## codify.kvx: project configuration at the root
 
 - [ ] 4. Configure
-  - [ ] 4.1 codify.kvx: auto-sync switch and configurable directories
+  - [x] 4.1 codify.kvx: auto-sync switch and configurable directories
     - config.c: load and validate codify.kvx into a cached CgConfig; config_spec_dir and the other path accessors; cg config, init, get, set, check.
     - Route every hard-coded spec/ join and spec root discovery through config_spec_dir; route .codify, .agents/skills, and the code map path through their accessors.
     - Gate every implicit sync on [sync] auto; say so in cg brief; report configuration problems in cg check as warnings.

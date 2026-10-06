@@ -41,10 +41,10 @@ ac_7  = "WHEN an MCP client calls memory_export or memory_import THE server SHAL
 title = "codify.kvx: project configuration at the root"
 story = "As someone setting Codify up in a repository with its own layout, I want one configuration file at the root that switches auto-sync and says where Codify's directories live, so that I can adopt it without renaming my directories or patching hooks."
 ac_1  = "WHEN codify.kvx exists at the project root THE cg binary SHALL load it once per process; a missing file or key SHALL mean the built-in default, so a repository without the file behaves exactly as before."
-ac_2  = "WHEN [paths] spec names a directory THE spec engine, orchestrator, fleet, docs, drift, guard, recap, MCP resources, and spec root discovery SHALL read and write workflow.kvx, feature specs, and rendered mirrors there, and the rendered pointer files SHALL name that directory."
-ac_3  = "WHEN [paths] context, skills, or codemap is set THE commands that write agent-context.md and recap.md, generated skills, and the code map SHALL use the configured location."
+ac_2  = "WHEN [paths] spec names a directory THE spec engine, orchestrator, fleet, docs, drift, guard, recap, MCP resources, spec root discovery, and every other reader of workflow.kvx and the feature specs SHALL read and write workflow.kvx, feature specs, and rendered mirrors there, and the rendered pointer files SHALL name that directory."
+ac_3  = "WHEN [paths] context, skills, or codemap is set THE commands that write agent-context.md and recap.md, generated skills, and the code map SHALL use the configured location; .codify/hooks SHALL stay where the agent settings already point."
 ac_4  = "WHEN a configured path is absolute, escapes the repository with .., or is empty THE loader SHALL reject it with an error naming the key and the file, and fall back to the default."
-ac_5  = "WHEN [sync] auto is false THE implicit syncs — the freshness pass before read commands, the post-edit hook, the pre-commit index, and the MCP, LSP, serve, and watch refreshes — SHALL be skipped, cg sync and cg index SHALL still run, and cg brief SHALL say that auto-sync is off."
+ac_5  = "WHEN [sync] auto is false THE implicit syncs — the freshness pass before read commands, the post-edit hook, the pre-commit index, the work-packet open, and the MCP, LSP, watch, fleet, integrate, and editor refreshes — SHALL be skipped; cg sync and cg index SHALL still run, qualification (cg spec done, implemented, and trace) SHALL still sync because its verdict depends on a current graph, and cg brief SHALL say that auto-sync is off."
 ac_6  = "WHEN cg config runs THE command SHALL print every effective setting with its origin (default or codify.kvx); init SHALL write a commented codify.kvx holding the defaults and refuse to overwrite an existing one; get KEY and set KEY VALUE SHALL read and surgically write one setting; check SHALL list unknown sections, unknown keys, and unusable values; --json SHALL be available for the effective settings and for check."
 ac_7  = "WHEN codify.kvx holds an unknown key or an unusable value THE commands SHALL keep working on the defaults: cg check reports it as a warning and never as a failure."
 
@@ -119,10 +119,10 @@ status  = "pending"
 
 [task.4.1]
 title      = "codify.kvx: auto-sync switch and configurable directories"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["config_load", "config_spec_dir", "cmd_config"]
-touches    = ["src/config.c", "src/cg.h", "src/main.c", "src/spec.c", "src/orchestrate.c", "src/fleet.c", "src/govern.c", "src/drift.c", "src/docs.c", "src/recap.c", "src/mcp.c", "src/events.c", "src/graph.c", "src/agent.c", "src/skills.c", "src/lsp.c", "src/watch.c", "src/serve.c", "src/integrate.c", "src/changelog.c", "src/runtime.c", "tests/unit/test_config.c", "tests/integration/40_config.sh", "docs/config.md", "README.md"]
+touches    = ["src/config.c", "src/cg.h", "src/main.c", "src/spec.c", "src/orchestrate.c", "src/fleet.c", "src/govern.c", "src/drift.c", "src/docs.c", "src/recap.c", "src/mcp.c", "src/events.c", "src/agent.c", "src/skills.c", "src/lsp.c", "src/watch.c", "src/integrate.c", "editors/vscode/extension.js", "tests/unit/test_config.c", "tests/integration/40_config.sh", "docs/config.md", "README.md"]
 verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/05_spec.sh && CG=$PWD/cg tests/integration/12_authoring.sh && CG=$PWD/cg tests/integration/25_syncgate.sh && CG=$PWD/cg tests/integration/26_fleet.sh"
 do_1       = "config.c: load and validate codify.kvx into a cached CgConfig; config_spec_dir and the other path accessors; cg config, init, get, set, check."
 do_2       = "Route every hard-coded spec/ join and spec root discovery through config_spec_dir; route .codify, .agents/skills, and the code map path through their accessors."
