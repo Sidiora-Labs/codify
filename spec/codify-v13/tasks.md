@@ -17,7 +17,7 @@
 ## CODEMAP.md: the repository in one read
 
 - [ ] 2. Map
-  - [ ] 2.1 cg codemap: a deterministic repository map from the graph
+  - [x] 2.1 cg codemap: a deterministic repository map from the graph
     - codemap_render: overview, layout, entry points, modules with key symbols, directory dependencies, tests, and workflow pointers, in a stable order, fitted to a token budget with per-section omission counts.
     - cmd_codemap: fresh graph, generated marker, -o, --check, --force, --budget, --json; refuse to overwrite a file Codify did not generate.
     - The codemap MCP tool, and one line in cg brief naming CODEMAP.md and whether it is stale.

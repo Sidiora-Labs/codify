@@ -25,12 +25,12 @@ Four things that decide how fast an agent becomes useful in a repository: retrie
 
 ### Acceptance Criteria
 
-1. WHEN cg codemap runs THE command SHALL refresh the graph and write CODEMAP.md at the repository root; -o SHALL choose another path and -o - SHALL print to stdout; --json SHALL emit the same map as structured data.
-2. WHEN the map is written THE content SHALL cover, in this order: an overview (project name, languages with file and line counts, detected build and test commands), the directory layout with a purpose line per directory and key file, the entry points (main functions, CLI commands, routes), the modules with their key files and most-referenced symbols with signatures, the dependencies between top-level directories aggregated from resolved imports and calls, where the tests live and what they cover, and pointers to the spec workflow and agent files when present.
+1. WHEN cg codemap runs THE command SHALL refresh the graph and write CODEMAP.md at the repository root, or the file [paths] codemap names in codify.kvx; -o SHALL choose another path and -o - SHALL print to stdout; --json SHALL emit the same map as structured data.
+2. WHEN the map is written THE content SHALL cover, in this order: an overview (project name, languages with file and line counts, detected build and test commands), the directory layout with a purpose line per directory and key file, the entry points (main functions, CLI commands, routes), the modules with their key files and most-referenced symbols with signatures, a Dependencies section (between top-level directories, aggregated from resolved imports and calls), where the tests live and what they cover, and pointers to the spec workflow and agent files when present.
 3. WHEN the same graph is mapped twice THE two outputs SHALL be byte-identical: no timestamps, stable ordering everywhere, so the file can be committed and diffed.
 4. WHEN --budget N is given (default 8000 tokens) THE map SHALL fit inside it by dropping the least-referenced files and symbols first and SHALL say how many were left out of each section.
 5. WHEN CODEMAP.md already exists without Codify's generated marker THE command SHALL refuse to overwrite it unless --force is given; --check SHALL exit non-zero, writing nothing, when the file is missing or differs from what would be generated.
-6. WHEN an MCP client calls the codemap tool THE server SHALL return the map text, and WHEN cg brief runs in a repository that has a CODEMAP.md THE brief SHALL name it and say whether it is stale.
+6. WHEN an MCP client calls the codemap tool THE server SHALL return the map text, and WHEN cg brief runs in a repository that has a CODEMAP.md THE brief SHALL name it and say whether it is stale against the graph as last indexed (brief does not refresh the graph).
 
 ## Requirement 3: Memories that travel between graphs
 

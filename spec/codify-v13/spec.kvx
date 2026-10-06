@@ -19,12 +19,12 @@ ac_8  = "WHEN the retrieval evaluation runs on its fixture THE gold symbol of ev
 [req.2]
 title = "CODEMAP.md: the repository in one read"
 story = "As an agent or a person new to a repository, I want one generated file at the root that says what the project is, how it is laid out, where the entry points are, and which symbols everything leans on, so that I understand the structure before I open a single source file."
-ac_1  = "WHEN cg codemap runs THE command SHALL refresh the graph and write CODEMAP.md at the repository root; -o SHALL choose another path and -o - SHALL print to stdout; --json SHALL emit the same map as structured data."
-ac_2  = "WHEN the map is written THE content SHALL cover, in this order: an overview (project name, languages with file and line counts, detected build and test commands), the directory layout with a purpose line per directory and key file, the entry points (main functions, CLI commands, routes), the modules with their key files and most-referenced symbols with signatures, the dependencies between top-level directories aggregated from resolved imports and calls, where the tests live and what they cover, and pointers to the spec workflow and agent files when present."
+ac_1  = "WHEN cg codemap runs THE command SHALL refresh the graph and write CODEMAP.md at the repository root, or the file [paths] codemap names in codify.kvx; -o SHALL choose another path and -o - SHALL print to stdout; --json SHALL emit the same map as structured data."
+ac_2  = "WHEN the map is written THE content SHALL cover, in this order: an overview (project name, languages with file and line counts, detected build and test commands), the directory layout with a purpose line per directory and key file, the entry points (main functions, CLI commands, routes), the modules with their key files and most-referenced symbols with signatures, a Dependencies section (between top-level directories, aggregated from resolved imports and calls), where the tests live and what they cover, and pointers to the spec workflow and agent files when present."
 ac_3  = "WHEN the same graph is mapped twice THE two outputs SHALL be byte-identical: no timestamps, stable ordering everywhere, so the file can be committed and diffed."
 ac_4  = "WHEN --budget N is given (default 8000 tokens) THE map SHALL fit inside it by dropping the least-referenced files and symbols first and SHALL say how many were left out of each section."
 ac_5  = "WHEN CODEMAP.md already exists without Codify's generated marker THE command SHALL refuse to overwrite it unless --force is given; --check SHALL exit non-zero, writing nothing, when the file is missing or differs from what would be generated."
-ac_6  = "WHEN an MCP client calls the codemap tool THE server SHALL return the map text, and WHEN cg brief runs in a repository that has a CODEMAP.md THE brief SHALL name it and say whether it is stale."
+ac_6  = "WHEN an MCP client calls the codemap tool THE server SHALL return the map text, and WHEN cg brief runs in a repository that has a CODEMAP.md THE brief SHALL name it and say whether it is stale against the graph as last indexed (brief does not refresh the graph)."
 
 [req.3]
 title = "Memories that travel between graphs"
@@ -85,7 +85,7 @@ status  = "pending"
 
 [task.2.1]
 title      = "cg codemap: a deterministic repository map from the graph"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["cmd_codemap", "codemap_render"]
 touches    = ["src/codemap.c", "src/cg.h", "src/main.c", "src/mcp.c", "src/govern.c", "tests/integration/38_codemap.sh", "tests/integration/04_mcp.sh", "tests/fixtures/codemap/*", "docs/codemap.md", "README.md"]
