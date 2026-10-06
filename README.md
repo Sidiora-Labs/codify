@@ -190,6 +190,7 @@ cg init
 | `cg watch [--debounce MS]` | Auto-sync on native filesystem events |
 | `cg root` | The project root `cg` resolves to from here; `--json` adds the shared project, the worktree flag, and the branch |
 | `cg info` | Machine profile, pipeline sizing, the bound project root, and the branch |
+| `cg config [init\|get K\|set K V\|check] [--json]` | Project configuration in `codify.kvx`: every setting with its origin, the commented defaults, one key read or written in place, and a check for unknown keys and bad values. Works before `cg init`. See [docs/config.md](docs/config.md) |
 
 ### Version control
 
@@ -522,6 +523,40 @@ All three share one gate, so the failure mode is the same everywhere: `jev: OPEN
 
 Apart from the opt-in changelog highlights and `cg recap`, this is the one remote call Codify makes, and the principle says so: the graph, memory and workflow stay local, Jev is **mandatory** for the features built on it — `cg memory classify` with no `OPENROUTER_API_KEY` is a clear error, never a quiet fallback — and **never authoritative**: it narrows, ranks, and flags, while `verify_cmd` and the graph checks decide. The key never reaches a command line (`curl` is driven through a private `0600` config file), `429` and `529` back off and retry, and every call is logged. See [docs/jev.md](docs/jev.md).
 
+## Project configuration
+
+Codify works without any configuration file. If you want to change where it
+keeps its files, or stop it from syncing the graph on its own, add an optional
+`codify.kvx` at the repository root. `cg config init` writes one with every
+default spelled out and a comment on each key:
+
+```
+[sync]
+auto = true                 # implicit syncs: hooks, read-command freshness, MCP/LSP/serve/watch
+
+[paths]
+spec    = "spec"            # workflow.kvx, feature specs, rendered mirrors
+context = ".codify"         # agent-context.md, recap.md
+skills  = ".agents/skills"  # generated SKILL.md files
+codemap = "CODEMAP.md"      # written by cg codemap
+```
+
+Setting `paths.spec = "planning/specs"` moves the whole spec workflow there.
+The engine, orchestrator, fleet, docs, drift, recap, MCP resources and root
+discovery all follow it, and the rendered CLAUDE.md and AGENTS.md name the new
+directory.
+
+Setting `auto = false` stops every implicit sync: the post-edit hook, the
+freshness check on read commands, the pre-commit index, the post-commit hook,
+and the MCP, LSP, watch and VS Code refreshes. `cg sync`, `cg index` and
+`cg init` still run, and `cg brief` says that the graph may be stale.
+
+A path that is absolute, that escapes the repository with `..`, or that is
+empty is rejected with a message naming the key and the file, and the default
+is used instead. Unknown keys never stop a command: `cg config check` lists
+them, and `cg check` reports them as a warning. See
+[docs/config.md](docs/config.md).
+
 ## Driving agents
 
 Everything above serves an agent that already exists. Codify can also be the thing that starts them: from the terminal with `cg spec run`, or from VS Code one task at a time.
@@ -658,6 +693,7 @@ editors/vscode/      VS Code extension (plain JS): kvx language, task tree,
 scripts/             install/uninstall scripts served at codify.centra.ag + release publisher
 docs/ARCHITECTURE.md how the pieces fit together
 docs/sync.md         the sync gate, freshness, slots, incremental resolution
+docs/config.md       codify.kvx: relocated spec/context/skills paths, auto-sync
 docs/hierarchy.md    roles, branch flow, the supervisor, supervision, approvals,
                      briefings
 docs/drift.md        spec, collision, interface, and coverage drift
