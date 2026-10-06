@@ -32,7 +32,7 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 
 **一路走来学到了什么。** 智能体记忆将刻意留下的笔记——决策、约束、结果、偏好、事实——存储在与图相同的数据库中,并关联到写下它们时所在的任务。`cg remember` 在任务进行中保存一条记忆,每次 `cg spec done` 都会自动记录一条如实的结果(包括被拒绝的完成),而 `cg recall` 按相关性与新近程度排序,将这一切重新带回。这几层相互增强:提交会自动打上其所实现任务的标签,记忆会浮现在它们所属的任务上,`cg why` 能把一个符号追溯到其背后的决策,`cg spec trace` 能从任意任务一路追溯到它的符号、提交和记忆。
 
-**它不仅出现在步骤的起止处,也陪伴在步骤之间。** `cg work open` 以一个紧凑的任务包开始,`cg work update` 只返回新增的状态、证据与工作区增量,`cg event progress` 识别循环而不把"有活动"误当作"有进展",`cg guard` 会在编辑越出声明范围时察觉。内置的 MCP 服务器向所有支持 MCP 的智能体暴露 57 个工具以及资源和提示词,`cg integrate` 负责规划、应用并诊断各宿主的原生配置。
+**它不仅出现在步骤的起止处,也陪伴在步骤之间。** `cg work open` 以一个紧凑的任务包开始,`cg work update` 只返回新增的状态、证据与工作区增量,`cg event progress` 识别循环而不把"有活动"误当作"有进展",`cg guard` 会在编辑越出声明范围时察觉。内置的 MCP 服务器向所有支持 MCP 的智能体暴露 60 个工具以及资源和提示词,`cg integrate` 负责规划、应用并诊断各宿主的原生配置。
 
 **它不仅服务智能体,还能驱动智能体。** `cg handoff` 与 `cg resume` 让任务在会话之间转移而不丢失状态,`cg spec claim-next` 以原子方式把下一个无冲突的任务交给空闲的智能体,`cg spec run` 则把整个 wave 分发给 Codex CLI 或 Claude Code 会话——每个已认领任务一个沙箱子进程,日志和提示词落盘,失败时释放租约。
 
@@ -167,7 +167,7 @@ cd your-project && cg init
 
 | 命令 | 说明 |
 |---|---|
-| `cg mcp` / `cg lsp` | 以 MCP stdio 服务器运行:57 个工具,外加资源和提示词;以语言服务器(stdio)运行——适用于所有编辑器,而不只是 VS Code |
+| `cg mcp` / `cg lsp` | 以 MCP stdio 服务器运行:60 个工具,外加资源和提示词;以语言服务器(stdio)运行——适用于所有编辑器,而不只是 VS Code |
 | `cg serve` | 面向编辑器的一条 JSON-RPC 连接(stdio):所有 MCP 工具、任意 `cg` 命令(`exec`)、`cancel`,以及从某个序号开始、提交后数毫秒内推送的事件订阅。空闲时不持锁、不跑索引。见 [docs/events.md](../../docs/events.md#cg-serve) |
 | `cg tool list \| call <name> [json]` | 在 shell 中直接运行一个 MCP 工具,无需 MCP 客户端 |
 | `cg integrate detect\|plan\|apply\|doctor` | 面向 Codex、Claude Code、Copilot/VS Code、Cursor、Gemini CLI、OpenCode、Zed、Windsurf、Cline 与 Continue 的能力感知配置;plan 只读,apply 幂等且有备份。`cg mcp-install` 是 `cg integrate apply` 的兼容别名 |

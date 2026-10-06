@@ -32,7 +32,7 @@ La versión 1.1.0 (v11) convierte la flota en algo a lo que entregas una spec y 
 
 **Qué se aprendió por el camino.** Una memoria de agente almacena notas deliberadas — decisiones, restricciones, resultados, preferencias, hechos — en la misma base de datos que el grafo, vinculadas a la tarea bajo la que se tomaron. `cg remember` guarda una a mitad de tarea, cada `cg spec done` registra automáticamente un resultado honesto (incluidos los rechazos) y `cg recall` lo recupera todo, ordenado por relevancia y actualidad. Las capas se refuerzan entre sí: los commits se etiquetan con la tarea que implementan, las memorias afloran en su tarea, `cg why` lleva un símbolo hasta las decisiones que hay detrás y `cg spec trace` recorre cualquier tarea hasta sus símbolos, commits y memorias.
 
-**Y está presente entre los pasos, no solo en ellos.** `cg work open` empieza con un paquete compacto de la tarea, `cg work update` devuelve solo los deltas nuevos de estado, evidencia y espacio de trabajo, `cg event progress` clasifica los bucles sin confundir actividad con progreso y `cg guard` detecta cuándo una edición se sale del alcance declarado. Un servidor MCP integrado expone 57 herramientas, recursos y prompts a cualquier agente compatible con MCP, mientras `cg integrate` planifica, aplica y diagnostica la configuración nativa de cada host.
+**Y está presente entre los pasos, no solo en ellos.** `cg work open` empieza con un paquete compacto de la tarea, `cg work update` devuelve solo los deltas nuevos de estado, evidencia y espacio de trabajo, `cg event progress` clasifica los bucles sin confundir actividad con progreso y `cg guard` detecta cuándo una edición se sale del alcance declarado. Un servidor MCP integrado expone 60 herramientas, recursos y prompts a cualquier agente compatible con MCP, mientras `cg integrate` planifica, aplica y diagnostica la configuración nativa de cada host.
 
 **Y dirige agentes, no solo los sirve.** `cg handoff` y `cg resume` pasan una tarea entre sesiones sin perder estado, `cg spec claim-next` entrega atómicamente a un agente ocioso la siguiente tarea sin conflictos y `cg spec run` reparte una oleada entera entre sesiones de Codex CLI o Claude Code — un proceso hijo aislado por tarea reclamada, con logs y prompts en disco y leases liberados si falla.
 
@@ -180,7 +180,7 @@ Notas duraderas para agentes, en la misma base de datos SQLite que el grafo. Las
 
 | Comando | Descripción |
 |---|---|
-| `cg mcp` | Servidor MCP por stdio: 57 herramientas, más recursos y prompts |
+| `cg mcp` | Servidor MCP por stdio: 60 herramientas, más recursos y prompts |
 | `cg lsp` | Language Server por stdio — para cualquier editor, no solo VS Code |
 | `cg serve` | Una conexión JSON-RPC (stdio) para un editor: cada herramienta MCP, cualquier comando `cg` (`exec`), `cancel` y suscripciones a eventos enviados desde un número de secuencia. Inactivo, no retiene ningún bloqueo. Ver [docs/events.md](../../docs/events.md#cg-serve) |
 | `cg tool list \| call <name> [json]` | Ejecuta una herramienta MCP desde la shell, sin cliente MCP |

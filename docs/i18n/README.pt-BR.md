@@ -32,7 +32,7 @@ A versão 1.1.0 (v11) transforma a frota em algo a que você entrega uma spec e 
 
 **O que foi aprendido ao longo do caminho.** Uma memória de agente armazena anotações deliberadas — decisões, restrições, resultados, preferências, fatos — no mesmo banco que o grafo, ligadas à tarefa sob a qual foram feitas. `cg remember` salva uma no meio da tarefa, cada `cg spec done` registra automaticamente um resultado honesto (incluindo recusas), e `cg recall` traz tudo de volta, ordenado por relevância e recência. As camadas se reforçam mutuamente: os commits são etiquetados automaticamente com a tarefa que implementam, as memórias aparecem na tarefa a que pertencem, `cg why` leva um símbolo de volta às decisões por trás dele e `cg spec trace` percorre qualquer tarefa até seus símbolos, commits e memórias.
 
-**E ele está presente entre as etapas, não só nelas.** `cg work open` começa com um pacote compacto da tarefa, `cg work update` devolve apenas os deltas novos de estado, evidência e workspace, `cg event progress` classifica loops sem confundir atividade com progresso, e `cg guard` percebe quando uma edição sai do escopo declarado. Um servidor MCP embutido expõe 57 ferramentas, recursos e prompts a qualquer agente compatível com MCP, enquanto `cg integrate` planeja, aplica e diagnostica a configuração nativa de cada host.
+**E ele está presente entre as etapas, não só nelas.** `cg work open` começa com um pacote compacto da tarefa, `cg work update` devolve apenas os deltas novos de estado, evidência e workspace, `cg event progress` classifica loops sem confundir atividade com progresso, e `cg guard` percebe quando uma edição sai do escopo declarado. Um servidor MCP embutido expõe 60 ferramentas, recursos e prompts a qualquer agente compatível com MCP, enquanto `cg integrate` planeja, aplica e diagnostica a configuração nativa de cada host.
 
 **E ele conduz agentes, não apenas os atende.** `cg handoff` e `cg resume` passam uma tarefa entre sessões sem perder estado, `cg spec claim-next` entrega atomicamente a um agente ocioso a próxima tarefa sem conflito, e `cg spec run` distribui uma onda inteira para sessões do Codex CLI ou do Claude Code — um processo filho em sandbox por tarefa reivindicada, logs e prompts em disco, leases liberados em caso de falha.
 
@@ -177,7 +177,7 @@ Anotações duráveis de agente, no mesmo banco SQLite que o grafo. Memórias es
 
 | Comando | Descrição |
 |---|---|
-| `cg mcp` / `cg lsp` | Servidor MCP via stdio (57 ferramentas, mais recursos e prompts); Language Server via stdio para qualquer editor |
+| `cg mcp` / `cg lsp` | Servidor MCP via stdio (60 ferramentas, mais recursos e prompts); Language Server via stdio para qualquer editor |
 | `cg serve` | Uma conexão JSON-RPC (stdio) para um editor: toda ferramenta MCP, qualquer comando `cg` (`exec`), `cancel` e assinaturas de eventos enviados a partir de um número de sequência, milissegundos após o commit. Ocioso, não segura lock nem indexa. Veja [docs/events.md](../../docs/events.md#cg-serve) |
 | `cg tool list \| call <name> [json]` | Executa uma ferramenta MCP pelo shell, sem cliente MCP |
 | `cg integrate detect\|plan\|apply\|doctor` | Configuração ciente de capacidades para Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline e Continue; o plano é só leitura, o apply é idempotente e com backup (`cg mcp-install` é um alias) |

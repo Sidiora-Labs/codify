@@ -53,7 +53,7 @@ overview = "Four independent slices, one wave. Retrieval (src/graph.c, src/scan.
 
 [documentation]
 mode      = "auto"
-status    = "pending"
+status    = "done"
 audiences = ["user", "developer"]
 targets   = ["README.md", "docs/**", "CHANGELOG.md"]
 

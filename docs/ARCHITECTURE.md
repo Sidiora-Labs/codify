@@ -380,6 +380,51 @@ bm25, recency breaking ties. `spec next`/`start` surface task-linked and
 title-matched memories; `trace` appends the task's memories to its
 chain.
 
+Memories travel between graphs as JSONL (`cmd_memory_export`,
+`cmd_memory_import`; format in [memory-transport.md](memory-transport.md)).
+`memory_content_id` is the SHA-256 of type, task and body, so the same
+note has the same id in every graph: import inserts only the ids the
+target lacks, relinks supersession by id, and runs as one write
+transaction that folds the per-row `memory.add` events into a single
+`memory.import`. `--from DIR` opens the other project's `graph.db`
+read-only and feeds it through the same parser, so a graph older than
+the class, confidence, and branch columns still imports.
+
+## Project configuration (`config.c`)
+
+`codify.kvx` at the root of a tree is optional; `config_load` parses it
+once per root into a cached, mutex-guarded `CgConfig` and every caller
+asks an accessor instead of joining a literal. `config_spec_dir`,
+`config_workflow_path` and `config_feature_path` replace each
+`<root>/spec` join in the spec engine, orchestrator, fleet, docs, drift,
+guard, recap and MCP resources; `config_context_path`,
+`config_skills_dir` and `config_codemap_path` do the same for
+`.codify/`, `.agents/skills/` and `CODEMAP.md`. A path that is absolute,
+empty, escapes the tree, or lands in `.git/` or `.codegraph/` is
+rejected with a message naming the key, and the default stands.
+`config_auto_sync` gates the implicit syncs — the freshness pass before
+read commands, the post-edit hook, the pre-commit index, `work open`,
+MCP `sync_first` tools, the LSP, the watcher, fleet watch and integrate
+— while `cg sync`, `cg index` and qualification still index.
+`config_check` reports unknown sections, keys and unusable values;
+`cg check` shows them as warnings. See [config.md](config.md).
+
+## Code map (`codemap.c`)
+
+`cmd_codemap` writes `CODEMAP.md` (or the `[paths] codemap` file) and
+`codemap_render` builds it from tables the index already holds: files,
+symbols, refs, imports, routes and comments, plus README prose and
+build manifests read from the tree. Every list has a total order and
+nothing carries a timestamp or an absolute path, so the same graph
+renders the same bytes; the map's own path is excluded inside the SQL,
+so writing it cannot make it stale. Each droppable entry carries a tier
+and a reference count; a bisection drops the lowest tier and the least
+referenced first until the text fits the token budget, and each section
+says what it left out. The first line is an ownership marker recording
+the budget: a file without it is never overwritten without `--force`,
+and `--check` and `cg brief` (`codemap_status`) re-render at the
+recorded budget and compare bytes. See [codemap.md](codemap.md).
+
 ## Git interop (`gitint.c`)
 
 `cg git-sync` pipes `git log --name-only` into `git_commits` and
@@ -699,4 +744,8 @@ many references it has, and the decisions recorded about it.
   fleet end to end under failure, straight and with the supervisor killed
   and resumed (`35_fleet_e2e`), and the recap's transcript parsing,
   decision pass, cache and writer against fixture transcripts and both
-  fakes (`36_recap`).
+  fakes (`36_recap`), declarations, phrase ranking, path outlines and the
+  context budget against a gold set (`37_explore`), the code map's
+  sections, determinism, budget and ownership (`38_codemap`), memory
+  export and import across graphs (`39_memory_port`), and `codify.kvx`
+  with a relocated spec directory and auto-sync off (`40_config`).

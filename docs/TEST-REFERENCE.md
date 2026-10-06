@@ -2,7 +2,7 @@
 
 These are test-only graph observations, not supported product APIs or live Codify HTTP endpoints. In particular, `GET /api/tasks`, `GET /users`, and `POST /users` come from fixture applications. They test extraction; Codify does not start those applications.
 
-The baseline contains 149 observations in 31 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
+The baseline contains 188 observations in 46 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
 
 For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testing instructions](../CONTRIBUTING.md#tests) explain how to exercise fixtures in temporary repositories.
 
@@ -161,6 +161,140 @@ For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testi
 | `load_tasks` | symbol | 6 | <code>def load_tasks(path):</code> |
 | `save_tasks` | symbol | 13 | <code>def save_tasks(path, tasks):</code> |
 
+## tests/fixtures/codemap/src/count.c
+
+[Open source](../tests/fixtures/codemap/src/count.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `count_file` | symbol | 5 | <code>int count_file(const char *path) {</code> |
+| `count_lines` | symbol | 13 | <code>int count_lines(const char *path) {</code> |
+
+## tests/fixtures/codemap/src/main.c
+
+[Open source](../tests/fixtures/codemap/src/main.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `main` | symbol | 6 | <code>int main(int argc, char **argv) {</code> |
+
+## tests/fixtures/codemap/src/tally.h
+
+[Open source](../tests/fixtures/codemap/src/tally.h)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `TALLY_H` | symbol | 3 | <code>#define TALLY_H</code> |
+| `count_file` | symbol | 4 | <code>int count_file(const char *path);</code> |
+| `count_lines` | symbol | 5 | <code>int count_lines(const char *path);</code> |
+| `text_load` | symbol | 6 | <code>char *text_load(const char *path);</code> |
+| `text_words` | symbol | 7 | <code>int text_words(const char *s);</code> |
+| `text_free` | symbol | 8 | <code>void text_free(char *s);</code> |
+
+## tests/fixtures/codemap/src/text.c
+
+[Open source](../tests/fixtures/codemap/src/text.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `text_load` | symbol | 7 | <code>char *text_load(const char *path) {</code> |
+| `text_words` | symbol | 17 | <code>int text_words(const char *s) {</code> |
+| `text_free` | symbol | 26 | <code>void text_free(char *s) { free(s); }</code> |
+
+## tests/fixtures/codemap/tests/test_count.c
+
+[Open source](../tests/fixtures/codemap/tests/test_count.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `main` | symbol | 5 | <code>int main(void) {</code> |
+
+## tests/fixtures/codemap/tools/stats.py
+
+[Open source](../tests/fixtures/codemap/tools/stats.py)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `tally` | symbol | 5 | <code>def tally(path):</code> |
+| `report` | symbol | 9 | <code>def report(paths):</code> |
+
+## tests/fixtures/explore/proj/gen/notes_pb2.py
+
+[Open source](../tests/fixtures/explore/proj/gen/notes_pb2.py)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `export_memory_message` | symbol | 2 | <code>def export_memory_message(notes):</code> |
+
+## tests/fixtures/explore/proj/src/main.c
+
+[Open source](../tests/fixtures/explore/proj/src/main.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `store_open` | symbol | 4 | <code>Store *store_open(void);</code> |
+| `main` | symbol | 6 | <code>int main(void) {</code> |
+
+## tests/fixtures/explore/proj/src/store.c
+
+[Open source](../tests/fixtures/explore/proj/src/store.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `Store` | symbol | 5 | <code>struct Store {</code> |
+| `write_line` | symbol | 10 | <code>static int write_line(FILE *out, const char *note) {</code> |
+| `memory_export` | symbol | 14 | <code>int memory_export(Store *s, FILE *out) {</code> |
+| `memory_import` | symbol | 20 | <code>int memory_import(Store *s, FILE *in) {</code> |
+| `store_count` | symbol | 32 | <code>int store_count(const Store *s) {</code> |
+| `store_close` | symbol | 36 | <code>void store_close(Store *s) {</code> |
+
+## tests/fixtures/explore/proj/src/store.h
+
+[Open source](../tests/fixtures/explore/proj/src/store.h)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `STORE_H` | symbol | 3 | <code>#define STORE_H</code> |
+| `memory_export` | symbol | 11 | <code>int memory_export(Store *s,</code> |
+| `memory_import` | symbol | 16 | <code>int memory_import(Store *s, FILE *in);</code> |
+| `store_close` | symbol | 19 | <code>void store_close(Store *s);</code> |
+| `store_count` | symbol | 21 | <code>int store_count(const Store *s);</code> |
+
+## tests/fixtures/explore/proj/tests/test_store.c
+
+[Open source](../tests/fixtures/explore/proj/tests/test_store.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `store_open` | symbol | 4 | <code>Store *store_open(void);</code> |
+| `test_export_memory` | symbol | 7 | <code>int test_export_memory(void) {</code> |
+
+## tests/fixtures/explore/proj/tools/backup.py
+
+[Open source](../tests/fixtures/explore/proj/tools/backup.py)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `rotate_archives` | symbol | 5 | <code>def rotate_archives(folder, keep):</code> |
+| `snapshot_notes` | symbol | 12 | <code>def snapshot_notes(rows, path):</code> |
+
+## tests/fixtures/explore/proj/web/api.ts
+
+[Open source](../tests/fixtures/explore/proj/web/api.ts)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `fetchNotes` | symbol | 1 | <code>export async function fetchNotes(project: string): Promise&lt;string[]&gt; {</code> |
+
+## tests/fixtures/explore/proj/web/memories.ts
+
+[Open source](../tests/fixtures/explore/proj/web/memories.ts)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `exportMemory` | symbol | 4 | <code>export async function exportMemory(project: string): Promise&lt;Blob&gt; {</code> |
+| `renderBadge` | symbol | 9 | <code>export function renderBadge(count: number): string {</code> |
+
 ## tests/fixtures/grounding/src/app.ts
 
 [Open source](../tests/fixtures/grounding/src/app.ts)
@@ -317,6 +451,16 @@ For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testi
 | `ok` | symbol | 10 | <code>#define ok(cond, ...) do { \</code> |
 | `ok_str` | symbol | 20 | <code>#define ok_str(got, want) do { \</code> |
 | `t_done` | symbol | 30 | <code>static int t_done(const char *name) {</code> |
+
+## tests/unit/test_config.c
+
+[Open source](../tests/unit/test_config.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `project` | symbol | 12 | <code>static void project(char *out, size_t cap, const char *name, const char *body) {</code> |
+| `quiet_load` | symbol | 25 | <code>static const CgConfig *quiet_load(const char *root) {</code> |
+| `main` | symbol | 37 | <code>int main(void) {</code> |
 
 ## tests/unit/test_json.c
 

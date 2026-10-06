@@ -4,6 +4,60 @@ All notable changes to this project are recorded here, generated from git histor
 A release is a tag or a version bump; a group is the commit-subject prefix; a task
 reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
+## [Unreleased]
+
+### Highlights
+
+This release adds codemap generation from the graph, a project configuration system, memory export/import, and retrieval/index improvements. Codemap writes a byte-stable CODEMAP.md with build/test commands, layout, entry points, modules, dependencies, tests, and workflow pointers, exposed as an MCP tool. Config relocates spec/context/skills/codemap through a per-root cache, gates implicit sync with auto=false, and exposes cg config list/init/get/set/check. Memory supports JSONL export/import by content id and graph-to-graph via MCP tools. Retrieval ranks definitions before prototypes with phrase ranking over names, docs, and bodies.
+
+- `cg codemap` writes CODEMAP.md from the graph; MCP tool; --force/--check
+- `cg config` list/init/get/set/check; codify.kvx paths relocation; sync auto=false
+- Memory export/import JSONL by content id, graph-to-graph, MCP tools
+- Prototypes resolve to definitions; schema v17; editor hover/go-to-definition
+- Recap resumes from Claude Code/Codex transcripts via Solar Decide
+
+### Spec workflow
+- 2.1 done ([6a80082](https://github.com/Sidiora-Labs/codify/commit/6a8008296e02461da674ee2d584b0c0e9a35a760), task codify-v13/2.1)
+- 3.1 done ([be19a89](https://github.com/Sidiora-Labs/codify/commit/be19a8986208b704d63c1cd6d78b74831b8cc1b1), task codify-v13/3.1)
+- 4.1 done — touches and criteria aligned with the delivered change ([b9fba53](https://github.com/Sidiora-Labs/codify/commit/b9fba5356870a6469fb831fce1753b7e200e9025), task codify-v13/4.1)
+- Merge codify-v13 onto main ([fd0b987](https://github.com/Sidiora-Labs/codify/commit/fd0b987e485c99b811dcb1ecaba4211def497113))
+- Codify-v13 — explore, map, carry, configure ([1e0d021](https://github.com/Sidiora-Labs/codify/commit/1e0d0213ed1fc9e7dca2f9379c79a20f5613dc65))
+- 1.1 done ([c24d737](https://github.com/Sidiora-Labs/codify/commit/c24d737276834d3947728070189bb4771c57df1a), task codify-v12/1.1)
+
+### Memory
+- Export and import — JSONL by content id, graph-to-graph, MCP tools ([47cac03](https://github.com/Sidiora-Labs/codify/commit/47cac035c6258bf6db068eb4cd1ee6afc73e25ae), task codify-v13/3.1)
+
+### Codemap
+- The default path, spec pointers, agent context and skills follow codify.kvx; a configured directory is created on write; codemap joins the MCP tool-list test; README counts 60 tools ([136280f](https://github.com/Sidiora-Labs/codify/commit/136280fd4b2ca20aec087ee12bd088baa2259dec), task codify-v13/2.1)
+- Cg codemap writes CODEMAP.md from the graph — overview with build and test commands, layout, entry points, modules with their most-referenced symbols, directory dependencies, tests, workflow pointers; byte-stable, budget-fitted with per-section omission counts, marker-owned with --force and --check; MCP codemap tool; brief names the map and whether it is stale ([7b2bed0](https://github.com/Sidiora-Labs/codify/commit/7b2bed09a920b328f903bb6236dc9fbd0389b4f7), task codify-v13/2.1)
+
+### Config
+- Unit and integration tests, docs/config.md and README section ([b3f37f7](https://github.com/Sidiora-Labs/codify/commit/b3f37f74be5783a011829088307e8437db2b016d), task codify-v13/4.1)
+- Codify.kvx project configuration — [paths] spec/context/skills/codemap relocate every spec, context and skill site through one per-root cache; [sync] auto=false gates every implicit sync; cg config list/init/get/set/check ([6b72a5a](https://github.com/Sidiora-Labs/codify/commit/6b72a5af1282bfcdeb5ed717b305a0af0fbe6185), task codify-v13/4.1)
+
+### Index
+- The spec graph check, editor hover and go-to-definition, and the agent context lead with the definition; spec: 1.1 done ([7415bfe](https://github.com/Sidiora-Labs/codify/commit/7415bfeed12e9a7e61803ecf85d9a45088761c0d), task codify-v13/1.1)
+- Prototypes are declarations that end at their own ';', calls through a prototype resolve to its definition, symbol_fts carries name words, refs.target_id indexed; schema v17 ([94b0348](https://github.com/Sidiora-Labs/codify/commit/94b03485c7d75beeb6e99644ae40b6054bd4833d), task codify-v13/1.1)
+
+### Recap
+- Resume brief from Claude Code and Codex transcripts — Solar Decide (System One via the Centra gateway) judges every statement's kind, still-true and needed-to-resume in small parallel cached chunks, the picked statements form a decided log, the changelog's gateway model writes the brief; jev_ask_at and chat_model_ask exposed ([80127c3](https://github.com/Sidiora-Labs/codify/commit/80127c310196ecdeddbc013c38f0c0dbd05ddc2d), task codify-v12/1.1)
+
+### Retrieval
+- Outlines label prototypes; the code map counts definitions, not their prototypes ([29a4f34](https://github.com/Sidiora-Labs/codify/commit/29a4f3423c2755c6b68a7c866bdb59ec480f1384), task codify-v13/1.1)
+- Definitions answer before prototypes, phrase ranking over names, docs and bodies, path outlines for files and directories, context filled to its budget with tokens_used ([4a32a6d](https://github.com/Sidiora-Labs/codify/commit/4a32a6dba303ec96155ee8674bd4262181abf0e0), task codify-v13/1.1)
+
+### Other
+- Update README.md ([c20c06b](https://github.com/Sidiora-Labs/codify/commit/c20c06b9ad09117652eb2a6f89f323a522f9f31d))
+
+## [1.1.0] - 2026-09-28
+
+### Highlights
+
+This release adds .env to .gitignore to prevent sensitive files from being tracked. The changelog generation message has been updated for clarity, and documentation on changelog and contribution processes has been enhanced.
+
+### Changelog
+- Add .env to .gitignore; update changelog generation message for clarity; enhance documentation on changelog and contribution processes ([a0f120e](https://github.com/Sidiora-Labs/codify/commit/a0f120eca214ab53afd52d1b457475e92415b8f0))
+
 ## [1.0.0] - 2026-09-28
 
 ### Highlights
@@ -147,21 +201,10 @@ Codify 1.0.0 ships a branch-scoped code graph (schema v15/v16, freshness gates, 
 
 ### Highlights
 
-Codify 0.9.0 ships an Agent panel with provider picker, Codify toolbar, sub-agent and timeline views, and redirects the legacy Codex ACP adapter to the maintained 1.7.0 release. The graph database stays writable while the LSP indexes, replayed sessions no longer carry Claude Code harness text in the user role, and the agent panel composer is taller.
-
-- Agent panel: provider picker, Codify toolbar, sub-agent and timeline views
-- Codex ACP adapter redirected to `@agentclientprotocol/codex-acp@1.7.0`
-- Graph database writable during LSP indexing
-- Replay notes and cleaned session titles in agent panel
-- Taller agent panel composer
-
-### Features
-- Agent panel with provider picker, Codify toolbar, sub-agent and timeline views ([0c05bf6](https://github.com/Sidiora-Labs/codify/commit/0c05bf6e1f15da6fb0a6c77cd9384e7186dcebdd))
-- Redirect legacy Codex ACP adapter to maintained 1.7.0 release ([b280b70](https://github.com/Sidiora-Labs/codify/commit/b280b70c7e9d9a74577be8beaadf9c190710915a))
+Fixed agent panel replay notes, cleaned session titles, and single-row timeline. Replayed sessions no longer carry Claude Code harness text in the user role. The agent panel composer is taller.
 
 ### Bug fixes
 - Agent panel replay notes, cleaned session titles, single-row timeline ([4f6a02b](https://github.com/Sidiora-Labs/codify/commit/4f6a02b8ce5396162e729581a76fa620c3484a65))
-- Keep the graph database writable while the LSP indexes ([5771e87](https://github.com/Sidiora-Labs/codify/commit/5771e87d04c93ac5fdae76ce2655cb9b9e5d71aa))
 
 ### Style
 - Taller agent panel composer ([17ad627](https://github.com/Sidiora-Labs/codify/commit/17ad627f6dc0de0295cefa1564b6b95f620b0775))
@@ -170,6 +213,24 @@ Codify 0.9.0 ships an Agent panel with provider picker, Codify toolbar, sub-agen
 - Qualify Codify 0.9.0 evidence-grounded documentation closure ([bc9ee64](https://github.com/Sidiora-Labs/codify/commit/bc9ee6450895ffe92eec37aae77d8408b82f96e0))
 - Qualify Codify 1.2.5 extension ([58f5641](https://github.com/Sidiora-Labs/codify/commit/58f56418c3b124a1845c40831c310b756e29ce9a))
 - Qualify Codify 0.8.5 control plane ([f825283](https://github.com/Sidiora-Labs/codify/commit/f8252837103943698f54df4b616801b8a0aa9ecc))
+
+## [0.8.5] - 2026-09-04
+
+### Highlights
+
+Codify 0.8.5 updates the Agent panel with a provider picker, Codify toolbar, sub-agent view, and timeline view, and redirects the legacy Codex ACP adapter to the maintained 1.7.0 release. The graph database stays writable while the LSP indexes, and spec workflow task 5.2 now qualifies the agent panel.
+
+- Agent panel: provider picker, Codify toolbar, sub-agent and timeline views (Extension 1.1.0)
+- Default `codify.acp.codexCommand` now `npx -y @agentclientprotocol/codex-acp@1.7.0`
+- Graph database writable during LSP indexing
+- Spec workflow task 5.2 qualifies agent panel
+
+### Features
+- Agent panel with provider picker, Codify toolbar, sub-agent and timeline views ([0c05bf6](https://github.com/Sidiora-Labs/codify/commit/0c05bf6e1f15da6fb0a6c77cd9384e7186dcebdd))
+- Redirect legacy Codex ACP adapter to maintained 1.7.0 release ([b280b70](https://github.com/Sidiora-Labs/codify/commit/b280b70c7e9d9a74577be8beaadf9c190710915a))
+
+### Bug fixes
+- Keep the graph database writable while the LSP indexes ([5771e87](https://github.com/Sidiora-Labs/codify/commit/5771e87d04c93ac5fdae76ce2655cb9b9e5d71aa))
 
 ### Spec workflow
 - Qualify task 5.2 agent panel ([21b2378](https://github.com/Sidiora-Labs/codify/commit/21b23788e55319014cf941f53c898b912b65fd31))
@@ -308,8 +369,11 @@ Initial release of Codify. The single-binary tool provides code graph, spec-driv
 ### Other
 - First commit ([2b6dede](https://github.com/Sidiora-Labs/codify/commit/2b6dede7c99e5856ef5464fc5d1c422b5ab77808))
 
+[Unreleased]: https://github.com/Sidiora-Labs/codify/compare/1.1.0...HEAD
+[1.1.0]: https://github.com/Sidiora-Labs/codify/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/Sidiora-Labs/codify/compare/0.9.0...1.0.0
-[0.9.0]: https://github.com/Sidiora-Labs/codify/compare/0.8.0...0.9.0
+[0.9.0]: https://github.com/Sidiora-Labs/codify/compare/0.8.5...0.9.0
+[0.8.5]: https://github.com/Sidiora-Labs/codify/compare/0.8.0...0.8.5
 [0.8.0]: https://github.com/Sidiora-Labs/codify/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/Sidiora-Labs/codify/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/Sidiora-Labs/codify/compare/0.4.0...0.6.0
