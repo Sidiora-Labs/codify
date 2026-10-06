@@ -26,7 +26,7 @@
 ## Memories that travel between graphs
 
 - [ ] 3. Carry
-  - [ ] 3.1 cg memory export and import: JSONL, content ids, graph-to-graph
+  - [x] 3.1 cg memory export and import: JSONL, content ids, graph-to-graph
     - memory_content_id and cg memory export: header line plus one JSON object per memory, with the selection filters and supersession by content id.
     - cg memory import from a file, stdin, or --from another project's graph: dedupe by content id, one transaction, --dry-run, --keep-branch, --retask, per-line error reports.
     - memory_export and memory_import MCP tools; round-trip, idempotence, and malformed-input tests.

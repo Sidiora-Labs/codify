@@ -29,10 +29,10 @@ ac_6  = "WHEN an MCP client calls the codemap tool THE server SHALL return the m
 [req.3]
 title = "Memories that travel between graphs"
 story = "As the owner of several repositories, forks, and fresh clones, I want to export the memories of one graph and import them into another, so that decisions, constraints, and lessons survive a re-clone and move between related projects."
-ac_1  = "WHEN cg memory export runs THE command SHALL write a header line (format, version, source project, cg version, count) followed by one JSON object per memory — a stable content id, created, type, task, body, symbols, files, source, branch, class, confidence, and the content id of the memory that superseded it — to stdout or -o FILE, selected by --task, --type, --branch, and --since DAYS."
-ac_2  = "WHEN cg memory import FILE (or - for stdin) runs THE command SHALL insert every memory whose content id the target graph does not hold, skip the ones it does, keep created, class, and confidence, record the source project in source, restore supersession links by content id, keep the full-text index in step, and report imported, skipped, and invalid counts (--json too)."
+ac_1  = "WHEN cg memory export runs THE command SHALL write a header line (format, version, the source project as project, cg version, count; no timestamp, so two exports of the same graph are byte-identical) followed by one JSON object per memory — a stable content id, created, type, task, body, symbols, files, source, branch, class, confidence, and the content id of the memory that superseded it — to stdout or -o FILE, selected by --task, --type, --branch, and --since DAYS."
+ac_2  = "WHEN cg memory import FILE (or - for stdin) runs THE command SHALL insert every memory whose content id the target graph does not hold, skip the ones it does, keep created, class, and confidence, record the source project in source as import:<project>/<original source>, restore supersession links by content id, keep the full-text index in step, and report imported, skipped, and invalid counts (--json too)."
 ac_3  = "WHEN an export is imported twice THE second import SHALL change nothing, and WHEN a memory is exported from one project and imported into an empty one THE target's recall SHALL return the same body, type, task, symbols, files, class, and creation time."
-ac_4  = "WHEN --dry-run is given THE import SHALL report what it would do and write nothing; a malformed line SHALL be reported with its line number and skipped; an unknown format or newer version SHALL stop the import before any write; the import SHALL be one transaction."
+ac_4  = "WHEN --dry-run is given THE import SHALL report what it would do and write nothing; a malformed line, or one whose type is not a lowercase word, SHALL be reported with its line number and skipped; an unknown format or newer version SHALL stop the import before any write; the import SHALL be one transaction."
 ac_5  = "WHEN cg memory import --from DIR runs THE command SHALL read the memories straight out of the Codify project at DIR, read-only, and import them exactly as it would an export file."
 ac_6  = "WHEN an imported memory names a branch the target graph does not track THE import SHALL clear the branch so every branch sees the memory, unless --keep-branch is given; --retask OLD=NEW SHALL rewrite a task-tag prefix on the way in."
 ac_7  = "WHEN an MCP client calls memory_export or memory_import THE server SHALL run the same code paths and return the same reports."
@@ -102,7 +102,7 @@ status  = "pending"
 
 [task.3.1]
 title      = "cg memory export and import: JSONL, content ids, graph-to-graph"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["cmd_memory_export", "cmd_memory_import", "memory_content_id"]
 touches    = ["src/memory.c", "src/cg.h", "src/main.c", "src/mcp.c", "tests/integration/39_memory_port.sh", "tests/integration/04_mcp.sh", "docs/memory-transport.md", "README.md"]
