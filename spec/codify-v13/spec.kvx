@@ -1,0 +1,131 @@
+# codify-v13 — explore, map, carry, configure: what an agent needs before its first edit.
+
+[meta]
+feature = "codify-v13"
+intro   = "Four things that decide how fast an agent becomes useful in a repository: retrieval that answers with the code itself (definitions over prototypes, file and directory outlines, phrase queries, the whole budget spent), a generated CODEMAP.md that orients a fresh agent in one read, memories that can be exported from one graph and imported into another, and a root-level codify.kvx that switches auto-sync and moves Codify's directories without a rebuild."
+
+[req.1]
+title = "Indexing and retrieval that answer with the code"
+story = "As an agent exploring a codebase, I want search and context to hand me the definition, the file outline, or the right symbols for a phrase in one call, so that I stop paging through headers, test fixtures, and one-line prototypes to find the code I need."
+ac_1  = "WHEN a function has a prototype in a header and a definition in a source file THE indexer SHALL record the prototype as a declaration, and cg search, symbol, context, and show SHALL answer with the definition first, carrying the prototype's doc comment when the definition has none of its own."
+ac_2  = "WHEN a header lists consecutive prototypes THE indexer SHALL end each declaration at its own terminator, so that no declaration is reported as a caller of the symbols declared after it."
+ac_3  = "WHEN the query of cg context names an indexed file THE command SHALL answer with that file's outline — its purpose line, every symbol with kind, line, and signature, what it imports, and which files depend on it — and WHEN it names a directory THE command SHALL list the files under it with purpose lines and symbol counts, both inside the budget."
+ac_4  = "WHEN the query is a phrase THE retrieval SHALL drop stopwords, split identifiers into their words, and match names, doc comments, and bodies, ranking each symbol by the combined evidence: a name match over a doc match over a body match, more distinct query words over fewer, referenced symbols over unreferenced ones, and source over tests, fixtures, and generated files."
+ac_5  = "WHEN the indexer stores a symbol THE search index SHALL carry the words of its name (snake_case, camelCase, PascalCase, digit runs) so that cg search \"export memory\" finds memory_export and exportMemory without scanning the symbols table."
+ac_6  = "WHEN hits remain and budget is left THE context command SHALL expand further hits with their doc and opening lines until the budget is used, SHALL never exceed the budget, and SHALL report the tokens used and what was omitted in --json."
+ac_7  = "WHEN context lists full-text file hits THE text output SHALL show the matching line beside the path, and source files SHALL precede tests and fixtures."
+ac_8  = "WHEN the retrieval evaluation runs on its fixture THE gold symbol of every recorded query SHALL be among the first three hits, and the existing accuracy, retrieval, and context suites SHALL still pass."
+
+[req.2]
+title = "CODEMAP.md: the repository in one read"
+story = "As an agent or a person new to a repository, I want one generated file at the root that says what the project is, how it is laid out, where the entry points are, and which symbols everything leans on, so that I understand the structure before I open a single source file."
+ac_1  = "WHEN cg codemap runs THE command SHALL refresh the graph and write CODEMAP.md at the repository root; -o SHALL choose another path and -o - SHALL print to stdout; --json SHALL emit the same map as structured data."
+ac_2  = "WHEN the map is written THE content SHALL cover, in this order: an overview (project name, languages with file and line counts, detected build and test commands), the directory layout with a purpose line per directory and key file, the entry points (main functions, CLI commands, routes), the modules with their key files and most-referenced symbols with signatures, the dependencies between top-level directories aggregated from resolved imports and calls, where the tests live and what they cover, and pointers to the spec workflow and agent files when present."
+ac_3  = "WHEN the same graph is mapped twice THE two outputs SHALL be byte-identical: no timestamps, stable ordering everywhere, so the file can be committed and diffed."
+ac_4  = "WHEN --budget N is given (default 8000 tokens) THE map SHALL fit inside it by dropping the least-referenced files and symbols first and SHALL say how many were left out of each section."
+ac_5  = "WHEN CODEMAP.md already exists without Codify's generated marker THE command SHALL refuse to overwrite it unless --force is given; --check SHALL exit non-zero, writing nothing, when the file is missing or differs from what would be generated."
+ac_6  = "WHEN an MCP client calls the codemap tool THE server SHALL return the map text, and WHEN cg brief runs in a repository that has a CODEMAP.md THE brief SHALL name it and say whether it is stale."
+
+[req.3]
+title = "Memories that travel between graphs"
+story = "As the owner of several repositories, forks, and fresh clones, I want to export the memories of one graph and import them into another, so that decisions, constraints, and lessons survive a re-clone and move between related projects."
+ac_1  = "WHEN cg memory export runs THE command SHALL write a header line (format, version, source project, cg version, count) followed by one JSON object per memory — a stable content id, created, type, task, body, symbols, files, source, branch, class, confidence, and the content id of the memory that superseded it — to stdout or -o FILE, selected by --task, --type, --branch, and --since DAYS."
+ac_2  = "WHEN cg memory import FILE (or - for stdin) runs THE command SHALL insert every memory whose content id the target graph does not hold, skip the ones it does, keep created, class, and confidence, record the source project in source, restore supersession links by content id, keep the full-text index in step, and report imported, skipped, and invalid counts (--json too)."
+ac_3  = "WHEN an export is imported twice THE second import SHALL change nothing, and WHEN a memory is exported from one project and imported into an empty one THE target's recall SHALL return the same body, type, task, symbols, files, class, and creation time."
+ac_4  = "WHEN --dry-run is given THE import SHALL report what it would do and write nothing; a malformed line SHALL be reported with its line number and skipped; an unknown format or newer version SHALL stop the import before any write; the import SHALL be one transaction."
+ac_5  = "WHEN cg memory import --from DIR runs THE command SHALL read the memories straight out of the Codify project at DIR, read-only, and import them exactly as it would an export file."
+ac_6  = "WHEN an imported memory names a branch the target graph does not track THE import SHALL clear the branch so every branch sees the memory, unless --keep-branch is given; --retask OLD=NEW SHALL rewrite a task-tag prefix on the way in."
+ac_7  = "WHEN an MCP client calls memory_export or memory_import THE server SHALL run the same code paths and return the same reports."
+
+[req.4]
+title = "codify.kvx: project configuration at the root"
+story = "As someone setting Codify up in a repository with its own layout, I want one configuration file at the root that switches auto-sync and says where Codify's directories live, so that I can adopt it without renaming my directories or patching hooks."
+ac_1  = "WHEN codify.kvx exists at the project root THE cg binary SHALL load it once per process; a missing file or key SHALL mean the built-in default, so a repository without the file behaves exactly as before."
+ac_2  = "WHEN [paths] spec names a directory THE spec engine, orchestrator, fleet, docs, drift, guard, recap, MCP resources, and spec root discovery SHALL read and write workflow.kvx, feature specs, and rendered mirrors there, and the rendered pointer files SHALL name that directory."
+ac_3  = "WHEN [paths] context, skills, or codemap is set THE commands that write agent-context.md and recap.md, generated skills, and the code map SHALL use the configured location."
+ac_4  = "WHEN a configured path is absolute, escapes the repository with .., or is empty THE loader SHALL reject it with an error naming the key and the file, and fall back to the default."
+ac_5  = "WHEN [sync] auto is false THE implicit syncs — the freshness pass before read commands, the post-edit hook, the pre-commit index, and the MCP, LSP, serve, and watch refreshes — SHALL be skipped, cg sync and cg index SHALL still run, and cg brief SHALL say that auto-sync is off."
+ac_6  = "WHEN cg config runs THE command SHALL print every effective setting with its origin (default or codify.kvx); init SHALL write a commented codify.kvx holding the defaults and refuse to overwrite an existing one; get KEY and set KEY VALUE SHALL read and surgically write one setting; check SHALL list unknown sections, unknown keys, and unusable values; --json SHALL be available for the effective settings and for check."
+ac_7  = "WHEN codify.kvx holds an unknown key or an unusable value THE commands SHALL keep working on the defaults: cg check reports it as a warning and never as a failure."
+
+[design]
+overview = "Four independent slices, one wave. Retrieval (src/graph.c, src/scan.c, src/lang.c, src/resolve.c, src/db.c): declarations get a flag and their own end line at index time, a name-words column feeds symbol_fts, and cmd_context grows a path door (context_path_outline), a phrase ranker over names, comment_fts, and body_fts, and a budget-filling second pass. Code map (src/codemap.c): codemap_render builds the map from the graph tables already there — files, symbols, refs, imports, routes, comments — into one StrBuf with a deterministic order, and cmd_codemap owns the file behind a generated marker. Memory transport (src/memory.c): memory_content_id is sha256 over type, task, and body; export streams JSONL, import reads a file, stdin, or another project's graph.db opened read-only, inside one write transaction. Configuration (src/config.c): config_load parses <root>/codify.kvx with the kvx reader into a cached CgConfig; config_spec_dir replaces every hard-coded \"%s/spec\" join; implicit sync sites ask config_auto_sync first. No new dependency; schema changes stay additive wherever the derived tables allow it."
+
+[documentation]
+mode      = "auto"
+status    = "pending"
+audiences = ["user", "developer"]
+targets   = ["README.md", "docs/**", "CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: Codify v13"
+
+[task.1]
+title   = "Explore"
+section = "Indexing and retrieval that answer with the code"
+status  = "pending"
+
+[task.1.1]
+title      = "Declarations, name words, path outlines, phrase ranking, and a spent budget"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_context", "cmd_search", "context_path_outline"]
+touches    = ["src/graph.c", "src/scan.c", "src/lang.c", "src/resolve.c", "src/db.c", "src/cg.h", "src/mcp.c", "src/main.c", "tests/unit/test_lang.c", "tests/integration/37_explore.sh", "tests/integration/*.sh", "tests/fixtures/explore/*", "docs/retrieval.md", "README.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/37_explore.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/15_accuracy.sh && CG=$PWD/cg tests/integration/16_retrieval.sh && CG=$PWD/cg tests/integration/34_context.sh"
+do_1       = "Index time: mark prototypes as declarations with their own end line, link them to their definition, and store the words of every symbol name in the search index."
+do_2       = "Query time: definitions before declarations everywhere; cg context answers a file or directory path with an outline (context_path_outline); phrases are matched over names, doc comments, and bodies and ranked by combined evidence."
+do_3       = "Spend the budget: expand further hits until it is used, show the matching line for file hits, report tokens used and omissions in --json."
+do_4       = "Record a retrieval evaluation fixture with gold symbols and assert top-3 recall in tests/integration/37_explore.sh."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8"]
+
+[task.2]
+title   = "Map"
+section = "CODEMAP.md: the repository in one read"
+status  = "pending"
+
+[task.2.1]
+title      = "cg codemap: a deterministic repository map from the graph"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_codemap", "codemap_render"]
+touches    = ["src/codemap.c", "src/cg.h", "src/main.c", "src/mcp.c", "src/govern.c", "tests/integration/38_codemap.sh", "tests/integration/04_mcp.sh", "tests/fixtures/codemap/*", "docs/codemap.md", "README.md"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/38_codemap.sh && CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/17_session.sh"
+do_1       = "codemap_render: overview, layout, entry points, modules with key symbols, directory dependencies, tests, and workflow pointers, in a stable order, fitted to a token budget with per-section omission counts."
+do_2       = "cmd_codemap: fresh graph, generated marker, -o, --check, --force, --budget, --json; refuse to overwrite a file Codify did not generate."
+do_3       = "The codemap MCP tool, and one line in cg brief naming CODEMAP.md and whether it is stale."
+reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
+
+[task.3]
+title   = "Carry"
+section = "Memories that travel between graphs"
+status  = "pending"
+
+[task.3.1]
+title      = "cg memory export and import: JSONL, content ids, graph-to-graph"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_memory_export", "cmd_memory_import", "memory_content_id"]
+touches    = ["src/memory.c", "src/cg.h", "src/main.c", "src/mcp.c", "tests/integration/39_memory_port.sh", "tests/integration/04_mcp.sh", "docs/memory-transport.md", "README.md"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/39_memory_port.sh && CG=$PWD/cg tests/integration/08_memory.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "memory_content_id and cg memory export: header line plus one JSON object per memory, with the selection filters and supersession by content id."
+do_2       = "cg memory import from a file, stdin, or --from another project's graph: dedupe by content id, one transaction, --dry-run, --keep-branch, --retask, per-line error reports."
+do_3       = "memory_export and memory_import MCP tools; round-trip, idempotence, and malformed-input tests."
+reqs       = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7"]
+
+[task.4]
+title   = "Configure"
+section = "codify.kvx: project configuration at the root"
+status  = "pending"
+
+[task.4.1]
+title      = "codify.kvx: auto-sync switch and configurable directories"
+status     = "pending"
+wave       = 1
+symbols    = ["config_load", "config_spec_dir", "cmd_config"]
+touches    = ["src/config.c", "src/cg.h", "src/main.c", "src/spec.c", "src/orchestrate.c", "src/fleet.c", "src/govern.c", "src/drift.c", "src/docs.c", "src/recap.c", "src/mcp.c", "src/events.c", "src/graph.c", "src/agent.c", "src/skills.c", "src/lsp.c", "src/watch.c", "src/serve.c", "src/integrate.c", "src/changelog.c", "src/runtime.c", "tests/unit/test_config.c", "tests/integration/40_config.sh", "docs/config.md", "README.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/05_spec.sh && CG=$PWD/cg tests/integration/12_authoring.sh && CG=$PWD/cg tests/integration/25_syncgate.sh && CG=$PWD/cg tests/integration/26_fleet.sh"
+do_1       = "config.c: load and validate codify.kvx into a cached CgConfig; config_spec_dir and the other path accessors; cg config, init, get, set, check."
+do_2       = "Route every hard-coded spec/ join and spec root discovery through config_spec_dir; route .codify, .agents/skills, and the code map path through their accessors."
+do_3       = "Gate every implicit sync on [sync] auto; say so in cg brief; report configuration problems in cg check as warnings."
+do_4       = "Tests: a repository with a relocated spec directory runs the spec loop end to end; auto-sync off leaves the graph untouched until cg sync; bad values fall back with a warning."
+reqs       = ["4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7"]
