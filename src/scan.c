@@ -222,10 +222,10 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->del_refs   = cg_prep(cg, "DELETE FROM refs WHERE file_id=?");
     s->del_routes = cg_prep(cg, "DELETE FROM routes WHERE file_id=?");
     s->del_body   = cg_prep(cg, "DELETE FROM body_fts WHERE rowid=?");
-    s->ins_sym    = cg_prep(cg, "INSERT INTO symbols(file_id,name,kind,line,end_line,sig)"
-                                " VALUES(?,?,?,?,?,?)");
-    s->ins_symfts = cg_prep(cg, "INSERT INTO symbol_fts(rowid,name,kind,path,sig)"
-                                " VALUES(?,?,?,?,?)");
+    s->ins_sym    = cg_prep(cg, "INSERT INTO symbols(file_id,name,kind,line,end_line,sig,"
+                                "decl) VALUES(?,?,?,?,?,?,?)");
+    s->ins_symfts = cg_prep(cg, "INSERT INTO symbol_fts(rowid,name,kind,path,sig,"
+                                "words) VALUES(?,?,?,?,?,?)");
     s->ins_ref    = cg_prep(cg, "INSERT INTO refs(file_id,name,line,sym_id,qual,kind,argc)"
                                 " VALUES(?,?,?,?,?,?,?)");
     s->ins_route  = cg_prep(cg, "INSERT INTO routes(file_id,framework,method,pattern,handler,line)"
@@ -262,12 +262,14 @@ static void stmts_init(Cg *cg, Stmts *s) {
      * both files the same set. Soft refs are left out: anchor_edges rebuilds
      * them for every file in scope after the walk. */
     s->cp_syms = cg_prep(cg,
-        "INSERT INTO symbols(file_id,name,kind,line,end_line,sig) "
-        "SELECT ?1,name,kind,line,end_line,sig FROM symbols WHERE file_id=?2 "
-        "ORDER BY id");
+        "INSERT INTO symbols(file_id,name,kind,line,end_line,sig,decl) "
+        "SELECT ?1,name,kind,line,end_line,sig,decl FROM symbols "
+        "WHERE file_id=?2 ORDER BY id");
     s->cp_symfts = cg_prep(cg,
-        "INSERT INTO symbol_fts(rowid,name,kind,path,sig) "
-        "SELECT id,name,kind,?3,sig FROM symbols WHERE file_id=?1");
+        "INSERT INTO symbol_fts(rowid,name,kind,path,sig,words) "
+        "SELECT n.id,n.name,n.kind,?3,n.sig,t.words FROM symbols n "
+        "JOIN symbols o ON o.file_id=?2 AND o.name=n.name AND o.line=n.line "
+        "JOIN symbol_fts t ON t.rowid=o.id WHERE n.file_id=?1");
     s->cp_refs = cg_prep(cg,
         "INSERT INTO refs(file_id,name,line,sym_id,qual,kind,argc) "
         "SELECT ?1,r.name,r.line,"
@@ -454,6 +456,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             sqlite3_bind_int  (s->ins_sym, 4, pr->defs[i].line);
             sqlite3_bind_int  (s->ins_sym, 5, end);
             sqlite3_bind_text (s->ins_sym, 6, pr->defs[i].sig, -1, SQLITE_STATIC);
+            sqlite3_bind_int  (s->ins_sym, 7, pr->defs[i].decl ? 1 : 0);
             step_reset(s->ins_sym);
             rowids[i] = sqlite3_last_insert_rowid(cg->db);
 
@@ -462,18 +465,22 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             sqlite3_bind_text (s->ins_symfts, 3, pr->defs[i].kind, -1, SQLITE_STATIC);
             sqlite3_bind_text (s->ins_symfts, 4, w->rel, -1, SQLITE_STATIC);
             sqlite3_bind_text (s->ins_symfts, 5, pr->defs[i].sig, -1, SQLITE_STATIC);
+            char words[256];
+            name_words(pr->defs[i].name, words, sizeof words);
+            sqlite3_bind_text (s->ins_symfts, 6, words, -1, SQLITE_TRANSIENT);
             step_reset(s->ins_symfts);
             scope_name(s, pr->defs[i].name);
             st->symbols++;
         }
         /* enclosing symbol for each ref: innermost def whose span contains
          * the ref line, preferring callable kinds; refs contained by no def
-         * stay NULL — top-level code is not somebody's call site */
+         * stay NULL — top-level code is not somebody's call site, and
+         * neither is a prototype */
         for (int i = 0; i < pr->nrefs; i++) {
             int best = -1, best_fn = -1;
             for (int dj = 0;
                  dj < pr->ndefs && pr->defs[dj].line <= pr->refs[i].line; dj++) {
-                if (ends[dj] < pr->refs[i].line) continue;
+                if (ends[dj] < pr->refs[i].line || pr->defs[dj].decl) continue;
                 best = dj;              /* defs ascend by line: later = inner */
                 const char *k = pr->defs[dj].kind;
                 if (strcmp(k, "function") == 0 || strcmp(k, "method") == 0 ||
@@ -530,7 +537,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
                 int best = -1, best_fn = -1;
                 for (int dj = 0;
                      dj < pr->ndefs && pr->defs[dj].line <= c->line; dj++) {
-                    if (ends[dj] < c->line) continue;
+                    if (ends[dj] < c->line || pr->defs[dj].decl) continue;
                     best = dj;
                     const char *k = pr->defs[dj].kind;
                     if (strcmp(k, "function") == 0 || strcmp(k, "method") == 0 ||
@@ -738,6 +745,10 @@ static void scope_anchor_files(Cg *cg) {
  * a route that exists; everything else is silence (req 4.4).
  * scoped: only the files scope_anchor_files picked are rescanned, and
  * st->soft is recounted from the table so the report stays truthful. */
+/* A prototype's doc still yields edges, but from no symbol: the prototype
+ * calls nothing, and naming it as the source would invent callers. */
+#define SOFT_FROM "CASE WHEN s.decl=1 THEN NULL ELSE c.sym_id END"
+
 static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {
     if (scoped) {
         scope_anchor_files(cg);
@@ -747,11 +758,11 @@ static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {
         cg_exec(cg, "DELETE FROM refs WHERE kind='soft'");
     }
     sqlite3_stmt *sel = cg_prep(cg, scoped ?
-        "SELECT c.file_id, c.line, c.sym_id, c.body, coalesce(s.name,'') "
+        "SELECT c.file_id, c.line, " SOFT_FROM ", c.body, coalesce(s.name,'') "
         "FROM comments c LEFT JOIN symbols s ON s.id=c.sym_id "
         "WHERE c.kind IN ('file','doc') AND c.file_id IN "
         "(SELECT id FROM temp.scope_afiles) ORDER BY c.file_id, c.line" :
-        "SELECT c.file_id, c.line, c.sym_id, c.body, coalesce(s.name,'') "
+        "SELECT c.file_id, c.line, " SOFT_FROM ", c.body, coalesce(s.name,'') "
         "FROM comments c LEFT JOIN symbols s ON s.id=c.sym_id "
         "WHERE c.kind IN ('file','doc') ORDER BY c.file_id, c.line");
     sqlite3_stmt *ins = cg_prep(cg,

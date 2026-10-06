@@ -954,11 +954,15 @@ static bool is_builtin(Cg *cg, const char *lang, long file_id,
 /* Tiered resolution: same file → imported name → same directory → unique.
  * No tier fires → unresolved. */
 
-typedef struct { long id; long file_id; char path[512]; } Cand;
+typedef struct {
+    long id; long file_id; char path[512];
+    bool decl, is_static;    /* a prototype; a file-local definition */
+} Cand;
 
 static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {
     sqlite3_stmt *q = cg_prep(cg,
-        "SELECT s.id, s.file_id, f.path FROM symbols s "
+        "SELECT s.id, s.file_id, f.path, s.decl, "
+        "ifnull(s.sig,'') LIKE 'static %' FROM symbols s "
         "JOIN files f ON f.id=s.file_id WHERE s.name=? AND f.branch_id=?2 "
         "ORDER BY f.path, s.line");
     sqlite3_bind_text(q, 1, name, -1, SQLITE_STATIC);
@@ -969,10 +973,54 @@ static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {
         out[n].file_id = sqlite3_column_int64(q, 1);
         const char *p = (const char *)sqlite3_column_text(q, 2);
         snprintf(out[n].path, sizeof out[n].path, "%s", p ? p : "");
+        out[n].decl = sqlite3_column_int(q, 3) != 0;
+        out[n].is_static = sqlite3_column_int(q, 4) != 0;
         n++;
     }
     sqlite3_finalize(q);
     return n;
+}
+
+/* basename without extension: "src/memory.h" -> "memory" */
+static size_t path_stem(const char *path, const char **out) {
+    const char *b = strrchr(path, '/');
+    b = b ? b + 1 : path;
+    const char *dot = strrchr(b, '.');
+    *out = b;
+    return dot && dot > b ? (size_t)(dot - b) : strlen(b);
+}
+
+/* A tier that lands on a prototype means the call goes to its definition,
+ * not to the header: callers of the real function would otherwise be
+ * filed under the declaration. The definition beside the header (same
+ * stem: memory.h -> memory.c) wins, else the one non-static definition
+ * (or the first, when they all sit in one file as #ifdef alternatives),
+ * else the one definition. Ambiguous or absent: stay on the prototype. */
+static int cand_definition(const Cand *c, int nc, int pick) {
+    if (pick < 0 || !c[pick].decl) return pick;
+    const char *hs;
+    size_t hn = path_stem(c[pick].path, &hs);
+    int stem = -1, pub = -1, npub = 0, any = -1, nany = 0;
+    bool one_file = true;
+    for (int i = 0; i < nc; i++) {
+        if (c[i].decl) continue;
+        const char *cs;
+        size_t cn = path_stem(c[i].path, &cs);
+        if (stem < 0 && cn == hn && strncmp(cs, hs, hn) == 0 &&
+            (!c[i].is_static || c[i].file_id == c[pick].file_id))
+            stem = i;
+        if (!c[i].is_static) {
+            if (pub < 0) pub = i;
+            else if (c[i].file_id != c[pub].file_id) one_file = false;
+            npub++;
+        }
+        any = i;
+        nany++;
+    }
+    if (stem >= 0) return stem;
+    if (npub == 1 || (npub > 1 && one_file)) return pub;
+    if (nany == 1) return any;
+    return pick;
 }
 
 /* Module matches: does an import's module string plausibly name a file? */
@@ -1150,9 +1198,16 @@ static void resolve_refs_run(Cg *cg, bool scoped) {
                 }
             }
 
-            /* tier 3: unique definition repository-wide */
-            if (best < 0 && nc == 1)
-                { best = 0; rule = "unique"; }
+            /* tier 3: unique definition repository-wide — prototypes of
+             * it do not make it ambiguous */
+            if (best < 0) {
+                int ndef = 0, only = -1;
+                for (int i = 0; i < nc; i++)
+                    if (!cands[i].decl) { ndef++; only = i; }
+                if (ndef == 1 || nc == 1)
+                    { best = ndef == 1 ? only : 0; rule = "unique"; }
+            }
+            best = cand_definition(cands, nc, best);
 
             /* no tier fired → unresolved */
             if (best < 0) {
@@ -1589,7 +1644,7 @@ static int hygiene_file(Cg *cg, const char *path, long file_id,
     /* unused symbols: no inbound reference (target_id or name match) */
     q = cg_prep(cg,
         "SELECT s.id, s.name, s.kind, s.line FROM symbols s "
-        "WHERE s.file_id=? AND s.kind IN ('function','method') "
+        "WHERE s.file_id=? AND s.kind IN ('function','method') AND s.decl=0 "
         "AND NOT EXISTS (SELECT 1 FROM refs r WHERE r.target_id=s.id) "
         "AND NOT EXISTS (SELECT 1 FROM refs r2 WHERE r2.name=s.name "
         "  AND r2.target_id IS NULL AND r2.file_id<>?) "

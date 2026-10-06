@@ -13,6 +13,7 @@ bool path_format(char *out, size_t cap, const char *fmt, ...) {
     }
     return true;
 }
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -158,6 +159,31 @@ void hash_lines(const char *data, size_t len, int from, int to,
     }
     if (!a || b < a) { sha256_hex("", 0, out_hex); return; }
     sha256_hex(a, (size_t)(b - a), out_hex);
+}
+
+void name_words(const char *name, char *out, size_t cap) {
+    size_t o = 0;
+    if (!cap) return;
+    for (const char *p = name; *p && o + 2 < cap; p++) {
+        unsigned char c = (unsigned char)*p, next = (unsigned char)p[1];
+        unsigned char prev = p > name ? (unsigned char)p[-1] : 0;
+        if (!isalnum(c)) {
+            if (o && out[o-1] != ' ') out[o++] = ' ';
+            continue;
+        }
+        bool brk = false;
+        if (o && out[o-1] != ' ') {
+            if (isdigit(c) != 0) brk = !isdigit(prev);
+            else if (isdigit(prev)) brk = true;
+            else if (isupper(c) && islower(prev)) brk = true;      /* fooBar */
+            else if (isupper(c) && isupper(prev) && islower(next))
+                brk = true;                                     /* HTTPServer */
+        }
+        if (brk) out[o++] = ' ';
+        out[o++] = (char)tolower(c);
+    }
+    while (o && out[o-1] == ' ') o--;
+    out[o] = 0;
 }
 
 int write_entire_file(const char *path, const void *data, size_t len) {

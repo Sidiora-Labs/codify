@@ -184,6 +184,12 @@ static bool word_in(const char *const *words, const char *s, size_t n) {
     return false;
 }
 
+/* words that open a C/C++ statement, never a declaration */
+static const char *STMT_LEADS[] = {
+    "return","else","case","goto","do","throw","delete","co_return",
+    "sizeof",NULL
+};
+
 static bool is_keyword(const LangSpec *L, const char *s, size_t n) {
     if (strcmp(L->name, "rust") == 0)
         return word_in(RUST_KEYWORDS, s, n);
@@ -354,6 +360,7 @@ static void add_def(ParseResult *pr, const char *name, size_t nlen,
     d->kind = kind;
     d->line = line;
     d->end_line = 0;
+    d->decl = false;
     /* signature: trimmed line, capped */
     while (*sig == ' ' || *sig == '\t') sig++;
     size_t sl = strlen(sig);
@@ -607,6 +614,68 @@ static int lang_scope_end(const LangSpec *L, char *const *lines, int nlines,
         if (!opened && j > def_line) return 0;     /* body brace not nearby */
     }
     return 0;
+}
+
+/* A function or method whose parameter list opens right after its name:
+ * follow the list across lines (multi-line signatures), then take the first
+ * `{` or `;` after it. `{` is the body, tracked to its closing brace; `;` in
+ * C/C++ is a prototype, marked decl and ending on that line. -1 = the
+ * shape is not recognised here (arrow functions, Python, no paren after the
+ * name) — the caller falls back to lang_scope_end. */
+#define SIG_SPAN 40
+static int callable_end(const LangSpec *L, char *const *lines, int nlines,
+                        SymDef *d, bool cfam) {
+    if (d->line < 1 || d->line > nlines) return -1;
+    if (strcmp(L->name, "python") == 0 || strcmp(L->name, "ruby") == 0 ||
+        strcmp(L->name, "erlang") == 0 || strcmp(L->name, "vbnet") == 0)
+        return -1;
+    const char *ln = lines[d->line - 1];
+    size_t nl = strlen(d->name);
+    const char *s = NULL;
+    for (const char *f = strstr(ln, d->name); f; f = strstr(f + 1, d->name)) {
+        if ((f > ln && idchar(f[-1])) || idchar(f[nl])) continue;
+        const char *a = f + nl;
+        while (*a == ' ' || *a == '\t') a++;
+        if (*a == '<') {                       /* template / generic params */
+            int ad = 0;
+            for (; *a; a++) {
+                if (*a == '<') ad++;
+                else if (*a == '>' && --ad == 0) { a++; break; }
+            }
+            while (*a == ' ' || *a == '\t') a++;
+        }
+        if (*a == '(') { s = a; break; }
+    }
+    if (!s) return -1;
+    int depth = 0, closed_at = 0;
+    bool closed = false;
+    for (int j = d->line; j <= nlines && j < d->line + SIG_SPAN; j++) {
+        if (closed && j > closed_at + 2) return -1;   /* body not nearby */
+        const char *c = j == d->line ? s : lines[j - 1];
+        for (; *c; c++) {
+            if (*c == '(') { depth++; continue; }
+            if (*c == ')') {
+                if (--depth == 0 && !closed) { closed = true; closed_at = j; }
+                continue;
+            }
+            if (depth > 0 || !closed) continue;
+            if (*c == ';') {
+                if (!cfam) return -1;
+                d->decl = true;
+                return j;
+            }
+            if (*c != '{') continue;
+            int bd = 0;
+            for (int k = j; k <= nlines; k++) {
+                for (const char *b = k == j ? c : lines[k - 1]; *b; b++) {
+                    if (*b == '{') bd++;
+                    else if (*b == '}' && --bd == 0) return k;
+                }
+            }
+            return 0;
+        }
+    }
+    return -1;
 }
 
 /* ---------------- imports ---------------- */
@@ -981,13 +1050,16 @@ void lang_parse(const char *lang, const char *path, const char *src,
                     const char *nm = cursor + m[g].rm_so;
                     size_t nn = (size_t)(m[g].rm_eo - m[g].rm_so);
                     bool skip = is_keyword(L, nm, nn);
-                    /* C/C++: a line ending in ';' that looks like a def is a
-                       prototype/extern decl, not a definition */
+                    /* C/C++: a column-0 statement (`return f(x);`) is not
+                       a definition; a prototype is, and the end pass marks
+                       it decl */
                     if (!skip && cfam_protos &&
                         strcmp(L->pats[p].kind, "function") == 0) {
-                        size_t cl = strlen(clean);
-                        while (cl && (clean[cl-1] == ' ' || clean[cl-1] == '\t')) cl--;
-                        if (cl && clean[cl-1] == ';') skip = true;
+                        const char *w = clean;
+                        while (*w == ' ' || *w == '\t') w++;
+                        size_t wn = 0;
+                        while (idchar(w[wn])) wn++;
+                        if (word_in(STMT_LEADS, w, wn)) skip = true;
                     }
                     /* C/C++: aggregate/enum patterns match uses as readily as
                        definitions.  `struct stat st;` is a use, not a def.
@@ -1214,9 +1286,15 @@ void lang_parse(const char *lang, const char *path, const char *src,
     }
     cmt_flush(&acc, pr);
     /* real scope ends now that every line's cleaned form is known */
-    for (int i = 0; i < pr->ndefs; i++)
-        pr->defs[i].end_line = lang_scope_end(L, clines, lineno,
-                                              pr->defs[i].line);
+    for (int i = 0; i < pr->ndefs; i++) {
+        SymDef *d = &pr->defs[i];
+        bool callable = strcmp(d->kind, "function") == 0 ||
+                        strcmp(d->kind, "method") == 0;
+        int end = callable ? callable_end(L, clines, lineno, d, cfam_protos)
+                           : -1;
+        d->end_line = end >= 0 ? end
+                               : lang_scope_end(L, clines, lineno, d->line);
+    }
     for (int i = 0; i < lineno; i++) free(clines[i]);
     free(clines);
     pr->nlines = lineno;

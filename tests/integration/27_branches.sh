@@ -128,7 +128,7 @@ db.execute("UPDATE meta SET value='14' WHERE key='schema_version'")
 db.commit()
 EOF
     err="$("$CG" branches 2>&1 >/dev/null)"
-    has "$err" "schema upgraded to v16"
+    has "$err" "schema upgraded to v17"
     out="$("$CG" branches --json)"
     echo "$out" | pyjson "
 b = {x['name']: x for x in d['branches']}
@@ -155,7 +155,7 @@ EOF
     python3 - "$TMP/proj/.codegraph/graph.db" <<'EOF'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
-db.execute("UPDATE meta SET value='16' WHERE key='schema_version'")
+db.execute("UPDATE meta SET value='17' WHERE key='schema_version'")
 db.commit()
 EOF
     has "$("$CG" branches)" "* main"

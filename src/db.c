@@ -23,7 +23,8 @@ static const char *SCHEMA =
     "CREATE INDEX IF NOT EXISTS idx_file_path ON files(path);"
     "CREATE TABLE IF NOT EXISTS symbols("
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL REFERENCES files(id),"
-    "  name TEXT NOT NULL, kind TEXT, line INTEGER, end_line INTEGER, sig TEXT);"
+    "  name TEXT NOT NULL, kind TEXT, line INTEGER, end_line INTEGER, sig TEXT,"
+    "  decl INTEGER NOT NULL DEFAULT 0);"
     "CREATE INDEX IF NOT EXISTS idx_sym_name ON symbols(name);"
     "CREATE INDEX IF NOT EXISTS idx_sym_file ON symbols(file_id);"
     "CREATE TABLE IF NOT EXISTS refs("
@@ -41,9 +42,11 @@ static const char *SCHEMA =
     "  id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL, framework TEXT,"
     "  method TEXT, pattern TEXT, handler TEXT, line INTEGER);"
     "CREATE INDEX IF NOT EXISTS idx_route_file ON routes(file_id);"
-    /* trigram FTS: instant case-insensitive substring search on names */
+    /* trigram FTS: instant case-insensitive substring search on names;
+     * words is the name split into its words (name_words), so a phrase
+     * finds memory_export and exportMemory alike */
     "CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5("
-    "  name, kind UNINDEXED, path UNINDEXED, sig, tokenize='trigram');"
+    "  name, kind UNINDEXED, path UNINDEXED, sig, words, tokenize='trigram');"
     /* word FTS over file bodies */
     "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
     "  path UNINDEXED, body, tokenize='unicode61');"
@@ -198,7 +201,7 @@ static const char *SCHEMA =
     "  body, tokenize='unicode61');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "16"
+#define SCHEMA_VERSION "17"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -378,6 +381,12 @@ int cg_open(Cg *cg, bool create) {
         return -1;
     }
     if (cg_schema_upgrade(cg) != 0) return -1;
+    /* callers, reference counts and dependents all ask "who resolved to
+     * this symbol": without it each such question scans every ref. Created
+     * after the upgrade, since a pre-target_id refs table would refuse it. */
+    sqlite3_exec(cg->db,
+        "CREATE INDEX IF NOT EXISTS idx_ref_target ON refs(target_id)",
+        NULL, NULL, NULL);
     events_install(cg);
     /* a branch never seen before is registered here, so the first cg call
      * from a fresh worktree needs one small write; a busy database leaves

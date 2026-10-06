@@ -433,16 +433,84 @@ int main(void) {
        "cpp: struct with body is a def");
     parse_result_free(&parsed);
 
-    /* C prototype vs definition: prototype (;) suppressed, definition kept */
+    /* C prototype vs definition: both recorded, the prototype as a decl
+       ending on its own line, the definition spanning its body */
     const char cproto[] =
         "int compute(int x);\n"
         "int compute(int x) { return x * 2; }\n";
     lang_parse("c", "src/proto.c", cproto, sizeof cproto - 1, &parsed);
-    ok(def_count(&parsed, "compute") == 1,
-       "c: prototype + definition yields one symbol");
-    ok(definition(&parsed, "compute") != NULL &&
-       definition(&parsed, "compute")->line == 2,
-       "c: the definition line wins, not the prototype");
+    ok(def_count(&parsed, "compute") == 2,
+       "c: prototype + definition yields two symbols");
+    ok(parsed.ndefs == 2 && parsed.defs[0].decl && parsed.defs[0].line == 1 &&
+       parsed.defs[0].end_line == 1,
+       "c: the prototype is a decl ending at its own ';'");
+    ok(parsed.ndefs == 2 && !parsed.defs[1].decl && parsed.defs[1].line == 2 &&
+       parsed.defs[1].end_line == 2,
+       "c: the definition is not a decl");
+    ok(!reference(&parsed, "compute"),
+       "c: a prototype is not a call to itself");
+    parse_result_free(&parsed);
+
+    /* header: multi-line prototypes end at their own terminator, so the
+       single-line prototype after them is neither swallowed nor a call */
+    const char chdr[] =
+        "/* Open the store. */\n"
+        "int store_open(const char *path,\n"
+        "               int flags);\n"
+        "void store_close(int h);\n"
+        "static inline int store_twice(int a,\n"
+        "                              int b,\n"
+        "                              int c)\n"
+        "{\n"
+        "    return store_close(a), b + c;\n"
+        "}\n"
+        "return_t store_misc(void);\n";
+    lang_parse("c", "src/store.h", chdr, sizeof chdr - 1, &parsed);
+    const SymDef *so = definition(&parsed, "store_open");
+    ok(so && so->decl && so->line == 2 && so->end_line == 3,
+       "c: a multi-line prototype ends at its ';'");
+    const SymDef *sc = definition(&parsed, "store_close");
+    ok(sc && sc->decl && sc->line == 4 && sc->end_line == 4,
+       "c: a one-line prototype is a decl");
+    const SymDef *st = definition(&parsed, "store_twice");
+    ok(st && !st->decl && st->end_line == 10,
+       "c: a three-line signature still finds its body brace");
+    const SymDef *sm = definition(&parsed, "store_misc");
+    ok(sm && sm->decl, "c: a type named return_t is not a statement lead");
+    const SymRef *call = ref_of(&parsed, "store_close");
+    ok(call && call->line == 9,
+       "c: the only store_close call is the one inside the body");
+    parse_result_free(&parsed);
+
+    const char cstmt[] =
+        "int f(void) {\n"
+        "return gx(1);\n"
+        "}\n";
+    lang_parse("c", "src/stmt.c", cstmt, sizeof cstmt - 1, &parsed);
+    ok(definition(&parsed, "gx") == NULL,
+       "c: a column-0 return statement is not a prototype");
+    ok(reference(&parsed, "gx"), "c: its call is a reference");
+    parse_result_free(&parsed);
+
+    const char cppvirt[] =
+        "struct Shape {\n"
+        "virtual double area() const = 0;\n"
+        "};\n";
+    lang_parse("cpp", "src/shape.hpp", cppvirt, sizeof cppvirt - 1, &parsed);
+    const SymDef *ar = definition(&parsed, "area");
+    ok(ar && ar->decl && ar->end_line == 2, "cpp: a pure virtual is a decl");
+    parse_result_free(&parsed);
+
+    const char jsfn[] =
+        "export function beta(a,\n"
+        "                     b,\n"
+        "                     c) {\n"
+        "    return a;\n"
+        "}\n";
+    lang_parse("javascript", "src/beta.js", jsfn, sizeof jsfn - 1, &parsed);
+    const SymDef *be = definition(&parsed, "beta");
+    ok(be && !be->decl && be->end_line == 5,
+       "js: a multi-line parameter list keeps its body span");
     parse_result_free(&parsed);
 
     /* C++ class inheritance: `class Foo : public Bar {` has body */

@@ -76,11 +76,16 @@ const char *cg_agent_parent(const char *flag);
 void sha256_hex(const void *data, size_t len, char out_hex[65]);
 /* sha256 of the raw bytes of lines [from..to], 1-based inclusive — the
  * drift identity behind comments.anchored_hash. Index time and query time
- * must compute it identically, so both go through here. In a header a
- * declaration's span runs to the next declaration, so editing one doc
- * comment re-baselines the one above it too. */
+ * must compute it identically, so both go through here. A declaration's
+ * span ends at its own terminator, so editing one header doc comment leaves
+ * its neighbours' baselines alone. */
 void hash_lines(const char *data, size_t len, int from, int to,
                 char out_hex[65]);
+/* An identifier's words, lowercased and space-separated: snake_case,
+ * camelCase, PascalCase and digit runs all split ("HTTPServer2go" ->
+ * "http server 2 go"). symbol_fts.words at index time, query terms at
+ * search time — both sides must split identically. */
+void name_words(const char *name, char *out, size_t cap);
 
 /* ---------------- ignore rules ---------------- */
 typedef struct {
@@ -107,6 +112,7 @@ typedef struct {
     int line;
     char *sig;         /* trimmed definition line (owned) */
     int end_line;      /* real scope end (brace/indent tracked); 0 = unresolved */
+    bool decl;         /* C/C++ prototype: no body, ends at its own ';' */
 } SymDef;
 
 typedef struct {
