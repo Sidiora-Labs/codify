@@ -35,7 +35,7 @@
 ## cg help that reads as a map
 
 - [ ] 4. Read
-  - [ ] 4.1 cg help: a grouped overview, per-command detail, --all, and --json from one command table
+  - [x] 4.1 cg help: a grouped overview, per-command detail, --all, and --json from one command table
     - help.c: the Command table (group, name, usage, summary, detail, flags, related) carrying every command and subcommand the long usage text describes today, and help_overview with terminal-width wrapping and tty-only bold/dim styling.
     - help_command, help_all, help_json; cg help <name>, cg <name> --help and -h, cg help --all, cg help --json, closest-name suggestions on an unknown name.
     - main's usage() and its bad-argument usage lines read the table; 43_help.sh asserts the dispatch is covered, no escape codes when piped, width respected, and the README's command reference names the same commands.

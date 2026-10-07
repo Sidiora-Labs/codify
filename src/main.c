@@ -3,215 +3,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+/* the overview lives in help.c beside the table it is drawn from */
 static void usage(void) {
-    printf(
-"Codify %s — the agent workflow tool: code graph + version control,\n"
-"local-first, from small projects to large codebases\n"
-"\n"
-"usage: cg <command> [args]\n"
-"\n"
-"graph\n"
-"  init [--nested]          create .codegraph/ here and build the index;\n"
-"                           in a linked git worktree, join the repository's\n"
-"                           shared graph under this branch instead\n"
-"  root                     print the tree cg operates on (--json adds the\n"
-"                           shared project, worktree flag, and branch)\n"
-"  branches                 every branch indexed into the shared graph, with\n"
-"                           worktree, head, and file count\n"
-"  index [--full]           (re)index the project now (waits for the gate)\n"
-"  sync [paths] [--max-age MS] [--background] [--wait MS] [--auto]\n"
-"                           incremental index; coalesces into a pass\n"
-"                           already running, skips when fresh; --auto marks\n"
-"                           an implicit sync, skipped when [sync] auto=false\n"
-"  search <query> [-n N]    find code by name (FTS5 trigram + full text)\n"
-"  symbol <name>            definition(s), snippet, reference count\n"
-"  impact <name> [-d N]     callers/callees to depth N (default 3)\n"
-"  context <query>          one-call context: symbols, snippets, edges,\n"
-"                           entry points, routes\n"
-"  routes [filter]          framework-aware URL routes -> handlers\n"
-"  survey [scope]           purpose lines and docs across many files,\n"
-"                           never bodies (scope: path prefix or query)\n"
-"  anchors [--stale] [--uncovered]\n"
-"                           anchor health: stale docs, and uncovered\n"
-"                           symbols ranked by coordination score\n"
-"  show <symbol|path:line>  print just that symbol's body\n"
-"  test-impact [symbol]     tests referencing a symbol, or your changes\n"
-"  why <symbol>             provenance: commits, tasks, and decisions\n"
-"  watch [--debounce MS]    auto-sync on file changes (native OS events)\n"
-"  info                     machine profile and how the pipeline was sized\n"
-"  config [--json]          every codify.kvx setting with its origin\n"
-"  config init | get <section.key> | set <section.key> <value> | check\n"
-"                           write the commented defaults (never over an\n"
-"                           existing file), read or surgically write one\n"
-"                           key, list unknown keys and unusable values\n"
-"\n"
-"version control\n"
-"  commit -m <msg>          snapshot; --task <id>, --amend, --git\n"
-"  git-sync [-n N]          ingest git history for provenance and ranking\n"
-"  log [-n N]               commit history\n"
-"  status                   working tree vs HEAD\n"
-"  state                    Git, snapshot, spec, live ownership, staleness\n"
-"  event ingest|history|progress\n"
-"                           normalized lifecycle evidence (stdin for ingest)\n"
-"  events [--since N] [--kind K,..] [-n N] [--follow [--for S]] [--head]\n"
-"                           the event log: every task, claim, attempt, agent,\n"
-"                           fleet, and orchestrator change by sequence\n"
-"                           number; --json is one object per line\n"
-"  work open|update|close   compact task packet, revision deltas, evidence\n"
-"  diff [A] [B]             HEAD vs worktree | A vs worktree | A vs B\n"
-"  checkout <id> [--force]  restore a snapshot\n"
-"  changes                  impact radius of uncommitted edits\n"
-"\n"
-"memory (durable agent notes, stored beside the graph)\n"
-"  remember <text>          save a memory; --type decision|constraint|\n"
-"                           outcome|preference|fact, --task <feature/id>\n"
-"                           (defaults to the in-progress spec task)\n"
-"  recall [query] [-n N]    search memories (FTS + recency); --task, --type,\n"
-"                           --near <file> for anchored retrieval\n"
-"  memory compact           drop duplicate memories (--dry-run to preview)\n"
-"  forget <id>              delete a memory\n"
-"  memory classify [<id>|--all|--unclassified] [-n N]\n"
-"                           ask Jev what each memory is (skill, decision,\n"
-"                           constraint, fact, noise) and store the class\n"
-"  memory export [-o FILE] [--task T] [--type T] [--branch B] [--since DAYS]\n"
-"                           memories as JSONL: a header line, then one\n"
-"                           object per memory with its content id\n"
-"  memory import <FILE|-> | --from DIR [--dry-run] [--keep-branch]\n"
-"                [--retask OLD=NEW]\n"
-"                           add the memories this graph lacks, by content\n"
-"                           id; --from reads another project's graph\n"
-"\n"
-"agentic\n"
-"  mcp                      run as an MCP server (stdio) for coding agents\n"
-"  lsp                      run as a Language Server (stdio) for editors\n"
-"  serve                    one JSON-RPC connection (stdio) for editors:\n"
-"                           every tool, any cg command, cancel, and pushed\n"
-"                           event subscriptions\n"
-"  tool list | call <name> [json]\n"
-"                           run one MCP tool without an MCP client\n"
-"  mcp-install              auto-connect to Claude Code, Cursor, VS Code,\n"
-"                           Windsurf, Gemini CLI, Codex CLI\n"
-"  integrate [detect|plan|apply|doctor]\n"
-"                           configure and diagnose every agent host\n"
-"  changelog [-n N] [-o F] [--unreleased] [--tag V] [--snapshots]\n"
-"            [--summarize|--no-summarize]\n"
-"                           release notes from git history (a release per\n"
-"                           tag, groups per subject prefix, task refs); with\n"
-"                           CENTRA_API_KEY a model adds Highlights per\n"
-"                           release; --snapshots: the snapshot-chain form\n"
-"  recap [--sessions N] [--since DAYS] [--budget CHARS] [-o F] [--decided]\n"
-"        [--agents claude,codex]\n"
-"                           resume brief from past Claude Code and Codex\n"
-"                           sessions: Solar Decide picks the statements,\n"
-"                           the gateway model writes .codify/recap.md;\n"
-"                           needs CENTRA_API_KEY; --decided stops at the\n"
-"                           picked statements (no prose); --facts prints\n"
-"                           the repository facts alone (no model)\n"
-"  agentmd [--write]        generate .codify/agent-context.md from the graph\n"
-"  codemap [-o FILE|-] [--budget N] [--force] [--check] [--json]\n"
-"                           write CODEMAP.md: the repository map from the\n"
-"                           graph (overview, layout, entry points, modules,\n"
-"                           dependencies, tests, workflow); --check exits 1\n"
-"                           when it is missing or stale\n"
-"  docs status|plan|packet  grounded documentation closure evidence;\n"
-"                           generate is an alias for packet\n"
-"  check [--strict]         one CI gate: render, lint, evidence, tree\n"
-"  brief                    session state: task, changes, decisions\n"
-"  review                   changed symbols vs acceptance criteria + risk\n"
-"  guard [paths] [--strict] edits outside the active task's declared scope\n"
-"  drift check <id> [--base REF] | collisions | coverage | summary [-f F]\n"
-"                           a task's change against its declaration; open\n"
-"                           tasks that would collide; criteria with no\n"
-"                           qualified task; drift counts for a feature\n"
-"  handoff [--task <id>]    record session state against a task: --done,\n"
-"                           --next, --blocked, -m <note>\n"
-"  resume [--task <id>]     task packet + latest handoff + memories + tree\n"
-"                           state; --prompt for a paste-ready briefing built\n"
-"                           from the graph, --budget N tokens (default 6000)\n"
-"  hook install             wire agent + git hooks so the graph self-syncs\n"
-"  hook post-edit           the wired edit hook: sync + guard the edited\n"
-"                           file in one process (payload on stdin)\n"
-"\n"
-"spec workflow (Ion kvx specs — works in any repo with spec/workflow.kvx)\n"
-"  spec render [--check]    regenerate IDE pointer files + markdown mirror\n"
-"  spec [status]            task board for the active feature\n"
-"  spec next                next eligible task with its acceptance criteria\n"
-"  spec docs <action>       documentation closure: status, auto, manual,\n"
-"                           off, start, block, reset, done\n"
-"  spec ready               all eligible tasks across waves (parallel view)\n"
-"  spec claim-next          atomically claim the first conflict-free task;\n"
-"                           --agent <name>, --ttl <min>\n"
-"  spec heartbeat <id>      renew a live attempt; --attempt, --fence, --ttl\n"
-"  spec reconcile           report stale in-progress declarations; --repair\n"
-"  spec mode <prod|standard> configure implementation dependency semantics\n"
-"  spec start <id>          mark a task in_progress (honors workflow limit)\n"
-"  spec implemented <id>    graph-check coding work without verify_cmd;\n"
-"                           mark qualification pending (Prod mode only)\n"
-"  spec done <id>           verify_cmd + graph checks (symbols/touches),\n"
-"                           then mark done; records an outcome memory\n"
-"  spec trace [<id>] [--no-sync]\n"
-"                           trace tasks to code: symbols in the graph,\n"
-"                           touched paths, tagged commits\n"
-"  spec run [-n N]          orchestrate parallel/prod work: claim eligible\n"
-"                           tasks and drive one agent per slot; --driver\n"
-"                           codex|claude|custom, --dry-run, --max-fail K,\n"
-"                           --agent-prefix P\n"
-"  fleet roles              the hierarchy from [hierarchy] and [role.*]:\n"
-"                           branch templates, base, remote, gates, PR policy\n"
-"  fleet status             who is alive in which role, on which task\n"
-"  fleet plan [-f F]        which manager owns the feature and which worker\n"
-"                           owns each wave, planned and live\n"
-"  fleet begin <id> [-f F] [--agent A]\n"
-"                           the wave worktree and branch for a task, cut\n"
-"                           from the feature branch, claimed for its worker\n"
-"  fleet merge-up <id> [--force] [--keep]\n"
-"                           merge a qualified wave branch into the feature\n"
-"                           branch; conflicts listed by path, --keep leaves\n"
-"                           them in the feature worktree to resolve\n"
-"  fleet land <feature> [--no-pr]\n"
-"                           merge the feature branch into local main behind\n"
-"                           the test and lint gates (red = reset, refused)\n"
-"  fleet pr <feature> [--dry-run]\n"
-"                           open the pull request through gh, or print the\n"
-"                           exact push and gh commands\n"
-"  fleet checkpoint [--dry-run]\n"
-"                           merge the open Codify pull requests in order\n"
-"  fleet up [--foreground] [--resume [RUN]] [-f F] [-n N] [--driver D]\n"
-"           [--max-fail K] [--max-rounds R]\n"
-"                           start a durable fleet run under a detached\n"
-"                           supervisor; --resume continues an unfinished\n"
-"                           run, adopting agents still alive\n"
-"  fleet down [--drain] | pause | resume [RUN]\n"
-"                           stop (claims released, branches kept), finish\n"
-"                           live work first, freeze, or continue a run\n"
-"  fleet runs               runs, their state, and whether a supervisor\n"
-"                           is alive\n"
-"  fleet approvals [--all] | approve <id> [--reject] [-m note]\n"
-"                           opt-in gates ([role.*] approve): what waits,\n"
-"                           and the decision that releases it\n"
-"  fleet steer <agent> <message>\n"
-"                           a message for a running agent: its next edit\n"
-"                           (Claude Code hook) or its next prompt\n"
-"\n"
-"jev (TypeSafe System One decisions via OpenRouter; OPENROUTER_API_KEY\n"
-"     is mandatory; CG_JEV_MODEL, CG_JEV_ENDPOINT, CG_JEV_CURL override)\n"
-"  jev doctor [--probe]     key, curl, endpoint, model, and log health;\n"
-"                           --probe sends one tiny decision\n"
-"  jev ask [<request.json>|-] [--state S] [--noul N I] [--choice N I\n"
-"           --option K=D ...] [--score N I --level L ...]\n"
-"                           ask Jev directly; answers as text or --json\n"
-"  jev log [-n N]           the last N calls from .codegraph/jev.log\n"
-"  skills list              memories classed as skills, and which of them\n"
-"                           have been rendered under .agents/skills\n"
-"  skills promote <id>      render one memory as .agents/skills/<slug>/\n"
-"                           SKILL.md, Codify-owned and linked to the memory\n"
-"  skills render            refresh every generated SKILL.md from its\n"
-"                           memory; names the ones whose memory is gone\n"
-"\n"
-"most query commands accept --json for machine-readable output\n"
-"query commands answer for the branch you are on; --branch <name> asks\n"
-"another one and --all-branches asks them all, labelling each hit\n",
-        CG_VERSION);
+    help_overview();
 }
 
 static bool flag(int *argc, char **argv, const char *name) {
@@ -324,18 +118,14 @@ static void index_fresh(Cg *cg, const SysInfo *si) {
 
 int main(int argc, char **argv) {
     if (argc < 2) { usage(); return 1; }
+    int hrc = help_route(argc, argv);
+    if (hrc >= 0) return hrc;
     kvx_status_hook = events_kvx_status;
     const char *cmd = argv[1];
     bool json = flag(&argc, argv, "--json");
     bool no_soft = flag(&argc, argv, "--no-soft");
     bool all_branches = flag(&argc, argv, "--all-branches");
     const char *scope_branch = opt(&argc, argv, "--branch", NULL);
-
-    if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 ||
-        strcmp(cmd, "-h") == 0) {
-        usage();
-        return 0;
-    }
 
     if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0) {
         printf("%s\n", CG_VERSION);
@@ -516,34 +306,32 @@ int main(int argc, char **argv) {
         }
     } else if (strcmp(cmd, "search") == 0) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
-        if (argc < 3) { fprintf(stderr, "usage: cg search <query>\n"); rc = 1; }
+        if (argc < 3) { help_usage("search"); rc = 1; }
         else rc = cmd_search(&cg, argv[2], limit > 0 ? limit : 20, json);
     } else if (strcmp(cmd, "symbol") == 0) {
-        if (argc < 3) { fprintf(stderr, "usage: cg symbol <name>\n"); rc = 1; }
+        if (argc < 3) { help_usage("symbol"); rc = 1; }
         else rc = cmd_symbol(&cg, argv[2], json);
     } else if (strcmp(cmd, "impact") == 0) {
         int depth = atoi(opt(&argc, argv, "-d", "3"));
         int budget = atoi(opt(&argc, argv, "--budget", "8000"));
-        if (argc < 3) { fprintf(stderr, "usage: cg impact <name> [-d N] "
-                                        "[--budget N]\n"); rc = 1; }
+        if (argc < 3) { help_usage("impact"); rc = 1; }
         else rc = cmd_impact(&cg, argv[2], depth > 0 ? depth : 3,
                              budget > 0 ? budget : 8000, json);
     } else if (strcmp(cmd, "context") == 0) {
         int budget = atoi(opt(&argc, argv, "--budget", "4000"));
         int limit = atoi(opt(&argc, argv, "-n", "8"));
-        if (argc < 3) { fprintf(stderr, "usage: cg context <query> "
-                                        "[--budget N] [-n K]\n"); rc = 1; }
+        if (argc < 3) { help_usage("context"); rc = 1; }
         else rc = cmd_context(&cg, argv[2], budget > 0 ? budget : 4000,
                               limit > 0 ? limit : 8, json);
     } else if (strcmp(cmd, "show") == 0) {
         bool full = flag(&argc, argv, "--full");
-        if (argc < 3) { fprintf(stderr, "usage: cg show <symbol> [--full]\n");
+        if (argc < 3) { help_usage("show");
                         rc = 1; }
         else rc = cmd_show(&cg, argv[2], full, json);
     } else if (strcmp(cmd, "test-impact") == 0) {
         rc = cmd_test_impact(&cg, argc >= 3 ? argv[2] : NULL, json);
     } else if (strcmp(cmd, "why") == 0) {
-        if (argc < 3) { fprintf(stderr, "usage: cg why <symbol>\n"); rc = 1; }
+        if (argc < 3) { help_usage("why"); rc = 1; }
         else rc = cmd_why(&cg, argv[2], json);
     } else if (strcmp(cmd, "routes") == 0) {
         rc = cmd_routes(&cg, argc >= 3 ? argv[2] : NULL, json);
@@ -577,7 +365,7 @@ int main(int argc, char **argv) {
             rc = cmd_hook_install(&cg);
         else if (argc >= 3 && strcmp(argv[2], "post-edit") == 0)
             rc = cmd_hook_post_edit(&cg, &si, json);
-        else { fprintf(stderr, "usage: cg hook install | post-edit\n"); rc = 1; }
+        else { help_usage("hook"); rc = 1; }
     } else if (strcmp(cmd, "check") == 0) {
         bool strict = flag(&argc, argv, "--strict");
         rc = cmd_check(&cg, json, strict);
@@ -591,8 +379,7 @@ int main(int argc, char **argv) {
         bool to_git = flag(&argc, argv, "--git");
         char *tag = task ? spec_task_tag(task) : NULL;
         if (!msg) {
-            fprintf(stderr,
-                    "usage: cg commit -m <message> [--task <id>] [--amend]\n");
+            help_usage("commit");
             rc = 1;
         } else if (task && !tag) {
             fprintf(stderr,
@@ -633,7 +420,7 @@ int main(int argc, char **argv) {
                       argc >= 4 ? argv[3] : NULL);
     } else if (strcmp(cmd, "checkout") == 0) {
         bool force = flag(&argc, argv, "--force");
-        if (argc < 3) { fprintf(stderr, "usage: cg checkout <id>\n"); rc = 1; }
+        if (argc < 3) { help_usage("checkout"); rc = 1; }
         else rc = cmd_checkout(&cg, argv[2], force);
     } else if (strcmp(cmd, "changes") == 0) {
         int limit = atoi(opt(&argc, argv, "--limit", "0"));
@@ -645,8 +432,7 @@ int main(int argc, char **argv) {
         const char *files = opt(&argc, argv, "--files", NULL);
         const char *supersedes = opt(&argc, argv, "--supersedes", NULL);
         if (argc < 3) {
-            fprintf(stderr, "usage: cg remember \"<text>\" [--type T] "
-                    "[--task <feature/id>] [--symbols a,b] [--files x,y]\n");
+            help_usage("remember");
             rc = 1;
         } else {
             char *dflt = task ? NULL : spec_active_tag();
@@ -692,15 +478,13 @@ int main(int argc, char **argv) {
             o.file = argc >= 4 ? argv[3] : NULL;
             rc = cmd_memory_import(&cg, &o, json);
         } else {
-            fprintf(stderr, "usage: cg memory compact [--dry-run] | "
-                    "classify [<id>|--all|--unclassified] [-n N] | "
-                    "export [-o FILE] | import <FILE|-> | --from DIR\n");
+            help_usage("memory");
             rc = 1;
         }
     } else if (strcmp(cmd, "skills") == 0) {
         rc = cmd_skills(&cg, argc, argv, json);
     } else if (strcmp(cmd, "forget") == 0) {
-        if (argc < 3) { fprintf(stderr, "usage: cg forget <id>\n"); rc = 1; }
+        if (argc < 3) { help_usage("forget"); rc = 1; }
         else rc = cmd_forget(&cg, argv[2]);
     } else if (strcmp(cmd, "lsp") == 0) {
         rc = cmd_lsp(&cg, &si);
@@ -773,6 +557,7 @@ int main(int argc, char **argv) {
         rc = cmd_resume(&cg, task, json, prompt);
     } else {
         fprintf(stderr, "cg: unknown command '%s' (try `cg help`)\n", cmd);
+        help_suggest(cmd);
         rc = 1;
     }
     cg_close(&cg);

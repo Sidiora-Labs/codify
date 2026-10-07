@@ -117,7 +117,7 @@ status  = "pending"
 
 [task.4.1]
 title      = "cg help: a grouped overview, per-command detail, --all, and --json from one command table"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["cmd_help", "help_overview", "help_command"]
 touches    = ["src/help.c", "src/main.c", "src/cg.h", "tests/integration/43_help.sh", "README.md", "docs/ARCHITECTURE.md"]

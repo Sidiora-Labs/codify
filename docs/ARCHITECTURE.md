@@ -89,6 +89,26 @@ files ───────────────────────► j
   `omitted` count, full-text hits carry a line number, and `show`
   truncates long bodies with a `use --full` marker.
 
+## The command line (`main.c`, `help.c`)
+
+`main.c` dispatches `cg <command>` with one `strcmp` branch per command;
+subcommand switches live with their modules (`cmd_spec`, `cmd_fleet`,
+`cmd_config`, `cmd_docs`, `cmd_drift`, `cmd_work`, ...). What the CLI *says*
+about itself lives in one place: the static `HELP` table in `help.c`, one row
+per command and subcommand (group, name, principal arguments, usage, summary,
+detail, flags, examples, related, aliases). Four views are drawn from it —
+`help_overview` (`cg`, `cg help`, `-h`, `--help`: the grouped map),
+`help_command` (`cg help <name>`, `cg <name> --help`), the `--all` dump, and
+`--json` — and `help_usage` prints a row's usage line when `main.c` meets a
+bad argument. `help_route` runs before any flag is consumed. Text is wrapped
+to `COLUMNS`, then the tty width, default 80, floor 60; bold and dim are
+added only on a terminal without `NO_COLOR` or `TERM=dumb` (`CG_COLOR=0|1`
+overrides). Module dispatchers that still print their own `usage:` line
+carry it byte for byte in their row. `tests/integration/43_help.sh` scans
+`main.c` and every subcommand switch and fails when a dispatched name has no
+row, when a row's usage and a bad-argument line disagree, or when the
+README's command reference misses a command.
+
 ## Version control (`vcs.c`, `sha256.c`)
 
 Content-addressed snapshots: blobs and commit objects under

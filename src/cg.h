@@ -1205,4 +1205,15 @@ int  codemap_status(Cg *cg, char *rel, size_t cap);
 int cmd_docs(Cg *cg, int argc, char **argv, bool json); /* documentation closure */
 int spec_docs_finish(Cg *cg, const char *feature); /* internal checked closure */
 
+/* ---------------- help.c: the command table ---------------- */
+/* One table drives the overview, per-command detail, --all, --json, and
+ * main's bad-argument usage lines. help_route returns -1 when argv is not
+ * a help request (cg help, -h, --help, cg <command> ... --help|-h). */
+void help_overview(void);
+int  help_command(const char *name);
+int  cmd_help(int argc, char **argv);
+int  help_route(int argc, char **argv);
+void help_usage(const char *name);              /* "usage: cg ..." on stderr */
+void help_suggest(const char *name);            /* closest names, on stderr */
+
 #endif
