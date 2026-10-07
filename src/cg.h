@@ -42,6 +42,10 @@ typedef struct {
 } SysInfo;
 
 void sysinfo_detect(SysInfo *si);
+/* The most parse threads one index pass will run, whoever asks: --workers,
+ * CG_INDEX_WORKERS, or [index] workers in codify.kvx. The machine profile's
+ * own choice stays at or under 16; a person may ask for more, up to this. */
+#define CG_MAX_WORKERS 64
 
 /* ---------------- small utils ---------------- */
 typedef struct { char *p; size_t len, cap; } StrBuf;
@@ -261,13 +265,14 @@ int  cg_schema_upgrade(Cg *cg);
  * is the built-in default. Paths are root-relative and normalized. */
 #define CG_CONFIG_FILE "codify.kvx"
 enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
-       CFG_PATH_CODEMAP, CFG_NKEYS };
+       CFG_PATH_CODEMAP, CFG_INDEX_WORKERS, CFG_NKEYS };
 typedef struct {
     char root[4096];
     char file[4200];           /* <root>/codify.kvx */
     bool present;              /* the file exists */
     bool sync_auto;            /* [sync] auto: implicit syncs run */
     char spec[1024], context[1024], skills[1024], codemap[1024];
+    int  index_workers;        /* [index] workers: 1..CG_MAX_WORKERS, 0 = auto */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -278,6 +283,11 @@ const char *config_spec_rel(const char *root);     /* "spec" */
 const char *config_context_rel(const char *root);  /* ".codify" */
 const char *config_skills_rel(const char *root);   /* ".agents/skills" */
 const char *config_codemap_rel(const char *root);  /* "CODEMAP.md" */
+/* [index] workers: the parse worker count asked for, 0 = the machine's */
+int  config_index_workers(const char *root);
+/* a worker count as written anywhere (codify.kvx, CG_INDEX_WORKERS,
+ * --workers): "auto" or 0 -> 0, 1..CG_MAX_WORKERS -> itself, else -1 */
+int  config_parse_workers(const char *v);
 /* absolute joins; false (out empty) on overflow, like path_format */
 bool config_spec_dir(const char *root, char *out, size_t cap);
 bool config_workflow_path(const char *root, char *out, size_t cap);
@@ -330,7 +340,10 @@ typedef struct {
     /* how long to wait for another process's index pass to finish before
      * coalescing into it: 0 = never, -1 = cg->lock_wait_ms */
     long lock_wait_ms;
-    int  workers_cap;      /* 0 = sysinfo's choice */
+    int  workers_cap;      /* a ceiling on whatever is asked; 0 = none */
+    /* --workers N: the count asked for, ahead of CG_INDEX_WORKERS and
+     * [index] workers; 0 = not given (see syncgate_worker_request) */
+    int  workers;
     bool background;       /* hook/watch/editor: renice, quarter of the cores */
     bool quiet;
     /* targeted sync: only these root-relative paths (files or dirs) are
@@ -356,8 +369,14 @@ char *syncgate_take_dirty(const Cg *cg);               /* malloc'd or NULL */
 int  syncgate_slot_count(const SysInfo *si);
 int  syncgate_slot_acquire(const SysInfo *si);         /* fd or -1 */
 void syncgate_slot_release(int fd);
-int  syncgate_worker_budget(const SysInfo *si, const IndexOpts *o, int jobs,
-                            int *slot_fd);
+/* The parse worker count asked for, before any per-pass bound: flag (when
+ * > 0), then CG_INDEX_WORKERS, then [index] workers in root's codify.kvx,
+ * then the machine profile; *origin names which ("flag",
+ * "CG_INDEX_WORKERS", "codify.kvx", "machine"). Never above CG_MAX_WORKERS. */
+int  syncgate_worker_request(const char *root, const SysInfo *si, int flag,
+                             const char **origin);
+int  syncgate_worker_budget(const char *root, const SysInfo *si,
+                            const IndexOpts *o, int jobs, int *slot_fd);
 void syncgate_background_nice(void);
 
 /* import resolution and ref resolution (resolve.c) — runs post-scan */

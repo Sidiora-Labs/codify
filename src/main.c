@@ -240,7 +240,30 @@ static const char *opt(int *argc, char **argv, const char *name,
     return dflt;
 }
 
-static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
+/* --workers N on index, sync, and info: 1..CG_MAX_WORKERS, or auto/0 for
+ * "not given". *out is 0 when absent; false (after saying why) when the
+ * value is unusable — a mistyped count fails loudly, unlike the file. */
+static bool workers_opt(int *argc, char **argv, const char *cmd, int *out) {
+    const char *v = opt(argc, argv, "--workers", NULL);
+    *out = 0;
+    if (!v) return true;
+    int n = config_parse_workers(v);
+    if (n < 0) {
+        fprintf(stderr, "cg %s: --workers takes 1 to %d, or auto — not "
+                "'%s'\n", cmd, CG_MAX_WORKERS, v);
+        return false;
+    }
+    *out = n;
+    return true;
+}
+
+static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
+    /* the count an unbounded foreground pass would ask for, and who chose
+     * it; background passes, the file count, and the slot gate bound it
+     * per pass (cg sync --json reports what one actually used) */
+    const char *worigin;
+    int wanted = syncgate_worker_request(cg ? cg->root : NULL, si,
+                                         flag_workers, &worigin);
     char key[64];
     char *ms = NULL, *nf = NULL, *nb = NULL;
     if (cg) {
@@ -265,11 +288,12 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
             "\"cores_cgroup_quota\":%.2f,\"cores_effective\":%d,"
             "\"mem_total_kb\":%ld,\"mem_available_kb\":%ld,"
             "\"cgroup_mem_limit_kb\":%ld,\"workers\":%d,"
+            "\"workers_origin\":\"%s\",\"machine_workers\":%d,"
             "\"db_cache_kb\":%d,\"mmap_bytes\":%ld",
             si->profile, si->cores_online, si->cores_affinity,
             si->cores_quota, si->cores_effective, si->mem_total_kb,
-            si->mem_avail_kb, si->cg_mem_limit_kb, si->workers,
-            si->db_cache_kb, si->mmap_bytes);
+            si->mem_avail_kb, si->cg_mem_limit_kb, wanted, worigin,
+            si->workers, si->db_cache_kb, si->mmap_bytes);
         if (ms) sb_printf(&b, ",\"last_index_ms\":%s", ms);
         if (nf) sb_printf(&b, ",\"project_files\":%s", nf);
         if (nb) sb_printf(&b, ",\"last_index_bytes\":%s", nb);
@@ -296,8 +320,9 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json) {
         if (si->cg_mem_limit_kb > 0)
             printf(" (cgroup limit %.1f GB)", si->cg_mem_limit_kb / 1048576.0);
         printf("\n");
-        printf("sized pipeline: %d workers, %d KB db cache, %ld MB mmap\n",
-               si->workers, si->db_cache_kb, si->mmap_bytes / 1048576);
+        printf("sized pipeline: %d workers (%s), %d KB db cache, %ld MB "
+               "mmap\n", wanted, worigin, si->db_cache_kb,
+               si->mmap_bytes / 1048576);
         if (ms && nf)
             printf("measured project cost: %s files, last index %sms%s%s\n",
                    nf, ms, nb ? ", " : "", nb ? nb : "");
@@ -365,7 +390,12 @@ int main(int argc, char **argv) {
         char root[4096];
         if (cg_find_root(root, sizeof root) == 0 && cg_open(&cg, false) == 0)
             pcg = &cg;
-        int rc = cmd_info(&si, pcg, json);
+        int fw;
+        if (!workers_opt(&argc, argv, "info", &fw)) {
+            if (pcg) cg_close(pcg);
+            return 1;
+        }
+        int rc = cmd_info(&si, pcg, json, fw);
         if (pcg) cg_close(pcg);
         return rc;
     }
@@ -468,9 +498,15 @@ int main(int argc, char **argv) {
     int rc = 0;
 
     if (strcmp(cmd, "index") == 0) {
-        bool full = flag(&argc, argv, "--full");
+        IndexOpts o = {0};                 /* cg_index's blocking pass */
+        o.full = flag(&argc, argv, "--full");
+        o.lock_wait_ms = -1;
+        if (!workers_opt(&argc, argv, "index", &o.workers)) {
+            cg_close(&cg);
+            return 1;
+        }
         IndexStats st;
-        rc = cg_index(&cg, &si, full, &st, false);
+        rc = cg_index_ex(&cg, &si, &o, &st);
         if (rc != 0 && st.busy) { cg_busy_report("The index"); rc = CG_EXIT_BUSY; }
     } else if (strcmp(cmd, "sync") == 0) {
         /* sync is what hooks, watchers, and editors call after every edit,
@@ -483,6 +519,10 @@ int main(int argc, char **argv) {
         bool implicit  = flag(&argc, argv, "--auto");
         o.max_age_ms   = atol(opt(&argc, argv, "--max-age", "0"));
         o.background   = flag(&argc, argv, "--background");
+        if (!workers_opt(&argc, argv, "sync", &o.workers)) {
+            cg_close(&cg);
+            return 1;
+        }
         o.lock_wait_ms = atol(opt(&argc, argv, "--wait",
                                   o.background ? "0" : "2000"));
         o.quiet = json;

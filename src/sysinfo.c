@@ -101,7 +101,10 @@ void sysinfo_detect(SysInfo *si) {
         si->mem_avail_kb = cg_avail;
     if (si->mem_avail_kb < 0) si->mem_avail_kb = 256 * 1024;  /* conservative */
 
-    /* Size the pipeline from what we actually have. */
+    /* Size the pipeline from what we actually have. 16 is the machine's own
+     * ceiling, below CG_MAX_WORKERS: past it a pass is bound by the single
+     * writer, so only a person (--workers, CG_INDEX_WORKERS, [index]
+     * workers) may ask for more. */
     int w = si->cores_effective;
     if (w > 16) w = 16;
     if (si->mem_avail_kb < 300 * 1024 && w > 2) w = 2;   /* < 300MB: stay lean */

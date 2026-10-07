@@ -187,20 +187,38 @@ void syncgate_slot_release(int fd) {
     syncgate_release(fd);
 }
 
-/* How many parse threads this pass may use. Background passes (hooks,
- * watchers, editor refreshes) never take more than a quarter of the cores;
- * a pass that could not get a machine slot runs on two. CG_INDEX_WORKERS
- * caps everything. *slot_fd receives the slot to release afterwards. */
-int syncgate_worker_budget(const SysInfo *si, const IndexOpts *o, int jobs,
-                           int *slot_fd) {
+int syncgate_worker_request(const char *root, const SysInfo *si, int flag,
+                            const char **origin) {
+    if (flag > 0) {
+        *origin = "flag";
+        return flag < CG_MAX_WORKERS ? flag : CG_MAX_WORKERS;
+    }
+    /* an unusable CG_INDEX_WORKERS (or "auto", or 0) defers to the file */
+    int n = config_parse_workers(getenv("CG_INDEX_WORKERS"));
+    if (n > 0) { *origin = "CG_INDEX_WORKERS"; return n; }
+    n = root ? config_index_workers(root) : 0;
+    if (n > 0) { *origin = CG_CONFIG_FILE; return n; }
+    *origin = "machine";
+    return si->workers;
+}
+
+/* How many parse threads this pass may use. The count asked for (see
+ * syncgate_worker_request) may exceed the machine profile's choice, up to
+ * CG_MAX_WORKERS. Then: a caller's workers_cap bounds it; a background pass
+ * (hooks, watchers, editor refreshes) takes a quarter of a count someone
+ * asked for, at least one, or else a quarter of the cores, at least two;
+ * never more than there are files; and a pass that could not get a machine
+ * slot runs on two. *slot_fd receives the slot to release afterwards. */
+int syncgate_worker_budget(const char *root, const SysInfo *si,
+                           const IndexOpts *o, int jobs, int *slot_fd) {
     *slot_fd = -1;
-    int w = si->workers;
+    const char *origin;
+    int w = syncgate_worker_request(root, si, o->workers, &origin);
+    bool asked = strcmp(origin, "machine") != 0;
     if (o->workers_cap > 0 && o->workers_cap < w) w = o->workers_cap;
-    const char *e = getenv("CG_INDEX_WORKERS");
-    if (e && e[0]) { int n = atoi(e); if (n > 0 && n < w) w = n; }
     if (o->background) {
-        int q = si->cores_effective / 4;
-        if (q < 2) q = 2;
+        int q = asked ? w / 4 : si->cores_effective / 4;
+        if (q < (asked ? 1 : 2)) q = asked ? 1 : 2;
         if (w > q) w = q;
     }
     if (w > jobs) w = jobs;

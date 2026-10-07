@@ -84,10 +84,20 @@ A pass that wants more than two parse threads must hold a slot. Without
 one it still runs — on two threads. Several projects indexing at once
 therefore share the cores instead of each claiming all of them.
 
-The worker budget for one pass, in order: the machine's sized worker count,
-capped by the caller, capped by `CG_INDEX_WORKERS`, capped to a quarter of
-the cores (minimum 2) for a background pass, capped by the number of files
-actually queued, and finally capped to 2 when no slot was free. A
+The worker budget for one pass (`syncgate_worker_budget`), in order:
+
+1. The count asked for — the first of `--workers N` on `cg index` or
+   `cg sync`, `CG_INDEX_WORKERS`, `[index] workers` in `codify.kvx`
+   ([docs/config.md](config.md#index-workers)), and the machine's sized
+   worker count (at most 16). An asked-for count may exceed the machine's
+   choice, up to 64, the pipeline's hard cap. `auto` or `0` defers to the
+   next source; `cg info` prints the result and its origin.
+2. Capped by the caller's ceiling (the language server asks for a quarter
+   of the cores).
+3. For a background pass, a quarter of an asked-for count (minimum 1), or
+   with nothing asked for, a quarter of the cores (minimum 2).
+4. Capped by the number of files actually queued.
+5. Capped to 2 when no slot was free. A
 background pass also renices itself to 10 once: a hook's sync should lose
 to the agent's own build and tests, not compete with them.
 
@@ -169,7 +179,7 @@ the transcript is its working memory.
 
 | Variable | Effect |
 |---|---|
-| `CG_INDEX_WORKERS` | hard cap on parse threads for any pass |
+| `CG_INDEX_WORKERS` | parse threads for any pass, 1–64: beats `[index] workers`, yields to `--workers` (`auto`/`0`/unusable: unset) |
 | `CG_INDEX_SLOTS` | machine-wide parse slots (default `cores/4`, minimum 1) |
 | `CG_SLOT_DIR` | where the slot files live (default `/tmp/codify-<uid>`) |
 | `CG_BUSY_TIMEOUT_MS` | how long a CLI write waits for the database lock (default 30000) |

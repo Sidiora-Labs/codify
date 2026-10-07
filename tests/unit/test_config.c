@@ -1,5 +1,5 @@
 /* unit tests for src/config.c — defaults, parsing, path validation, the
- * per-root cache, and spec root discovery */
+ * [index] workers count, the per-root cache, and spec root discovery */
 #include "cg.h"
 #include "tap.h"
 #include <unistd.h>
@@ -48,6 +48,8 @@ int main(void) {
     ok_str(c->context, ".codify");
     ok_str(c->skills, ".agents/skills");
     ok_str(c->codemap, "CODEMAP.md");
+    ok(c->index_workers == 0, "workers default to auto (0)");
+    ok(config_index_workers(root) == 0, "accessor: auto");
     ok(c->nproblems == 0, "no problems without a file");
     for (int i = 0; i < CFG_NKEYS; i++)
         ok(!c->from_file[i], "key %d not from the file", i);
@@ -81,9 +83,13 @@ int main(void) {
             "spec    = \"./planning//specs/\"\n"
             "context = \"state/ctx\"\n"
             "skills  = tools/skills\n"
-            "codemap = \"docs/MAP.md\"\n");
+            "codemap = \"docs/MAP.md\"\n"
+            "[index]\n"
+            "workers = 8   # a bigger machine\n");
     c = config_load(root);
     ok(c->present, "file present");
+    ok(c->index_workers == 8, "workers = 8 parsed (%d)", c->index_workers);
+    ok(config_index_workers(root) == 8, "workers accessor agrees");
     ok(!c->sync_auto, "auto = false parsed");
     ok_str(c->spec, "planning/specs");
     ok_str(c->context, "state/ctx");
@@ -141,6 +147,55 @@ int main(void) {
     project(root, sizeof root, "badbool", "[sync]\nauto = maybe\n");
     c = quiet_load(root);
     ok(c->sync_auto && c->nproblems == 1, "bad bool keeps the default");
+
+    /* ---- [index] workers: the parser every source shares */
+    ok(config_parse_workers("auto") == 0, "auto is 0");
+    ok(config_parse_workers("AUTO") == 0, "auto is case-blind");
+    ok(config_parse_workers("0") == 0, "0 is auto");
+    ok(config_parse_workers("1") == 1, "1");
+    ok(config_parse_workers("64") == CG_MAX_WORKERS, "64 is the cap");
+    ok(config_parse_workers(" 12 ") == 12, "blanks around a count");
+    const char *nw[] = { "65", "-1", "+3", "3.5", "x", "", "8x", "1e2",
+                         "99999999999999999999" };
+    for (int i = 0; i < (int)(sizeof nw / sizeof nw[0]); i++)
+        ok(config_parse_workers(nw[i]) == -1, "'%s' rejected", nw[i]);
+    ok(config_parse_workers(NULL) == -1, "NULL rejected");
+    ok(CG_MAX_WORKERS == 64, "the pipeline cap is 64");
+
+    /* in the file: quoted or bare, auto, and the bad ones fall back */
+    const char *goodw[] = { "1", "64", "\"16\"", "auto", "\"auto\"", "0" };
+    const int   wantw[] = { 1, 64, 16, 0, 0, 0 };
+    for (int i = 0; i < 6; i++) {
+        char name[32], body[96];
+        snprintf(name, sizeof name, "w%d", i);
+        snprintf(body, sizeof body, "[index]\nworkers = %s\n", goodw[i]);
+        project(root, sizeof root, name, body);
+        c = quiet_load(root);
+        ok(c->index_workers == wantw[i] && c->nproblems == 0,
+           "workers = %s -> %d (%d, %d problems)", goodw[i], wantw[i],
+           c->index_workers, c->nproblems);
+        ok(c->from_file[CFG_INDEX_WORKERS], "workers = %s from the file",
+           goodw[i]);
+    }
+    const char *badw[] = { "65", "-2", "many", "2.5", "\"\"" };
+    for (int i = 0; i < 5; i++) {
+        char name[32], body[96];
+        snprintf(name, sizeof name, "wbad%d", i);
+        snprintf(body, sizeof body, "[index]\nworkers = %s\n", badw[i]);
+        project(root, sizeof root, name, body);
+        c = quiet_load(root);
+        ok(c->index_workers == 0, "workers = %s falls back to auto", badw[i]);
+        ok(!c->from_file[CFG_INDEX_WORKERS], "workers = %s not from the file",
+           badw[i]);
+        ok(c->nproblems == 1, "workers = %s counted (%d)", badw[i],
+           c->nproblems);
+        StrBuf wt; sb_init(&wt);
+        ok(config_check(root, &wt, NULL) == 1, "check names workers = %s",
+           badw[i]);
+        ok(strstr(wt.p, "[index] workers") && strstr(wt.p, CG_CONFIG_FILE),
+           "the message names the key and file: %s", wt.p);
+        sb_free(&wt);
+    }
 
     /* ---- config_check: unknown sections and keys, bad values */
     project(root, sizeof root, "unknown",

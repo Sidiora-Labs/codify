@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # codify.kvx — project configuration: defaults, relocated spec, context and
-# skills paths, rejected paths, [sync] auto=false, and the cg config command
+# skills paths, rejected paths, [sync] auto=false, [index] workers, and the
+# cg config command
 . "$(dirname "$0")/../lib.sh"
 
 export HOME="$TMP/home"
@@ -35,6 +36,7 @@ out="$("$CG" config init)"
 has "$out" "wrote $TMP/cfg/codify.kvx"
 has "$(cat codify.kvx)" "# codify.kvx — project configuration for Codify. Every key is optional."
 has "$(cat codify.kvx)" 'codemap = "CODEMAP.md"      # written by cg codemap'
+has "$(cat codify.kvx)" '# workers = auto'            # commented, with its default
 cp codify.kvx "$TMP/template.kvx"
 expect_rc 1 "$CG" config init
 cmp -s codify.kvx "$TMP/template.kvx" || fail "config init overwrote the file"
@@ -64,7 +66,7 @@ d="$("$CG" config --json)"
     || fail "origin of a set key: $d"
 [ "$(json_get "$d" '[s["value"] for s in d["settings"] if s["key"]=="sync.auto"][0]')" = False ] \
     || fail "sync.auto value in JSON: $d"
-[ "$(json_get "$d" 'len(d["settings"])')" = 5 ] || fail "every setting listed: $d"
+[ "$(json_get "$d" 'len(d["settings"])')" = 6 ] || fail "every setting listed: $d"
 out="$("$CG" config)"
 has "$out" "paths.context  .agents/ctx"
 has "$out" "codify.kvx"
@@ -263,5 +265,97 @@ payload='{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Edit","
 printf '%s' "$payload" | "$CG" hook post-edit >/dev/null 2>&1 || true
 has "$("$CG" search autoSentinel)" "src/auto.ts"
 hasnt "$("$CG" brief 2>&1)" "auto-sync is off"
+
+# ---- [index] workers: the configured parse worker count
+# Private machine slots so a concurrent suite cannot hold them (a pass that
+# gets no slot drops to two workers), and no inherited override.
+unset CG_INDEX_WORKERS
+export CG_SLOT_DIR="$TMP/slots" CG_INDEX_SLOTS=4
+cp -r "$FIXTURES/sample" "$TMP/workers"
+cd "$TMP/workers"
+"$CG" init >/dev/null
+nfiles="$(find . -path ./.codegraph -prune -o -type f -print | wc -l)"
+[ "$nfiles" -ge 3 ] || fail "the fixture needs at least three files ($nfiles)"
+# every file stale again, so the next sync has all of them to parse
+n=0
+stale() {
+    n=$((n + 1))
+    find . -path ./.codegraph -prune -o -type f -print |
+        xargs touch -d "2001-01-01 00:00:$(printf %02d "$n")"
+}
+[ "$("$CG" config get index.workers)" = auto ] || fail "workers default auto"
+printf '[index]\nworkers = 1\n' > codify.kvx
+stale
+d="$("$CG" sync --json)"
+[ "$(json_get "$d" 'd["workers"]')" = 1 ] || fail "workers = 1: $d"
+printf '[index]\nworkers = 3\n' > codify.kvx
+stale
+d="$("$CG" sync --json)"
+[ "$(json_get "$d" 'd["workers"]')" = 3 ] || fail "workers = 3: $d"
+has "$("$CG" info)" "3 workers (codify.kvx)"
+d="$("$CG" info --json)"
+[ "$(json_get "$d" 'd["workers_origin"]')" = codify.kvx ] || fail "info origin: $d"
+# cg index and cg init honour it too; the summary reports what was used
+has "$("$CG" index --full)" "[3 workers"
+# precedence: --workers, then CG_INDEX_WORKERS, then the file
+printf '[index]\nworkers = 1\n' > codify.kvx
+stale
+d="$("$CG" sync --json --workers 2)"
+[ "$(json_get "$d" 'd["workers"]')" = 2 ] || fail "--workers 2 beats workers = 1: $d"
+has "$("$CG" index --full --workers 2)" "[2 workers"
+has "$(CG_INDEX_WORKERS=2 "$CG" index --full)" "[2 workers"
+has "$(CG_INDEX_WORKERS=2 "$CG" index --full --workers 3)" "[3 workers"
+has "$(CG_INDEX_WORKERS=2 "$CG" info)" "2 workers (CG_INDEX_WORKERS)"
+has "$("$CG" info --workers 5)" "5 workers (flag)"
+expect_rc 1 "$CG" sync --workers 65
+expect_rc 1 "$CG" index --workers many
+# a background pass takes a quarter of the configured count, at least one
+printf '[index]\nworkers = 8\n' > codify.kvx
+stale
+d="$("$CG" sync --json --background --wait 5000)"
+[ "$(json_get "$d" 'd["workers"]')" = 2 ] || fail "background quarter of 8: $d"
+# a bad value is named with its key and file, warned in cg check, and the
+# machine's choice stands in for it
+for v in 65 -1 many 2.5; do
+    printf '[index]\nworkers = %s\n' "$v" > codify.kvx
+    stale
+    err="$("$CG" sync --json 2>&1 >/dev/null)"
+    has "$err" "codify.kvx"
+    has "$err" "[index] workers = $v"
+    has "$("$CG" info 2>/dev/null)" "(machine)"
+done
+out="$("$CG" config check 2>&1)" && fail "config check should exit 1 on workers = 2.5"
+has "$out" "[index] workers = 2.5"
+out="$("$CG" check 2>&1)" || true
+has "$out" "codify.kvx problem(s)"
+has "$out" "[index] workers"
+# config get, set, and the JSON shape
+"$CG" config set index.workers 4 >/dev/null
+grep -q '^workers = 4$' codify.kvx || fail "workers written: $(cat codify.kvx)"
+[ "$("$CG" config get index.workers)" = 4 ] || fail "get after set"
+d="$("$CG" config get index.workers --json)"
+[ "$(json_get "$d" 'd["value"]')" = 4 ] || fail "value is a number: $d"
+[ "$(json_get "$d" 'd["default"]')" = auto ] || fail "default auto: $d"
+cp codify.kvx "$TMP/before-workers.kvx"
+expect_rc 1 "$CG" config set index.workers 65
+expect_rc 1 "$CG" config set index.workers -3
+expect_rc 1 "$CG" config set index.workers lots
+cmp -s codify.kvx "$TMP/before-workers.kvx" || fail "a rejected workers set wrote the file"
+"$CG" config set index.workers auto >/dev/null
+[ "$("$CG" config get index.workers)" = auto ] || fail "set back to auto"
+# more workers than cores: a warning from config check, never a failure
+cores="$(json_get "$("$CG" info --json)" 'd["cores_effective"]')"
+if [ "$cores" -lt 64 ]; then
+    printf '[index]\nworkers = 64\n' > codify.kvx
+    out="$("$CG" config check)" || fail "over-cores must not fail config check"
+    has "$out" "warning:"
+    has "$out" "more than the $cores effective core(s)"
+    d="$("$CG" config check --json)"
+    [ "$(json_get "$d" 'len(d["warnings"])')" = 1 ] || fail "warnings in JSON: $d"
+    [ "$(json_get "$d" 'd["ok"]')" = True ] || fail "a warning is not a problem: $d"
+fi
+printf '[index]\nworkers = 1\n' > codify.kvx
+has "$("$CG" config check)" ": ok"
+unset CG_SLOT_DIR CG_INDEX_SLOTS
 
 echo "40_config ok"

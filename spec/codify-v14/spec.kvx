@@ -100,7 +100,7 @@ status  = "pending"
 
 [task.3.1]
 title      = "[index] workers: a configured parse worker count with flag and environment precedence"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["config_index_workers", "syncgate_worker_budget"]
 touches    = ["src/config.c", "src/syncgate.c", "src/scan.c", "src/sysinfo.c", "src/main.c", "src/cg.h", "codify.kvx", "tests/unit/test_config.c", "tests/integration/40_config.sh", "docs/config.md", "docs/sync.md", "README.md"]

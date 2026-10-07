@@ -8,6 +8,8 @@
  *           context = ".codify"     agent-context.md, recap.md
  *           skills = ".agents/skills"   generated SKILL.md files
  *           codemap = "CODEMAP.md"  written by cg codemap
+ *   [index] workers = auto          parse workers per index pass: 1..64,
+ *                                   or auto (0) for the machine's choice
  *
  * The file belongs to the tree, exactly like the spec directory it may
  * relocate: it travels with the branch, so a linked worktree reads its own
@@ -22,11 +24,12 @@
  */
 #include "cg.h"
 #include <ctype.h>
+#include <errno.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-typedef enum { CFG_BOOL, CFG_PATH } CfgType;
+typedef enum { CFG_BOOL, CFG_PATH, CFG_INT } CfgType;
 
 /* The schema. Order is the order of every listing and of `cg config init`. */
 static const struct {
@@ -46,6 +49,8 @@ static const struct {
                            "generated SKILL.md files" },
     [CFG_PATH_CODEMAP] = { "paths", "codemap", CFG_PATH, "CODEMAP.md",
                            "written by cg codemap" },
+    [CFG_INDEX_WORKERS] = { "index", "workers", CFG_INT, "auto",
+                           "parse workers per index pass: 1-64, or auto" },
 };
 
 static const char CFG_TEMPLATE[] =
@@ -57,7 +62,10 @@ static const char CFG_TEMPLATE[] =
 "spec    = \"spec\"            # workflow.kvx, feature specs, rendered mirrors\n"
 "context = \".codify\"         # agent-context.md, recap.md\n"
 "skills  = \".agents/skills\"  # generated SKILL.md files\n"
-"codemap = \"CODEMAP.md\"      # written by cg codemap\n";
+"codemap = \"CODEMAP.md\"      # written by cg codemap\n"
+"\n"
+"[index]\n"
+"# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine\n";
 
 /* ---------------- reading and validating ---------------- */
 
@@ -122,6 +130,19 @@ static int cfg_parse_bool(const char *v) {
     for (int i = 0; T[i]; i++) if (!strcasecmp(v, T[i])) return 1;
     for (int i = 0; F[i]; i++) if (!strcasecmp(v, F[i])) return 0;
     return -1;
+}
+
+int config_parse_workers(const char *v) {
+    if (!v) return -1;
+    while (isspace((unsigned char)*v)) v++;
+    if (!strcasecmp(v, "auto")) return 0;
+    if (!isdigit((unsigned char)*v)) return -1;   /* no sign, no blank */
+    char *end = NULL;
+    errno = 0;
+    long n = strtol(v, &end, 10);
+    while (end && isspace((unsigned char)*end)) end++;
+    if (errno || !end || *end || n > CG_MAX_WORKERS) return -1;
+    return (int)n;
 }
 
 /* Normalize a configured path to clean root-relative form ("./a//b/" ->
@@ -215,7 +236,19 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
             continue;
         }
         char *v = kvx_str(k, x->section, x->key);
-        if (CFG_KEYS[i].type == CFG_BOOL) {
+        if (CFG_KEYS[i].type == CFG_INT) {
+            int n = config_parse_workers(v);
+            if (n < 0)
+                cfg_issue(is, "bad_value", x->section, x->key,
+                          "%s: [%s] %s = %s is not a worker count from 1 to "
+                          "%d — using %s (the machine's choice)", c->file,
+                          x->section, x->key, x->raw, CG_MAX_WORKERS,
+                          CFG_KEYS[i].dflt);
+            else {
+                c->index_workers = n;
+                c->from_file[i] = true;
+            }
+        } else if (CFG_KEYS[i].type == CFG_BOOL) {
             int b = cfg_parse_bool(v);
             if (b < 0)
                 cfg_issue(is, "bad_value", x->section, x->key,
@@ -293,6 +326,9 @@ const char *config_skills_rel(const char *root) {
 }
 const char *config_codemap_rel(const char *root) {
     return config_load(root)->codemap;
+}
+int config_index_workers(const char *root) {
+    return config_load(root)->index_workers;
 }
 
 bool config_spec_dir(const char *root, char *out, size_t cap) {
@@ -389,6 +425,23 @@ int config_check(const char *root, StrBuf *text, StrBuf *json) {
     return n;
 }
 
+/* More workers than this machine has cores is legal — the file travels to
+ * bigger machines — but here it only adds contention, so cg config check
+ * says so without failing. Empty when there is nothing to say. */
+static void cfg_core_warning(const char *root, char *out, size_t cap) {
+    out[0] = 0;
+    CgConfig c;
+    cfg_read(root, &c, NULL);
+    if (!c.index_workers) return;
+    SysInfo si;
+    sysinfo_detect(&si);
+    if (c.index_workers > si.cores_effective)
+        snprintf(out, cap, "%s: [index] workers = %d is more than the %d "
+                 "effective core(s) here — the extra workers only contend "
+                 "(allowed; not an error)", c.file, c.index_workers,
+                 si.cores_effective);
+}
+
 /* ---------------- cg config ---------------- */
 
 /* The tree `cg config` speaks for: the enclosing Codify project, else the
@@ -407,6 +460,12 @@ static void cfg_root(char *out, size_t cap) {
 
 static const char *cfg_value(const CgConfig *c, int i) {
     if (i == CFG_SYNC_AUTO) return c->sync_auto ? "true" : "false";
+    if (i == CFG_INDEX_WORKERS) {
+        static char num[16];           /* cg config is one thread */
+        if (!c->index_workers) return "auto";
+        snprintf(num, sizeof num, "%d", c->index_workers);
+        return num;
+    }
     return cfg_slot((CgConfig *)c, i);
 }
 
@@ -417,7 +476,10 @@ static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {
              CFG_KEYS[i].key);
     sb_json_str(b, dotted);
     sb_puts(b, ",\"value\":");
-    if (CFG_KEYS[i].type == CFG_BOOL) sb_puts(b, cfg_value(c, i));
+    /* a worker count is a number in JSON; auto stays the string "auto" */
+    if (CFG_KEYS[i].type == CFG_BOOL ||
+        (CFG_KEYS[i].type == CFG_INT && c->index_workers))
+        sb_puts(b, cfg_value(c, i));
     else sb_json_str(b, cfg_value(c, i));
     sb_puts(b, ",\"default\":");
     if (CFG_KEYS[i].type == CFG_BOOL) sb_puts(b, CFG_KEYS[i].dflt);
@@ -508,7 +570,17 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
         return 1;
     }
     char norm[1024];
-    if (CFG_KEYS[i].type == CFG_BOOL) {
+    if (CFG_KEYS[i].type == CFG_INT) {
+        int n = config_parse_workers(value);
+        if (n < 0) {
+            fprintf(stderr, "cg config: %s takes a worker count from 1 to "
+                    "%d, or auto — not '%s'\n", dotted, CG_MAX_WORKERS,
+                    value);
+            return 1;
+        }
+        if (n) snprintf(norm, sizeof norm, "%d", n);
+        else snprintf(norm, sizeof norm, "auto");
+    } else if (CFG_KEYS[i].type == CFG_BOOL) {
         int b = cfg_parse_bool(value);
         if (b < 0) {
             fprintf(stderr, "cg config: %s takes true or false, not '%s'\n",
@@ -535,7 +607,10 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
             return 1;
         }
     }
-    int rc = CFG_KEYS[i].type == CFG_BOOL
+    /* a count is written bare (workers = 8); auto is quoted like a path */
+    bool raw = CFG_KEYS[i].type == CFG_BOOL ||
+               (CFG_KEYS[i].type == CFG_INT && strcmp(norm, "auto"));
+    int rc = raw
            ? kvx_set_raw(path, CFG_KEYS[i].section, CFG_KEYS[i].key, norm)
            : kvx_set_string(path, CFG_KEYS[i].section, CFG_KEYS[i].key, norm);
     if (rc != 0) {
@@ -561,9 +636,22 @@ int cmd_config(int argc, char **argv, bool json) {
         StrBuf t; sb_init(&t);
         StrBuf j; sb_init(&j);
         int n = config_check(root, &t, &j);
-        if (json) printf("%s\n", j.p);
-        else if (n) fputs(t.p, stdout);
-        else if (config_load(root)->present)
+        char warn[4800];
+        cfg_core_warning(root, warn, sizeof warn);
+        if (json) {
+            /* the object config_check built, with a warnings list spliced
+             * in before its closing brace */
+            if (j.len && j.p[j.len - 1] == '}') j.p[--j.len] = 0;
+            sb_puts(&j, ",\"warnings\":[");
+            if (warn[0]) sb_json_str(&j, warn);
+            sb_puts(&j, "]}");
+            printf("%s\n", j.p);
+        } else if (n) {
+            fputs(t.p, stdout);
+            if (warn[0]) printf("warning: %s\n", warn);
+        } else if (warn[0]) {
+            printf("warning: %s\n", warn);
+        } else if (config_load(root)->present)
             printf("%s/%s: ok\n", root, CG_CONFIG_FILE);
         else
             printf("%s/%s: absent — every setting is the default\n", root,

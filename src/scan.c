@@ -1108,11 +1108,11 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         pthread_cond_init(&pipe.can_pop, NULL);
 
         int slot = -1;
-        int nw = syncgate_worker_budget(si, o, jobs.n, &slot);
-        if (nw > 16) nw = 16;
+        int nw = syncgate_worker_budget(cg->root, si, o, jobs.n, &slot);
+        if (nw > CG_MAX_WORKERS) nw = CG_MAX_WORKERS;
         if (nw > st->workers) st->workers = nw;
         pipe.producers_left = nw;
-        pthread_t th[16];
+        pthread_t th[CG_MAX_WORKERS];
         for (int i = 0; i < nw; i++)
             pthread_create(&th[i], NULL, worker, &pipe);
 

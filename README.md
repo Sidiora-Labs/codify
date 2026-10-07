@@ -175,7 +175,7 @@ cg init
 | Command | Description |
 |---|---|
 | `cg init [--nested]` | Create `.codegraph/` and build the initial index; inside a linked git worktree of an initialized repository, join the shared graph under this branch instead |
-| `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named. `cg index [--full]` is the blocking form that always walks |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named. `cg index [--full] [--workers N]` is the blocking form that always walks. `--workers` beats `CG_INDEX_WORKERS` and `[index] workers` |
 | `cg branches` | Every branch indexed into the shared graph, with its worktree, head, base, and file count |
 | `cg search <q> [-n N]` | Symbol and full-text search: a phrase matches names (`export memory` finds `memory_export` and `exportMemory`), doc comments and bodies, ranked in that order with source before tests; file hits show the matching line. Definitions answer, never their prototypes ([docs/retrieval.md](docs/retrieval.md)) |
 | `cg symbol <name>` | Definition, snippet, and reference count |
@@ -189,7 +189,7 @@ cg init
 | `cg test-impact [symbol]` | Tests referencing a symbol — or every symbol in your uncommitted changes |
 | `cg watch [--debounce MS]` | Auto-sync on native filesystem events |
 | `cg root` | The project root `cg` resolves to from here; `--json` adds the shared project, the worktree flag, and the branch |
-| `cg info` | Machine profile, pipeline sizing, the bound project root, and the branch |
+| `cg info` | Machine profile, pipeline sizing (the worker count and its origin), the bound project root, and the branch |
 | `cg config [init\|get K\|set K V\|check] [--json]` | Project configuration in `codify.kvx`: every setting with its origin, the commented defaults, one key read or written in place, and a check for unknown keys and bad values. Works before `cg init`. See [docs/config.md](docs/config.md) |
 
 ### Version control
@@ -540,7 +540,8 @@ Apart from the opt-in changelog highlights and `cg recap`, this is the one remot
 ## Project configuration
 
 Codify works without any configuration file. If you want to change where it
-keeps its files, or stop it from syncing the graph on its own, add an optional
+keeps its files, stop it from syncing the graph on its own, or set how many
+parse workers an index pass uses, add an optional
 `codify.kvx` at the repository root. `cg config init` writes one with every
 default spelled out and a comment on each key:
 
@@ -553,6 +554,9 @@ spec    = "spec"            # workflow.kvx, feature specs, rendered mirrors
 context = ".codify"         # agent-context.md, recap.md
 skills  = ".agents/skills"  # generated SKILL.md files
 codemap = "CODEMAP.md"      # written by cg codemap
+
+[index]
+# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine
 ```
 
 Setting `paths.spec = "planning/specs"` moves the whole spec workflow there.
@@ -564,6 +568,12 @@ Setting `auto = false` stops every implicit sync: the post-edit hook, the
 freshness check on read commands, the pre-commit index, the post-commit hook,
 and the MCP, LSP, watch and VS Code refreshes. `cg sync`, `cg index` and
 `cg init` still run, and `cg brief` says that the graph may be stale.
+
+`[index] workers = N` (1 to 64) sets the parse workers for `cg init`, `cg index`
+and `cg sync` — more than the machine profile picks on a big machine, fewer on
+a shared one. `--workers N` on the command line beats `CG_INDEX_WORKERS`,
+which beats the file; `cg info` prints the count and where it came from
+([docs/config.md](docs/config.md#index-workers)).
 
 A path that is absolute, that escapes the repository with `..`, or that is
 empty is rejected with a message naming the key and the file, and the default

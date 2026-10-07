@@ -7,3 +7,6 @@ spec    = "spec"            # workflow.kvx, feature specs, rendered mirrors
 context = ".codify"         # agent-context.md, recap.md
 skills  = ".agents/skills"  # generated SKILL.md files
 codemap = "CODEMAP.md"      # written by cg codemap
+
+[index]
+# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine

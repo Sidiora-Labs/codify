@@ -26,7 +26,7 @@
 ## [index] workers in codify.kvx
 
 - [ ] 3. Tune
-  - [ ] 3.1 [index] workers: a configured parse worker count with flag and environment precedence
+  - [x] 3.1 [index] workers: a configured parse worker count with flag and environment precedence
     - config.c: CFG_INDEX_WORKERS in CFG_KEYS with an integer kind, auto for 0 or missing, 1..64 accepted, the template line, get/set/check, and the over-cores warning in check.
     - syncgate_worker_budget: flag, CG_INDEX_WORKERS, config, sysinfo in that order against a 64 cap; the thread array and chunk accounting sized for 64; background passes take a quarter of the configured count; the origin recorded for cg info.
     - cg index and cg sync accept --workers N; cg info prints the count and origin; tests in 40_config.sh and test_config.c per req 3.6.
