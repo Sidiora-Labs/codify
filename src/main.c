@@ -275,6 +275,15 @@ int main(int argc, char **argv) {
         return rc;
     }
 
+    /* Every command below needs the graph, but a name that is no command
+     * at all is answered first: the suggestion must not hide behind "not
+     * inside a Codify project" when cg is run from an uninitialised tree. */
+    if (!help_known(cmd)) {
+        fprintf(stderr, "cg: unknown command '%s' (try `cg help`)\n", cmd);
+        help_suggest(cmd);
+        return 1;
+    }
+
     if (cg_open(&cg, false) != 0) return 1;
     cg.no_soft = no_soft;
     /* Reads answer for the branch the caller is standing on unless it says

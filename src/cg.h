@@ -20,7 +20,7 @@
 #define CG_OBJECTS  ".codegraph/objects"
 #define CG_HEAD     ".codegraph/HEAD"
 #define CG_IGNORE   ".cgignore"
-#define CG_VERSION  "1.3.0"
+#define CG_VERSION  "1.4.0"
 #define CG_MCP_VERSION "2025-11-25"
 #define CG_AGENT_CONTEXT ".codify/agent-context.md"
 #define CG_DOC_TASK "@docs"
@@ -1302,5 +1302,6 @@ int  cmd_help(int argc, char **argv);
 int  help_route(int argc, char **argv);
 void help_usage(const char *name);              /* "usage: cg ..." on stderr */
 void help_suggest(const char *name);            /* closest names, on stderr */
+bool help_known(const char *name);              /* a top-level row or alias */
 
 #endif

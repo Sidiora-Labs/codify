@@ -980,6 +980,10 @@ static const HelpCmd *help_find(const char *name) {
     return NULL;
 }
 
+/* main asks before it opens the graph, so an unknown command gets its
+ * suggestion outside a project too instead of "not inside a Codify project" */
+bool help_known(const char *name) { return help_find(name) != NULL; }
+
 /* the subcommands of a top-level name: rows named "<parent> <word>" */
 static bool is_child(const HelpCmd *c, const char *parent) {
     size_t n = strlen(parent);
