@@ -360,6 +360,19 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);
 /* Blocking full-strength wrapper: waits for the gate, always walks. */
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);
 
+/* progress.c — the live status line for init, index, and sync (main thread
+ * only; off unless requested and the pass is neither quiet nor background) */
+void progress_request(bool want);   /* the command a person runs asks for it */
+void progress_begin(const IndexOpts *o);
+void progress_step(const char *step);   /* cg init's named steps */
+void progress_phase(const char *phase, long done, long total);
+void progress_flush(void);              /* draw now: bounded points only */
+void progress_tick(long done, long total, const char *path);
+void progress_workers(int n);
+void progress_wait(const char *what, long waited_ms);  /* NULL clears */
+void progress_end(void);                /* erases the line; call before output */
+int  progress_begin_write(Cg *cg);      /* cg_begin_write, wait shown */
+
 /* syncgate.c — the single-writer index gate and machine-wide parse slots */
 int  syncgate_acquire(const Cg *cg, long wait_ms);     /* fd or -1 */
 void syncgate_release(int fd);

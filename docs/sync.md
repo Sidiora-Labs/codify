@@ -175,6 +175,30 @@ the transcript is its working memory.
 `cg hook install` writes the template that uses it, and the git
 `post-commit` hook syncs with `--background`.
 
+## Progress
+
+`cg init`, `cg index`, and `cg sync` run by a person show one status line on
+stderr while the pass runs: the phase (walking the tree, parsing files,
+writing the graph, resolving references, finishing), files done of files to
+do, the parse workers, the elapsed time, and the path in hand. On a terminal
+it is drawn in place from 250 ms into the pass, at most ten times a second,
+and erased before the summary, so the finished output is the same as before.
+`cg init` also names its first step (creating the graph directory) and the
+walk's file count once it is known.
+
+A pass that waits says so — `waiting 3.1s for another cg process's index
+pass` at the gate, `waiting 1.4s for the database write lock` between chunks
+— so a wait is never mistaken for a hang. The stall and busy messages are
+unchanged.
+
+Piped output prints nothing new. `CG_PROGRESS=plain` prints one plain line
+(no escape codes) at each phase change and at most every two seconds;
+`CG_PROGRESS=0` turns progress off everywhere. `--json`, `--auto`,
+`--background`, the post-edit hook, the freshness pass before read
+commands, and the MCP, LSP, serve, watch, fleet, and editor refreshes never
+show it. The counts come from the consumer loop the pipeline already runs;
+parse workers never touch it.
+
 ## Environment
 
 | Variable | Effect |
@@ -183,6 +207,7 @@ the transcript is its working memory.
 | `CG_INDEX_SLOTS` | machine-wide parse slots (default `cores/4`, minimum 1) |
 | `CG_SLOT_DIR` | where the slot files live (default `/tmp/codify-<uid>`) |
 | `CG_BUSY_TIMEOUT_MS` | how long a CLI write waits for the database lock (default 30000) |
+| `CG_PROGRESS` | `plain`: progress as plain lines even when piped; `0`: no progress |
 
 ## Limitations
 

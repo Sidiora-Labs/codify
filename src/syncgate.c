@@ -68,12 +68,14 @@ int syncgate_acquire(const Cg *cg, long wait_ms) {
     if (fd < 0) return -1;
     long waited = 0;
     for (;;) {
-        if (flock(fd, LOCK_EX | LOCK_NB) == 0) return fd;
+        if (flock(fd, LOCK_EX | LOCK_NB) == 0) { progress_wait(NULL, 0); return fd; }
         if (waited >= wait_ms) break;
+        progress_wait("another cg process's index pass", waited);
         long step = wait_ms - waited < GATE_POLL_MS ? wait_ms - waited : GATE_POLL_MS;
         sleep_ms(step);
         waited += step;
     }
+    progress_wait(NULL, 0);
     close(fd);
     return -1;
 }

@@ -65,7 +65,7 @@ status  = "pending"
 
 [task.1.1]
 title      = "Live progress on the terminal for init, index, and sync"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["progress_begin", "progress_tick", "progress_end"]
 touches    = ["src/progress.c", "src/scan.c", "src/syncgate.c", "src/main.c", "src/cg.h", "tests/integration/41_progress.sh", "docs/sync.md", "README.md"]

@@ -7,7 +7,7 @@
 ## Progress for init, sync, and index
 
 - [ ] 1. See
-  - [ ] 1.1 Live progress on the terminal for init, index, and sync
+  - [x] 1.1 Live progress on the terminal for init, index, and sync
     - progress.c: a main-thread Progress with phase, done, total, current path, workers, waiting-for, and elapsed; tty rendering in place at ten Hz, CG_PROGRESS=plain lines, CG_PROGRESS=0 off; erased before the summary.
     - Hook it into index_pass (walk, parse, write, resolve) and into the gate and lock waits; cg init names its steps; implicit and quiet passes never show it.
     - 41_progress.sh: CG_PROGRESS=plain shows the phases and counts on a fixture; default non-tty output is byte-identical to today; --json unchanged; implicit syncs silent.
