@@ -64,6 +64,7 @@ static void walk_dir(const char *root, const char *rel, const Ignore *ig,
     snprintf(abs, sizeof abs, "%s/%s", root, rel[0] ? rel : ".");
     DIR *d = opendir(abs);
     if (!d) return;
+    progress_tick(wl->n, 0, rel);       /* one tick per directory */
     struct dirent *e;
     while ((e = readdir(d))) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
@@ -857,7 +858,7 @@ static void anchor_edges_scoped(Cg *cg, IndexStats *st) {
  * re-parsed by the next run), and every result is freed either way. */
 static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
                        IndexStats *st) {
-    int rc = cg_begin_write(cg);
+    int rc = progress_begin_write(cg);
     for (int i = 0; i < n; i++) {
         if (rc == 0) write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st);
         if (chunk[i].parsed) parse_result_free(&chunk[i].pr);
@@ -1003,9 +1004,12 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     Ignore ig;
     ignore_load(&ig, cg->root);
     WalkList wl = {0};
+    progress_phase("walking the tree", 0, 0);
     if (targets) walk_targets(cg->root, &ig, targets, ntargets, &wl);
     else         walk_dir(cg->root, "", &ig, &wl);
     ignore_free(&ig);
+    progress_tick(wl.n, 0, "");
+    progress_flush();                   /* the count, once known */
     qsort(wl.v, (size_t)wl.n, sizeof(Walked), walked_cmp);
     if (!targets && wl.n > st->files_seen) st->files_seen = wl.n;
     if (targets) st->files_seen += wl.n;
@@ -1079,7 +1083,8 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     bool stalled = false;
 
     if (nremoved > 0) {
-        if (cg_begin_write(cg) != 0) {
+        progress_phase("writing the graph", 0, nremoved);
+        if (progress_begin_write(cg) != 0) {
             stalled = true;
         } else {
             sqlite3_stmt *del_file = cg_prep(cg, "DELETE FROM files WHERE id=?");
@@ -1116,10 +1121,17 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         for (int i = 0; i < nw; i++)
             pthread_create(&th[i], NULL, worker, &pipe);
 
+
+        /* progress counts what the consumer already sees: one per pop */
+        long popped = 0;
+        progress_workers(nw);
+        progress_phase("parsing files", 0, jobs.n);
         Done chunk[INDEX_CHUNK];
         int nchunk = 0;
         Done d;
         while (ring_pop(&pipe, &d)) {
+            popped++;
+            progress_tick(popped, jobs.n, d.idx >= 0 ? jobs.v[d.idx].rel : NULL);
             if (d.idx < 0) { st->files_skipped++; continue; }
             if (stalled) {                 /* drain so the workers can exit */
                 if (d.parsed) parse_result_free(&d.pr);
@@ -1128,11 +1140,14 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
             }
             chunk[nchunk++] = d;
             if (nchunk == INDEX_CHUNK) {
+                progress_phase("writing the graph", popped, jobs.n);
                 if (flush_chunk(cg, &s, jobs.v, chunk, nchunk, st) != 0)
                     stalled = true;
                 nchunk = 0;
+                progress_phase("parsing files", popped, jobs.n);
             }
         }
+        progress_phase("writing the graph", popped, jobs.n);
         if (nchunk && !stalled &&
             flush_chunk(cg, &s, jobs.v, chunk, nchunk, st) != 0)
             stalled = true;
@@ -1179,6 +1194,7 @@ static bool index_is_fresh(Cg *cg, long max_age_ms) {
 }
 
 static void index_report(const IndexStats *st, const IndexOpts *o) {
+    progress_end();                     /* the summary replaces the line */
     if (o->quiet) return;
     if (st->busy) {
         fprintf(stderr, "cg: index stalled — the database stayed busy; "
@@ -1209,6 +1225,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     memset(st, 0, sizeof *st);
     lang_global_init();
     if (o->background) syncgate_background_nice();
+    progress_begin(o);
 
     /* rows are written under the branch; without a registered one (the
      * database was busy at open) there is nothing correct to write */
@@ -1324,19 +1341,27 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     bool recover = pending && pending[0] == '1';
     free(pending);
     if (!stalled && need_resolve) {
-        if (cg_begin_write(cg) != 0) {
+        progress_workers(0);
+        progress_phase("resolving references", 0, 3);
+        progress_flush();               /* long and silent: draw it now */
+        if (progress_begin_write(cg) != 0) {
             stalled = true;
         } else {
             if (o->full || recover || !index_scope_bounded(cg)) {
                 anchor_edges(cg, st);
+                progress_tick(1, 3, NULL);
                 resolve_imports(cg);
+                progress_tick(2, 3, NULL);
                 resolve_refs(cg);
             } else {
                 st->scoped = true;
                 anchor_edges_scoped(cg, st);
+                progress_tick(1, 3, NULL);
                 resolve_imports_scoped(cg);
+                progress_tick(2, 3, NULL);
                 resolve_refs_scoped(cg);
             }
+            progress_tick(3, 3, NULL);
             cg_meta_set(cg, pkey, "0");
             cg_exec(cg, "COMMIT");
         }
@@ -1344,6 +1369,8 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     index_scope_end(cg);
     st->busy = stalled;
     st->ms = now_ms() - t0;
+    progress_workers(0);
+    progress_phase("finishing", 0, 0);
 
     /* a stalled run leaves the bookkeeping alone: every write below would
      * wait on the same lock, and the numbers would describe a partial pass */

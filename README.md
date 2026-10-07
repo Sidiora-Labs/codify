@@ -168,6 +168,12 @@ cd your-project
 cg init
 ```
 
+On a terminal, `cg init`, `cg index`, and `cg sync` show a live progress line
+on stderr — phase, files done of files to do, workers, elapsed time, and any
+lock it is waiting for — erased before the summary. Piped output is unchanged;
+`CG_PROGRESS=plain` prints plain lines instead, `CG_PROGRESS=0` turns it off.
+See [docs/sync.md](docs/sync.md#progress).
+
 ## Command reference
 
 ### Graph

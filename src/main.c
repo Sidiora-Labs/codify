@@ -402,6 +402,7 @@ int main(int argc, char **argv) {
         if (!nested && cg_find_project_at(here, root, shared, sizeof root) == 0
             && strcmp(root, here) == 0 && strcmp(shared, here) != 0) {
             if (cg_open(&cg, false) != 0) return 1;
+            progress_request(!json);
             IndexStats st;
             cg_index(&cg, &si, true, &st, false);
             printf("joined %s as worktree %s on branch %s\n", cg.shared,
@@ -419,6 +420,10 @@ int main(int argc, char **argv) {
                 "anyway.\n", root, here);
             return 1;
         }
+        /* a fifty-thousand-file tree must show activity in the first second:
+         * each step is named as it begins, the walk's count once known */
+        progress_request(!json);
+        progress_step("creating the graph directory");
         if (cg_open(&cg, true) != 0) return 1;
         IndexStats st;
         cg_index(&cg, &si, true, &st, false);
@@ -470,6 +475,7 @@ int main(int argc, char **argv) {
     if (strcmp(cmd, "index") == 0) {
         bool full = flag(&argc, argv, "--full");
         IndexStats st;
+        progress_request(!json);
         rc = cg_index(&cg, &si, full, &st, false);
         if (rc != 0 && st.busy) { cg_busy_report("The index"); rc = CG_EXIT_BUSY; }
     } else if (strcmp(cmd, "sync") == 0) {
@@ -494,6 +500,7 @@ int main(int argc, char **argv) {
             cg_close(&cg);
             return 0;
         }
+        progress_request(!json && !implicit && !o.background);
         rc = cg_index_ex(&cg, &si, &o, &st);
         if (json) {
             printf("{\"indexed\":%ld,\"removed\":%ld,\"seen\":%ld,"
