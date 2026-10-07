@@ -82,7 +82,7 @@ status  = "pending"
 
 [task.2.1]
 title      = "Journal lifecycle writes when the database is busy; replay under the next lock"
-status     = "pending"
+status     = "done"
 wave       = 1
 symbols    = ["journal_append", "journal_replay", "cmd_journal"]
 touches    = ["src/journal.c", "src/db.c", "src/memory.c", "src/events.c", "src/spec.c", "src/govern.c", "src/main.c", "src/cg.h", "src/agent.c", "tests/integration/42_journal.sh", "tests/integration/23_dblock.sh", "docs/journal.md", "docs/sync.md", "README.md"]

@@ -147,6 +147,7 @@ int main(int argc, char **argv) {
     if (hrc >= 0) return hrc;
     kvx_status_hook = events_kvx_status;
     const char *cmd = argv[1];
+    journal_set_command(cmd, argc > 2 ? argv[2] : NULL);
     bool json = flag(&argc, argv, "--json");
     bool no_soft = flag(&argc, argv, "--no-soft");
     bool all_branches = flag(&argc, argv, "--all-branches");
@@ -292,7 +293,9 @@ int main(int argc, char **argv) {
     }
     int rc = 0;
 
-    if (strcmp(cmd, "index") == 0) {
+    if (strcmp(cmd, "journal") == 0) {
+        rc = cmd_journal(&cg, argc - 2, argv + 2, json);
+    } else if (strcmp(cmd, "index") == 0) {
         IndexOpts o = {0};                 /* cg_index's blocking pass */
         o.full = flag(&argc, argv, "--full");
         o.lock_wait_ms = -1;
@@ -300,6 +303,7 @@ int main(int argc, char **argv) {
             cg_close(&cg);
             return 1;
         }
+        journal_replay(&cg, JOURNAL_PROBE);     /* queued writes first */
         IndexStats st;
         progress_request(!json);
         rc = cg_index_ex(&cg, &si, &o, &st);
@@ -325,6 +329,7 @@ int main(int argc, char **argv) {
         o.paths = (const char *const *)(argv + 2);
         o.npaths = argc - 2;
         IndexStats st;
+        journal_replay(&cg, JOURNAL_PROBE);     /* queued writes first */
         if (implicit && !config_auto_sync(cg.root)) {
             if (json) printf("{\"skipped\":\"auto-sync is off\"}\n");
             cg_close(&cg);
@@ -483,12 +488,10 @@ int main(int argc, char **argv) {
             rc = 1;
         } else {
             char *dflt = task ? NULL : spec_active_tag();
-            rc = cmd_remember(&cg, argv[2], type, task ? task : dflt,
-                              symbols, files, json);
+            rc = cmd_remember_ex(&cg, argv[2], type, task ? task : dflt,
+                                 symbols, files,
+                                 supersedes ? atol(supersedes) : 0, json);
             free(dflt);
-            if (rc == 0 && supersedes)
-                rc = memory_supersede(&cg, atol(supersedes),
-                                      (long)sqlite3_last_insert_rowid(cg.db));
         }
     } else if (strcmp(cmd, "recall") == 0) {
         const char *task = opt(&argc, argv, "--task", NULL);

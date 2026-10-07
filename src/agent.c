@@ -233,7 +233,15 @@ int cmd_agentmd(Cg *cg, bool write_files) {
         "cg changes              # impact radius of uncommitted edits\n"
         "```\n\n"
         "All of the above accept `--json`. The graph auto-syncs via "
-        "`cg watch`, or connect over MCP with `cg mcp-install`.\n");
+        "`cg watch`, or connect over MCP with `cg mcp-install`.\n\n"
+        /* an agent that re-runs a queued write duplicates it, and one that
+         * does not re-run an exit 75 loses it: the two must not blur */
+        "When another process (an editor's indexer) holds the database, "
+        "`cg remember`, `cg handoff`, and the bookkeeping behind "
+        "`cg spec done` say **queued**: the write is kept in "
+        "`.codegraph/journal/` and the next `cg` command applies it — do not "
+        "re-run it. Exit 75 (a claim) means nothing changed: re-run the same "
+        "command. `cg journal` lists what is queued.\n");
 
     if (write_files) {
         char dir[4700], path[4900];

@@ -16,7 +16,7 @@
 ## A write journal for the busy database
 
 - [ ] 2. Keep going
-  - [ ] 2.1 Journal lifecycle writes when the database is busy; replay under the next lock
+  - [x] 2.1 Journal lifecycle writes when the database is busy; replay under the next lock
     - journal.c: record format, journal_append via temp file and rename, journal_replay under a directory flock with per-record transactions, failed/ for rejected records, and the op dispatch through the functions the commands already use.
     - Route the busy branch of remember, handoff, work update and close, event ingest, the implicit events, and the spec bookkeeping (outcome memory, lease release, attempt finish) into journal_append; claims and commit keep exit 75 with a message that says they are not journaled.
     - Replay on cg_begin_write success, at open when the database is free, and in sync, index, and cg journal apply; cg journal list, apply, drop; pending counts in brief, state, and check; queued memories in recall.

@@ -27,6 +27,15 @@ static void bind_opt(sqlite3_stmt *st, int i, const char *v) {
 
 long memory_add(Cg *cg, const char *type, const char *task, const char *body,
                 const char *symbols, const char *files, const char *source) {
+    return memory_add_at(cg, (long)time(NULL), cg->branch, type, task, body,
+                         symbols, files, source);
+}
+
+/* The one insert. created and branch are explicit so a journal replay keeps
+ * the time and branch the note was actually written at, not the replayer's. */
+long memory_add_at(Cg *cg, long created, const char *branch, const char *type,
+                   const char *task, const char *body, const char *symbols,
+                   const char *files, const char *source) {
     /* The spec engine writes an outcome on every done and every refusal, so
      * repeating a task drops identical rows in. Collapse them at write time:
      * refresh the existing row's timestamp instead of adding a twin. */
@@ -38,7 +47,7 @@ long memory_add(Cg *cg, const char *type, const char *task, const char *body,
         sqlite3_bind_text(dup, 1, body, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(dup, 2, type, -1, SQLITE_TRANSIENT);
         bind_opt(dup, 3, task);
-        bind_opt(dup, 4, cg->branch);
+        bind_opt(dup, 4, branch);
         long found = -1;
         if (sqlite3_step(dup) == SQLITE_ROW)
             found = (long)sqlite3_column_int64(dup, 0);
@@ -46,7 +55,7 @@ long memory_add(Cg *cg, const char *type, const char *task, const char *body,
         if (found > 0) {
             sqlite3_stmt *up = cg_prep(cg,
                 "UPDATE memories SET created=? WHERE id=?");
-            sqlite3_bind_int64(up, 1, (sqlite3_int64)time(NULL));
+            sqlite3_bind_int64(up, 1, (sqlite3_int64)created);
             sqlite3_bind_int64(up, 2, found);
             sqlite3_step(up);
             sqlite3_finalize(up);
@@ -58,14 +67,14 @@ long memory_add(Cg *cg, const char *type, const char *task, const char *body,
     sqlite3_stmt *st = cg_prep(cg,
         "INSERT INTO memories(created,type,task,body,symbols,files,source,"
         "branch) VALUES(?,?,?,?,?,?,?,?)");
-    sqlite3_bind_int64(st, 1, (sqlite3_int64)time(NULL));
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)created);
     sqlite3_bind_text(st, 2, type, -1, SQLITE_TRANSIENT);
     bind_opt(st, 3, task);
     sqlite3_bind_text(st, 4, body, -1, SQLITE_TRANSIENT);
     bind_opt(st, 5, symbols);
     bind_opt(st, 6, files);
     sqlite3_bind_text(st, 7, source, -1, SQLITE_TRANSIENT);
-    bind_opt(st, 8, cg->branch);
+    bind_opt(st, 8, branch);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) return -1;
@@ -279,19 +288,65 @@ void memory_print_brief(const Memory *m, const char *indent) {
 
 int cmd_remember(Cg *cg, const char *text, const char *type, const char *task,
                  const char *symbols, const char *files, bool json) {
+    return cmd_remember_ex(cg, text, type, task, symbols, files, 0, json);
+}
+
+/* A decision must not be lost to an editor re-indexing the tree: when the
+ * lock wait runs out the note is journaled with everything it carries and
+ * the command still succeeds, saying it is queued. */
+int cmd_remember_ex(Cg *cg, const char *text, const char *type,
+                    const char *task, const char *symbols, const char *files,
+                    long supersedes, bool json) {
     if (!text || !text[0]) {
         fprintf(stderr, "cg: empty memory text\n");
         return 1;
     }
     const char *ty = type && type[0] ? type : "fact";
-    long id = memory_add(cg, ty, task, text, symbols, files, "manual");
-    if (id < 0) {
-        fprintf(stderr, "cg: could not save memory\n");
-        return 1;
+    long id = -1;
+    bool queued = false, sup_failed = false;
+    if (journal_begin(cg) == 0) {
+        id = memory_add(cg, ty, task, text, symbols, files, "manual");
+        if (id < 0) {
+            sqlite3_exec(cg->db, "ROLLBACK", NULL, NULL, NULL);
+            fprintf(stderr, "cg: could not save memory\n");
+            return 1;
+        }
+        /* a bad --supersedes id fails the command but keeps the note */
+        if (supersedes > 0 && memory_supersede(cg, supersedes, id) != 0)
+            sup_failed = true;
+        cg_exec(cg, "COMMIT");
+    } else {
+        StrBuf a; sb_init(&a);
+        sb_printf(&a, "{\"created\":%ld,\"type\":", (long)time(NULL));
+        sb_json_str(&a, ty);
+        sb_puts(&a, ",\"task\":");
+        if (task && task[0]) sb_json_str(&a, task); else sb_puts(&a, "null");
+        sb_puts(&a, ",\"body\":");
+        sb_json_str(&a, text);
+        sb_puts(&a, ",\"symbols\":");
+        if (symbols && symbols[0]) sb_json_str(&a, symbols);
+        else sb_puts(&a, "null");
+        sb_puts(&a, ",\"files\":");
+        if (files && files[0]) sb_json_str(&a, files); else sb_puts(&a, "null");
+        sb_printf(&a, ",\"source\":\"manual\",\"supersedes\":%ld}",
+                  supersedes > 0 ? supersedes : 0L);
+        char sum[200];
+        size_t n = strcspn(text, "\n");
+        snprintf(sum, sizeof sum, "[%s] %.*s", ty, n > 100 ? 100 : (int)n, text);
+        int rc = journal_append(cg, "memory.add", a.p, sum);
+        sb_free(&a);
+        if (rc != 0) {
+            cg_busy_why("the journal under .codegraph/ could not be written");
+            cg_busy_report("The memory");
+            return CG_EXIT_BUSY;
+        }
+        queued = true;
+        journal_announced();
     }
     if (json) {
         StrBuf b; sb_init(&b);
-        sb_printf(&b, "{\"id\":%ld,\"type\":", id);
+        if (queued) sb_puts(&b, "{\"id\":null,\"queued\":true,\"type\":");
+        else sb_printf(&b, "{\"id\":%ld,\"type\":", id);
         sb_json_str(&b, ty);
         sb_puts(&b, ",\"task\":");
         if (task && task[0]) sb_json_str(&b, task);
@@ -299,18 +354,27 @@ int cmd_remember(Cg *cg, const char *text, const char *type, const char *task,
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
+    } else if (queued) {
+        printf("queued [%s]%s%s%s — the database is busy; the next cg command "
+               "that gets the write lock applies it\n", ty,
+               task && task[0] ? " (task " : "", task && task[0] ? task : "",
+               task && task[0] ? ")" : "");
     } else if (task && task[0]) {
         printf("remembered #%ld [%s] (task %s)\n", id, ty, task);
     } else {
         printf("remembered #%ld [%s]\n", id, ty);
     }
-    return 0;
+    return sup_failed ? 1 : 0;
 }
 
 int cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
                int limit, bool json) {
     Memory *v = NULL;
     int n = memory_query(cg, query, task, type, limit, &v);
+    /* a note queued a moment ago behind a busy database is still the
+     * agent's decision: list it, marked queued, before the stored ones */
+    Memory *qv = NULL;
+    int nq = journal_queued_memories(cg, query, task, type, &qv);
     if (json) {
         StrBuf b; sb_init(&b);
         sb_printf(&b, "{\"count\":%d,\"memories\":[", n);
@@ -318,12 +382,43 @@ int cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
             if (i) sb_putc(&b, ',');
             memory_json(&v[i], &b);
         }
-        sb_puts(&b, "]}\n");
+        sb_puts(&b, "]");
+        if (nq) {
+            sb_puts(&b, ",\"queued\":[");
+            for (int i = 0; i < nq; i++) {
+                if (i) sb_putc(&b, ',');
+                StrBuf one; sb_init(&one);
+                memory_json(&qv[i], &one);
+                /* {"id":0,... -> {"queued":true,"id":null,... */
+                const char *rest = strchr(one.p, ',');
+                sb_printf(&b, "{\"queued\":true,\"id\":null%s",
+                          rest ? rest : "}");
+                sb_free(&one);
+            }
+            sb_puts(&b, "]");
+        }
+        sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
-    } else if (n == 0) {
+    } else if (n == 0 && nq == 0) {
         printf("no memories%s\n", query || task || type ? " match" : " yet");
     } else {
+        for (int i = 0; i < nq; i++) {
+            char when[32] = "?";
+            time_t t = (time_t)qv[i].created;
+            struct tm tmv;
+            if (localtime_r(&t, &tmv))
+                strftime(when, sizeof when, "%Y-%m-%d", &tmv);
+            printf("queued  [%s]  %s", qv[i].type, when);
+            if (qv[i].task) printf("  (task %s)", qv[i].task);
+            printf("  — waiting for the write lock (cg journal)\n");
+            for (const char *p = qv[i].body; *p; ) {
+                size_t len = strcspn(p, "\n");
+                printf("    %.*s\n", (int)len, p);
+                p += len;
+                if (*p) p++;
+            }
+        }
         for (int i = 0; i < n; i++) {
             char when[32] = "?";
             time_t t = (time_t)v[i].created;
@@ -351,6 +446,7 @@ int cmd_recall(Cg *cg, const char *query, const char *task, const char *type,
         }
     }
     memory_free(v, n);
+    memory_free(qv, nq);
     return 0;
 }
 
