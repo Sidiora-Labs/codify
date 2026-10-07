@@ -1060,10 +1060,38 @@ static void spec_attempt_sweep(Cg *g) {
     bool any = sqlite3_step(q) == SQLITE_ROW && sqlite3_column_int(q, 0) != 0;
     sqlite3_finalize(q);
     if (!any) return;
-    cg_exec(g,
+    static const char *SWEEP =
         "UPDATE attempts SET state='expired',reason='heartbeat expired' "
         "WHERE state='running' AND expires<=strftime('%s','now');"
-        "DELETE FROM leases WHERE expires<=strftime('%s','now')");
+        "DELETE FROM leases WHERE expires<=strftime('%s','now')";
+    if (sqlite3_get_autocommit(g->db) == 0) { cg_exec(g, SWEEP); return; }
+    /* Outside a transaction the sweep is housekeeping: a busy database
+     * skips it (the next command sweeps) instead of failing a read or a
+     * journaled write with exit 75. Readers already filter on expires. */
+    if (journal_busy_seen()) sqlite3_busy_timeout(g->db, 0);
+    char *err = NULL;
+    int rc = sqlite3_exec(g->db, SWEEP, NULL, NULL, &err);
+    sqlite3_busy_timeout(g->db, (int)g->lock_wait_ms);
+    int base = rc & 0xff;
+    if (rc != SQLITE_OK && base != SQLITE_BUSY && base != SQLITE_LOCKED) {
+        fprintf(stderr, "cg: sql error: %s\n  in: attempt sweep\n",
+                err ? err : "?");
+        sqlite3_free(err);
+        exit(2);
+    }
+    if (rc != SQLITE_OK) journal_mark_busy();
+    sqlite3_free(err);
+}
+
+/* A claim must see the live leases and attempts to decide who owns a task,
+ * so it is the one lifecycle write that is never journaled: wait, then
+ * exit 75 with nothing changed. */
+static void spec_claim_begin(Cg *g) {
+    if (cg_begin_write(g) == 0) return;
+    cg_busy_why("a claim must see the live leases and attempts to decide who "
+                "owns the task, so it cannot be queued for later");
+    cg_busy_report("The claim");
+    exit(CG_EXIT_BUSY);
 }
 
 static long spec_attempt_next_fence(Cg *g) {
@@ -1233,6 +1261,34 @@ static bool spec_attempt_owned(Cg *g, const char *tag, const char *agent,
 
 static void spec_release_lease(Spec *s, const char *id);
 
+/* Queue a lease release (and the attempt finish that rides with it) for the
+ * next process that holds the lock. agent, when set, must still own the
+ * lease at replay unless force; attempt/fence, when set, must still name
+ * the live attempt — a replay never releases work that changed hands. */
+static int spec_queue_release(Cg *g, const char *tag, const char *agent,
+                              const char *attempt, long fence, bool force,
+                              const char *state, const char *reason) {
+    StrBuf a; sb_init(&a);
+    sb_puts(&a, "{\"task\":");
+    sb_json_str(&a, tag);
+    sb_puts(&a, ",\"agent\":");
+    if (agent && agent[0]) sb_json_str(&a, agent); else sb_puts(&a, "null");
+    sb_puts(&a, ",\"attempt\":");
+    if (attempt && attempt[0]) sb_json_str(&a, attempt);
+    else sb_puts(&a, "null");
+    sb_printf(&a, ",\"fence\":%ld,\"force\":%s,\"state\":", fence,
+              force ? "true" : "false");
+    sb_json_str(&a, state);
+    sb_puts(&a, ",\"reason\":");
+    sb_json_str(&a, reason);
+    sb_putc(&a, '}');
+    char sum[800];
+    snprintf(sum, sizeof sum, "release %s (%s)", tag, state);
+    int rc = journal_append(g, "lease.release", a.p, sum);
+    sb_free(&a);
+    return rc;
+}
+
 /* Manual local lifecycle commands remain usable without an attempt. Once an
  * orchestrator supplies either credential, both become mandatory and the
  * exact live owner generation must match before task state may change. */
@@ -1286,7 +1342,19 @@ static int spec_set_status_owned(Spec *s, const char *id, const char *status,
     if (!memory_open_quiet(&g)) return -1;
     char tag[700];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
-    cg_exec(&g, "BEGIN IMMEDIATE");
+    if (journal_begin(&g) != 0) {
+        /* Busy: spec_require_owner checked these credentials moments ago
+         * (a read). The status still lands in the kvx file; the attempt
+         * finish and lease release are journaled with the credentials, so
+         * the replay applies them only if this attempt is still the live
+         * one. */
+        int wrc = kvx_set_status(s->fpath, sec, status);
+        if (wrc != 0) { cg_close(&g); return -1; }
+        spec_queue_release(&g, tag, agent, attempt_id, fence, false,
+                           "completed", "task left active execution");
+        cg_close(&g);
+        return 0;
+    }
     if (!spec_attempt_owned(&g, tag, agent, attempt_id, fence)) {
         cg_exec(&g, "ROLLBACK");
         cg_close(&g);
@@ -1417,7 +1485,28 @@ static void spec_note_outcome(Spec *s, const char *id, const char *body) {
     task_sec(sec, sizeof sec, id);
     char *syms = join_list(s->f, sec, "symbols");
     char *tchs = join_list(s->f, sec, "touches");
-    memory_add(&g, "outcome", task, body, syms, tchs, "auto");
+    if (journal_begin(&g) == 0) {
+        memory_add(&g, "outcome", task, body, syms, tchs, "auto");
+        cg_exec(&g, "COMMIT");
+    } else {
+        /* the verdict already stands in the kvx file; its memory waits in
+         * the journal rather than turning a passed `done` into exit 75 */
+        StrBuf a; sb_init(&a);
+        sb_printf(&a, "{\"created\":%ld,\"type\":\"outcome\",\"task\":",
+                  (long)time(NULL));
+        sb_json_str(&a, task);
+        sb_puts(&a, ",\"body\":");
+        sb_json_str(&a, body);
+        sb_puts(&a, ",\"symbols\":");
+        if (syms) sb_json_str(&a, syms); else sb_puts(&a, "null");
+        sb_puts(&a, ",\"files\":");
+        if (tchs) sb_json_str(&a, tchs); else sb_puts(&a, "null");
+        sb_puts(&a, ",\"source\":\"auto\"}");
+        char sum[300];
+        snprintf(sum, sizeof sum, "[outcome] %.200s", body);
+        journal_append(&g, "memory.add", a.p, sum);
+        sb_free(&a);
+    }
     free(syms); free(tchs);
     cg_close(&g);
 }
@@ -2105,9 +2194,9 @@ static void spec_release_lease(Spec *s, const char *id) {
     if (!memory_open_quiet(&g)) return;
     char tag[700];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
-    if (cg_begin_write(&g) != 0) {
-        fprintf(stderr, "cg spec: lease for %s not released (database busy); "
-                        "it expires on its own\n", id);
+    if (journal_begin(&g) != 0) {
+        spec_queue_release(&g, tag, NULL, NULL, 0, false, "completed",
+                           "task left active execution");
         cg_close(&g);
         return;
     }
@@ -2140,7 +2229,7 @@ static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
     long fence = 0;
 
-    cg_exec(&g, "BEGIN IMMEDIATE");
+    bool queued = journal_begin(&g) != 0;
     spec_attempt_sweep(&g);
     sqlite3_stmt *q = cg_prep(&g,
         "SELECT attempt_id,fence FROM attempts WHERE task=? AND agent=? "
@@ -2157,11 +2246,41 @@ static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,
     if (!attempt[0] || (attempt_arg && attempt_arg[0] &&
                        strcmp(attempt_arg, attempt) != 0) ||
         (fence_arg > 0 && fence_arg != fence)) {
-        cg_exec(&g, "ROLLBACK");
+        if (!queued) cg_exec(&g, "ROLLBACK");
         cg_close(&g);
         fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
                         "heartbeat rejected\n", id);
         return 1;
+    }
+    if (queued) {
+        /* the attempt is live as of this read; the renewal is journaled
+         * with its credentials and re-checked when it is applied */
+        StrBuf a; sb_init(&a);
+        sb_puts(&a, "{\"task\":"); sb_json_str(&a, tag);
+        sb_puts(&a, ",\"agent\":"); sb_json_str(&a, agent);
+        sb_puts(&a, ",\"attempt\":"); sb_json_str(&a, attempt);
+        sb_printf(&a, ",\"fence\":%ld,\"ttl\":%ld}", fence, ttl_min);
+        char sum[800];
+        snprintf(sum, sizeof sum, "heartbeat %s fence %ld", tag, fence);
+        int arc = journal_append(&g, "attempt.heartbeat", a.p, sum);
+        sb_free(&a);
+        cg_close(&g);
+        if (arc != 0) { cg_busy_report("The heartbeat"); return CG_EXIT_BUSY; }
+        journal_announced();
+        if (json) {
+            StrBuf b; sb_init(&b);
+            sb_puts(&b, "{\"heartbeat\":");
+            sb_json_str(&b, attempt);
+            sb_printf(&b, ",\"fence\":%ld,\"expires_in_min\":%ld,"
+                      "\"queued\":true}\n", fence, ttl_min);
+            fputs(b.p, stdout);
+            sb_free(&b);
+        } else {
+            printf("heartbeat %s attempt %.12s fence %ld (%ld min) — queued: "
+                   "the database is busy; the next cg command that gets the "
+                   "write lock applies it\n", id, attempt, fence, ttl_min);
+        }
+        return 0;
     }
 
     SpecAttempt renewed;
@@ -2265,7 +2384,7 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
         }
     }
 
-    cg_exec(g, "BEGIN IMMEDIATE");
+    spec_claim_begin(g);
     sqlite3_stmt *q = cg_prep(g, "SELECT agent,expires FROM leases WHERE task=?");
     sqlite3_bind_text(q, 1, tag, -1, SQLITE_STATIC);
     if (sqlite3_step(q) == SQLITE_ROW) {
@@ -2343,8 +2462,10 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
 
     if (release) {
         /* owner check and delete must be one transaction, or a racing
-         * agent's fresh lease can vanish under a vacuous release */
-        cg_exec(&g, "BEGIN IMMEDIATE");
+         * agent's fresh lease can vanish under a vacuous release; when the
+         * database is busy the checks run as reads now and again, inside
+         * the replay's transaction, before the release is applied */
+        bool queued = journal_begin(&g) != 0;
         spec_attempt_sweep(&g);
         /* releasing someone else's lease is the steal this exists to stop */
         sqlite3_stmt *q = cg_prep(&g, "SELECT agent FROM leases WHERE task=?");
@@ -2356,7 +2477,7 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
                         "with --agent %s or --force\n", id, owner, agent,
                         owner);
                 sqlite3_finalize(q);
-                cg_exec(&g, "ROLLBACK");
+                if (!queued) cg_exec(&g, "ROLLBACK");
                 cg_close(&g);
                 return 1;
             }
@@ -2366,23 +2487,38 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
             !spec_attempt_owned(&g, tag, agent, attempt_arg, fence_arg)) {
             fprintf(stderr, "cg spec: stale or foreign attempt for %s — "
                             "release rejected\n", id);
-            cg_exec(&g, "ROLLBACK");
+            if (!queued) cg_exec(&g, "ROLLBACK");
             cg_close(&g);
             return 1;
         }
-        spec_attempt_finish(&g, tag, "abandoned", "released by owner");
-        sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
-        sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
-        sqlite3_step(st);
-        sqlite3_finalize(st);
-        cg_exec(&g, "COMMIT");
+        if (queued) {
+            if (spec_queue_release(&g, tag, agent, attempt_arg, fence_arg,
+                                   force, "abandoned",
+                                   "released by owner") != 0) {
+                cg_busy_report("The release");
+                cg_close(&g);
+                return CG_EXIT_BUSY;
+            }
+            journal_announced();
+        } else {
+            spec_attempt_finish(&g, tag, "abandoned", "released by owner");
+            sqlite3_stmt *st = cg_prep(&g, "DELETE FROM leases WHERE task=?");
+            sqlite3_bind_text(st, 1, tag, -1, SQLITE_STATIC);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+            cg_exec(&g, "COMMIT");
+        }
         if (json) {
             StrBuf b; sb_init(&b);
             sb_puts(&b, "{\"released\":");
             sb_json_str(&b, tag);
+            if (queued) sb_puts(&b, ",\"queued\":true");
             sb_puts(&b, "}\n");
             fputs(b.p, stdout);
             sb_free(&b);
+        } else if (queued) {
+            printf("released %s — queued: the database is busy; the next cg "
+                   "command that gets the write lock applies it\n", id);
         } else printf("released %s\n", id);
         cg_close(&g);
         return 0;
@@ -2533,7 +2669,7 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
     }
 
     spec_attempt_sweep(&g);
-    cg_exec(&g, "BEGIN IMMEDIATE");
+    spec_claim_begin(&g);
 
     /* lowest wave first, dotted order within, skipping anything whose
      * touches collide with in-progress work or a live lease */
@@ -3000,21 +3136,9 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
     kvx_free(s->f);
     s->f = kvx_parse(s->fpath);
     char *title = s->f ? S(s->f, sec, "title") : xstrdup("");
-    if (json) {
-        StrBuf b; sb_init(&b);
-        sb_puts(&b, "{\"done\":");
-        sb_json_str(&b, id);
-        sb_puts(&b, ",\"next\":");
-        const char *jn = s->f ? spec_next_id(s) : NULL;
-        if (jn) sb_json_str(&b, jn);
-        else if (s->f && spec_docs_ready(s)) sb_json_str(&b, CG_DOC_TASK);
-        else sb_puts(&b, "null");
-        sb_puts(&b, "}\n");
-        fputs(b.p, stdout);
-        sb_free(&b);
-    } else {
-        printf("done %s — %s\n", id, title);
-    }
+    /* --json goes out after the outcome memory, so it can say whether any
+     * of the bookkeeping was journaled */
+    if (!json) printf("done %s — %s\n", id, title);
     {
         /* where the change parts from the declaration: advice, recorded as
          * a drift.spec event, never a reason to refuse */
@@ -3039,6 +3163,20 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
         sb_free(&mb);
     }
     free(title);
+    if (json) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "{\"done\":");
+        sb_json_str(&b, id);
+        sb_puts(&b, ",\"next\":");
+        const char *jn = s->f ? spec_next_id(s) : NULL;
+        if (jn) sb_json_str(&b, jn);
+        else if (s->f && spec_docs_ready(s)) sb_json_str(&b, CG_DOC_TASK);
+        else sb_puts(&b, "null");
+        if (journal_queued_count() > 0) sb_puts(&b, ",\"queued\":true");
+        sb_puts(&b, "}\n");
+        fputs(b.p, stdout);
+        sb_free(&b);
+    }
     if (s->f && !json) {
         const char *next = spec_next_id(s);
         if (next) {
@@ -3070,6 +3208,62 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
         }
     }
     return 0;
+}
+
+/* The replay half of the spec bookkeeping journaled above. Runs inside the
+ * replay's transaction; a condition that no longer holds (the lease changed
+ * hands, the attempt is no longer live) makes the record a no-op, not a
+ * failure: the write it described is simply moot now. */
+int spec_journal_apply(Cg *g, const char *op, const char *args, char *err,
+                       size_t errcap) {
+    char *tag = json_get_string(args, "task");
+    char *agent = json_get_string(args, "agent");
+    char *attempt = json_get_string(args, "attempt");
+    char *state = json_get_string(args, "state");
+    char *reason = json_get_string(args, "reason");
+    long fence = json_get_int(args, "fence", 0);
+    char *force_raw = json_get_raw(args, "force");
+    bool force = force_raw && strcmp(force_raw, "true") == 0;
+    free(force_raw);
+    int rc = 0;
+    if (!tag) {
+        snprintf(err, errcap, "%s without a task", op);
+        rc = -1;
+    } else if (strcmp(op, "lease.release") == 0 ||
+               strcmp(op, "attempt.finish") == 0) {
+        bool ok = true;
+        spec_attempt_sweep(g);
+        if (agent && !force) {
+            sqlite3_stmt *q = cg_prep(g, "SELECT agent FROM leases WHERE task=?");
+            sqlite3_bind_text(q, 1, tag, -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(q) == SQLITE_ROW &&
+                strcmp((const char *)sqlite3_column_text(q, 0), agent) != 0)
+                ok = false;
+            sqlite3_finalize(q);
+        }
+        if (ok && ((attempt && attempt[0]) || fence > 0))
+            ok = spec_attempt_owned(g, tag, agent ? agent : "", attempt, fence);
+        if (ok) {
+            spec_attempt_finish(g, tag, state ? state : "completed",
+                                reason ? reason : "task left active execution");
+            if (strcmp(op, "lease.release") == 0) {
+                sqlite3_stmt *st = cg_prep(g, "DELETE FROM leases WHERE task=?");
+                sqlite3_bind_text(st, 1, tag, -1, SQLITE_TRANSIENT);
+                sqlite3_step(st);
+                sqlite3_finalize(st);
+            }
+        }
+    } else if (strcmp(op, "attempt.heartbeat") == 0) {
+        long ttl = json_get_int(args, "ttl", 30);
+        if (agent && attempt)
+            spec_attempt_heartbeat(g, tag, agent, attempt, fence,
+                                   ttl > 0 ? ttl : 30, NULL);
+    } else {
+        snprintf(err, errcap, "unknown spec operation '%s'", op);
+        rc = -1;
+    }
+    free(tag); free(agent); free(attempt); free(state); free(reason);
+    return rc;
 }
 
 /* ---------------- graph-verified completion + trace ---------------- */

@@ -70,6 +70,9 @@ static void usage(void) {
 "                           --near <file> for anchored retrieval\n"
 "  memory compact           drop duplicate memories (--dry-run to preview)\n"
 "  forget <id>              delete a memory\n"
+"  journal [list|apply|drop <id>|drop --failed|drop --all]\n"
+"                           writes queued while the database was busy\n"
+"                           (docs/journal.md)\n"
 "  memory classify [<id>|--all|--unclassified] [-n N]\n"
 "                           ask Jev what each memory is (skill, decision,\n"
 "                           constraint, fact, noise) and store the class\n"
@@ -326,6 +329,7 @@ int main(int argc, char **argv) {
     if (argc < 2) { usage(); return 1; }
     kvx_status_hook = events_kvx_status;
     const char *cmd = argv[1];
+    journal_set_command(cmd, argc > 2 ? argv[2] : NULL);
     bool json = flag(&argc, argv, "--json");
     bool no_soft = flag(&argc, argv, "--no-soft");
     bool all_branches = flag(&argc, argv, "--all-branches");
@@ -467,8 +471,11 @@ int main(int argc, char **argv) {
     }
     int rc = 0;
 
-    if (strcmp(cmd, "index") == 0) {
+    if (strcmp(cmd, "journal") == 0) {
+        rc = cmd_journal(&cg, argc - 2, argv + 2, json);
+    } else if (strcmp(cmd, "index") == 0) {
         bool full = flag(&argc, argv, "--full");
+        journal_replay(&cg, JOURNAL_PROBE);     /* queued writes first */
         IndexStats st;
         rc = cg_index(&cg, &si, full, &st, false);
         if (rc != 0 && st.busy) { cg_busy_report("The index"); rc = CG_EXIT_BUSY; }
@@ -489,6 +496,7 @@ int main(int argc, char **argv) {
         o.paths = (const char *const *)(argv + 2);
         o.npaths = argc - 2;
         IndexStats st;
+        journal_replay(&cg, JOURNAL_PROBE);     /* queued writes first */
         if (implicit && !config_auto_sync(cg.root)) {
             if (json) printf("{\"skipped\":\"auto-sync is off\"}\n");
             cg_close(&cg);
@@ -650,12 +658,10 @@ int main(int argc, char **argv) {
             rc = 1;
         } else {
             char *dflt = task ? NULL : spec_active_tag();
-            rc = cmd_remember(&cg, argv[2], type, task ? task : dflt,
-                              symbols, files, json);
+            rc = cmd_remember_ex(&cg, argv[2], type, task ? task : dflt,
+                                 symbols, files,
+                                 supersedes ? atol(supersedes) : 0, json);
             free(dflt);
-            if (rc == 0 && supersedes)
-                rc = memory_supersede(&cg, atol(supersedes),
-                                      (long)sqlite3_last_insert_rowid(cg.db));
         }
     } else if (strcmp(cmd, "recall") == 0) {
         const char *task = opt(&argc, argv, "--task", NULL);

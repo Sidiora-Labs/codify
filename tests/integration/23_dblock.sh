@@ -55,6 +55,11 @@ out="$(CG_BUSY_TIMEOUT_MS=200 "$CG" spec claim 1.2 --agent beta 2>&1)" || rc=$?
 has "$out" "database is busy"
 has "$out" "safe to retry"
 has "$out" "CG_BUSY_TIMEOUT_MS"
+# a claim is never queued for later (docs/journal.md); the message says why
+has "$out" "not journaled"
+has "$out" "a claim must see the live leases"
+[ ! -d "$TMP/proj/.codegraph/journal" ] || [ -z "$(ls "$TMP/proj/.codegraph/journal")" ] \
+    || fail "a refused claim left a journal record"
 wait
 hasnt "$("$CG" spec status --json)" '"agent":"beta"'
 # ...and the same command simply works once the lock is gone

@@ -73,6 +73,16 @@ The windows the built-in callers use:
 `cg spec trace --no-sync` answers from the last completed index without
 touching the gate at all — that is what the editor polls.
 
+A sync or index holds the write lock in short bursts. While one runs, other
+commands' lifecycle writes may outlast their lock wait. That covers
+`cg remember`, `cg handoff`, the bookkeeping behind `cg spec done`, and hook
+events. Those writes are queued in the write journal under
+`.codegraph/journal/` instead of failing, and the command still exits 0
+([journal.md](journal.md)). `cg sync` and `cg index` replay any queued
+writes before they walk, as does every process that takes the lock. The
+indexer's own writes are never journaled. A sync that cannot get the lock
+reports busy as before.
+
 ## Machine-wide parse slots
 
 Freshness and coalescing bound one project. Slots bound the machine: a

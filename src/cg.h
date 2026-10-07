@@ -807,6 +807,61 @@ long events_since(Cg *cg, long since, const char *kinds, int limit,
                   EventFn fn, void *ud);
 void events_json(StrBuf *b, const EventRow *e);
 int  cmd_events(Cg *cg, int argc, char **argv, bool json);
+/* the raw insert behind events_emit_as, with every column explicit and no
+ * journal fallback: what a journal replay applies. -1 on failure. */
+long events_emit_at(Cg *cg, long at_ms, const char *kind, const char *subject,
+                    const char *run, const char *node, const char *branch,
+                    const char *payload);
+
+/* ---------------- write journal (journal.c, docs/journal.md) ----------------
+ * A lifecycle write that finds the database still busy after the lock wait
+ * is appended to .codegraph/journal/ instead of failing the command; the
+ * next cg process that holds the write lock replays it. Writes that must see
+ * the current state (claims, the indexer) are never journaled. */
+#define JOURNAL_VERSION 1
+typedef enum {
+    JOURNAL_HELD,    /* the caller holds BEGIN IMMEDIATE; keep one open */
+    JOURNAL_PROBE,   /* take the lock only if it is free right now */
+    JOURNAL_WAIT     /* wait up to cg->lock_wait_ms for the lock */
+} JournalMode;
+/* args: a JSON object (the operation's arguments). 0 written, -1 not. */
+int  journal_append(Cg *cg, const char *op, const char *args,
+                    const char *summary);
+/* Applied count, or -1 when the lock could not be had (or was lost between
+ * records under JOURNAL_HELD, leaving no transaction open). */
+int  journal_replay(Cg *cg, JournalMode mode);
+/* Take the write lock for a journaled write: 0 holding it, -1 busy. Once a
+ * process has seen the database busy, later journaled writes try once and
+ * journal at once instead of waiting the full timeout again. */
+int  journal_begin(Cg *cg);
+bool journal_busy_seen(void);
+void journal_mark_busy(void);
+int  journal_queued_count(void);          /* records this process appended */
+void journal_announced(void);             /* the command said "queued" itself */
+void journal_set_command(const char *cmd, const char *sub);
+int  journal_pending(const Cg *cg, int *failed);  /* pending; failed via ptr */
+/* queued memory.add records matching like memory_query, as Memory rows with
+ * id 0; returns the count */
+int  journal_queued_memories(const Cg *cg, const char *query,
+                             const char *task, const char *type, Memory **out);
+int  cmd_journal(Cg *cg, int argc, char **argv, bool json);
+/* Why the busy write that is about to be reported is not journaled; NULL
+ * restores the generic reason. Read by cg_busy_report. */
+void cg_busy_why(const char *why);
+/* the replay half of each journaled operation, beside the command it
+ * belongs to; args is the record's args object, branch the writer's */
+int  spec_journal_apply(Cg *g, const char *op, const char *args,
+                        char *err, size_t errcap);
+int  govern_journal_apply(Cg *g, const char *op, const char *args,
+                          const char *branch, long at_ms,
+                          char *err, size_t errcap);
+int  runtime_journal_apply(Cg *g, const char *args, char *err, size_t errcap);
+long memory_add_at(Cg *cg, long created, const char *branch, const char *type,
+                   const char *task, const char *body, const char *symbols,
+                   const char *files, const char *source);
+int  cmd_remember_ex(Cg *cg, const char *text, const char *type,
+                     const char *task, const char *symbols, const char *files,
+                     long supersedes, bool json);
 
 /* ---------------- drift (drift.c) ---------------- */
 /* A task's change against its declaration: paths outside its touches and

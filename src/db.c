@@ -392,6 +392,10 @@ int cg_open(Cg *cg, bool create) {
      * from a fresh worktree needs one small write; a busy database leaves
      * branch_id 0 and the indexer retries before it writes rows */
     cg_branch_resolve(cg);
+    /* writes a busy database queued (journal.c) are applied by the first
+     * process to find the lock free — a probe, never a wait, so opening a
+     * project for a read never queues behind an indexer */
+    journal_replay(cg, JOURNAL_PROBE);
     return 0;
 }
 
@@ -491,6 +495,14 @@ static bool busy_rc(int rc) {
     return base == SQLITE_BUSY || base == SQLITE_LOCKED;
 }
 
+static const char *g_busy_why;
+
+void cg_busy_why(const char *why) { g_busy_why = why; }
+
+/* Lifecycle writes (memories, events, lease releases, handoffs) never get
+ * here: they are journaled instead. What does get here is a write that must
+ * see the current state to be correct, so the message says why it was not
+ * queued — an agent should retry it, not wait for a replay. */
 void cg_busy_report(const char *what) {
     fprintf(stderr,
         "cg: the graph database is busy — another cg process (usually an "
@@ -498,8 +510,13 @@ void cg_busy_report(const char *what) {
         "lock for the whole wait.\n"
         "    %s was not applied; nothing changed. Re-run the same command — "
         "it is safe to retry.\n"
+        "    This write is not journaled: %s.\n"
         "    (waited %ldms; set CG_BUSY_TIMEOUT_MS to wait longer)\n",
-        what && what[0] ? what : "The write", cg_lock_wait_default());
+        what && what[0] ? what : "The write",
+        g_busy_why ? g_busy_why
+                   : "it must see the current state of the database to be "
+                     "correct, so it cannot be queued for later",
+        cg_lock_wait_default());
 }
 
 long cg_lock_wait_default(void) {
@@ -516,7 +533,9 @@ int cg_begin_write(Cg *cg) {
     char *err = NULL;
     int rc = sqlite3_exec(cg->db, "BEGIN IMMEDIATE", NULL, NULL, &err);
     sqlite3_busy_timeout(cg->db, (int)cg_lock_wait_default());
-    if (rc == SQLITE_OK) return 0;
+    /* holding the lock: queued writes go in first, each committed on its
+     * own, and the caller gets a fresh transaction after them */
+    if (rc == SQLITE_OK) return journal_replay(cg, JOURNAL_HELD) < 0 ? -1 : 0;
     if (busy_rc(rc)) { sqlite3_free(err); return -1; }
     fprintf(stderr, "cg: sql error: %s\n  in: BEGIN IMMEDIATE\n", err ? err : "?");
     sqlite3_free(err);

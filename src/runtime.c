@@ -110,6 +110,8 @@ int cmd_state(Cg *cg, bool json) {
     cg_capture(&snapshot, state_call_vcs, &vc);
     cg_capture(&declaration, state_call_spec, &sc);
     cg_capture(&stale, state_call_spec, &sr);
+    int jfailed = 0;
+    int jpending = journal_pending(cg, &jfailed);
 
     if (json) {
         StrBuf b; sb_init(&b);
@@ -142,6 +144,9 @@ int cmd_state(Cg *cg, bool json) {
         }
         sb_puts(&b, "},\"stale_state\":");
         state_raw_json(&b, stale);
+        if (jpending || jfailed)
+            sb_printf(&b, ",\"journal\":{\"pending\":%d,\"failed\":%d}",
+                      jpending, jfailed);
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -160,6 +165,9 @@ int cmd_state(Cg *cg, bool json) {
         else
             printf("none for agent %s\n", agent);
         printf("Stale state:\n%s", stale ? stale : "");
+        if (jpending || jfailed)
+            printf("Write journal: %d write(s) queued behind a busy database, "
+                   "%d refused — cg journal list\n", jpending, jfailed);
     }
     free(snapshot); free(declaration); free(stale);
     return 0;
@@ -343,8 +351,12 @@ void runtime_workspace_revision(Cg *cg, char out[65]) {
     ignore_free(&ig);
     qsort(files.v, (size_t)files.n, sizeof(RuntimeFile), runtime_file_cmp);
 
-    bool own_tx = sqlite3_get_autocommit(cg->db) != 0 &&
-                  cg_begin_write(cg) == 0;
+    /* runtime_files is a hash cache: when the database is busy the walk
+     * still hashes what it must and the revision is still exact, but the
+     * cache is left for the next command instead of waiting or exiting */
+    bool autocommit = sqlite3_get_autocommit(cg->db) != 0;
+    bool own_tx = autocommit && journal_begin(cg) == 0;
+    bool can_write = own_tx || !autocommit;
     cg_exec(cg, "CREATE TEMP TABLE IF NOT EXISTS runtime_seen("
                 "path TEXT PRIMARY KEY)");
     cg_exec(cg, "DELETE FROM runtime_seen");
@@ -379,13 +391,15 @@ void runtime_workspace_revision(Cg *cg, char out[65]) {
             if (!data) continue;
             sha256_hex(data, len, f->hash);
             free(data);
-            sqlite3_bind_text(save, 1, f->path, -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int64(save, 2, f->size);
-            sqlite3_bind_int64(save, 3, f->mtime_ns);
-            sqlite3_bind_int64(save, 4, f->ctime_ns);
-            sqlite3_bind_text(save, 5, f->hash, -1, SQLITE_TRANSIENT);
-            sqlite3_step(save);
-            sqlite3_reset(save); sqlite3_clear_bindings(save);
+            if (can_write) {
+                sqlite3_bind_text(save, 1, f->path, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int64(save, 2, f->size);
+                sqlite3_bind_int64(save, 3, f->mtime_ns);
+                sqlite3_bind_int64(save, 4, f->ctime_ns);
+                sqlite3_bind_text(save, 5, f->hash, -1, SQLITE_TRANSIENT);
+                sqlite3_step(save);
+                sqlite3_reset(save); sqlite3_clear_bindings(save);
+            }
         }
         sqlite3_bind_text(seen, 1, f->path, -1, SQLITE_TRANSIENT);
         sqlite3_step(seen);
@@ -394,13 +408,117 @@ void runtime_workspace_revision(Cg *cg, char out[65]) {
         sb_puts(&manifest, f->hash); sb_putc(&manifest, '\n');
     }
     sqlite3_finalize(find); sqlite3_finalize(save); sqlite3_finalize(seen);
-    cg_exec(cg, "DELETE FROM runtime_files WHERE path NOT IN "
-                "(SELECT path FROM runtime_seen)");
+    if (can_write)
+        cg_exec(cg, "DELETE FROM runtime_files WHERE path NOT IN "
+                    "(SELECT path FROM runtime_seen)");
     if (own_tx) cg_exec(cg, "COMMIT");
     sha256_hex(manifest.p, manifest.len, out);
     sb_free(&manifest);
     for (int i = 0; i < files.n; i++) free(files.v[i].path);
     free(files.v);
+}
+
+typedef struct {
+    long created;
+    const char *source, *kind, *session, *attempt, *task, *fingerprint,
+               *semantic, *revision, *previous, *output_hash, *payload;
+    int evidence, output_changed;
+} RuntimeEventRow;
+
+/* The one runtime_events insert, shared by ingest and the journal replay.
+ * Returns the step result; *inserted says whether a row was added. */
+static int runtime_event_store(Cg *cg, const RuntimeEventRow *r,
+                               bool *inserted) {
+    sqlite3_stmt *ins = cg_prep(cg,
+        "INSERT OR IGNORE INTO runtime_events(created,source,kind,session,"
+        "attempt_id,task,fingerprint,semantic_fingerprint,revision,"
+        "previous_revision,evidence_delta,activity,output_hash,"
+        "output_changed,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    sqlite3_bind_int64(ins, 1, r->created);
+    sqlite3_bind_text(ins, 2, r->source, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 3, r->kind, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 4, r->session, -1, SQLITE_TRANSIENT);
+    if (r->attempt && r->attempt[0])
+        sqlite3_bind_text(ins, 5, r->attempt, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(ins, 5);
+    if (r->task && r->task[0])
+        sqlite3_bind_text(ins, 6, r->task, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(ins, 6);
+    sqlite3_bind_text(ins, 7, r->fingerprint, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 8, r->semantic, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 9, r->revision, -1, SQLITE_TRANSIENT);
+    if (r->previous && r->previous[0])
+        sqlite3_bind_text(ins, 10, r->previous, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(ins, 10);
+    sqlite3_bind_int(ins, 11, r->evidence);
+    sqlite3_bind_int(ins, 12, 1);
+    if (r->output_hash && r->output_hash[0])
+        sqlite3_bind_text(ins, 13, r->output_hash, -1, SQLITE_TRANSIENT);
+    else sqlite3_bind_null(ins, 13);
+    sqlite3_bind_int(ins, 14, r->output_changed);
+    sqlite3_bind_text(ins, 15, r->payload, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(ins);
+    *inserted = rc == SQLITE_DONE && sqlite3_changes(cg->db) == 1;
+    sqlite3_finalize(ins);
+    return rc;
+}
+
+/* Replay of a journaled event.ingest: every column was computed when the
+ * hook fired, so the row lands exactly as it would have then. */
+int runtime_journal_apply(Cg *cg, const char *args, char *err,
+                          size_t errcap) {
+    static const char *const K[] = {
+        "source", "kind", "session", "attempt", "task", "fingerprint",
+        "semantic", "revision", "previous", "output_hash", "payload"
+    };
+    enum { NK = sizeof K / sizeof K[0] };
+    char *v[NK];
+    for (int i = 0; i < NK; i++) v[i] = json_get_string(args, K[i]);
+    int rc = 0;
+    if (!v[0] || !v[1] || !v[2] || !v[5] || !v[6] || !v[7] || !v[10]) {
+        snprintf(err, errcap, "event.ingest without its source, kind, "
+                 "session, fingerprints, revision or payload");
+        rc = -1;
+    } else {
+        RuntimeEventRow r = {
+            json_get_int(args, "created", 0), v[0], v[1], v[2], v[3], v[4],
+            v[5], v[6], v[7], v[8], v[9], v[10],
+            (int)json_get_int(args, "evidence", 0),
+            (int)json_get_int(args, "output_changed", 0)
+        };
+        bool inserted;
+        int src = runtime_event_store(cg, &r, &inserted);
+        if (src != SQLITE_DONE) {
+            snprintf(err, errcap, "%s", sqlite3_errmsg(cg->db));
+            rc = -1;
+        }
+    }
+    for (int i = 0; i < NK; i++) free(v[i]);
+    return rc;
+}
+
+/* a busy database queues the event with every column already computed */
+static bool runtime_event_queue(Cg *cg, const RuntimeEventRow *r) {
+    StrBuf a; sb_init(&a);
+    const char *k[] = { "source", "kind", "session", "attempt", "task",
+                        "fingerprint", "semantic", "revision", "previous",
+                        "output_hash", "payload" };
+    const char *v[] = { r->source, r->kind, r->session, r->attempt, r->task,
+                        r->fingerprint, r->semantic, r->revision, r->previous,
+                        r->output_hash, r->payload };
+    sb_printf(&a, "{\"created\":%ld,\"evidence\":%d,\"output_changed\":%d",
+              r->created, r->evidence, r->output_changed);
+    for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) {
+        sb_printf(&a, ",\"%s\":", k[i]);
+        if (v[i] && v[i][0]) sb_json_str(&a, v[i]); else sb_puts(&a, "null");
+    }
+    sb_putc(&a, '}');
+    char sum[300];
+    snprintf(sum, sizeof sum, "%s/%s %.12s", r->source, r->kind,
+             r->fingerprint);
+    int rc = journal_append(cg, "event.ingest", a.p, sum);
+    sb_free(&a);
+    return rc == 0;
 }
 
 int runtime_event_ingest(Cg *cg, const char *source, const char *payload,
@@ -493,39 +611,32 @@ int runtime_event_ingest(Cg *cg, const char *source, const char *payload,
         sb_free(&occurrence);
     }
 
-    bool inserted = false;
+    bool inserted = false, queued = false;
     long id = immediate_duplicate ? previous_id : 0;
     if (!immediate_duplicate) {
-        sqlite3_stmt *ins = cg_prep(cg,
-            "INSERT OR IGNORE INTO runtime_events(created,source,kind,session,"
-            "attempt_id,task,fingerprint,semantic_fingerprint,revision,"
-            "previous_revision,evidence_delta,activity,output_hash,"
-            "output_changed,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-        sqlite3_bind_int64(ins, 1, (long)time(NULL));
-        sqlite3_bind_text(ins, 2, source, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, 3, kind, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, 4, session, -1, SQLITE_TRANSIENT);
-        if (attempt[0]) sqlite3_bind_text(ins, 5, attempt, -1, SQLITE_TRANSIENT);
-        else sqlite3_bind_null(ins, 5);
-        if (task[0]) sqlite3_bind_text(ins, 6, task, -1, SQLITE_TRANSIENT);
-        else sqlite3_bind_null(ins, 6);
-        sqlite3_bind_text(ins, 7, fingerprint, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, 8, semantic, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(ins, 9, revision, -1, SQLITE_TRANSIENT);
-        if (previous[0])
-            sqlite3_bind_text(ins, 10, previous, -1, SQLITE_TRANSIENT);
-        else sqlite3_bind_null(ins, 10);
-        sqlite3_bind_int(ins, 11, evidence);
-        sqlite3_bind_int(ins, 12, 1);
-        if (output_hash[0])
-            sqlite3_bind_text(ins, 13, output_hash, -1, SQLITE_TRANSIENT);
-        else sqlite3_bind_null(ins, 13);
-        sqlite3_bind_int(ins, 14, output_changed);
-        sqlite3_bind_text(ins, 15, payload, -1, SQLITE_TRANSIENT);
-        sqlite3_step(ins);
-        inserted = sqlite3_changes(cg->db) == 1;
-        id = inserted ? (long)sqlite3_last_insert_rowid(cg->db) : 0;
-        sqlite3_finalize(ins);
+        RuntimeEventRow r = {
+            (long)time(NULL), source, kind, session, attempt, task,
+            fingerprint, semantic, revision, previous, output_hash, payload,
+            evidence, output_changed
+        };
+        if (journal_busy_seen()) sqlite3_busy_timeout(cg->db, 0);
+        int rc = runtime_event_store(cg, &r, &inserted);
+        sqlite3_busy_timeout(cg->db, (int)cg->lock_wait_ms);
+        if ((rc & 0xff) == SQLITE_BUSY || (rc & 0xff) == SQLITE_LOCKED) {
+            /* a hook must never lose the event it reports, nor fail the
+             * agent's tool call over a busy database */
+            journal_mark_busy();
+            if (!runtime_event_queue(cg, &r)) {
+                cg_busy_why("the journal under .codegraph/ could not be "
+                            "written");
+                cg_busy_report("The event");
+                exit(CG_EXIT_BUSY);
+            }
+            queued = true;
+            inserted = true;
+            journal_announced();
+        }
+        id = inserted && !queued ? (long)sqlite3_last_insert_rowid(cg->db) : 0;
     }
     if (!inserted && !immediate_duplicate) {
         sqlite3_stmt *q = cg_prep(cg,
@@ -548,15 +659,19 @@ int runtime_event_ingest(Cg *cg, const char *source, const char *payload,
         sb_puts(&b, ",\"fingerprint\":"); sb_json_str(&b, fingerprint);
         sb_puts(&b, ",\"workspace_revision\":"); sb_json_str(&b, revision);
         sb_printf(&b, ",\"activity\":true,\"output_changed\":%s,"
-                  "\"evidence_delta\":%d,\"implementation_progress\":%s}\n",
+                  "\"evidence_delta\":%d,\"implementation_progress\":%s%s}\n",
                   output_changed ? "true" : "false", evidence,
-                  implementation ? "true" : "false");
+                  implementation ? "true" : "false",
+                  queued ? ",\"queued\":true" : "");
         fputs(b.p, stdout); sb_free(&b);
     } else {
         printf("event %ld %s/%s %.12s — activity%s%s%s\n", id, source, kind,
                fingerprint, output_changed ? ", output changed" : "",
                evidence ? ", revision changed" : "",
                implementation ? ", implementation progress" : "");
+        if (queued)
+            printf("  queued: the database is busy; the next cg command that "
+                   "gets the write lock records it\n");
     }
     free(kind); free(session); free(attempt); free(task); free(output);
     return 0;

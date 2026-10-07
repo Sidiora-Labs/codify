@@ -118,31 +118,92 @@ long events_emit(Cg *cg, const char *kind, const char *subject,
     return events_emit_as(cg, kind, subject, getenv("CG_AGENT"), payload);
 }
 
-long events_emit_as(Cg *cg, const char *kind, const char *subject,
-                    const char *node, const char *payload) {
+static long events_insert(Cg *cg, long at_ms, const char *kind,
+                          const char *subject, const char *run,
+                          const char *node, const char *branch,
+                          const char *payload, int *rc_out) {
+    *rc_out = SQLITE_ERROR;
     if (!cg || !cg->db || !kind) return -1;
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(cg->db,
+    int prc = sqlite3_prepare_v2(cg->db,
             "INSERT INTO events(at,kind,subject,run,node,branch,payload) "
-            "VALUES(?,?,?,?,?,?,?)", -1, &st, NULL) != SQLITE_OK)
-        return -1;
-    sqlite3_bind_int64(st, 1, now_ms_wall());
+            "VALUES(?,?,?,?,?,?,?)", -1, &st, NULL);
+    if (prc != SQLITE_OK) { *rc_out = prc; return -1; }
+    sqlite3_bind_int64(st, 1, at_ms);
     sqlite3_bind_text(st, 2, kind, -1, SQLITE_TRANSIENT);
     bind_or_null(st, 3, subject);
-    bind_or_null(st, 4, getenv("CG_RUN"));
+    bind_or_null(st, 4, run);
     bind_or_null(st, 5, node);
-    bind_or_null(st, 6, cg->branch);
+    bind_or_null(st, 6, branch);
     bind_or_null(st, 7, payload);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
+    *rc_out = rc;
     if (rc != SQLITE_DONE) return -1;
-    long seq = (long)sqlite3_last_insert_rowid(cg->db);
+    return (long)sqlite3_last_insert_rowid(cg->db);
+}
+
+long events_emit_at(Cg *cg, long at_ms, const char *kind, const char *subject,
+                    const char *run, const char *node, const char *branch,
+                    const char *payload) {
+    int rc;
+    return events_insert(cg, at_ms, kind, subject, run, node, branch,
+                         payload, &rc);
+}
+
+/* Queue an event the database would not take: the record keeps the time it
+ * happened, so the log reads in the order things occurred once replayed. */
+static long events_queue(Cg *cg, long at, const char *kind,
+                         const char *subject, const char *node,
+                         const char *payload) {
+    StrBuf a; sb_init(&a);
+    sb_printf(&a, "{\"at\":%ld,\"kind\":", at);
+    sb_json_str(&a, kind);
+    sb_puts(&a, ",\"subject\":");
+    if (subject) sb_json_str(&a, subject); else sb_puts(&a, "null");
+    sb_puts(&a, ",\"node\":");
+    if (node && node[0]) sb_json_str(&a, node); else sb_puts(&a, "null");
+    sb_puts(&a, ",\"payload\":");
+    sb_puts(&a, payload && payload[0] ? payload : "null");
+    sb_putc(&a, '}');
+    char sum[300];
+    snprintf(sum, sizeof sum, "%s %s", kind, subject ? subject : "");
+    int rc = journal_append(cg, "event.emit", a.p, sum);
+    sb_free(&a);
+    return rc == 0 ? 0 : -1;
+}
+
+/* Outside a transaction a busy database queues the event in the journal
+ * (returning 0: no seq yet) instead of losing it; inside one, the caller
+ * already holds the lock and a failure is a real one. */
+long events_emit_as(Cg *cg, const char *kind, const char *subject,
+                    const char *node, const char *payload) {
+    if (!cg || !cg->db || !kind) return -1;
+    long at = now_ms_wall();
+    bool autocommit = sqlite3_get_autocommit(cg->db) != 0;
+    /* a process that already waited out the lock once does not wait again
+     * per event */
+    if (autocommit && journal_busy_seen())
+        sqlite3_busy_timeout(cg->db, 0);
+    int code;
+    long seq = events_insert(cg, at, kind, subject, getenv("CG_RUN"), node,
+                             cg->branch, payload, &code);
+    code &= 0xff;
+    if (autocommit && journal_busy_seen())
+        sqlite3_busy_timeout(cg->db, (int)cg_lock_wait_default());
+    if (seq < 0) {
+        if (autocommit && (code == SQLITE_BUSY || code == SQLITE_LOCKED)) {
+            journal_mark_busy();
+            return events_queue(cg, at, kind, subject, node, payload);
+        }
+        return -1;
+    }
     events_prune(cg, seq);
     return seq;
 }
 
-/* For callers with no connection of their own. Best effort: a busy
- * database loses the event rather than stalling the lifecycle command. */
+/* For callers with no connection of their own. A database still busy after
+ * the wait queues the event in the journal rather than losing it. */
 long events_emit_quiet(const char *kind, const char *subject,
                        const char *payload) {
     Cg g;
