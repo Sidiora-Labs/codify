@@ -51,7 +51,7 @@ overview = "Four independent slices, one wave, each in its own file so the merge
 
 [documentation]
 mode      = "auto"
-status    = "pending"
+status    = "in_progress"
 audiences = ["user", "developer"]
 targets   = ["README.md", "docs/**", "CHANGELOG.md"]
 

@@ -7,21 +7,21 @@ _Generated graph context owned by `cg agentmd`. Regenerate with `cg agentmd --wr
 ## Languages
 
 | Language | Files | Lines |
-|---|---:|---:|
-| c | 419 | 326113 |
-| typescript | 154 | 1210 |
-| javascript | 138 | 72804 |
-| go | 55 | 5962 |
-| python | 22 | 429 |
+| --- | ---: | ---: |
+| c | 57 | 44727 |
+| typescript | 16 | 125 |
+| javascript | 15 | 9446 |
+| python | 5 | 69 |
+| go | 5 | 542 |
 
-788 source files, 406518 lines total.
+98 source files, 54909 lines total.
 
 ## Directory map
 
-- `kvx/` — 33 files, 5753 lines (mostly go)
-- `src/` — 330 files, 314992 lines (mostly c)
-- `editors/` — 94 files, 57459 lines (mostly javascript)
-- `tests/` — 331 files, 28314 lines (mostly typescript)
+- `kvx/` — 3 files, 523 lines (mostly go)
+- `src/` — 38 files, 43060 lines (mostly c)
+- `editors/` — 11 files, 7933 lines (mostly javascript)
+- `tests/` — 46 files, 3393 lines (mostly c)
 
 ## Build & tooling
 
@@ -29,77 +29,44 @@ _Generated graph context owned by `cg agentmd`. Regenerate with `cg agentmd --wr
 
 ## Entry points
 
-- function `main` — `src/main.c:252`
-- function `main` — `src/main.c:261`
-- function `main` — `src/main.c:252`
-- function `main` — `src/main.c:252`
-- function `main` — `src/main.c:252`
-- function `main` — `src/main.c:254`
-- function `main` — `src/main.c:263`
-- function `main` — `src/main.c:263`
-- function `main` — `src/main.c:261`
-- function `main` — `src/main.c:263`
-- function `main` — `src/main.c:298`
+- function `main` — `src/main.c:325`
+- function `main` — `tests/fixtures/codemap/src/main.c:6`
+- function `main` — `tests/fixtures/codemap/tests/test_count.c:5`
+- function `main` — `tests/fixtures/explore/proj/src/main.c:6`
 - function `main` — `tests/fixtures/sample/main.go:9`
-- function `main` — `tests/fixtures/sample/main.go:9`
-- function `main` — `tests/fixtures/sample/main.go:9`
-- function `main` — `tests/fixtures/sample/main.go:9`
+- function `main` — `tests/unit/test_config.c:37`
+- function `main` — `tests/unit/test_drivers.c:45`
+- function `main` — `tests/unit/test_json.c:5`
+- function `main` — `tests/unit/test_kvx.c:251`
+- function `main` — `tests/unit/test_lang.c:58`
+- function `main` — `tests/unit/test_sha256.c:11`
+- function `main` — `tests/unit/test_util.c:6`
 
 ## HTTP routes
 
 | Method | Pattern | Handler | Where |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/api/tasks` | `handle` | `tests/fixtures/anchors/server.ts:12` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
-| GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
-| POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
 | GET | `/users` | `getUsers` | `tests/fixtures/sample/src/server.ts:21` |
 | POST | `/users` | `createUser` | `tests/fixtures/sample/src/server.ts:22` |
 
 ## Load-bearing symbols (most referenced)
 
-- `sb_puts` (function, 10441 refs) — `src/util.c:48`
-- `sb_printf` (function, 6109 refs) — `src/util.c:54`
-- `sb_json_str` (function, 5263 refs) — `src/util.c:67`
-- `sb_putc` (function, 3787 refs) — `src/util.c:47`
-- `sb_free` (function, 3259 refs) — `src/util.c:41`
-- `sb_init` (function, 3156 refs) — `src/util.c:40`
-- `cg_prep` (function, 2325 refs) — `src/db.c:425`
-- `ok` (macro, 1851 refs) — `tests/unit/tap.h:10`
-- `xstrdup` (function, 1719 refs) — `src/util.c:33`
-- `json_get_string` (function, 1265 refs) — `src/json.c:106`
-- `push` (method, 1048 refs) — `editors/vscode/agents.js:792`
-- `one` (function, 1025 refs) — `editors/vscode/language.js:35`
-- `xmalloc` (function, 922 refs) — `src/util.c:23`
-- `file` (function, 822 refs) — `editors/vscode/memories.js:435`
-- `read_entire_file` (function, 701 refs) — `src/util.c:117`
+- `sb_puts` (function, 1335 refs) — `src/util.c:49`
+- `sb_printf` (function, 878 refs) — `src/util.c:55`
+- `sb_json_str` (function, 666 refs) — `src/util.c:68`
+- `sb_putc` (function, 491 refs) — `src/util.c:48`
+- `sb_free` (function, 487 refs) — `src/util.c:42`
+- `sb_init` (function, 471 refs) — `src/util.c:41`
+- `cg_prep` (function, 274 refs) — `src/db.c:480`
+- `ok` (macro, 249 refs) — `tests/unit/tap.h:10`
+- `xstrdup` (function, 217 refs) — `src/util.c:34`
+- `json_get_string` (function, 199 refs) — `src/json.c:118`
+- `push` (method, 175 refs) — `editors/vscode/agents.js:792`
+- `one` (function, 146 refs) — `editors/vscode/language.js:35`
+- `xmalloc` (function, 118 refs) — `src/util.c:24`
+- `file` (function, 112 refs) — `editors/vscode/memories.js:438`
+- `ok_str` (macro, 90 refs) — `tests/unit/tap.h:20`
 
 ## Querying this codebase
 

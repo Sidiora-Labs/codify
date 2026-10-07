@@ -4,20 +4,47 @@ All notable changes to this project are recorded here, generated from git histor
 A release is a tag or a version bump; a group is the commit-subject prefix; a task
 reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
-## [v1.3.0] - 2026-10-06
+## [v1.4.0] - 2026-10-07
 
 ### Highlights
 
-Codify v1.3.0 ships a full codemap generator (`cg codemap`) that writes a byte-stable CODEMAP.md from the graph, a `codify.kvx` project config with `cg config list/init/get/set/check`, memory import/export over JSONL, and a spec workflow that now covers explore through carry. The index resolves prototypes to definitions, ranks by phrase over names/docs/bodies, and fills context to its token budget; the recap agent resumes from Claude Code and Codex transcripts via a cached, parallel-decided log.
+Codify v1.4.0 adds a live progress status line for init, index, and sync with phase details and worker counts, configurable via CG_PROGRESS. The help system is now a grouped map from a single command table, supporting --all, --json, and usage lines. Indexing gains configurable parse workers through --workers, CG_INDEX_WORKERS, or config with machine precedence, and the pipeline cap rises to 64. A write journal supports the busy database, and cg info prints the origin.
 
-- `cg codemap` writes CODEMAP.md (overview, build/test commands, layout, entry points, module symbols, directory deps, tests, workflow pointers) with `--force`/`--check`, byte-stable and budget-fitted
-- `codify.kvx` config relocates spec/context/skills/codemap through a per-root cache; `[sync] auto=false` gates implicit sync; `cg config list/init/get/set/check`
-- Memory export/import: JSONL by content id, graph-to-graph, MCP tools
-- Spec graph check, editor hover/go-to-definition, definitions before prototypes, phrase ranking, path outlines, context filled to budget with `tokens_used`
-- Recap resumes from Claude Code/Codex transcripts; Solar Decide judges statements in parallel cached chunks; `jev_ask_at` and `chat_model_ask` exposed
+- Live status line for init, index, sync (CG_PROGRESS=plain|0)
+- cg help grouped map with --all, --json, usage lines
+- [index] workers via --workers, CG_INDEX_WORKERS, config; pipeline cap 64
+- Write journal for busy database
+- cg info prints origin
+
+### Spec workflow
+- Codify-v14 — progress for init, sync and index; a write journal for the busy database; [index] workers in codify.kvx; cg help as a grouped map ([2010aeb](https://github.com/Sidiora-Labs/codify/commit/2010aebd328357f5297ec408a20bbe8c017b720b))
+
+### Help
+- Cg help as a grouped map from one command table — overview, per-command detail, --all, --json, and main's usage lines; 43_help.sh checks dispatch, width, color, and the README ([4c1ad82](https://github.com/Sidiora-Labs/codify/commit/4c1ad823f79677e1a06ca7fca67ce82e2dca49cb), task codify-v14/4.1)
+
+### Index
+- [index] workers in codify.kvx — a configured parse worker count with --workers, CG_INDEX_WORKERS, config, machine precedence; the pipeline cap rises to 64; cg info prints the origin; spec: 3.1 done ([b269d56](https://github.com/Sidiora-Labs/codify/commit/b269d5620fee7c17c75cb799d73f2debd94a8d70), task codify-v14/3.1)
+
+### Progress
+- A live status line for init, index and sync — phases, counts, workers, waits; CG_PROGRESS=plain|0; implicit and --json passes silent ([13b7ad2](https://github.com/Sidiora-Labs/codify/commit/13b7ad222047d97b73de003979d194c542f3cd4c), task codify-v14/1.1)
+
+## [1.3.0] - 2026-10-06
+
+### Highlights
+
+Codify 1.3.0 adds a project configuration file (`codify.kvx`) that relocates spec, context, skill, and codemap paths through a per-root cache and gates implicit sync with `auto=false`, plus `cg codemap` which generates a byte-stable CODEMAP.md from the graph with build/test commands, entry points, module symbols, directory dependencies, and tests, supporting `--force` and `--check`. Memory gains export/import via JSONL by content id, graph-to-graph, and MCP tools. The spec graph resolves prototype calls to definitions, definitions rank before prototypes by phrase, and schema v17 indexes `refs.target_id`. A recap feature resumes briefs from Claude Code and Codex transcripts using a gateway model to decide which statements to include.
+
+- `cg codemap` writes CODEMAP.md from the graph; `--force`, `--check`, byte-stable, budget-fitted
+- `codify.kvx` project config: `[paths]` relocate spec/context/skills/codemap, `[sync]` auto=false gates implicit sync
+- `cg config list/init/get/set/check` for configuration management
+- Memory export/import JSONL by content id, graph-to-graph, MCP tools
+- Definitions answer before prototypes; phrase ranking; schema v17; `refs.target_id` indexed
 
 ### Documentation
 - Codify-v13 closed — architecture covers configuration, the code map and memory transport; reference tables, changelog and tool counts regenerated ([c455a26](https://github.com/Sidiora-Labs/codify/commit/c455a263dda6214893ccb0b767f15bf89ff0c2d9), task codify-v13/@docs)
+
+### Build and tooling
+- Update changelog for v1.3.0 release; add project configuration and codemap details ([72d51fa](https://github.com/Sidiora-Labs/codify/commit/72d51fad0a11327c6ac56388017aa32305f2f085))
 
 ### Spec workflow
 - 2.1 done ([6a80082](https://github.com/Sidiora-Labs/codify/commit/6a8008296e02461da674ee2d584b0c0e9a35a760), task codify-v13/2.1)
@@ -372,7 +399,8 @@ Initial release of Codify. The single-binary tool provides code graph, spec-driv
 ### Other
 - First commit ([2b6dede](https://github.com/Sidiora-Labs/codify/commit/2b6dede7c99e5856ef5464fc5d1c422b5ab77808))
 
-[v1.3.0]: https://github.com/Sidiora-Labs/codify/compare/1.1.0...v1.3.0
+[v1.4.0]: https://github.com/Sidiora-Labs/codify/compare/1.3.0...v1.4.0
+[1.3.0]: https://github.com/Sidiora-Labs/codify/compare/1.1.0...1.3.0
 [1.1.0]: https://github.com/Sidiora-Labs/codify/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/Sidiora-Labs/codify/compare/0.9.0...1.0.0
 [0.9.0]: https://github.com/Sidiora-Labs/codify/compare/0.8.5...0.9.0
