@@ -176,12 +176,20 @@ See [docs/sync.md](docs/sync.md#progress).
 
 ## Command reference
 
+`cg help` prints the map: every command by group, one line each, fitted to the terminal. `cg help <command>` (or `cg <command> --help`, `-h`) shows one command's usage, subcommands, flags, examples, and related commands; `cg help --all` prints all of them, and `cg help --json` gives editors and agents the same table to build menus from. The tables below and `cg help` come from the same list of commands; `tests/integration/43_help.sh` keeps them in step.
+
+| Command | Description |
+|---|---|
+| `cg help [<command>] [--all] [--json]` | The grouped overview, one command's detail, every detail, or the whole table as JSON. An unknown name suggests the closest ones and exits 1. Bold and dim only on a terminal (`NO_COLOR`, `TERM=dumb`, and `CG_COLOR=0\|1` decide); `COLUMNS` sets the width, never below 60 |
+| `cg version` | Print the version (`--version` too) |
+
 ### Graph
 
 | Command | Description |
 |---|---|
 | `cg init [--nested]` | Create `.codegraph/` and build the initial index; inside a linked git worktree of an initialized repository, join the shared graph under this branch instead |
-| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named. `cg index [--full] [--workers N]` is the blocking form that always walks. `--workers` beats `CG_INDEX_WORKERS` and `[index] workers` |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named |
+| `cg index [--full] [--workers N]` | The blocking form of sync that always walks, waiting for a pass already running. `--workers N` (on both) beats `CG_INDEX_WORKERS` and `[index] workers` in `codify.kvx` |
 | `cg branches` | Every branch indexed into the shared graph, with its worktree, head, base, and file count |
 | `cg search <q> [-n N]` | Symbol and full-text search: a phrase matches names (`export memory` finds `memory_export` and `exportMemory`), doc comments and bodies, ranked in that order with source before tests; file hits show the matching line. Definitions answer, never their prototypes ([docs/retrieval.md](docs/retrieval.md)) |
 | `cg symbol <name>` | Definition, snippet, and reference count |
@@ -336,6 +344,7 @@ These four are what make Codify present at every step rather than only at the bo
 | `cg work open\|update\|close` | Open compact work context, retrieve revision deltas, and close criteria against evidence |
 | `cg handoff` | Record session state against a task before stopping: `--done "a;b"`, `--next "a;b"`, `--blocked "x"`, `-m <note>`, `--task <id>` (defaults to your current task). Stored as a structured memory; each handoff supersedes the previous one for the task |
 | `cg resume [--task <id>] [--prompt]` | Everything a fresh session needs to pick a task up: the task packet, the latest handoff (parsed back into done/next/blocked), task-scoped memories, uncommitted paths, lease state. `--prompt` renders it as a paste-ready block for a new agent session |
+| `cg journal [list\|apply\|drop <id>\|--failed\|--all]` | Pending writes queued while the database was busy: list, apply, drop. Lifecycle writes that find the database locked land under `.codegraph/journal/` and are replayed in order by the next process that holds the write lock |
 
 All query commands accept `--json`. That flag, the MCP server, and the language server are the agent-native interfaces.
 
@@ -354,6 +363,8 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 | `cg spec wave` | Every eligible task in the current wave, not just the first |
 | `cg spec ready` | Every eligible task across **all** waves, grouped by wave, each marked when its `touches` conflict with a live claim — the full frontier an orchestrator can dispatch |
 | `cg spec claim <id>` / `release <id>` | Lease a task to an owning agent with an expiry (`--agent`, `--ttl` minutes); claiming refuses a task another agent holds live, and releasing someone else's lease requires that agent's name or `--force` — no silent steals. `done` and `implemented` release the task's lease automatically |
+| `cg spec heartbeat <id>` | Renew a live attempt's lease: `--agent`, `--attempt`, `--fence`, `--ttl` |
+| `cg spec reconcile [--repair]` | Report in-progress declarations no live attempt backs; `--repair` fixes them |
 | `cg spec claim-next` | Atomically claim the first eligible task whose `touches` conflict with neither in-progress tasks nor live leases (file lock + one transaction), and return the full packet: task, lease, task-scoped memories. Exits 3 when the frontier is empty — distinct from an error |
 | `cg spec run` | Orchestrate a parallel or Prod wave: claim eligible tasks and drive one agent process per slot — see [Driving agents](#driving-agents). `-n N`, `--driver codex\|claude\|custom`, `--dry-run`, `--max-fail K`, `--agent-prefix P` |
 | `cg spec next` | The lowest-wave pending task whose `requires` are satisfied (`done` only in standard mode; `implemented` or `done` in Prod mode), with its do-bullets and expanded acceptance criteria |
