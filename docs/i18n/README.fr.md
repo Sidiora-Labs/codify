@@ -112,14 +112,22 @@ make && sudo make install
 cd votre-projet && cg init    # puis, dans n'importe quel projet
 ```
 
+Dans un terminal, `cg init`, `cg index` et `cg sync` affichent sur stderr une ligne de progression en direct — phase, fichiers traités sur fichiers à traiter, workers, temps écoulé et tout verrou attendu — effacée avant le résumé. Une sortie redirigée ne change pas ; `CG_PROGRESS=plain` imprime de simples lignes à la place, `CG_PROGRESS=0` la désactive. Voir [docs/sync.md](../../docs/sync.md#progress).
+
 ## Référence des commandes
+
+`cg help` affiche la carte : chaque commande par groupe, une ligne chacune, ajustée à la largeur du terminal. `cg help <command>` (ou `cg <command> --help`, `-h`) montre l'usage d'une commande, ses sous-commandes, options, exemples et commandes liées ; `cg help --all` les affiche toutes, et `cg help --json` fournit aux éditeurs et aux agents la même table pour construire leurs menus. Les tables ci-dessous et `cg help` proviennent de la même liste de commandes ; `tests/integration/43_help.sh` les maintient alignées.
+
+| Commande | Description |
+|---|---|
+| `cg help [<command>] [--all] [--json]` | La vue d'ensemble par groupe, le détail d'une commande, tous les détails, ou la table entière en JSON. Un nom inconnu suggère les plus proches et sort avec 1. Gras et atténué seulement dans un terminal (`NO_COLOR`, `TERM=dumb` et `CG_COLOR=0\|1` en décident) ; `COLUMNS` fixe la largeur, jamais sous 60 |
 
 ### Graphe
 
 | Commande | Description |
 |---|---|
 | `cg init [--nested]` | Crée `.codegraph/` et construit l'index initial ; dans un worktree git lié d'un dépôt initialisé, rejoint le graphe partagé sous cette branche. `cg branches` liste chaque branche indexée, avec worktree, head, base et nombre de fichiers |
-| `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | Index incrémental : se fond dans une passe en cours, s'abstient si frais, ne parcourt que les chemins nommés. `cg index [--full]` est la forme bloquante |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Index incrémental : se fond dans une passe en cours, s'abstient si frais, ne parcourt que les chemins nommés. `cg index [--full] [--workers N]` est la forme bloquante. `--workers N` (sur les deux) l'emporte sur `CG_INDEX_WORKERS` et `[index] workers` dans `codify.kvx` |
 | `cg search <q> [-n N]` / `cg symbol <name>` | Recherche de symboles et plein texte ; définition, extrait et nombre de références |
 | `cg impact <name> [-d N] [--budget N]` | Appelants et appelés transitifs, dans un budget de tokens (8000 par défaut) |
 | `cg context <q> [--budget N] [-n K]` | Bundle de contexte en un appel : mémoires, symboles, points d'entrée, routes (K=8, budget 4000 par défaut) |
@@ -184,6 +192,7 @@ Codify garde explicites quatre autorités indépendantes — l'état Git, les in
 | `cg check [--strict]` | La porte CI unique : rendu périmé, lint de spec, preuves, cohérence des claims, état du worktree |
 | `cg state` / `cg event ingest\|history\|progress` / `cg work open\|update\|close` | Les quatre autorités ; événements des hôtes ; paquet de travail compact |
 | `cg handoff` / `cg resume [--task <id>] [--prompt]` | Consigne l'état de session (`--done`, `--next`, `--blocked`, `-m`) ; restitue tout ce qu'il faut à une session neuve |
+| `cg journal [list\|apply\|drop <id>\|--failed\|--all]` | Écritures en attente, mises en file pendant que la base était occupée : lister, appliquer, abandonner. Les écritures de cycle de vie qui trouvent la base verrouillée atterrissent sous `.codegraph/journal/` et sont rejouées dans l'ordre par le prochain processus qui détient le verrou d'écriture |
 
 ## Flux de travail des specs
 

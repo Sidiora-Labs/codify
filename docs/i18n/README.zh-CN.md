@@ -113,14 +113,22 @@ make && sudo make install
 cd your-project && cg init
 ```
 
+在终端中,`cg init`、`cg index` 和 `cg sync` 会在 stderr 上显示一行实时进度——当前阶段、已完成/待处理的文件数、工作线程数、已用时间,以及正在等待的锁——并在输出摘要前清除。管道输出不受影响;`CG_PROGRESS=plain` 改为打印普通文本行,`CG_PROGRESS=0` 将其关闭。见 [docs/sync.md](../../docs/sync.md#progress)。
+
 ## 命令参考
+
+`cg help` 打印全景图:按分组列出每个命令,每条一行,按终端宽度排版。`cg help <command>`(或 `cg <command> --help`、`-h`)显示单个命令的用法、子命令、参数、示例和相关命令;`cg help --all` 打印全部命令的详情,`cg help --json` 则把同一张表交给编辑器和智能体,用来生成菜单。下面的表格与 `cg help` 出自同一份命令清单,由 `tests/integration/43_help.sh` 保持两者一致。
+
+| 命令 | 说明 |
+|---|---|
+| `cg help [<command>] [--all] [--json]` | 分组概览、单个命令的详情、全部详情,或以 JSON 输出整张表。名称未知时会提示最接近的命令并以 1 退出。粗体与暗色只在终端中使用(由 `NO_COLOR`、`TERM=dumb` 和 `CG_COLOR=0\|1` 决定);`COLUMNS` 设定宽度,最小为 60 |
 
 ### 图
 
 | 命令 | 说明 |
 |---|---|
 | `cg init [--nested]` / `cg branches` | 创建 `.codegraph/` 并构建初始索引(在已初始化仓库的关联 git worktree 中,则以当前分支加入共享图);列出索引进共享图的每个分支,及其 worktree、head、base 与文件数 |
-| `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | 增量索引:合并进已在运行的一轮、新鲜时跳过、只遍历指定路径。`cg index [--full]` 是总会遍历的阻塞形式 |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | 增量索引:合并进已在运行的一轮、新鲜时跳过、只遍历指定路径。`cg index [--full] [--workers N]` 是总会遍历的阻塞形式。`--workers N`(两者皆可)优先于 `CG_INDEX_WORKERS` 和 `codify.kvx` 中的 `[index] workers` |
 | `cg search <q> [-n N]` / `cg symbol <name>` | 符号与全文搜索;定义、代码片段与引用计数 |
 | `cg impact <name> [-d N] [--budget N]` | 传递性的调用者与被调用者,适配 token 预算(默认 8000) |
 | `cg context <q> [--budget N] [-n K]` | 面向智能体的一次性上下文包:记忆、符号、入口点、路由——前 K 个符号(默认 8),预算默认 4000,并给出明确的省略计数 |
@@ -189,6 +197,7 @@ cd your-project && cg init
 | `cg check [--strict]` | 唯一的 CI 关卡:渲染是否过期、spec lint、任务证据、认领一致性、工作树状态 |
 | `cg state` / `cg event …` / `cg work …` | 分别标注各类状态;规范化宿主生命周期事件;打开、增量更新和关闭工作上下文 |
 | `cg handoff` / `cg resume [--task <id>] [--prompt]` | 停下前记录会话状态(`--done "a;b"`、`--next "a;b"`、`--blocked "x"`、`-m <note>`、`--task <id>`,每条取代上一条);新会话接手任务所需的一切,`--prompt` 渲染为可直接粘贴的块 |
+| `cg journal [list\|apply\|drop <id>\|--failed\|--all]` | 数据库繁忙时排队的待写入项:列出、应用、丢弃。遇到数据库被锁的生命周期写入会落在 `.codegraph/journal/` 下,由下一个持有写锁的进程按顺序重放 |
 
 ## Spec 工作流
 

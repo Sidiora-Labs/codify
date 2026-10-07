@@ -737,6 +737,7 @@ scripts/             install/uninstall scripts served at codify.centra.ag + rele
 docs/ARCHITECTURE.md how the pieces fit together
 docs/sync.md         the sync gate, freshness, slots, incremental resolution
 docs/config.md       codify.kvx: relocated spec/context/skills paths, auto-sync
+docs/journal.md      the write journal: what is queued when the database is busy, replay, cg journal
 docs/retrieval.md    declarations, phrase ranking, path outlines, the budget
 docs/hierarchy.md    roles, branch flow, the supervisor, supervision, approvals,
                      briefings

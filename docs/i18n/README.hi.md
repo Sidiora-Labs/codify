@@ -130,14 +130,22 @@ cd your-project
 cg init
 ```
 
+टर्मिनल पर `cg init`, `cg index` और `cg sync` stderr पर एक लाइव progress लाइन दिखाते हैं — चरण, कुल में से कितनी फ़ाइलें हो चुकीं, workers, बीता समय, और जिस lock का इंतज़ार है वह — जो सारांश से पहले मिट जाती है। पाइप किया गया आउटपुट नहीं बदलता; `CG_PROGRESS=plain` इसकी जगह सादी लाइनें छापता है और `CG_PROGRESS=0` इसे बंद कर देता है। देखें [docs/sync.md](../../docs/sync.md#progress)।
+
 ## कमांड संदर्भ
+
+`cg help` पूरा नक्शा छापता है: हर कमांड अपने समूह में, एक-एक लाइन में, टर्मिनल की चौड़ाई के हिसाब से। `cg help <command>` (या `cg <command> --help`, `-h`) एक कमांड का usage, subcommands, फ़्लैग, उदाहरण और संबंधित कमांड दिखाता है; `cg help --all` सबको छापता है, और `cg help --json` एडिटरों और एजेंटों को वही टेबल देता है ताकि वे उससे मेनू बना सकें। नीचे की टेबल और `cg help` कमांडों की एक ही सूची से बनते हैं; `tests/integration/43_help.sh` दोनों को मेल में रखता है।
+
+| कमांड | विवरण |
+|---|---|
+| `cg help [<command>] [--all] [--json]` | समूहों वाला overview, एक कमांड का विवरण, सारे विवरण, या पूरी टेबल JSON में। अनजाना नाम सबसे क़रीबी नाम सुझाता है और 1 पर exit करता है। Bold और dim केवल टर्मिनल पर (`NO_COLOR`, `TERM=dumb` और `CG_COLOR=0\|1` तय करते हैं); `COLUMNS` चौड़ाई तय करता है, जो कभी 60 से कम नहीं होती |
 
 ### ग्राफ़
 
 | कमांड | विवरण |
 |---|---|
 | `cg init [--nested]` | `.codegraph/` बनाकर पहला इंडेक्स; initialized रिपॉज़िटरी के linked worktree में साझा ग्राफ़ से इस branch के रूप में जुड़ता है |
-| `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | इंक्रीमेंटल इंडेक्स: चल रहे पास में मिल जाता है, ताज़ा होने पर छोड़ देता है। `cg index [--full]` हमेशा walk करने वाला blocking रूप है |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | इंक्रीमेंटल इंडेक्स: चल रहे पास में मिल जाता है, ताज़ा होने पर छोड़ देता है। `cg index [--full] [--workers N]` हमेशा walk करने वाला blocking रूप है। `--workers N` (दोनों पर) `CG_INDEX_WORKERS` और `codify.kvx` के `[index] workers` से ऊपर रहता है |
 | `cg branches` | साझा ग्राफ़ में इंडेक्स हर branch, उसके worktree, head, base और फ़ाइल गिनती के साथ |
 | `cg search <q> [-n N]` / `cg symbol <name>` / `cg show <symbol\|path:line>` | सिंबल और फुल-टेक्स्ट सर्च; परिभाषा और रेफ़रेंस गिनती; केवल उस सिंबल की body |
 | `cg context <q> [--budget N] [-n K]` / `cg impact <name> [-d N]` | एक-कॉल कॉन्टेक्स्ट बंडल (डिफ़ॉल्ट 8 सिंबल, बजट 4000); ट्रांज़िटिव कॉलर और कैली (बजट 8000) |
@@ -205,6 +213,7 @@ Codify के स्नैपशॉट git की जगह नहीं ले�
 | `cg check [--strict]` | एकल CI gate: render staleness, spec lint, टास्क evidence, claim consistency, worktree state |
 | `cg state` / `cg event ingest\|history\|progress` / `cg work open\|update\|close` | ऊपर वर्णित control plane; संक्षिप्त work पैकेट, revision deltas, और evidence के मुक़ाबले मानदंड बंद करना |
 | `cg handoff` / `cg resume [--task <id>] [--prompt]` | रुकने से पहले सेशन state (`--done`, `--next`, `--blocked`, `-m`); नए सेशन के लिए टास्क पैकेट, ताज़ा handoff, मेमोरी और lease state |
+| `cg journal [list\|apply\|drop <id>\|--failed\|--all]` | डेटाबेस व्यस्त रहते समय कतार में रखे गए लंबित writes: सूची देखें, लागू करें, हटाएँ। जो lifecycle writes डेटाबेस को locked पाते हैं वे `.codegraph/journal/` में रखे जाते हैं, और write lock पाने वाली अगली प्रक्रिया उन्हें क्रम से replay करती है |
 
 सभी क्वेरी कमांड `--json` स्वीकार करते हैं। यह फ़्लैग, MCP सर्वर और language server एजेंट-नेटिव इंटरफ़ेस हैं।
 

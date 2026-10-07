@@ -123,14 +123,22 @@ make && sudo make install
 cd your-project && cg init
 ```
 
+En una terminal, `cg init`, `cg index` y `cg sync` muestran una línea de progreso en vivo por stderr —fase, archivos hechos de los pendientes, workers, tiempo transcurrido y cualquier lock que estén esperando—, que se borra antes del resumen. La salida redirigida no cambia; `CG_PROGRESS=plain` imprime líneas simples en su lugar y `CG_PROGRESS=0` la desactiva. Ver [docs/sync.md](../../docs/sync.md#progress).
+
 ## Referencia de comandos
+
+`cg help` imprime el mapa: cada comando por grupo, una línea por comando, ajustado al ancho de la terminal. `cg help <command>` (o `cg <command> --help`, `-h`) muestra el uso de un comando, sus subcomandos, flags, ejemplos y comandos relacionados; `cg help --all` los imprime todos, y `cg help --json` da a editores y agentes la misma tabla para construir menús. Las tablas de abajo y `cg help` salen de la misma lista de comandos; `tests/integration/43_help.sh` las mantiene sincronizadas.
+
+| Comando | Descripción |
+|---|---|
+| `cg help [<command>] [--all] [--json]` | La vista general por grupos, el detalle de un comando, todos los detalles o la tabla completa en JSON. Un nombre desconocido sugiere los más cercanos y sale con 1. Negrita y atenuado solo en una terminal (deciden `NO_COLOR`, `TERM=dumb` y `CG_COLOR=0\|1`); `COLUMNS` fija el ancho, nunca por debajo de 60 |
 
 ### Grafo
 
 | Comando | Descripción |
 |---|---|
 | `cg init [--nested]` | Crea `.codegraph/` y construye el índice inicial; dentro de un worktree enlazado, se une al grafo compartido bajo esta rama |
-| `cg sync [paths] [--max-age MS] [--background] [--wait MS]` | Índice incremental: se agrupa con una pasada en curso, se omite si está fresco. `cg index [--full]` es la forma bloqueante |
+| `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Índice incremental: se agrupa con una pasada en curso, se omite si está fresco. `cg index [--full] [--workers N]` es la forma bloqueante. `--workers N` (en ambos) tiene prioridad sobre `CG_INDEX_WORKERS` y `[index] workers` en `codify.kvx` |
 | `cg branches` | Cada rama indexada en el grafo compartido, con su worktree, head, base y número de archivos |
 | `cg search <q> [-n N]` | Búsqueda de símbolos y de texto completo |
 | `cg symbol <name>` | Definición, fragmento y recuento de referencias |
@@ -207,6 +215,7 @@ Todos avisan por defecto; solo `--strict` los hace fallar. Todos los comandos de
 | `cg check [--strict]` | La puerta única de CI: renderizado, lint de spec, evidencia, coherencia de claims, estado del worktree |
 | `cg state` / `cg event …` / `cg work …` | Autoridades separadas, eventos del host y contexto de trabajo compacto (ver arriba) |
 | `cg handoff` / `cg resume [--task <id>] [--prompt]` | Registra el estado de la sesión antes de parar; recupera todo lo que una sesión nueva necesita, como bloque listo para pegar con `--prompt` |
+| `cg journal [list\|apply\|drop <id>\|--failed\|--all]` | Escrituras pendientes encoladas mientras la base de datos estaba ocupada: listar, aplicar, descartar. Las escrituras de ciclo de vida que encuentran la base bloqueada quedan en `.codegraph/journal/` y el siguiente proceso que obtiene el lock de escritura las reproduce en orden |
 
 ## Flujo de trabajo de specs
 

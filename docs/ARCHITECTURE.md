@@ -17,7 +17,12 @@ files ───────────────────────► j
   min(online, affinity mask, cgroup v1/v2 CPU quota); honest memory =
   `MemAvailable` ∩ cgroup limits. Workers, SQLite page cache, and mmap
   budgets derive from that, so the same binary behaves sanely on a
-  16-core workstation and a 512 MB container.
+  16-core workstation and a 512 MB container. The machine's own worker
+  pick stays at or under 16; a person may ask for more — `--workers N`,
+  `CG_INDEX_WORKERS`, or `[index] workers` in `codify.kvx`, in that order
+  of precedence, up to `CG_MAX_WORKERS` (64) — and
+  `syncgate_worker_request` is the one place that resolves the request
+  and names its origin.
 - **`scan.c`** walks the tree, diffs (mtime, size) against the `files`
   table, fans changed files out to a worker pool through a bounded ring
   buffer, and writes results back on the main thread in short chunked
@@ -100,7 +105,10 @@ detail, flags, examples, related, aliases). Four views are drawn from it —
 `help_overview` (`cg`, `cg help`, `-h`, `--help`: the grouped map),
 `help_command` (`cg help <name>`, `cg <name> --help`), the `--all` dump, and
 `--json` — and `help_usage` prints a row's usage line when `main.c` meets a
-bad argument. `help_route` runs before any flag is consumed. Text is wrapped
+bad argument. `help_route` runs before any flag is consumed, and
+`help_known` runs before the graph is opened, so a misspelt command gets its
+`did you mean` in a tree without `.codegraph/` too, instead of
+`not inside a Codify project`. Text is wrapped
 to `COLUMNS`, then the tty width, default 80, floor 60; bold and dim are
 added only on a terminal without `NO_COLOR` or `TERM=dumb` (`CG_COLOR=0|1`
 overrides). Module dispatchers that still print their own `usage:` line
@@ -135,6 +143,11 @@ waits and for how long.
   actionable message — which process class holds the lock, that nothing
   was applied, that the same command is safe to retry — and exit 75
   (`CG_EXIT_BUSY`, EX_TEMPFAIL) rather than a generic "database is locked".
+- A lifecycle write — a memory, an event, a handoff, a work revision, a
+  lease release, a heartbeat — that still finds the lock held after the
+  wait is not failed but queued in the write journal (below), and the
+  command exits 0 saying so. Claims, fleet claims, and the indexer must
+  see the live state, so they keep waiting and exit 75.
 - Long-lived servers (`cg lsp`, `cg watch`) set a short `lock_wait_ms`
   and never exit on busy: their index is deferred and retried later, and
   they keep answering from the last completed index meanwhile.
@@ -161,6 +174,61 @@ note keyed by branch id. `IndexOpts` (freshness, lock wait, worker cap,
 background, target paths) and `IndexStats` (`fresh`, `coalesced`, `busy`,
 `scoped`, `passes`, `workers`) are the whole interface between callers and
 `cg_index_ex`. Full contract: [sync.md](sync.md).
+
+## Write journal (`journal.c`)
+
+Locking says who waits; the journal says what happens when waiting runs
+out. `journal_begin` is `cg_begin_write` for the lifecycle writes: it takes
+the lock or returns -1, and once a process has waited out the full timeout
+(`journal_mark_busy`) the later journaled writes in that same command try
+the lock once and queue at once. A write that cannot get the lock is
+`journal_append`ed as one JSON record under
+`.codegraph/journal/<ms>-<pid>-<seq>.json` — written to a dot-file,
+fsynced, renamed, so a reader never sees half of one — carrying the
+operation (`memory.add`, `event.emit`, `event.ingest`, `handoff.add`,
+`work.update`, `work.close`, `lease.release`, `attempt.heartbeat`), its
+arguments, and the writer's branch, agent, and run, so replay stores what
+the writer meant rather than the replayer's context. `journal_replay`
+holds a non-blocking `flock` on the directory (a second replayer skips
+rather than waits, since it may be waiting on the very lock the first
+holds) and runs in three modes: `JOURNAL_HELD` inside a transaction the
+caller already holds, which is every successful `cg_begin_write`;
+`JOURNAL_PROBE` at database open and at the start of `cg sync` and
+`cg index`, taking the lock only if it is free that instant; and
+`JOURNAL_WAIT` for `cg journal apply`. Each record is applied in its own
+transaction by the module that owns the operation — `memory_add_at`,
+`events_emit_at`, `spec_journal_apply`, `govern_journal_apply`,
+`runtime_journal_apply` — and its id lands in `journal_applied` inside
+that transaction, so a crash between commit and unlink cannot apply it
+twice. A record the database rejects for a reason other than busy moves
+to `failed/` with its `.err` and is reported once. `journal_pending`
+feeds the counts in `cg brief`, `cg state`, and `cg check`;
+`journal_queued_memories` lets `cg recall` show a memory that is still
+queued. Full contract: [journal.md](journal.md).
+
+## Progress (`progress.c`)
+
+The status line for the passes a person waits on. `progress_request` is
+called only by `cg init`, `cg index`, and `cg sync` run without `--json`,
+`--auto`, or `--background`; every implicit sync — the freshness pass
+before a read, the hook, MCP, LSP, serve, watch, fleet, the editors —
+reaches `cg_index_ex` without it and so can never draw. `progress_begin`
+mutes a quiet or background pass; `progress_phase` names the pipeline's
+stages (walking the tree, parsing files, writing the graph, resolving
+references, finishing); `progress_tick` carries files done of files to
+do and the path in hand; `progress_workers` the thread count; and
+`progress_wait` what the pass is waiting on — the index gate in
+`syncgate.c`, or the database write lock through `progress_begin_write`
+— so a wait is never mistaken for a hang. Main thread only: parse
+workers never call in, and the counts come from what the consumer loop
+already holds, so the pipeline pays one clock read per popped file and
+nothing under its ring mutex. On a terminal the line is redrawn in place
+from 250 ms into the pass, at most every 100 ms, and erased by
+`progress_end` (and at exit) before the summary, so the finished output
+is byte for byte what it was. `CG_PROGRESS=plain` prints a plain line on
+each phase change and at most every two seconds, terminal or not;
+`CG_PROGRESS=0`, or a pipe without it, prints nothing. See
+[sync.md](sync.md#progress).
 
 ## Watcher (`watch.c`)
 
@@ -426,6 +494,10 @@ rejected with a message naming the key, and the default stands.
 read commands, the post-edit hook, the pre-commit index, `work open`,
 MCP `sync_first` tools, the LSP, the watcher, fleet watch and integrate
 — while `cg sync`, `cg index` and qualification still index.
+`[index] workers` is the one key that is not a path: `config_index_workers`
+returns the count asked for (0 = the machine's), `config_parse_workers`
+reads a count as written anywhere — `codify.kvx`, `CG_INDEX_WORKERS`,
+`--workers` — and `cg info` prints which source won.
 `config_check` reports unknown sections, keys and unusable values;
 `cg check` shows them as warnings. See [config.md](config.md).
 
@@ -767,5 +839,9 @@ many references it has, and the decisions recorded about it.
   fakes (`36_recap`), declarations, phrase ranking, path outlines and the
   context budget against a gold set (`37_explore`), the code map's
   sections, determinism, budget and ownership (`38_codemap`), memory
-  export and import across graphs (`39_memory_port`), and `codify.kvx`
-  with a relocated spec directory and auto-sync off (`40_config`).
+  export and import across graphs (`39_memory_port`), `codify.kvx`
+  with a relocated spec directory and auto-sync off (`40_config`), the
+  progress line in its terminal, plain and silent forms (`41_progress`),
+  the write journal's queue, replay, fencing and `cg journal`
+  (`42_journal`), and the help table against `main.c`, every subcommand
+  switch and the README's command reference (`43_help`).
