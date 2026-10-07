@@ -1,0 +1,128 @@
+# codify-v14 — visible, unblockable, tunable, legible: the operator's view of Codify.
+
+[meta]
+feature = "codify-v14"
+intro   = "Four things a person or an agent runs into while using Codify rather than reading it: an index that shows what it is doing instead of going silent, lifecycle writes that survive a busy database instead of failing and sending the agent off course, a worker count that can be set per project in codify.kvx, and a help screen that reads as a map of the tool rather than a wall of text."
+
+[req.1]
+title = "Progress for init, sync, and index"
+story = "As a person running cg init on a large repository, or an agent watching cg sync, I want to see the walk, the parse, the write, and the resolve advancing, so that a long pass reads as progress and a stuck one is told apart from a slow one."
+ac_1  = "WHEN cg init, cg index, or cg sync runs with stderr on a terminal, without --json, and the pass is still running 250 ms after it started THE command SHALL show one progress line on stderr that updates in place: the phase (walking the tree, parsing files, writing the graph, resolving references, finishing), files done out of files to do, the path being parsed, the workers in use, and the elapsed time; it SHALL refresh at most ten times a second and SHALL be erased before the final summary line, so a finished command leaves the same output it leaves today."
+ac_2  = "WHEN stderr is not a terminal THE command SHALL print nothing beyond today's output by default; CG_PROGRESS=plain SHALL make it print one plain line (no escape codes) at each phase change and at most every two seconds; CG_PROGRESS=0 SHALL silence progress everywhere, terminal or not."
+ac_3  = "WHEN a sync is implicit or quiet — --auto, --background, the post-edit hook, the freshness pass before read commands, and the MCP, LSP, serve, watch, fleet, and editor refreshes — THE progress SHALL never appear."
+ac_4  = "WHEN cg init runs THE command SHALL name each step as it begins (creating the graph directory, walking the tree with the file count once known, indexing, done with the profile line it prints today), so a person watching a fifty-thousand-file repository sees activity within the first second."
+ac_5  = "WHEN a pass is waiting — for another process's index gate or for the database write lock — THE progress line SHALL say what it waits for and for how long it has waited, so a wait is never mistaken for a hang; the stall and busy messages printed today SHALL stay as they are."
+ac_6  = "WHEN progress is shown THE pipeline SHALL pay nothing measurable for it: no new locking in the parse workers, counters taken from the atomics and chunk accounting the pipeline already keeps, the final summary line and the --json output unchanged, and every existing test passing unchanged."
+
+[req.2]
+title = "A write journal for the busy database"
+story = "As an agent finishing a task while an editor's language server re-indexes the tree, I want cg remember, cg handoff, and the bookkeeping behind cg spec done to succeed anyway, so that a locked database never derails the task I was about to close."
+ac_1  = "WHEN a lifecycle write finds the database still busy after the lock wait — cg remember; the outcome memory, lease release, attempt finish, and events behind cg spec done, start, implemented, release, and heartbeat; cg handoff; cg work update and close; cg event ingest; and the events every command emits — THE command SHALL append the write to a journal under .codegraph/journal/ and exit 0 with its own result complete, printing one line that says the write is queued and will be applied by the next cg command that gets the lock; --json SHALL carry \"queued\": true."
+ac_2  = "WHEN a write must see the current state to be correct — cg spec claim and claim-next, fleet claims, and cg commit's snapshot row — THE command SHALL keep today's behaviour: wait, then exit 75 with the retry message, nothing changed; the message SHALL say that this write is not journaled and why."
+ac_3  = "WHEN any cg process holds the write lock — on a successful cg_begin_write, at open when the database is free, and in cg sync, cg index, and cg journal apply — THE process SHALL first replay the journal in record order, each record once in its own transaction and removed once applied; a record the database rejects for a reason other than busy SHALL be moved to .codegraph/journal/failed/ with the error and reported once; two processes replaying at once SHALL never apply a record twice, and a process that queued a record and then gets the lock SHALL apply its own records first."
+ac_4  = "WHEN a record is written THE journal SHALL hold one JSON file per record, named by wall time, pid, and sequence, written whole and renamed into place, carrying a format version, the operation, its arguments, and the writer's branch, agent, and run; an unknown operation or a newer version SHALL fail that record, never the replay; memories SHALL keep their original creation time, task, type, symbols, files, source, and branch when applied."
+ac_5  = "WHEN records are pending THE cg brief and cg state SHALL say how many, cg check SHALL report them as a warning and never a failure, and cg recall SHALL list queued memories that match, marked queued, so an agent that remembered a decision a moment ago still finds it."
+ac_6  = "WHEN cg journal runs THE command SHALL list pending and failed records (id, when, command, summary); cg journal apply SHALL replay now, waiting the lock timeout; cg journal drop <id> | --failed | --all SHALL remove records; --json SHALL be available on each."
+ac_7  = "WHEN cg spec done passes its verification and the database is busy THE task status SHALL still be written to the kvx file and every database side effect SHALL be journaled, so the command never exits 75 after a passed verification; the same holds for a refusal's blocked outcome memory."
+ac_8  = "WHEN the lock tests run THE suite SHALL show, under a four-second hold with CG_BUSY_TIMEOUT_MS=200: cg remember exits 0 and says queued; cg recall shows the memory as queued; the first command after the hold applies it; the memory is in the database with its original fields; the journal directory is empty; replaying twice changes nothing; a corrupted record lands in failed/ and is reported once; and cg spec claim still exits 75 as 23_dblock.sh asserts today."
+
+[req.3]
+title = "[index] workers in codify.kvx"
+story = "As someone indexing on a machine with many cores, or sharing one with a build, I want to set how many parse workers an indexing run may use in the project's codify.kvx, so that a big machine builds the graph faster and a shared one stays polite, without environment variables."
+ac_1  = "WHEN [index] workers = N (1 to 64) is set in codify.kvx THE indexer SHALL run N parse workers for cg init, cg index, and cg sync, bounded only by the number of files to parse and the cross-process slot gate; WHEN the key is missing, 0, or \"auto\" THE count SHALL come from the machine profile as today."
+ac_2  = "WHEN several sources name a count THE precedence SHALL be: --workers N on cg index and cg sync, then CG_INDEX_WORKERS, then [index] workers, then the machine profile; a configured or flagged count MAY exceed the machine profile's choice up to 64, and the pipeline's internal cap SHALL rise from 16 to 64 to allow it."
+ac_3  = "WHEN a background sync runs under a configured count THE pass SHALL use a quarter of the configured count, at least one, in place of a quarter of the cores."
+ac_4  = "WHEN cg info runs THE output SHALL print the worker count with its origin (flag, CG_INDEX_WORKERS, codify.kvx, or machine); the index summary's [N workers] SHALL report the count actually used; cg sync --json SHALL report it as today."
+ac_5  = "WHEN cg config, config init, get, set, and check run THE [index] workers key SHALL be known to each: the template SHALL carry it commented with its default, a non-integer, negative, or above-64 value SHALL be reported as unusable with the key and file named, fall back to auto, and appear in cg check as a warning; cg config check SHALL also warn, without failing, when the configured count exceeds the effective cores."
+ac_6  = "WHEN the config tests run THE suite SHALL show: workers = 1 makes cg sync --json report one worker; workers = 3 on a fixture with at least three files reports three; a bad value warns and falls back to auto; --workers 2 beats a configured 1; the unit test covers parse and validation."
+
+[req.4]
+title = "cg help that reads as a map"
+story = "As a person opening cg for the first time, or an agent deciding which command to call, I want the help screen to be an organized overview with one line per command and a way to drill into one, so that I find the right command without reading two hundred lines."
+ac_1  = "WHEN cg help, cg, cg -h, or cg --help runs THE output SHALL be a grouped overview: a one-line header with the version and tagline, then each group (graph, version control, memory, agentic, spec workflow, fleet, jev, skills, configuration) as a heading followed by its commands in aligned columns — the name and its principal arguments on the left, a one-line summary on the right — wrapped to the terminal width (COLUMNS, then the tty, default 80, minimum 60) and never wider, ending with the global flags (--json, --branch, --all-branches, --no-soft) and a pointer to cg help <command>."
+ac_2  = "WHEN cg help <command>, cg <command> --help, or cg <command> -h runs THE output SHALL show that command's usage line, its subcommands and flags with their descriptions (the detail the long usage text carries today), examples where the table has them, and related commands; cg help --all SHALL print every command's detail in group order; an unknown name SHALL suggest the closest names and exit 1."
+ac_3  = "WHEN stdout is a terminal, NO_COLOR is unset, and TERM is not dumb THE group headings and command names SHALL be styled with bold and dim ANSI sequences; WHEN stdout is not a terminal THE output SHALL contain no escape codes; CG_COLOR=0 SHALL disable styling and CG_COLOR=1 SHALL force it."
+ac_4  = "WHEN cg help --json runs THE output SHALL list every command and subcommand with group, name, usage, summary, flags, and related commands, so editors and agents can build menus from it."
+ac_5  = "WHEN the command table is edited THE table SHALL be the single source for the overview, the per-command detail, the JSON, and the usage lines main prints on bad arguments; a test SHALL assert that every command main dispatches (and every spec, fleet, jev, memory, config, docs, drift, event, work, hook, skills, and tool subcommand) appears in cg help --json and answers cg help <name> with exit 0, and that the README's command reference names the same commands."
+ac_6  = "WHEN cg <command> --help is used on a command that today prints its own usage on bad arguments THE two SHALL agree: the usage line on a bad argument SHALL come from the same table entry."
+
+[design]
+overview = "Four independent slices, one wave, each in its own file so the merge is mechanical. Progress (src/progress.c): a Progress struct owned by the main thread of index_pass; the ring consumer ticks it per file, the walk ticks it per directory, the gate and lock waits tick it with what they wait for; it renders with \\r and clear-to-end on a tty and plain lines under CG_PROGRESS=plain; a quiet or background IndexOpts leaves it off. Journal (src/journal.c): journal_append(cg, op, json) writes <ms>-<pid>-<seq>.json under .codegraph/journal/ via a temp file and rename; journal_replay(cg) takes a flock on the directory, reads the records in name order, dispatches each op (memory.add, event.emit, lease.release, attempt.finish, handoff.add, work.update) through the same functions the commands use, and unlinks or moves it; cg_begin_write calls journal_replay on success, cg_open calls it when a BEGIN IMMEDIATE succeeds at once; the busy branch of each listed command calls journal_append instead of cg_busy_report. Workers (src/config.c, src/syncgate.c): CFG_INDEX_WORKERS joins CFG_KEYS; config_index_workers(root) returns 0 for auto; syncgate_worker_budget applies flag, environment, config, and sysinfo in that order against a 64 cap, and records the origin for cg info. Help (src/help.c): a static Command table — group, name, usage, summary, detail, flags, related — drives help_overview, help_command, help_all, and help_json; main's usage() becomes a call into it and its bad-argument usage lines read the table."
+
+[documentation]
+mode      = "auto"
+status    = "pending"
+audiences = ["user", "developer"]
+targets   = ["README.md", "docs/**", "CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: Codify v14"
+
+[task.1]
+title   = "See"
+section = "Progress for init, sync, and index"
+status  = "pending"
+
+[task.1.1]
+title      = "Live progress on the terminal for init, index, and sync"
+status     = "pending"
+wave       = 1
+symbols    = ["progress_begin", "progress_tick", "progress_end"]
+touches    = ["src/progress.c", "src/scan.c", "src/syncgate.c", "src/main.c", "src/cg.h", "tests/integration/41_progress.sh", "docs/sync.md", "README.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/41_progress.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/06_watch.sh && CG=$PWD/cg tests/integration/25_syncgate.sh && CG=$PWD/cg tests/integration/23_dblock.sh"
+do_1       = "progress.c: a main-thread Progress with phase, done, total, current path, workers, waiting-for, and elapsed; tty rendering in place at ten Hz, CG_PROGRESS=plain lines, CG_PROGRESS=0 off; erased before the summary."
+do_2       = "Hook it into index_pass (walk, parse, write, resolve) and into the gate and lock waits; cg init names its steps; implicit and quiet passes never show it."
+do_3       = "41_progress.sh: CG_PROGRESS=plain shows the phases and counts on a fixture; default non-tty output is byte-identical to today; --json unchanged; implicit syncs silent."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6"]
+
+[task.2]
+title   = "Keep going"
+section = "A write journal for the busy database"
+status  = "pending"
+
+[task.2.1]
+title      = "Journal lifecycle writes when the database is busy; replay under the next lock"
+status     = "pending"
+wave       = 1
+symbols    = ["journal_append", "journal_replay", "cmd_journal"]
+touches    = ["src/journal.c", "src/db.c", "src/memory.c", "src/events.c", "src/spec.c", "src/govern.c", "src/main.c", "src/cg.h", "src/agent.c", "tests/integration/42_journal.sh", "tests/integration/23_dblock.sh", "docs/journal.md", "docs/sync.md", "README.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/42_journal.sh && CG=$PWD/cg tests/integration/23_dblock.sh && CG=$PWD/cg tests/integration/08_memory.sh && CG=$PWD/cg tests/integration/05_spec.sh && CG=$PWD/cg tests/integration/10_lifecycle.sh && CG=$PWD/cg tests/integration/30_events.sh && CG=$PWD/cg tests/integration/17_session.sh"
+do_1       = "journal.c: record format, journal_append via temp file and rename, journal_replay under a directory flock with per-record transactions, failed/ for rejected records, and the op dispatch through the functions the commands already use."
+do_2       = "Route the busy branch of remember, handoff, work update and close, event ingest, the implicit events, and the spec bookkeeping (outcome memory, lease release, attempt finish) into journal_append; claims and commit keep exit 75 with a message that says they are not journaled."
+do_3       = "Replay on cg_begin_write success, at open when the database is free, and in sync, index, and cg journal apply; cg journal list, apply, drop; pending counts in brief, state, and check; queued memories in recall."
+do_4       = "42_journal.sh covers the hold-and-release scenarios in req 2.8; 23_dblock.sh keeps its claim and sync assertions."
+reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.3]
+title   = "Tune"
+section = "[index] workers in codify.kvx"
+status  = "pending"
+
+[task.3.1]
+title      = "[index] workers: a configured parse worker count with flag and environment precedence"
+status     = "pending"
+wave       = 1
+symbols    = ["config_index_workers", "syncgate_worker_budget"]
+touches    = ["src/config.c", "src/syncgate.c", "src/scan.c", "src/sysinfo.c", "src/main.c", "src/cg.h", "codify.kvx", "tests/unit/test_config.c", "tests/integration/40_config.sh", "docs/config.md", "docs/sync.md", "README.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/25_syncgate.sh"
+do_1       = "config.c: CFG_INDEX_WORKERS in CFG_KEYS with an integer kind, auto for 0 or missing, 1..64 accepted, the template line, get/set/check, and the over-cores warning in check."
+do_2       = "syncgate_worker_budget: flag, CG_INDEX_WORKERS, config, sysinfo in that order against a 64 cap; the thread array and chunk accounting sized for 64; background passes take a quarter of the configured count; the origin recorded for cg info."
+do_3       = "cg index and cg sync accept --workers N; cg info prints the count and origin; tests in 40_config.sh and test_config.c per req 3.6."
+reqs       = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6"]
+
+[task.4]
+title   = "Read"
+section = "cg help that reads as a map"
+status  = "pending"
+
+[task.4.1]
+title      = "cg help: a grouped overview, per-command detail, --all, and --json from one command table"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_help", "help_overview", "help_command"]
+touches    = ["src/help.c", "src/main.c", "src/cg.h", "tests/integration/43_help.sh", "README.md", "docs/ARCHITECTURE.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/43_help.sh && CG=$PWD/cg tests/integration/03_agentic.sh && CG=$PWD/cg tests/integration/22_control.sh"
+do_1       = "help.c: the Command table (group, name, usage, summary, detail, flags, related) carrying every command and subcommand the long usage text describes today, and help_overview with terminal-width wrapping and tty-only bold/dim styling."
+do_2       = "help_command, help_all, help_json; cg help <name>, cg <name> --help and -h, cg help --all, cg help --json, closest-name suggestions on an unknown name."
+do_3       = "main's usage() and its bad-argument usage lines read the table; 43_help.sh asserts the dispatch is covered, no escape codes when piped, width respected, and the README's command reference names the same commands."
+reqs       = ["4.1", "4.2", "4.3", "4.4", "4.5", "4.6"]
