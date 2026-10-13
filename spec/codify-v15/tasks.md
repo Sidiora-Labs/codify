@@ -84,7 +84,7 @@
     - orchestrate.c: the supervisor's single manager becomes an array keyed by wave; spawn per wave with pending tasks under the manager max; workers under their wave's manager; the per-wave serialization only without {task}; state, fleet_nodes, status output and resume carry the managers; fleet.js labels managers by wave.
     - 26_fleet.sh, 32_supervisor.sh, 35_fleet_e2e.sh, 14_vscode.sh per req 10.6 (all but the parallel-wave clauses); docs/hierarchy.md.
     - _Requirements: 10.1, 10.2, 10.3_
-  - [-] 4.2 Waves side by side: start ahead of requires on the projection, the strict done gate, forward merges after a land, cg fleet sync
+  - [x] 4.2 Waves side by side: start ahead of requires on the projection, the strict done gate, forward merges after a land, cg fleet sync
     - config.c and fleet.c: [hierarchy] waves = parallel|sequential with the git-version default; spec.c: cg spec start --ahead claiming a task with open requires and recording ahead on the lease, done unchanged and strict; the worker prompt naming the open requirements and the projection branch.
     - orchestrate.c: the start gate under parallel ignores requires but keeps collisions and slots; after a land, main merged forward into every live wave branch between turns with conflict escalation naming the projection finding, workers steered to cg fleet sync, a projection build after land and sync; fleet.c: cg fleet sync merging the base into the worker's branch with the overlap refusal.
     - 32_supervisor.sh parallel clauses of req 10.6, 26_fleet.sh sync, 40_config.sh the key; docs.

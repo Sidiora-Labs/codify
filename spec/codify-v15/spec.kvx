@@ -301,7 +301,7 @@ reqs       = ["10.1", "10.2", "10.3"]
 
 [task.4.2]
 title      = "Waves side by side: start ahead of requires on the projection, the strict done gate, forward merges after a land, cg fleet sync"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 requires   = ["4.1", "3.2"]
 symbols    = ["orch_next_task", "fleet_sync", "spec_start_ahead", "sup_forward_merge"]
