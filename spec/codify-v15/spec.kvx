@@ -228,7 +228,7 @@ reqs       = ["6.4", "6.5"]
 
 [task.2.4]
 title      = "cg fleet discover: native agents from the transcripts the hosts already write"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["2.2"]
 symbols    = ["cmd_fleet_discover", "transcript_dirs", "discover_claude", "discover_codex"]
