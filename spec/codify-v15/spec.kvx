@@ -1,0 +1,300 @@
+# codify-v15 — scale, presence, projection: the graph at millions of lines, every agent in the fleet, and the merge seen before it happens.
+
+[meta]
+feature = "codify-v15"
+intro   = "Three things Codify must do to run a fleet on a large repository: answer the questions an agent otherwise asks grep, rg, and find — faster, placed in the graph, and under a token budget — on trees of several million lines; see every agent at work, including the subagents a Claude Code or Codex session spawns through its own Agent tool rather than through cg fleet; and fold every active branch, committed and uncommitted, into one projection branch so a conflict is reported the moment two agents create it, not when a merge fails hours later."
+
+[req.1]
+title = "cg grep: line search that beats grep for an agent"
+story = "As an agent working in a multi-million-line repository, I want one command that answers where a string or pattern occurs, with each hit placed in its enclosing symbol and the result ranked and capped, so that I stop paging through thousands of raw grep lines and stop paying tokens for them."
+ac_1  = "WHEN cg grep <pattern> runs THE command SHALL match the pattern as a literal substring by default, as a POSIX extended regular expression (regcomp from libc) with -E/--regex, case-sensitively by default and case-insensitively with -i; it SHALL take its candidate files from a trigram index over file bodies (every literal run of three or more characters in the pattern, and for a regex the longest metacharacter-free run), scoped to the branch in scope, and SHALL read and scan only those candidates from disk; a pattern that yields no trigram SHALL scan every indexed file of the branch in parallel workers and the summary SHALL say so."
+ac_2  = "WHEN hits are printed THE output SHALL group them by file, each line as path:line: text with the enclosing symbol named once per group (kind and name, from the branch's symbol spans), files ranked by hit count with source before tests and shallower paths first, at most -n N hits (default 50) under --budget TOKENS (default 4000), ending with an explicit tail (… N more hits in M files — narrow with --path or raise -n) when anything was left out; -C N adds context lines; --files lists only the files with their counts; --count prints the total."
+ac_3  = "WHEN the search is scoped THE command SHALL accept --path GLOB (repeatable, the glob language touches uses), --lang L, --no-tests, --symbol NAME (hits inside that symbol's span only), --kind K (hits inside symbols of that kind), and the global --branch and --all-branches exactly as search and context do; a hit outside any symbol is reported under (file scope)."
+ac_4  = "WHEN --json is given THE output SHALL be one object: query, regex, case_sensitive, candidates (files the index named), scanned (files read), hits as [{path, line, text, symbol, kind, branch when more than one is in scope}], omitted, and ms."
+ac_5  = "WHEN a file changed since the last sync THE scan SHALL still find the current text, because hits are read from disk; a file the index skips (binary, over the size limit) SHALL not be searched and the summary SHALL count skipped files; the freshness pass the other read commands run SHALL run first."
+ac_6  = "WHEN the MCP server lists tools THE list SHALL include grep_code with the same parameters (pattern, regex, case_sensitive, path, lang, symbol, no_tests, context, limit, budget), read-only annotations, and a description that says when to use it instead of a shell grep; cg tool call grep_code SHALL answer the same."
+ac_7  = "WHEN the grep tests run THE suite SHALL show on the sample fixture: a literal found with its enclosing symbol, a regex with -E, -i, --path narrowing, --symbol, --files and --count, the tail on a small -n, --json fields, candidates below the file count for a literal and equal to it for a two-character pattern, a hit in a file edited after the last sync, and the MCP tool answering."
+
+[req.2]
+title = "cg files and scoped queries: find without walking"
+story = "As an agent, I want to locate files by glob or by the words in their path, see what a directory holds without listing a thousand entries, and narrow every graph query to a path, a language, or non-test code, so that find and ls -R stop being the way I orient."
+ac_1  = "WHEN cg files <pattern> runs THE command SHALL answer from the files table: a glob (src/**/*.go) matches paths; words (sync gate) match the words of the path's segments (name_words, so syncgate.c and sync_gate.py are both found) through a trigram file index; a bare directory lists its entries; each row prints path, language, lines, and symbol count, ranked by match quality then path, at most -n N (default 40), with a tail naming what was omitted."
+ac_2  = "WHEN cg files --dirs [prefix] runs THE output SHALL list directories with their file and line counts and dominant language, largest first, to a depth of --depth N (default 2), so a tree of a million files reads as a map rather than a listing."
+ac_3  = "WHEN search, context, survey, or grep run with --path GLOB (repeatable), --lang L, or --no-tests THE result SHALL contain only rows under matching paths, languages, or non-test files, applied inside the query where an index exists and before ranking otherwise, so a narrowed query is never slower than the wide one."
+ac_4  = "WHEN cg context names a directory with more files than its budget holds THE outline SHALL list its subdirectories with counts first, then the files that fit, with the omitted count, instead of truncating a flat list."
+ac_5  = "WHEN the MCP server lists tools THE list SHALL include find_files (pattern, dirs, depth, lang, limit) with read-only annotations, and search_code and get_context SHALL accept path, lang, and no_tests."
+ac_6  = "WHEN the files tests run THE suite SHALL show globs, path words, a directory listing, --dirs with counts, --lang and -n, --json, the filters on search and context, the directory outline in context, and find_files over MCP."
+
+[req.3]
+title = "The index at scale"
+story = "As a person running cg init on a repository of several million lines, I want the pass to finish in minutes with flat memory and a database proportionate to the source, and every later sync to cost what changed rather than what exists, so that the graph is usable on the largest trees a fleet works on."
+ac_1  = "WHEN the tree is walked THE walk SHALL run in parallel (the top-level directories spread over the worker budget), use the directory entry's reported type to avoid a stat per entry where the filesystem provides it, apply the ignore rules exactly as today, and produce the same sorted list the single-threaded walk produced; the progress line SHALL count directories as they are walked."
+ac_2  = "WHEN cg sync runs on a git worktree, [index] walk is \"git\" or \"auto\" (the default) with more than 20000 files indexed, git is available, and the head recorded by the last pass is known THE pass SHALL take its candidate paths from git (the porcelain status including untracked files, plus the paths changed by commits between the recorded head and HEAD) instead of walking the tree, and SHALL find every added, modified, deleted, and renamed file the full walk would find; cg index --full, a missing or unknown recorded head, an unavailable git, and every twentieth pass SHALL walk the whole tree; --json SHALL say which (walk: \"full\" | \"git\")."
+ac_3  = "WHEN the schema is created with SQLite 3.43.0 or newer THE body index body_fts SHALL be contentless (content='', contentless_delete=1) with its rowid the file id, snippets and matching lines read from disk; a trigram body index body_tri (content='', contentless_delete=1, detail=none, tokenize='trigram') SHALL serve grep; a file index file_fts (trigram over the path's words) SHALL serve files; with an older SQLite THE same tables SHALL keep their content as today and cg info SHALL say so; the mode SHALL be recorded in meta so a database is always opened in the mode it was built with."
+ac_4  = "WHEN the resolve and soft-edge passes run THE lookups SHALL be index-backed: a files.base column holding the last path segment, indexed, SHALL replace every path LIKE '%/'||name scan, and no pass SHALL run a query without an index on a table that grows with the tree."
+ac_5  = "WHEN an index pass finishes THE --json output SHALL report ms per phase (walk, parse, write, resolve, soft) and peak_rss_kb from /proc/self/status, and the summary line SHALL stay as it is today."
+ac_6  = "WHEN tests/scale/gen.py runs THE script SHALL deterministically generate a repository of N files and about L lines (defaults 20000 files, 2 million lines) in C, Go, Python, TypeScript, and Rust with imports and calls that cross files, so the pipeline, the resolver, grep, and files can be measured; tests/integration/46_scale.sh SHALL always run a small profile (2000 files) asserting: init completes, a literal grep names fewer than 5 percent of the files as candidates, a one-file edit syncs by touching at most that file's rows, --json carries the phase times and peak RSS; under CG_SCALE=1 it SHALL run the default profile, print files per second, lines per second, database bytes per source byte, grep latency, and peak RSS, and assert peak RSS under 2 GB and database size under six times the source."
+ac_7  = "WHEN scripts/bench.sh runs THE script SHALL generate the default profile, time cg init, cg sync (no change), a one-file sync, cg grep, cg files, and cg context, and print a markdown table; docs/sync.md SHALL carry the numbers measured on the development machine with its profile named."
+
+[req.4]
+title = "Agents reach for the graph before the shell"
+story = "As the operator of a fleet, I want every agent told, at the moment it reaches for grep or find, that the graph answers the same question cheaper, and every host integration to say so up front, so that the index is used and the transcripts stay small."
+ac_1  = "WHEN cg hook pre-bash reads a PreToolUse payload whose tool is Bash and whose command runs grep, rg, ag, ack, find, fd, or ls -R over the tree (as the first word or after a pipe, ;, or &&) THE hook SHALL answer with hookSpecificOutput.additionalContext naming the equivalent cg command (cg grep with the pattern and any -i, --path from the directory argument; cg files for find and fd; cg files --dirs for ls -R) and one line on why, SHALL never set a permission decision, SHALL answer the same command once per session (a cursor in meta keyed by session and command hash) so it never nags, and SHALL stay silent for CG_SHELL_ADVICE=0, [hooks] shell_advice = false, a command that targets a path outside the tree, or a payload it cannot read."
+ac_2  = "WHEN the portable skill, .codify/agent-context.md, the MCP tool descriptions, and the start-task and orient prompts are generated THE text SHALL say to use grep_code, find_files, search_code, and get_context before any shell search and name cg grep and cg files in the CLI form."
+ac_3  = "WHEN cg hook install runs, and WHEN the Claude Code plugin's hooks.json is generated THE PreToolUse entry for Bash SHALL call cg hook pre-bash."
+ac_4  = "WHEN the advice tests run THE suite SHALL show the context for rg, grep -rn, find -name, and a piped grep; the rewrite carrying -i and the path; silence on the second identical command, on a path outside the tree, under CG_SHELL_ADVICE=0, and on a non-Bash payload; and that the output is one JSON object with no permission decision."
+
+[req.5]
+title = "The Claude Code plugin and the Codex hooks"
+story = "As a person using Claude Code or Codex on a Codify project, I want cg integrate to install one plugin that carries the hooks, the MCP server, and the skill, so that every session and every subagent reports to Codify without me editing settings files by hand."
+ac_1  = "WHEN cg integrate apply runs THE command SHALL write a plugin marketplace at $HOME/.codify/plugins/claude-code/ holding .claude-plugin/marketplace.json (name codify, owner Codify) and plugins/codify/ with .claude-plugin/plugin.json (name codify, the cg version), hooks/hooks.json, .mcp.json (the codify server as cg mcp by absolute path), skills/codify-workflow/SKILL.md (the portable skill), and commands/brief.md, fleet.md, projection.md (one-line invocations of cg brief, cg fleet status, cg projection status); every file SHALL carry a codify-owned marker, be regenerated when the cg version differs, and be left alone with a reported conflict when a file there is not codify-owned."
+ac_2  = "WHEN hooks/hooks.json is generated THE file SHALL register, each as a command hook calling cg by absolute path: SessionStart, SessionEnd, Stop, SubagentStart, SubagentStop, WorktreeCreate, WorktreeRemove → cg hook event --host claude; PreToolUse with matcher Agent|Task → cg hook event --host claude; PreToolUse with matcher Bash → cg hook pre-bash; PostToolUse with matcher Edit|Write|MultiEdit|NotebookEdit → cg hook post-edit; PostToolUse with matcher Agent|Task → cg hook event --host claude; every hook with a timeout of 20 seconds; cg SHALL exit 0 from every hook whatever happens."
+ac_3  = "WHEN the claude executable is on PATH THE apply SHALL run claude plugin marketplace add <root> and claude plugin install codify@codify --scope user, report their outcome, and otherwise print the two commands to run; --no-plugin SHALL skip the plugin; cg integrate detect and doctor SHALL report whether the plugin is installed (from the marketplace registration and installed plugins under $HOME/.claude/plugins) and whether its version matches cg; cg hook install SHALL skip writing PostToolUse into .claude/settings.json when the plugin is installed and say why, so no hook fires twice."
+ac_4  = "WHEN cg integrate apply runs in a repository THE command SHALL write <root>/.codex/hooks.json registering SessionStart, SessionEnd, Stop, SubagentStart, SubagentStop, PreToolUse, and PostToolUse → cg hook event --host codex (PostToolUse for edit tools → cg hook post-edit) with the same ownership rules, and doctor SHALL say that Codex requires the hooks to be trusted once through /hooks."
+ac_5  = "WHEN the plugin tests run THE suite SHALL show, under a temporary HOME: every file generated with valid JSON (python3 json), hooks.json naming every event in ac_2 with the cg path, plugin.json carrying cg's version, a second apply changing nothing, a foreign file reported as a conflict and kept, --no-plugin writing nothing, detect and doctor JSON reporting installed false then true against a faked $HOME/.claude/plugins registration, and claude plugin validate passing when claude is available (skipped otherwise)."
+
+[req.6]
+title = "Native agents in the fleet"
+story = "As the operator, I want every Claude Code or Codex session on this project, and every subagent it spawns through its own Agent tool, to appear in cg fleet status and the editor with its worktree, branch, task, and last activity, so that the fleet view is the whole fleet and not only the processes cg started."
+ac_1  = "WHEN cg hook event --host H reads a hook payload on stdin THE command SHALL record native agents in the agents registry with kind native: SessionStart → an agent named H:<first 8 of session_id> with host, session, cwd, model when given, started, state live; SubagentStart → an agent named H:<agent_id> with parent the session agent, agent_type, state live; a PreToolUse of Agent or Task → the pending spawn (description, subagent_type, model, isolation, run_in_background, tool_use_id, the first 200 characters of the prompt) attached to the next SubagentStart of that type in that session, or by tool_use_id when the subagent's meta.json names it; any Pre/PostToolUse carrying agent_id → that agent's heartbeat, last tool, and tool count; SubagentStop → state stopped, ended, transcript (agent_transcript_path), last message excerpt; Stop and SessionEnd → the session stopped; WorktreeCreate and WorktreeRemove → the payload kept as an event; and SHALL feed every payload through the same normalization as cg event ingest --source H so runtime evidence keeps working."
+ac_2  = "WHEN a native agent's hook payload carries a cwd that is a linked git worktree of the project THE worktree and its branch (read from git's files as cg root does, no process spawned) SHALL be recorded on the agent and registered in the branch registry with base the session's branch, so the shared graph, the fleet views, and the projection know the branch."
+ac_3  = "WHEN a native agent is recorded THE task SHALL be attributed in this order and the source kept: CG_TASK in the hook's environment; the task of a live attempt whose session matches; a task id of the active feature named in the Agent description or prompt (a bare id such as 2.1 or a [spec:feature/id] tag); the parent's task; else none."
+ac_4  = "WHEN cg fleet status runs THE output SHALL list native sessions and their subagents as an indented tree after the fleet roles, each with age since the last hook, state, host, model, worktree branch, task, and last tool; cg fleet tree --json SHALL carry native: [{agent, host, session, model, started, state, seen, cwd, worktree, branch, task, task_source, description, agent_type, children: [...]}]; cg brief and cg state SHALL print one line (native agents: N live, M subagents, K worktree branches); sessions stopped for more than a day SHALL be hidden unless --all."
+ac_5  = "WHEN events are emitted THE kinds agent.native.start, agent.native.spawn, agent.native.tool, agent.native.stop SHALL carry node the agent name, subject the task when known, and a payload with the fields above, so cg serve and the editor follow native agents the way they follow fleet agents."
+ac_6  = "WHEN the schema is upgraded THE agents table SHALL gain the nullable columns kind, host_kind, agent_id, agent_type, description, model, depth, state, started, ended, transcript, cwd, task, task_source, last_tool, tool_calls through ALTER TABLE, keeping every existing row."
+ac_7  = "WHEN the native tests run THE suite SHALL feed synthetic payloads for SessionStart, PreToolUse Agent, SubagentStart, PostToolUse inside the subagent with cwd set to a linked worktree the test created, SubagentStop, and Stop, and assert the registry rows, the parent link, the worktree and branch registration, the task attribution from a prompt naming a task, the events, fleet status text, fleet tree JSON, the brief line, exit 0 on a malformed payload, and that cg event history still shows the normalized events."
+
+[req.7]
+title = "Hosts without hooks: transcript discovery"
+story = "As the operator, I want sessions and subagents that never fired a hook — an older host, a hook the user has not trusted, a session started before the plugin — to be found from the transcripts the hosts already write, so that the fleet view does not depend on every host cooperating."
+ac_1  = "WHEN cg fleet discover runs THE command SHALL scan $HOME/.claude/projects/<encoded project path>/ for session transcripts changed within --since (default 24h), each session's subagents/agent-*.meta.json (agentType, worktreePath, worktreeBranch, description, model, spawnDepth, toolUseId) and transcript mtimes, and $HOME/.codex/sessions/ rollouts whose working directory is this project, and SHALL create or complete native rows for what hooks did not report, never overwriting a field a hook wrote; a worktree named there SHALL be registered as in req 6 ac_2; a transcript untouched for 15 minutes SHALL mark its agent stale; --json SHALL list what was found and what changed."
+ac_2  = "WHEN cg fleet status, cg fleet tree, cg serve's refresh, cg watch --fleet, and the editor's refresh run THE discovery SHALL run first when [fleet] discover is true (the default), bounded to one scan per 10 seconds per process, and SHALL be skipped under --no-discover."
+ac_3  = "WHEN the transcript locating code is shared THE helper that finds the project's Claude Code and Codex transcript directories SHALL be one function used by recap and discovery."
+ac_4  = "WHEN the discovery tests run THE suite SHALL use fixture transcripts under a temporary HOME (a session with two subagents, one with a worktree meta, and a Codex rollout) and assert the rows, the parent links, the branch registration, idempotence, that a hook-written field is not overwritten, the stale mark, and --json."
+
+[req.8]
+title = "The projection branch"
+story = "As the operator of a fleet, I want one branch that is main plus everything every active branch has done so far, committed or not, rebuilt on demand in seconds, so that I can read, diff, search, and build the state the repository is heading toward before any merge is attempted."
+ac_1  = "WHEN cg projection build runs THE command SHALL fold the active branches onto the base: base is [projection] base, else [hierarchy] main, else main; active branches are every branch in the registry whose worktree exists and that has a live agent (fleet or native) or was updated within [projection] stale (default 24h), excluding the base and the projection itself, plus --branch NAME additions and minus [projection] exclude globs; they SHALL be folded in topological order of their bases (a feature branch before the waves cut from it) then by registry update time."
+ac_2  = "WHEN a branch's worktree has uncommitted changes THE contribution SHALL be a shadow commit written from a copy of that worktree's git index (GIT_INDEX_FILE, git add -A honoring .gitignore, git write-tree, git commit-tree -p <head>), so the cost is proportional to the files changed and the real index and worktree are never touched; a clean worktree contributes its head."
+ac_3  = "WHEN the fold runs THE step for each branch SHALL use git merge-tree --write-tree --messages -z of the running projection commit and the branch's contribution, write a commit of the resulting tree with parents the previous projection commit and the contribution (message projection: + <branch>), and at the end update refs/codify/projection to the final commit — a real ref anyone can log, diff, or check out; the projection of no active branches SHALL equal the base and SHALL be written as the base's own commit."
+ac_4  = "WHEN a branch's merge step reports conflicts THE branch SHALL still be folded with git's conflict markers in the affected files, and each conflicted path SHALL be recorded with the branch, the earlier folded branches that also changed that path against the base, and the kind (content, modify/delete, add/add); --strict SHALL skip a conflicting branch instead and say so."
+ac_5  = "WHEN the build finishes THE text output SHALL print the base and its head, each branch folded with its commits ahead and dirty file count, the conflicts by path with their branches, and the ref; --json SHALL carry base, base_head, ref, commit, branches: [{name, head, contribution, dirty, commits, merged, conflicts}], conflicts: [{path, kind, branches}], ms; the build SHALL be stored in a projections table (built, base_head, commit, fingerprint, branches json, conflicts json, ms) and cg projection status SHALL print the last build without rebuilding; cg projection diff [branch] SHALL print git diff --stat of the projection against the base or the named branch; cg projection show SHALL list the paths the projection changes against the base."
+ac_6  = "WHEN the inputs have not changed THE build SHALL be a no-op that says so: the fingerprint is the base head plus every branch's contribution id, compared with the stored one; --force rebuilds."
+ac_7  = "WHEN --index is given or [projection] index is true THE projection SHALL be checked out detached in .codegraph/worktrees/projection (created on first use, updated with git checkout --detach <commit>) and indexed into the shared graph as branch codify/projection, so every read command answers --branch codify/projection; the checkout SHALL be skipped when the commit did not change."
+ac_8  = "WHEN there is no git repository, or git is older than 2.38 (no merge-tree --write-tree) THE command SHALL say exactly that and exit 1; a branch whose worktree is missing SHALL be reported and skipped; the build SHALL take the projection lock so two builds never race, and a second caller SHALL wait up to --wait MS (default 5000) then report the fresh result."
+ac_9  = "WHEN the projection tests run THE suite SHALL build a repository with main and three branches in worktrees — one clean, one with an uncommitted edit, two that conflict on one file — and assert: the ref exists and contains all three contributions (the uncommitted edit included), the conflict names both branches and the path, --json shape, a no-op second build, --force rebuilding, --strict excluding the conflicting branch, --branch adding a branch not otherwise active, --index making cg search --branch codify/projection find a symbol only one branch defines, projection diff and show, and the no-git refusal."
+
+[req.9]
+title = "Conflicts seen before the merge"
+story = "As an agent on a branch, I want to be told the moment another branch changes the symbol I am editing, breaks a signature I call, or edits the lines next to mine, and as the operator I want those findings in the fleet view and the brief, so that collisions are coordinated while both agents are still at the keyboard."
+ac_1  = "WHEN cg projection build runs THE findings SHALL go beyond git's textual conflicts: symbol — two active branches change the same symbol (path and name) against the base, found by mapping each branch's hunks against the base onto the symbol spans the graph holds for that branch, reported even when git merges the hunks cleanly; interface — a branch changes the signature of or removes a symbol that another active branch references (existing or newly added references, from the unified graph), reusing the interface check that runs after merges; near — two branches edit the same file within three lines of each other; content, delete, and add-add from the fold; each finding SHALL carry kind, path, symbol when any, lines, the branches involved with the agents on them (fleet or native) and a one-line advice."
+ac_2  = "WHEN findings are stored THE table projection_findings SHALL key each by kind, path, symbol, and branch set with first_seen, last_seen, and resolved, so a finding emits projection.conflict once when it appears, nothing while it persists, and projection.resolved when a build no longer finds it; projection.built SHALL summarize every build (branches, conflicts, ms); cg projection findings [--json] SHALL list the live ones with ages."
+ac_3  = "WHEN a finding appears and [projection] steer is not false THE agents on the branches involved SHALL be steered once per finding through cg fleet steer's channel (Projection: your branch X and Y (agent Z) both change alpha in src/a.c — coordinate or merge Y before you qualify; see cg projection findings), which a Claude Code session reads at its next edit; nothing SHALL block."
+ac_4  = "WHEN work happens THE projection SHALL follow it without being asked: cg hook post-edit and cg hook event SHALL mark the projection dirty and, when the last build is older than [projection] min_interval (default 15s) and [projection] auto is not false, start one background cg projection build --quiet under the projection lock; cg watch and cg watch --fleet SHALL rebuild when edits settle; cg serve's refresh and the fleet supervisor SHALL rebuild after a merge, land, or spawn; cg fleet merge-up and cg fleet land SHALL print the known findings for the branch before attempting the merge."
+ac_5  = "WHEN the state is shown THE live findings SHALL appear in cg projection status (grouped by branch with ages), cg brief (projection: N branches folded, M findings, the first two named), cg state, cg fleet tree --json (projection: {commit, built, findings: [...]} and findings count per branch), and the MCP tool projection_status; cg serve SHALL stream the projection events; the editor's fleet view SHALL show a Projection node listing the findings with the branches and a path that opens the file in its worktree, and SHALL badge the branches involved."
+ac_6  = "WHEN the conflict tests run THE suite SHALL show: two branches editing different hunks of one function produce a symbol finding and no git conflict; a signature change on one branch with a new caller on another produces an interface finding naming both; adjacent edits produce near; a textual conflict produces content with both branches; fixing one branch makes the next build emit projection.resolved; the steer text reaches a Claude Code post-edit hook's additionalContext; findings appear in brief, state, fleet tree JSON, and the editor's model from real cg output; a post-edit hook triggers a background build that lands within a few seconds; and merge-up prints the findings before merging."
+
+[req.10]
+title = "The fleet shape: a manager per wave, a worker per task, waves side by side"
+story = "As the operator, I want the fleet to put one manager on every wave and one worker on every task, all running at once, with the projection letting a worker build against work that has not landed yet, so that a ten-wave feature is ten managers and every task in flight rather than one worker grinding through a wave at a time."
+ac_1  = "WHEN the hierarchy defaults are printed by cg fleet roles THE manager role (section [role.manager], with [role.feature] accepted as the same section) SHALL be Wave Manager with agent wm-{feature}-{wave}, branch wave/{feature}/{wave}, base {main}; the worker role SHALL be Task Worker with agent w-{feature}-{task}, branch task/{feature}/{task}, base wave/{feature}/{wave}; a manager template without {wave} SHALL keep meaning one manager for the whole feature and a worker template without {task} one worker per wave, so a configured workflow.kvx keeps its shape; spec/workflow.kvx in this repository SHALL carry the new templates."
+ac_2  = "WHEN cg fleet plan runs THE output SHALL show main, then one manager row per wave that has a task not done (agent, branch, base, live managers), and under each wave one row per task with its own worker agent and branch and the live worker on it; fleet tree --json SHALL carry managers: [{..., wave, workers: [...]}] one per wave; cg fleet begin <id> SHALL cut task/{feature}/{task} from the wave branch (creating the wave branch from main when absent); cg fleet merge-up <id> SHALL merge the task branch into its wave branch; cg fleet land SHALL take a wave (land <wave> or land <id> naming a task of it) and merge the wave branch into main once every task of the wave is done, and SHALL refuse with the open tasks named otherwise."
+ac_3  = "WHEN the supervisor runs THE run SHALL spawn one manager per wave with pending tasks, bounded by the manager role's max (default: every such wave), and one worker per task under its wave's manager, bounded by the worker role's max, each on its own branch and worktree; a manager's turn SHALL merge up the task branches its workers handed up and land its wave when the wave is done; the per-wave serialization of tasks SHALL exist only when the worker template has no {task}; the supervisor's state, fleet tree, fleet_nodes, and the editor SHALL show the managers per wave."
+ac_4  = "WHEN [hierarchy] waves is parallel (the default when git is 2.38 or newer, else sequential) THE supervisor SHALL start a task whose requires are not yet done as soon as a slot is free (collision prediction still serializes), claiming it with cg spec start <id> --ahead, which SHALL be the only way to claim a task with open requires and SHALL record ahead on the lease; the worker's prompt SHALL name the open requirements and tell it to build against the projection — cg context, cg grep, and cg search with --branch codify/projection, cg projection findings for the branches it depends on — and that cg spec done refuses until the requirements have landed; cg spec done SHALL keep refusing a task with unmet requires (no force in fleet runs); waves = sequential SHALL restore the gate that waits for requires."
+ac_5  = "WHEN a wave lands on main THE supervisor SHALL merge main forward into every live wave branch in its manager's worktree between turns (a conflict aborts the merge and escalates, naming the projection finding when one exists), and SHALL steer every live worker under those waves to run cg fleet sync; cg fleet sync, run in a worker's worktree, SHALL merge the worker's base branch into its task branch, refuse when uncommitted changes overlap the merge and say which files, and print what came in; the projection build (req 8) SHALL run after every land and sync."
+ac_6  = "WHEN the fleet tests run THE suite SHALL show in 26_fleet.sh the plan with a manager per wave and a worker per task, begin cutting task/ from wave/, merge-up into the wave branch, land refusing with open tasks named and succeeding once they are done, old templates still yielding the old shape; in 32_supervisor.sh two waves of a two-wave spec running side by side with a wave-2 worker spawned while its requirement is open and its prompt naming the projection branch, spec done refusing that task until the requirement lands, main merged forward into the wave-2 branch after the wave-1 land with the worker steered to cg fleet sync, and waves = sequential waiting; in 14_vscode.sh the editor model carrying managers per wave; and 35_fleet_e2e.sh updated to the shape."
+
+[design]
+overview = "Nine requirements, three fronts, new code in new files so the merges are mechanical. Front one, find (src/grep.c, src/files.c, src/walk.c): grep takes trigrams from the pattern, asks body_tri for candidate file ids under the branch predicate branch_scope_sql already builds, scans the candidates from disk with regexec or memmem in parallel workers, maps each hit line onto the symbol spans of its file (one query per candidate file, cached), ranks by the rules in req 1 and prints under a budget with the same omitted-count tail cg context uses; files answers from files joined with file_fts and a symbol count subquery; the filters are one shared Filter struct parsed in main and applied in rank_query, context, survey and grep; walk.c spreads the top-level directories over a thread pool, each thread walking with readdir d_type and the shared Ignore, results merged and sorted; the git-assisted pass asks gitint for the porcelain status and the diff against the recorded head and feeds the paths through the existing targeted-walk path; the contentless FTS tables, body_tri, file_fts and files.base land in schema 18 with a meta fts_mode key. Front two, presence (src/plugin.c, src/native.c): plugin.c renders the marketplace tree from string templates and the cg path, and integrate.c's apply, detect and doctor call it; native.c owns cg hook event, the native rows in agents (schema 18 adds the columns), the pending-spawn matching, worktree detection through cg_find_root_at and git_head, task attribution, the agent.native.* events, and cg fleet discover over the transcript helper lifted out of recap.c; fleet_status and fleet tree read the native rows beside the fleet ones, and fleet.js grows a Sessions root fed by the tree JSON. Front three, projection (src/projection.c, src/conflicts.c): projection.c selects the branch set from the registry and the agents table, writes shadow commits with a copied index, folds with merge-tree, writes the ref and the projections row, and optionally checks out and indexes the projection worktree; conflicts.c computes the symbol, interface and near findings from git diff hunks and the graph's per-branch symbol spans, diffs them against projection_findings, emits the events and steers through driver_steer; the triggers are a dirty note under .codegraph plus a forked background build, called from the post-edit hook, cg hook event, watch, serve and the supervisor. Front four, the fleet shape (src/fleet.c, src/orchestrate.c): the manager role's templates expand {wave} and the worker role's expand {task}, so the defaults give one manager per wave on wave/{feature}/{wave} cut from main and one worker per task on task/{feature}/{task} cut from the wave branch; a template without the placeholder keeps the old one-per-feature or one-per-wave shape, which is how existing configurations keep working; the supervisor holds an array of managers instead of one, spawns a worker for every task its slots allow, and under [hierarchy] waves = parallel starts a task whose requires are still open with a prompt that points it at the projection, keeps the done gate strict, and after a wave lands merges main forward into the live wave branches and steers their workers to cg fleet sync. Merge discipline for the parallel waves: cg.h additions go in one labelled block per task at the end of the file; main.c gets one else-if per new command; help.c one table block per command; mcp.c one TOOLS entry per tool; db.c appends its schema strings with a comment naming the task; nobody reformats a file they did not create."
+
+[documentation]
+mode      = "auto"
+status    = "pending"
+audiences = ["user", "developer"]
+targets   = ["README.md", "docs/**", "CHANGELOG.md"]
+
+[tasks]
+heading = "Implementation Plan: Codify v15"
+
+[task.1]
+title   = "Find"
+section = "Line search, file finding, the index at scale, and agents that prefer the graph"
+status  = "pending"
+
+[task.1.1]
+title      = "cg grep: trigram candidates, regex and literal scan, hits placed in their symbols, grep_code over MCP"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_grep", "grep_candidates", "grep_scan", "t_grep"]
+touches    = ["src/grep.c", "src/db.c", "src/scan.c", "src/graph.c", "src/main.c", "src/help.c", "src/mcp.c", "src/cg.h", "tests/integration/44_grep.sh", "docs/retrieval.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/44_grep.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/16_retrieval.sh && CG=$PWD/cg tests/integration/27_branches.sh"
+do_1       = "db.c: body_tri (content='', contentless_delete=1, detail=none, trigram) written beside body_fts in the write path, with the SQLite-version fallback and the meta fts_mode key shared with task 1.3 (coordinate: whoever lands first defines fts_mode; the other reuses it)."
+do_2       = "grep.c: pattern to trigrams, candidate query under the branch predicate, parallel scan of candidates from disk with regexec or memmem, enclosing-symbol lookup per file, ranking, --path/--lang/--no-tests/--symbol/--kind/-C/--files/--count/-n/--budget, text and --json."
+do_3       = "main.c dispatch, help.c entry, mcp.c grep_code tool and cg tool call; 44_grep.sh per req 1.7."
+reqs       = ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]
+
+[task.1.2]
+title      = "cg files and the shared --path, --lang, --no-tests filters on search, context, survey, and grep"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_files", "query_filter_parse", "query_filter_sql", "t_files"]
+touches    = ["src/files.c", "src/graph.c", "src/db.c", "src/main.c", "src/help.c", "src/mcp.c", "src/cg.h", "tests/integration/45_files.sh", "docs/retrieval.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/45_files.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/34_context.sh && CG=$PWD/cg tests/integration/37_explore.sh"
+do_1       = "files.c: glob, path-word, and directory queries over files joined with file_fts (trigram over path words, written in the write path) and a symbol count; --dirs with depth, counts, dominant language; -n, --lang, --json."
+do_2       = "graph.c: a QueryFilter (paths, lang, no_tests) parsed once in main and applied inside rank_query, cmd_context, cmd_survey, and exported for grep; the directory outline in cmd_context lists subdirectories with counts before files."
+do_3       = "mcp.c: find_files tool; path, lang, no_tests on search_code and get_context; 45_files.sh per req 2.6."
+reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
+
+[task.1.3]
+title      = "The index at scale: parallel walk, git-assisted change detection, contentless FTS, indexed lookups, the scale fixture and bench"
+status     = "pending"
+wave       = 1
+symbols    = ["walk_parallel", "walk_git_candidates", "index_phase_ms"]
+touches    = ["src/walk.c", "src/scan.c", "src/gitint.c", "src/db.c", "src/config.c", "src/progress.c", "src/cg.h", "src/main.c", "tests/scale/gen.py", "tests/integration/46_scale.sh", "tests/integration/40_config.sh", "scripts/bench.sh", "docs/sync.md", "docs/config.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/46_scale.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/06_watch.sh && CG=$PWD/cg tests/integration/25_syncgate.sh && CG=$PWD/cg tests/integration/27_branches.sh && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/41_progress.sh"
+do_1       = "walk.c: the parallel walk over top-level directories with d_type, the same Ignore and the same sorted result; progress ticks per directory; index_pass calls it in place of walk_dir."
+do_2       = "gitint.c + scan.c: the git-assisted candidate list (porcelain v2 status with untracked, plus diff --name-only recorded-head..HEAD), the recorded head per branch in meta, [index] walk = auto|git|full in config.c with the 20000-file threshold and the every-twentieth-pass full walk, walk: full|git in --json."
+do_3       = "db.c: body_fts contentless with the SQLite-version fallback and meta fts_mode (shared with 1.1), files.base indexed and used by the soft-edge and resolver lookups in place of LIKE '%/'; phase ms and peak_rss_kb in IndexStats and --json."
+do_4       = "tests/scale/gen.py, 46_scale.sh (small profile always, CG_SCALE=1 full profile with the asserted bounds), scripts/bench.sh, the measured table in docs/sync.md."
+reqs       = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7"]
+
+[task.1.4]
+title      = "cg hook pre-bash and the guidance that points agents at the graph"
+status     = "pending"
+wave       = 2
+requires   = ["1.1", "1.2", "2.1"]
+symbols    = ["cmd_hook_pre_bash", "shell_advice_for"]
+touches    = ["src/govern.c", "src/integrate.c", "src/agent.c", "src/mcp.c", "src/plugin.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/47_advice.sh", "tests/integration/03_agentic.sh", "docs/events.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/47_advice.sh && CG=$PWD/cg tests/integration/03_agentic.sh && CG=$PWD/cg tests/integration/48_plugin.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
+do_1       = "govern.c: cmd_hook_pre_bash — parse the Bash command, recognise grep/rg/ag/ack/find/fd/ls -R, build the cg equivalent carrying -i and the path, the once-per-session cursor in meta, the opt-outs, one JSON object with additionalContext and no permission decision."
+do_2       = "integrate.c SKILL_BODY, agent.c context, mcp.c tool descriptions and prompts: say to use grep_code, find_files, search_code, get_context before shell search; hook install and the plugin's hooks.json register the Bash PreToolUse entry."
+do_3       = "47_advice.sh per req 4.4."
+reqs       = ["4.1", "4.2", "4.3", "4.4"]
+
+[task.2]
+title   = "Presence"
+section = "The Claude Code plugin, native agents in the fleet, and transcript discovery"
+status  = "pending"
+
+[task.2.1]
+title      = "The Claude Code plugin and the Codex hooks, installed by cg integrate"
+status     = "pending"
+wave       = 1
+symbols    = ["plugin_render", "plugin_install", "plugin_state"]
+touches    = ["src/plugin.c", "src/integrate.c", "src/govern.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/48_plugin.sh", "tests/integration/21_grounding.sh", "docs/integrate.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/48_plugin.sh && CG=$PWD/cg tests/integration/21_grounding.sh && CG=$PWD/cg tests/integration/03_agentic.sh"
+do_1       = "plugin.c: render the marketplace tree (marketplace.json, plugin.json with cg's version, hooks/hooks.json per req 5.2, .mcp.json, the skill, the three commands) under $HOME/.codify/plugins/claude-code/ with codify-owned markers, idempotent regeneration on version change, conflicts reported and kept; the Codex .codex/hooks.json."
+do_2       = "integrate.c: apply calls plugin_install (runs claude plugin marketplace add and install when claude is on PATH, prints the commands otherwise, --no-plugin), detect and doctor report installed and version state; cg hook install skips settings.json hooks when the plugin is installed."
+do_3       = "48_plugin.sh per req 5.5 under a temporary HOME; docs/integrate.md."
+reqs       = ["5.1", "5.2", "5.3", "5.4", "5.5"]
+
+[task.2.2]
+title      = "cg hook event: native sessions and subagents in the agents registry, their worktrees, tasks, and events"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_hook_event", "native_record", "native_attribute_task", "native_worktree"]
+touches    = ["src/native.c", "src/db.c", "src/main.c", "src/help.c", "src/fleet.c", "src/cg.h", "tests/integration/49_native.sh", "docs/events.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/49_native.sh && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/30_events.sh && CG=$PWD/cg tests/integration/22_control.sh"
+do_1       = "db.c: the agents columns of req 6.6 via ALTER TABLE at upgrade; native.c: cmd_hook_event parsing the payload (hook_event_name, session_id, agent_id, agent_type, tool_name, tool_input, tool_use_id, cwd, agent_transcript_path, last_assistant_message), the rows per req 6.1, pending spawns matched by type or tool_use_id, heartbeats, stops, and the pass-through to runtime_event_ingest."
+do_2       = "Worktree detection from cwd (cg_find_root_at, git_head) and branch_register with the session's branch as base; task attribution per req 6.3 with task_source; the agent.native.* events."
+do_3       = "fleet.c: fleet_status prints the native tree, fleet tree --json carries native[]; brief and state lines; 49_native.sh per req 6.7."
+reqs       = ["6.1", "6.2", "6.3", "6.4", "6.5", "6.6", "6.7"]
+
+[task.2.3]
+title      = "Native agents in the editor and the serve stream"
+status     = "pending"
+wave       = 2
+requires   = ["2.2"]
+symbols    = ["fleetTree", "nativeNodes"]
+touches    = ["editors/vscode/fleet.js", "editors/vscode/serve.js", "editors/vscode/package.json", "src/serve.c", "src/fleet.c", "tests/integration/14_vscode.sh", "tests/integration/31_serve.sh", "docs/hierarchy.md", "docs/events.md"]
+verify_cmd = "make cg && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/31_serve.sh && CG=$PWD/cg tests/integration/49_native.sh"
+do_1       = "fleet.js: a Sessions root under the fleet tree built from fleet tree --json native[], with ages, state, worktree branch merge state, task, last tool; agent.native.* events patch the rows live through the serve reducer; commands to open the worktree and the transcript."
+do_2       = "serve.c: the refresh runs the discovery hook (a no-op until 2.4 lands) and carries native rows in its snapshot; 14_vscode.sh fleet section and 31_serve.sh assert the model from real cg output."
+reqs       = ["6.4", "6.5"]
+
+[task.2.4]
+title      = "cg fleet discover: native agents from the transcripts the hosts already write"
+status     = "pending"
+wave       = 2
+requires   = ["2.2"]
+symbols    = ["cmd_fleet_discover", "transcript_dirs", "discover_claude", "discover_codex"]
+touches    = ["src/native.c", "src/recap.c", "src/fleet.c", "src/serve.c", "src/watch.c", "src/config.c", "src/cg.h", "src/help.c", "tests/integration/50_discover.sh", "tests/fixtures/native", "docs/hierarchy.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/50_discover.sh && CG=$PWD/cg tests/integration/36_recap.sh && CG=$PWD/cg tests/integration/49_native.sh && CG=$PWD/cg tests/integration/40_config.sh"
+do_1       = "recap.c: lift the transcript directory lookup into one shared helper; native.c: discover over Claude Code sessions, subagents meta.json, and Codex rollouts per req 7.1, never overwriting hook-written fields, stale marks, --json."
+do_2       = "fleet status, fleet tree, serve refresh, watch --fleet run discovery first under [fleet] discover (default true), once per 10 s per process, --no-discover; config.c knows the key."
+do_3       = "tests/fixtures/native and 50_discover.sh per req 7.4."
+reqs       = ["7.1", "7.2", "7.3", "7.4"]
+
+[task.3]
+title   = "Projection"
+section = "The projection branch and the conflicts it reveals before any merge"
+status  = "pending"
+
+[task.3.1]
+title      = "cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index"
+status     = "pending"
+wave       = 1
+symbols    = ["cmd_projection", "projection_build", "projection_branches", "projection_shadow_commit", "git_merge_tree"]
+touches    = ["src/projection.c", "src/gitint.c", "src/db.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/51_projection.sh", "docs/projection.md", "docs/config.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/51_projection.sh && CG=$PWD/cg tests/integration/11_git.sh && CG=$PWD/cg tests/integration/27_branches.sh && CG=$PWD/cg tests/integration/40_config.sh"
+do_1       = "gitint.c: merge-tree --write-tree --messages -z, commit-tree, write-tree from a copied index (shadow commit), ref update, git version check; projection.c: the branch set per req 8.1 from the registry and the agents table, [projection] base/stale/exclude/index in config.c."
+do_2       = "The fold, the conflict records with their earlier-branch attribution, --strict, the projections table, the fingerprint no-op and --force, the projection lock and --wait, text and --json, status, diff, show."
+do_3       = "--index: the detached worktree under .codegraph/worktrees/projection indexed as branch codify/projection; 51_projection.sh per req 8.9; docs/projection.md."
+reqs       = ["8.1", "8.2", "8.3", "8.4", "8.5", "8.6", "8.7", "8.8", "8.9"]
+
+[task.3.2]
+title      = "Symbol, interface, and near findings; projection events; steering the agents involved"
+status     = "pending"
+wave       = 2
+requires   = ["3.1"]
+symbols    = ["conflicts_compute", "conflicts_store", "conflicts_steer", "cmd_projection_findings"]
+touches    = ["src/conflicts.c", "src/projection.c", "src/drift.c", "src/db.c", "src/drivers.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/52_conflicts.sh", "docs/projection.md", "docs/drift.md", "docs/events.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/52_conflicts.sh && CG=$PWD/cg tests/integration/51_projection.sh && CG=$PWD/cg tests/integration/33_drift.sh && CG=$PWD/cg tests/integration/30_events.sh"
+do_1       = "conflicts.c: per branch, hunks against the base mapped onto that branch's symbol spans; pairwise symbol findings; the interface findings through drift_interface_check's machinery against the unified graph; near findings; content/delete/add-add from the fold; branches with their agents and the advice line."
+do_2       = "projection_findings table keyed by kind, path, symbol, branch set with first_seen/last_seen/resolved; projection.conflict once, projection.resolved on disappearance, projection.built per build; cg projection findings; steering through driver_steer with the opt-out."
+do_3       = "52_conflicts.sh per the first five clauses of req 9.6."
+reqs       = ["9.1", "9.2", "9.3"]
+
+[task.3.3]
+title      = "The projection follows the work: hooks, watch, serve, the supervisor, merge-up, and every surface"
+status     = "pending"
+wave       = 3
+requires   = ["3.2", "2.3", "1.4"]
+symbols    = ["projection_mark_dirty", "projection_auto_build", "t_projection_status"]
+touches    = ["src/projection.c", "src/govern.c", "src/native.c", "src/watch.c", "src/serve.c", "src/orchestrate.c", "src/fleet.c", "src/runtime.c", "src/mcp.c", "src/config.c", "src/cg.h", "editors/vscode/fleet.js", "tests/integration/53_projection_live.sh", "tests/integration/14_vscode.sh", "docs/projection.md", "docs/hierarchy.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/53_projection_live.sh && CG=$PWD/cg tests/integration/52_conflicts.sh && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/31_serve.sh && CG=$PWD/cg tests/integration/32_supervisor.sh"
+do_1       = "The dirty note and the forked background build under the projection lock with [projection] auto and min_interval; triggers from post-edit, hook event, watch (and --fleet), serve refresh, the supervisor after merge/land/spawn; merge-up and land print the branch's findings first."
+do_2       = "Surfaces: projection status grouped by branch, brief and state lines, fleet tree --json projection{} and per-branch counts, the projection_status MCP tool, serve streaming the events, fleet.js Projection node with openable paths and branch badges."
+do_3       = "53_projection_live.sh per the last four clauses of req 9.6; 14_vscode.sh fleet section for the Projection node."
+reqs       = ["9.4", "9.5", "9.6"]
+
+[task.4]
+title   = "Fleet shape"
+section = "A manager per wave, a worker per task, and waves that run side by side on the projection"
+status  = "pending"
+
+[task.4.1]
+title      = "Wave managers and task workers: the default hierarchy, plan, begin, merge-up, land, and the supervisor's manager array"
+status     = "pending"
+wave       = 1
+symbols    = ["hier_defaults", "fleet_plan", "fleet_worker_begin", "fleet_merge_up", "fleet_land", "orch_spawn_manager", "sup_tick"]
+touches    = ["src/fleet.c", "src/orchestrate.c", "src/cg.h", "src/help.c", "spec/workflow.kvx", "editors/vscode/fleet.js", "tests/integration/26_fleet.sh", "tests/integration/32_supervisor.sh", "tests/integration/35_fleet_e2e.sh", "tests/integration/14_vscode.sh", "docs/hierarchy.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/32_supervisor.sh && CG=$PWD/cg tests/integration/35_fleet_e2e.sh && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/22_control.sh"
+do_1       = "fleet.c: the new defaults and titles, [role.manager] as an alias of [role.feature], {wave} in the manager templates (per-wave managers when present, one per feature otherwise), fleet plan and fleet tree --json with a manager per wave, begin cutting task/ from the wave branch and creating the wave branch from main, merge-up into the wave branch, land taking a wave and refusing while tasks are open; spec/workflow.kvx on the new templates."
+do_2       = "orchestrate.c: the supervisor's single manager becomes an array keyed by wave; spawn per wave with pending tasks under the manager max; workers under their wave's manager; the per-wave serialization only without {task}; state, fleet_nodes, status output and resume carry the managers; fleet.js labels managers by wave."
+do_3       = "26_fleet.sh, 32_supervisor.sh, 35_fleet_e2e.sh, 14_vscode.sh per req 10.6 (all but the parallel-wave clauses); docs/hierarchy.md."
+reqs       = ["10.1", "10.2", "10.3"]
+
+[task.4.2]
+title      = "Waves side by side: start ahead of requires on the projection, the strict done gate, forward merges after a land, cg fleet sync"
+status     = "pending"
+wave       = 3
+requires   = ["4.1", "3.2"]
+symbols    = ["orch_next_task", "fleet_sync", "spec_start_ahead", "sup_forward_merge"]
+touches    = ["src/orchestrate.c", "src/fleet.c", "src/spec.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/integration/26_fleet.sh", "tests/integration/40_config.sh", "docs/hierarchy.md", "docs/projection.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/32_supervisor.sh && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/51_projection.sh && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/02_spec.sh"
+do_1       = "config.c and fleet.c: [hierarchy] waves = parallel|sequential with the git-version default; spec.c: cg spec start --ahead claiming a task with open requires and recording ahead on the lease, done unchanged and strict; the worker prompt naming the open requirements and the projection branch."
+do_2       = "orchestrate.c: the start gate under parallel ignores requires but keeps collisions and slots; after a land, main merged forward into every live wave branch between turns with conflict escalation naming the projection finding, workers steered to cg fleet sync, a projection build after land and sync; fleet.c: cg fleet sync merging the base into the worker's branch with the overlap refusal."
+do_3       = "32_supervisor.sh parallel clauses of req 10.6, 26_fleet.sh sync, 40_config.sh the key; docs."
+reqs       = ["10.4", "10.5", "10.6"]
