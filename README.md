@@ -3,7 +3,7 @@
 # Codify
 
 <img src="https://supabase.paxeer.app/storage/v1/object/public/json/readme_codify.png">
-<a 
+<a
   href="https://trendshift.io/repositories/267432?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-267432" target="_blank" rel="noopener noreferrer">
 <img src="https://trendshift.io/api/badge/trendshift/repositories/267432/daily?language=C" alt="Sidiora-Labs%2Fcodify | Trendshift" width="250" height="55"/>
 </a>
@@ -17,10 +17,9 @@ Pure C11. One binary. One SQLite database. Nothing leaves your machine.
 [![CI](https://img.shields.io/badge/CI-passing-brightgreen?style=for-the-badge)](.github/workflows/ci.yml)
 </div>
 <div align="center">
-  
+
 [English](README.md)  [简体中文](docs/i18n/README.zh-CN.md) · [Español](docs/i18n/README.es.md) · [हिन्दी](docs/i18n/README.hi.md) · [العربية](docs/i18n/README.ar.md) · [Français](docs/i18n/README.fr.md) · [Português (BR)](docs/i18n/README.pt-BR.md)
 </div>
-
 
 ---
 
@@ -179,14 +178,14 @@ See [docs/sync.md](docs/sync.md#progress).
 `cg help` prints the map: every command by group, one line each, fitted to the terminal. `cg help <command>` (or `cg <command> --help`, `-h`) shows one command's usage, subcommands, flags, examples, and related commands; `cg help --all` prints all of them, and `cg help --json` gives editors and agents the same table to build menus from. The tables below and `cg help` come from the same list of commands; `tests/integration/43_help.sh` keeps them in step.
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg help [<command>] [--all] [--json]` | The grouped overview, one command's detail, every detail, or the whole table as JSON. An unknown name suggests the closest ones and exits 1. Bold and dim only on a terminal (`NO_COLOR`, `TERM=dumb`, and `CG_COLOR=0\|1` decide); `COLUMNS` sets the width, never below 60 |
 | `cg version` | Print the version (`--version` too) |
 
 ### Graph
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg init [--nested]` | Create `.codegraph/` and build the initial index; inside a linked git worktree of an initialized repository, join the shared graph under this branch instead |
 | `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Incremental index: coalesces into a pass already running, skips when fresh, and walks only the paths named |
 | `cg index [--full] [--workers N]` | The blocking form of sync that always walks, waiting for a pass already running. `--workers N` (on both) beats `CG_INDEX_WORKERS` and `[index] workers` in `codify.kvx` |
@@ -213,7 +212,7 @@ See [docs/sync.md](docs/sync.md#progress).
 Snapshots are content-addressed with SHA-256 and blobs are deduplicated.
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg commit -m <msg>` | Snapshot the working tree; `--git` also makes a real git commit with the same spec tag |
 | `cg log` / `cg status` | History, and worktree versus HEAD |
 | `cg diff [A] [B]` | LCS line diff between snapshots or the worktree |
@@ -246,7 +245,7 @@ Codify's snapshots do not replace git. `.gitignore` is honoured alongside `.cgig
 [0.2.0]: https://github.com/acme/demo/compare/0.1.0...0.2.0
 ```
 
-**Highlights.** With `CENTRA_API_KEY` in the environment or the project's `.env` (or `CG_CHANGELOG_KEY`), each release also gets a `### Highlights` block: two to five sentences, and a few bullets for a large release, written by a model from that release's grouped commits. The derived bullets are never changed, and the prompt tells the model not to invent anything the commits do not say. The default endpoint is `https://gateway.centra.ag/v1/chat/completions` with the model `openrouter/ling-3.0-flash-sante:free(low)`; `CG_CHANGELOG_ENDPOINT` and `CG_CHANGELOG_MODEL` point it anywhere OpenAI-compatible. Answers are cached under `.codegraph/changelog-cache/` by the release's commits and the model, so regenerating the file asks only about releases that changed. `--summarize` insists (and says so when no key is found), `--no-summarize` keeps the model out, and a failed call prints `highlights for <release> skipped — <why>` on stderr and writes the notes without prose.
+**Highlights.** With `CENTRA_API_KEY` in the environment or the project's `.env` (or `CG_CHANGELOG_KEY`), each release also gets a `### Highlights` block: two to five sentences, and a few bullets for a large release, written by a model from that release's grouped commits. The derived bullets are never changed, and the prompt tells the model not to invent anything the commits do not say. The default endpoint is `https://gateway.centra.ag/v1/chat/completions` with the model `openrouter/anthropic/claude-haiku-5.5`; `CG_CHANGELOG_ENDPOINT` and `CG_CHANGELOG_MODEL` point it anywhere OpenAI-compatible. Answers are cached under `.codegraph/changelog-cache/` by the release's commits and the model, so regenerating the file asks only about releases that changed. `--summarize` insists (and says so when no key is found), `--no-summarize` keeps the model out, and a failed call prints `highlights for <release> skipped — <why>` on stderr and writes the notes without prose.
 
 ```sh
 cg changelog -o CHANGELOG.md        # every release, highlights when a key is present
@@ -289,7 +288,7 @@ cg codemap -o - --json      # the same map as structured data
 Durable agent notes, stored in the same SQLite database as the graph. Memories written while a spec task is in progress link themselves to it, and `cg spec done` records outcomes automatically. Never store secrets in them.
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg remember <text>` | Save a memory — `--type decision\|constraint\|outcome\|preference\|fact` (default `fact`), `--task <feature/id>` (defaults to the in-progress spec task), optional `--symbols` / `--files` anchors, `--supersedes <id>` to retire a reversed decision |
 | `cg recall [query]` | Search memories: full-text over the body, ranked by relevance then recency; filter with `--task`, `--type`, `-n N`, or `--near <file>` for anchored retrieval |
 | `cg forget <id>` | Delete a memory |
@@ -306,7 +305,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 ### Agentic
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg mcp` | Run as an MCP stdio server: 60 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
 | `cg serve` | One JSON-RPC connection (stdio) for an editor: every MCP tool, any `cg` command (`exec`), `cancel`, and pushed event subscriptions from a sequence number, within milliseconds of the commit. Idle, it holds no lock and runs no index pass. See [docs/events.md](docs/events.md#cg-serve) |
@@ -337,7 +336,7 @@ The adapter registry reports native, portable, or unavailable capabilities for M
 These four are what make Codify present at every step rather than only at the bookends. All of them advise by default; only `--strict` makes them fail.
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg brief` | Session state in one call: root, active task with its criteria, uncommitted paths, recent decisions |
 | `cg review` | The change paired with what it claims: changed symbols, callers now at risk, and the task's acceptance criteria |
 | `cg guard [paths] [--strict]` | Edits falling outside the scope the in-progress task declared in `touches` |
@@ -357,7 +356,7 @@ All query commands accept `--json`. That flag, the MCP server, and the language 
 The spec workflow is how Codify turns a feature plan into tracked, verified work. Specs live as plain-text kvx files — readable by humans, diffable, and owned by your repository — and Codify renders them into IDE rule files and markdown mirrors while driving the task loop on top. It works in any repository containing `spec/workflow.kvx`, is fully independent of `.codegraph/`, and is a drop-in C replacement for Ion's `spec/specgen` with byte-identical output.
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg spec new <feature>` | Scaffold `spec/<feature>/spec.kvx` — and `spec/workflow.kvx` when the repo has none — and make it active |
 | `cg spec add <id> --title T` | Insert a task, preserving every other byte: `--wave`, `--requires`, `--symbols`, `--touches`, `--verify`, `--do "a;b"`, `--reqs` |
 | `cg spec lint` | Validate the plan: `requires` cycles, requires pointing at unknown tasks, tasks with no acceptance criteria, dead `touches` globs. Exits 2 on errors |
@@ -399,7 +398,7 @@ targets   = ["README.md", "docs/**", "CONTRIBUTING.md", "CHANGELOG.md"]
 ```
 
 | Command | Contract |
-|---|---|
+| --- | --- |
 | `cg docs status` | Current mode, effective state, targets, and baseline mode |
 | `cg docs plan` | Read-only baseline or incremental plan, audience requirements, target scope, and existing documentation inventory |
 | `cg docs packet` | Write `.codegraph/docs/<feature>/packet.md`, `provenance.json`, `claims.kvx`, and `required.kvx` from bounded local evidence |
@@ -469,7 +468,7 @@ approve = ["land"]           # opt-in: wait for `cg fleet approve`
 ```
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg projection build [--index] [--strict]`, `status`, `diff [branch]`, `show`, `findings` | Every active branch folded onto the base with `git merge-tree`, uncommitted work included, at `refs/codify/projection`; conflicts reported by path and branch. `--index` indexes it as branch `codify/projection` ([docs/projection.md](docs/projection.md)) |
 | `cg fleet roles` | The hierarchy as configured: branch templates, base, remote, gates, PR policy. A repo with no `[hierarchy]` section shows the defaults it *would* use, marked not configured |
 | `cg fleet status` | Who is alive in which role, on which task, under which parent |
@@ -544,7 +543,7 @@ Memories carry the branch they were made on, because a decision taken on a wave 
 Some questions are not deterministic — *is this failure flaky or real, is this memory a reusable skill or noise, which of these findings matters most.* `cg jev` asks TypeSafe's System One model (`typesafe/jev-1.13`, over OpenRouter) for a typed answer: a `noul` (probability true), a `choice` of up to 255 labelled options, or an ordinal `score`. It never generates text.
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `cg jev doctor [--probe]` | Key, curl, endpoint, model, and log health; `--probe` sends one tiny decision |
 | `cg jev ask [<request.json>\|-]` | Ask directly: `--state S`, `--noul N I`, `--choice N I --option K=D …`, `--score N I --level L …`, or a complete request body |
 | `cg jev log [-n N]` | The last N calls from `.codegraph/jev.log`, with request id, model, tokens, cost, and latency |
@@ -552,7 +551,7 @@ Some questions are not deterministic — *is this failure flaky or real, is this
 Three commands ask a question of their own and print the answer beside their verdict:
 
 | When | Jev adds |
-|---|---|
+| --- | --- |
 | `cg spec done` and `verify_cmd` fails | `jev triage: test_failure (confidence 0.82) → fix_test (confidence 0.82)` — a category and a next action from the tail of the output, also appended to the outcome memory |
 | `cg guard` | `[jev 3.80 Blocking]` per finding, and the findings ordered most severe first — scored in one call whatever the count |
 | `cg fleet pr` | `Jev readiness: 0.95 (high) — 2/3 tasks qualified, 4 commits` in the pull request body |
@@ -658,7 +657,7 @@ The chat itself is a real chat: markdown replies with headings, tables and fence
 `cg lsp` is a Language Server over the same graph, so every editor gets Codify — not just the one with an extension. It needs no compiler, no toolchain, and no project configuration: everything is answered from `.codegraph/`.
 
 | Capability | What you get |
-|---|---|
+| --- | --- |
 | Go to definition, find references | Straight from the `symbols` and `refs` tables |
 | Hover | What the symbol is, how many references it has, **and the decisions recorded about it** |
 | Workspace and document symbols | Instant trigram-backed lookup across the project |

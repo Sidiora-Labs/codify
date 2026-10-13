@@ -164,7 +164,11 @@ has "$out" "fleet resumed: run"
 wait_for 240 '[ "$(run_state alpha)" = complete ]' || fail "resumed alpha did not complete: $(run_state alpha) — $(cat "$TMP/e2e/log")"
 # the resumed supervisor owned one run; beta, whose prerequisite is now met,
 # runs under a fresh one
-timeout 240 "$CG" fleet up --foreground --all -n 3 --max-fail 5 >/dev/null 2>&1 || fail "run B beta"
+# its output is kept: a failure here has been a flake, and the supervisor's
+# own log is the only place that says why
+timeout 240 "$CG" fleet up --foreground --all -n 3 --max-fail 5 >"$TMP/runB.log" 2>&1 \
+    || fail "run B beta (rc $?): $(tail -15 "$TMP/runB.log")
+driver: $(tail -5 "$TMP/e2e/log" 2>/dev/null)"
 wait_for 10 '[ "$(run_state beta)" = complete ]' || fail "beta did not complete"
 check_events
 B="$(end_state)"

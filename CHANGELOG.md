@@ -4,41 +4,135 @@ All notable changes to this project are recorded here, generated from git histor
 A release is a tag or a version bump; a group is the commit-subject prefix; a task
 reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
-## [v1.4.0] - 2026-10-07
+## [v1.5.0] - 2026-10-13
 
 ### Highlights
 
-Codify v1.4.0 adds a live progress status line for init, index, and sync with phase details and worker counts, configurable via CG_PROGRESS. The help system is now a grouped map from a single command table, supporting --all, --json, and usage lines. Indexing gains configurable parse workers through --workers, CG_INDEX_WORKERS, or config with machine precedence, and the pipeline cap rises to 64. A write journal supports the busy database, and cg info prints the origin.
+Codify v1.5.0 adds `cg grep` and `cg files`, which search lines and find files through a trigram index instead of shell tools, and it moves the index to a parallel walk with a contentless body index on SQLite 3.43+ (schema 18). `cg projection build` folds every active branch onto the base, records conflicts as findings, and steers the agents involved. Fleet runs now use wave managers and task workers, and waves can run side by side. Native Claude Code and Codex sessions and their subagents are recorded in the agents registry and shown in the editor's fleet view. `cg integrate apply` installs a Claude Code plugin and writes Codex hooks, and a pre-bash hook suggests `cg grep` or `cg files` in place of shell searches.
 
-- Live status line for init, index, sync (CG_PROGRESS=plain|0)
-- cg help grouped map with --all, --json, usage lines
-- [index] workers via --workers, CG_INDEX_WORKERS, config; pipeline cap 64
-- Write journal for busy database
-- cg info prints origin
+- `cg grep` searches lines with literal or POSIX regex matching, places each hit in its enclosing symbol, and is also exposed as `grep_code` over MCP.
+- `cg files` answers globs, path words and directories from a files table, with `--dirs`, `--path`, `--lang` and `--no-tests` filters shared with search, context and survey.
+- `cg projection build` produces `refs/codify/projection` and reports symbol, interface, near, content, delete and add-add conflicts through `cg projection findings`.
+- Fleet runs use a wave manager per wave and a task worker per task, with `[hierarchy] waves = parallel|sequential` and `cg fleet sync`.
+- `cg integrate apply` installs the Claude Code plugin (`--no-plugin` skips it), and `cg hook install` leaves `settings.json` to the plugin once it is installed.
+
+### Documentation
+- Codify-v14 closed — architecture covers the write journal, progress, [index] workers and the help table; source and test references regenerated from the graph; the six translations carry the v1.4 README changes; code map and agent context regenerated ([3be3ced](https://github.com/Sidiora-Labs/codify/commit/3be3ced6b958ab5ff616c20f42158d8fb9629fa3), task codify-v14/@docs)
+
+### Spec workflow
+- Task 4.2 done ([7d61600](https://github.com/Sidiora-Labs/codify/commit/7d616002641e856653af22c49f2839a1c02a9695))
+- Task 1.3 done ([671147e](https://github.com/Sidiora-Labs/codify/commit/671147ed42b5f14a7c237ad84a561c998b01f9a2))
+- Task 4.1 done ([a43c732](https://github.com/Sidiora-Labs/codify/commit/a43c7328a6552cf66f92d805fd67ba80068cef4f))
+- Tasks 3.2 and 1.4 done ([66c5978](https://github.com/Sidiora-Labs/codify/commit/66c597820469506596de951ba166860b8d595adc))
+- Task 4.1 symbols name the supervisor's manager array ([55040ca](https://github.com/Sidiora-Labs/codify/commit/55040ca28e4b5e5275db76dd6786b1a70a08fd6d))
+- Tasks 2.4 and 4.1 done ([76dccf5](https://github.com/Sidiora-Labs/codify/commit/76dccf52def968a00bff190b3bfbdbde31cf8c45))
+- Task 1.5 done ([95cb81e](https://github.com/Sidiora-Labs/codify/commit/95cb81e9c51a71961133ab60d6b662ef3ea9636d))
+- Task 2.3 done ([7877845](https://github.com/Sidiora-Labs/codify/commit/7877845936f107f7c91c85e7c8040bd43aabbe91))
+- Task 1.5 — grep hardening: the body_tri completeness guard and the shared QueryFilter on grep ([e5e4458](https://github.com/Sidiora-Labs/codify/commit/e5e445881977f88b6ad8fef1c791a161b649feaa))
+- Tasks 1.1 and 2.2 done; 1.1 symbols named as implemented ([9754e41](https://github.com/Sidiora-Labs/codify/commit/9754e4166e09dd91fa8320061f6c547be031ec12))
+- Task 1.1 done ([a3bc701](https://github.com/Sidiora-Labs/codify/commit/a3bc7013266e9ac84fb2c770739832a631342db5))
+- Task 1.2 done ([4ccbda9](https://github.com/Sidiora-Labs/codify/commit/4ccbda948c2e1e5264840a70801b4dd01bffc5aa))
+- Tasks 2.1 and 3.1 done; 2.1 no longer declares 21_grounding.sh, which the implementation did not need ([a0daa0c](https://github.com/Sidiora-Labs/codify/commit/a0daa0c860cf427938b90a745da72849f3c9c87e))
+- Codify-v15 rendered requirements, design, and tasks ([941e092](https://github.com/Sidiora-Labs/codify/commit/941e09264a3d5d14aef88d31a9e96b3fa20344c9))
+- Codify-v15 — grep and files over the graph, the index at scale, the Claude Code plugin and native agent tracking, the projection branch with conflicts before the merge, and the fleet shape of a manager per wave and a worker per task; active feature codify-v15 ([52d30fb](https://github.com/Sidiora-Labs/codify/commit/52d30fb0b91d1d4f2365ebee0a0bd0d487f30742))
+
+### Fleet
+- Waves side by side — [hierarchy] waves = parallel|sequential (parallel on git >= 2.38), cg spec start/fleet begin --ahead recording ahead on the lease, a strict done gate --force cannot pass in a fleet run, main merged forward into live wave branches after a land with conflicts escalated naming the projection finding, cg fleet sync, a projection build after land and sync; supervisor git status runs with --no-optional-locks so it no longer races a worker's index.lock ([2f1adba](https://github.com/Sidiora-Labs/codify/commit/2f1adba6193b782918d9c568fd383c0ed5192a0c), task codify-v15/4.2)
+- A wave manager per wave and a task worker per task — wm-{feature}-{wave} on wave/{feature}/{wave} from main, w-{feature}-{task} on task/{feature}/{task} from its wave branch; [role.manager] aliases [role.feature]; templates without {wave}/{task} keep the older shape; plan and tree --json carry a manager per wave; begin cuts task/ from wave/, merge-up goes into the wave branch, land <wave|task-id> refuses naming the open tasks; the supervisor keeps a manager array per wave bounded by the manager max; workflow, help, docs/hierarchy.md and the VS Code fleet view follow ([88b92b7](https://github.com/Sidiora-Labs/codify/commit/88b92b743e5bc8d9490773a57cb1f458d0678a02), task codify-v15/4.1)
+
+### Db
+- A files table stamped v18 before files.base gains the column on open, filled from path ([c631374](https://github.com/Sidiora-Labs/codify/commit/c631374afa29fbf898d0e0ee765630e1c51c9d94), task codify-v15/1.3)
+
+### Editor
+- Native sessions and their subagents under a Sessions root in the fleet view, patched live from agent.native.* through the serve reducer, with commands to open a native agent's worktree and transcript; cg serve snapshot carries the native rows after a weak discovery hook task 2.4 replaces ([d307dd8](https://github.com/Sidiora-Labs/codify/commit/d307dd8a8d7387d88cb615b6e535dbf2289939d4), task codify-v15/2.3)
+
+### Files
+- Cg files answers globs, path words and directories from the files table and a trigram file_fts (schema 18); --dirs maps the tree with counts and dominant language; --path, --lang and --no-tests narrow search, context and survey inside the SQL; a large directory's context outline leads with its subdirectories; find_files over MCP and the filters on search_code and get_context ([74f063f](https://github.com/Sidiora-Labs/codify/commit/74f063f09ee848f0d612c560c4f5aab4e73f61b0), task codify-v15/1.2)
+
+### Grep
+- A body_tri short of the files that carry a body makes grep scan the whole scope and say so (full scan — body_tri incomplete, full_scan:"body_tri incomplete" in --json) instead of missing files silently; the next whole index pass re-inserts the missing rows and reports N trigram rows repaired; --path, --lang and --no-tests go through the shared QueryFilter so grep narrows exactly as search, context, survey and files do ([9ad126d](https://github.com/Sidiora-Labs/codify/commit/9ad126d7d002d69f29060782aa3b1941bfc6f744), task codify-v15/1.5)
+- Cg grep searches lines through a trigram index (body_tri, contentless on SQLite 3.43+), scans candidates with literal or POSIX regex matching across worker threads, places each hit in its enclosing symbol, ranks and budgets the output, supports -C, --files, --count, --symbol, --kind, --path, --lang and --json, and answers grep_code over MCP; schema 18 ([615e28a](https://github.com/Sidiora-Labs/codify/commit/615e28aec16976a0f2a4dad323aca1926c459f76), task codify-v15/1.1)
+
+### Index
+- The index at scale — parallel walk, git-assisted candidates ([index] walk), contentless body_fts on SQLite >= 3.43 (fts_mode, cg info), files.base lookups replace LIKE '%/name', one FTS purge per chunk, walk/phase_ms/peak_rss_kb in --json; schema 18; tests/scale generator, 46_scale, scripts/bench.sh, measured table in docs/sync.md ([a2b88ff](https://github.com/Sidiora-Labs/codify/commit/a2b88ff5a4d21ffe72caee109e29bfec2d044446), task codify-v15/1.3)
+
+### Integrate
+- Cg integrate apply renders the Claude Code plugin marketplace under ~/.codify/plugins/claude-code (manifests, hooks.json calling cg by absolute path, .mcp.json, the workflow skill, brief/fleet/projection commands) with version-stamped codify-owned markers, installs it through the claude CLI or prints the two commands, and writes .codex/hooks.json; --no-plugin skips both; detect and doctor report the plugin's install and version state and the Codex /hooks trust step; cg hook install leaves settings.json to an installed plugin; every hook exits 0 outside a project or for an unknown subcommand; docs/integrate.md; 48_plugin.sh ([e6c5f95](https://github.com/Sidiora-Labs/codify/commit/e6c5f95c013ca97ff85dcbeec4390fd6bca58066), task codify-v15/2.1)
+
+### Plugin
+- No WorktreeCreate or WorktreeRemove hooks — a WorktreeCreate hook replaces git's worktree creation and a silent one makes it fail; hooks.json keeps only the documented hooks key with the ownership marker riding in each command; spec, test and doc follow ([e64f296](https://github.com/Sidiora-Labs/codify/commit/e64f29632085b0f8455c7672b9d2d03ce1aaff62))
+
+### Projection
+- A background build carries no agent, run or task identity from whoever triggered it, so its events are nobody's work ([664fb73](https://github.com/Sidiora-Labs/codify/commit/664fb739611cf61fc17ba4fa717449898c661125), task codify-v15/3.3)
+- Symbol, interface, near, and textual findings from every build (src/conflicts.c), kept in projection_findings with projection.conflict once, projection.resolved when a fix lands, and projection.built per build; cg projection findings lists the live ones with ages; the agents on the branches involved are steered once per finding unless [projection] steer = false; 52_conflicts.sh ([0074aef](https://github.com/Sidiora-Labs/codify/commit/0074aef29021a347a80b2ba5738c9132c45211f3), task codify-v15/3.2)
+- Cg projection build folds every active branch onto the base with merge-tree, uncommitted work through shadow commits from a copied index, conflicts folded with markers and attributed to the earlier branches, written to refs/codify/projection and the projections table; fingerprint no-op, --force, --strict, --branch, the build lock with --wait, status, diff, show, and --index checking the projection out under .codegraph/worktrees/projection indexed as branch codify/projection; [projection] base, stale, exclude, index in codify.kvx; schema 18 ([6435620](https://github.com/Sidiora-Labs/codify/commit/64356205512df955106ce4dd8c596a7ad122b524), task codify-v15/3.1)
+
+### Other
+- Merge task 3.3: the projection follows the work — cg hook post-edit and the work events of cg hook event mark the projection dirty and start one detached cg projection build --quiet under the projection lock, at most once per [projection] min_interval (15s) unless [projection] auto = false; cg watch and watch --fleet build when edits settle, cg serve and the fleet supervisor after merge, land, begin and spawn events; fleet merge-up and land print the branch's known findings before merging; projection status groups the live findings by branch with ages, brief and state name the first two, fleet tree --json carries projection{}, the projection_status MCP tool, a Projection node in the editor's fleet view; a background build drops the triggering agent's identity so its events are nobody's work; 53_projection_live.sh and a 14_vscode fleet section ([4097ab8](https://github.com/Sidiora-Labs/codify/commit/4097ab8a4ee72e4a7162b65c8cc1afa7f7982760), task codify-v15/3.3)
+- Fleet, sync doc: the merge-up header names the task branch and its base; the git walk's full-walk trigger describes the dirty set that collapsed past 256 KiB ([7759c7a](https://github.com/Sidiora-Labs/codify/commit/7759c7a841e4dc30937098f580579f04d2291efa))
+- Merge task 4.2: waves side by side — [hierarchy] waves = parallel|sequential, cg spec start and cg fleet begin --ahead (--force no longer bypasses requires), the strict done gate, forward merges of main into live wave branches after a land (sup_forward_merge, fleet.forward), cg fleet sync (fleet.sync), a projection rebuild after every land and sync; the fleet-test flake fixed at its root: the supervisor's tree fingerprint and tree_clean run git --no-optional-locks status, so they no longer take index.lock under a worker's commit ([0392b62](https://github.com/Sidiora-Labs/codify/commit/0392b6218ccd349927dfaa46b130d1d62eee62e5), task codify-v15/4.2)
+- Projection follows the work: cg hook post-edit and work events from cg hook event mark the projection dirty and start one detached cg projection build --quiet under the projection lock, once per [projection] min_interval (15s) unless [projection] auto = false; cg watch and watch --fleet build when edits settle, cg serve and the fleet supervisor after merge, land, begin and spawn events; fleet merge-up and land print the branch's known findings before merging; projection status groups the live findings by branch with ages, brief and state name the first two, fleet tree --json carries projection{} with per-branch counts, the projection_status MCP tool, and the editor fleet view gains a Projection node whose branch rows open the file in that worktree and badges on involved branches; 53_projection_live.sh and a 14_vscode fleet section ([38c7eb8](https://github.com/Sidiora-Labs/codify/commit/38c7eb8821cd9c8d39e93d8da6ec8fa03a0d1d39), task codify-v15/3.3)
+- Merge task 1.3: the index at scale — parallel walk (src/walk.c), git-assisted change detection under [index] walk, a contentless body index on SQLite 3.43+, files.base with idx_file_base and idx_import_target, one FTS purge per chunk (body_tri included), phase timings and peak RSS in sync --json, the scale fixture, 46_scale.sh and scripts/bench.sh; body_fts follows its own DDL when it already exists ([ea31d22](https://github.com/Sidiora-Labs/codify/commit/ea31d22190e2c43d5630694b92e74761fafe449d), task codify-v15/1.3)
+- Merge task 1.4: cg hook pre-bash — shell grep, find, rg, fd and ls -R advice toward cg grep and cg files, once per command per session, under [hooks] shell_advice; the skill, agent context, MCP descriptions and prompts say the same ([c70bd74](https://github.com/Sidiora-Labs/codify/commit/c70bd7453b1e7d382e593ba8f43f76c3c35ae0bb), task codify-v15/1.4)
+- Merge task 3.2: projection conflicts — symbol, interface, near, content, delete and add-add findings over the fold, stored in projection_findings, projection.conflict and projection.resolved events, cg projection findings, and one steer per agent per new finding under [projection] steer; an unknown hook subcommand drains only the stdin that arrives ([b1350c6](https://github.com/Sidiora-Labs/codify/commit/b1350c630bd185f1fd995937ee62a4744787a91f), task codify-v15/3.2)
+- Merge task 2.4: fleet discover — native sessions and subagents from the transcripts Claude Code and Codex already write; serve's snapshot and push loop run discovery first; the v18 agents columns are widened on every open so a graph stamped v18 before 2.2 gains them ([e99474d](https://github.com/Sidiora-Labs/codify/commit/e99474d968464f8c57f41ae0471a75c3713da188), task codify-v15/2.4)
+- Hook pre-bash: a shell grep, rg, ag, ack, find, fd, or ls -R over the tree is answered with its cg grep or cg files equivalent as PreToolUse additionalContext, once per session per command, never a permission decision, silent under CG_SHELL_ADVICE=0, [hooks] shell_advice = false, a path outside the tree, or a non-Bash payload; cg hook install registers it; the skill, agent context, MCP tool descriptions, and the start-work and orient prompts say to use grep_code, find_files, search_code, and get_context before any shell search ([08fa148](https://github.com/Sidiora-Labs/codify/commit/08fa148d5f9a43bb32128a588fabc7feaaf6646f), task codify-v15/1.4)
+- Merge task 4.1: wave managers and task workers — the default hierarchy, plan, begin, merge-up, land, and the supervisor's manager array ([026a34e](https://github.com/Sidiora-Labs/codify/commit/026a34e06f54b985ba88fee0cc482114194513d8), task codify-v15/4.1)
+- Fleet discover: native sessions and subagents from the transcripts Claude Code and Codex already write, for hosts whose hooks never fired. Rows are created or completed column by column only where empty, so a hook's field is never overwritten; the discovered column records which columns came from transcripts. Worktrees named in meta.json are registered, pending spawns are claimed by toolUseId, and a transcript untouched for 15 minutes marks its agent stale. fleet status, fleet tree, serve's refresh and watch --fleet run discovery first under [fleet] discover (default true), once per 10 s per process, skipped by --no-discover. The transcript directory lookup is one helper, transcript_dirs, shared with recap. ([96497d3](https://github.com/Sidiora-Labs/codify/commit/96497d36078b8ee12219bdf18ca0742c5e2bfb04), task codify-v15/2.4)
+- Merge task 1.5: grep hardening — the body_tri completeness guard and the shared QueryFilter on grep ([657ba24](https://github.com/Sidiora-Labs/codify/commit/657ba244be69ffcefe1c1ed49f15b13d6b268d3e), task codify-v15/1.5)
+- Merge task 2.3: native agents in the editor and the serve stream ([018ad1f](https://github.com/Sidiora-Labs/codify/commit/018ad1f240c8973c233937ce6545af7d91356e80), task codify-v15/2.3)
+- Merge task 2.2: cg hook event — native sessions and subagents in the agents registry, their worktrees, tasks, and events ([ce78643](https://github.com/Sidiora-Labs/codify/commit/ce7864376b0a7947ff229036356fc02778401d47), task codify-v15/2.2)
+- Native agents: cg hook event records Claude Code and Codex sessions and the subagents their Agent tool spawns in the agents registry (schema 18 columns added in place), with pending spawns matched by type or meta.json tool_use_id, linked-worktree branches registered against the session's branch, task attribution with its source, agent.native.* events, the native tree in fleet status and fleet tree --json, and the one-line summary in brief and state ([306c055](https://github.com/Sidiora-Labs/codify/commit/306c0554a5ad7e34052f7523d8fbec5a382f905f), task codify-v15/2.2)
+- Merge task 1.1: cg grep — trigram candidates, regex and literal scan, hits placed in their symbols, grep_code over MCP ([a383ce7](https://github.com/Sidiora-Labs/codify/commit/a383ce787e3db244bc7ee1434380421b330c92ca), task codify-v15/1.1)
+- Merge task 1.2: cg files and the shared --path, --lang, --no-tests filters ([5b93c78](https://github.com/Sidiora-Labs/codify/commit/5b93c78c3e6d5eb50d9fdaecff7571c9a30b5751), task codify-v15/1.2)
+- Merge task 3.1: cg projection build — active branches, shadow commits, the merge-tree fold, the ref, the worktree index ([17e8bba](https://github.com/Sidiora-Labs/codify/commit/17e8bbada8ea5fcc9b23fb8cf70a3dbb7a850d08), task codify-v15/3.1)
+- Merge task 2.1: the Claude Code plugin and the Codex hooks installed by cg integrate ([2e43799](https://github.com/Sidiora-Labs/codify/commit/2e43799c3ba3e324b5917d4123b6c821faa13b46), task codify-v15/2.1)
+
+## [1.4.0] - 2026-10-07
+
+### Highlights
+
+Codify 1.4.0 adds a live status line to `init`, `index` and `sync` that shows phases, counts, workers and waits. Lifecycle writes that find the database busy are now queued in `.codegraph/journal/` and replayed by the next process that gets the lock. Parse worker count is configurable, and `cg help` is now a grouped map built from one command table. Unknown commands are answered before the graph opens, so `cg serch` gets its suggestion even outside a project.
+
+- **Progress line:** `init`, `index` and `sync` show a live status line. Set `CG_PROGRESS=plain` or `CG_PROGRESS=0` to change it. Implicit and `--json` passes stay silent.
+- **Write journal:** Manage queued writes with `cg journal list`, `cg journal apply` and `cg journal drop`. Claims still exit 75 and say why they are not journaled.
+- **Parse workers:** Set the count with `--workers`, `CG_INDEX_WORKERS`, or `[index] workers` in `codify.kvx`. The pipeline cap rises to 64, and `cg info` prints where the value came from.
+- **Help:** `cg help` gives an overview, per-command detail, `--all` and `--json`.
+- **Pending counts:** `brief`, `state` and `check` report pending journal entries, and `recall` includes queued memories.
 
 ### Spec workflow
 - Codify-v14 — progress for init, sync and index; a write journal for the busy database; [index] workers in codify.kvx; cg help as a grouped map ([2010aeb](https://github.com/Sidiora-Labs/codify/commit/2010aebd328357f5297ec408a20bbe8c017b720b))
 
+### Changelog
+- V1.4.0 section regenerated; scripts/format_changelog.py; ignore scripts/index.html; codify-v14 documentation in progress ([4614459](https://github.com/Sidiora-Labs/codify/commit/46144594c076028fd01b273fc496757c36225a94))
+
 ### Help
+- An unknown command is answered before the graph opens, so cg serch gets its suggestion outside a project instead of 'not inside a Codify project'; version 1.4.0 ([41492bb](https://github.com/Sidiora-Labs/codify/commit/41492bb907a786e3b12a66ef2805370fa48b5012), task codify-v14/4.1)
 - Cg help as a grouped map from one command table — overview, per-command detail, --all, --json, and main's usage lines; 43_help.sh checks dispatch, width, color, and the README ([4c1ad82](https://github.com/Sidiora-Labs/codify/commit/4c1ad823f79677e1a06ca7fca67ce82e2dca49cb), task codify-v14/4.1)
 
 ### Index
 - [index] workers in codify.kvx — a configured parse worker count with --workers, CG_INDEX_WORKERS, config, machine precedence; the pipeline cap rises to 64; cg info prints the origin; spec: 3.1 done ([b269d56](https://github.com/Sidiora-Labs/codify/commit/b269d5620fee7c17c75cb799d73f2debd94a8d70), task codify-v14/3.1)
 
+### Journal
+- Lifecycle writes that find the database busy are queued in .codegraph/journal/ and replayed by the next process that holds the lock; claims still exit 75 and say why they are not journaled; cg journal list|apply|drop; pending counts in brief, state and check; queued memories in recall ([0ba580f](https://github.com/Sidiora-Labs/codify/commit/0ba580fe13e1e97c5fb2c02d977b9d18b9a376e6), task codify-v14/2.1)
+
 ### Progress
 - A live status line for init, index and sync — phases, counts, workers, waits; CG_PROGRESS=plain|0; implicit and --json passes silent ([13b7ad2](https://github.com/Sidiora-Labs/codify/commit/13b7ad222047d97b73de003979d194c542f3cd4c), task codify-v14/1.1)
+
+### Other
+- Change image source in README to a URL ([9ece15e](https://github.com/Sidiora-Labs/codify/commit/9ece15e0c72c72594ce3193766c579f98ee3d40c))
 
 ## [1.3.0] - 2026-10-06
 
 ### Highlights
 
-Codify 1.3.0 adds a project configuration file (`codify.kvx`) that relocates spec, context, skill, and codemap paths through a per-root cache and gates implicit sync with `auto=false`, plus `cg codemap` which generates a byte-stable CODEMAP.md from the graph with build/test commands, entry points, module symbols, directory dependencies, and tests, supporting `--force` and `--check`. Memory gains export/import via JSONL by content id, graph-to-graph, and MCP tools. The spec graph resolves prototype calls to definitions, definitions rank before prototypes by phrase, and schema v17 indexes `refs.target_id`. A recap feature resumes briefs from Claude Code and Codex transcripts using a gateway model to decide which statements to include.
+Codify 1.3.0 adds a code map: `cg codemap` writes CODEMAP.md from the graph, and an MCP codemap tool exposes the same output. A new `codify.kvx` project configuration relocates spec, context, skill and codemap paths and can turn off implicit syncs, managed with `cg config list/init/get/set/check`. Memory can now be exported and imported as JSONL keyed by content id, including graph-to-graph transfer. Index and retrieval changes make definitions answer before prototypes, and the schema moves to v17.
 
-- `cg codemap` writes CODEMAP.md from the graph; `--force`, `--check`, byte-stable, budget-fitted
-- `codify.kvx` project config: `[paths]` relocate spec/context/skills/codemap, `[sync]` auto=false gates implicit sync
-- `cg config list/init/get/set/check` for configuration management
-- Memory export/import JSONL by content id, graph-to-graph, MCP tools
-- Definitions answer before prototypes; phrase ranking; schema v17; `refs.target_id` indexed
+- `cg codemap` writes CODEMAP.md with build and test commands, layout, entry points, modules, directory dependencies and workflow pointers. Output is byte-stable and budget-fitted, and `--force` and `--check` manage the marker-owned section.
+- `codify.kvx` adds `[paths]` for spec, context, skills and codemap locations, and `[sync] auto=false` to gate implicit syncs.
+- Memory export and import use JSONL keyed by content id, work graph-to-graph, and are available as MCP tools.
+- The resume brief is generated from Claude Code and Codex transcripts, with statements judged for kind, still-true status and need-to-resume before the gateway model writes the brief. `jev_ask_at` and `chat_model_ask` are exposed.
+- Index schema v17 ends prototypes at their own `;`, resolves calls through a prototype to its definition, and makes editor hover and go-to-definition lead with the definition.
 
 ### Documentation
 - Codify-v13 closed — architecture covers configuration, the code map and memory transport; reference tables, changelog and tool counts regenerated ([c455a26](https://github.com/Sidiora-Labs/codify/commit/c455a263dda6214893ccb0b767f15bf89ff0c2d9), task codify-v13/@docs)
@@ -83,7 +177,7 @@ Codify 1.3.0 adds a project configuration file (`codify.kvx`) that relocates spe
 
 ### Highlights
 
-This release adds .env to .gitignore to prevent sensitive files from being tracked. The changelog generation message has been updated for clarity, and documentation on changelog and contribution processes has been enhanced.
+This release adds `.env` to `.gitignore`, so local environment files are no longer picked up by Git. The changelog generation message has been reworded for clarity. The documentation on the changelog and contribution processes has also been expanded.
 
 ### Changelog
 - Add .env to .gitignore; update changelog generation message for clarity; enhance documentation on changelog and contribution processes ([a0f120e](https://github.com/Sidiora-Labs/codify/commit/a0f120eca214ab53afd52d1b457475e92415b8f0))
@@ -92,13 +186,11 @@ This release adds .env to .gitignore to prevent sensitive files from being track
 
 ### Highlights
 
-Codify 1.0.0 ships a branch-scoped code graph (schema v15/v16, freshness gates, refuse-downgrade protection), a two-level concurrent fleet with a durable supervisor (pause/resume/crash recovery, branch lifecycle, per-role capabilities), and a full agent chat surface with inline permissions, cost ledger, and cancel/retry. The spec workflow is complete end-to-end with Jev advisory triage, guard ranking, PR readiness, skills classification via MCP, and drift detection at done/merge-up. Sync gains a single-writer index gate with coalescing, and serve exposes JSON-RPC over stdio with tool list/call and event subscriptions.
+Codify 1.0.0 makes the shared code graph branch-aware. Schema v15 adds a branch registry and branch-scoped file rows, linked worktrees join the shared `.codegraph`, and reads default to the open branch. A single-writer index gate with coalescing and freshness windows now governs indexing. The fleet layer adds a durable supervisor, per-task branches with a merge lock, and `cg drift` for spec and interface drift. Jev advisories, skills, and `cg serve` round out the release, and the VS Code extension gains a task tree, a fleet view, agent chat, and a memory browser.
 
-- `cg spec run --fleet` — two-level fleet run with feature managers and wave workers in worktrees, resume prompts hand work upward
-- `cg fleet` — begin/merge-up/land/pr/checkpoint branch lifecycle; supervisor with pause/resume, stall/retry/escalation budgets
-- Branch-scoped graph — reads default to open branch, per-branch freshness, schema v16 with branch registry, refuse downgrade
-- Agent chat — real diffs, terminal output, inline non-hanging permissions, cancel/retry, session switch, cost ledger
-- `cg serve` — JSON-RPC over stdio, `cg tool list|call`, pushed-event subscriptions; Vscode chat with slash commands, fleet attach, approval/escalation cards
+- **Branch-scoped graph:** reads default to the open branch, indexing reuses parsed content by hash, and `watch --fleet` follows every worktree.
+- **Fleet:** `cg fleet up/down/pause/resume/runs`, `cg fleet begin/merge-up/land/pr/checkpoint`, `cg fleet tree`, and `cg spec run --fleet`, which runs a feature manager and wave workers in their own worktrees.
+- **Jev and skills:** `cg jev doctor/ask/log`, `cg memory classify`, and `cg skills list/promote/render`, which writes
 
 ### Documentation
 - Merge branch-scoped required surface and the v10 reference tables ([c845585](https://github.com/Sidiora-Labs/codify/commit/c8455850668cddbf1a2ac806de8f71922277b695))
@@ -231,7 +323,7 @@ Codify 1.0.0 ships a branch-scoped code graph (schema v15/v16, freshness gates, 
 
 ### Highlights
 
-Fixed agent panel replay notes, cleaned session titles, and single-row timeline. Replayed sessions no longer carry Claude Code harness text in the user role. The agent panel composer is taller.
+Codify 0.9.0 is a small release with fixes to the agent panel. Replayed sessions no longer show Claude Code harness text as user messages, and session titles are cleaned up. The timeline now renders as a single row, and the agent panel composer is taller. The release also includes several version-tagged entries, but their titles do not describe specific changes.
 
 ### Bug fixes
 - Agent panel replay notes, cleaned session titles, single-row timeline ([4f6a02b](https://github.com/Sidiora-Labs/codify/commit/4f6a02b8ce5396162e729581a76fa620c3484a65))
@@ -248,12 +340,7 @@ Fixed agent panel replay notes, cleaned session titles, and single-row timeline.
 
 ### Highlights
 
-Codify 0.8.5 updates the Agent panel with a provider picker, Codify toolbar, sub-agent view, and timeline view, and redirects the legacy Codex ACP adapter to the maintained 1.7.0 release. The graph database stays writable while the LSP indexes, and spec workflow task 5.2 now qualifies the agent panel.
-
-- Agent panel: provider picker, Codify toolbar, sub-agent and timeline views (Extension 1.1.0)
-- Default `codify.acp.codexCommand` now `npx -y @agentclientprotocol/codex-acp@1.7.0`
-- Graph database writable during LSP indexing
-- Spec workflow task 5.2 qualifies agent panel
+Codify 0.8.5 adds an agent panel to the extension, version 1.1.0, with a provider picker, a Codify toolbar, and sub-agent and timeline views. The Agent view now offers labelled Codex / Claude Code / Custom choices. The default `codify.acp.codexCommand` moves from the legacy `@zed-industries/codex-acp` package to the maintained `@agentclientprotocol/codex-acp@1.7.0` release. The graph database stays writable while the LSP indexes, because the indexer now parses outside the lock and writes in short chunks. Task 5.2 of the spec workflow, the agent panel, has also been qualified.
 
 ### Features
 - Agent panel with provider picker, Codify toolbar, sub-agent and timeline views ([0c05bf6](https://github.com/Sidiora-Labs/codify/commit/0c05bf6e1f15da6fb0a6c77cd9384e7186dcebdd))
@@ -269,13 +356,7 @@ Codify 0.8.5 updates the Agent panel with a provider picker, Codify toolbar, sub
 
 ### Highlights
 
-Codify 0.8.0 qualifies the control plane and modernizes MCP and generated agent ownership. It adds bounded agent recovery and work packets, normalizes agent lifecycle events, and adds a universal agent integration registry. The release also adds truthful state and fenced orchestration, fenced task attempts and reconciliation, and makes the VS Code agent chat responsive and transparent.
-
-- Modernize MCP and generated agent ownership
-- Add bounded agent recovery and work packets
-- Normalize agent lifecycle events
-- Add universal agent integration registry
-- Add truthful state and fenced orchestration
+Codify 0.8.0 reworks the control plane that coordinates agents. It modernizes MCP and generated agent ownership, adds a universal agent integration registry, and normalizes agent lifecycle events. Agent work is more robust with bounded agent recovery, work packets, and truthful state. Orchestration gains fenced task attempts, reconciliation, and fenced orchestration. The VS Code agent chat is now more responsive and transparent.
 
 ### Features
 - Modernize MCP and generated agent ownership ([8459574](https://github.com/Sidiora-Labs/codify/commit/84595747d19b8e8709a4b8ced59a6366fe50afe0))
@@ -295,13 +376,7 @@ Codify 0.8.0 qualifies the control plane and modernizes MCP and generated agent 
 
 ### Highlights
 
-Codify 0.7.0 introduces index-time call and import resolution with grounding, contract, and hygiene findings, resolving every reference to at most one target via tiered resolution (same file → explicit import → same directory → unique repo-wide definition). The kvx format subproject is added as vendored plain files with its own git history, and the VS Code extension receives refined kvx syntax highlighting, a PNG sidebar icon, and an overhauled kvx grammar with status-aware tokens.
-
-- Index-time call and import resolution with grounding, contract, and hygiene findings
-- Tiered resolution: same file → explicit import → same directory → unique repo-wide definition
-- kvx format subproject vendored as plain files with standalone git history
-- VS Code extension bumped to 0.8.0 and 0.7.0; refined kvx syntax highlighting
-- Sidebar icon switched from SVG to PNG; kvx grammar overhauled with status-aware tokens
+Codify 0.7.0 introduces the resolution layer, which resolves call and import references at index time so that every reference points to at most one target. Resolution proceeds in tiers: the same file first, then an explicit import, then the same directory, then a unique repo-wide definition. The layer also produces grounding, contract, and hygiene findings. Alongside it, the VS Code extension moves to 0.8.0, with the sidebar icon switched from SVG to PNG and the kvx syntax highlighting grammar overhauled to be status-aware. The kvx format is now a subproject, vendored as plain files with its standalone git history kept.
 
 ### Releases
 - Codify 0.7.0: the resolution layer ([cd097e1](https://github.com/Sidiora-Labs/codify/commit/cd097e123141361c6d694cbf7503e4dc0e737113))
@@ -314,13 +389,7 @@ Codify 0.7.0 introduces index-time call and import resolution with grounding, co
 
 ### Highlights
 
-Codify 0.6.0 indexes comments and other code the parser misses, and replaces the agent panel with a persistent sidebar view that supports concurrent sessions, a command palette, a driver picker, and a New Chat button. The VS Code extension now ships an ACP v1 client that runs Claude Code or Codex in a native webview with streamed replies, collapsed thinking, and tool-call cards showing diffs.
-
-- Persistent "Agent" sidebar with command palette and concurrent sessions
-- Lazy adapter spawn, driver picker, New Chat button
-- Markdown rendering with copyable code blocks
-- VS Code ACP client for Claude Code / Codex
-- Streamed replies, collapsed thinking, tool-call diff cards
+Codify 0.6.0 moves the agent panel into a persistent "Agent" view in the Codify sidebar. The adapter now starts lazily on the first message, so no task is needed, and a driver picker and New Chat button sit alongside it. The release also adds a command palette and concurrent task sessions, plus markdown rendering with copyable code blocks. The VS Code extension gains an ACP agent panel, an Agent Client Protocol v1 client that runs Claude Code or Codex through their ACP adapters and shows streamed replies, collapsed thinking, and tool-call cards with diffs in a native webview. The release is framed as the intent layer, which indexes the part of a codebase the parser cannot see.
 
 ### Releases
 - Codify 0.6.0: the intent layer ([c415829](https://github.com/Sidiora-Labs/codify/commit/c415829c0ab0f420cec7b03ff0509788b3f733c7))
@@ -333,13 +402,13 @@ Codify 0.6.0 indexes comments and other code the parser misses, and replaces the
 
 ### Highlights
 
-Codify 0.4.0 introduces agent-native orchestration via `cg spec run`, session handoff and resume, and VS Code agent sessions. Indexing accuracy improves through scope-aware extraction with stable rowids, fused ranked search with token budgets, and import-aware call resolution. The release also adds claim-next atomicity with confl.
+Codify 0.4.0 adds agent-native orchestration through `cg spec run`, along with session handoff and resume and agent sessions in the VS Code extension. Indexing is more accurate, with scope-aware extraction that keeps stable rowids and import-aware call resolution. Search now fuses ranked results under token budgets, and claim-next gains atomicity.
 
 - `cg spec run` for agent-native orchestration
-- session handoff and resume
-- VS Code agent sessions
-- scope-aware extraction with stable rowids
-- fused ranked search with token budgets
+- Session handoff and resume
+- Agent sessions in the VS Code extension
+- Scope-aware extraction with stable rowids
+- Fused ranked search with token budgets
 
 ### Releases
 - Codify 0.4.0: agent orchestration, session continuity, and indexing accuracy ([7712760](https://github.com/Sidiora-Labs/codify/commit/7712760555ffcab0ec2667000dbfc11d15ff32c7))
@@ -351,13 +420,7 @@ Codify 0.4.0 introduces agent-native orchestration via `cg spec run`, session ha
 
 ### Highlights
 
-Prod mode is now exposed through the CLI and MCP with a complete lifecycle, an implemented state, and documented behavior for failing tests. Spec tasks run in parallel, and explicit snapshot tags are supported.
-
-- Prod mode lifecycle with implemented state
-- Prod mode exposed via CLI and MCP
-- Documented behavior for failing tests
-- Parallel spec tasks
-- Explicit snapshot tags
+Release 0.3.0 adds Prod mode, with its lifecycle state, documentation, and exposure through both the CLI and MCP. Spec-driven workflows also gain support for parallel spec tasks, and snapshots can now be given explicit tags. The README and architecture docs are updated to match. The Prod mode behavior was specified with failing tests before implementation, and those tests now cover the implemented lifecycle.
 
 ### Other
 - Update README and architecture docs for 0.3.0 release ([1c639cb](https://github.com/Sidiora-Labs/codify/commit/1c639cb6c244c69a2696e9d605c61a3dc146edfa))
@@ -373,13 +436,7 @@ Prod mode is now exposed through the CLI and MCP with a complete lifecycle, an i
 
 ### Highlights
 
-Codify 0.2.0 adds an agent memory layer with task-linked notes and auto-recorded outcomes. Directory touches are matched to changed descendants and in spec verification. Valid Rust keyword-like symbols are indexed, and qualified Rust symbols and GitHub workflows are traced. Installation and uninstallation scripts are added, the README is updated, and a version command is implemented.
-
-- Agent memory layer with task-linked notes and auto-recorded outcomes
-- Directory touches matched to changed descendants and in spec verification
-- Index valid Rust keyword-like symbols
-- Trace qualified Rust symbols and GitHub workflows
-- Installation and uninstallation scripts, version command, README update
+Codify 0.2.0 adds an agent memory layer, where notes can be linked to tasks and task outcomes are recorded automatically. Directory touches are now matched to changed descendants, and spec verification uses the same directory-touch matching. The code graph indexes Rust keyword-like symbols and traces qualified Rust symbols and GitHub workflows. The release also adds installation and uninstallation scripts and a version command, and the README has been updated.
 
 ### Other
 - Add agent memory layer with task-linked notes and auto-recorded outcomes ([3697f17](https://github.com/Sidiora-Labs/codify/commit/3697f1705b1c1d557ccad6f8012806e184f4ef3a))
@@ -394,12 +451,13 @@ Codify 0.2.0 adds an agent memory layer with task-linked notes and auto-recorded
 
 ### Highlights
 
-Initial release of Codify. The single-binary tool provides code graph, spec-driven task workflow, and agent fleet capabilities.
+This is the first release of Codify, a single-binary developer tool. The 0.1.0 commit list contains only a single "First commit" entry, so there are no individual changes to call out. Codify's code graph, spec-driven task workflow, and agent fleet are the intended scope of the project, but this release does not document specific commands or behaviour beyond that starting point.
 
 ### Other
 - First commit ([2b6dede](https://github.com/Sidiora-Labs/codify/commit/2b6dede7c99e5856ef5464fc5d1c422b5ab77808))
 
-[v1.4.0]: https://github.com/Sidiora-Labs/codify/compare/1.3.0...v1.4.0
+[v1.5.0]: https://github.com/Sidiora-Labs/codify/compare/1.4.0...v1.5.0
+[1.4.0]: https://github.com/Sidiora-Labs/codify/compare/1.3.0...1.4.0
 [1.3.0]: https://github.com/Sidiora-Labs/codify/compare/1.1.0...1.3.0
 [1.1.0]: https://github.com/Sidiora-Labs/codify/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/Sidiora-Labs/codify/compare/0.9.0...1.0.0
