@@ -161,11 +161,11 @@ reqs       = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7"]
 
 [task.1.4]
 title      = "cg hook pre-bash and the guidance that points agents at the graph"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["1.1", "1.2", "2.1"]
 symbols    = ["cmd_hook_pre_bash", "shell_advice_for"]
-touches    = ["src/govern.c", "src/integrate.c", "src/agent.c", "src/mcp.c", "src/plugin.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/47_advice.sh", "tests/integration/03_agentic.sh", "docs/events.md"]
+touches    = ["src/govern.c", "src/integrate.c", "src/agent.c", "src/mcp.c", "src/plugin.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/47_advice.sh", "docs/events.md"]
 verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/47_advice.sh && CG=$PWD/cg tests/integration/03_agentic.sh && CG=$PWD/cg tests/integration/48_plugin.sh && CG=$PWD/cg tests/integration/04_mcp.sh"
 do_1       = "govern.c: cmd_hook_pre_bash — parse the Bash command, recognise grep/rg/ag/ack/find/fd/ls -R, build the cg equivalent carrying -i and the path, the once-per-session cursor in meta, the opt-outs, one JSON object with additionalContext and no permission decision."
 do_2       = "integrate.c SKILL_BODY, agent.c context, mcp.c tool descriptions and prompts: say to use grep_code, find_files, search_code, get_context before shell search; hook install and the plugin's hooks.json register the Bash PreToolUse entry."
@@ -258,11 +258,11 @@ reqs       = ["8.1", "8.2", "8.3", "8.4", "8.5", "8.6", "8.7", "8.8", "8.9"]
 
 [task.3.2]
 title      = "Symbol, interface, and near findings; projection events; steering the agents involved"
-status     = "in_progress"
+status     = "done"
 wave       = 2
 requires   = ["3.1"]
 symbols    = ["conflicts_compute", "conflicts_store", "conflicts_steer", "cmd_projection_findings"]
-touches    = ["src/conflicts.c", "src/projection.c", "src/drift.c", "src/db.c", "src/drivers.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/52_conflicts.sh", "docs/projection.md", "docs/drift.md", "docs/events.md"]
+touches    = ["src/conflicts.c", "src/projection.c", "src/drift.c", "src/db.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/52_conflicts.sh", "docs/projection.md", "docs/drift.md", "docs/events.md"]
 verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/52_conflicts.sh && CG=$PWD/cg tests/integration/51_projection.sh && CG=$PWD/cg tests/integration/33_drift.sh && CG=$PWD/cg tests/integration/30_events.sh"
 do_1       = "conflicts.c: per branch, hunks against the base mapped onto that branch's symbol spans; pairwise symbol findings; the interface findings through drift_interface_check's machinery against the unified graph; near findings; content/delete/add-add from the fold; branches with their agents and the advice line."
 do_2       = "projection_findings table keyed by kind, path, symbol, branch set with first_seen/last_seen/resolved; projection.conflict once, projection.resolved on disappearance, projection.built per build; cg projection findings; steering through driver_steer with the opt-out."

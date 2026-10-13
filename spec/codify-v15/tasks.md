@@ -23,7 +23,7 @@
     - db.c: body_fts contentless with the SQLite-version fallback and meta fts_mode (shared with 1.1), files.base indexed and used by the soft-edge and resolver lookups in place of LIKE '%/'; phase ms and peak_rss_kb in IndexStats and --json.
     - tests/scale/gen.py, 46_scale.sh (small profile always, CG_SCALE=1 full profile with the asserted bounds), scripts/bench.sh, the measured table in docs/sync.md.
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
-  - [-] 1.4 cg hook pre-bash and the guidance that points agents at the graph
+  - [x] 1.4 cg hook pre-bash and the guidance that points agents at the graph
     - govern.c: cmd_hook_pre_bash — parse the Bash command, recognise grep/rg/ag/ack/find/fd/ls -R, build the cg equivalent carrying -i and the path, the once-per-session cursor in meta, the opt-outs, one JSON object with additionalContext and no permission decision.
     - integrate.c SKILL_BODY, agent.c context, mcp.c tool descriptions and prompts: say to use grep_code, find_files, search_code, get_context before shell search; hook install and the plugin's hooks.json register the Bash PreToolUse entry.
     - 47_advice.sh per req 4.4.
@@ -65,7 +65,7 @@
     - The fold, the conflict records with their earlier-branch attribution, --strict, the projections table, the fingerprint no-op and --force, the projection lock and --wait, text and --json, status, diff, show.
     - --index: the detached worktree under .codegraph/worktrees/projection indexed as branch codify/projection; 51_projection.sh per req 8.9; docs/projection.md.
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9_
-  - [-] 3.2 Symbol, interface, and near findings; projection events; steering the agents involved
+  - [x] 3.2 Symbol, interface, and near findings; projection events; steering the agents involved
     - conflicts.c: per branch, hunks against the base mapped onto that branch's symbol spans; pairwise symbol findings; the interface findings through drift_interface_check's machinery against the unified graph; near findings; content/delete/add-add from the fold; branches with their agents and the advice line.
     - projection_findings table keyed by kind, path, symbol, branch set with first_seen/last_seen/resolved; projection.conflict once, projection.resolved on disappearance, projection.built per build; cg projection findings; steering through driver_steer with the opt-out.
     - 52_conflicts.sh per the first five clauses of req 9.6.
