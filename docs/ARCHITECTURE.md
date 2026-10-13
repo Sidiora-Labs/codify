@@ -1131,8 +1131,14 @@ then from a wave branch that has not had main merged forward would be
 refused at its own done. `sup_forward_lands` therefore records on every
 tick, per wave, whether main is an ancestor of the wave's branch
 (`sup_wave_branch` names it from the manager template, `sup_wave_mark_fresh`
-asks git), and `orch_req_ready` consults `sup_wave_fresh` before it lets a
-task start on a requirement from another wave. The supervisor reads a
+asks git through `sup_branch_has_main`), and `orch_req_ready` consults
+`sup_wave_fresh` before it lets a task start on a requirement from another
+wave. The mark is taken at the top of the tick and the frontier is read
+later in it, so a land that reaches main between the two would leave a
+mark that says fresh beside a spec that says landed: `sup_wave_fresh`
+re-asks git for a mark that says fresh at the moment the gate decides,
+after the frontier was read, and a stale *not fresh* only costs a tick.
+The supervisor reads a
 worktree without touching it: `sup_tree_fp`
 (the stall check's git view) and `fleet.c`'s `tree_clean` run `git
 --no-optional-locks status`, because a plain `git status` refreshes the

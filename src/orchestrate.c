@@ -165,12 +165,34 @@ static bool g_fwd_pending;
  * land is known: a task whose requirement just landed must not be cut from
  * a wave branch that has not had main merged forward — its done would be
  * refused for the unmet requires. A wave without a branch yet counts as
- * fresh: it is cut from main. */
-static struct { long wave; bool fresh; } g_wave_fresh[256];
+ * fresh: it is cut from main.
+ * The mark is taken at the top of the tick and the frontier is read later
+ * in it, so a land that reaches main between the two leaves a mark that
+ * says fresh beside a spec that says landed: the gate re-checks a fresh
+ * mark against git at the moment it decides (after the frontier was
+ * read), and a stale "not fresh" only costs a tick. */
+static struct { long wave; bool fresh; char br[256]; } g_wave_fresh[256];
 static int g_nwave_fresh;
+static char g_fresh_repo[4600], g_fresh_main[256];  /* where the marks were taken */
+static bool sup_branch_has_main(const char *repo, const char *mainbr,
+                                const char *br) {
+    if (!git_branch_exists(repo, br)) return true;
+    StrBuf a; sb_init(&a);
+    sb_puts(&a, "merge-base --is-ancestor ");
+    sb_shquote(&a, mainbr);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, br);
+    bool in = git_run(repo, a.p, NULL) == 0;
+    sb_free(&a);
+    return in;
+}
 static bool sup_wave_fresh(long wave) {
-    for (int i = 0; i < g_nwave_fresh; i++)
-        if (g_wave_fresh[i].wave == wave) return g_wave_fresh[i].fresh;
+    for (int i = 0; i < g_nwave_fresh; i++) {
+        if (g_wave_fresh[i].wave != wave) continue;
+        if (!g_wave_fresh[i].fresh) return false;
+        return sup_branch_has_main(g_fresh_repo, g_fresh_main,
+                                   g_wave_fresh[i].br);
+    }
     return true;
 }
 static char g_waves_why[160];
@@ -2522,24 +2544,21 @@ static void sup_wave_branch(Sup *s, long wave, char *br, size_t cap) {
     kvx_free(wf);
 }
 
-/* record for orch_req_ready whether main is in <wave>'s branch */
+/* record for orch_req_ready whether main is in <wave>'s branch, with the
+ * branch and the repo the mark was taken in, so sup_wave_fresh can ask git
+ * again when the gate decides */
 static void sup_wave_mark_fresh(Sup *s, long wave) {
     if (g_nwave_fresh >= (int)(sizeof g_wave_fresh / sizeof *g_wave_fresh))
         return;
-    char br[256];
-    sup_wave_branch(s, wave, br, sizeof br);
-    bool fresh = true;
-    if (git_branch_exists(s->g->shared, br)) {
-        StrBuf a; sb_init(&a);
-        sb_puts(&a, "merge-base --is-ancestor ");
-        sb_shquote(&a, s->mainbr);
-        sb_putc(&a, ' ');
-        sb_shquote(&a, br);
-        fresh = git_run(s->g->shared, a.p, NULL) == 0;
-        sb_free(&a);
-    }
+    snprintf(g_fresh_repo, sizeof g_fresh_repo, "%s", s->g->shared);
+    snprintf(g_fresh_main, sizeof g_fresh_main, "%s", s->mainbr);
     g_wave_fresh[g_nwave_fresh].wave = wave;
-    g_wave_fresh[g_nwave_fresh++].fresh = fresh;
+    sup_wave_branch(s, wave, g_wave_fresh[g_nwave_fresh].br,
+                    sizeof g_wave_fresh[g_nwave_fresh].br);
+    g_wave_fresh[g_nwave_fresh].fresh =
+        sup_branch_has_main(s->g->shared, s->mainbr,
+                            g_wave_fresh[g_nwave_fresh].br);
+    g_nwave_fresh++;
 }
 
 /* a land seen in the events marks every live wave for a forward merge,
