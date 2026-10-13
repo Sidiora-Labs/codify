@@ -237,7 +237,10 @@ EOF
     # a payload without a path degrades to a background sync, never an error
     out="$(printf '{"tool_name":"Bash"}' | "$CG" hook post-edit 2>&1)" || fail "post-edit failed on a pathless payload: $out"
     # the installed Claude template uses it once, not sync+guard twice
-    "$CG" hook install >/dev/null 2>&1 || true
+    # under an empty HOME: with the Codify plugin installed for the user who
+    # runs the suite, hook install leaves settings.json to the plugin
+    mkdir -p "$TMP/hookhome"
+    HOME="$TMP/hookhome" "$CG" hook install >/dev/null 2>&1 || true
     has "$(cat .claude/settings.json)" "hook post-edit"
     hasnt "$(cat .claude/settings.json)" '"cg sync"'
     n="$(grep -o 'hook post-edit' .claude/settings.json | wc -l)"
