@@ -1003,6 +1003,14 @@ static int write_exec(const char *path, const char *body) {
 static const char *CLAUDE_SETTINGS_TEMPLATE =
 "{\n"
 "  \"hooks\": {\n"
+"    \"PreToolUse\": [\n"
+"      {\n"
+"        \"matcher\": \"Bash\",\n"
+"        \"hooks\": [\n"
+"          { \"type\": \"command\", \"command\": \"%s hook pre-bash\" }\n"
+"        ]\n"
+"      }\n"
+"    ],\n"
 "    \"PostToolUse\": [\n"
 "      {\n"
 "        \"matcher\": \"Edit|Write|MultiEdit|NotebookEdit\",\n"
@@ -1031,20 +1039,23 @@ int cmd_hook_install(Cg *cg)
     if (plugin.installed) {
         /* the plugin's hooks.json already runs post-edit on every edit */
         printf("  .  claude-code  the Codify plugin (codify@codify %s) is "
-               "installed and registers PostToolUse -> %s hook post-edit;\n"
+               "installed and registers PostToolUse -> %s hook post-edit\n"
+               "        and PreToolUse Bash -> hook pre-bash;\n"
                "        %s left alone so no hook fires twice\n",
                plugin.version, bin, path);
     } else if (existing && strstr(existing, "\"hooks\"")) {
         printf("  .  claude-code  %s already defines hooks - add manually:\n"
-               "        PostToolUse Edit|Write -> %s hook post-edit\n",
-               path, bin);
+               "        PostToolUse Edit|Write -> %s hook post-edit\n"
+               "        PreToolUse Bash -> %s hook pre-bash\n",
+               path, bin, bin);
     } else if (existing) {
         printf("  !  claude-code  %s has no hooks block - add manually:\n"
-               "        PostToolUse Edit|Write -> %s hook post-edit\n", path, bin);
+               "        PostToolUse Edit|Write -> %s hook post-edit\n"
+               "        PreToolUse Bash -> %s hook pre-bash\n", path, bin, bin);
     } else {
         mkdirs(dir);
         StrBuf b; sb_init(&b);
-        sb_printf(&b, CLAUDE_SETTINGS_TEMPLATE, bin);
+        sb_printf(&b, CLAUDE_SETTINGS_TEMPLATE, bin, bin);
         if (write_entire_file(path, b.p, b.len) == 0)
             printf("  ok claude-code  %s (created)\n", path);
         else
@@ -1224,6 +1235,654 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
     sb_free(&text);
     free(steer);
     free(path);
+    free(payload);
+    return 0;
+}
+
+/* ---------------- pre-bash hook: shell searches pointed at the graph ------ */
+
+/* A shell search an agent is about to run, read the way the shell would
+ * read it, so the advice names the cg command that answers the same
+ * question. Purpose: an indexed tree answers grep/find cheaper and smaller
+ * than the shell does, and an agent learns that best at the moment it
+ * reaches for the shell. Contract: advice only — the command still runs;
+ * a command this parser cannot place inside the tree gets no advice. */
+
+#define SA_MAXTOK 128
+#define SA_MAXSEG 32
+
+typedef struct {
+    char *tok[SA_MAXTOK];
+    bool  dyn[SA_MAXTOK];      /* holds an unquoted $ or ` — not resolvable */
+    int   n;
+    bool  piped;               /* reads the previous segment through | */
+} SaSeg;
+
+typedef struct {
+    const char *root;
+    char cwd[4096];
+    bool outside;              /* a path operand left the tree: say nothing */
+    StrBuf out;                /* suggestions, one per line */
+    int nsug;
+} SaCtx;
+
+/* what a tree lister (find, fd, ls -R, rg --files, git ls-files) names */
+typedef struct {
+    bool lister;
+    char dir[2048];            /* root-relative, "" = the root */
+    char glob[1024];           /* name glob, "" = any */
+    bool dirs;                 /* directories, not files */
+} SaList;
+
+static void sa_seg_free(SaSeg *s) {
+    for (int i = 0; i < s->n; i++) free(s->tok[i]);
+    s->n = 0;
+}
+
+static void sa_flush(SaSeg *s, StrBuf *t, bool *have, bool *dyn) {
+    if (*have && s->n < SA_MAXTOK) {
+        s->dyn[s->n] = *dyn;
+        s->tok[s->n++] = xstrdup(t->p ? t->p : "");
+    }
+    t->len = 0;
+    if (t->p) t->p[0] = 0;
+    *have = false;
+    *dyn = false;
+}
+
+/* Split cmd into segments at |, ||, &&, ;, & and newlines, honouring
+ * quotes and backslashes; each segment is tokenized like the shell. */
+static int sa_split(const char *cmd, SaSeg *seg, int max) {
+    int ns = 0;
+    StrBuf t; sb_init(&t);
+    bool have = false, dyn = false;
+    const char *p = cmd;
+    while (*p) {
+        char c = *p;
+        if (c == '\'') {
+            have = true;
+            for (p++; *p && *p != '\''; p++) sb_putc(&t, *p);
+            if (*p) p++;
+        } else if (c == '"') {
+            have = true;
+            for (p++; *p && *p != '"'; p++) {
+                if (*p == '\\' && p[1] && strchr("\"\\$`", p[1])) p++;
+                else if (*p == '$' || *p == '`') dyn = true;
+                sb_putc(&t, *p);
+            }
+            if (*p) p++;
+        } else if (c == '\\' && p[1]) {
+            have = true;
+            if (p[1] != '\n') sb_putc(&t, p[1]);
+            p += 2;
+        } else if (c == ' ' || c == '\t') {
+            sa_flush(&seg[ns], &t, &have, &dyn);
+            p++;
+        } else if (c == '|' || c == ';' || c == '&' || c == '\n') {
+            /* 2>&1 and &> are redirections, not separators */
+            if (c == '&' && (p[1] == '>' ||
+                (p > cmd && (p[-1] == '>' || p[-1] == '<')))) {
+                have = true; sb_putc(&t, c); p++;
+                continue;
+            }
+            sa_flush(&seg[ns], &t, &have, &dyn);
+            bool pipe = c == '|' && p[1] != '|';
+            p += (p[1] == c && (c == '|' || c == '&')) ? 2 : 1;
+            if (seg[ns].n == 0) continue;
+            if (ns + 1 >= max) break;
+            ns++;
+            seg[ns].piped = pipe;
+        } else {
+            if (c == '$' || c == '`') dyn = true;
+            have = true;
+            sb_putc(&t, c);
+            p++;
+        }
+    }
+    sa_flush(&seg[ns], &t, &have, &dyn);
+    sb_free(&t);
+    if (seg[ns].n) ns++;
+    return ns;
+}
+
+/* Lexically resolve operand against cwd; the root-relative form in rel
+ * ("" for the root itself). False when it lies outside root or cannot be
+ * resolved (a variable, a ~user). */
+static bool sa_rel(SaCtx *x, const char *operand, bool dyn, char *rel,
+                   size_t cap) {
+    if (dyn || !operand[0]) return false;
+    char abs[8192];
+    if (operand[0] == '~') {
+        const char *home = getenv("HOME");
+        if (!home || (operand[1] && operand[1] != '/')) return false;
+        snprintf(abs, sizeof abs, "%s%s", home, operand + 1);
+    } else if (operand[0] == '/') {
+        snprintf(abs, sizeof abs, "%s", operand);
+    } else {
+        snprintf(abs, sizeof abs, "%s/%s", x->cwd, operand);
+    }
+    char norm[8192] = "";
+    size_t nl = 0;
+    char *save = NULL;
+    for (char *c = strtok_r(abs, "/", &save); c;
+         c = strtok_r(NULL, "/", &save)) {
+        if (!strcmp(c, ".")) continue;
+        if (!strcmp(c, "..")) {
+            char *sl = strrchr(norm, '/');
+            nl = sl ? (size_t)(sl - norm) : 0;
+            norm[nl] = 0;
+            continue;
+        }
+        nl += (size_t)snprintf(norm + nl, sizeof norm - nl, "/%s", c);
+        if (nl >= sizeof norm) return false;
+    }
+    size_t rl = strlen(x->root);
+    while (rl > 1 && x->root[rl - 1] == '/') rl--;
+    if (strncmp(norm, x->root, rl) != 0 || (norm[rl] && norm[rl] != '/'))
+        return false;
+    snprintf(rel, cap, "%s", norm[rl] ? norm + rl + 1 : "");
+    return true;
+}
+
+/* a path operand: its root-relative form, or the whole command is outside */
+static bool sa_path(SaCtx *x, const char *operand, bool dyn, char *rel,
+                    size_t cap) {
+    if (sa_rel(x, operand, dyn, rel, cap)) return true;
+    x->outside = true;
+    return false;
+}
+
+static void sa_quote(StrBuf *b, const char *s) {
+    bool plain = s[0] != 0;
+    for (const char *p = s; *p; p++)
+        if (!isalnum((unsigned char)*p) && !strchr("_-./:@,+=", *p))
+            plain = false;
+    if (plain) { sb_puts(b, s); return; }
+    sb_putc(b, '\'');
+    for (const char *p = s; *p; p++) {
+        if (*p == '\'') sb_puts(b, "'\\''");
+        else sb_putc(b, *p);
+    }
+    sb_putc(b, '\'');
+}
+
+static void sa_suggest(SaCtx *x, const char *line) {
+    if (x->out.p && strstr(x->out.p, line)) return;     /* said already */
+    if (x->nsug >= 3) return;
+    sb_printf(&x->out, "  %s\n", line);
+    x->nsug++;
+}
+
+static const char *sa_base(const char *w) {
+    const char *s = strrchr(w, '/');
+    return s ? s + 1 : w;
+}
+
+static int sa_tool(const char *w) {      /* 1 grep-like, 2 find, 3 fd, 4 ls */
+    w = sa_base(w);
+    if (!strcmp(w, "grep") || !strcmp(w, "egrep") || !strcmp(w, "fgrep") ||
+        !strcmp(w, "rg") || !strcmp(w, "ag") || !strcmp(w, "ack"))
+        return 1;
+    if (!strcmp(w, "find")) return 2;
+    if (!strcmp(w, "fd") || !strcmp(w, "fdfind")) return 3;
+    if (!strcmp(w, "ls")) return 4;
+    return 0;
+}
+
+static void sa_find(SaCtx *x, SaSeg *s, int a, SaList *l) {
+    int i = a + 1;
+    bool any = false;
+    for (; i < s->n; i++) {
+        const char *t = s->tok[i];
+        if (t[0] == '-' || t[0] == '(' || t[0] == '!') break;
+        char rel[2048];
+        if (!sa_path(x, t, s->dyn[i], rel, sizeof rel)) return;
+        if (!any) snprintf(l->dir, sizeof l->dir, "%s", rel);
+        any = true;
+    }
+    if (!any && !sa_path(x, ".", false, l->dir, sizeof l->dir)) return;
+    for (; i < s->n; i++) {
+        const char *t = s->tok[i];
+        if ((!strcmp(t, "-name") || !strcmp(t, "-iname") ||
+             !strcmp(t, "-path") || !strcmp(t, "-ipath") ||
+             !strcmp(t, "-wholename")) && i + 1 < s->n) {
+            const char *g = s->tok[++i];
+            while (g[0] == '.' && g[1] == '/') g += 2;
+            if (g[0] == '*' && g[1] == '/') g += 2;
+            if (!l->glob[0]) snprintf(l->glob, sizeof l->glob, "%s", g);
+        } else if (!strcmp(t, "-type") && i + 1 < s->n) {
+            if (!strcmp(s->tok[++i], "d")) l->dirs = true;
+        } else if (!strcmp(t, "-exec") || !strcmp(t, "-execdir")) {
+            break;
+        }
+    }
+    l->lister = true;
+}
+
+static void sa_fd(SaCtx *x, SaSeg *s, int a, SaList *l) {
+    const char *pat = NULL, *ext = NULL;
+    bool any = false;
+    for (int i = a + 1; i < s->n; i++) {
+        const char *t = s->tok[i];
+        if (!strcmp(t, "-x") || !strcmp(t, "--exec") || !strcmp(t, "-X") ||
+            !strcmp(t, "--exec-batch"))
+            break;
+        if (!strcmp(t, "-e") || !strcmp(t, "--extension")) {
+            if (i + 1 < s->n) ext = s->tok[++i];
+        } else if (!strcmp(t, "-t") || !strcmp(t, "--type")) {
+            if (i + 1 < s->n && !strcmp(s->tok[++i], "d")) l->dirs = true;
+        } else if (!strcmp(t, "-E") || !strcmp(t, "--exclude") ||
+                   !strcmp(t, "-d") || !strcmp(t, "--max-depth") ||
+                   !strcmp(t, "-S") || !strcmp(t, "--size") ||
+                   !strcmp(t, "-c") || !strcmp(t, "--color")) {
+            i++;
+        } else if (t[0] == '-') {
+            continue;
+        } else if (!pat) {
+            pat = t;
+        } else {
+            char rel[2048];
+            if (!sa_path(x, t, s->dyn[i], rel, sizeof rel)) return;
+            if (!any) snprintf(l->dir, sizeof l->dir, "%s", rel);
+            any = true;
+        }
+    }
+    if (!any && !sa_path(x, ".", false, l->dir, sizeof l->dir)) return;
+    char g[1024] = "";
+    if (pat) {
+        /* fd takes a regex; anchors and escapes mean nothing to a glob */
+        size_t o = 0;
+        for (const char *p = pat; *p && o + 1 < sizeof g; p++)
+            if (*p != '^' && *p != '$' && *p != '\\') g[o++] = *p;
+        g[o] = 0;
+    }
+    if (g[0] && ext) snprintf(l->glob, sizeof l->glob, "*%s*.%s", g, ext);
+    else if (ext) snprintf(l->glob, sizeof l->glob, "*.%s", ext);
+    else snprintf(l->glob, sizeof l->glob, "%s", g);
+    l->lister = true;
+}
+
+/* the cg files line for what a lister names */
+static void sa_files_line(SaCtx *x, const SaList *l) {
+    StrBuf b; sb_init(&b);
+    sb_puts(&b, "cg files");
+    if (l->dirs && !l->glob[0]) {
+        sb_puts(&b, " --dirs");
+        if (l->dir[0]) { sb_putc(&b, ' '); sa_quote(&b, l->dir); }
+    } else if (l->glob[0]) {
+        sb_putc(&b, ' ');
+        sa_quote(&b, l->glob);
+        if (l->dir[0]) { sb_puts(&b, " --path "); sa_quote(&b, l->dir); }
+    } else if (l->dir[0]) {
+        sb_putc(&b, ' ');
+        sa_quote(&b, l->dir);
+    }
+    sb_puts(&b, "   (MCP find_files)");
+    sa_suggest(x, b.p);
+    sb_free(&b);
+}
+
+/* grep, rg, ag, ack at s->tok[a]. prev: the lister feeding it through a
+ * pipe or xargs (NULL when none); catv: the files a piped cat feeds it. */
+static void sa_grep(SaCtx *x, SaSeg *s, int a, const SaList *prev,
+                    bool xargs, char **catv, int catn) {
+    const char *tool = sa_base(s->tok[a]);
+    bool isgrep = strstr(tool, "grep") != NULL;
+    const char *argshort = isgrep ? "efmABCdD" : "efgtTmABCMjrEG";
+    static const char *ARGLONG[] = { "--regexp", "--file", "--max-count",
+        "--after-context", "--before-context", "--context", "--include",
+        "--exclude", "--exclude-dir", "--glob", "--type", "--type-not",
+        "--replace", "--ignore", "--ignore-dir", "--max-depth", NULL };
+    bool icase = false, regex = !strcmp(tool, "egrep"), fixed = false;
+    bool recursive = !isgrep, files_only = false;
+    const char *pat = NULL;
+    char *paths[SA_MAXTOK];
+    int np = 0;
+    bool opts_done = false;
+    for (int i = a + 1; i < s->n; i++) {
+        const char *t = s->tok[i];
+        if (!opts_done && !strcmp(t, "--")) { opts_done = true; continue; }
+        if (!opts_done && t[0] == '-' && t[1] == '-') {
+            if (!strcmp(t, "--ignore-case")) icase = true;
+            else if (!strcmp(t, "--extended-regexp") ||
+                     !strcmp(t, "--perl-regexp")) regex = true;
+            else if (!strcmp(t, "--fixed-strings") ||
+                     !strcmp(t, "--literal")) fixed = true;
+            else if (!strcmp(t, "--recursive")) recursive = true;
+            else if (!strcmp(t, "--files")) files_only = true;
+            else if (!strncmp(t, "--regexp=", 9)) pat = t + 9;
+            else if (!strchr(t, '='))
+                for (int k = 0; ARGLONG[k]; k++)
+                    if (!strcmp(t, ARGLONG[k])) {
+                        if (k == 0 && i + 1 < s->n) pat = s->tok[i + 1];
+                        i++;
+                        break;
+                    }
+            continue;
+        }
+        if (!opts_done && t[0] == '-' && t[1]) {
+            for (const char *c = t + 1; *c; c++) {
+                if (*c == 'i') icase = true;
+                else if (*c == 'E' && isgrep) regex = true;
+                else if (*c == 'P') regex = true;
+                else if (*c == 'F' || *c == 'Q') fixed = true;
+                else if (*c == 'r' && isgrep) recursive = true;
+                else if (*c == 'R') recursive = true;
+                if (strchr(argshort, *c)) {
+                    const char *v = c[1] ? c + 1
+                                  : (i + 1 < s->n ? s->tok[++i] : NULL);
+                    if (*c == 'e' && v) pat = v;
+                    break;
+                }
+            }
+            continue;
+        }
+        if (!pat) {
+            pat = t;
+        } else if (np < SA_MAXTOK) {
+            char rel[2048];
+            if (!sa_path(x, t, s->dyn[i], rel, sizeof rel)) goto out;
+            paths[np++] = xstrdup(rel);
+        }
+    }
+    if (files_only) {                        /* rg --files is a lister */
+        SaList l;
+        memset(&l, 0, sizeof l);
+        l.lister = true;
+        if (np) snprintf(l.dir, sizeof l.dir, "%s", paths[0]);
+        else if (!sa_path(x, ".", false, l.dir, sizeof l.dir)) goto out;
+        sa_files_line(x, &l);
+        goto out;
+    }
+    if (!pat || !pat[0]) goto out;
+
+    /* where it searches: its own operands, else what feeds it */
+    StrBuf where; sb_init(&where);
+    sb_puts(&where, "");
+    bool advise = true;
+    if (np) {
+        for (int k = 0; k < np; k++)
+            if (paths[k][0]) {
+                sb_puts(&where, " --path ");
+                sa_quote(&where, paths[k]);
+            }
+    } else if (catn) {
+        for (int k = 0; k < catn; k++)
+            if (catv[k][0]) {
+                sb_puts(&where, " --path ");
+                sa_quote(&where, catv[k]);
+            }
+    } else if (prev && prev->lister) {
+        if (!xargs) {                      /* filtering a list of names */
+            SaList l = *prev;
+            snprintf(l.glob, sizeof l.glob, "%s", pat);
+            l.dirs = false;
+            sa_files_line(x, &l);
+            advise = false;
+        } else {
+            char g[3200];
+            if (prev->glob[0] && prev->dir[0])
+                snprintf(g, sizeof g, "%s/**/%s", prev->dir, prev->glob);
+            else
+                snprintf(g, sizeof g, "%s",
+                         prev->glob[0] ? prev->glob : prev->dir);
+            if (g[0]) { sb_puts(&where, " --path "); sa_quote(&where, g); }
+        }
+    } else if (s->piped || xargs) {
+        advise = false;                  /* filtering some command's output */
+    } else if (recursive) {
+        char rel[2048];
+        if (!sa_path(x, ".", false, rel, sizeof rel)) advise = false;
+        else if (rel[0]) { sb_puts(&where, " --path "); sa_quote(&where, rel); }
+    } else {
+        advise = false;                  /* a grep reading its stdin */
+    }
+    if (advise) {
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, "cg grep ");
+        /* cg grep is literal unless -E; a pattern the tool read as a regex
+         * stays one */
+        bool re = !fixed && strpbrk(pat, "\\[]*+?(){}|^$") != NULL &&
+                  (regex || !isgrep || strpbrk(pat, "[]*^$\\"));
+        if (re) sb_puts(&b, "-E ");
+        if (icase) sb_puts(&b, "-i ");
+        sa_quote(&b, pat);
+        sb_puts(&b, where.p);
+        sb_puts(&b, "   (MCP grep_code)");
+        sa_suggest(x, b.p);
+        sb_free(&b);
+    }
+    sb_free(&where);
+out:
+    for (int k = 0; k < np; k++) free(paths[k]);
+}
+
+static bool sa_prefix_word(const char *w) {
+    return !strcmp(w, "sudo") || !strcmp(w, "command") ||
+           !strcmp(w, "time") || !strcmp(w, "nice") || !strcmp(w, "(") ||
+           !strcmp(w, "{") || !strcmp(w, "then") || !strcmp(w, "do");
+}
+
+char *shell_advice_for(const char *root, const char *cwd, const char *cmd) {
+    if (!root || !root[0] || !cmd || !cmd[0]) return NULL;
+    SaCtx x;
+    memset(&x, 0, sizeof x);
+    x.root = root;
+    if (cwd && cwd[0] == '/') snprintf(x.cwd, sizeof x.cwd, "%s", cwd);
+    else if (!getcwd(x.cwd, sizeof x.cwd))
+        snprintf(x.cwd, sizeof x.cwd, "%s", root);
+    sb_init(&x.out);
+    SaSeg *seg = xmalloc(sizeof *seg * SA_MAXSEG);
+    memset(seg, 0, sizeof *seg * SA_MAXSEG);
+    int ns = sa_split(cmd, seg, SA_MAXSEG);
+    SaList prev;
+    memset(&prev, 0, sizeof prev);
+    char *catv[SA_MAXTOK];
+    int catn = 0;
+    for (int si = 0; si < ns && !x.outside; si++) {
+        SaSeg *s = &seg[si];
+        if (!s->piped) {
+            memset(&prev, 0, sizeof prev);
+            for (int k = 0; k < catn; k++) free(catv[k]);
+            catn = 0;
+        }
+        SaList cur;
+        memset(&cur, 0, sizeof cur);
+        char *curcatv[SA_MAXTOK];
+        int curcat = 0;
+        bool catbad = false;
+        int a = 0;
+        /* VAR=value and sudo/command/time in front of the command */
+        while (a < s->n && s->tok[a][0] != '-' && s->tok[a][0] != '=' &&
+               strchr(s->tok[a], '='))
+            a++;
+        while (a < s->n && sa_prefix_word(s->tok[a])) a++;
+        /* drop redirections: >f, 2>/dev/null, < f, and their targets */
+        int w = a;
+        for (int i = a; i < s->n; i++) {
+            const char *r = s->tok[i];
+            while (isdigit((unsigned char)*r)) r++;
+            if (*r == '&' && r[1] == '>') r++;
+            if (*r == '>' || *r == '<') {
+                const char *q = r;
+                while (*q == '>' || *q == '<' || *q == '&') q++;
+                bool bare = !*q;
+                free(s->tok[i]);
+                s->tok[i] = NULL;
+                if (bare && i + 1 < s->n) {   /* the target is the next word */
+                    free(s->tok[i + 1]);
+                    s->tok[++i] = NULL;
+                }
+                continue;
+            }
+            s->tok[w] = s->tok[i];
+            s->dyn[w] = s->dyn[i];
+            if (w != i) s->tok[i] = NULL;
+            w++;
+        }
+        s->n = w;
+        if (a >= s->n) continue;
+        const char *w0 = sa_base(s->tok[a]);
+        if (!strcmp(w0, "cd")) {
+            char rel[2048];
+            if (a + 1 < s->n && sa_rel(&x, s->tok[a + 1], s->dyn[a + 1],
+                                       rel, sizeof rel))
+                snprintf(x.cwd, sizeof x.cwd, "%s%s%s", root,
+                         rel[0] ? "/" : "", rel);
+            else if (a + 1 < s->n)       /* left the tree, or unknowable */
+                snprintf(x.cwd, sizeof x.cwd, "/nonexistent/outside");
+            continue;
+        }
+        bool xargs = false;
+        if (!strcmp(w0, "xargs")) {
+            xargs = true;
+            for (a++; a < s->n && s->tok[a][0] == '-'; a++)
+                if (s->tok[a][1] && !s->tok[a][2] &&
+                    strchr("IdEnLPs", s->tok[a][1]))
+                    a++;
+            if (a >= s->n) continue;
+            w0 = sa_base(s->tok[a]);
+        }
+        int tool = sa_tool(w0);
+        if (tool == 1) {
+            sa_grep(&x, s, a, prev.lister ? &prev : NULL, xargs,
+                    s->piped ? catv : NULL, s->piped ? catn : 0);
+        } else if (tool == 2) {
+            sa_find(&x, s, a, &cur);
+            if (cur.lister) sa_files_line(&x, &cur);
+            /* find ... -exec grep: a grep over what find names */
+            for (int i = a; i < s->n && cur.lister && !x.outside; i++)
+                if ((!strcmp(s->tok[i], "-exec") ||
+                     !strcmp(s->tok[i], "-execdir")) && i + 1 < s->n &&
+                    sa_tool(s->tok[i + 1]) == 1) {
+                    SaSeg sub;
+                    memset(&sub, 0, sizeof sub);
+                    for (int k = i + 1; k < s->n && sub.n < SA_MAXTOK; k++) {
+                        if (!strcmp(s->tok[k], ";") || !strcmp(s->tok[k], "+"))
+                            break;
+                        if (!strcmp(s->tok[k], "{}")) continue;
+                        sub.tok[sub.n] = s->tok[k];
+                        sub.dyn[sub.n++] = s->dyn[k];
+                    }
+                    sa_grep(&x, &sub, 0, &cur, true, NULL, 0);
+                    break;
+                }
+        } else if (tool == 3) {
+            sa_fd(&x, s, a, &cur);
+            if (cur.lister) sa_files_line(&x, &cur);
+        } else if (tool == 4) {
+            bool rec = false;
+            const char *dir = NULL;
+            bool ddyn = false;
+            for (int i = a + 1; i < s->n; i++) {
+                const char *t = s->tok[i];
+                if (!strcmp(t, "--recursive")) rec = true;
+                else if (t[0] == '-' && t[1] != '-' && strchr(t, 'R'))
+                    rec = true;
+                else if (t[0] != '-' && !dir) { dir = t; ddyn = s->dyn[i]; }
+            }
+            if (rec && sa_path(&x, dir ? dir : ".", ddyn, cur.dir,
+                               sizeof cur.dir)) {
+                cur.lister = true;
+                cur.dirs = true;
+                sa_files_line(&x, &cur);
+            }
+        } else if (!strcmp(w0, "cat") && !xargs) {
+            for (int i = a + 1; i < s->n && !catbad; i++) {
+                char rel[2048];
+                if (s->tok[i][0] == '-') continue;
+                if (!sa_rel(&x, s->tok[i], s->dyn[i], rel, sizeof rel))
+                    catbad = true;
+                else if (curcat < SA_MAXTOK)
+                    curcatv[curcat++] = xstrdup(rel);
+            }
+        } else if (!strcmp(w0, "git") && a + 1 < s->n &&
+                   !strcmp(s->tok[a + 1], "ls-files")) {
+            if (sa_rel(&x, ".", false, cur.dir, sizeof cur.dir))
+                cur.lister = true;
+        }
+        for (int k = 0; k < catn; k++) free(catv[k]);
+        catn = 0;
+        if (!catbad) {
+            memcpy(catv, curcatv, sizeof *catv * (size_t)curcat);
+            catn = curcat;
+        } else {
+            for (int k = 0; k < curcat; k++) free(curcatv[k]);
+        }
+        prev = cur;
+    }
+    for (int k = 0; k < catn; k++) free(catv[k]);
+    for (int i = 0; i < ns; i++) sa_seg_free(&seg[i]);
+    free(seg);
+    if (x.outside || x.nsug == 0) { sb_free(&x.out); return NULL; }
+    return x.out.p;
+}
+
+static bool sa_env_off(void) {
+    const char *e = getenv("CG_SHELL_ADVICE");
+    return e && (!strcmp(e, "0") || !strcasecmp(e, "false") ||
+                 !strcasecmp(e, "off") || !strcasecmp(e, "no"));
+}
+
+/* PreToolUse for Bash. Reads the host's payload; when the command is a
+ * shell search over this tree, answers with the cg command that does the
+ * same from the graph, as additionalContext. Never a permissionDecision:
+ * the command runs either way. Once per session per command (a meta cursor
+ * keyed by session and command hash), so a repeated command is not nagged.
+ * Silent for CG_SHELL_ADVICE=0, [hooks] shell_advice = false, a payload
+ * that is not Bash or does not parse, and a command reaching outside the
+ * tree. Always exits 0: a hook that fails wedges the agent's tool loop. */
+int cmd_hook_pre_bash(Cg *cg, bool json) {
+    (void)json;                     /* the host contract is JSON already */
+    char *payload = hook_read_stdin();
+    if (!payload || sa_env_off() || !config_shell_advice(cg->root)) {
+        free(payload);
+        return 0;
+    }
+    char *tool = json_get_string(payload, "tool_name");
+    char *ti = tool && !strcmp(tool, "Bash")
+             ? json_get_object(payload, "tool_input") : NULL;
+    char *command = ti ? json_get_string(ti, "command") : NULL;
+    char *session = json_get_string(payload, "session_id");
+    char *cwd = json_get_string(payload, "cwd");
+    char *advice = command ? shell_advice_for(cg->root, cwd, command) : NULL;
+    if (advice) {
+        char hex[65], key[400];
+        sha256_hex(command, strlen(command), hex);
+        snprintf(key, sizeof key, "shell_advice:%.200s:%.16s",
+                 session && session[0] ? session : "-", hex);
+        char *seen = cg_meta_get(cg, key);
+        if (!seen) {
+            char now[32];
+            snprintf(now, sizeof now, "%ld", (long)time(NULL));
+            cg_meta_set(cg, key, now);
+            StrBuf ctx; sb_init(&ctx);
+            sb_puts(&ctx, "Codify: this tree is indexed; the graph answers "
+                          "that shell search directly:\n");
+            sb_puts(&ctx, advice);
+            sb_puts(&ctx, "Why: hits come back grouped under their enclosing "
+                          "symbol, ranked, and capped to a token budget, so "
+                          "the transcript stays small. Use grep_code, "
+                          "find_files, search_code, and get_context before "
+                          "any shell search. (Advice only: your command "
+                          "still runs.)");
+            StrBuf j; sb_init(&j);
+            sb_puts(&j, "{\"hookSpecificOutput\":{\"hookEventName\":"
+                        "\"PreToolUse\",\"additionalContext\":");
+            sb_json_str(&j, ctx.p);
+            sb_puts(&j, "}}\n");
+            fputs(j.p, stdout);
+            sb_free(&j);
+            sb_free(&ctx);
+        }
+        free(seen);
+    }
+    free(advice);
+    free(cwd);
+    free(session);
+    free(command);
+    free(ti);
+    free(tool);
     free(payload);
     return 0;
 }

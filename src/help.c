@@ -522,6 +522,18 @@ static const HelpCmd HELP[] = {
     "cg event ingest --source <host>. Always exits 0; a malformed payload "
     "is logged to .codegraph/hooks.log.",
   .hide = true },
+/* codify-v15 1.4 */
+{ .group = "agentic", .name = "hook pre-bash", .args = "",
+  .usage = "hook pre-bash",
+  .summary = "the wired Bash hook: a shell search pointed at cg grep/files",
+  .detail = "Reads a PreToolUse payload on stdin. When the Bash command runs "
+    "grep, rg, ag, ack, find, fd, or ls -R over the tree (first word, or "
+    "after |, ;, &&), answers with additionalContext naming the cg grep or "
+    "cg files command that does the same from the graph, once per session "
+    "per command. Never a permission decision: the command still runs. "
+    "Silent for CG_SHELL_ADVICE=0, [hooks] shell_advice = false, a path "
+    "outside the tree, or a payload that is not Bash. Always exits 0.",
+  .hide = true },
 { .group = "agentic", .name = "journal", .args = "list|apply|drop",
   .usage = "journal [list | apply | drop <id> | --failed | --all] [--json]",
   .summary = "pending writes queued while the database was busy",

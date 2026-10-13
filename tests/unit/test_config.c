@@ -44,6 +44,7 @@ int main(void) {
     const CgConfig *c = config_load(root);
     ok(!c->present, "absent file is not present");
     ok(c->sync_auto, "auto-sync defaults on");
+    ok(c->shell_advice, "shell advice defaults on");
     ok_str(c->spec, "spec");
     ok_str(c->context, ".codify");
     ok_str(c->skills, ".agents/skills");
@@ -90,8 +91,12 @@ int main(void) {
             "base = \"trunk\"\n"
             "stale = \"2h\"\n"
             "exclude = [\"tmp/*\", \"wip-*\"]\n"
-            "index = true\n");
+            "index = true\n"
+            "[hooks]\n"
+            "shell_advice = false\n");
     c = config_load(root);
+    ok(!c->shell_advice, "hooks shell_advice = false parsed");
+    ok(!config_shell_advice(root), "shell_advice accessor agrees");
     ok_str(c->proj_base, "trunk");
     ok(c->proj_stale == 7200, "stale = 2h parsed (%ld)", c->proj_stale);
     ok(c->proj_index, "projection index = true parsed");

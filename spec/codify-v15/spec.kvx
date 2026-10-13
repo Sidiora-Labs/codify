@@ -161,7 +161,7 @@ reqs       = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7"]
 
 [task.1.4]
 title      = "cg hook pre-bash and the guidance that points agents at the graph"
-status     = "pending"
+status     = "in_progress"
 wave       = 2
 requires   = ["1.1", "1.2", "2.1"]
 symbols    = ["cmd_hook_pre_bash", "shell_advice_for"]
