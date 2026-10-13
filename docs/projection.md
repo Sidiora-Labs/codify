@@ -252,3 +252,21 @@ to Codify; do not edit it.
 | `steer` | `true` | Steer the agents on both branches when a build finds a new conflict. |
 
 The liveness window for agents is `[agents] ttl` in `spec/workflow.kvx`.
+
+## Waves side by side
+
+With `[hierarchy] waves = parallel` (see
+[hierarchy.md](hierarchy.md#waves-side-by-side)), the projection is
+what a task started ahead of its `requires` builds against. The
+requirements live on other task and wave branches, and the projection
+already has them folded in. The worker's prompt tells it to:
+
+- read code with `--branch codify/projection`;
+- watch `cg projection findings` for what its work collides with.
+
+A build runs after every `cg fleet land` and every successful
+`cg fleet sync`, so the projection follows main as waves land. When the
+supervisor's forward merge of main into a wave branch conflicts, the
+escalation to the wave manager names the live finding on the conflicting
+path, if there is one. That is the conflict the projection predicted
+before the land.

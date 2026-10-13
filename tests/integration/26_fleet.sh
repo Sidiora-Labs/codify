@@ -1080,4 +1080,137 @@ EOF
     hasnt "$out" "wm-fleet-"
 fi
 
+if want parallel; then
+    # ---- (codify-v15 4.2) start ahead, the strict done gate, cg fleet sync
+    setup_repo
+    proj="$(pwd -P)"
+    wt="$proj/.codegraph/worktrees"
+    "$CG" spec add 3.2 --title "Docs on alpha" --wave 2 --touches 'docs/*.md' \
+          --requires 2.1 >/dev/null
+    "$CG" spec start 2.2 >/dev/null
+    "$CG" spec done 2.2 --force >/dev/null 2>&1   # wave 1 is 2.1 alone here
+    cat >> spec/workflow.kvx <<'EOF'
+
+[hierarchy]
+test_gate = "true"
+pr        = "manual"
+EOF
+    git add -A >/dev/null; git commit -qm "hierarchy" >/dev/null
+
+    # open requires: a plain start or begin refuses, --force too; --ahead
+    # claims it and the lease says what it is ahead of
+    err="$("$CG" spec start 3.2 2>&1 >/dev/null || true)"
+    has "$err" "task 3.2 has unmet requires: 2.1 (--ahead to start against the projection"
+    expect_rc 1 "$CG" spec start 3.2 --force
+    expect_rc 1 "$CG" fleet begin 3.2
+    err="$("$CG" fleet begin 3.2 2>&1 >/dev/null || true)"
+    has "$err" "(--ahead claims it against the projection)"
+    out="$("$CG" fleet begin 3.2 --ahead)"
+    has "$out" "branch:   task/fleet/3.2 from wave/fleet/2"
+    has "$out" "cg spec start 3.2 --ahead"
+    python3 - <<'EOF' || fail "begin --ahead did not record ahead on the lease"
+import sqlite3
+db = sqlite3.connect(".codegraph/graph.db", timeout=10)
+r = db.execute("SELECT agent, ahead FROM leases WHERE task='fleet/3.2'").fetchone()
+assert r == ("w-fleet-3.2", "2.1"), r
+EOF
+    cd "$wt/task-fleet-3.2"
+    export CG_AGENT=w-fleet-3.2 CG_ROLE=worker CG_PARENT=wm-fleet-2
+    out="$("$CG" spec start 3.2 --ahead)"
+    has "$out" "ahead of 2.1 — build against the projection (--branch codify/projection)"
+    echo '# docs on alpha' > docs/d.md
+    git add -A >/dev/null; git commit -qm "docs [spec:fleet/3.2]" >/dev/null
+    # done is strict, and in a fleet run --force does not get past it
+    err="$("$CG" spec done 3.2 2>&1 >/dev/null || true)"
+    has "$err" "task 3.2 has unmet requires: 2.1 — done waits until they land"
+    err="$("$CG" spec done 3.2 --force 2>&1 >/dev/null || true)"
+    has "$err" "task 3.2 has unmet requires: 2.1"
+    hasnt "$err" "--force to override"
+    grep -q 'status = "in_progress"' spec/fleet/spec.kvx || fail "a refused done moved the status"
+
+    # sync: up to date while the base has nothing new
+    out="$("$CG" fleet sync)"
+    has "$out" "task/fleet/3.2 is up to date with wave/fleet/2"
+
+    # wave 1 lands on main: 2.1 done there
+    cd "$proj"
+    unset CG_AGENT CG_ROLE CG_PARENT
+    "$CG" fleet begin 2.1 >/dev/null
+    cd "$wt/task-fleet-2.1"
+    CG_AGENT=w-fleet-2.1 "$CG" spec start 2.1 >/dev/null
+    echo 'export function alpha(){ return 1 }' > src/a.ts
+    echo '# alpha documented' > docs/d.md
+    CG_AGENT=w-fleet-2.1 "$CG" spec done 2.1 >/dev/null
+    git add -A >/dev/null; git commit -qm "alpha [spec:fleet/2.1]" >/dev/null
+    cd "$proj"
+    "$CG" fleet merge-up 2.1 >/dev/null
+    before="$("$CG" events --kind projection.built --json -n 50 | grep -c . || true)"
+    out="$("$CG" fleet land 1 --no-pr)"
+    has "$out" "landed wave/fleet/1 into main"
+    after="$("$CG" events --kind projection.built --json -n 50 | grep -c . || true)"
+    [ "$after" -gt "$before" ] || fail "no projection build after the land"
+    # main forward into the wave branch (the supervisor's job, by hand here)
+    git branch -f wave/fleet/2 main
+
+    # an uncommitted file the merge would bring in: refused, named, untouched
+    cd "$wt/task-fleet-3.2"
+    export CG_AGENT=w-fleet-3.2 CG_ROLE=worker CG_PARENT=wm-fleet-2
+    echo 'wip' >> docs/d.md
+    head_before="$(git rev-parse HEAD)"
+    expect_rc 1 "$CG" fleet sync
+    err="$("$CG" fleet sync 2>&1 >/dev/null || true)"
+    has "$err" "1 uncommitted file(s) here are also changed on wave/fleet/2"
+    has "$err" "  docs/d.md"
+    [ "$(git rev-parse HEAD)" = "$head_before" ] || fail "a refused sync moved HEAD"
+    has "$(cat docs/d.md)" "wip"
+    out="$("$CG" fleet sync --json 2>/dev/null || true)"
+    echo "$out" | pyjson '
+assert d["outcome"] == "refused" and d["overlap"] == ["docs/d.md"], d
+' || fail "sync refusal JSON"
+
+    # committed: the same file conflicts — aborted, named, branch as it was
+    git add -A >/dev/null; git commit -qm "docs wip [spec:fleet/3.2]" >/dev/null
+    head_before="$(git rev-parse HEAD)"
+    expect_rc 1 "$CG" fleet sync
+    err="$("$CG" fleet sync 2>&1 >/dev/null || true)"
+    has "$err" "sync of wave/fleet/2 into task/fleet/3.2 conflicted — merge aborted"
+    has "$err" "  docs/d.md"
+    has "$err" "git merge wave/fleet/2"
+    [ "$(git rev-parse HEAD)" = "$head_before" ] || fail "a conflicted sync moved HEAD"
+    [ -z "$(git status --porcelain --untracked-files=no)" ] || fail "a conflicted sync left a merge behind"
+
+    # take theirs for the doc, then the sync brings the land in and done qualifies
+    git show wave/fleet/2:docs/d.md > docs/d.md
+    git add -A >/dev/null; git commit -qm "docs follow alpha [spec:fleet/3.2]" >/dev/null
+    out="$("$CG" fleet sync)"
+    has "$out" "synced wave/fleet/2 into task/fleet/3.2 — "
+    has "$out" "land wave/fleet/1 into main"
+    has "$out" "  src/a.ts"
+    has "$out" "projection: "
+    has "$(cat src/a.ts)" "return 1"
+    has "$(git log -1 --format=%s)" "sync wave/fleet/2 into task/fleet/3.2"
+    "$CG" events --kind fleet.sync --json -n 20 | python3 -c '
+import json, sys
+ev = [json.loads(l)["payload"] for l in sys.stdin if l.strip()]
+m = [e for e in ev if e["outcome"] == "merged"]
+c = [e for e in ev if e["outcome"] == "conflict"]
+assert m and m[-1]["branch"] == "task/fleet/3.2" and m[-1]["base"] == "wave/fleet/2", ev
+assert "src/a.ts" in m[-1]["files"] and m[-1]["agent"] == "w-fleet-3.2", m
+assert c and c[0]["conflicts"] == ["docs/d.md"], c
+' || fail "fleet.sync events"
+    out="$("$CG" spec done 3.2)"
+    has "$out" "3.2"
+    grep -q 'status = "done"' spec/fleet/spec.kvx || fail "3.2 not done after the sync"
+    out="$("$CG" fleet sync --json)"
+    echo "$out" | pyjson 'assert d["outcome"] == "current", d' || fail "sync current JSON"
+    unset CG_AGENT CG_ROLE CG_PARENT
+    # no base known: say how to give one
+    cd "$proj"
+    git checkout -q -b loose
+    err="$("$CG" fleet sync 2>&1 >/dev/null || true)"
+    has "$err" "no base known for loose — pass --base <branch>"
+    git checkout -q main
+    cd "$proj"
+fi
+
 echo "ok 26_fleet ($section)"

@@ -433,6 +433,35 @@ bool hier_per_wave(const Hierarchy *h) {
     return strstr(h->roles[FLEET_FEATURE].branch, "{wave}") != NULL;
 }
 
+/* git 2.38 brought merge-tree --write-tree, which the projection folds
+ * with: without it there is nothing for a task started ahead to build on */
+static bool git_folds(void) {
+    static int have = -1;
+    if (have < 0) {
+        int ma = 0, mi = 0;
+        have = git_version(&ma, &mi) == 0 && (ma > 2 || (ma == 2 && mi >= 38));
+    }
+    return have == 1;
+}
+
+bool hier_waves_parallel(const Kvx *wf, char *why, size_t cap) {
+    char *v = wf ? kvx_str(wf, "hierarchy", "waves") : NULL;
+    bool par;
+    if (v && (!strcmp(v, "parallel") || !strcmp(v, "sequential"))) {
+        par = !strcmp(v, "parallel");
+        if (why && cap) snprintf(why, cap, "[hierarchy] waves = %s", v);
+    } else {
+        par = git_folds();
+        if (why && cap)
+            snprintf(why, cap, "%s%s%s, git %s 2.38", v && v[0] ? "[hierarchy] waves = " : "",
+                     v && v[0] ? v : "default",
+                     v && v[0] ? " is not parallel|sequential" : "",
+                     par ? ">=" : "<");
+    }
+    free(v);
+    return par;
+}
+
 long hier_manager_wave(const Hierarchy *h, long wave) {
     return hier_per_wave(h) ? wave : -1;
 }
@@ -1461,7 +1490,9 @@ static bool task_status_on_branch(const Lifecycle *c, const char *branch,
 
 static bool tree_clean(const char *tree) {
     StrBuf o; sb_init(&o);
-    int rc = git_run(tree, "status --porcelain --untracked-files=no", &o);
+    /* no index refresh: an agent may be committing in this worktree */
+    int rc = git_run(tree, "--no-optional-locks status --porcelain "
+                           "--untracked-files=no", &o);
     bool clean = rc == 0 && o.len == 0;
     sb_free(&o);
     return clean;
@@ -1557,6 +1588,11 @@ static void ev_long(StrBuf *b, const char *key, long v) {
  * manager can hand the same task to a replacement worker. */
 int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
                        const char *agent_flag, bool json) {
+    return fleet_worker_begin_ex(cg, id, feature_ov, agent_flag, json, false);
+}
+
+int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,
+                          const char *agent_flag, bool json, bool ahead) {
     Lifecycle c;
     if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
     long wave = 0;
@@ -1624,7 +1660,7 @@ int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
     setenv("CG_WAVE", wavebuf, 1);
     SpecAttempt at;
     long ttl = 30;
-    if (spec_claim(cg, c.tree, c.feature, id, agent, ttl, &at) != 0) {
+    if (spec_claim_ex(cg, c.tree, c.feature, id, agent, ttl, ahead, &at) != 0) {
         fprintf(stderr, "cg fleet: %s was not claimed — %s and %s stay for "
                         "a retry\n", id, branch, path);
         lifecycle_close(&c);
@@ -1671,8 +1707,8 @@ int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
         sb_printf(&b, "  claim:    attempt %.12s, fence %ld, %ld min\n",
                   at.attempt_id, at.fence, ttl);
         sb_printf(&b, "next: cd %s && CG_AGENT=%s CG_ROLE=worker CG_PARENT=%s "
-                  "CG_FEATURE=%s CG_WAVE=%ld cg spec start %s\n", path, agent,
-                  parent, c.feature, wave, id);
+                  "CG_FEATURE=%s CG_WAVE=%ld cg spec start %s%s\n", path, agent,
+                  parent, c.feature, wave, id, ahead ? " --ahead" : "");
     }
     fputs(b.p, stdout);
     sb_free(&b);
@@ -2339,6 +2375,7 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
     land_event(cg, &c, red >= 0 ? "refused" : "landed", branch,
                red >= 0 ? pre : head, n, NULL, 0, red >= 0 ? names[red] : NULL);
     if (red >= 0) { lifecycle_close(&c); return 1; }
+    fleet_projection_rebuild(cg, NULL, 0);   /* codify-v15 4.2: after a land */
 
     /* the pull request: opened on green when the policy is auto, printed
      * as commands when it is manual, skipped on --no-pr */
@@ -2826,6 +2863,275 @@ int fleet_checkpoint(Cg *cg, bool dry_run, bool json) {
 
 /* ---------------- dispatch ---------------- */
 
+/* ---------------- codify-v15 4.2: cg fleet sync ---------------- */
+
+typedef struct { Cg *cg; } ProjRebuild;
+
+static int proj_rebuild_run(void *ctx) {
+    ProjRebuild *r = ctx;
+    SysInfo si;
+    sysinfo_detect(&si);
+    char *av[] = { "build", "--wait", "3000", NULL };
+    return cmd_projection(r->cg, &si, 3, av, NULL, false);
+}
+
+int fleet_projection_rebuild(Cg *cg, char *line, size_t cap) {
+    if (line && cap) line[0] = 0;
+    if (!git_folds()) {
+        if (line && cap) snprintf(line, cap, "no projection: git older than 2.38");
+        return 1;
+    }
+    ProjRebuild r = { cg };
+    char *out = NULL;
+    int rc = cg_capture(&out, proj_rebuild_run, &r);
+    if (line && cap && out) {
+        size_t n = strcspn(out, "\n");
+        snprintf(line, cap, "%.*s", (int)(n < cap ? n : cap - 1), out);
+    }
+    free(out);
+    return rc;
+}
+
+/* paths, one per line, of `git <args>` in tree; returns how many */
+static int git_lines(const char *tree, const char *args, char ***out,
+                     int strip) {
+    *out = NULL;
+    StrBuf o; sb_init(&o);
+    int n = 0;
+    if (git_run(tree, args, &o) == 0) {
+        char *save = NULL;
+        for (char *l = strtok_r(o.p ? o.p : (char *)"", "\n", &save); l;
+             l = strtok_r(NULL, "\n", &save)) {
+            if ((int)strlen(l) <= strip) continue;
+            const char *path = l + strip;
+            const char *arrow = strstr(path, " -> ");   /* a rename: the new name */
+            if (arrow) path = arrow + 4;
+            *out = xrealloc(*out, sizeof **out * (size_t)(n + 1));
+            (*out)[n++] = xstrdup(path);
+        }
+    }
+    sb_free(&o);
+    return n;
+}
+
+/* The worker's base, in order: --base, CG_BASE when CG_BRANCH is the branch
+ * checked out here, the branches registry. "" when none is known. */
+static void sync_base(Cg *cg, const char *branch, const char *flag, char *out,
+                      size_t cap) {
+    out[0] = 0;
+    if (flag && flag[0]) { snprintf(out, cap, "%s", flag); return; }
+    const char *eb = getenv("CG_BRANCH"), *ebase = getenv("CG_BASE");
+    if (eb && ebase && ebase[0] && !strcmp(eb, branch)) {
+        snprintf(out, cap, "%s", ebase);
+        return;
+    }
+    sqlite3_stmt *q = cg_prep(cg, "SELECT base FROM branches WHERE name=?");
+    sqlite3_bind_text(q, 1, branch, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW && sqlite3_column_text(q, 0))
+        snprintf(out, cap, "%s", (const char *)sqlite3_column_text(q, 0));
+    sqlite3_finalize(q);
+}
+
+/* cg fleet sync: what landed (and was merged forward into the wave branch)
+ * comes into the task branch, so a task started ahead of its requires can
+ * see them done and qualify. Never a merge over uncommitted work it would
+ * touch; a conflict is aborted and named, for the worker to resolve with
+ * git merge itself. */
+int fleet_sync(Cg *cg, int argc, char **argv, bool json) {
+    const char *base_flag = NULL;
+    for (int i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "--base") && i + 1 < argc) base_flag = argv[++i];
+        else if (!strcmp(argv[i], "--json")) json = true;
+        else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) i++;
+        else {
+            fprintf(stderr, "usage: cg fleet sync [--base <branch>] [--json]\n");
+            return 1;
+        }
+    }
+    StrBuf top; sb_init(&top);
+    if (git_run(".", "rev-parse --show-toplevel", &top) != 0 || !top.p) {
+        fprintf(stderr, "cg fleet sync: not in a git worktree\n");
+        sb_free(&top);
+        return 1;
+    }
+    top.p[strcspn(top.p, "\n")] = 0;
+    char tree[4096];
+    snprintf(tree, sizeof tree, "%s", top.p);
+    sb_free(&top);
+    char branch[512] = "", head[65] = "";
+    if (!git_head(tree, branch, sizeof branch, head, sizeof head) ||
+        !branch[0]) {
+        fprintf(stderr, "cg fleet sync: %s is not on a branch\n", tree);
+        return 1;
+    }
+    char base[512];
+    sync_base(cg, branch, base_flag, base, sizeof base);
+    if (!base[0]) {
+        fprintf(stderr, "cg fleet sync: no base known for %s — pass --base "
+                "<branch>\n", branch);
+        return 1;
+    }
+    if (!git_branch_exists(tree, base)) {
+        StrBuf a; sb_init(&a); StrBuf o; sb_init(&o);
+        sb_puts(&a, "rev-parse --verify --quiet ");
+        sb_shquote(&a, base);
+        int rc = git_run(tree, a.p, &o);
+        sb_free(&a); sb_free(&o);
+        if (rc != 0) {
+            fprintf(stderr, "cg fleet sync: base %s does not exist\n", base);
+            return 1;
+        }
+    }
+    StrBuf a; sb_init(&a);
+    StrBuf range; sb_init(&range);
+    sb_printf(&range, "HEAD..%s", base);
+    sb_puts(&a, "rev-list --count ");
+    sb_shquote(&a, range.p);
+    StrBuf o; sb_init(&o);
+    long incoming = git_run(tree, a.p, &o) == 0 && o.p ? atol(o.p) : -1;
+    sb_free(&a); sb_free(&o);
+    if (incoming < 0) {
+        fprintf(stderr, "cg fleet sync: cannot compare %s with %s\n", branch,
+                base);
+        sb_free(&range);
+        return 1;
+    }
+    char line[512] = "";
+    if (incoming == 0) {
+        sb_free(&range);
+        if (json)
+            printf("{\"branch\":\"%s\",\"base\":\"%s\",\"outcome\":\"current\","
+                   "\"commits\":0}\n", branch, base);
+        else printf("%s is up to date with %s\n", branch, base);
+        return 0;
+    }
+
+    /* what comes in, and what is uncommitted here */
+    sb_init(&a);
+    StrBuf three; sb_init(&three);
+    sb_printf(&three, "HEAD...%s", base);
+    sb_puts(&a, "diff --name-only ");
+    sb_shquote(&a, three.p);
+    sb_free(&three);
+    char **in = NULL;
+    int nin = git_lines(tree, a.p, &in, 0);
+    sb_free(&a);
+    char **dirty = NULL;
+    int ndirty = git_lines(tree, "--no-optional-locks status --porcelain -uall",
+                           &dirty, 3);
+    char **hit = NULL;
+    int nhit = 0;
+    for (int i = 0; i < ndirty; i++)
+        for (int j = 0; j < nin; j++)
+            if (!strcmp(dirty[i], in[j])) {
+                hit = xrealloc(hit, sizeof *hit * (size_t)(nhit + 1));
+                hit[nhit++] = dirty[i];
+                break;
+            }
+    if (nhit > 0) {
+        fprintf(stderr, "cg fleet sync: %d uncommitted file(s) here are also "
+                "changed on %s — commit or stash them, then sync:\n", nhit,
+                base);
+        for (int i = 0; i < nhit; i++) fprintf(stderr, "  %s\n", hit[i]);
+        if (json) {
+            StrBuf b; sb_init(&b);
+            sb_puts(&b, "{\"branch\":"); sb_json_str(&b, branch);
+            sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
+            sb_puts(&b, ",\"outcome\":\"refused\",\"overlap\":[");
+            for (int i = 0; i < nhit; i++) {
+                if (i) sb_putc(&b, ',');
+                sb_json_str(&b, hit[i]);
+            }
+            sb_puts(&b, "]}\n");
+            fputs(b.p, stdout);
+            sb_free(&b);
+        }
+        free(hit); free_list(dirty, ndirty); free_list(in, nin);
+        sb_free(&range);
+        return 1;
+    }
+    free(hit); free_list(dirty, ndirty);
+
+    /* what came in: the commits, then the merge */
+    StrBuf log; sb_init(&log);
+    sb_init(&a);
+    sb_puts(&a, "log --oneline --no-decorate -n 20 ");
+    sb_shquote(&a, range.p);
+    git_run(tree, a.p, &log);
+    sb_free(&a);
+    sb_free(&range);
+    sb_init(&a);
+    StrBuf msg; sb_init(&msg);
+    sb_printf(&msg, "sync %s into %s", base, branch);
+    sb_puts(&a, "merge --no-edit -m ");
+    sb_shquote(&a, msg.p);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, base);
+    sb_free(&msg);
+    StrBuf err; sb_init(&err);
+    int mrc = git_run(tree, a.p, &err);
+    sb_free(&a);
+    char **conf = NULL;
+    int nconf = 0;
+    if (mrc != 0) {
+        nconf = git_conflicted_paths(tree, &conf);
+        StrBuf ab; sb_init(&ab);
+        git_run(tree, "merge --abort", &ab);
+        sb_free(&ab);
+    }
+    char nhead[65] = "", nb[512];
+    git_head(tree, nb, sizeof nb, nhead, sizeof nhead);
+    {
+        StrBuf e; sb_init(&e);
+        ev_str(&e, "branch", branch); ev_str(&e, "base", base);
+        ev_str(&e, "outcome", mrc == 0 ? "merged" : "conflict");
+        ev_long(&e, "commits", incoming);
+        ev_list(&e, "files", in, nin);
+        ev_list(&e, "conflicts", conf, nconf);
+        ev_str(&e, "head", nhead);
+        ev_str(&e, "agent", getenv("CG_AGENT"));
+        fleet_event(cg, "fleet.sync", branch, &e);
+    }
+    if (mrc == 0) {
+        branch_register(cg, branch, tree, nhead, base);
+        fleet_projection_rebuild(cg, line, sizeof line);
+    }
+    StrBuf b; sb_init(&b);
+    if (json) {
+        sb_puts(&b, "{\"branch\":"); sb_json_str(&b, branch);
+        sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
+        sb_printf(&b, ",\"outcome\":\"%s\",\"commits\":%ld",
+                  mrc == 0 ? "merged" : "conflict", incoming);
+        sb_puts(&b, ",\"log\":"); sb_json_str(&b, log.p ? log.p : "");
+        sb_puts(&b, ",\"files\":[");
+        for (int i = 0; i < nin; i++) {
+            if (i) sb_putc(&b, ',');
+            sb_json_str(&b, in[i]);
+        }
+        sb_putc(&b, ']');
+        put_conflicts(&b, conf, nconf, true);
+        sb_puts(&b, ",\"projection\":"); sb_json_str(&b, line);
+        sb_puts(&b, "}\n");
+    } else if (mrc == 0) {
+        sb_printf(&b, "synced %s into %s — %ld commit(s), %d file(s) came in:\n",
+                  base, branch, incoming, nin);
+        sb_puts(&b, log.p ? log.p : "");
+        for (int i = 0; i < nin; i++) sb_printf(&b, "  %s\n", in[i]);
+        if (line[0]) sb_printf(&b, "projection: %s\n", line);
+    } else {
+        char ex[300];
+        excerpt(&err, ex, sizeof ex);
+        sb_printf(&b, "sync of %s into %s conflicted — merge aborted, %s left "
+                  "as it was (%s)\n", base, branch, branch, ex);
+        put_conflicts(&b, conf, nconf, false);
+        sb_printf(&b, "resolve it yourself: git merge %s\n", base);
+    }
+    fputs(b.p, mrc == 0 || json ? stdout : stderr);
+    sb_free(&b); sb_free(&log); sb_free(&err);
+    free_list(conf, nconf); free_list(in, nin);
+    return mrc == 0 ? 0 : 1;
+}
+
 int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     const char *sub = argc >= 3 ? argv[2] : "status";
     const char *feature = NULL, *agent = NULL, *pos = NULL;
@@ -2843,6 +3149,7 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     if (strcmp(sub, "roles") == 0) return fleet_roles(cg, json);
     if (strcmp(sub, "discover") == 0)            /* codify-v15 2.4 */
         return cmd_fleet_discover(cg, argc - 3, argv + 3, json);
+    if (strcmp(sub, "sync") == 0) return fleet_sync(cg, argc - 3, argv + 3, json); /* codify-v15 4.2 */
     if (strcmp(sub, "status") == 0 || strcmp(sub, "tree") == 0)
         native_discover_auto(cg);               /* hooks missed: transcripts */
     if (strcmp(sub, "status") == 0) return fleet_status(cg, json);
@@ -2859,8 +3166,10 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
                                                    : " [--force] [--keep]");
             return 1;
         }
+        bool ahead = false;              /* begin --ahead: open requires */
+        for (int i = 3; i < argc; i++) ahead |= !strcmp(argv[i], "--ahead");
         return strcmp(sub, "begin") == 0
-             ? fleet_worker_begin(cg, pos, feature, agent, json)
+             ? fleet_worker_begin_ex(cg, pos, feature, agent, json, ahead)
              : fleet_merge_up(cg, pos, feature, force, keep, json);
     }
     if (strcmp(sub, "land") == 0)
