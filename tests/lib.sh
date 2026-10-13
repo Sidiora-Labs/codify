@@ -9,6 +9,14 @@ FIXTURES="$(cd "$(dirname "$0")/../fixtures" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Every direct read of a graph.db waits for a lock instead of failing on it.
+# cg forks detached projection builds (projection_auto_build, after discovery
+# and the post-edit hook) that write the same file, and the sqlite3 shell has
+# no busy timeout of its own: under suite load a query that opens the graph
+# while such a build commits or checkpoints gets "database is locked" and an
+# assertion fails on an empty result. 50_discover showed it 2 runs in 20.
+sqlite3() { command sqlite3 -cmd '.timeout 5000' "$@"; }
+
 fail() {
     echo "FAIL: $*" >&2
     exit 1
