@@ -42,6 +42,7 @@ Three ways in, one table:
 | `fleet.run`, `fleet.begin`, `fleet.merge`, `fleet.gate`, `fleet.land`, `fleet.pr`, `fleet.checkpoint` | the run and the branch flow |
 | `agent.session`, `agent.text`, `agent.tool`, `agent.usage`, `agent.result` | what an agent said, did, and spent (from its structured output) |
 | `agent.steer`, `agent.steer.delivered` | a message queued for an agent, and its delivery |
+| `agent.native.start`, `agent.native.spawn`, `agent.native.tool`, `agent.native.stop`, `agent.native.worktree` | a host's own session or subagent (Claude Code, Codex) started, announced a spawn through its Agent tool, finished a tool call, stopped, or created/removed a worktree — from `cg hook event` (see below) |
 | `supervisor.stall`, `supervisor.escalate`, `supervisor.blocked`, `supervisor.budget` | supervision decisions |
 | `approval.request`, `approval.decided` | the opt-in approval gates |
 | `drift.spec`, `drift.interface`, `drift.collision`, `drift.coverage` | drift findings (see [drift.md](drift.md)) |
@@ -140,6 +141,58 @@ cursor records what was delivered, so nothing arrives twice, and delivery
 is recorded as `agent.steer.delivered`. The supervisor steers with the same
 call: stall nudges, escalations, and interface-drift notices all go out
 this way.
+
+## Native agents (`cg hook event`)
+
+A Claude Code or Codex session, and every subagent it spawns through its own
+Agent tool, never passes through `cg fleet`. Its hooks do:
+
+```
+cg hook event --host claude|codex [--json]     # one hook payload on stdin
+```
+
+Each payload is recorded in the `agents` registry with `kind = 'native'`
+and then fed to `cg event ingest --source <host>`, so runtime evidence
+(`cg event history`, `agent.activity`) keeps working unchanged.
+
+| Hook | Registry | Event |
+|---|---|---|
+| `SessionStart` | the session `<host>:<first 8 of session_id>`: host, session, cwd, model, started, state `live` | `agent.native.start` |
+| `PreToolUse` of `Agent` or `Task` | a pending spawn `<host>:spawn:<tool_use_id>` (description, subagent_type, model, task) | `agent.native.spawn` (also isolation, run_in_background, tool_use_id, the first 200 characters of the prompt) |
+| `SubagentStart` | the subagent `<host>:<agent_id>`, parent the spawner; claims the pending spawn named by `toolUseId` in its `meta.json`, else the oldest pending spawn of its type in the session | `agent.native.start` |
+| `PreToolUse` / `PostToolUse` | heartbeat (`seen`), `last_tool`, `tool_calls` of the agent the payload speaks for | `agent.native.tool` (on `PostToolUse`) |
+| `SubagentStop` | state `stopped`, `ended`, `transcript` | `agent.native.stop` (with the last message excerpt) |
+| `Stop`, `SessionEnd` | the session `stopped` (any later hook makes it `live` again) | `agent.native.stop`, once per transition |
+| `WorktreeCreate`, `WorktreeRemove` | heartbeat | `agent.native.worktree` (the payload kept) |
+
+Every `agent.native.*` event carries `node` = the agent name (for a spawn,
+the spawner), `subject` = the task when known, and a payload with agent,
+host, session, parent, state, agent_type, description, model, depth, cwd,
+worktree, branch, task, and task_source.
+
+- **Worktrees.** A `cwd` inside a linked worktree of the project records
+  the worktree and its branch on the agent (read from the repository's own
+  files, no process spawned) and registers the branch in `cg branches` with
+  base the session's branch.
+- **Tasks**, in order, with `task_source`: `env` (`CG_TASK` in the hook's
+  environment), `attempt` (a live attempt whose session is this session),
+  `prompt` (a task id of the active feature named in the spawn's
+  description or prompt — a bare dotted id such as `2.1` or a
+  `[spec:feature/id]` tag), `parent` (the parent's task).
+- **Views.** `cg fleet status` lists native sessions and their subagents as
+  an indented tree after the fleet roles (age since the last hook, state —
+  `stale` after 120 s without a hook — host, model, branch, task, last
+  tool); `cg fleet status --json` and `cg fleet tree --json` carry
+  `native: [{agent, host, session, model, started, state, stale, seen, cwd,
+  worktree, branch, task, task_source, description, agent_type, parent,
+  depth, last_tool, tool_calls, ended, transcript, children: [...]}]`
+  (`fleet tree --json` answers `{"hierarchy": false, "native": [...]}` in a
+  repository without a `[hierarchy]`). `cg brief` and `cg state` print
+  `native agents: N live, M subagents, K worktree branches`. Sessions
+  stopped for more than a day are hidden unless `--all`.
+- **Never fatal.** The command always exits 0; a malformed payload is
+  logged to `.codegraph/hooks.log` and stderr, and a database still busy
+  after 3 s leaves the registry untouched for that one payload.
 
 ## Limitations
 

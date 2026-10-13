@@ -506,6 +506,7 @@ int cmd_brief(Cg *cg, bool json)
                       jpending, jfailed);
         brief_branches(cg, &b, true);
         fleet_brief(cg, &b, true);
+        native_summary(cg, &b, true);
         {
             char *feat = brief_feature(cg, task);
             if (feat) {
@@ -535,6 +536,7 @@ int cmd_brief(Cg *cg, bool json)
                       jfailed ? " refused" : "");
         brief_branches(cg, &b, false);
         fleet_brief(cg, &b, false);
+        native_summary(cg, &b, false);
         {
             /* drift found so far on this feature: what a reader should
              * know moved outside a declaration or under another branch */

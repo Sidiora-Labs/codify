@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
      * outside a Codify project there is nothing to do, and a failing hook
      * would be reported to the agent as an error on every edit */
     if (strcmp(cmd, "hook") == 0 && argc >= 3 &&
-        strcmp(argv[2], "post-edit") == 0) {
+        (strcmp(argv[2], "post-edit") == 0 || strcmp(argv[2], "event") == 0)) {
         char root[4096];
         if (cg_find_root(root, sizeof root) != 0) return 0;
     }
@@ -426,6 +426,9 @@ int main(int argc, char **argv) {
             rc = cmd_hook_install(&cg);
         else if (argc >= 3 && strcmp(argv[2], "post-edit") == 0)
             rc = cmd_hook_post_edit(&cg, &si, json);
+        else if (argc >= 3 && strcmp(argv[2], "event") == 0)
+            rc = cmd_hook_event(&cg, opt(&argc, argv, "--host", "claude"),
+                                json);
         else { help_usage("hook"); rc = 1; }
     } else if (strcmp(cmd, "check") == 0) {
         bool strict = flag(&argc, argv, "--strict");
