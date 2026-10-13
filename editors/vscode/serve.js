@@ -161,6 +161,12 @@ class ServeClient {
         return s.id;
     }
 
+    /* The server's own snapshot: the native agents (codify-v15 2.3), read
+     * after its discovery pass, and the event head they are current to. */
+    async snapshot(all) {
+        return this.request('snapshot', all ? { all: true } : {}, 20000);
+    }
+
     async cancel(reqId) {
         return this.request('cancel', { id: reqId }, 20000);
     }
@@ -222,7 +228,7 @@ class ServeClient {
  * the patch the view can apply directly. */
 function liveModel() {
     return { seq: 0, tasks: {}, claims: {}, agents: {}, runs: {}, drift: 0,
-             memories: 0, approvals: {} };
+             memories: 0, approvals: {}, native: {} };
 }
 
 function splitSubject(subject) {
@@ -265,6 +271,7 @@ function applyEvent(model, ev) {
         if (p.worktree) patch.worktree = p.worktree;
         return { view: 'tasks', task: id, feature, patch, fleet: true };
     }
+    if (k.startsWith('agent.native.')) return applyNative(model, ev);
     if (k.startsWith('agent.') && k !== 'agent.activity') {
         if (k === 'agent.join' || k === 'agent.update') {
             model.agents[ev.subject] = Object.assign(model.agents[ev.subject] || {},
@@ -299,4 +306,70 @@ function applyEvent(model, ev) {
     return null;
 }
 
-module.exports = { ServeClient, liveModel, applyEvent, splitSubject };
+/* ---------------- native agents (codify-v15 2.3) ----------------
+ *
+ * A host's own sessions and subagents (cg hook event). Each agent.native.*
+ * event carries the agent's whole row in its payload, so the fold keeps the
+ * latest row per agent in model.native and the fleet view's Sessions root
+ * patches itself from it without asking cg again (fleet.js patchSessions).
+ * A spawn's node is the spawner; the row it announces is the pending child. */
+const NATIVE_FIELDS = ['agent', 'host', 'session', 'parent', 'state',
+    'agent_type', 'description', 'model', 'depth', 'cwd', 'worktree',
+    'branch', 'task', 'task_source'];
+
+function applyNative(model, ev) {
+    const p = ev.payload || {};
+    const k = ev.kind;
+    const native = model.native || (model.native = {});
+    const name = (k === 'agent.native.spawn' ? p.agent : (p.agent || ev.node)) ||
+        ev.node;
+    if (!name) return null;
+    const row = native[name] || (native[name] = { agent: name });
+    for (const f of NATIVE_FIELDS) {
+        if (p[f] !== undefined && p[f] !== null && p[f] !== '') row[f] = p[f];
+    }
+    if (ev.at) row.seen = ev.at;
+    if (k === 'agent.native.tool') {
+        if (p.tool) row.last_tool = p.tool;
+        if (typeof p.tool_calls === 'number') row.tool_calls = p.tool_calls;
+    } else if (k === 'agent.native.stop') {
+        row.state = 'stopped';
+        if (ev.at) row.ended = ev.at;
+        if (p.transcript) row.transcript = p.transcript;
+        if (p.last_message) row.last_message = p.last_message;
+    } else if (k === 'agent.native.spawn') {
+        row.state = row.state || 'pending';
+        /* the spawner spoke: its heartbeat moves too */
+        if (ev.node && ev.node !== name) {
+            const s = native[ev.node] || (native[ev.node] = { agent: ev.node });
+            if (ev.at) s.seen = ev.at;
+        }
+    } else if (k === 'agent.native.start' && row.state !== 'stopped') {
+        row.state = row.state || 'live';
+        if (!row.started && ev.at) row.started = ev.at;
+    }
+    if (ev.seq) row.seq = ev.seq;
+    return { view: 'fleet', native: name, kind: k, row };
+}
+
+/* A `snapshot` reply ({head, native: [tree]}) replaces what the events built:
+ * after a reconnect the pushed events in between are gone, and the snapshot
+ * is the server's word on every row. */
+function applySnapshot(model, snap) {
+    if (!snap || !Array.isArray(snap.native)) return 0;
+    const native = {};
+    const walk = (n) => {
+        if (!n || typeof n !== 'object' || typeof n.agent !== 'string') return;
+        const row = Object.assign({}, n);
+        delete row.children;
+        native[n.agent] = row;
+        for (const c of Array.isArray(n.children) ? n.children : []) walk(c);
+    };
+    for (const n of snap.native) walk(n);
+    model.native = native;
+    if (typeof snap.head === 'number') model.seq = Math.max(model.seq, snap.head);
+    return Object.keys(native).length;
+}
+
+module.exports = { ServeClient, liveModel, applyEvent, splitSubject,
+                   applyNative, applySnapshot };

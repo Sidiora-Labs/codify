@@ -146,7 +146,9 @@
       { "command": "codify.fleet.mergeUp", "title": "Codify: Merge a Wave Branch Up", "icon": "$(git-merge)" },
       { "command": "codify.fleet.land", "title": "Codify: Land the Feature", "icon": "$(rocket)" },
       { "command": "codify.fleet.openPr", "title": "Codify: Open the Feature Pull Request", "icon": "$(git-pull-request)" },
-      { "command": "codify.fleet.checkpoint", "title": "Codify: Checkpoint the Open Pull Requests", "icon": "$(milestone)" }
+      { "command": "codify.fleet.checkpoint", "title": "Codify: Checkpoint the Open Pull Requests", "icon": "$(milestone)" },
+      { "command": "codify.fleet.openSessionWorktree", "title": "Codify: Open Native Agent Worktree", "icon": "$(folder-opened)" },
+      { "command": "codify.fleet.openSessionTranscript", "title": "Codify: Open Native Agent Transcript", "icon": "$(output)" }
     ],
     "menus": {
       "view/title": [
@@ -215,7 +217,9 @@
         { "command": "codify.fleet.land", "when": "view == codifyFleet && viewItem =~ /^fleet-(main|manager)/", "group": "1_fleet@1" },
         { "command": "codify.fleet.openPr", "when": "view == codifyFleet && viewItem =~ /^fleet-manager/", "group": "1_fleet@2" },
         { "command": "codify.fleet.checkpoint", "when": "view == codifyFleet && viewItem =~ /^fleet-main/", "group": "1_fleet@3" },
-        { "command": "codify.fleet.openWorktree", "when": "view == codifyFleet && viewItem =~ /-worktree/", "group": "2_open@1" }
+        { "command": "codify.fleet.openWorktree", "when": "view == codifyFleet && viewItem =~ /-worktree/", "group": "2_open@1" },
+        { "command": "codify.fleet.openSessionTranscript", "when": "view == codifyFleet && viewItem =~ /^fleet-native.*-ntx/", "group": "inline@0" },
+        { "command": "codify.fleet.openSessionWorktree", "when": "view == codifyFleet && viewItem =~ /^fleet-native.*-nwt/", "group": "inline@1" }
       ],
       "editor/context": [
         { "command": "codify.why", "when": "editorTextFocus && codify.hasSpec", "group": "codify@1" },

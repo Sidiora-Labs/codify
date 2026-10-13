@@ -84,6 +84,7 @@ JSON-RPC 2.0 over stdio.
 | `exec {args:[...]}` | any `cg` command, exactly as the CLI runs it: `{exit, stdout, stderr, cancelled, truncated}` |
 | `cancel {id}` | stop an in-flight `tools/call` or `exec` |
 | `subscribe {since?, kinds?}` | push `events` notifications from that sequence number; `kinds` is the same comma-list string `cg events --kind` takes |
+| `snapshot {all?}` | the native agents now: `{head, native: [...], counts: {live, subagents, worktree_branches}}` — the same tree `cg fleet tree --json` carries, current to event `head`; `all` includes sessions stopped for more than a day. Runs the transcript discovery pass first once it exists |
 | `unsubscribe {subscription}`, `ping`, `shutdown` | |
 
 ```
@@ -100,6 +101,15 @@ lock and runs no index pass. It wakes on writes to the database files
 (inotify on Linux, a 150 ms stat poll elsewhere) and reads each
 subscriber's events from its cursor, so an event reaches the client within
 milliseconds of its commit; the suite asserts under 250 ms.
+
+An editor follows native agents the way it follows fleet agents: it takes
+a `snapshot` (or `cg fleet tree --json`), subscribes from that head, and
+folds every `agent.native.start`, `agent.native.spawn`,
+`agent.native.tool` and `agent.native.stop` onto the rows — each payload
+carries the agent's whole row, so no event needs a second call. The VS
+Code extension's Sessions root (see
+[hierarchy.md](hierarchy.md#native-sessions-in-the-editor)) is built that
+way.
 
 ## `cg tool`
 

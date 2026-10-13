@@ -488,6 +488,162 @@ function fleetTree(status, specStatus, branches, opts) {
     };
 }
 
+/* ---------------- native sessions (codify-v15 2.3, pure) ----------------
+ *
+ * The host's own agents — a Claude Code or Codex session and the subagents
+ * it spawned through its Agent tool — as `cg hook event` recorded them.
+ * `cg fleet tree --json` (and `cg fleet status --json`) carry them as
+ *
+ *   native: [{agent, host, session, model, started, state, stale, seen, cwd,
+ *             worktree, branch, task, task_source, description, agent_type,
+ *             parent, depth, last_tool, tool_calls, ended, transcript,
+ *             children: [...]}]
+ *
+ * nativeNodes() turns that into the Sessions root: a session per host
+ * session, its subagents nested. They are not fleet roles — nobody planned
+ * them — so they sit beside Main Gideon rather than under it. State is the
+ * row's own (live, pending, stopped) except that a live row cg marked stale,
+ * or one silent past STALE_SEC by our clock, reads as stale. Merge state is
+ * what the branch registry proves for the worktree branch against the base
+ * it was registered with (the session's branch). */
+function nativeNode(n, depth, ctx, rootTranscript) {
+    const str = (v) => (typeof v === 'string' && v) ? v : null;
+    const num = (v) => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+    const seen = num(n.seen);
+    const age = relAge(seen, ctx.now);
+    const raw = str(n.state) || 'live';
+    const state = raw === 'live' && (n.stale === true || age.stale) ? 'stale' : raw;
+    const branch = str(n.branch);
+    const row = branch ? ctx.reg.get(branch) : null;
+    const base = (row && row.base) || null;
+    const id = String(n.agent).slice(String(n.agent).lastIndexOf(':') + 1);
+    /* a live subagent's transcript is reported only when it stops, but the
+     * host writes it beside the session's: <session>/subagents/agent-<id> */
+    let transcript = str(n.transcript);
+    if (!transcript && depth > 0 && raw !== 'pending' && rootTranscript &&
+        /\.jsonl$/.test(rootTranscript)) {
+        transcript = `${rootTranscript.slice(0, -6)}/subagents/agent-${id}.jsonl`;
+    }
+    const node = {
+        kind: depth ? 'subagent' : 'session',
+        agent: n.agent, host: str(n.host), session: str(n.session),
+        model: str(n.model), state, rawState: raw,
+        started: num(n.started), seen, age, ended: num(n.ended),
+        cwd: str(n.cwd), worktree: str(n.worktree), branch, base,
+        merge: branch ? mergeState(branch, base, ctx.reg, ctx.exists)
+                      : { state: 'none', label: '' },
+        task: str(n.task), taskSource: str(n.task_source),
+        description: str(n.description), agentType: str(n.agent_type),
+        parent: str(n.parent), depth: num(n.depth) === null ? depth : n.depth,
+        lastTool: str(n.last_tool), toolCalls: num(n.tool_calls) || 0,
+        lastMessage: str(n.last_message),
+        transcript, children: [],
+    };
+    const rt = depth ? rootTranscript : str(n.transcript);
+    for (const c of Array.isArray(n.children) ? n.children : []) {
+        if (c && typeof c === 'object' && typeof c.agent === 'string') {
+            const k = nativeNode(c, depth + 1, ctx, rt);
+            k.parent = k.parent || node.agent;
+            node.children.push(k);
+        }
+    }
+    return node;
+}
+
+/* sessions, live and stale rows, subagents still running, worktree branches */
+function nativeCounts(nodes) {
+    const c = { sessions: 0, live: 0, stale: 0, stopped: 0, subagents: 0,
+                worktrees: 0 };
+    const branches = new Set();
+    const walk = (n) => {
+        if (n.kind === 'session') c.sessions += 1;
+        else if (n.state === 'live' || n.state === 'stale') c.subagents += 1;
+        if (n.state === 'live') c.live += 1;
+        if (n.state === 'stale') c.stale += 1;
+        if (n.state === 'stopped') c.stopped += 1;
+        if (n.worktree && n.branch) branches.add(n.branch);
+        for (const k of n.children) walk(k);
+    };
+    for (const n of nodes) walk(n);
+    c.worktrees = branches.size;
+    return c;
+}
+
+/* `native` is the tree's native[] (anything else is no sessions); opts are
+ * {now, branches (cg branches --json), exists}. */
+function nativeNodes(native, opts) {
+    const o = opts || {};
+    const reg = new Map();
+    const bl = o.branches && Array.isArray(o.branches.branches) ? o.branches.branches : [];
+    for (const b of bl) if (b && b.name) reg.set(b.name, b);
+    const ctx = { now: o.now || Math.floor(Date.now() / 1000), reg,
+                  exists: o.exists || null };
+    const nodes = [];
+    for (const n of Array.isArray(native) ? native : []) {
+        if (n && typeof n === 'object' && typeof n.agent === 'string') {
+            nodes.push(nativeNode(n, 0, ctx, null));
+        }
+    }
+    return { nodes, counts: nativeCounts(nodes), ctx };
+}
+
+/* Fold the serve reducer's rows (serve.js applyNative: model.native, the
+ * latest row per agent) onto the Sessions model in place, so an
+ * agent.native.* event moves its row at once; the catch-up refresh that
+ * follows replaces the whole model with cg's answer. A row older than the
+ * model's is skipped; one the model has never seen is added under its
+ * parent, or as a new session. Returns the number of rows patched or added. */
+function patchSessions(sessions, liveNative, now) {
+    if (!sessions || !liveNative) return 0;
+    const ctx = Object.assign({}, sessions.ctx,
+        { now: now || Math.floor(Date.now() / 1000) });
+    const index = new Map();
+    const walk = (n) => { index.set(n.agent, n); n.children.forEach(walk); };
+    sessions.nodes.forEach(walk);
+    const rows = Object.values(liveNative)
+        .filter((r) => r && typeof r.agent === 'string')
+        .sort((a, b) => (a.depth || 0) - (b.depth || 0) || (a.seq || 0) - (b.seq || 0));
+    let changed = 0;
+    for (const r of rows) {
+        const have = index.get(r.agent);
+        if (have && have.seen && r.seen && r.seen < have.seen) continue;
+        const parent = r.parent ? index.get(r.parent) : null;
+        const depth = have ? (have.kind === 'session' ? 0 : have.depth || 1)
+            : parent ? (parent.kind === 'session' ? 1 : (parent.depth || 1) + 1) : 0;
+        let rootT = null;
+        for (let p = have && have.parent ? index.get(have.parent) : parent; p;
+             p = p.parent ? index.get(p.parent) : null) {
+            if (p.kind === 'session') { rootT = p.transcript; break; }
+        }
+        const merged = have ? {
+            agent: have.agent, host: have.host, session: have.session,
+            model: have.model, started: have.started, state: have.rawState,
+            seen: have.seen, cwd: have.cwd, worktree: have.worktree,
+            branch: have.branch, task: have.task, task_source: have.taskSource,
+            description: have.description, agent_type: have.agentType,
+            parent: have.parent, depth: have.depth, last_tool: have.lastTool,
+            tool_calls: have.toolCalls, ended: have.ended,
+            transcript: have.transcript, last_message: have.lastMessage,
+        } : {};
+        for (const [k, v] of Object.entries(r)) {
+            if (v !== undefined && v !== null && v !== '' && k !== 'seq') merged[k] = v;
+        }
+        if (merged.state === 'live') merged.ended = null;
+        const fresh = nativeNode(merged, depth, ctx, rootT);
+        if (have) {
+            fresh.children = have.children;
+            Object.assign(have, fresh);
+        } else {
+            if (parent) parent.children.push(fresh);
+            else sessions.nodes.push(fresh);
+            index.set(fresh.agent, fresh);
+        }
+        changed += 1;
+    }
+    sessions.counts = nativeCounts(sessions.nodes);
+    return changed;
+}
+
 /* ---------------- the Start flow (headless-safe) ----------------
  *
  * What a person sees before the fleet starts: the roles and what each may
@@ -660,6 +816,7 @@ class FleetView {
         this.visible = true;
         this.force = false;           /* one pass even while the view is hidden */
         this.view = null;
+        this.sessions = null;         /* codify-v15 2.3: the Sessions root */
     }
 
     /* One pass of the fleet's own cg calls, run inside the extension's
@@ -696,6 +853,7 @@ class FleetView {
                 try { return fs.existsSync(p); } catch { return true; }
             },
         });
+        this.sessions = await this.nativeModel(status, tree, branches, call);
         /* v11: what the supervisor and the agents have been doing */
         if (configured) {
             const runs = await call(['fleet', 'runs']);
@@ -745,13 +903,121 @@ class FleetView {
         const m = this.model;
         /* Nothing configured: the welcome view explains it better than a
          * placeholder row ever could, and it only shows on an empty tree. */
-        if (!m || !m.hierarchy.configured) return [];
+        const sessions = this.sessionsRoot();
+        if (!m || !m.hierarchy.configured) return sessions ? [sessions] : [];
         const top = [];
         /* what waits for a person comes first: nothing below moves until
          * it is decided */
         for (const a of m.approvals || []) top.push(this.approvalItem(a));
         top.push(this.nodeItem(m.main));
+        if (sessions) top.push(sessions);
         return top;
+    }
+
+    /* ---- native sessions (codify-v15 2.3) ---- */
+
+    /* The Sessions model from what this refresh already read: the tree's
+     * native[] when cg drew one, else fleet status's (a repository without
+     * a [hierarchy] has only that). Branch merge state needs the registry,
+     * read here only when a native agent works on a branch and the fleet
+     * pass did not read it already. */
+    async nativeModel(status, tree, branches, call) {
+        const native = (tree && Array.isArray(tree.native)) ? tree.native
+            : (status && Array.isArray(status.native)) ? status.native : [];
+        if (!native.length) return null;
+        let reg = branches;
+        const anyBranch = JSON.stringify(native).includes('"branch":"');
+        if (!reg && anyBranch && call) reg = await call(['branches']);
+        return nativeNodes(native, { branches: reg, exists: (p) => {
+            try { return fs.existsSync(p); } catch { return true; }
+        } });
+    }
+
+    /* agent.native.* arrived: fold the serve reducer's rows onto the model
+     * and redraw now; the catch-up refresh replaces it with cg's answer. */
+    patchLive() {
+        const live = this.deps && this.deps.live ? this.deps.live() : null;
+        if (!live || !live.native || !Object.keys(live.native).length) return 0;
+        if (!this.sessions) this.sessions = nativeNodes([], {});
+        const n = patchSessions(this.sessions, live.native);
+        if (n) this._em.fire();
+        return n;
+    }
+
+    sessionsRoot() {
+        const s = this.sessions;
+        if (!s || !s.nodes.length) return null;
+        const kids = s.nodes.map((n) => this.sessionItem(n));
+        const it = new vscode.TreeItem('Sessions',
+            vscode.TreeItemCollapsibleState.Expanded);
+        it.id = 'fleet:native';
+        it.childItems = kids;
+        const c = s.counts;
+        it.description = `${c.live} live` +
+            (c.stale ? ` · ${c.stale} stale` : '') +
+            ` · ${c.subagents} subagent${c.subagents === 1 ? '' : 's'}` +
+            (c.worktrees ? ` · ${c.worktrees} worktree branch${c.worktrees === 1 ? '' : 'es'}` : '');
+        it.iconPath = new vscode.ThemeIcon('hubot');
+        it.contextValue = 'fleet-native-root';
+        it.tooltip = 'Claude Code and Codex sessions on this project and the ' +
+            'subagents they spawned, from `cg hook event`';
+        return it;
+    }
+
+    /* One native agent: who (the session, or the subagent's type), its
+     * state and age since the last hook, its worktree branch and whether
+     * that is in its base, its task and where the task came from, and the
+     * last tool it ran. */
+    sessionItem(n) {
+        const kids = n.children.map((c) => this.sessionItem(c));
+        const label = n.kind === 'session' ? n.agent
+            : `${n.agentType || 'subagent'}${n.description ? ` — ${n.description}` : ''}`;
+        const it = new vscode.TreeItem(label, kids.length
+            ? (n.state === 'stopped' ? vscode.TreeItemCollapsibleState.Collapsed
+                                     : vscode.TreeItemCollapsibleState.Expanded)
+            : vscode.TreeItemCollapsibleState.None);
+        it.id = `fleet:native:${n.agent}`;
+        it.childItems = kids;
+        it.node = n;
+        const bits = [n.state, n.age.text];
+        if (n.branch) {
+            bits.push(n.branch + (n.merge.state === 'unmerged' ? ' (unmerged)'
+                : n.merge.state === 'in-sync' ? ' (merged)' : ''));
+        }
+        if (n.merge.worktreeMissing) bits.push('worktree gone');
+        if (n.task) bits.push(`task ${n.task}${n.taskSource ? ` (${n.taskSource})` : ''}`);
+        if (n.lastTool) bits.push(`› ${n.lastTool}`);
+        it.description = bits.join(' · ');
+        const icon = n.kind === 'session' ? 'terminal' : 'person';
+        const color = n.state === 'live' ? 'testing.iconPassed'
+            : n.state === 'stale' ? 'list.warningForeground' : null;
+        it.iconPath = color ? new vscode.ThemeIcon(icon, new vscode.ThemeColor(color))
+                            : new vscode.ThemeIcon(icon);
+        it.contextValue = `fleet-native-${n.kind}` +
+            (n.worktree ? '-nwt' : '') + (n.transcript ? '-ntx' : '');
+        const md = new vscode.MarkdownString();
+        md.appendMarkdown(`**${n.agent}** — ${n.kind === 'session' ? 'session' : 'subagent'}` +
+            `${n.host ? ` on ${n.host}` : ''}\n\n`);
+        if (n.parent) md.appendMarkdown(`spawned by \`${n.parent}\`\n\n`);
+        if (n.model) md.appendMarkdown(`model ${n.model}\n\n`);
+        md.appendMarkdown(`${n.state} · last hook ${n.age.text}` +
+            (n.toolCalls ? ` · ${n.toolCalls} tool call${n.toolCalls === 1 ? '' : 's'}` : '') + '\n\n');
+        if (n.branch) {
+            md.appendMarkdown(`branch \`${n.branch}\`` +
+                (n.base ? ` from \`${n.base}\`` : '') +
+                (n.merge.label ? ` — ${n.merge.label}` : '') + '\n\n');
+        }
+        if (n.worktree) md.appendMarkdown(`worktree \`${n.worktree}\`\n\n`);
+        else if (n.cwd) md.appendMarkdown(`cwd \`${n.cwd}\`\n\n`);
+        if (n.task) md.appendMarkdown(`task ${n.task} (from ${n.taskSource || '?'})\n\n`);
+        if (n.lastMessage) md.appendMarkdown(`> ${n.lastMessage.split('\n')[0]}\n\n`);
+        if (n.transcript) md.appendMarkdown(`transcript \`${n.transcript}\``);
+        it.tooltip = md;
+        if (n.transcript) {
+            it.command = { command: 'codify.fleet.openSessionTranscript',
+                           title: 'Open transcript', arguments: [{ node: n }] };
+        }
+        return it;
     }
 
     noticeItem(label, icon, command) {
@@ -1359,6 +1625,59 @@ async function cmdApprove(arg) {
     await deps.refresh();
 }
 
+/* ---- native sessions (codify-v15 2.3) ---- */
+
+function sessionNodes() {
+    const out = [];
+    const walk = (n) => { out.push(n); n.children.forEach(walk); };
+    if (view.sessions) view.sessions.nodes.forEach(walk);
+    return out;
+}
+
+/* a native agent's worktree; from the palette, a pick of the ones that have one */
+async function cmdOpenSessionWorktree(arg) {
+    const n = view.nodeOf(arg);
+    let dir = n && n.worktree;
+    if (!dir) {
+        const all = sessionNodes().filter((x) => x.worktree).map((x) => ({
+            label: x.agent, description: x.branch || '', detail: x.worktree,
+            dir: x.worktree }));
+        if (!all.length) {
+            vscode.window.showInformationMessage('No native agent works in a worktree.');
+            return;
+        }
+        const pick = await vscode.window.showQuickPick(all,
+            { placeHolder: 'Open which native agent worktree?' });
+        if (!pick) return;
+        dir = pick.dir;
+    }
+    await cmdOpenWorktree({ node: { worktree: dir } });
+}
+
+/* the transcript file the host writes (JSONL), opened as a document */
+async function cmdOpenSessionTranscript(arg) {
+    let n = view.nodeOf(arg);
+    if (!n) {
+        const all = sessionNodes().filter((x) => x.transcript).map((x) => ({
+            label: x.agent, description: x.state, detail: x.transcript, n: x }));
+        if (!all.length) {
+            vscode.window.showInformationMessage('No native agent transcript is known yet.');
+            return;
+        }
+        const pick = await vscode.window.showQuickPick(all,
+            { placeHolder: 'Open which transcript?' });
+        if (!pick) return;
+        n = pick.n;
+    }
+    if (!n.transcript || !fs.existsSync(n.transcript)) {
+        vscode.window.showInformationMessage(
+            `${n.agent} has no transcript on disk${n.transcript ? ` (${n.transcript})` : ''}.`);
+        return;
+    }
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(n.transcript));
+    await vscode.window.showTextDocument(doc, { preview: true });
+}
+
 /* ---------------- registration ---------------- */
 
 function register(ctx, d) {
@@ -1398,6 +1717,8 @@ function register(ctx, d) {
         'codify.fleet.land': cmdLand,
         'codify.fleet.openPr': cmdOpenPr,
         'codify.fleet.checkpoint': cmdCheckpoint,
+        'codify.fleet.openSessionWorktree': cmdOpenSessionWorktree,
+        'codify.fleet.openSessionTranscript': cmdOpenSessionTranscript,
     };
     for (const [name, fn] of Object.entries(cmds)) {
         ctx.subscriptions.push(vscode.commands.registerCommand(name, fn));
@@ -1407,10 +1728,11 @@ function register(ctx, d) {
         refresh: (specStatus) => view.refresh(specStatus),
         /* a fleet event arrived: the next refresh redraws this view even
          * while it is hidden, so it is right the moment it is opened */
-        touch: () => { view.force = true; },
+        touch: () => { view.force = true; view.patchLive(); },
         get visible() { return view.visible; },
     };
 }
 
 module.exports = { register, FleetView, fleetTree, relAge, mergeState,
-                   treeFacts, parentsFromTree, startPlan, liveDecorate };
+                   treeFacts, parentsFromTree, startPlan, liveDecorate,
+                   nativeNodes, patchSessions };
