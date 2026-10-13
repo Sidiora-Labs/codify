@@ -50,6 +50,7 @@ int main(void) {
     ok_str(c->skills, ".agents/skills");
     ok_str(c->codemap, "CODEMAP.md");
     ok(c->index_workers == 0, "workers default to auto (0)");
+    ok(c->index_walk == CG_WALK_AUTO, "walk defaults to auto");
     ok(config_index_workers(root) == 0, "accessor: auto");
     ok(c->nproblems == 0, "no problems without a file");
     for (int i = 0; i < CFG_NKEYS; i++)
@@ -87,6 +88,7 @@ int main(void) {
             "codemap = \"docs/MAP.md\"\n"
             "[index]\n"
             "workers = 8   # a bigger machine\n"
+            "walk = \"full\"\n"
             "[projection]\n"
             "base = \"trunk\"\n"
             "stale = \"2h\"\n"
@@ -121,6 +123,12 @@ int main(void) {
     for (int i = 0; i < nglobs; i++) free(globs[i]);
     free(globs);
     ok(c->present, "file present");
+    ok(c->index_walk == CG_WALK_FULL, "walk = full parsed (%d)", c->index_walk);
+    ok(config_index_walk(root) == CG_WALK_FULL, "walk accessor agrees");
+    ok(config_parse_walk("auto") == CG_WALK_AUTO, "walk auto");
+    ok(config_parse_walk(" Git") == CG_WALK_GIT, "walk git, case-blind");
+    ok(config_parse_walk("sometimes") < 0, "walk rejects other words");
+    ok(config_parse_walk(NULL) < 0, "walk rejects nothing");
     ok(c->index_workers == 8, "workers = 8 parsed (%d)", c->index_workers);
     ok(config_index_workers(root) == 8, "workers accessor agrees");
     ok(!c->sync_auto, "auto = false parsed");

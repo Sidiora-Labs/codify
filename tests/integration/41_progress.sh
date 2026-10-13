@@ -59,7 +59,7 @@ echo "# again" >> lib/tasks.py
 CG_PROGRESS=plain "$CG" sync --json >"$TMP/out" 2>"$TMP/err"
 [ ! -s "$TMP/err" ] || fail "sync --json printed progress: $(cat "$TMP/err")"
 [ "$(wc -l < "$TMP/out")" -eq 1 ] || fail "sync --json printed more than one line"
-grep -Eq '^\{"indexed":1,"removed":0,"seen":[0-9]+,"skipped":0,"reused":0,"ms":[0-9]+,"workers":[0-9]+,"passes":1,"fresh":false,"coalesced":false,"busy":false,"scoped":(true|false),"targeted":false\}$' "$TMP/out" \
+grep -Eq '^\{"indexed":1,"removed":0,"seen":[0-9]+,"skipped":0,"reused":0,"ms":[0-9]+,"workers":[0-9]+,"passes":1,"fresh":false,"coalesced":false,"busy":false,"scoped":(true|false),"targeted":false,"walk":"full","phase_ms":\{"walk":[0-9]+,"parse":[0-9]+,"write":[0-9]+,"resolve":[0-9]+,"soft":[0-9]+\},"peak_rss_kb":[0-9]+\}$' "$TMP/out" \
     || fail "sync --json changed: $(cat "$TMP/out")"
 
 # --- 4. implicit and quiet syncs never show progress

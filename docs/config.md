@@ -1,8 +1,8 @@
 # Project configuration — codify.kvx
 
 You can put an optional `codify.kvx` at the root of a repository to change
-where Codify keeps its files, whether it syncs the graph on its own, and how
-many parse workers an index pass uses. Every
+where Codify keeps its files, whether it syncs the graph on its own, how
+many parse workers an index pass uses, and how a pass finds changed files. Every
 key in the file is optional. If the file or a key is missing, Codify uses the
 default, so a repository without the file works exactly as it did before the
 file existed.
@@ -28,6 +28,7 @@ codemap = "CODEMAP.md"      # written by cg codemap
 
 [index]
 # workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine
+# walk = auto               # how sync finds changes: git (status + diff since the last pass), full (walk the tree), auto (git above 20000 files)
 
 [projection]
 # base    = "main"          # branch the projection folds onto; default [hierarchy] main, else main
@@ -44,6 +45,7 @@ codemap = "CODEMAP.md"      # written by cg codemap
 | `paths.skills` | `.agents/skills` | The directory for generated `SKILL.md` files (`cg skills`, and the `codify-workflow` skill from `cg integrate`). |
 | `paths.codemap` | `CODEMAP.md` | The file `cg codemap` writes. |
 | `index.workers` | `auto` | Parse workers per index pass for `cg init`, `cg index` and `cg sync`: `1` to `64`, or `auto` (also `0`) for the machine's choice. See [[index] workers](#index-workers). |
+| `index.walk` | `auto` | How a whole-tree pass finds changed files: `full` walks the tree, `git` asks git, `auto` asks git above 20000 indexed files. See [[index] walk](#index-walk). |
 | `projection.base` | *(empty)* | The branch `cg projection build` folds onto. Empty means `[hierarchy] main` from `workflow.kvx`, else `main`. See [docs/projection.md](projection.md). |
 | `projection.stale` | `24h` | How long after its last index a branch with no live agent still counts as active: `90s`, `30m`, `24h`, `2d`, or plain seconds. |
 | `projection.exclude` | `[]` | Branch-name globs (`fnmatch`) never folded into the projection, even when named with `--branch`. `cg config set projection.exclude "tmp/*,wip-*"` writes the list. |
@@ -163,6 +165,46 @@ without failing.
 `cg config set index.workers 8` writes `workers = 8`; `cg config set
 index.workers auto` writes `workers = "auto"`. In `cg config --json` a count
 is a number and `auto` is the string `"auto"`.
+
+## [index] walk
+
+A whole-tree pass (`cg sync` with no paths, a hook, the freshness pass
+before a read command) has to find what changed since the last one. By
+default it walks the tree: every directory read, every file's size and
+mtime compared with the graph. That costs time in proportion to the tree,
+whatever changed. `[index] walk` picks how it finds them:
+
+```
+[index]
+walk = git
+```
+
+- `full` — always walk the tree.
+- `git` — ask git instead. The candidates are `git status --porcelain=v2
+  --untracked-files=all` (modified, added, deleted, unmerged and untracked
+  files), `git diff --name-only <head at the last pass>..HEAD` (whatever
+  commits since then touched, both sides of a rename), and the files that
+  were dirty at the last pass (a file edited and then reverted shows in
+  neither list the second time). Only those go through the targeted path
+  that `cg sync <path>…` uses.
+- `auto` (the default) — `git` once the branch has more than 20000 indexed
+  files, `full` below that.
+
+A git pass falls back to the walk, without a warning because nothing is
+wrong, when git is not available or fails, when the tree is not a git work
+tree, when the head the last pass saw is not recorded or not a commit git
+knows, or when a candidate is a `.gitignore` or `.cgignore` (git names the
+ignore file, not the files it newly hides or reveals). Every twentieth pass
+on a branch, and every `cg index --full`, walks the whole tree regardless,
+so anything git could not see (a file under a submodule, an ignored file the
+graph indexed before the rule appeared) is caught within twenty passes.
+Each pass records the head it saw in the graph's meta table, per branch.
+
+`cg sync --json` and `cg index --json` say which one ran in `"walk"`:
+`"full"`, `"git"`, `"targets"` (named paths), or `"none"` (a fresh or
+coalesced pass that did not run). `cg config set index.walk git` writes
+`walk = "git"`. Any other word is a bad value: it is named with its file,
+`auto` stands in, and `cg config check` exits 1.
 
 ## cg config
 

@@ -17,7 +17,7 @@
     - graph.c: a QueryFilter (paths, lang, no_tests) parsed once in main and applied inside rank_query, cmd_context, cmd_survey, and exported for grep; the directory outline in cmd_context lists subdirectories with counts before files.
     - mcp.c: find_files tool; path, lang, no_tests on search_code and get_context; 45_files.sh per req 2.6.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
-  - [ ] 1.3 The index at scale: parallel walk, git-assisted change detection, contentless FTS, indexed lookups, the scale fixture and bench
+  - [x] 1.3 The index at scale: parallel walk, git-assisted change detection, contentless FTS, indexed lookups, the scale fixture and bench
     - walk.c: the parallel walk over top-level directories with d_type, the same Ignore and the same sorted result; progress ticks per directory; index_pass calls it in place of walk_dir.
     - gitint.c + scan.c: the git-assisted candidate list (porcelain v2 status with untracked, plus diff --name-only recorded-head..HEAD), the recorded head per branch in meta, [index] walk = auto|git|full in config.c with the 20000-file threshold and the every-twentieth-pass full walk, walk: full|git in --json.
     - db.c: body_fts contentless with the SQLite-version fallback and meta fts_mode (shared with 1.1), files.base indexed and used by the soft-edge and resolver lookups in place of LIKE '%/'; phase ms and peak_rss_kb in IndexStats and --json.

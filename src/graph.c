@@ -1096,6 +1096,24 @@ static void rank_bodies(Cg *cg, const Terms *T, Hit *h, int *nh,
             p += ll + (nl ? 1 : 0);
         }
         free(data);
+        /* a contentless body index has no snippet(): the excerpt is the
+         * best line, read from disk above, its matching words marked as
+         * snippet() would (codify-v15 1.3) */
+        if (!f->excerpt[0] && f->text[0]) {
+            StrBuf e; sb_init(&e);
+            for (const char *c = f->text; *c; ) {
+                const char *w = c;
+                while (*c && (isalnum((unsigned char)*c) || *c == '_')) c++;
+                if (c > w) {
+                    bool hit = text_mask(w, (size_t)(c - w), T) != 0;
+                    sb_printf(&e, hit ? ">>%.*s<<" : "%.*s", (int)(c - w), w);
+                } else {
+                    sb_printf(&e, "%c", *c++);
+                }
+            }
+            free(f->excerpt);
+            f->excerpt = e.p ? e.p : xstrdup("");
+        }
         for (int k = 0; k < ns; k++) {
             if (!sm[k]) continue;
             Hit *x = hit_get(h, nh, &sv[k], popcount(sm[k]) >= need);
@@ -2232,9 +2250,13 @@ static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {
             ? "SELECT f.id, f.path, ifnull(f.lines,0) FROM files f "
               "WHERE f.path=?1"
             : "SELECT f.id, f.path, ifnull(f.lines,0) FROM files f "
-              "WHERE substr(f.path, -length(?1)-1)='/'||?1",
+              "INDEXED BY idx_file_base WHERE f.base=?9 AND substr(f.path, -length(?1)-1)='/'||?1",
             " ORDER BY f.path LIMIT 2");
         sqlite3_bind_text(st, 1, path, -1, SQLITE_STATIC);
+        if (pass == 1) {
+            const char *pb = strrchr(path, '/');
+            sqlite3_bind_text(st, 9, pb ? pb + 1 : path, -1, SQLITE_TRANSIENT);
+        }
         int found = 0;
         while (sqlite3_step(st) == SQLITE_ROW && found++ == 0) {
             fid = sqlite3_column_int64(st, 0);
@@ -2874,10 +2896,12 @@ static int symbols_at_position(Cg *cg, const char *path, int line,
                                SymRow *out, int cap) {
     sqlite3_stmt *st = prep_scoped(cg,
         "SELECT " SYM_COLS " FROM symbols s JOIN files f ON f.id=s.file_id "
-        "WHERE (f.path=?1 OR f.path LIKE '%/' || ?1) "
+        "WHERE f.base=?4 AND (f.path=?1 OR f.path LIKE '%/' || ?1) "
         "AND s.line<=?2 AND (s.end_line>=?2 OR s.end_line=0) ",
         " ORDER BY s.line DESC LIMIT ?3");
     sqlite3_bind_text(st, 1, path, -1, SQLITE_STATIC);
+    const char *pb = strrchr(path, '/');
+    sqlite3_bind_text(st, 4, pb ? pb + 1 : path, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 2, line);
     sqlite3_bind_int(st, 3, cap);
     int n = 0;
