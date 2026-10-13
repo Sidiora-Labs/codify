@@ -1,0 +1,3 @@
+{"type":"bridge-session","sessionId":"@SID@"}
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":"Look after the alpha work."},"uuid":"u1","timestamp":"2026-10-13T01:00:00.000Z","cwd":"@PROJ@","sessionId":"@SID@","gitBranch":"main"}
+{"parentUuid":"u1","isSidechain":false,"type":"assistant","message":{"model":"claude-opus-4-1","role":"assistant","content":[{"type":"text","text":"On it."}]},"uuid":"a1","timestamp":"2026-10-13T01:00:05.000Z","cwd":"@PROJ@","sessionId":"@SID@"}

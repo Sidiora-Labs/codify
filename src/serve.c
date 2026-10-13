@@ -521,6 +521,7 @@ int cmd_serve(Cg *cg, const SysInfo *si) {
             long period = ino >= 0 ? SERVE_SAFETY_MS : SERVE_POLL_MS;
             bool due = now - last_check >= period;
             if ((dirty && now - last_push >= SERVE_MIN_GAP_MS) || due) {
+                native_discover_auto(cg);       /* codify-v15 2.4 */
                 for (int i = 0; i < sv.nsubs; i++) serve_push(cg, &sv.subs[i]);
                 last_push = last_check = now;
                 dirty = false;

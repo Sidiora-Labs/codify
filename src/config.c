@@ -64,6 +64,10 @@ static const struct {
     [CFG_PROJ_INDEX]   = { "projection", "index", CFG_BOOL, "false",
                            "check the projection out and index it as branch "
                            "codify/projection" },
+    /* codify-v15 2.4 */
+    [CFG_FLEET_DISCOVER] = { "fleet", "discover", CFG_BOOL, "true",
+                           "fleet status/tree, serve and watch --fleet run cg "
+                           "fleet discover first (once per 10s)" },
 };
 
 static const char CFG_TEMPLATE[] =
@@ -84,7 +88,10 @@ static const char CFG_TEMPLATE[] =
 "# base    = \"main\"          # branch the projection folds onto; default [hierarchy] main, else main\n"
 "# stale   = \"24h\"           # a branch without a live agent stays active this long after its last index\n"
 "# exclude = []              # branch-name globs never folded in\n"
-"# index   = false           # check the projection out and index it as branch codify/projection\n";
+"# index   = false           # check the projection out and index it as branch codify/projection\n"
+"\n"
+"[fleet]\n"
+"# discover = true           # fleet status/tree, serve and watch --fleet run cg fleet discover first (once per 10s)\n";
 
 /* ---------------- reading and validating ---------------- */
 
@@ -214,6 +221,7 @@ static void cfg_defaults(CgConfig *c, const char *root) {
     snprintf(c->root, sizeof c->root, "%s", root);
     snprintf(c->file, sizeof c->file, "%s/%s", root, CG_CONFIG_FILE);
     c->sync_auto = true;
+    c->fleet_discover = true;                  /* codify-v15 2.4 */
     snprintf(c->proj_stale_s, sizeof c->proj_stale_s, "24h");
     c->proj_stale = 86400;
     for (int i = 0; i < CFG_NKEYS; i++) {
@@ -278,6 +286,7 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
                           x->raw, CFG_KEYS[i].dflt);
             else {
                 if (i == CFG_PROJ_INDEX) c->proj_index = b == 1;
+                else if (i == CFG_FLEET_DISCOVER) c->fleet_discover = b == 1;
                 else c->sync_auto = b == 1;
                 c->from_file[i] = true;
             }
@@ -396,6 +405,10 @@ long config_projection_stale(const char *root) {
 }
 bool config_projection_index(const char *root) {
     return config_load(root)->proj_index;
+}
+/* codify-v15 2.4 */
+bool config_fleet_discover(const char *root) {
+    return config_load(root)->fleet_discover;
 }
 int config_projection_exclude(const char *root, char ***out) {
     *out = NULL;
@@ -545,6 +558,7 @@ static void cfg_root(char *out, size_t cap) {
 static const char *cfg_value(const CgConfig *c, int i) {
     if (i == CFG_SYNC_AUTO) return c->sync_auto ? "true" : "false";
     if (i == CFG_PROJ_INDEX) return c->proj_index ? "true" : "false";
+    if (i == CFG_FLEET_DISCOVER) return c->fleet_discover ? "true" : "false";
     if (i == CFG_PROJ_BASE) return c->proj_base;
     if (i == CFG_PROJ_STALE) return c->proj_stale_s;
     if (i == CFG_PROJ_EXCLUDE) return c->proj_exclude;

@@ -51,7 +51,7 @@
     - fleet.js: a Sessions root under the fleet tree built from fleet tree --json native[], with ages, state, worktree branch merge state, task, last tool; agent.native.* events patch the rows live through the serve reducer; commands to open the worktree and the transcript.
     - serve.c: the refresh runs the discovery hook (a no-op until 2.4 lands) and carries native rows in its snapshot; 14_vscode.sh fleet section and 31_serve.sh assert the model from real cg output.
     - _Requirements: 6.4, 6.5_
-  - [ ] 2.4 cg fleet discover: native agents from the transcripts the hosts already write
+  - [-] 2.4 cg fleet discover: native agents from the transcripts the hosts already write
     - recap.c: lift the transcript directory lookup into one shared helper; native.c: discover over Claude Code sessions, subagents meta.json, and Codex rollouts per req 7.1, never overwriting hook-written fields, stale marks, --json.
     - fleet status, fleet tree, serve refresh, watch --fleet run discovery first under [fleet] discover (default true), once per 10 s per process, --no-discover; config.c knows the key.
     - tests/fixtures/native and 50_discover.sh per req 7.4.

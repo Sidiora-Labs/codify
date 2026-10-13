@@ -268,6 +268,7 @@ enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PATH_CODEMAP, CFG_INDEX_WORKERS,
        /* codify-v15 3.1 */
        CFG_PROJ_BASE, CFG_PROJ_STALE, CFG_PROJ_EXCLUDE, CFG_PROJ_INDEX,
+       CFG_FLEET_DISCOVER,                 /* codify-v15 2.4 */
        CFG_NKEYS };
 typedef struct {
     char root[4096];
@@ -282,6 +283,7 @@ typedef struct {
     long proj_stale;           /* seconds */
     char proj_exclude[1024];   /* globs, comma-joined */
     bool proj_index;           /* check out and index the projection */
+    bool fleet_discover;       /* codify-v15 2.4: [fleet] discover */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -799,6 +801,24 @@ int  native_fleet_tree_json(Cg *cg, const char *feature);
 bool native_counts(Cg *cg, int *live, int *subs, int *branches);
 void native_summary(Cg *cg, StrBuf *b, bool json);  /* brief/state line */
 void native_flags(int argc, char **argv);
+/* codify-v15 2.4 */
+/* The project's transcript directories (recap.c), shared by cg recap and cg
+ * fleet discover: Claude Code's ~/.claude/projects/<root, non-alnum -> '-'>
+ * and Codex's ~/.codex/sessions; either out may be NULL. */
+void transcript_dirs(const char *root, char *claude, size_t ccap,
+                     char *codex, size_t xcap);
+/* a Codex rollout's session_meta: cwd, id, timestamp; false if none */
+bool transcript_codex_head(const char *path, char *cwd, size_t ccap,
+                           char *id, size_t icap, char *ts, size_t tcap);
+/* cg fleet discover (native.c): native rows from the transcripts the hosts
+ * write, for what hooks did not report. native_discover_auto runs it first
+ * in fleet status/tree, serve's refresh, and watch --fleet when [fleet]
+ * discover is true, at most once per 10 s per process; --no-discover (a
+ * global flag) sets native_no_discover. */
+extern bool native_no_discover;
+int  cmd_fleet_discover(Cg *cg, int argc, char **argv, bool json);
+void native_discover_auto(Cg *cg);
+bool config_fleet_discover(const char *root);   /* [fleet] discover */
 int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility);
 int integrate_plan(Cg *cg, bool json);
 int integrate_apply(Cg *cg, bool json);

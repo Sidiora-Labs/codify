@@ -2499,6 +2499,10 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     }
     native_flags(argc, argv);                   /* --all: old sessions too */
     if (strcmp(sub, "roles") == 0) return fleet_roles(cg, json);
+    if (strcmp(sub, "discover") == 0)            /* codify-v15 2.4 */
+        return cmd_fleet_discover(cg, argc - 3, argv + 3, json);
+    if (strcmp(sub, "status") == 0 || strcmp(sub, "tree") == 0)
+        native_discover_auto(cg);               /* hooks missed: transcripts */
     if (strcmp(sub, "status") == 0) return fleet_status(cg, json);
     if (strcmp(sub, "plan") == 0) return fleet_plan(cg, feature, json);
     /* the running shape of the fleet — main, its managers, their workers —
@@ -2578,7 +2582,7 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
         return seq > 0 ? 0 : 1;
     }
     fprintf(stderr, "usage: cg fleet roles | status | plan [-f F] | "
-                    "tree [-f F] | begin <id> [-f F] [--agent A] | "
+                    "tree [-f F] | discover [--since DUR] | begin <id> [-f F] [--agent A] | "
                     "merge-up <id> [--force] [--keep] | land <feature> "
                     "[--no-pr] | pr <feature> [--dry-run] | checkpoint "
                     "[--dry-run]\n");

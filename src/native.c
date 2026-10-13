@@ -25,6 +25,7 @@
  * sessions stopped for more than a day unless --all. */
 #include "cg.h"
 #include <ctype.h>
+#include <dirent.h>
 #include <time.h>
 #include <limits.h>
 #include <sys/stat.h>
@@ -327,11 +328,11 @@ static bool task_in_text(const char *text, char *out, size_t cap) {
  * task id of the active feature named in the spawn's description or prompt;
  * the parent's task. Returns the source ("env", "attempt", "prompt",
  * "parent") with task filled, or NULL with task empty. */
-const char *native_attribute_task(Cg *cg, const char *session,
+static const char *attribute_task(Cg *cg, bool use_env, const char *session,
                                   const char *description, const char *prompt,
                                   const char *parent, char *task, size_t cap) {
     task[0] = 0;
-    const char *env = getenv("CG_TASK");
+    const char *env = use_env ? getenv("CG_TASK") : NULL;
     if (env && env[0]) { snprintf(task, cap, "%s", env); return "env"; }
     if (session && session[0]) {
         sqlite3_stmt *st = cg_prep(cg,
@@ -351,6 +352,13 @@ const char *native_attribute_task(Cg *cg, const char *session,
         if (p.task[0]) { snprintf(task, cap, "%s", p.task); return "parent"; }
     }
     return NULL;
+}
+
+const char *native_attribute_task(Cg *cg, const char *session,
+                                  const char *description, const char *prompt,
+                                  const char *parent, char *task, size_t cap) {
+    return attribute_task(cg, true, session, description, prompt, parent,
+                          task, cap);
 }
 
 /* ---------------- events ---------------- */
@@ -1180,4 +1188,807 @@ void native_summary(Cg *cg, StrBuf *b, bool json) {
 void native_flags(int argc, char **argv) {
     for (int i = 0; i < argc; i++)
         if (strcmp(argv[i], "--all") == 0) native_show_all = true;
+}
+
+/* ---------------- cg fleet discover ---------------- */
+
+/* Hosts without hooks — an older host, a hook the user has not trusted, a
+ * session started before the plugin — still write transcripts. Discovery
+ * reads them (spec/codify-v15 req 7):
+ *   - Claude Code: <claude dir>/<session>.jsonl and, per session,
+ *     <session>/subagents/agent-<id>.jsonl with agent-<id>.meta.json
+ *     (agentType, worktreePath, worktreeBranch, description, model,
+ *     spawnDepth, toolUseId); the claude dirs are those of the main tree, of
+ *     this tree, and of every registered worktree;
+ *   - Codex: rollouts whose session_meta cwd is inside this project.
+ * Directories come from transcript_dirs (recap.c), the one lookup recap uses.
+ *
+ * Provenance: the agents column `discovered` (added on first use) lists the
+ * fields discovery wrote, "row" first when discovery created the row. A field
+ * is written only while it is empty, so whatever a hook wrote is never
+ * overwritten, and a hook arriving later simply wins. Two things move on a
+ * row after it is filled: `seen` follows the transcript's mtime on rows
+ * discovery created; and `state` goes live -> stale when the transcript and
+ * the last hook are both older than 15 minutes, back to live (only when
+ * discovery set the stale) when the transcript moves again — any hook's
+ * heartbeat makes it live as well. A pending spawn named by a meta.json's
+ * toolUseId is claimed exactly as SubagentStart claims it. */
+
+#define DISCOVER_STALE_S   900     /* transcript untouched: the agent is stale */
+#define DISCOVER_EVERY_S   10      /* automatic runs: at most one per process */
+#define DISCOVER_HEAD_LINES 400    /* lines read for cwd, model, prompt */
+
+bool native_no_discover = false;
+
+typedef struct {
+    long now, oldest;
+    StrBuf found, changed;
+    int nfound, nchanged, nclaude, ncodex;
+    char **seen_dirs;
+    int nseen_dirs;
+} Disc;
+
+/* one agent's changes during this run, reported once */
+typedef struct {
+    char agent[256];
+    bool created;
+    char claimed[256];
+    StrBuf fields;
+    const char *state;
+} Delta;
+
+static void delta_init(Delta *d, const char *agent) {
+    memset(d, 0, sizeof *d);
+    snprintf(d->agent, sizeof d->agent, "%s", agent);
+    sb_init(&d->fields);
+}
+
+static void delta_field(Delta *d, const char *f) {
+    if (d->fields.len) sb_putc(&d->fields, ',');
+    sb_putc(&d->fields, '"');
+    sb_puts(&d->fields, f);
+    sb_putc(&d->fields, '"');
+}
+
+static void delta_done(Disc *D, Delta *d) {
+    if (d->created || d->fields.len || d->state || d->claimed[0]) {
+        if (D->nchanged++) sb_putc(&D->changed, ',');
+        sb_puts(&D->changed, "{\"agent\":");
+        sb_json_str(&D->changed, d->agent);
+        sb_printf(&D->changed, ",\"created\":%s,\"fields\":[%s]",
+                  d->created ? "true" : "false", d->fields.len ? d->fields.p : "");
+        put_kv(&D->changed, "state", d->state);
+        put_kv(&D->changed, "claimed", d->claimed);
+        sb_putc(&D->changed, '}');
+    }
+    sb_free(&d->fields);
+}
+
+static long mtime_of(const char *p) {
+    struct stat st;
+    return stat(p, &st) == 0 ? (long)st.st_mtime : 0;
+}
+
+static bool is_dir(const char *p) {
+    struct stat st;
+    return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static bool ends_with(const char *s, const char *suf) {
+    size_t n = strlen(s), m = strlen(suf);
+    return n >= m && strcmp(s + n - m, suf) == 0;
+}
+
+/* 2026-10-13T01:10:53.654Z -> epoch seconds; 0 when unreadable */
+static long iso_time(const char *ts) {
+    if (!ts || !ts[0]) return 0;
+    struct tm tm;
+    memset(&tm, 0, sizeof tm);
+    if (sscanf(ts, "%d-%d-%dT%d:%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+               &tm.tm_hour, &tm.tm_min, &tm.tm_sec) != 6)
+        return 0;
+    tm.tm_year -= 1900;
+    tm.tm_mon -= 1;
+    return (long)timegm(&tm);
+}
+
+static bool has_agents_column(Cg *cg, const char *col) {
+    sqlite3_stmt *q = NULL;
+    bool have = false;
+    if (sqlite3_prepare_v2(cg->db, "SELECT 1 FROM pragma_table_info('agents') "
+                           "WHERE name=?", -1, &q, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(q, 1, col, -1, SQLITE_STATIC);
+        have = sqlite3_step(q) == SQLITE_ROW;
+        sqlite3_finalize(q);
+    }
+    return have;
+}
+
+/* false on a database without the native columns (before schema 18) */
+static bool ensure_discovered_column(Cg *cg) {
+    if (!has_agents_column(cg, "state")) return false;
+    if (!has_agents_column(cg, "discovered"))
+        exec_ok(cg, "ALTER TABLE agents ADD COLUMN discovered TEXT");
+    return has_agents_column(cg, "discovered");
+}
+
+/* is field f in the agent's discovered list? */
+static bool disc_has(Cg *cg, const char *agent, const char *f) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT 1 FROM agents WHERE agent=? AND "
+        "instr(','||ifnull(discovered,'')||',', ','||?||',')>0");
+    sqlite3_bind_text(st, 1, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, f, -1, SQLITE_TRANSIENT);
+    bool r = sqlite3_step(st) == SQLITE_ROW;
+    sqlite3_finalize(st);
+    return r;
+}
+
+static void disc_note(Cg *cg, const char *agent, const char *f) {
+    if (disc_has(cg, agent, f)) return;
+    sqlite3_stmt *st = cg_prep(cg,
+        "UPDATE agents SET discovered=CASE WHEN ifnull(discovered,'')='' "
+        "THEN ?1 ELSE discovered||','||?1 END WHERE agent=?2");
+    sqlite3_bind_text(st, 1, f, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+}
+
+/* Write column col only while it is empty: a hook's value always stands. */
+static void fill(Cg *cg, Delta *d, const char *col, const char *v) {
+    if (!v || !v[0]) return;
+    char sql[256];
+    snprintf(sql, sizeof sql, "UPDATE agents SET %s=? WHERE agent=? AND "
+             "(%s IS NULL OR %s='')", col, col, col);
+    sqlite3_stmt *st = cg_prep(cg, sql);
+    sqlite3_bind_text(st, 1, v, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, d->agent, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (sqlite3_changes(cg->db) > 0) {
+        disc_note(cg, d->agent, col);
+        delta_field(d, col);
+    }
+}
+
+static void fill_int(Cg *cg, Delta *d, const char *col, long v) {
+    if (v <= 0) return;
+    char sql[256];
+    snprintf(sql, sizeof sql, "UPDATE agents SET %s=? WHERE agent=? AND "
+             "%s IS NULL", col, col);
+    sqlite3_stmt *st = cg_prep(cg, sql);
+    sqlite3_bind_int64(st, 1, v);
+    sqlite3_bind_text(st, 2, d->agent, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (sqlite3_changes(cg->db) > 0) {
+        disc_note(cg, d->agent, col);
+        delta_field(d, col);
+    }
+}
+
+/* A row discovery creates: live, seen at the transcript's mtime. */
+static void disc_create(Cg *cg, Delta *d, const char *host, const char *session,
+                        const char *parent, const char *agent_id, long depth,
+                        long started, long mtime, const char *task,
+                        const char *task_source) {
+    sqlite3_stmt *st = cg_prep(cg,
+        "INSERT INTO agents(agent,kind,host,host_kind,session,parent,agent_id,"
+        "depth,state,started,seen,task,task_source,discovered) "
+        "VALUES(?,'native',?,?,?,?,?,?,'live',?,?,?,?,'row') "
+        "ON CONFLICT(agent) DO NOTHING");
+    sqlite3_bind_text(st, 1, d->agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, machine(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, host, -1, SQLITE_TRANSIENT);
+    bind_s(st, 4, session);
+    bind_s(st, 5, parent);
+    bind_s(st, 6, agent_id);
+    sqlite3_bind_int64(st, 7, depth);
+    sqlite3_bind_int64(st, 8, started > 0 ? started : mtime);
+    sqlite3_bind_int64(st, 9, mtime);
+    bind_s(st, 10, task);
+    bind_s(st, 11, task_source);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    d->created = sqlite3_changes(cg->db) > 0;
+}
+
+/* seen and the stale mark, from the transcript's mtime */
+static void disc_liveness(Cg *cg, Disc *D, Delta *d, long mtime) {
+    if (mtime <= 0) return;
+    if (disc_has(cg, d->agent, "row")) {
+        sqlite3_stmt *st = cg_prep(cg,
+            "UPDATE agents SET seen=? WHERE agent=? AND seen<?");
+        sqlite3_bind_int64(st, 1, mtime);
+        sqlite3_bind_text(st, 2, d->agent, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 3, mtime);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+    char state[16] = "";
+    long seen = 0;
+    sqlite3_stmt *st = cg_prep(cg, "SELECT ifnull(state,''),seen FROM agents "
+                                   "WHERE agent=?");
+    sqlite3_bind_text(st, 1, d->agent, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        col_cpy(st, 0, state, sizeof state);
+        seen = (long)sqlite3_column_int64(st, 1);
+    }
+    sqlite3_finalize(st);
+    long last = seen > mtime ? seen : mtime;
+    const char *to = NULL;
+    if (strcmp(state, "live") == 0 && D->now - last > DISCOVER_STALE_S)
+        to = "stale";
+    else if (strcmp(state, "stale") == 0 && D->now - mtime <= DISCOVER_STALE_S &&
+             disc_has(cg, d->agent, "state"))
+        to = "live";
+    if (!to) return;
+    st = cg_prep(cg, "UPDATE agents SET state=? WHERE agent=?");
+    sqlite3_bind_text(st, 1, to, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, d->agent, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    disc_note(cg, d->agent, "state");
+    d->state = to;
+}
+
+/* Where an agent works: cwd, branch, and — inside a linked worktree of this
+ * project — the worktree, registered as req 6 ac_2 registers it (base: the
+ * session's branch). Only empty columns are written. */
+static void disc_place(Cg *cg, Delta *d, const char *sname, const char *cwd,
+                       const char *wt_hint) {
+    char wt[4096] = "", br[256] = "", head[65] = "";
+    bool linked = false;
+    if (wt_hint && wt_hint[0] && is_dir(wt_hint))
+        linked = native_worktree(cg, wt_hint, wt, sizeof wt, br, sizeof br,
+                                 head, sizeof head);
+    if (!linked && cwd && cwd[0])
+        linked = native_worktree(cg, cwd, wt, sizeof wt, br, sizeof br,
+                                 head, sizeof head);
+    bool named = br[0] && strcmp(br, "(detached)") != 0;
+    if (linked && named) {
+        char base[256] = "";
+        if (strcmp(d->agent, sname) != 0) session_branch(cg, sname, base, sizeof base);
+        if (strcmp(base, br) == 0) base[0] = 0;
+        branch_register(cg, br, wt, head, base[0] ? base : NULL);
+        fill(cg, d, "worktree", wt);
+    }
+    fill(cg, d, "cwd", linked ? wt : cwd);
+    if (named) fill(cg, d, "branch", br);
+}
+
+static void disc_found(Disc *D, const char *agent, const char *host,
+                       const char *kind, const char *session,
+                       const char *transcript, long mtime) {
+    if (D->nfound++) sb_putc(&D->found, ',');
+    sb_puts(&D->found, "{\"agent\":");
+    sb_json_str(&D->found, agent);
+    put_kv(&D->found, "host", host);
+    put_kv(&D->found, "kind", kind);
+    put_kv(&D->found, "session", session);
+    put_kv(&D->found, "transcript", transcript);
+    sb_printf(&D->found, ",\"mtime\":%ld,\"stale\":%s}", mtime,
+              D->now - mtime > DISCOVER_STALE_S ? "true" : "false");
+}
+
+static void disc_finish(Cg *cg, Disc *D, Delta *d) {
+    if (d->created)
+        emit(cg, "agent.native.start", d->agent, d->agent,
+             ",\"source\":\"discover\"");
+    delta_done(D, d);
+}
+
+/* The first lines of a Claude Code transcript: cwd, model, the first
+ * timestamp, and (want_prompt) the first user message when it is text. */
+typedef struct { char cwd[4096], model[128], ts[64]; char *prompt; } Head;
+
+static void claude_head(const char *path, Head *h, bool want_prompt) {
+    memset(h, 0, sizeof *h);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char *line = NULL; size_t cap = 0;
+    for (int n = 0; n < DISCOVER_HEAD_LINES && getline(&line, &cap, f) > 0; n++) {
+        if (!h->cwd[0]) {
+            char *v = jstr(line, "cwd");
+            if (v) snprintf(h->cwd, sizeof h->cwd, "%s", v);
+            free(v);
+        }
+        if (!h->ts[0]) {
+            char *v = jstr(line, "timestamp");
+            if (v) snprintf(h->ts, sizeof h->ts, "%s", v);
+            free(v);
+        }
+        char *type = jstr(line, "type");
+        bool asst = type && strcmp(type, "assistant") == 0;
+        bool user = type && strcmp(type, "user") == 0;
+        free(type);
+        if ((asst && !h->model[0]) || (user && want_prompt && !h->prompt)) {
+            char *m = json_get_object(line, "message");
+            if (asst) {
+                char *v = jstr(m, "model");
+                if (v && strcmp(v, "<synthetic>") != 0)
+                    snprintf(h->model, sizeof h->model, "%s", v);
+                free(v);
+            } else {
+                h->prompt = jstr(m, "content");   /* NULL for block arrays */
+            }
+            free(m);
+        }
+        if (h->cwd[0] && h->model[0] && h->ts[0] && (!want_prompt || h->prompt))
+            break;
+    }
+    free(line);
+    fclose(f);
+}
+
+/* The agent that spawned a nested subagent: the sibling whose transcript
+ * holds the spawn's tool_use id. */
+static void nested_parent(const char *subdir, const char *self_id,
+                          const char *tuid, char *out, size_t cap) {
+    out[0] = 0;
+    DIR *dd = opendir(subdir);
+    if (!dd) return;
+    struct dirent *de;
+    while ((de = readdir(dd)) != NULL && !out[0]) {
+        const char *n = de->d_name;
+        if (strncmp(n, "agent-", 6) != 0 || !ends_with(n, ".jsonl")) continue;
+        char id[256];
+        snprintf(id, sizeof id, "%.*s", (int)(strlen(n) - 12), n + 6);
+        if (!id[0] || strcmp(id, self_id) == 0) continue;
+        char p[4700];
+        int w = snprintf(p, sizeof p, "%s/%s", subdir, n);
+        if (w <= 0 || (size_t)w >= sizeof p) continue;
+        char *body = read_entire_file(p, NULL);
+        if (body && strstr(body, tuid) &&
+            snprintf(out, cap, "claude:%s", id) >= (int)cap)
+            out[0] = 0;
+        free(body);
+    }
+    closedir(dd);
+}
+
+static void discover_subagent(Cg *cg, Disc *D, const char *sid,
+                              const char *sname, const char *subdir,
+                              const char *aid) {
+    char tpath[4700], mpath[4700];
+    int w1 = snprintf(tpath, sizeof tpath, "%s/agent-%s.jsonl", subdir, aid);
+    int w2 = snprintf(mpath, sizeof mpath, "%s/agent-%s.meta.json", subdir, aid);
+    if (w1 <= 0 || w2 <= 0 || (size_t)w1 >= sizeof tpath ||
+        (size_t)w2 >= sizeof mpath)
+        return;
+    long mtime = mtime_of(tpath);
+    bool have_t = mtime > 0;
+    if (!mtime) mtime = mtime_of(mpath);
+    if (!mtime) return;
+    char *meta = read_entire_file(mpath, NULL);
+    char *m_type = jstr(meta, "agentType"), *m_wt = jstr(meta, "worktreePath"),
+         *m_desc = jstr(meta, "description"), *m_model = jstr(meta, "model"),
+         *m_tuid = jstr(meta, "toolUseId"), *m_wbr = jstr(meta, "worktreeBranch");
+    long m_depth = meta ? json_get_int(meta, "spawnDepth", 0) : 0;
+
+    char name[256];
+    snprintf(name, sizeof name, "claude:%s", aid);
+    Delta d;
+    delta_init(&d, name);
+    NRow r;
+    row_get(cg, name, &r);
+
+    /* a spawn a PreToolUse hook announced and no SubagentStart claimed */
+    NRow pr;
+    memset(&pr, 0, sizeof pr);
+    char pending[256] = "";
+    if (!r.found && m_tuid) {
+        snprintf(pending, sizeof pending, "claude:spawn:%s", m_tuid);
+        row_get(cg, pending, &pr);
+        if (!pr.found || strcmp(pr.state, "pending") != 0) {
+            pending[0] = 0;
+            memset(&pr, 0, sizeof pr);
+        }
+    }
+    Head h;
+    claude_head(tpath, &h, true);
+    char parent[256] = "";
+    if (pr.found && pr.parent[0]) snprintf(parent, sizeof parent, "%s", pr.parent);
+    else if (m_depth > 1 && m_tuid)
+        nested_parent(subdir, aid, m_tuid, parent, sizeof parent);
+    if (!parent[0]) snprintf(parent, sizeof parent, "%s", sname);
+    long depth = pr.found ? pr.depth : m_depth > 0 ? m_depth : 1;
+    if (!r.found) {
+        disc_create(cg, &d, "claude", sid, parent, aid, depth, iso_time(h.ts),
+                    mtime, pr.task[0] ? pr.task : NULL,
+                    pr.task_source[0] ? pr.task_source : NULL);
+        if (pending[0] && d.created) {
+            sqlite3_stmt *st = cg_prep(cg, "DELETE FROM agents WHERE agent=?");
+            sqlite3_bind_text(st, 1, pending, -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+            snprintf(d.claimed, sizeof d.claimed, "%s", pending);
+        }
+    }
+    fill(cg, &d, "parent", parent);
+    fill(cg, &d, "session", sid);
+    fill(cg, &d, "agent_id", aid);
+    fill(cg, &d, "agent_type", m_type ? m_type : "general-purpose");
+    fill(cg, &d, "description", pr.description[0] ? pr.description : m_desc);
+    fill(cg, &d, "model", pr.model[0] ? pr.model : m_model ? m_model : h.model);
+    fill_int(cg, &d, "depth", depth);
+    if (have_t) fill(cg, &d, "transcript", tpath);
+    disc_place(cg, &d, sname, h.cwd[0] ? h.cwd : NULL, m_wt);
+    if (m_wbr) fill(cg, &d, "branch", m_wbr);
+    NRow now;
+    row_get(cg, name, &now);
+    if (!now.task[0]) {
+        char task[256];
+        const char *src = attribute_task(cg, false, sid, now.description,
+                                         h.prompt, now.parent, task, sizeof task);
+        if (src) {
+            fill(cg, &d, "task", task);
+            fill(cg, &d, "task_source", src);
+        }
+    }
+    disc_liveness(cg, D, &d, mtime);
+    disc_found(D, name, "claude", "subagent", sid, have_t ? tpath : mpath, mtime);
+    D->nclaude++;
+    disc_finish(cg, D, &d);
+    free(h.prompt);
+    free(meta); free(m_type); free(m_wt); free(m_desc); free(m_model);
+    free(m_tuid); free(m_wbr);
+}
+
+static long meta_depth(const char *subdir, const char *aid) {
+    char mp[4700];
+    int w = snprintf(mp, sizeof mp, "%s/agent-%s.meta.json", subdir, aid);
+    if (w <= 0 || (size_t)w >= sizeof mp) return 1;
+    char *meta = read_entire_file(mp, NULL);
+    long dep = meta ? json_get_int(meta, "spawnDepth", 1) : 1;
+    free(meta);
+    return dep;
+}
+
+static void discover_session(Cg *cg, Disc *D, const char *dir, const char *sid) {
+    char tpath[4700], subdir[4700];
+    int w1 = snprintf(tpath, sizeof tpath, "%s/%s.jsonl", dir, sid);
+    int w2 = snprintf(subdir, sizeof subdir, "%s/%s/subagents", dir, sid);
+    if (w1 <= 0 || w2 <= 0 || (size_t)w1 >= sizeof tpath ||
+        (size_t)w2 >= sizeof subdir)
+        return;
+    long smtime = mtime_of(tpath), newest = smtime;
+
+    /* the subagents of the session, each by its id */
+    char **ids = NULL;
+    int nids = 0, cids = 0;
+    DIR *dd = opendir(subdir);
+    if (dd) {
+        struct dirent *de;
+        while ((de = readdir(dd)) != NULL) {
+            const char *n = de->d_name;
+            if (strncmp(n, "agent-", 6) != 0) continue;
+            size_t cut = ends_with(n, ".meta.json") ? 10
+                       : ends_with(n, ".jsonl") ? 6 : 0;
+            if (!cut || strlen(n) <= 6 + cut) continue;
+            char id[256];
+            snprintf(id, sizeof id, "%.*s", (int)(strlen(n) - 6 - cut), n + 6);
+            char p[4700];
+            int w = snprintf(p, sizeof p, "%s/%s", subdir, n);
+            if (w > 0 && (size_t)w < sizeof p) {
+                long m = mtime_of(p);
+                if (m > newest) newest = m;
+            }
+            bool dup = false;
+            for (int i = 0; i < nids && !dup; i++) dup = !strcmp(ids[i], id);
+            if (dup) continue;
+            if (nids == cids) {
+                cids = cids ? cids * 2 : 8;
+                ids = xrealloc(ids, sizeof *ids * (size_t)cids);
+            }
+            ids[nids++] = xstrdup(id);
+        }
+        closedir(dd);
+    }
+    if (newest > 0 && newest >= D->oldest) {
+        char sname[160];
+        snprintf(sname, sizeof sname, "claude:%.8s", sid);
+        Delta d;
+        delta_init(&d, sname);
+        NRow r;
+        row_get(cg, sname, &r);
+        Head h;
+        memset(&h, 0, sizeof h);
+        if (smtime && (!r.found || !r.cwd[0] || !r.model[0]))
+            claude_head(tpath, &h, false);
+        long when = smtime ? smtime : newest;
+        if (!r.found)
+            disc_create(cg, &d, "claude", sid, NULL, NULL, 0, iso_time(h.ts),
+                        when, NULL, NULL);
+        fill(cg, &d, "session", sid);
+        fill(cg, &d, "model", h.model);
+        if (smtime) fill(cg, &d, "transcript", tpath);
+        if (h.cwd[0]) disc_place(cg, &d, sname, h.cwd, NULL);
+        if (!r.task[0]) {
+            char task[256];
+            const char *src = attribute_task(cg, false, sid, NULL, NULL, NULL,
+                                             task, sizeof task);
+            if (src) { fill(cg, &d, "task", task); fill(cg, &d, "task_source", src); }
+        }
+        disc_liveness(cg, D, &d, when);
+        disc_found(D, sname, "claude", "session", sid, smtime ? tpath : subdir,
+                   when);
+        D->nclaude++;
+        disc_finish(cg, D, &d);
+        /* depth 1 first, so a nested subagent finds its parent's row */
+        for (int pass = 0; pass < 2; pass++)
+            for (int i = 0; i < nids; i++) {
+                bool top = meta_depth(subdir, ids[i]) <= 1;
+                if ((pass == 0) == top)
+                    discover_subagent(cg, D, sid, sname, subdir, ids[i]);
+            }
+    }
+    for (int i = 0; i < nids; i++) free(ids[i]);
+    free(ids);
+}
+
+static void discover_claude_dir(Cg *cg, Disc *D, const char *dir) {
+    for (int i = 0; i < D->nseen_dirs; i++)
+        if (strcmp(D->seen_dirs[i], dir) == 0) return;
+    D->seen_dirs = xrealloc(D->seen_dirs,
+                            sizeof(char *) * (size_t)(D->nseen_dirs + 1));
+    D->seen_dirs[D->nseen_dirs++] = xstrdup(dir);
+    DIR *dd = opendir(dir);
+    if (!dd) return;
+    char **sids = NULL;
+    int n = 0, c = 0;
+    struct dirent *de;
+    while ((de = readdir(dd)) != NULL) {
+        const char *nm = de->d_name;
+        if (nm[0] == '.') continue;
+        char sid[256];
+        if (ends_with(nm, ".jsonl")) {
+            snprintf(sid, sizeof sid, "%.*s", (int)(strlen(nm) - 6), nm);
+        } else {
+            char p[4700];
+            int w = snprintf(p, sizeof p, "%s/%s/subagents", dir, nm);
+            if (w <= 0 || (size_t)w >= sizeof p || !is_dir(p)) continue;
+            snprintf(sid, sizeof sid, "%s", nm);
+        }
+        bool dup = !sid[0];
+        for (int i = 0; i < n && !dup; i++) dup = !strcmp(sids[i], sid);
+        if (dup) continue;
+        if (n == c) {
+            c = c ? c * 2 : 16;
+            sids = xrealloc(sids, sizeof *sids * (size_t)c);
+        }
+        sids[n++] = xstrdup(sid);
+    }
+    closedir(dd);
+    for (int i = 0; i < n; i++) {
+        discover_session(cg, D, dir, sids[i]);
+        free(sids[i]);
+    }
+    free(sids);
+}
+
+/* Claude Code: the project directories of the main tree, this tree, and
+ * every registered worktree (a session opened inside a worktree). */
+static void discover_claude(Cg *cg, Disc *D) {
+    char dir[4300];
+    transcript_dirs(cg->shared, dir, sizeof dir, NULL, 0);
+    discover_claude_dir(cg, D, dir);
+    transcript_dirs(cg->root, dir, sizeof dir, NULL, 0);
+    discover_claude_dir(cg, D, dir);
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT worktree FROM branches WHERE "
+                           "worktree IS NOT NULL AND worktree<>''", -1, &st,
+                           NULL) != SQLITE_OK)
+        return;
+    char **wts = NULL;
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        wts = xrealloc(wts, sizeof(char *) * (size_t)(n + 1));
+        wts[n++] = xstrdup((const char *)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    for (int i = 0; i < n; i++) {
+        transcript_dirs(wts[i], dir, sizeof dir, NULL, 0);
+        discover_claude_dir(cg, D, dir);
+        free(wts[i]);
+    }
+    free(wts);
+}
+
+/* a working directory inside this project: the main tree or any of its
+ * linked worktrees */
+static bool in_project(Cg *cg, const char *cwd) {
+    size_t n = strlen(cg->shared);
+    if (strncmp(cwd, cg->shared, n) == 0 && (cwd[n] == 0 || cwd[n] == '/'))
+        return true;
+    char root[4096], shared[4096];
+    if (!is_dir(cwd) || cg_find_project_at(cwd, root, shared, sizeof root) != 0)
+        return false;
+    return same_dir(shared, cg->shared);
+}
+
+/* the model a rollout ran with: the first turn_context's payload.model */
+static void codex_model(const char *path, char *out, size_t cap) {
+    out[0] = 0;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char *line = NULL; size_t lc = 0;
+    for (int n = 0; n < DISCOVER_HEAD_LINES && getline(&line, &lc, f) > 0; n++) {
+        if (!strstr(line, "\"turn_context\"")) continue;
+        char *pl = json_get_object(line, "payload");
+        char *m = jstr(pl, "model");
+        if (m) snprintf(out, cap, "%s", m);
+        free(m); free(pl);
+        if (out[0]) break;
+    }
+    free(line);
+    fclose(f);
+}
+
+static void discover_codex_file(Cg *cg, Disc *D, const char *path, long mtime) {
+    char cwd[4096], id[256], ts[64];
+    if (!transcript_codex_head(path, cwd, sizeof cwd, id, sizeof id, ts, sizeof ts))
+        return;
+    if (!id[0] || !in_project(cg, cwd)) return;
+    char name[160];
+    snprintf(name, sizeof name, "codex:%.8s", id);
+    Delta d;
+    delta_init(&d, name);
+    NRow r;
+    row_get(cg, name, &r);
+    if (!r.found)
+        disc_create(cg, &d, "codex", id, NULL, NULL, 0, iso_time(ts), mtime,
+                    NULL, NULL);
+    fill(cg, &d, "session", id);
+    if (!r.model[0]) {
+        char model[128];
+        codex_model(path, model, sizeof model);
+        fill(cg, &d, "model", model);
+    }
+    fill(cg, &d, "transcript", path);
+    disc_place(cg, &d, name, cwd, NULL);
+    if (!r.task[0]) {
+        char task[256];
+        const char *src = attribute_task(cg, false, id, NULL, NULL, NULL,
+                                         task, sizeof task);
+        if (src) { fill(cg, &d, "task", task); fill(cg, &d, "task_source", src); }
+    }
+    disc_liveness(cg, D, &d, mtime);
+    disc_found(D, name, "codex", "session", id, path, mtime);
+    D->ncodex++;
+    disc_finish(cg, D, &d);
+}
+
+static void discover_codex_in(Cg *cg, Disc *D, const char *dir, int depth) {
+    DIR *dd = opendir(dir);
+    if (!dd) return;
+    struct dirent *de;
+    while ((de = readdir(dd)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char p[4400];
+        int w = snprintf(p, sizeof p, "%s/%s", dir, de->d_name);
+        if (w <= 0 || (size_t)w >= sizeof p) continue;
+        struct stat st;
+        if (stat(p, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (depth < 4) discover_codex_in(cg, D, p, depth + 1);
+            continue;
+        }
+        if (strncmp(de->d_name, "rollout-", 8) != 0 ||
+            !ends_with(de->d_name, ".jsonl"))
+            continue;
+        if ((long)st.st_mtime < D->oldest) continue;
+        discover_codex_file(cg, D, p, (long)st.st_mtime);
+    }
+    closedir(dd);
+}
+
+/* Codex: every rollout changed within the window whose cwd is ours. */
+static void discover_codex(Cg *cg, Disc *D) {
+    char dir[4300];
+    transcript_dirs(cg->shared, NULL, 0, dir, sizeof dir);
+    discover_codex_in(cg, D, dir, 0);
+}
+
+/* One discovery pass under one write transaction. 0 ok, -1 busy, -2 a
+ * database without the native agent columns. */
+static int discover_run(Cg *cg, long since, Disc *D) {
+    memset(D, 0, sizeof *D);
+    D->now = (long)time(NULL);
+    D->oldest = since > 0 ? D->now - since : 0;
+    sb_init(&D->found);
+    sb_init(&D->changed);
+    sqlite3_busy_timeout(cg->db, NATIVE_BUSY_MS);
+    int rc = -1;
+    if (exec_ok(cg, "BEGIN IMMEDIATE")) {
+        if (!ensure_discovered_column(cg)) {
+            exec_ok(cg, "ROLLBACK");
+            rc = -2;
+        } else {
+            discover_claude(cg, D);
+            discover_codex(cg, D);
+            if (exec_ok(cg, "COMMIT")) rc = 0;
+            else exec_ok(cg, "ROLLBACK");
+        }
+    }
+    sqlite3_busy_timeout(cg->db, (int)cg->lock_wait_ms);
+    for (int i = 0; i < D->nseen_dirs; i++) free(D->seen_dirs[i]);
+    free(D->seen_dirs);
+    D->seen_dirs = NULL;
+    D->nseen_dirs = 0;
+    return rc;
+}
+
+static void disc_free(Disc *D) {
+    sb_free(&D->found);
+    sb_free(&D->changed);
+}
+
+/* cg fleet discover [--since DUR] [--json] */
+int cmd_fleet_discover(Cg *cg, int argc, char **argv, bool json) {
+    long since = 86400;
+    for (int i = 0; i < argc; i++)
+        if (strcmp(argv[i], "--since") == 0 && i + 1 < argc) {
+            since = hier_duration(argv[++i]);
+            if (since < 0) {
+                fprintf(stderr, "cg fleet discover: --since %s is not a "
+                                "duration (90s, 30m, 24h, 2d)\n", argv[i]);
+                return 1;
+            }
+        }
+    Disc D;
+    int drc = discover_run(cg, since, &D);
+    if (drc != 0) {
+        disc_free(&D);
+        fprintf(stderr, "cg fleet discover: %s\n", drc == -2
+                ? "the graph predates native agents (schema 18); run cg sync"
+                : "the database is busy; try again");
+        return 1;
+    }
+    if (json) {
+        printf("{\"since\":%ld,\"found\":[%s],\"changed\":[%s]}\n", since,
+               D.nfound ? D.found.p : "", D.nchanged ? D.changed.p : "");
+        disc_free(&D);
+        return 0;
+    }
+    printf("discovered %d agent%s from transcripts (%d claude, %d codex), "
+           "%d changed\n", D.nfound, D.nfound == 1 ? "" : "s", D.nclaude,
+           D.ncodex, D.nchanged);
+    /* the changes, one line each, read back from their JSON */
+    StrBuf arr; sb_init(&arr);
+    sb_printf(&arr, "[%s]", D.nchanged ? D.changed.p : "");
+    char **items = NULL;
+    int n = json_array_items(arr.p, &items);
+    for (int i = 0; i < n; i++) {
+        char *a = jstr(items[i], "agent"), *st = jstr(items[i], "state"),
+             *cl = jstr(items[i], "claimed"), *fl = json_get_raw(items[i], "fields"),
+             *cr = json_get_raw(items[i], "created");
+        bool created = cr && strcmp(cr, "true") == 0;
+        printf("  %s %s", created ? "+" : "~", a ? a : "?");
+        if (created) printf("  created");
+        if (fl && strcmp(fl, "[]") != 0) printf("  filled %s", fl);
+        if (st) printf("  now %s", st);
+        if (cl) printf("  claimed %s", cl);
+        putchar('\n');
+        free(a); free(st); free(cl); free(fl); free(cr); free(items[i]);
+    }
+    free(items);
+    sb_free(&arr);
+    disc_free(&D);
+    return 0;
+}
+
+/* The automatic run in front of the fleet views: quiet, bounded to one scan
+ * per DISCOVER_EVERY_S per process, off under [fleet] discover = false or
+ * --no-discover. */
+void native_discover_auto(Cg *cg) {
+    static long last;
+    if (native_no_discover || !config_fleet_discover(cg->root)) return;
+    long now = (long)time(NULL);
+    if (last && now - last < DISCOVER_EVERY_S) return;
+    last = now;
+    Disc D;
+    discover_run(cg, 86400, &D);
+    disc_free(&D);
 }

@@ -337,6 +337,7 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
     fflush(stdout);
     for (;;) {
         if (now_ms() >= next_scan) {
+            native_discover_auto(cg);           /* codify-v15 2.4 */
             fleet_scan(cg, &v, &n);
             next_scan = now_ms() + FLEET_POLL_MS;
             fflush(stdout);

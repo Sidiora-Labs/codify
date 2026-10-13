@@ -66,7 +66,7 @@ d="$("$CG" config --json)"
     || fail "origin of a set key: $d"
 [ "$(json_get "$d" '[s["value"] for s in d["settings"] if s["key"]=="sync.auto"][0]')" = False ] \
     || fail "sync.auto value in JSON: $d"
-[ "$(json_get "$d" 'len(d["settings"])')" = 10 ] || fail "every setting listed: $d"
+[ "$(json_get "$d" 'len(d["settings"])')" = 11 ] || fail "every setting listed: $d"
 out="$("$CG" config)"
 has "$out" "paths.context  .agents/ctx"
 has "$out" "codify.kvx"
@@ -357,5 +357,19 @@ fi
 printf '[index]\nworkers = 1\n' > codify.kvx
 has "$("$CG" config check)" ": ok"
 unset CG_SLOT_DIR CG_INDEX_SLOTS
+
+# ---- [fleet] discover (codify-v15 2.4): default true, a bool, in the template
+rm -f codify.kvx
+[ "$("$CG" config get fleet.discover)" = true ] || fail "fleet.discover default"
+"$CG" config init >/dev/null
+has "$(cat codify.kvx)" '[fleet]'
+has "$(cat codify.kvx)" '# discover = true'
+"$CG" config set fleet.discover false >/dev/null
+[ "$("$CG" config get fleet.discover)" = false ] || fail "fleet.discover set"
+grep -q '^discover = false' codify.kvx || fail "fleet.discover written: $(grep discover codify.kvx)"
+expect_rc 1 "$CG" config set fleet.discover sometimes
+printf '[fleet]\ndiscover = maybe\n' > codify.kvx
+has "$("$CG" config check 2>&1 || true)" "[fleet] discover = maybe is not true or false"
+rm -f codify.kvx
 
 echo "40_config ok"

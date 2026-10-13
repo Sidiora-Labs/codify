@@ -1,0 +1,11 @@
+Transcript fixtures for tests/integration/50_discover.sh (cg fleet discover).
+The test copies them under a temporary HOME and replaces the placeholders
+@SID@ (the session id), @PROJ@ (the project root) and @WT@ (the subagent's
+worktree):
+
+  claude/  -> $HOME/.claude/projects/<project root, non-alnum -> '-'>/ with
+              SESSION renamed to the session id: one session with two
+              subagents, agent-aaa11111 working in a worktree (its meta.json
+              names worktreePath and worktreeBranch), agent-bbb22222 not
+  codex/   -> $HOME/.codex/sessions/: one rollout whose cwd is the project,
+              one whose cwd is elsewhere

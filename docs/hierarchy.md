@@ -426,6 +426,53 @@ rather than inventing one. `--json` returns `main`, `managers[]` with
 
 All the reports take `--json`.
 
+### Native agents from transcripts: `cg fleet discover`
+
+`cg hook event` records a host's own sessions and subagents as native rows
+in the agents registry (see [events.md](events.md)). A host whose hooks never
+fired — an older host, a hook the user has not trusted, a session started
+before the plugin — still writes transcripts, and `cg fleet discover` reads
+them:
+
+```sh
+cg fleet discover                 # transcripts changed in the last 24h
+cg fleet discover --since 3d --json
+```
+
+- **Claude Code**: `~/.claude/projects/<project path, non-alphanumerics → '-'>/`
+  for the main tree, the current tree, and every registered worktree. Each
+  `<session>.jsonl` is a session (`claude:<first 8 of the id>`: cwd, model,
+  start, transcript); each `<session>/subagents/agent-<id>.meta.json` beside
+  `agent-<id>.jsonl` is a subagent (`claude:<id>`, parent the session — or,
+  at spawnDepth 2 and deeper, the sibling whose transcript holds its
+  `toolUseId` — with agentType, description, model, spawnDepth, and the task
+  named in its first prompt). A pending spawn a `PreToolUse` hook recorded
+  under that `toolUseId` is claimed, as `SubagentStart` would.
+- **Codex**: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` whose first
+  record's cwd is this project or one of its worktrees (`codex:<first 8>`,
+  the model from the first `turn_context`).
+- **Worktrees**: a `worktreePath` in meta.json (or a transcript cwd) inside a
+  linked worktree of this project registers its branch exactly as the hook
+  does, with the session's branch as base, so `cg branches`, the shared
+  graph, and the projection see it.
+- **Never over a hook**: discovery writes a column only while it is empty;
+  the `discovered` column (added on first use) lists the columns it wrote,
+  `row` first when it created the row. A hook arriving later overwrites
+  freely. On rows discovery created, `seen` follows the transcript's mtime.
+- **Stale**: an agent whose transcript and last hook are both older than 15
+  minutes is marked `stale`; the next hook heartbeat, or the transcript
+  moving again, makes it `live`.
+- `--json` prints `{since, found: [{agent, host, kind, session, transcript,
+  mtime, stale}], changed: [{agent, created, fields, state, claimed}]}`;
+  a second run over unchanged transcripts changes nothing.
+
+`cg fleet status`, `cg fleet tree` (the editor's refresh), `cg serve`'s
+refresh, and `cg watch --fleet` run discovery first when `[fleet] discover`
+in `codify.kvx` is true (the default), at most once per 10 seconds per
+process; `--no-discover` skips it for one command. The directory lookup is
+the one `cg recap` uses (`CG_RECAP_CLAUDE_DIR` and `CG_RECAP_CODEX_DIR`
+override both).
+
 ## A worked example
 
 One feature, two waves, from nothing to a merged pull request.

@@ -90,8 +90,12 @@ int main(void) {
             "base = \"trunk\"\n"
             "stale = \"2h\"\n"
             "exclude = [\"tmp/*\", \"wip-*\"]\n"
-            "index = true\n");
+            "index = true\n"
+            "[fleet]\n"
+            "discover = false\n");
     c = config_load(root);
+    ok(!c->fleet_discover && !config_fleet_discover(root),
+       "fleet discover = false parsed");
     ok_str(c->proj_base, "trunk");
     ok(c->proj_stale == 7200, "stale = 2h parsed (%ld)", c->proj_stale);
     ok(c->proj_index, "projection index = true parsed");
