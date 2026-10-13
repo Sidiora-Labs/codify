@@ -139,6 +139,80 @@ including the closing `tokens_used`/`budget`/`omitted` keys.
   alone would not fit, so the budget is raised and the output reports
   64.
 
+## Line search: cg grep
+
+`cg grep <pattern>` answers "where does this string occur" — the question
+an agent otherwise asks `grep` or `rg` — with each hit placed in the graph.
+The code is `src/grep.c`; over MCP it is the `grep_code` tool, which takes
+the same parameters (`pattern`, `regex`, `case_sensitive`, `path`, `lang`,
+`symbol`, `kind`, `no_tests`, `context`, `limit`, `budget`, `files`,
+`count`) and answers with the `--json` object.
+
+**Matching.** The pattern is a literal substring by default and a POSIX
+extended regular expression (libc `regcomp`) with `-E`/`--regex`. Both are
+case-sensitive unless `-i` is given.
+
+**Candidates.** `body_tri` is a trigram FTS5 table over every indexed file
+body. It is contentless, with `detail=none`, and its rowid is `files.id`.
+The indexer writes it beside `body_fts`. On SQLite older than 3.43,
+which cannot delete from a contentless table, it keeps its content, and
+meta `fts_mode` records which form was built. grep takes the literal a
+match must contain: the whole pattern for a literal, or the longest
+metacharacter-free run for a regex. A character followed by `*`, `?` or `{`
+is optional and leaves the run, and any `|` means no run is required. It
+then asks for every trigram of that literal, each on its own, because
+`detail=none` refuses phrase queries. The files that hold all of them,
+within the branch scope (`--branch`, `--all-branches`), are the
+candidates. A pattern with no three-character literal skips this step:
+every indexed file of the scope is scanned, and the summary says so. The
+index only narrows the search. A candidate that does not match costs a
+read, never a wrong hit.
+
+**Scanning.** Candidates are read from disk, in that branch's worktree, by
+parallel workers. Their count is the machine's index worker budget,
+bounded by the number of candidates. A literal is found with `memmem`
+(over a lowercased copy under `-i`) and a regex with `regexec`, one hit per
+line. Hits are what the file holds now, so an edit made since the last sync
+is found in any file the index already names. `cg grep` also runs the same
+freshness pass as the other read commands before it starts. A file the
+indexer would not read (binary, or larger than 8 MB) or whose body it does
+not index (larger than 2 MB) is not searched. Each one is counted as
+`skipped`.
+
+**Placement and ranking.** For each file with hits, one query loads its
+symbol spans (definitions only, not prototypes). Each hit is placed in the
+innermost span that holds it, or in `(file scope)` when none does.
+`--symbol NAME` keeps only hits inside a span of that name, and `--kind K`
+only hits inside spans of that kind. `--path GLOB` (repeatable, matched
+the way `touches` globs are), `--lang` (a language name or an extension)
+and `--no-tests` filter the files. Files are ranked by hit count, then
+source before tests, then shallower paths first.
+
+**Output.** Hits are grouped by file. The enclosing symbol is named once
+for each run of hits inside it, and each hit is written as
+`path:line: text`. `-C N` adds context lines (`path-N- text`). The answer
+stops at `-n` hits (default 50) or at the `--budget` (default 4000 tokens),
+whichever comes first, and ends with the tail:
+
+```
+… 3 more hits in 2 files — narrow with --path or raise -n
+5 hits in 2 files · 2 candidates of 14 indexed files · 2 scanned · 0 skipped · 1 ms
+```
+
+`--files` lists only the matching files with their counts, and `--count`
+prints only the total. The `--json` object is:
+
+```
+{"query","regex","case_sensitive","candidates","scanned","skipped",
+ "indexed","full_scan","total","files_with_hits",
+ "hits":[{"path","line","text","symbol","kind","branch"?,"before"?,"after"?}],
+ "omitted","omitted_files","ms"}
+```
+
+`symbol` and `kind` are null for file scope. `branch` is present when more
+than one branch is in scope. `before` and `after` are present with
+`context`. With `--files`, `hits` is replaced by `files:[{"path","count"}]`.
+
 ## Cost
 
 A first `cg context` on Codify's own tree (about 250 files and 20k refs)

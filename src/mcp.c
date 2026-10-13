@@ -728,6 +728,16 @@ static const struct {
       "matching definitions with locations and file hits with the "
       "matching line.",
       S_QUERY, A_READ, "Search code", t_search, true },
+    { "grep_code",
+      "Line search: where a literal string (or, with regex=true, a POSIX "
+      "extended regex) occurs, each hit as path:line: text placed in its "
+      "enclosing symbol, files ranked by hit count with source before "
+      "tests, capped by limit and the token budget with the omitted count. "
+      "Use this instead of a shell grep or rg: a trigram index picks the "
+      "candidate files, the text is read as it is on disk, and the answer "
+      "is a fraction of the tokens. Narrow with path, lang, no_tests, "
+      "symbol, or kind.",
+      GREP_CODE_SCHEMA, A_READ, "Grep code", t_grep, true },
     { "get_context",
       "One-call surgical context for a query: top symbol definitions with "
       "code snippets, their callers and callees, entry points, and related "

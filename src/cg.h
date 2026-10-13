@@ -452,6 +452,26 @@ bool is_entrypoint(Cg *cg, long sym_id, const char *name, const char *kind,
 
 /* ---------------- graph queries ---------------- */
 int cmd_search (Cg *cg, const char *q, int limit, bool json);
+/* codify-v15 1.1: cg grep (grep.c) — trigram candidates from body_tri, the
+ * candidates scanned from disk in parallel, each hit placed in the symbol
+ * span that encloses it, ranked and capped by -n and a token budget */
+#define GREP_MAX_PATHS 16
+typedef struct {
+    const char *pattern;
+    bool regex, icase;              /* -E/--regex, -i */
+    const char *paths[GREP_MAX_PATHS]; int npaths;   /* --path GLOB */
+    const char *lang;               /* --lang L */
+    bool no_tests;                  /* --no-tests */
+    const char *symbol, *kind;      /* --symbol NAME, --kind K */
+    int context;                    /* -C N */
+    int limit, budget;              /* -n N (50), --budget TOKENS (4000) */
+    bool files_only, count_only;    /* --files, --count */
+} GrepOpts;
+int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json);
+/* the grep_code MCP tool: its input schema and its handler, which takes
+ * mcp.c's call context ({Cg *, const SysInfo *, const char *args}) */
+extern const char GREP_CODE_SCHEMA[];
+int t_grep(void *call_ctx);
 int cmd_symbol (Cg *cg, const char *name, bool json);
 int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);
 int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);

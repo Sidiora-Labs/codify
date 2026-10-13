@@ -169,7 +169,12 @@ static void *worker(void *arg) {
             strcmp(p->jobs[i].twin_hash, d.hash) == 0) {
             d.reuse_from  = p->jobs[i].twin_id;
             d.reuse_lines = p->jobs[i].twin_lines;
-            free(data);
+            if ((long)len <= MAX_FTS_BYTES) {   /* codify-v15 1.1: body_tri */
+                d.body = data;
+                d.body_len = len;
+            } else {
+                free(data);
+            }
             ring_push(p, &d);
             continue;
         }
@@ -205,6 +210,7 @@ typedef struct {
                  /* branch reuse: copy a twin's rows instead of parsing */
                  *cp_syms, *cp_symfts, *cp_refs, *cp_cmts, *cp_cmtfts,
                  *cp_routes, *cp_imports, *cp_body;
+    sqlite3_stmt *del_tri, *ins_tri;       /* codify-v15 1.1: body_tri */
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
@@ -232,6 +238,8 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->ins_route  = cg_prep(cg, "INSERT INTO routes(file_id,framework,method,pattern,handler,line)"
                                 " VALUES(?,?,?,?,?,?)");
     s->ins_body   = cg_prep(cg, "INSERT INTO body_fts(rowid,path,body) VALUES(?,?,?)");
+    s->del_tri    = cg_prep(cg, "DELETE FROM body_tri WHERE rowid=?");
+    s->ins_tri    = cg_prep(cg, "INSERT INTO body_tri(rowid,body) VALUES(?,?)");
     s->del_imports= cg_prep(cg, "DELETE FROM imports WHERE file_id=?");
     s->ins_import = cg_prep(cg, "INSERT INTO imports(file_id,name,module,line,system)"
                                 " VALUES(?,?,?,?,?)");
@@ -350,6 +358,7 @@ static void purge_file_children(Stmts *s, long file_id) {
     sqlite3_bind_int64(s->del_refs,   1, file_id); step_reset(s->del_refs);
     sqlite3_bind_int64(s->del_routes, 1, file_id); step_reset(s->del_routes);
     sqlite3_bind_int64(s->del_body,   1, file_id); step_reset(s->del_body);
+    sqlite3_bind_int64(s->del_tri,    1, file_id); step_reset(s->del_tri);
     sqlite3_bind_int64(s->del_imports,1, file_id); step_reset(s->del_imports);
     sqlite3_bind_int64(s->del_cmtfts, 1, file_id); step_reset(s->del_cmtfts);
     sqlite3_bind_int64(s->del_cmts,   1, file_id); step_reset(s->del_cmts);
@@ -413,6 +422,14 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     if (d->reuse_from) {
         purge_file_children(s, file_id);
         index_copy_rows(cg, s, file_id, d->reuse_from, w->rel, st);
+        /* codify-v15 1.1: body_tri keeps no content to copy from the twin;
+         * the worker kept these bytes for it */
+        if (d->body) {
+            sqlite3_bind_int64(s->ins_tri, 1, file_id);
+            sqlite3_bind_text (s->ins_tri, 2, d->body, (int)d->body_len,
+                               SQLITE_STATIC);
+            step_reset(s->ins_tri);
+        }
         st->files_indexed++;
         st->bytes += w->size;
         return;
@@ -616,6 +633,9 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
         sqlite3_bind_text (s->ins_body, 2, w->rel, -1, SQLITE_STATIC);
         sqlite3_bind_text (s->ins_body, 3, d->body, (int)d->body_len, SQLITE_STATIC);
         step_reset(s->ins_body);
+        sqlite3_bind_int64(s->ins_tri, 1, file_id);
+        sqlite3_bind_text (s->ins_tri, 2, d->body, (int)d->body_len, SQLITE_STATIC);
+        step_reset(s->ins_tri);
     }
     for (int i = 0; i < noldd; i++) { free(oldd[i].body); free(oldd[i].hash); }
     free(oldd);
