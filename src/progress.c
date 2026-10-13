@@ -44,6 +44,7 @@ static struct {
     const char *printed[MAX_PHASES]; /* plain: phases entered this pass */
     int  nprinted;
     long done, total;
+    long dirs;           /* the walk: directories read so far */
     char path[512];
     int  workers;
     const char *wait_what;
@@ -78,6 +79,7 @@ static void compose(char *out, size_t cap, long now) {
     ADD("cg: %s", P.phase ? P.phase : "starting");
     if (P.total > 0)     ADD(" %ld/%ld", P.done, P.total);
     else if (P.done > 0) ADD(" %ld file%s", P.done, P.done == 1 ? "" : "s");
+    if (P.dirs > 0)      ADD(", %ld dir%s", P.dirs, P.dirs == 1 ? "" : "s");
     if (P.workers > 0)
         ADD(", %d worker%s", P.workers, P.workers == 1 ? "" : "s");
     if (P.wait_what)
@@ -152,6 +154,7 @@ void progress_begin(const IndexOpts *o) {
     P.muted = o->quiet || o->background;
     P.nprinted = 0;
     P.done = P.total = 0;
+    P.dirs = 0;
     P.path[0] = 0;
     P.workers = 0;
     P.wait_what = NULL;
@@ -174,9 +177,16 @@ void progress_phase(const char *phase, long done, long total) {
     P.phase = phase;
     P.done = done;
     P.total = total;
-    if (change) P.path[0] = 0;
+    if (change) { P.path[0] = 0; P.dirs = 0; }
     P.dirty = true;
     render(change, false);
+}
+
+/* codify-v15 1.3: the parallel walk counts directories as they are read */
+void progress_dirs(long dirs) {
+    if (!active()) return;
+    P.dirs = dirs;
+    P.dirty = true;
 }
 
 void progress_tick(long done, long total, const char *path) {

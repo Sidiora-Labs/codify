@@ -19,6 +19,7 @@ static const char *SCHEMA =
     "  id INTEGER PRIMARY KEY, branch_id INTEGER NOT NULL DEFAULT 0,"
     "  path TEXT NOT NULL, lang TEXT,"
     "  size INTEGER, mtime INTEGER, hash TEXT, lines INTEGER,"
+    "  base TEXT,"                       /* last path segment (1.3) */
     "  UNIQUE(branch_id, path));"
     "CREATE INDEX IF NOT EXISTS idx_file_path ON files(path);"
     "CREATE TABLE IF NOT EXISTS symbols("
@@ -47,9 +48,8 @@ static const char *SCHEMA =
      * finds memory_export and exportMemory alike */
     "CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5("
     "  name, kind UNINDEXED, path UNINDEXED, sig, words, tokenize='trigram');"
-    /* word FTS over file bodies */
-    "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
-    "  path UNINDEXED, body, tokenize='unicode61');"
+    /* word FTS over file bodies: body_fts, created by db_fts_create in
+     * the mode meta.fts_mode records (contentless on SQLite 3.43+) */
     /* agent memory: deliberate notes, linked to spec tasks by "feature/id".
      * branch is where the note was taken (NULL for the main tree); class and
      * confidence are Jev's verdict, filled by `cg memory classify`, over a
@@ -252,6 +252,10 @@ static const char *body_tri_compat(sqlite3 *db) {
 /* the schema above, as stored in meta.schema_version */
 #define SCHEMA_VERSION "18"
 
+/* codify-v15 1.3: idx_file_base and idx_import_target are created in
+ * cg_open after the upgrade — a v17 files table has no base column */
+static int db_fts_create(Cg *cg);       /* codify-v15 1.3, below */
+
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
 static bool path_exists(const char *base, const char *name) {
@@ -431,11 +435,19 @@ int cg_open(Cg *cg, bool create) {
         return -1;
     }
     if (cg_schema_upgrade(cg) != 0) return -1;
+    if (db_fts_create(cg) != 0) return -1;
     /* callers, reference counts and dependents all ask "who resolved to
      * this symbol": without it each such question scans every ref. Created
      * after the upgrade, since a pre-target_id refs table would refuse it. */
     sqlite3_exec(cg->db,
         "CREATE INDEX IF NOT EXISTS idx_ref_target ON refs(target_id)",
+        NULL, NULL, NULL);
+    /* codify-v15 1.3: lookups by file name (soft edges, the resolver),
+     * which used to scan every path with LIKE '%/'||name, and the imports
+     * a changed file is the target of */
+    sqlite3_exec(cg->db,
+        "CREATE INDEX IF NOT EXISTS idx_file_base ON files(base, branch_id);"
+        "CREATE INDEX IF NOT EXISTS idx_import_target ON imports(target_file_id)",
         NULL, NULL, NULL);
     events_install(cg);
     /* a branch never seen before is registered here, so the first cg call
@@ -446,6 +458,93 @@ int cg_open(Cg *cg, bool create) {
      * process to find the lock free — a probe, never a wait, so opening a
      * project for a read never queues behind an indexer */
     journal_replay(cg, JOURNAL_PROBE);
+    return 0;
+}
+
+/* codify-v15 1.3. A contentless body index stores the words of every file
+ * but not the file again: the text is on disk, and snippets and matching
+ * lines are read from there (rank_bodies). It needs SQLite 3.43.0 for
+ * contentless_delete; an older library keeps today's content-bearing table.
+ * The mode is recorded in meta.fts_mode when the table is created and read
+ * on every open afterwards, so a database is always used in the mode it
+ * was built with — never re-guessed from whichever library opened it. */
+#define FTS_CONTENTLESS_MIN 3043000
+
+static char *fts_mode_read(Cg *cg) {
+    sqlite3_stmt *st = NULL;
+    char *out = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT value FROM meta WHERE key='fts_mode'",
+                           -1, &st, NULL) != SQLITE_OK)
+        return NULL;
+    if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+        out = xstrdup((const char *)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    return out;
+}
+
+bool db_fts_contentless(Cg *cg) {
+    char *m = fts_mode_read(cg);
+    bool c = m && strcmp(m, "contentless") == 0;
+    free(m);
+    return c;
+}
+
+/* 0 absent, 1 present, 2 present and contentless (read from its DDL, for a
+ * table whose fts_mode row a busy database kept from being written) */
+static int body_fts_state(Cg *cg) {
+    sqlite3_stmt *st = NULL;
+    int state = 0;
+    if (sqlite3_prepare_v2(cg->db,
+            "SELECT sql LIKE '%contentless_delete%' FROM sqlite_master "
+            "WHERE name='body_fts'", -1, &st, NULL) != SQLITE_OK)
+        return 0;
+    if (sqlite3_step(st) == SQLITE_ROW)
+        state = sqlite3_column_int(st, 0) ? 2 : 1;
+    sqlite3_finalize(st);
+    return state;
+}
+
+static int db_fts_create(Cg *cg) {
+    char *mode = fts_mode_read(cg);
+    int state = body_fts_state(cg);
+    bool exists = state > 0;
+    bool contentless;
+    /* an existing table's DDL is the truth: a database stamped by a build
+     * whose SCHEMA still created body_fts carries a content-bearing table
+     * under a "contentless" meta row, and must be used as what it is */
+    if (exists) {
+        contentless = state == 2;
+    } else if (mode) {
+        contentless = strcmp(mode, "contentless") == 0;
+    } else {
+        contentless = sqlite3_libversion_number() >= FTS_CONTENTLESS_MIN;
+    }
+    if (contentless && sqlite3_libversion_number() < FTS_CONTENTLESS_MIN) {
+        fprintf(stderr,
+            "cg: %s/%s keeps a contentless body index, which needs SQLite "
+            "3.43.0 or newer; this cg links SQLite %s.\n", cg->shared, CG_DB,
+            sqlite3_libversion());
+        free(mode);
+        return -1;
+    }
+    if (!exists) {
+        char *err = NULL;
+        const char *sql = contentless
+            ? "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
+              "  path UNINDEXED, body, tokenize='unicode61',"
+              "  content='', contentless_delete=1)"
+            : "CREATE VIRTUAL TABLE IF NOT EXISTS body_fts USING fts5("
+              "  path UNINDEXED, body, tokenize='unicode61')";
+        if (sqlite3_exec(cg->db, sql, NULL, NULL, &err) != SQLITE_OK) {
+            fprintf(stderr, "cg: schema: %s\n", err ? err : "?");
+            sqlite3_free(err);
+            free(mode);
+            return -1;
+        }
+    }
+    if (!mode || (strcmp(mode, "contentless") == 0) != contentless)
+        cg_meta_set(cg, "fts_mode", contentless ? "contentless" : "content");
+    free(mode);
     return 0;
 }
 
@@ -541,7 +640,8 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS comment_fts;"
         "DROP TABLE IF EXISTS file_fts;"
         "DROP TABLE IF EXISTS body_tri;"
-        "DELETE FROM meta WHERE key LIKE 'last_index_%' "
+        "DELETE FROM meta WHERE key='fts_mode';"
+        "DELETE FROM meta WHERE key LIKE 'last_index_%' OR key LIKE 'walk_%' "
         "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
     char *err = NULL;
     if (sqlite3_exec(cg->db, DROPS, NULL, NULL, &err) != SQLITE_OK ||

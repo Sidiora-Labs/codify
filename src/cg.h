@@ -272,6 +272,7 @@ enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PROJ_STEER,            /* codify-v15 3.2 */
        /* codify-v15 1.4 */
        CFG_HOOKS_SHELL_ADVICE,
+       CFG_INDEX_WALK,             /* codify-v15 1.3 */
        CFG_NKEYS };
 typedef struct {
     char root[4096];
@@ -289,6 +290,7 @@ typedef struct {
     bool fleet_discover;       /* codify-v15 2.4: [fleet] discover */
     bool proj_steer;           /* codify-v15 3.2: steer on new findings */
     bool shell_advice;         /* codify-v15 1.4: [hooks] shell_advice */
+    int  index_walk;           /* [index] walk: CG_WALK_AUTO|GIT|FULL */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -346,7 +348,12 @@ typedef struct {
     long files_reused;
     /* codify-v15 1.5: body_tri rows put back for unchanged files */
     long tri_repaired;
+    /* codify-v15 1.3: ms per phase, peak RSS, and how the tree was walked */
+    long phase_ms[5];      /* IDX_PH_WALK .. IDX_PH_SOFT */
+    long peak_rss_kb;
+    const char *walk;      /* "full" | "git" | "targets" | "none" */
 } IndexStats;
+enum { IDX_PH_WALK, IDX_PH_PARSE, IDX_PH_WRITE, IDX_PH_RESOLVE, IDX_PH_SOFT };
 
 /* How a caller wants its index pass run. Zero-initialised means: walk now,
  * wait cg->lock_wait_ms for the gate, full machine budget, foreground. */
@@ -375,6 +382,39 @@ typedef struct {
  * lock for the whole wait. Never exits on a busy database. A coalesced or
  * fresh pass returns 0 with the matching flag set and no files indexed. */
 int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);
+/* codify-v15 1.3 — the index at scale */
+/* walk.c: every regular file (at most max_bytes, no symlinks, the ignore
+ * rules applied as ever) under root/rel ("" = the tree), walked by `threads`
+ * threads over a shared directory list and appended to out, which comes back
+ * sorted by path. Ticks the progress line per directory (main thread). */
+typedef struct { char *rel; long size, mtime; } WalkEntry;
+typedef struct { WalkEntry *v; int n, cap; long dirs; } WalkSet;
+void walk_parallel(const char *root, const char *rel, const Ignore *ig,
+                   int threads, long max_bytes, WalkSet *out);
+void walkset_free(WalkSet *w);
+int  walk_threads_default(int budget);     /* CG_WALK_THREADS overrides */
+/* gitint.c: the paths that may differ from what the pass at `since` saw —
+ * porcelain v2 status with untracked files, plus `git diff --name-only
+ * since..HEAD` (both sides of a rename). Root-relative, malloc'd, the
+ * *nstatus status paths first; returns the count, or -1 when git cannot
+ * answer (no git, unknown commit). */
+int  walk_git_candidates(const char *root, const char *since, char ***out,
+                         int *nstatus);
+/* scan.c: add the time since t0 to one phase of st */
+void index_phase_ms(IndexStats *st, int phase, long t0);
+/* the pass as one JSON object (sync and index --json) */
+void index_stats_json(const IndexStats *st, bool targeted, StrBuf *b);
+long index_peak_rss_kb(void);              /* VmHWM, 0 when unknown */
+/* db.c: body_fts is contentless (SQLite >= 3.43, meta fts_mode) */
+bool db_fts_contentless(Cg *cg);
+/* progress.c: directories walked so far, shown beside the file count */
+void progress_dirs(long dirs);
+/* [index] walk: how a whole-tree pass finds its candidates */
+enum { CG_WALK_AUTO, CG_WALK_GIT, CG_WALK_FULL };
+int  config_index_walk(const char *root);
+int  config_parse_walk(const char *v);     /* -1 when not auto|git|full */
+#define CG_WALK_GIT_MIN_FILES 20000        /* auto: git above this many */
+#define CG_WALK_FULL_EVERY    20           /* every Nth pass walks fully */
 /* Blocking full-strength wrapper: waits for the gate, always walks. */
 int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);
 

@@ -37,6 +37,7 @@ has "$out" "wrote $TMP/cfg/codify.kvx"
 has "$(cat codify.kvx)" "# codify.kvx — project configuration for Codify. Every key is optional."
 has "$(cat codify.kvx)" 'codemap = "CODEMAP.md"      # written by cg codemap'
 has "$(cat codify.kvx)" '# workers = auto'            # commented, with its default
+has "$(cat codify.kvx)" '# walk = auto'               # codify-v15 1.3
 cp codify.kvx "$TMP/template.kvx"
 expect_rc 1 "$CG" config init
 cmp -s codify.kvx "$TMP/template.kvx" || fail "config init overwrote the file"
@@ -66,7 +67,7 @@ d="$("$CG" config --json)"
     || fail "origin of a set key: $d"
 [ "$(json_get "$d" '[s["value"] for s in d["settings"] if s["key"]=="sync.auto"][0]')" = False ] \
     || fail "sync.auto value in JSON: $d"
-[ "$(json_get "$d" 'len(d["settings"])')" = 13 ] || fail "every setting listed: $d"
+[ "$(json_get "$d" 'len(d["settings"])')" = 14 ] || fail "every setting listed: $d"
 out="$("$CG" config)"
 has "$out" "paths.context  .agents/ctx"
 has "$out" "codify.kvx"
@@ -371,5 +372,32 @@ expect_rc 1 "$CG" config set fleet.discover sometimes
 printf '[fleet]\ndiscover = maybe\n' > codify.kvx
 has "$("$CG" config check 2>&1 || true)" "[fleet] discover = maybe is not true or false"
 rm -f codify.kvx
+# ---- [index] walk (codify-v15 1.3): auto, git, or full; a bad value is
+# named and auto stands in; the sync's --json says which walk it took
+printf '' > codify.kvx
+[ "$("$CG" config get index.walk)" = auto ] || fail "walk default auto"
+d="$("$CG" config get index.walk --json)"
+[ "$(json_get "$d" 'd["default"]')" = auto ] || fail "walk default in JSON: $d"
+"$CG" config set index.walk git >/dev/null
+grep -q '^walk = "git"$' codify.kvx || fail "walk written: $(cat codify.kvx)"
+[ "$("$CG" config get index.walk)" = git ] || fail "get after set git"
+"$CG" config set index.walk FULL >/dev/null
+[ "$("$CG" config get index.walk)" = full ] || fail "set is case-blind"
+cp codify.kvx "$TMP/before-walk.kvx"
+expect_rc 1 "$CG" config set index.walk sometimes
+cmp -s codify.kvx "$TMP/before-walk.kvx" || fail "a rejected walk set wrote the file"
+d="$("$CG" sync --json)"
+[ "$(json_get "$d" 'd["walk"]')" = full ] || fail "walk = full walks: $d"
+printf '[index]\nwalk = "sometimes"\n' > codify.kvx
+err="$("$CG" sync --json 2>&1 >/dev/null)"
+has "$err" "[index] walk = "
+has "$err" "not auto, git, or full"
+out="$("$CG" config check 2>&1)" && fail "config check should exit 1 on a bad walk"
+has "$out" "[index] walk"
+# auto below the threshold is the walk, as before
+printf '[index]\nwalk = auto\n' > codify.kvx
+d="$("$CG" sync --json)"
+[ "$(json_get "$d" 'd["walk"]')" = full ] || fail "auto on a small tree walks: $d"
+printf '[index]\nworkers = 1\n' > codify.kvx
 
 echo "40_config ok"

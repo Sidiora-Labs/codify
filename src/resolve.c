@@ -301,10 +301,13 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
          * exists once in the tree; two candidates stay unresolved. */
         sqlite3_stmt *u = cg_prep(cg,
             "SELECT id FROM files "
-            "WHERE branch_id=?2 AND substr(path, -length(?1) - 1) = '/' || ?1 "
+            "WHERE base=?3 AND branch_id=?2 "
+            "AND substr(path, -length(?1) - 1) = '/' || ?1 "
             "LIMIT 2");
+        const char *mb = strrchr(module, '/');
         sqlite3_bind_text(u, 1, module, -1, SQLITE_STATIC);
         sqlite3_bind_int64(u, 2, cg->branch_id);
+        sqlite3_bind_text(u, 3, mb ? mb + 1 : module, -1, SQLITE_STATIC);
         long only = -1;
         int hits = 0;
         while (sqlite3_step(u) == SQLITE_ROW) {
@@ -428,9 +431,22 @@ static long find_repo_file(Cg *cg, const char *module, const char *from_path,
         const char *mdot = strrchr(rp, '.');
         bool mod_has_ext = mdot && !strchr(mdot, '/');
         if (!mod_has_ext) {
+            /* a match's last segment is the module's, bare or with an
+             * extension: through idx_file_base, not every file on the
+             * branch per unresolved import ('/' sorts right after '.') */
+            const char *ml = strrchr(rp, '/');
+            ml = ml ? ml + 1 : rp;
+            char lo[4100], hi[4100];
+            snprintf(lo, sizeof lo, "%s.", ml);
+            snprintf(hi, sizeof hi, "%s/", ml);
             sqlite3_stmt *suffix = cg_prep(cg,
-                "SELECT id, path FROM files WHERE branch_id=?1 ORDER BY path");
+                "SELECT id, path FROM files INDEXED BY idx_file_base "
+                "WHERE branch_id=?1 AND (base=?2 OR (base>=?3 AND base<?4)) "
+                "ORDER BY path");
             sqlite3_bind_int64(suffix, 1, cg->branch_id);
+            sqlite3_bind_text(suffix, 2, ml, -1, SQLITE_STATIC);
+            sqlite3_bind_text(suffix, 3, lo, -1, SQLITE_STATIC);
+            sqlite3_bind_text(suffix, 4, hi, -1, SQLITE_STATIC);
             while (sqlite3_step(suffix) == SQLITE_ROW) {
                 const char *cp = (const char *)sqlite3_column_text(suffix, 1);
                 char cne[4096];
@@ -547,8 +563,15 @@ static void resolve_imports_run(Cg *cg, bool scoped) {
         "  i.target_file_id IN (SELECT id FROM temp.scope_files) OR "
         "  (i.target_file_id IS NOT NULL AND "
         "   i.target_file_id NOT IN (SELECT id FROM files))) AS direct "
-        "FROM imports i JOIN files f ON f.id = i.file_id "
-        "WHERE f.branch_id=?1 AND "
+        "FROM imports i CROSS JOIN files f ON f.id = i.file_id "
+        /* found through idx_import_file and idx_import_target, not a scan
+         * of every import on the branch (codify-v15 1.3); a target left
+         * dangling by a pass that did not record it waits for --full */
+        "WHERE i.id IN (SELECT id FROM imports WHERE file_id IN "
+        " (SELECT id FROM temp.scope_files) UNION SELECT id FROM imports "
+        " WHERE target_file_id IN (SELECT id FROM temp.scope_files) UNION "
+        " SELECT id FROM imports WHERE target_file_id IS NULL) "
+        "AND f.branch_id=?1 AND "
         "(direct OR (i.target_file_id IS NULL AND i.system=0)) "
         "ORDER BY i.id" :
         "SELECT i.id, i.module, i.system, f.path, f.lang, 1 "
@@ -959,8 +982,12 @@ typedef struct {
     bool decl, is_static;    /* a prototype; a file-local definition */
 } Cand;
 
+/* Prepared once per resolve_refs_run: it runs once per call ref, and
+ * preparing it each time was a tenth of a large init (codify-v15 1.3). */
+static sqlite3_stmt *fc_stmt;
+
 static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {
-    sqlite3_stmt *q = cg_prep(cg,
+    sqlite3_stmt *q = fc_stmt ? fc_stmt : cg_prep(cg,
         "SELECT s.id, s.file_id, f.path, s.decl, "
         "ifnull(s.sig,'') LIKE 'static %' FROM symbols s "
         "JOIN files f ON f.id=s.file_id WHERE s.name=? AND f.branch_id=?2 "
@@ -977,7 +1004,8 @@ static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {
         out[n].is_static = sqlite3_column_int(q, 4) != 0;
         n++;
     }
-    sqlite3_finalize(q);
+    if (q == fc_stmt) { sqlite3_reset(q); sqlite3_clear_bindings(q); }
+    else sqlite3_finalize(q);
     return n;
 }
 
@@ -1087,12 +1115,16 @@ static int load_imports(Cg *cg, long file_id, ImpCache *out, int cap) {
  * unique tier picks elsewhere). Counters are then recomputed from the table,
  * not from the partial pass. */
 static void resolve_refs_run(Cg *cg, bool scoped) {
+    /* scoped: the refs the scope names, found through idx_ref_file and
+     * idx_ref_name and joined to their files after — the planner, left to
+     * itself, scanned every ref on the branch for the OR (codify-v15 1.3) */
     sqlite3_stmt *sel = cg_prep(cg, scoped ?
         "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
-        "FROM refs r JOIN files f ON f.id=r.file_id "
-        "WHERE r.kind='call' AND f.branch_id=?1 "
-        "AND (r.file_id IN (SELECT id FROM temp.scope_files)"
-        " OR r.name IN (SELECT name FROM temp.scope_names)) "
+        "FROM refs r CROSS JOIN files f ON f.id=r.file_id "
+        "WHERE r.id IN (SELECT id FROM refs WHERE file_id IN "
+        "(SELECT id FROM temp.scope_files) UNION SELECT id FROM refs "
+        "WHERE name IN (SELECT name FROM temp.scope_names)) "
+        "AND r.kind='call' AND f.branch_id=?1 "
         "ORDER BY r.file_id, r.id" :
         "SELECT r.id, r.name, r.file_id, r.qual, f.path, f.lang "
         "FROM refs r JOIN files f ON f.id=r.file_id "
@@ -1100,6 +1132,11 @@ static void resolve_refs_run(Cg *cg, bool scoped) {
     sqlite3_bind_int64(sel, 1, cg->branch_id);
     sqlite3_stmt *upd = cg_prep(cg,
         "UPDATE refs SET target_id=?, verdict=?, conf=? WHERE id=?");
+    fc_stmt = cg_prep(cg,
+        "SELECT s.id, s.file_id, f.path, s.decl, "
+        "ifnull(s.sig,'') LIKE 'static %' FROM symbols s "
+        "JOIN files f ON f.id=s.file_id WHERE s.name=? AND f.branch_id=?2 "
+        "ORDER BY f.path, s.line");
 
     long cur_fid = -1;
     ImpCache imps[64];
@@ -1239,6 +1276,8 @@ static void resolve_refs_run(Cg *cg, bool scoped) {
 
     sqlite3_finalize(sel);
     sqlite3_finalize(upd);
+    sqlite3_finalize(fc_stmt);
+    fc_stmt = NULL;
 
     if (scoped) {
         internal_c = external_c = unknown_c = 0;

@@ -148,7 +148,7 @@ reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
 
 [task.1.3]
 title      = "The index at scale: parallel walk, git-assisted change detection, contentless FTS, indexed lookups, the scale fixture and bench"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["walk_parallel", "walk_git_candidates", "index_phase_ms"]
 touches    = ["src/walk.c", "src/scan.c", "src/gitint.c", "src/db.c", "src/config.c", "src/progress.c", "src/cg.h", "src/main.c", "tests/scale/gen.py", "tests/integration/46_scale.sh", "tests/integration/40_config.sh", "scripts/bench.sh", "docs/sync.md", "docs/config.md"]
@@ -306,7 +306,7 @@ wave       = 3
 requires   = ["4.1", "3.2"]
 symbols    = ["orch_next_task", "fleet_sync", "spec_start_ahead", "sup_forward_merge"]
 touches    = ["src/orchestrate.c", "src/fleet.c", "src/spec.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/32_supervisor.sh", "tests/integration/26_fleet.sh", "tests/integration/40_config.sh", "docs/hierarchy.md", "docs/projection.md"]
-verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/32_supervisor.sh && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/51_projection.sh && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/02_spec.sh"
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/32_supervisor.sh && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/51_projection.sh && CG=$PWD/cg tests/integration/40_config.sh && CG=$PWD/cg tests/integration/05_spec.sh"
 do_1       = "config.c and fleet.c: [hierarchy] waves = parallel|sequential with the git-version default; spec.c: cg spec start --ahead claiming a task with open requires and recording ahead on the lease, done unchanged and strict; the worker prompt naming the open requirements and the projection branch."
 do_2       = "orchestrate.c: the start gate under parallel ignores requires but keeps collisions and slots; after a land, main merged forward into every live wave branch between turns with conflict escalation naming the projection finding, workers steered to cg fleet sync, a projection build after land and sync; fleet.c: cg fleet sync merging the base into the worker's branch with the overlap refusal."
 do_3       = "32_supervisor.sh parallel clauses of req 10.6, 26_fleet.sh sync, 40_config.sh the key; docs."

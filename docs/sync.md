@@ -209,6 +209,75 @@ commands, and the MCP, LSP, serve, watch, fleet, and editor refreshes never
 show it. The counts come from the consumer loop the pipeline already runs;
 parse workers never touch it.
 
+## The index at scale
+
+A whole-tree pass has four costs: finding what changed, parsing it, writing
+it, and resolving references. Each one scales with the size of the change,
+not with the size of the repository, wherever it can.
+
+- **The walk is parallel.** Directories go into a shared queue, and walk
+  threads read them (the parse budget, or `CG_WALK_THREADS`). The result is
+  sorted, so the file list does not depend on the thread count. `.cgignore`,
+  `.gitignore` and the size cap apply as before.
+- **Git can supply the candidates.** With `[index] walk = git`
+  (or `auto` above 20000 indexed files), a pass asks for changed and
+  untracked files with `git status --porcelain=v2 -z`, plus a `git diff --name-only`
+  since the head the last pass recorded. Only those files are stat'ed and
+  hashed. Several events force a full walk: a changed ignore file, a moved
+  head the diff cannot reach, a candidate list over 256K entries, or every
+  twentieth pass. See [[index] walk](config.md#index-walk).
+- **The body index is contentless** on SQLite 3.43 and later
+  (`content=''`, `contentless_delete=1`). It stores the index but not a
+  second copy of every file. Excerpts are cut from the file on disk.
+  `cg info` names the mode (`body index: contentless` or `stored`), and
+  `meta.fts_mode` records it.
+- **Name lookups use `files.base`**, the indexed last path segment. The
+  import resolver, the C header lookup, `cg context` path outlines and
+  position lookups no longer use `LIKE '%/name'` scans.
+- **A chunk purges its FTS rows in one statement per table.** Per-file FTS
+  deletes each flushed the pending segment.
+- `--json` reports `"walk"` (`git`, `full`, `targets`, `none`), `phase_ms`
+  (`walk`, `parse`, `write`, `resolve`, `soft`) and `peak_rss_kb`. The
+  one-line summary is unchanged.
+
+### Measured
+
+`scripts/bench.sh` builds the profile below in a scratch repository and
+times each operation. `CG_SCALE=1 tests/integration/46_scale.sh` checks the
+same profile against its limits (peak RSS under 2 GB, database under 6× the
+source). Without `CG_SCALE`, the test runs a 2000-file profile on every
+`make test`.
+
+Profile: workstation, 16 effective cores, SQLite 3.45.1, body index
+contentless. Fixture: 20000 files, 1,950,030 lines, 50.5 MB of source. The
+machine was shared during the runs, so times vary by about 25%.
+
+| Operation | Before (v1.4) | Now | Notes |
+|---|---|---|---|
+| `cg init` | 331 s | 30–40 s | 500–670 files/s, 49–65k lines/s |
+| database after init | 208.6 MB (4.1×) | 141 MB (2.8×) | bytes per source byte in parentheses |
+| peak RSS, `cg init` | 276 MB | 206 MB | |
+| `cg sync`, nothing changed, `walk = full` | | 372 ms | walk 204 ms |
+| `cg sync`, nothing changed, `walk = git` | | 362 ms | |
+| `cg sync`, one file edited, `walk = full` | | 1073 ms | resolve 372 ms, soft 114 ms |
+| `cg sync`, one file edited, `walk = git` | | 901 ms | |
+| `cg index --full` | | 39–61 s | write 39–51 s, resolve 7 s; peak RSS 351–376 MB; database 180 MB (3.56×) |
+| `cg context` (a literal) | | 326 ms | |
+| `cg search` | | 93 ms | |
+
+On the 2000-file profile, `cg init` drops from 6.0 s to 2.3 s and the
+database from 20.7 MB to 13.9 MB.
+
+Some costs remain:
+
+- `cg index --full` spends most of its time writing. It deletes and
+  re-inserts every FTS row, so it costs more per file than `cg init`.
+- The scoped resolve still counts call verdicts over the whole refs table
+  (about 150–300 ms at 20000 files).
+- `git status` costs about 90 ms of a `walk = git` pass.
+- An unresolved import whose target lies outside the pass's scope waits
+  for the next `--full`.
+
 ## Environment
 
 | Variable | Effect |
@@ -218,6 +287,7 @@ parse workers never touch it.
 | `CG_SLOT_DIR` | where the slot files live (default `/tmp/codify-<uid>`) |
 | `CG_BUSY_TIMEOUT_MS` | how long a CLI write waits for the database lock (default 30000) |
 | `CG_PROGRESS` | `plain`: progress as plain lines even when piped; `0`: no progress |
+| `CG_WALK_THREADS` | walk threads for a whole-tree pass (default: the parse budget, 1–64) |
 
 ## Limitations
 
