@@ -223,7 +223,19 @@ static const char *SCHEMA =
      * the content-bearing form first and this line is then a no-op. */
     "CREATE VIRTUAL TABLE IF NOT EXISTS body_tri USING fts5("
     "  body, content='', contentless_delete=1, detail=none,"
-    "  tokenize='trigram');";
+    "  tokenize='trigram');"
+    /* codify-v15 3.2: what projection builds found (conflicts.c), one row
+     * per kind, path, symbol, and branch set (sorted, comma-joined).
+     * resolved is NULL while a build still finds it, else when one stopped;
+     * stamp is the build that last saw it. Durable: never dropped. */
+    "CREATE TABLE IF NOT EXISTS projection_findings("
+    "  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, path TEXT NOT NULL,"
+    "  symbol TEXT NOT NULL DEFAULT '', branches TEXT NOT NULL,"
+    "  lines TEXT, agents TEXT, advice TEXT, changer TEXT,"
+    "  first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,"
+    "  resolved INTEGER, stamp INTEGER NOT NULL DEFAULT 0,"
+    "  steered INTEGER NOT NULL DEFAULT 0,"
+    "  UNIQUE(kind, path, symbol, branches));";
 
 /* codify-v15 1.1: the body_tri an SQLite before 3.43 can build (it cannot
  * delete from a contentless table) is created before SCHEMA runs, so

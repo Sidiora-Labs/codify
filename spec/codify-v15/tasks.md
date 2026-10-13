@@ -65,7 +65,7 @@
     - The fold, the conflict records with their earlier-branch attribution, --strict, the projections table, the fingerprint no-op and --force, the projection lock and --wait, text and --json, status, diff, show.
     - --index: the detached worktree under .codegraph/worktrees/projection indexed as branch codify/projection; 51_projection.sh per req 8.9; docs/projection.md.
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9_
-  - [ ] 3.2 Symbol, interface, and near findings; projection events; steering the agents involved
+  - [-] 3.2 Symbol, interface, and near findings; projection events; steering the agents involved
     - conflicts.c: per branch, hunks against the base mapped onto that branch's symbol spans; pairwise symbol findings; the interface findings through drift_interface_check's machinery against the unified graph; near findings; content/delete/add-add from the fold; branches with their agents and the advice line.
     - projection_findings table keyed by kind, path, symbol, branch set with first_seen/last_seen/resolved; projection.conflict once, projection.resolved on disappearance, projection.built per build; cg projection findings; steering through driver_steer with the opt-out.
     - 52_conflicts.sh per the first five clauses of req 9.6.

@@ -427,7 +427,8 @@ static void proj_conflicts_json(const Projection *p, StrBuf *b) {
 static void proj_object(const char *base, const char *base_head,
                         const char *commit, const char *branches,
                         const char *conflicts, long ms, long built,
-                        bool unchanged, const char *index_json, StrBuf *b) {
+                        bool unchanged, const char *index_json,
+                        const char *findings_json, StrBuf *b) {
     sb_puts(b, "{\"base\":");
     sb_json_str(b, base);
     sb_puts(b, ",\"base_head\":");
@@ -438,6 +439,8 @@ static void proj_object(const char *base, const char *base_head,
               "\"conflicts\":%s,\"ms\":%ld", unchanged ? "true" : "false",
               built, branches, conflicts, ms);
     if (index_json) sb_printf(b, ",\"index\":%s", index_json);
+    /* codify-v15 3.2: the live findings, {"findings":[...],"count":N} */
+    if (findings_json) sb_printf(b, ",\"findings\":%s", findings_json);
     sb_puts(b, "}\n");
 }
 
@@ -714,11 +717,12 @@ static int proj_git_check(Cg *cg) {
 }
 
 static void proj_print_row(const ProjRow *r, bool unchanged, bool json,
-                           const char *index_json) {
+                           const char *index_json, const char *findings_json) {
     StrBuf b; sb_init(&b);
     if (json)
         proj_object(r->base, r->base_head, r->commit, r->branches,
-                    r->conflicts, r->ms, r->built, unchanged, index_json, &b);
+                    r->conflicts, r->ms, r->built, unchanged, index_json,
+                    findings_json, &b);
     else
         proj_text(r->base, r->base_head, r->commit, r->branches,
                   r->conflicts, r->ms, &b);
@@ -743,7 +747,7 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
                 "lock for %ld ms — showing the last build\n", o->wait_ms);
         ProjRow r;
         proj_last(cg, &r);
-        if (r.found) proj_print_row(&r, true, json, NULL);
+        if (r.found) proj_print_row(&r, true, json, NULL, NULL);
         proj_row_free(&r);
         return CG_EXIT_BUSY;
     }
@@ -795,7 +799,17 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
             printf("projection unchanged — inputs match the build of %.12s; "
                    "--force rebuilds\n", last.commit);
         }
-        proj_print_row(&last, true, json, o->index ? ij.p : NULL);
+        /* codify-v15 3.2: still a build — projection.built says so; the
+         * findings are the last build's, untouched */
+        int nb = 0;
+        for (int i = 0; i < p.nb; i++) nb += !p.b[i].skip;
+        conflicts_store(cg, NULL, 0, nb, last.commit, now_ms() - t0, true);
+        StrBuf fj; sb_init(&fj);
+        conflicts_print(cg, json, &fj);
+        proj_print_row(&last, true, json, o->index ? ij.p : NULL,
+                       json ? fj.p : NULL);
+        if (!json) fputs(fj.p, stdout);
+        sb_free(&fj);
         sb_free(&ij);
         proj_row_free(&last);
         proj_free(&p);
@@ -820,15 +834,40 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
     proj_conflicts_json(&p, &cj);
     if (proj_store(cg, &p, bj.p, cj.p) != 0)
         cg_busy_report("cg projection (the build row was not stored)");
+    /* codify-v15 3.2: the findings of this fold, stored, steered */
+    ConflictBranch *cb = p.nb ? xmalloc(sizeof *cb * (size_t)p.nb) : NULL;
+    int ncb = 0;
+    for (int i = 0; i < p.nb; i++) {
+        if (p.b[i].skip || !p.b[i].merged) continue;
+        cb[ncb].name = p.b[i].name;
+        cb[ncb].worktree = p.b[i].worktree;
+        cb[ncb].head = p.b[i].head;
+        cb[ncb].contribution = p.b[i].contribution;
+        ncb++;
+    }
+    ProjectionFinding *fs = NULL;
+    int nfs = conflicts_compute(cg, p.base, p.base_head, cb, ncb, p.c, p.nc,
+                                &fs);
+    if (conflicts_store(cg, fs, nfs, ncb, p.commit, now_ms() - t0, false) < 0)
+        cg_busy_report("cg projection (the findings were not stored)");
+    else
+        conflicts_steer(cg, fs, nfs);
+    conflicts_free(fs, nfs);
+    free(cb);
+    StrBuf fj; sb_init(&fj);
+    conflicts_print(cg, json, &fj);
     StrBuf ij; sb_init(&ij);
     int irc = 0;
     if (o->index) irc = proj_index(cg, si, p.commit, p.base, &ij, json);
     StrBuf out; sb_init(&out);
     if (json)
         proj_object(p.base, p.base_head, p.commit, bj.p, cj.p, p.ms, p.built,
-                    false, o->index ? ij.p : NULL, &out);
-    else
+                    false, o->index ? ij.p : NULL, fj.p, &out);
+    else {
         proj_text(p.base, p.base_head, p.commit, bj.p, cj.p, p.ms, &out);
+        sb_puts(&out, fj.p);
+    }
+    sb_free(&fj);
     fputs(out.p, stdout);
     sb_free(&out); sb_free(&ij); sb_free(&bj); sb_free(&cj);
     proj_free(&p);
@@ -848,7 +887,7 @@ static int proj_status(Cg *cg, bool json) {
         long d = (long)time(NULL) - r.built;
         printf("last build %ld s ago\n", d < 0 ? 0 : d);
     }
-    proj_print_row(&r, false, json, NULL);
+    proj_print_row(&r, false, json, NULL, NULL);
     proj_row_free(&r);
     return 0;
 }
@@ -1000,6 +1039,8 @@ int cmd_projection(Cg *cg, const SysInfo *si, int argc, char **argv,
     else if (!strcmp(sub, "diff")) rc = proj_diff(cg, pos ? pos : first_branch,
                                                    json);
     else if (!strcmp(sub, "show")) rc = proj_show(cg, json);
+    else if (!strcmp(sub, "findings"))                  /* codify-v15 3.2 */
+        rc = cmd_projection_findings(cg, pos ? 1 : 0, NULL, json);
     else { help_usage("projection"); rc = 1; }
     free(o.extra);
     return rc;

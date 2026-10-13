@@ -66,7 +66,7 @@ d="$("$CG" config --json)"
     || fail "origin of a set key: $d"
 [ "$(json_get "$d" '[s["value"] for s in d["settings"] if s["key"]=="sync.auto"][0]')" = False ] \
     || fail "sync.auto value in JSON: $d"
-[ "$(json_get "$d" 'len(d["settings"])')" = 11 ] || fail "every setting listed: $d"
+[ "$(json_get "$d" 'len(d["settings"])')" = 12 ] || fail "every setting listed: $d"
 out="$("$CG" config)"
 has "$out" "paths.context  .agents/ctx"
 has "$out" "codify.kvx"

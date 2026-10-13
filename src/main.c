@@ -1,5 +1,6 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
+#include <poll.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -475,9 +476,15 @@ int main(int argc, char **argv) {
             rc = cmd_hook_event(&cg, opt(&argc, argv, "--host", "claude"),
                                 json);
         else {          /* hooks never fail the host: drain, note, exit 0 */
+            /* A host pipes its payload and closes; a shell (an agent's
+             * tool, a terminal) hands over a stdin that never closes, so
+             * the drain reads only what arrives within a short wait. */
             char drain[4096];
-            if (!isatty(STDIN_FILENO))
-                while (fread(drain, 1, sizeof drain, stdin) > 0) {}
+            struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+            while (!isatty(STDIN_FILENO) && poll(&pfd, 1, 200) > 0) {
+                ssize_t n = read(STDIN_FILENO, drain, sizeof drain);
+                if (n <= 0) break;
+            }
             help_usage("hook");
             rc = 0;
         }

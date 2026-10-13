@@ -789,9 +789,10 @@ static const HelpCmd HELP[] = {
 
 /* ---------------- fleet ---------------- */
 /* codify-v15 3.1 */
-{ .group = "fleet", .name = "projection", .args = "build | status | diff | show",
+{ .group = "fleet", .name = "projection",
+  .args = "build | status | diff | show | findings",
   .usage = "projection build [--force] [--strict] [--index] [--branch NAME] "
-    "[--wait MS] | status | diff [branch] | show",
+    "[--wait MS] | status | diff [branch] | show | findings",
   .summary = "every active branch folded onto the base, at a real ref",
   .detail = "Folds each active branch onto the base with git merge-tree and "
     "writes the result to refs/codify/projection: what main would be if "
@@ -826,6 +827,20 @@ static const HelpCmd HELP[] = {
 { .group = "fleet", .name = "projection show", .args = "",
   .usage = "projection show",
   .summary = "the paths the projection changes against the base" },
+/* codify-v15 3.2 */
+{ .group = "fleet", .name = "projection findings", .args = "",
+  .usage = "projection findings",
+  .summary = "the live conflict findings between branches, with ages",
+  .detail = "What the builds found and still find: symbol (two branches "
+    "change one symbol, even when the merge is clean), interface (a "
+    "signature changed or removed on one branch, referenced in code another "
+    "branch changed), near (edits within three lines), and the content, "
+    "delete, and add-add conflicts of the fold — each with its branches, "
+    "their agents, the lines, and one line of advice. The agents on both "
+    "branches are steered once per new finding unless [projection] steer = "
+    "false. See docs/projection.md.",
+  .examples = "cg projection findings\ncg projection findings --json",
+  .related = "projection build,fleet steer" },
 { .group = "fleet", .name = "fleet", .args = "<subcommand>",
   .usage = "fleet roles | status | plan [-f F] | "
     "tree [-f F] | discover [--since DUR] | begin <id> [-f F] [--agent A] | "

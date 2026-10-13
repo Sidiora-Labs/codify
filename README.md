@@ -469,7 +469,7 @@ approve = ["land"]           # opt-in: wait for `cg fleet approve`
 
 | Command | Description |
 |---|---|
-| `cg projection build [--index] [--strict]`, `status`, `diff [branch]`, `show` | Every active branch folded onto the base with `git merge-tree`, uncommitted work included, at `refs/codify/projection`; conflicts reported by path and branch. `--index` indexes it as branch `codify/projection` ([docs/projection.md](docs/projection.md)) |
+| `cg projection build [--index] [--strict]`, `status`, `diff [branch]`, `show`, `findings` | Every active branch folded onto the base with `git merge-tree`, uncommitted work included, at `refs/codify/projection`; conflicts reported by path and branch. `--index` indexes it as branch `codify/projection` ([docs/projection.md](docs/projection.md)) |
 | `cg fleet roles` | The hierarchy as configured: branch templates, base, remote, gates, PR policy. A repo with no `[hierarchy]` section shows the defaults it *would* use, marked not configured |
 | `cg fleet status` | Who is alive in which role, on which task, under which parent |
 | `cg fleet discover [--since DUR]` | Native Claude Code and Codex sessions and subagents found from the transcripts the hosts write, for hosts whose hooks never fired: rows created or completed (never overwriting a hook's field), worktrees registered, untouched transcripts marked stale. `fleet status`/`tree`, `serve` and `watch --fleet` run it first unless `--no-discover` or `[fleet] discover = false` |

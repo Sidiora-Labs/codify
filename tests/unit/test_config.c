@@ -91,6 +91,7 @@ int main(void) {
             "stale = \"2h\"\n"
             "exclude = [\"tmp/*\", \"wip-*\"]\n"
             "index = true\n"
+            "steer = false\n"                    /* codify-v15 3.2 */
             "[fleet]\n"
             "discover = false\n");
     c = config_load(root);
@@ -99,6 +100,8 @@ int main(void) {
     ok_str(c->proj_base, "trunk");
     ok(c->proj_stale == 7200, "stale = 2h parsed (%ld)", c->proj_stale);
     ok(c->proj_index, "projection index = true parsed");
+    ok(!c->proj_steer && !config_projection_steer(root),
+       "projection steer = false parsed");
     char **globs = NULL;
     int nglobs = config_projection_exclude(root, &globs);
     ok(nglobs == 2 && !strcmp(globs[0], "tmp/*") && !strcmp(globs[1], "wip-*"),

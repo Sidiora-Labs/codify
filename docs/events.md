@@ -46,6 +46,7 @@ Three ways in, one table:
 | `supervisor.stall`, `supervisor.escalate`, `supervisor.blocked`, `supervisor.budget` | supervision decisions |
 | `approval.request`, `approval.decided` | the opt-in approval gates |
 | `drift.spec`, `drift.interface`, `drift.collision`, `drift.coverage` | drift findings (see [drift.md](drift.md)) |
+| `projection.conflict`, `projection.resolved`, `projection.built` | a projection build found a new conflict finding (kind, path, symbol, lines, branches, agents, advice), stopped finding one, or finished (branches, conflicts, new, resolved, ms, commit); see [projection.md](projection.md#findings) |
 | `memory.add` | a memory was written |
 
 Retention is by count: 50000 events by default (`CG_EVENTS_KEEP`), pruned

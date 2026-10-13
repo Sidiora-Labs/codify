@@ -83,6 +83,12 @@ merge feature/alpha and adjust before you qualify. New signature: export functio
 alpha(n: number): number {
 ```
 
+The same question is asked before any merge: every projection build runs
+this machinery over each active branch against the base and reports an
+`interface` finding when another branch references the changed symbol in
+code it changed, beside the `symbol`, `near`, and textual findings (see
+[projection.md](projection.md#findings)).
+
 ## Requirement coverage before land
 
 `cg fleet land` first checks that every acceptance criterion of the feature
