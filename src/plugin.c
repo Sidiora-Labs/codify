@@ -88,15 +88,18 @@ static void hook_group(StrBuf *b, const char *matcher, const char *bin,
 
 typedef struct { const char *event, *matcher, *args; } HookRow;
 
-/* req 5.2: every row a command hook calling cg by absolute path */
+/* req 5.2: every row a command hook calling cg by absolute path.
+ * WorktreeCreate and WorktreeRemove are deliberately absent: a
+ * WorktreeCreate hook REPLACES git's worktree creation and must print the
+ * new path, and one that prints nothing makes creation fail (hooks.md),
+ * so an observing hook there would break the host. Native worktrees are
+ * seen from the subagent's cwd instead. */
 static const HookRow CLAUDE_HOOKS[] = {
     { "SessionStart",   NULL, "hook event --host claude" },
     { "SessionEnd",     NULL, "hook event --host claude" },
     { "Stop",           NULL, "hook event --host claude" },
     { "SubagentStart",  NULL, "hook event --host claude" },
     { "SubagentStop",   NULL, "hook event --host claude" },
-    { "WorktreeCreate", NULL, "hook event --host claude" },
-    { "WorktreeRemove", NULL, "hook event --host claude" },
     { "PreToolUse",  "Agent|Task", "hook event --host claude" },
     { "PreToolUse",  "Bash",       "hook pre-bash" },
     { "PostToolUse", "Edit|Write|MultiEdit|NotebookEdit", "hook post-edit" },
@@ -144,12 +147,13 @@ static void hooks_object(StrBuf *b, const HookRow *rows, const char *bin,
     sb_puts(b, "\n  }\n");
 }
 
+/* Only the documented "hooks" key: the docs do not say how an unknown
+ * top-level key in hooks.json is treated, so the marker rides in each
+ * command as a shell comment, as it does for Codex. */
 static char *claude_hooks_body(const char *bin) {
     StrBuf b; sb_init(&b);
-    sb_puts(&b, "{\n  \"description\": \"Codify: native sessions, subagents, "
-                "worktrees, and edits into the local graph (" PLUGIN_MARK
-                ")\",\n");
-    hooks_object(&b, CLAUDE_HOOKS, bin, NULL);
+    sb_puts(&b, "{\n");
+    hooks_object(&b, CLAUDE_HOOKS, bin, " # " PLUGIN_MARK);
     sb_puts(&b, "}\n");
     return b.p;
 }

@@ -83,8 +83,7 @@ def check(doc, want):
 h = json.load(open(p + "/hooks/hooks.json"))
 ev = "hook event --host claude"
 check(h, [(e, None, ev) for e in ["SessionStart", "SessionEnd", "Stop",
-          "SubagentStart", "SubagentStop", "WorktreeCreate",
-          "WorktreeRemove"]] + [
+          "SubagentStart", "SubagentStop"]] + [
     ("PreToolUse", "Agent|Task", ev),
     ("PreToolUse", "Bash", "hook pre-bash"),
     ("PostToolUse", "Edit|Write|MultiEdit|NotebookEdit", "hook post-edit"),

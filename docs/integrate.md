@@ -70,7 +70,7 @@ timeout:
 
 | Event | Matcher | Command |
 |---|---|---|
-| SessionStart, SessionEnd, Stop, SubagentStart, SubagentStop, WorktreeCreate, WorktreeRemove | | `cg hook event --host claude` |
+| SessionStart, SessionEnd, Stop, SubagentStart, SubagentStop | | `cg hook event --host claude` |
 | PreToolUse | `Agent\|Task` | `cg hook event --host claude` |
 | PreToolUse | `Bash` | `cg hook pre-bash` |
 | PostToolUse | `Edit\|Write\|MultiEdit\|NotebookEdit` | `cg hook post-edit` |
