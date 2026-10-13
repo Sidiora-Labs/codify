@@ -12,7 +12,7 @@
     - grep.c: pattern to trigrams, candidate query under the branch predicate, parallel scan of candidates from disk with regexec or memmem, enclosing-symbol lookup per file, ranking, --path/--lang/--no-tests/--symbol/--kind/-C/--files/--count/-n/--budget, text and --json.
     - main.c dispatch, help.c entry, mcp.c grep_code tool and cg tool call; 44_grep.sh per req 1.7.
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7_
-  - [ ] 1.2 cg files and the shared --path, --lang, --no-tests filters on search, context, survey, and grep
+  - [-] 1.2 cg files and the shared --path, --lang, --no-tests filters on search, context, survey, and grep
     - files.c: glob, path-word, and directory queries over files joined with file_fts (trigram over path words, written in the write path) and a symbol count; --dirs with depth, counts, dominant language; -n, --lang, --json.
     - graph.c: a QueryFilter (paths, lang, no_tests) parsed once in main and applied inside rank_query, cmd_context, cmd_survey, and exported for grep; the directory outline in cmd_context lists subdirectories with counts before files.
     - mcp.c: find_files tool; path, lang, no_tests on search_code and get_context; 45_files.sh per req 2.6.

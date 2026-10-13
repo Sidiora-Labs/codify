@@ -106,6 +106,18 @@ const char *branch_tree(Cg *cg, long branch_id, char *out, size_t cap) {
 static sqlite3_stmt *prep_scoped(Cg *cg, const char *head, const char *tail) {
     char scope[64], sql[2048];
     branch_scope_sql(cg, "f", scope, sizeof scope);
+    /* codify-v15 1.2: --path/--lang/--no-tests ride the same splice, so
+     * search, context and survey narrow inside every scoped read */
+    const QueryFilter *qf = cg_filter_get(cg);
+    if (qf) {
+        char *flt = query_filter_sql(qf, "f");
+        StrBuf b; sb_init(&b);
+        sb_printf(&b, "%s%s%s%s", head, scope, flt, tail);
+        free(flt);
+        sqlite3_stmt *st = cg_prep(cg, b.p);
+        sb_free(&b);
+        return st;
+    }
     snprintf(sql, sizeof sql, "%s%s%s", head, scope, tail);
     return cg_prep(cg, sql);
 }
@@ -618,6 +630,19 @@ static int resolve_best(Cg *cg, long from_fid, const char *from_path,
     return best;
 }
 
+/* codify-v15 1.2: edge lists (callers, callees) are read unscoped by
+ * prep_scoped, so the filter keeps their rows here; files.lang is
+ * lang_for_path of the path, so the check matches the SQL one */
+static int qf_keep(const Cg *cg, SymRow *v, int n) {
+    const QueryFilter *qf = cg_filter_get(cg);
+    if (!qf) return n;
+    int k = 0;
+    for (int i = 0; i < n; i++)
+        if (query_filter_match(qf, v[i].path, lang_for_path(v[i].path)))
+            v[k++] = v[i];
+    return k;
+}
+
 /* callers of def: the enclosing function or method of every ref that
  * targets it. Refs resolved at index time are trusted first, so with
  * several same-named defs a fixture's `find` no longer claims unrelated
@@ -677,7 +702,7 @@ static int callers_of(Cg *cg, const SymRow *def, SymRow *out, int cap) {
         sqlite3_finalize(st);
     }
 
-    return n;
+    return qf_keep(cg, out, n);
 }
 
 static int sym_path_line_cmp(const void *a, const void *b) {
@@ -766,7 +791,7 @@ static int callees_of(Cg *cg, long sym_id, SymRow *out, int cap) {
     }
 
     qsort(out, (size_t)n, sizeof(SymRow), sym_path_line_cmp);
-    return n;
+    return qf_keep(cg, out, n);
 }
 
 /* Reference counts join files so they stay per branch: without it a repo
@@ -2378,7 +2403,10 @@ static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {
         sb_free(&imp);
         sb_free(&deps);
     } else {
-        /* a directory: every indexed file below it, path-ordered */
+        /* a directory: every indexed file below it, path-ordered. When
+         * they overflow the budget (codify-v15 1.2), its subdirectories
+         * with counts come first, then the files that fit, so a large
+         * directory reads as a map instead of a truncated list. */
         char pre[1100];
         snprintf(pre, sizeof pre, "%s/", path);
         st = prep_scoped(cg,
@@ -2388,41 +2416,117 @@ static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {
             " ORDER BY f.path, f.branch_id");
         sqlite3_bind_text(st, 1, pre, -1, SQLITE_STATIC);
         sqlite3_bind_int(st, 2, (int)strlen(pre));
-        int nf = 0, of = 0;
+        struct DirFile { long id, lines; int syms; char *path; } *dv = NULL;
+        int ndv = 0, cdv = 0;
         while (sqlite3_step(st) == SQLITE_ROW) {
-            long id = sqlite3_column_int64(st, 0);
-            const char *fp = (const char *)sqlite3_column_text(st, 1);
-            long ln = sqlite3_column_int64(st, 2);
-            int sc = sqlite3_column_int(st, 3);
-            if (nf + of == 0) {
-                if (json) {
-                    sb_puts(&b, "{\"query\":"); sb_json_str(&b, q);
-                    sb_puts(&b, ",\"path\":"); sb_json_str(&b, path);
-                    sb_puts(&b, ",\"kind\":\"dir\",\"files\":[");
-                } else {
-                    sb_printf(&b, "context for '%s'\n\ndirectory %s/\n", q,
-                              path);
-                }
+            if (ndv == cdv) {
+                cdv = cdv ? cdv * 2 : 64;
+                dv = xrealloc(dv, sizeof *dv * (size_t)cdv);
             }
-            char purpose[512];
-            file_purpose(cg, id, purpose, sizeof purpose);
-            StrBuf it; sb_init(&it);
-            if (json) {
-                sb_puts(&it, "{\"path\":"); sb_json_str(&it, fp);
-                sb_puts(&it, ",\"purpose\":"); sb_json_str(&it, purpose);
-                sb_printf(&it, ",\"symbols\":%d,\"lines\":%ld}", sc, ln);
-            } else {
-                sb_printf(&it, "  %-40s %3d sym  %s\n", fp, sc,
-                          purpose[0] ? purpose : "—");
-            }
-            ctx_fit(&b, &it, room > CTX_MARK ? room - CTX_MARK : 0, json,
-                    &nf, &of);
+            dv[ndv].id = sqlite3_column_int64(st, 0);
+            dv[ndv].path = xstrdup((const char *)sqlite3_column_text(st, 1));
+            dv[ndv].lines = sqlite3_column_int64(st, 2);
+            dv[ndv].syms = sqlite3_column_int(st, 3);
+            ndv++;
         }
         sqlite3_finalize(st);
-        if (nf + of == 0) { sb_free(&b); return -1; }
-        ctx_omitted(&b, nf, of, json);
-        if (json) sb_putc(&b, ']');
-        omitted_total = of;
+        if (ndv == 0) { sb_free(&b); free(dv); return -1; }
+        size_t plen = strlen(pre);
+
+        /* the immediate subdirectories, aggregated (rows are path-ordered,
+         * so one subdirectory's files are contiguous) */
+        struct DirSub { char name[512]; int files, syms; long lines; } *sd = NULL;
+        int nsd = 0;
+        for (int i = 0; i < ndv; i++) {
+            const char *rest = dv[i].path + plen;
+            const char *sl = strchr(rest, '/');
+            if (!sl) continue;
+            size_t l = (size_t)(sl - rest);
+            if (!nsd || strlen(sd[nsd - 1].name) != l ||
+                strncmp(sd[nsd - 1].name, rest, l) != 0) {
+                sd = xrealloc(sd, sizeof *sd * (size_t)(nsd + 1));
+                snprintf(sd[nsd].name, sizeof sd[0].name, "%.*s", (int)l, rest);
+                sd[nsd].files = sd[nsd].syms = 0;
+                sd[nsd].lines = 0;
+                nsd++;
+            }
+            sd[nsd - 1].files++;
+            sd[nsd - 1].syms += dv[i].syms;
+            sd[nsd - 1].lines += dv[i].lines;
+        }
+
+        size_t froom = room > CTX_MARK ? room - CTX_MARK : 0;
+        for (int mode = 0; mode < 2; mode++) {
+            /* mode 0 is the flat list; mode 1 the map, tried only when the
+             * flat list overflowed and there is a subdirectory to fold */
+            b.len = 0;
+            b.p[0] = 0;
+            if (json) {
+                sb_puts(&b, "{\"query\":"); sb_json_str(&b, q);
+                sb_puts(&b, ",\"path\":"); sb_json_str(&b, path);
+                sb_puts(&b, ",\"kind\":\"dir\"");
+            } else {
+                sb_printf(&b, "context for '%s'\n\ndirectory %s/\n", q, path);
+            }
+            int osd = 0;
+            if (mode == 1) {
+                int nsub = 0;
+                if (json) sb_puts(&b, ",\"subdirs\":[");
+                else sb_printf(&b, "%d files; subdirectories:\n", ndv);
+                size_t sroom = b.len + (froom > b.len ? froom - b.len : 0) / 2;
+                for (int i = 0; i < nsd; i++) {
+                    char full[1100];
+                    snprintf(full, sizeof full, "%s%s/", pre, sd[i].name);
+                    StrBuf it; sb_init(&it);
+                    if (json) {
+                        sb_puts(&it, "{\"path\":");
+                        sb_json_str(&it, full);
+                        sb_printf(&it, ",\"files\":%d,\"symbols\":%d,"
+                                  "\"lines\":%ld}", sd[i].files, sd[i].syms,
+                                  sd[i].lines);
+                    } else {
+                        sb_printf(&it, "  %-40s %3d files %4d sym %6ld lines\n",
+                                  full, sd[i].files, sd[i].syms, sd[i].lines);
+                    }
+                    ctx_fit(&b, &it, sroom, json, &nsub, &osd);
+                }
+                ctx_omitted(&b, nsub, osd, json);
+                if (json) sb_putc(&b, ']');
+                else sb_puts(&b, "files:\n");
+            }
+            if (json) sb_puts(&b, ",\"files\":[");
+            int nf = 0, of = 0;
+            /* the map lists the directory's own files before deeper ones */
+            for (int pass = 0; pass < (mode ? 2 : 1); pass++) {
+                for (int i = 0; i < ndv; i++) {
+                    if (mode) {
+                        bool own = !strchr(dv[i].path + plen, '/');
+                        if (own != (pass == 0)) continue;
+                    }
+                    if (of) { of++; continue; }
+                    char purpose[512];
+                    file_purpose(cg, dv[i].id, purpose, sizeof purpose);
+                    StrBuf it; sb_init(&it);
+                    if (json) {
+                        sb_puts(&it, "{\"path\":"); sb_json_str(&it, dv[i].path);
+                        sb_puts(&it, ",\"purpose\":"); sb_json_str(&it, purpose);
+                        sb_printf(&it, ",\"symbols\":%d,\"lines\":%ld}",
+                                  dv[i].syms, dv[i].lines);
+                    } else {
+                        sb_printf(&it, "  %-40s %3d sym  %s\n", dv[i].path,
+                                  dv[i].syms, purpose[0] ? purpose : "—");
+                    }
+                    ctx_fit(&b, &it, froom, json, &nf, &of);
+                }
+            }
+            ctx_omitted(&b, nf, of, json);
+            if (json) sb_putc(&b, ']');
+            omitted_total = of + osd;
+            if (!of || nsd == 0) break;
+        }
+        for (int i = 0; i < ndv; i++) free(dv[i].path);
+        free(dv);
+        free(sd);
     }
     ctx_tail(&b, budget, omitted_total, json);
     fputs(b.p, stdout);

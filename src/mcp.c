@@ -21,12 +21,55 @@ typedef struct {
     const char *args;      /* arguments object, or NULL */
 } CallCtx;
 
+/* codify-v15 1.2: path (a glob or a list of them), lang and no_tests
+ * narrow search_code and get_context exactly as the CLI flags do; the
+ * filter is cleared after the call so the next tool starts wide */
+static void mcp_filter(const CallCtx *c, QueryFilter *f) {
+    memset(f, 0, sizeof *f);
+    if (!c->args) return;
+    char *raw = json_get_raw(c->args, "path");
+    if (raw && raw[0] == '[') {
+        char **items = NULL;
+        int n = json_array_items(raw, &items);
+        for (int i = 0; i < n; i++) {
+            char *v = json_string_value(items[i]);
+            if (v && v[0] && f->npaths < QF_MAX_PATHS)
+                snprintf(f->paths[f->npaths++], sizeof f->paths[0], "%s", v);
+            free(v);
+            free(items[i]);
+        }
+        free(items);
+    } else if (raw) {
+        char *v = json_string_value(raw);
+        if (v && v[0]) snprintf(f->paths[f->npaths++], sizeof f->paths[0], "%s", v);
+        free(v);
+    }
+    free(raw);
+    char *lang = json_get_string(c->args, "lang");
+    char *nt = json_get_raw(c->args, "no_tests");
+    char *argv[4] = { "x", NULL, NULL, NULL };
+    int argc = 1;
+    if (lang && lang[0]) { argv[argc++] = "--lang"; argv[argc++] = lang; }
+    if (nt && strcmp(nt, "true") == 0) argv[argc++] = "--no-tests";
+    QueryFilter g;
+    if (argc > 1 && query_filter_parse(&argc, argv, &g) == 0) {
+        memcpy(f->lang, g.lang, sizeof f->lang);
+        f->no_tests = g.no_tests;
+    }
+    free(lang);
+    free(nt);
+}
+
 static int t_search(void *v) {
     CallCtx *c = v;
     char *q = c->args ? json_get_string(c->args, "query") : NULL;
     if (!q) { printf("{\"error\":\"missing query\"}\n"); return 1; }
     int limit = (int)json_get_int(c->args, "limit", 20);
+    QueryFilter f;
+    mcp_filter(c, &f);
+    cg_filter_set(c->cg, &f);
     int rc = cmd_search(c->cg, q, limit > 0 ? limit : 20, true);
+    cg_filter_set(c->cg, NULL);
     free(q);
     return rc;
 }
@@ -36,9 +79,42 @@ static int t_context(void *v) {
     if (!q) { printf("{\"error\":\"missing query\"}\n"); return 1; }
     int budget = (int)json_get_int(c->args, "budget", 4000);
     int limit = (int)json_get_int(c->args, "limit", 8);
+    QueryFilter f;
+    mcp_filter(c, &f);
+    cg_filter_set(c->cg, &f);
     int rc = cmd_context(c->cg, q, budget > 0 ? budget : 4000,
                          limit > 0 ? limit : 8, true);
+    cg_filter_set(c->cg, NULL);
     free(q);
+    return rc;
+}
+
+/* find_files: cg files through the same argv the CLI parses */
+static int t_files(void *v) {
+    CallCtx *c = v;
+    char *pat = c->args ? json_get_string(c->args, "pattern") : NULL;
+    char *lang = c->args ? json_get_string(c->args, "lang") : NULL;
+    char *dirs = c->args ? json_get_raw(c->args, "dirs") : NULL;
+    long depth = c->args ? json_get_int(c->args, "depth", 0) : 0;
+    long limit = c->args ? json_get_int(c->args, "limit", 0) : 0;
+    char dbuf[24], lbuf[24];
+    char *argv[12];
+    int argc = 0;
+    argv[argc++] = "files";
+    if (dirs && strcmp(dirs, "true") == 0) argv[argc++] = "--dirs";
+    if (pat && pat[0]) argv[argc++] = pat;
+    if (lang && lang[0]) { argv[argc++] = "--lang"; argv[argc++] = lang; }
+    if (depth > 0) {
+        snprintf(dbuf, sizeof dbuf, "%ld", depth);
+        argv[argc++] = "--depth"; argv[argc++] = dbuf;
+    }
+    if (limit > 0) {
+        snprintf(lbuf, sizeof lbuf, "%ld", limit);
+        argv[argc++] = "-n"; argv[argc++] = lbuf;
+    }
+    argv[argc] = NULL;
+    int rc = cmd_files(c->cg, argc, argv, true);
+    free(pat); free(lang); free(dirs);
     return rc;
 }
 
@@ -550,12 +626,29 @@ static int t_codemap(void *v) {
     return cmd_codemap(c->cg, &o);
 }
 
+/* codify-v15 1.2: the narrowing search_code and get_context share */
+#define S_QFILTER "\"path\":{\"type\":[\"string\",\"array\"],\"items\":" \
+                 "{\"type\":\"string\"},\"description\":\"only paths under " \
+                 "this glob or directory (a string or a list)\"},\"lang\":" \
+                 "{\"type\":\"string\",\"description\":\"only files of this " \
+                 "language (c, python, ts, ...)\"},\"no_tests\":{\"type\":" \
+                 "\"boolean\",\"description\":\"leave test files out\"},"
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
+                 S_QFILTER \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
 #define S_CTX    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  "\"budget\":{\"type\":\"integer\",\"description\":" \
-                 "\"token budget, default 4000\"}," \
+                 "\"token budget, default 4000\"}," S_QFILTER \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
+#define S_FILES  "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":" \
+                 "\"string\",\"description\":\"a glob (src/**/*.go), path words " \
+                 "(sync gate), or a directory; omit for the top level\"}," \
+                 "\"dirs\":{\"type\":\"boolean\",\"description\":\"directories " \
+                 "with file and line counts and dominant language instead\"}," \
+                 "\"depth\":{\"type\":\"integer\",\"description\":\"levels for " \
+                 "dirs, default 2\"},\"lang\":{\"type\":\"string\"}," \
+                 "\"limit\":{\"type\":\"integer\",\"description\":\"rows, " \
+                 "default 40\"}}}"
 #define S_SURVEY "{\"type\":\"object\",\"properties\":{\"scope\":{\"type\":" \
                  "\"string\",\"description\":\"path prefix or prose query; omit " \
                  "for the whole tree\"},\"budget\":{\"type\":\"integer\"," \
@@ -736,6 +829,13 @@ static const struct {
       "imports, dependents); a directory lists its files. Use this first "
       "when exploring unfamiliar code.",
       S_CTX, A_READ, "Get context", t_context, true },
+    { "find_files",
+      "Find files by glob (src/**/*.go), by the words of their path (sync "
+      "gate finds syncgate.c and sync_gate.py), or list a directory; each "
+      "row has path, language, lines and symbol count. dirs=true maps the "
+      "tree instead: directories with file and line counts and dominant "
+      "language, largest first. Use instead of ls or find.",
+      S_FILES, A_READ, "Find files", t_files, true },
     { "survey",
       "Wide, cheap orientation over many files: each file's purpose line "
       "and its documented symbols with signatures — never bodies. Covers "

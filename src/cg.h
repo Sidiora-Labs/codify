@@ -476,6 +476,35 @@ int  packet_upstream_evidence(Cg *cg, const char *feature, const char *req,
                               StrBuf *b);
 /* the tier below bodies: purpose lines and docs, wide and cheap */
 int cmd_survey(Cg *cg, const char *scope, int budget, bool json);
+/* codify-v15 1.2 */
+/* --path GLOB (repeatable), --lang L, --no-tests: the one narrowing every
+ * retrieval read shares. A path is a directory, a file, or a glob where
+ * `**` and `*` both cross `/`; a slashless glob also matches basenames. */
+#define QF_MAX_PATHS 16
+typedef struct {
+    char paths[QF_MAX_PATHS][512];
+    int  npaths;
+    char lang[32];        /* files.lang spelling; "py" etc. normalised */
+    bool no_tests;        /* drop what graph_path_is_test calls a test */
+} QueryFilter;
+/* Strip the filter flags from argv (anywhere after the command) into f.
+ * 0 ok, -1 on a flag missing its value (reported on stderr). */
+int  query_filter_parse(int *argc, char **argv, QueryFilter *f);
+bool query_filter_active(const QueryFilter *f);
+/* " AND (...)" over the alias's path and lang columns, or "" when f is
+ * inactive; malloc'd. The no-tests clause calls cg_is_test(), which
+ * cg_filter_set (or query_filter_register) installs on the connection. */
+char *query_filter_sql(const QueryFilter *f, const char *alias);
+void query_filter_register(sqlite3 *db);
+/* The same decision for a row already in hand (grep's candidates). */
+bool query_filter_match(const QueryFilter *f, const char *path,
+                        const char *lang);
+/* The filter graph.c's scoped reads (search, context, survey) apply until
+ * cleared with NULL; per thread, so one MCP call never leaks into the next */
+void cg_filter_set(Cg *cg, const QueryFilter *f);
+const QueryFilter *cg_filter_get(const Cg *cg);
+/* cg files [pattern] [--dirs [prefix]] [--depth N] [-n N] [filters] */
+int cmd_files(Cg *cg, int argc, char **argv, bool json);
 /* anchor health: stale docs plus the coordination-ranked backfill list */
 int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json);
 int cmd_routes (Cg *cg, const char *filter, bool json);

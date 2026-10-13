@@ -198,10 +198,15 @@ static const char *SCHEMA =
      * comments.id, so path, kind, and the bound symbol come from the join
      * rather than from duplicated UNINDEXED columns on every row. */
     "CREATE VIRTUAL TABLE IF NOT EXISTS comment_fts USING fts5("
-    "  body, tokenize='unicode61');";
+    "  body, tokenize='unicode61');"
+    /* codify-v15 1.2 */
+    /* cg files: name_words(path) under trigram, rowid = files.id, so
+     * "sync gate" finds syncgate.c and sync_gate.py alike */
+    "CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5("
+    "  words, tokenize='trigram');";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "17"
+#define SCHEMA_VERSION "18"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */
@@ -460,6 +465,7 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS imports;DROP TABLE IF EXISTS symbol_fts;"
         "DROP TABLE IF EXISTS body_fts;DROP TABLE IF EXISTS comments;"
         "DROP TABLE IF EXISTS comment_fts;"
+        "DROP TABLE IF EXISTS file_fts;"
         "DELETE FROM meta WHERE key LIKE 'last_index_%' "
         "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
     char *err = NULL;

@@ -300,6 +300,17 @@ int main(int argc, char **argv) {
         cg_close(&cg);
         return 1;
     }
+    /* codify-v15 1.2: --path/--lang/--no-tests, parsed once for the reads
+     * that narrow by them; graph.c applies the filter inside their SQL */
+    if (strcmp(cmd, "search") == 0 || strcmp(cmd, "context") == 0 ||
+        strcmp(cmd, "survey") == 0) {
+        QueryFilter qf;
+        if (query_filter_parse(&argc, argv, &qf) != 0) {
+            cg_close(&cg);
+            return 1;
+        }
+        cg_filter_set(&cg, &qf);
+    }
     int rc = 0;
 
     if (strcmp(cmd, "journal") == 0) {
@@ -404,6 +415,8 @@ int main(int argc, char **argv) {
         int budget = atoi(opt(&argc, argv, "--budget", "16000"));
         rc = cmd_survey(&cg, argc >= 3 ? argv[2] : NULL,
                         budget > 0 ? budget : 16000, json);
+    } else if (strcmp(cmd, "files") == 0) {
+        rc = cmd_files(&cg, argc - 1, argv + 1, json);
     } else if (strcmp(cmd, "watch") == 0) {
         int deb = atoi(opt(&argc, argv, "--debounce", "300"));
         bool fleet = flag(&argc, argv, "--fleet");
