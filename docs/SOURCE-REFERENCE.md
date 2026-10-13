@@ -2,7 +2,7 @@
 
 This is a source-navigation companion to the [architecture guide](ARCHITECTURE.md) and [contributor guide](../CONTRIBUTING.md), generated from Codify's own documentation evidence packet. It records indexed symbols, not promises that every symbol is public or stable. Static helpers, shared declarations, and JavaScript implementation details are included because the baseline coverage heuristic includes them.
 
-The baseline contains 2658 observations in 55 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
+The baseline contains 3256 observations in 62 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
 
 For tests, deliberately invalid examples, and sample web routes, see the separate [test and fixture reference](TEST-REFERENCE.md). Go files under `kvx/impl/go/` are vendored reference tooling; the shipped `cg` build uses the C sources selected by the [Makefile](../Makefile).
 
@@ -261,89 +261,119 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `relAge` | function | 49 | <code>function relAge(seen, now) {</code> |
-| `mergeState` | function | 65 | <code>function mergeState(name, base, reg, exists) {</code> |
-| `treeFacts` | function | 107 | <code>function treeFacts(tree) {</code> |
-| `str` | function | 112 | <code>const str = (v) =&gt; (typeof v === 'string' &amp;&amp; v) ? v : null;</code> |
-| `num` | function | 113 | <code>const num = (v) =&gt; (typeof v === 'number' &amp;&amp; Number.isFinite(v)) ? v : null;</code> |
-| `t` | function | 118 | <code>const t = (m.tasks &amp;&amp; typeof m.tasks === 'object') ? m.tasks : {};</code> |
-| `parentsFromTree` | function | 161 | <code>function parentsFromTree(tree) {</code> |
-| `kids` | function | 164 | <code>const kids = (n) =&gt; [].concat(n.children &#124;&#124; [], n.managers &#124;&#124; [],</code> |
-| `nameOf` | function | 167 | <code>const nameOf = (n) =&gt; typeof n.agent === 'string' ? n.agent</code> |
-| `walk` | function | 169 | <code>const walk = (n, parent) =&gt; {</code> |
-| `taskNode` | function | 190 | <code>function taskNode(id, claim, planned) {</code> |
-| `fleetTree` | function | 223 | <code>function fleetTree(status, specStatus, branches, opts) {</code> |
-| `arr` | function | 224 | <code>const arr = (v) =&gt; Array.isArray(v) ? v : [];</code> |
-| `feature` | function | 244 | <code>const feature = (specStatus &amp;&amp; specStatus.feature) &#124;&#124;</code> |
-| `seenOf` | function | 265 | <code>const seenOf = (name) =&gt; {</code> |
-| `tasksOf` | function | 269 | <code>const tasksOf = (name) =&gt; {</code> |
-| `claimFor` | function | 277 | <code>const claimFor = (id) =&gt; (claimsBy.get(name) &#124;&#124; []).find((c) =&gt; c.id === id);</code> |
-| `waveTasks` | function | 288 | <code>const waveTasks = (name, planWave, live, held) =&gt; {</code> |
-| `mainName` | function | 310 | <code>const mainName = (facts &amp;&amp; facts.main.agent) &#124;&#124; (mainRow &amp;&amp; mainRow.agent) &#124;&#124;</code> |
-| `mainBranch` | function | 312 | <code>const mainBranch = (facts &amp;&amp; facts.main.branch) &#124;&#124;</code> |
-| `addManager` | function | 318 | <code>const addManager = (agent, feat, live, seen, tf) =&gt; {</code> |
-| `branch` | function | 320 | <code>const branch = (tf &amp;&amp; tf.branch) &#124;&#124;</code> |
-| `base` | function | 323 | <code>const base = (tf &amp;&amp; tf.base) &#124;&#124; mainBranch;</code> |
-| `live` | function | 350 | <code>const live = (m.seen &#124;&#124; 0) &gt; 0 &#124;&#124;</code> |
-| `addWorker` | function | 368 | <code>const addWorker = (agent, feat, wave, live, seen, tf) =&gt; {</code> |
-| `claim` | function | 377 | <code>const claim = (claimsBy.get(agent) &#124;&#124; [])[0];</code> |
-| `branch` | function | 381 | <code>const branch = (tf &amp;&amp; tf.branch) &#124;&#124; (claim &amp;&amp; claim.branch) &#124;&#124;</code> |
-| `base` | function | 383 | <code>const base = (tf &amp;&amp; tf.base) &#124;&#124; (planWave &amp;&amp; planWave.base) &#124;&#124;</code> |
-| `live` | function | 407 | <code>const live = (w.heartbeat &#124;&#124; w.seen &#124;&#124; 0) &gt; 0 &#124;&#124;</code> |
-| `managerFor` | function | 433 | <code>const managerFor = (feat) =&gt;</code> |
-| `claim` | function | 438 | <code>const claim = (claimsBy.get(w.agent) &#124;&#124; [])[0];</code> |
-| `startPlan` | function | 497 | <code>function startPlan(input) {</code> |
-| `open` | function | 507 | <code>const open = (i.runs &#124;&#124; []).filter((r) =&gt; ['running', 'paused', 'draining', 'stopping'].includes(r.state));</code> |
-| `secs` | function | 515 | <code>const secs = (s) =&gt; !s ? '—' : s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`;</code> |
-| `coll` | function | 530 | <code>const coll = (i.collisions &amp;&amp; i.collisions.collisions) &#124;&#124; [];</code> |
-| `workers` | function | 538 | <code>const workers = (roles.roles &#124;&#124; []).find((r) =&gt; r.name === 'worker');</code> |
-| `liveDecorate` | function | 550 | <code>function liveDecorate(model, input) {</code> |
-| `agents` | function | 553 | <code>const agents = (i.live &amp;&amp; i.live.agents) &#124;&#124; {};</code> |
-| `walk` | function | 566 | <code>const walk = (n) =&gt; {</code> |
-| `byDotted` | function | 595 | <code>function byDotted(a, b) {</code> |
-| `short` | function | 623 | <code>function short(s, n) {</code> |
-| `withTimeout` | function | 628 | <code>function withTimeout(p, ms, onTimeout) {</code> |
-| `FleetView` | class | 650 | <code>class FleetView {</code> |
-| `constructor` | method | 651 | <code>constructor(deps) {</code> |
-| `refresh` | method | 668 | <code>async refresh(specStatus) {</code> |
-| `call` | function | 672 | <code>const call = (args) =&gt; withTimeout(cgJson(args), CALL_TIMEOUT_MS,</code> |
-| `_done` | method | 715 | <code>_done() {</code> |
-| `getTreeItem` | method | 735 | <code>getTreeItem(el) { return el; }</code> |
-| `getChildren` | method | 737 | <code>getChildren(el) {</code> |
-| `noticeItem` | method | 757 | <code>noticeItem(label, icon, command) {</code> |
-| `nodeItem` | method | 775 | <code>nodeItem(n) {</code> |
-| `kids` | function | 776 | <code>const kids = (n.children &#124;&#124; []).map((c) =&gt; this.nodeItem(c))</code> |
-| `approvalItem` | method | 821 | <code>approvalItem(a) {</code> |
-| `agentIcon` | method | 831 | <code>agentIcon(n) {</code> |
-| `agentTooltip` | method | 841 | <code>agentTooltip(n) {</code> |
-| `taskBadges` | method | 884 | <code>taskBadges(t) {</code> |
-| `taskItem` | method | 894 | <code>taskItem(t, owner) {</code> |
-| `prItem` | method | 926 | <code>prItem(p) {</code> |
-| `nodeOf` | method | 946 | <code>nodeOf(arg) { return arg &amp;&amp; arg.node ? arg.node : null; }</code> |
-| `remember` | method | 951 | <code>remember(feature, pr) {</code> |
-| `featureOf` | function | 965 | <code>function featureOf(node) {</code> |
-| `run` | function | 971 | <code>async function run(args, title) {</code> |
-| `parse` | function | 979 | <code>function parse(r) {</code> |
-| `pickTask` | function | 985 | <code>async function pickTask(placeHolder) {</code> |
-| `walk` | function | 989 | <code>const walk = (n) =&gt; {</code> |
-| `taskIdOf` | function | 1014 | <code>function taskIdOf(arg) {</code> |
-| `cmdRefresh` | function | 1021 | <code>async function cmdRefresh() {</code> |
-| `cmdOpenWorktree` | function | 1028 | <code>async function cmdOpenWorktree(arg) {</code> |
-| `walk` | function | 1033 | <code>const walk = (x) =&gt; {</code> |
-| `cmdBegin` | function | 1072 | <code>async function cmdBegin(arg) {</code> |
-| `cmdMergeUp` | function | 1092 | <code>async function cmdMergeUp(arg) {</code> |
-| `cmdLand` | function | 1127 | <code>async function cmdLand(arg) {</code> |
-| `prFrom` | function | 1165 | <code>function prFrom(j) {</code> |
-| `cmdOpenPr` | function | 1171 | <code>async function cmdOpenPr(arg) {</code> |
-| `cmdCheckpoint` | function | 1208 | <code>async function cmdCheckpoint() {</code> |
-| `cmdStart` | function | 1248 | <code>async function cmdStart(arg) {</code> |
-| `fleetControl` | function | 1291 | <code>async function fleetControl(verb, label) {</code> |
-| `cmdStop` | function | 1300 | <code>async function cmdStop() {</code> |
-| `cmdOpenTranscript` | function | 1316 | <code>async function cmdOpenTranscript(arg) {</code> |
-| `ids` | function | 1325 | <code>const ids = (n.tasks &#124;&#124; []).map((t) =&gt; t.id);</code> |
-| `cmdApprove` | function | 1337 | <code>async function cmdApprove(arg) {</code> |
-| `items` | function | 1341 | <code>const items = ((j &amp;&amp; j.approvals) &#124;&#124; []).map((x) =&gt; ({</code> |
-| `register` | function | 1364 | <code>function register(ctx, d) {</code> |
+| `relAge` | function | 51 | <code>function relAge(seen, now) {</code> |
+| `mergeState` | function | 67 | <code>function mergeState(name, base, reg, exists) {</code> |
+| `treeFacts` | function | 112 | <code>function treeFacts(tree) {</code> |
+| `str` | function | 117 | <code>const str = (v) =&gt; (typeof v === 'string' &amp;&amp; v) ? v : null;</code> |
+| `num` | function | 118 | <code>const num = (v) =&gt; (typeof v === 'number' &amp;&amp; Number.isFinite(v)) ? v : null;</code> |
+| `t` | function | 123 | <code>const t = (m.tasks &amp;&amp; typeof m.tasks === 'object') ? m.tasks : {};</code> |
+| `parentsFromTree` | function | 168 | <code>function parentsFromTree(tree) {</code> |
+| `kids` | function | 171 | <code>const kids = (n) =&gt; [].concat(n.children &#124;&#124; [], n.managers &#124;&#124; [],</code> |
+| `nameOf` | function | 174 | <code>const nameOf = (n) =&gt; typeof n.agent === 'string' ? n.agent</code> |
+| `walk` | function | 176 | <code>const walk = (n, parent) =&gt; {</code> |
+| `planShape` | function | 202 | <code>function planShape(plan) {</code> |
+| `arr` | function | 203 | <code>const arr = (v) =&gt; Array.isArray(v) ? v : [];</code> |
+| `wv` | function | 206 | <code>const wv = (v) =&gt; (typeof v === 'number' &amp;&amp; v &gt;= 0) ? v : null;</code> |
+| `taskNode` | function | 239 | <code>function taskNode(id, claim, planned) {</code> |
+| `fleetTree` | function | 272 | <code>function fleetTree(status, specStatus, branches, opts) {</code> |
+| `arr` | function | 273 | <code>const arr = (v) =&gt; Array.isArray(v) ? v : [];</code> |
+| `feature` | function | 293 | <code>const feature = (specStatus &amp;&amp; specStatus.feature) &#124;&#124;</code> |
+| `planMgr` | function | 316 | <code>const planMgr = (feat, wave) =&gt; plan &amp;&amp; plan.feature === feat</code> |
+| `seenOf` | function | 319 | <code>const seenOf = (name) =&gt; {</code> |
+| `tasksOf` | function | 323 | <code>const tasksOf = (name) =&gt; {</code> |
+| `claimFor` | function | 331 | <code>const claimFor = (id) =&gt; (claimsBy.get(name) &#124;&#124; []).find((c) =&gt; c.id === id);</code> |
+| `waveTasks` | function | 342 | <code>const waveTasks = (name, planWave, live, held) =&gt; {</code> |
+| `mainName` | function | 364 | <code>const mainName = (facts &amp;&amp; facts.main.agent) &#124;&#124; (mainRow &amp;&amp; mainRow.agent) &#124;&#124;</code> |
+| `mainBranch` | function | 366 | <code>const mainBranch = (facts &amp;&amp; facts.main.branch) &#124;&#124;</code> |
+| `addManager` | function | 372 | <code>const addManager = (agent, feat, live, seen, tf, wave) =&gt; {</code> |
+| `branch` | function | 377 | <code>const branch = (tf &amp;&amp; tf.branch) &#124;&#124; (pm &amp;&amp; pm.branch) &#124;&#124;</code> |
+| `base` | function | 379 | <code>const base = (tf &amp;&amp; tf.base) &#124;&#124; mainBranch;</code> |
+| `live` | function | 406 | <code>const live = (m.seen &#124;&#124; 0) &gt; 0 &#124;&#124;</code> |
+| `addWorker` | function | 431 | <code>const addWorker = (agent, feat, wave, live, seen, tf) =&gt; {</code> |
+| `claim` | function | 441 | <code>const claim = (claimsBy.get(agent) &#124;&#124; [])[0];</code> |
+| `branch` | function | 445 | <code>const branch = (tf &amp;&amp; tf.branch) &#124;&#124; (claim &amp;&amp; claim.branch) &#124;&#124;</code> |
+| `base` | function | 447 | <code>const base = (tf &amp;&amp; tf.base) &#124;&#124; (planWave &amp;&amp; planWave.base) &#124;&#124;</code> |
+| `live` | function | 471 | <code>const live = (w.heartbeat &#124;&#124; w.seen &#124;&#124; 0) &gt; 0 &#124;&#124;</code> |
+| `managerFor` | function | 497 | <code>const managerFor = (feat, wave) =&gt; {</code> |
+| `claim` | function | 505 | <code>const claim = (claimsBy.get(w.agent) &#124;&#124; [])[0];</code> |
+| `nativeNode` | function | 579 | <code>function nativeNode(n, depth, ctx, rootTranscript) {</code> |
+| `str` | function | 580 | <code>const str = (v) =&gt; (typeof v === 'string' &amp;&amp; v) ? v : null;</code> |
+| `num` | function | 581 | <code>const num = (v) =&gt; (typeof v === 'number' &amp;&amp; Number.isFinite(v)) ? v : null;</code> |
+| `base` | function | 588 | <code>const base = (row &amp;&amp; row.base) &#124;&#124; null;</code> |
+| `nativeCounts` | function | 624 | <code>function nativeCounts(nodes) {</code> |
+| `walk` | function | 628 | <code>const walk = (n) =&gt; {</code> |
+| `nativeNodes` | function | 644 | <code>function nativeNodes(native, opts) {</code> |
+| `patchSessions` | function | 666 | <code>function patchSessions(sessions, liveNative, now) {</code> |
+| `walk` | function | 671 | <code>const walk = (n) =&gt; { index.set(n.agent, n); n.children.forEach(walk); };</code> |
+| `startPlan` | function | 723 | <code>function startPlan(input) {</code> |
+| `open` | function | 733 | <code>const open = (i.runs &#124;&#124; []).filter((r) =&gt; ['running', 'paused', 'draining', 'stopping'].includes(r.state));</code> |
+| `secs` | function | 741 | <code>const secs = (s) =&gt; !s ? '—' : s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`;</code> |
+| `coll` | function | 756 | <code>const coll = (i.collisions &amp;&amp; i.collisions.collisions) &#124;&#124; [];</code> |
+| `workers` | function | 764 | <code>const workers = (roles.roles &#124;&#124; []).find((r) =&gt; r.name === 'worker');</code> |
+| `liveDecorate` | function | 776 | <code>function liveDecorate(model, input) {</code> |
+| `agents` | function | 779 | <code>const agents = (i.live &amp;&amp; i.live.agents) &#124;&#124; {};</code> |
+| `walk` | function | 792 | <code>const walk = (n) =&gt; {</code> |
+| `byDotted` | function | 821 | <code>function byDotted(a, b) {</code> |
+| `roleTitle` | function | 844 | <code>function roleTitle(n) {</code> |
+| `short` | function | 860 | <code>function short(s, n) {</code> |
+| `withTimeout` | function | 865 | <code>function withTimeout(p, ms, onTimeout) {</code> |
+| `projectionNodes` | function | 891 | <code>function projectionNodes(proj, now) {</code> |
+| `findings` | function | 899 | <code>const findings = (proj.findings &#124;&#124; []).map((f) =&gt; ({</code> |
+| `findingBadge` | function | 922 | <code>function findingBadge(projection, branch) {</code> |
+| `FleetView` | class | 927 | <code>class FleetView {</code> |
+| `constructor` | method | 928 | <code>constructor(deps) {</code> |
+| `refresh` | method | 947 | <code>async refresh(specStatus) {</code> |
+| `call` | function | 951 | <code>const call = (args) =&gt; withTimeout(cgJson(args), CALL_TIMEOUT_MS,</code> |
+| `_done` | method | 996 | <code>_done() {</code> |
+| `getTreeItem` | method | 1016 | <code>getTreeItem(el) { return el; }</code> |
+| `getChildren` | method | 1018 | <code>getChildren(el) {</code> |
+| `projectionRoot` | method | 1046 | <code>projectionRoot() {</code> |
+| `findingItem` | method | 1066 | <code>findingItem(f, i) {</code> |
+| `findingBranchItem` | method | 1088 | <code>findingBranchItem(f, b, i) {</code> |
+| `nativeModel` | method | 1111 | <code>async nativeModel(status, tree, branches, call) {</code> |
+| `native` | function | 1112 | <code>const native = (tree &amp;&amp; Array.isArray(tree.native)) ? tree.native</code> |
+| `patchLive` | method | 1125 | <code>patchLive() {</code> |
+| `sessionsRoot` | method | 1134 | <code>sessionsRoot() {</code> |
+| `sessionItem` | method | 1158 | <code>sessionItem(n) {</code> |
+| `noticeItem` | method | 1212 | <code>noticeItem(label, icon, command) {</code> |
+| `nodeItem` | method | 1230 | <code>nodeItem(n) {</code> |
+| `kids` | function | 1231 | <code>const kids = (n.children &#124;&#124; []).map((c) =&gt; this.nodeItem(c))</code> |
+| `approvalItem` | method | 1279 | <code>approvalItem(a) {</code> |
+| `agentIcon` | method | 1289 | <code>agentIcon(n) {</code> |
+| `agentTooltip` | method | 1299 | <code>agentTooltip(n) {</code> |
+| `taskBadges` | method | 1342 | <code>taskBadges(t) {</code> |
+| `taskItem` | method | 1352 | <code>taskItem(t, owner) {</code> |
+| `prItem` | method | 1384 | <code>prItem(p) {</code> |
+| `nodeOf` | method | 1404 | <code>nodeOf(arg) { return arg &amp;&amp; arg.node ? arg.node : null; }</code> |
+| `remember` | method | 1409 | <code>remember(feature, pr) {</code> |
+| `featureOf` | function | 1423 | <code>function featureOf(node) {</code> |
+| `run` | function | 1429 | <code>async function run(args, title) {</code> |
+| `parse` | function | 1437 | <code>function parse(r) {</code> |
+| `pickTask` | function | 1443 | <code>async function pickTask(placeHolder) {</code> |
+| `walk` | function | 1447 | <code>const walk = (n) =&gt; {</code> |
+| `taskIdOf` | function | 1472 | <code>function taskIdOf(arg) {</code> |
+| `cmdRefresh` | function | 1479 | <code>async function cmdRefresh() {</code> |
+| `cmdOpenWorktree` | function | 1486 | <code>async function cmdOpenWorktree(arg) {</code> |
+| `walk` | function | 1491 | <code>const walk = (x) =&gt; {</code> |
+| `cmdBegin` | function | 1530 | <code>async function cmdBegin(arg) {</code> |
+| `cmdMergeUp` | function | 1550 | <code>async function cmdMergeUp(arg) {</code> |
+| `landTarget` | function | 1587 | <code>function landTarget(node, feature) {</code> |
+| `cmdLand` | function | 1597 | <code>async function cmdLand(arg) {</code> |
+| `prFrom` | function | 1637 | <code>function prFrom(j) {</code> |
+| `cmdOpenPr` | function | 1643 | <code>async function cmdOpenPr(arg) {</code> |
+| `cmdCheckpoint` | function | 1682 | <code>async function cmdCheckpoint() {</code> |
+| `cmdStart` | function | 1722 | <code>async function cmdStart(arg) {</code> |
+| `fleetControl` | function | 1765 | <code>async function fleetControl(verb, label) {</code> |
+| `cmdStop` | function | 1774 | <code>async function cmdStop() {</code> |
+| `cmdOpenTranscript` | function | 1790 | <code>async function cmdOpenTranscript(arg) {</code> |
+| `ids` | function | 1799 | <code>const ids = (n.tasks &#124;&#124; []).map((t) =&gt; t.id);</code> |
+| `cmdApprove` | function | 1811 | <code>async function cmdApprove(arg) {</code> |
+| `items` | function | 1815 | <code>const items = ((j &amp;&amp; j.approvals) &#124;&#124; []).map((x) =&gt; ({</code> |
+| `sessionNodes` | function | 1838 | <code>function sessionNodes() {</code> |
+| `walk` | function | 1840 | <code>const walk = (n) =&gt; { out.push(n); n.children.forEach(walk); };</code> |
+| `cmdOpenSessionWorktree` | function | 1846 | <code>async function cmdOpenSessionWorktree(arg) {</code> |
+| `cmdOpenSessionTranscript` | function | 1866 | <code>async function cmdOpenSessionTranscript(arg) {</code> |
+| `register` | function | 1891 | <code>function register(ctx, d) {</code> |
 
 ## editors/vscode/kvx.js
 
@@ -458,14 +488,19 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `tool` | method | 147 | <code>async tool(name, args) {</code> |
 | `tools` | method | 151 | <code>async tools() {</code> |
 | `subscribe` | method | 156 | <code>async subscribe(kinds) {</code> |
-| `cancel` | method | 164 | <code>async cancel(reqId) {</code> |
-| `_consume` | method | 168 | <code>_consume(chunk) {</code> |
-| `_dispatch` | method | 181 | <code>_dispatch(msg) {</code> |
-| `_kill` | method | 199 | <code>_kill() {</code> |
-| `dispose` | method | 208 | <code>dispose() {</code> |
-| `liveModel` | function | 223 | <code>function liveModel() {</code> |
-| `splitSubject` | function | 228 | <code>function splitSubject(subject) {</code> |
-| `applyEvent` | function | 234 | <code>function applyEvent(model, ev) {</code> |
+| `snapshot` | method | 166 | <code>async snapshot(all) {</code> |
+| `cancel` | method | 170 | <code>async cancel(reqId) {</code> |
+| `_consume` | method | 174 | <code>_consume(chunk) {</code> |
+| `_dispatch` | method | 187 | <code>_dispatch(msg) {</code> |
+| `_kill` | method | 205 | <code>_kill() {</code> |
+| `dispose` | method | 214 | <code>dispose() {</code> |
+| `liveModel` | function | 229 | <code>function liveModel() {</code> |
+| `splitSubject` | function | 234 | <code>function splitSubject(subject) {</code> |
+| `applyEvent` | function | 240 | <code>function applyEvent(model, ev) {</code> |
+| `applyNative` | function | 320 | <code>function applyNative(model, ev) {</code> |
+| `name` | function | 324 | <code>const name = (k === 'agent.native.spawn' ? p.agent : (p.agent &#124;&#124; ev.node)) &#124;&#124;</code> |
+| `applySnapshot` | function | 358 | <code>function applySnapshot(model, snap) {</code> |
+| `walk` | function | 361 | <code>const walk = (n) =&gt; {</code> |
 
 ## editors/vscode/tasks.js
 
@@ -487,66 +522,66 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `mergeTasks` | function | 208 | <code>function mergeTasks(spec, trace, status, plan) {</code> |
 | `mode` | function | 211 | <code>const mode = (status &amp;&amp; status.mode) &#124;&#124; 'standard';</code> |
 | `feature` | function | 212 | <code>const feature = (spec &amp;&amp; spec.feature) &#124;&#124; (trace &amp;&amp; trace.feature) &#124;&#124;</code> |
-| `statusOf` | function | 231 | <code>const statusOf = (id) =&gt; {</code> |
-| `sp` | function | 239 | <code>const sp = (spec &amp;&amp; spec.byId.get(id)) &#124;&#124; {};</code> |
-| `patchRows` | function | 277 | <code>function patchRows(rows, feature, applied) {</code> |
-| `taskFilter` | function | 293 | <code>function taskFilter(rows, filter) {</code> |
-| `haystack` | function | 322 | <code>function haystack(r) {</code> |
-| `filterLabel` | function | 331 | <code>function filterLabel(filter) {</code> |
-| `resumePrompt` | function | 350 | <code>function resumePrompt(row, opts) {</code> |
-| `touches` | function | 373 | <code>const touches = (row.touches &#124;&#124; []).map((t) =&gt; t.pattern &#124;&#124; t);</code> |
-| `symbols` | function | 375 | <code>const symbols = (row.symbols &#124;&#124; []).map((s) =&gt; s.name &#124;&#124; s);</code> |
-| `mem` | function | 384 | <code>const mem = (row.memories &#124;&#124; []).slice(0, 5);</code> |
-| `detailHtml` | function | 405 | <code>function detailHtml(nonce) {</code> |
-| `detailView` | function | 759 | <code>function detailView(row, spec) {</code> |
-| `blocked` | function | 763 | <code>const blocked = (row.blockers &#124;&#124; []).length &gt; 0;</code> |
-| `clauses` | function | 764 | <code>const clauses = (spec &amp;&amp; spec.clauses) &#124;&#124; {};</code> |
-| `icon` | function | 816 | <code>function icon(name, color) {</code> |
-| `statusIcon` | function | 821 | <code>function statusIcon(row) {</code> |
-| `statusWord` | function | 830 | <code>function statusWord(row) {</code> |
-| `TaskTreeProvider` | class | 840 | <code>class TaskTreeProvider {</code> |
-| `constructor` | method | 841 | <code>constructor(d) {</code> |
-| `loadFilter` | method | 851 | <code>loadFilter() {</code> |
-| `setFilter` | method | 858 | <code>setFilter(patch) {</code> |
-| `describe` | method | 869 | <code>describe() {</code> |
-| `visible` | method | 881 | <code>visible() { return taskFilter(this.rows, this.filter); }</code> |
-| `refresh` | method | 886 | <code>async refresh() {</code> |
-| `applyEvent` | method | 907 | <code>applyEvent(applied) {</code> |
-| `readSpecFile` | method | 917 | <code>readSpecFile(rel) {</code> |
-| `fleetPlan` | method | 927 | <code>async fleetPlan() {</code> |
-| `row` | method | 934 | <code>row(id) { return this.rows.find((r) =&gt; r.id === id); }</code> |
-| `owners` | method | 936 | <code>owners() {</code> |
-| `waves` | method | 940 | <code>waves() {</code> |
-| `getTreeItem` | method | 946 | <code>getTreeItem(el) { return el; }</code> |
-| `getChildren` | method | 948 | <code>getChildren(el) {</code> |
-| `featureNodes` | method | 957 | <code>featureNodes() {</code> |
-| `docsNode` | method | 1000 | <code>docsNode() {</code> |
-| `sectionNodes` | method | 1019 | <code>sectionNodes(rows, feature) {</code> |
-| `waveNodes` | method | 1040 | <code>waveNodes(rows, parentKey) {</code> |
-| `taskNode` | method | 1069 | <code>taskNode(row) {</code> |
-| `tooltip` | method | 1089 | <code>tooltip(row) {</code> |
-| `touches` | function | 1107 | <code>const touches = (row.touches &#124;&#124; []).map((t) =&gt; t.pattern).join(' ');</code> |
-| `groupBy` | function | 1114 | <code>function groupBy(rows, key) {</code> |
-| `taskDetail` | function | 1128 | <code>async function taskDetail(arg) {</code> |
-| `postTask` | function | 1148 | <code>function postTask(id) {</code> |
-| `refreshPanels` | function | 1165 | <code>function refreshPanels() {</code> |
-| `panelMessage` | function | 1169 | <code>async function panelMessage(id, msg) {</code> |
-| `openSymbol` | function | 1193 | <code>async function openSymbol(msg) {</code> |
-| `text` | function | 1202 | <code>const text = (r.stdout &#124;&#124; '') + (r.stderr &#124;&#124; '');</code> |
-| `openPath` | function | 1210 | <code>async function openPath(pattern) {</code> |
-| `taskIdFrom` | function | 1229 | <code>function taskIdFrom(arg) {</code> |
-| `resolveId` | function | 1238 | <code>async function resolveId(arg, placeHolder, filter) {</code> |
-| `rows` | function | 1241 | <code>const rows = (provider ? provider.visible() : []).filter(filter &#124;&#124; (() =&gt; true));</code> |
-| `cmdFilterStatus` | function | 1255 | <code>async function cmdFilterStatus() {</code> |
-| `cmdFilterWave` | function | 1275 | <code>async function cmdFilterWave() {</code> |
-| `cmdFilterOwner` | function | 1290 | <code>async function cmdFilterOwner() {</code> |
-| `cmdSearch` | function | 1311 | <code>async function cmdSearch() {</code> |
-| `cmdClearFilters` | function | 1321 | <code>function cmdClearFilters() {</code> |
-| `cmdFilter` | function | 1326 | <code>async function cmdFilter() {</code> |
-| `cmdVerify` | function | 1347 | <code>async function cmdVerify(arg) {</code> |
-| `cmdOpenBranch` | function | 1371 | <code>async function cmdOpenBranch(arg) {</code> |
-| `cmdCopyPrompt` | function | 1410 | <code>async function cmdCopyPrompt(arg) {</code> |
-| `register` | function | 1425 | <code>function register(ctx, d) {</code> |
+| `statusOf` | function | 245 | <code>const statusOf = (id) =&gt; {</code> |
+| `sp` | function | 253 | <code>const sp = (spec &amp;&amp; spec.byId.get(id)) &#124;&#124; {};</code> |
+| `patchRows` | function | 292 | <code>function patchRows(rows, feature, applied) {</code> |
+| `taskFilter` | function | 308 | <code>function taskFilter(rows, filter) {</code> |
+| `haystack` | function | 337 | <code>function haystack(r) {</code> |
+| `filterLabel` | function | 346 | <code>function filterLabel(filter) {</code> |
+| `resumePrompt` | function | 365 | <code>function resumePrompt(row, opts) {</code> |
+| `touches` | function | 388 | <code>const touches = (row.touches &#124;&#124; []).map((t) =&gt; t.pattern &#124;&#124; t);</code> |
+| `symbols` | function | 390 | <code>const symbols = (row.symbols &#124;&#124; []).map((s) =&gt; s.name &#124;&#124; s);</code> |
+| `mem` | function | 399 | <code>const mem = (row.memories &#124;&#124; []).slice(0, 5);</code> |
+| `detailHtml` | function | 420 | <code>function detailHtml(nonce) {</code> |
+| `detailView` | function | 774 | <code>function detailView(row, spec) {</code> |
+| `blocked` | function | 778 | <code>const blocked = (row.blockers &#124;&#124; []).length &gt; 0;</code> |
+| `clauses` | function | 779 | <code>const clauses = (spec &amp;&amp; spec.clauses) &#124;&#124; {};</code> |
+| `icon` | function | 831 | <code>function icon(name, color) {</code> |
+| `statusIcon` | function | 836 | <code>function statusIcon(row) {</code> |
+| `statusWord` | function | 845 | <code>function statusWord(row) {</code> |
+| `TaskTreeProvider` | class | 855 | <code>class TaskTreeProvider {</code> |
+| `constructor` | method | 856 | <code>constructor(d) {</code> |
+| `loadFilter` | method | 866 | <code>loadFilter() {</code> |
+| `setFilter` | method | 873 | <code>setFilter(patch) {</code> |
+| `describe` | method | 884 | <code>describe() {</code> |
+| `visible` | method | 896 | <code>visible() { return taskFilter(this.rows, this.filter); }</code> |
+| `refresh` | method | 901 | <code>async refresh() {</code> |
+| `applyEvent` | method | 922 | <code>applyEvent(applied) {</code> |
+| `readSpecFile` | method | 932 | <code>readSpecFile(rel) {</code> |
+| `fleetPlan` | method | 942 | <code>async fleetPlan() {</code> |
+| `row` | method | 949 | <code>row(id) { return this.rows.find((r) =&gt; r.id === id); }</code> |
+| `owners` | method | 951 | <code>owners() {</code> |
+| `waves` | method | 955 | <code>waves() {</code> |
+| `getTreeItem` | method | 961 | <code>getTreeItem(el) { return el; }</code> |
+| `getChildren` | method | 963 | <code>getChildren(el) {</code> |
+| `featureNodes` | method | 972 | <code>featureNodes() {</code> |
+| `docsNode` | method | 1015 | <code>docsNode() {</code> |
+| `sectionNodes` | method | 1034 | <code>sectionNodes(rows, feature) {</code> |
+| `waveNodes` | method | 1055 | <code>waveNodes(rows, parentKey) {</code> |
+| `taskNode` | method | 1084 | <code>taskNode(row) {</code> |
+| `tooltip` | method | 1104 | <code>tooltip(row) {</code> |
+| `touches` | function | 1122 | <code>const touches = (row.touches &#124;&#124; []).map((t) =&gt; t.pattern).join(' ');</code> |
+| `groupBy` | function | 1129 | <code>function groupBy(rows, key) {</code> |
+| `taskDetail` | function | 1143 | <code>async function taskDetail(arg) {</code> |
+| `postTask` | function | 1163 | <code>function postTask(id) {</code> |
+| `refreshPanels` | function | 1180 | <code>function refreshPanels() {</code> |
+| `panelMessage` | function | 1184 | <code>async function panelMessage(id, msg) {</code> |
+| `openSymbol` | function | 1208 | <code>async function openSymbol(msg) {</code> |
+| `text` | function | 1217 | <code>const text = (r.stdout &#124;&#124; '') + (r.stderr &#124;&#124; '');</code> |
+| `openPath` | function | 1225 | <code>async function openPath(pattern) {</code> |
+| `taskIdFrom` | function | 1244 | <code>function taskIdFrom(arg) {</code> |
+| `resolveId` | function | 1253 | <code>async function resolveId(arg, placeHolder, filter) {</code> |
+| `rows` | function | 1256 | <code>const rows = (provider ? provider.visible() : []).filter(filter &#124;&#124; (() =&gt; true));</code> |
+| `cmdFilterStatus` | function | 1270 | <code>async function cmdFilterStatus() {</code> |
+| `cmdFilterWave` | function | 1290 | <code>async function cmdFilterWave() {</code> |
+| `cmdFilterOwner` | function | 1305 | <code>async function cmdFilterOwner() {</code> |
+| `cmdSearch` | function | 1326 | <code>async function cmdSearch() {</code> |
+| `cmdClearFilters` | function | 1336 | <code>function cmdClearFilters() {</code> |
+| `cmdFilter` | function | 1341 | <code>async function cmdFilter() {</code> |
+| `cmdVerify` | function | 1362 | <code>async function cmdVerify(arg) {</code> |
+| `cmdOpenBranch` | function | 1386 | <code>async function cmdOpenBranch(arg) {</code> |
+| `cmdCopyPrompt` | function | 1425 | <code>async function cmdCopyPrompt(arg) {</code> |
+| `register` | function | 1440 | <code>function register(ctx, d) {</code> |
 
 ## kvx/impl/go/canonical.go
 
@@ -631,7 +666,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `CG_OBJECTS` | macro | 20 | <code>#define CG_OBJECTS  ".codegraph/objects"</code> |
 | `CG_HEAD` | macro | 21 | <code>#define CG_HEAD     ".codegraph/HEAD"</code> |
 | `CG_IGNORE` | macro | 22 | <code>#define CG_IGNORE   ".cgignore"</code> |
-| `CG_VERSION` | macro | 23 | <code>#define CG_VERSION  "1.4.0"</code> |
+| `CG_VERSION` | macro | 23 | <code>#define CG_VERSION  "1.5.0"</code> |
 | `CG_MCP_VERSION` | macro | 24 | <code>#define CG_MCP_VERSION "2025-11-25"</code> |
 | `CG_AGENT_CONTEXT` | macro | 25 | <code>#define CG_AGENT_CONTEXT ".codify/agent-context.md"</code> |
 | `CG_DOC_TASK` | macro | 26 | <code>#define CG_DOC_TASK "@docs"</code> |
@@ -703,346 +738,461 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `cg_meta_get` | function | 255 | <code>char *cg_meta_get(Cg *cg, const char *k);          /* malloc'd or NULL */</code> |
 | `cg_schema_upgrade` | function | 258 | <code>int  cg_schema_upgrade(Cg *cg);</code> |
 | `CG_CONFIG_FILE` | macro | 266 | <code>#define CG_CONFIG_FILE "codify.kvx"</code> |
-| `CgConfig` | typedef | 269 | <code>typedef struct {</code> |
-| `config_load` | function | 280 | <code>const CgConfig *config_load(const char *root);</code> |
-| `config_auto_sync` | function | 281 | <code>bool config_auto_sync(const char *root);</code> |
-| `config_spec_rel` | function | 282 | <code>const char *config_spec_rel(const char *root);     /* "spec" */</code> |
-| `config_context_rel` | function | 283 | <code>const char *config_context_rel(const char *root);  /* ".codify" */</code> |
-| `config_skills_rel` | function | 284 | <code>const char *config_skills_rel(const char *root);   /* ".agents/skills" */</code> |
-| `config_codemap_rel` | function | 285 | <code>const char *config_codemap_rel(const char *root);  /* "CODEMAP.md" */</code> |
-| `config_index_workers` | function | 287 | <code>int  config_index_workers(const char *root);</code> |
-| `config_parse_workers` | function | 290 | <code>int  config_parse_workers(const char *v);</code> |
-| `config_spec_dir` | function | 292 | <code>bool config_spec_dir(const char *root, char *out, size_t cap);</code> |
-| `config_workflow_path` | function | 293 | <code>bool config_workflow_path(const char *root, char *out, size_t cap);</code> |
-| `config_feature_path` | function | 294 | <code>bool config_feature_path(const char *root, const char *feature, char *out,</code> |
-| `config_context_dir` | function | 296 | <code>bool config_context_dir(const char *root, char *out, size_t cap);</code> |
-| `config_context_path` | function | 297 | <code>bool config_context_path(const char *root, const char *name, char *out,</code> |
-| `config_skills_dir` | function | 299 | <code>bool config_skills_dir(const char *root, char *out, size_t cap);</code> |
-| `config_codemap_path` | function | 300 | <code>bool config_codemap_path(const char *root, char *out, size_t cap);</code> |
-| `config_in_spec` | function | 302 | <code>bool config_in_spec(const char *root, const char *rel);</code> |
-| `config_find_spec_root` | function | 304 | <code>int  config_find_spec_root(const char *start, char *out, size_t cap);</code> |
-| `config_check` | function | 308 | <code>int  config_check(const char *root, StrBuf *text, StrBuf *json);</code> |
-| `cmd_config` | function | 309 | <code>int  cmd_config(int argc, char **argv, bool json);</code> |
-| `IndexStats` | typedef | 312 | <code>typedef struct {</code> |
-| `IndexOpts` | typedef | 335 | <code>typedef struct {</code> |
-| `cg_index_ex` | function | 359 | <code>int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);</code> |
-| `cg_index` | function | 361 | <code>int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);</code> |
-| `progress_request` | function | 365 | <code>void progress_request(bool want);   /* the command a person runs asks for it */</code> |
-| `progress_begin` | function | 366 | <code>void progress_begin(const IndexOpts *o);</code> |
-| `progress_step` | function | 367 | <code>void progress_step(const char *step);   /* cg init's named steps */</code> |
-| `progress_phase` | function | 368 | <code>void progress_phase(const char *phase, long done, long total);</code> |
-| `progress_flush` | function | 369 | <code>void progress_flush(void);              /* draw now: bounded points only */</code> |
-| `progress_tick` | function | 370 | <code>void progress_tick(long done, long total, const char *path);</code> |
-| `progress_workers` | function | 371 | <code>void progress_workers(int n);</code> |
-| `progress_wait` | function | 372 | <code>void progress_wait(const char *what, long waited_ms);  /* NULL clears */</code> |
-| `progress_end` | function | 373 | <code>void progress_end(void);                /* erases the line; call before output */</code> |
-| `progress_begin_write` | function | 374 | <code>int  progress_begin_write(Cg *cg);      /* cg_begin_write, wait shown */</code> |
-| `syncgate_acquire` | function | 377 | <code>int  syncgate_acquire(const Cg *cg, long wait_ms);     /* fd or -1 */</code> |
-| `syncgate_release` | function | 378 | <code>void syncgate_release(int fd);</code> |
-| `syncgate_mark_dirty` | function | 379 | <code>void syncgate_mark_dirty(const Cg *cg, const char *const *paths, int npaths);</code> |
-| `syncgate_is_dirty` | function | 380 | <code>bool syncgate_is_dirty(const Cg *cg);</code> |
-| `syncgate_take_dirty` | function | 381 | <code>char *syncgate_take_dirty(const Cg *cg);               /* malloc'd or NULL */</code> |
-| `syncgate_slot_count` | function | 382 | <code>int  syncgate_slot_count(const SysInfo *si);</code> |
-| `syncgate_slot_acquire` | function | 383 | <code>int  syncgate_slot_acquire(const SysInfo *si);         /* fd or -1 */</code> |
-| `syncgate_slot_release` | function | 384 | <code>void syncgate_slot_release(int fd);</code> |
-| `syncgate_worker_request` | function | 389 | <code>int  syncgate_worker_request(const char *root, const SysInfo *si, int flag,</code> |
-| `syncgate_worker_budget` | function | 391 | <code>int  syncgate_worker_budget(const char *root, const SysInfo *si,</code> |
-| `syncgate_background_nice` | function | 393 | <code>void syncgate_background_nice(void);</code> |
-| `resolve_imports` | function | 396 | <code>void resolve_imports(Cg *cg);</code> |
-| `resolve_refs` | function | 397 | <code>void resolve_refs(Cg *cg);</code> |
-| `resolve_imports_scoped` | function | 402 | <code>void resolve_imports_scoped(Cg *cg);</code> |
-| `resolve_refs_scoped` | function | 403 | <code>void resolve_refs_scoped(Cg *cg);</code> |
-| `index_scope_begin` | function | 406 | <code>void index_scope_begin(Cg *cg);</code> |
-| `index_scope_end` | function | 407 | <code>void index_scope_end(Cg *cg);</code> |
-| `index_scope_bounded` | function | 410 | <code>bool index_scope_bounded(Cg *cg);</code> |
-| `GroundFinding` | typedef | 413 | <code>typedef struct {</code> |
-| `ground_findings` | function | 422 | <code>int ground_findings(Cg *cg, const char *path, GroundFinding **out);</code> |
-| `ground_findings_free` | function | 423 | <code>void ground_findings_free(GroundFinding *v, int n);</code> |
-| `file_calibrated` | function | 424 | <code>bool file_calibrated(Cg *cg, long file_id, const char *lang);</code> |
-| `ContractFinding` | typedef | 427 | <code>typedef struct {</code> |
-| `contract_findings` | function | 435 | <code>int contract_findings(Cg *cg, const char *path, ContractFinding **out);</code> |
-| `contract_findings_free` | function | 436 | <code>void contract_findings_free(ContractFinding *v, int n);</code> |
-| `HygieneFinding` | typedef | 439 | <code>typedef struct {</code> |
-| `hygiene_findings` | function | 447 | <code>int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out);</code> |
-| `hygiene_findings_all` | function | 448 | <code>int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit);</code> |
-| `hygiene_findings_free` | function | 449 | <code>void hygiene_findings_free(HygieneFinding *v, int n);</code> |
-| `is_entrypoint` | function | 450 | <code>bool is_entrypoint(Cg *cg, long sym_id, const char *name, const char *kind,</code> |
-| `cmd_search` | function | 454 | <code>int cmd_search (Cg *cg, const char *q, int limit, bool json);</code> |
-| `cmd_symbol` | function | 455 | <code>int cmd_symbol (Cg *cg, const char *name, bool json);</code> |
-| `cmd_impact` | function | 456 | <code>int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);</code> |
-| `cmd_context` | function | 457 | <code>int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);</code> |
-| `graph_task_focus` | function | 458 | <code>char *graph_task_focus(Cg *cg, const char *task_packet); /* malloc'd query */</code> |
-| `graph_symbol_brief` | function | 461 | <code>int  graph_symbol_brief(Cg *cg, const char *name, int snippet_lines,</code> |
-| `graph_glob_symbols` | function | 464 | <code>int  graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,</code> |
-| `task_packet_build` | function | 470 | <code>int  task_packet_build(Cg *cg, const char *tag, int budget, StrBuf *out);</code> |
-| `manager_packet_build` | function | 472 | <code>int  manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out);</code> |
-| `packet_upstream_evidence` | function | 475 | <code>int  packet_upstream_evidence(Cg *cg, const char *feature, const char *req,</code> |
-| `cmd_survey` | function | 478 | <code>int cmd_survey(Cg *cg, const char *scope, int budget, bool json);</code> |
-| `cmd_anchors` | function | 480 | <code>int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json);</code> |
-| `cmd_routes` | function | 481 | <code>int cmd_routes (Cg *cg, const char *filter, bool json);</code> |
-| `cmd_show` | function | 482 | <code>int cmd_show   (Cg *cg, const char *name, bool full, bool json); /* one body */</code> |
-| `cmd_test_impact` | function | 483 | <code>int cmd_test_impact(Cg *cg, const char *name, bool json);</code> |
-| `cmd_why` | function | 484 | <code>int cmd_why    (Cg *cg, const char *name, bool json);   /* provenance join */</code> |
-| `graph_path_is_test` | function | 485 | <code>bool graph_path_is_test(const char *path);</code> |
-| `graph_symbol_at` | function | 487 | <code>int  graph_symbol_at(Cg *cg, const char *path, int line, char *name, size_t cap);</code> |
-| `branch_scope_sql` | function | 496 | <code>const char *branch_scope_sql(const Cg *cg, const char *alias, char *out,</code> |
-| `cg_scope_set` | function | 500 | <code>int  cg_scope_set(Cg *cg, const char *name, bool all);</code> |
-| `branch_hit_label` | function | 504 | <code>const char *branch_hit_label(Cg *cg, long branch_id, char *out, size_t cap);</code> |
-| `branch_tree` | function | 508 | <code>const char *branch_tree(Cg *cg, long branch_id, char *out, size_t cap);</code> |
-| `cmd_commit` | function | 511 | <code>int cmd_commit  (Cg *cg, const char *msg, bool quiet);</code> |
-| `cmd_commit_with_options` | function | 512 | <code>int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,</code> |
-| `cmd_log` | function | 514 | <code>int cmd_log     (Cg *cg, int limit, bool json);</code> |
-| `cmd_status` | function | 515 | <code>int cmd_status  (Cg *cg, bool json);</code> |
-| `cmd_state` | function | 516 | <code>int cmd_state   (Cg *cg, bool json);              /* Git/snapshot/spec/live */</code> |
-| `cmd_event` | function | 517 | <code>int cmd_event(Cg *cg, int argc, char **argv, bool json);</code> |
-| `runtime_event_ingest` | function | 518 | <code>int runtime_event_ingest(Cg *cg, const char *source, const char *payload,</code> |
-| `runtime_workspace_revision` | function | 520 | <code>void runtime_workspace_revision(Cg *cg, char out[65]);</code> |
-| `RuntimeProgress` | typedef | 521 | <code>typedef struct {</code> |
-| `runtime_classify_progress` | function | 527 | <code>int runtime_classify_progress(Cg *cg, const char *attempt,</code> |
-| `runtime_progress` | function | 529 | <code>int runtime_progress(Cg *cg, bool json);</code> |
-| `cmd_diff` | function | 530 | <code>int cmd_diff    (Cg *cg, const char *a, const char *b);</code> |
-| `cmd_checkout` | function | 531 | <code>int cmd_checkout(Cg *cg, const char *id, bool force);</code> |
-| `cmd_changes` | function | 532 | <code>int cmd_changes (Cg *cg, int limit, bool json); /* impact of uncommitted edits */</code> |
-| `vcs_find_commits` | function | 538 | <code>int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,</code> |
-| `vcs_changed_paths` | function | 542 | <code>int vcs_changed_paths(Cg *cg, const char *needle, char ***out);</code> |
-| `vcs_commits_for_path` | function | 545 | <code>int vcs_commits_for_path(Cg *cg, const char *path, int limit, char ***ids,</code> |
-| `Memory` | typedef | 549 | <code>typedef struct {</code> |
-| `memory_add` | function | 563 | <code>long memory_add(Cg *cg, const char *type, const char *task, const char *body,</code> |
-| `memory_query` | function | 567 | <code>int  memory_query(Cg *cg, const char *query, const char *task,</code> |
-| `memory_clear` | function | 569 | <code>void memory_clear(Memory *m);            /* free one entry's fields */</code> |
-| `memory_free` | function | 570 | <code>void memory_free(Memory *v, int n);</code> |
-| `memory_json` | function | 571 | <code>void memory_json(const Memory *m, StrBuf *b);</code> |
-| `memory_print_brief` | function | 572 | <code>void memory_print_brief(const Memory *m, const char *indent);</code> |
-| `memory_open_quiet` | function | 574 | <code>bool memory_open_quiet(Cg *g);</code> |
-| `cmd_remember` | function | 575 | <code>int  cmd_remember(Cg *cg, const char *text, const char *type, const char *task,</code> |
-| `cmd_recall` | function | 577 | <code>int  cmd_recall(Cg *cg, const char *query, const char *task, const char *type,</code> |
-| `cmd_forget` | function | 579 | <code>int  cmd_forget(Cg *cg, const char *idstr);</code> |
-| `memory_supersede` | function | 580 | <code>int  memory_supersede(Cg *cg, long old_id, long new_id);</code> |
-| `cmd_recall_near` | function | 581 | <code>int  cmd_recall_near(Cg *cg, const char *path, int limit, bool json);</code> |
-| `cmd_memory_compact` | function | 582 | <code>int  cmd_memory_compact(Cg *cg, bool dry_run, bool json);</code> |
-| `memory_promote_branch` | function | 587 | <code>int  memory_promote_branch(Cg *cg, const char *from, const char *to);</code> |
-| `memory_content_id` | function | 591 | <code>void memory_content_id(const char *type, const char *task, const char *body,</code> |
-| `MemExportOpts` | typedef | 593 | <code>typedef struct {</code> |
-| `MemImportOpts` | typedef | 599 | <code>typedef struct {</code> |
-| `cmd_memory_export` | function | 606 | <code>int  cmd_memory_export(Cg *cg, const MemExportOpts *o, bool json);</code> |
-| `cmd_memory_import` | function | 609 | <code>int  cmd_memory_import(Cg *cg, const MemImportOpts *o, bool json);</code> |
-| `cmd_watch` | function | 612 | <code>int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms);</code> |
-| `watch_fleet` | function | 617 | <code>int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms);</code> |
-| `json_get_string` | function | 620 | <code>char *json_get_string(const char *obj, const char *key);  /* malloc, unescaped */</code> |
-| `json_string_value` | function | 621 | <code>char *json_string_value(const char *raw);  /* "\"a\\nb\"" -&gt; malloc "a\nb"; NULL if not a string */</code> |
-| `json_get_int` | function | 622 | <code>long  json_get_int(const char *obj, const char *key, long dflt);</code> |
-| `json_get_raw` | function | 623 | <code>char *json_get_raw(const char *obj, const char *key);     /* raw token, malloc */</code> |
-| `json_get_object` | function | 624 | <code>char *json_get_object(const char *obj, const char *key);  /* balanced {...}   */</code> |
-| `json_object_keys` | function | 625 | <code>int   json_object_keys(const char *obj, char **keys, int cap); /* malloc'd each */</code> |
-| `json_array_items` | function | 628 | <code>int   json_array_items(const char *arr, char ***out);</code> |
-| `cg_capture` | function | 631 | <code>int cg_capture(char **out, int (*fn)(void *), void *ctx);</code> |
-| `KvxEntry` | typedef | 634 | <code>typedef struct { char *section, *key, *raw; } KvxEntry;</code> |
-| `Kvx` | typedef | 635 | <code>typedef struct {</code> |
-| `kvx_parse` | function | 641 | <code>Kvx  *kvx_parse(const char *path);                /* NULL on open/parse error */</code> |
-| `kvx_free` | function | 642 | <code>void  kvx_free(Kvx *k);</code> |
-| `kvx_has` | function | 643 | <code>bool  kvx_has(const Kvx *k, const char *sec);</code> |
-| `kvx_raw` | function | 644 | <code>const char *kvx_raw(const Kvx *k, const char *sec, const char *key);</code> |
-| `kvx_str` | function | 645 | <code>char *kvx_str(const Kvx *k, const char *sec, const char *key); /* malloc; NULL absent */</code> |
-| `kvx_long` | function | 646 | <code>long  kvx_long(const Kvx *k, const char *sec, const char *key, long dflt);</code> |
-| `kvx_bool` | function | 647 | <code>bool  kvx_bool(const Kvx *k, const char *sec, const char *key, bool dflt);</code> |
-| `kvx_list` | function | 648 | <code>int   kvx_list(const Kvx *k, const char *sec, const char *key, char ***out);</code> |
-| `kvx_keys` | function | 649 | <code>int   kvx_keys(const Kvx *k, const char *sec, const char ***out); /* borrowed */</code> |
-| `kvx_subsections` | function | 650 | <code>int   kvx_subsections(const Kvx *k, const char *prefix, char ***out); /* file order */</code> |
-| `kvx_sort_dotted` | function | 651 | <code>void  kvx_sort_dotted(char **ids, int n);</code> |
-| `kvx_set_status` | function | 653 | <code>int   kvx_set_status(const char *path, const char *section, const char *value);</code> |
-| `void` | function | 658 | <code>extern void (*kvx_status_hook)(const char *path, const char *section,</code> |
-| `kvx_set_string` | function | 661 | <code>int   kvx_set_string(const char *path, const char *section, const char *key,</code> |
-| `kvx_set_raw` | function | 664 | <code>int   kvx_set_raw(const char *path, const char *section, const char *key,</code> |
-| `cmd_spec` | function | 667 | <code>int cmd_spec(int argc, char **argv, bool json);</code> |
-| `spec_attempt_set_branch` | function | 671 | <code>int spec_attempt_set_branch(Cg *g, const char *tag, const char *branch,</code> |
-| `SpecAttempt` | typedef | 673 | <code>typedef struct {</code> |
-| `spec_claim` | function | 685 | <code>int spec_claim(Cg *g, const char *root, const char *feature, const char *id,</code> |
-| `spec_active_tag` | function | 689 | <code>char *spec_active_tag(void);</code> |
-| `spec_task_tag` | function | 691 | <code>char *spec_task_tag(const char *requested);</code> |
-| `spec_active_touches` | function | 693 | <code>int   spec_active_touches(char ***out);</code> |
-| `spec_globs_overlap` | function | 695 | <code>bool  spec_globs_overlap(const char *a, const char *b);</code> |
-| `spec_resolve_task` | function | 698 | <code>char *spec_resolve_task(const char *requested, const char *agent);</code> |
-| `spec_task_packet` | function | 700 | <code>char *spec_task_packet(const char *requested);</code> |
-| `spec_task_memories_tag` | function | 702 | <code>int   spec_task_memories_tag(const char *requested, Memory **out);</code> |
-| `cmd_lsp` | function | 705 | <code>int  cmd_lsp(Cg *cg, const SysInfo *si);</code> |
-| `lsp_hover` | function | 706 | <code>void lsp_hover(Cg *cg, const char *name, StrBuf *md);</code> |
-| `lsp_diagnostics` | function | 707 | <code>void lsp_diagnostics(Cg *cg, const char *abs, StrBuf *out);</code> |
-| `lsp_path_in_task_scope` | function | 708 | <code>bool lsp_path_in_task_scope(Cg *cg, const char *rel);</code> |
-| `anchor_stale` | function | 715 | <code>int anchor_stale(Cg *cg,</code> |
-| `cmd_check` | function | 720 | <code>int cmd_check(Cg *cg, bool json, bool strict);   /* the single CI gate */</code> |
-| `cmd_brief` | function | 721 | <code>int cmd_brief(Cg *cg, bool json);                /* session state in one call */</code> |
-| `cmd_guard` | function | 722 | <code>int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);</code> |
-| `cmd_review` | function | 723 | <code>int cmd_review(Cg *cg, bool json);</code> |
-| `cmd_hook_install` | function | 724 | <code>int cmd_hook_install(Cg *cg);</code> |
-| `cmd_hook_post_edit` | function | 725 | <code>int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json);</code> |
-| `cmd_integrate` | function | 726 | <code>int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility);</code> |
-| `integrate_plan` | function | 727 | <code>int integrate_plan(Cg *cg, bool json);</code> |
-| `integrate_apply` | function | 728 | <code>int integrate_apply(Cg *cg, bool json);</code> |
-| `integrate_doctor` | function | 729 | <code>int integrate_doctor(Cg *cg, bool json);</code> |
-| `integrate_apply_portable` | function | 730 | <code>int integrate_apply_portable(Cg *cg, bool quiet);</code> |
-| `cmd_handoff` | function | 732 | <code>int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,</code> |
-| `cmd_resume` | function | 735 | <code>int cmd_resume(Cg *cg, const char *task, bool json, bool prompt);</code> |
-| `cmd_work` | function | 736 | <code>int cmd_work(Cg *cg, int argc, char **argv, bool json);</code> |
-| `work_open` | function | 737 | <code>int work_open(Cg *cg, const char *task, bool json);</code> |
-| `work_update` | function | 738 | <code>int work_update(Cg *cg, const char *revision, bool json);</code> |
-| `work_close` | function | 739 | <code>int work_close(Cg *cg, const char *task, int nevidence, char **evidence,</code> |
-| `cmd_spec_run` | function | 745 | <code>int cmd_spec_run(int argc, char **argv);</code> |
-| `cmd_fleet_up` | function | 751 | <code>int  cmd_fleet_up(Cg *cg, int argc, char **argv, bool json);</code> |
-| `cmd_fleet_control` | function | 752 | <code>int  cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,</code> |
-| `cmd_fleet_runs` | function | 754 | <code>int  cmd_fleet_runs(Cg *cg, bool json);</code> |
-| `fleet_supervisor_alive` | function | 755 | <code>bool fleet_supervisor_alive(const char *shared);</code> |
-| `CG_EXIT_APPROVAL` | macro | 760 | <code>#define CG_EXIT_APPROVAL 4</code> |
-| `fleet_gate` | function | 761 | <code>int  fleet_gate(Cg *cg, const char *gate, const char *subject);</code> |
-| `cmd_fleet_approvals` | function | 762 | <code>int  cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json);</code> |
-| `DriverSpec` | typedef | 765 | <code>typedef struct {</code> |
-| `driver_argv` | function | 777 | <code>int driver_argv(const DriverSpec *d, const char *root, const char *promptfile,</code> |
-| `DriverEvent` | typedef | 779 | <code>typedef struct {</code> |
-| `void` | function | 787 | <code>typedef void (*DriverEventFn)(const DriverEvent *e, void *ud);</code> |
-| `driver_stream_parse` | function | 790 | <code>int driver_stream_parse(const char *line, DriverEventFn fn, void *ud);</code> |
-| `DriverTap` | typedef | 791 | <code>typedef struct {</code> |
-| `driver_tap_init` | function | 800 | <code>void driver_tap_init(DriverTap *t, const char *log, const char *agent,</code> |
-| `driver_tap_poll` | function | 804 | <code>int  driver_tap_poll(DriverTap *t);</code> |
-| `driver_tap_free` | function | 805 | <code>void driver_tap_free(DriverTap *t);</code> |
-| `driver_steer` | function | 807 | <code>long driver_steer(Cg *cg, const char *agent, const char *message);</code> |
-| `driver_steer_take` | function | 810 | <code>char *driver_steer_take(Cg *cg, const char *agent, const char *via);</code> |
-| `EventRow` | typedef | 813 | <code>typedef struct {</code> |
-| `int` | function | 818 | <code>typedef int (*EventFn)(const EventRow *e, void *ud);</code> |
-| `events_install` | function | 819 | <code>int  events_install(Cg *cg);         /* triggers; called by cg_open */</code> |
-| `events_emit` | function | 823 | <code>long events_emit(Cg *cg, const char *kind, const char *subject,</code> |
-| `events_emit_as` | function | 827 | <code>long events_emit_as(Cg *cg, const char *kind, const char *subject,</code> |
-| `events_emit_quiet` | function | 829 | <code>long events_emit_quiet(const char *kind, const char *subject,</code> |
-| `events_bind` | function | 831 | <code>void events_bind(Cg *cg);            /* see events_kvx_status */</code> |
-| `events_unbind` | function | 832 | <code>void events_unbind(void);</code> |
-| `events_kvx_status` | function | 833 | <code>void events_kvx_status(const char *path, const char *section,</code> |
-| `events_head` | function | 835 | <code>long events_head(Cg *cg);</code> |
-| `events_pruned_through` | function | 836 | <code>long events_pruned_through(Cg *cg);</code> |
-| `events_since` | function | 838 | <code>long events_since(Cg *cg, long since, const char *kinds, int limit,</code> |
-| `events_json` | function | 840 | <code>void events_json(StrBuf *b, const EventRow *e);</code> |
-| `cmd_events` | function | 841 | <code>int  cmd_events(Cg *cg, int argc, char **argv, bool json);</code> |
-| `events_emit_at` | function | 844 | <code>long events_emit_at(Cg *cg, long at_ms, const char *kind, const char *subject,</code> |
-| `JOURNAL_VERSION` | macro | 853 | <code>#define JOURNAL_VERSION 1</code> |
-| `JournalMode` | typedef | 854 | <code>typedef enum {</code> |
-| `journal_append` | function | 860 | <code>int  journal_append(Cg *cg, const char *op, const char *args,</code> |
-| `journal_replay` | function | 864 | <code>int  journal_replay(Cg *cg, JournalMode mode);</code> |
-| `journal_begin` | function | 868 | <code>int  journal_begin(Cg *cg);</code> |
-| `journal_busy_seen` | function | 869 | <code>bool journal_busy_seen(void);</code> |
-| `journal_mark_busy` | function | 870 | <code>void journal_mark_busy(void);</code> |
-| `journal_queued_count` | function | 871 | <code>int  journal_queued_count(void);          /* records this process appended */</code> |
-| `journal_announced` | function | 872 | <code>void journal_announced(void);             /* the command said "queued" itself */</code> |
-| `journal_set_command` | function | 873 | <code>void journal_set_command(const char *cmd, const char *sub);</code> |
-| `journal_pending` | function | 874 | <code>int  journal_pending(const Cg *cg, int *failed);  /* pending; failed via ptr */</code> |
-| `journal_queued_memories` | function | 877 | <code>int  journal_queued_memories(const Cg *cg, const char *query,</code> |
-| `cmd_journal` | function | 879 | <code>int  cmd_journal(Cg *cg, int argc, char **argv, bool json);</code> |
-| `cg_busy_why` | function | 882 | <code>void cg_busy_why(const char *why);</code> |
-| `spec_journal_apply` | function | 885 | <code>int  spec_journal_apply(Cg *g, const char *op, const char *args,</code> |
-| `govern_journal_apply` | function | 887 | <code>int  govern_journal_apply(Cg *g, const char *op, const char *args,</code> |
-| `runtime_journal_apply` | function | 890 | <code>int  runtime_journal_apply(Cg *g, const char *args, char *err, size_t errcap);</code> |
-| `memory_add_at` | function | 891 | <code>long memory_add_at(Cg *cg, long created, const char *branch, const char *type,</code> |
-| `cmd_remember_ex` | function | 894 | <code>int  cmd_remember_ex(Cg *cg, const char *text, const char *type,</code> |
-| `drift_spec_check` | function | 904 | <code>int  drift_spec_check(Cg *cg, const char *tree, const char *base,</code> |
-| `drift_print` | function | 907 | <code>void drift_print(const char *report_json);</code> |
-| `drift_collision_predict` | function | 909 | <code>bool drift_collision_predict(Cg *cg, const char *feature, const char *a,</code> |
-| `cmd_drift` | function | 911 | <code>int  cmd_drift(Cg *cg, int argc, char **argv, bool json);</code> |
-| `drift_interface_check` | function | 917 | <code>int  drift_interface_check(Cg *cg, const char *tree, const char *base_branch,</code> |
-| `coverage_check` | function | 922 | <code>int  coverage_check(Cg *cg, const char *feature, StrBuf *out);</code> |
-| `coverage_print` | function | 923 | <code>void coverage_print(const char *report_json, const char *feature);</code> |
-| `drift_summary` | function | 925 | <code>int  drift_summary(Cg *cg, const char *feature, StrBuf *text, StrBuf *json);</code> |
-| `graph_neighbors` | function | 927 | <code>int  graph_neighbors(Cg *cg, const char *name, char ***out);</code> |
-| `RoleCaps` | typedef | 938 | <code>typedef struct {</code> |
-| `FleetRole` | typedef | 949 | <code>typedef struct {</code> |
-| `Hierarchy` | typedef | 957 | <code>typedef struct {</code> |
-| `hier_load` | function | 974 | <code>bool hier_load(const Kvx *wf, Hierarchy *h);   /* defaults, then overrides */</code> |
-| `hier_role_caps` | function | 977 | <code>void hier_role_caps(const Kvx *wf, Hierarchy *h);</code> |
-| `hier_duration` | function | 979 | <code>long hier_duration(const char *s);</code> |
-| `hier_free` | function | 980 | <code>void hier_free(Hierarchy *h);</code> |
-| `hier_expand_task` | function | 984 | <code>void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
-| `hier_per_task` | function | 986 | <code>bool hier_per_task(const Hierarchy *h);</code> |
-| `fleet_merge_lock` | function | 991 | <code>int  fleet_merge_lock(const char *shared, const char *feature, long wait_ms);</code> |
-| `fleet_merge_unlock` | function | 992 | <code>void fleet_merge_unlock(int fd);</code> |
-| `hier_expand` | function | 993 | <code>void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
-| `fleet_identity_record` | function | 995 | <code>int  fleet_identity_record(Cg *g);           /* no-op without CG_ROLE */</code> |
-| `fleet_brief` | function | 996 | <code>void fleet_brief(Cg *cg, StrBuf *b, bool json);</code> |
-| `fleet_worker_begin` | function | 1003 | <code>int  fleet_worker_begin(Cg *cg, const char *id, const char *feature,</code> |
-| `fleet_merge_up` | function | 1005 | <code>int  fleet_merge_up(Cg *cg, const char *id, const char *feature, bool force,</code> |
-| `fleet_feature_land` | function | 1007 | <code>int  fleet_feature_land(Cg *cg, const char *feature, bool no_pr, bool json);</code> |
-| `fleet_pr_open` | function | 1008 | <code>int  fleet_pr_open(Cg *cg, const char *feature, bool dry_run, bool json);</code> |
-| `fleet_checkpoint` | function | 1009 | <code>int  fleet_checkpoint(Cg *cg, bool dry_run, bool json);</code> |
-| `cmd_fleet` | function | 1010 | <code>int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);</code> |
-| `FleetNode` | typedef | 1015 | <code>typedef struct {</code> |
-| `orch_spawn_manager` | function | 1032 | <code>int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,</code> |
-| `orch_spawn_worker` | function | 1037 | <code>int orch_spawn_worker(Cg *cg, const char *feature, const char *id,</code> |
-| `orch_tree_status` | function | 1042 | <code>int orch_tree_status(Cg *cg, const char *feature, bool json);</code> |
-| `JevQuestion` | typedef | 1054 | <code>typedef struct {</code> |
-| `JevAnswer` | typedef | 1061 | <code>typedef struct {</code> |
-| `JevResult` | typedef | 1070 | <code>typedef struct {</code> |
-| `jev_question_noul` | function | 1082 | <code>int  jev_question_noul(JevQuestion *q, const char *name,</code> |
-| `jev_question_choice` | function | 1085 | <code>int  jev_question_choice(JevQuestion *q, const char *name,</code> |
-| `jev_question_score` | function | 1088 | <code>int  jev_question_score(JevQuestion *q, const char *name,</code> |
-| `jev_question_free` | function | 1091 | <code>void jev_question_free(JevQuestion *q);</code> |
-| `jev_request_json` | function | 1095 | <code>void jev_request_json(const char *model, const char *state_json,</code> |
-| `jev_ask` | function | 1102 | <code>int  jev_ask(Cg *cg, const char *state_json, const JevQuestion *qs, int nq,</code> |
-| `jev_ask_raw` | function | 1106 | <code>int  jev_ask_raw(Cg *cg, const char *body, JevResult *out);</code> |
-| `jev_ask_at` | function | 1111 | <code>int  jev_ask_at(Cg *cg, const char *key, const char *model,</code> |
-| `jev_answer` | function | 1114 | <code>const JevAnswer *jev_answer(const JevResult *r, const char *name);</code> |
-| `jev_result_free` | function | 1115 | <code>void jev_result_free(JevResult *r);</code> |
-| `cmd_jev` | function | 1116 | <code>int  cmd_jev(Cg *cg, int argc, char **argv, bool json);</code> |
-| `jev_advisory_ready` | function | 1124 | <code>bool jev_advisory_ready(const char *what);</code> |
-| `JevTriage` | typedef | 1125 | <code>typedef struct {</code> |
-| `jev_triage_failure` | function | 1133 | <code>int  jev_triage_failure(Cg *cg, const char *output, JevTriage *out);</code> |
-| `JevFinding` | typedef | 1134 | <code>typedef struct {</code> |
-| `jev_rank_findings` | function | 1144 | <code>int  jev_rank_findings(Cg *cg, JevFinding *v, int n);</code> |
-| `JevReadiness` | typedef | 1145 | <code>typedef struct {</code> |
-| `jev_pr_readiness` | function | 1149 | <code>int  jev_pr_readiness(Cg *cg, const char *state_json, JevReadiness *out);</code> |
-| `jev_report_error` | function | 1160 | <code>int  jev_report_error(const JevResult *r, const char *what);</code> |
-| `memory_get` | function | 1163 | <code>bool memory_get(Cg *cg, long id, Memory *out);</code> |
-| `cmd_memory_classify` | function | 1166 | <code>int  cmd_memory_classify(Cg *cg, const char *sel, int limit, bool json);</code> |
-| `skill_render` | function | 1170 | <code>int  skill_render(Cg *cg, const Memory *m, char *path_out, size_t cap);</code> |
-| `skill_findings` | function | 1173 | <code>int  skill_findings(Cg *cg, char ***out);</code> |
-| `cmd_skills` | function | 1174 | <code>int  cmd_skills(Cg *cg, int argc, char **argv, bool json);</code> |
-| `git_available` | function | 1176 | <code>bool git_available(const Cg *cg);</code> |
-| `git_head` | function | 1181 | <code>bool git_head(const char *tree, char *branch, size_t bcap, char *sha,</code> |
-| `git_worktree_main` | function | 1185 | <code>bool git_worktree_main(const char *tree, char *main_out, size_t cap);</code> |
-| `cg_branch_resolve` | function | 1189 | <code>int  cg_branch_resolve(Cg *cg);</code> |
-| `branch_register` | function | 1193 | <code>long branch_register(Cg *cg, const char *name, const char *worktree,</code> |
-| `cmd_branches` | function | 1195 | <code>int  cmd_branches(Cg *cg, int argc, char **argv, bool json);</code> |
-| `git_run` | function | 1199 | <code>int  git_run(const char *tree, const char *args, StrBuf *out);</code> |
-| `git_branch_exists` | function | 1200 | <code>bool git_branch_exists(const char *tree, const char *branch);</code> |
-| `git_worktree_add` | function | 1207 | <code>int  git_worktree_add(const char *tree, const char *path, const char *branch,</code> |
-| `git_conflicted_paths` | function | 1211 | <code>int  git_conflicted_paths(const char *tree, char ***out);</code> |
-| `git_ingest` | function | 1214 | <code>int  git_ingest(Cg *cg, int limit, long *ncommits, long *npaths, long *seen);</code> |
-| `cmd_git_sync` | function | 1215 | <code>int  cmd_git_sync(Cg *cg, int limit, bool json);</code> |
-| `git_churn_for_path` | function | 1216 | <code>int  git_churn_for_path(Cg *cg, const char *path);</code> |
-| `git_commit_mirror` | function | 1217 | <code>int  git_commit_mirror(Cg *cg, const char *message);</code> |
-| `cmd_mcp` | function | 1220 | <code>int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */</code> |
-| `mcp_tools_json` | function | 1224 | <code>void mcp_tools_json(StrBuf *r);                    /* {"tools":[...]} */</code> |
-| `mcp_call_tool` | function | 1225 | <code>int  mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,</code> |
-| `cmd_tool` | function | 1227 | <code>int  cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json);</code> |
-| `cmd_serve` | function | 1230 | <code>int  cmd_serve(Cg *cg, const SysInfo *si);</code> |
-| `cmd_mcp_install` | function | 1231 | <code>int cmd_mcp_install(Cg *cg);                       /* wire into agent configs */</code> |
-| `cmd_changelog` | function | 1233 | <code>int cmd_changelog(Cg *cg, int limit, const char *outfile);</code> |
-| `ChangelogOpts` | typedef | 1236 | <code>typedef struct {</code> |
-| `cmd_changelog_git` | function | 1242 | <code>int cmd_changelog_git(Cg *cg, const ChangelogOpts *o);</code> |
-| `ChatModel` | typedef | 1249 | <code>typedef struct {</code> |
-| `chat_model_config` | function | 1253 | <code>void  chat_model_config(const Cg *cg, ChatModel *m);</code> |
-| `chat_model_ask` | function | 1256 | <code>char *chat_model_ask(const Cg *cg, const ChatModel *m, const char *prompt,</code> |
-| `env_file_key` | function | 1259 | <code>void  env_file_key(const char *root, const char *want, char *out, size_t cap);</code> |
-| `RecapOpts` | typedef | 1263 | <code>typedef struct {</code> |
-| `cmd_recap` | function | 1273 | <code>int cmd_recap(Cg *cg, const RecapOpts *o);</code> |
-| `cmd_agentmd` | function | 1274 | <code>int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */</code> |
-| `CodemapOpts` | typedef | 1278 | <code>typedef struct {</code> |
-| `cmd_codemap` | function | 1283 | <code>int  cmd_codemap(Cg *cg, const CodemapOpts *o);</code> |
-| `codemap_render` | function | 1286 | <code>int  codemap_render(Cg *cg, int budget, bool json, const char *self_rel,</code> |
-| `codemap_default_path` | function | 1288 | <code>void codemap_default_path(const Cg *cg, char *out, size_t cap);</code> |
-| `codemap_status` | function | 1291 | <code>int  codemap_status(Cg *cg, char *rel, size_t cap);</code> |
-| `cmd_docs` | function | 1292 | <code>int cmd_docs(Cg *cg, int argc, char **argv, bool json); /* documentation closure */</code> |
-| `spec_docs_finish` | function | 1293 | <code>int spec_docs_finish(Cg *cg, const char *feature); /* internal checked closure */</code> |
-| `help_overview` | function | 1299 | <code>void help_overview(void);</code> |
-| `help_command` | function | 1300 | <code>int  help_command(const char *name);</code> |
-| `cmd_help` | function | 1301 | <code>int  cmd_help(int argc, char **argv);</code> |
-| `help_route` | function | 1302 | <code>int  help_route(int argc, char **argv);</code> |
-| `help_usage` | function | 1303 | <code>void help_usage(const char *name);              /* "usage: cg ..." on stderr */</code> |
-| `help_suggest` | function | 1304 | <code>void help_suggest(const char *name);            /* closest names, on stderr */</code> |
-| `help_known` | function | 1305 | <code>bool help_known(const char *name);              /* a top-level row or alias */</code> |
+| `CgConfig` | typedef | 279 | <code>typedef struct {</code> |
+| `config_load` | function | 304 | <code>const CgConfig *config_load(const char *root);</code> |
+| `config_auto_sync` | function | 305 | <code>bool config_auto_sync(const char *root);</code> |
+| `config_spec_rel` | function | 306 | <code>const char *config_spec_rel(const char *root);     /* "spec" */</code> |
+| `config_context_rel` | function | 307 | <code>const char *config_context_rel(const char *root);  /* ".codify" */</code> |
+| `config_skills_rel` | function | 308 | <code>const char *config_skills_rel(const char *root);   /* ".agents/skills" */</code> |
+| `config_codemap_rel` | function | 309 | <code>const char *config_codemap_rel(const char *root);  /* "CODEMAP.md" */</code> |
+| `config_index_workers` | function | 311 | <code>int  config_index_workers(const char *root);</code> |
+| `config_parse_workers` | function | 314 | <code>int  config_parse_workers(const char *v);</code> |
+| `config_spec_dir` | function | 316 | <code>bool config_spec_dir(const char *root, char *out, size_t cap);</code> |
+| `config_workflow_path` | function | 317 | <code>bool config_workflow_path(const char *root, char *out, size_t cap);</code> |
+| `config_feature_path` | function | 318 | <code>bool config_feature_path(const char *root, const char *feature, char *out,</code> |
+| `config_context_dir` | function | 320 | <code>bool config_context_dir(const char *root, char *out, size_t cap);</code> |
+| `config_context_path` | function | 321 | <code>bool config_context_path(const char *root, const char *name, char *out,</code> |
+| `config_skills_dir` | function | 323 | <code>bool config_skills_dir(const char *root, char *out, size_t cap);</code> |
+| `config_codemap_path` | function | 324 | <code>bool config_codemap_path(const char *root, char *out, size_t cap);</code> |
+| `config_in_spec` | function | 326 | <code>bool config_in_spec(const char *root, const char *rel);</code> |
+| `config_find_spec_root` | function | 328 | <code>int  config_find_spec_root(const char *start, char *out, size_t cap);</code> |
+| `config_check` | function | 332 | <code>int  config_check(const char *root, StrBuf *text, StrBuf *json);</code> |
+| `cmd_config` | function | 333 | <code>int  cmd_config(int argc, char **argv, bool json);</code> |
+| `IndexStats` | typedef | 336 | <code>typedef struct {</code> |
+| `IndexOpts` | typedef | 366 | <code>typedef struct {</code> |
+| `cg_index_ex` | function | 390 | <code>int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);</code> |
+| `WalkEntry` | typedef | 396 | <code>typedef struct { char *rel; long size, mtime; } WalkEntry;</code> |
+| `WalkSet` | typedef | 397 | <code>typedef struct { WalkEntry *v; int n, cap; long dirs; } WalkSet;</code> |
+| `walk_parallel` | function | 398 | <code>void walk_parallel(const char *root, const char *rel, const Ignore *ig,</code> |
+| `walkset_free` | function | 400 | <code>void walkset_free(WalkSet *w);</code> |
+| `walk_threads_default` | function | 401 | <code>int  walk_threads_default(int budget);     /* CG_WALK_THREADS overrides */</code> |
+| `walk_git_candidates` | function | 407 | <code>int  walk_git_candidates(const char *root, const char *since, char ***out,</code> |
+| `index_phase_ms` | function | 410 | <code>void index_phase_ms(IndexStats *st, int phase, long t0);</code> |
+| `index_stats_json` | function | 412 | <code>void index_stats_json(const IndexStats *st, bool targeted, StrBuf *b);</code> |
+| `index_peak_rss_kb` | function | 413 | <code>long index_peak_rss_kb(void);              /* VmHWM, 0 when unknown */</code> |
+| `db_fts_contentless` | function | 415 | <code>bool db_fts_contentless(Cg *cg);</code> |
+| `progress_dirs` | function | 417 | <code>void progress_dirs(long dirs);</code> |
+| `config_index_walk` | function | 420 | <code>int  config_index_walk(const char *root);</code> |
+| `config_parse_walk` | function | 421 | <code>int  config_parse_walk(const char *v);     /* -1 when not auto&#124;git&#124;full */</code> |
+| `CG_WALK_GIT_MIN_FILES` | macro | 422 | <code>#define CG_WALK_GIT_MIN_FILES 20000        /* auto: git above this many */</code> |
+| `CG_WALK_FULL_EVERY` | macro | 423 | <code>#define CG_WALK_FULL_EVERY    20           /* every Nth pass walks fully */</code> |
+| `cg_index` | function | 425 | <code>int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet);</code> |
+| `progress_request` | function | 429 | <code>void progress_request(bool want);   /* the command a person runs asks for it */</code> |
+| `progress_begin` | function | 430 | <code>void progress_begin(const IndexOpts *o);</code> |
+| `progress_step` | function | 431 | <code>void progress_step(const char *step);   /* cg init's named steps */</code> |
+| `progress_phase` | function | 432 | <code>void progress_phase(const char *phase, long done, long total);</code> |
+| `progress_flush` | function | 433 | <code>void progress_flush(void);              /* draw now: bounded points only */</code> |
+| `progress_tick` | function | 434 | <code>void progress_tick(long done, long total, const char *path);</code> |
+| `progress_workers` | function | 435 | <code>void progress_workers(int n);</code> |
+| `progress_wait` | function | 436 | <code>void progress_wait(const char *what, long waited_ms);  /* NULL clears */</code> |
+| `progress_end` | function | 437 | <code>void progress_end(void);                /* erases the line; call before output */</code> |
+| `progress_begin_write` | function | 438 | <code>int  progress_begin_write(Cg *cg);      /* cg_begin_write, wait shown */</code> |
+| `syncgate_acquire` | function | 441 | <code>int  syncgate_acquire(const Cg *cg, long wait_ms);     /* fd or -1 */</code> |
+| `syncgate_release` | function | 442 | <code>void syncgate_release(int fd);</code> |
+| `syncgate_mark_dirty` | function | 443 | <code>void syncgate_mark_dirty(const Cg *cg, const char *const *paths, int npaths);</code> |
+| `syncgate_is_dirty` | function | 444 | <code>bool syncgate_is_dirty(const Cg *cg);</code> |
+| `syncgate_take_dirty` | function | 445 | <code>char *syncgate_take_dirty(const Cg *cg);               /* malloc'd or NULL */</code> |
+| `syncgate_slot_count` | function | 446 | <code>int  syncgate_slot_count(const SysInfo *si);</code> |
+| `syncgate_slot_acquire` | function | 447 | <code>int  syncgate_slot_acquire(const SysInfo *si);         /* fd or -1 */</code> |
+| `syncgate_slot_release` | function | 448 | <code>void syncgate_slot_release(int fd);</code> |
+| `syncgate_worker_request` | function | 453 | <code>int  syncgate_worker_request(const char *root, const SysInfo *si, int flag,</code> |
+| `syncgate_worker_budget` | function | 455 | <code>int  syncgate_worker_budget(const char *root, const SysInfo *si,</code> |
+| `syncgate_background_nice` | function | 457 | <code>void syncgate_background_nice(void);</code> |
+| `resolve_imports` | function | 460 | <code>void resolve_imports(Cg *cg);</code> |
+| `resolve_refs` | function | 461 | <code>void resolve_refs(Cg *cg);</code> |
+| `resolve_imports_scoped` | function | 466 | <code>void resolve_imports_scoped(Cg *cg);</code> |
+| `resolve_refs_scoped` | function | 467 | <code>void resolve_refs_scoped(Cg *cg);</code> |
+| `index_scope_begin` | function | 470 | <code>void index_scope_begin(Cg *cg);</code> |
+| `index_scope_end` | function | 471 | <code>void index_scope_end(Cg *cg);</code> |
+| `index_scope_bounded` | function | 474 | <code>bool index_scope_bounded(Cg *cg);</code> |
+| `GroundFinding` | typedef | 477 | <code>typedef struct {</code> |
+| `ground_findings` | function | 486 | <code>int ground_findings(Cg *cg, const char *path, GroundFinding **out);</code> |
+| `ground_findings_free` | function | 487 | <code>void ground_findings_free(GroundFinding *v, int n);</code> |
+| `file_calibrated` | function | 488 | <code>bool file_calibrated(Cg *cg, long file_id, const char *lang);</code> |
+| `ContractFinding` | typedef | 491 | <code>typedef struct {</code> |
+| `contract_findings` | function | 499 | <code>int contract_findings(Cg *cg, const char *path, ContractFinding **out);</code> |
+| `contract_findings_free` | function | 500 | <code>void contract_findings_free(ContractFinding *v, int n);</code> |
+| `HygieneFinding` | typedef | 503 | <code>typedef struct {</code> |
+| `hygiene_findings` | function | 511 | <code>int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out);</code> |
+| `hygiene_findings_all` | function | 512 | <code>int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit);</code> |
+| `hygiene_findings_free` | function | 513 | <code>void hygiene_findings_free(HygieneFinding *v, int n);</code> |
+| `is_entrypoint` | function | 514 | <code>bool is_entrypoint(Cg *cg, long sym_id, const char *name, const char *kind,</code> |
+| `cmd_search` | function | 518 | <code>int cmd_search (Cg *cg, const char *q, int limit, bool json);</code> |
+| `GREP_MAX_PATHS` | macro | 522 | <code>#define GREP_MAX_PATHS 16</code> |
+| `GrepOpts` | typedef | 523 | <code>typedef struct {</code> |
+| `cmd_grep` | function | 534 | <code>int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json);</code> |
+| `t_grep` | function | 538 | <code>int t_grep(void *call_ctx);</code> |
+| `grep_tri_complete` | function | 542 | <code>bool grep_tri_complete(Cg *cg, long *have, long *want);</code> |
+| `cmd_symbol` | function | 543 | <code>int cmd_symbol (Cg *cg, const char *name, bool json);</code> |
+| `cmd_impact` | function | 544 | <code>int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);</code> |
+| `cmd_context` | function | 545 | <code>int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);</code> |
+| `graph_task_focus` | function | 546 | <code>char *graph_task_focus(Cg *cg, const char *task_packet); /* malloc'd query */</code> |
+| `graph_symbol_brief` | function | 549 | <code>int  graph_symbol_brief(Cg *cg, const char *name, int snippet_lines,</code> |
+| `graph_glob_symbols` | function | 552 | <code>int  graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,</code> |
+| `task_packet_build` | function | 558 | <code>int  task_packet_build(Cg *cg, const char *tag, int budget, StrBuf *out);</code> |
+| `manager_packet_build` | function | 560 | <code>int  manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out);</code> |
+| `packet_upstream_evidence` | function | 563 | <code>int  packet_upstream_evidence(Cg *cg, const char *feature, const char *req,</code> |
+| `cmd_survey` | function | 566 | <code>int cmd_survey(Cg *cg, const char *scope, int budget, bool json);</code> |
+| `QF_MAX_PATHS` | macro | 571 | <code>#define QF_MAX_PATHS 16</code> |
+| `QueryFilter` | typedef | 572 | <code>typedef struct {</code> |
+| `query_filter_parse` | function | 580 | <code>int  query_filter_parse(int *argc, char **argv, QueryFilter *f);</code> |
+| `query_filter_active` | function | 581 | <code>bool query_filter_active(const QueryFilter *f);</code> |
+| `query_filter_sql` | function | 585 | <code>char *query_filter_sql(const QueryFilter *f, const char *alias);</code> |
+| `query_filter_register` | function | 586 | <code>void query_filter_register(sqlite3 *db);</code> |
+| `query_filter_match` | function | 588 | <code>bool query_filter_match(const QueryFilter *f, const char *path,</code> |
+| `cg_filter_set` | function | 592 | <code>void cg_filter_set(Cg *cg, const QueryFilter *f);</code> |
+| `cg_filter_get` | function | 593 | <code>const QueryFilter *cg_filter_get(const Cg *cg);</code> |
+| `cmd_files` | function | 595 | <code>int cmd_files(Cg *cg, int argc, char **argv, bool json);</code> |
+| `cmd_anchors` | function | 597 | <code>int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json);</code> |
+| `cmd_routes` | function | 598 | <code>int cmd_routes (Cg *cg, const char *filter, bool json);</code> |
+| `cmd_show` | function | 599 | <code>int cmd_show   (Cg *cg, const char *name, bool full, bool json); /* one body */</code> |
+| `cmd_test_impact` | function | 600 | <code>int cmd_test_impact(Cg *cg, const char *name, bool json);</code> |
+| `cmd_why` | function | 601 | <code>int cmd_why    (Cg *cg, const char *name, bool json);   /* provenance join */</code> |
+| `graph_path_is_test` | function | 602 | <code>bool graph_path_is_test(const char *path);</code> |
+| `graph_symbol_at` | function | 604 | <code>int  graph_symbol_at(Cg *cg, const char *path, int line, char *name, size_t cap);</code> |
+| `branch_scope_sql` | function | 613 | <code>const char *branch_scope_sql(const Cg *cg, const char *alias, char *out,</code> |
+| `cg_scope_set` | function | 617 | <code>int  cg_scope_set(Cg *cg, const char *name, bool all);</code> |
+| `branch_hit_label` | function | 621 | <code>const char *branch_hit_label(Cg *cg, long branch_id, char *out, size_t cap);</code> |
+| `branch_tree` | function | 625 | <code>const char *branch_tree(Cg *cg, long branch_id, char *out, size_t cap);</code> |
+| `cmd_commit` | function | 628 | <code>int cmd_commit  (Cg *cg, const char *msg, bool quiet);</code> |
+| `cmd_commit_with_options` | function | 629 | <code>int cmd_commit_with_options(Cg *cg, const char *msg, bool quiet,</code> |
+| `cmd_log` | function | 631 | <code>int cmd_log     (Cg *cg, int limit, bool json);</code> |
+| `cmd_status` | function | 632 | <code>int cmd_status  (Cg *cg, bool json);</code> |
+| `cmd_state` | function | 633 | <code>int cmd_state   (Cg *cg, bool json);              /* Git/snapshot/spec/live */</code> |
+| `cmd_event` | function | 634 | <code>int cmd_event(Cg *cg, int argc, char **argv, bool json);</code> |
+| `runtime_event_ingest` | function | 635 | <code>int runtime_event_ingest(Cg *cg, const char *source, const char *payload,</code> |
+| `runtime_workspace_revision` | function | 637 | <code>void runtime_workspace_revision(Cg *cg, char out[65]);</code> |
+| `RuntimeProgress` | typedef | 638 | <code>typedef struct {</code> |
+| `runtime_classify_progress` | function | 644 | <code>int runtime_classify_progress(Cg *cg, const char *attempt,</code> |
+| `runtime_progress` | function | 646 | <code>int runtime_progress(Cg *cg, bool json);</code> |
+| `cmd_diff` | function | 647 | <code>int cmd_diff    (Cg *cg, const char *a, const char *b);</code> |
+| `cmd_checkout` | function | 648 | <code>int cmd_checkout(Cg *cg, const char *id, bool force);</code> |
+| `cmd_changes` | function | 649 | <code>int cmd_changes (Cg *cg, int limit, bool json); /* impact of uncommitted edits */</code> |
+| `vcs_find_commits` | function | 655 | <code>int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,</code> |
+| `vcs_changed_paths` | function | 659 | <code>int vcs_changed_paths(Cg *cg, const char *needle, char ***out);</code> |
+| `vcs_commits_for_path` | function | 662 | <code>int vcs_commits_for_path(Cg *cg, const char *path, int limit, char ***ids,</code> |
+| `Memory` | typedef | 666 | <code>typedef struct {</code> |
+| `memory_add` | function | 680 | <code>long memory_add(Cg *cg, const char *type, const char *task, const char *body,</code> |
+| `memory_query` | function | 684 | <code>int  memory_query(Cg *cg, const char *query, const char *task,</code> |
+| `memory_clear` | function | 686 | <code>void memory_clear(Memory *m);            /* free one entry's fields */</code> |
+| `memory_free` | function | 687 | <code>void memory_free(Memory *v, int n);</code> |
+| `memory_json` | function | 688 | <code>void memory_json(const Memory *m, StrBuf *b);</code> |
+| `memory_print_brief` | function | 689 | <code>void memory_print_brief(const Memory *m, const char *indent);</code> |
+| `memory_open_quiet` | function | 691 | <code>bool memory_open_quiet(Cg *g);</code> |
+| `cmd_remember` | function | 692 | <code>int  cmd_remember(Cg *cg, const char *text, const char *type, const char *task,</code> |
+| `cmd_recall` | function | 694 | <code>int  cmd_recall(Cg *cg, const char *query, const char *task, const char *type,</code> |
+| `cmd_forget` | function | 696 | <code>int  cmd_forget(Cg *cg, const char *idstr);</code> |
+| `memory_supersede` | function | 697 | <code>int  memory_supersede(Cg *cg, long old_id, long new_id);</code> |
+| `cmd_recall_near` | function | 698 | <code>int  cmd_recall_near(Cg *cg, const char *path, int limit, bool json);</code> |
+| `cmd_memory_compact` | function | 699 | <code>int  cmd_memory_compact(Cg *cg, bool dry_run, bool json);</code> |
+| `memory_promote_branch` | function | 704 | <code>int  memory_promote_branch(Cg *cg, const char *from, const char *to);</code> |
+| `memory_content_id` | function | 708 | <code>void memory_content_id(const char *type, const char *task, const char *body,</code> |
+| `MemExportOpts` | typedef | 710 | <code>typedef struct {</code> |
+| `MemImportOpts` | typedef | 716 | <code>typedef struct {</code> |
+| `cmd_memory_export` | function | 723 | <code>int  cmd_memory_export(Cg *cg, const MemExportOpts *o, bool json);</code> |
+| `cmd_memory_import` | function | 726 | <code>int  cmd_memory_import(Cg *cg, const MemImportOpts *o, bool json);</code> |
+| `cmd_watch` | function | 729 | <code>int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms);</code> |
+| `watch_fleet` | function | 734 | <code>int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms);</code> |
+| `json_get_string` | function | 737 | <code>char *json_get_string(const char *obj, const char *key);  /* malloc, unescaped */</code> |
+| `json_string_value` | function | 738 | <code>char *json_string_value(const char *raw);  /* "\"a\\nb\"" -&gt; malloc "a\nb"; NULL if not a string */</code> |
+| `json_get_int` | function | 739 | <code>long  json_get_int(const char *obj, const char *key, long dflt);</code> |
+| `json_get_raw` | function | 740 | <code>char *json_get_raw(const char *obj, const char *key);     /* raw token, malloc */</code> |
+| `json_get_object` | function | 741 | <code>char *json_get_object(const char *obj, const char *key);  /* balanced {...}   */</code> |
+| `json_object_keys` | function | 742 | <code>int   json_object_keys(const char *obj, char **keys, int cap); /* malloc'd each */</code> |
+| `json_array_items` | function | 745 | <code>int   json_array_items(const char *arr, char ***out);</code> |
+| `cg_capture` | function | 748 | <code>int cg_capture(char **out, int (*fn)(void *), void *ctx);</code> |
+| `KvxEntry` | typedef | 751 | <code>typedef struct { char *section, *key, *raw; } KvxEntry;</code> |
+| `Kvx` | typedef | 752 | <code>typedef struct {</code> |
+| `kvx_parse` | function | 758 | <code>Kvx  *kvx_parse(const char *path);                /* NULL on open/parse error */</code> |
+| `kvx_free` | function | 759 | <code>void  kvx_free(Kvx *k);</code> |
+| `kvx_has` | function | 760 | <code>bool  kvx_has(const Kvx *k, const char *sec);</code> |
+| `kvx_raw` | function | 761 | <code>const char *kvx_raw(const Kvx *k, const char *sec, const char *key);</code> |
+| `kvx_str` | function | 762 | <code>char *kvx_str(const Kvx *k, const char *sec, const char *key); /* malloc; NULL absent */</code> |
+| `kvx_long` | function | 763 | <code>long  kvx_long(const Kvx *k, const char *sec, const char *key, long dflt);</code> |
+| `kvx_bool` | function | 764 | <code>bool  kvx_bool(const Kvx *k, const char *sec, const char *key, bool dflt);</code> |
+| `kvx_list` | function | 765 | <code>int   kvx_list(const Kvx *k, const char *sec, const char *key, char ***out);</code> |
+| `kvx_keys` | function | 766 | <code>int   kvx_keys(const Kvx *k, const char *sec, const char ***out); /* borrowed */</code> |
+| `kvx_subsections` | function | 767 | <code>int   kvx_subsections(const Kvx *k, const char *prefix, char ***out); /* file order */</code> |
+| `kvx_sort_dotted` | function | 768 | <code>void  kvx_sort_dotted(char **ids, int n);</code> |
+| `kvx_set_status` | function | 770 | <code>int   kvx_set_status(const char *path, const char *section, const char *value);</code> |
+| `void` | function | 775 | <code>extern void (*kvx_status_hook)(const char *path, const char *section,</code> |
+| `kvx_set_string` | function | 778 | <code>int   kvx_set_string(const char *path, const char *section, const char *key,</code> |
+| `kvx_set_raw` | function | 781 | <code>int   kvx_set_raw(const char *path, const char *section, const char *key,</code> |
+| `cmd_spec` | function | 784 | <code>int cmd_spec(int argc, char **argv, bool json);</code> |
+| `spec_attempt_set_branch` | function | 788 | <code>int spec_attempt_set_branch(Cg *g, const char *tag, const char *branch,</code> |
+| `SpecAttempt` | typedef | 790 | <code>typedef struct {</code> |
+| `spec_claim` | function | 802 | <code>int spec_claim(Cg *g, const char *root, const char *feature, const char *id,</code> |
+| `spec_active_tag` | function | 806 | <code>char *spec_active_tag(void);</code> |
+| `spec_task_tag` | function | 808 | <code>char *spec_task_tag(const char *requested);</code> |
+| `spec_active_touches` | function | 810 | <code>int   spec_active_touches(char ***out);</code> |
+| `spec_globs_overlap` | function | 812 | <code>bool  spec_globs_overlap(const char *a, const char *b);</code> |
+| `spec_resolve_task` | function | 815 | <code>char *spec_resolve_task(const char *requested, const char *agent);</code> |
+| `spec_task_packet` | function | 817 | <code>char *spec_task_packet(const char *requested);</code> |
+| `spec_task_memories_tag` | function | 819 | <code>int   spec_task_memories_tag(const char *requested, Memory **out);</code> |
+| `cmd_lsp` | function | 822 | <code>int  cmd_lsp(Cg *cg, const SysInfo *si);</code> |
+| `lsp_hover` | function | 823 | <code>void lsp_hover(Cg *cg, const char *name, StrBuf *md);</code> |
+| `lsp_diagnostics` | function | 824 | <code>void lsp_diagnostics(Cg *cg, const char *abs, StrBuf *out);</code> |
+| `lsp_path_in_task_scope` | function | 825 | <code>bool lsp_path_in_task_scope(Cg *cg, const char *rel);</code> |
+| `anchor_stale` | function | 832 | <code>int anchor_stale(Cg *cg,</code> |
+| `cmd_check` | function | 837 | <code>int cmd_check(Cg *cg, bool json, bool strict);   /* the single CI gate */</code> |
+| `cmd_brief` | function | 838 | <code>int cmd_brief(Cg *cg, bool json);                /* session state in one call */</code> |
+| `cmd_guard` | function | 839 | <code>int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);</code> |
+| `cmd_review` | function | 840 | <code>int cmd_review(Cg *cg, bool json);</code> |
+| `cmd_hook_install` | function | 841 | <code>int cmd_hook_install(Cg *cg);</code> |
+| `cmd_hook_post_edit` | function | 842 | <code>int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json);</code> |
+| `cmd_hook_event` | function | 847 | <code>int  cmd_hook_event(Cg *cg, const char *host, bool json);   /* always 0 */</code> |
+| `cmd_hook_pre_bash` | function | 851 | <code>int  cmd_hook_pre_bash(Cg *cg, bool json);                  /* always 0 */</code> |
+| `shell_advice_for` | function | 852 | <code>char *shell_advice_for(const char *root, const char *cwd, const char *cmd);</code> |
+| `config_shell_advice` | function | 853 | <code>bool config_shell_advice(const char *root);    /* [hooks] shell_advice */</code> |
+| `native_record` | function | 854 | <code>int  native_record(Cg *cg, const char *host, const char *payload,</code> |
+| `native_attribute_task` | function | 856 | <code>const char *native_attribute_task(Cg *cg, const char *session,</code> |
+| `native_worktree` | function | 859 | <code>bool native_worktree(Cg *cg, const char *cwd, char *wt, size_t wcap,</code> |
+| `native_tree_json` | function | 861 | <code>void native_tree_json(Cg *cg, StrBuf *b);           /* [...] */</code> |
+| `native_fleet_section` | function | 862 | <code>void native_fleet_section(Cg *cg, StrBuf *b, bool json);</code> |
+| `native_fleet_tree_json` | function | 863 | <code>int  native_fleet_tree_json(Cg *cg, const char *feature);</code> |
+| `native_counts` | function | 864 | <code>bool native_counts(Cg *cg, int *live, int *subs, int *branches);</code> |
+| `native_summary` | function | 865 | <code>void native_summary(Cg *cg, StrBuf *b, bool json);  /* brief/state line */</code> |
+| `native_flags` | function | 866 | <code>void native_flags(int argc, char **argv);</code> |
+| `transcript_dirs` | function | 871 | <code>void transcript_dirs(const char *root, char *claude, size_t ccap,</code> |
+| `transcript_codex_head` | function | 874 | <code>bool transcript_codex_head(const char *path, char *cwd, size_t ccap,</code> |
+| `cmd_fleet_discover` | function | 882 | <code>int  cmd_fleet_discover(Cg *cg, int argc, char **argv, bool json);</code> |
+| `native_discover_auto` | function | 883 | <code>void native_discover_auto(Cg *cg);</code> |
+| `config_fleet_discover` | function | 884 | <code>bool config_fleet_discover(const char *root);   /* [fleet] discover */</code> |
+| `cmd_integrate` | function | 885 | <code>int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility);</code> |
+| `integrate_plan` | function | 886 | <code>int integrate_plan(Cg *cg, bool json);</code> |
+| `integrate_apply` | function | 887 | <code>int integrate_apply(Cg *cg, bool json);</code> |
+| `integrate_doctor` | function | 888 | <code>int integrate_doctor(Cg *cg, bool json);</code> |
+| `integrate_apply_portable` | function | 889 | <code>int integrate_apply_portable(Cg *cg, bool quiet);</code> |
+| `PluginState` | typedef | 893 | <code>typedef struct {</code> |
+| `integrate_self` | function | 904 | <code>void integrate_self(char out[4096]);</code> |
+| `integrate_skill_body` | function | 905 | <code>const char *integrate_skill_body(void);</code> |
+| `integrate_skip_plugin` | function | 906 | <code>void integrate_skip_plugin(bool skip);</code> |
+| `plugin_root` | function | 907 | <code>void plugin_root(char out[4700]);</code> |
+| `plugin_render` | function | 908 | <code>int  plugin_render(const char *bin, bool json, StrBuf *out, int *changed,</code> |
+| `plugin_install` | function | 910 | <code>int  plugin_install(bool json, StrBuf *out);</code> |
+| `plugin_state` | function | 911 | <code>void plugin_state(PluginState *st);</code> |
+| `plugin_state_json` | function | 912 | <code>void plugin_state_json(const PluginState *st, StrBuf *b);</code> |
+| `plugin_codex_hooks_body` | function | 913 | <code>char *plugin_codex_hooks_body(const char *bin);</code> |
+| `plugin_codex_hooks` | function | 914 | <code>int  plugin_codex_hooks(const Cg *cg, const char *bin, char path[4700]);</code> |
+| `plugin_codex_state` | function | 915 | <code>const char *plugin_codex_state(const Cg *cg, char path[4700]);</code> |
+| `plugin_file_state` | function | 916 | <code>const char *plugin_file_state(const char *path, const char *mark);</code> |
+| `cmd_handoff` | function | 918 | <code>int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,</code> |
+| `cmd_resume` | function | 921 | <code>int cmd_resume(Cg *cg, const char *task, bool json, bool prompt);</code> |
+| `cmd_work` | function | 922 | <code>int cmd_work(Cg *cg, int argc, char **argv, bool json);</code> |
+| `work_open` | function | 923 | <code>int work_open(Cg *cg, const char *task, bool json);</code> |
+| `work_update` | function | 924 | <code>int work_update(Cg *cg, const char *revision, bool json);</code> |
+| `work_close` | function | 925 | <code>int work_close(Cg *cg, const char *task, int nevidence, char **evidence,</code> |
+| `cmd_spec_run` | function | 931 | <code>int cmd_spec_run(int argc, char **argv);</code> |
+| `cmd_fleet_up` | function | 937 | <code>int  cmd_fleet_up(Cg *cg, int argc, char **argv, bool json);</code> |
+| `cmd_fleet_control` | function | 938 | <code>int  cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,</code> |
+| `cmd_fleet_runs` | function | 940 | <code>int  cmd_fleet_runs(Cg *cg, bool json);</code> |
+| `fleet_supervisor_alive` | function | 941 | <code>bool fleet_supervisor_alive(const char *shared);</code> |
+| `CG_EXIT_APPROVAL` | macro | 946 | <code>#define CG_EXIT_APPROVAL 4</code> |
+| `fleet_gate` | function | 947 | <code>int  fleet_gate(Cg *cg, const char *gate, const char *subject);</code> |
+| `cmd_fleet_approvals` | function | 948 | <code>int  cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json);</code> |
+| `DriverSpec` | typedef | 951 | <code>typedef struct {</code> |
+| `driver_argv` | function | 963 | <code>int driver_argv(const DriverSpec *d, const char *root, const char *promptfile,</code> |
+| `DriverEvent` | typedef | 965 | <code>typedef struct {</code> |
+| `void` | function | 973 | <code>typedef void (*DriverEventFn)(const DriverEvent *e, void *ud);</code> |
+| `driver_stream_parse` | function | 976 | <code>int driver_stream_parse(const char *line, DriverEventFn fn, void *ud);</code> |
+| `DriverTap` | typedef | 977 | <code>typedef struct {</code> |
+| `driver_tap_init` | function | 986 | <code>void driver_tap_init(DriverTap *t, const char *log, const char *agent,</code> |
+| `driver_tap_poll` | function | 990 | <code>int  driver_tap_poll(DriverTap *t);</code> |
+| `driver_tap_free` | function | 991 | <code>void driver_tap_free(DriverTap *t);</code> |
+| `driver_steer` | function | 993 | <code>long driver_steer(Cg *cg, const char *agent, const char *message);</code> |
+| `driver_steer_take` | function | 996 | <code>char *driver_steer_take(Cg *cg, const char *agent, const char *via);</code> |
+| `EventRow` | typedef | 999 | <code>typedef struct {</code> |
+| `int` | function | 1004 | <code>typedef int (*EventFn)(const EventRow *e, void *ud);</code> |
+| `events_install` | function | 1005 | <code>int  events_install(Cg *cg);         /* triggers; called by cg_open */</code> |
+| `events_emit` | function | 1009 | <code>long events_emit(Cg *cg, const char *kind, const char *subject,</code> |
+| `events_emit_as` | function | 1013 | <code>long events_emit_as(Cg *cg, const char *kind, const char *subject,</code> |
+| `events_emit_quiet` | function | 1015 | <code>long events_emit_quiet(const char *kind, const char *subject,</code> |
+| `events_bind` | function | 1017 | <code>void events_bind(Cg *cg);            /* see events_kvx_status */</code> |
+| `events_unbind` | function | 1018 | <code>void events_unbind(void);</code> |
+| `events_kvx_status` | function | 1019 | <code>void events_kvx_status(const char *path, const char *section,</code> |
+| `events_head` | function | 1021 | <code>long events_head(Cg *cg);</code> |
+| `events_pruned_through` | function | 1022 | <code>long events_pruned_through(Cg *cg);</code> |
+| `events_since` | function | 1024 | <code>long events_since(Cg *cg, long since, const char *kinds, int limit,</code> |
+| `events_json` | function | 1026 | <code>void events_json(StrBuf *b, const EventRow *e);</code> |
+| `cmd_events` | function | 1027 | <code>int  cmd_events(Cg *cg, int argc, char **argv, bool json);</code> |
+| `events_emit_at` | function | 1030 | <code>long events_emit_at(Cg *cg, long at_ms, const char *kind, const char *subject,</code> |
+| `JOURNAL_VERSION` | macro | 1039 | <code>#define JOURNAL_VERSION 1</code> |
+| `JournalMode` | typedef | 1040 | <code>typedef enum {</code> |
+| `journal_append` | function | 1046 | <code>int  journal_append(Cg *cg, const char *op, const char *args,</code> |
+| `journal_replay` | function | 1050 | <code>int  journal_replay(Cg *cg, JournalMode mode);</code> |
+| `journal_begin` | function | 1054 | <code>int  journal_begin(Cg *cg);</code> |
+| `journal_busy_seen` | function | 1055 | <code>bool journal_busy_seen(void);</code> |
+| `journal_mark_busy` | function | 1056 | <code>void journal_mark_busy(void);</code> |
+| `journal_queued_count` | function | 1057 | <code>int  journal_queued_count(void);          /* records this process appended */</code> |
+| `journal_announced` | function | 1058 | <code>void journal_announced(void);             /* the command said "queued" itself */</code> |
+| `journal_set_command` | function | 1059 | <code>void journal_set_command(const char *cmd, const char *sub);</code> |
+| `journal_pending` | function | 1060 | <code>int  journal_pending(const Cg *cg, int *failed);  /* pending; failed via ptr */</code> |
+| `journal_queued_memories` | function | 1063 | <code>int  journal_queued_memories(const Cg *cg, const char *query,</code> |
+| `cmd_journal` | function | 1065 | <code>int  cmd_journal(Cg *cg, int argc, char **argv, bool json);</code> |
+| `cg_busy_why` | function | 1068 | <code>void cg_busy_why(const char *why);</code> |
+| `spec_journal_apply` | function | 1071 | <code>int  spec_journal_apply(Cg *g, const char *op, const char *args,</code> |
+| `govern_journal_apply` | function | 1073 | <code>int  govern_journal_apply(Cg *g, const char *op, const char *args,</code> |
+| `runtime_journal_apply` | function | 1076 | <code>int  runtime_journal_apply(Cg *g, const char *args, char *err, size_t errcap);</code> |
+| `memory_add_at` | function | 1077 | <code>long memory_add_at(Cg *cg, long created, const char *branch, const char *type,</code> |
+| `cmd_remember_ex` | function | 1080 | <code>int  cmd_remember_ex(Cg *cg, const char *text, const char *type,</code> |
+| `drift_spec_check` | function | 1090 | <code>int  drift_spec_check(Cg *cg, const char *tree, const char *base,</code> |
+| `drift_print` | function | 1093 | <code>void drift_print(const char *report_json);</code> |
+| `drift_collision_predict` | function | 1095 | <code>bool drift_collision_predict(Cg *cg, const char *feature, const char *a,</code> |
+| `cmd_drift` | function | 1097 | <code>int  cmd_drift(Cg *cg, int argc, char **argv, bool json);</code> |
+| `drift_interface_check` | function | 1103 | <code>int  drift_interface_check(Cg *cg, const char *tree, const char *base_branch,</code> |
+| `coverage_check` | function | 1108 | <code>int  coverage_check(Cg *cg, const char *feature, StrBuf *out);</code> |
+| `coverage_print` | function | 1109 | <code>void coverage_print(const char *report_json, const char *feature);</code> |
+| `drift_summary` | function | 1111 | <code>int  drift_summary(Cg *cg, const char *feature, StrBuf *text, StrBuf *json);</code> |
+| `graph_neighbors` | function | 1113 | <code>int  graph_neighbors(Cg *cg, const char *name, char ***out);</code> |
+| `RoleCaps` | typedef | 1124 | <code>typedef struct {</code> |
+| `FleetRole` | typedef | 1135 | <code>typedef struct {</code> |
+| `Hierarchy` | typedef | 1143 | <code>typedef struct {</code> |
+| `hier_load` | function | 1160 | <code>bool hier_load(const Kvx *wf, Hierarchy *h);   /* defaults, then overrides */</code> |
+| `hier_role_caps` | function | 1163 | <code>void hier_role_caps(const Kvx *wf, Hierarchy *h);</code> |
+| `hier_duration` | function | 1165 | <code>long hier_duration(const char *s);</code> |
+| `hier_free` | function | 1166 | <code>void hier_free(Hierarchy *h);</code> |
+| `hier_expand_task` | function | 1170 | <code>void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
+| `hier_per_task` | function | 1172 | <code>bool hier_per_task(const Hierarchy *h);</code> |
+| `hier_per_wave` | function | 1176 | <code>bool hier_per_wave(const Hierarchy *h);</code> |
+| `hier_manager_wave` | function | 1178 | <code>long hier_manager_wave(const Hierarchy *h, long wave);</code> |
+| `fleet_merge_lock` | function | 1183 | <code>int  fleet_merge_lock(const char *shared, const char *feature, long wait_ms);</code> |
+| `fleet_merge_unlock` | function | 1184 | <code>void fleet_merge_unlock(int fd);</code> |
+| `hier_expand` | function | 1185 | <code>void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
+| `fleet_identity_record` | function | 1187 | <code>int  fleet_identity_record(Cg *g);           /* no-op without CG_ROLE */</code> |
+| `fleet_brief` | function | 1188 | <code>void fleet_brief(Cg *cg, StrBuf *b, bool json);</code> |
+| `fleet_worker_begin` | function | 1195 | <code>int  fleet_worker_begin(Cg *cg, const char *id, const char *feature,</code> |
+| `fleet_merge_up` | function | 1197 | <code>int  fleet_merge_up(Cg *cg, const char *id, const char *feature, bool force,</code> |
+| `fleet_feature_land` | function | 1199 | <code>int  fleet_feature_land(Cg *cg, const char *feature, bool no_pr, bool json);</code> |
+| `fleet_land` | function | 1203 | <code>int  fleet_land(Cg *cg, const char *what, const char *feature, bool no_pr,</code> |
+| `fleet_pr_open` | function | 1205 | <code>int  fleet_pr_open(Cg *cg, const char *feature, bool dry_run, bool json);</code> |
+| `fleet_checkpoint` | function | 1206 | <code>int  fleet_checkpoint(Cg *cg, bool dry_run, bool json);</code> |
+| `cmd_fleet` | function | 1207 | <code>int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);</code> |
+| `FleetNode` | typedef | 1212 | <code>typedef struct {</code> |
+| `orch_spawn_manager` | function | 1230 | <code>int orch_spawn_manager(Cg *cg, const char *feature, long wave,</code> |
+| `orch_spawn_worker` | function | 1236 | <code>int orch_spawn_worker(Cg *cg, const char *feature, const char *id,</code> |
+| `orch_tree_status` | function | 1241 | <code>int orch_tree_status(Cg *cg, const char *feature, bool json);</code> |
+| `JevQuestion` | typedef | 1253 | <code>typedef struct {</code> |
+| `JevAnswer` | typedef | 1260 | <code>typedef struct {</code> |
+| `JevResult` | typedef | 1269 | <code>typedef struct {</code> |
+| `jev_question_noul` | function | 1281 | <code>int  jev_question_noul(JevQuestion *q, const char *name,</code> |
+| `jev_question_choice` | function | 1284 | <code>int  jev_question_choice(JevQuestion *q, const char *name,</code> |
+| `jev_question_score` | function | 1287 | <code>int  jev_question_score(JevQuestion *q, const char *name,</code> |
+| `jev_question_free` | function | 1290 | <code>void jev_question_free(JevQuestion *q);</code> |
+| `jev_request_json` | function | 1294 | <code>void jev_request_json(const char *model, const char *state_json,</code> |
+| `jev_ask` | function | 1301 | <code>int  jev_ask(Cg *cg, const char *state_json, const JevQuestion *qs, int nq,</code> |
+| `jev_ask_raw` | function | 1305 | <code>int  jev_ask_raw(Cg *cg, const char *body, JevResult *out);</code> |
+| `jev_ask_at` | function | 1310 | <code>int  jev_ask_at(Cg *cg, const char *key, const char *model,</code> |
+| `jev_answer` | function | 1313 | <code>const JevAnswer *jev_answer(const JevResult *r, const char *name);</code> |
+| `jev_result_free` | function | 1314 | <code>void jev_result_free(JevResult *r);</code> |
+| `cmd_jev` | function | 1315 | <code>int  cmd_jev(Cg *cg, int argc, char **argv, bool json);</code> |
+| `jev_advisory_ready` | function | 1323 | <code>bool jev_advisory_ready(const char *what);</code> |
+| `JevTriage` | typedef | 1324 | <code>typedef struct {</code> |
+| `jev_triage_failure` | function | 1332 | <code>int  jev_triage_failure(Cg *cg, const char *output, JevTriage *out);</code> |
+| `JevFinding` | typedef | 1333 | <code>typedef struct {</code> |
+| `jev_rank_findings` | function | 1343 | <code>int  jev_rank_findings(Cg *cg, JevFinding *v, int n);</code> |
+| `JevReadiness` | typedef | 1344 | <code>typedef struct {</code> |
+| `jev_pr_readiness` | function | 1348 | <code>int  jev_pr_readiness(Cg *cg, const char *state_json, JevReadiness *out);</code> |
+| `jev_report_error` | function | 1359 | <code>int  jev_report_error(const JevResult *r, const char *what);</code> |
+| `memory_get` | function | 1362 | <code>bool memory_get(Cg *cg, long id, Memory *out);</code> |
+| `cmd_memory_classify` | function | 1365 | <code>int  cmd_memory_classify(Cg *cg, const char *sel, int limit, bool json);</code> |
+| `skill_render` | function | 1369 | <code>int  skill_render(Cg *cg, const Memory *m, char *path_out, size_t cap);</code> |
+| `skill_findings` | function | 1372 | <code>int  skill_findings(Cg *cg, char ***out);</code> |
+| `cmd_skills` | function | 1373 | <code>int  cmd_skills(Cg *cg, int argc, char **argv, bool json);</code> |
+| `git_available` | function | 1375 | <code>bool git_available(const Cg *cg);</code> |
+| `git_head` | function | 1380 | <code>bool git_head(const char *tree, char *branch, size_t bcap, char *sha,</code> |
+| `git_worktree_main` | function | 1384 | <code>bool git_worktree_main(const char *tree, char *main_out, size_t cap);</code> |
+| `cg_branch_resolve` | function | 1388 | <code>int  cg_branch_resolve(Cg *cg);</code> |
+| `branch_register` | function | 1392 | <code>long branch_register(Cg *cg, const char *name, const char *worktree,</code> |
+| `cmd_branches` | function | 1394 | <code>int  cmd_branches(Cg *cg, int argc, char **argv, bool json);</code> |
+| `PROJECTION_REF` | macro | 1399 | <code>#define PROJECTION_REF    "refs/codify/projection"</code> |
+| `PROJECTION_BRANCH` | macro | 1400 | <code>#define PROJECTION_BRANCH "codify/projection"</code> |
+| `ProjectionConflict` | typedef | 1405 | <code>typedef struct {</code> |
+| `projection_conflicts_free` | function | 1412 | <code>void projection_conflicts_free(ProjectionConflict *v, int n);</code> |
+| `cmd_projection` | function | 1414 | <code>int  cmd_projection(Cg *cg, const SysInfo *si, int argc, char **argv,</code> |
+| `config_projection_base` | function | 1418 | <code>const char *config_projection_base(const char *root);</code> |
+| `config_projection_stale` | function | 1419 | <code>long config_projection_stale(const char *root);</code> |
+| `config_projection_exclude` | function | 1420 | <code>int  config_projection_exclude(const char *root, char ***out);  /* malloc'd */</code> |
+| `config_projection_index` | function | 1421 | <code>bool config_projection_index(const char *root);</code> |
+| `DriftHunk` | typedef | 1427 | <code>typedef struct { int from, to, ofrom, oto; } DriftHunk; /* head side, base side */</code> |
+| `DriftFile` | typedef | 1428 | <code>typedef struct { char *path; DriftHunk *h; int nh; } DriftFile;</code> |
+| `drift_hunks` | function | 1429 | <code>int  drift_hunks(const char *tree, const char *base, const char *head,</code> |
+| `drift_files_free` | function | 1431 | <code>void drift_files_free(DriftFile *v, int n);</code> |
+| `DriftIface` | typedef | 1432 | <code>typedef struct {</code> |
+| `drift_interface_changes` | function | 1436 | <code>int  drift_interface_changes(const char *tree, const char *pre,</code> |
+| `drift_ifaces_free` | function | 1438 | <code>void drift_ifaces_free(DriftIface *v, int n);</code> |
+| `ConflictBranch` | typedef | 1441 | <code>typedef struct {</code> |
+| `ProjectionFinding` | typedef | 1447 | <code>typedef struct {</code> |
+| `conflicts_compute` | function | 1460 | <code>int  conflicts_compute(Cg *cg, const char *base, const char *base_head,</code> |
+| `conflicts_store` | function | 1467 | <code>int  conflicts_store(Cg *cg, ProjectionFinding *f, int n, int nbranches,</code> |
+| `conflicts_steer` | function | 1471 | <code>int  conflicts_steer(Cg *cg, ProjectionFinding *f, int n);</code> |
+| `conflicts_free` | function | 1472 | <code>void conflicts_free(ProjectionFinding *f, int n);</code> |
+| `conflicts_print` | function | 1474 | <code>int  conflicts_print(Cg *cg, bool json, StrBuf *out);</code> |
+| `cmd_projection_findings` | function | 1475 | <code>int  cmd_projection_findings(Cg *cg, int argc, char **argv, bool json);</code> |
+| `config_projection_steer` | function | 1476 | <code>bool config_projection_steer(const char *root);   /* [projection] steer */</code> |
+| `hier_waves_parallel` | function | 1482 | <code>bool hier_waves_parallel(const Kvx *wf, char *why, size_t cap);</code> |
+| `spec_claim_ex` | function | 1486 | <code>int  spec_claim_ex(Cg *g, const char *root, const char *feature,</code> |
+| `fleet_worker_begin_ex` | function | 1489 | <code>int  fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature,</code> |
+| `spec_start_ahead` | function | 1493 | <code>int  spec_start_ahead(Cg *g, const char *tag, const char *agent,</code> |
+| `fleet_sync` | function | 1498 | <code>int  fleet_sync(Cg *cg, int argc, char **argv, bool json);</code> |
+| `fleet_projection_rebuild` | function | 1501 | <code>int  fleet_projection_rebuild(Cg *cg, char *line, size_t cap);</code> |
+| `projection_mark_dirty` | function | 1512 | <code>void projection_mark_dirty(Cg *cg, const char *why);</code> |
+| `projection_auto_build` | function | 1513 | <code>int  projection_auto_build(Cg *cg, const char *why, long *retry_ms);</code> |
+| `projection_follow` | function | 1518 | <code>void projection_follow(Cg *cg, const char *why);</code> |
+| `projection_branch_findings` | function | 1521 | <code>int  projection_branch_findings(Cg *cg, const char *branch, StrBuf *out);</code> |
+| `projection_summary` | function | 1523 | <code>void projection_summary(Cg *cg, StrBuf *b, bool json);</code> |
+| `projection_tree_json` | function | 1525 | <code>void projection_tree_json(Cg *cg, StrBuf *b);</code> |
+| `config_projection_auto` | function | 1526 | <code>bool config_projection_auto(const char *root);           /* default true */</code> |
+| `config_projection_min_interval` | function | 1527 | <code>long config_projection_min_interval(const char *root);   /* seconds, 15 */</code> |
+| `git_run` | function | 1531 | <code>int  git_run(const char *tree, const char *args, StrBuf *out);</code> |
+| `git_version` | function | 1534 | <code>int  git_version(int *major, int *minor);          /* 0, or -1: no git */</code> |
+| `git_rev_commit` | function | 1536 | <code>int  git_rev_commit(const char *tree, const char *rev, char *sha, size_t cap);</code> |
+| `git_is_ancestor` | function | 1537 | <code>bool git_is_ancestor(const char *tree, const char *a, const char *b);</code> |
+| `git_count_commits` | function | 1538 | <code>long git_count_commits(const char *tree, const char *from, const char *to);</code> |
+| `git_changed_paths` | function | 1540 | <code>int  git_changed_paths(const char *tree, const char *from, const char *to,</code> |
+| `git_merge_tree` | function | 1545 | <code>int  git_merge_tree(const char *tree, const char *a, const char *b,</code> |
+| `git_commit_tree` | function | 1549 | <code>int  git_commit_tree(const char *tree, const char *treeid,</code> |
+| `git_update_ref` | function | 1552 | <code>int  git_update_ref(const char *tree, const char *ref, const char *sha);</code> |
+| `git_commit_time` | function | 1553 | <code>long git_commit_time(const char *tree, const char *rev);   /* 0 unknown */</code> |
+| `git_shadow_tree` | function | 1557 | <code>int  git_shadow_tree(const char *worktree, const char *tmp_index,</code> |
+| `git_tree_diff_count` | function | 1560 | <code>int  git_tree_diff_count(const char *tree, const char *a, const char *b);</code> |
+| `git_capture_text` | function | 1562 | <code>int  git_capture_text(const char *tree, const char *args, StrBuf *out);</code> |
+| `git_branch_exists` | function | 1563 | <code>bool git_branch_exists(const char *tree, const char *branch);</code> |
+| `git_worktree_add` | function | 1570 | <code>int  git_worktree_add(const char *tree, const char *path, const char *branch,</code> |
+| `git_conflicted_paths` | function | 1574 | <code>int  git_conflicted_paths(const char *tree, char ***out);</code> |
+| `git_ingest` | function | 1577 | <code>int  git_ingest(Cg *cg, int limit, long *ncommits, long *npaths, long *seen);</code> |
+| `cmd_git_sync` | function | 1578 | <code>int  cmd_git_sync(Cg *cg, int limit, bool json);</code> |
+| `git_churn_for_path` | function | 1579 | <code>int  git_churn_for_path(Cg *cg, const char *path);</code> |
+| `git_commit_mirror` | function | 1580 | <code>int  git_commit_mirror(Cg *cg, const char *message);</code> |
+| `cmd_mcp` | function | 1583 | <code>int cmd_mcp(Cg *cg, const SysInfo *si);            /* stdio MCP server */</code> |
+| `mcp_tools_json` | function | 1587 | <code>void mcp_tools_json(StrBuf *r);                    /* {"tools":[...]} */</code> |
+| `mcp_call_tool` | function | 1588 | <code>int  mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,</code> |
+| `cmd_tool` | function | 1590 | <code>int  cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json);</code> |
+| `cmd_serve` | function | 1593 | <code>int  cmd_serve(Cg *cg, const SysInfo *si);</code> |
+| `cmd_mcp_install` | function | 1594 | <code>int cmd_mcp_install(Cg *cg);                       /* wire into agent configs */</code> |
+| `cmd_changelog` | function | 1596 | <code>int cmd_changelog(Cg *cg, int limit, const char *outfile);</code> |
+| `ChangelogOpts` | typedef | 1599 | <code>typedef struct {</code> |
+| `cmd_changelog_git` | function | 1605 | <code>int cmd_changelog_git(Cg *cg, const ChangelogOpts *o);</code> |
+| `ChatModel` | typedef | 1612 | <code>typedef struct {</code> |
+| `chat_model_config` | function | 1616 | <code>void  chat_model_config(const Cg *cg, ChatModel *m);</code> |
+| `chat_model_ask` | function | 1619 | <code>char *chat_model_ask(const Cg *cg, const ChatModel *m, const char *prompt,</code> |
+| `env_file_key` | function | 1622 | <code>void  env_file_key(const char *root, const char *want, char *out, size_t cap);</code> |
+| `RecapOpts` | typedef | 1626 | <code>typedef struct {</code> |
+| `cmd_recap` | function | 1636 | <code>int cmd_recap(Cg *cg, const RecapOpts *o);</code> |
+| `cmd_agentmd` | function | 1637 | <code>int cmd_agentmd(Cg *cg, bool write_files);         /* graph agent context */</code> |
+| `CodemapOpts` | typedef | 1641 | <code>typedef struct {</code> |
+| `cmd_codemap` | function | 1646 | <code>int  cmd_codemap(Cg *cg, const CodemapOpts *o);</code> |
+| `codemap_render` | function | 1649 | <code>int  codemap_render(Cg *cg, int budget, bool json, const char *self_rel,</code> |
+| `codemap_default_path` | function | 1651 | <code>void codemap_default_path(const Cg *cg, char *out, size_t cap);</code> |
+| `codemap_status` | function | 1654 | <code>int  codemap_status(Cg *cg, char *rel, size_t cap);</code> |
+| `cmd_docs` | function | 1655 | <code>int cmd_docs(Cg *cg, int argc, char **argv, bool json); /* documentation closure */</code> |
+| `spec_docs_finish` | function | 1656 | <code>int spec_docs_finish(Cg *cg, const char *feature); /* internal checked closure */</code> |
+| `help_overview` | function | 1662 | <code>void help_overview(void);</code> |
+| `help_command` | function | 1663 | <code>int  help_command(const char *name);</code> |
+| `cmd_help` | function | 1664 | <code>int  cmd_help(int argc, char **argv);</code> |
+| `help_route` | function | 1665 | <code>int  help_route(int argc, char **argv);</code> |
+| `help_usage` | function | 1666 | <code>void help_usage(const char *name);              /* "usage: cg ..." on stderr */</code> |
+| `help_suggest` | function | 1667 | <code>void help_suggest(const char *name);            /* closest names, on stderr */</code> |
+| `help_known` | function | 1668 | <code>bool help_known(const char *name);              /* a top-level row or alias */</code> |
 
 ## src/changelog.c
 
@@ -1050,39 +1200,35 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `git_capture` | function | 36 | <code>static int git_capture(const char *tree, const char *args, StrBuf *out) {</code> |
-| `repo_url` | function | 55 | <code>static void repo_url(const char *tree, char *out, size_t cap) {</code> |
-| `Tag` | typedef | 79 | <code>typedef struct { char name[128]; long when; } Tag;</code> |
-| `tags_load` | function | 81 | <code>static int tags_load(const char *tree, Tag **out) {</code> |
-| `version_source` | function | 111 | <code>static const char *version_source(const char *tree, char *path, size_t cap) {</code> |
-| `version_parse` | function | 124 | <code>static void version_parse(const char *src, const char *body, char *out, size_t cap) {</code> |
-| `version_at` | function | 145 | <code>static void version_at(const char *tree, const char *src, const char *rev,</code> |
-| `version_now` | function | 159 | <code>static void version_now(const char *tree, const char *src, char *out, size_t cap) {</code> |
-| `Boundary` | typedef | 170 | <code>typedef struct { char name[128]; char commit[65]; long when; } Boundary;</code> |
-| `boundaries_load` | function | 172 | <code>static int boundaries_load(const char *tree, const char *src, Boundary **out) {</code> |
-| `ADD` | macro | 176 | <code>#define ADD(nm, cm, wh) do { \</code> |
-| `Entry` | typedef | 232 | <code>typedef struct {</code> |
-| `entry_free` | function | 241 | <code>static void entry_free(Entry *e) {</code> |
-| `NGROUPS` | macro | 259 | <code>#define NGROUPS ((int)(sizeof GROUPS / sizeof GROUPS[0]))</code> |
-| `re_init` | function | 265 | <code>static void re_init(void) {</code> |
-| `upper_first` | function | 274 | <code>static char *upper_first(const char *s) {</code> |
-| `trimdup` | function | 280 | <code>static char *trimdup(const char *s, size_t n) {</code> |
-| `entry_parse` | function | 291 | <code>static void entry_parse(Entry *e, const char *subject, const char *body) {</code> |
-| `commits_load` | function | 343 | <code>static int commits_load(const char *tree, const char *range, Entry **out) {</code> |
-| `Release` | typedef | 378 | <code>typedef struct {</code> |
-| `group_rank` | function | 385 | <code>static int group_rank(const char *g) {</code> |
-| `render_release` | function | 391 | <code>static void render_release(StrBuf *md, const Release *r, Entry *v, int n,</code> |
-| `Summ` | typedef | 464 | <code>typedef ChatModel Summ;</code> |
-| `env_file_key` | function | 468 | <code>void env_file_key(const char *root, const char *want, char *out, size_t cap) {</code> |
-| `chat_model_config` | function | 497 | <code>void chat_model_config(const Cg *cg, ChatModel *s) {</code> |
-| `summ_config` | macro | 515 | <code>#define summ_config chat_model_config</code> |
-| `cfgquote` | function | 517 | <code>static void cfgquote(StrBuf *b, const char *s) {</code> |
-| `write_private` | function | 526 | <code>static int write_private(const char *path, const char *data) {</code> |
-| `summ_ask` | function | 540 | <code>static char *summ_ask(const Cg *cg, const Summ *s, const Release *r,</code> |
-| `chat_model_ask` | function | 560 | <code>char *chat_model_ask(const Cg *cg, const ChatModel *s, const char *prompt_text,</code> |
-| `highlights_body` | function | 665 | <code>static const char *highlights_body(const char *text) {</code> |
-| `summ_cache_path` | function | 680 | <code>static void summ_cache_path(const Cg *cg, const Release *r, const Summ *s,</code> |
-| `cmd_changelog_git` | function | 692 | <code>int cmd_changelog_git(Cg *cg, const ChangelogOpts *o) {</code> |
+| `git_capture` | function | 36 | <code>static int git_capture(const char *tree, const char *args, StrBuf *out)</code> |
+| `repo_url` | function | 59 | <code>static void repo_url(const char *tree, char *out, size_t cap)</code> |
+| `tags_load` | function | 107 | <code>static int tags_load(const char *tree, Tag **out)</code> |
+| `version_source` | function | 147 | <code>static const char *version_source(const char *tree, char *path, size_t cap)</code> |
+| `version_parse` | function | 166 | <code>static void version_parse(const char *src, const char *body, char *out, size_t cap)</code> |
+| `version_at` | function | 196 | <code>static void version_at(const char *tree, const char *src, const char *rev,</code> |
+| `version_now` | function | 217 | <code>static void version_now(const char *tree, const char *src, char *out, size_t cap)</code> |
+| `boundaries_load` | function | 236 | <code>static int boundaries_load(const char *tree, const char *src, Boundary **out)</code> |
+| `ADD` | macro | 241 | <code>#define ADD(nm, cm, wh)                                            \</code> |
+| `entry_free` | function | 337 | <code>static void entry_free(Entry *e)</code> |
+| `NGROUPS` | macro | 378 | <code>#define NGROUPS ((int)(sizeof GROUPS / sizeof GROUPS[0]))</code> |
+| `re_init` | function | 384 | <code>static void re_init(void)</code> |
+| `upper_first` | function | 395 | <code>static char *upper_first(const char *s)</code> |
+| `trimdup` | function | 403 | <code>static char *trimdup(const char *s, size_t n)</code> |
+| `entry_parse` | function | 420 | <code>static void entry_parse(Entry *e, const char *subject, const char *body)</code> |
+| `commits_load` | function | 494 | <code>static int commits_load(const char *tree, const char *range, Entry **out)</code> |
+| `group_rank` | function | 557 | <code>static int group_rank(const char *g)</code> |
+| `render_release` | function | 567 | <code>static void render_release(StrBuf *md, const Release *r, Entry *v, int n,</code> |
+| `Summ` | typedef | 664 | <code>typedef ChatModel Summ;</code> |
+| `env_file_key` | function | 668 | <code>void env_file_key(const char *root, const char *want, char *out, size_t cap)</code> |
+| `chat_model_config` | function | 711 | <code>void chat_model_config(const Cg *cg, ChatModel *s)</code> |
+| `summ_config` | macro | 736 | <code>#define summ_config chat_model_config</code> |
+| `cfgquote` | function | 738 | <code>static void cfgquote(StrBuf *b, const char *s)</code> |
+| `write_private` | function | 750 | <code>static int write_private(const char *path, const char *data)</code> |
+| `summ_ask` | function | 771 | <code>static char *summ_ask(const Cg *cg, const Summ *s, const Release *r,</code> |
+| `chat_model_ask` | function | 793 | <code>char *chat_model_ask(const Cg *cg, const ChatModel *s, const char *prompt_text,</code> |
+| `highlights_body` | function | 944 | <code>static const char *highlights_body(const char *text)</code> |
+| `summ_cache_path` | function | 965 | <code>static void summ_cache_path(const Cg *cg, const Release *r, const Summ *s,</code> |
+| `cmd_changelog_git` | function | 978 | <code>int cmd_changelog_git(Cg *cg, const ChangelogOpts *o)</code> |
 
 ## src/codemap.c
 
@@ -1209,48 +1355,107 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `CfgType` | typedef | 32 | <code>typedef enum { CFG_BOOL, CFG_PATH, CFG_INT } CfgType;</code> |
-| `CfgIssue` | typedef | 72 | <code>typedef struct {</code> |
-| `CfgIssues` | typedef | 79 | <code>typedef struct { CfgIssue *v; int n, cap; } CfgIssues;</code> |
-| `cfg_issue` | function | 81 | <code>static void cfg_issue(CfgIssues *is, const char *kind, const char *section,</code> |
-| `cfg_issue` | function | 85 | <code>static void cfg_issue(CfgIssues *is, const char *kind, const char *section,</code> |
-| `cfg_index` | function | 103 | <code>static int cfg_index(const char *section, const char *key) {</code> |
-| `cfg_index_dotted` | function | 112 | <code>static int cfg_index_dotted(const char *dotted) {</code> |
-| `cfg_known_section` | function | 120 | <code>static bool cfg_known_section(const char *section) {</code> |
-| `cfg_parse_bool` | function | 127 | <code>static int cfg_parse_bool(const char *v) {</code> |
-| `config_parse_workers` | function | 135 | <code>int config_parse_workers(const char *v) {</code> |
-| `cfg_path_check` | function | 151 | <code>static const char *cfg_path_check(const char *v, char *out, size_t cap) {</code> |
-| `cfg_slot` | function | 183 | <code>static char *cfg_slot(CgConfig *c, int i) {</code> |
-| `cfg_defaults` | function | 193 | <code>static void cfg_defaults(CgConfig *c, const char *root) {</code> |
-| `cfg_read` | function | 205 | <code>static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {</code> |
-| `CfgNode` | struct | 282 | <code>typedef struct CfgNode { CgConfig c; struct CfgNode *next; } CfgNode;</code> |
-| `config_load` | function | 287 | <code>const CgConfig *config_load(const char *root) {</code> |
-| `config_auto_sync` | function | 317 | <code>bool config_auto_sync(const char *root) { return config_load(root)-&gt;sync_auto; }</code> |
-| `config_spec_rel` | function | 318 | <code>const char *config_spec_rel(const char *root) {</code> |
-| `config_context_rel` | function | 321 | <code>const char *config_context_rel(const char *root) {</code> |
-| `config_skills_rel` | function | 324 | <code>const char *config_skills_rel(const char *root) {</code> |
-| `config_codemap_rel` | function | 327 | <code>const char *config_codemap_rel(const char *root) {</code> |
-| `config_index_workers` | function | 330 | <code>int config_index_workers(const char *root) {</code> |
-| `config_spec_dir` | function | 334 | <code>bool config_spec_dir(const char *root, char *out, size_t cap) {</code> |
-| `config_workflow_path` | function | 338 | <code>bool config_workflow_path(const char *root, char *out, size_t cap) {</code> |
-| `config_feature_path` | function | 343 | <code>bool config_feature_path(const char *root, const char *feature, char *out,</code> |
-| `config_context_dir` | function | 349 | <code>bool config_context_dir(const char *root, char *out, size_t cap) {</code> |
-| `config_context_path` | function | 353 | <code>bool config_context_path(const char *root, const char *name, char *out,</code> |
-| `config_skills_dir` | function | 359 | <code>bool config_skills_dir(const char *root, char *out, size_t cap) {</code> |
-| `config_codemap_path` | function | 363 | <code>bool config_codemap_path(const char *root, char *out, size_t cap) {</code> |
-| `config_in_spec` | function | 367 | <code>bool config_in_spec(const char *root, const char *rel) {</code> |
-| `config_find_spec_root` | function | 373 | <code>int config_find_spec_root(const char *start, char *out, size_t cap) {</code> |
-| `cfg_issues_json` | function | 392 | <code>static void cfg_issues_json(const CgConfig *c, const CfgIssues *is,</code> |
-| `config_check` | function | 415 | <code>int config_check(const char *root, StrBuf *text, StrBuf *json) {</code> |
-| `cfg_core_warning` | function | 431 | <code>static void cfg_core_warning(const char *root, char *out, size_t cap) {</code> |
-| `cfg_root` | function | 450 | <code>static void cfg_root(char *out, size_t cap) {</code> |
-| `cfg_value` | function | 461 | <code>static const char *cfg_value(const CgConfig *c, int i) {</code> |
-| `cfg_setting_json` | function | 472 | <code>static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {</code> |
-| `cfg_list` | function | 491 | <code>static int cfg_list(const char *root, bool json) {</code> |
-| `cfg_init` | function | 528 | <code>static int cfg_init(const char *root) {</code> |
-| `cfg_get` | function | 545 | <code>static int cfg_get(const char *root, const char *dotted, bool json) {</code> |
-| `cfg_set` | function | 565 | <code>static int cfg_set(const char *root, const char *dotted, const char *value) {</code> |
-| `cmd_config` | function | 624 | <code>int cmd_config(int argc, char **argv, bool json) {</code> |
+| `CfgType` | typedef | 34 | <code>typedef enum { CFG_BOOL, CFG_PATH, CFG_INT, CFG_STR, CFG_DUR,</code> |
+| `CfgIssue` | typedef | 126 | <code>typedef struct {</code> |
+| `CfgIssues` | typedef | 133 | <code>typedef struct { CfgIssue *v; int n, cap; } CfgIssues;</code> |
+| `cfg_issue` | function | 135 | <code>static void cfg_issue(CfgIssues *is, const char *kind, const char *section,</code> |
+| `cfg_issue` | function | 139 | <code>static void cfg_issue(CfgIssues *is, const char *kind, const char *section,</code> |
+| `cfg_index` | function | 157 | <code>static int cfg_index(const char *section, const char *key) {</code> |
+| `cfg_index_dotted` | function | 166 | <code>static int cfg_index_dotted(const char *dotted) {</code> |
+| `cfg_known_section` | function | 174 | <code>static bool cfg_known_section(const char *section) {</code> |
+| `cfg_parse_bool` | function | 181 | <code>static int cfg_parse_bool(const char *v) {</code> |
+| `config_parse_workers` | function | 189 | <code>int config_parse_workers(const char *v) {</code> |
+| `config_parse_walk` | function | 203 | <code>int config_parse_walk(const char *v) {</code> |
+| `walk_name` | function | 212 | <code>static const char *walk_name(int w) {</code> |
+| `cfg_path_check` | function | 219 | <code>static const char *cfg_path_check(const char *v, char *out, size_t cap) {</code> |
+| `cfg_slot` | function | 251 | <code>static char *cfg_slot(CgConfig *c, int i) {</code> |
+| `cfg_defaults` | function | 261 | <code>static void cfg_defaults(CgConfig *c, const char *root) {</code> |
+| `cfg_read` | function | 282 | <code>static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {</code> |
+| `CfgNode` | struct | 415 | <code>typedef struct CfgNode { CgConfig c; struct CfgNode *next; } CfgNode;</code> |
+| `config_load` | function | 420 | <code>const CgConfig *config_load(const char *root) {</code> |
+| `config_auto_sync` | function | 450 | <code>bool config_auto_sync(const char *root) { return config_load(root)-&gt;sync_auto; }</code> |
+| `config_spec_rel` | function | 451 | <code>const char *config_spec_rel(const char *root) {</code> |
+| `config_context_rel` | function | 454 | <code>const char *config_context_rel(const char *root) {</code> |
+| `config_skills_rel` | function | 457 | <code>const char *config_skills_rel(const char *root) {</code> |
+| `config_codemap_rel` | function | 460 | <code>const char *config_codemap_rel(const char *root) {</code> |
+| `config_index_workers` | function | 463 | <code>int config_index_workers(const char *root) {</code> |
+| `config_projection_base` | function | 467 | <code>const char *config_projection_base(const char *root) {</code> |
+| `config_projection_stale` | function | 470 | <code>long config_projection_stale(const char *root) {</code> |
+| `config_projection_index` | function | 473 | <code>bool config_projection_index(const char *root) {</code> |
+| `config_fleet_discover` | function | 477 | <code>bool config_fleet_discover(const char *root) {</code> |
+| `config_projection_steer` | function | 480 | <code>bool config_projection_steer(const char *root) {   /* codify-v15 3.2 */</code> |
+| `config_shell_advice` | function | 483 | <code>bool config_shell_advice(const char *root) {    /* codify-v15 1.4 */</code> |
+| `config_projection_auto` | function | 487 | <code>bool config_projection_auto(const char *root) {</code> |
+| `config_projection_min_interval` | function | 490 | <code>long config_projection_min_interval(const char *root) {</code> |
+| `config_projection_exclude` | function | 493 | <code>int config_projection_exclude(const char *root, char ***out) {</code> |
+| `config_index_walk` | function | 510 | <code>int config_index_walk(const char *root) {</code> |
+| `config_spec_dir` | function | 514 | <code>bool config_spec_dir(const char *root, char *out, size_t cap) {</code> |
+| `config_workflow_path` | function | 518 | <code>bool config_workflow_path(const char *root, char *out, size_t cap) {</code> |
+| `config_feature_path` | function | 523 | <code>bool config_feature_path(const char *root, const char *feature, char *out,</code> |
+| `config_context_dir` | function | 529 | <code>bool config_context_dir(const char *root, char *out, size_t cap) {</code> |
+| `config_context_path` | function | 533 | <code>bool config_context_path(const char *root, const char *name, char *out,</code> |
+| `config_skills_dir` | function | 539 | <code>bool config_skills_dir(const char *root, char *out, size_t cap) {</code> |
+| `config_codemap_path` | function | 543 | <code>bool config_codemap_path(const char *root, char *out, size_t cap) {</code> |
+| `config_in_spec` | function | 547 | <code>bool config_in_spec(const char *root, const char *rel) {</code> |
+| `config_find_spec_root` | function | 553 | <code>int config_find_spec_root(const char *start, char *out, size_t cap) {</code> |
+| `cfg_issues_json` | function | 572 | <code>static void cfg_issues_json(const CgConfig *c, const CfgIssues *is,</code> |
+| `config_check` | function | 595 | <code>int config_check(const char *root, StrBuf *text, StrBuf *json) {</code> |
+| `cfg_core_warning` | function | 611 | <code>static void cfg_core_warning(const char *root, char *out, size_t cap) {</code> |
+| `cfg_root` | function | 630 | <code>static void cfg_root(char *out, size_t cap) {</code> |
+| `cfg_value` | function | 641 | <code>static const char *cfg_value(const CgConfig *c, int i) {</code> |
+| `cfg_setting_json` | function | 662 | <code>static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {</code> |
+| `cfg_list` | function | 700 | <code>static int cfg_list(const char *root, bool json) {</code> |
+| `cfg_init` | function | 737 | <code>static int cfg_init(const char *root) {</code> |
+| `cfg_get` | function | 754 | <code>static int cfg_get(const char *root, const char *dotted, bool json) {</code> |
+| `cfg_set` | function | 774 | <code>static int cfg_set(const char *root, const char *dotted, const char *value) {</code> |
+| `cmd_config` | function | 873 | <code>int cmd_config(int argc, char **argv, bool json) {</code> |
+
+## src/conflicts.c
+
+[Open source](../src/conflicts.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `NEAR_LINES` | macro | 35 | <code>#define NEAR_LINES 3</code> |
+| `CHunk` | typedef | 39 | <code>typedef struct {</code> |
+| `CFile` | typedef | 45 | <code>typedef struct {</code> |
+| `CBr` | typedef | 51 | <code>typedef struct {</code> |
+| `Span` | typedef | 60 | <code>typedef struct { char *name; int line, end; } Span;</code> |
+| `branch_id_of` | function | 62 | <code>static long branch_id_of(Cg *cg, const char *name) {</code> |
+| `spans_of` | function | 72 | <code>static int spans_of(Cg *cg, long bid, const char *path, Span **out) {</code> |
+| `spans_free` | function | 101 | <code>static void spans_free(Span *s, int n) {</code> |
+| `list_has` | function | 106 | <code>static bool list_has(char **v, int n, const char *s) {</code> |
+| `list_push` | function | 111 | <code>static void list_push(char ***v, int *n, const char *s) {</code> |
+| `list_free` | function | 117 | <code>static void list_free(char **v, int n) {</code> |
+| `hunk_symbols` | function | 124 | <code>static void hunk_symbols(CHunk *ch, const Span *s, int ns, int lo, int hi) {</code> |
+| `branch_load` | function | 139 | <code>static void branch_load(Cg *cg, const char *base_head, long base_id, CBr *x) {</code> |
+| `agents_ttl` | function | 173 | <code>static long agents_ttl(Cg *cg) {</code> |
+| `branch_agents` | function | 186 | <code>static void branch_agents(Cg *cg, long since, CBr *x) {</code> |
+| `br_named` | function | 204 | <code>static CBr *br_named(CBr *v, int n, const char *name) {</code> |
+| `file_of` | function | 209 | <code>static CFile *file_of(CBr *x, const char *path) {</code> |
+| `range_str` | function | 216 | <code>static void range_str(StrBuf *b, int from, int to) {</code> |
+| `FList` | typedef | 223 | <code>typedef struct { ProjectionFinding *v; int n, cap; } FList;</code> |
+| `str_cmp` | function | 225 | <code>static int str_cmp(const void *a, const void *b) {</code> |
+| `fl_add` | function | 229 | <code>static ProjectionFinding *fl_add(FList *l, const char *kind, const char *path,</code> |
+| `fl_has_textual` | function | 259 | <code>static bool fl_has_textual(const FList *l, const char *path, const char *a,</code> |
+| `lines_on` | function | 275 | <code>static char *lines_on(CBr *v, int nv, char **branches, int nb,</code> |
+| `fold_kind` | function | 299 | <code>static const char *fold_kind(const char *git_kind) {</code> |
+| `advice_for` | function | 306 | <code>static char *advice_for(const ProjectionFinding *f, const char *other) {</code> |
+| `agents_json` | function | 338 | <code>static char *agents_json(CBr *v, int nv, char **branches, int nb) {</code> |
+| `carries` | function | 362 | <code>static bool carries(Cg *cg, const char *base_head, const ConflictBranch *a,</code> |
+| `merge_base` | function | 369 | <code>static int merge_base(Cg *cg, const char *a, const char *b, char *out,</code> |
+| `conflicts_compute` | function | 384 | <code>int conflicts_compute(Cg *cg, const char *base, const char *base_head,</code> |
+| `conflicts_free` | function | 548 | <code>void conflicts_free(ProjectionFinding *f, int n) {</code> |
+| `branch_csv` | function | 559 | <code>static char *branch_csv(const ProjectionFinding *f) {</code> |
+| `branches_json_csv` | function | 568 | <code>static void branches_json_csv(StrBuf *b, const char *csv) {</code> |
+| `finding_json` | function | 585 | <code>static void finding_json(StrBuf *b, const char *kind, const char *path,</code> |
+| `live_count` | function | 608 | <code>static long live_count(Cg *cg) {</code> |
+| `conflicts_store` | function | 616 | <code>int conflicts_store(Cg *cg, ProjectionFinding *f, int n, int nbranches,</code> |
+| `steer_what` | function | 744 | <code>static void steer_what(StrBuf *b, const ProjectionFinding *f, const char *me) {</code> |
+| `conflicts_steer` | function | 767 | <code>int conflicts_steer(Cg *cg, ProjectionFinding *f, int n) {</code> |
+| `age_str` | function | 831 | <code>static void age_str(char *out, size_t cap, long s) {</code> |
+| `conflicts_print` | function | 839 | <code>int conflicts_print(Cg *cg, bool json, StrBuf *out) {</code> |
+| `cmd_projection_findings` | function | 907 | <code>int cmd_projection_findings(Cg *cg, int argc, char **argv, bool json) {</code> |
 
 ## src/db.c
 
@@ -1258,28 +1463,35 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `SCHEMA_VERSION` | macro | 204 | <code>#define SCHEMA_VERSION "17"</code> |
-| `path_exists` | function | 208 | <code>static bool path_exists(const char *base, const char *name) {</code> |
-| `is_project_dir` | function | 215 | <code>static bool is_project_dir(const char *base) {</code> |
-| `cg_is_boundary` | function | 225 | <code>bool cg_is_boundary(const char *dir) {</code> |
-| `git_file_at` | function | 237 | <code>static bool git_file_at(const char *dir) {</code> |
-| `cg_find_project_at` | function | 244 | <code>int cg_find_project_at(const char *start, char *root, char *shared,</code> |
-| `cg_find_root_at` | function | 293 | <code>int cg_find_root_at(const char *start, char *out, size_t cap) {</code> |
-| `cg_find_root` | function | 298 | <code>int cg_find_root(char *out, size_t cap) {</code> |
-| `cg_bkey` | function | 304 | <code>void cg_bkey(const Cg *cg, const char *name, char *out, size_t cap) {</code> |
-| `cmd_root` | function | 310 | <code>int cmd_root(bool json) {</code> |
-| `cg_open` | function | 341 | <code>int cg_open(Cg *cg, bool create) {</code> |
-| `cg_schema_upgrade` | function | 409 | <code>int cg_schema_upgrade(Cg *cg) {</code> |
-| `cg_close` | function | 479 | <code>void cg_close(Cg *cg) {</code> |
-| `cg_prep` | function | 484 | <code>sqlite3_stmt *cg_prep(Cg *cg, const char *sql) {</code> |
-| `busy_rc` | function | 493 | <code>static bool busy_rc(int rc) {</code> |
-| `cg_busy_why` | function | 500 | <code>void cg_busy_why(const char *why) { g_busy_why = why; }</code> |
-| `cg_busy_report` | function | 506 | <code>void cg_busy_report(const char *what) {</code> |
-| `cg_lock_wait_default` | function | 522 | <code>long cg_lock_wait_default(void) {</code> |
-| `cg_begin_write` | function | 528 | <code>int cg_begin_write(Cg *cg) {</code> |
-| `cg_exec` | function | 549 | <code>void cg_exec(Cg *cg, const char *sql) {</code> |
-| `cg_meta_set` | function | 563 | <code>void cg_meta_set(Cg *cg, const char *k, const char *v) {</code> |
-| `cg_meta_get` | function | 573 | <code>char *cg_meta_get(Cg *cg, const char *k) {</code> |
+| `body_tri_compat` | function | 244 | <code>static const char *body_tri_compat(sqlite3 *db) {</code> |
+| `SCHEMA_VERSION` | macro | 253 | <code>#define SCHEMA_VERSION "18"</code> |
+| `db_fts_create` | function | 257 | <code>static int db_fts_create(Cg *cg);       /* codify-v15 1.3, below */</code> |
+| `path_exists` | function | 261 | <code>static bool path_exists(const char *base, const char *name) {</code> |
+| `is_project_dir` | function | 268 | <code>static bool is_project_dir(const char *base) {</code> |
+| `cg_is_boundary` | function | 278 | <code>bool cg_is_boundary(const char *dir) {</code> |
+| `git_file_at` | function | 290 | <code>static bool git_file_at(const char *dir) {</code> |
+| `cg_find_project_at` | function | 297 | <code>int cg_find_project_at(const char *start, char *root, char *shared,</code> |
+| `cg_find_root_at` | function | 346 | <code>int cg_find_root_at(const char *start, char *out, size_t cap) {</code> |
+| `cg_find_root` | function | 351 | <code>int cg_find_root(char *out, size_t cap) {</code> |
+| `cg_bkey` | function | 357 | <code>void cg_bkey(const Cg *cg, const char *name, char *out, size_t cap) {</code> |
+| `cmd_root` | function | 363 | <code>int cmd_root(bool json) {</code> |
+| `cg_open` | function | 394 | <code>int cg_open(Cg *cg, bool create) {</code> |
+| `FTS_CONTENTLESS_MIN` | macro | 471 | <code>#define FTS_CONTENTLESS_MIN 3043000</code> |
+| `fts_mode_read` | function | 473 | <code>static char *fts_mode_read(Cg *cg) {</code> |
+| `db_fts_contentless` | function | 485 | <code>bool db_fts_contentless(Cg *cg) {</code> |
+| `body_fts_state` | function | 494 | <code>static int body_fts_state(Cg *cg) {</code> |
+| `db_fts_create` | function | 507 | <code>static int db_fts_create(Cg *cg) {</code> |
+| `cg_schema_upgrade` | function | 558 | <code>int cg_schema_upgrade(Cg *cg) {</code> |
+| `cg_close` | function | 683 | <code>void cg_close(Cg *cg) {</code> |
+| `cg_prep` | function | 688 | <code>sqlite3_stmt *cg_prep(Cg *cg, const char *sql) {</code> |
+| `busy_rc` | function | 697 | <code>static bool busy_rc(int rc) {</code> |
+| `cg_busy_why` | function | 704 | <code>void cg_busy_why(const char *why) { g_busy_why = why; }</code> |
+| `cg_busy_report` | function | 710 | <code>void cg_busy_report(const char *what) {</code> |
+| `cg_lock_wait_default` | function | 726 | <code>long cg_lock_wait_default(void) {</code> |
+| `cg_begin_write` | function | 732 | <code>int cg_begin_write(Cg *cg) {</code> |
+| `cg_exec` | function | 753 | <code>void cg_exec(Cg *cg, const char *sql) {</code> |
+| `cg_meta_set` | function | 767 | <code>void cg_meta_set(Cg *cg, const char *k, const char *v) {</code> |
+| `cg_meta_get` | function | 777 | <code>char *cg_meta_get(Cg *cg, const char *k) {</code> |
 
 ## src/docs.c
 
@@ -1332,29 +1544,33 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `Hunk` | typedef | 18 | <code>typedef struct { int from, to; } Hunk;</code> |
+| `Hunk` | typedef | 18 | <code>typedef struct { int from, to, ofrom, oto; } Hunk;   /* new side, base side */</code> |
 | `FileDiff` | typedef | 19 | <code>typedef struct { char *path; Hunk *h; int nh, ch; } FileDiff;</code> |
 | `list_free` | function | 21 | <code>static void list_free(char **v, int n) {</code> |
 | `packet_strings` | function | 26 | <code>static int packet_strings(const char *packet, const char *key, char ***out) {</code> |
 | `fd_get` | function | 41 | <code>static FileDiff *fd_get(FileDiff **v, int *n, int *cap, const char *path) {</code> |
 | `fd_hunk` | function | 53 | <code>static void fd_hunk(FileDiff *f, int from, int to) {</code> |
-| `drift_diff` | function | 65 | <code>static int drift_diff(const char *tree, const char *base, const char *head,</code> |
-| `drift_exempt` | function | 133 | <code>static bool drift_exempt(const char *tree, const char *path) {</code> |
-| `drift_in_touches` | function | 144 | <code>static bool drift_in_touches(const char *path, char **touches, int nt) {</code> |
-| `drift_public` | function | 153 | <code>static bool drift_public(const char *path, const char *name, const char *kind,</code> |
-| `drift_spec_check` | function | 172 | <code>int drift_spec_check(Cg *cg, const char *tree, const char *base,</code> |
-| `drift_print` | function | 254 | <code>void drift_print(const char *report_json) {</code> |
-| `drift_collision_predict` | function | 286 | <code>bool drift_collision_predict(Cg *cg, const char *feature, const char *a,</code> |
-| `drift_active_feature` | function | 328 | <code>static char *drift_active_feature(Cg *cg) {</code> |
-| `drift_open_tasks` | function | 338 | <code>static int drift_open_tasks(Cg *cg, const char *feature, char ***out) {</code> |
-| `cmd_drift` | function | 361 | <code>int cmd_drift(Cg *cg, int argc, char **argv, bool json) {</code> |
-| `blob_defs` | function | 457 | <code>static int blob_defs(const char *tree, const char *rev, const char *path,</code> |
-| `def_named` | function | 486 | <code>static const SymDef *def_named(const ParseResult *pr, const char *name) {</code> |
-| `drift_ref_sites` | function | 496 | <code>static int drift_ref_sites(Cg *cg, const char *name, long skip_branch,</code> |
-| `drift_interface_check` | function | 538 | <code>int drift_interface_check(Cg *cg, const char *tree, const char *base_branch,</code> |
-| `coverage_check` | function | 629 | <code>int coverage_check(Cg *cg, const char *feature, StrBuf *out) {</code> |
-| `coverage_print` | function | 700 | <code>void coverage_print(const char *report_json, const char *feature) {</code> |
-| `drift_summary` | function | 720 | <code>int drift_summary(Cg *cg, const char *feature, StrBuf *text, StrBuf *json) {</code> |
+| `drift_diff` | function | 67 | <code>static int drift_diff(const char *tree, const char *base, const char *head,</code> |
+| `drift_exempt` | function | 141 | <code>static bool drift_exempt(const char *tree, const char *path) {</code> |
+| `drift_in_touches` | function | 152 | <code>static bool drift_in_touches(const char *path, char **touches, int nt) {</code> |
+| `drift_public` | function | 161 | <code>static bool drift_public(const char *path, const char *name, const char *kind,</code> |
+| `drift_spec_check` | function | 180 | <code>int drift_spec_check(Cg *cg, const char *tree, const char *base,</code> |
+| `drift_print` | function | 262 | <code>void drift_print(const char *report_json) {</code> |
+| `drift_collision_predict` | function | 294 | <code>bool drift_collision_predict(Cg *cg, const char *feature, const char *a,</code> |
+| `drift_active_feature` | function | 336 | <code>static char *drift_active_feature(Cg *cg) {</code> |
+| `drift_open_tasks` | function | 346 | <code>static int drift_open_tasks(Cg *cg, const char *feature, char ***out) {</code> |
+| `cmd_drift` | function | 369 | <code>int cmd_drift(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `blob_defs` | function | 465 | <code>static int blob_defs(const char *tree, const char *rev, const char *path,</code> |
+| `def_named` | function | 494 | <code>static const SymDef *def_named(const ParseResult *pr, const char *name) {</code> |
+| `drift_ref_sites` | function | 504 | <code>static int drift_ref_sites(Cg *cg, const char *name, long skip_branch,</code> |
+| `drift_interface_check` | function | 546 | <code>int drift_interface_check(Cg *cg, const char *tree, const char *base_branch,</code> |
+| `drift_hunks` | function | 641 | <code>int drift_hunks(const char *tree, const char *base, const char *head,</code> |
+| `drift_files_free` | function | 669 | <code>void drift_files_free(DriftFile *v, int n) {</code> |
+| `drift_interface_changes` | function | 674 | <code>int drift_interface_changes(const char *tree, const char *pre,</code> |
+| `drift_ifaces_free` | function | 716 | <code>void drift_ifaces_free(DriftIface *v, int n) {</code> |
+| `coverage_check` | function | 726 | <code>int coverage_check(Cg *cg, const char *feature, StrBuf *out) {</code> |
+| `coverage_print` | function | 797 | <code>void coverage_print(const char *report_json, const char *feature) {</code> |
+| `drift_summary` | function | 817 | <code>int drift_summary(Cg *cg, const char *feature, StrBuf *text, StrBuf *json) {</code> |
 
 ## src/drivers.c
 
@@ -1420,86 +1636,155 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `ev_ring_add` | function | 404 | <code>static int ev_ring_add(const EventRow *e, void *ud) {</code> |
 | `cmd_events` | function | 411 | <code>int cmd_events(Cg *cg, int argc, char **argv, bool json) {</code> |
 
+## src/files.c
+
+[Open source](../src/files.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `has_glob` | function | 19 | <code>static bool has_glob(const char *s) { return strpbrk(s, "*?[") != NULL; }</code> |
+| `lang_normalise` | function | 22 | <code>static void lang_normalise(const char *in, char *out, size_t cap) {</code> |
+| `qf_add_path` | function | 30 | <code>static void qf_add_path(QueryFilter *f, const char *p) {</code> |
+| `query_filter_parse` | function | 36 | <code>int query_filter_parse(int *argc, char **argv, QueryFilter *f) {</code> |
+| `query_filter_active` | function | 64 | <code>bool query_filter_active(const QueryFilter *f) {</code> |
+| `qf_globs` | function | 72 | <code>static int qf_globs(const char *in, char out[2][1100], bool *exact) {</code> |
+| `query_filter_sql` | function | 102 | <code>char *query_filter_sql(const QueryFilter *f, const char *alias) {</code> |
+| `query_filter_match` | function | 132 | <code>bool query_filter_match(const QueryFilter *f, const char *path,</code> |
+| `sql_is_test` | function | 151 | <code>static void sql_is_test(sqlite3_context *ctx, int argc, sqlite3_value **argv) {</code> |
+| `query_filter_register` | function | 157 | <code>void query_filter_register(sqlite3 *db) {</code> |
+| `cg_filter_set` | function | 166 | <code>void cg_filter_set(Cg *cg, const QueryFilter *f) {</code> |
+| `cg_filter_get` | function | 173 | <code>const QueryFilter *cg_filter_get(const Cg *cg) {</code> |
+| `FileRow` | typedef | 179 | <code>typedef struct {</code> |
+| `filerow_cmp` | function | 187 | <code>static int filerow_cmp(const void *a, const void *b) {</code> |
+| `files_prep` | function | 194 | <code>static sqlite3_stmt *files_prep(Cg *cg, const QueryFilter *f,</code> |
+| `rows_push` | function | 208 | <code>static void rows_push(FileRow **v, int *n, int *c, sqlite3_stmt *st) {</code> |
+| `FILE_COLS` | macro | 222 | <code>#define FILE_COLS "f.id, f.path, f.lang, ifnull(f.lines,0)"</code> |
+| `words_score` | function | 227 | <code>static int words_score(const char *path, char terms[][64], int nt) {</code> |
+| `print_rows` | function | 254 | <code>static void print_rows(Cg *cg, FileRow *v, int n, int limit, bool json,</code> |
+| `SubDir` | typedef | 278 | <code>typedef struct { char name[512]; int files; long lines; } SubDir;</code> |
+| `subdir_cmp` | function | 280 | <code>static int subdir_cmp(const void *a, const void *b) {</code> |
+| `files_dir` | function | 284 | <code>static int files_dir(Cg *cg, const QueryFilter *f, const char *dir,</code> |
+| `DLANGS` | macro | 367 | <code>#define DLANGS 6</code> |
+| `DirAgg` | typedef | 368 | <code>typedef struct {</code> |
+| `DirMap` | typedef | 377 | <code>typedef struct {</code> |
+| `str_hash` | function | 384 | <code>static size_t str_hash(const char *s, size_t n) {</code> |
+| `dm_grow` | function | 390 | <code>static void dm_grow(DirMap *m) {</code> |
+| `dm_get` | function | 404 | <code>static int dm_get(DirMap *m, const char *p, size_t len, int depth, int parent) {</code> |
+| `dir_add_lang` | function | 428 | <code>static void dir_add_lang(DirAgg *d, const char *lang, long lines) {</code> |
+| `dir_dominant` | function | 440 | <code>static const char *dir_dominant(const DirAgg *d) {</code> |
+| `dirorder_cmp` | function | 448 | <code>static int dirorder_cmp(const void *a, const void *b) {</code> |
+| `dirs_emit` | function | 457 | <code>static void dirs_emit(DirMap *m, int parent, int *order, int *no) {</code> |
+| `files_dirs` | function | 473 | <code>static int files_dirs(Cg *cg, const QueryFilter *f, const char *prefix,</code> |
+| `files_glob` | function | 582 | <code>static int files_glob(Cg *cg, const QueryFilter *f, const char *pat,</code> |
+| `files_words` | function | 601 | <code>static int files_words(Cg *cg, const QueryFilter *f, const char *pat,</code> |
+| `is_dir_path` | function | 651 | <code>static bool is_dir_path(Cg *cg, const char *p) {</code> |
+| `files_query` | function | 667 | <code>static int files_query(Cg *cg, const QueryFilter *fp, const char *pat,</code> |
+| `cmd_files` | function | 670 | <code>int cmd_files(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `files_query` | function | 705 | <code>static int files_query(Cg *cg, const QueryFilter *fp, const char *pat,</code> |
+
 ## src/fleet.c
 
 [Open source](../src/fleet.c)
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `FleetIdentity` | typedef | 28 | <code>typedef struct {</code> |
-| `fleet_identity` | function | 36 | <code>static void fleet_identity(FleetIdentity *id) {</code> |
-| `bind_opt` | function | 46 | <code>static void bind_opt(sqlite3_stmt *st, int i, const char *v) {</code> |
-| `fleet_identity_record` | function | 56 | <code>int fleet_identity_record(Cg *g) {</code> |
-| `role_set` | function | 90 | <code>static void role_set(FleetRole *r, const char *name, const char *title,</code> |
-| `hier_defaults` | function | 99 | <code>static void hier_defaults(Hierarchy *h) {</code> |
-| `take_str` | function | 117 | <code>static void take_str(char **slot, const Kvx *k, const char *sec,</code> |
-| `hier_duration` | function | 125 | <code>long hier_duration(const char *s) {</code> |
-| `hier_problem` | function | 142 | <code>static void hier_problem(Hierarchy *h, const char *fmt, const char *role,</code> |
-| `cap_raw` | function | 158 | <code>static char *cap_raw(const Kvx *wf, const char *sec, const char *key) {</code> |
-| `cap_duration` | function | 171 | <code>static void cap_duration(Hierarchy *h, const Kvx *wf, const char *sec,</code> |
-| `cap_count` | function | 183 | <code>static void cap_count(Hierarchy *h, const Kvx *wf, const char *sec,</code> |
-| `hier_role_caps` | function | 200 | <code>void hier_role_caps(const Kvx *wf, Hierarchy *h) {</code> |
-| `hier_load` | function | 289 | <code>bool hier_load(const Kvx *wf, Hierarchy *h) {</code> |
-| `hier_free` | function | 327 | <code>void hier_free(Hierarchy *h) {</code> |
-| `hier_expand` | function | 342 | <code>void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
-| `hier_per_task` | function | 347 | <code>bool hier_per_task(const Hierarchy *h) {</code> |
-| `hier_expand_task` | function | 355 | <code>void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
-| `fleet_workflow` | function | 389 | <code>static Kvx *fleet_workflow(const Cg *cg, char *path, size_t cap) {</code> |
-| `role_title` | function | 394 | <code>static const char *role_title(const Hierarchy *h, const char *role) {</code> |
-| `ago` | function | 401 | <code>static void ago(long seen, char *out, size_t cap) {</code> |
-| `fleet_brief` | function | 411 | <code>void fleet_brief(Cg *cg, StrBuf *b, bool json) {</code> |
-| `gate_bit` | function | 446 | <code>static unsigned gate_bit(const char *gate) {</code> |
-| `approval_event` | function | 452 | <code>static void approval_event(Cg *cg, const char *kind, long id, const char *gate,</code> |
-| `fleet_gate` | function | 474 | <code>int fleet_gate(Cg *cg, const char *gate, const char *subject) {</code> |
-| `cmd_fleet_approvals` | function | 544 | <code>int cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json) {</code> |
-| `C` | macro | 609 | <code>#define C(i) ((const char *)sqlite3_column_text(st, i))</code> |
-| `fmt_secs` | function | 644 | <code>static void fmt_secs(long s, char *out, size_t cap) {</code> |
-| `approvals` | function | 652 | <code>static void approvals(unsigned bits, char *out, size_t cap, const char *sep) {</code> |
-| `fleet_roles` | function | 664 | <code>static int fleet_roles(Cg *cg, bool json) {</code> |
-| `agent_live_tasks` | function | 770 | <code>static char *agent_live_tasks(Cg *g, const char *agent) {</code> |
-| `fleet_status` | function | 786 | <code>static int fleet_status(Cg *cg, bool json) {</code> |
-| `PlanTask` | typedef | 907 | <code>typedef struct { char *id, *title, *status; long wave; } PlanTask;</code> |
-| `plan_task_cmp` | function | 909 | <code>static int plan_task_cmp(const void *a, const void *b) {</code> |
-| `LiveAgent` | typedef | 917 | <code>typedef struct { char *agent; long wave; char *role; } LiveAgent;</code> |
-| `live_add` | function | 919 | <code>static void live_add(LiveAgent **v, int *n, int *cap, const char *agent,</code> |
-| `live_names` | function | 933 | <code>static void live_names(const LiveAgent *v, int n, const char *role,</code> |
-| `fleet_plan` | function | 945 | <code>static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {</code> |
-| `Lifecycle` | typedef | 1150 | <code>typedef struct {</code> |
-| `lifecycle_close` | function | 1161 | <code>static void lifecycle_close(Lifecycle *c) {</code> |
-| `fleet_merge_lock` | function | 1169 | <code>int fleet_merge_lock(const char *shared, const char *feature, long wait_ms) {</code> |
-| `fleet_merge_unlock` | function | 1186 | <code>void fleet_merge_unlock(int fd) {</code> |
-| `lifecycle_merge_lock` | function | 1193 | <code>static int lifecycle_merge_lock(Lifecycle *c) {</code> |
-| `lifecycle_open` | function | 1203 | <code>static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {</code> |
-| `worktree_path` | function | 1244 | <code>static void worktree_path(const Lifecycle *c, const char *branch, char *out,</code> |
-| `task_wave_status` | function | 1259 | <code>static bool task_wave_status(const char *specpath, const char *id, long *wave,</code> |
-| `task_status_on_branch` | function | 1278 | <code>static bool task_status_on_branch(const Lifecycle *c, const char *branch,</code> |
-| `tree_clean` | function | 1303 | <code>static bool tree_clean(const char *tree) {</code> |
-| `commits_between` | function | 1311 | <code>static long commits_between(const char *tree, const char *base,</code> |
-| `ensure_branch` | function | 1328 | <code>static bool ensure_branch(const char *tree, const char *branch,</code> |
-| `excerpt` | function | 1344 | <code>static void excerpt(const StrBuf *b, char *out, size_t cap) {</code> |
-| `json_str_or_null` | function | 1354 | <code>static void json_str_or_null(StrBuf *b, const char *s) {</code> |
-| `put_conflicts` | function | 1358 | <code>static void put_conflicts(StrBuf *b, char **paths, int n, bool json) {</code> |
-| `free_list` | function | 1372 | <code>static void free_list(char **v, int n) {</code> |
-| `fleet_event` | function | 1378 | <code>static void fleet_event(Cg *cg, const char *kind, const char *subject,</code> |
-| `ev_str` | function | 1387 | <code>static void ev_str(StrBuf *b, const char *key, const char *v) {</code> |
-| `ev_long` | function | 1392 | <code>static void ev_long(StrBuf *b, const char *key, long v) {</code> |
-| `fleet_worker_begin` | function | 1399 | <code>int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,</code> |
-| `ev_list` | function | 1534 | <code>static void ev_list(StrBuf *b, const char *key, char **v, int n) {</code> |
-| `merge_event` | function | 1543 | <code>static void merge_event(Cg *cg, const Lifecycle *c, const char *id,</code> |
-| `fleet_merge_up` | function | 1565 | <code>int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,</code> |
-| `run_gate` | function | 1763 | <code>static int run_gate(const char *tree, const char *cmd, const char *logpath,</code> |
-| `pr_open_core` | function | 1790 | <code>static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,</code> |
-| `pr_event` | function | 1793 | <code>static void pr_event(Cg *cg, const Lifecycle *c, const char *outcome,</code> |
-| `land_event` | function | 1805 | <code>static void land_event(Cg *cg, const Lifecycle *c, const char *outcome,</code> |
-| `fleet_feature_land` | function | 1823 | <code>int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {</code> |
-| `find_gh` | function | 2027 | <code>static bool find_gh(char *out, size_t cap) {</code> |
-| `run_in` | function | 2033 | <code>static int run_in(const char *tree, const char *cmd, StrBuf *out) {</code> |
-| `write_pr_body` | function | 2058 | <code>static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,</code> |
-| `pr_open_core` | function | 2130 | <code>static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,</code> |
-| `fleet_pr_open` | function | 2273 | <code>int fleet_pr_open(Cg *cg, const char *feature_ov, bool dry_run, bool json) {</code> |
-| `OpenPr` | typedef | 2297 | <code>typedef struct { long number; char *head, *title, *url; } OpenPr;</code> |
-| `fleet_checkpoint` | function | 2303 | <code>int fleet_checkpoint(Cg *cg, bool dry_run, bool json) {</code> |
-| `cmd_fleet` | function | 2484 | <code>int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `FleetIdentity` | typedef | 29 | <code>typedef struct {</code> |
+| `fleet_identity` | function | 37 | <code>static void fleet_identity(FleetIdentity *id) {</code> |
+| `bind_opt` | function | 47 | <code>static void bind_opt(sqlite3_stmt *st, int i, const char *v) {</code> |
+| `fleet_identity_record` | function | 57 | <code>int fleet_identity_record(Cg *g) {</code> |
+| `role_sections` | function | 94 | <code>static int role_sections(int r, const char *out[2]) {</code> |
+| `role_set` | function | 100 | <code>static void role_set(FleetRole *r, const char *name, const char *title,</code> |
+| `hier_defaults` | function | 109 | <code>static void hier_defaults(Hierarchy *h) {</code> |
+| `take_str` | function | 127 | <code>static void take_str(char **slot, const Kvx *k, const char *sec,</code> |
+| `hier_duration` | function | 135 | <code>long hier_duration(const char *s) {</code> |
+| `hier_problem` | function | 152 | <code>static void hier_problem(Hierarchy *h, const char *fmt, const char *role,</code> |
+| `cap_raw` | function | 168 | <code>static char *cap_raw(const Kvx *wf, const char *sec, const char *key) {</code> |
+| `cap_duration` | function | 181 | <code>static void cap_duration(Hierarchy *h, const Kvx *wf, const char *sec,</code> |
+| `cap_count` | function | 193 | <code>static void cap_count(Hierarchy *h, const Kvx *wf, const char *sec,</code> |
+| `role_caps_section` | function | 207 | <code>static void role_caps_section(Hierarchy *h, const Kvx *wf, int r,</code> |
+| `hier_role_caps` | function | 213 | <code>void hier_role_caps(const Kvx *wf, Hierarchy *h) {</code> |
+| `role_caps_section` | function | 263 | <code>static void role_caps_section(Hierarchy *h, const Kvx *wf, int r,</code> |
+| `role_reset` | function | 317 | <code>static void role_reset(char **slot, const char *v) {</code> |
+| `hier_old_shape` | function | 327 | <code>static void hier_old_shape(Hierarchy *h, bool set[FLEET_ROLES][4]) {</code> |
+| `hier_load` | function | 354 | <code>bool hier_load(const Kvx *wf, Hierarchy *h) {</code> |
+| `hier_free` | function | 408 | <code>void hier_free(Hierarchy *h) {</code> |
+| `hier_expand` | function | 423 | <code>void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
+| `hier_per_task` | function | 428 | <code>bool hier_per_task(const Hierarchy *h) {</code> |
+| `hier_per_wave` | function | 432 | <code>bool hier_per_wave(const Hierarchy *h) {</code> |
+| `git_folds` | function | 438 | <code>static bool git_folds(void) {</code> |
+| `hier_waves_parallel` | function | 447 | <code>bool hier_waves_parallel(const Kvx *wf, char *why, size_t cap) {</code> |
+| `hier_manager_wave` | function | 465 | <code>long hier_manager_wave(const Hierarchy *h, long wave) {</code> |
+| `hier_expand_task` | function | 473 | <code>void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,</code> |
+| `fleet_workflow` | function | 507 | <code>static Kvx *fleet_workflow(const Cg *cg, char *path, size_t cap) {</code> |
+| `role_title` | function | 512 | <code>static const char *role_title(const Hierarchy *h, const char *role) {</code> |
+| `ago` | function | 522 | <code>static void ago(long seen, char *out, size_t cap) {</code> |
+| `fleet_brief` | function | 532 | <code>void fleet_brief(Cg *cg, StrBuf *b, bool json) {</code> |
+| `gate_bit` | function | 567 | <code>static unsigned gate_bit(const char *gate) {</code> |
+| `approval_event` | function | 573 | <code>static void approval_event(Cg *cg, const char *kind, long id, const char *gate,</code> |
+| `fleet_gate` | function | 595 | <code>int fleet_gate(Cg *cg, const char *gate, const char *subject) {</code> |
+| `cmd_fleet_approvals` | function | 665 | <code>int cmd_fleet_approvals(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `C` | macro | 730 | <code>#define C(i) ((const char *)sqlite3_column_text(st, i))</code> |
+| `fmt_secs` | function | 765 | <code>static void fmt_secs(long s, char *out, size_t cap) {</code> |
+| `approvals` | function | 773 | <code>static void approvals(unsigned bits, char *out, size_t cap, const char *sep) {</code> |
+| `fleet_roles` | function | 785 | <code>static int fleet_roles(Cg *cg, bool json) {</code> |
+| `agent_live_tasks` | function | 894 | <code>static char *agent_live_tasks(Cg *g, const char *agent) {</code> |
+| `fleet_status` | function | 910 | <code>static int fleet_status(Cg *cg, bool json) {</code> |
+| `PlanTask` | typedef | 1034 | <code>typedef struct { char *id, *title, *status; long wave; } PlanTask;</code> |
+| `plan_task_cmp` | function | 1036 | <code>static int plan_task_cmp(const void *a, const void *b) {</code> |
+| `LiveAgent` | typedef | 1044 | <code>typedef struct { char *agent; long wave; char *role; char *task; } LiveAgent;</code> |
+| `live_add` | function | 1046 | <code>static void live_add(LiveAgent **v, int *n, int *cap, const char *agent,</code> |
+| `live_names` | function | 1064 | <code>static void live_names(const LiveAgent *v, int n, const char *role,</code> |
+| `fleet_plan` | function | 1084 | <code>static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {</code> |
+| `Lifecycle` | typedef | 1336 | <code>typedef struct {</code> |
+| `lifecycle_close` | function | 1348 | <code>static void lifecycle_close(Lifecycle *c) {</code> |
+| `fleet_merge_lock` | function | 1356 | <code>int fleet_merge_lock(const char *shared, const char *feature, long wait_ms) {</code> |
+| `fleet_merge_unlock` | function | 1373 | <code>void fleet_merge_unlock(int fd) {</code> |
+| `lifecycle_merge_lock` | function | 1380 | <code>static int lifecycle_merge_lock(Lifecycle *c) {</code> |
+| `lifecycle_open` | function | 1390 | <code>static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {</code> |
+| `worktree_path` | function | 1432 | <code>static void worktree_path(const Lifecycle *c, const char *branch, char *out,</code> |
+| `task_wave_status` | function | 1447 | <code>static bool task_wave_status(const char *specpath, const char *id, long *wave,</code> |
+| `task_status_on_branch` | function | 1466 | <code>static bool task_status_on_branch(const Lifecycle *c, const char *branch,</code> |
+| `tree_clean` | function | 1491 | <code>static bool tree_clean(const char *tree) {</code> |
+| `commits_between` | function | 1501 | <code>static long commits_between(const char *tree, const char *base,</code> |
+| `ensure_branch` | function | 1518 | <code>static bool ensure_branch(const char *tree, const char *branch,</code> |
+| `excerpt` | function | 1534 | <code>static void excerpt(const StrBuf *b, char *out, size_t cap) {</code> |
+| `json_str_or_null` | function | 1544 | <code>static void json_str_or_null(StrBuf *b, const char *s) {</code> |
+| `put_conflicts` | function | 1548 | <code>static void put_conflicts(StrBuf *b, char **paths, int n, bool json) {</code> |
+| `free_list` | function | 1562 | <code>static void free_list(char **v, int n) {</code> |
+| `fleet_event` | function | 1568 | <code>static void fleet_event(Cg *cg, const char *kind, const char *subject,</code> |
+| `ev_str` | function | 1577 | <code>static void ev_str(StrBuf *b, const char *key, const char *v) {</code> |
+| `ev_long` | function | 1582 | <code>static void ev_long(StrBuf *b, const char *key, long v) {</code> |
+| `fleet_worker_begin` | function | 1589 | <code>int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,</code> |
+| `fleet_worker_begin_ex` | function | 1594 | <code>int fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature_ov,</code> |
+| `ev_list` | function | 1730 | <code>static void ev_list(StrBuf *b, const char *key, char **v, int n) {</code> |
+| `merge_event` | function | 1739 | <code>static void merge_event(Cg *cg, const Lifecycle *c, const char *id,</code> |
+| `fleet_merge_up` | function | 1762 | <code>int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,</code> |
+| `run_gate` | function | 1968 | <code>static int run_gate(const char *tree, const char *cmd, const char *logpath,</code> |
+| `pr_open_core` | function | 1995 | <code>static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,</code> |
+| `pr_event` | function | 1998 | <code>static void pr_event(Cg *cg, const Lifecycle *c, const char *outcome,</code> |
+| `land_event` | function | 2011 | <code>static void land_event(Cg *cg, const Lifecycle *c, const char *outcome,</code> |
+| `lifecycle_subject` | function | 2028 | <code>static void lifecycle_subject(const Lifecycle *c, char *out, size_t cap) {</code> |
+| `lifecycle_branch` | function | 2034 | <code>static void lifecycle_branch(const Lifecycle *c, char *out, size_t cap) {</code> |
+| `spec_on_branch` | function | 2040 | <code>static Kvx *spec_on_branch(const Lifecycle *c, const char *branch) {</code> |
+| `wave_open_tasks` | function | 2064 | <code>static int wave_open_tasks(const Lifecycle *c, long wave, const char *branch,</code> |
+| `lifecycle_target` | function | 2103 | <code>static int lifecycle_target(Lifecycle *c, const char *what, const char *verb) {</code> |
+| `fleet_feature_land` | function | 2153 | <code>int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {</code> |
+| `names_wave_or_task` | function | 2165 | <code>static bool names_wave_or_task(const char *s) {</code> |
+| `fleet_land` | function | 2172 | <code>int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,</code> |
+| `find_gh` | function | 2414 | <code>static bool find_gh(char *out, size_t cap) {</code> |
+| `run_in` | function | 2420 | <code>static int run_in(const char *tree, const char *cmd, StrBuf *out) {</code> |
+| `write_pr_body` | function | 2445 | <code>static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,</code> |
+| `pr_open_core` | function | 2517 | <code>static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,</code> |
+| `fleet_pr_open` | function | 2661 | <code>int fleet_pr_open(Cg *cg, const char *feature_ov, bool dry_run, bool json) {</code> |
+| `OpenPr` | typedef | 2696 | <code>typedef struct { long number; char *head, *title, *url; } OpenPr;</code> |
+| `fleet_checkpoint` | function | 2702 | <code>int fleet_checkpoint(Cg *cg, bool dry_run, bool json) {</code> |
+| `ProjRebuild` | typedef | 2885 | <code>typedef struct { Cg *cg; } ProjRebuild;</code> |
+| `proj_rebuild_run` | function | 2887 | <code>static int proj_rebuild_run(void *ctx) {</code> |
+| `fleet_projection_rebuild` | function | 2895 | <code>int fleet_projection_rebuild(Cg *cg, char *line, size_t cap) {</code> |
+| `git_lines` | function | 2913 | <code>static int git_lines(const char *tree, const char *args, char ***out,</code> |
+| `sync_base` | function | 2936 | <code>static void sync_base(Cg *cg, const char *branch, const char *flag, char *out,</code> |
+| `fleet_sync` | function | 2957 | <code>int fleet_sync(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `cmd_fleet` | function | 3152 | <code>int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {</code> |
 
 ## src/gitint.c
 
@@ -1507,25 +1792,45 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `git_available` | function | 20 | <code>bool git_available(const Cg *cg) {</code> |
-| `chomp` | function | 31 | <code>static char *chomp(char *s) {</code> |
-| `git_abs` | function | 40 | <code>static bool git_abs(const char *base, const char *p, char *out, size_t cap) {</code> |
-| `git_dirs` | function | 54 | <code>static bool git_dirs(const char *tree, char *gitdir, char *common, size_t cap) {</code> |
-| `git_worktree_main` | function | 86 | <code>bool git_worktree_main(const char *tree, char *main_out, size_t cap) {</code> |
-| `git_ref_sha` | function | 99 | <code>static bool git_ref_sha(const char *common, const char *ref, char *sha,</code> |
-| `git_head` | function | 130 | <code>bool git_head(const char *tree, char *branch, size_t bcap, char *sha,</code> |
-| `git_run` | function | 155 | <code>int git_run(const char *tree, const char *args, StrBuf *out) {</code> |
-| `git_branch_exists` | function | 177 | <code>bool git_branch_exists(const char *tree, const char *branch) {</code> |
-| `git_worktree_add` | function | 189 | <code>int git_worktree_add(const char *tree, const char *path, const char *branch,</code> |
-| `git_conflicted_paths` | function | 223 | <code>int git_conflicted_paths(const char *tree, char ***out) {</code> |
-| `branch_register` | function | 249 | <code>long branch_register(Cg *cg, const char *name, const char *worktree,</code> |
-| `cg_branch_resolve` | function | 274 | <code>int cg_branch_resolve(Cg *cg) {</code> |
-| `ago` | function | 290 | <code>static void ago(long since, char *out, size_t cap) {</code> |
-| `cmd_branches` | function | 301 | <code>int cmd_branches(Cg *cg, int argc, char **argv, bool json) {</code> |
-| `git_ingest` | function | 363 | <code>int git_ingest(Cg *cg, int limit, long *ncommits_out, long *npaths_out,</code> |
-| `cmd_git_sync` | function | 425 | <code>int cmd_git_sync(Cg *cg, int limit, bool json) {</code> |
-| `git_churn_for_path` | function | 449 | <code>int git_churn_for_path(Cg *cg, const char *path) {</code> |
-| `git_commit_mirror` | function | 461 | <code>int git_commit_mirror(Cg *cg, const char *message) {</code> |
+| `git_available` | function | 21 | <code>bool git_available(const Cg *cg) {</code> |
+| `chomp` | function | 32 | <code>static char *chomp(char *s) {</code> |
+| `git_abs` | function | 41 | <code>static bool git_abs(const char *base, const char *p, char *out, size_t cap) {</code> |
+| `git_dirs` | function | 55 | <code>static bool git_dirs(const char *tree, char *gitdir, char *common, size_t cap) {</code> |
+| `git_worktree_main` | function | 87 | <code>bool git_worktree_main(const char *tree, char *main_out, size_t cap) {</code> |
+| `git_ref_sha` | function | 100 | <code>static bool git_ref_sha(const char *common, const char *ref, char *sha,</code> |
+| `git_head` | function | 131 | <code>bool git_head(const char *tree, char *branch, size_t bcap, char *sha,</code> |
+| `git_run` | function | 156 | <code>int git_run(const char *tree, const char *args, StrBuf *out) {</code> |
+| `git_branch_exists` | function | 178 | <code>bool git_branch_exists(const char *tree, const char *branch) {</code> |
+| `git_worktree_add` | function | 190 | <code>int git_worktree_add(const char *tree, const char *path, const char *branch,</code> |
+| `git_conflicted_paths` | function | 224 | <code>int git_conflicted_paths(const char *tree, char ***out) {</code> |
+| `git_capture_raw` | function | 252 | <code>static int git_capture_raw(const char *tree, const char *args, char **out,</code> |
+| `cand_push` | function | 278 | <code>static void cand_push(char ***v, int *n, int *cap, const char *p, size_t len) {</code> |
+| `walk_git_candidates` | function | 300 | <code>int walk_git_candidates(const char *root, const char *since, char ***out,</code> |
+| `branch_register` | function | 370 | <code>long branch_register(Cg *cg, const char *name, const char *worktree,</code> |
+| `cg_branch_resolve` | function | 395 | <code>int cg_branch_resolve(Cg *cg) {</code> |
+| `ago` | function | 411 | <code>static void ago(long since, char *out, size_t cap) {</code> |
+| `cmd_branches` | function | 422 | <code>int cmd_branches(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `git_ingest` | function | 484 | <code>int git_ingest(Cg *cg, int limit, long *ncommits_out, long *npaths_out,</code> |
+| `cmd_git_sync` | function | 546 | <code>int cmd_git_sync(Cg *cg, int limit, bool json) {</code> |
+| `git_churn_for_path` | function | 570 | <code>int git_churn_for_path(Cg *cg, const char *path) {</code> |
+| `git_commit_mirror` | function | 582 | <code>int git_commit_mirror(Cg *cg, const char *message) {</code> |
+| `GIT_PROJ_IDENT` | macro | 618 | <code>#define GIT_PROJ_IDENT "GIT_AUTHOR_NAME='Codify projection' " \</code> |
+| `git_capture` | function | 626 | <code>static int git_capture(const char *tree, const char *env, const char *args,</code> |
+| `git_take_oid` | function | 649 | <code>static bool git_take_oid(const char *s, char *out, size_t cap) {</code> |
+| `git_version` | function | 660 | <code>int git_version(int *major, int *minor) {</code> |
+| `git_rev_commit` | function | 673 | <code>int git_rev_commit(const char *tree, const char *rev, char *sha, size_t cap) {</code> |
+| `git_is_ancestor` | function | 687 | <code>bool git_is_ancestor(const char *tree, const char *a, const char *b) {</code> |
+| `git_count_commits` | function | 695 | <code>long git_count_commits(const char *tree, const char *from, const char *to) {</code> |
+| `git_split_z` | function | 706 | <code>static int git_split_z(const StrBuf *o, char ***out) {</code> |
+| `git_changed_paths` | function | 728 | <code>int git_changed_paths(const char *tree, const char *from, const char *to,</code> |
+| `git_conflict_kind` | function | 743 | <code>static void git_conflict_kind(const char *msg, char *out, size_t cap) {</code> |
+| `git_merge_tree` | function | 756 | <code>int git_merge_tree(const char *tree, const char *a, const char *b,</code> |
+| `git_commit_tree` | function | 826 | <code>int git_commit_tree(const char *tree, const char *treeid,</code> |
+| `git_update_ref` | function | 847 | <code>int git_update_ref(const char *tree, const char *ref, const char *sha) {</code> |
+| `git_commit_time` | function | 857 | <code>long git_commit_time(const char *tree, const char *rev) {</code> |
+| `git_shadow_tree` | function | 867 | <code>int git_shadow_tree(const char *worktree, const char *tmp_index,</code> |
+| `git_tree_diff_count` | function | 904 | <code>int git_tree_diff_count(const char *tree, const char *a, const char *b) {</code> |
+| `git_capture_text` | function | 917 | <code>int git_capture_text(const char *tree, const char *args, StrBuf *out) {</code> |
 
 ## src/govern.c
 
@@ -1546,60 +1851,82 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `brief_branches` | function | 387 | <code>static void brief_branches(Cg *cg, StrBuf *b, bool json) {</code> |
 | `brief_feature` | function | 446 | <code>static char *brief_feature(Cg *cg, const char *task_json) {</code> |
 | `cmd_brief` | function | 459 | <code>int cmd_brief(Cg *cg, bool json)</code> |
-| `path_in_scope` | function | 590 | <code>static bool path_in_scope(const char *task_json, const char *path) {</code> |
-| `GuardStale` | typedef | 621 | <code>typedef struct {</code> |
-| `guard_stale_cb` | function | 629 | <code>static void guard_stale_cb(void *u, const char *path, int line,</code> |
-| `guard_collect` | function | 652 | <code>static void guard_collect(JevFinding **v, int *n, int *cap, const char *kind,</code> |
-| `cmd_guard` | function | 667 | <code>int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)</code> |
-| `cmd_review` | function | 819 | <code>int cmd_review(Cg *cg, bool json)</code> |
-| `cmd_hook_install_git` | function | 990 | <code>static int cmd_hook_install_git(Cg *cg, const char *bin);</code> |
-| `write_exec` | function | 992 | <code>static int write_exec(const char *path, const char *body) {</code> |
-| `cmd_hook_install` | function | 1015 | <code>int cmd_hook_install(Cg *cg)</code> |
-| `cmd_hook_install_git` | function | 1053 | <code>static int cmd_hook_install_git(Cg *cg, const char *bin)</code> |
-| `hook_read_stdin` | function | 1103 | <code>static char *hook_read_stdin(void) {</code> |
-| `hook_edited_path` | function | 1116 | <code>static char *hook_edited_path(const char *payload) {</code> |
-| `HookGuard` | typedef | 1127 | <code>typedef struct { Cg *cg; char *path; bool json; } HookGuard;</code> |
-| `hook_guard_call` | function | 1129 | <code>static int hook_guard_call(void *u) {</code> |
-| `HOOK_MAX_LINES` | macro | 1135 | <code>#define HOOK_MAX_LINES 24</code> |
-| `cmd_hook_post_edit` | function | 1144 | <code>int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {</code> |
-| `handoff_field` | function | 1231 | <code>static char *handoff_field(const char *body, const char *key) {</code> |
-| `handoff_live_id` | function | 1252 | <code>static long handoff_live_id(Cg *cg, const char *tag) {</code> |
-| `handoff_store` | function | 1266 | <code>static long handoff_store(Cg *cg, const char *tag, const char *body,</code> |
-| `handoff_files` | function | 1278 | <code>static char *handoff_files(Cg *cg, int cap, int *count) {</code> |
-| `cmd_handoff` | function | 1295 | <code>int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,</code> |
-| `resume_json_field` | function | 1385 | <code>static void resume_json_field(StrBuf *b, const char *name, const char *v) {</code> |
-| `cmd_resume` | function | 1396 | <code>int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)</code> |
-| `WorkCapture` | typedef | 1602 | <code>typedef struct { Cg *cg; const char *query; } WorkCapture;</code> |
-| `work_call_state` | function | 1603 | <code>static int work_call_state(void *v) {</code> |
-| `work_call_progress` | function | 1606 | <code>static int work_call_progress(void *v) {</code> |
-| `work_call_context` | function | 1609 | <code>static int work_call_context(void *v) {</code> |
-| `work_call_tests` | function | 1613 | <code>static int work_call_tests(void *v) {</code> |
-| `work_raw_json` | function | 1618 | <code>static void work_raw_json(StrBuf *b, const char *raw) {</code> |
-| `work_last_event` | function | 1627 | <code>static long work_last_event(Cg *cg, const char *task) {</code> |
-| `work_event_json` | function | 1637 | <code>static void work_event_json(Cg *cg, StrBuf *b, const char *task, long after,</code> |
-| `work_memories_json` | function | 1675 | <code>static void work_memories_json(Cg *cg, StrBuf *b, const char *task) {</code> |
-| `work_revision_store` | function | 1692 | <code>static void work_revision_store(Cg *cg, const char *revision, long created,</code> |
-| `work_revision_create` | function | 1736 | <code>static bool work_revision_create(Cg *cg, const char *task, long event_id,</code> |
-| `work_open` | function | 1784 | <code>int work_open(Cg *cg, const char *task, bool json) {</code> |
-| `work_workspace_delta` | function | 1851 | <code>static void work_workspace_delta(Cg *cg, StrBuf *b, const char *revision,</code> |
-| `packet_list` | function | 1875 | <code>static int packet_list(const char *packet, const char *key, char ***out);</code> |
-| `list_free` | function | 1876 | <code>static void list_free(char **v, int n);</code> |
-| `packet_scope` | function | 1877 | <code>static long packet_scope(Cg *cg);</code> |
-| `work_upstream_delta` | function | 1882 | <code>static int work_upstream_delta(Cg *cg, const char *task, long since_s,</code> |
-| `work_update` | function | 1955 | <code>int work_update(Cg *cg, const char *revision, bool json) {</code> |
-| `work_supplied_evidence` | function | 2045 | <code>static const char *work_supplied_evidence(const char *clause, int n,</code> |
-| `work_recorded_evidence` | function | 2054 | <code>static char *work_recorded_evidence(Cg *cg, const char *task,</code> |
-| `work_close` | function | 2093 | <code>int work_close(Cg *cg, const char *requested, int nevidence, char **evidence,</code> |
-| `govern_journal_apply` | function | 2195 | <code>int govern_journal_apply(Cg *cg, const char *op, const char *args,</code> |
-| `cmd_work` | function | 2262 | <code>int cmd_work(Cg *cg, int argc, char **argv, bool json) {</code> |
-| `packet_list` | function | 2284 | <code>static int packet_list(const char *packet, const char *key, char ***out) {</code> |
-| `list_free` | function | 2299 | <code>static void list_free(char **v, int n) {</code> |
-| `packet_scope` | function | 2307 | <code>static long packet_scope(Cg *cg) {</code> |
-| `packet_upstream_evidence` | function | 2320 | <code>int packet_upstream_evidence(Cg *cg, const char *feature, const char *req,</code> |
-| `PacketPart` | typedef | 2361 | <code>typedef struct { const char *name; StrBuf b; bool must; } PacketPart;</code> |
-| `packet_assemble` | function | 2366 | <code>static int packet_assemble(PacketPart *parts, int n, int budget, StrBuf *out) {</code> |
-| `task_packet_build` | function | 2395 | <code>int task_packet_build(Cg *cg, const char *tag, int budget, StrBuf *out) {</code> |
-| `manager_packet_build` | function | 2550 | <code>int manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out) {</code> |
+| `path_in_scope` | function | 594 | <code>static bool path_in_scope(const char *task_json, const char *path) {</code> |
+| `GuardStale` | typedef | 625 | <code>typedef struct {</code> |
+| `guard_stale_cb` | function | 633 | <code>static void guard_stale_cb(void *u, const char *path, int line,</code> |
+| `guard_collect` | function | 656 | <code>static void guard_collect(JevFinding **v, int *n, int *cap, const char *kind,</code> |
+| `cmd_guard` | function | 671 | <code>int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict)</code> |
+| `cmd_review` | function | 823 | <code>int cmd_review(Cg *cg, bool json)</code> |
+| `cmd_hook_install_git` | function | 994 | <code>static int cmd_hook_install_git(Cg *cg, const char *bin);</code> |
+| `write_exec` | function | 996 | <code>static int write_exec(const char *path, const char *body) {</code> |
+| `cmd_hook_install` | function | 1027 | <code>int cmd_hook_install(Cg *cg)</code> |
+| `cmd_hook_install_git` | function | 1076 | <code>static int cmd_hook_install_git(Cg *cg, const char *bin)</code> |
+| `hook_read_stdin` | function | 1126 | <code>static char *hook_read_stdin(void) {</code> |
+| `hook_edited_path` | function | 1139 | <code>static char *hook_edited_path(const char *payload) {</code> |
+| `HookGuard` | typedef | 1150 | <code>typedef struct { Cg *cg; char *path; bool json; } HookGuard;</code> |
+| `hook_guard_call` | function | 1152 | <code>static int hook_guard_call(void *u) {</code> |
+| `HOOK_MAX_LINES` | macro | 1158 | <code>#define HOOK_MAX_LINES 24</code> |
+| `cmd_hook_post_edit` | function | 1167 | <code>int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {</code> |
+| `SA_MAXTOK` | macro | 1256 | <code>#define SA_MAXTOK 128</code> |
+| `SA_MAXSEG` | macro | 1257 | <code>#define SA_MAXSEG 32</code> |
+| `SaSeg` | typedef | 1259 | <code>typedef struct {</code> |
+| `SaCtx` | typedef | 1266 | <code>typedef struct {</code> |
+| `SaList` | typedef | 1275 | <code>typedef struct {</code> |
+| `sa_seg_free` | function | 1282 | <code>static void sa_seg_free(SaSeg *s) {</code> |
+| `sa_flush` | function | 1287 | <code>static void sa_flush(SaSeg *s, StrBuf *t, bool *have, bool *dyn) {</code> |
+| `sa_split` | function | 1300 | <code>static int sa_split(const char *cmd, SaSeg *seg, int max) {</code> |
+| `sa_rel` | function | 1356 | <code>static bool sa_rel(SaCtx *x, const char *operand, bool dyn, char *rel,</code> |
+| `sa_path` | function | 1393 | <code>static bool sa_path(SaCtx *x, const char *operand, bool dyn, char *rel,</code> |
+| `sa_quote` | function | 1400 | <code>static void sa_quote(StrBuf *b, const char *s) {</code> |
+| `sa_suggest` | function | 1414 | <code>static void sa_suggest(SaCtx *x, const char *line) {</code> |
+| `sa_base` | function | 1421 | <code>static const char *sa_base(const char *w) {</code> |
+| `sa_tool` | function | 1426 | <code>static int sa_tool(const char *w) {      /* 1 grep-like, 2 find, 3 fd, 4 ls */</code> |
+| `sa_find` | function | 1437 | <code>static void sa_find(SaCtx *x, SaSeg *s, int a, SaList *l) {</code> |
+| `sa_fd` | function | 1467 | <code>static void sa_fd(SaCtx *x, SaSeg *s, int a, SaList *l) {</code> |
+| `sa_files_line` | function | 1511 | <code>static void sa_files_line(SaCtx *x, const SaList *l) {</code> |
+| `sa_grep` | function | 1532 | <code>static void sa_grep(SaCtx *x, SaSeg *s, int a, const SaList *prev,</code> |
+| `sa_prefix_word` | function | 1665 | <code>static bool sa_prefix_word(const char *w) {</code> |
+| `shell_advice_for` | function | 1671 | <code>char *shell_advice_for(const char *root, const char *cwd, const char *cmd) {</code> |
+| `sa_env_off` | function | 1826 | <code>static bool sa_env_off(void) {</code> |
+| `cmd_hook_pre_bash` | function | 1840 | <code>int cmd_hook_pre_bash(Cg *cg, bool json) {</code> |
+| `handoff_field` | function | 1905 | <code>static char *handoff_field(const char *body, const char *key) {</code> |
+| `handoff_live_id` | function | 1926 | <code>static long handoff_live_id(Cg *cg, const char *tag) {</code> |
+| `handoff_store` | function | 1940 | <code>static long handoff_store(Cg *cg, const char *tag, const char *body,</code> |
+| `handoff_files` | function | 1952 | <code>static char *handoff_files(Cg *cg, int cap, int *count) {</code> |
+| `cmd_handoff` | function | 1969 | <code>int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,</code> |
+| `resume_json_field` | function | 2059 | <code>static void resume_json_field(StrBuf *b, const char *name, const char *v) {</code> |
+| `cmd_resume` | function | 2070 | <code>int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)</code> |
+| `WorkCapture` | typedef | 2291 | <code>typedef struct { Cg *cg; const char *query; } WorkCapture;</code> |
+| `work_call_state` | function | 2292 | <code>static int work_call_state(void *v) {</code> |
+| `work_call_progress` | function | 2295 | <code>static int work_call_progress(void *v) {</code> |
+| `work_call_context` | function | 2298 | <code>static int work_call_context(void *v) {</code> |
+| `work_call_tests` | function | 2302 | <code>static int work_call_tests(void *v) {</code> |
+| `work_raw_json` | function | 2307 | <code>static void work_raw_json(StrBuf *b, const char *raw) {</code> |
+| `work_last_event` | function | 2316 | <code>static long work_last_event(Cg *cg, const char *task) {</code> |
+| `work_event_json` | function | 2326 | <code>static void work_event_json(Cg *cg, StrBuf *b, const char *task, long after,</code> |
+| `work_memories_json` | function | 2364 | <code>static void work_memories_json(Cg *cg, StrBuf *b, const char *task) {</code> |
+| `work_revision_store` | function | 2381 | <code>static void work_revision_store(Cg *cg, const char *revision, long created,</code> |
+| `work_revision_create` | function | 2425 | <code>static bool work_revision_create(Cg *cg, const char *task, long event_id,</code> |
+| `work_open` | function | 2473 | <code>int work_open(Cg *cg, const char *task, bool json) {</code> |
+| `work_workspace_delta` | function | 2540 | <code>static void work_workspace_delta(Cg *cg, StrBuf *b, const char *revision,</code> |
+| `packet_list` | function | 2564 | <code>static int packet_list(const char *packet, const char *key, char ***out);</code> |
+| `list_free` | function | 2565 | <code>static void list_free(char **v, int n);</code> |
+| `packet_scope` | function | 2566 | <code>static long packet_scope(Cg *cg);</code> |
+| `work_upstream_delta` | function | 2571 | <code>static int work_upstream_delta(Cg *cg, const char *task, long since_s,</code> |
+| `work_update` | function | 2644 | <code>int work_update(Cg *cg, const char *revision, bool json) {</code> |
+| `work_supplied_evidence` | function | 2734 | <code>static const char *work_supplied_evidence(const char *clause, int n,</code> |
+| `work_recorded_evidence` | function | 2743 | <code>static char *work_recorded_evidence(Cg *cg, const char *task,</code> |
+| `work_close` | function | 2782 | <code>int work_close(Cg *cg, const char *requested, int nevidence, char **evidence,</code> |
+| `govern_journal_apply` | function | 2884 | <code>int govern_journal_apply(Cg *cg, const char *op, const char *args,</code> |
+| `cmd_work` | function | 2951 | <code>int cmd_work(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `packet_list` | function | 2973 | <code>static int packet_list(const char *packet, const char *key, char ***out) {</code> |
+| `list_free` | function | 2988 | <code>static void list_free(char **v, int n) {</code> |
+| `packet_scope` | function | 2996 | <code>static long packet_scope(Cg *cg) {</code> |
+| `packet_upstream_evidence` | function | 3009 | <code>int packet_upstream_evidence(Cg *cg, const char *feature, const char *req,</code> |
+| `PacketPart` | typedef | 3050 | <code>typedef struct { const char *name; StrBuf b; bool must; } PacketPart;</code> |
+| `packet_assemble` | function | 3055 | <code>static int packet_assemble(PacketPart *parts, int n, int budget, StrBuf *out) {</code> |
+| `task_packet_build` | function | 3084 | <code>int task_packet_build(Cg *cg, const char *tag, int budget, StrBuf *out) {</code> |
+| `manager_packet_build` | function | 3239 | <code>int manager_packet_build(Cg *cg, const char *feature, int budget, StrBuf *out) {</code> |
 
 ## src/graph.c
 
@@ -1615,106 +1942,151 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `branch_hit_label` | function | 76 | <code>const char *branch_hit_label(Cg *cg, long branch_id, char *out, size_t cap) {</code> |
 | `branch_tree` | function | 89 | <code>const char *branch_tree(Cg *cg, long branch_id, char *out, size_t cap) {</code> |
 | `prep_scoped` | function | 106 | <code>static sqlite3_stmt *prep_scoped(Cg *cg, const char *head, const char *tail) {</code> |
-| `file_snippet_n` | function | 115 | <code>static char *file_snippet_n(Cg *cg, long branch_id, const char *rel, int from,</code> |
-| `file_snippet` | function | 146 | <code>static char *file_snippet(Cg *cg, long branch_id, const char *rel, int from,</code> |
-| `SymRow` | typedef | 151 | <code>typedef struct {</code> |
-| `sym_from_stmt_at` | function | 160 | <code>static int sym_from_stmt_at(sqlite3_stmt *st, int off, SymRow *r) {</code> |
-| `sym_from_stmt` | function | 178 | <code>static int sym_from_stmt(sqlite3_stmt *st, SymRow *r) {</code> |
-| `SYM_COLS` | macro | 186 | <code>#define SYM_COLS \</code> |
-| `ci_has` | function | 192 | <code>static bool ci_has(const char *hay, const char *needle) {</code> |
-| `doc_derivable` | function | 202 | <code>static bool doc_derivable(const char *doc, const char *name, const char *sig) {</code> |
-| `DOC_MAX_BYTES` | macro | 219 | <code>#define DOC_MAX_BYTES 700    /* per-symbol share: ~10 lines of prose */</code> |
-| `SymDoc` | typedef | 221 | <code>typedef struct { char *body; bool stale, cut; } SymDoc;</code> |
-| `body_first` | function | 225 | <code>static bool body_first(void) {</code> |
-| `doc_take` | function | 235 | <code>static void doc_take(SymDoc *d, const char *body, bool stale) {</code> |
-| `symbol_doc_rows` | function | 254 | <code>static void symbol_doc_rows(Cg *cg, const SymRow *r, const SymRow *own,</code> |
-| `symbol_doc` | function | 296 | <code>static bool symbol_doc(Cg *cg, const SymRow *r, SymDoc *d) {</code> |
-| `doc_render` | function | 318 | <code>static void doc_render(StrBuf *b, const SymDoc *d) {</code> |
-| `anchor_stale` | function | 338 | <code>int anchor_stale(Cg *cg,</code> |
-| `doc_json` | function | 393 | <code>static void doc_json(StrBuf *b, const SymDoc *d) {</code> |
-| `defs_named` | function | 401 | <code>static int defs_named(Cg *cg, const char *name, SymRow *out, int cap) {</code> |
-| `find_symbols` | function | 417 | <code>static int find_symbols(Cg *cg, const char *q, SymRow *out, int cap) {</code> |
-| `find_symbols_all` | function | 456 | <code>static int find_symbols_all(Cg *cg, const char *q, SymRow *out, int cap) {</code> |
-| `RESOLVE_MAX_DEFS` | macro | 495 | <code>#define RESOLVE_MAX_DEFS 64</code> |
-| `rank_path_penalized` | function | 499 | <code>static bool rank_path_penalized(const char *path) {</code> |
-| `path_depth` | function | 520 | <code>static int path_depth(const char *p) {</code> |
-| `module_matches` | function | 532 | <code>static bool module_matches(const char *module, const char *cand_path) {</code> |
-| `resolve_best` | function | 571 | <code>static int resolve_best(Cg *cg, long from_fid, const char *from_path,</code> |
-| `callers_of` | function | 625 | <code>static int callers_of(Cg *cg, const SymRow *def, SymRow *out, int cap) {</code> |
-| `sym_path_line_cmp` | function | 683 | <code>static int sym_path_line_cmp(const void *a, const void *b) {</code> |
-| `callees_of` | function | 694 | <code>static int callees_of(Cg *cg, long sym_id, SymRow *out, int cap) {</code> |
-| `ref_count` | function | 774 | <code>static int ref_count(Cg *cg, const char *name) {</code> |
-| `ref_count_resolved` | function | 788 | <code>static int ref_count_resolved(Cg *cg, const SymRow *def) {</code> |
-| `MAX_TERMS` | macro | 830 | <code>#define MAX_TERMS 8</code> |
-| `Terms` | typedef | 831 | <code>typedef struct { char t[MAX_TERMS][64]; int n; } Terms;</code> |
-| `query_terms` | function | 836 | <code>static void query_terms(const char *q, Terms *T) {</code> |
-| `term_hits` | function | 864 | <code>static bool term_hits(const char *t, const char *w, size_t wn) {</code> |
-| `words_mask` | function | 872 | <code>static unsigned words_mask(const char *words, const Terms *T) {</code> |
-| `text_mask` | function | 886 | <code>static unsigned text_mask(const char *text, size_t len, const Terms *T) {</code> |
-| `popcount` | function | 902 | <code>static int popcount(unsigned m) {</code> |
-| `Hit` | typedef | 910 | <code>typedef struct {</code> |
-| `RANK_CAP` | macro | 917 | <code>#define RANK_CAP 256</code> |
-| `hit_get` | function | 919 | <code>static Hit *hit_get(Hit *h, int *nh, const SymRow *r, bool add) {</code> |
-| `hit_cmp` | function | 929 | <code>static int hit_cmp(const void *a, const void *b) {</code> |
-| `FileHit` | typedef | 941 | <code>typedef struct {</code> |
-| `FILE_SCAN` | macro | 950 | <code>#define FILE_SCAN 16</code> |
-| `filehit_cmp` | function | 952 | <code>static int filehit_cmp(const void *a, const void *b) {</code> |
-| `filehits_free` | function | 960 | <code>static void filehits_free(FileHit *f, int n) {</code> |
-| `fts_terms` | function | 966 | <code>static char *fts_terms(const Terms *T, bool any) {</code> |
-| `rank_bodies` | function | 980 | <code>static void rank_bodies(Cg *cg, const Terms *T, Hit *h, int *nh,</code> |
-| `rank_query` | function | 1091 | <code>static int rank_query(Cg *cg, const char *q, SymRow *out, int cap,</code> |
-| `ep_interesting` | function | 1255 | <code>static bool ep_interesting(const SymRow *r) {</code> |
-| `ep_push` | function | 1264 | <code>static bool ep_push(SymRow *out, int *n, int cap, const SymRow *r) {</code> |
-| `ep_climb` | function | 1273 | <code>static void ep_climb(Cg *cg, const SymRow *from, SymRow *out, int *n, int cap,</code> |
-| `context_entry_points` | function | 1290 | <code>static int context_entry_points(Cg *cg, const char *q, const SymRow *matched,</code> |
-| `hit_tag` | function | 1319 | <code>static const char *hit_tag(Cg *cg, const SymRow *r, char *out, size_t cap) {</code> |
-| `json_sym` | function | 1327 | <code>static void json_sym(Cg *cg, StrBuf *b, const SymRow *r) {</code> |
-| `json_sym_compact` | function | 1344 | <code>static void json_sym_compact(Cg *cg, StrBuf *b, const SymRow *r) {</code> |
-| `SeenSet` | typedef | 1358 | <code>typedef struct { char v[96][256]; int n; } SeenSet;</code> |
-| `seen_has` | function | 1360 | <code>static bool seen_has(const SeenSet *s, const char *name) {</code> |
-| `seen_add` | function | 1366 | <code>static void seen_add(SeenSet *s, const char *name) {</code> |
-| `filehit_put` | function | 1375 | <code>static void filehit_put(Cg *cg, StrBuf *b, const FileHit *f, bool json) {</code> |
-| `cmd_search` | function | 1396 | <code>int cmd_search(Cg *cg, const char *q, int limit, bool json) {</code> |
-| `cmd_symbol` | function | 1448 | <code>int cmd_symbol(Cg *cg, const char *name, bool json) {</code> |
-| `INode` | typedef | 1502 | <code>typedef struct { char name[256]; char via[256]; int depth; SymRow loc; } INode;</code> |
-| `inode_seen` | function | 1504 | <code>static bool inode_seen(INode *v, int n, const char *name) {</code> |
-| `IMPACT_CAP` | macro | 1510 | <code>#define IMPACT_CAP 400</code> |
-| `impact_bfs` | function | 1513 | <code>static int impact_bfs(Cg *cg, const SymRow *root, int depth, bool up,</code> |
-| `impact_json_dir` | function | 1547 | <code>static void impact_json_dir(Cg *cg, StrBuf *b, const char *key, const INode *v,</code> |
-| `cmd_impact` | function | 1577 | <code>int cmd_impact(Cg *cg, const char *name, int depth, int budget, bool json) {</code> |
-| `cmd_routes` | function | 1639 | <code>int cmd_routes(Cg *cg, const char *filter, bool json) {</code> |
-| `first_line` | function | 1695 | <code>static void first_line(StrBuf *b, const char *body, int max) {</code> |
-| `SurveySym` | typedef | 1722 | <code>typedef struct {</code> |
-| `cmd_survey` | function | 1729 | <code>int cmd_survey(Cg *cg, const char *scope, int budget, bool json) {</code> |
-| `AnchStale` | typedef | 1974 | <code>typedef struct { StrBuf *txt, *js; int n; } AnchStale;</code> |
-| `anch_stale_cb` | function | 1976 | <code>static void anch_stale_cb(void *u, const char *path, int line,</code> |
-| `DOC_VIA_DECL` | macro | 2000 | <code>#define DOC_VIA_DECL \</code> |
-| `cmd_anchors` | function | 2005 | <code>int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json) {</code> |
-| `CTX_TAIL` | macro | 2126 | <code>#define CTX_TAIL 96</code> |
-| `CTX_MARK` | macro | 2128 | <code>#define CTX_MARK 16</code> |
-| `ctx_tail` | function | 2130 | <code>static void ctx_tail(StrBuf *b, int budget, int omitted, bool json) {</code> |
-| `file_purpose` | function | 2147 | <code>static void file_purpose(Cg *cg, long file_id, char *out, size_t cap) {</code> |
-| `ctx_fit` | function | 2166 | <code>static bool ctx_fit(StrBuf *b, StrBuf *it, size_t room, bool json, int *emitted,</code> |
-| `ctx_omitted` | function | 2180 | <code>static void ctx_omitted(StrBuf *b, int emitted, int omitted, bool json) {</code> |
-| `context_path_outline` | function | 2193 | <code>static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {</code> |
-| `CTX_OPEN_MAX` | macro | 2435 | <code>#define CTX_OPEN_MAX 60           /* opening lines one hit may grow to */</code> |
-| `CTX_MIN_BUDGET` | macro | 2438 | <code>#define CTX_MIN_BUDGET 64</code> |
-| `cmd_context` | function | 2440 | <code>int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {</code> |
-| `symbols_at_position` | function | 2769 | <code>static int symbols_at_position(Cg *cg, const char *path, int line,</code> |
-| `graph_symbol_at` | function | 2786 | <code>int graph_symbol_at(Cg *cg, const char *path, int line, char *name,</code> |
-| `cmd_show` | function | 2797 | <code>int cmd_show(Cg *cg, const char *name, bool full, bool json) {</code> |
-| `TEST_PATH_SQL` | macro | 2862 | <code>#define TEST_PATH_SQL \</code> |
-| `graph_path_is_test` | function | 2869 | <code>bool graph_path_is_test(const char *path) {</code> |
-| `tests_for_symbol` | function | 2905 | <code>static int tests_for_symbol(Cg *cg, const char *name, StrBuf *b, bool json,</code> |
-| `graph_task_focus` | function | 2934 | <code>char *graph_task_focus(Cg *cg, const char *task_packet) {</code> |
-| `cmd_test_impact` | function | 2960 | <code>int cmd_test_impact(Cg *cg, const char *name, bool json) {</code> |
-| `cmd_why` | function | 3019 | <code>int cmd_why(Cg *cg, const char *name, bool json) {</code> |
-| `path_is_header` | function | 3124 | <code>static bool path_is_header(const char *path) {</code> |
-| `lang_family` | function | 3134 | <code>static const char *lang_family(const char *path) {</code> |
-| `edges_prefer_impl` | function | 3144 | <code>static int edges_prefer_impl(Cg *cg, SymRow *e, int n, bool callers,</code> |
-| `graph_symbol_brief` | function | 3170 | <code>int graph_symbol_brief(Cg *cg, const char *name, int snippet_lines,</code> |
-| `graph_glob_symbols` | function | 3258 | <code>int graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,</code> |
-| `graph_neighbors` | function | 3292 | <code>int graph_neighbors(Cg *cg, const char *name, char ***out) {</code> |
+| `file_snippet_n` | function | 127 | <code>static char *file_snippet_n(Cg *cg, long branch_id, const char *rel, int from,</code> |
+| `file_snippet` | function | 158 | <code>static char *file_snippet(Cg *cg, long branch_id, const char *rel, int from,</code> |
+| `SymRow` | typedef | 163 | <code>typedef struct {</code> |
+| `sym_from_stmt_at` | function | 172 | <code>static int sym_from_stmt_at(sqlite3_stmt *st, int off, SymRow *r) {</code> |
+| `sym_from_stmt` | function | 190 | <code>static int sym_from_stmt(sqlite3_stmt *st, SymRow *r) {</code> |
+| `SYM_COLS` | macro | 198 | <code>#define SYM_COLS \</code> |
+| `ci_has` | function | 204 | <code>static bool ci_has(const char *hay, const char *needle) {</code> |
+| `doc_derivable` | function | 214 | <code>static bool doc_derivable(const char *doc, const char *name, const char *sig) {</code> |
+| `DOC_MAX_BYTES` | macro | 231 | <code>#define DOC_MAX_BYTES 700    /* per-symbol share: ~10 lines of prose */</code> |
+| `SymDoc` | typedef | 233 | <code>typedef struct { char *body; bool stale, cut; } SymDoc;</code> |
+| `body_first` | function | 237 | <code>static bool body_first(void) {</code> |
+| `doc_take` | function | 247 | <code>static void doc_take(SymDoc *d, const char *body, bool stale) {</code> |
+| `symbol_doc_rows` | function | 266 | <code>static void symbol_doc_rows(Cg *cg, const SymRow *r, const SymRow *own,</code> |
+| `symbol_doc` | function | 308 | <code>static bool symbol_doc(Cg *cg, const SymRow *r, SymDoc *d) {</code> |
+| `doc_render` | function | 330 | <code>static void doc_render(StrBuf *b, const SymDoc *d) {</code> |
+| `anchor_stale` | function | 350 | <code>int anchor_stale(Cg *cg,</code> |
+| `doc_json` | function | 405 | <code>static void doc_json(StrBuf *b, const SymDoc *d) {</code> |
+| `defs_named` | function | 413 | <code>static int defs_named(Cg *cg, const char *name, SymRow *out, int cap) {</code> |
+| `find_symbols` | function | 429 | <code>static int find_symbols(Cg *cg, const char *q, SymRow *out, int cap) {</code> |
+| `find_symbols_all` | function | 468 | <code>static int find_symbols_all(Cg *cg, const char *q, SymRow *out, int cap) {</code> |
+| `RESOLVE_MAX_DEFS` | macro | 507 | <code>#define RESOLVE_MAX_DEFS 64</code> |
+| `rank_path_penalized` | function | 511 | <code>static bool rank_path_penalized(const char *path) {</code> |
+| `path_depth` | function | 532 | <code>static int path_depth(const char *p) {</code> |
+| `module_matches` | function | 544 | <code>static bool module_matches(const char *module, const char *cand_path) {</code> |
+| `resolve_best` | function | 583 | <code>static int resolve_best(Cg *cg, long from_fid, const char *from_path,</code> |
+| `qf_keep` | function | 636 | <code>static int qf_keep(const Cg *cg, SymRow *v, int n) {</code> |
+| `callers_of` | function | 650 | <code>static int callers_of(Cg *cg, const SymRow *def, SymRow *out, int cap) {</code> |
+| `sym_path_line_cmp` | function | 708 | <code>static int sym_path_line_cmp(const void *a, const void *b) {</code> |
+| `callees_of` | function | 719 | <code>static int callees_of(Cg *cg, long sym_id, SymRow *out, int cap) {</code> |
+| `ref_count` | function | 799 | <code>static int ref_count(Cg *cg, const char *name) {</code> |
+| `ref_count_resolved` | function | 813 | <code>static int ref_count_resolved(Cg *cg, const SymRow *def) {</code> |
+| `MAX_TERMS` | macro | 855 | <code>#define MAX_TERMS 8</code> |
+| `Terms` | typedef | 856 | <code>typedef struct { char t[MAX_TERMS][64]; int n; } Terms;</code> |
+| `query_terms` | function | 861 | <code>static void query_terms(const char *q, Terms *T) {</code> |
+| `term_hits` | function | 889 | <code>static bool term_hits(const char *t, const char *w, size_t wn) {</code> |
+| `words_mask` | function | 897 | <code>static unsigned words_mask(const char *words, const Terms *T) {</code> |
+| `text_mask` | function | 911 | <code>static unsigned text_mask(const char *text, size_t len, const Terms *T) {</code> |
+| `popcount` | function | 927 | <code>static int popcount(unsigned m) {</code> |
+| `Hit` | typedef | 935 | <code>typedef struct {</code> |
+| `RANK_CAP` | macro | 942 | <code>#define RANK_CAP 256</code> |
+| `hit_get` | function | 944 | <code>static Hit *hit_get(Hit *h, int *nh, const SymRow *r, bool add) {</code> |
+| `hit_cmp` | function | 954 | <code>static int hit_cmp(const void *a, const void *b) {</code> |
+| `FileHit` | typedef | 966 | <code>typedef struct {</code> |
+| `FILE_SCAN` | macro | 975 | <code>#define FILE_SCAN 16</code> |
+| `filehit_cmp` | function | 977 | <code>static int filehit_cmp(const void *a, const void *b) {</code> |
+| `filehits_free` | function | 985 | <code>static void filehits_free(FileHit *f, int n) {</code> |
+| `fts_terms` | function | 991 | <code>static char *fts_terms(const Terms *T, bool any) {</code> |
+| `rank_bodies` | function | 1005 | <code>static void rank_bodies(Cg *cg, const Terms *T, Hit *h, int *nh,</code> |
+| `rank_query` | function | 1134 | <code>static int rank_query(Cg *cg, const char *q, SymRow *out, int cap,</code> |
+| `ep_interesting` | function | 1298 | <code>static bool ep_interesting(const SymRow *r) {</code> |
+| `ep_push` | function | 1307 | <code>static bool ep_push(SymRow *out, int *n, int cap, const SymRow *r) {</code> |
+| `ep_climb` | function | 1316 | <code>static void ep_climb(Cg *cg, const SymRow *from, SymRow *out, int *n, int cap,</code> |
+| `context_entry_points` | function | 1333 | <code>static int context_entry_points(Cg *cg, const char *q, const SymRow *matched,</code> |
+| `hit_tag` | function | 1362 | <code>static const char *hit_tag(Cg *cg, const SymRow *r, char *out, size_t cap) {</code> |
+| `json_sym` | function | 1370 | <code>static void json_sym(Cg *cg, StrBuf *b, const SymRow *r) {</code> |
+| `json_sym_compact` | function | 1387 | <code>static void json_sym_compact(Cg *cg, StrBuf *b, const SymRow *r) {</code> |
+| `SeenSet` | typedef | 1401 | <code>typedef struct { char v[96][256]; int n; } SeenSet;</code> |
+| `seen_has` | function | 1403 | <code>static bool seen_has(const SeenSet *s, const char *name) {</code> |
+| `seen_add` | function | 1409 | <code>static void seen_add(SeenSet *s, const char *name) {</code> |
+| `filehit_put` | function | 1418 | <code>static void filehit_put(Cg *cg, StrBuf *b, const FileHit *f, bool json) {</code> |
+| `cmd_search` | function | 1439 | <code>int cmd_search(Cg *cg, const char *q, int limit, bool json) {</code> |
+| `cmd_symbol` | function | 1491 | <code>int cmd_symbol(Cg *cg, const char *name, bool json) {</code> |
+| `INode` | typedef | 1545 | <code>typedef struct { char name[256]; char via[256]; int depth; SymRow loc; } INode;</code> |
+| `inode_seen` | function | 1547 | <code>static bool inode_seen(INode *v, int n, const char *name) {</code> |
+| `IMPACT_CAP` | macro | 1553 | <code>#define IMPACT_CAP 400</code> |
+| `impact_bfs` | function | 1556 | <code>static int impact_bfs(Cg *cg, const SymRow *root, int depth, bool up,</code> |
+| `impact_json_dir` | function | 1590 | <code>static void impact_json_dir(Cg *cg, StrBuf *b, const char *key, const INode *v,</code> |
+| `cmd_impact` | function | 1620 | <code>int cmd_impact(Cg *cg, const char *name, int depth, int budget, bool json) {</code> |
+| `cmd_routes` | function | 1682 | <code>int cmd_routes(Cg *cg, const char *filter, bool json) {</code> |
+| `first_line` | function | 1738 | <code>static void first_line(StrBuf *b, const char *body, int max) {</code> |
+| `SurveySym` | typedef | 1765 | <code>typedef struct {</code> |
+| `cmd_survey` | function | 1772 | <code>int cmd_survey(Cg *cg, const char *scope, int budget, bool json) {</code> |
+| `AnchStale` | typedef | 2017 | <code>typedef struct { StrBuf *txt, *js; int n; } AnchStale;</code> |
+| `anch_stale_cb` | function | 2019 | <code>static void anch_stale_cb(void *u, const char *path, int line,</code> |
+| `DOC_VIA_DECL` | macro | 2043 | <code>#define DOC_VIA_DECL \</code> |
+| `cmd_anchors` | function | 2048 | <code>int cmd_anchors(Cg *cg, bool stale_only, bool unc_only, bool json) {</code> |
+| `CTX_TAIL` | macro | 2169 | <code>#define CTX_TAIL 96</code> |
+| `CTX_MARK` | macro | 2171 | <code>#define CTX_MARK 16</code> |
+| `ctx_tail` | function | 2173 | <code>static void ctx_tail(StrBuf *b, int budget, int omitted, bool json) {</code> |
+| `file_purpose` | function | 2190 | <code>static void file_purpose(Cg *cg, long file_id, char *out, size_t cap) {</code> |
+| `ctx_fit` | function | 2209 | <code>static bool ctx_fit(StrBuf *b, StrBuf *it, size_t room, bool json, int *emitted,</code> |
+| `ctx_omitted` | function | 2223 | <code>static void ctx_omitted(StrBuf *b, int emitted, int omitted, bool json) {</code> |
+| `context_path_outline` | function | 2236 | <code>static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {</code> |
+| `DirFile` | struct | 2441 | <code>struct DirFile { long id, lines; int syms; char *path; } *dv = NULL;</code> |
+| `DirSub` | struct | 2460 | <code>struct DirSub { char name[512]; int files, syms; long lines; } *sd = NULL;</code> |
+| `CTX_OPEN_MAX` | macro | 2561 | <code>#define CTX_OPEN_MAX 60           /* opening lines one hit may grow to */</code> |
+| `CTX_MIN_BUDGET` | macro | 2564 | <code>#define CTX_MIN_BUDGET 64</code> |
+| `cmd_context` | function | 2566 | <code>int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {</code> |
+| `symbols_at_position` | function | 2895 | <code>static int symbols_at_position(Cg *cg, const char *path, int line,</code> |
+| `graph_symbol_at` | function | 2914 | <code>int graph_symbol_at(Cg *cg, const char *path, int line, char *name,</code> |
+| `cmd_show` | function | 2925 | <code>int cmd_show(Cg *cg, const char *name, bool full, bool json) {</code> |
+| `TEST_PATH_SQL` | macro | 2990 | <code>#define TEST_PATH_SQL \</code> |
+| `graph_path_is_test` | function | 2997 | <code>bool graph_path_is_test(const char *path) {</code> |
+| `tests_for_symbol` | function | 3033 | <code>static int tests_for_symbol(Cg *cg, const char *name, StrBuf *b, bool json,</code> |
+| `graph_task_focus` | function | 3062 | <code>char *graph_task_focus(Cg *cg, const char *task_packet) {</code> |
+| `cmd_test_impact` | function | 3088 | <code>int cmd_test_impact(Cg *cg, const char *name, bool json) {</code> |
+| `cmd_why` | function | 3147 | <code>int cmd_why(Cg *cg, const char *name, bool json) {</code> |
+| `path_is_header` | function | 3252 | <code>static bool path_is_header(const char *path) {</code> |
+| `lang_family` | function | 3262 | <code>static const char *lang_family(const char *path) {</code> |
+| `edges_prefer_impl` | function | 3272 | <code>static int edges_prefer_impl(Cg *cg, SymRow *e, int n, bool callers,</code> |
+| `graph_symbol_brief` | function | 3298 | <code>int graph_symbol_brief(Cg *cg, const char *name, int snippet_lines,</code> |
+| `graph_glob_symbols` | function | 3386 | <code>int graph_glob_symbols(Cg *cg, const char *glob, int max_files, int max_syms,</code> |
+| `graph_neighbors` | function | 3420 | <code>int graph_neighbors(Cg *cg, const char *name, char ***out) {</code> |
+
+## src/grep.c
+
+[Open source](../src/grep.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `GREP_FILE_MAX` | macro | 21 | <code>#define GREP_FILE_MAX (8L * 1024 * 1024)</code> |
+| `GREP_BODY_MAX` | macro | 22 | <code>#define GREP_BODY_MAX (2L * 1024 * 1024)</code> |
+| `GREP_TEXT_MAX` | macro | 23 | <code>#define GREP_TEXT_MAX 200          /* bytes of a hit line we print */</code> |
+| `GREP_MAX_TRI` | macro | 24 | <code>#define GREP_MAX_TRI  24           /* trigrams asked of the index */</code> |
+| `ere_meta` | function | 54 | <code>static bool ere_meta(char c) { return c &amp;&amp; strchr(".[]()*+?{}&#124;^$\\", c); }</code> |
+| `required_literal` | function | 60 | <code>static char *required_literal(const char *pat, bool regex) {</code> |
+| `u8len` | function | 104 | <code>static size_t u8len(const unsigned char *s) {</code> |
+| `trigram_query` | function | 115 | <code>static int trigram_query(const char *lit, StrBuf *q) {</code> |
+| `GSpan` | typedef | 141 | <code>typedef struct { char *name, *kind; int line, end; } GSpan;</code> |
+| `GHit` | typedef | 142 | <code>typedef struct { int line; char *text; } GHit;</code> |
+| `GFile` | typedef | 144 | <code>typedef struct {</code> |
+| `spans_load` | function | 160 | <code>static void spans_load(Cg *cg, long file_id, const char *by, const char *val,</code> |
+| `spans_free` | function | 190 | <code>static void spans_free(GSpan *s, int n) {</code> |
+| `span_at` | function | 196 | <code>static const GSpan *span_at(const GSpan *s, int n, int line) {</code> |
+| `GScan` | typedef | 209 | <code>typedef struct {</code> |
+| `hit_add` | function | 220 | <code>static void hit_add(GScan *g, GFile *f, int line, const char *ls,</code> |
+| `scan_literal` | function | 250 | <code>static void scan_literal(GScan *g, GFile *f, const char *buf, size_t len) {</code> |
+| `scan_regex` | function | 279 | <code>static void scan_regex(GScan *g, GFile *f, char *buf, size_t len,</code> |
+| `scan_worker` | function | 296 | <code>static void *scan_worker(void *arg) {</code> |
+| `file_rank` | function | 330 | <code>static int file_rank(const void *a, const void *b) {</code> |
+| `GLines` | typedef | 340 | <code>typedef struct { char *buf; char **lines; int n; } GLines;</code> |
+| `glines_load` | function | 342 | <code>static void glines_load(GLines *gl, const GFile *f) {</code> |
+| `glines_free` | function | 366 | <code>static void glines_free(GLines *gl) { free(gl-&gt;buf); free(gl-&gt;lines); }</code> |
+| `put_trimmed` | function | 368 | <code>static void put_trimmed(StrBuf *b, const char *s, bool json) {</code> |
+| `put_context` | function | 383 | <code>static void put_context(StrBuf *b, const GLines *gl, int line, int ctx) {</code> |
+| `grep_tri_complete` | function | 410 | <code>bool grep_tri_complete(Cg *cg, long *have, long *want) {</code> |
+| `now_scope_count` | function | 454 | <code>static long now_scope_count(Cg *cg) {</code> |
+| `GREP_MAX_TREES` | macro | 470 | <code>#define GREP_MAX_TREES 32</code> |
+| `GCands` | typedef | 471 | <code>typedef struct {</code> |
+| `cands_reset` | function | 478 | <code>static void cands_reset(GCands *c) {</code> |
+| `cands_collect` | function | 486 | <code>static int cands_collect(Cg *cg, const GrepOpts *o, const QueryFilter *qf,</code> |
+| `cmd_grep` | function | 551 | <code>int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json) {</code> |
+| `GrepCall` | typedef | 914 | <code>typedef struct { Cg *cg; const SysInfo *si; const char *args; } GrepCall;</code> |
+| `arg_true` | function | 916 | <code>static bool arg_true(const char *args, const char *key, bool dflt) {</code> |
+| `t_grep` | function | 924 | <code>int t_grep(void *v) {</code> |
 
 ## src/help.c
 
@@ -1725,44 +2097,44 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `HelpCmd` | typedef | 21 | <code>typedef struct {</code> |
 | `HelpGroup` | typedef | 36 | <code>typedef struct { const char *key, *title, *blurb; } HelpGroup;</code> |
 | `NGROUPS` | macro | 49 | <code>#define NGROUPS (int)(sizeof GROUPS / sizeof GROUPS[0])</code> |
-| `NHELP` | macro | 859 | <code>#define NHELP (int)(sizeof HELP / sizeof HELP[0])</code> |
-| `help_width` | function | 869 | <code>static int help_width(void) {</code> |
-| `help_styled` | function | 884 | <code>static bool help_styled(void) {</code> |
-| `Out` | typedef | 895 | <code>typedef struct { StrBuf b; int width; bool style; int col; } Out;</code> |
-| `dwidth` | function | 898 | <code>static int dwidth(const char *s, size_t n) {</code> |
-| `o_raw` | function | 905 | <code>static void o_raw(Out *o, const char *s, size_t n) {</code> |
-| `o_str` | function | 909 | <code>static void o_str(Out *o, const char *s) { o_raw(o, s, strlen(s)); }</code> |
-| `o_nl` | function | 910 | <code>static void o_nl(Out *o) { sb_putc(&amp;o-&gt;b, '\n'); o-&gt;col = 0; }</code> |
-| `o_pad` | function | 911 | <code>static void o_pad(Out *o, int to) { while (o-&gt;col &lt; to) o_raw(o, " ", 1); }</code> |
-| `o_on` | function | 912 | <code>static void o_on(Out *o, const char *sgr) {</code> |
-| `BOLD` | macro | 915 | <code>#define BOLD "\033[1m"</code> |
-| `DIM` | macro | 916 | <code>#define DIM  "\033[2m"</code> |
-| `OFF` | macro | 917 | <code>#define OFF  "\033[0m"</code> |
-| `o_wrap` | function | 922 | <code>static void o_wrap(Out *o, const char *s, int indent) {</code> |
-| `o_init` | function | 950 | <code>static void o_init(Out *o) {</code> |
-| `o_flush` | function | 956 | <code>static void o_flush(Out *o, FILE *f) {</code> |
-| `in_list` | function | 963 | <code>static bool in_list(const char *list, const char *name) {</code> |
-| `help_find` | function | 975 | <code>static const HelpCmd *help_find(const char *name) {</code> |
-| `help_known` | function | 985 | <code>bool help_known(const char *name) { return help_find(name) != NULL; }</code> |
-| `is_child` | function | 988 | <code>static bool is_child(const HelpCmd *c, const char *parent) {</code> |
-| `group_of` | function | 993 | <code>static const HelpGroup *group_of(const HelpCmd *c) {</code> |
-| `row` | function | 1003 | <code>static void row(Out *o, const char *name, const char *args, const char *sum,</code> |
-| `left_col` | function | 1017 | <code>static int left_col(const Out *o) {</code> |
-| `flags_block` | function | 1022 | <code>static void flags_block(Out *o, const char *flags, int lcol) {</code> |
-| `help_overview` | function | 1042 | <code>void help_overview(void) {</code> |
-| `section` | function | 1071 | <code>static void section(Out *o, const char *title) {</code> |
-| `detail` | function | 1076 | <code>static void detail(Out *o, const HelpCmd *c) {</code> |
-| `edit_dist` | function | 1128 | <code>static int edit_dist(const char *a, const char *b) {</code> |
-| `help_suggest` | function | 1144 | <code>void help_suggest(const char *name) {</code> |
-| `find_words` | function | 1174 | <code>static const HelpCmd *find_words(int n, char **w) {</code> |
-| `help_command` | function | 1188 | <code>int help_command(const char *name) {</code> |
-| `help_all` | function | 1201 | <code>static void help_all(void) {</code> |
-| `json_list` | function | 1213 | <code>static void json_list(StrBuf *b, const char *list, char sep) {</code> |
-| `json_flags` | function | 1230 | <code>static void json_flags(StrBuf *b, const char *flags) {</code> |
-| `help_json` | function | 1253 | <code>static void help_json(void) {</code> |
-| `help_usage` | function | 1319 | <code>void help_usage(const char *name) {</code> |
-| `cmd_help` | function | 1325 | <code>int cmd_help(int argc, char **argv) {</code> |
-| `help_route` | function | 1355 | <code>int help_route(int argc, char **argv) {</code> |
+| `NHELP` | macro | 1040 | <code>#define NHELP (int)(sizeof HELP / sizeof HELP[0])</code> |
+| `help_width` | function | 1050 | <code>static int help_width(void) {</code> |
+| `help_styled` | function | 1065 | <code>static bool help_styled(void) {</code> |
+| `Out` | typedef | 1076 | <code>typedef struct { StrBuf b; int width; bool style; int col; } Out;</code> |
+| `dwidth` | function | 1079 | <code>static int dwidth(const char *s, size_t n) {</code> |
+| `o_raw` | function | 1086 | <code>static void o_raw(Out *o, const char *s, size_t n) {</code> |
+| `o_str` | function | 1090 | <code>static void o_str(Out *o, const char *s) { o_raw(o, s, strlen(s)); }</code> |
+| `o_nl` | function | 1091 | <code>static void o_nl(Out *o) { sb_putc(&amp;o-&gt;b, '\n'); o-&gt;col = 0; }</code> |
+| `o_pad` | function | 1092 | <code>static void o_pad(Out *o, int to) { while (o-&gt;col &lt; to) o_raw(o, " ", 1); }</code> |
+| `o_on` | function | 1093 | <code>static void o_on(Out *o, const char *sgr) {</code> |
+| `BOLD` | macro | 1096 | <code>#define BOLD "\033[1m"</code> |
+| `DIM` | macro | 1097 | <code>#define DIM  "\033[2m"</code> |
+| `OFF` | macro | 1098 | <code>#define OFF  "\033[0m"</code> |
+| `o_wrap` | function | 1103 | <code>static void o_wrap(Out *o, const char *s, int indent) {</code> |
+| `o_init` | function | 1131 | <code>static void o_init(Out *o) {</code> |
+| `o_flush` | function | 1137 | <code>static void o_flush(Out *o, FILE *f) {</code> |
+| `in_list` | function | 1144 | <code>static bool in_list(const char *list, const char *name) {</code> |
+| `help_find` | function | 1156 | <code>static const HelpCmd *help_find(const char *name) {</code> |
+| `help_known` | function | 1166 | <code>bool help_known(const char *name) { return help_find(name) != NULL; }</code> |
+| `is_child` | function | 1169 | <code>static bool is_child(const HelpCmd *c, const char *parent) {</code> |
+| `group_of` | function | 1174 | <code>static const HelpGroup *group_of(const HelpCmd *c) {</code> |
+| `row` | function | 1184 | <code>static void row(Out *o, const char *name, const char *args, const char *sum,</code> |
+| `left_col` | function | 1198 | <code>static int left_col(const Out *o) {</code> |
+| `flags_block` | function | 1203 | <code>static void flags_block(Out *o, const char *flags, int lcol) {</code> |
+| `help_overview` | function | 1223 | <code>void help_overview(void) {</code> |
+| `section` | function | 1252 | <code>static void section(Out *o, const char *title) {</code> |
+| `detail` | function | 1257 | <code>static void detail(Out *o, const HelpCmd *c) {</code> |
+| `edit_dist` | function | 1309 | <code>static int edit_dist(const char *a, const char *b) {</code> |
+| `help_suggest` | function | 1325 | <code>void help_suggest(const char *name) {</code> |
+| `find_words` | function | 1355 | <code>static const HelpCmd *find_words(int n, char **w) {</code> |
+| `help_command` | function | 1369 | <code>int help_command(const char *name) {</code> |
+| `help_all` | function | 1382 | <code>static void help_all(void) {</code> |
+| `json_list` | function | 1394 | <code>static void json_list(StrBuf *b, const char *list, char sep) {</code> |
+| `json_flags` | function | 1411 | <code>static void json_flags(StrBuf *b, const char *flags) {</code> |
+| `help_json` | function | 1434 | <code>static void help_json(void) {</code> |
+| `help_usage` | function | 1500 | <code>void help_usage(const char *name) {</code> |
+| `cmd_help` | function | 1506 | <code>int cmd_help(int argc, char **argv) {</code> |
+| `help_route` | function | 1536 | <code>int help_route(int argc, char **argv) {</code> |
 
 ## src/integrate.c
 
@@ -1774,7 +2146,7 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Adapter` | typedef | 14 | <code>typedef struct {</code> |
 | `NADAPTERS` | macro | 47 | <code>#define NADAPTERS ((int)(sizeof ADAPTERS / sizeof ADAPTERS[0]))</code> |
 | `ConfigState` | typedef | 49 | <code>typedef struct {</code> |
-| `integrate_self` | function | 54 | <code>static void integrate_self(char out[4096]) {</code> |
+| `integrate_self` | function | 54 | <code>void integrate_self(char out[4096]) {</code> |
 | `integrate_path` | function | 62 | <code>static void integrate_path(const Cg *cg, const char *tmpl, char out[4700]) {</code> |
 | `json_balanced` | function | 76 | <code>static bool json_balanced(const char *s) {</code> |
 | `protocol_supported` | function | 95 | <code>static bool protocol_supported(const char *v) {</code> |
@@ -1785,20 +2157,24 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `integrate_entry` | function | 152 | <code>static char *integrate_entry(const char *bin, bool vscode) {</code> |
 | `integrate_json_apply` | function | 161 | <code>static int integrate_json_apply(const Adapter *a, const char *path,</code> |
 | `integrate_toml_apply` | function | 206 | <code>static int integrate_toml_apply(const char *path, const char *bin) {</code> |
-| `asset_state` | function | 249 | <code>static const char *asset_state(const char *path, const char *marker) {</code> |
-| `apply_asset` | function | 257 | <code>static int apply_asset(const char *path, const char *body, bool executable) {</code> |
-| `host_shim_body` | function | 268 | <code>static char *host_shim_body(const char *host) {</code> |
-| `IntegrateAgentmd` | typedef | 275 | <code>typedef struct { Cg *cg; } IntegrateAgentmd;</code> |
-| `integrate_agentmd_call` | function | 276 | <code>static int integrate_agentmd_call(void *v) {</code> |
-| `integrate_agent_context` | function | 285 | <code>static int integrate_agent_context(Cg *cg) {</code> |
-| `integrate_apply_portable` | function | 312 | <code>int integrate_apply_portable(Cg *cg, bool quiet) {</code> |
-| `adapter_json` | function | 338 | <code>static void adapter_json(const Adapter *a, const char *path,</code> |
-| `integrate_plan` | function | 356 | <code>int integrate_plan(Cg *cg, bool json) {</code> |
-| `integrate_apply` | function | 418 | <code>int integrate_apply(Cg *cg, bool json) {</code> |
-| `doctor_find` | function | 468 | <code>static void doctor_find(StrBuf *findings, int *n, bool json,</code> |
-| `integrate_doctor` | function | 484 | <code>int integrate_doctor(Cg *cg, bool json) {</code> |
-| `integrate_detect` | function | 575 | <code>static int integrate_detect(Cg *cg, bool json) {</code> |
-| `cmd_integrate` | function | 603 | <code>int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility) {</code> |
+| `asset_state` | function | 252 | <code>static const char *asset_state(const char *path, const char *marker) {</code> |
+| `apply_asset` | function | 260 | <code>static int apply_asset(const char *path, const char *body, bool executable) {</code> |
+| `integrate_skill_body` | function | 272 | <code>const char *integrate_skill_body(void) { return SKILL_BODY; }</code> |
+| `integrate_skip_plugin` | function | 276 | <code>void integrate_skip_plugin(bool skip) { skip_plugin = skip; }</code> |
+| `integrate_plugin_apply` | function | 283 | <code>static void integrate_plugin_apply(Cg *cg, const char *bin, bool json,</code> |
+| `integrate_plugin_report` | function | 329 | <code>static void integrate_plugin_report(Cg *cg, bool json, StrBuf *b) {</code> |
+| `host_shim_body` | function | 354 | <code>static char *host_shim_body(const char *host) {</code> |
+| `IntegrateAgentmd` | typedef | 361 | <code>typedef struct { Cg *cg; } IntegrateAgentmd;</code> |
+| `integrate_agentmd_call` | function | 362 | <code>static int integrate_agentmd_call(void *v) {</code> |
+| `integrate_agent_context` | function | 371 | <code>static int integrate_agent_context(Cg *cg) {</code> |
+| `integrate_apply_portable` | function | 398 | <code>int integrate_apply_portable(Cg *cg, bool quiet) {</code> |
+| `adapter_json` | function | 424 | <code>static void adapter_json(const Adapter *a, const char *path,</code> |
+| `integrate_plan` | function | 442 | <code>int integrate_plan(Cg *cg, bool json) {</code> |
+| `integrate_apply` | function | 504 | <code>int integrate_apply(Cg *cg, bool json) {</code> |
+| `doctor_find` | function | 556 | <code>static void doctor_find(StrBuf *findings, int *n, bool json,</code> |
+| `integrate_doctor` | function | 572 | <code>int integrate_doctor(Cg *cg, bool json) {</code> |
+| `integrate_detect` | function | 688 | <code>static int integrate_detect(Cg *cg, bool json) {</code> |
+| `cmd_integrate` | function | 721 | <code>int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility) {</code> |
 
 ## src/jev.c
 
@@ -2050,14 +2426,14 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `usage` | function | 7 | <code>static void usage(void) {</code> |
-| `flag` | function | 11 | <code>static bool flag(int *argc, char **argv, const char *name) {</code> |
-| `opt` | function | 23 | <code>static const char *opt(int *argc, char **argv, const char *name,</code> |
-| `workers_opt` | function | 40 | <code>static bool workers_opt(int *argc, char **argv, const char *cmd, int *out) {</code> |
-| `cmd_info` | function | 54 | <code>static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {</code> |
-| `FRESH_WINDOW_MS` | macro | 133 | <code>#define FRESH_WINDOW_MS 3000</code> |
-| `index_fresh` | function | 134 | <code>static void index_fresh(Cg *cg, const SysInfo *si) {</code> |
-| `main` | function | 144 | <code>int main(int argc, char **argv) {</code> |
+| `usage` | function | 8 | <code>static void usage(void) {</code> |
+| `flag` | function | 12 | <code>static bool flag(int *argc, char **argv, const char *name) {</code> |
+| `opt` | function | 24 | <code>static const char *opt(int *argc, char **argv, const char *name,</code> |
+| `workers_opt` | function | 41 | <code>static bool workers_opt(int *argc, char **argv, const char *cmd, int *out) {</code> |
+| `cmd_info` | function | 55 | <code>static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {</code> |
+| `FRESH_WINDOW_MS` | macro | 144 | <code>#define FRESH_WINDOW_MS 3000</code> |
+| `index_fresh` | function | 145 | <code>static void index_fresh(Cg *cg, const SysInfo *si) {</code> |
+| `main` | function | 155 | <code>int main(int argc, char **argv) {</code> |
 
 ## src/mcp.c
 
@@ -2066,129 +2442,134 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
 | `CallCtx` | typedef | 18 | <code>typedef struct {</code> |
-| `t_search` | function | 24 | <code>static int t_search(void *v) {</code> |
-| `t_context` | function | 33 | <code>static int t_context(void *v) {</code> |
-| `t_survey` | function | 45 | <code>static int t_survey(void *v) {</code> |
-| `t_anchors` | function | 54 | <code>static int t_anchors(void *v) {</code> |
-| `t_symbol` | function | 63 | <code>static int t_symbol(void *v) {</code> |
-| `t_impact` | function | 71 | <code>static int t_impact(void *v) {</code> |
-| `t_routes` | function | 82 | <code>static int t_routes(void *v) {</code> |
-| `t_status` | function | 89 | <code>static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c-&gt;cg, true); }</code> |
-| `t_state` | function | 90 | <code>static int t_state(void *v)   { CallCtx *c = v; return cmd_state(c-&gt;cg, true); }</code> |
-| `t_integrate` | function | 91 | <code>static int t_integrate(void *v) {</code> |
-| `t_event_ingest` | function | 98 | <code>static int t_event_ingest(void *v) {</code> |
-| `t_event_history` | function | 109 | <code>static int t_event_history(void *v) {</code> |
-| `t_progress` | function | 116 | <code>static int t_progress(void *v) {</code> |
-| `t_work_open` | function | 120 | <code>static int t_work_open(void *v) {</code> |
-| `t_work_update` | function | 127 | <code>static int t_work_update(void *v) {</code> |
-| `t_work_close` | function | 135 | <code>static int t_work_close(void *v) {</code> |
-| `t_changes` | function | 149 | <code>static int t_changes(void *v) {</code> |
-| `t_log` | function | 154 | <code>static int t_log(void *v) {</code> |
-| `t_commit` | function | 159 | <code>static int t_commit(void *v) {</code> |
-| `fold_stderr` | function | 171 | <code>static int fold_stderr(void) {</code> |
-| `unfold_stderr` | function | 177 | <code>static void unfold_stderr(int saved) {</code> |
-| `run_spec` | function | 183 | <code>static int run_spec(int argc, char **argv, bool json) {</code> |
-| `t_spec_status` | function | 190 | <code>static int t_spec_status(void *v) {</code> |
-| `t_spec_reconcile` | function | 195 | <code>static int t_spec_reconcile(void *v) {</code> |
-| `t_spec_next` | function | 204 | <code>static int t_spec_next(void *v) {</code> |
-| `t_spec_start` | function | 209 | <code>static int t_spec_start(void *v) {</code> |
-| `t_spec_mode` | function | 218 | <code>static int t_spec_mode(void *v) {</code> |
-| `t_spec_implemented` | function | 227 | <code>static int t_spec_implemented(void *v) {</code> |
-| `t_spec_done` | function | 242 | <code>static int t_spec_done(void *v) {</code> |
-| `t_spec_render` | function | 254 | <code>static int t_spec_render(void *v) {</code> |
-| `t_spec_trace` | function | 262 | <code>static int t_spec_trace(void *v) {</code> |
-| `t_docs` | function | 271 | <code>static int t_docs(void *v, const char *action) {</code> |
-| `t_docs_status` | function | 276 | <code>static int t_docs_status(void *v) { return t_docs(v, "status"); }</code> |
-| `t_docs_plan` | function | 277 | <code>static int t_docs_plan(void *v)   { return t_docs(v, "plan"); }</code> |
-| `t_docs_packet` | function | 278 | <code>static int t_docs_packet(void *v) { return t_docs(v, "packet"); }</code> |
-| `t_docs_check` | function | 279 | <code>static int t_docs_check(void *v)  { return t_docs(v, "check"); }</code> |
-| `t_docs_trace` | function | 280 | <code>static int t_docs_trace(void *v)  { return t_docs(v, "trace"); }</code> |
-| `t_docs_close` | function | 281 | <code>static int t_docs_close(void *v)  { return t_docs(v, "close"); }</code> |
-| `t_remember` | function | 282 | <code>static int t_remember(void *v) {</code> |
-| `t_recall` | function | 295 | <code>static int t_recall(void *v) {</code> |
-| `t_memory_export` | function | 305 | <code>static int t_memory_export(void *v) {</code> |
-| `t_memory_import` | function | 323 | <code>static int t_memory_import(void *v) {</code> |
-| `t_show` | function | 353 | <code>static int t_show(void *v) {</code> |
-| `t_why` | function | 364 | <code>static int t_why(void *v) {</code> |
-| `t_test_impact` | function | 372 | <code>static int t_test_impact(void *v) {</code> |
-| `t_brief` | function | 379 | <code>static int t_brief(void *v)  { CallCtx *c = v; return cmd_brief(c-&gt;cg, true); }</code> |
-| `t_review` | function | 380 | <code>static int t_review(void *v) { CallCtx *c = v; return cmd_review(c-&gt;cg, true); }</code> |
-| `t_check` | function | 381 | <code>static int t_check(void *v)  { CallCtx *c = v; return cmd_check(c-&gt;cg, true, false); }</code> |
-| `t_guard` | function | 382 | <code>static int t_guard(void *v) {</code> |
-| `t_git_sync` | function | 390 | <code>static int t_git_sync(void *v) {</code> |
-| `t_spec_wave` | function | 395 | <code>static int t_spec_wave(void *v) {</code> |
-| `t_spec_lint` | function | 400 | <code>static int t_spec_lint(void *v) {</code> |
-| `t_spec_new` | function | 405 | <code>static int t_spec_new(void *v) {</code> |
-| `t_spec_add` | function | 414 | <code>static int t_spec_add(void *v) {</code> |
-| `t_spec_claim` | function | 445 | <code>static int t_spec_claim(void *v) {</code> |
-| `t_spec_release` | function | 460 | <code>static int t_spec_release(void *v) {</code> |
-| `t_spec_ready` | function | 475 | <code>static int t_spec_ready(void *v) {</code> |
-| `t_spec_claim_next` | function | 480 | <code>static int t_spec_claim_next(void *v) {</code> |
-| `t_handoff` | function | 493 | <code>static int t_handoff(void *v) {</code> |
-| `t_resume` | function | 506 | <code>static int t_resume(void *v) {</code> |
-| `t_memory_classify` | function | 517 | <code>static int t_memory_classify(void *v) {</code> |
-| `t_skills_list` | function | 527 | <code>static int t_skills_list(void *v) {</code> |
-| `t_skills_promote` | function | 532 | <code>static int t_skills_promote(void *v) {</code> |
-| `t_codemap` | function | 543 | <code>static int t_codemap(void *v) {</code> |
-| `S_QUERY` | macro | 553 | <code>#define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \</code> |
-| `S_CTX` | macro | 555 | <code>#define S_CTX    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \</code> |
-| `S_SURVEY` | macro | 559 | <code>#define S_SURVEY "{\"type\":\"object\",\"properties\":{\"scope\":{\"type\":" \</code> |
-| `S_ANCHORS` | macro | 563 | <code>#define S_ANCHORS "{\"type\":\"object\",\"properties\":{\"stale\":{\"type\":" \</code> |
-| `S_NAME` | macro | 567 | <code>#define S_NAME   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}," \</code> |
-| `S_IMPACT` | macro | 569 | <code>#define S_IMPACT "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \</code> |
-| `S_FILTER` | macro | 573 | <code>#define S_FILTER "{\"type\":\"object\",\"properties\":{\"filter\":{\"type\":\"string\"}}}"</code> |
-| `S_EMPTY` | macro | 574 | <code>#define S_EMPTY  "{\"type\":\"object\",\"properties\":{}}"</code> |
-| `S_INTEGRATE` | macro | 575 | <code>#define S_INTEGRATE "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_EVENT` | macro | 579 | <code>#define S_EVENT "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_WORK_OPEN` | macro | 583 | <code>#define S_WORK_OPEN "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_WORK_UPDATE` | macro | 585 | <code>#define S_WORK_UPDATE "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_WORK_CLOSE` | macro | 588 | <code>#define S_WORK_CLOSE "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_RECONCILE` | macro | 592 | <code>#define S_RECONCILE "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_LIMIT` | macro | 595 | <code>#define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"</code> |
-| `S_MSG` | macro | 596 | <code>#define S_MSG    "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}," \</code> |
-| `S_TASKID` | macro | 598 | <code>#define S_TASKID "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \</code> |
-| `S_TASKDN` | macro | 600 | <code>#define S_TASKDN "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \</code> |
-| `S_MODE` | macro | 603 | <code>#define S_MODE   "{\"type\":\"object\",\"properties\":{\"mode\":{" \</code> |
-| `S_CHECK` | macro | 606 | <code>#define S_CHECK  "{\"type\":\"object\",\"properties\":{\"check\":{\"type\":\"boolean\"}}}"</code> |
-| `S_TRACE` | macro | 607 | <code>#define S_TRACE  "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \</code> |
-| `S_REMEMBER` | macro | 609 | <code>#define S_REMEMBER "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_FEATURE` | macro | 617 | <code>#define S_FEATURE "{\"type\":\"object\",\"properties\":{\"feature\":" \</code> |
-| `S_PATHOPT` | macro | 619 | <code>#define S_PATHOPT "{\"type\":\"object\",\"properties\":{\"path\":" \</code> |
-| `S_SHOW` | macro | 622 | <code>#define S_SHOW   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \</code> |
-| `S_NAMEOPT` | macro | 625 | <code>#define S_NAMEOPT "{\"type\":\"object\",\"properties\":{\"name\":" \</code> |
-| `S_CLAIM` | macro | 628 | <code>#define S_CLAIM  "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_ADD` | macro | 633 | <code>#define S_ADD    "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_RECALL` | macro | 643 | <code>#define S_RECALL "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_MEMEXPORT` | macro | 648 | <code>#define S_MEMEXPORT "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_MEMIMPORT` | macro | 657 | <code>#define S_MEMIMPORT "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_CLAIMNEXT` | macro | 669 | <code>#define S_CLAIMNEXT "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_RELEASE` | macro | 674 | <code>#define S_RELEASE "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_HANDOFF` | macro | 680 | <code>#define S_HANDOFF "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_RESUME` | macro | 687 | <code>#define S_RESUME "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_CLASSIFY` | macro | 690 | <code>#define S_CLASSIFY "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_PROMOTE` | macro | 695 | <code>#define S_PROMOTE "{\"type\":\"object\",\"properties\":{" \</code> |
-| `S_CODEMAP` | macro | 698 | <code>#define S_CODEMAP "{\"type\":\"object\",\"properties\":{" \</code> |
-| `A_READ` | macro | 707 | <code>#define A_READ  "{\"readOnlyHint\":true,\"destructiveHint\":false," \</code> |
-| `A_WRITE` | macro | 709 | <code>#define A_WRITE "{\"readOnlyHint\":false,\"destructiveHint\":false," \</code> |
-| `A_MUTATE` | macro | 711 | <code>#define A_MUTATE "{\"readOnlyHint\":false,\"destructiveHint\":true," \</code> |
-| `MCP_FRESH_MS` | macro | 716 | <code>#define MCP_FRESH_MS 1500</code> |
-| `MCP_GATE_WAIT_MS` | macro | 717 | <code>#define MCP_GATE_WAIT_MS 1500</code> |
-| `NTOOLS` | macro | 1015 | <code>#define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))</code> |
-| `mcp_tool_annotations` | function | 1086 | <code>static void mcp_tool_annotations(int i, StrBuf *b) {</code> |
-| `mcp_resource_abs` | function | 1092 | <code>static void mcp_resource_abs(Cg *cg, const char *rel, char *out, size_t cap) {</code> |
-| `mcp_list_resources` | function | 1104 | <code>static void mcp_list_resources(Cg *cg, StrBuf *r) {</code> |
-| `mcp_list_prompts` | function | 1145 | <code>static void mcp_list_prompts(StrBuf *r) {</code> |
-| `mcp_tools_json` | function | 1159 | <code>void mcp_tools_json(StrBuf *r) {</code> |
-| `mcp_call_tool` | function | 1176 | <code>int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,</code> |
-| `cmd_tool` | function | 1204 | <code>int cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json) {</code> |
-| `send_line` | function | 1254 | <code>static void send_line(StrBuf *b) {</code> |
-| `reply_result` | function | 1261 | <code>static void reply_result(const char *id, const char *result_json) {</code> |
-| `reply_error` | function | 1268 | <code>static void reply_error(const char *id, int code, const char *msg) {</code> |
-| `cmd_mcp` | function | 1277 | <code>int cmd_mcp(Cg *cg, const SysInfo *si) {</code> |
-| `self_path` | function | 1426 | <code>static int self_path(char *out, size_t cap) {</code> |
-| `server_entry` | function | 1433 | <code>static char *server_entry(const char *bin, bool vscode_style) {</code> |
-| `install_json` | function | 1444 | <code>static void install_json(const char *path, const char *root_key,</code> |
-| `cmd_mcp_install` | function | 1492 | <code>int cmd_mcp_install(Cg *cg) {</code> |
+| `mcp_filter` | function | 27 | <code>static void mcp_filter(const CallCtx *c, QueryFilter *f) {</code> |
+| `t_search` | function | 63 | <code>static int t_search(void *v) {</code> |
+| `t_context` | function | 76 | <code>static int t_context(void *v) {</code> |
+| `t_files` | function | 93 | <code>static int t_files(void *v) {</code> |
+| `t_survey` | function | 121 | <code>static int t_survey(void *v) {</code> |
+| `t_anchors` | function | 130 | <code>static int t_anchors(void *v) {</code> |
+| `t_symbol` | function | 139 | <code>static int t_symbol(void *v) {</code> |
+| `t_impact` | function | 147 | <code>static int t_impact(void *v) {</code> |
+| `t_routes` | function | 158 | <code>static int t_routes(void *v) {</code> |
+| `t_status` | function | 165 | <code>static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c-&gt;cg, true); }</code> |
+| `t_state` | function | 166 | <code>static int t_state(void *v)   { CallCtx *c = v; return cmd_state(c-&gt;cg, true); }</code> |
+| `t_projection_status` | function | 168 | <code>static int t_projection_status(void *v) {</code> |
+| `t_integrate` | function | 173 | <code>static int t_integrate(void *v) {</code> |
+| `t_event_ingest` | function | 180 | <code>static int t_event_ingest(void *v) {</code> |
+| `t_event_history` | function | 191 | <code>static int t_event_history(void *v) {</code> |
+| `t_progress` | function | 198 | <code>static int t_progress(void *v) {</code> |
+| `t_work_open` | function | 202 | <code>static int t_work_open(void *v) {</code> |
+| `t_work_update` | function | 209 | <code>static int t_work_update(void *v) {</code> |
+| `t_work_close` | function | 217 | <code>static int t_work_close(void *v) {</code> |
+| `t_changes` | function | 231 | <code>static int t_changes(void *v) {</code> |
+| `t_log` | function | 236 | <code>static int t_log(void *v) {</code> |
+| `t_commit` | function | 241 | <code>static int t_commit(void *v) {</code> |
+| `fold_stderr` | function | 253 | <code>static int fold_stderr(void) {</code> |
+| `unfold_stderr` | function | 259 | <code>static void unfold_stderr(int saved) {</code> |
+| `run_spec` | function | 265 | <code>static int run_spec(int argc, char **argv, bool json) {</code> |
+| `t_spec_status` | function | 272 | <code>static int t_spec_status(void *v) {</code> |
+| `t_spec_reconcile` | function | 277 | <code>static int t_spec_reconcile(void *v) {</code> |
+| `t_spec_next` | function | 286 | <code>static int t_spec_next(void *v) {</code> |
+| `t_spec_start` | function | 291 | <code>static int t_spec_start(void *v) {</code> |
+| `t_spec_mode` | function | 300 | <code>static int t_spec_mode(void *v) {</code> |
+| `t_spec_implemented` | function | 309 | <code>static int t_spec_implemented(void *v) {</code> |
+| `t_spec_done` | function | 324 | <code>static int t_spec_done(void *v) {</code> |
+| `t_spec_render` | function | 336 | <code>static int t_spec_render(void *v) {</code> |
+| `t_spec_trace` | function | 344 | <code>static int t_spec_trace(void *v) {</code> |
+| `t_docs` | function | 353 | <code>static int t_docs(void *v, const char *action) {</code> |
+| `t_docs_status` | function | 358 | <code>static int t_docs_status(void *v) { return t_docs(v, "status"); }</code> |
+| `t_docs_plan` | function | 359 | <code>static int t_docs_plan(void *v)   { return t_docs(v, "plan"); }</code> |
+| `t_docs_packet` | function | 360 | <code>static int t_docs_packet(void *v) { return t_docs(v, "packet"); }</code> |
+| `t_docs_check` | function | 361 | <code>static int t_docs_check(void *v)  { return t_docs(v, "check"); }</code> |
+| `t_docs_trace` | function | 362 | <code>static int t_docs_trace(void *v)  { return t_docs(v, "trace"); }</code> |
+| `t_docs_close` | function | 363 | <code>static int t_docs_close(void *v)  { return t_docs(v, "close"); }</code> |
+| `t_remember` | function | 364 | <code>static int t_remember(void *v) {</code> |
+| `t_recall` | function | 377 | <code>static int t_recall(void *v) {</code> |
+| `t_memory_export` | function | 387 | <code>static int t_memory_export(void *v) {</code> |
+| `t_memory_import` | function | 405 | <code>static int t_memory_import(void *v) {</code> |
+| `t_show` | function | 435 | <code>static int t_show(void *v) {</code> |
+| `t_why` | function | 446 | <code>static int t_why(void *v) {</code> |
+| `t_test_impact` | function | 454 | <code>static int t_test_impact(void *v) {</code> |
+| `t_brief` | function | 461 | <code>static int t_brief(void *v)  { CallCtx *c = v; return cmd_brief(c-&gt;cg, true); }</code> |
+| `t_review` | function | 462 | <code>static int t_review(void *v) { CallCtx *c = v; return cmd_review(c-&gt;cg, true); }</code> |
+| `t_check` | function | 463 | <code>static int t_check(void *v)  { CallCtx *c = v; return cmd_check(c-&gt;cg, true, false); }</code> |
+| `t_guard` | function | 464 | <code>static int t_guard(void *v) {</code> |
+| `t_git_sync` | function | 472 | <code>static int t_git_sync(void *v) {</code> |
+| `t_spec_wave` | function | 477 | <code>static int t_spec_wave(void *v) {</code> |
+| `t_spec_lint` | function | 482 | <code>static int t_spec_lint(void *v) {</code> |
+| `t_spec_new` | function | 487 | <code>static int t_spec_new(void *v) {</code> |
+| `t_spec_add` | function | 496 | <code>static int t_spec_add(void *v) {</code> |
+| `t_spec_claim` | function | 527 | <code>static int t_spec_claim(void *v) {</code> |
+| `t_spec_release` | function | 542 | <code>static int t_spec_release(void *v) {</code> |
+| `t_spec_ready` | function | 557 | <code>static int t_spec_ready(void *v) {</code> |
+| `t_spec_claim_next` | function | 562 | <code>static int t_spec_claim_next(void *v) {</code> |
+| `t_handoff` | function | 575 | <code>static int t_handoff(void *v) {</code> |
+| `t_resume` | function | 588 | <code>static int t_resume(void *v) {</code> |
+| `t_memory_classify` | function | 599 | <code>static int t_memory_classify(void *v) {</code> |
+| `t_skills_list` | function | 609 | <code>static int t_skills_list(void *v) {</code> |
+| `t_skills_promote` | function | 614 | <code>static int t_skills_promote(void *v) {</code> |
+| `t_codemap` | function | 625 | <code>static int t_codemap(void *v) {</code> |
+| `S_QFILTER` | macro | 636 | <code>#define S_QFILTER "\"path\":{\"type\":[\"string\",\"array\"],\"items\":" \</code> |
+| `S_QUERY` | macro | 642 | <code>#define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \</code> |
+| `S_CTX` | macro | 645 | <code>#define S_CTX    "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \</code> |
+| `S_FILES` | macro | 649 | <code>#define S_FILES  "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":" \</code> |
+| `S_SURVEY` | macro | 658 | <code>#define S_SURVEY "{\"type\":\"object\",\"properties\":{\"scope\":{\"type\":" \</code> |
+| `S_ANCHORS` | macro | 662 | <code>#define S_ANCHORS "{\"type\":\"object\",\"properties\":{\"stale\":{\"type\":" \</code> |
+| `S_NAME` | macro | 666 | <code>#define S_NAME   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}," \</code> |
+| `S_IMPACT` | macro | 668 | <code>#define S_IMPACT "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \</code> |
+| `S_FILTER` | macro | 672 | <code>#define S_FILTER "{\"type\":\"object\",\"properties\":{\"filter\":{\"type\":\"string\"}}}"</code> |
+| `S_EMPTY` | macro | 673 | <code>#define S_EMPTY  "{\"type\":\"object\",\"properties\":{}}"</code> |
+| `S_INTEGRATE` | macro | 674 | <code>#define S_INTEGRATE "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_EVENT` | macro | 678 | <code>#define S_EVENT "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_WORK_OPEN` | macro | 682 | <code>#define S_WORK_OPEN "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_WORK_UPDATE` | macro | 684 | <code>#define S_WORK_UPDATE "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_WORK_CLOSE` | macro | 687 | <code>#define S_WORK_CLOSE "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_RECONCILE` | macro | 691 | <code>#define S_RECONCILE "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_LIMIT` | macro | 694 | <code>#define S_LIMIT  "{\"type\":\"object\",\"properties\":{\"limit\":{\"type\":\"integer\"}}}"</code> |
+| `S_MSG` | macro | 695 | <code>#define S_MSG    "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}," \</code> |
+| `S_TASKID` | macro | 697 | <code>#define S_TASKID "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \</code> |
+| `S_TASKDN` | macro | 699 | <code>#define S_TASKDN "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \</code> |
+| `S_MODE` | macro | 702 | <code>#define S_MODE   "{\"type\":\"object\",\"properties\":{\"mode\":{" \</code> |
+| `S_CHECK` | macro | 705 | <code>#define S_CHECK  "{\"type\":\"object\",\"properties\":{\"check\":{\"type\":\"boolean\"}}}"</code> |
+| `S_TRACE` | macro | 706 | <code>#define S_TRACE  "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"," \</code> |
+| `S_REMEMBER` | macro | 708 | <code>#define S_REMEMBER "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_FEATURE` | macro | 716 | <code>#define S_FEATURE "{\"type\":\"object\",\"properties\":{\"feature\":" \</code> |
+| `S_PATHOPT` | macro | 718 | <code>#define S_PATHOPT "{\"type\":\"object\",\"properties\":{\"path\":" \</code> |
+| `S_SHOW` | macro | 721 | <code>#define S_SHOW   "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \</code> |
+| `S_NAMEOPT` | macro | 724 | <code>#define S_NAMEOPT "{\"type\":\"object\",\"properties\":{\"name\":" \</code> |
+| `S_CLAIM` | macro | 727 | <code>#define S_CLAIM  "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_ADD` | macro | 732 | <code>#define S_ADD    "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_RECALL` | macro | 742 | <code>#define S_RECALL "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_MEMEXPORT` | macro | 747 | <code>#define S_MEMEXPORT "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_MEMIMPORT` | macro | 756 | <code>#define S_MEMIMPORT "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_CLAIMNEXT` | macro | 768 | <code>#define S_CLAIMNEXT "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_RELEASE` | macro | 773 | <code>#define S_RELEASE "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_HANDOFF` | macro | 779 | <code>#define S_HANDOFF "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_RESUME` | macro | 786 | <code>#define S_RESUME "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_CLASSIFY` | macro | 789 | <code>#define S_CLASSIFY "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_PROMOTE` | macro | 794 | <code>#define S_PROMOTE "{\"type\":\"object\",\"properties\":{" \</code> |
+| `S_CODEMAP` | macro | 797 | <code>#define S_CODEMAP "{\"type\":\"object\",\"properties\":{" \</code> |
+| `A_READ` | macro | 806 | <code>#define A_READ  "{\"readOnlyHint\":true,\"destructiveHint\":false," \</code> |
+| `A_WRITE` | macro | 808 | <code>#define A_WRITE "{\"readOnlyHint\":false,\"destructiveHint\":false," \</code> |
+| `A_MUTATE` | macro | 810 | <code>#define A_MUTATE "{\"readOnlyHint\":false,\"destructiveHint\":true," \</code> |
+| `MCP_FRESH_MS` | macro | 815 | <code>#define MCP_FRESH_MS 1500</code> |
+| `MCP_GATE_WAIT_MS` | macro | 816 | <code>#define MCP_GATE_WAIT_MS 1500</code> |
+| `NTOOLS` | macro | 1141 | <code>#define NTOOLS ((int)(sizeof TOOLS / sizeof TOOLS[0]))</code> |
+| `mcp_tool_annotations` | function | 1216 | <code>static void mcp_tool_annotations(int i, StrBuf *b) {</code> |
+| `mcp_resource_abs` | function | 1222 | <code>static void mcp_resource_abs(Cg *cg, const char *rel, char *out, size_t cap) {</code> |
+| `mcp_list_resources` | function | 1234 | <code>static void mcp_list_resources(Cg *cg, StrBuf *r) {</code> |
+| `mcp_list_prompts` | function | 1275 | <code>static void mcp_list_prompts(StrBuf *r) {</code> |
+| `mcp_tools_json` | function | 1289 | <code>void mcp_tools_json(StrBuf *r) {</code> |
+| `mcp_call_tool` | function | 1306 | <code>int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,</code> |
+| `cmd_tool` | function | 1334 | <code>int cmd_tool(Cg *cg, const SysInfo *si, int argc, char **argv, bool json) {</code> |
+| `send_line` | function | 1384 | <code>static void send_line(StrBuf *b) {</code> |
+| `reply_result` | function | 1391 | <code>static void reply_result(const char *id, const char *result_json) {</code> |
+| `reply_error` | function | 1398 | <code>static void reply_error(const char *id, int code, const char *msg) {</code> |
+| `cmd_mcp` | function | 1407 | <code>int cmd_mcp(Cg *cg, const SysInfo *si) {</code> |
+| `self_path` | function | 1556 | <code>static int self_path(char *out, size_t cap) {</code> |
+| `server_entry` | function | 1563 | <code>static char *server_entry(const char *bin, bool vscode_style) {</code> |
+| `install_json` | function | 1574 | <code>static void install_json(const char *path, const char *root_key,</code> |
+| `cmd_mcp_install` | function | 1622 | <code>int cmd_mcp_install(Cg *cg) {</code> |
 
 ## src/memory.c
 
@@ -2266,6 +2647,114 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `port_read_input` | function | 1501 | <code>static int port_read_input(Cg *cg, const MemImportOpts *o, char **text,</code> |
 | `cmd_memory_import` | function | 1523 | <code>int cmd_memory_import(Cg *cg, const MemImportOpts *o, bool json) {</code> |
 
+## src/native.c
+
+[Open source](../src/native.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `NATIVE_STALE_S` | macro | 34 | <code>#define NATIVE_STALE_S 120         /* no hook for this long: shown as stale */</code> |
+| `NATIVE_HIDE_S` | macro | 35 | <code>#define NATIVE_HIDE_S  86400       /* stopped this long: hidden unless --all */</code> |
+| `NATIVE_PROMPT_CHARS` | macro | 36 | <code>#define NATIVE_PROMPT_CHARS 200</code> |
+| `NATIVE_MESSAGE_CHARS` | macro | 37 | <code>#define NATIVE_MESSAGE_CHARS 300</code> |
+| `NATIVE_BUSY_MS` | macro | 38 | <code>#define NATIVE_BUSY_MS 3000        /* a hook waits this long for the lock */</code> |
+| `Hook` | typedef | 44 | <code>typedef struct {</code> |
+| `jstr` | function | 52 | <code>static char *jstr(const char *obj, const char *key) {</code> |
+| `jmodel` | function | 60 | <code>static char *jmodel(const char *obj) {</code> |
+| `hook_free` | function | 71 | <code>static void hook_free(Hook *h) {</code> |
+| `hook_parse` | function | 78 | <code>static void hook_parse(Hook *h, const char *host, const char *p) {</code> |
+| `agent_name` | function | 98 | <code>static void agent_name(const Hook *h, const char *id, char *out, size_t cap) {</code> |
+| `excerpt` | function | 103 | <code>static char *excerpt(const char *s, size_t n) {</code> |
+| `bind_s` | function | 116 | <code>static void bind_s(sqlite3_stmt *st, int i, const char *v) {</code> |
+| `col_cpy` | function | 121 | <code>static void col_cpy(sqlite3_stmt *st, int c, char *out, size_t cap) {</code> |
+| `exec_ok` | function | 126 | <code>static bool exec_ok(Cg *cg, const char *sql) {</code> |
+| `put_kv` | function | 130 | <code>static void put_kv(StrBuf *b, const char *k, const char *v) {</code> |
+| `NRow` | typedef | 136 | <code>typedef struct {</code> |
+| `row_get` | function | 144 | <code>static void row_get(Cg *cg, const char *agent, NRow *r) {</code> |
+| `machine` | function | 172 | <code>static const char *machine(void) {</code> |
+| `same_dir` | function | 185 | <code>static bool same_dir(const char *a, const char *b) {</code> |
+| `native_worktree` | function | 195 | <code>bool native_worktree(Cg *cg, const char *cwd, char *wt, size_t wcap,</code> |
+| `session_branch` | function | 210 | <code>static void session_branch(Cg *cg, const char *sname, char *out, size_t cap) {</code> |
+| `place_agent` | function | 221 | <code>static void place_agent(Cg *cg, const char *agent, const char *sname,</code> |
+| `active_tasks` | function | 255 | <code>static void active_tasks(Cg *cg) {</code> |
+| `is_task_id` | function | 280 | <code>static bool is_task_id(const char *id, size_t n) {</code> |
+| `idch` | function | 286 | <code>static bool idch(char c) {</code> |
+| `task_in_text` | function | 293 | <code>static bool task_in_text(const char *text, char *out, size_t cap) {</code> |
+| `attribute_task` | function | 331 | <code>static const char *attribute_task(Cg *cg, bool use_env, const char *session,</code> |
+| `native_attribute_task` | function | 357 | <code>const char *native_attribute_task(Cg *cg, const char *session,</code> |
+| `emit` | function | 366 | <code>static void emit(Cg *cg, const char *kind, const char *agent,</code> |
+| `ensure_session` | function | 403 | <code>static bool ensure_session(Cg *cg, const Hook *h) {</code> |
+| `ensure_subagent` | function | 442 | <code>static bool ensure_subagent(Cg *cg, const Hook *h, const char *name) {</code> |
+| `set_task_if_none` | function | 460 | <code>static void set_task_if_none(Cg *cg, const char *agent, const char *session,</code> |
+| `actor` | function | 481 | <code>static void actor(const Hook *h, char *out, size_t cap) {</code> |
+| `heartbeat` | function | 486 | <code>static void heartbeat(Cg *cg, const char *agent, const char *tool,</code> |
+| `record_spawn` | function | 503 | <code>static void record_spawn(Cg *cg, const Hook *h, const char *spawner) {</code> |
+| `read_meta` | function | 560 | <code>static char *read_meta(Cg *cg, const Hook *h) {</code> |
+| `record_start` | function | 595 | <code>static void record_start(Cg *cg, const Hook *h) {</code> |
+| `record_stop` | function | 707 | <code>static void record_stop(Cg *cg, const Hook *h, const char *agent,</code> |
+| `is_spawn_tool` | function | 731 | <code>static bool is_spawn_tool(const char *t) {</code> |
+| `native_record` | function | 736 | <code>int native_record(Cg *cg, const char *host, const char *payload,</code> |
+| `read_stdin_all` | function | 825 | <code>static char *read_stdin_all(void) {</code> |
+| `hook_log` | function | 839 | <code>static void hook_log(Cg *cg, const char *why, const char *payload) {</code> |
+| `IngestCall` | typedef | 852 | <code>typedef struct { Cg *cg; const char *host; const char *payload; } IngestCall;</code> |
+| `ingest_call` | function | 854 | <code>static int ingest_call(void *u) {</code> |
+| `cmd_hook_event` | function | 859 | <code>int cmd_hook_event(Cg *cg, const char *host, bool json) {</code> |
+| `NView` | typedef | 925 | <code>typedef struct {</code> |
+| `load_views` | function | 934 | <code>static int load_views(Cg *cg, NView **out) {</code> |
+| `is_root` | function | 1000 | <code>static bool is_root(const NView *v, int n, int i) {</code> |
+| `shown_state` | function | 1007 | <code>static const char *shown_state(const NView *r) {</code> |
+| `age` | function | 1014 | <code>static void age(long t, char *out, size_t cap) {</code> |
+| `text_node` | function | 1023 | <code>static void text_node(StrBuf *b, const NView *v, int n, int i, int indent) {</code> |
+| `json_node` | function | 1043 | <code>static void json_node(StrBuf *b, const NView *v, int n, int i, int guard) {</code> |
+| `native_tree_json` | function | 1080 | <code>void native_tree_json(Cg *cg, StrBuf *b) {</code> |
+| `native_fleet_section` | function | 1096 | <code>void native_fleet_section(Cg *cg, StrBuf *b, bool json) {</code> |
+| `TreeCall` | typedef | 1115 | <code>typedef struct { Cg *cg; const char *feature; } TreeCall;</code> |
+| `tree_call` | function | 1117 | <code>static int tree_call(void *u) {</code> |
+| `native_fleet_tree_json` | function | 1122 | <code>int native_fleet_tree_json(Cg *cg, const char *feature) {</code> |
+| `native_counts` | function | 1162 | <code>bool native_counts(Cg *cg, int *live, int *subs, int *branches) {</code> |
+| `native_summary` | function | 1188 | <code>void native_summary(Cg *cg, StrBuf *b, bool json) {</code> |
+| `native_flags` | function | 1202 | <code>void native_flags(int argc, char **argv) {</code> |
+| `DISCOVER_STALE_S` | macro | 1231 | <code>#define DISCOVER_STALE_S   900     /* transcript untouched: the agent is stale */</code> |
+| `DISCOVER_EVERY_S` | macro | 1232 | <code>#define DISCOVER_EVERY_S   10      /* automatic runs: at most one per process */</code> |
+| `DISCOVER_HEAD_LINES` | macro | 1233 | <code>#define DISCOVER_HEAD_LINES 400    /* lines read for cwd, model, prompt */</code> |
+| `Disc` | typedef | 1237 | <code>typedef struct {</code> |
+| `Delta` | typedef | 1246 | <code>typedef struct {</code> |
+| `delta_init` | function | 1254 | <code>static void delta_init(Delta *d, const char *agent) {</code> |
+| `delta_field` | function | 1260 | <code>static void delta_field(Delta *d, const char *f) {</code> |
+| `delta_done` | function | 1267 | <code>static void delta_done(Disc *D, Delta *d) {</code> |
+| `mtime_of` | function | 1281 | <code>static long mtime_of(const char *p) {</code> |
+| `is_dir` | function | 1286 | <code>static bool is_dir(const char *p) {</code> |
+| `ends_with` | function | 1291 | <code>static bool ends_with(const char *s, const char *suf) {</code> |
+| `iso_time` | function | 1297 | <code>static long iso_time(const char *ts) {</code> |
+| `has_agents_column` | function | 1309 | <code>static bool has_agents_column(Cg *cg, const char *col) {</code> |
+| `ensure_discovered_column` | function | 1322 | <code>static bool ensure_discovered_column(Cg *cg) {</code> |
+| `disc_has` | function | 1330 | <code>static bool disc_has(Cg *cg, const char *agent, const char *f) {</code> |
+| `disc_note` | function | 1341 | <code>static void disc_note(Cg *cg, const char *agent, const char *f) {</code> |
+| `fill` | function | 1353 | <code>static void fill(Cg *cg, Delta *d, const char *col, const char *v) {</code> |
+| `fill_int` | function | 1369 | <code>static void fill_int(Cg *cg, Delta *d, const char *col, long v) {</code> |
+| `disc_create` | function | 1386 | <code>static void disc_create(Cg *cg, Delta *d, const char *host, const char *session,</code> |
+| `disc_liveness` | function | 1412 | <code>static void disc_liveness(Cg *cg, Disc *D, Delta *d, long mtime) {</code> |
+| `disc_place` | function | 1453 | <code>static void disc_place(Cg *cg, Delta *d, const char *sname, const char *cwd,</code> |
+| `disc_found` | function | 1475 | <code>static void disc_found(Disc *D, const char *agent, const char *host,</code> |
+| `disc_finish` | function | 1489 | <code>static void disc_finish(Cg *cg, Disc *D, Delta *d) {</code> |
+| `Head` | typedef | 1498 | <code>typedef struct { char cwd[4096], model[128], ts[64]; char *prompt; } Head;</code> |
+| `claude_head` | function | 1500 | <code>static void claude_head(const char *path, Head *h, bool want_prompt) {</code> |
+| `nested_parent` | function | 1541 | <code>static void nested_parent(const char *subdir, const char *self_id,</code> |
+| `discover_subagent` | function | 1565 | <code>static void discover_subagent(Cg *cg, Disc *D, const char *sid,</code> |
+| `meta_depth` | function | 1653 | <code>static long meta_depth(const char *subdir, const char *aid) {</code> |
+| `discover_session` | function | 1663 | <code>static void discover_session(Cg *cg, Disc *D, const char *dir, const char *sid) {</code> |
+| `discover_claude_dir` | function | 1745 | <code>static void discover_claude_dir(Cg *cg, Disc *D, const char *dir) {</code> |
+| `discover_claude` | function | 1787 | <code>static void discover_claude(Cg *cg, Disc *D) {</code> |
+| `in_project` | function | 1815 | <code>static bool in_project(Cg *cg, const char *cwd) {</code> |
+| `codex_model` | function | 1826 | <code>static void codex_model(const char *path, char *out, size_t cap) {</code> |
+| `discover_codex_file` | function | 1843 | <code>static void discover_codex_file(Cg *cg, Disc *D, const char *path, long mtime) {</code> |
+| `discover_codex_in` | function | 1877 | <code>static void discover_codex_in(Cg *cg, Disc *D, const char *dir, int depth) {</code> |
+| `discover_codex` | function | 1902 | <code>static void discover_codex(Cg *cg, Disc *D) {</code> |
+| `discover_run` | function | 1910 | <code>static int discover_run(Cg *cg, long since, Disc *D) {</code> |
+| `disc_free` | function | 1937 | <code>static void disc_free(Disc *D) {</code> |
+| `cmd_fleet_discover` | function | 1943 | <code>int cmd_fleet_discover(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `native_discover_auto` | function | 1999 | <code>void native_discover_auto(Cg *cg) {</code> |
+
 ## src/orchestrate.c
 
 [Open source](../src/orchestrate.c)
@@ -2286,129 +2775,185 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `orch_call_resume` | function | 124 | <code>static int orch_call_resume(void *v) {</code> |
 | `orch_call_docs_packet` | function | 129 | <code>static int orch_call_docs_packet(void *v) {</code> |
 | `orch_docs_ready` | function | 137 | <code>static bool orch_docs_ready(const char *id) {</code> |
-| `orch_prompt_retry` | function | 157 | <code>static void orch_prompt_retry(const char *path, const char *feature,</code> |
-| `orch_roles_load` | function | 160 | <code>static void orch_roles_load(const Hierarchy *h) {</code> |
-| `orch_argv` | function | 177 | <code>static int orch_argv(const char *driver, const char *extra, const char *cmd,</code> |
-| `orch_argv_free` | function | 190 | <code>static void orch_argv_free(char **av) {</code> |
-| `orch_argv_print` | function | 194 | <code>static void orch_argv_print(char **av) {</code> |
-| `orch_spec_root` | function | 207 | <code>static int orch_spec_root(char *out, size_t cap) {</code> |
-| `orch_task_status` | function | 213 | <code>static char *orch_task_status(const char *specroot, const char *feature,</code> |
-| `orch_abandon` | function | 254 | <code>static void orch_abandon(const char *specroot, const char *feature,</code> |
-| `orch_event` | function | 289 | <code>static void orch_event(const char *kind, const char *role, const char *agent,</code> |
-| `OE` | macro | 296 | <code>#define OE(k, v) do { if (v) { sb_puts(&amp;p, ",\"" k "\":"); \</code> |
-| `orch_note_failure` | function | 311 | <code>static void orch_note_failure(const char *feature, const char *id, int rc) {</code> |
-| `orch_prompt_steer` | function | 327 | <code>static void orch_prompt_steer(const char *path, const char *agent) {</code> |
-| `orch_write_prompt` | function | 345 | <code>static int orch_write_prompt(const char *cgroot, const char *feature,</code> |
-| `orch_spawn` | function | 379 | <code>static pid_t orch_spawn(char **av, const char *root, const char *promptfile,</code> |
-| `orch_dry_run` | function | 415 | <code>static int orch_dry_run(const char *specroot, const char *cgroot,</code> |
-| `OrchSlot` | typedef | 492 | <code>typedef struct {</code> |
-| `orch_heartbeat` | function | 504 | <code>static int orch_heartbeat(OrchSlot *slot, long ttl_min) {</code> |
-| `orch_live` | function | 520 | <code>static int orch_live(const OrchSlot *slots, int n) {</code> |
-| `orch_reap` | function | 530 | <code>static int orch_reap(pid_t pid) {</code> |
-| `FleetRunOpts` | typedef | 552 | <code>typedef struct { const char *run_id; const char *resume; bool all; } FleetRunOpts;</code> |
-| `orch_fleet_run` | function | 553 | <code>static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,</code> |
-| `cmd_spec_run` | function | 558 | <code>int cmd_spec_run(int argc, char **argv) {</code> |
-| `ORCH_WAKE_BACKOFF` | macro | 965 | <code>#define ORCH_WAKE_BACKOFF  1          /* seconds between manager wakes */</code> |
-| `ORCH_ROUNDS_DFLT` | macro | 966 | <code>#define ORCH_ROUNDS_DFLT   16          /* manager wakes before giving up */</code> |
-| `orch_hier` | function | 970 | <code>static Kvx *orch_hier(const char *tree, Hierarchy *h) {</code> |
-| `orch_worktree_path` | function | 981 | <code>static void orch_worktree_path(const Hierarchy *h, const char *tree,</code> |
-| `orch_excerpt` | function | 992 | <code>static void orch_excerpt(const StrBuf *b, char *out, size_t cap) {</code> |
-| `orch_ahead` | function | 1004 | <code>static long orch_ahead(const char *tree, const char *base, const char *branch) {</code> |
-| `OrchEnv` | typedef | 1029 | <code>typedef struct { char *v[ORCH_ENVN]; } OrchEnv;</code> |
-| `orch_env_save` | function | 1031 | <code>static void orch_env_save(OrchEnv *s) {</code> |
-| `orch_env_restore` | function | 1038 | <code>static void orch_env_restore(OrchEnv *s) {</code> |
-| `orch_env_apply` | function | 1047 | <code>static void orch_env_apply(const FleetNode *n) {</code> |
-| `orch_agent_record` | function | 1067 | <code>static void orch_agent_record(Cg *g, const FleetNode *n) {</code> |
-| `orch_fleet_exec` | function | 1094 | <code>static pid_t orch_fleet_exec(char **av, const FleetNode *n,</code> |
-| `OrchTask` | typedef | 1141 | <code>typedef struct {</code> |
-| `orch_tasks_free` | function | 1151 | <code>static void orch_tasks_free(OrchTask *v, int n) {</code> |
-| `orch_tasks_load` | function | 1163 | <code>static int orch_tasks_load(Cg *cg, const char *feature, const char *fwt,</code> |
-| `orch_task_wave` | function | 1251 | <code>static long orch_task_wave(Cg *cg, const char *feature, const char *id) {</code> |
-| `OrchSubtree` | typedef | 1263 | <code>typedef struct {</code> |
-| `orch_subtree` | function | 1271 | <code>static void orch_subtree(Cg *cg, const char *feature, const char *fbranch,</code> |
-| `OrchPlanCall` | typedef | 1291 | <code>typedef struct { Cg *g; const char *feature; } OrchPlanCall;</code> |
-| `orch_call_plan` | function | 1293 | <code>static int orch_call_plan(void *v) {</code> |
-| `orch_manager_prompt` | function | 1311 | <code>static int orch_manager_prompt(Cg *cg, const FleetNode *n, const char *path) {</code> |
-| `orch_spawn_manager` | function | 1347 | <code>int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,</code> |
-| `OrchBeginCall` | typedef | 1442 | <code>typedef struct { Cg *g; const char *id; const char *feature; } OrchBeginCall;</code> |
-| `orch_call_begin` | function | 1444 | <code>static int orch_call_begin(void *v) {</code> |
-| `orch_json_into` | function | 1457 | <code>static void orch_json_into(const char *js, const char *key, char *out,</code> |
-| `orch_spawn_worker` | function | 1464 | <code>int orch_spawn_worker(Cg *cg, const char *feature, const char *id,</code> |
-| `orch_ago` | function | 1590 | <code>static void orch_ago(long seen, char *out, size_t cap) {</code> |
-| `OrchWorkerRow` | typedef | 1599 | <code>typedef struct {</code> |
-| `orch_worker_rows` | function | 1606 | <code>static int orch_worker_rows(Cg *cg, const char *feature, OrchWorkerRow **out) {</code> |
-| `orch_tree_status` | function | 1663 | <code>int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {</code> |
-| `OrchFleetSlot` | typedef | 1802 | <code>typedef struct {</code> |
-| `orch_live_fleet` | function | 1818 | <code>static int orch_live_fleet(const OrchFleetSlot *s, int n) {</code> |
-| `orch_finished_id` | function | 1824 | <code>static bool orch_finished_id(const OrchTask *v, int n, const char *id) {</code> |
-| `orch_attempts` | function | 1837 | <code>static int orch_attempts(char **tried, int ntried, const char *id) {</code> |
-| `orch_collides` | function | 1854 | <code>static bool orch_collides(const char *a, const char *b) {</code> |
-| `orch_task_slots` | function | 1889 | <code>static bool orch_task_slots(const OrchTask *t, const OrchFleetSlot *slots,</code> |
-| `orch_next_task` | function | 1900 | <code>static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,</code> |
-| `orch_node_heartbeat` | function | 1916 | <code>static int orch_node_heartbeat(const FleetNode *n, long ttl_min) {</code> |
-| `proc_start_time` | function | 1930 | <code>static long proc_start_time(pid_t pid) {</code> |
-| `proc_alive` | function | 1955 | <code>static bool proc_alive(pid_t pid, long start) {</code> |
-| `sup_lock_path` | function | 1964 | <code>static int sup_lock_path(const char *shared, char *out, size_t cap) {</code> |
-| `sup_lock_take` | function | 1971 | <code>static int sup_lock_take(const char *shared) {</code> |
-| `fleet_supervisor_alive` | function | 1980 | <code>bool fleet_supervisor_alive(const char *shared) {</code> |
-| `Sup` | typedef | 1988 | <code>typedef struct {</code> |
-| `sup_event` | function | 2014 | <code>static void sup_event(Sup *s, const char *state, const char *reason) {</code> |
-| `sup_save` | function | 2027 | <code>static void sup_save(Sup *s) {</code> |
-| `sup_set_state` | function | 2041 | <code>static void sup_set_state(Sup *s, const char *state, const char *reason) {</code> |
-| `sup_control` | function | 2057 | <code>static void sup_control(Sup *s) {</code> |
-| `sup_node_add` | function | 2067 | <code>static long sup_node_add(Sup *s, const FleetNode *n, const char *log,</code> |
-| `sup_node_end` | function | 2096 | <code>static void sup_node_end(Sup *s, long id, const char *state, int exit,</code> |
-| `sup_gone` | function | 2115 | <code>static bool sup_gone(pid_t pid, long start, bool adopted, int *crc) {</code> |
-| `sup_kill` | function | 2129 | <code>static void sup_kill(pid_t pid, long start, bool adopted) {</code> |
-| `sup_terminate` | function | 2141 | <code>static void sup_terminate(Sup *s) {</code> |
-| `sup_tap_adopt` | function | 2159 | <code>static void sup_tap_adopt(DriverTap *t, const char *log, const char *agent,</code> |
-| `fleet_run_resume` | function | 2172 | <code>static int fleet_run_resume(Sup *s) {</code> |
-| `COL` | macro | 2208 | <code>#define COL(i) ((const char *)sqlite3_column_text(st, i))</code> |
-| `wall_ms_now` | function | 2263 | <code>static long wall_ms_now(void) {</code> |
-| `sup_slot_begin` | function | 2269 | <code>static void sup_slot_begin(Cg *g, OrchFleetSlot *sl) {</code> |
-| `sup_tree_fp` | function | 2281 | <code>static void sup_tree_fp(const char *wt, char out[65]) {</code> |
-| `sup_progressed` | function | 2306 | <code>static bool sup_progressed(Sup *s, OrchFleetSlot *sl) {</code> |
-| `sup_note` | function | 2334 | <code>static void sup_note(Sup *s, const char *kind, const OrchFleetSlot *sl,</code> |
-| `HandoffCall` | typedef | 2348 | <code>typedef struct { Cg *cg; const char *task, *blocked, *note; } HandoffCall;</code> |
-| `sup_handoff_call` | function | 2349 | <code>static int sup_handoff_call(void *v) {</code> |
-| `sup_end_attempt` | function | 2357 | <code>static void sup_end_attempt(Sup *s, OrchFleetSlot *sl, const char *kind,</code> |
-| `supervisor_budget_check` | function | 2374 | <code>static bool supervisor_budget_check(Sup *s, OrchFleetSlot *sl, long now) {</code> |
-| `supervisor_stall_check` | function | 2395 | <code>static void supervisor_stall_check(Sup *s, OrchFleetSlot *sl, long now) {</code> |
-| `sup_supervise` | function | 2427 | <code>static void sup_supervise(Sup *s) {</code> |
-| `sup_esc_find` | function | 2438 | <code>static int sup_esc_find(Sup *s, const char *task) {</code> |
-| `supervisor_escalate` | function | 2444 | <code>static void supervisor_escalate(Sup *s, const char *task, int level,</code> |
-| `supervisor_retry` | function | 2498 | <code>static void supervisor_retry(Sup *s, const char *task, const char *why) {</code> |
-| `sup_escalations_check` | function | 2505 | <code>static void sup_escalations_check(Sup *s, const OrchTask *v, int n) {</code> |
-| `orch_prompt_retry` | function | 2524 | <code>static void orch_prompt_retry(const char *path, const char *feature,</code> |
-| `sup_approval` | function | 2577 | <code>static int sup_approval(Sup *s, long *id) {</code> |
-| `supervisor_tick` | function | 2592 | <code>static int supervisor_tick(Sup *s) {</code> |
-| `run_id_new` | function | 2885 | <code>static void run_id_new(const char *feature, char *out, size_t cap) {</code> |
-| `run_latest_open` | function | 2896 | <code>static bool run_latest_open(Cg *g, char *out, size_t cap, char *feature,</code> |
-| `fleet_run_open` | function | 2913 | <code>static int fleet_run_open(Sup *s, const char *host) {</code> |
-| `sup_feature_paths` | function | 2940 | <code>static void sup_feature_paths(Cg *g, const char *feature, char *fbranch,</code> |
-| `feature_done` | function | 2953 | <code>static bool feature_done(Cg *g, const char *feature) {</code> |
-| `feature_ready` | function | 2977 | <code>static bool feature_ready(Cg *g, const char *feature, char *waiting, size_t cap) {</code> |
-| `features_open` | function | 2999 | <code>static int features_open(Cg *g, char ***out) {</code> |
-| `sup_open` | function | 3030 | <code>static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,</code> |
-| `sup_close` | function | 3090 | <code>static void sup_close(Sup *s) {</code> |
-| `MainAgent` | typedef | 3105 | <code>typedef struct {</code> |
-| `orch_main_prompt` | function | 3115 | <code>static int orch_main_prompt(Cg *g, const FleetNode *n, Sup *sups, int nsup,</code> |
-| `orch_spawn_main` | function | 3158 | <code>static int orch_spawn_main(Cg *g, const char *driver, const char *extra,</code> |
-| `main_wake` | function | 3190 | <code>static void main_wake(MainAgent *m, const char *reason) {</code> |
-| `main_tick` | function | 3200 | <code>static void main_tick(Cg *g, MainAgent *m, Sup *sups, int nsup,</code> |
-| `supervisor_run` | function | 3256 | <code>static int supervisor_run(Cg *g, char **features, int nfeat,</code> |
-| `orch_fleet_run` | function | 3397 | <code>static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,</code> |
-| `self_exe` | function | 3534 | <code>static void self_exe(char *out, size_t cap) {</code> |
-| `RunRef` | typedef | 3542 | <code>typedef struct { char run[40], feature[128], state[16]; int pid; bool alive; } RunRef;</code> |
-| `run_ref` | function | 3544 | <code>static bool run_ref(Cg *cg, const char *run, RunRef *r) {</code> |
-| `run_state_set` | function | 3565 | <code>static void run_state_set(Cg *cg, const char *run, const char *state,</code> |
-| `run_cleanup` | function | 3589 | <code>static int run_cleanup(Cg *cg, const char *run, const char *feature) {</code> |
-| `Live` | typedef | 3595 | <code>typedef struct { long id; char role[16], agent[128], task[64], attempt[65];</code> |
-| `pos_arg` | function | 3631 | <code>static const char *pos_arg(int argc, char **argv) {</code> |
-| `detach_supervisor` | function | 3639 | <code>static int detach_supervisor(Cg *cg, char **pass, int npass,</code> |
-| `cmd_fleet_up` | function | 3716 | <code>int cmd_fleet_up(Cg *cg, int argc, char **argv, bool json) {</code> |
-| `cmd_fleet_control` | function | 3764 | <code>int cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,</code> |
-| `cmd_fleet_runs` | function | 3853 | <code>int cmd_fleet_runs(Cg *cg, bool json) {</code> |
+| `sup_wave_fresh` | function | 171 | <code>static bool sup_wave_fresh(long wave) {</code> |
+| `orch_prompt_retry` | function | 179 | <code>static void orch_prompt_retry(const char *path, const char *feature,</code> |
+| `orch_roles_load` | function | 182 | <code>static void orch_roles_load(const Hierarchy *h) {</code> |
+| `orch_argv` | function | 200 | <code>static int orch_argv(const char *driver, const char *extra, const char *cmd,</code> |
+| `orch_argv_free` | function | 213 | <code>static void orch_argv_free(char **av) {</code> |
+| `orch_argv_print` | function | 217 | <code>static void orch_argv_print(char **av) {</code> |
+| `orch_spec_root` | function | 230 | <code>static int orch_spec_root(char *out, size_t cap) {</code> |
+| `orch_task_status` | function | 236 | <code>static char *orch_task_status(const char *specroot, const char *feature,</code> |
+| `orch_abandon` | function | 277 | <code>static void orch_abandon(const char *specroot, const char *feature,</code> |
+| `orch_event` | function | 312 | <code>static void orch_event(const char *kind, const char *role, const char *agent,</code> |
+| `OE` | macro | 319 | <code>#define OE(k, v) do { if (v) { sb_puts(&amp;p, ",\"" k "\":"); \</code> |
+| `orch_note_failure` | function | 334 | <code>static void orch_note_failure(const char *feature, const char *id, int rc) {</code> |
+| `orch_prompt_steer` | function | 350 | <code>static void orch_prompt_steer(const char *path, const char *agent) {</code> |
+| `orch_hier` | function | 368 | <code>static Kvx *orch_hier(const char *tree, Hierarchy *h);</code> |
+| `orch_prompt_ahead` | function | 372 | <code>static void orch_prompt_ahead(Cg *cg, const FleetNode *n, const char *feature,</code> |
+| `orch_write_prompt` | function | 439 | <code>static int orch_write_prompt(const char *cgroot, const char *feature,</code> |
+| `orch_spawn` | function | 473 | <code>static pid_t orch_spawn(char **av, const char *root, const char *promptfile,</code> |
+| `orch_dry_run` | function | 509 | <code>static int orch_dry_run(const char *specroot, const char *cgroot,</code> |
+| `OrchSlot` | typedef | 586 | <code>typedef struct {</code> |
+| `orch_heartbeat` | function | 598 | <code>static int orch_heartbeat(OrchSlot *slot, long ttl_min) {</code> |
+| `orch_live` | function | 614 | <code>static int orch_live(const OrchSlot *slots, int n) {</code> |
+| `orch_reap` | function | 624 | <code>static int orch_reap(pid_t pid) {</code> |
+| `FleetRunOpts` | typedef | 646 | <code>typedef struct { const char *run_id; const char *resume; bool all; } FleetRunOpts;</code> |
+| `orch_fleet_run` | function | 647 | <code>static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,</code> |
+| `cmd_spec_run` | function | 652 | <code>int cmd_spec_run(int argc, char **argv) {</code> |
+| `ORCH_WAKE_BACKOFF` | macro | 1059 | <code>#define ORCH_WAKE_BACKOFF  1          /* seconds between manager wakes */</code> |
+| `ORCH_ROUNDS_DFLT` | macro | 1060 | <code>#define ORCH_ROUNDS_DFLT   16          /* manager wakes before giving up */</code> |
+| `orch_hier` | function | 1064 | <code>static Kvx *orch_hier(const char *tree, Hierarchy *h) {</code> |
+| `orch_worktree_path` | function | 1075 | <code>static void orch_worktree_path(const Hierarchy *h, const char *tree,</code> |
+| `orch_excerpt` | function | 1086 | <code>static void orch_excerpt(const StrBuf *b, char *out, size_t cap) {</code> |
+| `orch_ahead` | function | 1098 | <code>static long orch_ahead(const char *tree, const char *base, const char *branch) {</code> |
+| `OrchEnv` | typedef | 1123 | <code>typedef struct { char *v[ORCH_ENVN]; } OrchEnv;</code> |
+| `orch_env_save` | function | 1125 | <code>static void orch_env_save(OrchEnv *s) {</code> |
+| `orch_env_restore` | function | 1132 | <code>static void orch_env_restore(OrchEnv *s) {</code> |
+| `orch_env_apply` | function | 1141 | <code>static void orch_env_apply(const FleetNode *n) {</code> |
+| `orch_agent_record` | function | 1161 | <code>static void orch_agent_record(Cg *g, const FleetNode *n) {</code> |
+| `orch_fleet_exec` | function | 1188 | <code>static pid_t orch_fleet_exec(char **av, const FleetNode *n,</code> |
+| `OrchTask` | typedef | 1235 | <code>typedef struct {</code> |
+| `orch_tasks_free` | function | 1247 | <code>static void orch_tasks_free(OrchTask *v, int n) {</code> |
+| `orch_tasks_wave_trees` | function | 1257 | <code>static void orch_tasks_wave_trees(Cg *cg, const char *feature, OrchTask *v,</code> |
+| `orch_tasks_load` | function | 1295 | <code>static int orch_tasks_load(Cg *cg, const char *feature, const char *fwt,</code> |
+| `orch_task_wave` | function | 1385 | <code>static long orch_task_wave(Cg *cg, const char *feature, const char *id) {</code> |
+| `OrchSubtree` | typedef | 1397 | <code>typedef struct {</code> |
+| `orch_subtree` | function | 1406 | <code>static void orch_subtree(Cg *cg, const char *feature, long wave,</code> |
+| `OrchPlanCall` | typedef | 1427 | <code>typedef struct { Cg *g; const char *feature; } OrchPlanCall;</code> |
+| `orch_call_plan` | function | 1429 | <code>static int orch_call_plan(void *v) {</code> |
+| `orch_manager_prompt` | function | 1447 | <code>static int orch_manager_prompt(Cg *cg, const FleetNode *n, const char *path) {</code> |
+| `orch_spawn_manager` | function | 1506 | <code>int orch_spawn_manager(Cg *cg, const char *feature, long wave,</code> |
+| `OrchBeginCall` | typedef | 1610 | <code>typedef struct { Cg *g; const char *id; const char *feature; } OrchBeginCall;</code> |
+| `orch_call_begin` | function | 1612 | <code>static int orch_call_begin(void *v) {</code> |
+| `orch_json_into` | function | 1627 | <code>static void orch_json_into(const char *js, const char *key, char *out,</code> |
+| `orch_spawn_worker` | function | 1634 | <code>int orch_spawn_worker(Cg *cg, const char *feature, const char *id,</code> |
+| `orch_ago` | function | 1761 | <code>static void orch_ago(long seen, char *out, size_t cap) {</code> |
+| `OrchWorkerRow` | typedef | 1770 | <code>typedef struct {</code> |
+| `orch_worker_rows` | function | 1777 | <code>static int orch_worker_rows(Cg *cg, const char *feature, OrchWorkerRow **out) {</code> |
+| `orch_tree_has_wave` | function | 1834 | <code>static bool orch_tree_has_wave(const long *waves, int n, long wave) {</code> |
+| `orch_tree_status` | function | 1839 | <code>int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {</code> |
+| `OrchFleetSlot` | typedef | 2014 | <code>typedef struct {</code> |
+| `orch_live_fleet` | function | 2030 | <code>static int orch_live_fleet(const OrchFleetSlot *s, int n) {</code> |
+| `orch_finished_id` | function | 2036 | <code>static bool orch_finished_id(const OrchTask *v, int n, const char *id) {</code> |
+| `orch_attempts` | function | 2049 | <code>static int orch_attempts(char **tried, int ntried, const char *id) {</code> |
+| `orch_collides` | function | 2066 | <code>static bool orch_collides(const char *a, const char *b) {</code> |
+| `orch_task_slots` | function | 2101 | <code>static bool orch_task_slots(const OrchTask *t, const OrchFleetSlot *slots,</code> |
+| `orch_req_ready` | function | 2119 | <code>static bool orch_req_ready(const OrchTask *v, int n, const OrchTask *t,</code> |
+| `orch_next_task_in` | function | 2142 | <code>static bool orch_next_task_in(const OrchTask *v, int n, char **tried,</code> |
+| `orch_next_task` | function | 2160 | <code>static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,</code> |
+| `orch_node_heartbeat` | function | 2166 | <code>static int orch_node_heartbeat(const FleetNode *n, long ttl_min) {</code> |
+| `proc_start_time` | function | 2180 | <code>static long proc_start_time(pid_t pid) {</code> |
+| `proc_alive` | function | 2205 | <code>static bool proc_alive(pid_t pid, long start) {</code> |
+| `sup_lock_path` | function | 2214 | <code>static int sup_lock_path(const char *shared, char *out, size_t cap) {</code> |
+| `sup_lock_take` | function | 2221 | <code>static int sup_lock_take(const char *shared) {</code> |
+| `fleet_supervisor_alive` | function | 2230 | <code>bool fleet_supervisor_alive(const char *shared) {</code> |
+| `SupMgr` | typedef | 2241 | <code>typedef struct {</code> |
+| `Sup` | typedef | 2252 | <code>typedef struct {</code> |
+| `sup_mgr` | function | 2277 | <code>static SupMgr *sup_mgr(Sup *s, long wave) {</code> |
+| `sup_mgrs_live` | function | 2290 | <code>static int sup_mgrs_live(const Sup *s) {</code> |
+| `sup_mgr_agent` | function | 2303 | <code>static void sup_mgr_agent(Sup *s, long wave, char *out, size_t cap);</code> |
+| `sup_forward_finding` | function | 2306 | <code>static void sup_forward_finding(Cg *g, char **paths, int np, char *out,</code> |
+| `sup_forward_steer` | function | 2332 | <code>static int sup_forward_steer(Sup *s, long wave, const char *br,</code> |
+| `sup_forward_merge` | function | 2380 | <code>static int sup_forward_merge(Sup *s, long wave) {</code> |
+| `sup_wave_branch` | function | 2517 | <code>static void sup_wave_branch(Sup *s, long wave, char *br, size_t cap) {</code> |
+| `sup_wave_mark_fresh` | function | 2526 | <code>static void sup_wave_mark_fresh(Sup *s, long wave) {</code> |
+| `sup_forward_lands` | function | 2548 | <code>static void sup_forward_lands(Sup *s) {</code> |
+| `sup_mgr_agent` | function | 2594 | <code>static void sup_mgr_agent(Sup *s, long wave, char *out, size_t cap) {</code> |
+| `sup_mgr_log` | function | 2605 | <code>static void sup_mgr_log(const Sup *s, long wave, char *out, size_t cap) {</code> |
+| `sup_event` | function | 2616 | <code>static void sup_event(Sup *s, const char *state, const char *reason) {</code> |
+| `sup_save` | function | 2629 | <code>static void sup_save(Sup *s) {</code> |
+| `sup_set_state` | function | 2643 | <code>static void sup_set_state(Sup *s, const char *state, const char *reason) {</code> |
+| `sup_control` | function | 2659 | <code>static void sup_control(Sup *s) {</code> |
+| `sup_node_add` | function | 2669 | <code>static long sup_node_add(Sup *s, const FleetNode *n, const char *log,</code> |
+| `sup_node_end` | function | 2698 | <code>static void sup_node_end(Sup *s, long id, const char *state, int exit,</code> |
+| `sup_gone` | function | 2717 | <code>static bool sup_gone(pid_t pid, long start, bool adopted, int *crc) {</code> |
+| `sup_kill` | function | 2731 | <code>static void sup_kill(pid_t pid, long start, bool adopted) {</code> |
+| `sup_terminate` | function | 2743 | <code>static void sup_terminate(Sup *s) {</code> |
+| `sup_tap_adopt` | function | 2763 | <code>static void sup_tap_adopt(DriverTap *t, const char *log, const char *agent,</code> |
+| `fleet_run_resume` | function | 2776 | <code>static int fleet_run_resume(Sup *s) {</code> |
+| `COL` | macro | 2812 | <code>#define COL(i) ((const char *)sqlite3_column_text(st, i))</code> |
+| `wall_ms_now` | function | 2869 | <code>static long wall_ms_now(void) {</code> |
+| `sup_slot_begin` | function | 2875 | <code>static void sup_slot_begin(Cg *g, OrchFleetSlot *sl) {</code> |
+| `sup_tree_fp` | function | 2891 | <code>static void sup_tree_fp(const char *wt, char out[65]) {</code> |
+| `sup_progressed` | function | 2917 | <code>static bool sup_progressed(Sup *s, OrchFleetSlot *sl) {</code> |
+| `sup_note` | function | 2945 | <code>static void sup_note(Sup *s, const char *kind, const OrchFleetSlot *sl,</code> |
+| `HandoffCall` | typedef | 2959 | <code>typedef struct { Cg *cg; const char *task, *blocked, *note; } HandoffCall;</code> |
+| `sup_handoff_call` | function | 2960 | <code>static int sup_handoff_call(void *v) {</code> |
+| `sup_end_attempt` | function | 2968 | <code>static void sup_end_attempt(Sup *s, OrchFleetSlot *sl, const char *kind,</code> |
+| `supervisor_budget_check` | function | 2985 | <code>static bool supervisor_budget_check(Sup *s, OrchFleetSlot *sl, long now) {</code> |
+| `supervisor_stall_check` | function | 3006 | <code>static void supervisor_stall_check(Sup *s, OrchFleetSlot *sl, long now) {</code> |
+| `sup_supervise` | function | 3038 | <code>static void sup_supervise(Sup *s) {</code> |
+| `sup_esc_find` | function | 3049 | <code>static int sup_esc_find(Sup *s, const char *task) {</code> |
+| `supervisor_escalate` | function | 3055 | <code>static void supervisor_escalate(Sup *s, const char *task, int level,</code> |
+| `supervisor_retry` | function | 3109 | <code>static void supervisor_retry(Sup *s, const char *task, const char *why) {</code> |
+| `sup_escalations_check` | function | 3116 | <code>static void sup_escalations_check(Sup *s, const OrchTask *v, int n) {</code> |
+| `orch_prompt_retry` | function | 3139 | <code>static void orch_prompt_retry(const char *path, const char *feature,</code> |
+| `sup_approval` | function | 3192 | <code>static int sup_approval(Sup *s, long *id) {</code> |
+| `sup_subtree` | function | 3209 | <code>static void sup_subtree(Sup *s, OrchSubtree *sub) {</code> |
+| `sup_wake_managers` | function | 3250 | <code>static int sup_wake_managers(Sup *s, const OrchSubtree *sub, long now) {</code> |
+| `supervisor_tick` | function | 3351 | <code>static int supervisor_tick(Sup *s) {</code> |
+| `run_id_new` | function | 3619 | <code>static void run_id_new(const char *feature, char *out, size_t cap) {</code> |
+| `run_latest_open` | function | 3630 | <code>static bool run_latest_open(Cg *g, char *out, size_t cap, char *feature,</code> |
+| `fleet_run_open` | function | 3647 | <code>static int fleet_run_open(Sup *s, const char *host) {</code> |
+| `sup_feature_paths` | function | 3677 | <code>static bool sup_feature_paths(Cg *g, const char *feature, char *fbranch,</code> |
+| `feature_done` | function | 3702 | <code>static bool feature_done(Cg *g, const char *feature) {</code> |
+| `feature_ready` | function | 3726 | <code>static bool feature_ready(Cg *g, const char *feature, char *waiting, size_t cap) {</code> |
+| `features_open` | function | 3748 | <code>static int features_open(Cg *g, char ***out) {</code> |
+| `sup_open` | function | 3779 | <code>static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,</code> |
+| `sup_close` | function | 3864 | <code>static void sup_close(Sup *s) {</code> |
+| `MainAgent` | typedef | 3879 | <code>typedef struct {</code> |
+| `orch_main_prompt` | function | 3889 | <code>static int orch_main_prompt(Cg *g, const FleetNode *n, Sup *sups, int nsup,</code> |
+| `orch_spawn_main` | function | 3931 | <code>static int orch_spawn_main(Cg *g, const char *driver, const char *extra,</code> |
+| `main_wake` | function | 3963 | <code>static void main_wake(MainAgent *m, const char *reason) {</code> |
+| `main_tick` | function | 3973 | <code>static void main_tick(Cg *g, MainAgent *m, Sup *sups, int nsup,</code> |
+| `supervisor_run` | function | 4029 | <code>static int supervisor_run(Cg *g, char **features, int nfeat,</code> |
+| `orch_fleet_run` | function | 4170 | <code>static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,</code> |
+| `self_exe` | function | 4325 | <code>static void self_exe(char *out, size_t cap) {</code> |
+| `RunRef` | typedef | 4333 | <code>typedef struct { char run[40], feature[128], state[16]; int pid; bool alive; } RunRef;</code> |
+| `run_ref` | function | 4335 | <code>static bool run_ref(Cg *cg, const char *run, RunRef *r) {</code> |
+| `run_state_set` | function | 4356 | <code>static void run_state_set(Cg *cg, const char *run, const char *state,</code> |
+| `run_cleanup` | function | 4380 | <code>static int run_cleanup(Cg *cg, const char *run, const char *feature) {</code> |
+| `Live` | typedef | 4386 | <code>typedef struct { long id; char role[16], agent[128], task[64], attempt[65];</code> |
+| `pos_arg` | function | 4422 | <code>static const char *pos_arg(int argc, char **argv) {</code> |
+| `detach_supervisor` | function | 4430 | <code>static int detach_supervisor(Cg *cg, char **pass, int npass,</code> |
+| `cmd_fleet_up` | function | 4507 | <code>int cmd_fleet_up(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `cmd_fleet_control` | function | 4555 | <code>int cmd_fleet_control(Cg *cg, const char *verb, int argc, char **argv,</code> |
+| `cmd_fleet_runs` | function | 4644 | <code>int cmd_fleet_runs(Cg *cg, bool json) {</code> |
+
+## src/plugin.c
+
+[Open source](../src/plugin.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `PLUGIN_MARK` | macro | 24 | <code>#define PLUGIN_MARK "codify-owned: claude-code-plugin cg " CG_VERSION</code> |
+| `CODEX_MARK` | macro | 25 | <code>#define CODEX_MARK  "codify-owned: codex-hooks cg " CG_VERSION</code> |
+| `HOOK_TIMEOUT` | macro | 26 | <code>#define HOOK_TIMEOUT 20</code> |
+| `plugin_root` | function | 28 | <code>void plugin_root(char out[4700]) {</code> |
+| `plugin_mkparent` | function | 34 | <code>static int plugin_mkparent(const char *path) {</code> |
+| `plugin_write` | function | 44 | <code>static int plugin_write(const char *path, const char *body) {</code> |
+| `shell_word` | function | 54 | <code>static void shell_word(StrBuf *b, const char *s) {</code> |
+| `hook_cmd` | function | 64 | <code>static void hook_cmd(StrBuf *b, const char *bin, const char *args,</code> |
+| `hook_group` | function | 76 | <code>static void hook_group(StrBuf *b, const char *matcher, const char *bin,</code> |
+| `HookRow` | typedef | 89 | <code>typedef struct { const char *event, *matcher, *args; } HookRow;</code> |
+| `hooks_object` | function | 126 | <code>static void hooks_object(StrBuf *b, const HookRow *rows, const char *bin,</code> |
+| `claude_hooks_body` | function | 153 | <code>static char *claude_hooks_body(const char *bin) {</code> |
+| `plugin_codex_hooks_body` | function | 164 | <code>char *plugin_codex_hooks_body(const char *bin) {</code> |
+| `marketplace_body` | function | 172 | <code>static char *marketplace_body(void) {</code> |
+| `plugin_json_body` | function | 192 | <code>static char *plugin_json_body(void) {</code> |
+| `mcp_json_body` | function | 206 | <code>static char *mcp_json_body(const char *bin) {</code> |
+| `skill_body` | function | 217 | <code>static char *skill_body(void) {</code> |
+| `command_body` | function | 224 | <code>static char *command_body(const char *bin, const char *desc,</code> |
+| `PluginFile` | typedef | 234 | <code>typedef struct { const char *rel; char *body; } PluginFile;</code> |
+| `plugin_render` | function | 239 | <code>int plugin_render(const char *bin, bool json, StrBuf *out, int *changed,</code> |
+| `plugin_codex_hooks` | function | 287 | <code>int plugin_codex_hooks(const Cg *cg, const char *bin, char path[4700]) {</code> |
+| `plugin_file_state` | function | 296 | <code>const char *plugin_file_state(const char *path, const char *mark) {</code> |
+| `plugin_codex_state` | function | 305 | <code>const char *plugin_codex_state(const Cg *cg, char path[4700]) {</code> |
+| `plugin_state` | function | 316 | <code>void plugin_state(PluginState *st) {</code> |
+| `plugin_state_json` | function | 383 | <code>void plugin_state_json(const PluginState *st, StrBuf *b) {</code> |
+| `find_claude` | function | 397 | <code>static bool find_claude(char *out, size_t cap) {</code> |
+| `claude_run` | function | 405 | <code>static int claude_run(const char *claude, const char *args, char *last,</code> |
+| `plugin_install` | function | 446 | <code>int plugin_install(bool json, StrBuf *out) {</code> |
 
 ## src/progress.c
 
@@ -2421,23 +2966,89 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `PLAIN_EVERY_MS` | macro | 30 | <code>#define PLAIN_EVERY_MS 2000</code> |
 | `WRITE_SLICE_MS` | macro | 31 | <code>#define WRITE_SLICE_MS 100</code> |
 | `MAX_PHASES` | macro | 32 | <code>#define MAX_PHASES     8</code> |
-| `active` | function | 53 | <code>static bool active(void) {</code> |
-| `term_width` | function | 57 | <code>static int term_width(void) {</code> |
-| `erase` | function | 66 | <code>static void erase(void) {</code> |
-| `compose` | function | 74 | <code>static void compose(char *out, size_t cap, long now) {</code> |
-| `ADD` | macro | 76 | <code>#define ADD(...) do { if (n &lt; cap) \</code> |
-| `render` | function | 95 | <code>static void render(bool entered, bool force) {</code> |
-| `at_exit_erase` | function | 132 | <code>static void at_exit_erase(void) { erase(); }</code> |
-| `progress_request` | function | 134 | <code>void progress_request(bool want) {</code> |
-| `progress_begin` | function | 151 | <code>void progress_begin(const IndexOpts *o) {</code> |
-| `progress_step` | function | 160 | <code>void progress_step(const char *step) {</code> |
-| `progress_phase` | function | 171 | <code>void progress_phase(const char *phase, long done, long total) {</code> |
-| `progress_tick` | function | 182 | <code>void progress_tick(long done, long total, const char *path) {</code> |
-| `progress_flush` | function | 191 | <code>void progress_flush(void) {</code> |
-| `progress_workers` | function | 195 | <code>void progress_workers(int n) {</code> |
-| `progress_wait` | function | 199 | <code>void progress_wait(const char *what, long waited_ms) {</code> |
-| `progress_end` | function | 210 | <code>void progress_end(void) {</code> |
-| `progress_begin_write` | function | 221 | <code>int progress_begin_write(Cg *cg) {</code> |
+| `active` | function | 54 | <code>static bool active(void) {</code> |
+| `term_width` | function | 58 | <code>static int term_width(void) {</code> |
+| `erase` | function | 67 | <code>static void erase(void) {</code> |
+| `compose` | function | 75 | <code>static void compose(char *out, size_t cap, long now) {</code> |
+| `ADD` | macro | 77 | <code>#define ADD(...) do { if (n &lt; cap) \</code> |
+| `render` | function | 97 | <code>static void render(bool entered, bool force) {</code> |
+| `at_exit_erase` | function | 134 | <code>static void at_exit_erase(void) { erase(); }</code> |
+| `progress_request` | function | 136 | <code>void progress_request(bool want) {</code> |
+| `progress_begin` | function | 153 | <code>void progress_begin(const IndexOpts *o) {</code> |
+| `progress_step` | function | 163 | <code>void progress_step(const char *step) {</code> |
+| `progress_phase` | function | 174 | <code>void progress_phase(const char *phase, long done, long total) {</code> |
+| `progress_dirs` | function | 186 | <code>void progress_dirs(long dirs) {</code> |
+| `progress_tick` | function | 192 | <code>void progress_tick(long done, long total, const char *path) {</code> |
+| `progress_flush` | function | 201 | <code>void progress_flush(void) {</code> |
+| `progress_workers` | function | 205 | <code>void progress_workers(int n) {</code> |
+| `progress_wait` | function | 209 | <code>void progress_wait(const char *what, long waited_ms) {</code> |
+| `progress_end` | function | 220 | <code>void progress_end(void) {</code> |
+| `progress_begin_write` | function | 231 | <code>int progress_begin_write(Cg *cg) {</code> |
+
+## src/projection.c
+
+[Open source](../src/projection.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `PROJ_MIN_MAJOR` | macro | 32 | <code>#define PROJ_MIN_MAJOR 2</code> |
+| `PROJ_MIN_MINOR` | macro | 33 | <code>#define PROJ_MIN_MINOR 38</code> |
+| `ProjBranch` | typedef | 35 | <code>typedef struct {</code> |
+| `Projection` | typedef | 54 | <code>typedef struct {</code> |
+| `projection_conflicts_free` | function | 65 | <code>void projection_conflicts_free(ProjectionConflict *v, int n) {</code> |
+| `proj_free` | function | 75 | <code>static void proj_free(Projection *p) {</code> |
+| `proj_add` | function | 85 | <code>static ProjBranch *proj_add(Projection *p, const char *name) {</code> |
+| `dir_has_git` | function | 98 | <code>static bool dir_has_git(const char *dir) {</code> |
+| `proj_base_name` | function | 108 | <code>static void proj_base_name(Cg *cg, char *out, size_t cap) {</code> |
+| `proj_agents_ttl` | function | 124 | <code>static long proj_agents_ttl(Cg *cg) {</code> |
+| `proj_branch_live` | function | 138 | <code>static bool proj_branch_live(Cg *cg, const char *name, const char *worktree,</code> |
+| `proj_cmp` | function | 154 | <code>static int proj_cmp(const void *a, const void *b) {</code> |
+| `projection_branches` | function | 168 | <code>static int projection_branches(Cg *cg, const char *base, char **extra, int nextra,</code> |
+| `projection_shadow_commit` | function | 271 | <code>static int projection_shadow_commit(Cg *cg, ProjBranch *b, int seq) {</code> |
+| `proj_conflict_add` | function | 294 | <code>static void proj_conflict_add(Projection *p, const ProjectionConflict *src,</code> |
+| `proj_fold` | function | 321 | <code>static int proj_fold(Cg *cg, Projection *p, bool strict) {</code> |
+| `proj_branches_json` | function | 379 | <code>static void proj_branches_json(const Projection *p, StrBuf *b) {</code> |
+| `proj_conflicts_json` | function | 408 | <code>static void proj_conflicts_json(const Projection *p, StrBuf *b) {</code> |
+| `proj_object` | function | 429 | <code>static void proj_object(const char *base, const char *base_head,</code> |
+| `raw_true` | function | 449 | <code>static bool raw_true(const char *obj, const char *key) {</code> |
+| `proj_text` | function | 458 | <code>static void proj_text(const char *base, const char *base_head,</code> |
+| `ProjRow` | typedef | 519 | <code>typedef struct {</code> |
+| `proj_row_free` | function | 526 | <code>static void proj_row_free(ProjRow *r) {</code> |
+| `proj_last` | function | 532 | <code>static void proj_last(Cg *cg, ProjRow *r) {</code> |
+| `proj_store` | function | 555 | <code>static int proj_store(Cg *cg, const Projection *p, const char *branches,</code> |
+| `proj_index` | function | 586 | <code>static int proj_index(Cg *cg, const SysInfo *si, const char *commit,</code> |
+| `proj_lock` | function | 676 | <code>static int proj_lock(Cg *cg, long wait_ms, bool *waited) {</code> |
+| `proj_unlock` | function | 692 | <code>static void proj_unlock(int fd) {</code> |
+| `proj_cg_path` | function | 711 | <code>static void proj_cg_path(Cg *cg, const char *name, char *out, size_t cap) {</code> |
+| `projection_mark_dirty` | function | 715 | <code>void projection_mark_dirty(Cg *cg, const char *why) {</code> |
+| `proj_dirty` | function | 727 | <code>static bool proj_dirty(Cg *cg) {</code> |
+| `proj_dirty_clear` | function | 734 | <code>static void proj_dirty_clear(Cg *cg) {</code> |
+| `proj_last_activity` | function | 743 | <code>static long proj_last_activity(Cg *cg) {</code> |
+| `proj_worth_building` | function | 770 | <code>static bool proj_worth_building(Cg *cg) {</code> |
+| `proj_spawn_background` | function | 791 | <code>static int proj_spawn_background(Cg *cg) {</code> |
+| `projection_auto_build` | function | 831 | <code>int projection_auto_build(Cg *cg, const char *why, long *retry_ms) {</code> |
+| `projection_follow` | function | 863 | <code>void projection_follow(Cg *cg, const char *why) {</code> |
+| `proj_age` | function | 889 | <code>static void proj_age(char *out, size_t cap, long s) {</code> |
+| `proj_others` | function | 898 | <code>static void proj_others(const char *csv, const char *me, StrBuf *b) {</code> |
+| `proj_findings_of` | function | 911 | <code>static int proj_findings_of(Cg *cg, const char *branch, const char *indent,</code> |
+| `projection_branch_findings` | function | 946 | <code>int projection_branch_findings(Cg *cg, const char *branch, StrBuf *out) {</code> |
+| `proj_count_for` | function | 960 | <code>static long proj_count_for(Cg *cg, const char *branch) {</code> |
+| `proj_branch_names` | function | 977 | <code>static int proj_branch_names(Cg *cg, const char *branches_json, char ***out) {</code> |
+| `proj_names_free` | function | 1021 | <code>static void proj_names_free(char **v, int n) {</code> |
+| `proj_worktree_of` | function | 1027 | <code>static void proj_worktree_of(const char *branches_json, const char *name,</code> |
+| `proj_live_findings` | function | 1045 | <code>static long proj_live_findings(Cg *cg) {</code> |
+| `proj_folded` | function | 1056 | <code>static int proj_folded(const char *branches_json) {</code> |
+| `projection_summary` | function | 1069 | <code>void projection_summary(Cg *cg, StrBuf *b, bool json) {</code> |
+| `projection_tree_json` | function | 1143 | <code>void projection_tree_json(Cg *cg, StrBuf *b) {</code> |
+| `proj_git_check` | function | 1186 | <code>static int proj_git_check(Cg *cg) {</code> |
+| `proj_print_row` | function | 1206 | <code>static void proj_print_row(const ProjRow *r, bool unchanged, bool json,</code> |
+| `ProjOpts` | typedef | 1220 | <code>typedef struct {</code> |
+| `projection_build` | function | 1227 | <code>static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool json) {</code> |
+| `proj_status` | function | 1373 | <code>static int proj_status(Cg *cg, bool json, const char *branch) {</code> |
+| `proj_against` | function | 1433 | <code>static int proj_against(Cg *cg, const char *branch, char *sha, size_t cap,</code> |
+| `proj_diff` | function | 1463 | <code>static int proj_diff(Cg *cg, const char *branch, bool json) {</code> |
+| `proj_show` | function | 1493 | <code>static int proj_show(Cg *cg, bool json) {</code> |
+| `cmd_projection` | function | 1542 | <code>int cmd_projection(Cg *cg, const SysInfo *si, int argc, char **argv,</code> |
 
 ## src/recap.c
 
@@ -2477,37 +3088,39 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `Sessions` | typedef | 429 | <code>typedef struct { Session *v; int n, cap; } Sessions;</code> |
 | `sessions_add` | function | 431 | <code>static void sessions_add(Sessions *ss, const Session *s) {</code> |
 | `file_mtime` | function | 439 | <code>static long file_mtime(const char *path) {</code> |
-| `claude_dir` | function | 446 | <code>static void claude_dir(const char *root, char *out, size_t cap) {</code> |
-| `find_claude` | function | 457 | <code>static void find_claude(const char *root, long oldest, Sessions *out) {</code> |
-| `codex_owned` | function | 478 | <code>static bool codex_owned(const char *path, const char *root) {</code> |
-| `find_codex_in` | function | 497 | <code>static void find_codex_in(const char *dir, const char *root, long oldest,</code> |
-| `find_codex` | function | 526 | <code>static void find_codex(const char *root, long oldest, Sessions *out) {</code> |
-| `cmp_newest` | function | 537 | <code>static int cmp_newest(const void *a, const void *b) {</code> |
-| `cmp_oldest` | function | 542 | <code>static int cmp_oldest(const void *a, const void *b) { return -cmp_newest(a, b); }</code> |
-| `sess_cap` | function | 546 | <code>static void sess_cap(Session *s, int cap) {</code> |
-| `Recap` | typedef | 566 | <code>typedef struct {</code> |
-| `recap_config` | function | 575 | <code>static void recap_config(const Cg *cg, Recap *r) {</code> |
-| `role_name` | function | 588 | <code>static const char *role_name(char r) {</code> |
-| `chunk_state` | function | 595 | <code>static void chunk_state(const Session *s, int from, int to, StrBuf *b) {</code> |
-| `cache_path` | function | 619 | <code>static void cache_path(const Recap *r, const char *state, char *out, size_t cap) {</code> |
-| `cache_read` | function | 628 | <code>static bool cache_read(const char *path, Session *s, int from, int to) {</code> |
-| `cache_write` | function | 647 | <code>static void cache_write(const char *path, const Session *s, int from, int to) {</code> |
-| `decide_chunk` | function | 660 | <code>static int decide_chunk(Cg *cg, Recap *r, Session *s, int from, int to) {</code> |
-| `Chunk` | typedef | 737 | <code>typedef struct { int sess, from, to; } Chunk;</code> |
-| `chunks_of` | function | 739 | <code>static int chunks_of(const Sessions *ss, Chunk **out) {</code> |
-| `chunk_cached` | function | 762 | <code>static bool chunk_cached(Recap *r, Session *s, const Chunk *c) {</code> |
-| `decide_parallel` | function | 779 | <code>static void decide_parallel(Cg *cg, Recap *r, Sessions *ss, const Chunk *v, int n, int par) {</code> |
-| `decide_all` | function | 797 | <code>static void decide_all(Cg *cg, Recap *r, Sessions *ss) {</code> |
-| `Pick` | typedef | 819 | <code>typedef struct { int sess, idx; double score; } Pick;</code> |
-| `snip_score` | function | 821 | <code>static double snip_score(const Snip *p) {</code> |
-| `cmp_pick` | function | 827 | <code>static int cmp_pick(const void *a, const void *b) {</code> |
-| `select_picks` | function | 834 | <code>static int select_picks(Sessions *ss, long budget) {</code> |
-| `render_decided` | function | 859 | <code>static void render_decided(const Sessions *ss, const Recap *r, StrBuf *b) {</code> |
-| `run_capture` | function | 887 | <code>static void run_capture(const char *cmd, StrBuf *out) {</code> |
-| `repo_facts` | function | 896 | <code>static void repo_facts(Cg *cg, int since_days, StrBuf *b) {</code> |
-| `write_brief` | function | 987 | <code>static char *write_brief(Cg *cg, Recap *r, const Sessions *ss, const char *facts,</code> |
-| `agent_wanted` | function | 1031 | <code>static bool agent_wanted(const char *list, const char *agent) {</code> |
-| `cmd_recap` | function | 1036 | <code>int cmd_recap(Cg *cg, const RecapOpts *o) {</code> |
+| `transcript_dirs` | function | 451 | <code>void transcript_dirs(const char *root, char *claude, size_t ccap,</code> |
+| `transcript_codex_head` | function | 474 | <code>bool transcript_codex_head(const char *path, char *cwd, size_t ccap,</code> |
+| `claude_dir` | function | 505 | <code>static void claude_dir(const char *root, char *out, size_t cap) {</code> |
+| `find_claude` | function | 509 | <code>static void find_claude(const char *root, long oldest, Sessions *out) {</code> |
+| `codex_owned` | function | 530 | <code>static bool codex_owned(const char *path, const char *root) {</code> |
+| `find_codex_in` | function | 538 | <code>static void find_codex_in(const char *dir, const char *root, long oldest,</code> |
+| `find_codex` | function | 567 | <code>static void find_codex(const char *root, long oldest, Sessions *out) {</code> |
+| `cmp_newest` | function | 573 | <code>static int cmp_newest(const void *a, const void *b) {</code> |
+| `cmp_oldest` | function | 578 | <code>static int cmp_oldest(const void *a, const void *b) { return -cmp_newest(a, b); }</code> |
+| `sess_cap` | function | 582 | <code>static void sess_cap(Session *s, int cap) {</code> |
+| `Recap` | typedef | 602 | <code>typedef struct {</code> |
+| `recap_config` | function | 611 | <code>static void recap_config(const Cg *cg, Recap *r) {</code> |
+| `role_name` | function | 624 | <code>static const char *role_name(char r) {</code> |
+| `chunk_state` | function | 631 | <code>static void chunk_state(const Session *s, int from, int to, StrBuf *b) {</code> |
+| `cache_path` | function | 655 | <code>static void cache_path(const Recap *r, const char *state, char *out, size_t cap) {</code> |
+| `cache_read` | function | 664 | <code>static bool cache_read(const char *path, Session *s, int from, int to) {</code> |
+| `cache_write` | function | 683 | <code>static void cache_write(const char *path, const Session *s, int from, int to) {</code> |
+| `decide_chunk` | function | 696 | <code>static int decide_chunk(Cg *cg, Recap *r, Session *s, int from, int to) {</code> |
+| `Chunk` | typedef | 773 | <code>typedef struct { int sess, from, to; } Chunk;</code> |
+| `chunks_of` | function | 775 | <code>static int chunks_of(const Sessions *ss, Chunk **out) {</code> |
+| `chunk_cached` | function | 798 | <code>static bool chunk_cached(Recap *r, Session *s, const Chunk *c) {</code> |
+| `decide_parallel` | function | 815 | <code>static void decide_parallel(Cg *cg, Recap *r, Sessions *ss, const Chunk *v, int n, int par) {</code> |
+| `decide_all` | function | 833 | <code>static void decide_all(Cg *cg, Recap *r, Sessions *ss) {</code> |
+| `Pick` | typedef | 855 | <code>typedef struct { int sess, idx; double score; } Pick;</code> |
+| `snip_score` | function | 857 | <code>static double snip_score(const Snip *p) {</code> |
+| `cmp_pick` | function | 863 | <code>static int cmp_pick(const void *a, const void *b) {</code> |
+| `select_picks` | function | 870 | <code>static int select_picks(Sessions *ss, long budget) {</code> |
+| `render_decided` | function | 895 | <code>static void render_decided(const Sessions *ss, const Recap *r, StrBuf *b) {</code> |
+| `run_capture` | function | 923 | <code>static void run_capture(const char *cmd, StrBuf *out) {</code> |
+| `repo_facts` | function | 932 | <code>static void repo_facts(Cg *cg, int since_days, StrBuf *b) {</code> |
+| `write_brief` | function | 1023 | <code>static char *write_brief(Cg *cg, Recap *r, const Sessions *ss, const char *facts,</code> |
+| `agent_wanted` | function | 1067 | <code>static bool agent_wanted(const char *list, const char *agent) {</code> |
+| `cmd_recap` | function | 1072 | <code>int cmd_recap(Cg *cg, const RecapOpts *o) {</code> |
 
 ## src/resolve.c
 
@@ -2528,46 +3141,46 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `strip_ext` | function | 226 | <code>static void strip_ext(char *buf, size_t cap, const char *path) {</code> |
 | `norm_dots` | function | 235 | <code>static void norm_dots(char *p) {</code> |
 | `find_repo_file` | function | 265 | <code>static long find_repo_file(Cg *cg, const char *module, const char *from_path,</code> |
-| `NEAR_MAX` | macro | 456 | <code>#define NEAR_MAX 32</code> |
-| `NearManifest` | typedef | 457 | <code>typedef struct { char dir[1024]; Manifest m; bool exists; } NearManifest;</code> |
-| `near_manifest_has` | function | 459 | <code>static bool near_manifest_has(Cg *cg, NearManifest *near, int *nnear,</code> |
-| `node_core_module` | function | 485 | <code>static bool node_core_module(const char *module) {</code> |
-| `mod_matches` | function | 506 | <code>static bool mod_matches(const char *module, const char *cand_path);</code> |
-| `resolve_imports_run` | function | 517 | <code>static void resolve_imports_run(Cg *cg, bool scoped) {</code> |
-| `resolve_imports` | function | 667 | <code>void resolve_imports(Cg *cg)        { resolve_imports_run(cg, false); }</code> |
-| `resolve_imports_scoped` | function | 668 | <code>void resolve_imports_scoped(Cg *cg) { resolve_imports_run(cg, true); }</code> |
-| `in_list` | function | 857 | <code>static bool in_list(const char *const *list, const char *name) {</code> |
-| `in_names` | function | 865 | <code>static bool in_names(const char *names, const char *name) {</code> |
-| `C_HDR_MAX` | macro | 886 | <code>#define C_HDR_MAX 64</code> |
-| `C_HDR_LEN` | macro | 887 | <code>#define C_HDR_LEN 48</code> |
-| `c_load_headers` | function | 894 | <code>static void c_load_headers(Cg *cg, long file_id) {</code> |
-| `c_builtin` | function | 917 | <code>static bool c_builtin(Cg *cg, long file_id, const char *name) {</code> |
-| `c_builtin_reset` | function | 929 | <code>static void c_builtin_reset(void) { c_hdrs.file_id = -1; c_hdrs.n = 0; }</code> |
-| `is_resolving_lang` | function | 932 | <code>static bool is_resolving_lang(const char *lang) {</code> |
-| `is_builtin` | function | 939 | <code>static bool is_builtin(Cg *cg, const char *lang, long file_id,</code> |
-| `Cand` | typedef | 957 | <code>typedef struct {</code> |
-| `find_candidates` | function | 962 | <code>static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {</code> |
-| `path_stem` | function | 985 | <code>static size_t path_stem(const char *path, const char **out) {</code> |
-| `cand_definition` | function | 999 | <code>static int cand_definition(const Cand *c, int nc, int pick) {</code> |
-| `mod_matches` | function | 1027 | <code>static bool mod_matches(const char *module, const char *cand_path) {</code> |
-| `ImpCache` | typedef | 1064 | <code>typedef struct { char name[128]; char module[256]; } ImpCache;</code> |
-| `load_imports` | function | 1066 | <code>static int load_imports(Cg *cg, long file_id, ImpCache *out, int cap) {</code> |
-| `resolve_refs_run` | function | 1089 | <code>static void resolve_refs_run(Cg *cg, bool scoped) {</code> |
-| `resolve_refs` | function | 1277 | <code>void resolve_refs(Cg *cg)        { resolve_refs_run(cg, false); }</code> |
-| `resolve_refs_scoped` | function | 1278 | <code>void resolve_refs_scoped(Cg *cg) { resolve_refs_run(cg, true); }</code> |
-| `edit_distance` | function | 1283 | <code>static int edit_distance(const char *a, const char *b) {</code> |
-| `near_miss` | function | 1301 | <code>static bool near_miss(Cg *cg, const char *name, char *out, size_t cap) {</code> |
-| `file_calibrated` | function | 1327 | <code>bool file_calibrated(Cg *cg, long file_id, const char *lang) {</code> |
-| `ground_findings` | function | 1387 | <code>int ground_findings(Cg *cg, const char *path, GroundFinding **out) {</code> |
-| `ground_findings_free` | function | 1472 | <code>void ground_findings_free(GroundFinding *v, int n) {</code> |
-| `kind_callable` | function | 1480 | <code>static bool kind_callable(const char *kind) {</code> |
-| `contract_findings` | function | 1487 | <code>int contract_findings(Cg *cg, const char *path, ContractFinding **out) {</code> |
-| `contract_findings_free` | function | 1557 | <code>void contract_findings_free(ContractFinding *v, int n) {</code> |
-| `is_entrypoint` | function | 1565 | <code>bool is_entrypoint(Cg *cg, long sym_id, const char *name, const char *kind,</code> |
-| `hygiene_file` | function | 1614 | <code>static int hygiene_file(Cg *cg, const char *path, long file_id,</code> |
-| `hygiene_findings` | function | 1680 | <code>int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out) {</code> |
-| `hygiene_findings_all` | function | 1698 | <code>int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit) {</code> |
-| `hygiene_findings_free` | function | 1714 | <code>void hygiene_findings_free(HygieneFinding *v, int n) {</code> |
+| `NEAR_MAX` | macro | 472 | <code>#define NEAR_MAX 32</code> |
+| `NearManifest` | typedef | 473 | <code>typedef struct { char dir[1024]; Manifest m; bool exists; } NearManifest;</code> |
+| `near_manifest_has` | function | 475 | <code>static bool near_manifest_has(Cg *cg, NearManifest *near, int *nnear,</code> |
+| `node_core_module` | function | 501 | <code>static bool node_core_module(const char *module) {</code> |
+| `mod_matches` | function | 522 | <code>static bool mod_matches(const char *module, const char *cand_path);</code> |
+| `resolve_imports_run` | function | 533 | <code>static void resolve_imports_run(Cg *cg, bool scoped) {</code> |
+| `resolve_imports` | function | 690 | <code>void resolve_imports(Cg *cg)        { resolve_imports_run(cg, false); }</code> |
+| `resolve_imports_scoped` | function | 691 | <code>void resolve_imports_scoped(Cg *cg) { resolve_imports_run(cg, true); }</code> |
+| `in_list` | function | 880 | <code>static bool in_list(const char *const *list, const char *name) {</code> |
+| `in_names` | function | 888 | <code>static bool in_names(const char *names, const char *name) {</code> |
+| `C_HDR_MAX` | macro | 909 | <code>#define C_HDR_MAX 64</code> |
+| `C_HDR_LEN` | macro | 910 | <code>#define C_HDR_LEN 48</code> |
+| `c_load_headers` | function | 917 | <code>static void c_load_headers(Cg *cg, long file_id) {</code> |
+| `c_builtin` | function | 940 | <code>static bool c_builtin(Cg *cg, long file_id, const char *name) {</code> |
+| `c_builtin_reset` | function | 952 | <code>static void c_builtin_reset(void) { c_hdrs.file_id = -1; c_hdrs.n = 0; }</code> |
+| `is_resolving_lang` | function | 955 | <code>static bool is_resolving_lang(const char *lang) {</code> |
+| `is_builtin` | function | 962 | <code>static bool is_builtin(Cg *cg, const char *lang, long file_id,</code> |
+| `Cand` | typedef | 980 | <code>typedef struct {</code> |
+| `find_candidates` | function | 989 | <code>static int find_candidates(Cg *cg, const char *name, Cand *out, int cap) {</code> |
+| `path_stem` | function | 1013 | <code>static size_t path_stem(const char *path, const char **out) {</code> |
+| `cand_definition` | function | 1027 | <code>static int cand_definition(const Cand *c, int nc, int pick) {</code> |
+| `mod_matches` | function | 1055 | <code>static bool mod_matches(const char *module, const char *cand_path) {</code> |
+| `ImpCache` | typedef | 1092 | <code>typedef struct { char name[128]; char module[256]; } ImpCache;</code> |
+| `load_imports` | function | 1094 | <code>static int load_imports(Cg *cg, long file_id, ImpCache *out, int cap) {</code> |
+| `resolve_refs_run` | function | 1117 | <code>static void resolve_refs_run(Cg *cg, bool scoped) {</code> |
+| `resolve_refs` | function | 1316 | <code>void resolve_refs(Cg *cg)        { resolve_refs_run(cg, false); }</code> |
+| `resolve_refs_scoped` | function | 1317 | <code>void resolve_refs_scoped(Cg *cg) { resolve_refs_run(cg, true); }</code> |
+| `edit_distance` | function | 1322 | <code>static int edit_distance(const char *a, const char *b) {</code> |
+| `near_miss` | function | 1340 | <code>static bool near_miss(Cg *cg, const char *name, char *out, size_t cap) {</code> |
+| `file_calibrated` | function | 1366 | <code>bool file_calibrated(Cg *cg, long file_id, const char *lang) {</code> |
+| `ground_findings` | function | 1426 | <code>int ground_findings(Cg *cg, const char *path, GroundFinding **out) {</code> |
+| `ground_findings_free` | function | 1511 | <code>void ground_findings_free(GroundFinding *v, int n) {</code> |
+| `kind_callable` | function | 1519 | <code>static bool kind_callable(const char *kind) {</code> |
+| `contract_findings` | function | 1526 | <code>int contract_findings(Cg *cg, const char *path, ContractFinding **out) {</code> |
+| `contract_findings_free` | function | 1596 | <code>void contract_findings_free(ContractFinding *v, int n) {</code> |
+| `is_entrypoint` | function | 1604 | <code>bool is_entrypoint(Cg *cg, long sym_id, const char *name, const char *kind,</code> |
+| `hygiene_file` | function | 1653 | <code>static int hygiene_file(Cg *cg, const char *path, long file_id,</code> |
+| `hygiene_findings` | function | 1719 | <code>int hygiene_findings(Cg *cg, const char *path, HygieneFinding **out) {</code> |
+| `hygiene_findings_all` | function | 1737 | <code>int hygiene_findings_all(Cg *cg, HygieneFinding **out, int limit) {</code> |
+| `hygiene_findings_free` | function | 1753 | <code>void hygiene_findings_free(HygieneFinding *v, int n) {</code> |
 
 ## src/routes.c
 
@@ -2598,33 +3211,33 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `state_raw_json` | function | 61 | <code>static void state_raw_json(StrBuf *b, const char *raw) {</code> |
 | `state_live_attempt` | function | 70 | <code>static bool state_live_attempt(Cg *cg, const char *agent, SpecAttempt *a,</code> |
 | `cmd_state` | function | 99 | <code>int cmd_state(Cg *cg, bool json) {</code> |
-| `runtime_key_cmp` | function | 178 | <code>static int runtime_key_cmp(const void *a, const void *b) {</code> |
-| `runtime_json_object_valid` | function | 186 | <code>static bool runtime_json_object_valid(const char *payload) {</code> |
-| `runtime_canonical_json` | function | 220 | <code>static char *runtime_canonical_json(const char *payload) {</code> |
-| `runtime_first_string` | function | 248 | <code>static char *runtime_first_string(const char *payload,</code> |
-| `runtime_first_raw` | function | 258 | <code>static char *runtime_first_raw(const char *payload,</code> |
-| `runtime_kind` | function | 268 | <code>static char *runtime_kind(const char *payload) {</code> |
-| `RuntimeFile` | typedef | 286 | <code>typedef struct {</code> |
-| `RuntimeFiles` | typedef | 293 | <code>typedef struct { RuntimeFile *v; int n, cap; } RuntimeFiles;</code> |
-| `runtime_files_push` | function | 295 | <code>static void runtime_files_push(RuntimeFiles *files, const char *path,</code> |
-| `runtime_walk_files` | function | 312 | <code>static void runtime_walk_files(const char *root, const char *rel,</code> |
-| `runtime_file_cmp` | function | 337 | <code>static int runtime_file_cmp(const void *a, const void *b) {</code> |
-| `runtime_workspace_revision` | function | 346 | <code>void runtime_workspace_revision(Cg *cg, char out[65]) {</code> |
-| `RuntimeEventRow` | typedef | 421 | <code>typedef struct {</code> |
-| `runtime_event_store` | function | 430 | <code>static int runtime_event_store(Cg *cg, const RuntimeEventRow *r,</code> |
-| `runtime_journal_apply` | function | 468 | <code>int runtime_journal_apply(Cg *cg, const char *args, char *err,</code> |
-| `runtime_event_queue` | function | 501 | <code>static bool runtime_event_queue(Cg *cg, const RuntimeEventRow *r) {</code> |
-| `runtime_event_ingest` | function | 524 | <code>int runtime_event_ingest(Cg *cg, const char *source, const char *payload,</code> |
-| `runtime_event_history` | function | 680 | <code>static int runtime_event_history(Cg *cg, int limit, bool json) {</code> |
-| `RuntimeSample` | typedef | 737 | <code>typedef struct {</code> |
-| `runtime_contains_ci` | function | 744 | <code>static bool runtime_contains_ci(const char *s, const char *needle) {</code> |
-| `runtime_sample_failure` | function | 757 | <code>static bool runtime_sample_failure(const RuntimeSample *s) {</code> |
-| `runtime_sample_waiting` | function | 776 | <code>static bool runtime_sample_waiting(const RuntimeSample *s) {</code> |
-| `runtime_threshold` | function | 788 | <code>static int runtime_threshold(const char *name, int dflt, int floor) {</code> |
-| `runtime_classify_progress` | function | 798 | <code>int runtime_classify_progress(Cg *cg, const char *attempt,</code> |
-| `runtime_progress_fields` | function | 952 | <code>static void runtime_progress_fields(StrBuf *b, const RuntimeProgress *p) {</code> |
-| `runtime_progress` | function | 971 | <code>int runtime_progress(Cg *cg, bool json) {</code> |
-| `cmd_event` | function | 1043 | <code>int cmd_event(Cg *cg, int argc, char **argv, bool json) {</code> |
+| `runtime_key_cmp` | function | 185 | <code>static int runtime_key_cmp(const void *a, const void *b) {</code> |
+| `runtime_json_object_valid` | function | 193 | <code>static bool runtime_json_object_valid(const char *payload) {</code> |
+| `runtime_canonical_json` | function | 227 | <code>static char *runtime_canonical_json(const char *payload) {</code> |
+| `runtime_first_string` | function | 255 | <code>static char *runtime_first_string(const char *payload,</code> |
+| `runtime_first_raw` | function | 265 | <code>static char *runtime_first_raw(const char *payload,</code> |
+| `runtime_kind` | function | 275 | <code>static char *runtime_kind(const char *payload) {</code> |
+| `RuntimeFile` | typedef | 293 | <code>typedef struct {</code> |
+| `RuntimeFiles` | typedef | 300 | <code>typedef struct { RuntimeFile *v; int n, cap; } RuntimeFiles;</code> |
+| `runtime_files_push` | function | 302 | <code>static void runtime_files_push(RuntimeFiles *files, const char *path,</code> |
+| `runtime_walk_files` | function | 319 | <code>static void runtime_walk_files(const char *root, const char *rel,</code> |
+| `runtime_file_cmp` | function | 344 | <code>static int runtime_file_cmp(const void *a, const void *b) {</code> |
+| `runtime_workspace_revision` | function | 353 | <code>void runtime_workspace_revision(Cg *cg, char out[65]) {</code> |
+| `RuntimeEventRow` | typedef | 428 | <code>typedef struct {</code> |
+| `runtime_event_store` | function | 437 | <code>static int runtime_event_store(Cg *cg, const RuntimeEventRow *r,</code> |
+| `runtime_journal_apply` | function | 475 | <code>int runtime_journal_apply(Cg *cg, const char *args, char *err,</code> |
+| `runtime_event_queue` | function | 508 | <code>static bool runtime_event_queue(Cg *cg, const RuntimeEventRow *r) {</code> |
+| `runtime_event_ingest` | function | 531 | <code>int runtime_event_ingest(Cg *cg, const char *source, const char *payload,</code> |
+| `runtime_event_history` | function | 687 | <code>static int runtime_event_history(Cg *cg, int limit, bool json) {</code> |
+| `RuntimeSample` | typedef | 744 | <code>typedef struct {</code> |
+| `runtime_contains_ci` | function | 751 | <code>static bool runtime_contains_ci(const char *s, const char *needle) {</code> |
+| `runtime_sample_failure` | function | 764 | <code>static bool runtime_sample_failure(const RuntimeSample *s) {</code> |
+| `runtime_sample_waiting` | function | 783 | <code>static bool runtime_sample_waiting(const RuntimeSample *s) {</code> |
+| `runtime_threshold` | function | 795 | <code>static int runtime_threshold(const char *name, int dflt, int floor) {</code> |
+| `runtime_classify_progress` | function | 805 | <code>int runtime_classify_progress(Cg *cg, const char *attempt,</code> |
+| `runtime_progress_fields` | function | 959 | <code>static void runtime_progress_fields(StrBuf *b, const RuntimeProgress *p) {</code> |
+| `runtime_progress` | function | 978 | <code>int runtime_progress(Cg *cg, bool json) {</code> |
+| `cmd_event` | function | 1050 | <code>int cmd_event(Cg *cg, int argc, char **argv, bool json) {</code> |
 
 ## src/scan.c
 
@@ -2632,56 +3245,67 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `MAX_FILE_BYTES` | macro | 13 | <code>#define MAX_FILE_BYTES (8L * 1024 * 1024)   /* larger files: skip entirely */</code> |
-| `MAX_FTS_BYTES` | macro | 14 | <code>#define MAX_FTS_BYTES  (2L * 1024 * 1024)   /* larger: no body full-text */</code> |
-| `RING_CAP` | macro | 15 | <code>#define RING_CAP 256</code> |
-| `INDEX_CHUNK` | macro | 20 | <code>#define INDEX_CHUNK 96</code> |
-| `Walked` | typedef | 25 | <code>typedef struct {</code> |
-| `DbFile` | typedef | 29 | <code>typedef struct { char *path; long id, size, mtime; char hash[65]; } DbFile;</code> |
-| `Done` | typedef | 31 | <code>typedef struct {</code> |
-| `WalkList` | typedef | 44 | <code>typedef struct { Walked *v; int n, cap; } WalkList;</code> |
-| `walk_push` | function | 46 | <code>static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {</code> |
-| `walk_dir` | function | 61 | <code>static void walk_dir(const char *root, const char *rel, const Ignore *ig,</code> |
-| `walked_cmp` | function | 89 | <code>static int walked_cmp(const void *a, const void *b) {</code> |
-| `dbfile_cmp` | function | 92 | <code>static int dbfile_cmp(const void *a, const void *b) {</code> |
-| `Pipe` | typedef | 98 | <code>typedef struct {</code> |
-| `ring_push` | function | 111 | <code>static void ring_push(Pipe *p, Done *d) {</code> |
-| `producer_done` | function | 122 | <code>static void producer_done(Pipe *p) {</code> |
-| `ring_pop` | function | 129 | <code>static bool ring_pop(Pipe *p, Done *out) {</code> |
-| `worker` | function | 145 | <code>static void *worker(void *arg) {</code> |
-| `Stmts` | typedef | 195 | <code>typedef struct {</code> |
-| `stmts_init` | function | 210 | <code>static void stmts_init(Cg *cg, Stmts *s) {</code> |
-| `step_reset` | function | 303 | <code>static void step_reset(sqlite3_stmt *st);</code> |
-| `scope_record_file` | function | 309 | <code>static void scope_record_file(Stmts *s, long file_id, bool added) {</code> |
-| `scope_name` | function | 329 | <code>static void scope_name(Stmts *s, const char *name) {</code> |
-| `stmts_fin` | function | 335 | <code>static void stmts_fin(Stmts *s) {</code> |
-| `step_reset` | function | 341 | <code>static void step_reset(sqlite3_stmt *st) {</code> |
-| `purge_file_children` | function | 347 | <code>static void purge_file_children(Stmts *s, long file_id) {</code> |
-| `index_copy_rows` | function | 362 | <code>static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,</code> |
-| `write_done` | function | 383 | <code>static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,</code> |
-| `soft_insert` | function | 632 | <code>static void soft_insert(sqlite3_stmt *ins, long file_id, int line,</code> |
-| `probe` | function | 648 | <code>static bool probe(sqlite3_stmt *st, const char *tok, char *out, size_t cap) {</code> |
-| `index_scope_begin` | function | 661 | <code>void index_scope_begin(Cg *cg) {</code> |
-| `index_scope_end` | function | 671 | <code>void index_scope_end(Cg *cg) {</code> |
-| `count_sql` | function | 676 | <code>static long count_sql(Cg *cg, const char *sql) {</code> |
-| `index_scope_bounded` | function | 683 | <code>bool index_scope_bounded(Cg *cg) {</code> |
-| `scope_anchor_files` | function | 696 | <code>static void scope_anchor_files(Cg *cg) {</code> |
-| `SOFT_FROM` | macro | 751 | <code>#define SOFT_FROM "CASE WHEN s.decl=1 THEN NULL ELSE c.sym_id END"</code> |
-| `anchor_edges_run` | function | 753 | <code>static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {</code> |
-| `anchor_edges` | function | 848 | <code>static void anchor_edges(Cg *cg, IndexStats *st) {</code> |
-| `anchor_edges_scoped` | function | 852 | <code>static void anchor_edges_scoped(Cg *cg, IndexStats *st) {</code> |
-| `flush_chunk` | function | 859 | <code>static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,</code> |
-| `target_rel` | function | 876 | <code>static bool target_rel(const char *root, const char *in, char *out, size_t cap) {</code> |
-| `targets_cover` | function | 895 | <code>static bool targets_cover(char **t, int nt, const char *path) {</code> |
-| `walk_targets` | function | 908 | <code>static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,</code> |
-| `note_targets` | function | 936 | <code>static int note_targets(const char *root, const char *note, char ***out,</code> |
-| `targets_free` | function | 961 | <code>static void targets_free(char **t, int n) {</code> |
-| `index_find_twins` | function | 972 | <code>static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {</code> |
-| `index_pass` | function | 1002 | <code>static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,</code> |
-| `index_is_fresh` | function | 1178 | <code>static bool index_is_fresh(Cg *cg, long max_age_ms) {</code> |
-| `index_report` | function | 1196 | <code>static void index_report(const IndexStats *st, const IndexOpts *o) {</code> |
-| `cg_index_ex` | function | 1223 | <code>int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {</code> |
-| `cg_index` | function | 1408 | <code>int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {</code> |
+| `MAX_FILE_BYTES` | macro | 14 | <code>#define MAX_FILE_BYTES (8L * 1024 * 1024)   /* larger files: skip entirely */</code> |
+| `MAX_FTS_BYTES` | macro | 15 | <code>#define MAX_FTS_BYTES  (2L * 1024 * 1024)   /* larger: no body full-text */</code> |
+| `RING_CAP` | macro | 16 | <code>#define RING_CAP 256</code> |
+| `INDEX_CHUNK` | macro | 21 | <code>#define INDEX_CHUNK 96</code> |
+| `Walked` | typedef | 26 | <code>typedef struct {</code> |
+| `DbFile` | typedef | 30 | <code>typedef struct { char *path; long id, size, mtime; char hash[65]; } DbFile;</code> |
+| `Done` | typedef | 32 | <code>typedef struct {</code> |
+| `WalkList` | typedef | 45 | <code>typedef struct { Walked *v; int n, cap; } WalkList;</code> |
+| `walk_push` | function | 47 | <code>static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {</code> |
+| `walk_dir` | function | 65 | <code>static void walk_dir(const char *root, const char *rel, const Ignore *ig,</code> |
+| `walked_cmp` | function | 75 | <code>static int walked_cmp(const void *a, const void *b) {</code> |
+| `dbfile_cmp` | function | 78 | <code>static int dbfile_cmp(const void *a, const void *b) {</code> |
+| `Pipe` | typedef | 84 | <code>typedef struct {</code> |
+| `ring_push` | function | 97 | <code>static void ring_push(Pipe *p, Done *d) {</code> |
+| `producer_done` | function | 108 | <code>static void producer_done(Pipe *p) {</code> |
+| `ring_pop` | function | 115 | <code>static bool ring_pop(Pipe *p, Done *out) {</code> |
+| `worker` | function | 131 | <code>static void *worker(void *arg) {</code> |
+| `Stmts` | typedef | 186 | <code>typedef struct {</code> |
+| `stmts_init` | function | 207 | <code>static void stmts_init(Cg *cg, Stmts *s) {</code> |
+| `step_reset` | function | 335 | <code>static void step_reset(sqlite3_stmt *st);</code> |
+| `scope_record_file` | function | 341 | <code>static void scope_record_file(Stmts *s, long file_id, bool added) {</code> |
+| `scope_name` | function | 361 | <code>static void scope_name(Stmts *s, const char *name) {</code> |
+| `stmts_fin` | function | 367 | <code>static void stmts_fin(Stmts *s) {</code> |
+| `step_reset` | function | 373 | <code>static void step_reset(sqlite3_stmt *st) {</code> |
+| `purge_file_children` | function | 379 | <code>static void purge_file_children(Stmts *s, long file_id) {</code> |
+| `index_copy_rows` | function | 416 | <code>static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,</code> |
+| `write_done` | function | 448 | <code>static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,</code> |
+| `soft_insert` | function | 718 | <code>static void soft_insert(sqlite3_stmt *ins, long file_id, int line,</code> |
+| `probe` | function | 734 | <code>static bool probe(sqlite3_stmt *st, const char *tok, char *out, size_t cap) {</code> |
+| `index_scope_begin` | function | 751 | <code>void index_scope_begin(Cg *cg) {</code> |
+| `index_scope_end` | function | 761 | <code>void index_scope_end(Cg *cg) {</code> |
+| `count_sql` | function | 766 | <code>static long count_sql(Cg *cg, const char *sql) {</code> |
+| `index_scope_bounded` | function | 773 | <code>bool index_scope_bounded(Cg *cg) {</code> |
+| `scope_anchor_files` | function | 786 | <code>static void scope_anchor_files(Cg *cg) {</code> |
+| `SOFT_FROM` | macro | 841 | <code>#define SOFT_FROM "CASE WHEN s.decl=1 THEN NULL ELSE c.sym_id END"</code> |
+| `anchor_edges_run` | function | 843 | <code>static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {</code> |
+| `anchor_edges` | function | 943 | <code>static void anchor_edges(Cg *cg, IndexStats *st) {</code> |
+| `anchor_edges_scoped` | function | 947 | <code>static void anchor_edges_scoped(Cg *cg, IndexStats *st) {</code> |
+| `fts_prepurge` | function | 957 | <code>static void fts_prepurge(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n) {</code> |
+| `flush_chunk` | function | 981 | <code>static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,</code> |
+| `target_rel` | function | 1002 | <code>static bool target_rel(const char *root, const char *in, char *out, size_t cap) {</code> |
+| `targets_cover` | function | 1021 | <code>static bool targets_cover(char **t, int nt, const char *path) {</code> |
+| `walk_targets` | function | 1034 | <code>static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,</code> |
+| `note_targets` | function | 1062 | <code>static int note_targets(const char *root, const char *note, char ***out,</code> |
+| `targets_free` | function | 1087 | <code>static void targets_free(char **t, int n) {</code> |
+| `index_find_twins` | function | 1098 | <code>static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {</code> |
+| `index_pass` | function | 1128 | <code>static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,</code> |
+| `TRI_REPAIR_MAX` | macro | 1337 | <code>#define TRI_REPAIR_MAX 50000</code> |
+| `tri_rows` | function | 1339 | <code>static long tri_rows(Cg *cg) {</code> |
+| `index_tri_repair` | function | 1358 | <code>static void index_tri_repair(Cg *cg, long *repaired) {</code> |
+| `index_phase_ms` | function | 1416 | <code>void index_phase_ms(IndexStats *st, int phase, long t0) {</code> |
+| `index_peak_rss_kb` | function | 1421 | <code>long index_peak_rss_kb(void) {</code> |
+| `index_stats_json` | function | 1430 | <code>void index_stats_json(const IndexStats *st, bool targeted, StrBuf *b) {</code> |
+| `is_ignore_file` | function | 1455 | <code>static bool is_ignore_file(const char *rel) {</code> |
+| `WALK_DIRTY_MAX` | macro | 1461 | <code>#define WALK_DIRTY_MAX (256 * 1024)</code> |
+| `index_git_plan` | function | 1471 | <code>static bool index_git_plan(Cg *cg, const IndexOpts *o, const char *head,</code> |
+| `index_git_record` | function | 1533 | <code>static void index_git_record(Cg *cg, const char *head, bool gitpass) {</code> |
+| `index_is_fresh` | function | 1573 | <code>static bool index_is_fresh(Cg *cg, long max_age_ms) {</code> |
+| `index_report` | function | 1591 | <code>static void index_report(const IndexStats *st, const IndexOpts *o) {</code> |
+| `cg_index_ex` | function | 1621 | <code>int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {</code> |
+| `cg_index` | function | 1838 | <code>int cg_index(Cg *cg, const SysInfo *si, bool full, IndexStats *st, bool quiet) {</code> |
 
 ## src/serve.c
 
@@ -2689,33 +3313,34 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 
 | Indexed name | Kind | Line | Source declaration |
 | --- | --- | ---: | --- |
-| `SERVE_PROTOCOL` | macro | 31 | <code>#define SERVE_PROTOCOL  "codify-serve/1"</code> |
-| `SERVE_MAX_JOBS` | macro | 32 | <code>#define SERVE_MAX_JOBS  32</code> |
-| `SERVE_MAX_SUBS` | macro | 33 | <code>#define SERVE_MAX_SUBS  16</code> |
-| `SERVE_BATCH` | macro | 34 | <code>#define SERVE_BATCH     500</code> |
-| `SERVE_POLL_MS` | macro | 35 | <code>#define SERVE_POLL_MS   150     /* change check without inotify */</code> |
-| `SERVE_SAFETY_MS` | macro | 36 | <code>#define SERVE_SAFETY_MS 1000    /* re-check even with inotify */</code> |
-| `SERVE_MIN_GAP_MS` | macro | 37 | <code>#define SERVE_MIN_GAP_MS 15     /* coalesce a burst of WAL writes */</code> |
-| `SERVE_OUT_CAP` | macro | 38 | <code>#define SERVE_OUT_CAP   (16L &lt;&lt; 20)</code> |
-| `Sub` | typedef | 40 | <code>typedef struct {</code> |
-| `Job` | typedef | 45 | <code>typedef struct {</code> |
-| `mono_ms` | function | 57 | <code>static long mono_ms(void) {</code> |
-| `send_raw` | function | 63 | <code>static void send_raw(const char *p, size_t n) {</code> |
-| `send_msg` | function | 81 | <code>static void send_msg(StrBuf *b) {</code> |
-| `reply` | function | 87 | <code>static void reply(const char *id, const char *result) {</code> |
-| `reply_err` | function | 93 | <code>static void reply_err(const char *id, int code, const char *msg) {</code> |
-| `set_nonblock` | function | 104 | <code>static void set_nonblock(int fd) {</code> |
-| `job_spawn` | function | 109 | <code>static int job_spawn(Job *jobs, const Cg *cg, char **argv, const char *id,</code> |
-| `job_drain` | function | 152 | <code>static bool job_drain(Job *j, int fd, StrBuf *b) {</code> |
-| `job_finish` | function | 168 | <code>static void job_finish(Job *j, int status) {</code> |
-| `Batch` | typedef | 203 | <code>typedef struct { StrBuf *b; int n; long last; } Batch;</code> |
-| `batch_add` | function | 205 | <code>static int batch_add(const EventRow *e, void *ud) {</code> |
-| `serve_push` | function | 213 | <code>static void serve_push(Cg *cg, Sub *s) {</code> |
-| `Server` | typedef | 249 | <code>typedef struct {</code> |
-| `raw_or` | function | 258 | <code>static char *raw_or(const char *obj, const char *key) {</code> |
-| `serve_dispatch` | function | 262 | <code>static void serve_dispatch(Server *sv, const char *line) {</code> |
-| `kill_jobs` | function | 383 | <code>static void kill_jobs(Job *jobs) {</code> |
-| `cmd_serve` | function | 399 | <code>int cmd_serve(Cg *cg, const SysInfo *si) {</code> |
+| `SERVE_PROTOCOL` | macro | 32 | <code>#define SERVE_PROTOCOL  "codify-serve/1"</code> |
+| `SERVE_MAX_JOBS` | macro | 33 | <code>#define SERVE_MAX_JOBS  32</code> |
+| `SERVE_MAX_SUBS` | macro | 34 | <code>#define SERVE_MAX_SUBS  16</code> |
+| `SERVE_BATCH` | macro | 35 | <code>#define SERVE_BATCH     500</code> |
+| `SERVE_POLL_MS` | macro | 36 | <code>#define SERVE_POLL_MS   150     /* change check without inotify */</code> |
+| `SERVE_SAFETY_MS` | macro | 37 | <code>#define SERVE_SAFETY_MS 1000    /* re-check even with inotify */</code> |
+| `SERVE_MIN_GAP_MS` | macro | 38 | <code>#define SERVE_MIN_GAP_MS 15     /* coalesce a burst of WAL writes */</code> |
+| `SERVE_OUT_CAP` | macro | 39 | <code>#define SERVE_OUT_CAP   (16L &lt;&lt; 20)</code> |
+| `Sub` | typedef | 41 | <code>typedef struct {</code> |
+| `Job` | typedef | 46 | <code>typedef struct {</code> |
+| `mono_ms` | function | 58 | <code>static long mono_ms(void) {</code> |
+| `send_raw` | function | 64 | <code>static void send_raw(const char *p, size_t n) {</code> |
+| `send_msg` | function | 82 | <code>static void send_msg(StrBuf *b) {</code> |
+| `reply` | function | 88 | <code>static void reply(const char *id, const char *result) {</code> |
+| `reply_err` | function | 94 | <code>static void reply_err(const char *id, int code, const char *msg) {</code> |
+| `set_nonblock` | function | 105 | <code>static void set_nonblock(int fd) {</code> |
+| `job_spawn` | function | 110 | <code>static int job_spawn(Job *jobs, const Cg *cg, char **argv, const char *id,</code> |
+| `job_drain` | function | 153 | <code>static bool job_drain(Job *j, int fd, StrBuf *b) {</code> |
+| `job_finish` | function | 169 | <code>static void job_finish(Job *j, int status) {</code> |
+| `Batch` | typedef | 204 | <code>typedef struct { StrBuf *b; int n; long last; } Batch;</code> |
+| `batch_add` | function | 206 | <code>static int batch_add(const EventRow *e, void *ud) {</code> |
+| `serve_push` | function | 214 | <code>static void serve_push(Cg *cg, Sub *s) {</code> |
+| `serve_snapshot` | function | 254 | <code>static void serve_snapshot(Cg *cg, const char *id, const char *params) {</code> |
+| `Server` | typedef | 276 | <code>typedef struct {</code> |
+| `raw_or` | function | 285 | <code>static char *raw_or(const char *obj, const char *key) {</code> |
+| `serve_dispatch` | function | 289 | <code>static void serve_dispatch(Server *sv, const char *line) {</code> |
+| `kill_jobs` | function | 413 | <code>static void kill_jobs(Job *jobs) {</code> |
+| `cmd_serve` | function | 429 | <code>int cmd_serve(Cg *cg, const SysInfo *si) {</code> |
 
 ## src/sha256.c
 
@@ -2845,48 +3470,53 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `spec_touches_conflict` | function | 1953 | <code>static bool spec_touches_conflict(Spec *s, const char *id, char *other,</code> |
 | `spec_live_leases` | function | 2035 | <code>static int spec_live_leases(const Spec *s, StrBuf *b, bool json) {</code> |
 | `spec_wave_cmd` | function | 2106 | <code>static int spec_wave_cmd(Spec *s, bool json) {</code> |
-| `spec_lease_upsert` | function | 2164 | <code>static int spec_lease_upsert(Cg *g, const char *tag, const char *agent,</code> |
-| `spec_release_lease` | function | 2192 | <code>static void spec_release_lease(Spec *s, const char *id) {</code> |
-| `spec_heartbeat_cmd` | function | 2212 | <code>static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,</code> |
-| `spec_reconcile_cmd` | function | 2313 | <code>static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {</code> |
-| `spec_claim_take` | function | 2361 | <code>static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,</code> |
-| `spec_claim` | function | 2432 | <code>int spec_claim(Cg *g, const char *root, const char *feature, const char *id,</code> |
-| `spec_claim_cmd` | function | 2450 | <code>static int spec_claim_cmd(Spec *s, const char *id, const char *agent,</code> |
-| `spec_ready_cmd` | function | 2551 | <code>static int spec_ready_cmd(Spec *s, bool json) {</code> |
-| `spec_claim_next_cmd` | function | 2651 | <code>static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,</code> |
-| `spec_start_cmd` | function | 2827 | <code>static int spec_start_cmd(Spec *s, const char *id, bool force, bool json) {</code> |
-| `spec_verify_task` | function | 2918 | <code>static int spec_verify_task(Spec *s, const char *id);</code> |
-| `spec_implemented_cmd` | function | 2920 | <code>static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,</code> |
-| `spec_run_verify` | function | 3015 | <code>static int spec_run_verify(const char *root, const char *cmd, char *tail,</code> |
-| `spec_done_cmd` | function | 3045 | <code>static int spec_done_cmd(Spec *s, const char *id, const char *agent,</code> |
-| `spec_journal_apply` | function | 3217 | <code>int spec_journal_apply(Cg *g, const char *op, const char *args, char *err,</code> |
-| `spec_graph_open` | function | 3281 | <code>static bool spec_graph_open(Cg *g, bool sync) {</code> |
-| `graph_symbol_row` | function | 3302 | <code>static void graph_symbol_row(sqlite3_stmt *st, char *path, size_t pcap,</code> |
-| `path_has_qualifier` | function | 3313 | <code>static bool path_has_qualifier(const char *path, const char *segment,</code> |
-| `qualified_path_score` | function | 3336 | <code>static int qualified_path_score(const char *qualified, const char *path) {</code> |
-| `graph_symbol_named` | function | 3353 | <code>static int graph_symbol_named(Cg *g, const char *lookup,</code> |
-| `graph_symbol` | function | 3396 | <code>static int graph_symbol(Cg *g, const char *name, char *path, size_t pcap,</code> |
-| `task_tag` | function | 3408 | <code>static void task_tag(const Spec *s, const char *id, char *out, size_t cap) {</code> |
-| `pattern_hit` | function | 3418 | <code>static bool pattern_hit(const char *pat, char **paths, int np) {</code> |
-| `spec_verify_task` | function | 3438 | <code>static int spec_verify_task(Spec *s, const char *id) {</code> |
-| `trace_task` | function | 3496 | <code>static void trace_task(Spec *s, Cg *g, bool have_graph, const char *id,</code> |
-| `spec_trace_cmd` | function | 3629 | <code>static int spec_trace_cmd(Spec *s, const char *id, bool sync, bool json) {</code> |
-| `spec_new_cmd` | function | 3771 | <code>static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {</code> |
-| `list_literal` | function | 3843 | <code>static char *list_literal(const char *csv) {</code> |
-| `TaskSpec` | typedef | 3868 | <code>typedef struct {</code> |
-| `spec_add_cmd` | function | 3875 | <code>static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t,</code> |
-| `Lint` | typedef | 3952 | <code>typedef struct { StrBuf b; int errors, warnings; } Lint;</code> |
-| `lint_say` | function | 3954 | <code>static void lint_say(Lint *l, bool error, const char *id, const char *fmt, ...) {</code> |
-| `lint_cycle` | function | 3966 | <code>static bool lint_cycle(Spec *s, const char *id, char **stack, int depth,</code> |
-| `spec_lint_cmd` | function | 3998 | <code>static int spec_lint_cmd(Spec *s, bool json) {</code> |
-| `spec_active_touches` | function | 4115 | <code>int spec_active_touches(char ***out) {</code> |
-| `spec_active_tag` | function | 4128 | <code>char *spec_active_tag(void) {</code> |
-| `spec_task_tag` | function | 4148 | <code>char *spec_task_tag(const char *requested) {</code> |
-| `spec_resolve_task` | function | 4183 | <code>char *spec_resolve_task(const char *requested, const char *agent) {</code> |
-| `spec_load_tag` | function | 4219 | <code>static int spec_load_tag(Spec *s, const char *requested, const char **id_out) {</code> |
-| `spec_task_packet` | function | 4229 | <code>char *spec_task_packet(const char *requested) {</code> |
-| `spec_task_memories_tag` | function | 4248 | <code>int spec_task_memories_tag(const char *requested, Memory **out) {</code> |
-| `cmd_spec` | function | 4264 | <code>int cmd_spec(int argc, char **argv, bool json) {</code> |
+| `spec_lease_ahead_column` | function | 2166 | <code>static bool spec_lease_ahead_column(Cg *g) {</code> |
+| `spec_lease_ahead_set` | function | 2179 | <code>static int spec_lease_ahead_set(Cg *g, const char *tag, const char *reqs) {</code> |
+| `spec_start_ahead` | function | 2189 | <code>int spec_start_ahead(Cg *g, const char *tag, const char *agent,</code> |
+| `spec_lease_upsert` | function | 2210 | <code>static int spec_lease_upsert(Cg *g, const char *tag, const char *agent,</code> |
+| `spec_release_lease` | function | 2238 | <code>static void spec_release_lease(Spec *s, const char *id) {</code> |
+| `spec_heartbeat_cmd` | function | 2258 | <code>static int spec_heartbeat_cmd(Spec *s, const char *id, const char *agent,</code> |
+| `spec_reconcile_cmd` | function | 2359 | <code>static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {</code> |
+| `spec_lease_ahead_set` | function | 2407 | <code>static int spec_lease_ahead_set(Cg *g, const char *tag, const char *reqs);</code> |
+| `spec_claim_take` | function | 2409 | <code>static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,</code> |
+| `spec_claim_ex` | function | 2497 | <code>int spec_claim_ex(Cg *g, const char *root, const char *feature,</code> |
+| `spec_claim` | function | 2510 | <code>int spec_claim(Cg *g, const char *root, const char *feature, const char *id,</code> |
+| `spec_claim_cmd` | function | 2521 | <code>static int spec_claim_cmd(Spec *s, const char *id, const char *agent,</code> |
+| `spec_ready_cmd` | function | 2623 | <code>static int spec_ready_cmd(Spec *s, bool json) {</code> |
+| `spec_claim_next_cmd` | function | 2723 | <code>static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,</code> |
+| `spec_start_cmd` | function | 2899 | <code>static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,</code> |
+| `spec_verify_task` | function | 3016 | <code>static int spec_verify_task(Spec *s, const char *id);</code> |
+| `spec_implemented_cmd` | function | 3018 | <code>static int spec_implemented_cmd(Spec *s, const char *id, const char *agent,</code> |
+| `spec_run_verify` | function | 3113 | <code>static int spec_run_verify(const char *root, const char *cmd, char *tail,</code> |
+| `spec_done_cmd` | function | 3143 | <code>static int spec_done_cmd(Spec *s, const char *id, const char *agent,</code> |
+| `spec_journal_apply` | function | 3334 | <code>int spec_journal_apply(Cg *g, const char *op, const char *args, char *err,</code> |
+| `spec_graph_open` | function | 3398 | <code>static bool spec_graph_open(Cg *g, bool sync) {</code> |
+| `graph_symbol_row` | function | 3419 | <code>static void graph_symbol_row(sqlite3_stmt *st, char *path, size_t pcap,</code> |
+| `path_has_qualifier` | function | 3430 | <code>static bool path_has_qualifier(const char *path, const char *segment,</code> |
+| `qualified_path_score` | function | 3453 | <code>static int qualified_path_score(const char *qualified, const char *path) {</code> |
+| `graph_symbol_named` | function | 3470 | <code>static int graph_symbol_named(Cg *g, const char *lookup,</code> |
+| `graph_symbol` | function | 3513 | <code>static int graph_symbol(Cg *g, const char *name, char *path, size_t pcap,</code> |
+| `task_tag` | function | 3525 | <code>static void task_tag(const Spec *s, const char *id, char *out, size_t cap) {</code> |
+| `pattern_hit` | function | 3535 | <code>static bool pattern_hit(const char *pat, char **paths, int np) {</code> |
+| `spec_verify_task` | function | 3555 | <code>static int spec_verify_task(Spec *s, const char *id) {</code> |
+| `trace_task` | function | 3613 | <code>static void trace_task(Spec *s, Cg *g, bool have_graph, const char *id,</code> |
+| `spec_trace_cmd` | function | 3746 | <code>static int spec_trace_cmd(Spec *s, const char *id, bool sync, bool json) {</code> |
+| `spec_new_cmd` | function | 3888 | <code>static int spec_new_cmd(const char *root_ov, const char *feature, bool json) {</code> |
+| `list_literal` | function | 3960 | <code>static char *list_literal(const char *csv) {</code> |
+| `TaskSpec` | typedef | 3985 | <code>typedef struct {</code> |
+| `spec_add_cmd` | function | 3992 | <code>static int spec_add_cmd(Spec *s, const char *id, const TaskSpec *t,</code> |
+| `Lint` | typedef | 4069 | <code>typedef struct { StrBuf b; int errors, warnings; } Lint;</code> |
+| `lint_say` | function | 4071 | <code>static void lint_say(Lint *l, bool error, const char *id, const char *fmt, ...) {</code> |
+| `lint_cycle` | function | 4083 | <code>static bool lint_cycle(Spec *s, const char *id, char **stack, int depth,</code> |
+| `spec_lint_cmd` | function | 4115 | <code>static int spec_lint_cmd(Spec *s, bool json) {</code> |
+| `spec_active_touches` | function | 4232 | <code>int spec_active_touches(char ***out) {</code> |
+| `spec_active_tag` | function | 4245 | <code>char *spec_active_tag(void) {</code> |
+| `spec_task_tag` | function | 4265 | <code>char *spec_task_tag(const char *requested) {</code> |
+| `spec_resolve_task` | function | 4300 | <code>char *spec_resolve_task(const char *requested, const char *agent) {</code> |
+| `spec_load_tag` | function | 4336 | <code>static int spec_load_tag(Spec *s, const char *requested, const char **id_out) {</code> |
+| `spec_task_packet` | function | 4346 | <code>char *spec_task_packet(const char *requested) {</code> |
+| `spec_task_memories_tag` | function | 4365 | <code>int spec_task_memories_tag(const char *requested, Memory **out) {</code> |
+| `cmd_spec` | function | 4381 | <code>int cmd_spec(int argc, char **argv, bool json) {</code> |
 
 ## src/syncgate.c
 
@@ -3021,6 +3651,23 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `vcs_find_commits` | function | 1139 | <code>int vcs_find_commits(Cg *cg, const char *needle, char ***ids, char ***msgs,</code> |
 | `vcs_changed_paths` | function | 1170 | <code>int vcs_changed_paths(Cg *cg, const char *needle, char ***out) {</code> |
 
+## src/walk.c
+
+[Open source](../src/walk.c)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `WalkShared` | typedef | 34 | <code>typedef struct {</code> |
+| `WalkLocal` | typedef | 48 | <code>typedef struct {</code> |
+| `local_push` | function | 54 | <code>static void local_push(WalkLocal *l, const char *rel, long size, long mtime) {</code> |
+| `queue_dir` | function | 66 | <code>static void queue_dir(WalkShared *sh, const char *rel) {</code> |
+| `walk_one` | function | 76 | <code>static void walk_one(WalkLocal *l, const char *rel) {</code> |
+| `walk_thread` | function | 132 | <code>static void *walk_thread(void *arg) {</code> |
+| `entry_cmp` | function | 157 | <code>static int entry_cmp(const void *a, const void *b) {</code> |
+| `walk_threads_default` | function | 161 | <code>int walk_threads_default(int budget) {</code> |
+| `walk_parallel` | function | 169 | <code>void walk_parallel(const char *root, const char *rel, const Ignore *ig,</code> |
+| `walkset_free` | function | 241 | <code>void walkset_free(WalkSet *w) {</code> |
+
 ## src/watch.c
 
 [Open source](../src/watch.c)
@@ -3040,11 +3687,11 @@ For tests, deliberately invalid examples, and sample web routes, see the separat
 | `watch_sync` | function | 124 | <code>static int watch_sync(Cg *cg, const SysInfo *si, const Pending *p,</code> |
 | `watch_auto_off` | function | 139 | <code>static bool watch_auto_off(const char *root) {</code> |
 | `cmd_watch` | function | 147 | <code>int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |
-| `FleetWatch` | typedef | 220 | <code>typedef struct {</code> |
-| `FLEET_POLL_MS` | macro | 232 | <code>#define FLEET_POLL_MS 3000</code> |
-| `fleet_watch_open` | function | 234 | <code>static FleetWatch *fleet_watch_open(const Cg *parent, long id,</code> |
-| `fleet_watch_close` | function | 259 | <code>static void fleet_watch_close(FleetWatch *f) {</code> |
-| `fleet_scan` | function | 272 | <code>static void fleet_scan(Cg *cg, FleetWatch ***pv, int *pn) {</code> |
-| `watch_fleet` | function | 328 | <code>int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |
-| `watch_fleet` | function | 396 | <code>int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |
-| `cmd_watch` | function | 403 | <code>int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |
+| `FleetWatch` | typedef | 235 | <code>typedef struct {</code> |
+| `FLEET_POLL_MS` | macro | 247 | <code>#define FLEET_POLL_MS 3000</code> |
+| `fleet_watch_open` | function | 249 | <code>static FleetWatch *fleet_watch_open(const Cg *parent, long id,</code> |
+| `fleet_watch_close` | function | 274 | <code>static void fleet_watch_close(FleetWatch *f) {</code> |
+| `fleet_scan` | function | 287 | <code>static void fleet_scan(Cg *cg, FleetWatch ***pv, int *pn) {</code> |
+| `watch_fleet` | function | 343 | <code>int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |
+| `watch_fleet` | function | 423 | <code>int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |
+| `cmd_watch` | function | 430 | <code>int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {</code> |

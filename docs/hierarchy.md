@@ -903,7 +903,7 @@ shape:
 | Value | Meaning |
 |---|---|
 | `parallel` | A task may start while the tasks it `requires` are still open. The slot gate keeps the file collisions and the agent limit; it ignores `requires`. The default when git is 2.38 or newer. |
-| `sequential` | The waiting gate: a task starts only once its `requires` are done (across waves, once they have landed on main). The default on older git, where the projection cannot be built. |
+| `sequential` | The waiting gate: a task starts only once its `requires` are done (across waves, once they have landed on main and main has been merged forward into the task's wave branch — a land merges before its gates run, so the supervisor checks the branch, not the declaration). The default on older git, where the projection cannot be built. |
 
 `cg fleet up` prints which one applies and why when it starts.
 

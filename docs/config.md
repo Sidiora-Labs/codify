@@ -35,6 +35,9 @@ codemap = "CODEMAP.md"      # written by cg codemap
 # stale   = "24h"           # a branch without a live agent stays active this long after its last index
 # exclude = []              # branch-name globs never folded in
 # index   = false           # check the projection out and index it as branch codify/projection
+# steer   = true            # message the agents on both sides of a new conflict
+# auto    = true            # hooks, watch, serve and the supervisor start a background build when work happens
+# min_interval = "15s"     # an automatic build waits this long after the last one
 ```
 
 | Key | Default | Controls |
@@ -50,6 +53,9 @@ codemap = "CODEMAP.md"      # written by cg codemap
 | `projection.stale` | `24h` | How long after its last index a branch with no live agent still counts as active: `90s`, `30m`, `24h`, `2d`, or plain seconds. |
 | `projection.exclude` | `[]` | Branch-name globs (`fnmatch`) never folded into the projection, even when named with `--branch`. `cg config set projection.exclude "tmp/*,wip-*"` writes the list. |
 | `projection.index` | `false` | Whether every build also checks the projection out under `.codegraph/worktrees/projection` and indexes it as branch `codify/projection`, as `--index` does. |
+| `projection.steer` | `true` | Whether a build that finds a new conflict steers the agents on both branches through the `cg fleet steer` channel. `false` keeps the findings and events and stops the messages. |
+| `projection.auto` | `true` | Whether the edit hooks, `cg hook event`, `cg watch`, `cg serve` and the fleet supervisor start a background `cg projection build --quiet` when work happens. `false` leaves builds to `cg projection build`. See [Following the work](projection.md#live). |
+| `projection.min_interval` | `15s` | How long an automatic build waits after the last one, so a burst of edits becomes one build: `5s`, `1m`, or plain seconds. |
 
 The file is read once per process for each root, and the result is cached.
 It belongs to the tree it sits in, so it travels with the branch in the same

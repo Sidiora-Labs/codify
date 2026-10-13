@@ -40,7 +40,7 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 
 **它不仅服务智能体,还能驱动智能体。** `cg handoff` 与 `cg resume` 让任务在会话之间转移而不丢失状态,`cg spec claim-next` 以原子方式把下一个无冲突的任务交给空闲的智能体,`cg spec run` 则把整个 wave 分发给 Codex CLI 或 Claude Code 会话——每个已认领任务一个沙箱子进程,日志和提示词落盘,失败时释放租约。
 
-**它扛得住一整支 fleet。** 索引是共享资源,而非每个进程各自的习惯:第一个需要索引的 `cg` 负责执行,其余的留下一条记录并合并进去,新鲜度窗口可以完全跳过遍历,机器级的解析槽位让并发的多个项目都保持在核心预算之内([docs/sync.md](../../docs/sync.md))。在此之上,`spec/workflow.kvx` 可以声明一个层级——拥有任务列表的主智能体、每个特性一个特性管理者、其下的 wave 工作者——由 `cg fleet` 驱动分支流程:worktree、向上合并、在测试与 lint 关卡之后落地、拉取请求、检查点。`cg fleet up` 在一个脱离终端的监督进程下独立运行整棵树——多个特性同时进行,管理者与其工作者同时存活,每个工作者在自己的 worktree 中——催促停滞的智能体,带着失败原因重试,升级无法挽救的问题,在你选择启用的审批关卡处停下,并且只在工作**合并**之后才报告完成,而不是在进程退出时([docs/hierarchy.md](../../docs/hierarchy.md))。杀掉监督进程后,`cg fleet up --resume` 会接管仍在运行的智能体。偏离 spec 的改动、相互冲突的任务、其他分支依赖的接口变化都会在合并前被标出([docs/drift.md](../../docs/drift.md)),每一次变化都是一个事件,可由 `cg events --follow` 与 `cg serve` 实时推送([docs/events.md](../../docs/events.md))。它们共享同一个图和同一份记忆:仓库的每个分支和关联 worktree 都索引进同一个 `.codegraph/`,按分支隔离([docs/branches.md](../../docs/branches.md))。
+**它扛得住一整支 fleet。** 索引是共享资源,而非每个进程各自的习惯:第一个需要索引的 `cg` 负责执行,其余的留下一条记录并合并进去,新鲜度窗口可以完全跳过遍历,机器级的解析槽位让并发的多个项目都保持在核心预算之内([docs/sync.md](../../docs/sync.md))。在此之上,`spec/workflow.kvx` 可以声明一个层级——拥有任务列表的主智能体、每个 wave 一个管理者、每个任务一个工作者——由 `cg fleet` 驱动分支流程:worktree、向上合并、在测试与 lint 关卡之后落地、拉取请求、检查点。`cg fleet up` 在一个脱离终端的监督进程下独立运行整棵树——所有 wave 同时进行,每个管理者与其工作者同时存活,每个工作者在自己的 worktree 中——催促停滞的智能体,带着失败原因重试,升级无法挽救的问题,在你选择启用的审批关卡处停下,并且只在工作**合并**之后才报告完成,而不是在进程退出时([docs/hierarchy.md](../../docs/hierarchy.md))。杀掉监督进程后,`cg fleet up --resume` 会接管仍在运行的智能体。偏离 spec 的改动、相互冲突的任务、其他分支依赖的接口变化都会在合并前被标出([docs/drift.md](../../docs/drift.md));`cg projection build` 把每个活跃分支(包括未提交的工作)折叠到同一个投影 ref 上,在任何合并发生之前指出符号、接口与文本冲突及其所属分支,并且投影会通过钩子、`cg watch`、`cg serve` 和监督进程跟随工作更新([docs/projection.md](../../docs/projection.md))。每一次变化都是一个事件,可由 `cg events --follow` 与 `cg serve` 实时推送([docs/events.md](../../docs/events.md))。它们共享同一个图和同一份记忆:仓库的每个分支和关联 worktree 都索引进同一个 `.codegraph/`,按分支隔离([docs/branches.md](../../docs/branches.md))。
 
 **需要做判断时,它会请求一个决策。** `cg jev` 调用 TypeSafe 的 System One 模型获取类型化的判断——真/假、多选一、排序。`cg memory classify` 用它判断哪些笔记是可复用的技能,`cg skills promote` 再将其渲染为可移植的 `.agents/skills/<slug>/SKILL.md`;失败的 `verify_cmd` 会得到一行分诊,`cg guard` 的发现会被排序,拉取请求会得到一个就绪度评分。这是 Codify 唯一的远程调用:对构建于其上的功能是必需的,对核心循环从不需要,并且从不具有权威性——Jev 的任何回答都从未改变过退出码([docs/jev.md](../../docs/jev.md))。
 
@@ -134,9 +134,11 @@ cd your-project && cg init
 | `cg init [--nested]` / `cg branches` | 创建 `.codegraph/` 并构建初始索引(在已初始化仓库的关联 git worktree 中,则以当前分支加入共享图);列出索引进共享图的每个分支,及其 worktree、head、base 与文件数 |
 | `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | 增量索引:合并进已在运行的一轮、新鲜时跳过、只遍历指定路径。`cg index [--full] [--workers N]` 是总会遍历的阻塞形式。`--workers N`(两者皆可)优先于 `CG_INDEX_WORKERS` 和 `codify.kvx` 中的 `[index] workers` |
 | `cg search <q> [-n N]` / `cg symbol <name>` | 符号与全文搜索;定义、代码片段与引用计数 |
+| `cg grep <pattern> [-E] [-i]` | 代替 shell grep 的行搜索:通过三元组索引查找字面量(或 `-E` 正则),从磁盘读取,每个命中定位到其所在的符号,按 `-n` 与 `--budget` 排序截断并给出省略的尾部;`--path`、`--lang`、`--no-tests`、`--symbol`、`--kind`、`-C`、`--files`、`--count`([docs/retrieval.md](../../docs/retrieval.md)) |
 | `cg impact <name> [-d N] [--budget N]` | 传递性的调用者与被调用者,适配 token 预算(默认 8000) |
 | `cg context <q> [--budget N] [-n K]` | 面向智能体的一次性上下文包:记忆、符号、入口点、路由——前 K 个符号(默认 8),预算默认 4000,并给出明确的省略计数 |
 | `cg survey [path\|query] [--budget N]` / `cg anchors [--stale] [--uncovered]` | 函数体之下的一层:每次约 100 个文件的目的行与带签名的文档,从不输出函数体(预算默认 16000);锚点健康度:代码已变化的文档,以及按协调度评分排序的未覆盖符号 |
+| `cg files [pattern] [--dirs] [--depth N] [-n N]` | 按 glob(`src/**/*.go`)、按路径中的词(`sync gate`)或按目录列出文件,各附语言、行数与符号数;`--dirs` 列出目录及其文件数、行数与主要语言。`--path`、`--lang` 与 `--no-tests` 可缩小范围,与它们在 `search`、`context` 和 `survey` 中的作用相同 |
 | `cg routes [filter]` / `cg show <symbol\|path:line> [--full]` | URL 模式到处理函数的映射表;只看某个符号的函数体(按名称或编辑器光标位置) |
 | `cg why <symbol>` / `cg test-impact [symbol]` | 来龙去脉:改过它的提交、实现的任务、记录的决策;引用某符号(或所有未提交改动)的测试 |
 | `cg watch [--debounce MS]` | 基于原生文件系统事件的自动同步 |
@@ -184,6 +186,8 @@ cd your-project && cg init
 | `cg tool list \| call <name> [json]` | 在 shell 中直接运行一个 MCP 工具,无需 MCP 客户端 |
 | `cg integrate detect\|plan\|apply\|doctor` | 面向 Codex、Claude Code、Copilot/VS Code、Cursor、Gemini CLI、OpenCode、Zed、Windsurf、Cline 与 Continue 的能力感知配置;plan 只读,apply 幂等且有备份。`cg mcp-install` 是 `cg integrate apply` 的兼容别名 |
 | `cg hook install` / `cg hook post-edit` | 接入智能体与 git 钩子,让图保持新鲜、范围漂移自动浮现;post-edit 钩子每次编辑只做一次定向后台同步加一次 guard |
+| `cg hook event` | 接入的生命周期钩子(`--host claude\|codex`):把宿主自己的会话及其 Agent 工具派生的子智能体连同 worktree、分支、任务和最后一次工具调用记入智能体注册表,发出 `agent.native.*` 事件,并把负载交给 `cg event ingest`;总是以 0 退出 |
+| `cg hook pre-bash` | 接入的 Bash 钩子:当命令在代码树上运行 grep、rg、ag、ack、find、fd 或 `ls -R` 时,以上下文形式给出对应的 `cg grep` 或 `cg files` 写法,每个会话每条命令一次;从不做权限决定,在 `CG_SHELL_ADVICE=0` 或 `[hooks] shell_advice = false` 下静默;总是以 0 退出 |
 | `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots] [--summarize\|--no-summarize]` | 基于 git 历史的发布说明,设置 `CENTRA_API_KEY` 时每个发布附带模型撰写的 Highlights(见[变更日志](#变更日志));`--snapshots` 或无 `.git` 时改为基于快照链的符号级差异 |
 | `cg agentmd [--write]` | 在 `.codify/agent-context.md` 生成图导览;根目录的 `AGENTS.md` 与 `CLAUDE.md` 仍归 `cg spec render` 所有 |
 
@@ -214,7 +218,7 @@ Spec 工作流是 Codify 将特性计划转化为可追踪、可验证工作的�
 | `cg spec` / `cg spec status` / `cg spec mode <prod\|standard\|parallel>` | 任务面板:模式,分别统计 `done`、`implemented`、`in_progress` 与 `pending`,当前任务、下一个任务与实时认领;配置依赖与并发语义(缺失或未知按 standard) |
 | `cg spec wave` / `ready` / `claim <id>` / `release <id>` / `claim-next` | 当前 wave 或跨**所有** wave 的可执行任务(标出冲突);带所有者和过期时间的租约,不允许静默抢占;`claim-next` 原子认领第一个无冲突任务并返回完整任务包,前沿为空时以 3 退出 |
 | `cg spec run` | 编排 parallel 或 Prod wave,每个槽位驱动一个智能体进程——见[驱动智能体](#驱动智能体) |
-| `cg spec next` / `cg spec start <id>` | 最低 wave 且 `requires` 已满足的待办任务;标记为 `in_progress`(一次一个,`--force` 可覆盖) |
+| `cg spec next` / `cg spec start <id>` | 最低 wave 且 `requires` 已满足的待办任务;标记为 `in_progress`(一次一个且 `requires` 已满足;`--force` 只覆盖一次一个的限制,`--ahead` 认领 `requires` 仍未完成的任务,基于投影构建,`done` 要等它们落地) |
 | `cg spec implemented <id>` / `cg spec done <id>` | Prod 中只检查源代码证据并标记 `implemented`;运行 `verify_cmd` 与图检查,通过才标记 `done` |
 | `cg spec trace [<id>]` / `cg spec docs <status\|auto\|manual\|off\|start\|block\|reset>` | 将任务追溯到符号、改动路径、打标签的提交与记忆;查看或配置保留的 `@docs` 收尾阶段 |
 
@@ -230,7 +234,7 @@ Standard 与 Prod 模式一次只运行一个任务,而如今一次派出五个�
 
 ### Fleet 模式:智能体的层级
 
-并行模式让二十个智能体不改同一批文件,Fleet 模式则给它们一个结构。`spec/workflow.kvx` 声明一个层级——拥有任务列表并合并 PR 的**主**智能体、每个特性一个拥有其分支的**特性管理者**、以及在从特性分支切出的分支上各实现一个 wave 的 **wave 工作者**——工作通过经过验证的合并向上流动。
+并行模式让二十个智能体不改同一批文件,Fleet 模式则给它们一个结构。`spec/workflow.kvx` 声明一个层级——拥有任务列表并合并 PR 的**主**智能体、每个 wave 一个拥有从 main 切出的 wave 分支的 **wave 管理者**、以及每个任务一个在从其 wave 分支切出的分支上工作的**任务工作者**——因此所有 wave 同时运行,同一 wave 的任务并排进行,工作通过经过验证的合并向上流动。设置 `waves = parallel`(git 2.38 及更新版本上的默认值)时,任务可以先于它所 `requires` 的任务开始,基于投影构建;`done` 依然严格,每次落地后 main 会被向前合并进每个存活的 wave 分支,工作者用 `cg fleet sync` 将其并入。不含 `{wave}` 与 `{task}` 的模板保留旧的结构:每个特性一个特性管理者,每个 wave 一个工作者。
 
 ```ini
 [hierarchy]
@@ -238,14 +242,15 @@ enabled    = true
 main       = "main"
 remote     = "origin"
 worktrees  = ".codegraph/worktrees"
+waves      = "parallel"      # parallel | sequential:任务能否先于其 requires 开始?
 test_gate  = "make test"
 lint_gate  = "make cg CFLAGS='-O2 -Werror'"
 pr         = "auto"          # auto | manual
 checkpoint = "manual"
 
-[role.worker]                # [role.main] 与 [role.feature] 同理;
+[role.worker]                # [role.main] 与 [role.manager] 同理;
 branch  = "task/{feature}/{task}"  # 每个键都有默认值;
-base    = "feature/{feature}"      # {task} 让每个任务拥有自己的分支
+base    = "wave/{feature}/{wave}"  # {wave} 与 {task} 让每个 wave 和每个任务拥有自己的分支
 driver  = "codex"            # 其智能体如何运行,以及可花费多少
 wall    = "3h"
 stall   = "10m"
@@ -255,21 +260,24 @@ approve = ["land"]           # 主动启用:等待 `cg fleet approve`
 
 | 命令 | 说明 |
 |---|---|
+| `cg projection build [--index] [--strict]`、`status`、`diff [branch]`、`show`、`findings` | 用 `git merge-tree` 把每个活跃分支(包括未提交的工作)折叠到 base 上,写入 `refs/codify/projection`;冲突按路径和分支报告。`--index` 将其作为分支 `codify/projection` 建立索引([docs/projection.md](../../docs/projection.md)) |
 | `cg fleet roles` | 当前配置的层级:分支模板、base、remote、关卡、PR 策略;未配置时显示默认值并标明 |
 | `cg fleet status` | 谁以什么角色存活、在哪个任务上、隶属哪个上级 |
-| `cg fleet plan [-f F]` | 哪个管理者拥有该特性、哪个工作者拥有各个 wave,计划分支与实时智能体并列 |
+| `cg fleet discover [--since DUR]` | 从宿主写下的记录中发现原生的 Claude Code 与 Codex 会话及子智能体,用于钩子从未触发的宿主:创建或完成行(从不覆盖钩子写入的字段)、登记 worktree、把未变动的记录标为过期。`fleet status`/`tree`、`serve` 与 `watch --fleet` 会先运行它,除非指定 `--no-discover` 或 `[fleet] discover = false` |
+| `cg fleet sync [--base B]` | 在任务 worktree 中,于某次落地被向前合并后并入其 base 分支:若有未提交文件在 base 上也有改动则拒绝(并指出该文件),冲突时中止并指出,否则列出并入的提交与文件,随后构建一次投影 |
+| `cg fleet plan [-f F]` | 哪个管理者拥有各个 wave、哪个工作者拥有各个任务,计划分支与实时智能体并列 |
 | `cg fleet tree [-f F]` | 实时的树——主、管理者、工作者——附各分支进度、是否领先 base 或已合并、每个工作者的尝试与心跳 |
-| `cg fleet begin <id>` | 创建或复用从特性分支切出的 wave 分支与 worktree,并为其工作者认领任务;幂等 |
-| `cg fleet merge-up <id>` | 将**已通过资格确认**的 wave 分支合并进特性分支;冲突按路径列出并中止合并,或用 `--keep` 保留 |
-| `cg fleet land <feature>` | 将特性分支合并进本地 main 并运行测试与 lint 关卡;失败则重置 main,通过且策略为 `auto` 时开 PR;`--no-pr` 跳过 |
-| `cg fleet pr <feature>` | 通过 `gh` 推送并针对 `<remote>/<main>` 开 PR,没有 `gh` 时打印确切命令;`--dry-run` 不调用任何东西 |
-| `cg fleet checkpoint` | 按编号从小到大合并开着的 `feature/*` PR,遇到第一个无法合并的即停止 |
+| `cg fleet begin <id>` | 创建或复用从其 wave 分支切出的任务分支与 worktree,并为其工作者认领任务;幂等;`--ahead` 认领 `requires` 仍未完成的任务 |
+| `cg fleet merge-up <id>` | 先打印投影中已知的相关发现,再将**已通过资格确认**的任务分支合并进其 wave 分支;冲突按路径列出并中止合并,或用 `--keep` 保留 |
+| `cg fleet land <wave\|id>` | 将 wave 分支合并进本地 main 并运行测试与 lint 关卡;该 wave 仍有未完成任务时拒绝;失败则重置 main,通过且策略为 `auto` 时开 PR,并把 main 向前合并进存活的 wave 分支;`--no-pr` 跳过 PR |
+| `cg fleet pr <wave\|feature>` | 通过 `gh` 推送并针对 `<remote>/<main>` 开 PR,没有 `gh` 时打印确切命令;`--dry-run` 不调用任何东西 |
+| `cg fleet checkpoint` | 按编号从小到大合并开着的 `wave/*` PR(旧结构中为 `feature/*`),遇到第一个无法合并的即停止 |
 | `cg fleet up [-f F \| --all] [-n N] [--foreground] [--resume [RUN]] [--dry-run]` | 在脱离终端的监督进程下启动一次持久运行:主、管理者和工作者同时运行,直到每个任务通过资格确认并合并;`--resume` 继续未完成的运行,接管仍存活的智能体 |
 | `cg fleet down [--drain] \| pause \| resume [RUN]` | 停止(释放认领、保留分支)、让进行中的工作先完成、冻结新进程的派生,或继续 |
 | `cg fleet runs` | 各次运行、其状态以及监督进程是否存活 |
 | `cg fleet approvals [--all] \| approve <id> [--reject] [-m note]` | 在主动启用的关卡(`land`、`pr`、`drift`、`coverage`)处等待的内容,以及放行它的决定 |
 | `cg fleet steer <agent> <message>` | 给运行中的智能体发一条消息:在其下一次编辑时(Claude Code,通过 post-edit 钩子)或下一次提示时送达 |
-| `cg fleet brief <feature>` | 特性管理者的简报:子树状态、存活的工作者、失败的尝试、冲突、审批 |
+| `cg fleet brief <feature>` | 某个特性的管理者简报:子树状态、存活的工作者、失败的尝试、冲突、审批 |
 
 智能体在树中的位置存在其环境变量中——`CG_AGENT`、`CG_ROLE`、`CG_PARENT`、`CG_FEATURE`、`CG_WAVE`(以及指定 `gh` 二进制的 `CG_GH`)。没有 `CG_ROLE` 时不注册任何东西,单人会话不受影响。`cg fleet up` 独立驱动整棵树:脱离终端的监督进程运行你指定的每个特性(`--all`:所有还有工作的特性,各自在其 `[meta] requires` 完成后开始),管理者与其工作者同时存活,每个工作者在自己的 worktree 中:
 

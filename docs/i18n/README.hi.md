@@ -40,7 +40,7 @@ Codify (कमांड `cg`) एक ही बाइनरी में सम�
 
 **और यह एजेंटों को चलाता भी है, सिर्फ़ सेवा नहीं करता।** `cg handoff` और `cg resume` किसी टास्क को state खोए बिना एक सेशन से दूसरे तक ले जाते हैं, `cg spec claim-next` खाली बैठे एजेंट को अगला टकराव-रहित टास्क atomically सौंपता है, और `cg spec run` पूरी wave को Codex CLI या Claude Code सेशनों में बाँट देता है — हर claimed टास्क के लिए एक sandboxed child प्रोसेस, लॉग और prompt डिस्क पर, विफलता पर lease मुक्त।
 
-**और यह पूरे fleet को झेल लेता है।** इंडेक्सिंग एक साझा संसाधन है: पहला `cg` पास चलाता है, बाकी एक नोट छोड़कर उसी में मिल जाते हैं, freshness window होने पर walk छोड़ दिया जाता है, और मशीन-व्यापी parse slots एक साथ चल रहे प्रोजेक्टों को कोर बजट में रखते हैं ([docs/sync.md](../../docs/sync.md))। उसके ऊपर `spec/workflow.kvx` एक hierarchy घोषित कर सकता है — टास्क सूची का मालिक main एजेंट, हर फ़ीचर का feature manager, उसके नीचे wave workers — और `cg fleet` branch flow चलाता है: worktree, merge-up, test और lint gates के पीछे land, pull request, checkpoint। `cg fleet up` यह पूरा पेड़ एक detached supervisor के नीचे खुद चलाता है — अटके एजेंटों को nudge करता है, विफल को ग़लती की जानकारी के साथ दोबारा चलाता है, न बचने लायक को escalate करता है, आपके चुने approval gates पर रुकता है, और complete तब कहता है जब काम **merged** हो, न कि जब प्रोसेस बंद हो ([docs/hierarchy.md](../../docs/hierarchy.md))। Supervisor मर जाए तो `cg fleet up --resume` ज़िंदा एजेंटों को अपना लेता है। spec से drift, टकराते टास्क और दूसरी branches जिन interface पर निर्भर हैं उनके बदलाव merge से पहले चिह्नित होते हैं ([docs/drift.md](../../docs/drift.md)), और हर बदलाव एक event है जिसे `cg events --follow` और `cg serve` लाइव stream करते हैं ([docs/events.md](../../docs/events.md))। सब एक ग्राफ़ और एक मेमोरी साझा करते हैं: रिपॉज़िटरी की हर branch और linked worktree उसी `.codegraph/` में, branch के दायरे में, इंडेक्स होती है ([docs/branches.md](../../docs/branches.md))।
+**और यह पूरे fleet को झेल लेता है।** इंडेक्सिंग एक साझा संसाधन है: पहला `cg` पास चलाता है, बाकी एक नोट छोड़कर उसी में मिल जाते हैं, freshness window होने पर walk छोड़ दिया जाता है, और मशीन-व्यापी parse slots एक साथ चल रहे प्रोजेक्टों को कोर बजट में रखते हैं ([docs/sync.md](../../docs/sync.md))। उसके ऊपर `spec/workflow.kvx` एक hierarchy घोषित कर सकता है — टास्क सूची का मालिक main एजेंट, हर wave का एक manager, हर टास्क का एक worker — और `cg fleet` branch flow चलाता है: worktree, merge-up, test और lint gates के पीछे land, pull request, checkpoint। `cg fleet up` यह पूरा पेड़ एक detached supervisor के नीचे खुद चलाता है — सभी waves एक साथ, हर manager और उसके workers साथ ज़िंदा, हर worker अपने worktree में — अटके एजेंटों को nudge करता है, विफल को ग़लती की जानकारी के साथ दोबारा चलाता है, न बचने लायक को escalate करता है, आपके चुने approval gates पर रुकता है, और complete तब कहता है जब काम **merged** हो, न कि जब प्रोसेस बंद हो ([docs/hierarchy.md](../../docs/hierarchy.md))। Supervisor मर जाए तो `cg fleet up --resume` ज़िंदा एजेंटों को अपना लेता है। spec से drift, टकराते टास्क और दूसरी branches जिन interface पर निर्भर हैं उनके बदलाव merge से पहले चिह्नित होते हैं ([docs/drift.md](../../docs/drift.md)); `cg projection build` हर सक्रिय branch को, बिना कमिट किए काम सहित, एक projection ref पर जोड़ता है और कुछ भी merge होने से पहले सिंबल, interface और टेक्स्ट टकरावों को उनकी branches के नाम के साथ बताता है, और projection hooks, `cg watch`, `cg serve` और supervisor के ज़रिए काम के साथ चलता रहता है ([docs/projection.md](../../docs/projection.md))। हर बदलाव एक event है जिसे `cg events --follow` और `cg serve` लाइव stream करते हैं ([docs/events.md](../../docs/events.md))। सब एक ग्राफ़ और एक मेमोरी साझा करते हैं: रिपॉज़िटरी की हर branch और linked worktree उसी `.codegraph/` में, branch के दायरे में, इंडेक्स होती है ([docs/branches.md](../../docs/branches.md))।
 
 **और ज़रूरत पड़ने पर यह निर्णय माँगता है।** `cg jev` typed फ़ैसलों के लिए TypeSafe के System One मॉडल तक पहुँचता है — true/false, one-of, ranked। `cg memory classify` इससे बताता है कि कौन से नोट पुन: प्रयोग योग्य skills हैं, और `cg skills promote` उन्हें पोर्टेबल `.agents/skills/<slug>/SKILL.md` में रेंडर करता है; विफल `verify_cmd` को एक triage लाइन, `cg guard` के findings को रैंकिंग, और pull request को readiness स्कोर मिलता है। यह Codify की इकलौती remote कॉल है: इस पर बने फ़ीचरों के लिए अनिवार्य, मूल चक्र के लिए कभी नहीं, और कभी प्रामाणिक नहीं — Jev के किसी जवाब ने कभी exit code नहीं बदला ([docs/jev.md](../../docs/jev.md))।
 
@@ -152,8 +152,10 @@ cg init
 | `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | इंक्रीमेंटल इंडेक्स: चल रहे पास में मिल जाता है, ताज़ा होने पर छोड़ देता है। `cg index [--full] [--workers N]` हमेशा walk करने वाला blocking रूप है। `--workers N` (दोनों पर) `CG_INDEX_WORKERS` और `codify.kvx` के `[index] workers` से ऊपर रहता है |
 | `cg branches` | साझा ग्राफ़ में इंडेक्स हर branch, उसके worktree, head, base और फ़ाइल गिनती के साथ |
 | `cg search <q> [-n N]` / `cg symbol <name>` / `cg show <symbol\|path:line>` | सिंबल और फुल-टेक्स्ट सर्च; परिभाषा और रेफ़रेंस गिनती; केवल उस सिंबल की body |
+| `cg grep <pattern> [-E] [-i]` | shell grep की जगह लाइन सर्च: literal (या `-E` regex) trigram इंडेक्स से मिलता है, डिस्क से पढ़ा जाता है, हर hit अपने घेरने वाले सिंबल में रखा जाता है, `-n` और `--budget` से रैंक और सीमित, छूटे हिस्से की गिनती सहित; `--path`, `--lang`, `--no-tests`, `--symbol`, `--kind`, `-C`, `--files`, `--count` ([docs/retrieval.md](../../docs/retrieval.md)) |
 | `cg context <q> [--budget N] [-n K]` / `cg impact <name> [-d N]` | एक-कॉल कॉन्टेक्स्ट बंडल (डिफ़ॉल्ट 8 सिंबल, बजट 4000); ट्रांज़िटिव कॉलर और कैली (बजट 8000) |
 | `cg survey [path\|query]` / `cg anchors [--stale] [--uncovered]` | ~100 फ़ाइलों की purpose लाइनें और docs, body कभी नहीं; anchor की सेहत और backfill सूची |
+| `cg files [pattern] [--dirs] [--depth N] [-n N]` | glob (`src/**/*.go`), पाथ के शब्दों (`sync gate`) या डायरेक्टरी से फ़ाइलें, हर एक भाषा, लाइनों और सिंबल गिनती के साथ; `--dirs` डायरेक्टरियों का नक्शा फ़ाइल और लाइन गिनती व प्रमुख भाषा सहित देता है। `--path`, `--lang` और `--no-tests` इसे वैसे ही सीमित करते हैं जैसे `search`, `context` और `survey` को |
 | `cg routes` / `cg why <symbol>` / `cg test-impact [symbol]` | URL से हैंडलर; उत्पत्ति (कमिट, टास्क, निर्णय); संबंधित टेस्ट |
 | `cg watch` / `cg root` / `cg info` | ऑटो-सिंक; हल किया गया प्रोजेक्ट root; मशीन प्रोफ़ाइल, पाइपलाइन आकार और branch |
 
@@ -201,6 +203,8 @@ Codify के स्नैपशॉट git की जगह नहीं ले�
 | `cg tool list \| call <name> [json]` | MCP client के बिना shell से एक MCP टूल चलाता है |
 | `cg integrate detect\|plan\|apply\|doctor` | Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline और Continue के लिए सेटअप; plan केवल पढ़ता है, apply idempotent और बैकअप सहित (`cg mcp-install` इसका alias है) |
 | `cg hook install` / `cg hook post-edit` | एजेंट और git hooks जोड़ता है; हर edit पर एक लक्षित बैकग्राउंड सिंक और guard |
+| `cg hook event` | जुड़ा lifecycle hook (`--host claude\|codex`): host के अपने सेशन और उसके Agent टूल से बने subagents को उनके worktree, branch, टास्क और आख़िरी टूल के साथ agents registry में दर्ज करता है, `agent.native.*` events निकालता है, और payload `cg event ingest` को देता है; हमेशा exit 0 |
+| `cg hook pre-bash` | जुड़ा Bash hook: जब कोई कमांड ट्री पर grep, rg, ag, ack, find, fd या `ls -R` चलाती है, तो `cg grep` या `cg files` का समकक्ष context के रूप में बताता है, प्रति सेशन प्रति कमांड एक बार; कभी permission फ़ैसला नहीं, `CG_SHELL_ADVICE=0` या `[hooks] shell_advice = false` पर चुप; हमेशा exit 0 |
 | `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots] [--summarize\|--no-summarize]` | git इतिहास से रिलीज़ नोट — हर tag या version bump पर रिलीज़, `CENTRA_API_KEY` होने पर Highlights (देखें [Changelog](#changelog)) |
 | `cg agentmd [--write]` | `.codify/agent-context.md` पर ग्राफ़ orientation; रूट के `AGENTS.md` और `CLAUDE.md` का मालिक `cg spec render` है |
 
@@ -233,7 +237,7 @@ spec सादे-टेक्स्ट kvx फ़ाइलों के रू�
 | `cg spec ready` / `cg spec wave` | सभी waves का पूरा frontier, लाइव claims से टकराव चिह्नित; वर्तमान wave के सभी योग्य टास्क |
 | `cg spec claim <id>` / `release <id>` / `cg spec claim-next` | मालिक और expiry वाला lease; पहला टकराव-रहित टास्क atomically claim करता है (frontier खाली होने पर exit 3) |
 | `cg spec run` | parallel या Prod wave का orchestration — देखें [एजेंटों को चलाना](#एजेंटों-को-चलाना) |
-| `cg spec next` / `cg spec start <id>` | सबसे कम wave वाला योग्य टास्क; उसे `in_progress` करना |
+| `cg spec next` / `cg spec start <id>` | सबसे कम wave वाला योग्य टास्क; उसे `in_progress` करना। `--force` केवल एक-समय-में-एक की सीमा हटाता है; `--ahead` ऐसा टास्क claim करता है जिसके `requires` अभी खुले हैं, projection पर बनाने के लिए, और `done` उनके land होने तक रुकता है |
 | `cg spec implemented <id>` / `cg spec done <id>` | Prod में source जाँच के बाद `implemented`; `verify_cmd` और ग्राफ़ जाँचें पास होने पर ही `done` |
 | `cg spec trace [<id>]` | टास्क → सिंबल → पाथ → कमिट → मेमोरी |
 | `cg spec docs <status\|auto\|manual\|off\|start\|block\|reset>` | आरक्षित `@docs` closure stage देखना या कॉन्फ़िगर करना |
@@ -250,7 +254,7 @@ spec सादे-टेक्स्ट kvx फ़ाइलों के रू�
 
 ### Fleet मोड: एजेंटों की hierarchy
 
-Fleet मोड एजेंटों को एक ढाँचा देता है: `spec/workflow.kvx` में एक **main** एजेंट (टास्क सूची का मालिक, PR merge करता है), हर फ़ीचर का एक **feature manager** (अपनी branch का मालिक), और **wave workers** जो feature branch से कटी branch पर काम करते हैं — काम सत्यापित merges से ऊपर बहता है।
+Fleet मोड एजेंटों को एक ढाँचा देता है: `spec/workflow.kvx` में एक **main** एजेंट (टास्क सूची का मालिक, PR merge करता है), हर wave का एक **wave manager** (main से कटी wave branch का मालिक), और हर टास्क का एक **task worker** जो अपनी wave branch से कटी branch पर काम करता है — इसलिए सभी waves एक साथ चलती हैं, एक wave के टास्क अगल-बगल चलते हैं, और काम सत्यापित merges से ऊपर बहता है। `waves = parallel` (git 2.38 और नए पर डिफ़ॉल्ट) के साथ कोई टास्क अपने `requires` वाले टास्कों से पहले शुरू होकर projection पर बन सकता है; `done` सख़्त रहता है, हर land के बाद main हर लाइव wave branch में आगे merge होता है, और workers उसे `cg fleet sync` से लेते हैं। `{wave}` और `{task}` के बिना templates पुराना ढाँचा रखते हैं: हर फ़ीचर का एक feature manager, हर wave का एक worker।
 
 ```ini
 [hierarchy]
@@ -258,14 +262,15 @@ enabled    = true
 main       = "main"
 remote     = "origin"
 worktrees  = ".codegraph/worktrees"
+waves      = "parallel"      # parallel | sequential: क्या कोई टास्क अपने requires से पहले शुरू हो सकता है?
 test_gate  = "make test"
 lint_gate  = "make cg CFLAGS='-O2 -Werror'"
 pr         = "auto"          # auto | manual
 checkpoint = "manual"
 
-[role.worker]                # [role.main] और [role.feature] भी इसी तरह;
+[role.worker]                # [role.main] और [role.manager] भी इसी तरह;
 branch  = "task/{feature}/{task}"  # हर key का एक डिफ़ॉल्ट है;
-base    = "feature/{feature}"      # {task} हर टास्क को अपनी branch देता है
+base    = "wave/{feature}/{wave}"  # {wave} और {task} हर wave और हर टास्क को अपनी branch देते हैं
 driver  = "codex"            # इसके एजेंट कैसे चलें, और कितना ख़र्च करें
 wall    = "3h"
 stall   = "10m"
@@ -275,21 +280,24 @@ approve = ["land"]           # opt-in: `cg fleet approve` का इंतज़
 
 | कमांड | विवरण |
 |---|---|
+| `cg projection build [--index] [--strict]`, `status`, `diff [branch]`, `show`, `findings` | हर सक्रिय branch को, बिना कमिट किए काम सहित, `git merge-tree` से base पर `refs/codify/projection` में जोड़ता है; टकराव पाथ और branch सहित। `--index` इसे branch `codify/projection` के रूप में इंडेक्स करता है ([docs/projection.md](../../docs/projection.md)) |
 | `cg fleet roles` | कॉन्फ़िगर की गई hierarchy: branch templates, base, remote, gates, PR नीति |
 | `cg fleet status` | कौन किस role में, किस टास्क पर, किस parent के नीचे ज़िंदा है |
-| `cg fleet plan [-f F]` | कौन सा manager फ़ीचर का मालिक है और हर wave का worker कौन, लाइव एजेंटों के साथ |
+| `cg fleet discover [--since DUR]` | उन hosts के लिए जिनके hooks कभी नहीं चले, hosts के लिखे transcripts से मिले native Claude Code और Codex सेशन और subagents: पंक्तियाँ बनाई या पूरी की जाती हैं (hook का field कभी overwrite नहीं), worktrees दर्ज, अछूते transcripts stale चिह्नित। `fleet status`/`tree`, `serve` और `watch --fleet` इसे पहले चलाते हैं, जब तक `--no-discover` या `[fleet] discover = false` न हो |
+| `cg fleet sync [--base B]` | task worktree में, land के आगे merge होने के बाद उसकी base branch merge करता है: base पर भी बदली कोई uncommitted फ़ाइल हो तो इनकार (नाम सहित), टकराव abort करके नामित, वरना आए कमिट और फ़ाइलें, फिर projection build |
+| `cg fleet plan [-f F]` | हर wave का मालिक कौन सा manager है और हर टास्क का worker कौन, लाइव एजेंटों के साथ |
 | `cg fleet tree [-f F]` | लाइव पेड़ — main, managers, workers — हर branch की प्रगति, merge state, attempt और heartbeat |
-| `cg fleet begin <id>` | wave branch और worktree बनाता या दोबारा उपयोग करता है और worker के लिए टास्क claim करता है |
-| `cg fleet merge-up <id>` | **qualified** wave branch को feature branch में merge करता है; टकराव पाथ सहित बताकर abort |
-| `cg fleet land <feature>` | feature branch को लोकल main में merge करके test और lint gates चलाता है; लाल होने पर main वापस, हरा होने पर `auto` नीति में PR |
-| `cg fleet pr <feature>` | `gh` से push और PR; `gh` न हो तो सटीक कमांड छापता है |
-| `cg fleet checkpoint` | खुले `feature/*` PR सबसे छोटे नंबर से merge करता है, पहले न होने वाले पर रुकता है |
+| `cg fleet begin <id>` | अपनी wave branch से कटी task branch और worktree बनाता या दोबारा उपयोग करता है और worker के लिए टास्क claim करता है; `--ahead` ऐसा टास्क claim करता है जिसके `requires` अभी खुले हैं |
+| `cg fleet merge-up <id>` | **qualified** task branch को उसकी wave branch में merge करता है, पहले उसके लिए projection की ज्ञात findings छापकर; टकराव पाथ सहित बताकर abort |
+| `cg fleet land <wave\|id>` | wave branch को लोकल main में merge करके test और lint gates चलाता है; wave का कोई टास्क खुला हो तो इनकार; लाल होने पर main वापस, हरा होने पर `auto` नीति में PR और main का लाइव wave branches में आगे merge |
+| `cg fleet pr <wave\|feature>` | `gh` से push और PR; `gh` न हो तो सटीक कमांड छापता है |
+| `cg fleet checkpoint` | खुले `wave/*` PR (पुराने ढाँचे में `feature/*`) सबसे छोटे नंबर से merge करता है, पहले न होने वाले पर रुकता है |
 | `cg fleet up [-f F \| --all] [-n N] [--foreground] [--resume [RUN]] [--dry-run]` | detached supervisor के नीचे टिकाऊ run: main, managers और workers एक साथ, हर टास्क qualified और merged होने तक। `--resume` ज़िंदा एजेंटों को अपनाकर अधूरा run जारी रखता है |
 | `cg fleet down [--drain] \| pause \| resume [RUN]` | रोकना (claims मुक्त, branches बनी रहती हैं), लाइव काम पूरा होने देना, spawning रोकना, या जारी रखना |
 | `cg fleet runs` | runs, उनकी state, और supervisor ज़िंदा है या नहीं |
 | `cg fleet approvals [--all] \| approve <id> [--reject] [-m note]` | opt-in gate (`land`, `pr`, `drift`, `coverage`) पर क्या रुका है, और उसे छोड़ने वाला फ़ैसला |
 | `cg fleet steer <agent> <message>` | चलते एजेंट के लिए संदेश: उसका अगला edit (Claude Code, post-edit hook से) या अगला prompt |
-| `cg fleet brief <feature>` | feature manager की briefing: subtree state, लाइव workers, विफल attempts, टकराव, approvals |
+| `cg fleet brief <feature>` | किसी फ़ीचर के लिए manager की briefing: subtree state, लाइव workers, विफल attempts, टकराव, approvals |
 
 पेड़ में एजेंट की जगह उसके environment (`CG_AGENT`, `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE`) में रहती है; बिना `CG_ROLE` के अकेला सेशन अपरिवर्तित रहता है। `cg fleet up` पूरा पेड़ खुद चलाता है — हर नामित फ़ीचर (`--all`: काम बाकी वाला हर फ़ीचर), manager और उसके workers साथ, हर worker अपने worktree में:
 

@@ -39,11 +39,11 @@ Version 1.1.0 (v11) turns the fleet into something you hand a spec to and leave 
 
 The layers reinforce each other: commits are auto-tagged with the task they implement, memories surface on the task they belong to, `cg why` walks a symbol back to the decisions behind it, and `cg spec trace` walks any task to its symbols, commits, and memories.
 
-**And it is present between the steps, not only at them.** `cg work open` starts with a compact task packet, `cg work update` returns only new state/evidence/workspace deltas, `cg event progress` classifies loops without mistaking activity for progress, and `cg guard` notices when an edit drifts outside declared scope. A built-in MCP server exposes 60 tools, resources, and prompts to every MCP-capable agent, while `cg integrate` plans, applies, and diagnoses each host's native configuration.
+**And it is present between the steps, not only at them.** `cg work open` starts with a compact task packet, `cg work update` returns only new state/evidence/workspace deltas, `cg event progress` classifies loops without mistaking activity for progress, and `cg guard` notices when an edit drifts outside declared scope. A built-in MCP server exposes 63 tools, resources, and prompts to every MCP-capable agent, while `cg integrate` plans, applies, and diagnoses each host's native configuration.
 
 **And it drives agents, not just serves them.** `cg handoff` and `cg resume` move a task between sessions without losing state, `cg spec claim-next` hands an idle agent the next conflict-free task atomically, and `cg spec run` fans a whole wave out to Codex CLI or Claude Code sessions — one sandboxed child process per claimed task, logs and prompts on disk, leases released on failure.
 
-**And it survives a fleet.** Indexing is a shared resource, not a per-process habit: the first `cg` that wants a pass runs it, the rest leave a note and coalesce into it, a freshness window skips the walk entirely, and machine-wide parse slots keep concurrent projects inside the core budget ([docs/sync.md](docs/sync.md)). Above that, `spec/workflow.kvx` can declare a hierarchy — a main agent owning the task list, a feature manager per feature, wave workers under each — and `cg fleet` drives the branch flow: worktree, merge-up, land behind the test and lint gates, pull request, checkpoint. `cg fleet up` runs that whole tree by itself under a detached supervisor — several features at once, a manager and its workers alive together, each worker in its own worktree — nudging stalled agents, retrying failed ones with what went wrong, escalating what cannot be rescued, stopping at the approval gates you opted into, and reporting complete when the work **merged**, not when a process exited ([docs/hierarchy.md](docs/hierarchy.md)). Kill the supervisor and `cg fleet up --resume` adopts the agents still alive. Drift from the spec, colliding tasks, and interface changes other branches depend on are flagged before they merge ([docs/drift.md](docs/drift.md)), and every change is an event that `cg events --follow` and `cg serve` stream live ([docs/events.md](docs/events.md)). All of them share one graph and one memory: every branch and linked worktree of the repository indexes into the same `.codegraph/`, scoped by branch ([docs/branches.md](docs/branches.md)).
+**And it survives a fleet.** Indexing is a shared resource, not a per-process habit: the first `cg` that wants a pass runs it, the rest leave a note and coalesce into it, a freshness window skips the walk entirely, and machine-wide parse slots keep concurrent projects inside the core budget ([docs/sync.md](docs/sync.md)). Above that, `spec/workflow.kvx` can declare a hierarchy — a main agent owning the task list, a manager per wave, a worker per task — and `cg fleet` drives the branch flow: worktree, merge-up, land behind the test and lint gates, pull request, checkpoint. `cg fleet up` runs that whole tree by itself under a detached supervisor — every wave at once, each manager and its workers alive together, each worker in its own worktree — nudging stalled agents, retrying failed ones with what went wrong, escalating what cannot be rescued, stopping at the approval gates you opted into, and reporting complete when the work **merged**, not when a process exited ([docs/hierarchy.md](docs/hierarchy.md)). Kill the supervisor and `cg fleet up --resume` adopts the agents still alive. Drift from the spec, colliding tasks, and interface changes other branches depend on are flagged before they merge ([docs/drift.md](docs/drift.md)); `cg projection build` folds every active branch, uncommitted work included, onto one projection ref and names the symbol, interface and textual conflicts with their branches before anything merges, and the projection follows the work through the hooks, `cg watch`, `cg serve` and the supervisor ([docs/projection.md](docs/projection.md)). Every change is an event that `cg events --follow` and `cg serve` stream live ([docs/events.md](docs/events.md)). All of them share one graph and one memory: every branch and linked worktree of the repository indexes into the same `.codegraph/`, scoped by branch ([docs/branches.md](docs/branches.md)).
 
 **And it asks for a decision when one is needed.** `cg jev` reaches TypeSafe's System One model for typed judgements — true/false, one-of, ranked. `cg memory classify` uses it to say which notes are reusable skills, and `cg skills promote` renders those into portable `.agents/skills/<slug>/SKILL.md`; a failing `verify_cmd` gets a triage line, `cg guard` gets its findings ranked, and a pull request gets a readiness score. It is the one remote call Codify makes: mandatory for the features built on it, never for the core loop, and never authoritative — no answer of Jev's has ever changed an exit code ([docs/jev.md](docs/jev.md)).
 
@@ -306,7 +306,7 @@ A classified memory carries its class everywhere it appears — `class skill 0.8
 
 | Command | Description |
 | --- | --- |
-| `cg mcp` | Run as an MCP stdio server: 60 tools, plus resources and prompts (see below) |
+| `cg mcp` | Run as an MCP stdio server: 63 tools, plus resources and prompts (see below) |
 | `cg lsp` | Run as a Language Server (stdio) — every editor, not just VS Code |
 | `cg serve` | One JSON-RPC connection (stdio) for an editor: every MCP tool, any `cg` command (`exec`), `cancel`, and pushed event subscriptions from a sequence number, within milliseconds of the commit. Idle, it holds no lock and runs no index pass. See [docs/events.md](docs/events.md#cg-serve) |
 | `cg tool list \| call <name> [json]` | Run one MCP tool from a shell, without an MCP client |
@@ -371,7 +371,7 @@ The spec workflow is how Codify turns a feature plan into tracked, verified work
 | `cg spec claim-next` | Atomically claim the first eligible task whose `touches` conflict with neither in-progress tasks nor live leases (file lock + one transaction), and return the full packet: task, lease, task-scoped memories. Exits 3 when the frontier is empty — distinct from an error |
 | `cg spec run` | Orchestrate a parallel or Prod wave: claim eligible tasks and drive one agent process per slot — see [Driving agents](#driving-agents). `-n N`, `--driver codex\|claude\|custom`, `--dry-run`, `--max-fail K`, `--agent-prefix P` |
 | `cg spec next` | The lowest-wave pending task whose `requires` are satisfied (`done` only in standard mode; `implemented` or `done` in Prod mode), with its do-bullets and expanded acceptance criteria |
-| `cg spec start <id>` | Mark a task `in_progress`; enforces one at a time and met `requires`, with `--force` to override |
+| `cg spec start <id>` | Mark a task `in_progress`; enforces one at a time and met `requires`. `--force` overrides the one-at-a-time limit only; `--ahead` claims a task whose `requires` are still open, to be built against the projection, and `done` waits until they land |
 | `cg spec implemented <id>` | In Prod mode, run source graph checks without executing `verify_cmd`, then mark coding complete as `implemented` (unchecked; qualification pending; no `--force`) |
 | `cg spec done <id>` | From `in_progress` or `implemented`, run the task's `verify_cmd` and graph checks; mark it `done` only when qualification passes, otherwise preserve `implemented` |
 | `cg spec trace [<id>]` | Trace tasks to code: declared symbols resolved in the graph (location, kind, refs), touched paths matched against actual changes, the commits tagged with the task, and its memories |
@@ -444,7 +444,7 @@ The workflow also feeds the memory layer on its own. Every completion writes a t
 
 ### Fleet mode: a hierarchy of agents
 
-Parallel mode keeps twenty agents from editing the same files. Fleet mode gives them a shape. `spec/workflow.kvx` declares a hierarchy — a **main** agent that owns the task list and merges pull requests, one **feature manager** per feature owning its branch, and **wave workers** implementing one wave each on a branch cut from the feature branch — and work flows upward through verified merges.
+Parallel mode keeps twenty agents from editing the same files. Fleet mode gives them a shape. `spec/workflow.kvx` declares a hierarchy — a **main** agent that owns the task list and merges pull requests, one **wave manager** per wave owning a wave branch cut from main, and one **task worker** per task on a branch cut from its wave branch — so every wave runs at once, the tasks of a wave run side by side, and work flows upward through verified merges. With `waves = parallel` (the default on git 2.38 and newer) a task may start ahead of the tasks it `requires`, building against the projection; `done` stays strict, main is merged forward into every live wave branch after each land, and workers take it in with `cg fleet sync`. Templates without `{wave}` and `{task}` keep the older shape: a feature manager per feature, a worker per wave.
 
 ```ini
 [hierarchy]
@@ -452,14 +452,15 @@ enabled    = true
 main       = "main"
 remote     = "origin"
 worktrees  = ".codegraph/worktrees"
+waves      = "parallel"      # parallel | sequential: may a task start ahead of its requires?
 test_gate  = "make test"
 lint_gate  = "make cg CFLAGS='-O2 -Werror'"
 pr         = "auto"          # auto | manual
 checkpoint = "manual"
 
-[role.worker]                # [role.main] and [role.feature] likewise;
+[role.worker]                # [role.main] and [role.manager] likewise;
 branch  = "task/{feature}/{task}"  # every key falls back to a default;
-base    = "feature/{feature}"      # {task} gives each task its own branch
+base    = "wave/{feature}/{wave}"  # {wave} and {task} give each wave and each task its own branch
 driver  = "codex"            # how its agents run, and what they may spend
 wall    = "3h"
 stall   = "10m"
@@ -474,19 +475,19 @@ approve = ["land"]           # opt-in: wait for `cg fleet approve`
 | `cg fleet status` | Who is alive in which role, on which task, under which parent |
 | `cg fleet discover [--since DUR]` | Native Claude Code and Codex sessions and subagents found from the transcripts the hosts write, for hosts whose hooks never fired: rows created or completed (never overwriting a hook's field), worktrees registered, untouched transcripts marked stale. `fleet status`/`tree`, `serve` and `watch --fleet` run it first unless `--no-discover` or `[fleet] discover = false` |
 | `cg fleet sync [--base B]` | In a task worktree, merge its base branch in after a land was merged forward: refused while an uncommitted file is also changed on the base (named), a conflict aborted and named, otherwise the commits and files that came in, then a projection build |
-| `cg fleet plan [-f F]` | Which manager owns the feature and which worker owns each wave, planned branches beside live agents |
+| `cg fleet plan [-f F]` | Which manager owns each wave and which worker owns each task, planned branches beside live agents |
 | `cg fleet tree [-f F]` | The live tree — main, managers, workers — with each branch's progress, whether it is ahead of its base or already merged, and every worker's attempt and heartbeat. Refused in a repo that runs flat |
-| `cg fleet begin <id>` | Create or reuse the wave branch and worktree, cut from the feature branch, and claim the task for its worker. Idempotent; `--agent` names a replacement |
-| `cg fleet merge-up <id>` | Merge a **qualified** wave branch into the feature branch. Refused while the branch tip says the task is not `done`; conflicts are listed by path and the merge aborted, or left in place with `--keep` |
-| `cg fleet land <feature>` | Merge the feature branch into local main and run the test and lint gates. Red resets main to where it was; green opens the PR when the policy says `auto`. `--no-pr` skips it |
-| `cg fleet pr <feature>` | Push and open the pull request against `<remote>/<main>` through `gh`, or print the exact commands when `gh` is absent. `--dry-run` calls nothing; an already-open PR is reported, not duplicated |
-| `cg fleet checkpoint` | Merge the open `feature/*` pull requests lowest number first, stopping at the first that will not merge |
+| `cg fleet begin <id>` | Create or reuse the task branch and worktree, cut from its wave branch, and claim the task for its worker. Idempotent; `--agent` names a replacement; `--ahead` claims a task whose `requires` are still open |
+| `cg fleet merge-up <id>` | Merge a **qualified** task branch into its wave branch, after printing the projection's known findings for it. Refused while the branch tip says the task is not `done`; conflicts are listed by path and the merge aborted, or left in place with `--keep` |
+| `cg fleet land <wave\|id>` | Merge a wave branch into local main and run the test and lint gates. Refused while a task of the wave is open; red resets main to where it was; green opens the PR when the policy says `auto` and merges main forward into the live wave branches. `--no-pr` skips the PR |
+| `cg fleet pr <wave\|feature>` | Push and open the pull request against `<remote>/<main>` through `gh`, or print the exact commands when `gh` is absent. `--dry-run` calls nothing; an already-open PR is reported, not duplicated |
+| `cg fleet checkpoint` | Merge the open `wave/*` pull requests (`feature/*` in the older shape) lowest number first, stopping at the first that will not merge |
 | `cg fleet up [-f F \| --all] [-n N] [--foreground] [--resume [RUN]] [--dry-run]` | Start a durable run under a detached supervisor: main, managers, and workers at once, supervised until every task is qualified and merged. `--resume` continues an unfinished run, adopting agents still alive |
 | `cg fleet down [--drain] \| pause \| resume [RUN]` | Stop (claims released, branches kept), let live work finish first, freeze spawning, or continue |
 | `cg fleet runs` | Runs, their state, and whether their supervisor is alive |
 | `cg fleet approvals [--all] \| approve <id> [--reject] [-m note]` | What waits at an opt-in gate (`land`, `pr`, `drift`, `coverage`), and the decision that releases it |
 | `cg fleet steer <agent> <message>` | A message for a running agent: its next edit (Claude Code, through the post-edit hook) or its next prompt |
-| `cg fleet brief <feature>` | The feature manager's briefing: subtree state, live workers, failed attempts, conflicts, approvals |
+| `cg fleet brief <feature>` | The manager's briefing for a feature: subtree state, live workers, failed attempts, conflicts, approvals |
 
 An agent's place in the tree lives in its environment — `CG_AGENT`, `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE` (and `CG_GH` to name the `gh` binary) — and `cg fleet begin` prints the exact line to export. With no `CG_ROLE` nothing is registered, so a solo session is unchanged. With it, `cg brief` names the role and parent, claims carry the branch, and the attempt ledger records branch, worktree, and parent for good.
 

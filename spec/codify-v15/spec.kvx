@@ -110,7 +110,7 @@ overview = "Nine requirements, three fronts, new code in new files so the merges
 
 [documentation]
 mode      = "auto"
-status    = "pending"
+status    = "done"
 audiences = ["user", "developer"]
 targets   = ["README.md", "docs/**", "CHANGELOG.md"]
 

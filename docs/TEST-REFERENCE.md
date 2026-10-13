@@ -2,7 +2,7 @@
 
 These are test-only graph observations, not supported product APIs or live Codify HTTP endpoints. In particular, `GET /api/tasks`, `GET /users`, and `POST /users` come from fixture applications. They test extraction; Codify does not start those applications.
 
-The baseline contains 191 observations in 47 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
+The baseline contains 202 observations in 48 files. Source links and line numbers refer to the checkout used for this documentation pass; rerun the workflow after implementation changes. The declaration column quotes the source line at the indexed location and may be only the first line of a multiline declaration. It is not an inferred behavioral contract.
 
 For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testing instructions](../CONTRIBUTING.md#tests) explain how to exercise fixtures in temporary repositories.
 
@@ -438,6 +438,24 @@ For shipped modules, see the [source reference](SOURCE-REFERENCE.md). The [testi
 | --- | --- | ---: | --- |
 | `formatName` | function | 1 | <code>export function formatName(first: string, last: string): string {</code> |
 | `capitalize` | function | 5 | <code>export function capitalize(s: string): string {</code> |
+
+## tests/scale/gen.py
+
+[Open source](../tests/scale/gen.py)
+
+| Indexed name | Kind | Line | Source declaration |
+| --- | --- | ---: | --- |
+| `Lcg` | class | 28 | <code>class Lcg:</code> |
+| `__init__` | function | 29 | <code>def __init__(self, seed):</code> |
+| `next` | function | 32 | <code>def next(self):</code> |
+| `below` | function | 36 | <code>def below(self, n):</code> |
+| `plan` | function | 40 | <code>def plan(nfiles):</code> |
+| `mdir` | function | 56 | <code>def mdir(mod):</code> |
+| `fname` | function | 60 | <code>def fname(lang, i, k):</code> |
+| `rel_ts` | function | 64 | <code>def rel_ts(here, t):</code> |
+| `render` | function | 74 | <code>def render(lang, i, mod, stem, peers, rng, per_file, nfuncs):</code> |
+| `header` | function | 181 | <code>def header(i, stem, nfuncs):</code> |
+| `main` | function | 190 | <code>def main():</code> |
 
 ## tests/unit/tap.h
 

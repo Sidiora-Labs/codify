@@ -23,7 +23,9 @@ files ───────────────────────► j
   of precedence, up to `CG_MAX_WORKERS` (64) — and
   `syncgate_worker_request` is the one place that resolves the request
   and names its origin.
-- **`scan.c`** walks the tree, diffs (mtime, size) against the `files`
+- **`scan.c`** walks the tree (in parallel, through `walk.c`, or asks git
+  for the candidates; see [Walk and the index at scale](#walk-and-the-index-at-scale-walkc-scanc)),
+  diffs (mtime, size) against the `files`
   table, fans changed files out to a worker pool through a bounded ring
   buffer, and writes results back on the main thread in short chunked
   transactions (`INDEX_CHUNK` files per `BEGIN IMMEDIATE`). Parsing happens
@@ -57,19 +59,44 @@ files ───────────────────────► j
   `leases`, fenced `attempts` (with `branch`, `worktree`, `parent`),
   the `agents` registry, normalized `runtime_events`, incremental
   `runtime_files`, revision baselines in `work_packets` / `work_files`,
-  and criterion-linked `work_evidence`, plus three FTS5 tables — trigram
-  over symbol names and their split name words (substring and word
-  search), unicode61 over file bodies (word search), and unicode61 over
-  memory bodies. C/C++ prototypes are `symbols` rows with `decl=1` that
+  and criterion-linked `work_evidence`, the `projections` and
+  `projection_findings` tables (durable, see
+  [Projection](#projection-projectionc-conflictsc)), plus the FTS5 tables —
+  trigram over symbol names and their split name words (substring and word
+  search), unicode61 over file bodies (`body_fts`, word search), unicode61
+  over comments and over memory bodies, trigram over every file body
+  (`body_tri`, the candidates for `cg grep`), and trigram over each path's
+  words (`file_fts`, for `cg files`). `files.base` holds a path's last
+  segment. C/C++ prototypes are `symbols` rows with `decl=1` that
   end at their own `;`; `refs.target_id` is indexed (see
   [retrieval.md](retrieval.md)). The schema is versioned in
-  `meta.schema_version` (`cg_schema_upgrade`, currently v17): on a mismatch
-  the derived tables — everything the indexer rebuilds from source — are
+  `meta.schema_version` (`cg_schema_upgrade`, `SCHEMA_VERSION` currently
+  18): on a mismatch the derived tables — `files`, `symbols`, `refs`,
+  `routes`, `imports`, `comments` and their FTS tables, `file_fts` and
+  `body_tri`, with `meta.fts_mode` and the per-branch `last_index_*`,
+  `walk_*`, `project_files*` and `index_pending_resolve*` marks — are
   dropped and recreated for the next sync, while the branch and agent
-  registries, memories, git history, attempts, runtime history, and work
-  evidence are never touched. A database written by a *newer* `cg` is
-  refused rather than downgraded, so an old editor binary and a new CLI
-  cannot take turns re-indexing the tree.
+  registries, memories, git history, attempts, runtime history, work
+  evidence, and projection builds and findings are never touched. A few
+  guarded `ALTER TABLE`s run on *every* open, before the version check,
+  because a database stamped v18 by an earlier build of v18 can lack them:
+  the `agents` table gains the native-agent columns (`kind`, `host_kind`,
+  `agent_id`, `agent_type`, `description`, `model`, `depth`, `state`,
+  `started`, `ended`, `transcript`, `cwd`, `task`, `task_source`,
+  `last_tool`, `tool_calls`, `discovered`), each added only when
+  `pragma_table_info` says it is missing, and `files` gains `base`, filled
+  from `path` in place rather than by a rebuild. After the upgrade
+  `cg_open` runs `db_fts_create`, which creates `body_fts` contentless
+  (`content=''`, `contentless_delete=1`) on SQLite 3.43.0 or newer and
+  content-bearing otherwise, and records the form in `meta.fts_mode`; an
+  existing table's DDL wins over the meta row, so a database is always
+  used in the form it was built with, and a contentless one opened by an
+  older SQLite is refused with the version named. `body_tri_compat`
+  does the same for `body_tri` before the schema runs. `idx_file_base`
+  (`files(base, branch_id)`) and `idx_import_target` are created after the
+  upgrade, since a v17 `files` table has no `base`. A database written by
+  a *newer* `cg` is refused rather than downgraded, so an old editor
+  binary and a new CLI cannot take turns re-indexing the tree.
   It also resolves the project root, which is load-bearing:
   `cg_find_root_at` stops the upward walk at a `.git`/`go.mod`/
   `package.json`-style boundary, at `$HOME`, and at a mount change, so a
@@ -93,6 +120,159 @@ files ───────────────────────► j
   `{"n","at"}` form on every repeat, cut sections carry an explicit
   `omitted` count, full-text hits carry a line number, and `show`
   truncates long bodies with a `use --full` marker.
+
+## Walk and the index at scale (`walk.c`, `scan.c`)
+
+A whole-tree pass pays for finding what changed, parsing it, writing it,
+and resolving references; each is kept proportional to the change rather
+than to the tree wherever it can be.
+
+`walk_parallel` replaces the recursive walk. Directories are a shared work
+list: each walk thread takes one, reads it, queues its subdirectories and
+keeps the regular files it found, so a lopsided tree still spreads over
+the threads. The thread count is `walk_threads_default`: the parse budget,
+or `CG_WALK_THREADS` (1 to `CG_MAX_WORKERS`). The entry's `d_type` decides
+directory, link or file without a stat (only `DT_UNKNOWN` costs an
+`lstat`); a kept file costs one `fstatat` for the size and mtime the diff
+reads. The ignore rules apply to every entry as before, symbolic links are
+never followed, and the merged list is sorted with `strcmp`, so the result
+does not depend on the thread count. The calling thread does not walk: it
+waits and draws the progress line (`progress_dirs`, `progress_tick`),
+since progress is main-thread only.
+
+`[index] walk` (`config_index_walk`: `auto`, `git` or `full`) lets a
+whole-tree pass ask git instead of walking. `index_git_plan` uses git when
+the mode is `git`, or `auto` with more than `CG_WALK_GIT_MIN_FILES` (20000)
+files on the branch, and when the head the last pass recorded
+(`meta` `walk_head`, per branch) is known. `walk_git_candidates` in
+`gitint.c` returns `git status --porcelain=v2 -z --untracked-files=all`
+plus `git diff --name-only <recorded head> HEAD`; the paths that were dirty
+at the last pass (`walk_dirty`) are added, because a file edited and then
+reverted shows in neither list the second time. The candidates then go
+through the same targeted path `cg sync <path>…` uses. The pass walks the
+whole tree instead when `cg index --full` asked for it, when git fails or
+the recorded head is not a commit it knows, when a candidate is a
+`.gitignore` or `.cgignore` (git names the ignore file, not what it newly
+hides or reveals), when the dirty set kept for the next pass outgrew
+`WALK_DIRTY_MAX` (256 KiB of paths, stored as `*`), and on every
+`CG_WALK_FULL_EVERY`th (20th) pass, counted in `walk_passes`.
+`index_git_record` stores the head, the next dirty set and the count after
+a pass that completed. Full contract: [sync.md](sync.md#the-index-at-scale)
+and [config.md](config.md#index-walk).
+
+The write side changed with it. `body_fts` is contentless on SQLite 3.43+
+(see `db.c` above), so snippets and matching lines are read from the file
+on disk. Name lookups in the resolver, the C header lookup, path outlines
+and position lookups use `files.base` behind `idx_file_base` instead of
+`LIKE '%/'||name` scans, and `idx_import_target` serves "who imports this
+file". A DELETE on an FTS5 table flushes its pending segment even when it
+matches nothing, so `fts_prepurge` collects a chunk's rewritten file ids
+in `temp.fts_purge` and clears `symbol_fts`, `comment_fts`, `body_fts` and
+`body_tri` with one statement per table before any row of the chunk is
+inserted. `index_tri_repair` (after every whole-tree pass) re-inserts the
+`body_tri` rows the open branch is missing, at most `TRI_REPAIR_MAX`
+(50000) a pass, which is what clears `cg grep`'s completeness guard.
+
+`IndexStats` carries `walk` (`full`, `git`, `targets`, `none`),
+`phase_ms` (`walk`, `parse`, `write`, `resolve`, `soft`, added up by
+`index_phase_ms`) and `peak_rss_kb` (`VmHWM` from `/proc/self/status`,
+`index_peak_rss_kb`); `index_stats_json` puts them in `cg sync --json` and
+`cg index --json`, and the one-line summary is unchanged. `cg info` names
+the body index mode. `tests/scale/gen.py` writes a deterministic
+repository (seeded LCG; default 20000 files, about 2M lines of C, Go,
+Python, TypeScript and Rust with cross-file imports and calls, and one
+unique `scale_marker_<n>` literal per file), and `scripts/bench.sh` builds
+it in a scratch git repository, times `cg init`, no-change and one-file
+syncs under each walk mode and the read commands, and prints a markdown
+table. Measured on the development machine (20000 files, 1.95M lines; the
+full table and profile are in [sync.md](sync.md#measured)):
+
+| Operation | Before (v1.4) | Now |
+|---|---|---|
+| `cg init` | 331 s | 30–40 s |
+| database after init | 208.6 MB | 141 MB |
+| `cg sync`, nothing changed | | about 370 ms |
+
+## Line search (`grep.c`)
+
+`cg grep <pattern>` answers where a string occurs, with each hit placed in
+the graph. `cmd_grep` takes a `GrepOpts`; the pattern is a literal
+substring by default and a POSIX ERE (libc `regcomp`) with `-E`/`--regex`,
+case-sensitive unless `-i`. A bad regex fails once, before anything is
+read.
+
+Candidates come from `body_tri`, the trigram FTS5 table over every indexed
+file body, written beside `body_fts` (contentless with `detail=none` on
+SQLite 3.43+, content-bearing before; `meta.fts_mode` records which).
+`required_literal` picks the literal a match must contain — the whole
+pattern for a literal, the longest metacharacter-free run for a regex, none
+when the regex has a `|` — and `trigram_query` asks for each of its
+trigrams on its own (at most `GREP_MAX_TRI`, 24), since `detail=none`
+refuses phrases. `cands_collect` runs that query under the branch
+predicate `branch_scope_sql` builds, with the shared `QueryFilter` spliced
+in by `query_filter_sql` and `--symbol`/`--kind` as `EXISTS` joins on
+`symbols`. A pattern with no three-character literal, or a candidate query
+that fails, scans every indexed file of the scope instead, and the summary
+says so. Before trusting the index, `grep_tri_complete` compares
+`body_tri`'s row count (from `body_tri_docsize`) with the files that carry
+a body (size at most `GREP_BODY_MAX`, 2 MB); when the table is short it
+counts the scope file by file, and a scope with any file missing its row
+is scanned whole, reported as `full scan — body_tri incomplete` and
+`"full_scan":"body_tri incomplete"` in `--json`. The next whole-tree pass
+repairs the rows (`index_tri_repair` above).
+
+`scan_worker` threads read the candidates from disk, in each branch's own
+worktree (`branch_tree`), so a hit is the text as it is now. Their count is
+`syncgate_worker_request`'s budget, capped at `CG_MAX_WORKERS` and at one
+thread per eight candidates plus one. A literal is found with `memmem`
+(over a lowercased copy under `-i`), a regex with `regexec`, one hit per
+line. Files over `GREP_FILE_MAX` (8 MB), files whose body the index does
+not keep (over 2 MB) and binary files are counted as skipped, not searched.
+For each file with hits, `spans_load` reads its definition spans
+(`decl=0`) once and `span_at` places each hit in the innermost one, or in
+`(file scope)`. Files are ranked by hit count, then source before tests,
+then shallower paths (`file_rank`). Output groups hits by file and names
+the enclosing symbol once per run; `-C N` adds context, `-n` (default 50)
+and `--budget` (default 4000 tokens) cut the answer with an explicit
+`… N more hits in M files` tail, `--files` lists files with counts, and
+`--count` prints the total. `--path GLOB` (repeatable), `--lang` and
+`--no-tests` go through `query_filter_parse`, the same parser search,
+context, survey and files use, so a glob selects the same files on every
+command; `--branch` and `--all-branches` scope it as they scope the other
+reads. Over MCP the same command is the read-only `grep_code` tool
+(`t_grep`, schema `GREP_CODE_SCHEMA`). Full contract:
+[retrieval.md](retrieval.md#line-search-cg-grep).
+
+## File finding (`files.c`)
+
+`cg files` finds files from the `files` table without touching the disk,
+and `files.c` also owns the `QueryFilter` every narrowed read shares.
+`query_filter_parse` takes `--path GLOB` (repeatable, a plain path meaning
+that file or anything under it), `--lang L` (a language or an extension,
+normalised through `lang_for_path`) and `--no-tests` out of an argv;
+`query_filter_sql` turns them into a predicate on `path`, `lang` and the
+`cg_is_test` SQL function (`query_filter_register`), and
+`query_filter_match` makes the same decision in C on a row in hand.
+`main.c` parses the filter once for `search`, `context` and `survey` and
+hands it to `graph.c` with `cg_filter_set`, a thread-local the queries read
+back through `cg_filter_get`; grep builds its own argv for the same parser,
+and the MCP tools `search_code`, `get_context` and `find_files` take
+`path`, `lang` and `no_tests` the same way.
+
+`cmd_files` picks its mode from the pattern. A glob (any of `*?[`) is one
+more `--path` (`files_glob`). Words go to `files_words`, which matches
+`file_fts` — `name_words(path)` under the trigram tokenizer, rowid
+`files.id`, written once when the `files` row first appears — with a
+`MATCH` for every word of three characters or more and `instr` for the
+shorter ones, then scores basename words above directory words
+(`words_score`). A bare directory (`is_dir_path`) lists its subdirectories
+with counts, then its files (`files_dir`). Each row prints path, language,
+lines and symbol count, at most `-n` (default 40) with a tail naming what
+was left out. `--dirs [prefix]` aggregates instead (`files_dirs`): every
+directory to `--depth` (default 2, at most 16) with file and line counts
+and the dominant language by lines, largest first. Every query is scoped
+by `branch_scope_sql` and narrowed inside the SQL. Full contract:
+[retrieval.md](retrieval.md#finding-files-cg-files).
 
 ## The command line (`main.c`, `help.c`)
 
@@ -241,29 +421,58 @@ stub out behind the same interface.
 ## Fleet (`fleet.c`)
 
 The hierarchy that turns one repository into a tree of agents. `hier_load`
-reads `[hierarchy]` and `[role.main|feature|worker]` from
-`spec/workflow.kvx` over built-in defaults; `hier_expand` fills `{main}`,
-`{remote}`, `{feature}`, `{wave}`, and `{task}` in the branch and agent
-templates. `hier_role_caps` resolves each role's capabilities (driver,
+reads `[hierarchy]` and `[role.main|manager|worker]` from
+`spec/workflow.kvx` over built-in defaults (`[role.feature]` is the
+manager's older name; `role_sections` reads both, `[role.manager]`
+winning); `hier_expand` fills `{main}`, `{remote}`, `{feature}`, `{wave}`,
+and `{task}` in the branch and agent templates. The defaults
+(`hier_defaults`) are a Wave Manager per wave (`wm-{feature}-{wave}` on
+`wave/{feature}/{wave}`, based on `{main}`) and a Task Worker per task
+(`w-{feature}-{task}` on `task/{feature}/{task}`, based on the wave
+branch), so the waves of one feature run side by side. A workflow written
+for the old shape — a worker template without `{task}` — keeps it:
+`hier_old_shape` turns the defaults it did not override back into a
+Feature Manager on `feature/{feature}` (`fm-{feature}`) over a Wave Worker
+per wave (`w-{feature}-{wave}`) whose base is the manager's branch.
+`hier_per_wave` and `hier_per_task` tell the two shapes apart by the
+placeholders in the branch templates, and `fleet_plan` lays out the tree a
+feature would get. `hier_role_caps` resolves each role's capabilities (driver,
 model, args, max, wall, spend, retries, stall, approve) into a `RoleCaps`,
 reporting unusable values instead of dropping them.
 Identity comes from the environment (`CG_AGENT`, `CG_ROLE`, `CG_PARENT`,
 `CG_FEATURE`, `CG_WAVE`) and is recorded in the `agents` registry only when
 a role is set, so solo sessions leave no trace. The branch lifecycle —
-`fleet_worker_begin`, `fleet_merge_up`, `fleet_feature_land`,
-`fleet_pr_open`, `fleet_checkpoint` — drives `git` and `gh` through the
-helpers in `gitint.c`, always against the shared project (the main
-worktree), and shares the spec engine's claim primitives rather than
-adding a second ownership system. `merge-up` and `land` take the
+`fleet_worker_begin`, `fleet_merge_up`, `fleet_land`, `fleet_pr_open`,
+`fleet_checkpoint` — drives `git` and `gh` through the helpers in
+`gitint.c`, always against the shared project (the main worktree), and
+shares the spec engine's claim primitives rather than adding a second
+ownership system. `begin <id>` creates the worker's branch from its base
+(creating the base from main when it is missing), adds its worktree and
+registers the branch; `merge-up <id>` merges the worker's branch into its
+base — the wave branch, by default — in that branch's worktree; `land` and
+`pr` take a wave number or a task id in the wave (`lifecycle_target`,
+defaulting to `CG_WAVE`, so a Wave Manager lands its own wave), and
+`land <feature>` still lands the feature branch in the old shape
+(`fleet_feature_land` delegates to `fleet_land`). `merge-up` and `land` take the
 feature's merge lock (`fleet_merge_lock`, an `flock` on
 `.codegraph/fleet/merge-<feature>.lock`), which is what lets a manager and
 its workers run at the same time. `fleet_gate` is the opt-in approval
 gate: for a fleet agent whose workflow lists the gate, it records a
 pending row in `fleet_approvals` and returns `CG_EXIT_APPROVAL` (4) until
 `cg fleet approve` decides it, and an approval is consumed by the one
-command it let through. `cg fleet tree` is dispatched here but
-implemented as `orch_tree_status` in `orchestrate.c`, beside the run it
-reports on. Full contract: [hierarchy.md](hierarchy.md).
+command it let through. `fleet_sync` (`cg fleet sync`) is the worker's
+side of a forward merge: in a task worktree it merges the base branch
+(`--base`, else `CG_BASE`, else the `branches` registry) into the task
+branch, refusing while an uncommitted file there is also changed on the
+base, aborting a conflict with its paths named, and otherwise listing the
+commits and files that came in before a projection build; a `fleet.sync`
+event records each one. `hier_waves_parallel` reads `[hierarchy] waves`
+(`parallel` | `sequential`): parallel when the key says so or, unset, when
+git is 2.38 or newer — the projection the ahead tasks build against needs
+`merge-tree --write-tree` — and it reports which and why. `cg fleet tree`
+is dispatched here but implemented as `orch_tree_status` in
+`orchestrate.c`, beside the run it reports on. Full contract:
+[hierarchy.md](hierarchy.md).
 
 ## Event log (`events.c`)
 
@@ -325,6 +534,78 @@ qualified task, before `land`. All four record events and warn; only the
 `drift` and `coverage` approval gates block. Full contract:
 [drift.md](drift.md).
 
+## Projection (`projection.c`, `conflicts.c`)
+
+`cg projection build` answers what main would look like if every branch in
+flight merged now. `projection_branches` takes every registered branch
+whose worktree exists and that has a live agent (seen within `[agents]
+ttl`) or was indexed within `[projection] stale` (default 24h), minus the
+base, the projection itself and the `[projection] exclude` globs, plus any
+`--branch`; they are folded in order of the depth of their base chain,
+then registry update time (`proj_cmp`). The base is `[projection] base`,
+else `[hierarchy] main`, else `main`. A branch's uncommitted work goes in
+through a shadow commit written from a copy of its index
+(`projection_shadow_commit`), and `proj_fold` folds each contribution onto
+the result so far with `git merge-tree --write-tree` (git 2.38 or later,
+`proj_git_check`), commits it with `git commit-tree` and moves one ref,
+`refs/codify/projection`. Nothing touches a worktree, an index or a branch
+ref. A conflict does not stop the fold: the branch goes in with git's
+markers and the path is recorded with every branch that touched it
+(`--strict` instead leaves a conflicting branch out). Builds take an
+`flock` on `.codegraph/projection.lock`, waiting `--wait` ms (5000); a
+timeout prints the last build and exits `CG_EXIT_BUSY` (75). A build whose
+fingerprint (base head and each branch's contribution and skip reason)
+matches the last one is a no-op. Builds are stored in `projections`;
+`--index` (or `[projection] index`) checks the result out at
+`.codegraph/worktrees/projection` and indexes it as branch
+`codify/projection`, so every read command answers `--branch
+codify/projection`. `status`, `diff`, `show` and `findings` read what the
+builds stored.
+
+`conflicts_compute` reads the same fold with the graph in hand. Besides
+git's own conflicts (content, delete, add-add) it finds `symbol` (two
+branches change the same symbol against the base, even when git merges
+the hunks cleanly), `interface` (one branch re-signatures or removes a
+public symbol another branch references in code it changed, through
+`drift_interface_changes`) and `near` (two branches edit one file within
+`NEAR_LINES`, 3, of each other). Each branch's hunks are mapped onto the
+symbol spans the graph holds for that branch (`files.branch_id`), falling
+back to the base's spans. `conflicts_store` diffs a build's findings
+against `projection_findings`, keyed by kind, path, symbol and branch set:
+`projection.conflict` once when one appears, `projection.resolved` when a
+build stops finding it, and `projection.built` for every build, the no-op
+included. `conflicts_steer` (on unless `[projection] steer = false`) tells
+the agents on the branches of each new finding through `driver_steer`,
+once. Nothing here blocks.
+
+The projection follows the work without anyone running a build. Every
+place work happens leaves a dirty note under `.codegraph`
+(`projection_mark_dirty`) and asks `projection_auto_build` to act on it:
+`cg hook post-edit`, the work events `cg hook event` receives from a host
+(`PostToolUse`, `Stop`, `SubagentStop`, `SessionEnd`, `WorktreeCreate`,
+`WorktreeRemove`; a session start or a prompt is not work), `cg watch`
+and `watch --fleet` once an index pass has settled, `cg serve`, and the
+supervisor after a merge, a land, a begin and a spawn. The callers are
+hooks a host waits on, so nothing there waits: the build runs as a
+detached grandchild (`cg projection build --quiet`, stdio on
+`/dev/null`, every `CG_*` identity variable unset so its events are
+nobody's work), the lock is probed without blocking, a build already
+running is left to it, and `[projection] min_interval` (default 15s)
+keeps a burst of edits to one build; `[projection] auto = false` turns
+the automatic builds off and leaves `cg projection build` to the user. A
+build consumes the note when it takes the lock, so an edit that lands
+mid-build is picked up by the next one. The findings then show wherever
+the work is looked at: `cg projection status` groups the live findings by
+the branch they involve, with ages and each branch's worktree; `cg brief`
+and `cg state` name the first two (`projection_summary`); `cg fleet
+merge-up` and `cg fleet land` print the branch's known findings before
+merging; `cg fleet tree --json` carries a `projection{}` block with
+per-branch counts (`projection_tree_json`), the `projection_status` MCP
+tool answers the same question to an agent, and the editor's fleet view
+gains a Projection node whose branch rows open the file in that worktree,
+with badges on the branches involved. Full contract:
+[projection.md](projection.md).
+
 ## Jev decisions (`jev.c`)
 
 The one remote call. `jev_ask` builds a canonical request body (sorted
@@ -361,7 +642,7 @@ the rendered copy stale.
 
 ## Agent surface (`mcp.c`, `agent.c`, `json.c`)
 
-`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 57
+`cg mcp` is a newline-delimited JSON-RPC 2.0 stdio server exposing 63
 tools, each carrying read-only/destructive annotations so a client can
 auto-approve reads instead of prompting on every search. It also serves
 resources (the workflow file, rendered board, graph context, and every
@@ -376,6 +657,13 @@ the server emits no list-change notifications. CLI command output is captured vi
 agent configs without a full JSON parser by inserting after the root
 key's opening brace.
 
+The finding tools are `search_code`, `grep_code` (line search, `t_grep`
+in `grep.c`), `find_files` (`cg files`) and `get_context`; `search_code`
+and `get_context` take the same `path`, `lang` and `no_tests` narrowing as
+the other two, parsed into the shared `QueryFilter` (`mcp_filter`). Their
+descriptions and the served prompts tell an agent to use them before any
+shell `grep` or `find`.
+
 `integrate.c` is the vendor-neutral adapter registry. Every host declares
 MCP, instruction, skill, hook, session, and cloud capabilities as native,
 portable, or unavailable. Detect and plan are read-only; apply merges the
@@ -388,6 +676,107 @@ instructions (`AGENTS.md`, `CLAUDE.md`, and IDE pointers). `cg agentmd`
 owns only `.codify/agent-context.md`, a deterministic graph projection.
 Running either generator therefore cannot overwrite the other's source or
 projection.
+
+## Native agents (`native.c`)
+
+The fleet knows only the processes it started; the Claude Code and Codex
+sessions working on the project, and the subagents they spawn through
+their own Agent tool, reach Codify through their hooks. `cg hook event
+--host claude|codex` (`cmd_hook_event`) reads one hook payload on stdin,
+first hands it to the runtime event normalization (`runtime_event_ingest`
+through `cg_capture`, output dropped, so evidence flows as before), then
+records it in the same `agents` registry the fleet uses with
+`kind='native'`. It takes the write lock with `BEGIN IMMEDIATE` and waits
+at most `NATIVE_BUSY_MS` (3 s); a malformed payload or a busy database is
+written to `.codegraph/hooks.log`, and the command always exits 0, because
+a failing hook wedges the host's tool loop.
+
+Names are stable: a session is `H:<first 8 of session_id>`, a subagent
+`H:<agent_id>`. A spawn announced by `PreToolUse Agent|Task` waits as
+`H:spawn:<tool_use_id>` in state `pending` until its `SubagentStart`
+claims it — by the `toolUseId` in the subagent's `meta.json` when that
+file exists, else the oldest pending spawn of the same type in the
+session. Subagent payloads carry the parent's session id, so the session
+row is created on first sight of any payload. A cwd inside a linked
+worktree of the project (`native_worktree`, read from git's files without
+spawning git) registers that branch with the session's branch as its base.
+`attribute_task` gives the agent a task from `CG_TASK`, else a live
+attempt of the session, else a task id of the active feature named in the
+description or prompt, else the parent's, and records which source it
+used. Each step emits `agent.native.start`, `.spawn`, `.tool`, `.stop` or
+`.worktree` with the task as subject and the agent as node. Rows are never
+deleted, except a pending spawn once claimed; a row is shown stale after
+`NATIVE_STALE_S` (120 s) without a hook and hidden once stopped for
+`NATIVE_HIDE_S` (a day) unless `--all`. `native_fleet_section`,
+`native_fleet_tree_json` and `native_summary` put them in `cg fleet
+status`, `cg fleet tree`, `cg brief` and `cg state`.
+
+`cg fleet discover` (`cmd_fleet_discover`, `--since`, default a day) finds
+the same agents from what the hosts leave on disk, for sessions that ran
+without the hooks: the Claude Code transcript directories of the shared
+tree, this tree and every registered worktree (`transcript_dirs` in
+`recap.c`), with their `subagents/*.jsonl` and `.meta.json`, and the
+Codex rollouts whose cwd is inside the project. It reads the first
+`DISCOVER_HEAD_LINES` (400) lines of each for cwd, model and prompt,
+links subagents to their parents, registers branches and claims pending
+spawns like the hooks do. A field is written only while it is empty, and
+the `discovered` column records which fields discovery wrote, so a hook's
+value is never overwritten. A live row with no transcript or hook activity
+for `DISCOVER_STALE_S` (15 minutes) turns stale, and back when its
+transcript moves. `native_discover_auto` runs a quiet pass in front of
+the fleet views, `cg serve` and `cg watch`, at most once per
+`DISCOVER_EVERY_S` (10 s) per process, unless `[fleet] discover = false`
+or `--no-discover`.
+
+## The Claude Code plugin (`plugin.c`, `integrate.c`)
+
+`cg integrate apply` installs Codify into Claude Code as a plugin from a
+local marketplace instead of editing `settings.json` (`--no-plugin`
+skips it; `integrate_plugin_apply`). `plugin.c` writes the marketplace
+under `$HOME/.codify/plugins/claude-code`: `.claude-plugin/marketplace.json`,
+and under `plugins/codify/` the `plugin.json` (version `CG_VERSION`),
+`hooks/hooks.json`, `.mcp.json` (the `codify` server as the absolute `cg`
+path with `mcp`), the `codify-workflow` skill (`integrate_skill_body`) and
+the `brief`, `fleet` and `projection` commands (`cg brief`, `cg fleet
+status`, `cg projection status`). Every file carries an ownership marker
+(`codify-owned: claude-code-plugin cg <version>`, as a JSON key, a shell
+comment in each hook command, an env value or an HTML comment), and
+`plugin_write` rewrites only a file that carries it: an existing file
+without the marker is reported as a conflict and kept, and a current file
+is left unchanged. `plugin_install` then runs `claude plugin marketplace
+add|update` and `claude plugin install|update codify@codify --scope user`
+when the `claude` CLI is on the PATH, and prints those two commands when
+it is not.
+
+The plugin's hooks (timeout `HOOK_TIMEOUT`, 20 s) send `SessionStart`,
+`SessionEnd`, `Stop`, `SubagentStart`, `SubagentStop` and
+`PreToolUse`/`PostToolUse` on `Agent|Task` to `cg hook event --host
+claude`, `PreToolUse Bash` to `cg hook pre-bash`, and `PostToolUse` on
+`Edit|Write|MultiEdit|NotebookEdit` to `cg hook post-edit`. There is no
+`WorktreeCreate` hook: one replaces git's worktree creation and must print
+the path, so a silent hook would make creation fail. For Codex,
+`<project>/.codex/hooks.json` gets the same lifecycle events plus every
+`PreToolUse`/`PostToolUse` to `cg hook event --host codex` and
+`apply_patch|Edit|Write` to `post-edit`, under its own marker; Codex asks
+for it to be trusted once through `/hooks`. With the plugin installed, `cg
+hook install` leaves `settings.json` hooks alone so nothing runs twice.
+`integrate_plugin_report` adds the plugin's state (from
+`$HOME/.claude/plugins`) to `detect` and `doctor`.
+
+`cg hook pre-bash` (`cmd_hook_pre_bash` in `govern.c`) is the shell
+advice. `sa_tool` recognises a search through `grep`/`egrep`/`fgrep`/`rg`/
+`ag`/`ack`, `find`, `fd`, or a recursive `ls`, including `find -exec grep`,
+`xargs`, `git ls-files` pipelines and a leading `cd`; `shell_advice_for`
+returns nothing when the command looks outside the project, and otherwise
+the equivalent `cg grep` or `cg files` command with its MCP tool name
+(`grep_code`, `find_files`), followed by a line asking the agent to use
+`grep_code`, `find_files`, `search_code` and `get_context` before a shell
+search. The advice goes back as `additionalContext` in a `PreToolUse`
+`hookSpecificOutput` with no permission decision, so the command still
+runs; it is given once per session per command (a `meta` key on the
+session and a hash of the command), and is silent under
+`CG_SHELL_ADVICE=0` or `[hooks] shell_advice = false`. The hook always
+exits 0.
 
 ## Agent control plane (`runtime.c`, `govern.c`)
 
@@ -498,6 +887,16 @@ MCP `sync_first` tools, the LSP, the watcher, fleet watch and integrate
 returns the count asked for (0 = the machine's), `config_parse_workers`
 reads a count as written anywhere — `codify.kvx`, `CG_INDEX_WORKERS`,
 `--workers` — and `cg info` prints which source won.
+Every key is a row of `CFG_KEYS` with a type — `CFG_BOOL`, `CFG_PATH`,
+`CFG_INT`, `CFG_STR`, `CFG_DUR` (a duration such as `24h`, read by
+`hier_duration`), `CFG_LIST` and `CFG_ENUM` — a default, and the comment
+`cg config init` writes. The keys beyond paths and workers are
+`[index] walk` (`auto`, `git` or `full`; `config_index_walk`, parsed by
+`config_parse_walk`), `[projection] base`, `stale` (default `24h`),
+`exclude` (branch-name globs), `index` (default false) and `steer`
+(default true) behind the `config_projection_*` accessors, `[fleet]
+discover` (default true, `config_fleet_discover`) and `[hooks]
+shell_advice` (default true, `config_shell_advice`).
 `config_check` reports unknown sections, keys and unusable values;
 `cg check` shows them as warnings. See [config.md](config.md).
 
@@ -676,14 +1075,70 @@ role, parent, agent, task, branch, worktree, pid and start time, attempt,
 fence, retries, spend), so `--resume` adopts a child whose pid and
 `/proc` start time still match and judges any other by its branch tip.
 
-`orch_spawn_manager` starts a feature manager in the feature worktree and
-`orch_spawn_worker` a worker per free slot — per task when the worker
-template names `{task}`, per wave otherwise — each through the role's
+`orch_spawn_manager` starts a manager in its branch's worktree — one per
+wave (`wm-{feature}-{wave}` on the wave branch), or one for the feature in
+the old shape (wave -1) — and `orch_spawn_worker` a worker per free slot,
+per task when the worker template names `{task}`, per wave otherwise. The
+supervisor keeps its managers in an array of `SupMgr` slots
+(`sup_mgr(wave)`, at most `SUP_MAX_MGRS`, 64; `sup_mgrs_live` counts the
+live ones). `sup_wake_managers` gives a turn to every wave that still owes
+something — an unfinished task or a branch not yet landed — on the run's
+first turn, and later to a wave whose workers have all ended with an empty
+frontier, or whose manager an escalation or a conflict asks for; live
+managers are capped by `[role.manager] max` when it is set (`mgr_max`;
+unset means every wave, and the old shape has one manager) and every turn
+spends one of the run's wakes.
+Two tasks of one wave run one after the other only when the worker
+template has no `{task}` (they would share a branch); with per-task
+workers, the waves and the tasks in them run side by side, apart from
+predicted collisions. Each is spawned through the role's
 driver capabilities, with the role, parent, feature, wave, branch, base,
 and run exported and the branch already checked out. Workers and managers
 run concurrently; the merge lock in `fleet.c` serializes their merges.
 The main agent, when `[hierarchy] main_agent` asks for one, is a driver
 process woken at start, on a blocked task, and when a feature finishes.
+
+Waves run side by side by default. `orch_req_ready` is the gate: with
+`[hierarchy] waves = parallel` a requirement is ready when it is finished
+or when a live slot is working on it, so the dependent task starts ahead,
+builds against the projection, and its `done` waits for the land; with
+`sequential` a requirement is ready only where the task's branch is cut
+from — main for another wave's task (the manager-per-wave shape, and not
+while a land still owes a forward merge), the wave branch for its own.
+`orch_next_task_in` picks the lowest such task of one wave, and
+`orch_next_task` of the whole feature. A worker spawned ahead is started through
+`spec_start_ahead`, which records what the lease is ahead of in
+`leases.ahead` (a column added on first use) and gives the worker's prompt
+an *Ahead of its requirements* section naming the open requirements,
+their branches, `--branch codify/projection` and `cg projection
+findings`; `cg spec start --ahead` and `cg fleet begin --ahead` are the
+same path by hand, and `--force` no longer bypasses `requires` anywhere.
+`cg spec done` stays strict: `task_unmet` lists the requirements not done
+in the tree it runs in, and inside a fleet run (`CG_RUN` or `CG_ROLE` set)
+`--force` does not get past them, so an ahead task qualifies only once
+its requirements have landed and come in through `cg fleet sync`. After a
+land, `sup_forward_merge` merges main into every live wave branch in that
+wave's manager worktree, between the manager's turns and under the merge
+lock; each live worker of the wave is steered to `cg fleet sync` and a
+`fleet.forward` event records who was told. A conflict is aborted and
+handed to the manager with the paths and the projection finding that
+predicted them, and the workers are steered once main is an ancestor of
+the wave branch again. A projection build follows every land and every
+sync. Sequential waves keep one more gate: a land merges into main before
+its test and lint gates run and emits `fleet.land` only after them, so
+the main tree's spec says *done* before the land is known, and a task cut
+then from a wave branch that has not had main merged forward would be
+refused at its own done. `sup_forward_lands` therefore records on every
+tick, per wave, whether main is an ancestor of the wave's branch
+(`sup_wave_branch` names it from the manager template, `sup_wave_mark_fresh`
+asks git), and `orch_req_ready` consults `sup_wave_fresh` before it lets a
+task start on a requirement from another wave. The supervisor reads a
+worktree without touching it: `sup_tree_fp`
+(the stall check's git view) and `fleet.c`'s `tree_clean` run `git
+--no-optional-locks status`, because a plain `git status` refreshes the
+index under `index.lock` and, taken while the worker runs `git add` or
+`git commit` in that worktree, fails the worker's command — a qualified
+task that never reached its wave branch was the fleet tests' flake.
 
 Supervision is four named checks: `supervisor_stall_check` (progress is an
 event by or about the agent, log growth, or a git status/HEAD change in its
@@ -693,7 +1148,9 @@ attempt with a handoff), `supervisor_budget_check` (wall and spend),
 attempts' reasons, last output, and outcome memories), and
 `supervisor_escalate` (manager, then main, then blocked while the run
 continues). A run ends when the subtree is **merged**, not when a process
-exits, and a manager has a wake budget (16 by default, `--max-rounds`).
+exits, and the managers share one wake budget for the run (16 per wave
+that has a manager by default, `ORCH_ROUNDS_DFLT`; `--max-rounds` sets the
+whole run's).
 `orch_tree_status` renders the same join for `cg fleet tree` and
 `--status`. Without an enabled `[hierarchy]` the flag is refused before
 anything is spawned, and the single-level path above is untouched.
@@ -843,5 +1300,28 @@ many references it has, and the decisions recorded about it.
   with a relocated spec directory and auto-sync off (`40_config`), the
   progress line in its terminal, plain and silent forms (`41_progress`),
   the write journal's queue, replay, fencing and `cg journal`
-  (`42_journal`), and the help table against `main.c`, every subcommand
-  switch and the README's command reference (`43_help`).
+  (`42_journal`), the help table against `main.c`, every subcommand
+  switch and the README's command reference (`43_help`), line search —
+  trigram candidates, literal and regex scans from disk, symbol placement,
+  ranking, the `-n`/`--budget` tail, `--json` and `grep_code` (`44_grep`),
+  file finding by glob, path words and directory, `--dirs`, the shared
+  filters on search, context and survey, and `find_files` over MCP
+  (`45_files`), the index at scale on a 2000-file profile of the scale
+  fixture — parallel and one-thread walks agree, literal candidates under
+  5%, a one-file edit, the `--json` phases, RSS and walk mode, and
+  `walk = git` through adds, edits, deletes, renames, commits and reverts
+  (`46_scale`; `CG_SCALE=1` runs the default profile), the pre-bash shell
+  advice and its opt-outs (`47_advice`), the Claude Code plugin and Codex
+  hooks under a temporary `HOME` with a stubbed `claude` CLI
+  (`48_plugin`), native agents from hook payloads — rows, worktrees,
+  attribution, events, the fleet views, the upgrade of an old `agents`
+  table and exit 0 on malformed input (`49_native`), discovery from the
+  fixture transcripts in `tests/fixtures/native` (`50_discover`), the
+  projection's fold, shadow commits, conflicts, ref, stored builds, no-op
+  and `--index` (`51_projection`), its symbol, interface and near
+  findings, events and steering (`52_conflicts`), and the builds that
+  follow the work — the hooks, `cg watch`, `cg serve`, the supervisor,
+  `min_interval`, `auto = false`, and the findings on `status`, `brief`,
+  `merge-up` and `fleet tree --json` (`53_projection_live`).
+- `tests/scale/gen.py` — the deterministic scale fixture (default 20000
+  files, about 2M lines) that `46_scale` and `scripts/bench.sh` build.

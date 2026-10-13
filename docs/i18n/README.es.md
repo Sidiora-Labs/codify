@@ -40,7 +40,7 @@ La versión 1.1.0 (v11) convierte la flota en algo a lo que entregas una spec y 
 
 **Y dirige agentes, no solo los sirve.** `cg handoff` y `cg resume` pasan una tarea entre sesiones sin perder estado, `cg spec claim-next` entrega atómicamente a un agente ocioso la siguiente tarea sin conflictos y `cg spec run` reparte una oleada entera entre sesiones de Codex CLI o Claude Code — un proceso hijo aislado por tarea reclamada, con logs y prompts en disco y leases liberados si falla.
 
-**Y sobrevive a una flota.** Indexar es un recurso compartido: el primer `cg` que necesita una pasada la ejecuta, los demás dejan una nota y se agrupan en ella, una ventana de frescura se salta el recorrido por completo y unos slots de parseo a nivel de máquina mantienen los proyectos concurrentes dentro del presupuesto de núcleos ([docs/sync.md](../../docs/sync.md)). Encima, `spec/workflow.kvx` puede declarar una jerarquía — un agente principal dueño de la lista de tareas, un gestor por funcionalidad y trabajadores por oleada — y `cg fleet` dirige el flujo de ramas: worktree, merge hacia arriba, aterrizaje tras las puertas de test y lint, pull request, checkpoint. `cg fleet up` ejecuta el árbol entero por sí solo bajo un supervisor desacoplado: varias funcionalidades a la vez, cada trabajador en su propio worktree, empujando a los agentes atascados, reintentando los fallidos con lo que salió mal, escalando lo que no tiene arreglo, deteniéndose en las puertas de aprobación que activaste y dando el trabajo por completo cuando se **fusionó**, no cuando un proceso terminó ([docs/hierarchy.md](../../docs/hierarchy.md)). Si matas el supervisor, `cg fleet up --resume` adopta a los agentes que siguen vivos. La deriva respecto a la spec, las tareas que chocan y los cambios de interfaz de los que dependen otras ramas se señalan antes de fusionar ([docs/drift.md](../../docs/drift.md)), y cada cambio es un evento que `cg events --follow` y `cg serve` transmiten en vivo ([docs/events.md](../../docs/events.md)). Todos comparten un grafo y una memoria: cada rama y worktree enlazado se indexa en el mismo `.codegraph/`, separado por rama ([docs/branches.md](../../docs/branches.md)).
+**Y sobrevive a una flota.** Indexar es un recurso compartido: el primer `cg` que necesita una pasada la ejecuta, los demás dejan una nota y se agrupan en ella, una ventana de frescura se salta el recorrido por completo y unos slots de parseo a nivel de máquina mantienen los proyectos concurrentes dentro del presupuesto de núcleos ([docs/sync.md](../../docs/sync.md)). Encima, `spec/workflow.kvx` puede declarar una jerarquía — un agente principal dueño de la lista de tareas, un gestor por oleada y un trabajador por tarea — y `cg fleet` dirige el flujo de ramas: worktree, merge hacia arriba, aterrizaje tras las puertas de test y lint, pull request, checkpoint. `cg fleet up` ejecuta el árbol entero por sí solo bajo un supervisor desacoplado: todas las oleadas a la vez, cada gestor junto a sus trabajadores, cada trabajador en su propio worktree, empujando a los agentes atascados, reintentando los fallidos con lo que salió mal, escalando lo que no tiene arreglo, deteniéndose en las puertas de aprobación que activaste y dando el trabajo por completo cuando se **fusionó**, no cuando un proceso terminó ([docs/hierarchy.md](../../docs/hierarchy.md)). Si matas el supervisor, `cg fleet up --resume` adopta a los agentes que siguen vivos. La deriva respecto a la spec, las tareas que chocan y los cambios de interfaz de los que dependen otras ramas se señalan antes de fusionar ([docs/drift.md](../../docs/drift.md)); `cg projection build` pliega cada rama activa, trabajo sin commitear incluido, sobre una única ref de proyección y nombra los conflictos de símbolos, interfaces y texto con sus ramas antes de que nada se fusione, y la proyección sigue al trabajo a través de los hooks, `cg watch`, `cg serve` y el supervisor ([docs/projection.md](../../docs/projection.md)). Cada cambio es un evento que `cg events --follow` y `cg serve` transmiten en vivo ([docs/events.md](../../docs/events.md)). Todos comparten un grafo y una memoria: cada rama y worktree enlazado se indexa en el mismo `.codegraph/`, separado por rama ([docs/branches.md](../../docs/branches.md)).
 
 **Y pide una decisión cuando hace falta.** `cg jev` consulta el modelo System One de TypeSafe para juicios tipados — verdadero/falso, uno de varios, ordenado. `cg memory classify` lo usa para decir qué notas son skills reutilizables, y `cg skills promote` las convierte en `.agents/skills/<slug>/SKILL.md` portables; un `verify_cmd` fallido recibe una línea de triaje, los hallazgos de `cg guard` se ordenan y un pull request recibe una puntuación de preparación. Es la única llamada remota que hace Codify: obligatoria para las funciones construidas sobre ella, nunca para el ciclo principal y nunca autoritativa — ninguna respuesta de Jev ha cambiado jamás un código de salida ([docs/jev.md](../../docs/jev.md)).
 
@@ -145,10 +145,12 @@ En una terminal, `cg init`, `cg index` y `cg sync` muestran una línea de progre
 | `cg sync [paths] [--max-age MS] [--background] [--wait MS] [--workers N]` | Índice incremental: se agrupa con una pasada en curso, se omite si está fresco. `cg index [--full] [--workers N]` es la forma bloqueante. `--workers N` (en ambos) tiene prioridad sobre `CG_INDEX_WORKERS` y `[index] workers` en `codify.kvx` |
 | `cg branches` | Cada rama indexada en el grafo compartido, con su worktree, head, base y número de archivos |
 | `cg search <q> [-n N]` | Búsqueda de símbolos y de texto completo |
+| `cg grep <pattern> [-E] [-i]` | Búsqueda por líneas en lugar de un grep de shell: un literal (o regex con `-E`) hallado mediante el índice de trigramas, leído del disco, cada coincidencia situada en su símbolo envolvente, ordenada y limitada por `-n` y `--budget` ([docs/retrieval.md](../../docs/retrieval.md)) |
 | `cg symbol <name>` | Definición, fragmento y recuento de referencias |
 | `cg impact <name> [-d N] [--budget N]` | Llamadores y llamados transitivos, ajustados a un presupuesto (por defecto 8000) |
 | `cg context <q> [--budget N] [-n K]` | Paquete de contexto en una llamada: memorias, símbolos, puntos de entrada, rutas (por defecto 8 símbolos, 4000 tokens) |
 | `cg survey [path\|query] [--budget N]` | Líneas de propósito y docs con firmas en ~100 archivos por llamada, nunca un cuerpo (presupuesto por defecto 16000) |
+| `cg files [pattern] [--dirs] [--depth N] [-n N]` | Archivos por glob (`src/**/*.go`), por las palabras de su ruta o por directorio, con lenguaje, líneas y número de símbolos; `--dirs` mapea directorios. `--path`, `--lang` y `--no-tests` acotan, igual que en `search`, `context` y `survey` |
 | `cg anchors [--stale] [--uncovered]` | Salud de las anclas: docs obsoletos y símbolos sin cubrir ordenados por puntuación de coordinación |
 | `cg routes [filter]` | Tabla de patrón de URL a manejador |
 | `cg why <symbol>` | Procedencia: commits que lo cambiaron, tareas que implementaron, decisiones registradas |
@@ -199,6 +201,8 @@ Notas duraderas para agentes, en la misma base de datos SQLite que el grafo. Las
 | `cg integrate detect\|plan\|apply\|doctor` | Configuración para Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, OpenCode, Zed, Windsurf, Cline y Continue; planificar es de solo lectura, aplicar es idempotente y con copia de seguridad |
 | `cg mcp-install` | Alias de compatibilidad de `cg integrate apply` |
 | `cg hook install` / `cg hook post-edit` | Conecta hooks de agente y git; el hook de edición hace una sincronización dirigida y un guard de la ruta editada |
+| `cg hook event` | El hook de ciclo de vida (`--host claude\|codex`): registra las sesiones del host y los subagentes que lanza en el registro de agentes, emite eventos `agent.native.*` y pasa el payload a `cg event ingest`; siempre sale con 0 |
+| `cg hook pre-bash` | El hook de Bash: cuando un comando ejecuta grep, rg, ag, ack, find, fd o `ls -R` sobre el árbol, responde con el equivalente de `cg grep` o `cg files` como contexto, una vez por sesión y comando; nunca decide permisos, silencioso con `CG_SHELL_ADVICE=0` o `[hooks] shell_advice = false`; siempre sale con 0 |
 | `cg changelog [-n N] [-o FILE] [--unreleased] [--tag NAME] [--snapshots] [--summarize\|--no-summarize]` | Notas de versión desde git, una versión por tag o cambio de versión, con Highlights de un modelo si `CENTRA_API_KEY` está definida (ver [Changelog](#changelog)) |
 | `cg agentmd [--write]` | Genera la orientación del grafo en `.codify/agent-context.md`; `AGENTS.md` y `CLAUDE.md` siguen siendo de `cg spec render` |
 
@@ -236,7 +240,7 @@ Las specs viven como archivos kvx en texto plano — legibles, aptos para diff y
 | `cg spec claim <id>` / `release <id>` | Lease con dueño y caducidad (`--agent`, `--ttl`); sin robos silenciosos |
 | `cg spec claim-next` | Reclama atómicamente la primera tarea sin conflictos y devuelve el paquete completo. Sale con 3 si el frente está vacío |
 | `cg spec run` | Orquesta una oleada con un proceso de agente por slot — ver [Dirigir agentes](#dirigir-agentes) |
-| `cg spec next` / `cg spec start <id>` | La tarea pendiente de menor oleada con `requires` satisfechos; la marca como `in_progress` |
+| `cg spec next` / `cg spec start <id>` | La tarea pendiente de menor oleada con `requires` satisfechos; la marca como `in_progress`. `--force` solo salta el límite de una a la vez; `--ahead` reclama una tarea cuyos `requires` siguen abiertos, para construirla contra la proyección, y `done` espera a que aterricen |
 | `cg spec implemented <id>` | En Prod, comprueba la evidencia de código sin ejecutar `verify_cmd` y marca `implemented` |
 | `cg spec done <id>` | Ejecuta `verify_cmd` y las comprobaciones del grafo; solo marca `done` si la cualificación pasa |
 | `cg spec trace [<id>]` | Tarea → símbolos, rutas tocadas, commits etiquetados y memorias |
@@ -254,7 +258,7 @@ Estos comandos reescriben solo la línea `status = "..."` o de modo del kvx; tod
 
 ### Modo flota: una jerarquía de agentes
 
-El modo paralelo impide que veinte agentes editen los mismos archivos; el modo flota les da forma. `spec/workflow.kvx` declara un agente **principal** que posee la lista de tareas y fusiona los pull requests, un **gestor de funcionalidad** por funcionalidad dueño de su rama y **trabajadores de oleada** en ramas cortadas de la rama de funcionalidad; el trabajo sube mediante merges verificados.
+El modo paralelo impide que veinte agentes editen los mismos archivos; el modo flota les da forma. `spec/workflow.kvx` declara un agente **principal** que posee la lista de tareas y fusiona los pull requests, un **gestor de oleada** por oleada dueño de una rama de oleada cortada de main y un **trabajador de tarea** por tarea en una rama cortada de su rama de oleada — así todas las oleadas corren a la vez, las tareas de una oleada corren en paralelo y el trabajo sube mediante merges verificados. Con `waves = parallel` (por defecto en git 2.38 y posteriores) una tarea puede empezar antes que las tareas que `requires`, construyendo contra la proyección; `done` sigue siendo estricto, main se fusiona hacia delante en cada rama de oleada viva tras cada aterrizaje y los trabajadores lo incorporan con `cg fleet sync`. Las plantillas sin `{wave}` ni `{task}` conservan la forma anterior: un gestor por funcionalidad y un trabajador por oleada.
 
 ```ini
 [hierarchy]
@@ -262,14 +266,15 @@ enabled    = true
 main       = "main"
 remote     = "origin"
 worktrees  = ".codegraph/worktrees"
+waves      = "parallel"      # parallel | sequential: ¿puede una tarea empezar antes que sus requires?
 test_gate  = "make test"
 lint_gate  = "make cg CFLAGS='-O2 -Werror'"
 pr         = "auto"          # auto | manual
 checkpoint = "manual"
 
-[role.worker]                # [role.main] y [role.feature] igual;
+[role.worker]                # [role.main] y [role.manager] igual;
 branch  = "task/{feature}/{task}"  # cada clave tiene un valor por defecto;
-base    = "feature/{feature}"      # {task} da a cada tarea su propia rama
+base    = "wave/{feature}/{wave}"  # {wave} y {task} dan a cada oleada y a cada tarea su propia rama
 driver  = "codex"            # cómo corren sus agentes y cuánto pueden gastar
 wall    = "3h"
 stall   = "10m"
@@ -279,21 +284,24 @@ approve = ["land"]           # opcional: esperar a `cg fleet approve`
 
 | Comando | Descripción |
 |---|---|
+| `cg projection build [--index] [--strict]`, `status`, `diff [branch]`, `show`, `findings` | Cada rama activa plegada sobre la base con `git merge-tree`, trabajo sin commitear incluido, en `refs/codify/projection`; conflictos por ruta y rama. `--index` la indexa como rama `codify/projection` ([docs/projection.md](../../docs/projection.md)) |
 | `cg fleet roles` | La jerarquía configurada: plantillas de rama, base, remoto, puertas, política de PR |
 | `cg fleet status` | Quién está vivo, en qué rol, en qué tarea y bajo qué padre |
-| `cg fleet plan [-f F]` | Qué gestor posee la funcionalidad y qué trabajador cada oleada |
+| `cg fleet discover [--since DUR]` | Sesiones y subagentes nativos de Claude Code y Codex hallados en las transcripciones que escriben los hosts, para hosts cuyos hooks nunca se dispararon; `fleet status`/`tree`, `serve` y `watch --fleet` lo ejecutan antes salvo `--no-discover` o `[fleet] discover = false` |
+| `cg fleet sync [--base B]` | En un worktree de tarea, fusiona su rama base tras un merge hacia delante: rechazado si un archivo sin commitear también cambió en la base, un conflicto se aborta y se nombra; después, una construcción de la proyección |
+| `cg fleet plan [-f F]` | Qué gestor posee cada oleada y qué trabajador cada tarea |
 | `cg fleet tree [-f F]` | El árbol vivo con el progreso de cada rama, si está por delante de su base o ya fusionada, e intento y heartbeat de cada trabajador |
-| `cg fleet begin <id>` | Crea o reutiliza la rama y el worktree de la oleada y reclama la tarea. Idempotente |
-| `cg fleet merge-up <id>` | Fusiona una rama de oleada **cualificada** en la rama de funcionalidad; lista los conflictos por ruta |
-| `cg fleet land <feature>` | Fusiona en main local y ejecuta las puertas de test y lint; en rojo restaura main, en verde abre el PR si la política es `auto` |
-| `cg fleet pr <feature>` | Hace push y abre el PR mediante `gh`, o imprime los comandos si no está; `--dry-run` no llama a nada |
-| `cg fleet checkpoint` | Fusiona los PR `feature/*` abiertos de menor a mayor número, parando en el primero que no fusione |
+| `cg fleet begin <id>` | Crea o reutiliza la rama y el worktree de la tarea, cortados de su rama de oleada, y reclama la tarea. Idempotente; `--ahead` reclama una tarea cuyos `requires` siguen abiertos |
+| `cg fleet merge-up <id>` | Fusiona una rama de tarea **cualificada** en su rama de oleada, tras imprimir los hallazgos conocidos de la proyección; lista los conflictos por ruta |
+| `cg fleet land <wave\|id>` | Fusiona una rama de oleada en main local y ejecuta las puertas de test y lint; rechazado mientras quede abierta una tarea de la oleada; en rojo restaura main, en verde abre el PR si la política es `auto` y fusiona main hacia delante en las ramas de oleada vivas |
+| `cg fleet pr <wave\|feature>` | Hace push y abre el PR mediante `gh`, o imprime los comandos si no está; `--dry-run` no llama a nada |
+| `cg fleet checkpoint` | Fusiona los PR `wave/*` abiertos (`feature/*` en la forma anterior) de menor a mayor número, parando en el primero que no fusione |
 | `cg fleet up [-f F \| --all] [-n N] [--foreground] [--resume [RUN]] [--dry-run]` | Arranca una ejecución duradera bajo un supervisor desacoplado, hasta que cada tarea esté cualificada y fusionada. `--resume` adopta a los agentes vivos |
 | `cg fleet down [--drain] \| pause \| resume [RUN]` | Detener (claims liberados, ramas conservadas), dejar terminar el trabajo vivo, congelar o continuar |
 | `cg fleet runs` | Las ejecuciones, su estado y si su supervisor sigue vivo |
 | `cg fleet approvals [--all] \| approve <id> [--reject] [-m note]` | Lo que espera en una puerta opcional (`land`, `pr`, `drift`, `coverage`) y la decisión que lo libera |
 | `cg fleet steer <agent> <message>` | Un mensaje para un agente en marcha: en su próxima edición (Claude Code, vía el hook post-edit) o su próximo prompt |
-| `cg fleet brief <feature>` | El briefing del gestor: estado del subárbol, trabajadores vivos, intentos fallidos, conflictos, aprobaciones |
+| `cg fleet brief <feature>` | El briefing del gestor para una funcionalidad: estado del subárbol, trabajadores vivos, intentos fallidos, conflictos, aprobaciones |
 
 La posición de un agente en el árbol vive en su entorno — `CG_AGENT`, `CG_ROLE`, `CG_PARENT`, `CG_FEATURE`, `CG_WAVE` — y sin `CG_ROLE` no se registra nada, así que una sesión en solitario no cambia. `cg fleet up` dirige el árbol entero por sí solo:
 
