@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "apply_patch|Edit|Write", "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook post-edit # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] },
+      { "hooks": [ { "type": "command", "command": "/usr/local/bin/cg hook event --host codex # codify-owned: codex-hooks cg 1.5.0", "timeout": 20 } ] }
+    ]
+  }
+}

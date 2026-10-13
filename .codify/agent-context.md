@@ -8,20 +8,20 @@ _Generated graph context owned by `cg agentmd`. Regenerate with `cg agentmd --wr
 
 | Language | Files | Lines |
 |---|---:|---:|
-| c | 67 | 60175 |
+| c | 67 | 60193 |
 | typescript | 16 | 125 |
 | javascript | 15 | 10064 |
 | python | 7 | 783 |
 | go | 5 | 542 |
 
-110 source files, 71689 lines total.
+110 source files, 71707 lines total.
 
 ## Directory map
 
 - `kvx/` — 3 files, 523 lines (mostly go)
 - `scripts/` — 1 files, 481 lines (mostly python)
 - `editors/` — 11 files, 8551 lines (mostly javascript)
-- `src/` — 48 files, 58412 lines (mostly c)
+- `src/` — 48 files, 58430 lines (mostly c)
 - `tests/` — 47 files, 3722 lines (mostly c)
 
 ## Build & tooling
@@ -56,7 +56,7 @@ _Generated graph context owned by `cg agentmd`. Regenerate with `cg agentmd --wr
 ## Load-bearing symbols (most referenced)
 
 - `sb_puts` (function, 1699 refs) — `src/util.c:49`
-- `sb_printf` (function, 1130 refs) — `src/util.c:55`
+- `sb_printf` (function, 1131 refs) — `src/util.c:55`
 - `sb_json_str` (function, 843 refs) — `src/util.c:68`
 - `sb_free` (function, 689 refs) — `src/util.c:42`
 - `sb_init` (function, 662 refs) — `src/util.c:41`
@@ -67,7 +67,7 @@ _Generated graph context owned by `cg agentmd`. Regenerate with `cg agentmd --wr
 - `xstrdup` (function, 275 refs) — `src/util.c:34`
 - `one` (function, 224 refs) — `editors/vscode/language.js:35`
 - `push` (method, 193 refs) — `editors/vscode/agents.js:792`
-- `file` (function, 145 refs) — `editors/vscode/memories.js:438`
+- `file` (function, 146 refs) — `editors/vscode/memories.js:438`
 - `xmalloc` (function, 145 refs) — `src/util.c:24`
 - `branch` (function, 128 refs) — `editors/vscode/fleet.js:377`
 
