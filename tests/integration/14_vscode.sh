@@ -197,19 +197,19 @@ import json, sqlite3, time
 db = sqlite3.connect(".codegraph/graph.db", isolation_level=None)
 now = int(time.time() * 1000)
 rows = [
-  ("orch.spawn", "st/2.1", "w-st-1", {"role": "worker", "agent": "w-st-1", "task": "2.1"}),
-  ("supervisor.stall", "st/2.1", None, {"agent": "w-st-1", "task": "2.1", "action": "nudge", "reason": "no progress"}),
-  ("supervisor.stall", "st/2.1", None, {"agent": "w-st-1", "task": "2.1", "action": "stop", "reason": "stalled — no progress for 40s after a nudge"}),
-  ("orch.spawn", "st/2.1", "w-st-1", {"role": "worker", "agent": "w-st-1", "task": "2.1"}),
-  ("supervisor.escalate", "st/2.1", None, {"task": "2.1", "level": 1, "to": "manager", "agent": "fm-st"}),
-  ("agent.tool", "st/2.1", "w-st-1", {"agent": "w-st-1", "tool": "Bash", "detail": "make test"}),
-  ("agent.usage", "st/2.1", "w-st-1", {"agent": "w-st-1", "tokens_in": 1200, "tokens_out": 80, "cost_usd": 0.42}),
+  ("orch.spawn", "st/2.1", "w-st-2.1", {"role": "worker", "agent": "w-st-2.1", "task": "2.1"}),
+  ("supervisor.stall", "st/2.1", None, {"agent": "w-st-2.1", "task": "2.1", "action": "nudge", "reason": "no progress"}),
+  ("supervisor.stall", "st/2.1", None, {"agent": "w-st-2.1", "task": "2.1", "action": "stop", "reason": "stalled — no progress for 40s after a nudge"}),
+  ("orch.spawn", "st/2.1", "w-st-2.1", {"role": "worker", "agent": "w-st-2.1", "task": "2.1"}),
+  ("supervisor.escalate", "st/2.1", None, {"task": "2.1", "level": 1, "to": "manager", "agent": "wm-st-1"}),
+  ("agent.tool", "st/2.1", "w-st-2.1", {"agent": "w-st-2.1", "tool": "Bash", "detail": "make test"}),
+  ("agent.usage", "st/2.1", "w-st-2.1", {"agent": "w-st-2.1", "tokens_in": 1200, "tokens_out": 80, "cost_usd": 0.42}),
 ]
 for kind, subj, node, payload in rows:
     db.execute("INSERT INTO events(at,kind,subject,node,payload) VALUES(?,?,?,?,?)", (now, kind, subj, node, json.dumps(payload)))
-db.execute("INSERT INTO fleet_approvals(gate,subject,state,requested,requested_by) VALUES('land','st','pending',?, 'fm-st')", (int(time.time()),))
+db.execute("INSERT INTO fleet_approvals(gate,subject,state,requested,requested_by) VALUES('land','st/wave-1','pending',?, 'wm-st-1')", (int(time.time()),))
 EOF
-    CG_AGENT=w-st-1 CG_ROLE=worker CG_PARENT=fm-st CG_FEATURE=st CG_WAVE=1 "$CG" spec claim 2.1 >/dev/null
+    CG_AGENT=w-st-2.1 CG_ROLE=worker CG_PARENT=wm-st-1 CG_FEATURE=st CG_WAVE=1 "$CG" spec claim 2.1 >/dev/null
     node - "$EXT" "$CG" "$TMP/st" <<'JS'
 const path = require('path'), cp = require('child_process');
 const [dir, CG, cwd] = process.argv.slice(2);
@@ -228,10 +228,11 @@ const plan = startPlan({ roles, dryRun: dry, collisions, runs });
 check(plan.canStart === true, `plan should be startable: ${plan.warnings}`);
 check(plan.feature === 'st', `feature ${plan.feature}`);
 const md = plan.markdown;
-check(/\| worker \| w-\{feature\}-\{wave\} \| wave\/\{feature\}\/\{wave\} \| codex \| — \| 2 \| 2h \| \$3\.00 \| 2 \| 15m \| land \|/.test(md), 'worker row carries its budgets and gate: ' + md);
-check(/\| feature \| .* \| land \|/.test(md) === false, 'approve is per role: the worker declared land, not the manager');
-check(/manager fm-st — st on feature\/st/.test(md), 'the dry run is in the plan');
-check(/worker w-st-1 — 2\.1/.test(md) && /worker w-st-1 — 2\.2/.test(md), 'every worker spawn listed');
+check(/\| worker \| w-\{feature\}-\{task\} \| task\/\{feature\}\/\{task\} \| codex \| — \| 2 \| 2h \| \$3\.00 \| 2 \| 15m \| land \|/.test(md), 'worker row carries its budgets and gate: ' + md);
+check(/\| manager \| wm-\{feature\}-\{wave\} \| wave\/\{feature\}\/\{wave\} \| .* \| 0 \| /.test(md), 'the manager row: one per wave, every wave at once: ' + md);
+check(/\| manager \| .* \| land \|/.test(md) === false, 'approve is per role: the worker declared land, not the manager');
+check(/manager wm-st-1 — st wave 1 on wave\/st\/1/.test(md), 'the dry run is in the plan');
+check(/worker w-st-2\.1 — 2\.1/.test(md) && /worker w-st-2\.2 — 2\.2/.test(md), 'every worker spawn listed');
 check(/## Predicted collisions/.test(md), 'collisions section');
 check(/2\.1 and 2\.2: .*call one another/.test(md), 'the alpha/beta collision is predicted: ' + md);
 check(/cg fleet up -n 2 -f st/.test(md), 'the exact command');
@@ -255,23 +256,26 @@ const live = liveModel();
 const evs = run('events', '--kind', 'supervisor.,orch.spawn,agent.', '-n', '300', '--json').stdout
     .split('\n').filter(Boolean).map((l) => JSON.parse(l));
 for (const e of evs) applyEvent(live, e);
-check(live.agents['w-st-1'] && live.agents['w-st-1'].last === 'Bash make test', 'the agent\'s last step is in the live model');
-check(Math.abs(live.agents['w-st-1'].cost - 0.42) < 1e-9, 'its cost too');
+check(live.agents['w-st-2.1'] && live.agents['w-st-2.1'].last === 'Bash make test', 'the agent\'s last step is in the live model');
+check(Math.abs(live.agents['w-st-2.1'].cost - 0.42) < 1e-9, 'its cost too');
 const t0 = Date.now();
 liveDecorate(model, { live, events: evs.filter((e) => /^(supervisor\.|orch\.)/.test(e.kind)),
                       runs: json('fleet', 'runs', '--json'), approvals: json('fleet', 'approvals', '--json') });
 check(Date.now() - t0 < 300, 'decoration is instant');
 const find = (n, pred, out = []) => { if (!n) return out; if (pred(n)) out.push(n); for (const c of n.children || []) find(c, pred, out); return out; };
-const worker = find(model.main, (n) => n.agent === 'w-st-1')[0];
+const worker = find(model.main, (n) => n.agent === 'w-st-2.1')[0];
 check(worker, 'the claimed worker is in the tree: ' + JSON.stringify(model.main).slice(0, 400));
 check(worker.step === 'Bash make test', `step ${worker.step}`);
 check(Math.abs(worker.cost - 0.42) < 1e-9, `cost ${worker.cost}`);
 const t21 = (worker.tasks || []).find((t) => t.id === '2.1');
 check(t21, 'task 2.1 under its worker');
+const wm = find(model.main, (n) => n.kind === 'manager' && n.wave === 1)[0];
+check(wm && wm.agent === 'wm-st-1' && wm.branch === 'wave/st/1', 'the wave manager is in the tree by its wave: ' + JSON.stringify(wm || null).slice(0, 300));
+check(find(wm, (n) => n.agent === 'w-st-2.1').length === 1, 'the task worker sits under its wave manager');
 check(t21.attempts === 2 && t21.nudged === true, `attempts ${t21.attempts} nudged ${t21.nudged}`);
 check(/stalled/.test(t21.stopped), `stopped ${t21.stopped}`);
 check(t21.escalated === 'manager', `escalated ${t21.escalated}`);
-check(model.approvals.length === 1 && model.approvals[0].gate === 'land' && model.approvals[0].requested_by === 'fm-st', 'the pending approval is on the model');
+check(model.approvals.length === 1 && model.approvals[0].gate === 'land' && model.approvals[0].requested_by === 'wm-st-1', 'the pending approval is on the model');
 check(model.run === null, 'no run yet');
 console.log('start flow ok');
 JS
@@ -1436,10 +1440,14 @@ if (!/CALL_TIMEOUT_MS/.test(body)) {
 console.log('fleet manifest ok:', menus.length, 'menu entries');
 JS
 
-    # ---- the join, over JSON the real cg printed for a real fleet
+    # ---- the join, over JSON the real cg printed for a real fleet: first in
+    #      the older shape (a worker template without {task} — one feature
+    #      manager, a worker per wave), then in the default one (a manager
+    #      per wave, a worker per task)
     command -v git >/dev/null 2>&1 || fail "fleet section needs git"
+    fleet_repo() {
     rm -rf "$TMP/fleet"
-    mkdir -p "$TMP/fleet/src" "$TMP/fleet/lib" "$TMP/fleet/docs" "$TMP/json"
+    mkdir -p "$TMP/fleet/src" "$TMP/fleet/lib" "$TMP/fleet/docs" "$1"
     cd "$TMP/fleet"
     git init -q -b main . 2>/dev/null || git init -q .
     git config user.email t@t; git config user.name t
@@ -1452,17 +1460,23 @@ JS
     "$CG" spec add 2.2 --title "Beta work" --wave 1 --touches 'lib/*.ts' >/dev/null
     "$CG" spec add 3.1 --title "Docs work" --wave 2 --touches 'docs/*.md' >/dev/null
     "$CG" init >/dev/null
-    printf '\n[hierarchy]\nmain = "main"\n' >> spec/workflow.kvx
+    printf '\n[hierarchy]\nmain = "main"\n%s' "$2" >> spec/workflow.kvx
     git add -A >/dev/null; git commit -qm base >/dev/null
     "$CG" fleet begin 2.1 >/dev/null
     CG_AGENT=gideon CG_ROLE=main "$CG" fleet status >/dev/null
-    CG_AGENT=fm-fleet CG_ROLE=feature CG_PARENT=gideon CG_FEATURE=fleet \
+    env CG_AGENT="$3" CG_ROLE=feature CG_PARENT=gideon CG_FEATURE=fleet $4 \
         "$CG" fleet status >/dev/null
-    CG_AGENT=gideon CG_ROLE=main "$CG" fleet status --json > "$TMP/json/status.json"
-    "$CG" spec status --json > "$TMP/json/spec.json"
-    "$CG" branches --json > "$TMP/json/branches.json"
-    "$CG" fleet plan --json > "$TMP/json/plan.json"
-    "$CG" fleet tree --json > "$TMP/json/tree.json"
+    CG_AGENT=gideon CG_ROLE=main "$CG" fleet status --json > "$1/status.json"
+    "$CG" spec status --json > "$1/spec.json"
+    "$CG" branches --json > "$1/branches.json"
+    "$CG" fleet plan --json > "$1/plan.json"
+    "$CG" fleet tree --json > "$1/tree.json"
+    }
+    fleet_repo "$TMP/json-waves" "" wm-fleet-1 CG_WAVE=1
+    fleet_repo "$TMP/json" '
+[role.worker]
+branch = "wave/{feature}/{wave}"
+' fm-fleet ""
 
     node - "$EXT" "$TMP/json" "$(date +%s)" <<'JS'
 const path = require('path'), fs = require('fs');
@@ -1853,6 +1867,54 @@ check(/touch: \(\) => \{ view\.force = true; view\.patchLive\(\); \}/.test(src),
 console.log('fleet sessions surface ok');
 JS
     [ $? -eq 0 ] || fail "fleet sessions surface"
+    # ---- the default shape: a wave manager per wave, labelled by its wave,
+    #      and a task worker per task under the manager of its wave
+    node - "$EXT" "$TMP/json-waves" "$(date +%s)" <<'JS'
+const path = require('path'), fs = require('fs');
+const [, , dir, out, nowArg] = process.argv;
+const { fleetTree, treeFacts } = require(path.join(dir, 'fleet.js'));
+const now = Number(nowArg);
+const j = (n) => JSON.parse(fs.readFileSync(path.join(out, n), 'utf8'));
+const eq = (got, want, what) => {
+    if (got !== want) throw new Error(`${what}: ${JSON.stringify(got)} != ${JSON.stringify(want)}`);
+};
+const facts = treeFacts(j('tree.json'));
+eq(String(facts.managers.map((m) => m.wave)), '0,1,2', 'the tree carries a manager per wave');
+for (const src of ['tree', 'composed']) {
+    const t = fleetTree(j('status.json'), j('spec.json'), j('branches.json'),
+        { plan: j('plan.json'), tree: src === 'tree' ? j('tree.json') : null, now });
+    eq(t.source, src, 'source');
+    const ms = t.main.children.filter((n) => n.kind === 'manager');
+    eq(String(ms.map((m) => m.wave)), '0,1,2', `${src}: managers by wave`);
+    for (const m of ms) {
+        eq(m.agent, `wm-fleet-${m.wave}`, `${src}: manager of wave ${m.wave}`);
+        eq(m.branch, `wave/fleet/${m.wave}`, `${src}: wave ${m.wave} branch`);
+        eq(m.base, 'main', `${src}: wave ${m.wave} base`);
+        for (const w of m.children) eq(w.wave, m.wave, `${src}: ${w.agent} in its wave`);
+    }
+    const m1 = ms.find((m) => m.wave === 1);
+    eq(m1.live, true, `${src}: the registered wave manager is live`);
+    const w = new Map(m1.children.map((x) => [x.agent, x]));
+    eq(String([...w.keys()].sort()), 'w-fleet-2.1,w-fleet-2.2', `${src}: a worker per task`);
+    const a = w.get('w-fleet-2.1');
+    eq(a.parent, 'wm-fleet-1', `${src}: the worker reports to its wave manager`);
+    eq(a.live, true, `${src}: 2.1's worker is live`);
+    eq(a.branch, 'task/fleet/2.1', `${src}: task branch`);
+    eq(a.base, 'wave/fleet/1', `${src}: cut from the wave branch`);
+    eq(String(a.tasks.map((x) => x.id)), '2.1', `${src}: one task`);
+    eq(w.get('w-fleet-2.2').live, false, `${src}: 2.2 has no agent yet`);
+    eq(String(w.get('w-fleet-2.2').tasks.map((x) => x.id)), '2.2', `${src}: 2.2 planned`);
+    const m2 = ms.find((m) => m.wave === 2);
+    eq(String(m2.children.map((x) => x.agent)), 'w-fleet-3.1', `${src}: wave 2's worker`);
+}
+// the label says which wave a manager owns
+const src = fs.readFileSync(path.join(dir, 'fleet.js'), 'utf8');
+if (!/'Wave Manager'/.test(src) || !/bits\.push\(`wave \$\{n\.wave\}`\)/.test(src)) {
+    throw new Error('managers are not labelled by wave');
+}
+console.log('fleet waves ok');
+JS
+    [ $? -eq 0 ] || fail "fleet waves"
 
     # ---- the symbol the task promises resolves in the graph
     rm -rf "$TMP/ext"

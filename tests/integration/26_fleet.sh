@@ -3,11 +3,16 @@
 #   roles     — [hierarchy]/[role.*] parsing with defaults, CG_ROLE/CG_PARENT
 #               identity in claims, brief, and the agents registry,
 #               cg fleet roles|status|plan text and JSON
-#   branches  — the branch lifecycle: cg fleet begin (wave worktree +
-#               branch + claim), merge-up into the feature branch with
-#               conflicts by path, land on main behind the gates, the pull
-#               request through gh (faked) or as printed commands, and the
+#   branches  — the branch lifecycle in the old shape (templates without
+#               {wave}/{task}): cg fleet begin (wave worktree + branch +
+#               claim), merge-up into the feature branch with conflicts by
+#               path, land on main behind the gates, the pull request
+#               through gh (faked) or as printed commands, and the
 #               checkpoint that merges open feature PRs in order
+#   waves     — (codify-v15 4.1) the default shape: a wave manager per wave
+#               on wave/<f>/<n> from main, a task worker per task on
+#               task/<f>/<id> from its wave branch; begin, merge-up into the
+#               wave branch, land <wave|task> refused while tasks are open
 #   orchestrate — (task 2.3) two-level spec run --fleet
 #   caps      — per-role capabilities: driver, model, args, max, wall,
 #               spend, retries, stall, approve; [agents] defaults; problems
@@ -50,9 +55,13 @@ if want roles; then
     out="$("$CG" fleet roles)"
     has "$out" "hierarchy: not configured"
     has "$out" "gideon"
-    has "$out" "fm-{feature}"
+    has "$out" "Wave Manager"
+    has "$out" "wm-{feature}-{wave}"
     has "$out" "wave/{feature}/{wave}"
-    has "$out" "feature/{feature}"
+    has "$out" "Task Worker"
+    has "$out" "w-{feature}-{task}"
+    has "$out" "task/{feature}/{task}"
+    hasnt "$out" "feature/{feature}"
     out="$("$CG" fleet roles --json)"
     echo "$out" | pyjson '
 assert d["configured"] is False and d["enabled"] is False, d
@@ -60,14 +69,17 @@ assert d["main"] == "main" and d["remote"] == "origin", d
 assert d["pr"] == "auto" and d["checkpoint"] == "manual", d
 assert d["test_gate"] == "make test" and d["lint_gate"] == "", d
 names = [r["name"] for r in d["roles"]]
-assert names == ["main", "feature", "worker"], names
+assert names == ["main", "manager", "worker"], names
 w = d["roles"][2]
-assert w["agent"] == "w-{feature}-{wave}", w
-assert w["branch"] == "wave/{feature}/{wave}" and w["base"] == "feature/{feature}", w
+assert w["title"] == "Task Worker" and w["agent"] == "w-{feature}-{task}", w
+assert w["branch"] == "task/{feature}/{task}" and w["base"] == "wave/{feature}/{wave}", w
 f = d["roles"][1]
-assert f["branch"] == "feature/{feature}" and f["base"] == "{main}", f
+assert f["title"] == "Wave Manager" and f["agent"] == "wm-{feature}-{wave}", f
+assert f["branch"] == "wave/{feature}/{wave}" and f["base"] == "{main}", f
+assert f["caps"]["max"] == 0, f          # 0: a manager for every wave
 assert d["roles"][0]["base"] == "", d["roles"][0]
 ' || fail "default roles JSON"
+    has "$("$CG" fleet roles)" "all"
 
     # ---- [hierarchy] + partial [role.*] override the defaults, rest kept
     cat >> spec/workflow.kvx <<'EOF'
@@ -95,9 +107,13 @@ EOF
     has "$out" "remote: upstream"
     has "$out" "gideon-prime"
     has "$out" "work/{feature}-{wave}"
+    # a worker per wave (no {task}) keeps the old shape: one manager of the
+    # whole feature on feature/{feature}, the worker cut from it
     has "$out" "fm-{feature}"
+    has "$out" "Feature Manager"
+    has "$out" "Wave Worker"
     has "$out" "npm run lint"
-    has "$out" "[role.bogus] is not main, feature, or worker"
+    has "$out" "[role.bogus] is not main, manager (feature), or worker"
     out="$("$CG" fleet roles --json)"
     echo "$out" | pyjson '
 assert d["configured"] is True and d["enabled"] is True, d
@@ -109,7 +125,10 @@ assert r["main"]["agent"] == "gideon-prime", r
 assert r["main"]["branch"] == "{main}", r
 assert r["worker"]["branch"] == "work/{feature}-{wave}", r
 assert r["worker"]["base"] == "feature/{feature}", r
-assert r["feature"]["agent"] == "fm-{feature}", r
+assert r["worker"]["agent"] == "w-{feature}-{wave}", r
+assert r["manager"]["agent"] == "fm-{feature}", r
+assert r["manager"]["branch"] == "feature/{feature}", r
+assert r["manager"]["caps"]["max"] == 2, r
 assert d["unknown_roles"] == ["bogus"], d
 ' || fail "override roles JSON"
 
@@ -229,22 +248,26 @@ assert all(isinstance(x["seen"], int) for x in d["agents"]), d
     has "$out" "feature   fm-fleet"
     has "$out" "feature/fleet"
     has "$out" "← trunk"
-    has "$out" "wave 1    w-fleet-1"
+    has "$out" "  wave 1  w-fleet-1"
     has "$out" "work/fleet-1"
     has "$out" "← feature/fleet"
-    has "$out" "wave 2    w-fleet-2"
+    has "$out" "  wave 2  w-fleet-2"
     has "$out" "work/fleet-2"
     has "$out" "2.1      in_progress  Alpha work"
     has "$out" "3.1      pending      Docs work"
     out="$("$CG" fleet plan --json)"
     echo "$out" | pyjson '
 assert d["feature"] == "fleet", d
+assert d["shape"] == {"manager": "feature", "worker": "wave"}, d["shape"]
 assert d["main"]["agent"] == "gideon-prime" and d["main"]["branch"] == "trunk", d["main"]
 assert d["main"]["live"] == ["gideon"], d["main"]
-fm = d["feature_manager"]
+assert len(d["managers"]) == 1, d["managers"]
+fm = d["managers"][0]
+assert fm["wave"] is None, fm
 assert fm["agent"] == "fm-fleet" and fm["branch"] == "feature/fleet", fm
 assert fm["base"] == "trunk" and fm["live"] == ["fm-fleet"], fm
-w = {x["wave"]: x for x in d["waves"]}
+assert all(x["task"] is None for x in fm["workers"]), fm
+w = {x["wave"]: x for x in fm["workers"]}
 assert sorted(w) == [0, 1, 2], w
 assert [t["id"] for t in w[0]["tasks"]] == ["1.1"] and w[0]["tasks"][0]["status"] == "done", w[0]
 assert w[1]["agent"] == "w-fleet-1" and w[1]["branch"] == "work/fleet-1", w[1]
@@ -254,6 +277,42 @@ assert [t["id"] for t in w[1]["tasks"]] == ["2.1", "2.2"], w[1]
 assert {t["id"]: t["status"] for t in w[1]["tasks"]} == {"2.1": "in_progress", "2.2": "pending"}, w[1]
 assert w[2]["live"] == [] and [t["id"] for t in w[2]["tasks"]] == ["3.1"], w[2]
 ' || fail "fleet plan JSON"
+
+    # ---- the default shape: a wave manager per wave with work, a task
+    #      worker per task under it; a wave that is all done has none
+    python3 - <<'EOF'
+p = "spec/workflow.kvx"
+s = open(p).read().replace('[role.worker]\nbranch = "work/{feature}-{wave}"\n', '', 1)
+open(p, "w").write(s)
+EOF
+    out="$("$CG" fleet plan)"
+    has "$out" "wave 1    wm-fleet-1"
+    has "$out" "wave/fleet/1"
+    has "$out" "wave 2    wm-fleet-2"
+    has "$out" "w-fleet-2.1"
+    has "$out" "task/fleet/2.1"
+    has "$out" "w-fleet-3.1"
+    has "$out" "task/fleet/3.1"
+    has "$out" "Alpha work"
+    hasnt "$out" "fm-fleet"
+    hasnt "$out" "feature/fleet"
+    hasnt "$out" "wm-fleet-0"
+    out="$("$CG" fleet plan --json)"
+    echo "$out" | pyjson '
+assert d["shape"] == {"manager": "wave", "worker": "task"}, d["shape"]
+m = {x["wave"]: x for x in d["managers"]}
+assert sorted(m) == [1, 2], m                     # wave 0 is all done
+assert m[1]["agent"] == "wm-fleet-1" and m[1]["branch"] == "wave/fleet/1", m[1]
+assert m[1]["base"] == "trunk", m[1]
+w = {x["task"]: x for x in m[1]["workers"]}
+assert sorted(w) == ["2.1", "2.2"], w
+assert w["2.1"]["agent"] == "w-fleet-2.1" and w["2.1"]["branch"] == "task/fleet/2.1", w
+assert w["2.1"]["base"] == "wave/fleet/1" and w["2.1"]["wave"] == 1, w
+assert w["2.1"]["live"] == ["w-fleet-1"], w       # the claim holder of 2.1
+assert w["2.2"]["live"] == ["solo"], w
+assert [t["id"] for t in w["2.2"]["tasks"]] == ["2.2"], w
+assert [x["task"] for x in m[2]["workers"]] == ["3.1"], m[2]
+' || fail "fleet plan JSON, per wave"
 
     # -f names another feature; an unknown one is a clean error
     expect_rc 1 "$CG" fleet plan -f nope
@@ -270,8 +329,8 @@ if want caps; then
     # ---- no workflow capabilities: every role still has a full budget
     out="$("$CG" fleet roles --json)"
     echo "$out" | pyjson '
-c = {r["name"]: r["caps"] for r in d["roles"]}
-assert c["main"]["max"] == 1 and c["feature"]["max"] == 2, c
+c = dict(zip(["main", "feature", "worker"], [r["caps"] for r in d["roles"]]))
+assert c["main"]["max"] == 1 and c["feature"]["max"] == 0, c   # every wave
 assert c["worker"]["max"] == 2, c                  # [agents].max default
 assert c["worker"]["driver"] == "codex" and c["worker"]["model"] == "", c
 assert (c["main"]["wall_s"], c["feature"]["wall_s"], c["worker"]["wall_s"]) == (3600, 3600, 7200), c
@@ -311,6 +370,7 @@ approve = "retry"
 EOF
     out="$("$CG" fleet roles --json)"
     echo "$out" | pyjson '
+assert [r["name"] for r in d["roles"]] == ["main", "feature", "worker"], d["roles"]
 c = {r["name"]: r["caps"] for r in d["roles"]}
 m, f, w = c["main"], c["feature"], c["worker"]
 assert m["driver"] == "claude" and m["model"] == "opus", m
@@ -348,12 +408,13 @@ EOF
 c = {r["name"]: r["caps"] for r in d["roles"]}
 w, f, m = c["worker"], c["feature"], c["main"]
 assert w["wall_s"] == 7200 and w["driver"] == "codex" and w["approve"] == ["retry"], w
-assert f["max"] == 2 and m["max"] == 1, (f, m)
+assert f["max"] == 0 and m["max"] == 1, (f, m)
 p = " | ".join(d["problems"])
 assert "wall = \"soon\" is not a duration" in p, p
 assert "driver = \"gpt\" is not codex, claude, or custom" in p, p
 assert "approve gate \"merge\" is not land, pr, retry, drift, or coverage" in p, p
-assert "[role.feature] max = \"0\" is not a usable count" in p, p
+# a manager max of 0 is usable: a manager for every wave
+assert "[role.feature] max" not in p, p
 assert "there is one main agent" in p, p
 ' || fail "cap problems"
     out="$("$CG" fleet roles)"
@@ -364,11 +425,16 @@ if want branches; then
     setup_repo
     proj="$(pwd -P)"
     wt="$proj/.codegraph/worktrees"
+    # the old shape: a worker per wave under one manager of the feature,
+    # which is what a worker branch without {task} still gives
     cat >> spec/workflow.kvx <<'EOF'
 
 [hierarchy]
 test_gate = "sh gate.sh"
 lint_gate = "sh lint.sh"
+
+[role.worker]
+branch = "wave/{feature}/{wave}"
 EOF
     printf 'test -f gate.ok\n' > gate.sh
     printf 'test -f lint.ok\n' > lint.sh
@@ -704,6 +770,80 @@ assert d['local_main']['updated'] is True and len(d['local_main']['head']) == 40
     expect_rc 1 "$CG" fleet merge-up
 fi
 
+if want waves; then
+    setup_repo
+    proj="$(pwd -P)"
+    wt="$proj/.codegraph/worktrees"
+    cat >> spec/workflow.kvx <<'EOF'
+
+[hierarchy]
+test_gate = "true"
+pr        = "manual"
+EOF
+    git add -A >/dev/null; git commit -qm "hierarchy" >/dev/null
+    base_sha="$(git rev-parse HEAD)"
+
+    # ---- begin: the wave branch cut from main, the task's from the wave's
+    out="$("$CG" fleet begin 2.1)"
+    has "$out" "begin 2.1 — wave 1 of fleet"
+    has "$out" "agent:    w-fleet-2.1 (worker, reports to wm-fleet-1)"
+    has "$out" "branch:   task/fleet/2.1 from wave/fleet/1 (created)   [wave/fleet/1 cut from main]"
+    has "$out" "worktree: $wt/task-fleet-2.1 (created)"
+    [ "$(git rev-parse wave/fleet/1)" = "$base_sha" ] || fail "wave branch not at main"
+    hasnt "$(git branch --list --format='%(refname:short)')" "feature/fleet"
+    out="$("$CG" fleet begin 2.2 --json)"
+    echo "$out" | pyjson '
+assert d["agent"] == "w-fleet-2.2" and d["parent"] == "wm-fleet-1", d
+assert d["branch"] == "task/fleet/2.2" and d["base"] == "wave/fleet/1", d
+assert d["branch_created"] is True and d["base_created"] is False, d
+assert d["env"]["CG_PARENT"] == "wm-fleet-1" and d["env"]["CG_WAVE"] == "1", d["env"]
+' || fail "begin per task JSON"
+
+    # ---- one task qualifies and merges up into its wave branch
+    cd "$wt/task-fleet-2.1"
+    CG_AGENT=w-fleet-2.1 CG_ROLE=worker CG_PARENT=wm-fleet-1 "$CG" spec start 2.1 >/dev/null
+    echo 'export function alpha(){ return 1 }' > src/a.ts
+    CG_AGENT=w-fleet-2.1 "$CG" spec done 2.1 >/dev/null
+    git add -A >/dev/null; git commit -qm "alpha [spec:fleet/2.1]" >/dev/null
+    cd "$proj"
+    out="$("$CG" fleet merge-up 2.1)"
+    has "$out" "merged task/fleet/2.1 into wave/fleet/1"
+    has "$out" "at $wt/wave-fleet-1"
+    has "$(git show wave/fleet/1:src/a.ts)" "return 1"
+
+    # ---- land: a wave with an open task is refused, naming the task
+    expect_rc 1 "$CG" fleet land 1
+    err="$("$CG" fleet land 1 2>&1 >/dev/null || true)"
+    has "$err" "wave 1 of fleet is not done — 1 task open: 2.2 (pending)"
+    err="$("$CG" fleet land 2.1 2>&1 >/dev/null || true)"
+    has "$err" "wave 1 of fleet is not done"
+    [ "$(git rev-parse HEAD)" = "$base_sha" ] || fail "main moved on a refused land"
+
+    # ---- the second task: the wave is done and lands whole
+    cd "$wt/task-fleet-2.2"
+    CG_AGENT=w-fleet-2.2 CG_ROLE=worker CG_PARENT=wm-fleet-1 "$CG" spec start 2.2 >/dev/null
+    echo 'export function beta(){ return 2 }' > lib/b.ts
+    CG_AGENT=w-fleet-2.2 "$CG" spec done 2.2 >/dev/null
+    git add -A >/dev/null; git commit -qm "beta [spec:fleet/2.2]" >/dev/null
+    cd "$proj"
+    "$CG" fleet merge-up 2.2 >/dev/null
+    out="$("$CG" fleet land 2.2 --no-pr)"
+    has "$out" "landed wave/fleet/1 into main"
+    has "$(cat src/a.ts)" "return 1"
+    has "$(cat lib/b.ts)" "return 2"
+    out="$("$CG" fleet land 1 --no-pr --json)"
+    echo "$out" | pyjson "assert d['landed'] is False and d['commits'] == 0, d" \
+        || fail "land wave nothing JSON"
+
+    # ---- the next wave cuts from main, which now carries wave 1
+    out="$("$CG" fleet begin 3.1)"
+    has "$out" "agent:    w-fleet-3.1 (worker, reports to wm-fleet-2)"
+    has "$out" "task/fleet/3.1 from wave/fleet/2 (created)   [wave/fleet/2 cut from main]"
+    has "$(git show wave/fleet/2:lib/b.ts)" "return 2"
+    # nothing given and nothing in the environment: say which waves there are
+    expect_rc 1 "$CG" fleet land
+fi
+
 if want orchestrate; then
     setup_repo
     proj="$(pwd -P)"
@@ -782,23 +922,27 @@ fi
 [ "\$CG_ROLE" = feature ] || exit 9
 [ -z "\${CG_TASK:-}" ] || exit 9
 [ -z "\${CG_ATTEMPT:-}" ] || exit 9
-grep -q "cg fleet land \$CG_FEATURE" "\$PF" || exit 9
-left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,sys; m = json.load(sys.stdin)["managers"][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+[ -n "\${CG_WAVE:-}" ] || exit 9
+grep -q "cg fleet land \$CG_WAVE -f \$CG_FEATURE" "\$PF" || exit 9
+left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,os,sys; m = [m for m in json.load(sys.stdin)["managers"] if m["wave"] == int(os.environ["CG_WAVE"])][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
 [ "\$left" -eq 0 ] || exit 0
-exec "$CG" fleet land "\$CG_FEATURE" --no-pr >/dev/null
+exec "$CG" fleet land "\$CG_WAVE" -f "\$CG_FEATURE" --no-pr >/dev/null
 EOF
     chmod +x "$TMP/fleet-driver.sh"
     git add -A >/dev/null; git commit -qm "hierarchy and driver" >/dev/null
 
-    # ---- the plan: the manager on the feature branch, one worker per task
-    #      on its wave branch, and nothing claimed or created
+    # ---- the plan: a manager per wave on its wave branch, one worker per
+    #      task on its task branch, and nothing claimed or created
     out="$("$CG" spec run --fleet --dry-run -n 2)"
     has "$out" "fleet plan — driver custom, 2 worker slot(s), feature fleet (dry run: nothing claimed)"
-    has "$out" "manager fm-fleet — fleet on feature/fleet (from main)"
-    has "$out" "worktree $wt/feature-fleet"
-    has "$out" "worker w-fleet-1 — 2.1 (wave 1) on wave/fleet/1 (from feature/fleet)"
-    has "$out" "worker w-fleet-1 — 2.2 (wave 1) on wave/fleet/1 (from feature/fleet)"
-    has "$out" "worker w-fleet-2 — 3.1 (wave 2) on wave/fleet/2 (from feature/fleet)"
+    has "$out" "manager wm-fleet-1 — fleet wave 1 on wave/fleet/1 (from main)"
+    has "$out" "worktree $wt/wave-fleet-1"
+    has "$out" "manager wm-fleet-2 — fleet wave 2 on wave/fleet/2 (from main)"
+    has "$out" "worker w-fleet-2.1 — 2.1 (wave 1) on task/fleet/2.1 (from wave/fleet/1)"
+    has "$out" "worker w-fleet-2.2 — 2.2 (wave 1) on task/fleet/2.2 (from wave/fleet/1)"
+    has "$out" "worker w-fleet-3.1 — 3.1 (wave 2) on task/fleet/3.1 (from wave/fleet/2)"
+    hasnt "$out" "feature/fleet"
+    hasnt "$out" "wm-fleet-0"
     has "$out" "/bin/sh -c"
     has "$out" "fleet-driver.sh"
     hasnt "$out" "1.1"
@@ -811,40 +955,47 @@ EOF
     out="$("$CG" fleet tree)"
     has "$out" "fleet tree — fleet"
     has "$out" "main     gideon"
-    has "$out" "feature  fm-fleet"
-    has "$out" "branch feature/fleet"
-    has "$out" "tasks 1/4 done, 0 running  ahead 0  incomplete"
+    has "$out" "wave 0   wm-fleet-0"
+    has "$out" "wave 1   wm-fleet-1"
+    has "$out" "branch wave/fleet/1"
+    has "$out" "wave 2   wm-fleet-2"
+    has "$out" "tasks 0/2 done, 0 running  ahead 0  incomplete"
     has "$out" "(no workers yet)"
 
-    # ---- the run: one manager, wave workers under it, each in its own
-    #      worktree with its identity in the environment
+    # ---- the run: a manager per wave, task workers under them, each in its
+    #      own worktree with its identity in the environment
     out="$("$CG" spec run --fleet -n 1)"
-    has "$out" "[fleet] fleet — manager + 1 worker slot(s), driver custom, 16 wake(s)"
-    has "$out" "[fleet] manager fm-fleet on feature/fleet"
-    has "$out" "log .codegraph/agents/fleet-manager.log"
-    has "$out" "[fleet] worker w-fleet-1 → 2.1 (wave 1) on wave/fleet/1, log .codegraph/agents/fleet-2.1.log"
-    has "$out" "[fleet] worker w-fleet-1 task 2.1 exit 0 → done"
-    has "$out" "[fleet] worker w-fleet-1 → 2.2 (wave 1) on wave/fleet/1"
-    has "$out" "[fleet] worker w-fleet-2 → 3.1 (wave 2) on wave/fleet/2"
-    has "$out" "[fleet] fleet complete — 4/4 task(s) qualified, feature/fleet merged into main, 0 failure(s)"
+    has "$out" "[fleet] fleet — a manager per wave (all at once) + 1 worker slot(s), driver custom"
+    has "$out" "[fleet] manager wm-fleet-1 on wave/fleet/1"
+    has "$out" "log .codegraph/agents/fleet-manager-1.log"
+    has "$out" "[fleet] manager wm-fleet-2 on wave/fleet/2"
+    hasnt "$out" "[fleet] manager wm-fleet-0"      # wave 0 is done already
+    has "$out" "[fleet] worker w-fleet-2.1 → 2.1 (wave 1) on task/fleet/2.1, log .codegraph/agents/fleet-2.1.log"
+    has "$out" "[fleet] worker w-fleet-2.1 task 2.1 exit 0 → done"
+    has "$out" "[fleet] worker w-fleet-2.2 → 2.2 (wave 1) on task/fleet/2.2"
+    has "$out" "[fleet] worker w-fleet-3.1 → 3.1 (wave 2) on task/fleet/3.1"
+    has "$out" "[fleet] fleet complete — 4/4 task(s) qualified"
 
     # every child was handed CG_ROLE, CG_PARENT, CG_FEATURE, CG_WAVE, the
     # branch, the base, and the worktree to run in
     out="$(cat "$calls")"
-    has "$out" "feature|fm-fleet|fleet|gideon|fleet|-|feature/fleet|main|feature-fleet"
-    has "$out" "worker|w-fleet-1|2.1|fm-fleet|fleet|1|wave/fleet/1|feature/fleet|wave-fleet-1"
-    has "$out" "worker|w-fleet-1|2.2|fm-fleet|fleet|1|wave/fleet/1|feature/fleet|wave-fleet-1"
-    has "$out" "worker|w-fleet-2|3.1|fm-fleet|fleet|2|wave/fleet/2|feature/fleet|wave-fleet-2"
+    has "$out" "feature|wm-fleet-1|fleet|gideon|fleet|1|wave/fleet/1|main|wave-fleet-1"
+    has "$out" "feature|wm-fleet-2|fleet|gideon|fleet|2|wave/fleet/2|main|wave-fleet-2"
+    has "$out" "worker|w-fleet-2.1|2.1|wm-fleet-1|fleet|1|task/fleet/2.1|wave/fleet/1|task-fleet-2.1"
+    has "$out" "worker|w-fleet-2.2|2.2|wm-fleet-1|fleet|1|task/fleet/2.2|wave/fleet/1|task-fleet-2.2"
+    has "$out" "worker|w-fleet-3.1|3.1|wm-fleet-2|fleet|2|task/fleet/3.1|wave/fleet/2|task-fleet-3.1"
 
     # the briefings end on the command that moves the work upward
-    has "$(cat .codegraph/agents/fleet-2.1.prompt)" "you are a wave worker on wave/fleet/1, reporting to fm-fleet"
+    has "$(cat .codegraph/agents/fleet-2.1.prompt)" "you are a task worker on task/fleet/2.1, reporting to wm-fleet-1"
     has "$(cat .codegraph/agents/fleet-2.1.prompt)" "cg fleet merge-up 2.1"
-    has "$(cat .codegraph/agents/fleet-manager.prompt)" "You are fm-fleet, the feature manager for fleet."
-    has "$(cat .codegraph/agents/fleet-manager.prompt)" "cg fleet land fleet"
-    has "$(cat .codegraph/agents/fleet-manager.prompt)" "cg fleet pr fleet"
+    has "$(cat .codegraph/agents/fleet-manager-1.prompt)" "You are wm-fleet-1, the wave manager for wave 1 of fleet."
+    has "$(cat .codegraph/agents/fleet-manager-1.prompt)" "cg fleet land 1 -f fleet"
+    has "$(cat .codegraph/agents/fleet-manager-1.prompt)" "cg fleet pr 1 -f fleet"
+    has "$(cat .codegraph/agents/fleet-manager-2.prompt)" "the wave manager for wave 2 of fleet"
 
     # the subtree is complete because it merged, not because a process exited
-    has "$(git log --oneline -1)" "land feature/fleet into main [spec:fleet]"
+    has "$(git log --oneline)" "land wave/fleet/1 into main"
+    has "$(git log --oneline)" "land wave/fleet/2 into main"
     has "$(cat src/a.ts)" "return 1"
     has "$(cat lib/b.ts)" "return 2"
     has "$(cat docs/d.md)" "by the worker"
@@ -854,10 +1005,10 @@ EOF
 
     # ---- the tree after the run: main -> manager -> workers
     out="$("$CG" fleet tree)"
-    has "$out" "tasks 4/4 done, 0 running  ahead 0  complete"
-    has "$out" "worker w-fleet-1"
+    has "$out" "tasks 2/2 done, 0 running  ahead 0  complete"
+    has "$out" "worker w-fleet-2.2"
     has "$out" "wave 1  task 2.2  completed"
-    has "$out" "worker w-fleet-2"
+    has "$out" "worker w-fleet-3.1"
     has "$out" "wave 2  task 3.1  completed"
     out="$("$CG" spec run --fleet --status)"
     has "$out" "fleet tree — fleet"
@@ -866,21 +1017,27 @@ EOF
 assert d["feature"] == "fleet" and d["enabled"] is True, d
 assert d["main"]["agent"] == "gideon" and d["main"]["branch"] == "main", d
 assert d["main"]["role"] == "main", d
-m = d["managers"][0]
-assert m["agent"] == "fm-fleet" and m["role"] == "feature" and m["parent"] == "gideon", m
-assert m["branch"] == "feature/fleet" and m["base"] == "main", m
-assert m["worktree"].endswith("/.codegraph/worktrees/feature-fleet"), m
-assert m["tasks"] == {"total": 4, "done": 4, "claimed": 0}, m
+ms = {m["wave"]: m for m in d["managers"]}
+assert sorted(ms) == [0, 1, 2], ms
+m = ms[1]
+assert m["agent"] == "wm-fleet-1" and m["role"] == "feature" and m["parent"] == "gideon", m
+assert m["branch"] == "wave/fleet/1" and m["base"] == "main", m
+assert m["worktree"].endswith("/.codegraph/worktrees/wave-fleet-1"), m
+assert m["tasks"] == {"total": 2, "done": 2, "claimed": 0}, m
 assert m["ahead"] == 0 and m["merged"] is True and m["complete"] is True, m
+assert ms[0]["tasks"] == {"total": 1, "done": 1, "claimed": 0}, ms[0]
 w = {x["agent"]: x for x in m["workers"]}
-assert set(w) == {"w-fleet-1", "w-fleet-2"}, w
-assert w["w-fleet-1"]["role"] == "worker" and w["w-fleet-1"]["parent"] == "fm-fleet", w
-assert w["w-fleet-1"]["wave"] == 1 and w["w-fleet-1"]["branch"] == "wave/fleet/1", w
-assert w["w-fleet-1"]["base"] == "feature/fleet", w
-assert w["w-fleet-1"]["worktree"].endswith("/wave-fleet-1"), w
-assert w["w-fleet-2"]["wave"] == 2 and w["w-fleet-2"]["task"] == "3.1", w
-assert w["w-fleet-2"]["state"] == "completed" and len(w["w-fleet-2"]["attempt"]) > 0, w
-assert w["w-fleet-2"]["heartbeat"] > 0, w
+assert set(w) == {"w-fleet-2.1", "w-fleet-2.2"}, w
+assert w["w-fleet-2.1"]["role"] == "worker" and w["w-fleet-2.1"]["parent"] == "wm-fleet-1", w
+assert w["w-fleet-2.1"]["wave"] == 1 and w["w-fleet-2.1"]["branch"] == "task/fleet/2.1", w
+assert w["w-fleet-2.1"]["base"] == "wave/fleet/1", w
+assert w["w-fleet-2.1"]["worktree"].endswith("/task-fleet-2.1"), w
+w2 = {x["agent"]: x for x in ms[2]["workers"]}
+assert set(w2) == {"w-fleet-3.1"}, w2
+w2 = w2["w-fleet-3.1"]
+assert w2["wave"] == 2 and w2["task"] == "3.1" and w2["parent"] == "wm-fleet-2", w2
+assert w2["state"] == "completed" and len(w2["attempt"]) > 0, w2
+assert w2["heartbeat"] > 0, w2
 ' || fail "fleet tree JSON"
 
     # ---- nothing left to do: the run is complete without spawning anything
@@ -906,10 +1063,21 @@ EOF
       *"no manager wake is left (--max-rounds)"*|*"fleet cannot finish — blocked: 4.1"*) : ;;
       *) fail "a fleet that cannot finish must say why it stopped: $out" ;;
     esac
-    cnt="$(printf '%s' "$out" | grep -c '\[fleet\] manager fm-fleet on feature/fleet')"
-    [ "$cnt" -le 2 ] || fail "spawned $cnt managers with --max-rounds 2"
+    cnt="$(printf '%s' "$out" | grep -c '\[fleet\] manager wm-fleet-[0-9]* on ')"
+    [ "$cnt" -le 2 ] || fail "spawned $cnt managers with --max-rounds 2: $out"
     st="$("$CG" spec status --json)"
     has "$st" '"claims":[]'
+
+    # ---- old templates keep the old shape: one manager of the feature
+    cat >> spec/workflow.kvx <<'EOF'
+
+[role.worker]
+branch = "wave/{feature}/{wave}"
+EOF
+    out="$("$CG" spec run --fleet --dry-run -n 1)"
+    has "$out" "manager fm-fleet — fleet on feature/fleet (from main)"
+    has "$out" "worker w-fleet-3 — 4.1 (wave 3) on wave/fleet/3 (from feature/fleet)"
+    hasnt "$out" "wm-fleet-"
 fi
 
 echo "ok 26_fleet ($section)"

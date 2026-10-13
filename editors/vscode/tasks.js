@@ -211,9 +211,23 @@ function mergeTasks(spec, trace, status, plan) {
     const mode = (status && status.mode) || 'standard';
     const feature = (spec && spec.feature) || (trace && trace.feature) ||
         (status && status.feature) || '';
+    /* A wave's branch, and the branch each task is worked on. With a
+     * manager per wave the plan's managers[] name the wave branches and
+     * their workers[] rows name a task each; in the older shape (and an
+     * older cg's waves[]) a worker row is the wave's branch. */
     const waveBranch = new Map();
-    for (const w of (plan && plan.waves) || []) {
-        if (w.branch) waveBranch.set(String(w.wave), w.branch);
+    const taskBranch = new Map();
+    const rows = [];
+    for (const m of (plan && plan.managers) || []) {
+        if (m && m.branch && typeof m.wave === 'number') {
+            waveBranch.set(String(m.wave), m.branch);
+        }
+        for (const w of (m && m.workers) || []) rows.push(w);
+    }
+    for (const w of rows.length ? rows : (plan && plan.waves) || []) {
+        if (!w || !w.branch) continue;
+        if (w.task) taskBranch.set(String(w.task), w.branch);
+        else waveBranch.set(String(w.wave), w.branch);
     }
     const nextId = status && status.next ? status.next.id : undefined;
 
@@ -261,6 +275,7 @@ function mergeTasks(spec, trace, status, plan) {
             branch: claim ? claim.branch || '' : '',
             worktree: claim ? claim.worktree || '' : '',
             waveBranch: waveBranch.get(String(sp.wave)) || '',
+            taskBranch: taskBranch.get(String(id)) || '',
             next: id === nextId,
         };
         row.blockers = row.requires
@@ -771,7 +786,7 @@ function detailView(row, spec) {
         feature: row.feature,
         agent: row.agent,
         role: row.role,
-        branch: row.branch || row.waveBranch,
+        branch: row.branch || row.taskBranch || row.waveBranch,
         worktree: row.worktree,
         attempt: row.claim && row.claim.attempt_id
             ? String(row.claim.attempt_id).slice(0, 12) : '',
@@ -801,8 +816,8 @@ function detailView(row, spec) {
             { action: 'release', label: 'Release', disabled: !claimed,
               why: claimed ? 'cg spec release ' + row.id : 'Nobody holds this task.' },
             { action: 'branch', label: 'Open branch',
-              disabled: !(row.worktree || row.branch || row.waveBranch),
-              why: row.worktree || row.branch || row.waveBranch ||
+              disabled: !(row.worktree || row.branch || row.taskBranch || row.waveBranch),
+              why: row.worktree || row.branch || row.taskBranch || row.waveBranch ||
                   'No branch or worktree recorded for this task.' },
             { action: 'prompt', label: 'Copy resume prompt' },
             { action: 'spec', label: 'Open in spec' },
@@ -1373,7 +1388,7 @@ async function cmdOpenBranch(arg) {
     if (!id) return;
     const row = provider.row(id);
     if (!row) return;
-    const branch = row.branch || row.waveBranch;
+    const branch = row.branch || row.taskBranch || row.waveBranch;
     if (row.worktree && fs.existsSync(row.worktree)) {
         const pick = await vscode.window.showQuickPick([
             { label: '$(empty-window) Open worktree in a new window', v: 'new' },

@@ -1,8 +1,10 @@
 /* Codify fleet view — the agent hierarchy, live, in the sidebar.
  *
- * A fleet is a tree: Main Gideon owns the main branch, a feature manager owns
- * feature/<name>, and wave workers own wave/<feature>/<n>, each in its own
- * worktree. `cg fleet tree` reports that hierarchy directly and is preferred
+ * A fleet is a tree: Main Gideon owns the main branch, a wave manager owns
+ * each wave's wave/<feature>/<n>, and a task worker owns each task's
+ * task/<feature>/<id>, each in its own worktree. (A workflow whose templates
+ * name neither {wave} nor {task} keeps the older shape: one feature manager
+ * on feature/<name>, wave workers on wave/<feature>/<n>.) `cg fleet tree` reports that hierarchy directly and is preferred
  * wherever it speaks; what it does not cover — the waves nobody has started,
  * the tasks in each one, and whether a branch is already in its base — is
  * joined from the agents registry (cg fleet status), the live claims (cg spec
@@ -90,7 +92,7 @@ function mergeState(name, base, reg, exists) {
 /* `cg fleet tree --json` is cg's own walk of the hierarchy:
  *
  *   {feature, enabled, main:{agent,role,branch,worktree},
- *    managers:[{agent,role,parent,feature,branch,base,worktree,seen,
+ *    managers:[{agent,role,parent,feature,wave,branch,base,worktree,seen,
  *               tasks:{total,done,claimed}, ahead, merged, complete,
  *               workers:[{agent,role,parent,wave,branch,base,worktree,task,
  *                         attempt,state,heartbeat,seen}]}]}
@@ -101,6 +103,9 @@ function mergeState(name, base, reg, exists) {
  * it lists only agents that have registered, and a worker's branch/base/
  * worktree stay empty in the registry until its attempt fills them in, so the
  * plan, the claims and the branch registry still fill the gaps.
+ *
+ * A manager's `wave` is its wave, or null for a manager of the whole
+ * feature (the older shape, and any cg before managers were per wave).
  *
  * Any other shape returns null, and the join falls back to composing the tree
  * itself with only the generic parent hint below. */
@@ -116,10 +121,12 @@ function treeFacts(tree) {
     for (const m of tree.managers) {
         if (!m || typeof m !== 'object' || typeof m.agent !== 'string') continue;
         const t = (m.tasks && typeof m.tasks === 'object') ? m.tasks : {};
+        const mwave = num(m.wave);
         const mgr = {
             agent: m.agent,
             parent: str(m.parent) || main.agent,
             feature: str(m.feature) || str(tree.feature),
+            wave: (mwave !== null && mwave >= 0) ? mwave : null,
             branch: str(m.branch), base: str(m.base), worktree: str(m.worktree),
             seen: num(m.seen), ahead: num(m.ahead),
             merged: m.merged === true, complete: m.complete === true,
@@ -185,6 +192,48 @@ function parentsFromTree(tree) {
         }
     }
     return { parents, root };
+}
+
+/* `cg fleet plan --json` in either shape, as one:
+ *   {managers:[{wave|null, agent, branch, base, live}],
+ *    workers:[{wave, task|null, agent, branch, base, live, tasks}]}
+ * The current shape nests a worker row per task (or per wave) under each
+ * manager; an older cg gave one feature_manager and a row per wave. */
+function planShape(plan) {
+    const arr = (v) => Array.isArray(v) ? v : [];
+    const out = { managers: [], workers: [] };
+    if (!plan || typeof plan !== 'object') return out;
+    const wv = (v) => (typeof v === 'number' && v >= 0) ? v : null;
+    if (Array.isArray(plan.managers)) {
+        for (const m of plan.managers) {
+            if (!m || typeof m !== 'object') continue;
+            out.managers.push({ wave: wv(m.wave), agent: m.agent || null,
+                                branch: m.branch || null, base: m.base || null,
+                                live: arr(m.live) });
+            for (const w of arr(m.workers)) {
+                if (!w || typeof w !== 'object') continue;
+                out.workers.push({ wave: wv(w.wave), task: w.task || null,
+                                   agent: w.agent || null, branch: w.branch || null,
+                                   base: w.base || null, live: arr(w.live),
+                                   tasks: arr(w.tasks), parent: m.agent || null });
+            }
+        }
+        return out;
+    }
+    const fm = plan.feature_manager;
+    if (fm && typeof fm === 'object') {
+        out.managers.push({ wave: null, agent: fm.agent || null,
+                            branch: fm.branch || null, base: fm.base || null,
+                            live: arr(fm.live) });
+    }
+    for (const w of arr(plan.waves)) {
+        if (!w || w.wave === undefined) continue;
+        out.workers.push({ wave: w.wave, task: null, agent: w.agent || null,
+                           branch: w.branch || null, base: w.base || null,
+                           live: arr(w.live), tasks: arr(w.tasks),
+                           parent: fm && fm.agent || null });
+    }
+    return out;
 }
 
 function taskNode(id, claim, planned) {
@@ -256,12 +305,17 @@ function fleetTree(status, specStatus, branches, opts) {
         claimsBy.get(c.agent).push(c);
     }
     const plannedTask = new Map();          /* task id -> {id,status,title} */
-    const waveOf = new Map();               /* wave number -> plan wave */
-    for (const w of arr(plan && plan.waves)) {
-        if (!w || w.wave === undefined) continue;
-        waveOf.set(w.wave, w);
-        for (const t of arr(w.tasks)) if (t && t.id) plannedTask.set(t.id, t);
+    const shape = planShape(plan);
+    const planOf = new Map();               /* worker agent -> plan row */
+    const waveOf = new Map();               /* wave number -> plan row (per wave) */
+    for (const w of shape.workers) {
+        if (w.agent) planOf.set(w.agent, w);
+        if (w.task === null && w.wave !== null) waveOf.set(w.wave, w);
+        for (const t of w.tasks) if (t && t.id) plannedTask.set(t.id, t);
     }
+    const planMgr = (feat, wave) => plan && plan.feature === feat
+        ? shape.managers.find((m) => m.wave === (wave === undefined ? null : wave))
+        : null;
     const seenOf = (name) => {
         const row = agents.find((a) => a.agent === name);
         return row ? row.seen : null;
@@ -315,15 +369,17 @@ function fleetTree(status, specStatus, branches, opts) {
     /* Managers: the live ones, plus the slot the plan says the active feature
      * has, so the tree shows the shape of the work before anyone starts. */
     const managers = new Map();
-    const addManager = (agent, feat, live, seen, tf) => {
+    const addManager = (agent, feat, live, seen, tf, wave) => {
         if (!agent || managers.has(agent)) return managers.get(agent);
-        const branch = (tf && tf.branch) ||
-            (plan && plan.feature_manager && plan.feature === feat
-                ? plan.feature_manager.branch : feat ? `feature/${feat}` : null);
+        const mw = tf && tf.wave !== undefined ? tf.wave
+            : wave === undefined ? null : wave;
+        const pm = planMgr(feat, mw);
+        const branch = (tf && tf.branch) || (pm && pm.branch) ||
+            (feat ? (mw === null ? `feature/${feat}` : `wave/${feat}/${mw}`) : null);
         const base = (tf && tf.base) || mainBranch;
         const node = {
             kind: 'manager', agent, role: 'feature', feature: feat || null,
-            wave: null, live, seen: seen || null, age: relAge(seen, now),
+            wave: mw, live, seen: seen || null, age: relAge(seen, now),
             branch, base,
             merge: mergeState(branch, base, reg, exists),
             worktree: (tf && tf.worktree) ||
@@ -352,14 +408,21 @@ function fleetTree(status, specStatus, branches, opts) {
         addManager(m.agent, m.feature, live, m.seen || seenOf(m.agent), m);
     }
     for (const a of agents) {
-        if (a.role === 'feature') addManager(a.agent, a.feature, true, a.seen);
+        if (a.role !== 'feature') continue;
+        /* a manager registers under its wave; one of the whole feature has
+         * none (cg stores -1) */
+        const w = typeof a.wave === 'number' && a.wave >= 0 ? a.wave : null;
+        addManager(a.agent, a.feature, true, a.seen, null, w);
     }
-    if (plan && plan.feature_manager && plan.feature_manager.agent) {
-        const known = [...managers.values()].some((m) => m.feature === plan.feature);
-        if (!known) {
-            addManager(plan.feature_manager.agent, plan.feature, false,
-                       seenOf(plan.feature_manager.agent));
-        }
+    /* every manager the plan lays out — one per wave with work, or one for
+     * the feature — so the tree shows the shape before anyone starts */
+    for (const pm of shape.managers) {
+        if (!pm.agent) continue;
+        const known = [...managers.values()].some((m) =>
+            m.agent === pm.agent ||
+            (m.feature === plan.feature && m.wave === pm.wave));
+        if (!known) addManager(pm.agent, plan.feature, false, seenOf(pm.agent),
+                               null, pm.wave);
     }
 
     /* Workers: the live ones, plus every wave the plan lays out, so an empty
@@ -372,8 +435,9 @@ function fleetTree(status, specStatus, branches, opts) {
             if (live && !w.live) { w.live = true; w.seen = seen; w.age = relAge(seen, now); }
             return w;
         }
-        const planWave = wave === null || wave === undefined
-            ? null : waveOf.get(wave);
+        const planWave = planOf.get(agent) ||
+            (wave === null || wave === undefined ? null : waveOf.get(wave)) ||
+            null;
         const claim = (claimsBy.get(agent) || [])[0];
         /* The registry row a worker registers with carries no branch until an
          * attempt fills it in, so an empty field in the tree is a gap to fill,
@@ -412,9 +476,9 @@ function fleetTree(status, specStatus, branches, opts) {
     for (const a of agents) {
         if (a.role === 'worker') addWorker(a.agent, a.feature, a.wave, true, a.seen);
     }
-    for (const w of arr(plan && plan.waves)) {
-        if (!w || !w.agent) continue;
-        const live = arr(w.live).filter((n) => workers.has(n) ||
+    for (const w of shape.workers) {
+        if (!w.agent) continue;
+        const live = w.live.filter((n) => workers.has(n) ||
             agents.some((a) => a.agent === n && a.role === 'worker'));
         if (live.length) continue;                 /* a live worker owns it */
         addWorker(w.agent, plan.feature, w.wave, false, seenOf(w.agent));
@@ -429,9 +493,12 @@ function fleetTree(status, specStatus, branches, opts) {
     }
 
     /* Attach: the agent's own parent, else a tree hint, else the manager that
-     * owns its feature, else Main. */
-    const managerFor = (feat) =>
-        [...managers.values()].find((m) => m.feature && m.feature === feat);
+     * owns its wave (or its whole feature), else Main. */
+    const managerFor = (feat, wave) => {
+        const ms = [...managers.values()].filter((m) => m.feature && m.feature === feat);
+        return ms.find((m) => m.wave !== null && m.wave === wave) ||
+            ms.find((m) => m.wave === null) || ms[0];
+    };
     const orphans = [];
     for (const w of workers.values()) {
         const row = agents.find((a) => a.agent === w.agent);
@@ -439,7 +506,8 @@ function fleetTree(status, specStatus, branches, opts) {
         const parent = treeParent.get(w.agent) ||
             (row && row.parent) || (claim && claim.parent) ||
             hint.parents.get(w.agent) ||
-            (managerFor(w.feature) && managerFor(w.feature).agent) || mainName;
+            (managerFor(w.feature, w.wave) && managerFor(w.feature, w.wave).agent) ||
+            mainName;
         w.parent = parent;
         const m = managers.get(parent);
         if (m) m.children.push(w);
@@ -454,7 +522,9 @@ function fleetTree(status, specStatus, branches, opts) {
     }
     const managerList = [...managers.values()]
         .sort((a, b) => String(a.feature || a.agent)
-            .localeCompare(String(b.feature || b.agent)));
+            .localeCompare(String(b.feature || b.agent)) ||
+            Number(a.wave === null ? -1 : a.wave) -
+            Number(b.wave === null ? -1 : b.wave));
 
     const main = {
         kind: 'main', agent: mainName, role: 'main', feature: null, wave: null,
@@ -769,6 +839,17 @@ function byDotted(a, b) {
 const ROLE_TITLE = { main: 'Main Gideon', feature: 'Feature Manager',
                      worker: 'Wave Worker' };
 
+/* A manager with a wave is that wave's manager; a worker on one task is a
+ * task worker. Without either it is the older shape's role. */
+function roleTitle(n) {
+    if (n.kind === 'manager' && n.wave !== null && n.wave !== undefined) {
+        return 'Wave Manager';
+    }
+    if (n.kind === 'worker' && n.tasks && n.tasks.length === 1 && n.branch &&
+        n.branch.indexOf(n.tasks[0].id) >= 0) return 'Task Worker';
+    return ROLE_TITLE[n.role] || 'agent';
+}
+
 const STATUS_ICON = {
     done: ['pass-filled', 'testing.iconPassed'],
     implemented: ['circle-large-filled', 'charts.purple'],
@@ -1053,8 +1134,9 @@ class FleetView {
         /* The row reads left to right the way the fleet is organised: who this
          * is, which branch it owns, and how long ago it was last heard from. */
         const bits = [];
-        if (n.kind !== 'worker') bits.push(ROLE_TITLE[n.role] || 'agent');
-        else if (n.wave !== null && n.wave !== undefined) bits.push(`wave ${n.wave}`);
+        if (n.kind !== 'worker') bits.push(roleTitle(n));
+        if (n.wave !== null && n.wave !== undefined &&
+            n.kind !== 'main') bits.push(`wave ${n.wave}`);
         if (n.branch) bits.push(n.branch);
         if (n.note) bits.push(n.note);
         if (n.progress && n.progress.total) {
@@ -1106,7 +1188,7 @@ class FleetView {
 
     agentTooltip(n) {
         const md = new vscode.MarkdownString();
-        md.appendMarkdown(`**${n.agent}** — ${ROLE_TITLE[n.role] || 'agent'}\n\n`);
+        md.appendMarkdown(`**${n.agent}** — ${roleTitle(n)}\n\n`);
         if (n.parent) md.appendMarkdown(`reports to \`${n.parent}\`\n\n`);
         if (n.feature) md.appendMarkdown(`feature \`${n.feature}\`` +
             (n.wave !== null && n.wave !== undefined ? ` · wave ${n.wave}` : '') + '\n\n');
@@ -1361,7 +1443,7 @@ async function cmdMergeUp(arg) {
     const node = view.nodeOf(arg);
     const feature = featureOf(node);
     const where = node && node.branch ? `${node.branch} into ${node.base}`
-        : `task ${id}'s wave branch into the feature branch`;
+        : `task ${id}'s branch into its manager's branch`;
     const choice = await vscode.window.showWarningMessage(
         `Merge ${where}?`,
         { modal: true, detail: 'cg refuses unless the task qualified on its ' +
@@ -1390,21 +1472,35 @@ async function cmdMergeUp(arg) {
     await deps.refresh();
 }
 
+/* A wave manager's node lands (or opens the pull request for) its wave;
+ * anything else, the feature. */
+function landTarget(node, feature) {
+    const wave = node && node.kind === 'manager' &&
+        node.wave !== null && node.wave !== undefined ? node.wave : null;
+    return wave === null
+        ? { what: [feature], label: (node && node.kind === 'manager' &&
+              node.branch) || `feature/${feature}` }
+        : { what: [String(wave), '-f', feature],
+            label: node.branch || `wave/${feature}/${wave}` };
+}
+
 async function cmdLand(arg) {
-    const feature = featureOf(view.nodeOf(arg));
+    const node = view.nodeOf(arg);
+    const feature = featureOf(node);
     if (!feature) {
         vscode.window.showInformationMessage('No active feature to land.');
         return;
     }
+    const target = landTarget(node, feature);
     const main = view.model ? view.model.hierarchy.main : 'main';
     const ok = await vscode.window.showWarningMessage(
-        `Land feature/${feature} into ${main}?`,
+        `Land ${target.label} into ${main}?`,
         { modal: true, detail: 'The gates run first. If one is red, ' +
             `${main} is reset to where it was and nothing lands. On green, ` +
             'the pull request policy decides whether a PR is opened.' },
         'Land', 'Land without a pull request');
     if (!ok) return;
-    const args = ['fleet', 'land', feature, '--json'];
+    const args = ['fleet', 'land', ...target.what, '--json'];
     if (ok === 'Land without a pull request') args.push('--no-pr');
     const r = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification,
@@ -1435,19 +1531,21 @@ function prFrom(j) {
 }
 
 async function cmdOpenPr(arg) {
-    const feature = featureOf(view.nodeOf(arg));
+    const node = view.nodeOf(arg);
+    const feature = featureOf(node);
     if (!feature) {
         vscode.window.showInformationMessage('No active feature for a pull request.');
         return;
     }
+    const target = landTarget(node, feature);
     const choice = await vscode.window.showWarningMessage(
-        `Open the pull request for feature/${feature}?`,
+        `Open the pull request for ${target.label}?`,
         { modal: true, detail: 'This pushes the feature branch to the remote ' +
             'and asks gh to open a pull request. A dry run only prints the ' +
             'commands it would run.' },
         'Open it', 'Dry run');
     if (!choice) return;
-    const args = ['fleet', 'pr', feature, '--json'];
+    const args = ['fleet', 'pr', ...target.what, '--json'];
     if (choice === 'Dry run') args.push('--dry-run');
     const r = await run(args, `fleet pr ${feature}`);
     const j = parse(r);

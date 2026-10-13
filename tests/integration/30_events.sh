@@ -203,6 +203,10 @@ if want fleet; then
 [hierarchy]
 test_gate = "sh gate.sh"
 lint_gate = "sh lint.sh"
+
+# the older shape: the feature lands whole, so the gates are what refuse it
+[role.worker]
+branch = "wave/{feature}/{wave}"
 EOF
     printf 'test -f gate.ok\n' > gate.sh
     printf 'true\n' > lint.sh

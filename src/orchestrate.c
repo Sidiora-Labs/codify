@@ -1156,6 +1156,42 @@ static void orch_tasks_free(OrchTask *v, int n) {
     free(v);
 }
 
+/* With a manager per wave, what merge-up brought up lives in each wave's
+ * manager worktree, not in one feature worktree: read every wave's. */
+static void orch_tasks_wave_trees(Cg *cg, const char *feature, OrchTask *v,
+                                  int n) {
+    Hierarchy h;
+    Kvx *wf = orch_hier(cg->shared, &h);
+    if (hier_per_wave(&h)) {
+        for (int i = 0; i < n; i++) {
+            if (v[i].finished) continue;
+            bool first = true;          /* one parse per wave */
+            for (int j = 0; j < i; j++) first &= v[j].wave != v[i].wave;
+            if (!first) continue;
+            char br[256], wt[4600], fp[4800];
+            hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, v[i].wave,
+                        br, sizeof br);
+            orch_worktree_path(&h, cg->shared, br, wt, sizeof wt);
+            config_feature_path(wt, feature, fp, sizeof fp);
+            Kvx *wk = kvx_parse(fp);
+            if (!wk) continue;
+            for (int t = i; t < n; t++) {
+                if (v[t].wave != v[i].wave || v[t].finished) continue;
+                char sec[300];
+                snprintf(sec, sizeof sec, "task.%s", v[t].id);
+                char *fs = kvx_str(wk, sec, "status");
+                if (fs && (strcmp(fs, "done") == 0 ||
+                           strcmp(fs, "implemented") == 0))
+                    v[t].finished = true;
+                free(fs);
+            }
+            kvx_free(wk);
+        }
+    }
+    hier_free(&h);
+    kvx_free(wf);
+}
+
 /* The feature's leaves with all three answers to "is it done": the main
  * tree's declaration, the feature worktree's checkout (what merge-up has
  * brought up), and a completed attempt (what a worker qualified on its own
@@ -1209,6 +1245,7 @@ static int orch_tasks_load(Cg *cg, const char *feature, const char *fwt,
     free(ids);
     kvx_free(k);
     kvx_free(fk);
+    orch_tasks_wave_trees(cg, feature, v, n);
 
     sqlite3_stmt *st = cg_prep(cg,
         "SELECT task FROM attempts WHERE task LIKE ?||'/%' "
@@ -1268,13 +1305,15 @@ typedef struct {
     bool complete;
 } OrchSubtree;
 
-static void orch_subtree(Cg *cg, const char *feature, const char *fbranch,
-                         const char *fwt, const char *main_branch,
-                         OrchSubtree *s) {
+/* wave -1: the whole feature; else the tasks of that wave only */
+static void orch_subtree(Cg *cg, const char *feature, long wave,
+                         const char *fbranch, const char *fwt,
+                         const char *main_branch, OrchSubtree *s) {
     memset(s, 0, sizeof *s);
     OrchTask *v = NULL;
     int n = orch_tasks_load(cg, feature, fwt, &v);
     for (int i = 0; i < n; i++) {
+        if (wave >= 0 && v[i].wave != wave) continue;
         s->total++;
         if (v[i].finished) s->done++;
         else if (v[i].claimed) s->claimed++;
@@ -1313,15 +1352,27 @@ static int orch_manager_prompt(Cg *cg, const FleetNode *n, const char *path) {
     snprintf(dir, sizeof dir, "%s/.codegraph/agents", cg->shared);
     mkdirs(dir);
     StrBuf b; sb_init(&b);
-    sb_printf(&b, "# feature manager: %s\n\n", n->feature);
-    sb_printf(&b, "You are %s, the feature manager for %s.\n", n->agent,
-              n->feature);
+    if (n->wave >= 0) {
+        sb_printf(&b, "# wave manager: %s wave %ld\n\n", n->feature, n->wave);
+        sb_printf(&b, "You are %s, the wave manager for wave %ld of %s.\n",
+                  n->agent, n->wave, n->feature);
+    } else {
+        sb_printf(&b, "# feature manager: %s\n\n", n->feature);
+        sb_printf(&b, "You are %s, the feature manager for %s.\n", n->agent,
+                  n->feature);
+    }
     sb_printf(&b, "  branch:   %s (cut from %s)\n", n->branch, n->base);
     sb_printf(&b, "  worktree: %s\n", n->worktree);
     sb_printf(&b, "  reports:  %s\n\n", n->parent[0] ? n->parent : "-");
-    sb_puts(&b, "Your wave workers are spawned for you, each on its own wave "
-            "branch and worktree. You own the feature branch: take what they "
-            "hand up, keep it green, and land it.\n\n");
+    if (n->wave >= 0)
+        sb_printf(&b, "Your task workers are spawned for you, each on its own "
+                  "task branch and worktree, cut from yours. You own wave %ld's "
+                  "branch: take what they hand up, keep it green, and land it "
+                  "once every task of the wave is done.\n\n", n->wave);
+    else
+        sb_puts(&b, "Your wave workers are spawned for you, each on its own "
+                "wave branch and worktree. You own the feature branch: take "
+                "what they hand up, keep it green, and land it.\n\n");
     char *plan = NULL;
     OrchPlanCall pc = { cg, n->feature };
     if (cg_capture(&plan, orch_call_plan, &pc) == 0 && plan && plan[0]) {
@@ -1331,22 +1382,33 @@ static int orch_manager_prompt(Cg *cg, const FleetNode *n, const char *path) {
     free(plan);
     const char *bs = getenv("CG_PACKET_BUDGET");
     manager_packet_build(cg, n->feature, bs && atoi(bs) > 0 ? atoi(bs) : 4000, &b);
-    sb_printf(&b,
-        "Your subtree is complete only once every task of %s is qualified "
-        "and %s is merged into %s:\n"
-        "  cg fleet tree -f %s      # where your workers stand\n"
-        "  cg fleet merge-up <id>   # a wave branch a worker handed up\n"
-        "  cg fleet land %s         # the gates, then main\n"
-        "  cg fleet pr %s           # the pull request\n",
-        n->feature, n->branch, n->base, n->feature, n->feature, n->feature);
+    if (n->wave >= 0)
+        sb_printf(&b,
+            "Your subtree is complete only once every task of wave %ld of %s "
+            "is qualified and %s is merged into %s:\n"
+            "  cg fleet tree -f %s      # where your workers stand\n"
+            "  cg fleet merge-up <id>   # a task branch a worker handed up\n"
+            "  cg fleet land %ld -f %s  # the gates, then main\n"
+            "  cg fleet pr %ld -f %s    # the pull request\n",
+            n->wave, n->feature, n->branch, n->base, n->feature, n->wave,
+            n->feature, n->wave, n->feature);
+    else
+        sb_printf(&b,
+            "Your subtree is complete only once every task of %s is qualified "
+            "and %s is merged into %s:\n"
+            "  cg fleet tree -f %s      # where your workers stand\n"
+            "  cg fleet merge-up <id>   # a wave branch a worker handed up\n"
+            "  cg fleet land %s         # the gates, then main\n"
+            "  cg fleet pr %s           # the pull request\n",
+            n->feature, n->branch, n->base, n->feature, n->feature, n->feature);
     int rc = write_entire_file(path, b.p, b.len);
     sb_free(&b);
     return rc;
 }
 
-int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
-                       const char *extra, const char *cmd_tmpl, bool dry_run,
-                       FleetNode *n) {
+int orch_spawn_manager(Cg *cg, const char *feature, long wave,
+                       const char *driver, const char *extra,
+                       const char *cmd_tmpl, bool dry_run, FleetNode *n) {
     memset(n, 0, sizeof *n);
     n->pid = -1;
     n->wave = -1;
@@ -1362,9 +1424,10 @@ int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
     const FleetRole *rf = &h.roles[FLEET_FEATURE];
     snprintf(n->feature, sizeof n->feature, "%s", feature);
     snprintf(n->role, sizeof n->role, "feature");
-    hier_expand(&h, rf->agent, feature, -1, n->agent, sizeof n->agent);
-    hier_expand(&h, rf->branch, feature, -1, n->branch, sizeof n->branch);
-    hier_expand(&h, rf->base, feature, -1, n->base, sizeof n->base);
+    n->wave = hier_manager_wave(&h, wave);
+    hier_expand(&h, rf->agent, feature, n->wave, n->agent, sizeof n->agent);
+    hier_expand(&h, rf->branch, feature, n->wave, n->branch, sizeof n->branch);
+    hier_expand(&h, rf->base, feature, n->wave, n->base, sizeof n->base);
     hier_expand(&h, h.roles[FLEET_MAIN].agent, feature, -1, n->parent,
                 sizeof n->parent);
     orch_worktree_path(&h, cg->shared, n->branch, n->worktree,
@@ -1372,14 +1435,22 @@ int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
     hier_free(&h);
     kvx_free(wf);
 
-    char prompt[4700], logpath[4700];
-    snprintf(prompt, sizeof prompt, "%s/.codegraph/agents/%s-manager.prompt",
-             cg->shared, feature);
-    snprintf(logpath, sizeof logpath, "%s/.codegraph/agents/%s-manager.log",
-             cg->shared, feature);
+    char prompt[4700], logpath[4700], mname[160];
+    if (n->wave >= 0)
+        snprintf(mname, sizeof mname, "%s-manager-%ld", feature, n->wave);
+    else
+        snprintf(mname, sizeof mname, "%s-manager", feature);
+    snprintf(prompt, sizeof prompt, "%s/.codegraph/agents/%s.prompt",
+             cg->shared, mname);
+    snprintf(logpath, sizeof logpath, "%s/.codegraph/agents/%s.log",
+             cg->shared, mname);
     if (dry_run) {
-        printf("  manager %s — %s on %s (from %s)\n", n->agent, feature,
-               n->branch, n->base);
+        if (n->wave >= 0)
+            printf("  manager %s — %s wave %ld on %s (from %s)\n", n->agent,
+                   feature, n->wave, n->branch, n->base);
+        else
+            printf("  manager %s — %s on %s (from %s)\n", n->agent, feature,
+                   n->branch, n->base);
         printf("    worktree %s\n", n->worktree);
         char *av[ORCH_MAX_ARGV];
         int ac = orch_argv(driver, extra, cmd_tmpl, FLEET_FEATURE, n->worktree,
@@ -1486,8 +1557,8 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
     hier_expand_task(&h, rw->agent, feature, wave, id, n->agent, sizeof n->agent);
     hier_expand_task(&h, rw->branch, feature, wave, id, n->branch, sizeof n->branch);
     hier_expand_task(&h, rw->base, feature, wave, id, n->base, sizeof n->base);
-    hier_expand(&h, h.roles[FLEET_FEATURE].agent, feature, -1, n->parent,
-                sizeof n->parent);
+    hier_expand(&h, h.roles[FLEET_FEATURE].agent, feature,
+                hier_manager_wave(&h, wave), n->parent, sizeof n->parent);
     orch_worktree_path(&h, cg->shared, n->branch, n->worktree,
                        sizeof n->worktree);
     hier_free(&h);
@@ -1660,6 +1731,11 @@ static int orch_worker_rows(Cg *cg, const char *feature, OrchWorkerRow **out) {
     return n;
 }
 
+static bool orch_tree_has_wave(const long *waves, int n, long wave) {
+    for (int i = 0; i < n; i++) if (waves[i] == wave) return true;
+    return false;
+}
+
 int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
     Hierarchy h;
     Kvx *wf = orch_hier(cg->shared, &h);
@@ -1682,30 +1758,23 @@ int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
         kvx_free(wf);
         return 1;
     }
-    char mainbr[256], mainagent[128], fagent[128], fbranch[256], fbase[256];
+    char mainbr[256], mainagent[128];
     snprintf(mainbr, sizeof mainbr, "%s", h.main_branch);
     hier_expand(&h, h.roles[FLEET_MAIN].agent, feature, -1, mainagent,
                 sizeof mainagent);
-    hier_expand(&h, h.roles[FLEET_FEATURE].agent, feature, -1, fagent,
-                sizeof fagent);
-    hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, -1, fbranch,
-                sizeof fbranch);
-    hier_expand(&h, h.roles[FLEET_FEATURE].base, feature, -1, fbase,
-                sizeof fbase);
-    char fwt[4600];
-    orch_worktree_path(&h, cg->shared, fbranch, fwt, sizeof fwt);
-    bool enabled = h.enabled;
-    hier_free(&h);
-    kvx_free(wf);
+    bool enabled = h.enabled, per_wave = hier_per_wave(&h);
 
-    OrchSubtree sub;
-    orch_subtree(cg, feature, fbranch, fwt, mainbr, &sub);
-    long mseen = 0;
-    sqlite3_stmt *st = cg_prep(cg, "SELECT seen FROM agents WHERE agent=?");
-    if (st) {
-        sqlite3_bind_text(st, 1, fagent, -1, SQLITE_TRANSIENT);
-        if (sqlite3_step(st) == SQLITE_ROW) mseen = sqlite3_column_int64(st, 0);
-        sqlite3_finalize(st);
+    /* the managers: one per wave that has tasks, or one for the feature */
+    long waves[256];
+    int nwv = 0;
+    if (per_wave) {
+        OrchTask *v = NULL;
+        int n = orch_tasks_load(cg, feature, NULL, &v);
+        for (int i = 0; i < n && nwv < 256; i++)
+            if (!nwv || waves[nwv - 1] != v[i].wave) waves[nwv++] = v[i].wave;
+        orch_tasks_free(v, n);
+    } else {
+        waves[nwv++] = -1;
     }
     OrchWorkerRow *w = NULL;
     int nw = orch_worker_rows(cg, feature, &w);
@@ -1721,74 +1790,117 @@ int orch_tree_status(Cg *cg, const char *feature_ov, bool json) {
         sb_json_str(&b, mainbr);
         sb_puts(&b, ",\"worktree\":");
         sb_json_str(&b, cg->shared);
-        sb_puts(&b, "},\"managers\":[{\"agent\":");
-        sb_json_str(&b, fagent);
-        sb_puts(&b, ",\"role\":\"feature\",\"parent\":");
-        sb_json_str(&b, mainagent);
-        sb_puts(&b, ",\"feature\":");
-        sb_json_str(&b, feature);
-        sb_puts(&b, ",\"branch\":");
-        sb_json_str(&b, fbranch);
-        sb_puts(&b, ",\"base\":");
-        sb_json_str(&b, fbase);
-        sb_puts(&b, ",\"worktree\":");
-        sb_json_str(&b, fwt);
-        sb_printf(&b, ",\"seen\":%ld,\"tasks\":{\"total\":%d,\"done\":%d,"
-                  "\"claimed\":%d},\"ahead\":%ld,\"merged\":%s,"
-                  "\"complete\":%s,\"drift\":", mseen, sub.total, sub.done,
-                  sub.claimed, sub.ahead, sub.merged ? "true" : "false",
-                  sub.complete ? "true" : "false");
-        drift_summary(cg, feature, NULL, &b);
-        sb_puts(&b, ",\"workers\":[");
-        for (int i = 0; i < nw; i++) {
-            if (i) sb_putc(&b, ',');
-            sb_puts(&b, "{\"agent\":");
-            sb_json_str(&b, w[i].agent);
-            sb_puts(&b, ",\"role\":\"worker\",\"parent\":");
-            sb_json_str(&b, fagent);
-            sb_printf(&b, ",\"wave\":%ld,\"branch\":", w[i].wave);
-            sb_json_str(&b, w[i].branch);
-            sb_puts(&b, ",\"base\":");
-            sb_json_str(&b, w[i].base);
-            sb_puts(&b, ",\"worktree\":");
-            sb_json_str(&b, w[i].worktree);
-            sb_puts(&b, ",\"task\":");
-            sb_json_str(&b, w[i].task);
-            sb_puts(&b, ",\"attempt\":");
-            sb_json_str(&b, w[i].attempt);
-            sb_puts(&b, ",\"state\":");
-            sb_json_str(&b, w[i].state[0] ? w[i].state : "idle");
-            sb_printf(&b, ",\"heartbeat\":%ld,\"seen\":%ld}", w[i].heartbeat,
-                      w[i].seen);
-        }
-        sb_puts(&b, "]}]}\n");
+        sb_puts(&b, "},\"managers\":[");
     } else {
-        char ago[32];
         sb_printf(&b, "fleet tree — %s%s\n", feature,
                   enabled ? "" : " (hierarchy disabled)");
         sb_printf(&b, "main     %-16s branch %s\n", mainagent, mainbr);
-        orch_ago(mseen, ago, sizeof ago);
-        sb_printf(&b, "  feature  %-16s branch %-20s base %s\n", fagent,
-                  fbranch, fbase);
-        sb_printf(&b, "           tasks %d/%d done, %d running  ahead %ld  "
-                  "%s  seen %s\n", sub.done, sub.total, sub.claimed,
-                  sub.ahead < 0 ? 0 : sub.ahead,
-                  sub.complete ? "complete" : "incomplete", ago);
-        {
-            StrBuf dt; sb_init(&dt);
-            int nd = drift_summary(cg, feature, &dt, NULL);
-            if (nd) sb_printf(&b, "           drift %d finding(s):\n%s", nd, dt.p);
-            sb_free(&dt);
-        }
-        if (!nw) sb_puts(&b, "    (no workers yet)\n");
-        for (int i = 0; i < nw; i++) {
-            orch_ago(w[i].heartbeat, ago, sizeof ago);
-            sb_printf(&b, "    worker %-16s branch %-20s wave %ld  task %s  "
-                      "%s  hb %s\n", w[i].agent, w[i].branch, w[i].wave,
-                      w[i].task[0] ? w[i].task : "-",
-                      w[i].state[0] ? w[i].state : "idle", ago);
-        }
     }
+    for (int m = 0; m < nwv; m++) {
+        long wave = waves[m];
+        char fagent[128], fbranch[256], fbase[256], fwt[4600];
+        hier_expand(&h, h.roles[FLEET_FEATURE].agent, feature, wave, fagent,
+                    sizeof fagent);
+        hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, wave, fbranch,
+                    sizeof fbranch);
+        hier_expand(&h, h.roles[FLEET_FEATURE].base, feature, wave, fbase,
+                    sizeof fbase);
+        orch_worktree_path(&h, cg->shared, fbranch, fwt, sizeof fwt);
+        OrchSubtree sub;
+        orch_subtree(cg, feature, wave, fbranch, per_wave ? NULL : fwt,
+                     mainbr, &sub);
+        long mseen = 0;
+        sqlite3_stmt *st = cg_prep(cg, "SELECT seen FROM agents WHERE agent=?");
+        if (st) {
+            sqlite3_bind_text(st, 1, fagent, -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(st) == SQLITE_ROW) mseen = sqlite3_column_int64(st, 0);
+            sqlite3_finalize(st);
+        }
+        /* a worker sits under the manager of its wave; one whose wave no
+         * manager owns goes under the first, so nobody drops off the tree */
+        #define TREE_OWNS(i) (!per_wave || w[i].wave == wave || \
+            (m == 0 && !orch_tree_has_wave(waves, nwv, w[i].wave)))
+        if (json) {
+            if (m) sb_putc(&b, ',');
+            sb_puts(&b, "{\"agent\":");
+            sb_json_str(&b, fagent);
+            sb_puts(&b, ",\"role\":\"feature\",\"parent\":");
+            sb_json_str(&b, mainagent);
+            sb_puts(&b, ",\"feature\":");
+            sb_json_str(&b, feature);
+            if (wave >= 0) sb_printf(&b, ",\"wave\":%ld", wave);
+            else sb_puts(&b, ",\"wave\":null");
+            sb_puts(&b, ",\"branch\":");
+            sb_json_str(&b, fbranch);
+            sb_puts(&b, ",\"base\":");
+            sb_json_str(&b, fbase);
+            sb_puts(&b, ",\"worktree\":");
+            sb_json_str(&b, fwt);
+            sb_printf(&b, ",\"seen\":%ld,\"tasks\":{\"total\":%d,\"done\":%d,"
+                      "\"claimed\":%d},\"ahead\":%ld,\"merged\":%s,"
+                      "\"complete\":%s,\"drift\":", mseen, sub.total, sub.done,
+                      sub.claimed, sub.ahead, sub.merged ? "true" : "false",
+                      sub.complete ? "true" : "false");
+            drift_summary(cg, feature, NULL, &b);
+            sb_puts(&b, ",\"workers\":[");
+            int k = 0;
+            for (int i = 0; i < nw; i++) {
+                if (!TREE_OWNS(i)) continue;
+                if (k++) sb_putc(&b, ',');
+                sb_puts(&b, "{\"agent\":");
+                sb_json_str(&b, w[i].agent);
+                sb_puts(&b, ",\"role\":\"worker\",\"parent\":");
+                sb_json_str(&b, fagent);
+                sb_printf(&b, ",\"wave\":%ld,\"branch\":", w[i].wave);
+                sb_json_str(&b, w[i].branch);
+                sb_puts(&b, ",\"base\":");
+                sb_json_str(&b, w[i].base);
+                sb_puts(&b, ",\"worktree\":");
+                sb_json_str(&b, w[i].worktree);
+                sb_puts(&b, ",\"task\":");
+                sb_json_str(&b, w[i].task);
+                sb_puts(&b, ",\"attempt\":");
+                sb_json_str(&b, w[i].attempt);
+                sb_puts(&b, ",\"state\":");
+                sb_json_str(&b, w[i].state[0] ? w[i].state : "idle");
+                sb_printf(&b, ",\"heartbeat\":%ld,\"seen\":%ld}", w[i].heartbeat,
+                          w[i].seen);
+            }
+            sb_puts(&b, "]}");
+        } else {
+            char ago[32], label[32];
+            orch_ago(mseen, ago, sizeof ago);
+            if (wave >= 0) snprintf(label, sizeof label, "wave %ld", wave);
+            else snprintf(label, sizeof label, "feature");
+            sb_printf(&b, "  %-8s %-16s branch %-20s base %s\n", label, fagent,
+                      fbranch, fbase);
+            sb_printf(&b, "           tasks %d/%d done, %d running  ahead %ld  "
+                      "%s  seen %s\n", sub.done, sub.total, sub.claimed,
+                      sub.ahead < 0 ? 0 : sub.ahead,
+                      sub.complete ? "complete" : "incomplete", ago);
+            if (m == 0) {
+                StrBuf dt; sb_init(&dt);
+                int nd = drift_summary(cg, feature, &dt, NULL);
+                if (nd) sb_printf(&b, "           drift %d finding(s):\n%s", nd, dt.p);
+                sb_free(&dt);
+            }
+            int k = 0;
+            for (int i = 0; i < nw; i++) {
+                if (!TREE_OWNS(i)) continue;
+                k++;
+                orch_ago(w[i].heartbeat, ago, sizeof ago);
+                sb_printf(&b, "    worker %-16s branch %-20s wave %ld  task %s  "
+                          "%s  hb %s\n", w[i].agent, w[i].branch, w[i].wave,
+                          w[i].task[0] ? w[i].task : "-",
+                          w[i].state[0] ? w[i].state : "idle", ago);
+            }
+            if (!k) sb_puts(&b, "    (no workers yet)\n");
+        }
+        #undef TREE_OWNS
+    }
+    if (json) sb_puts(&b, "]}\n");
+    hier_free(&h);
+    kvx_free(wf);
     fputs(b.p, stdout);
     sb_free(&b);
     free(w);
@@ -1897,11 +2009,14 @@ static bool orch_task_slots(const OrchTask *t, const OrchFleetSlot *slots,
     return true;
 }
 
-static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,
-                           const OrchFleetSlot *slots, int nslots,
-                           char *out, size_t cap) {
+/* wave -1: any task; else only that wave's (whose requires may still be
+ * anywhere in the feature) */
+static bool orch_next_task_in(const OrchTask *v, int n, char **tried,
+                              int ntried, const OrchFleetSlot *slots,
+                              int nslots, long wave, char *out, size_t cap) {
     for (int i = 0; i < n; i++) {
         if (v[i].finished || v[i].claimed) continue;
+        if (wave >= 0 && v[i].wave != wave) continue;
         bool skip = orch_attempts(tried, ntried, v[i].id) >= g_max_attempts;
         for (int j = 0; j < v[i].nreq && !skip; j++)
             if (!orch_finished_id(v, n, v[i].req[j])) skip = true;
@@ -1911,6 +2026,12 @@ static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,
         return true;
     }
     return false;
+}
+
+static bool orch_next_task(const OrchTask *v, int n, char **tried, int ntried,
+                           const OrchFleetSlot *slots, int nslots,
+                           char *out, size_t cap) {
+    return orch_next_task_in(v, n, tried, ntried, slots, nslots, -1, out, cap);
 }
 
 static int orch_node_heartbeat(const FleetNode *n, long ttl_min) {
@@ -1985,6 +2106,20 @@ bool fleet_supervisor_alive(const char *shared) {
     return false;
 }
 
+/* One manager of the run: of one wave, or (wave -1) of the whole feature
+ * in the old shape. Its process comes and goes a turn at a time; the slot
+ * stays, keyed by the wave. */
+typedef struct {
+    long wave;
+    FleetNode n;
+    DriverTap tap;
+    bool live, adopted;
+    bool needed;          /* an escalation or a conflict wants this manager */
+    long node, start;     /* fleet_nodes.id; kernel start time of n.pid */
+    int turns;            /* turns this supervisor gave it */
+} SupMgr;
+enum { SUP_MAX_MGRS = 64 };
+
 typedef struct {
     Cg *g;
     char run[40], feature[128], fbranch[256], fwt[4600], mainbr[256];
@@ -1992,10 +2127,11 @@ typedef struct {
     const char *extra;
     int nslots, maxfail, failures, rc, wakes, ntried;
     OrchFleetSlot *slots;
-    FleetNode mgr;
-    DriverTap mgr_tap;
-    bool mgr_live, mgr_adopted;
-    long mgr_node, mgr_start, last_wake, ttl_min, waiting_on;
+    SupMgr mgrs[SUP_MAX_MGRS];   /* codify-v15 4.1: a manager per wave */
+    int nmgrs;
+    bool per_wave;        /* the manager template names {wave} */
+    long mgr_max;         /* managers alive at once; 0: every wave */
+    long last_wake, ttl_min, waiting_on;
     bool stopping, paused, first_turn, frontier_empty;
     char *tried[ORCH_MAX_TRIED];
     char state[16];
@@ -2005,9 +2141,49 @@ typedef struct {
     char esc_task[32][64];
     int esc_level[32], nesc, n_unfinished, n_blocked;
     int esc_wakes[32];
-    bool mgr_needed;      /* an escalation or a conflict wants the manager */
     long conflict_seq;    /* merge conflicts seen up to this event */
 } Sup;
+
+/* the manager slot of <wave> (-1 in the old shape), made on first ask */
+static SupMgr *sup_mgr(Sup *s, long wave) {
+    if (!s->per_wave) wave = -1;
+    for (int i = 0; i < s->nmgrs; i++)
+        if (s->mgrs[i].wave == wave) return &s->mgrs[i];
+    if (s->nmgrs >= SUP_MAX_MGRS) return &s->mgrs[SUP_MAX_MGRS - 1];
+    SupMgr *m = &s->mgrs[s->nmgrs++];
+    memset(m, 0, sizeof *m);
+    m->wave = wave;
+    m->n.pid = -1;
+    m->n.wave = wave;
+    return m;
+}
+
+static int sup_mgrs_live(const Sup *s) {
+    int c = 0;
+    for (int i = 0; i < s->nmgrs; i++) c += s->mgrs[i].live;
+    return c;
+}
+
+/* who manages <wave>: the live one's name, else what the template says */
+static void sup_mgr_agent(Sup *s, long wave, char *out, size_t cap) {
+    SupMgr *m = sup_mgr(s, wave);
+    if (m->n.agent[0]) { snprintf(out, cap, "%s", m->n.agent); return; }
+    Hierarchy h;
+    Kvx *wf = orch_hier(s->g->shared, &h);
+    hier_expand(&h, h.roles[FLEET_FEATURE].agent, s->feature,
+                s->per_wave ? wave : -1, out, cap);
+    hier_free(&h);
+    kvx_free(wf);
+}
+
+static void sup_mgr_log(const Sup *s, long wave, char *out, size_t cap) {
+    if (wave >= 0)
+        snprintf(out, cap, "%s/.codegraph/agents/%s-manager-%ld.log",
+                 s->g->shared, s->feature, wave);
+    else
+        snprintf(out, cap, "%s/.codegraph/agents/%s-manager.log",
+                 s->g->shared, s->feature);
+}
 
 enum { SUP_GO = 0, SUP_DONE = 1 };
 
@@ -2139,10 +2315,12 @@ static void sup_kill(pid_t pid, long start, bool adopted) {
 /* Terminate everything the run has alive, release the workers' claims, and
  * keep every branch: stopping is a pause of the work, not its deletion. */
 static void sup_terminate(Sup *s) {
-    if (s->mgr_live) {
-        sup_kill(s->mgr.pid, s->mgr_start, s->mgr_adopted);
-        s->mgr_live = false;
-        sup_node_end(s, s->mgr_node, "killed", -999, "stopped");
+    for (int i = 0; i < s->nmgrs; i++) {
+        SupMgr *m = &s->mgrs[i];
+        if (!m->live) continue;
+        sup_kill(m->n.pid, m->start, m->adopted);
+        m->live = false;
+        sup_node_end(s, m->node, "killed", -999, "stopped");
     }
     for (int i = 0; i < s->nslots; i++) {
         OrchFleetSlot *sl = &s->slots[i];
@@ -2225,12 +2403,14 @@ static int fleet_run_resume(Sup *s) {
         bool alive = proc_alive(n.pid, start);
         if (strcmp(n.role, "feature") == 0) {
             if (!alive) { sup_node_end(s, id, "exited", -999, "lost"); continue; }
-            s->mgr = n;
-            s->mgr_live = true;
-            s->mgr_adopted = true;
-            s->mgr_node = id;
-            s->mgr_start = start;
-            sup_tap_adopt(&s->mgr_tap, log, n.agent, "feature", s->feature);
+            SupMgr *m = sup_mgr(s, n.wave);
+            m->n = n;
+            m->live = true;
+            m->adopted = true;
+            m->node = id;
+            m->start = start;
+            m->turns++;
+            sup_tap_adopt(&m->tap, log, n.agent, "feature", s->feature);
             printf("[fleet] adopted manager %s (pid %d)\n", n.agent, n.pid);
             continue;
         }
@@ -2451,12 +2631,12 @@ static void supervisor_escalate(Sup *s, const char *task, int level,
     }
     s->esc_level[k] = level;
     s->esc_wakes[k] = s->wakes;
-    if (level == 1) s->mgr_needed = true;
+    /* the task goes to the manager of its own wave */
+    long wave = orch_task_wave(s->g, s->feature, task);
+    if (level == 1) sup_mgr(s, wave)->needed = true;
     char to[128];
-    if (level == 1)
-        snprintf(to, sizeof to, "%s", s->mgr.agent[0] ? s->mgr.agent : "manager");
-    else
-        snprintf(to, sizeof to, "%s", "main");
+    if (level == 1) sup_mgr_agent(s, wave, to, sizeof to);
+    else snprintf(to, sizeof to, "%s", "main");
     char subj[300];
     snprintf(subj, sizeof subj, "%s/%s", s->feature, task);
     StrBuf p; sb_init(&p);
@@ -2472,7 +2652,7 @@ static void supervisor_escalate(Sup *s, const char *task, int level,
     char msg[600];
     if (level == 1) {
         snprintf(msg, sizeof msg, "Task %s failed every attempt the budget "
-                 "allows (%s). Decide: fix it on the feature branch yourself, "
+                 "allows (%s). Decide: fix it on your branch yourself, "
                  "re-plan it, or record it as blocked with `cg handoff --task "
                  "%s --blocked \"...\"` so the run can finish the rest.",
                  task, reason, task);
@@ -2504,7 +2684,11 @@ static void supervisor_retry(Sup *s, const char *task, const char *why) {
 /* a manager wake came and went and the task is still not qualified */
 static void sup_escalations_check(Sup *s, const OrchTask *v, int n) {
     for (int k = 0; k < s->nesc; k++) {
-        if (s->esc_level[k] != 1 || s->mgr_live) continue;
+        if (s->esc_level[k] != 1) continue;
+        long wave = -1;
+        for (int i = 0; i < n; i++)
+            if (strcmp(v[i].id, s->esc_task[k]) == 0) wave = v[i].wave;
+        if (sup_mgr(s, wave)->live) continue;
         if (s->wakes >= s->esc_wakes[k]) continue;     /* no wake since */
         if (orch_finished_id(v, n, s->esc_task[k])) continue;
         supervisor_escalate(s, s->esc_task[k], 2, "the manager did not rescue it");
@@ -2589,6 +2773,150 @@ static int sup_approval(Sup *s, long *id) {
     return r;
 }
 
+/* The run's subtree: in the old shape the feature branch's, else every
+ * task of the feature with every wave branch merged into main. */
+static void sup_subtree(Sup *s, OrchSubtree *sub) {
+    if (!s->per_wave) {
+        orch_subtree(s->g, s->feature, -1, s->fbranch, s->fwt, s->mainbr, sub);
+        return;
+    }
+    memset(sub, 0, sizeof *sub);
+    OrchTask *v = NULL;
+    int n = orch_tasks_load(s->g, s->feature, NULL, &v);
+    Hierarchy h;
+    Kvx *wf = orch_hier(s->g->shared, &h);
+    long ahead = 0;
+    for (int i = 0; i < n; i++) {
+        sub->total++;
+        if (v[i].finished) sub->done++;
+        else if (v[i].claimed) sub->claimed++;
+        if (i && v[i - 1].wave == v[i].wave) continue;
+        char br[256];
+        hier_expand(&h, h.roles[FLEET_FEATURE].branch, s->feature, v[i].wave,
+                    br, sizeof br);
+        long a = orch_ahead(s->g->shared, s->mainbr, br);
+        if (a > 0) ahead += a;
+        /* a branch git could not count is not proven merged */
+        else if (a < 0 && git_branch_exists(s->g->shared, br)) ahead += 1;
+    }
+    hier_free(&h);
+    kvx_free(wf);
+    orch_tasks_free(v, n);
+    sub->all_done = sub->total > 0 && sub->done == sub->total;
+    sub->ahead = ahead;
+    sub->merged = ahead == 0;
+    sub->complete = sub->all_done && sub->merged;
+}
+
+/* Give each manager that has something to do a turn: every wave with work
+ * on the run's first turn (as many as the manager max allows; 0 is all),
+ * and after that a wave whose workers have all ended and whose frontier
+ * is empty, while it still owes something — a task nobody else can move,
+ * or finished work its branch has not landed — or when an escalation or a
+ * conflict asks for it. A wave waiting only on another wave's requires is
+ * left alone: its manager could not move it. Every turn is spent from the
+ * run's budget, so a fleet that cannot finish stops instead of spinning. */
+static int sup_wake_managers(Sup *s, const OrchSubtree *sub, long now) {
+    Cg *g = s->g;
+    const OrchCfg *cfg = s->cfg;
+    const char *feature = s->feature;
+    OrchTask *v = NULL;
+    int n = orch_tasks_load(g, feature, s->per_wave ? NULL : s->fwt, &v);
+    Hierarchy h;
+    Kvx *wf = orch_hier(g->shared, &h);
+    int rc = SUP_GO;
+    bool pending_first = false;
+    for (int i = 0; i < n || (!s->per_wave && i == 0); i++) {
+        long wave = s->per_wave ? v[i].wave : -1;
+        if (s->per_wave && i && v[i - 1].wave == wave) continue;
+        SupMgr *m = sup_mgr(s, wave);
+        if (m->live) continue;
+        int unfinished = 0, movable = 0, live = 0;
+        for (int t = 0; t < n; t++) {
+            if (wave >= 0 && v[t].wave != wave) continue;
+            if (v[t].finished) continue;
+            unfinished++;
+            bool waits = false;
+            for (int r = 0; r < v[t].nreq && !waits; r++)
+                if (!orch_finished_id(v, n, v[t].req[r])) waits = true;
+            if (!waits) movable++;
+        }
+        for (int k = 0; k < s->nslots; k++)
+            if (s->slots[k].live && (wave < 0 || s->slots[k].n.wave == wave))
+                live++;
+        char br[256];
+        hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, wave, br,
+                    sizeof br);
+        long ahead = s->per_wave ? orch_ahead(g->shared, s->mainbr, br)
+                                 : sub->ahead;
+        bool owes = unfinished > 0 || ahead > 0;
+        if (!owes) continue;
+        char probe[64];
+        bool frontier = s->per_wave
+            ? orch_next_task_in(v, n, s->tried, s->ntried, s->slots,
+                                s->nslots, wave, probe, sizeof probe)
+            : !s->frontier_empty;
+        bool first = s->first_turn && m->turns == 0;
+        bool idle = !frontier && live == 0 &&
+                    (movable > 0 || unfinished == 0);
+        if (!s->per_wave) idle = s->frontier_empty && live == 0;
+        if (!first && !idle && !m->needed) continue;
+        if (s->mgr_max > 0 && sup_mgrs_live(s) >= s->mgr_max) {
+            if (first) pending_first = true;
+            continue;
+        }
+        if (s->wakes <= 0) {
+            fprintf(stderr, "cg spec run: %s did not complete and no manager "
+                    "wake is left (--max-rounds) — %d/%d task(s) qualified, "
+                    "%ld commit(s) still on %s\n", feature, sub->done,
+                    sub->total, sub->ahead < 0 ? 0 : sub->ahead, s->fbranch);
+            orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
+                       "no_wakes_left", s->fbranch, NULL);
+            s->rc = 1;
+            sup_set_state(s, "failed", "no_wakes_left");
+            rc = SUP_DONE;
+            break;
+        }
+        FleetNode mn;
+        if (orch_spawn_manager(g, feature, wave, cfg->driver, s->extra,
+                               cfg->cmd, false, &mn) != 0) {
+            s->rc = 1;
+            sup_set_state(s, "failed", "manager_spawn");
+            rc = SUP_DONE;
+            break;
+        }
+        m->n = mn;
+        m->live = true;
+        m->adopted = false;
+        m->start = proc_start_time(mn.pid);
+        m->needed = false;
+        m->turns++;
+        s->last_wake = now;
+        s->wakes--;
+        char lp[4700];
+        sup_mgr_log(s, mn.wave, lp, sizeof lp);
+        printf("[fleet] manager %s on %s (%d wake(s) left), log "
+               ".codegraph/agents/%s\n", mn.agent, mn.branch, s->wakes,
+               strrchr(lp, '/') + 1);
+        fflush(stdout);
+        orch_event("orch.spawn", "feature", mn.agent, feature, NULL,
+                   mn.pid, -999, NULL, mn.branch, NULL);
+        driver_tap_free(&m->tap);
+        driver_tap_init(&m->tap, lp, mn.agent, "feature", feature);
+        m->node = sup_node_add(s, &m->n, lp, m->start);
+    }
+    if (rc == SUP_GO && s->first_turn && !pending_first) {
+        s->first_turn = false;
+        sup_save(s);
+    } else if (rc == SUP_GO) {
+        sup_save(s);
+    }
+    hier_free(&h);
+    kvx_free(wf);
+    orch_tasks_free(v, n);
+    return rc;
+}
+
 static int supervisor_tick(Sup *s) {
     Cg *g = s->g;
     const OrchCfg *cfg = s->cfg;
@@ -2614,7 +2942,8 @@ static int supervisor_tick(Sup *s) {
 
     for (int i = 0; i < s->nslots; i++)
         if (s->slots[i].live) driver_tap_poll(&s->slots[i].tap);
-    if (s->mgr_live) driver_tap_poll(&s->mgr_tap);
+    for (int i = 0; i < s->nmgrs; i++)
+        if (s->mgrs[i].live) driver_tap_poll(&s->mgrs[i].tap);
     if (!s->paused) sup_supervise(s);
 
     /* reap workers: the branch tip, not the exit code, decides */
@@ -2683,29 +3012,31 @@ static int supervisor_tick(Sup *s) {
         supervisor_retry(s, sl->n.task, "lost its fenced claim");
     }
 
-    if (s->mgr_live) {
+    for (int i = 0; i < s->nmgrs; i++) {
+        SupMgr *m = &s->mgrs[i];
         int crc;
-        if (sup_gone(s->mgr.pid, s->mgr_start, s->mgr_adopted, &crc)) {
-            s->mgr_live = false;
-            driver_tap_poll(&s->mgr_tap);
-            char ex[16];
-            if (crc > -900) snprintf(ex, sizeof ex, "%d", crc);
-            else snprintf(ex, sizeof ex, "?");
-            printf("[fleet] manager %s exit %s\n", s->mgr.agent, ex);
-            fflush(stdout);
-            orch_event("orch.exit", "feature", s->mgr.agent, feature, NULL,
-                       s->mgr.pid, crc > -900 ? crc : -1, NULL, s->mgr.branch,
-                       NULL);
-            sup_node_end(s, s->mgr_node, "exited", crc, NULL);
-        }
+        if (!m->live || !sup_gone(m->n.pid, m->start, m->adopted, &crc))
+            continue;
+        m->live = false;
+        driver_tap_poll(&m->tap);
+        char ex[16];
+        if (crc > -900) snprintf(ex, sizeof ex, "%d", crc);
+        else snprintf(ex, sizeof ex, "?");
+        printf("[fleet] manager %s exit %s\n", m->n.agent, ex);
+        fflush(stdout);
+        orch_event("orch.exit", "feature", m->n.agent, feature, NULL,
+                   m->n.pid, crc > -900 ? crc : -1, NULL, m->n.branch, NULL);
+        sup_node_end(s, m->node, "exited", crc, NULL);
     }
 
     /* A manager is done when its subtree is: every task qualified and
-     * the feature branch merged. The process exiting proves nothing. */
+     * its branch merged — every wave's, with a manager per wave. The
+     * process exiting proves nothing. */
     OrchSubtree sub;
-    orch_subtree(g, feature, s->fbranch, s->fwt, s->mainbr, &sub);
+    sup_subtree(s, &sub);
     int live = orch_live_fleet(s->slots, s->nslots);
-    if (sub.complete && !s->mgr_live && live == 0) {
+    int mlive = sup_mgrs_live(s);
+    if (sub.complete && !mlive && live == 0) {
         printf("[fleet] %s complete — %d/%d task(s) qualified, %s merged "
                "into %s, %d failure(s)\n", feature, sub.done, sub.total,
                s->fbranch, s->mainbr, s->failures);
@@ -2732,7 +3063,7 @@ static int supervisor_tick(Sup *s) {
      * instead of spinning. Paused, nothing new starts. */
     now = (long)time(NULL);
     long appr = 0;
-    int ap = !s->mgr_live && live == 0 ? sup_approval(s, &appr) : 0;
+    int ap = !mlive && live == 0 ? sup_approval(s, &appr) : 0;
     if (ap == 2) {
         fprintf(stderr, "cg spec run: approval #%ld for %s was rejected — "
                 "stopping the run (branches kept)\n", appr, feature);
@@ -2748,7 +3079,7 @@ static int supervisor_tick(Sup *s) {
     }
     /* nothing left that anyone can move: every unfinished task is blocked
      * after its manager and main were told — end, and say which */
-    if (!s->mgr_live && live == 0 && !sub.complete && s->frontier_empty &&
+    if (!mlive && live == 0 && !sub.complete && s->frontier_empty &&
         s->n_unfinished > 0 && s->n_unfinished == s->n_blocked) {
         StrBuf r; sb_init(&r);
         sb_puts(&r, "blocked:");
@@ -2771,64 +3102,33 @@ static int supervisor_tick(Sup *s) {
         sqlite3_bind_text(cq, 2, like, -1, SQLITE_TRANSIENT);
         while (sqlite3_step(cq) == SQLITE_ROW) {
             s->conflict_seq = sqlite3_column_int64(cq, 0);
-            char *oc = json_get_string((const char *)sqlite3_column_text(cq, 1), "outcome");
-            if (oc && !strcmp(oc, "conflict")) s->mgr_needed = true;
+            const char *pl = (const char *)sqlite3_column_text(cq, 1);
+            char *oc = json_get_string(pl, "outcome");
+            if (oc && !strcmp(oc, "conflict")) {
+                /* the manager of the wave the merge went into */
+                char *task = json_get_string(pl, "task");
+                long wave = task ? orch_task_wave(g, feature, task) : -1;
+                sup_mgr(s, wave)->needed = true;
+                free(task);
+            }
             free(oc);
         }
         sqlite3_finalize(cq);
     }
-    if (!s->stopping && !s->paused && !s->mgr_live && !sub.complete &&
-        ap == 0 && (s->first_turn || (s->frontier_empty && live == 0) ||
-                    s->mgr_needed) &&
+    if (!s->stopping && !s->paused && !sub.complete && ap == 0 &&
         now - s->last_wake >= ORCH_WAKE_BACKOFF) {
-        if (s->wakes <= 0) {
-            fprintf(stderr, "cg spec run: %s did not complete and no manager "
-                    "wake is left (--max-rounds) — %d/%d task(s) qualified, "
-                    "%ld commit(s) still on %s\n", feature, sub.done,
-                    sub.total, sub.ahead < 0 ? 0 : sub.ahead, s->fbranch);
-            orch_event("orch.stop", "feature", NULL, feature, NULL, 0, -999,
-                       "no_wakes_left", s->fbranch, NULL);
-            s->rc = 1;
-            sup_set_state(s, "failed", "no_wakes_left");
-            return SUP_DONE;
-        }
-        FleetNode mn;
-        if (orch_spawn_manager(g, feature, cfg->driver, s->extra, cfg->cmd,
-                               false, &mn) != 0) {
-            s->rc = 1;
-            sup_set_state(s, "failed", "manager_spawn");
-            return SUP_DONE;
-        }
-        s->mgr = mn;
-        s->mgr_live = true;
-        s->mgr_adopted = false;
-        s->mgr_start = proc_start_time(mn.pid);
-        s->last_wake = now;
-        s->first_turn = false;
-        s->mgr_needed = false;
-        s->wakes--;
-        printf("[fleet] manager %s on %s (%d wake(s) left), log "
-               ".codegraph/agents/%s-manager.log\n", s->mgr.agent,
-               s->mgr.branch, s->wakes, feature);
-        fflush(stdout);
-        orch_event("orch.spawn", "feature", s->mgr.agent, feature, NULL,
-                   s->mgr.pid, -999, NULL, s->mgr.branch, NULL);
-        char lp[4700];
-        snprintf(lp, sizeof lp, "%s/.codegraph/agents/%s-manager.log",
-                 g->shared, feature);
-        driver_tap_free(&s->mgr_tap);
-        driver_tap_init(&s->mgr_tap, lp, s->mgr.agent, "feature", feature);
-        s->mgr_node = sup_node_add(s, &s->mgr, lp, s->mgr_start);
-        sup_save(s);
+        int wrc = sup_wake_managers(s, &sub, now);
+        if (wrc != SUP_GO) return wrc;
     }
 
-    /* Refill worker slots from the frontier — never while the manager runs,
-     * for the same reason: a worker handing its wave up merges into the
-     * manager's worktree, so the two levels take turns rather than race
-     * for it. */
+    /* Refill worker slots from the frontier, beside the managers: a worker
+     * does not wait for its manager's turn, and the merge lock serializes
+     * a worker handing up into the manager's branch. With a worker per
+     * task every task of every wave may run at once; with a worker per
+     * wave, a wave's tasks take turns (orch_task_slots). */
     if (!s->stopping && !s->paused) {
         OrchTask *v = NULL;
-        int n = orch_tasks_load(g, feature, s->fwt, &v);
+        int n = orch_tasks_load(g, feature, s->per_wave ? NULL : s->fwt, &v);
         for (int i = 0; i < s->nslots && s->ntried < ORCH_MAX_TRIED; i++) {
             OrchFleetSlot *sl = &s->slots[i];
             if (sl->live) continue;
@@ -2875,7 +3175,8 @@ static int supervisor_tick(Sup *s) {
         orch_tasks_free(v, n);
     }
 
-    if (s->stopping && !s->mgr_live && orch_live_fleet(s->slots, s->nslots) == 0) {
+    if (s->stopping && !sup_mgrs_live(s) &&
+        orch_live_fleet(s->slots, s->nslots) == 0) {
         sup_set_state(s, "stopped", s->rc ? "max_fail" : "drained");
         return SUP_DONE;
     }
@@ -2936,17 +3237,32 @@ static int fleet_run_open(Sup *s, const char *host) {
     return rc;
 }
 
-/* the branch, worktree, and main a feature's run works with */
-static void sup_feature_paths(Cg *g, const char *feature, char *fbranch,
+/* The branch, worktree, and main a feature's run works with. With a
+ * manager per wave there is no one feature branch: fbranch then names the
+ * wave branches as a pattern (wave/<feature>/<star>) and fwt is empty. Returns
+ * whether managers are per wave. */
+static bool sup_feature_paths(Cg *g, const char *feature, char *fbranch,
                               size_t fbcap, char *fwt, size_t fwcap,
                               char *mainbr, size_t mbcap) {
     Hierarchy h;
     Kvx *wf = orch_hier(g->shared, &h);
     snprintf(mainbr, mbcap, "%s", h.main_branch);
-    hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, -1, fbranch, fbcap);
-    orch_worktree_path(&h, g->shared, fbranch, fwt, fwcap);
+    bool per_wave = hier_per_wave(&h);
+    if (per_wave) {
+        char tmpl[512];
+        snprintf(tmpl, sizeof tmpl, "%s", h.roles[FLEET_FEATURE].branch);
+        char *w = strstr(tmpl, "{wave}");
+        if (w) memmove(w + 1, w + 6, strlen(w + 6) + 1), *w = '*';
+        hier_expand(&h, tmpl, feature, -1, fbranch, fbcap);
+        if (fwcap) fwt[0] = 0;
+    } else {
+        hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, -1, fbranch,
+                    fbcap);
+        orch_worktree_path(&h, g->shared, fbranch, fwt, fwcap);
+    }
     hier_free(&h);
     kvx_free(wf);
+    return per_wave;
 }
 
 /* every leaf task of the feature done on the main tree */
@@ -3036,13 +3352,27 @@ static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,
     s->extra = extra;
     s->nslots = nslots;
     s->maxfail = maxfail;
-    s->wakes = maxrounds > 0 ? maxrounds : ORCH_ROUNDS_DFLT;
     s->first_turn = true;
     s->ttl_min = cfg->ttl > 0 ? (cfg->ttl + 59) / 60 : 60;
-    s->mgr.pid = -1;
     snprintf(s->feature, sizeof s->feature, "%s", feature);
-    sup_feature_paths(g, feature, s->fbranch, sizeof s->fbranch, s->fwt,
-                      sizeof s->fwt, s->mainbr, sizeof s->mainbr);
+    s->per_wave = sup_feature_paths(g, feature, s->fbranch, sizeof s->fbranch,
+                                    s->fwt, sizeof s->fwt, s->mainbr,
+                                    sizeof s->mainbr);
+    s->mgr_max = g_role[FLEET_FEATURE].set ? g_role[FLEET_FEATURE].max : 0;
+    if (!s->per_wave) s->mgr_max = 1;     /* one manager owns the feature */
+    /* the budget covers every manager's turns: the default scales with the
+     * waves that have managers; --max-rounds is the whole run's */
+    int nwaves = 1;
+    if (s->per_wave) {
+        OrchTask *v = NULL;
+        int n = orch_tasks_load(g, feature, NULL, &v);
+        nwaves = 0;
+        for (int i = 0; i < n; i++)
+            if (!i || v[i - 1].wave != v[i].wave) nwaves++;
+        orch_tasks_free(v, n);
+        if (nwaves < 1) nwaves = 1;
+    }
+    s->wakes = maxrounds > 0 ? maxrounds : ORCH_ROUNDS_DFLT * nwaves;
     if (g_role[FLEET_WORKER].set && g_role[FLEET_WORKER].max > 0 &&
         s->nslots > g_role[FLEET_WORKER].max)
         s->nslots = (int)g_role[FLEET_WORKER].max;
@@ -3079,8 +3409,14 @@ static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,
     }
     sup_control(s);
     sup_event(s, s->state[0] ? s->state : "running", resume ? "resumed" : "started");
-    printf("[fleet] %s — manager + %d worker slot(s), driver %s, %d wake(s)\n",
-           feature, s->nslots, cfg->driver, s->wakes);
+    if (s->per_wave)
+        printf("[fleet] %s — a manager per wave (%s at once) + %d worker "
+               "slot(s), driver %s, %d wake(s)\n", feature,
+               s->mgr_max > 0 ? "up to max" : "all", s->nslots, cfg->driver,
+               s->wakes);
+    else
+        printf("[fleet] %s — manager + %d worker slot(s), driver %s, %d "
+               "wake(s)\n", feature, s->nslots, cfg->driver, s->wakes);
     printf("[fleet] run %s%s — supervisor pid %d\n", s->run,
            resume ? " (resumed)" : "", (int)getpid());
     fflush(stdout);
@@ -3091,7 +3427,7 @@ static void sup_close(Sup *s) {
     for (int i = 0; i < s->ntried; i++) free(s->tried[i]);
     for (int i = 0; i < ORCH_MAX_SLOTS && s->slots; i++)
         driver_tap_free(&s->slots[i].tap);
-    driver_tap_free(&s->mgr_tap);
+    for (int i = 0; i < s->nmgrs; i++) driver_tap_free(&s->mgrs[i].tap);
     free(s->slots);
     s->slots = NULL;
 }
@@ -3122,8 +3458,7 @@ static int orch_main_prompt(Cg *g, const FleetNode *n, Sup *sups, int nsup,
     sb_printf(&b, "You were woken because: %s\n\n## Features\n", reason);
     for (int i = 0; i < nsup; i++) {
         OrchSubtree sub;
-        orch_subtree(g, sups[i].feature, sups[i].fbranch, sups[i].fwt,
-                     sups[i].mainbr, &sub);
+        sup_subtree(&sups[i], &sub);
         sb_printf(&b, "- %s: %d of %d task(s) done, %s%s — run %s (%s), "
                   "%d failure(s)\n", sups[i].feature, sub.done, sub.total,
                   sub.merged ? "merged into " : "not yet merged into ",
@@ -3441,6 +3776,7 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
                                          : (active ? active : ""));
     free(active);
     bool configured = h.configured, enabled = h.enabled;
+    bool per_wave = hier_per_wave(&h);
     char mainbr[256], fbranch[256];
     snprintf(mainbr, sizeof mainbr, "%s", h.main_branch);
     hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature, -1, fbranch,
@@ -3481,17 +3817,32 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     if (dry) {
         printf("fleet plan — driver %s, %d worker slot(s), feature %s "
                "(dry run: nothing claimed)\n", cfg->driver, nslots, feature);
-        FleetNode mn;
-        if (orch_spawn_manager(&g, feature, cfg->driver, extra, cfg->cmd,
-                               true, &mn) != 0) {
-            cg_close(&g);
-            return 1;
-        }
         OrchTask *v = NULL;
-        int n = orch_tasks_load(&g, feature, fwt, &v);
+        int n = orch_tasks_load(&g, feature, per_wave ? NULL : fwt, &v);
         int shown = 0;
+        long mwave = -2;     /* the manager shown last */
+        if (!per_wave) {
+            FleetNode mn;
+            if (orch_spawn_manager(&g, feature, -1, cfg->driver, extra,
+                                   cfg->cmd, true, &mn) != 0) {
+                orch_tasks_free(v, n);
+                cg_close(&g);
+                return 1;
+            }
+        }
         for (int i = 0; i < n; i++) {
             if (v[i].finished) continue;
+            if (per_wave && v[i].wave != mwave) {
+                /* a manager per wave with work, its workers under it */
+                FleetNode mn;
+                if (orch_spawn_manager(&g, feature, v[i].wave, cfg->driver,
+                                       extra, cfg->cmd, true, &mn) != 0) {
+                    orch_tasks_free(v, n);
+                    cg_close(&g);
+                    return 1;
+                }
+                mwave = v[i].wave;
+            }
             FleetNode wn;
             orch_spawn_worker(&g, feature, v[i].id, cfg->driver, extra,
                               cfg->cmd, true, &wn);

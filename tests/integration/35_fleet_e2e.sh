@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The fleet, end to end, under failure: two features (beta requires alpha),
-# a task that fails its first attempt, a worker that stalls, a merge
-# conflict the manager resolves, an interface change a live branch is told
-# about, pull requests through a fake gh — run once straight through, and
+# a wave manager per wave and a task worker per task, a task that fails its
+# first attempt, a worker that stalls, a land conflict a wave manager
+# resolves, an interface change a live branch is told about, pull requests
+# through a fake gh — run once straight through, and
 # once with the supervisor killed mid-run and resumed. Both must end in the
 # same state.
 . "$(dirname "$0")/../lib.sh"
@@ -44,8 +45,6 @@ test_gate = "true"
 pr        = "auto"
 
 [role.worker]
-branch  = "task/{feature}/{task}"
-agent   = "w-{feature}-{task}"
 stall   = "2s"
 retries = 2
 wall    = "10m"
@@ -71,7 +70,7 @@ end_state() {
         echo "alpha: $("$CG" spec status -f alpha --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["done"], "/", d["tasks"])')"
         echo "beta: $("$CG" spec status -f beta --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["done"], "/", d["tasks"])')"
         echo "runs: $("$CG" fleet runs --json | python3 -c 'import json,sys; print(sorted((r["feature"], r["state"]) for r in json.load(sys.stdin)["runs"]))')"
-        echo "main has: $(for b in feature/alpha feature/beta; do git merge-base --is-ancestor $b main && echo -n "$b "; done)"
+        echo "main has: $(for b in wave/alpha/1 wave/alpha/2 wave/beta/1; do git merge-base --is-ancestor $b main && echo -n "$b "; done)"
         echo "src/a.ts: $(cat src/a.ts | tr '\n' ' ')"
         echo "src/d.ts: $(cat src/d.ts | tr '\n' ' ')"
         echo "docs/d.md: $(cat docs/d.md)"
@@ -96,21 +95,28 @@ st = of("supervisor.stall", lambda e: e["subject"] == "alpha/2.2")
 assert [e["payload"]["action"] for e in st] == ["nudge", "stop"], st
 assert not of("supervisor.escalate") and not of("supervisor.blocked"), "rescued retries must not escalate"
 # the retry prompt carried what failed
-# the conflict, then the resolution
-m = [e["payload"]["outcome"] for e in of("fleet.merge", lambda e: e["subject"] == "alpha/3.2")]
-assert m[0] == "conflict" and "docs/d.md" in of("fleet.merge", lambda e: e["subject"] == "alpha/3.2")[0]["payload"]["conflicts"], m
+# every merge-up went into its own wave branch, cleanly
+mg = of("fleet.merge", lambda e: e["subject"].startswith("alpha/"))
+assert mg and all(e["payload"]["outcome"] == "merged" for e in mg), mg
+# wave 2 met wave 1 on main: the conflict, then the resolution
+l2 = [e["payload"] for e in of("fleet.land", lambda e: e["payload"]["feature"] == "alpha" and e["payload"].get("wave") == 2)]
+assert [x["outcome"] for x in l2] == ["conflict", "landed"], l2
+assert "docs/d.md" in l2[0]["conflicts"], l2
+l1 = [e["payload"]["outcome"] for e in of("fleet.land", lambda e: e["payload"]["feature"] == "alpha" and e["payload"].get("wave") == 1)]
+assert l1 == ["landed"], l1
 # the interface change reached the live branch
 d = of("drift.interface")
 assert d and d[0]["payload"]["symbol"] == "alpha" and d[0]["payload"]["change"] == "signature", d
 agents = {a["agent"] for a in d[0]["payload"]["agents"]}
 assert "w-alpha-3.2" in agents, agents
 steer = of("agent.steer", lambda e: "Interface drift" in (e["payload"].get("message") or ""))
-assert {e["subject"] for e in steer} >= {"w-alpha-3.2", "fm-alpha"}, steer
-# both features landed behind the gates and opened pull requests
-lands = {e["payload"]["feature"]: e["payload"]["outcome"] for e in of("fleet.land")}
-assert lands == {"alpha": "landed", "beta": "landed"}, lands
-prs = {e["payload"]["feature"] for e in of("fleet.pr", lambda e: e["payload"]["outcome"] == "opened")}
-assert prs == {"alpha", "beta"}, prs
+assert {e["subject"] for e in steer} >= {"w-alpha-3.2", "wm-alpha-2"}, steer
+# both features landed behind the gates, a wave at a time, and opened
+# pull requests
+lands = {(e["payload"]["feature"], e["payload"].get("wave")): e["payload"]["outcome"] for e in of("fleet.land")}
+assert lands == {("alpha", 1): "landed", ("alpha", 2): "landed", ("beta", 1): "landed"}, lands
+prs = {(e["payload"]["feature"], e["payload"].get("wave")) for e in of("fleet.pr", lambda e: e["payload"]["outcome"] == "opened")}
+assert prs == {("alpha", 1), ("alpha", 2), ("beta", 1)}, prs
 # beta started only once alpha had landed
 land_a = min(e["seq"] for e in of("fleet.land", lambda e: e["payload"]["feature"] == "alpha"))
 start_b = min(e["seq"] for e in of("orch.spawn", lambda e: (e["payload"].get("feature")) == "beta"))
@@ -122,8 +128,8 @@ print("events ok:", len(ev), "events")
     has "$(cat "$TMP/e2e/prompt-alpha-2.1-2")" "## Previous attempts"
     has "$(cat "$TMP/e2e/prompt-alpha-2.1-2")" "cannot find name beta"
     has "$(cat "$TMP/e2e/prompt-alpha-2.2-2")" "stopped by the supervisor: stalled"
-    has "$(cat "$TMP/e2e/log")" "resolved 3.2"
-    [ "$(grep -c '^pr create' "$GH_FAKE_DIR/calls.txt")" = 2 ] || fail "two pull requests expected"
+    has "$(cat "$TMP/e2e/log")" "resolved land wave 2"
+    [ "$(grep -c '^pr create' "$GH_FAKE_DIR/calls.txt")" = 3 ] || fail "a pull request per wave expected"
 }
 
 # ---- run A: straight through
@@ -138,11 +144,11 @@ A="$(end_state)"
 echo "$A"
 has "$A" "alpha: 4 / 4"
 has "$A" "beta: 2 / 2"
-has "$A" "main has: feature/alpha feature/beta"
+has "$A" "main has: wave/alpha/1 wave/alpha/2 wave/beta/1"
 has "$A" "alpha(n: number)"
 has "$A" "alpha(4)"
 has "$A" "docs/d.md: # doc, by the worker"
-has "$A" "prs: 2"
+has "$A" "prs: 3"
 
 # ---- run B: the supervisor dies mid-run and is resumed
 setup_repo

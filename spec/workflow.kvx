@@ -42,17 +42,17 @@ title  = "Main Gideon"
 agent  = "gideon"
 branch = "{main}"
 
-[role.feature]
-title  = "Feature Manager"
-agent  = "fm-{feature}"
-branch = "feature/{feature}"
+[role.manager]
+title  = "Wave Manager"
+agent  = "wm-{feature}-{wave}"
+branch = "wave/{feature}/{wave}"
 base   = "{main}"
 
 [role.worker]
-title  = "Wave Worker"
-agent  = "w-{feature}-{wave}"
-branch = "wave/{feature}/{wave}"
-base   = "feature/{feature}"
+title  = "Task Worker"
+agent  = "w-{feature}-{task}"
+branch = "task/{feature}/{task}"
+base   = "wave/{feature}/{wave}"
 
 [principle]
 task_driven     = "Work is driven by the active feature's task list, in wave order."
