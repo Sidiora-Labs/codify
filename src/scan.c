@@ -1206,6 +1206,92 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     return stalled ? -1 : 0;
 }
 
+/* codify-v15 1.5: body_tri rows a graph should hold but does not — the
+ * table was created on a database already at its schema version, or a
+ * write was cut short. A pass only rewrites files whose size or mtime
+ * moved, so an unchanged file never gets its row back on its own. When the
+ * table is short of the files that carry a body (size within
+ * MAX_FTS_BYTES, the predicate write_done applies), this re-reads the open
+ * branch's files that have no row and inserts them, at most
+ * TRI_REPAIR_MAX per pass so a huge repair spreads over several syncs.
+ * cg grep's completeness guard (grep_tri_complete) clears once it is done. */
+#define TRI_REPAIR_MAX 50000
+
+static long tri_rows(Cg *cg) {
+    sqlite3_stmt *q = NULL;
+    /* the docsize shadow holds one row per document and counts without
+     * walking the full-text index; body_tri itself when it is absent */
+    if (sqlite3_prepare_v2(cg->db, "SELECT count(*) FROM body_tri_docsize",
+                           -1, &q, NULL) != SQLITE_OK) {
+        sqlite3_finalize(q);
+        q = NULL;
+        if (sqlite3_prepare_v2(cg->db, "SELECT count(*) FROM body_tri", -1,
+                               &q, NULL) != SQLITE_OK) {
+            sqlite3_finalize(q);
+            return -1;
+        }
+    }
+    long n = sqlite3_step(q) == SQLITE_ROW ? sqlite3_column_int64(q, 0) : -1;
+    sqlite3_finalize(q);
+    return n;
+}
+
+static void index_tri_repair(Cg *cg, long *repaired) {
+    char sql[160];
+    snprintf(sql, sizeof sql, "SELECT count(*) FROM files WHERE size<=%ld",
+             MAX_FTS_BYTES);
+    long want = count_sql(cg, sql), have = tri_rows(cg);
+    if (have < 0 || have >= want) return;
+    sqlite3_stmt *sel = cg_prep(cg,
+        "SELECT f.id,f.path FROM files f WHERE f.branch_id=?1 AND f.size<=?2 "
+        "AND NOT EXISTS(SELECT 1 FROM body_tri t WHERE t.rowid=f.id) "
+        "ORDER BY f.id LIMIT ?3");
+    sqlite3_bind_int64(sel, 1, cg->branch_id);
+    sqlite3_bind_int64(sel, 2, MAX_FTS_BYTES);
+    sqlite3_bind_int64(sel, 3, TRI_REPAIR_MAX);
+    long *ids = NULL;
+    char **paths = NULL;
+    long n = 0, cap = 0;
+    while (sqlite3_step(sel) == SQLITE_ROW) {
+        if (n == cap) {
+            cap = cap ? cap * 2 : 256;
+            ids = xrealloc(ids, sizeof *ids * (size_t)cap);
+            paths = xrealloc(paths, sizeof *paths * (size_t)cap);
+        }
+        ids[n] = sqlite3_column_int64(sel, 0);
+        const char *p = (const char *)sqlite3_column_text(sel, 1);
+        paths[n++] = xstrdup(p ? p : "");
+    }
+    sqlite3_finalize(sel);
+    if (n == 0) { free(ids); free(paths); return; }
+    progress_phase("repairing trigram rows", 0, n);
+    if (progress_begin_write(cg) == 0) {
+        sqlite3_stmt *ins = cg_prep(cg,
+            "INSERT INTO body_tri(rowid,body) VALUES(?,?)");
+        for (long i = 0; i < n; i++) {
+            char abs[4900];
+            snprintf(abs, sizeof abs, "%s/%s", cg->root, paths[i]);
+            size_t len = 0;
+            char *data = read_entire_file(abs, &len);
+            /* what write_done would not have kept is not invented here */
+            if (data && (long)len <= MAX_FTS_BYTES && !looks_binary(data, len)) {
+                sqlite3_bind_int64(ins, 1, ids[i]);
+                sqlite3_bind_text(ins, 2, data, (int)len, SQLITE_STATIC);
+                if (sqlite3_step(ins) == SQLITE_DONE) (*repaired)++;
+                sqlite3_reset(ins);
+                sqlite3_clear_bindings(ins);
+            }
+            free(data);
+            progress_tick(i + 1, n, paths[i]);
+        }
+        sqlite3_finalize(ins);
+        cg_exec(cg, "COMMIT");
+    }
+    for (long i = 0; i < n; i++) free(paths[i]);
+    free(paths);
+    free(ids);
+}
+
 /* The graph is fresh for a caller when the last whole-tree walk of its
  * branch started inside its window and nothing has been queued since: no
  * resolve left behind by a stall, no dirty note from a coalesced caller.
@@ -1253,6 +1339,9 @@ static void index_report(const IndexStats *st, const IndexOpts *o) {
                st->files_removed, st->files_skipped, reused, st->ms,
                st->symbols, st->refs, st->routes, st->anchors, st->soft,
                st->workers, st->passes > 1 ? ", drained" : "");
+        if (st->tri_repaired)                    /* codify-v15 1.5 */
+            printf("%ld trigram row%s repaired\n", st->tri_repaired,
+                   st->tri_repaired == 1 ? "" : "s");
     }
 }
 
@@ -1365,6 +1454,8 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
         if (!whole && ntargets == 0) break;
     }
     targets_free(targets, ntargets);
+    /* codify-v15 1.5: a whole walk also puts back missing body_tri rows */
+    if (!stalled && whole_at > 0) index_tri_repair(cg, &st->tri_repaired);
 
     /* Chunks committed before a stall carry unresolved refs and edges. The
      * pending flag makes the next successful index finish that work even

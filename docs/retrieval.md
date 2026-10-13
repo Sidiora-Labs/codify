@@ -247,6 +247,24 @@ every indexed file of the scope is scanned, and the summary says so. The
 index only narrows the search. A candidate that does not match costs a
 read, never a wrong hit.
 
+**The completeness guard.** A candidate list is only as good as the table
+behind it. A graph whose `body_tri` was created after its files were
+indexed (the table added to a database already at its schema version), or
+whose write was cut short, holds fewer rows than files, and the files
+without a row would never be candidates: a silent miss. So before it asks
+the index, grep compares `body_tri`'s row count with the count of indexed
+files that carry a body (at most 2 MB; files the indexer skipped have no
+`files` row and do not count). When the table is short, grep counts the
+scope file by file and, if any file in scope lacks its row, scans every
+file in scope instead. The summary says
+`full scan — body_tri incomplete (N of M files); the next cg sync repairs it`
+and `--json` carries `"full_scan":"body_tri incomplete"` with
+`"body_tri":{"rows":N,"files":M}`. The guard clears itself: every whole-tree
+index pass (`cg sync`, `cg index`, and the freshness pass a read command
+runs) makes the same comparison, re-reads the open branch's files that have
+no row, inserts them (at most 50,000 a pass), and reports
+`N trigram rows repaired`. `cg index --full` rebuilds every row regardless.
+
 **Scanning.** Candidates are read from disk, in that branch's worktree, by
 parallel workers. Their count is the machine's index worker budget,
 bounded by the number of candidates. A literal is found with `memmem`
@@ -262,9 +280,11 @@ not index (larger than 2 MB) is not searched. Each one is counted as
 symbol spans (definitions only, not prototypes). Each hit is placed in the
 innermost span that holds it, or in `(file scope)` when none does.
 `--symbol NAME` keeps only hits inside a span of that name, and `--kind K`
-only hits inside spans of that kind. `--path GLOB` (repeatable, matched
-the way `touches` globs are), `--lang` (a language name or an extension)
-and `--no-tests` filter the files. Files are ranked by hit count, then
+only hits inside spans of that kind. `--path GLOB` (repeatable), `--lang`
+(a language name or an extension) and `--no-tests` filter the files through
+the same `QueryFilter` that search, context, survey and files use
+(`query_filter_parse`, applied inside the candidate query by
+`query_filter_sql`), so a glob selects the same files on every command. Files are ranked by hit count, then
 source before tests, then shallower paths first.
 
 **Output.** Hits are grouped by file. The enclosing symbol is named once
@@ -283,12 +303,15 @@ prints only the total. The `--json` object is:
 
 ```
 {"query","regex","case_sensitive","candidates","scanned","skipped",
- "indexed","full_scan","total","files_with_hits",
+ "indexed","full_scan","body_tri"?,"total","files_with_hits",
  "hits":[{"path","line","text","symbol","kind","branch"?,"before"?,"after"?}],
  "omitted","omitted_files","ms"}
 ```
 
-`symbol` and `kind` are null for file scope. `branch` is present when more
+`full_scan` is false when the index narrowed, true when the pattern has
+no trigram (or the index could not answer), and `"body_tri incomplete"`
+when the completeness guard fired. `symbol` and `kind` are null for file
+scope. `branch` is present when more
 than one branch is in scope. `before` and `after` are present with
 `context`. With `--files`, `hits` is replaced by `files:[{"path","count"}]`.
 

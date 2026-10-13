@@ -131,6 +131,77 @@ hasnt "$out" "big.txt"
 rm big.txt
 "$CG" sync >/dev/null
 
+# codify-v15 1.5: a body_tri short of the files it should cover (emptied by
+# hand here; in the wild, created on a graph already at its schema version)
+# never misses silently: grep scans the whole scope and says why, and the
+# next sync puts the rows back so the index narrows again
+"$CG" config set sync.auto off >/dev/null
+want="$(j "$("$CG" grep formatName --json)" "d['total']")"
+sqlite3 .codegraph/graph.db "DELETE FROM body_tri"
+out="$("$CG" grep formatName)"
+has "$out" "src/server.ts:7: "
+has "$out" "src/util.ts:1: export function formatName"
+has "$out" "$want hits in 2 files"
+has "$out" "full scan — body_tri incomplete (0 of"
+out="$("$CG" grep formatName --json)"
+python3 - "$out" "$want" <<'EOF'
+import json, sys
+d = json.loads(sys.argv[1])
+assert d["full_scan"] == "body_tri incomplete", d
+assert d["candidates"] == d["indexed"] and d["total"] == int(sys.argv[2]), d
+assert d["body_tri"]["rows"] == 0 and d["body_tri"]["files"] > 0, d
+EOF
+"$CG" config set sync.auto on >/dev/null
+out="$("$CG" sync)"
+has "$out" "trigram rows repaired"
+out="$("$CG" grep formatName --json)"
+python3 - "$out" "$want" <<'EOF'
+import json, sys
+d = json.loads(sys.argv[1])
+assert d["full_scan"] is False, d
+assert 0 < d["candidates"] < d["indexed"] and d["total"] == int(sys.argv[2]), d
+assert "body_tri" not in d, d
+EOF
+out="$("$CG" grep formatName)"
+hasnt "$out" "body_tri incomplete"
+# a partial loss: one file's row gone, the hit in it still found
+uid="$(sqlite3 .codegraph/graph.db "SELECT id FROM files WHERE path='src/util.ts'")"
+sqlite3 .codegraph/graph.db "DELETE FROM body_tri WHERE rowid=$uid"
+"$CG" config set sync.auto off >/dev/null
+out="$("$CG" grep 'export function formatName')"
+has "$out" "src/util.ts:1:"
+has "$out" "body_tri incomplete"
+"$CG" config set sync.auto on >/dev/null
+out="$("$CG" sync)"
+has "$out" "1 trigram row repaired"
+
+# --path narrows grep and search to the same files: one QueryFilter. Each
+# command's filtered answer is its wide answer cut to the glob, and a glob
+# naming one file gives that one file on both
+python3 - "$("$CG" grep formatName --json)" \
+          "$("$CG" search formatName --json)" \
+          "$("$CG" grep formatName --path 'src/util*' --json)" \
+          "$("$CG" search formatName --path 'src/util*' --json)" \
+          "$("$CG" grep formatName --path 'src/s*' --json)" \
+          "$("$CG" search formatName --path 'src/s*' --json)" <<'EOF'
+import fnmatch, json, sys
+def gfiles(s): return {h["path"] for h in json.loads(s)["hits"]}
+def sfiles(s):
+    d = json.loads(s)
+    return {x["path"] for k in ("symbols", "files") for x in d.get(k, [])}
+gall, sall = gfiles(sys.argv[1]), sfiles(sys.argv[2])
+g, s = gfiles(sys.argv[3]), sfiles(sys.argv[4])
+assert g == s == {"src/util.ts"}, (g, s)
+g, s = gfiles(sys.argv[5]), sfiles(sys.argv[6])
+cut = lambda xs: {p for p in xs if fnmatch.fnmatch(p, "src/s*")}
+assert g == cut(gall) == {"src/server.ts"}, (g, gall)
+assert s == cut(sall) and "src/server.ts" in s, (s, sall)
+EOF
+out="$("$CG" grep load_tasks --path lib --no-tests --files)"
+has "$out" "lib/tasks.py"
+out="$("$CG" grep load_tasks --lang py --files)"
+has "$out" "lib/tasks.py"
+
 # branches: a linked worktree's files (reused from their byte-identical
 # twins, so their trigrams come through the reuse path) answer on their own
 # branch, and --all-branches labels each hit with the branch it came from

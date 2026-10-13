@@ -15,7 +15,6 @@
 #include <regex.h>
 #include <stdatomic.h>
 #include <ctype.h>
-#include <fnmatch.h>
 
 /* mirrors scan.c: the indexer never reads a file over GREP_FILE_MAX and
  * keeps no body (so no trigrams) for one over GREP_BODY_MAX */
@@ -157,37 +156,6 @@ typedef struct {
     /* every span of the file, loaded after the scan for files with hits */
     GSpan *spans; int nspans; bool spans_loaded;
 } GFile;
-
-static bool path_hit(const char *pat, const char *path) {
-    size_t pl = strlen(pat);
-    if (strcmp(pat, path) == 0 || fnmatch(pat, path, 0) == 0) return true;
-    if (pl && pat[pl - 1] == '/' && strncmp(path, pat, pl) == 0) return true;
-    /* a bare directory names everything under it, as touches reads it */
-    if (!strpbrk(pat, "*?[") && strncmp(path, pat, pl) == 0 &&
-        path[pl] == '/')
-        return true;
-    return false;
-}
-
-static bool lang_hit(const char *want, const char *lang, const char *path) {
-    if (lang && strcasecmp(want, lang) == 0) return true;
-    const char *ext = path_ext(path);            /* ".ts" */
-    if (ext && ext[0] == '.') ext++;
-    return ext && ext[0] && strcasecmp(want, ext) == 0;
-}
-
-static bool filters_pass(const GrepOpts *o, const char *path,
-                         const char *lang) {
-    if (o->npaths > 0) {
-        bool any = false;
-        for (int i = 0; i < o->npaths && !any; i++)
-            any = path_hit(o->paths[i], path);
-        if (!any) return false;
-    }
-    if (o->lang && o->lang[0] && !lang_hit(o->lang, lang, path)) return false;
-    if (o->no_tests && graph_path_is_test(path)) return false;
-    return true;
-}
 
 static void spans_load(Cg *cg, long file_id, const char *by, const char *val,
                        GSpan **out, int *n) {
@@ -430,6 +398,59 @@ static void put_context(StrBuf *b, const GLines *gl, int line, int ctx) {
     sb_putc(b, ']');
 }
 
+/* codify-v15 1.5: does body_tri hold a row for every file in scope that
+ * carries a body? A graph whose table was created after its files were
+ * indexed (SCHEMA adding body_tri to a database already at its version), or
+ * a write cut short, holds fewer, and a candidate query over it would miss
+ * files silently. The cheap test first: the table's row count against
+ * every file the indexer keeps a body for (size within GREP_BODY_MAX, as
+ * scan.c's write_done decides; skipped files have no files row at all).
+ * Only when that is short is the scope counted file by file. *have and
+ * *want report the scoped numbers (both 0 when the cheap test passed). */
+bool grep_tri_complete(Cg *cg, long *have, long *want) {
+    long h = 0, w = 0;
+    if (have) *have = 0;
+    if (want) *want = 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT count(*) FROM body_tri_docsize",
+                           -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_finalize(st);
+        st = NULL;
+        if (sqlite3_prepare_v2(cg->db, "SELECT count(*) FROM body_tri", -1,
+                               &st, NULL) != SQLITE_OK) {
+            sqlite3_finalize(st);
+            return false;                    /* no table: nothing narrows */
+        }
+    }
+    long rows = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int64(st, 0)
+                                               : -1;
+    sqlite3_finalize(st);
+    st = cg_prep(cg, "SELECT count(*) FROM files WHERE size<=?1");
+    sqlite3_bind_int64(st, 1, GREP_BODY_MAX);
+    long bodies = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int64(st, 0)
+                                                 : 0;
+    sqlite3_finalize(st);
+    if (rows >= bodies) return true;
+    char scope[64], sql[320];
+    branch_scope_sql(cg, "f", scope, sizeof scope);
+    snprintf(sql, sizeof sql,
+             "SELECT count(*), count(t.rowid) FROM files f "
+             "LEFT JOIN body_tri t ON t.rowid=f.id WHERE f.size<=?1%s", scope);
+    if (sqlite3_prepare_v2(cg->db, sql, -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_finalize(st);
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, GREP_BODY_MAX);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        w = sqlite3_column_int64(st, 0);
+        h = sqlite3_column_int64(st, 1);
+    }
+    sqlite3_finalize(st);
+    if (have) *have = h;
+    if (want) *want = w;
+    return h >= w;
+}
+
 static long now_scope_count(Cg *cg) {
     char scope[64], sql[256];
     branch_scope_sql(cg, "f", scope, sizeof scope);
@@ -443,8 +464,9 @@ static long now_scope_count(Cg *cg) {
 
 /* The files the scan reads: the index's candidates (match = the trigram
  * query) or every indexed file of the branch scope (match = NULL), with
- * --path/--lang/--no-tests applied and --symbol/--kind as a join. A file
- * whose body the index never kept is counted in big, not read. */
+ * the shared QueryFilter (--path/--lang/--no-tests, as search, context,
+ * survey and files narrow) inside the SQL and --symbol/--kind as a join. A
+ * file whose body the index never kept is counted in big, not read. */
 #define GREP_MAX_TREES 32
 typedef struct {
     GFile *files; int n, cap;
@@ -461,8 +483,8 @@ static void cands_reset(GCands *c) {
     c->candidates = c->big = 0;
 }
 
-static int cands_collect(Cg *cg, const GrepOpts *o, const char *match,
-                         GCands *c) {
+static int cands_collect(Cg *cg, const GrepOpts *o, const QueryFilter *qf,
+                         const char *match, GCands *c) {
     char scope[64];
     branch_scope_sql(cg, "f", scope, sizeof scope);
     StrBuf sql; sb_init(&sql);
@@ -472,6 +494,10 @@ static int cands_collect(Cg *cg, const GrepOpts *o, const char *match,
     else sb_printf(&sql, "(f.size>%ld OR f.id IN (SELECT rowid FROM body_tri "
                          "WHERE body_tri MATCH ?1))", GREP_BODY_MAX);
     sb_puts(&sql, scope);
+    char *flt = query_filter_sql(qf, "f");
+    sb_puts(&sql, flt);
+    free(flt);
+    if (query_filter_active(qf)) query_filter_register(cg->db);
     bool sym = o->symbol && o->symbol[0], kind = o->kind && o->kind[0];
     if (sym)
         sb_puts(&sql, " AND EXISTS(SELECT 1 FROM symbols s WHERE "
@@ -490,7 +516,8 @@ static int cands_collect(Cg *cg, const GrepOpts *o, const char *match,
     while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
         const char *path = (const char *)sqlite3_column_text(st, 1);
         const char *lang = (const char *)sqlite3_column_text(st, 2);
-        if (!path || !filters_pass(o, path, lang)) continue;
+        /* the SQL narrowed already; the same decision, row in hand */
+        if (!path || !query_filter_match(qf, path, lang)) continue;
         long size = sqlite3_column_int64(st, 4);
         long bid = sqlite3_column_int64(st, 3);
         if (size > GREP_BODY_MAX) { c->big++; continue; }
@@ -551,19 +578,44 @@ int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json) {
     int limit = o->limit > 0 ? o->limit : 50;
     int budget = o->budget > 0 ? o->budget : 4000;
 
+    /* --path/--lang/--no-tests through the one parser every read shares */
+    QueryFilter qf;
+    {
+        char *av[2 * GREP_MAX_PATHS + 5];
+        int ac = 0;
+        av[ac++] = "grep";
+        for (int i = 0; i < o->npaths && i < GREP_MAX_PATHS; i++) {
+            av[ac++] = "--path";
+            av[ac++] = (char *)o->paths[i];
+        }
+        if (o->lang && o->lang[0]) {
+            av[ac++] = "--lang";
+            av[ac++] = (char *)o->lang;
+        }
+        if (o->no_tests) av[ac++] = "--no-tests";
+        if (query_filter_parse(&ac, av, &qf) != 0) return 1;
+    }
+
     /* the index's candidates: files holding every trigram of the literal */
     char *lit = required_literal(o->pattern, o->regex);
     StrBuf q; sb_init(&q);
     bool full_scan = trigram_query(lit, &q) == 0;
     free(lit);
+    /* codify-v15 1.5: a body_tri short of the files it should cover would
+     * drop real hits from the candidates; scan the whole scope instead
+     * until the next sync puts the rows back */
+    long tri_have = 0, tri_want = 0;
+    bool tri_short = !full_scan &&
+                     !grep_tri_complete(cg, &tri_have, &tri_want);
+    if (tri_short) full_scan = true;
 
     GCands c;
     memset(&c, 0, sizeof c);
     /* an index that cannot answer (a busy or damaged table) narrows
      * nothing: scan the branch rather than report a false "no hits" */
-    if (cands_collect(cg, o, full_scan ? NULL : q.p, &c) != 0) {
+    if (cands_collect(cg, o, &qf, full_scan ? NULL : q.p, &c) != 0) {
         cands_reset(&c);
-        if (full_scan || cands_collect(cg, o, NULL, &c) != 0) {
+        if (full_scan || cands_collect(cg, o, &qf, NULL, &c) != 0) {
             fprintf(stderr, "cg grep: %s\n", sqlite3_errmsg(cg->db));
             cands_reset(&c);
             sb_free(&q);
@@ -665,7 +717,11 @@ int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json) {
                   "\"files_with_hits\":%d",
                   o->regex ? "true" : "false", o->icase ? "false" : "true",
                   candidates, scanned, skipped, indexed,
-                  full_scan ? "true" : "false", total, nhitf);
+                  tri_short ? "\"body_tri incomplete\""
+                            : full_scan ? "true" : "false", total, nhitf);
+        if (tri_short)
+            sb_printf(&b, ",\"body_tri\":{\"rows\":%ld,\"files\":%ld}",
+                      tri_have, tri_want);
     }
 
     if (o->count_only) {
@@ -830,7 +886,11 @@ int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json) {
                   total, total == 1 ? "" : "s", nhitf, nhitf == 1 ? "" : "s",
                   candidates, candidates == 1 ? "" : "s", indexed,
                   indexed == 1 ? "" : "s", scanned, skipped, ms);
-        if (full_scan)
+        if (tri_short)
+            sb_printf(&b, "full scan — body_tri incomplete (%ld of %ld "
+                      "files); the next cg sync repairs it\n",
+                      tri_have, tri_want);
+        else if (full_scan)
             sb_puts(&b, "no three-character literal in the pattern for the "
                         "trigram index: every indexed file was scanned\n");
     }
