@@ -337,6 +337,8 @@ typedef struct {
     /* files whose rows were copied from an identical twin on another
      * branch instead of parsed again (see branch reuse in scan.c) */
     long files_reused;
+    /* codify-v15 1.5: body_tri rows put back for unchanged files */
+    long tri_repaired;
 } IndexStats;
 
 /* How a caller wants its index pass run. Zero-initialised means: walk now,
@@ -481,6 +483,10 @@ int cmd_grep(Cg *cg, const SysInfo *si, const GrepOpts *o, bool json);
  * mcp.c's call context ({Cg *, const SysInfo *, const char *args}) */
 extern const char GREP_CODE_SCHEMA[];
 int t_grep(void *call_ctx);
+/* codify-v15 1.5 */
+/* body_tri holds a row for every file in scope that carries a body; when
+ * false, *have of *want such files have one and grep scans the scope */
+bool grep_tri_complete(Cg *cg, long *have, long *want);
 int cmd_symbol (Cg *cg, const char *name, bool json);
 int cmd_impact (Cg *cg, const char *name, int depth, int budget, bool json);
 int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json);

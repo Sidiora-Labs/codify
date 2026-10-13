@@ -174,7 +174,7 @@ reqs       = ["4.1", "4.2", "4.3", "4.4"]
 
 [task.1.5]
 title      = "grep hardening: the body_tri completeness guard and the shared QueryFilter on grep"
-status     = "pending"
+status     = "in_progress"
 wave       = 2
 requires   = ["1.1", "1.2"]
 symbols    = ["grep_tri_complete", "cmd_grep"]
