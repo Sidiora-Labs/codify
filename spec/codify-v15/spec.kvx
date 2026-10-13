@@ -291,7 +291,7 @@ status  = "pending"
 title      = "Wave managers and task workers: the default hierarchy, plan, begin, merge-up, land, and the supervisor's manager array"
 status     = "in_progress"
 wave       = 1
-symbols    = ["hier_defaults", "fleet_plan", "fleet_worker_begin", "fleet_merge_up", "fleet_land", "orch_spawn_manager", "sup_tick"]
+symbols    = ["hier_defaults", "fleet_plan", "fleet_worker_begin", "fleet_merge_up", "fleet_land", "orch_spawn_manager", "sup_mgr", "sup_mgrs_live"]
 touches    = ["src/fleet.c", "src/orchestrate.c", "src/cg.h", "src/help.c", "spec/workflow.kvx", "editors/vscode/fleet.js", "tests/integration/26_fleet.sh", "tests/integration/32_supervisor.sh", "tests/integration/35_fleet_e2e.sh", "tests/integration/14_vscode.sh", "docs/hierarchy.md"]
 verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/26_fleet.sh && CG=$PWD/cg tests/integration/32_supervisor.sh && CG=$PWD/cg tests/integration/35_fleet_e2e.sh && CG=$PWD/cg tests/integration/14_vscode.sh && CG=$PWD/cg tests/integration/22_control.sh"
 do_1       = "fleet.c: the new defaults and titles, [role.manager] as an alias of [role.feature], {wave} in the manager templates (per-wave managers when present, one per feature otherwise), fleet plan and fleet tree --json with a manager per wave, begin cutting task/ from the wave branch and creating the wave branch from main, merge-up into the wave branch, land taking a wave and refusing while tasks are open; spec/workflow.kvx on the new templates."
