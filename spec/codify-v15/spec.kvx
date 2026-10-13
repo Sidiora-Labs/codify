@@ -172,6 +172,19 @@ do_2       = "integrate.c SKILL_BODY, agent.c context, mcp.c tool descriptions a
 do_3       = "47_advice.sh per req 4.4."
 reqs       = ["4.1", "4.2", "4.3", "4.4"]
 
+[task.1.5]
+title      = "grep hardening: the body_tri completeness guard and the shared QueryFilter on grep"
+status     = "pending"
+wave       = 2
+requires   = ["1.1", "1.2"]
+symbols    = ["grep_tri_complete", "cmd_grep"]
+touches    = ["src/grep.c", "src/scan.c", "src/graph.c", "src/cg.h", "tests/integration/44_grep.sh", "docs/retrieval.md"]
+verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/44_grep.sh && CG=$PWD/cg tests/integration/45_files.sh && CG=$PWD/cg tests/integration/16_retrieval.sh && CG=$PWD/cg tests/integration/01_graph.sh"
+do_1       = "grep.c: before taking candidates from body_tri, compare its row count with the count of indexed files that carry a body in scope; when body_tri is short (a graph written before the table existed, or a partial write) grep scans every file in scope, says so in the summary and --json (full_scan reason), and scan.c's next pass re-inserts the missing rows so the guard clears itself (cg sync repairs; cg index --full always rebuilds)."
+do_2       = "grep.c: --path, --lang, --no-tests go through query_filter_parse / query_filter_match from graph.c (task 1.2) in place of grep's own static helpers, so the four read commands and files narrow identically; the static helpers are removed."
+do_3       = "44_grep.sh: a graph whose body_tri was emptied by hand makes grep full-scan with the reason and the next cg sync restores candidates; a --path glob behaves the same on grep and search; docs/retrieval.md says how the guard behaves."
+reqs       = ["1.1", "1.5", "2.3"]
+
 [task.2]
 title   = "Presence"
 section = "The Claude Code plugin, native agents in the fleet, and transcript discovery"

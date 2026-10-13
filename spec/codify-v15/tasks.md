@@ -28,6 +28,11 @@
     - integrate.c SKILL_BODY, agent.c context, mcp.c tool descriptions and prompts: say to use grep_code, find_files, search_code, get_context before shell search; hook install and the plugin's hooks.json register the Bash PreToolUse entry.
     - 47_advice.sh per req 4.4.
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
+  - [ ] 1.5 grep hardening: the body_tri completeness guard and the shared QueryFilter on grep
+    - grep.c: before taking candidates from body_tri, compare its row count with the count of indexed files that carry a body in scope; when body_tri is short (a graph written before the table existed, or a partial write) grep scans every file in scope, says so in the summary and --json (full_scan reason), and scan.c's next pass re-inserts the missing rows so the guard clears itself (cg sync repairs; cg index --full always rebuilds).
+    - grep.c: --path, --lang, --no-tests go through query_filter_parse / query_filter_match from graph.c (task 1.2) in place of grep's own static helpers, so the four read commands and files narrow identically; the static helpers are removed.
+    - 44_grep.sh: a graph whose body_tri was emptied by hand makes grep full-scan with the reason and the next cg sync restores candidates; a --path glob behaves the same on grep and search; docs/retrieval.md says how the guard behaves.
+    - _Requirements: 1.1, 1.5, 2.3_
 
 ## The Claude Code plugin, native agents in the fleet, and transcript discovery
 
@@ -91,7 +96,7 @@
 {
   "waves": [
     { "id": 1,  "tasks": ["1.1", "1.2", "1.3", "2.1", "2.2", "3.1", "4.1"] },
-    { "id": 2,  "tasks": ["1.4", "2.3", "2.4", "3.2"] },
+    { "id": 2,  "tasks": ["1.4", "1.5", "2.3", "2.4", "3.2"] },
     { "id": 3,  "tasks": ["3.3", "4.2"] }
   ]
 }
