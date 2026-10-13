@@ -811,6 +811,13 @@ static int proj_spawn_background(Cg *cg) {
         if (maxfd < 0 || maxfd > 65536) maxfd = 65536;
         for (int fd = 3; fd < (int)maxfd; fd++) close(fd);
         if (chdir(cg->shared) != 0) _exit(126);
+        /* the build is nobody's work: no agent, run, or task identity from
+         * whoever triggered it, or its events would count as theirs */
+        static const char *const who[] = { "CG_AGENT", "CG_ROLE", "CG_PARENT",
+            "CG_FEATURE", "CG_WAVE", "CG_TASK", "CG_RUN", "CG_ATTEMPT",
+            "CG_FENCE", "CG_SESSION", "CG_HOST", "CG_BRANCH", "CG_BASE",
+            "CG_SLOT_DIR", "CG_SUPERVISOR_LOG", NULL };
+        for (int i = 0; who[i]; i++) unsetenv(who[i]);
         char *av[] = { self, (char *)"projection", (char *)"build",
                        (char *)"--quiet", NULL };
         execv(self, av);
