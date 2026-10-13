@@ -2159,6 +2159,52 @@ static int spec_wave_cmd(Spec *s, bool json) {
     return 0;
 }
 
+/* leases.ahead: the requires a task was started ahead of (space separated),
+ * so a claim taken against the projection is told from one taken on landed
+ * work. Added on first use: the column is advisory, and an index that never
+ * saw an ahead start simply lacks it. */
+static bool spec_lease_ahead_column(Cg *g) {
+    sqlite3_stmt *q = NULL;
+    bool have = false;
+    if (sqlite3_prepare_v2(g->db, "SELECT 1 FROM pragma_table_info('leases') "
+                           "WHERE name='ahead'", -1, &q, NULL) == SQLITE_OK)
+        have = sqlite3_step(q) == SQLITE_ROW;
+    sqlite3_finalize(q);
+    if (have) return true;
+    return sqlite3_exec(g->db, "ALTER TABLE leases ADD COLUMN ahead TEXT",
+                        NULL, NULL, NULL) == SQLITE_OK;
+}
+
+/* rows changed (0: no lease for tag), -1 on error */
+static int spec_lease_ahead_set(Cg *g, const char *tag, const char *reqs) {
+    if (!spec_lease_ahead_column(g)) return -1;
+    sqlite3_stmt *u = cg_prep(g, "UPDATE leases SET ahead=? WHERE task=?");
+    sqlite3_bind_text(u, 1, reqs, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(u, 2, tag, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(u) == SQLITE_DONE ? sqlite3_changes(g->db) : -1;
+    sqlite3_finalize(u);
+    return rc;
+}
+
+int spec_start_ahead(Cg *g, const char *tag, const char *agent,
+                     const char *reqs, const char *touches) {
+    int n = spec_lease_ahead_set(g, tag, reqs);
+    if (n != 0) return n > 0 ? 0 : -1;
+    long now = (long)time(NULL);
+    sqlite3_stmt *ins = cg_prep(g,
+        "INSERT INTO leases(task,agent,claimed,expires,touches,ahead) "
+        "VALUES(?,?,?,?,?,?)");
+    sqlite3_bind_text(ins, 1, tag, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 2, agent, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(ins, 3, now);
+    sqlite3_bind_int64(ins, 4, now + 3600);
+    sqlite3_bind_text(ins, 5, touches ? touches : "", -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 6, reqs, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(ins) == SQLITE_DONE ? 0 : -1;
+    sqlite3_finalize(ins);
+    return rc;
+}
+
 /* upsert one lease; runs inside whatever transaction the caller holds —
  * always a BEGIN IMMEDIATE one, so the write never fails on lock upgrade */
 static int spec_lease_upsert(Cg *g, const char *tag, const char *agent,
@@ -2358,9 +2404,11 @@ static int spec_reconcile_cmd(Spec *s, bool repair, bool json) {
  * then the lease and fenced attempt in one BEGIN IMMEDIATE. Prints the
  * refusal to stderr and returns 1; 0 with *out filled on success. Shared by
  * `cg spec claim` and `cg fleet begin`. */
+static int spec_lease_ahead_set(Cg *g, const char *tag, const char *reqs);
+
 static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
                            const char *host, const char *session, long ttl_min,
-                           SpecAttempt *out) {
+                           bool ahead, SpecAttempt *out) {
     char tag[256];
     snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
     long now = (long)time(NULL);
@@ -2375,11 +2423,17 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
     {
         char *st0 = docs ? spec_docs_stage(s) : task_status(s, id);
         bool in_flight = strcmp(st0, "in_progress") == 0;
-        free(st0);
         bool claimable = docs ? spec_docs_ready(s) : task_eligible(s, id);
+        /* --ahead: a pending leaf whose requires are still open, built
+         * against the projection; done stays refused until they land */
+        if (!claimable && ahead && !docs && task_is_leaf(s, id) &&
+            (!st0[0] || strcmp(st0, "pending") == 0))
+            claimable = true;
+        free(st0);
         if (!in_flight && !claimable) {
             fprintf(stderr, "cg spec: %s is not claimable — it is finished, "
-                    "a heading, or has unmet requires\n", id);
+                    "a heading, or has unmet requires%s\n", id,
+                    ahead ? "" : " (--ahead claims it against the projection)");
                 return 1;
         }
     }
@@ -2423,22 +2477,39 @@ static int spec_claim_take(Cg *g, Spec *s, const char *id, const char *agent,
         cg_exec(g, "ROLLBACK");
         return 1;
     }
+    if (ahead && !docs) {
+        char *unmet[16];
+        int nu = task_unmet(s, id, unmet, 16);
+        StrBuf r; sb_init(&r);
+        for (int i = 0; i < nu && i < 16; i++) {
+            sb_printf(&r, "%s%s", i ? " " : "", unmet[i]);
+            free(unmet[i]);
+        }
+        if (nu > 0) spec_lease_ahead_set(g, tag, r.p);
+        sb_free(&r);
+    }
     cg_exec(g, "COMMIT");
     free(touches);
 
     return 0;
 }
 
-int spec_claim(Cg *g, const char *root, const char *feature, const char *id,
-               const char *agent, long ttl_min, SpecAttempt *out) {
+int spec_claim_ex(Cg *g, const char *root, const char *feature,
+                  const char *id, const char *agent, long ttl_min, bool ahead,
+                  SpecAttempt *out) {
     Spec s;
     if (spec_load(&s, root, feature, false) != 0) {
         spec_close(&s);
         return 1;
     }
-    int rc = spec_claim_take(g, &s, id, agent, NULL, NULL, ttl_min, out);
+    int rc = spec_claim_take(g, &s, id, agent, NULL, NULL, ttl_min, ahead, out);
     spec_close(&s);
     return rc;
+}
+
+int spec_claim(Cg *g, const char *root, const char *feature, const char *id,
+               const char *agent, long ttl_min, SpecAttempt *out) {
+    return spec_claim_ex(g, root, feature, id, agent, ttl_min, false, out);
 }
 
 /* A claim creates both its compatibility lease and authoritative fenced
@@ -2524,7 +2595,8 @@ static int spec_claim_cmd(Spec *s, const char *id, const char *agent,
         return 0;
     }
     SpecAttempt attempt;
-    int trc = spec_claim_take(&g, s, id, agent, host, session, ttl_min, &attempt);
+    int trc = spec_claim_take(&g, s, id, agent, host, session, ttl_min, false,
+                              &attempt);
     cg_close(&g);
     if (trc != 0) return 1;
 
@@ -2824,7 +2896,8 @@ static int spec_claim_next_cmd(Spec *s, const char *agent, const char *host,
     return 0;
 }
 
-static int spec_start_cmd(Spec *s, const char *id, bool force, bool json) {
+static int spec_start_cmd(Spec *s, const char *id, bool force, bool ahead,
+                          bool json) {
     if (!task_exists(s, id)) {
         fprintf(stderr, "cg spec: no [task.%s] in %s\n", id, s->fpath);
         return 1;
@@ -2873,16 +2946,41 @@ static int spec_start_cmd(Spec *s, const char *id, bool force, bool json) {
                 in_progress, max_in_progress);
         return 1;
     }
+    /* --ahead is the one way past open requires: the work is built against
+     * the projection, the lease says so, and done still waits for them */
     char *unmet[8];
     int nu = task_unmet(s, id, unmet, 8);
-    if (nu > 0 && !force) {
-        fprintf(stderr, "cg spec: task %s has unmet requires:", id);
-        for (int i = 0; i < nu && i < 8; i++) fprintf(stderr, " %s", unmet[i]);
-        fprintf(stderr, " (--force to override)\n");
-        for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
+    StrBuf ahead_reqs; sb_init(&ahead_reqs);
+    for (int i = 0; i < nu && i < 8; i++)
+        sb_printf(&ahead_reqs, "%s%s", i ? " " : "", unmet[i]);
+    for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
+    if (nu > 0 && !ahead) {
+        fprintf(stderr, "cg spec: task %s has unmet requires: %s (--ahead to "
+                "start against the projection; done waits until they "
+                "land)\n", id, ahead_reqs.p);
+        sb_free(&ahead_reqs);
         return 1;
     }
-    for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
+    if (nu > 0) {
+        Cg g;
+        char tag[700], sec0[300];
+        snprintf(tag, sizeof tag, "%s/%s", s->feature, id);
+        task_sec(sec0, sizeof sec0, id);
+        char *touches = join_list(s->f, sec0, "touches");
+        if (memory_open_quiet(&g)) {
+            if (spec_start_ahead(&g, tag, cg_agent_name(NULL), ahead_reqs.p,
+                                 touches) != 0)
+                fprintf(stderr, "cg spec: ahead of %s not recorded on the "
+                        "lease (busy index)\n", ahead_reqs.p);
+            cg_close(&g);
+        }
+        free(touches);
+        if (!json)
+            printf("ahead of %s — build against the projection (--branch %s); "
+                   "`cg spec done %s` waits until they land\n", ahead_reqs.p,
+                   PROJECTION_BRANCH, id);
+    }
+    sb_free(&ahead_reqs);
 
     char sec[300];
     task_sec(sec, sizeof sec, id);
@@ -3066,6 +3164,25 @@ static int spec_done_cmd(Spec *s, const char *id, const char *agent,
         return 1;
     }
     free(st);
+    /* strict: work started ahead of its requires is not done until they
+     * land here; in a fleet run --force does not get past it */
+    {
+        char *unmet[8];
+        int nu = task_unmet(s, id, unmet, 8);
+        bool fleet = (getenv("CG_RUN") && getenv("CG_RUN")[0]) ||
+                     (getenv("CG_ROLE") && getenv("CG_ROLE")[0]);
+        if (nu > 0 && (!force || fleet)) {
+            fprintf(stderr, "cg spec: task %s has unmet requires:", id);
+            for (int i = 0; i < nu && i < 8; i++)
+                fprintf(stderr, " %s", unmet[i]);
+            fprintf(stderr, " — done waits until they land (`cg fleet sync` "
+                    "brings them in after the land)%s\n",
+                    fleet ? "" : "; --force to override");
+            for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
+            return 1;
+        }
+        for (int i = 0; i < nu && i < 8; i++) free(unmet[i]);
+    }
 
     char sec[300];
     task_sec(sec, sizeof sec, id);
@@ -4263,7 +4380,8 @@ int spec_task_memories_tag(const char *requested, Memory **out) {
 
 int cmd_spec(int argc, char **argv, bool json) {
     const char *sub = argc > 0 ? argv[0] : "status";
-    bool check = false, force = false, repair = false, no_sync = false;
+    bool check = false, force = false, repair = false, no_sync = false,
+         ahead = false;
     const char *feature_ov = NULL, *root_ov = NULL;
     const char *pos[4];
     int npos = 0;
@@ -4275,6 +4393,7 @@ int cmd_spec(int argc, char **argv, bool json) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) check = true;
         else if (strcmp(argv[i], "--force") == 0) force = true;
+        else if (strcmp(argv[i], "--ahead") == 0) ahead = true;
         else if (strcmp(argv[i], "--repair") == 0) repair = true;
         else if (strcmp(argv[i], "--no-sync") == 0) no_sync = true;
         else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc)
@@ -4456,7 +4575,7 @@ int cmd_spec(int argc, char **argv, bool json) {
         if (npos < 1) { fprintf(stderr, "usage: cg spec start <id>\n"); rc = 1; }
         else if (strcmp(pos[0], CG_DOC_TASK) == 0)
             rc = spec_docs_cmd(&s, "start", cg_agent_name(agent), attempt, fence, json);
-        else rc = spec_start_cmd(&s, pos[0], force, json);
+        else rc = spec_start_cmd(&s, pos[0], force, ahead, json);
     } else if (strcmp(sub, "implemented") == 0) {
         if (force) {
             fprintf(stderr, "cg spec implemented does not support --force\n");

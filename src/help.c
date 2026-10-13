@@ -711,7 +711,7 @@ static const HelpCmd HELP[] = {
 { .group = "spec", .name = "spec start", .args = "<id>",
   .usage = "spec start <id>",
   .summary = "mark a task in_progress (honors workflow limit)",
-  .flags = "--force\tstart despite the limit or unmet requires\n" },
+  .flags = "--force\tstart despite the workflow limit\n--ahead\tstart with requires still open, against the projection; done waits until they land\n" },
 { .group = "spec", .name = "spec done", .args = "<id>",
   .usage = "spec done <id>",
   .summary = "verify_cmd + graph checks, then mark done",
@@ -902,6 +902,19 @@ static const HelpCmd HELP[] = {
     "--no-discover skips that.",
   .flags = "--since DUR\ttranscripts changed within DUR (default 24h)\n",
   .related = "fleet status,hook event,recap" },
+/* codify-v15 4.2 */
+{ .group = "fleet", .name = "fleet sync", .args = "[--base B]",
+  .usage = "fleet sync [--base B] [--json]",
+  .summary = "merge the worker's base branch into its task branch",
+  .detail = "Run in a task worktree after a land was merged forward into "
+    "its wave branch. Refuses while an uncommitted file here is also "
+    "changed on the base, and names it; a conflict is aborted, the paths "
+    "named, the branch left as it was. Prints the commits and files that "
+    "came in, then rebuilds the projection. A task started with spec start "
+    "--ahead can qualify once its requires arrive this way.",
+  .flags = "--base B\tthe branch to merge (default: CG_BASE, else the "
+    "branches registry)\n",
+  .related = "fleet begin,spec start,projection" },
 { .group = "fleet", .name = "fleet plan", .args = "[-f F]",
   .usage = "fleet plan [-f F]",
   .summary = "which manager and worker own what, planned and live" },

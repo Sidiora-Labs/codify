@@ -152,6 +152,14 @@ static struct {
 static bool g_driver_explicit;
 /* worker branches name {task}: a wave's tasks each get their own */
 static bool g_per_task;
+/* codify-v15 4.2: [hierarchy] waves. Parallel starts a task ahead of its
+ * open requires, on the projection; sequential waits for them to land.
+ * g_per_wave: a manager per wave, so another wave's work reaches a task
+ * only through main. */
+static bool g_waves_parallel, g_per_wave;
+/* a land not yet merged forward into every live wave branch */
+static bool g_fwd_pending;
+static char g_waves_why[160];
 /* the attempt a worker being spawned is on: 0 first, else a retry */
 static int g_retry_attempt;
 static void orch_prompt_retry(const char *path, const char *feature,
@@ -159,6 +167,7 @@ static void orch_prompt_retry(const char *path, const char *feature,
 
 static void orch_roles_load(const Hierarchy *h) {
     g_per_task = hier_per_task(h);
+    g_per_wave = hier_per_wave(h);
     for (int r = 0; r < FLEET_ROLES; r++) {
         const RoleCaps *c = &h->roles[r].caps;
         g_role[r].set = true;
@@ -340,6 +349,77 @@ static void orch_prompt_steer(const char *path, const char *agent) {
     sb_free(&b);
     free(body);
     free(msgs);
+}
+
+static Kvx *orch_hier(const char *tree, Hierarchy *h);
+
+/* A worker whose branch does not have its requirements yet is told which,
+ * where their work is, and how to build on it before it lands. */
+static void orch_prompt_ahead(Cg *cg, const FleetNode *n, const char *feature,
+                              const char *id, const char *path) {
+    char fp[4800], sec[300];
+    config_feature_path(n->worktree, feature, fp, sizeof fp);
+    Kvx *k = kvx_parse(fp);
+    if (!k) return;
+    snprintf(sec, sizeof sec, "task.%s", id);
+    char **req = NULL;
+    int nr = kvx_list(k, sec, "requires", &req);
+    Hierarchy h;
+    Kvx *wf = orch_hier(cg->shared, &h);
+    StrBuf open; sb_init(&open);
+    StrBuf brs; sb_init(&brs);
+    int nopen = 0;
+    for (int r = 0; r < nr; r++) {
+        char rs[300];
+        snprintf(rs, sizeof rs, "task.%s", req[r]);
+        char *st = kvx_str(k, rs, "status");
+        bool met = st && (!strcmp(st, "done") || !strcmp(st, "implemented"));
+        free(st);
+        if (!met) {
+            long w = kvx_long(k, rs, "wave", 0);
+            char tb[256], wb[256];
+            hier_expand_task(&h, h.roles[FLEET_WORKER].branch, feature, w,
+                             req[r], tb, sizeof tb);
+            hier_expand(&h, h.roles[FLEET_FEATURE].branch, feature,
+                        hier_manager_wave(&h, w), wb, sizeof wb);
+            sb_printf(&open, "%s%s", nopen ? ", " : "", req[r]);
+            sb_printf(&brs, "  - %s on `%s` (wave %ld, lands through `%s`)\n",
+                      req[r], tb, w, wb);
+            nopen++;
+        }
+        free(req[r]);
+    }
+    free(req);
+    hier_free(&h);
+    kvx_free(wf);
+    kvx_free(k);
+    if (nopen > 0) {
+        char *body = read_entire_file(path, NULL);
+        StrBuf b; sb_init(&b);
+        sb_puts(&b, body ? body : "");
+        sb_printf(&b, "\n\n## Ahead of its requirements\n\n"
+                  "Task %s starts while its requirements are still open: %s. "
+                  "Their work is not on your branch yet:\n%s\n"
+                  "- Claim it with `cg spec start %s --ahead` (a plain start "
+                  "refuses while requirements are open).\n"
+                  "- Build against the projection, where every active branch "
+                  "is folded together, theirs included: `cg context <area> "
+                  "--branch %s`, `cg grep <pattern> --branch %s`, `cg search "
+                  "<query> --branch %s`.\n"
+                  "- `cg projection findings` lists where your branch and the "
+                  "branches above collide; settle those with their owners "
+                  "early.\n"
+                  "- `cg spec done %s` refuses until %s land%s on main. Commit "
+                  "your work; when you are steered to, run `cg fleet sync` to "
+                  "bring the land into your branch, then `cg spec done %s`.\n",
+                  id, open.p, brs.p, id, PROJECTION_BRANCH, PROJECTION_BRANCH,
+                  PROJECTION_BRANCH, id, open.p, nopen == 1 ? "s" : "", id);
+        write_entire_file(path, b.p, b.len);
+        sb_free(&b);
+        free(body);
+    }
+    sb_free(&open);
+    sb_free(&brs);
 }
 
 static int orch_write_prompt(const char *cgroot, const char *feature,
@@ -1145,6 +1225,8 @@ typedef struct {
     long wave;
     bool finished;        /* qualified: main, the feature branch, or the ledger */
     bool claimed;         /* a live lease is out on it */
+    bool landed;          /* done on main */
+    bool merged;          /* done where its wave's tasks are cut from */
     char **req; int nreq;
 } OrchTask;
 
@@ -1182,7 +1264,7 @@ static void orch_tasks_wave_trees(Cg *cg, const char *feature, OrchTask *v,
                 char *fs = kvx_str(wk, sec, "status");
                 if (fs && (strcmp(fs, "done") == 0 ||
                            strcmp(fs, "implemented") == 0))
-                    v[t].finished = true;
+                    v[t].finished = v[t].merged = true;
                 free(fs);
             }
             kvx_free(wk);
@@ -1232,11 +1314,12 @@ static int orch_tasks_load(Cg *cg, const char *feature, const char *fwt,
             t->nreq = kvx_list(k, sec, "requires", &t->req);
             t->finished = strcmp(t->status, "done") == 0 ||
                           strcmp(t->status, "implemented") == 0;
+            t->landed = t->merged = t->finished;
             if (!t->finished && fk) {
                 char *fs = kvx_str(fk, sec, "status");
                 if (fs && (strcmp(fs, "done") == 0 ||
                            strcmp(fs, "implemented") == 0))
-                    t->finished = true;
+                    t->finished = t->merged = true;
                 free(fs);
             }
         }
@@ -1517,7 +1600,9 @@ static int orch_call_begin(void *v) {
     fflush(stderr);
     int saved = dup(2);
     dup2(1, 2);                     /* keep refusals with the capture */
-    int rc = fleet_worker_begin(c->g, c->id, c->feature, NULL, true);
+    /* the gate (orch_req_ready) decided this task may start; on main its
+     * requires may still be open, and only --ahead claims it then */
+    int rc = fleet_worker_begin_ex(c->g, c->id, c->feature, NULL, true, true);
     fflush(stdout);
     fflush(stderr);
     dup2(saved, 2);
@@ -1627,6 +1712,7 @@ int orch_spawn_worker(Cg *cg, const char *feature, const char *id,
                                 sizeof prompt);
     orch_env_restore(&saved);
     if (prc == 0) orch_prompt_steer(prompt, n->agent);
+    if (prc == 0) orch_prompt_ahead(cg, n, feature, id, prompt);
     if (prc == 0 && g_retry_attempt > 0)
         orch_prompt_retry(prompt, feature, id, g_retry_attempt);
     if (prc != 0) {
@@ -2009,6 +2095,32 @@ static bool orch_task_slots(const OrchTask *t, const OrchFleetSlot *slots,
     return true;
 }
 
+/* May t start with requirement rid where it stands? Parallel waves: when
+ * it is finished or being worked on in a slot — the task then builds
+ * against the projection and its done waits for the land; a requirement
+ * nobody is on would hold the slot for nothing. Sequential: when it is
+ * where t's branch is cut from — main for another wave's (with a manager
+ * per wave), the wave branch for its own. */
+static bool orch_req_ready(const OrchTask *v, int n, const OrchTask *t,
+                           const char *rid, const OrchFleetSlot *slots,
+                           int nslots) {
+    const char *slash = strrchr(rid, '/');
+    if (slash) rid = slash + 1;
+    const OrchTask *r = NULL;
+    for (int i = 0; i < n && !r; i++)
+        if (strcmp(v[i].id, rid) == 0) r = &v[i];
+    if (!r) return true;                 /* not ours to wait for */
+    if (g_waves_parallel) {
+        if (r->finished) return true;
+        for (int s = 0; s < nslots; s++)
+            if (slots[s].live && strcmp(slots[s].n.task, r->id) == 0)
+                return true;
+        return false;
+    }
+    if (g_per_wave && r->wave != t->wave) return r->landed && !g_fwd_pending;
+    return g_per_task ? r->merged : r->finished;
+}
+
 /* wave -1: any task; else only that wave's (whose requires may still be
  * anywhere in the feature) */
 static bool orch_next_task_in(const OrchTask *v, int n, char **tried,
@@ -2019,7 +2131,8 @@ static bool orch_next_task_in(const OrchTask *v, int n, char **tried,
         if (wave >= 0 && v[i].wave != wave) continue;
         bool skip = orch_attempts(tried, ntried, v[i].id) >= g_max_attempts;
         for (int j = 0; j < v[i].nreq && !skip; j++)
-            if (!orch_finished_id(v, n, v[i].req[j])) skip = true;
+            if (!orch_req_ready(v, n, &v[i], v[i].req[j], slots, nslots))
+                skip = true;
         if (!skip && !orch_task_slots(&v[i], slots, nslots)) skip = true;
         if (skip) continue;
         snprintf(out, cap, "%s", v[i].id);
@@ -2162,6 +2275,268 @@ static int sup_mgrs_live(const Sup *s) {
     int c = 0;
     for (int i = 0; i < s->nmgrs; i++) c += s->mgrs[i].live;
     return c;
+}
+
+/* ---- codify-v15 4.2: main forward into the live wave branches ---- */
+
+static long g_land_seq;          /* fleet.land events seen up to here */
+static char g_fwd_landed[256];   /* the branch that last landed */
+static struct { long wave; char head[65]; int turns; } g_fwd_conf[SUP_MAX_MGRS];
+static int g_nfwd_conf;
+
+static void sup_mgr_agent(Sup *s, long wave, char *out, size_t cap);
+
+/* the live projection finding on one of paths, as one line; "" if none */
+static void sup_forward_finding(Cg *g, char **paths, int np, char *out,
+                                size_t cap) {
+    out[0] = 0;
+    for (int i = 0; i < np && !out[0]; i++) {
+        sqlite3_stmt *q = cg_prep(g, "SELECT kind,path,symbol,branches,advice "
+                                     "FROM projection_findings WHERE "
+                                     "resolved IS NULL AND path=? "
+                                     "ORDER BY last_seen DESC LIMIT 1");
+        if (!q) return;
+        sqlite3_bind_text(q, 1, paths[i], -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(q) == SQLITE_ROW) {
+            const char *sym = (const char *)sqlite3_column_text(q, 2);
+            const char *adv = (const char *)sqlite3_column_text(q, 4);
+            snprintf(out, cap, "projection finding: %s %s%s%s between %s%s%s",
+                     (const char *)sqlite3_column_text(q, 0),
+                     (const char *)sqlite3_column_text(q, 1),
+                     sym && sym[0] ? " " : "", sym ? sym : "",
+                     (const char *)sqlite3_column_text(q, 3),
+                     adv && adv[0] ? " — " : "", adv ? adv : "");
+        }
+        sqlite3_finalize(q);
+    }
+}
+
+/* main is in <wave>'s branch now: every live worker of the wave is
+ * steered to bring it in with `cg fleet sync`; returns how many */
+static int sup_forward_steer(Sup *s, long wave, const char *br,
+                             const char *outcome) {
+    Cg *g = s->g;
+    char subj[300];
+    snprintf(subj, sizeof subj, "%s/%ld", s->feature, wave);
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"feature\":"); sb_json_str(&p, s->feature);
+    sb_printf(&p, ",\"wave\":%ld,\"branch\":", wave);
+    sb_json_str(&p, br);
+    sb_puts(&p, ",\"main\":"); sb_json_str(&p, s->mainbr);
+    sb_puts(&p, ",\"landed\":"); sb_json_str(&p, g_fwd_landed);
+    sb_puts(&p, ",\"outcome\":"); sb_json_str(&p, outcome);
+    sb_puts(&p, ",\"steered\":[");
+    StrBuf st; sb_init(&st);
+    int nsteer = 0;
+    for (int i = 0; i < s->nslots; i++) {
+        OrchFleetSlot *sl = &s->slots[i];
+        if (!sl->live || sl->n.wave != wave) continue;
+        sb_free(&st);
+        sb_init(&st);
+        sb_printf(&st, "%s landed on %s and is now merged forward into %s. "
+                  "Commit your work, then run `cg fleet sync` to bring it "
+                  "into %s — your requirements are then done there and "
+                  "`cg spec done %s` can qualify.",
+                  g_fwd_landed[0] ? g_fwd_landed : "a wave", s->mainbr, br,
+                  sl->n.branch, sl->n.task);
+        driver_steer(g, sl->n.agent, st.p);
+        if (nsteer) sb_putc(&p, ',');
+        sb_json_str(&p, sl->n.agent);
+        nsteer++;
+    }
+    sb_puts(&p, "]}");
+    sb_free(&st);
+    events_emit(g, "fleet.forward", subj, p.p);
+    printf("[fleet] %s %s forward into %s; %d worker(s) steered to cg fleet "
+           "sync\n", s->mainbr, strcmp(outcome, "merged") == 0 ? "merged"
+           : "(resolved by its manager) merged", br, nsteer);
+    fflush(stdout);
+    sb_free(&p);
+    return nsteer;
+}
+
+/* After a land: main merged into <wave>'s branch in its manager's
+ * worktree, while the manager is between turns, under the merge lock.
+ * Its live workers are then steered to `cg fleet sync`. A conflict is
+ * aborted and handed to the manager, naming the projection finding when
+ * one covers the path. 0: nothing to do or merged; 1: try again later
+ * (manager mid-turn, lock busy); 2: conflicted, escalated. */
+static int sup_forward_merge(Sup *s, long wave) {
+    Cg *g = s->g;
+    SupMgr *m = sup_mgr(s, wave);
+    if (m->live) return 1;
+    Hierarchy h;
+    Kvx *wf = orch_hier(g->shared, &h);
+    char br[256], wt[4600];
+    hier_expand(&h, h.roles[FLEET_FEATURE].branch, s->feature, wave, br,
+                sizeof br);
+    orch_worktree_path(&h, g->shared, br, wt, sizeof wt);
+    hier_free(&h);
+    kvx_free(wf);
+    if (!git_branch_exists(g->shared, br)) return 0;
+    StrBuf a; sb_init(&a);
+    StrBuf o; sb_init(&o);
+    sb_puts(&a, "merge-base --is-ancestor ");
+    sb_shquote(&a, s->mainbr);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, br);
+    int anc = git_run(g->shared, a.p, &o);
+    sb_free(&a); sb_free(&o);
+    if (anc == 0) {                              /* main is already in */
+        for (int i = 0; i < g_nfwd_conf; i++)    /* the manager resolved it */
+            if (g_fwd_conf[i].wave == wave && g_fwd_conf[i].head[0]) {
+                g_fwd_conf[i].head[0] = 0;
+                sup_forward_steer(s, wave, br, "resolved");
+            }
+        return 0;
+    }
+    char mhead[65] = "";
+    {
+        StrBuf r; sb_init(&r);
+        StrBuf ra; sb_init(&ra);
+        sb_puts(&ra, "rev-parse --verify --quiet ");
+        sb_shquote(&ra, s->mainbr);
+        if (git_run(g->shared, ra.p, &r) == 0 && r.p)
+            snprintf(mhead, sizeof mhead, "%.64s", r.p);
+        mhead[strcspn(mhead, "\n")] = 0;
+        sb_free(&r); sb_free(&ra);
+    }
+    for (int i = 0; i < g_nfwd_conf; i++)        /* escalated: until it moves */
+        if (g_fwd_conf[i].wave == wave && !strcmp(g_fwd_conf[i].head, mhead) &&
+            g_fwd_conf[i].turns == m->turns)
+            return 2;
+    if (access(wt, F_OK) != 0) {
+        char dir[4600];
+        snprintf(dir, sizeof dir, "%s", wt);
+        char *sl = strrchr(dir, '/');
+        if (sl) { *sl = 0; mkdirs(dir); }
+        StrBuf err; sb_init(&err);
+        bool wc = false, bc = false;
+        int arc = git_worktree_add(g->shared, wt, br, s->mainbr, &wc, &bc, &err);
+        sb_free(&err);
+        if (arc != 0) return 1;
+    }
+    int fd = fleet_merge_lock(g->shared, s->feature, 200);
+    if (fd < 0) return 1;
+    StrBuf msg; sb_init(&msg);
+    sb_printf(&msg, "merge %s forward into %s", s->mainbr, br);
+    sb_init(&a);
+    sb_puts(&a, "merge --no-edit -m ");
+    sb_shquote(&a, msg.p);
+    sb_putc(&a, ' ');
+    sb_shquote(&a, s->mainbr);
+    sb_free(&msg);
+    StrBuf err; sb_init(&err);
+    int mrc = git_run(wt, a.p, &err);
+    sb_free(&a);
+    char **paths = NULL;
+    int np = 0;
+    if (mrc != 0) {
+        np = git_conflicted_paths(wt, &paths);
+        StrBuf ab; sb_init(&ab);
+        git_run(wt, "merge --abort", &ab);
+        sb_free(&ab);
+    }
+    fleet_merge_unlock(fd);
+
+    char subj[300];
+    snprintf(subj, sizeof subj, "%s/%ld", s->feature, wave);
+    StrBuf p; sb_init(&p);
+    sb_puts(&p, "{\"feature\":"); sb_json_str(&p, s->feature);
+    sb_printf(&p, ",\"wave\":%ld,\"branch\":", wave);
+    sb_json_str(&p, br);
+    sb_puts(&p, ",\"main\":"); sb_json_str(&p, s->mainbr);
+    sb_puts(&p, ",\"landed\":"); sb_json_str(&p, g_fwd_landed);
+    sb_puts(&p, ",\"outcome\":\"conflict\"");
+    if (mrc == 0) {
+        sb_free(&p); sb_free(&err);
+        sup_forward_steer(s, wave, br, "merged");
+        return 0;
+    }
+    char finding[700];
+    sup_forward_finding(g, paths, np, finding, sizeof finding);
+    sb_puts(&p, ",\"conflicts\":[");
+    StrBuf list; sb_init(&list);
+    for (int i = 0; i < np; i++) {
+        if (i) sb_putc(&p, ',');
+        sb_json_str(&p, paths[i]);
+        sb_printf(&list, "%s%s", i ? ", " : "", paths[i]);
+    }
+    sb_putc(&p, ']');
+    sb_puts(&p, ",\"finding\":"); sb_json_str(&p, finding);
+    sb_puts(&p, "}");
+    events_emit(g, "fleet.forward", subj, p.p);
+    char ex[300];
+    orch_excerpt(&err, ex, sizeof ex);
+    char agent[256];
+    sup_mgr_agent(s, wave, agent, sizeof agent);
+    StrBuf mm; sb_init(&mm);
+    sb_printf(&mm, "%s could not be merged forward into %s after %s landed: "
+              "%s%s. The merge was aborted. %s%sResolve it in %s: `git merge "
+              "%s`, settle the conflicts, commit.",
+              s->mainbr, br, g_fwd_landed[0] ? g_fwd_landed : "a wave",
+              np ? "conflicts in " : "", np ? list.p : ex,
+              finding, finding[0] ? ". " : "", wt, s->mainbr);
+    driver_steer(g, agent, mm.p);
+    m->needed = true;
+    printf("[fleet] forward merge of %s into %s conflicted (%s)%s%s — "
+           "escalated to %s\n", s->mainbr, br, np ? list.p : ex,
+           finding[0] ? "; " : "", finding, agent);
+    fflush(stdout);
+    int slot = -1;
+    for (int i = 0; i < g_nfwd_conf; i++) if (g_fwd_conf[i].wave == wave) slot = i;
+    if (slot < 0 && g_nfwd_conf < SUP_MAX_MGRS) slot = g_nfwd_conf++;
+    if (slot >= 0) {
+        g_fwd_conf[slot].wave = wave;
+        snprintf(g_fwd_conf[slot].head, sizeof g_fwd_conf[slot].head, "%s", mhead);
+        g_fwd_conf[slot].turns = m->turns;
+    }
+    for (int i = 0; i < np; i++) free(paths[i]);
+    free(paths);
+    sb_free(&mm); sb_free(&list); sb_free(&p); sb_free(&err);
+    return 2;
+}
+
+/* a land seen in the events marks every live wave for a forward merge,
+ * carried out as each manager is between turns */
+static void sup_forward_lands(Sup *s) {
+    if (!s->per_wave) return;
+    Cg *g = s->g;
+    sqlite3_stmt *q = cg_prep(g, "SELECT seq,payload FROM events WHERE "
+                                 "kind='fleet.land' AND seq>? AND subject=?");
+    sqlite3_bind_int64(q, 1, g_land_seq);
+    sqlite3_bind_text(q, 2, s->feature, -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        g_land_seq = sqlite3_column_int64(q, 0);
+        const char *pl = (const char *)sqlite3_column_text(q, 1);
+        char *oc = pl ? json_get_string(pl, "outcome") : NULL;
+        if (oc && !strcmp(oc, "landed")) {
+            char *b = json_get_string(pl, "branch");
+            snprintf(g_fwd_landed, sizeof g_fwd_landed, "%s", b ? b : "");
+            free(b);
+            g_fwd_pending = true;
+        }
+        free(oc);
+    }
+    sqlite3_finalize(q);
+    static bool retry;                    /* a conflicted wave, escalated */
+    if (!g_fwd_pending && !retry) return;
+    OrchTask *v = NULL;
+    int n = orch_tasks_load(g, s->feature, NULL, &v);
+    bool again = false, conflicted = false;
+    for (int i = 0; i < n; i++) {
+        if (i && v[i - 1].wave == v[i].wave) continue;
+        bool unfinished = false;          /* live: work left, or not landed */
+        for (int t = i; t < n && v[t].wave == v[i].wave; t++)
+            unfinished |= !v[t].landed;
+        if (!unfinished) continue;
+        int frc = sup_forward_merge(s, v[i].wave);
+        if (frc == 1) again = true;           /* not yet: the gate waits */
+        else if (frc == 2) conflicted = true; /* the manager's now */
+    }
+    orch_tasks_free(v, n);
+    g_fwd_pending = again;
+    retry = conflicted;
 }
 
 /* who manages <wave>: the live one's name, else what the template says */
@@ -2457,12 +2832,17 @@ static void sup_slot_begin(Cg *g, OrchFleetSlot *sl) {
     sl->why[0] = 0;
 }
 
-/* git's view of the worktree: status and HEAD, hashed */
+/* git's view of the worktree: status and HEAD, hashed. Read-only and
+ * lock-free: a plain `git status` refreshes the index under index.lock,
+ * and taken while the worker runs `git add` or `git commit` in that same
+ * worktree it fails the worker's command — the qualified task then never
+ * reaches its wave branch, and the wave can never land. */
 static void sup_tree_fp(const char *wt, char out[65]) {
     StrBuf c; sb_init(&c);
     sb_puts(&c, "git -C ");
     sb_shquote(&c, wt);
-    sb_puts(&c, " status --porcelain -uall 2>/dev/null; git -C ");
+    sb_puts(&c, " --no-optional-locks status --porcelain -uall 2>/dev/null; "
+                "git -C ");
     sb_shquote(&c, wt);
     sb_puts(&c, " rev-parse HEAD 2>/dev/null");
     FILE *f = popen(c.p, "r");
@@ -3115,6 +3495,7 @@ static int supervisor_tick(Sup *s) {
         }
         sqlite3_finalize(cq);
     }
+    if (!s->paused) sup_forward_lands(s);          /* codify-v15 4.2 */
     if (!s->stopping && !s->paused && !sub.complete && ap == 0 &&
         now - s->last_wake >= ORCH_WAKE_BACKOFF) {
         int wrc = sup_wake_managers(s, &sub, now);
@@ -3379,6 +3760,8 @@ static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,
     s->slots = xmalloc(sizeof(OrchFleetSlot) * ORCH_MAX_SLOTS);
     memset(s->slots, 0, sizeof(OrchFleetSlot) * ORCH_MAX_SLOTS);
     s->conflict_seq = events_head(g);
+    g_land_seq = s->conflict_seq;
+    g_fwd_pending = true;       /* a resumed run may have missed a land */
     char host[256] = "";
     gethostname(host, sizeof host - 1);
     if (resume) {
@@ -3419,6 +3802,9 @@ static int sup_open(Cg *g, Sup *s, const char *feature, const OrchCfg *cfg,
                "wake(s)\n", feature, s->nslots, cfg->driver, s->wakes);
     printf("[fleet] run %s%s — supervisor pid %d\n", s->run,
            resume ? " (resumed)" : "", (int)getpid());
+    printf("[fleet] waves %s (%s)\n", g_waves_parallel ? "parallel — a task "
+           "may start ahead of its requires, on the projection" : "sequential",
+           g_waves_why);
     fflush(stdout);
     return 0;
 }
@@ -3769,6 +4155,8 @@ static int orch_fleet_run(const char *feature_ov, const OrchCfg *cfg,
     Hierarchy h;
     Kvx *wf = orch_hier(g.shared, &h);
     orch_roles_load(&h);
+    g_waves_parallel = hier_waves_parallel(wf, g_waves_why,
+                                           sizeof g_waves_why);
     char *active = wf ? kvx_str(wf, "meta", "active_feature") : NULL;
     char feature[128];
     snprintf(feature, sizeof feature, "%s",

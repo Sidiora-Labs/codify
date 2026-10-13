@@ -893,3 +893,55 @@ shape's feature manager: `cg fleet land <feature>` and `cg fleet pr
 - The supervisor spawns agents through the configured driver. It does not
   talk to any agent vendor's API itself, and it does not authenticate the
   CLIs it starts.
+
+## Waves side by side
+
+By default the supervisor no longer waits for one wave to land before
+starting the next. `[hierarchy] waves` in `spec/workflow.kvx` picks the
+shape:
+
+| Value | Meaning |
+|---|---|
+| `parallel` | A task may start while the tasks it `requires` are still open. The slot gate keeps the file collisions and the agent limit; it ignores `requires`. The default when git is 2.38 or newer. |
+| `sequential` | The waiting gate: a task starts only once its `requires` are done (across waves, once they have landed on main). The default on older git, where the projection cannot be built. |
+
+`cg fleet up` prints which one applies and why when it starts.
+
+**Starting ahead.** `cg spec start <id> --ahead` (and `cg fleet begin <id>
+--ahead`) is the only way to claim a task whose `requires` are open.
+`--force` does not do it. The lease records what the task is ahead of. A
+worker the supervisor starts this way gets an *Ahead of its requirements*
+section in its prompt. The section names the open requirements and the
+branches they live on, and points the worker at the projection
+(`--branch codify/projection`) and `cg projection findings`.
+
+**Done stays strict.** `cg spec done` refuses a task while any of its
+`requires` is not done in the tree it runs in. Outside a fleet, `--force`
+still overrides that. Inside a fleet run (`CG_RUN` or `CG_ROLE` set),
+`--force` does not. An ahead task qualifies once its requirements have
+landed and come in through `cg fleet sync`.
+
+**Forward merges.** After a wave lands, the supervisor merges main
+forward into every live wave branch. It does the merge in that wave's
+manager worktree, between the manager's turns. Each live worker of that
+wave is then steered to run `cg fleet sync`, and a `fleet.forward` event
+records who was steered. If the merge conflicts, it is aborted and the
+manager is steered with the conflicting paths and the projection finding
+that predicted them. When the manager has resolved it (main is an ancestor
+of the wave branch again), the workers are steered then.
+
+**`cg fleet sync`.** Run it in a task worktree to merge the base branch
+(`--base`, else `CG_BASE`, else the branches registry) into the task
+branch:
+
+- It is refused while an uncommitted file is also changed on the base,
+  and it names those files.
+- A conflict is aborted, with the paths named and the branch left as it
+  was.
+- Otherwise it prints the commits and files that came in.
+
+A projection build follows every land and every successful sync. Each
+sync records a `fleet.sync` event.
+
+With `waves = parallel`, the limitation above, that a wave's tasks wait
+for the tasks they `require`, applies only to `done`, not to starting.

@@ -510,4 +510,188 @@ for l in sys.stdin:
     has "$(git log --oneline main)" "land wave/beta/1 into main"
 fi
 
+if want parallel; then
+    # Waves side by side (codify-v15 4.2): wave 2's 3.1 requires wave 1's
+    # 2.1. Parallel: 3.1 starts ahead on the projection, its done refuses
+    # until 2.1 lands, main is merged forward into wave/fleet/2 and the
+    # worker steered to cg fleet sync. Sequential: 3.1 waits for the land.
+    setup_par() {
+        rm -rf "$TMP/proj" "$TMP/go"
+        mkdir -p "$TMP/proj/src" "$TMP/proj/docs" "$TMP/go"
+        cd "$TMP/proj"
+        git init -q -b main . 2>/dev/null || git init -q .
+        git config user.email t@t; git config user.name t
+        echo 'export function alpha(){}' > src/a.ts
+        echo '# doc' > docs/d.md
+        "$CG" spec new fleet >/dev/null
+        "$CG" spec docs off >/dev/null
+        "$CG" spec start 1.1 >/dev/null
+        "$CG" spec done 1.1 >/dev/null
+        "$CG" spec mode parallel >/dev/null
+        "$CG" spec add 2.1 --title "Alpha" --wave 1 --touches 'src/*.ts' --reqs 1.1 >/dev/null
+        "$CG" spec add 3.1 --title "Docs" --wave 2 --touches 'docs/*.md' --requires 2.1 >/dev/null
+        "$CG" init >/dev/null
+        printf '.codegraph/\n*.lock\n' > .gitignore
+        cat >> spec/workflow.kvx <<EOF
+
+[hierarchy]
+test_gate = "true"
+pr        = "manual"
+waves     = "$1"
+
+[agents]
+driver = "custom"
+cmd    = "sh $TMP/driver.sh \${PROMPT_FILE} \${TASK} \${ROOT} \${AGENT}"
+max    = 2
+ttl    = 600
+EOF
+        cat > "$TMP/driver.sh" <<EOF
+#!/bin/sh
+PF="\$1"; TASK="\$2"; ROOT="\$3"; AGENT="\$4"
+cd "\$ROOT" || exit 9
+if [ "\$CG_ROLE" = worker ]; then
+    cp "\$PF" "$TMP/go/prompt-\$TASK"
+    if [ "\$TASK" = 2.1 ]; then
+        while [ ! -f "$TMP/go/go-2.1" ]; do sleep 0.1; done
+        "$CG" spec start 2.1 >/dev/null 2>&1
+        echo 'export function alpha(){ return 1 }' > src/a.ts
+        "$CG" spec done 2.1 >/dev/null || exit 1
+        git add -A >/dev/null
+        git commit -qm "2.1 [spec:fleet/2.1]" >/dev/null || exit 1
+        exec "$CG" fleet merge-up 2.1 >/dev/null
+    fi
+    "$CG" spec start 3.1 --ahead > "$TMP/go/start-3.1" 2>&1 || exit 1
+    echo '# doc by the worker' > docs/d.md
+    git add -A >/dev/null
+    git commit -qm "3.1 work [spec:fleet/3.1]" >/dev/null || exit 1
+    if ! "$CG" spec done 3.1 > "$TMP/go/done-3.1" 2>&1; then
+        cp "$TMP/go/done-3.1" "$TMP/go/refused-3.1"
+        i=0
+        until "$CG" events --kind agent.steer --json -n 50 | grep "\"agent\":\"\$AGENT\"" | grep -q "cg fleet sync"; do
+            i=\$((i+1)); [ \$i -lt 600 ] || exit 1; sleep 0.2
+        done
+        "$CG" fleet sync > "$TMP/go/sync-3.1" 2>&1 || exit 1
+        "$CG" spec done 3.1 >/dev/null 2>&1 || exit 1
+    fi
+    git add -A >/dev/null
+    git commit -qm "3.1 [spec:fleet/3.1]" >/dev/null || exit 1
+    exec "$CG" fleet merge-up 3.1 >/dev/null
+fi
+# go/clash: wave 2's manager changes what 2.1 changes, then resolves the
+# forward merge it is handed by taking main's side
+if [ -f "$TMP/go/clash" ] && [ "\$CG_WAVE" = 2 ]; then
+    if [ ! -f "$TMP/go/clashed" ]; then
+        : > "$TMP/go/clashed"
+        echo 'export function alpha(){ return 2 }' > src/a.ts
+        git add -A >/dev/null; git commit -qm "wave 2 touches alpha" >/dev/null
+    elif "$CG" events --kind agent.steer --json -n 50 | grep "\"agent\":\"\$AGENT\"" | grep -q "could not be merged forward"; then
+        [ -f "$TMP/go/resolved" ] || git merge -q -X theirs --no-edit main >/dev/null 2>&1 || exit 1
+        : > "$TMP/go/resolved"
+    fi
+fi
+left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,os,sys; w = os.environ.get("CG_WAVE"); m = [m for m in json.load(sys.stdin)["managers"] if w is None or m["wave"] == int(w)][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+[ "\$left" -eq 0 ] || exit 0
+exec "$CG" fleet land \${CG_WAVE:-} -f "\$CG_FEATURE" --no-pr >/dev/null 2>>"$TMP/go/land.err"
+EOF
+        git add -A >/dev/null; git commit -qm base >/dev/null
+    }
+    landed_seq() { "$CG" events --kind fleet.land --json -n 50 | python3 -c '
+import json, sys
+s = [json.loads(l) for l in sys.stdin if l.strip()]
+s = [e["seq"] for e in s if e["payload"].get("outcome") == "landed" and e["payload"].get("wave") == 1]
+print(min(s) if s else 0)'; }
+    spawn_seq() { "$CG" events --kind orch.spawn --json -n 50 | python3 -c "
+import json, sys
+s = [json.loads(l)['seq'] for l in sys.stdin if l.strip() and json.loads(l)['payload'].get('task') == '$1']
+print(min(s) if s else 0)"; }
+
+    # ---- parallel: 3.1 starts while 2.1 is open
+    setup_par parallel
+    "$CG" fleet up -n 2 >/dev/null
+    wait_for 30 '[ -f "$TMP/go/prompt-3.1" ]' || fail "3.1 was not started ahead of 2.1: $(cat "$(run_field log)")"
+    [ "$(landed_seq)" = 0 ] || fail "wave 1 landed before 3.1 started"
+    has "$(cat "$(run_field log)")" "[fleet] waves parallel"
+    p="$(cat "$TMP/go/prompt-3.1")"
+    has "$p" "## Ahead of its requirements"
+    has "$p" "requirements are still open: 2.1"
+    has "$p" "--branch codify/projection"
+    has "$p" "cg projection findings"
+    has "$p" "task/fleet/2.1"
+    has "$p" "cg spec start 3.1 --ahead"
+    has "$p" "\`cg spec done 3.1\` refuses until 2.1 lands on main"
+    hasnt "$(cat "$TMP/go/prompt-2.1")" "## Ahead of its requirements"
+    wait_for 30 '[ -f "$TMP/go/refused-3.1" ]' || fail "3.1 never tried done: $(cat "$TMP/go/done-3.1" 2>/dev/null)"
+    has "$(cat "$TMP/go/start-3.1")" "ahead of 2.1"
+    has "$(cat "$TMP/go/refused-3.1")" "task 3.1 has unmet requires: 2.1 — done waits until they land"
+    python3 - <<'EOF' || fail "the lease does not record ahead"
+import sqlite3
+db = sqlite3.connect(".codegraph/graph.db", timeout=10)
+r = db.execute("SELECT agent, ahead FROM leases WHERE task='fleet/3.1'").fetchone()
+assert r == ("w-fleet-3.1", "2.1"), r
+EOF
+    : > "$TMP/go/go-2.1"
+    wait_for 120 '[ "$(run_state)" = complete ]' || fail "parallel run did not complete: $(run_state) $(cat "$(run_field log)")"
+    [ "$(spawn_seq 3.1)" -lt "$(landed_seq)" ] || fail "3.1 spawned after the land"
+    [ "$(spawns 3.1)" = 1 ] || fail "3.1 ran $(spawns 3.1) times"
+    "$CG" events --kind fleet.forward --json -n 20 | python3 -c '
+import json, sys
+ev = [json.loads(l) for l in sys.stdin if l.strip()]
+m = [e for e in ev if e["payload"]["outcome"] == "merged" and e["payload"]["branch"] == "wave/fleet/2"]
+assert m and m[0]["payload"]["landed"] == "wave/fleet/1", ev
+assert m[0]["payload"]["steered"] == ["w-fleet-3.1"], m
+' || fail "main was not merged forward into wave/fleet/2"
+    has "$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"w-fleet-3.1"')" "cg fleet sync"
+    s="$(cat "$TMP/go/sync-3.1")"
+    has "$s" "synced wave/fleet/2 into task/fleet/3.1"
+    has "$s" "land wave/fleet/1 into main"
+    has "$s" "spec/fleet/spec.kvx"
+    has "$s" "projection: base main"
+    has "$(cat "$(run_field log)")" "merged forward into wave/fleet/2; 1 worker(s) steered to cg fleet sync"
+    "$CG" events --kind fleet.sync --json -n 20 | grep -q '"outcome":"merged"' || fail "no fleet.sync event"
+    has "$(git show main:spec/fleet/spec.kvx)" 'status     = "done"'
+    "$CG" spec status --json -f fleet | pyjson '
+assert d["done"] == 3, d
+' || fail "not every task landed done"
+
+    # ---- a forward merge that conflicts is aborted and escalated, naming
+    # the projection finding; the worker is steered once it is resolved
+    setup_par parallel
+    : > "$TMP/go/clash"
+    "$CG" fleet up -n 2 >/dev/null
+    wait_for 30 '[ -f "$TMP/go/clashed" ] && [ -f "$TMP/go/refused-3.1" ]' \
+        || fail "the clash was not set up: $(cat "$(run_field log)")"
+    : > "$TMP/go/go-2.1"
+    wait_for 120 '[ "$(run_state)" = complete ]' || fail "clash run did not complete: $(run_state) $(cat "$(run_field log)")"
+    [ -f "$TMP/go/resolved" ] || fail "the manager was never handed the conflict"
+    log="$(cat "$(run_field log)")"
+    has "$log" "forward merge of main into wave/fleet/2 conflicted (src/a.ts)"
+    has "$log" "escalated to wm-fleet-2"
+    has "$log" "main (resolved by its manager) merged forward into wave/fleet/2; 1 worker(s) steered to cg fleet sync"
+    "$CG" events --kind fleet.forward --json -n 20 | python3 -c '
+import json, sys
+ev = [json.loads(l)["payload"] for l in sys.stdin if l.strip()]
+c = [e for e in ev if e["outcome"] == "conflict"]
+r = [e for e in ev if e["outcome"] == "resolved"]
+assert c and c[0]["conflicts"] == ["src/a.ts"] and c[0]["branch"] == "wave/fleet/2", ev
+assert "src/a.ts" in c[0]["finding"], c
+assert r and r[0]["steered"] == ["w-fleet-3.1"], ev
+' || fail "forward conflict events"
+    m="$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"wm-fleet-2"')"
+    has "$m" "could not be merged forward into wave/fleet/2"
+    has "$m" "projection finding:"
+    has "$("$CG" events --kind agent.steer --json -n 50 | grep '"agent":"w-fleet-3.1"')" "cg fleet sync"
+    has "$(git show main:src/a.ts)" "return 1"
+
+    # ---- sequential: 3.1 waits for the land
+    setup_par sequential
+    : > "$TMP/go/go-2.1"
+    out="$(timeout 120 "$CG" fleet up --foreground -n 2 2>&1)" || fail "sequential run: $out"
+    has "$out" "[fleet] waves sequential ([hierarchy] waves = sequential)"
+    has "$out" "[fleet] fleet complete"
+    [ "$(landed_seq)" -gt 0 ] || fail "wave 1 never landed"
+    [ "$(spawn_seq 3.1)" -gt "$(landed_seq)" ] || fail "sequential 3.1 did not wait for the land"
+    [ ! -f "$TMP/go/refused-3.1" ] || fail "sequential 3.1 was refused: $(cat "$TMP/go/refused-3.1")"
+    hasnt "$(cat "$TMP/go/prompt-3.1")" "## Ahead of its requirements"
+fi
+
 echo "supervisor OK"

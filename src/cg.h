@@ -1468,6 +1468,31 @@ void conflicts_free(ProjectionFinding *f, int n);
 int  conflicts_print(Cg *cg, bool json, StrBuf *out);
 int  cmd_projection_findings(Cg *cg, int argc, char **argv, bool json);
 bool config_projection_steer(const char *root);   /* [projection] steer */
+/* codify-v15 4.2 */
+/* Waves side by side (docs/hierarchy.md). [hierarchy] waves = parallel |
+ * sequential in spec/workflow.kvx; unset, parallel when git is 2.38 or
+ * newer (merge-tree --write-tree, which the projection folds with). why
+ * (may be NULL) gets how it was decided. */
+bool hier_waves_parallel(const Kvx *wf, char *why, size_t cap);
+/* `cg fleet begin --ahead` and the supervisor under a parallel start: the
+ * claim may take a pending task whose requires are still open, and records
+ * them as ahead on the lease. spec_claim is spec_claim_ex(..., false, ...). */
+int  spec_claim_ex(Cg *g, const char *root, const char *feature,
+                   const char *id, const char *agent, long ttl_min,
+                   bool ahead, SpecAttempt *out);
+int  fleet_worker_begin_ex(Cg *cg, const char *id, const char *feature,
+                           const char *agent_flag, bool json, bool ahead);
+/* Record on <tag>'s lease ("feature/id") the requires it started ahead of
+ * (space separated); creates the lease for <agent> when there is none. */
+int  spec_start_ahead(Cg *g, const char *tag, const char *agent,
+                      const char *reqs, const char *touches);
+/* cg fleet sync [--base B] [--json]: the worker's base branch merged into
+ * its task branch in the cwd's worktree; refused when uncommitted changes
+ * overlap what comes in. Then a projection build. */
+int  fleet_sync(Cg *cg, int argc, char **argv, bool json);
+/* a projection build in this process, quiet; line (may be NULL) gets one
+ * summary line. 0 built or unchanged. */
+int  fleet_projection_rebuild(Cg *cg, char *line, size_t cap);
 /* Run `git -C <tree> <args>` (args already shell-quoted), stdout and
  * stderr appended to out (may be NULL). Returns the exit status, -1 when
  * git could not be started. */
