@@ -94,14 +94,17 @@ static const HelpCmd HELP[] = {
   .examples = "cg sync\ncg sync src/main.c --json\ncg sync --auto --background",
   .related = "index,watch,hook" },
 { .group = "graph", .name = "search", .args = "<query> [-n N]",
-  .usage = "search <query> [-n N]",
+  .usage = "search <query> [-n N] [--path GLOB] [--lang L] [--no-tests]",
   .summary = "find code by name, doc comment, or body",
   .detail = "Symbol and full-text search (FTS5 trigram + full text). A "
     "phrase matches names (export memory finds memory_export and "
     "exportMemory), doc comments, and bodies, ranked in that order with "
     "source before tests; file hits show the matching line. Definitions "
     "answer, never their prototypes.",
-  .flags = "-n N\tmaximum results (default 20)\n",
+  .flags = "-n N\tmaximum results (default 20)\n"
+    "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
+    "--lang L\tonly files of language L (c, python, go, ts...)\n"
+    "--no-tests\tleave test files out\n",
   .examples = "cg search \"export memory\"\ncg search index_pass -n 5 --json",
   .related = "symbol,context,show" },
 { .group = "graph", .name = "symbol", .args = "<name>",
@@ -117,27 +120,56 @@ static const HelpCmd HELP[] = {
     "--budget N\ttoken budget (default 8000)\n",
   .related = "symbol,changes,test-impact" },
 { .group = "graph", .name = "context", .args = "<query>",
-  .usage = "context <query> [--budget N] [-n K]",
+  .usage = "context <query> [--budget N] [-n K] [--path GLOB] [--lang L] "
+    "[--no-tests]",
   .summary = "one call: symbols, snippets, edges, routes",
   .detail = "The context bundle for an agent: memories, symbols, snippets, "
     "edges, entry points, and routes, filled to a token budget with "
     "explicit omitted counts (and tokens_used in --json). A file path gets "
     "the file's outline (purpose, symbols, imports, dependents); a "
-    "directory gets its files.",
+    "directory gets its files, or, when they overflow the budget, its "
+    "subdirectories with counts first and then the files that fit.",
   .flags = "--budget N\ttoken budget (default 4000)\n"
-    "-n K\ttop K symbols (default 8)\n",
+    "-n K\ttop K symbols (default 8)\n"
+    "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
+    "--lang L\tonly files of language L (c, python, go, ts...)\n"
+    "--no-tests\tleave test files out\n",
   .examples = "cg context \"journal replay\"\ncg context src/help.c",
   .related = "survey,search,show" },
 { .group = "graph", .name = "survey", .args = "[scope]",
-  .usage = "survey [path|query] [--budget N]",
+  .usage = "survey [path|query] [--budget N] [--path GLOB] [--lang L] "
+    "[--no-tests]",
   .summary = "purpose lines and docs across many files",
   .detail = "The tier below bodies: file purpose lines and symbol docs with "
     "signatures across about 100 files per call, never a body. The scope is "
     "a path prefix or a query. Uncovered files and symbols are named, and "
     "anything cut by the budget is an explicit omitted count.",
-  .flags = "--budget N\ttoken budget (default 16000)\n",
+  .flags = "--budget N\ttoken budget (default 16000)\n"
+    "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
+    "--lang L\tonly files of language L (c, python, go, ts...)\n"
+    "--no-tests\tleave test files out\n",
   .examples = "cg survey src/\ncg survey \"spec workflow\"",
   .related = "context,anchors" },
+{ .group = "graph", .name = "files", .args = "[pattern]",
+  .usage = "files [pattern] [--dirs] [--depth N] [-n N] [--path GLOB] "
+    "[--lang L] [--no-tests]",
+  .summary = "find files by glob, path words, or directory",
+  .detail = "Answers from the files table. A glob (src/**/*.go) matches "
+    "paths; words (sync gate) match the words of each path's segments, so "
+    "syncgate.c and sync_gate.py are both found; a bare directory lists its "
+    "subdirectories and files. Each row is path, language, lines and symbol "
+    "count, best match first, with a tail naming what -n left out. --dirs "
+    "maps directories instead: file and line counts and dominant language, "
+    "largest first, to --depth levels.",
+  .flags = "--dirs\tdirectories with counts instead of files\n"
+    "--depth N\tdirectory levels for --dirs (default 2)\n"
+    "-n N\tmaximum rows (default 40)\n"
+    "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
+    "--lang L\tonly files of language L (c, python, go, ts...)\n"
+    "--no-tests\tleave test files out\n",
+  .examples = "cg files 'src/**/*.c'\ncg files sync gate\ncg files --dirs\n"
+    "cg files --lang python -n 10",
+  .related = "search,survey,context" },
 { .group = "graph", .name = "show", .args = "<symbol|path:line>",
   .usage = "show <symbol|path:line> [--full]",
   .summary = "print just that symbol's body",

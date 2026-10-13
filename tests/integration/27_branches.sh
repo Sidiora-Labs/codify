@@ -155,7 +155,7 @@ EOF
     python3 - "$TMP/proj/.codegraph/graph.db" <<'EOF'
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
-db.execute("UPDATE meta SET value='17' WHERE key='schema_version'")
+db.execute("UPDATE meta SET value='18' WHERE key='schema_version'")
 db.commit()
 EOF
     has "$("$CG" branches)" "* main"

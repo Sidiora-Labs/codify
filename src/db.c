@@ -205,7 +205,12 @@ static const char *SCHEMA =
     "CREATE TABLE IF NOT EXISTS projections("
     "  id INTEGER PRIMARY KEY, built INTEGER NOT NULL, base TEXT,"
     "  base_head TEXT, commit_id TEXT, fingerprint TEXT, branches TEXT,"
-    "  conflicts TEXT, ms INTEGER);";
+    "  conflicts TEXT, ms INTEGER);"
+    /* codify-v15 1.2 */
+    /* cg files: name_words(path) under trigram, rowid = files.id, so
+     * "sync gate" finds syncgate.c and sync_gate.py alike */
+    "CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5("
+    "  words, tokenize='trigram');";
 
 /* the schema above, as stored in meta.schema_version */
 #define SCHEMA_VERSION "18"
@@ -467,6 +472,7 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS imports;DROP TABLE IF EXISTS symbol_fts;"
         "DROP TABLE IF EXISTS body_fts;DROP TABLE IF EXISTS comments;"
         "DROP TABLE IF EXISTS comment_fts;"
+        "DROP TABLE IF EXISTS file_fts;"
         "DELETE FROM meta WHERE key LIKE 'last_index_%' "
         "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
     char *err = NULL;

@@ -1,7 +1,8 @@
-# Retrieval: search, symbol, show, context
+# Retrieval: search, symbol, show, context, files
 
-How `cg search`, `cg symbol`, `cg show` and `cg context` decide what to
-answer with, and in what order. The code lives in `src/graph.c`. The
+How `cg search`, `cg symbol`, `cg show`, `cg context` and `cg files` decide
+what to answer with, and in what order. The code lives in `src/graph.c`,
+and `cg files` and the shared filters live in `src/files.c`. The
 parsing it relies on is in `src/lang.c`, and the resolution in
 `src/resolve.c`.
 
@@ -106,7 +107,11 @@ search. The outline holds:
   imports name it
 
 A directory (`src`, `src/`) gets its indexed files, each with its purpose
-line, symbol count and line count.
+line, symbol count and line count. When those files overflow the budget
+and the directory has subdirectories, the outline becomes a map: the
+immediate subdirectories first, each with its file, symbol and line
+counts, then the directory's own files, then deeper ones, as many as fit,
+with the omitted count. A small directory still gets the flat list.
 
 Imports and dependents are measured before the symbol list, so a long file
 cannot crowd them out. A purpose line that would leave no room for the
@@ -119,7 +124,81 @@ JSON shapes:
  "imports":[…],"dependents":[…],"tokens_used","budget","omitted"}
 {"query","path","kind":"dir","files":[{"path","purpose","symbols","lines"}],
  "tokens_used","budget","omitted"}
+{"query","path","kind":"dir","subdirs":[{"path","files","symbols","lines"}],
+ "files":[…],"tokens_used","budget","omitted"}        (the map form)
 ```
+
+## Filters: --path, --lang, --no-tests
+
+`cg search`, `cg context`, `cg survey` and `cg files` take the same three
+filters, parsed once (`query_filter_parse` in `src/files.c`):
+
+- `--path GLOB`, repeatable, any one matching. A plain path is that file or
+  anything under that directory (`--path src/net`). In a glob, `*` and `**`
+  both cross `/` (`src/**/*.go` and `src/*.go` match the same paths), and
+  a glob without a `/` also matches basenames at any depth
+  (`--path '*_test.go'`).
+- `--lang L`: one language, in the spelling `files.lang` uses (`c`,
+  `python`, `typescript`, `go`, ...). An extension (`py`, `ts`, `h`) is
+  translated through the same table the indexer uses.
+- `--no-tests`: drop every file `graph_path_is_test` calls a test.
+
+The filter is applied inside the SQL, not after it. `prep_scoped` splices
+`query_filter_sql` beside the branch predicate, so the symbol, doc and body
+passes of the ranking, the directory outline and survey's file list all
+narrow before `LIMIT` and before ranking. A narrowed query never reads
+more rows than the wide one. Callers and callees, which are read through
+the reference join, are filtered on the way out. Over MCP, `search_code`
+and `get_context` take `path` (a string or a list), `lang` and `no_tests`.
+
+## Finding files: cg files
+
+`cg files` answers from the `files` table, without walking the disk:
+
+```
+cg files 'src/**/*.c'       # a glob over paths
+cg files sync gate          # the words of the path
+cg files src                # a directory: subdirectories, then its files
+cg files --dirs             # the map: directories with counts
+```
+
+- **A glob** (any of `*?[`) matches paths the way `--path` does.
+- **Words** match the words of the path's segments. `file_fts` holds
+  `name_words(path)` under the trigram tokenizer, so `sync gate` finds
+  `syncgate.c` and `sync_gate.py`. Ranking is by match quality: a whole
+  word of the basename beats part of one, which beats a directory segment.
+  A path that carries every word in its basename leads, and ties sort by
+  path.
+- **A bare directory** lists its subdirectories with file and line counts,
+  then its own files.
+
+Each row prints the path, language, lines and symbol count. At most `-n N`
+rows are printed (40 by default), and a tail line names how many were
+left out.
+
+`--dirs [prefix]` aggregates instead. It lists every directory down to
+`--depth N` (default 2) below the prefix, with its file count, line count
+and dominant language (by lines), largest first and nested under its
+parent, so a tree of a million files reads as a map. The filters apply to
+both forms (`cg files --dirs --lang go`).
+
+JSON shapes:
+
+```
+{"mode":"glob"|"words","pattern","files":[{"path","lang","lines","symbols"}],
+ "total","omitted"}
+{"mode":"dir","path","dirs":[{"path","files","lines"}],"files":[…],
+ "total","omitted"}
+{"mode":"dirs","prefix","depth","files","lines","lang",
+ "dirs":[{"path","depth","files","lines","lang"}],"omitted"}
+```
+
+Over MCP the tool is `find_files` (pattern, dirs, depth, lang, limit). It
+is read-only.
+
+The indexer writes `file_fts` beside the `files` row, once, when the row
+first appears, since a row keeps its path for life. The entry is deleted
+with the row.
 
 ## The budget
 

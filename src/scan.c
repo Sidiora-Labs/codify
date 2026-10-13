@@ -205,6 +205,7 @@ typedef struct {
                  /* branch reuse: copy a twin's rows instead of parsing */
                  *cp_syms, *cp_symfts, *cp_refs, *cp_cmts, *cp_cmtfts,
                  *cp_routes, *cp_imports, *cp_body;
+    sqlite3_stmt *put_filefts, *del_filefts;      /* codify-v15 1.2 */
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
@@ -298,6 +299,12 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->cp_body = cg_prep(cg,
         "INSERT INTO body_fts(rowid,path,body) SELECT ?1,?3,body "
         "FROM body_fts WHERE rowid=?2");
+    /* codify-v15 1.2: a files row keeps its path for life, so its path
+     * words are written once, when the row first appears */
+    s->put_filefts = cg_prep(cg,
+        "INSERT INTO file_fts(rowid,words) SELECT ?1,?2 WHERE NOT EXISTS "
+        "(SELECT 1 FROM file_fts WHERE rowid=?1)");
+    s->del_filefts = cg_prep(cg, "DELETE FROM file_fts WHERE rowid=?");
 }
 
 static void step_reset(sqlite3_stmt *st);
@@ -402,6 +409,13 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     sqlite3_reset(s->sel_file);
     sqlite3_clear_bindings(s->sel_file);
     if (!file_id) return;
+    {                                             /* codify-v15 1.2 */
+        char pw[2048];
+        name_words(w->rel, pw, sizeof pw);
+        sqlite3_bind_int64(s->put_filefts, 1, file_id);
+        sqlite3_bind_text(s->put_filefts, 2, pw, -1, SQLITE_TRANSIENT);
+        step_reset(s->put_filefts);
+    }
 
     /* size/mtime changed but content did not (touch, branch switch): the
      * upsert above refreshed the metadata; keep the child rows — and with
@@ -1093,6 +1107,8 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                 purge_file_children(&s, removed_ids[i]);
                 sqlite3_bind_int64(del_file, 1, removed_ids[i]);
                 step_reset(del_file);
+                sqlite3_bind_int64(s.del_filefts, 1, removed_ids[i]);
+                step_reset(s.del_filefts);               /* codify-v15 1.2 */
                 st->files_removed++;
             }
             sqlite3_finalize(del_file);
