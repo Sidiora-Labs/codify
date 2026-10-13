@@ -434,7 +434,7 @@ assert f[1]["kind"] == "grounding" and f[1]["jev_score"] == 0.2, f
     printf '.codegraph/\n' > .gitignore
     git add -A >/dev/null; git commit -qm base >/dev/null
     git branch wave/adv/1      # the default shape: a pull request per wave
-    body="$TMP/prproj/.codegraph/fleet/pr-adv.md"
+    body="$TMP/prproj/.codegraph/fleet/pr-adv-1.md"   # one body file per wave branch
 
     out="$(CG_GH=/nonexistent/gh "$CG" fleet pr 1 --dry-run 2>&1)"
     has "$out" "jev: OPENROUTER_API_KEY is not set — pull request readiness skipped"

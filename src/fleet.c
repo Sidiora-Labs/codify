@@ -2324,8 +2324,14 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
     int red = -1;
     for (int g = 0; g < 2 && red < 0; g++) {
         if (!cmds[g] || !cmds[g][0]) { logs[g][0] = 0; continue; }
-        snprintf(logs[g], sizeof logs[g], "%s/land-%s-%s.log", logdir,
-                 c.feature, names[g]);
+        /* one log per branch, like the pull request body: a wave's land
+         * must not overwrite the record of the wave landed before it */
+        if (c.wave >= 0)
+            snprintf(logs[g], sizeof logs[g], "%s/land-%s-%ld-%s.log",
+                     logdir, c.feature, c.wave, names[g]);
+        else
+            snprintf(logs[g], sizeof logs[g], "%s/land-%s-%s.log", logdir,
+                     c.feature, names[g]);
         gate_ran[g] = true;
         gate_rc[g] = run_gate(c.tree, cmds[g], logs[g], &gate_ms[g]);
         if (gate_rc[g] != 0) red = g;
@@ -2440,8 +2446,11 @@ static int run_in(const char *tree, const char *cmd, StrBuf *out) {
 
 /* the pull request body: the feature's title, its task list, and Jev's read
  * on whether the branch is ready, written to .codegraph/fleet so the printed
- * gh command is runnable as-is. With no Jev answer the body simply leaves the
- * readiness line out — it never blocks the pull request */
+ * gh command is runnable as-is. One file per branch — pr-<feature>.md for
+ * the feature's, pr-<feature>-<wave>.md for a wave's — because two waves of
+ * one feature may open their pull requests at the same moment, and a shared
+ * file would hand one of them the other's body. With no Jev answer the body
+ * simply leaves the readiness line out — it never blocks the pull request */
 static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
                           char *title, size_t tcap, char *bodypath,
                           size_t bcap) {
@@ -2451,8 +2460,14 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
     else snprintf(title, tcap, "feature/%s", c->feature);
     free(t);
     StrBuf b; sb_init(&b);
-    sb_printf(&b, "Feature `%s`, landed on `%s` by Codify with the test and "
-                  "lint gates green.\n\n## Tasks\n", c->feature, c->h.main_branch);
+    if (c->wave >= 0)
+        sb_printf(&b, "Wave %ld of feature `%s`, landed on `%s` by Codify "
+                      "with the test and lint gates green.\n\n## Tasks\n",
+                  c->wave, c->feature, c->h.main_branch);
+    else
+        sb_printf(&b, "Feature `%s`, landed on `%s` by Codify with the test "
+                      "and lint gates green.\n\n## Tasks\n",
+                  c->feature, c->h.main_branch);
     StrBuf tasks; sb_init(&tasks);
     int ntask = 0, ndone = 0;
     if (f) {
@@ -2504,7 +2519,10 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
     char dir[4700];
     snprintf(dir, sizeof dir, "%s/%s/fleet", c->tree, CG_DIR);
     mkdirs(dir);
-    snprintf(bodypath, bcap, "%s/pr-%s.md", dir, c->feature);
+    if (c->wave >= 0)
+        snprintf(bodypath, bcap, "%s/pr-%s-%ld.md", dir, c->feature, c->wave);
+    else
+        snprintf(bodypath, bcap, "%s/pr-%s.md", dir, c->feature);
     write_entire_file(bodypath, b.p, b.len);
     sb_free(&b);
 }

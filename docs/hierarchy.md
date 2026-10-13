@@ -355,7 +355,7 @@ half-landed main is the one state nobody can reason about.
 
 ```
 landing refused: test gate `sh gate.sh` failed (exit 1) — main reset to b5d899dd
-  log: /path/proj/.codegraph/fleet/land-fleet-test.log
+  log: /path/proj/.codegraph/fleet/land-fleet-1-test.log
 ```
 
 A wave branch that no longer merges into main — an earlier wave landed
@@ -386,13 +386,13 @@ way:
 pull request (gh not found): run these to open wave/fleet/1 against origin/main:
   git -C '/path/proj' push -u 'origin' 'wave/fleet/1'
   cd '/path/proj' && 'gh' pr create --base 'main' --head 'wave/fleet/1' \
-     --title 'wave/fleet/1' --body-file '/path/proj/.codegraph/fleet/pr-fleet.md'
+     --title 'wave/fleet/1' --body-file '/path/proj/.codegraph/fleet/pr-fleet-1.md'
 ```
 
-The body is the feature's title, its task list, and a readiness line:
+The body file is one per branch — `pr-<feature>-<wave>.md` for a wave, `pr-<feature>.md` in the older shape — so two waves opening at once never hand each other their bodies. It carries the feature's title, its task list, and a readiness line:
 
 ```markdown
-Feature `fleet`, landed on `main` by Codify with the test and lint gates green.
+Wave 1 of feature `fleet`, landed on `main` by Codify with the test and lint gates green.
 
 ## Tasks
 - 1.1 First task (done)
