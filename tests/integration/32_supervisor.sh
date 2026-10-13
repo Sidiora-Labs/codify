@@ -100,9 +100,11 @@ if [ "\$CG_ROLE" = worker ]; then
     git commit -qm "\$TASK [spec:\$CG_FEATURE/\$TASK]" >/dev/null || exit 1
     exec "$CG" fleet merge-up "\$TASK" >/dev/null
 fi
-left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,sys; m = json.load(sys.stdin)["managers"][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+# a wave manager lands its wave (CG_WAVE); a manager of the whole feature
+# (old templates, no CG_WAVE) the feature
+left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,os,sys; w = os.environ.get("CG_WAVE"); m = [m for m in json.load(sys.stdin)["managers"] if w is None or m["wave"] == int(w)][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
 [ "\$left" -eq 0 ] || exit 0
-exec "$CG" fleet land "\$CG_FEATURE" --no-pr >/dev/null 2>"$TMP/go/land.err"
+exec "$CG" fleet land \${CG_WAVE:-} -f "\$CG_FEATURE" --no-pr >/dev/null 2>"$TMP/go/land.err"
 EOF
     git add -A >/dev/null; git commit -qm base >/dev/null
 }
@@ -216,7 +218,7 @@ assert r['run'] == '$run' and r['state'] == 'complete' and r['failures'] == 0, r
     [ "$(run_state)" = stopped ] || fail "not stopped"
     expect_rc 1 "$CG" fleet down
 
-    # ---- approval gate: the manager's land waits for a person
+    # ---- approval gate: each wave manager's land waits for a person
     EXTRA_ROLE='[role.feature]
 approve = ["land"]' setup_repo
     "$CG" fleet up -n 1 >/dev/null
@@ -224,8 +226,8 @@ approve = ["land"]' setup_repo
         || fail "no land approval requested: $(cat "$(run_field log)")"
     "$CG" fleet approvals --json | pyjson '
 a = d["approvals"][0]
-assert a["gate"] == "land" and a["subject"] == "fleet" and a["state"] == "pending", a
-assert a["requested_by"] == "fm-fleet" and a["run"], a
+assert a["gate"] == "land" and a["subject"].startswith("fleet/wave-") and a["state"] == "pending", a
+assert a["requested_by"] == "wm-fleet-" + a["subject"].rsplit("-", 1)[1] and a["run"], a
 ' || fail "approval record"
     has "$(cat "$TMP/go/land.err")" "waits for approval #"
     sleep 3
@@ -237,11 +239,18 @@ assert a["requested_by"] == "fm-fleet" and a["run"], a
     has "$(cat "$(run_field log)")" "waiting for approval #"
     id="$("$CG" fleet approvals --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["approvals"][0]["id"])')"
     out="$("$CG" fleet approve "$id" -m "looks good")"
-    has "$out" "approved #$id — land of fleet"
-    wait_for 60 '[ "$(run_state)" = complete ]' || fail "approved run did not complete: $(run_state)"
+    has "$out" "approved #$id — land of fleet/wave-"
+    # every wave lands behind its own approval
+    approve_rest() {
+        "$CG" fleet approvals --json | python3 -c 'import json,sys; [print(a["id"]) for a in json.load(sys.stdin)["approvals"]]' |
+            while read -r x; do "$CG" fleet approve "$x" -m "looks good" >/dev/null; done
+        [ "$(run_state)" = complete ]
+    }
+    wait_for 90 approve_rest || fail "approved run did not complete: $(run_state)"
     "$CG" fleet approvals --all --json | pyjson '
-a = [x for x in d["approvals"] if x["gate"] == "land"][0]
-assert a["state"] == "used" and a["note"] == "looks good", a
+a = [x for x in d["approvals"] if x["gate"] == "land"]
+assert len(a) == 2 and sorted(x["subject"] for x in a) == ["fleet/wave-1", "fleet/wave-2"], a
+assert all(x["state"] == "used" and x["note"] == "looks good" for x in a), a
 ' || fail "approval consumed"
     out="$("$CG" events --kind approval. --json -n 10)"
     has "$out" '"kind":"approval.request"'
@@ -266,7 +275,7 @@ retries = 1' setup_repo
     has "$out" "no progress for"
     has "$out" "nudged"
     has "$out" "stalled — no progress for"
-    has "$out" "2.1 out of retries — escalated to fm-fleet"
+    has "$out" "2.1 out of retries — escalated to wm-fleet-1"
     has "$out" "2.1 blocked — escalated to main"
     has "$out" "fleet cannot finish — blocked: 2.1"
     [ "$(run_state)" = blocked ] || fail "run state $(run_state)"
@@ -274,14 +283,14 @@ retries = 1' setup_repo
     [ "$(spawns 2.1)" = 2 ] || fail "2.1 should run exactly twice (1 retry), ran $(spawns 2.1)"
     [ "$(count supervisor.stall 'json.loads(l)["payload"]["action"] == "nudge"')" = 2 ] || fail "one nudge per attempt"
     [ "$(count supervisor.stall 'json.loads(l)["payload"]["action"] == "stop"')" = 2 ] || fail "one stop per attempt"
-    [ "$(count supervisor.escalate 'json.loads(l)["payload"]["agent"] == "fm-fleet"')" = 1 ] || fail "escalation to the manager"
+    [ "$(count supervisor.escalate 'json.loads(l)["payload"]["agent"] == "wm-fleet-1"')" = 1 ] || fail "escalation to the wave's manager"
     [ "$(count supervisor.blocked 'json.loads(l)["payload"]["to"] == "main"')" = 1 ] || fail "escalation to main"
     steer="$(evk agent.steer)"
-    has "$steer" '"subject":"w-fleet-1"'                 # the nudge
-    has "$steer" '"subject":"fm-fleet"'                  # the escalation
+    has "$steer" '"subject":"w-fleet-2.1"'               # the nudge
+    has "$steer" '"subject":"wm-fleet-1"'                # the escalation
     has "$steer" '"subject":"gideon"'                    # main
     # the rest of the feature was not held up by the stuck task
-    has "$(git show feature/fleet:spec/fleet/spec.kvx | sed -n '/task.3.1/,/^$/p')" 'status = "done"'
+    has "$(git show wave/fleet/2:spec/fleet/spec.kvx | sed -n '/task.3.1/,/^$/p')" 'status = "done"'
     # the stop left a handoff, and the retry's prompt says what happened
     has "$("$CG" resume --task 2.1)" "blocked: stalled — no progress for"
     p2="$(cat "$TMP/go/prompt-2.1-2")"
@@ -361,10 +370,10 @@ if [ "\$CG_ROLE" = worker ]; then
 fi
 log start "\$CG_FEATURE"
 sleep 1
-left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,sys; m = json.load(sys.stdin)["managers"][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+left="\$("$CG" fleet tree -f "\$CG_FEATURE" --json | python3 -c 'import json,os,sys; m = [m for m in json.load(sys.stdin)["managers"] if m["wave"] == int(os.environ["CG_WAVE"])][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
 log end "\$CG_FEATURE"
 [ "\$left" -eq 0 ] || exit 0
-exec "$CG" fleet land "\$CG_FEATURE" --no-pr >/dev/null
+exec "$CG" fleet land "\$CG_WAVE" -f "\$CG_FEATURE" --no-pr >/dev/null
 EOF
     }
 
@@ -424,9 +433,9 @@ EOF
     branches="$(git branch --list 'task/*')"
     has "$branches" "task/fleet/2.1"
     has "$branches" "task/fleet/2.2"
-    log="$(git log --oneline feature/fleet)"
-    has "$log" "merge task/fleet/2.1 into feature/fleet [spec:fleet/2.1]"
-    has "$log" "merge task/fleet/2.2 into feature/fleet [spec:fleet/2.2]"
+    log="$(git log --oneline wave/fleet/1)"
+    has "$log" "merge task/fleet/2.1 into wave/fleet/1 [spec:fleet/2.1]"
+    has "$log" "merge task/fleet/2.2 into wave/fleet/1 [spec:fleet/2.2]"
     has "$(cat "$TMP/go/main-1")" "the run is starting"
     has "$(cat "$TMP/go/main-"*)" "feature fleet ended complete"
     "$CG" events --kind orch.spawn --json -n 100 | python3 -c '
@@ -498,7 +507,7 @@ for l in sys.stdin:
     if e["kind"].startswith(("orch.", "fleet.land", "task.status", "fleet.merge", "fleet.run")):
         print(e["seq"], e["kind"], e["subject"], (e["payload"] or {}).get("status") or (e["payload"] or {}).get("outcome") or (e["payload"] or {}).get("state") or "", e.get("branch"))
 ' >&2; fail "beta must wait for alpha"; }
-    has "$(git log --oneline main)" "land feature/beta into main"
+    has "$(git log --oneline main)" "land wave/beta/1 into main"
 fi
 
 echo "supervisor OK"

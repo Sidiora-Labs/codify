@@ -133,7 +133,9 @@ assert "src/c.ts" not in json.dumps(pairs.get(("4.2", "4.3"), "")), pairs
 test_gate = "true"
 pr        = "manual"
 
+# the older shape: a worker per wave merging up into the feature branch
 [role.worker]
+branch  = "wave/{feature}/{wave}"
 approve = ["drift"]
 EOF
     git add -A >/dev/null; git commit -qm "hierarchy" >/dev/null
@@ -198,9 +200,10 @@ if [ "\$CG_ROLE" = worker ]; then
     echo "end \$TASK \$(date +%s%N)" >> "$TMP/order"
     exec "$CG" fleet merge-up "\$TASK" >/dev/null
 fi
-left="\$("$CG" fleet tree -f drift --json | python3 -c 'import json,sys; m = json.load(sys.stdin)["managers"][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
+# a wave manager lands its wave once every task of it is done
+left="\$("$CG" fleet tree -f drift --json | python3 -c 'import json,os,sys; m = [m for m in json.load(sys.stdin)["managers"] if str(m["wave"]) == os.environ["CG_WAVE"]][0]; print(m["tasks"]["total"] - m["tasks"]["done"])')"
 [ "\$left" -eq 0 ] || exit 0
-exec "$CG" fleet land drift --no-pr >/dev/null
+exec "$CG" fleet land "\$CG_WAVE" -f drift --no-pr >/dev/null
 EOF
     git add -A >/dev/null; git commit -qm "collision setup" >/dev/null
     rm -f "$TMP/order"
@@ -231,6 +234,11 @@ if want interface; then
 [hierarchy]
 test_gate = "true"
 pr        = "manual"
+
+# a worker per task under one manager of the whole feature
+[role.manager]
+agent  = "fm-{feature}"
+branch = "feature/{feature}"
 
 [role.worker]
 branch = "task/{feature}/{task}"

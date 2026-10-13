@@ -947,10 +947,10 @@ typedef struct {
     unsigned approve;  /* APPROVE_* bits */
 } RoleCaps;
 typedef struct {
-    char *name;        /* main | feature | worker */
+    char *name;        /* main | manager (or feature) | worker */
     char *title;       /* what the role is called in reports and prompts */
-    char *agent;       /* agent-name template: {feature}, {wave} */
-    char *branch;      /* branch template: {main}, {feature}, {wave} */
+    char *agent;       /* agent-name template: {feature}, {wave}, {task} */
+    char *branch;      /* branch template: {main}, {feature}, {wave}, {task} */
     char *base;        /* branch the role's branch is cut from and merges into */
     RoleCaps caps;
 } FleetRole;
@@ -984,6 +984,12 @@ void hier_free(Hierarchy *h);
 void hier_expand_task(const Hierarchy *h, const char *tmpl, const char *feature,
                       long wave, const char *task, char *out, size_t cap);
 bool hier_per_task(const Hierarchy *h);
+/* codify-v15 4.1: a manager branch template naming {wave} gives every wave
+ * its own Wave Manager on its own branch, cut from main and landed into it
+ * on its own; without it one manager owns the whole feature (the old shape) */
+bool hier_per_wave(const Hierarchy *h);
+/* the wave whose branch <tmpl> names for a manager: -1 in the old shape */
+long hier_manager_wave(const Hierarchy *h, long wave);
 /* One merge into a feature branch at a time: merge-up and land hold it,
  * so workers and their manager run together instead of taking turns.
  * Returns a descriptor to release with fleet_merge_unlock, -1 when
@@ -1005,6 +1011,11 @@ int  fleet_worker_begin(Cg *cg, const char *id, const char *feature,
 int  fleet_merge_up(Cg *cg, const char *id, const char *feature, bool force,
                     bool keep, bool json);
 int  fleet_feature_land(Cg *cg, const char *feature, bool no_pr, bool json);
+/* codify-v15 4.1: land one wave branch into main — <what> is a wave number
+ * or a task id in it (a feature name in the old shape); refuses, naming
+ * them, while any task of the wave is open */
+int  fleet_land(Cg *cg, const char *what, const char *feature, bool no_pr,
+                bool json);
 int  fleet_pr_open(Cg *cg, const char *feature, bool dry_run, bool json);
 int  fleet_checkpoint(Cg *cg, bool dry_run, bool json);
 int  cmd_fleet(Cg *cg, int argc, char **argv, bool json);
@@ -1017,7 +1028,7 @@ typedef struct {
     char role[16];        /* CG_ROLE: "feature" | "worker" */
     char parent[128];     /* CG_PARENT */
     char feature[128];    /* CG_FEATURE */
-    long wave;            /* CG_WAVE; -1 for a feature manager */
+    long wave;            /* CG_WAVE; -1 for a manager of the whole feature */
     char task[64];        /* the task a worker holds; "" for a manager */
     char branch[256];     /* CG_BRANCH */
     char base[256];       /* CG_BASE */
@@ -1026,10 +1037,12 @@ typedef struct {
     long fence;
     int  pid;             /* -1 when nothing was forked (dry run) */
 } FleetNode;
-/* Spawn one feature manager for <feature>: its worktree on the feature
- * branch (cut from main when new), a briefing built from the feature plan,
- * and the driver exec'd there. 0 with *n filled, 1 when nothing ran. */
-int orch_spawn_manager(Cg *cg, const char *feature, const char *driver,
+/* Spawn the manager of <wave> of <feature> (-1: of the whole feature, the
+ * old shape): its worktree on the wave branch (cut from main when new), a
+ * briefing built from the plan, and the driver exec'd there. 0 with *n
+ * filled, 1 when nothing ran. */
+int orch_spawn_manager(Cg *cg, const char *feature, long wave,
+                       const char *driver,
                        const char *extra, const char *cmd_tmpl, bool dry_run,
                        FleetNode *n);
 /* Spawn one wave worker for task <id>: the branch, worktree, and claim come

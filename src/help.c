@@ -715,9 +715,9 @@ static const HelpCmd HELP[] = {
 { .group = "fleet", .name = "fleet", .args = "<subcommand>",
   .usage = "fleet roles | status | plan [-f F] | "
     "tree [-f F] | begin <id> [-f F] [--agent A] | "
-    "merge-up <id> [--force] [--keep] | land <feature> "
-    "[--no-pr] | pr <feature> [--dry-run] | checkpoint [--dry-run]",
-  .summary = "a hierarchy of agents: main, managers, workers",
+    "merge-up <id> [--force] [--keep] | land <wave|id> [-f F] "
+    "[--no-pr] | pr <wave|id> [--dry-run] | checkpoint [--dry-run]",
+  .summary = "a hierarchy of agents: main, a manager per wave, a worker per task",
   .detail = "Configured by [hierarchy] and [role.*] in spec/workflow.kvx.",
   .related = "spec run,events", .hide = true },
 { .group = "fleet", .name = "fleet up", .args = "[-f F] [-n N]",
@@ -752,22 +752,27 @@ static const HelpCmd HELP[] = {
   .summary = "which manager and worker own what, planned and live" },
 { .group = "fleet", .name = "fleet roles", .args = "",
   .usage = "fleet roles",
-  .summary = "branch templates, base, remote, gates, PR policy" },
+  .summary = "main, manager, worker: templates, base, remote, gates, PR policy",
+  .detail = "[role.manager] (or [role.feature]) defaults to a Wave Manager "
+    "per wave on wave/{feature}/{wave}; [role.worker] to a Task Worker per "
+    "task on task/{feature}/{task}. Templates without {wave} and {task} give "
+    "the older shape: one feature manager, a worker per wave." },
 { .group = "fleet", .name = "fleet begin", .args = "<id> [--agent A]",
   .usage = "fleet begin <task-id> [-f <feature>] [--agent A]",
-  .summary = "the wave worktree and branch for a task, claimed" },
+  .summary = "the task worktree and branch, cut from its wave branch, claimed" },
 { .group = "fleet", .name = "fleet merge-up", .args = "<id> [--keep]",
   .usage = "fleet merge-up <task-id> [-f <feature>] [--force] [--keep]",
-  .summary = "merge a qualified wave branch into the feature",
+  .summary = "merge a qualified task branch into its wave branch",
   .flags = "--force\tmerge despite the task not being done\n--keep\tleave "
-    "conflicts in the feature worktree to resolve\n" },
-{ .group = "fleet", .name = "fleet land", .args = "<feature> [--no-pr]",
-  .usage = "fleet land <feature> [--no-pr]",
-  .summary = "merge the feature into main behind test and lint",
-  .detail = "Red resets main to where it was; green opens the PR when the "
-    "policy says auto." },
-{ .group = "fleet", .name = "fleet pr", .args = "<feature> [--dry-run]",
-  .usage = "fleet pr <feature> [--dry-run]",
+    "conflicts in the wave worktree to resolve\n" },
+{ .group = "fleet", .name = "fleet land", .args = "<wave|id> [-f F] [--no-pr]",
+  .usage = "fleet land <wave|task-id|feature> [-f <feature>] [--no-pr]",
+  .summary = "merge a wave branch into main behind test and lint",
+  .detail = "Refuses while a task of the wave is open, and names it. Red "
+    "resets main to where it was; green opens the PR when the policy says "
+    "auto. In the older shape it takes the feature." },
+{ .group = "fleet", .name = "fleet pr", .args = "<wave|feature> [--dry-run]",
+  .usage = "fleet pr <wave|feature> [--dry-run]",
   .summary = "open the pull request through gh" },
 { .group = "fleet", .name = "fleet checkpoint", .args = "[--dry-run]",
   .usage = "fleet checkpoint [--dry-run]",

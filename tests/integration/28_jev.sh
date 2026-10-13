@@ -433,10 +433,10 @@ assert f[1]["kind"] == "grounding" and f[1]["jev_score"] == 0.2, f
     "$CG" init >/dev/null
     printf '.codegraph/\n' > .gitignore
     git add -A >/dev/null; git commit -qm base >/dev/null
-    git branch feature/adv
+    git branch wave/adv/1      # the default shape: a pull request per wave
     body="$TMP/prproj/.codegraph/fleet/pr-adv.md"
 
-    out="$(CG_GH=/nonexistent/gh "$CG" fleet pr adv --dry-run 2>&1)"
+    out="$(CG_GH=/nonexistent/gh "$CG" fleet pr 1 --dry-run 2>&1)"
     has "$out" "jev: OPENROUTER_API_KEY is not set — pull request readiness skipped"
     has "$out" "pull request (dry-run)"
     has "$(cat "$body")" "## Tasks"
@@ -444,7 +444,7 @@ assert f[1]["kind"] == "grounding" and f[1]["jev_score"] == 0.2, f
 
     export OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcd
     reset_fake
-    CG_GH=/nonexistent/gh "$CG" fleet pr adv --dry-run >/dev/null
+    CG_GH=/nonexistent/gh "$CG" fleet pr 1 --dry-run >/dev/null
     has "$(cat "$body")" "Jev readiness: 0.95 (high) — 0/2 tasks qualified, 0 commits, gates not run in this command"
     python3 - "$JEV_FAKE_DIR/request.1.json" <<'EOF' || fail "readiness request"
 import json, sys
@@ -452,16 +452,16 @@ d = json.load(open(sys.argv[1]))
 assert list(d["questions"]) == ["readiness"], d
 assert d["questions"]["readiness"]["type"] == "noul", d
 st = d["state"]
-assert st["feature"] == "adv" and st["branch"] == "feature/adv", st
+assert st["feature"] == "adv" and st["branch"] == "wave/adv/1", st
 assert st["base"] == "main" and st["commits_ahead"] == 0, st
 assert st["tasks"]["total"] == 2 and st["tasks"]["done"] == 0, st
 assert [t["id"] for t in st["tasks"]["list"]] == ["1.1", "2.1"], st
 assert st["gates"] == "not run in this command", st
 EOF
     # a low answer says so, and never stops the pull request
-    CG_GH=/nonexistent/gh JEV_FAKE_NOUL=0.3 "$CG" fleet pr adv --dry-run >/dev/null
+    CG_GH=/nonexistent/gh JEV_FAKE_NOUL=0.3 "$CG" fleet pr 1 --dry-run >/dev/null
     has "$(cat "$body")" "Jev readiness: 0.30 (low)"
-    out="$(CG_GH=/nonexistent/gh JEV_FAKE_MODE=500 "$CG" fleet pr adv --dry-run 2>&1)"
+    out="$(CG_GH=/nonexistent/gh JEV_FAKE_MODE=500 "$CG" fleet pr 1 --dry-run 2>&1)"
     has "$out" "jev: pull request readiness skipped — jev request failed (status 500)"
     has "$out" "pull request (dry-run)"
     hasnt "$(cat "$body")" "Jev readiness"

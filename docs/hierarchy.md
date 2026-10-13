@@ -1,11 +1,25 @@
 # The fleet hierarchy
 
 One repository, a tree of agents. A **main** agent owns the task list and
-merges pull requests, one **feature manager** per feature owns the feature
-branch, and **workers** implement a wave — or, with a `{task}` branch
-template, a single task — on a branch cut from the feature branch. Work
-flows upward through verified merges: worker branch into feature, feature
-into local main, main out through a pull request.
+merges pull requests. A **wave manager** per wave owns that wave's branch,
+cut from main. A **task worker** per task implements one task on a branch
+cut from its wave's branch. Work flows upward through verified merges: task
+branch into wave branch, wave branch into local main, main out through a
+pull request.
+
+```
+main
+├── wm-<feature>-1   wave/<feature>/1   ← main
+│   ├── w-<feature>-2.1   task/<feature>/2.1   ← wave/<feature>/1
+│   └── w-<feature>-2.2   task/<feature>/2.2   ← wave/<feature>/1
+└── wm-<feature>-2   wave/<feature>/2   ← main
+    └── w-<feature>-3.1   task/<feature>/3.1   ← wave/<feature>/2
+```
+
+That is the default. A workflow whose templates leave out `{wave}` and
+`{task}` gets the older shape instead: one **feature manager** per feature
+on `feature/<feature>`, and a worker per wave on a branch cut from it (see
+[The older shape](#the-older-shape)).
 
 You can drive every step by hand, or hand the spec to `cg fleet up`: a
 durable supervisor that runs all three levels at once, supervises every
@@ -29,7 +43,7 @@ then show the defaults they *would* use, marked `not configured`.
 enabled    = true
 main       = "main"                          # the branch everything lands on
 remote     = "origin"
-worktrees  = ".codegraph/worktrees"          # where wave/feature worktrees go
+worktrees  = ".codegraph/worktrees"          # where wave/task worktrees go
 test_gate  = "make test"
 lint_gate  = "make cg CFLAGS='-O2 -Werror'"
 pr         = "auto"                          # auto | manual
@@ -41,6 +55,41 @@ title  = "Main Gideon"
 agent  = "gideon"
 branch = "{main}"
 
+[role.manager]
+title  = "Wave Manager"
+agent  = "wm-{feature}-{wave}"
+branch = "wave/{feature}/{wave}"
+base   = "{main}"
+
+[role.worker]
+title  = "Task Worker"
+agent  = "w-{feature}-{task}"
+branch = "task/{feature}/{task}"
+base   = "wave/{feature}/{wave}"
+```
+
+Every `[role.*]` key falls back to the default above, so a workflow that
+names only what differs still gets a whole tree. The role names are fixed —
+`main`, `manager`, `worker`. `[role.feature]` is the same section as
+`[role.manager]` under its older name, and `CG_ROLE=feature` is still how a
+manager identifies itself. A `[role.something-else]` section is reported as
+unknown rather than silently ignored.
+
+Templates expand `{main}`, `{remote}`, `{feature}`, `{wave}`, and `{task}`.
+`enabled = false` keeps the configuration but switches the fleet off.
+
+The shape follows the templates. A manager branch that names `{wave}` gives
+a manager per wave; a worker branch that names `{task}` gives a worker per
+task, so the tasks of one wave run side by side, each on its own branch and
+worktree.
+
+### The older shape
+
+Templates without the placeholders give the hierarchy Codify had before
+v1.5: one feature manager per feature, and a worker per wave that does its
+wave's tasks one after the other on one branch.
+
+```ini
 [role.feature]
 title  = "Feature Manager"
 agent  = "fm-{feature}"
@@ -54,27 +103,9 @@ branch = "wave/{feature}/{wave}"
 base   = "feature/{feature}"
 ```
 
-Every `[role.*]` key falls back to the default above, so a workflow that
-names only what differs still gets a whole tree. The role names are fixed —
-`main`, `feature`, `worker`. A `[role.something-else]` section is reported
-as unknown rather than silently ignored.
-
-Templates expand `{main}`, `{remote}`, `{feature}`, `{wave}`, and `{task}`.
-A feature-level template expands `{wave}` and `{task}` to nothing, so it
-never grows a stray number. `enabled = false` keeps the configuration but
-switches the fleet off.
-
-A worker template that names `{task}` gives every task its own branch and
-worktree, so the tasks of one wave can run side by side:
-
-```ini
-[role.worker]
-agent  = "w-{feature}-{task}"
-branch = "task/{feature}/{task}"
-```
-
-Without `{task}`, a worker owns a whole wave and does its tasks one after
-the other on one branch.
+In that shape a feature-level template expands `{wave}` and `{task}` to
+nothing, `merge-up` goes into `feature/<feature>`, and `land` takes the
+feature. Everything else in this document works the same way in both shapes.
 
 `cg fleet roles` prints the resolved tree:
 
@@ -85,8 +116,8 @@ gates: test `sh gate.sh`   lint `sh lint.sh`
 pull requests: auto   checkpoint: manual
 role     title            agent                branch                   base
 main     Main Gideon      gideon               {main}                   —
-feature  Feature Manager  fm-{feature}         feature/{feature}        {main}
-worker   Wave Worker      w-{feature}-{wave}   wave/{feature}/{wave}    feature/{feature}
+manager  Wave Manager     wm-{feature}-{wave}  wave/{feature}/{wave}    {main}
+worker   Task Worker      w-{feature}-{task}   task/{feature}/{task}    wave/{feature}/{wave}
 ```
 
 ## Role capabilities
@@ -106,8 +137,8 @@ claude_args = "--permission-mode acceptEdits"
 model   = "opus"
 approve = ["pr", "drift"]     # stop here until `cg fleet approve`
 
-[role.feature]
-max  = 3                      # feature managers alive at once
+[role.manager]
+max  = 3                      # wave managers alive at once (default: every wave)
 wall = "45m"
 
 [role.worker]
@@ -119,12 +150,12 @@ spend   = "$4.50"             # one attempt's cost budget
 retries = 2                   # attempts after the first
 ```
 
-| Key | Meaning | main | feature | worker |
+| Key | Meaning | main | manager | worker |
 |---|---|---|---|---|
 | `driver` | `codex`, `claude`, or `custom` | `[agents].driver`, else `codex` | same | same |
 | `model` | handed to the driver | driver default | same | same |
 | `args` | extra driver argv | `[agents].<driver>_args` | same | same |
-| `max` | agents of the role alive at once | 1 (always) | 2 | `[agents].max`, else 2 |
+| `max` | agents of the role alive at once | 1 (always) | 0 — every wave (older shape: 2) | `[agents].max`, else 2 |
 | `wall` | wall-clock budget per attempt | 1h | 1h | 2h |
 | `spend` | USD budget per attempt | none | none | none |
 | `retries` | attempts after the first, per task | 0 | 1 | 2 |
@@ -133,9 +164,11 @@ retries = 2                   # attempts after the first
 
 Durations take `90s`, `30m`, `2h`, `1d`, or plain seconds; `0` means no
 limit. `approve` may be a list or a single string. Blocking is opt-in:
-with no `approve`, nothing waits for a person. For the feature role, `max`
-is how many features run at once under `--all`; for workers it caps the
-agents writing code at once, alongside `-n`.
+with no `approve`, nothing waits for a person. For the manager role, `max`
+bounds the wave managers alive at once in a run, and `0` means one for
+every wave; in the older shape it is how many features run at once under
+`--all`. For workers it caps the agents writing code at once, alongside
+`-n`.
 
 A value that cannot be used is reported, never silently dropped, and the
 default is kept:
@@ -152,7 +185,7 @@ warn: [role.worker] approve gate "merge" is not land, pr, retry, drift, or cover
 ```
 role     driver  model           max   wall    spend  retries  stall  approve
 main     custom  —               1     1h      —        0    30m  —
-feature  custom  —               2     1h      —        1    30m  —
+manager  custom  —             all     1h      —        1    30m  —
 worker   custom  —               3    10m      —        2     2s  —
 ```
 
@@ -166,11 +199,11 @@ An agent's place in the tree lives in its environment, not in a file:
 
 | Variable | Meaning |
 |---|---|
-| `CG_AGENT` | this agent's name (`w-fleet-1`) |
-| `CG_ROLE` | `main`, `feature`, or `worker` |
-| `CG_PARENT` | the agent it reports to (`fm-fleet`); unset for main |
+| `CG_AGENT` | this agent's name (`w-fleet-2.1`) |
+| `CG_ROLE` | `main`, `feature` (a manager), or `worker` |
+| `CG_PARENT` | the agent it reports to (`wm-fleet-1`); unset for main |
 | `CG_FEATURE` | the feature it is working |
-| `CG_WAVE` | the wave a worker owns |
+| `CG_WAVE` | the wave a manager or worker belongs to |
 | `CG_GH` | path or name of the `gh` binary (otherwise looked up on `PATH`) |
 
 Without `CG_ROLE` nothing is written to the agents registry, so a solo
@@ -181,13 +214,13 @@ the fleet reports, so a manager that only reads still shows up as alive.
 The identity reaches the ordinary commands too. `cg brief` gains a line:
 
 ```
-agent: w-fleet-1 — Wave Worker, reports to fm-fleet (feature fleet, wave 1)
+agent: w-fleet-2.1 — Task Worker, reports to wm-fleet-1 (feature fleet, wave 1)
 ```
 
 and `cg spec status` carries it into the claim:
 
 ```
-2.1      claimed by w-fleet-1 [worker under fm-fleet] on wave/fleet/1
+2.1      claimed by w-fleet-2.1 [worker under wm-fleet-1] on task/fleet/2.1
          (attempt fd4374c04e17, fence 1, 30 min left)
 ```
 
@@ -198,8 +231,8 @@ work done on* after the session is gone.
 ## The branch flow
 
 ```
-  wave/<feature>/<wave>  ──merge-up──►  feature/<feature>  ──land──►  main  ──pr──►  origin/main
-        worker                             feature manager            (gates)        checkpoint
+  task/<feature>/<id>  ──merge-up──►  wave/<feature>/<wave>  ──land──►  main  ──pr──►  origin/main
+       task worker                       wave manager               (gates)        checkpoint
 ```
 
 Every lifecycle command operates on the shared project — the main
@@ -209,73 +242,67 @@ it happens to be standing on is irrelevant to what they do.
 
 ### `cg fleet begin <id>`
 
-Creates or reuses the wave branch and its worktree, then claims the task
-for its worker.
+Creates or reuses the task's branch and worktree, cut from its wave's
+branch, then claims the task for its worker.
 
 ```
 $ cg fleet begin 2.1
 begin 2.1 — wave 1 of fleet
-  agent:    w-fleet-1 (worker, reports to fm-fleet)
-  branch:   wave/fleet/1 from feature/fleet (created)   [feature/fleet cut from main]
-  worktree: /path/proj/.codegraph/worktrees/wave-fleet-1 (created)
-  claim:    attempt fd4374c04e17, fence 1, 30 min
-next: cd /path/proj/.codegraph/worktrees/wave-fleet-1 && CG_AGENT=w-fleet-1 \
-      CG_ROLE=worker CG_PARENT=fm-fleet CG_FEATURE=fleet CG_WAVE=1 cg spec start 2.1
+  agent:    w-fleet-2.1 (worker, reports to wm-fleet-1)
+  branch:   task/fleet/2.1 from wave/fleet/1 (created)   [wave/fleet/1 cut from main]
+  worktree: /path/proj/.codegraph/worktrees/task-fleet-2.1 (created)
+  claim:    attempt 8e94807ad1cf, fence 1, 30 min
+next: cd /path/proj/.codegraph/worktrees/task-fleet-2.1 && CG_AGENT=w-fleet-2.1 \
+      CG_ROLE=worker CG_PARENT=wm-fleet-1 CG_FEATURE=fleet CG_WAVE=1 cg spec start 2.1
 ```
 
-The feature branch is cut from main on first use. Main's own checkout never
-moves. A second `begin` reuses both branch and worktree and renews the
-claim, so a manager can hand the same task to a replacement worker —
-`--agent` names that replacement.
+The wave branch is cut from main on first use, so a later wave starts from
+a main that already carries the waves landed before it. Main's own
+checkout never moves. A second `begin` reuses both branch and worktree and
+renews the claim, so a manager can hand the same task to a replacement
+worker — `--agent` names that replacement.
 
 Refusals are specific and leave the branch alone: a task another agent
-holds (`2.1 is already claimed by intruder` … `wave/fleet/1 and <worktree>
-stay for a retry`), a task id with no wave, a task already `done`.
+holds (`2.1 is already claimed by intruder` … `task/fleet/2.1 and
+<worktree> stay for a retry`), a task id with no wave, a task already
+`done`.
 
 ### `cg fleet merge-up <id>`
 
-Merges the wave branch into the feature branch, in the feature manager's
-own worktree.
+Merges the task's branch into its wave branch, in the wave manager's own
+worktree.
 
 ```
 $ cg fleet merge-up 2.1
-merged wave/fleet/1 into feature/fleet: 1 commit (head 227a1f98) at …/feature-fleet
+merged task/fleet/2.1 into wave/fleet/1: 1 commit (head 1484f740) at …/wave-fleet-1
+  promoted 1 memory to wave/fleet/1
 ```
 
 It is refused until the task's status **on the branch tip** says `done` —
-the spec file as committed on the wave branch, not the one in the main
+the spec file as committed on the task branch, not the one in the main
 tree. A merge of unproven work is what the hierarchy exists to prevent.
 
 ```
-2.1 is in_progress on wave/fleet/1, not done — qualify it
+2.1 is in_progress on task/fleet/2.1, not done — qualify it
 (cg spec done 2.1) and commit, or --force
 ```
 
-A conflict is reported by path and the feature worktree is left exactly as
-it was:
+A conflict is reported by path and the wave worktree is left exactly as it
+was:
 
 ```
-cg fleet: wave/fleet/2 does not merge into feature/fleet
+cg fleet: task/fleet/2.2 does not merge into wave/fleet/1
   conflicts in 1 path(s):
     docs/d.md
   merge aborted
 ```
 
 `--keep` leaves the merge in place instead, for the manager to resolve by
-hand and run `merge-up` again. A feature worktree with uncommitted changes
-is refused before any merge is attempted. Re-running after a successful
-merge prints `nothing to merge: feature/fleet already contains
-wave/fleet/1`.
+hand and run `merge-up` again. A wave worktree with uncommitted changes is
+refused before any merge is attempted. Re-running after a successful merge
+prints `nothing to merge: wave/fleet/1 already contains task/fleet/2.1`.
 
-A successful merge also brings the memories with it:
-
-```
-$ cg fleet merge-up 2.1
-merged wave/fleet/1 into feature/fleet: 1 commit (head 227a1f98) at …/feature-fleet
-  promoted 3 memories to feature/fleet
-```
-
-A note made on a wave branch is not yet a decision of the project, so it is
+A note made on a task branch is not yet a decision of the project, so it is
 recorded against that branch and promoted to the base when the code is —
 dropping any the base already holds, so merging twice never duplicates a
 decision. `--json` reports it as `memories_promoted`.
@@ -302,18 +329,28 @@ Git history is ingested before the check runs, so that commit does not need
 a `cg git-sync` first. This is what lets a worker be resumed, or its task
 qualified by its manager, after the change has already been committed.
 
-### `cg fleet land <feature>`
+### `cg fleet land <wave|id>`
 
-Merges the feature branch into **local** main, then runs the gates.
+Merges a wave branch into **local** main, then runs the gates. The wave is
+named by its number or by any of its task ids; `-f` names the feature when
+it is not the active one, and a wave manager's `CG_WAVE` is used when
+nothing is given.
 
 ```
-$ cg fleet land fleet
-landed feature/fleet into main: 2 commits, gates green (head 67187334)
+$ cg fleet land 1
+landed wave/fleet/1 into main: 2 commits, gates green (head 67187334)
   test: `sh gate.sh` ok in 5 ms
   lint: `sh lint.sh` ok in 6 ms
 ```
 
-Red means main is reset to where it was. Landing is all or nothing: a
+A wave lands whole or not at all. While any of its tasks is open the land
+is refused before anything is merged, and the open tasks are named:
+
+```
+cg fleet: wave 1 of fleet is not done — 1 task open: 2.2 (pending)
+```
+
+Red gates mean main is reset to where it was. Landing is all or nothing: a
 half-landed main is the one state nobody can reason about.
 
 ```
@@ -321,17 +358,23 @@ landing refused: test gate `sh gate.sh` failed (exit 1) — main reset to b5d899
   log: /path/proj/.codegraph/fleet/land-fleet-test.log
 ```
 
+A wave branch that no longer merges into main — an earlier wave landed
+first and touched the same lines — is refused with the conflicting paths
+and main untouched. The manager merges main into its wave branch, resolves
+there, and lands again.
+
 With `pr = "auto"` a green land opens the pull request in the same call;
-`--no-pr` lands without touching `gh`.
+`--no-pr` lands without touching `gh`. In the older shape `land` takes the
+feature (`cg fleet land fleet`) and merges `feature/fleet`.
 
-### `cg fleet pr <feature>`
+### `cg fleet pr <wave|feature>`
 
-Pushes the feature branch and opens the pull request against
-`<remote>/<main>` through `gh`.
+Pushes the landed branch — a wave's, or in the older shape the feature's —
+and opens the pull request against `<remote>/<main>` through `gh`.
 
 ```
-$ cg fleet pr fleet
-opened https://github.com/acme/repo/pull/7 (feature/fleet → main)
+$ cg fleet pr 1
+opened https://github.com/acme/repo/pull/7 (wave/fleet/1 → main)
 ```
 
 An already-open PR is reported, not duplicated. `--dry-run` prints what it
@@ -340,10 +383,10 @@ printed instead, runnable as they stand — the body file is written either
 way:
 
 ```
-pull request (gh not found): run these to open feature/fleet against origin/main:
-  git -C '/path/proj' push -u 'origin' 'feature/fleet'
-  cd '/path/proj' && 'gh' pr create --base 'main' --head 'feature/fleet' \
-     --title 'feature/fleet' --body-file '/path/proj/.codegraph/fleet/pr-fleet.md'
+pull request (gh not found): run these to open wave/fleet/1 against origin/main:
+  git -C '/path/proj' push -u 'origin' 'wave/fleet/1'
+  cd '/path/proj' && 'gh' pr create --base 'main' --head 'wave/fleet/1' \
+     --title 'wave/fleet/1' --body-file '/path/proj/.codegraph/fleet/pr-fleet.md'
 ```
 
 The body is the feature's title, its task list, and a readiness line:
@@ -367,15 +410,17 @@ readiness skipped`). See [jev.md](jev.md#pull-request-readiness).
 
 ### `cg fleet checkpoint`
 
-Merges the open Codify pull requests — the ones on `feature/*` branches —
+Merges the open Codify pull requests — the ones whose head matches the
+manager branch template up to `{feature}`: `wave/*` by default, `feature/*`
+in the older shape —
 lowest number first, and stops at the first that will not merge, so the
 order stays what a reader expects. Anything else is skipped by name
-(`skipped #8 hotfix/x — not a feature/* branch`). Local main then
+(`skipped #8 hotfix/x — not a wave/* branch`). Local main then
 fast-forwards to the remote when it is clean.
 
 ```
 $ cg fleet checkpoint --dry-run
-checkpoint (dry-run): merge the open feature/* pull requests lowest number first:
+checkpoint (dry-run): merge the open wave/* pull requests lowest number first:
   gh pr list --base 'main' --state open --json number,headRefName,title,url
   gh pr merge <number> --merge
 ```
@@ -385,42 +430,53 @@ checkpoint (dry-run): merge the open feature/* pull requests lowest number first
 ```sh
 cg fleet roles              # the configured hierarchy
 cg fleet status             # who is alive in which role, on which task
-cg fleet plan [-f F]        # which manager owns the feature, which worker each wave
-cg fleet tree [-f F]        # the live tree: main → managers → workers
+cg fleet plan [-f F]        # which manager owns each wave, which worker each task
+cg fleet tree [-f F]        # the live tree: main → wave managers → task workers
 cg fleet                    # same as status
 ```
 
 `cg fleet plan` lays the tree over the task list — planned branches on the
-left, live agents on the right:
+left, live agents on the right, a manager row per wave and a worker row per
+task under it:
 
 ```
 fleet plan — feature fleet (hierarchy enabled)
-main      gideon               main                                  live: —
-feature   fm-fleet             feature/fleet           ← main        live: —
-wave 0    w-fleet-0            wave/fleet/0            ← feature/fleet  live: —
-          1.1      done         First task
-wave 1    w-fleet-1            wave/fleet/1            ← feature/fleet  live: —
-          2.1      done         Alpha work
-wave 2    w-fleet-2            wave/fleet/2            ← feature/fleet  live: —
-          3.1      pending      Docs work
+main      gideon               main                                                  live: —
+wave 1    wm-fleet-1           wave/fleet/1                 ← main                 live: —
+  2.1     pending      w-fleet-2.1          task/fleet/2.1               live: —
+          Alpha work
+  2.2     pending      w-fleet-2.2          task/fleet/2.2               live: —
+          Beta work
+wave 2    wm-fleet-2           wave/fleet/2                 ← main                 live: —
+  3.1     pending      w-fleet-3.1          task/fleet/3.1               live: —
+          Docs work
 ```
 
+`--json` carries `managers[]`, each with its `wave`, `agent`, `branch` and
+`base`, and its `workers[]` with `task`, `agent`, `branch` and `base`. In
+the older shape there is one manager with `wave` null and a worker row per
+wave.
+
 `cg fleet tree` is the same tree with what actually happened on it —
-progress, whether the feature branch is ahead of its base or already merged,
-and the state and heartbeat of every worker:
+progress, whether each wave branch is ahead of main or already merged, and
+the state and heartbeat of every worker:
 
 ```
 $ cg fleet tree
-fleet tree — codify-v10
+fleet tree — fleet
 main     gideon           branch main
-  feature  fm-codify-v10    branch feature/codify-v10   base main
-           tasks 13/16 done, 0 running  ahead 0  incomplete  seen -
+  wave 1   wm-fleet-1       branch wave/fleet/1         base main
+           tasks 1/2 done, 0 running  ahead 2  incomplete  seen -
+    worker w-fleet-2.1      branch                      wave 1  task 2.1  completed  hb 1s ago
+  wave 2   wm-fleet-2       branch wave/fleet/2         base main
+           tasks 0/1 done, 0 running  ahead 0  incomplete  seen -
     (no workers yet)
 ```
 
 It refuses in a repository with no hierarchy — *this repository runs flat* —
-rather than inventing one. `--json` returns `main`, `managers[]` with
-`tasks {total, done, claimed}`, `ahead`, `merged` and `complete`, and
+rather than inventing one. `--json` returns `main`, `managers[]` — one per
+wave, each with its `wave` — with `tasks {total, done, claimed}`, `ahead`,
+`merged` and `complete`, and
 `workers[]` with `wave`, `task`, `branch`, `base`, `worktree`, `state`,
 `attempt` and `heartbeat`.
 
@@ -428,36 +484,37 @@ All the reports take `--json`.
 
 ## A worked example
 
-One feature, two waves, from nothing to a merged pull request.
+One feature, two waves, from nothing to merged pull requests.
 
 ```sh
 # --- Gideon, in the main checkout -------------------------------------
 cg fleet roles                       # confirm the tree before spawning anything
-cg fleet begin 2.1                   # cuts feature/fleet from main, then wave/fleet/1
+cg fleet begin 2.1                   # cuts wave/fleet/1 from main, then task/fleet/2.1
+cg fleet begin 2.2                   # task/fleet/2.2, from the same wave branch
 
-# --- the worker, in its own worktree ----------------------------------
-cd .codegraph/worktrees/wave-fleet-1
-export CG_AGENT=w-fleet-1 CG_ROLE=worker CG_PARENT=fm-fleet \
+# --- a task worker, in its own worktree -------------------------------
+cd .codegraph/worktrees/task-fleet-2.1
+export CG_AGENT=w-fleet-2.1 CG_ROLE=worker CG_PARENT=wm-fleet-1 \
        CG_FEATURE=fleet CG_WAVE=1
 cg spec start 2.1
 # ...implement...
-cg spec done 2.1                     # qualification runs here, on the wave branch
+cg spec done 2.1                     # qualification runs here, on the task branch
 git add -A && git commit -m "alpha: implement [spec:fleet/2.1]"
+cg fleet merge-up 2.1                # task/fleet/2.1 → wave/fleet/1
+# ...the worker on 2.2 does the same, beside it...
 
-# --- the feature manager ----------------------------------------------
-cd /path/proj
-cg fleet merge-up 2.1                # wave/fleet/1 → feature/fleet
-cg fleet begin 3.1                   # wave 2 is cut from the feature branch,
-                                     # so it already has wave 1's work
-# ...worker 2 does the same...
-cg fleet merge-up 3.1
+# --- the wave manager of wave 1 ---------------------------------------
+cg fleet land 1                      # refused while 2.1 or 2.2 is open;
+                                     # then wave/fleet/1 → main behind the
+                                     # gates, and the PR (pr = "auto")
 
-# --- landing ----------------------------------------------------------
-cg fleet land fleet                  # feature/fleet → main behind the gates,
-                                     # then the PR (pr = "auto")
+# --- wave 2 -----------------------------------------------------------
+cg fleet begin 3.1                   # wave/fleet/2 is cut from main, so it
+                                     # already has wave 1's work
+# ...worker, merge-up, cg fleet land 2...
 
 # --- Gideon, at a checkpoint ------------------------------------------
-cg fleet checkpoint                  # merge the open feature/* PRs in order
+cg fleet checkpoint                  # merge the open Codify PRs in order
 ```
 
 The claim on 2.1 was taken by `begin` and released by `cg spec done`, as
@@ -491,13 +548,16 @@ and spend — so a new supervisor can pick the run up where the last one
 stopped.
 
 - `-f F` runs one feature (default: the active one). `--all` runs every
-  feature with work left, each as its own run with its own manager and
+  feature with work left, each as its own run with its own managers and
   workers; a feature whose `[meta] requires` are not all done waits and
-  starts once they are, up to `[role.feature] max` at once.
+  starts once they are.
+- Each run has a manager per wave with work, up to `[role.manager] max`
+  alive at once (default: every wave). A wave's manager is woken when its
+  workers have nothing left to do and its wave has work to merge up or land.
 - `-n N` is the number of worker slots. Workers are also capped by
   `[role.worker] max`.
-- `--max-rounds R` is each manager's wake budget (16 by default), so a
-  fleet that cannot finish stops instead of spinning. `--max-fail K` stops
+- `--max-rounds R` is the run's manager wake budget (16 per wave by
+  default), so a fleet that cannot finish stops instead of spinning. `--max-fail K` stops
   the run once failed attempts exceed K (default 2).
 - `--dry-run` plans without claiming or creating anything, in the
   foreground. `cg spec run --fleet` is the same run as a foreground
@@ -507,9 +567,9 @@ A real run reports each spawn and each result, and ends on the merge rather
 than on a process exiting:
 
 ```
-[fleet] alpha — manager + 3 worker slot(s), driver custom, 16 wake(s)
+[fleet] alpha — a manager per wave (all at once) + 3 worker slot(s), driver custom, 48 wake(s)
 [fleet] run dc70cdc5f81a — supervisor pid 2970055
-[fleet] manager fm-alpha on feature/alpha (15 wake(s) left), log .codegraph/agents/alpha-manager.log
+[fleet] manager wm-alpha-1 on wave/alpha/1 (47 wake(s) left), log .codegraph/agents/alpha-manager-1.log
 [fleet] worker w-alpha-2.1 → 2.1 (wave 1) on task/alpha/2.1, log .codegraph/agents/alpha-2.1.log
 [fleet] worker w-alpha-2.2 → 2.2 (wave 1) on task/alpha/2.2, log .codegraph/agents/alpha-2.2.log
 [fleet] worker w-alpha-3.2 → 3.2 (wave 2) on task/alpha/3.2, log .codegraph/agents/alpha-3.2.log
@@ -522,9 +582,9 @@ than on a process exiting:
 [fleet] worker w-alpha-2.2 → 2.2 (wave 1) on task/alpha/2.2, log .codegraph/agents/alpha-2.2.log
 [fleet] worker w-alpha-2.2 task 2.2 exit 0 → done
 [fleet] worker w-alpha-3.2 task 3.2 exit 0 → done
-[fleet] beta — manager + 3 worker slot(s), driver custom, 16 wake(s)
-[fleet] alpha complete — 4/4 task(s) qualified, feature/alpha merged into main, 2 failure(s)
-[fleet] beta complete — 2/2 task(s) qualified, feature/beta merged into main, 0 failure(s)
+[fleet] beta — a manager per wave (all at once) + 3 worker slot(s), driver custom, 32 wake(s)
+[fleet] alpha complete — 4/4 task(s) qualified, wave/alpha/* merged into main, 2 failure(s)
+[fleet] beta complete — 2/2 task(s) qualified, wave/beta/* merged into main, 0 failure(s)
 ```
 
 That is two features, `beta` requiring `alpha`: a task that failed once and
@@ -533,19 +593,19 @@ the moment `alpha` landed.
 
 ### Three levels at once
 
-The manager and its workers are alive together. What used to make them
-take turns — two processes merging into the same feature worktree — is now
-a lock: `merge-up` and `land` take the feature's merge lock
-(`.codegraph/fleet/merge-<feature>.lock`), waiting up to two minutes
+The wave managers and their workers are alive together. Two processes
+merging into the same wave worktree would race, so that is a lock:
+`merge-up` and `land` take the merge lock of the branch they merge into
+(`.codegraph/fleet/merge-<name>.lock`), waiting up to two minutes
 (`CG_MERGE_LOCK_WAIT_MS`) before refusing with *another merge into …'s
 branch held the lock*.
 
-With a `{task}` worker template each task gets its own slot, branch, and
-worktree, and the tasks of a wave run in parallel when their declared
-touches are disjoint and no collision is predicted (see
-[drift.md](drift.md#collision-prediction)). A predicted collision runs one
-after the other. A task that is already running is never handed to a
-second slot.
+Each task gets its own slot, branch, and worktree, and the tasks of a wave
+run in parallel when their declared touches are disjoint and no collision
+is predicted (see [drift.md](drift.md#collision-prediction)). A predicted
+collision runs one after the other. A task that is already running is never
+handed to a second slot. In the older shape a worker owns a whole wave and
+works its tasks in order.
 
 The outcome of a child is decided by the task's status on its branch tip
 and by the merge state, never by the exit code alone: `exit 1 →
@@ -618,9 +678,9 @@ run. The new attempt's prompt carries what went wrong, under
 agent said last, and the task's outcome memories — including `verify_cmd`
 failures and their Jev triage.
 
-**Escalation.** When the retries are spent, the task goes to the feature
+**Escalation.** When the retries are spent, the task goes to its wave's
 manager: it is steered with the failure and woken to fix the task on the
-feature branch, re-plan it, or record it as blocked. If a manager wake
+wave branch, re-plan it, or record it as blocked. If a manager wake
 comes and goes and the task is still not qualified, it goes to main,
 is marked blocked with the reason, and an outcome memory records it — and
 the rest of the run continues.
@@ -687,7 +747,7 @@ Scope:
 A worker packet holds, in priority order: the task, its criteria and scope;
 the current definitions of its declared symbols with their callers and
 callees; *What your prerequisites produced* — the symbols its required
-tasks actually introduced on the feature branch, with signatures; *Working
+tasks actually introduced upstream, with signatures; *Working
 alongside you* — the touches of live sibling workers, to leave alone; the
 decisions and constraints recorded for it; and the files in scope. When
 the budget runs out, lower parts are cut before higher ones.
@@ -706,7 +766,7 @@ $ cg fleet brief alpha
 ```
 
 While a worker runs, work merged upstream reaches it through `cg work
-update`: when another task has merged into the feature branch since the
+update`: when another task has merged into the wave branch since the
 attempt began, the delta gains an `upstream` list naming the task, the
 branch, and the symbols it brought, each resolved in the graph. When
 nothing merged, the delta stays as compact as before.
@@ -715,19 +775,23 @@ Each child also gets its identity in the environment: `CG_ROLE`,
 `CG_PARENT`, `CG_FEATURE`, `CG_WAVE`, `CG_BRANCH`, `CG_BASE`, `CG_RUN` —
 and, for a worker, `CG_TASK`, `CG_ATTEMPT` and `CG_FENCE`. The prompts end
 on the command that moves work upward: a worker's with `cg fleet merge-up
-<id>`, a manager's with `cg fleet land <feature>` and `cg fleet pr
-<feature>`.
+<id>`, a wave manager's with `cg fleet land <wave> -f <feature>` (the older
+shape's feature manager: `cg fleet land <feature>` and `cg fleet pr
+<feature>`).
 
 ## Limitations
 
 - The lifecycle commands drive `git` and `gh` as subprocesses. Without
   `gh`, `pr` and `checkpoint` print the commands rather than running them.
 - `land` runs the gates in the main tree, after the merge, and resets on
-  red. It does not run them on the feature branch first.
+  red. It does not run them on the wave branch first.
+- Waves land in the order their managers finish, not strictly by number;
+  a wave's tasks still wait for the tasks they `require`.
 - `merge-up` reads the task's status from the branch tip, so work that
   qualified but was not committed looks unqualified. That is deliberate;
   `--force` exists for the exceptions.
-- `checkpoint` only recognises `feature/*` head branches as Codify's own.
+- `checkpoint` only recognises head branches that match the manager
+  template (`wave/*`, or `feature/*` in the older shape) as Codify's own.
 - One supervisor per project. `--all` runs several features under it, but
   two independent `cg fleet up` calls in one repository are refused.
 - `--dry-run` previews one feature — the one named by `-f`, else the

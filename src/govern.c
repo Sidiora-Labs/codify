@@ -1561,12 +1561,27 @@ int cmd_resume(Cg *cg, const char *task, bool json, bool prompt)
             const char *role = cg_agent_role(NULL);
             const char *branch = getenv("CG_BRANCH");
             const char *parent = cg_agent_parent(NULL);
+            /* codify-v15 4.1: a branch naming the task is a task worker's */
+            bool per_task = branch && strstr(branch, sid);
+            const char *wave_env = getenv("CG_WAVE");
             if (role && strcmp(role, "worker") == 0) {
-                sb_puts(&b, "\nfleet: you are a wave worker");
+                sb_printf(&b, "\nfleet: you are a %s worker",
+                          per_task ? "task" : "wave");
                 if (branch && branch[0]) sb_printf(&b, " on %s", branch);
                 if (parent) sb_printf(&b, ", reporting to %s", parent);
-                sb_printf(&b, ". Commit on your branch, then hand the wave "
-                          "up to your manager:\n  cg fleet merge-up %s\n", sid);
+                sb_printf(&b, ". Commit on your branch, then hand the %s "
+                          "up to your manager:\n  cg fleet merge-up %s\n",
+                          per_task ? "task" : "wave", sid);
+            } else if (role && strcmp(role, "feature") == 0 && wave_env &&
+                       wave_env[0]) {
+                const char *env = getenv("CG_FEATURE");
+                sb_printf(&b, "\nfleet: you are the wave manager for wave %s "
+                          "of %s. Your subtree is complete only once every "
+                          "task of the wave is qualified and %s is merged:\n"
+                          "  cg fleet land %s -f %s\n", wave_env,
+                          env ? env : "the feature",
+                          branch && branch[0] ? branch : "the wave branch",
+                          wave_env, env ? env : "<feature>");
             } else if (role && strcmp(role, "feature") == 0) {
                 const char *env = getenv("CG_FEATURE");
                 const char *slash = strchr(tag, '/');

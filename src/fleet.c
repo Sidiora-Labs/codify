@@ -16,6 +16,7 @@
  * pull request, and the checkpoint. The two-level orchestrator builds on
  * all of it. */
 #include "cg.h"
+#include <ctype.h>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -85,7 +86,16 @@ int fleet_identity_record(Cg *g) {
 
 /* ---------------- hierarchy config ---------------- */
 
-static const char *ROLE_NAMES[FLEET_ROLES] = { "main", "feature", "worker" };
+static const char *ROLE_NAMES[FLEET_ROLES] = { "main", "manager", "worker" };
+
+/* The sections one role reads, in order, later ones winning: the manager
+ * answers to [role.feature], its name before waves had managers, and to
+ * [role.manager]. */
+static int role_sections(int r, const char *out[2]) {
+    if (r == FLEET_FEATURE) { out[0] = "feature"; out[1] = "manager"; return 2; }
+    out[0] = ROLE_NAMES[r];
+    return 1;
+}
 
 static void role_set(FleetRole *r, const char *name, const char *title,
                      const char *agent, const char *branch, const char *base) {
@@ -107,11 +117,11 @@ static void hier_defaults(Hierarchy *h) {
     h->checkpoint = xstrdup("manual");
     role_set(&h->roles[FLEET_MAIN], "main", "Main Gideon", "gideon",
              "{main}", "");
-    role_set(&h->roles[FLEET_FEATURE], "feature", "Feature Manager",
-             "fm-{feature}", "feature/{feature}", "{main}");
-    role_set(&h->roles[FLEET_WORKER], "worker", "Wave Worker",
-             "w-{feature}-{wave}", "wave/{feature}/{wave}",
-             "feature/{feature}");
+    role_set(&h->roles[FLEET_FEATURE], "manager", "Wave Manager",
+             "wm-{feature}-{wave}", "wave/{feature}/{wave}", "{main}");
+    role_set(&h->roles[FLEET_WORKER], "worker", "Task Worker",
+             "w-{feature}-{task}", "task/{feature}/{task}",
+             "wave/{feature}/{wave}");
 }
 
 static void take_str(char **slot, const Kvx *k, const char *sec,
@@ -194,6 +204,9 @@ static void cap_count(Hierarchy *h, const Kvx *wf, const char *sec,
     free(v);
 }
 
+static void role_caps_section(Hierarchy *h, const Kvx *wf, int r,
+                              const char *sec, const char *name, RoleCaps *c);
+
 /* Defaults first, from [agents] where it says anything, then [role.*].
  * A multi-day run must never inherit "unlimited" by accident, so every
  * role gets a wall-clock and retry budget unless the workflow says 0. */
@@ -201,17 +214,25 @@ void hier_role_caps(const Kvx *wf, Hierarchy *h) {
     char *driver = wf ? kvx_str(wf, "agents", "driver") : NULL;
     long wmax = wf ? kvx_long(wf, "agents", "max", 2) : 2;
     if (wmax < 1) wmax = 1;
-    static const long MAXES[FLEET_ROLES]   = { 1, 2, 0 };
+    /* the manager's 0 is every wave with work; one manager per feature
+     * (no {wave}) keeps its old two features at once */
+    long MAXES[FLEET_ROLES] = { 1, hier_per_wave(h) ? 0 : 2, 0 };
     static const long WALLS[FLEET_ROLES]   = { 3600, 3600, 7200 };
     static const long RETRIES[FLEET_ROLES] = { 0, 1, 2 };
     static const long STALLS[FLEET_ROLES]  = { 1800, 1800, 900 };
     for (int r = 0; r < FLEET_ROLES; r++) {
         RoleCaps *c = &h->roles[r].caps;
-        const char *name = ROLE_NAMES[r];
+        const char *secs[2];
+        int nsecs = role_sections(r, secs);
+        const char *name = secs[nsecs - 1];
         char sec[64];
-        snprintf(sec, sizeof sec, "role.%s", name);
         c->driver = xstrdup(driver && driver[0] ? driver : "codex");
-        if (wf) take_str(&c->driver, wf, sec, "driver");
+        for (int k = 0; wf && k < nsecs; k++) {
+            snprintf(sec, sizeof sec, "role.%s", secs[k]);
+            if (!kvx_has(wf, sec)) continue;
+            take_str(&c->driver, wf, sec, "driver");
+            name = secs[k];       /* problems name the section written */
+        }
         if (strcmp(c->driver, "codex") && strcmp(c->driver, "claude") &&
             strcmp(c->driver, "custom")) {
             hier_problem(h, "[role.%s] %s = \"%s\" is not codex, claude, or "
@@ -220,20 +241,33 @@ void hier_role_caps(const Kvx *wf, Hierarchy *h) {
             c->driver = xstrdup("codex");
         }
         c->model = xstrdup("");
-        if (wf) take_str(&c->model, wf, sec, "model");
         char akey[64];
         snprintf(akey, sizeof akey, "%s_args", c->driver);
         c->args = wf ? kvx_str(wf, "agents", akey) : NULL;
         if (!c->args) c->args = xstrdup("");
-        if (wf) take_str(&c->args, wf, sec, "args");
-        c->max = MAXES[r] ? MAXES[r] : wmax;
+        c->max = MAXES[r] || r == FLEET_FEATURE ? MAXES[r] : wmax;
         c->wall = WALLS[r];
         c->retries = RETRIES[r];
         c->stall = STALLS[r];
         c->spend = 0;
         c->approve = 0;
-        if (!wf) continue;
-        cap_count(h, wf, sec, name, "max", 1, &c->max);
+        for (int k = 0; wf && k < nsecs; k++) {
+            snprintf(sec, sizeof sec, "role.%s", secs[k]);
+            if (kvx_has(wf, sec)) role_caps_section(h, wf, r, sec, secs[k], c);
+        }
+    }
+    free(driver);
+}
+
+/* one [role.X] section's capabilities over what is already in *c */
+static void role_caps_section(Hierarchy *h, const Kvx *wf, int r,
+                              const char *sec, const char *name, RoleCaps *c) {
+    {
+        take_str(&c->model, wf, sec, "model");
+        take_str(&c->args, wf, sec, "args");
+        /* 0 managers means one for every wave with work */
+        cap_count(h, wf, sec, name, "max", r == FLEET_FEATURE ? 0 : 1,
+                  &c->max);
         cap_count(h, wf, sec, name, "retries", 0, &c->retries);
         cap_duration(h, wf, sec, name, "wall", &c->wall);
         cap_duration(h, wf, sec, name, "stall", &c->stall);
@@ -278,7 +312,38 @@ void hier_role_caps(const Kvx *wf, Hierarchy *h) {
         }
         free(ap);
     }
-    free(driver);
+}
+
+static void role_reset(char **slot, const char *v) {
+    free(*slot);
+    *slot = xstrdup(v);
+}
+
+/* A workflow written for the old shape names a worker per wave or a manager
+ * per feature and leaves the rest to the defaults; the defaults it did not
+ * write then follow the shape it did, instead of the new one's: a worker
+ * per wave under a manager of the whole feature, branches that do not
+ * collide, and titles that say what each role is. */
+static void hier_old_shape(Hierarchy *h, bool set[FLEET_ROLES][4]) {
+    FleetRole *m = &h->roles[FLEET_FEATURE], *w = &h->roles[FLEET_WORKER];
+    enum { T, A, B, BASE };
+    /* a worker per wave would share the wave's branch with its manager */
+    if (!strstr(w->branch, "{task}") && !set[FLEET_FEATURE][B]) {
+        role_reset(&m->branch, "feature/{feature}");
+        if (!set[FLEET_FEATURE][A]) role_reset(&m->agent, "fm-{feature}");
+    }
+    if (!strstr(m->branch, "{wave}") && !set[FLEET_FEATURE][A] &&
+        strstr(m->agent, "{wave}"))
+        role_reset(&m->agent, "fm-{feature}");
+    if (!strstr(w->branch, "{task}") && !set[FLEET_WORKER][A] &&
+        strstr(w->agent, "{task}"))
+        role_reset(&w->agent, "w-{feature}-{wave}");
+    if (!set[FLEET_FEATURE][T] && !strstr(m->branch, "{wave}"))
+        role_reset(&m->title, "Feature Manager");
+    if (!set[FLEET_WORKER][T] && !strstr(w->branch, "{task}"))
+        role_reset(&w->title, "Wave Worker");
+    /* a worker's work goes up to its manager's branch */
+    if (!set[FLEET_WORKER][BASE]) role_reset(&w->base, m->branch);
 }
 
 /* Read [hierarchy] and [role.main|feature|worker] over the built-in
@@ -288,8 +353,10 @@ void hier_role_caps(const Kvx *wf, Hierarchy *h) {
  * they would use. wf may be NULL (no workflow file at all). */
 bool hier_load(const Kvx *wf, Hierarchy *h) {
     hier_defaults(h);
-    hier_role_caps(wf, h);
-    if (!wf || !kvx_has(wf, "hierarchy")) return false;
+    if (!wf || !kvx_has(wf, "hierarchy")) {
+        hier_role_caps(wf, h);
+        return false;
+    }
     h->configured = true;
     h->enabled = kvx_bool(wf, "hierarchy", "enabled", true);
     take_str(&h->main_branch, wf, "hierarchy", "main");
@@ -303,24 +370,38 @@ bool hier_load(const Kvx *wf, Hierarchy *h) {
     char **names = NULL;
     int n = kvx_subsections(wf, "role", &names);
     for (int i = 0; i < n; i++) {
-        char sec[128];
-        snprintf(sec, sizeof sec, "role.%s", names[i]);
-        int which = -1;
+        bool known = strcmp(names[i], "feature") == 0;
         for (int r = 0; r < FLEET_ROLES; r++)
-            if (strcmp(names[i], ROLE_NAMES[r]) == 0) which = r;
-        if (which < 0) {
-            if (h->nunknown < (int)(sizeof h->unknown / sizeof h->unknown[0]))
-                h->unknown[h->nunknown++] = xstrdup(names[i]);
-        } else {
-            FleetRole *r = &h->roles[which];
-            take_str(&r->title, wf, sec, "title");
-            take_str(&r->agent, wf, sec, "agent");
-            take_str(&r->branch, wf, sec, "branch");
-            take_str(&r->base, wf, sec, "base");
-        }
+            if (strcmp(names[i], ROLE_NAMES[r]) == 0) known = true;
+        if (!known &&
+            h->nunknown < (int)(sizeof h->unknown / sizeof h->unknown[0]))
+            h->unknown[h->nunknown++] = xstrdup(names[i]);
         free(names[i]);
     }
     free(names);
+    /* which template keys the workflow wrote, per role */
+    bool set[FLEET_ROLES][4] = { { false } };
+    for (int which = 0; which < FLEET_ROLES; which++) {
+        const char *secs[2];
+        int nsecs = role_sections(which, secs);
+        FleetRole *r = &h->roles[which];
+        for (int k = 0; k < nsecs; k++) {
+            char sec[128];
+            snprintf(sec, sizeof sec, "role.%s", secs[k]);
+            if (!kvx_has(wf, sec)) continue;
+            /* the manager keeps the name its workflow gives it */
+            if (which == FLEET_FEATURE) { free(r->name); r->name = xstrdup(secs[k]); }
+            char **slot[4] = { &r->title, &r->agent, &r->branch, &r->base };
+            static const char *KEYS[4] = { "title", "agent", "branch", "base" };
+            for (int j = 0; j < 4; j++)
+                if (kvx_raw(wf, sec, KEYS[j])) {
+                    take_str(slot[j], wf, sec, KEYS[j]);
+                    set[which][j] = true;
+                }
+        }
+    }
+    hier_old_shape(h, set);
+    hier_role_caps(wf, h);
     return h->enabled;
 }
 
@@ -346,6 +427,14 @@ void hier_expand(const Hierarchy *h, const char *tmpl, const char *feature,
 
 bool hier_per_task(const Hierarchy *h) {
     return strstr(h->roles[FLEET_WORKER].branch, "{task}") != NULL;
+}
+
+bool hier_per_wave(const Hierarchy *h) {
+    return strstr(h->roles[FLEET_FEATURE].branch, "{wave}") != NULL;
+}
+
+long hier_manager_wave(const Hierarchy *h, long wave) {
+    return hier_per_wave(h) ? wave : -1;
 }
 
 /* Expand {main}, {remote}, {feature}, {wave}, and {task} in a role
@@ -393,6 +482,9 @@ static Kvx *fleet_workflow(const Cg *cg, char *path, size_t cap) {
 
 static const char *role_title(const Hierarchy *h, const char *role) {
     if (!role) return "";
+    /* a manager registers as "feature", whatever the workflow calls it */
+    if (strcmp(role, "feature") == 0 || strcmp(role, "manager") == 0)
+        return h->roles[FLEET_FEATURE].title;
     for (int r = 0; r < FLEET_ROLES; r++)
         if (strcmp(h->roles[r].name, role) == 0) return h->roles[r].title;
     return role;
@@ -745,17 +837,20 @@ static int fleet_roles(Cg *cg, bool json) {
             if (c->spend > 0) snprintf(spend, sizeof spend, "$%.2f", c->spend);
             else snprintf(spend, sizeof spend, "—");
             approvals(c->approve, appr, sizeof appr, ",");
-            printf("%-8s %-7s %-14s %4ld %6s %8s %8ld %6s  %s\n",
+            char mx[24];
+            if (c->max > 0) snprintf(mx, sizeof mx, "%ld", c->max);
+            else snprintf(mx, sizeof mx, "all");  /* a manager for every wave */
+            printf("%-8s %-7s %-14s %4s %6s %8s %8ld %6s  %s\n",
                    h.roles[r].name, c->driver, c->model[0] ? c->model : "—",
-                   c->max, wall, spend, c->retries, stall,
+                   mx, wall, spend, c->retries, stall,
                    appr[0] ? appr : "—");
         }
         for (int r = 0; r < FLEET_ROLES; r++)
             if (h.roles[r].caps.args[0])
                 printf("args %-8s %s\n", h.roles[r].name, h.roles[r].caps.args);
         for (int i = 0; i < h.nunknown; i++)
-            printf("warn: [role.%s] is not main, feature, or worker — "
-                   "ignored\n", h.unknown[i]);
+            printf("warn: [role.%s] is not main, manager (feature), or "
+                   "worker — ignored\n", h.unknown[i]);
         for (int i = 0; i < h.nproblems; i++)
             printf("warn: %s\n", h.problems[i]);
     }
@@ -914,12 +1009,14 @@ static int plan_task_cmp(const void *a, const void *b) {
 
 /* live agents on one feature, by role; workers are keyed by the wave of
  * the task they hold, managers by the feature they registered */
-typedef struct { char *agent; long wave; char *role; } LiveAgent;
+typedef struct { char *agent; long wave; char *role; char *task; } LiveAgent;
 
 static void live_add(LiveAgent **v, int *n, int *cap, const char *agent,
-                     long wave, const char *role) {
+                     long wave, const char *role, const char *task) {
+    if (!task) task = "";
     for (int i = 0; i < *n; i++)
-        if (strcmp((*v)[i].agent, agent) == 0 && (*v)[i].wave == wave) return;
+        if (strcmp((*v)[i].agent, agent) == 0 && (*v)[i].wave == wave &&
+            strcmp((*v)[i].task, task) == 0) return;
     if (*n == *cap) {
         *cap = *cap ? *cap * 2 : 8;
         *v = xrealloc(*v, sizeof(LiveAgent) * (size_t)*cap);
@@ -927,15 +1024,25 @@ static void live_add(LiveAgent **v, int *n, int *cap, const char *agent,
     (*v)[*n].agent = xstrdup(agent);
     (*v)[*n].wave = wave;
     (*v)[*n].role = xstrdup(role);
+    (*v)[*n].task = xstrdup(task);
     (*n)++;
 }
 
+/* the live agents of <role>, on <wave> (-1: any) and <task> (NULL: any) */
 static void live_names(const LiveAgent *v, int n, const char *role,
-                       long wave, StrBuf *b, bool json) {
+                       long wave, const char *task, StrBuf *b, bool json) {
     int k = 0;
     for (int i = 0; i < n; i++) {
         if (strcmp(v[i].role, role) != 0) continue;
         if (wave >= 0 && v[i].wave != wave) continue;
+        if (task && strcmp(v[i].task, task) != 0) continue;
+        bool dup = false;   /* one agent on two tasks of a wave is one name */
+        for (int j = 0; j < i; j++)
+            if (strcmp(v[j].agent, v[i].agent) == 0 &&
+                strcmp(v[j].role, role) == 0 &&
+                (wave < 0 || v[j].wave == wave) &&
+                (!task || strcmp(v[j].task, task) == 0)) dup = true;
+        if (dup) continue;
         if (k++) sb_puts(b, json ? "," : ", ");
         if (json) sb_json_str(b, v[i].agent); else sb_puts(b, v[i].agent);
     }
@@ -1014,23 +1121,30 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
                 if (strcmp(tasks[i].id, id) == 0) { wave = tasks[i].wave; break; }
             const char *role = (const char *)sqlite3_column_text(st, 2);
             /* a manager holding a task is still listed as the manager */
+            bool wk = strcmp(role, "worker") == 0;
             live_add(&live, &nlive, &clive,
                      (const char *)sqlite3_column_text(st, 1),
-                     strcmp(role, "worker") == 0 ? wave : -1, role);
+                     wk ? wave : -1, role, wk ? id : NULL);
         }
         sqlite3_finalize(st);
     }
     st = cg_prep(cg,
-        "SELECT agent, role FROM agents WHERE role IN ('main','feature') "
+        "SELECT agent, role, ifnull(wave,-1) FROM agents "
+        "WHERE role IN ('main','feature') "
         "AND (role='main' OR ifnull(feature,'')=?) "
         "AND seen > strftime('%s','now') - ?");
     if (st) {
         sqlite3_bind_text(st, 1, feature, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(st, 2, ttl);
-        while (sqlite3_step(st) == SQLITE_ROW)
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *role = (const char *)sqlite3_column_text(st, 1);
+            /* a manager is keyed by its wave only in the per-wave shape */
+            long wave = strcmp(role, "feature") == 0 && hier_per_wave(&h)
+                ? (long)sqlite3_column_int64(st, 2) : -1;
             live_add(&live, &nlive, &clive,
-                     (const char *)sqlite3_column_text(st, 0), -1,
-                     (const char *)sqlite3_column_text(st, 1));
+                     (const char *)sqlite3_column_text(st, 0), wave, role,
+                     NULL);
+        }
         sqlite3_finalize(st);
     }
 
@@ -1039,25 +1153,21 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
     const FleetRole *rm = &h.roles[FLEET_MAIN];
     const FleetRole *rf = &h.roles[FLEET_FEATURE];
     const FleetRole *rw = &h.roles[FLEET_WORKER];
+    bool per_wave = hier_per_wave(&h), per_task = hier_per_task(&h);
     if (json) {
         sb_puts(&b, "{\"feature\":");
         sb_json_str(&b, feature);
         sb_printf(&b, ",\"hierarchy\":{\"configured\":%s,\"enabled\":%s}",
                   h.configured ? "true" : "false", h.enabled ? "true" : "false");
+        sb_printf(&b, ",\"shape\":{\"manager\":\"%s\",\"worker\":\"%s\"}",
+                  per_wave ? "wave" : "feature", per_task ? "task" : "wave");
         hier_expand(&h, rm->agent, feature, -1, agent, sizeof agent);
         hier_expand(&h, rm->branch, feature, -1, branch, sizeof branch);
         sb_puts(&b, ",\"main\":{\"agent\":"); sb_json_str(&b, agent);
         sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
-        sb_puts(&b, ",\"live\":["); live_names(live, nlive, "main", -1, &b, true);
-        sb_puts(&b, "]}");
-        hier_expand(&h, rf->agent, feature, -1, agent, sizeof agent);
-        hier_expand(&h, rf->branch, feature, -1, branch, sizeof branch);
-        hier_expand(&h, rf->base, feature, -1, base, sizeof base);
-        sb_puts(&b, ",\"feature_manager\":{\"agent\":"); sb_json_str(&b, agent);
-        sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
-        sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
-        sb_puts(&b, ",\"live\":["); live_names(live, nlive, "feature", -1, &b, true);
-        sb_puts(&b, "]},\"waves\":[");
+        sb_puts(&b, ",\"live\":[");
+        live_names(live, nlive, "main", -1, NULL, &b, true);
+        sb_puts(&b, "]},\"managers\":[");
     } else {
         sb_printf(&b, "fleet plan — feature %s (hierarchy %s)\n", feature,
                   !h.configured ? "not configured, defaults shown"
@@ -1065,68 +1175,112 @@ static int fleet_plan(Cg *cg, const char *feature_ov, bool json) {
         hier_expand(&h, rm->agent, feature, -1, agent, sizeof agent);
         hier_expand(&h, rm->branch, feature, -1, branch, sizeof branch);
         sb_printf(&b, "%-9s %-20s %-28s %-24s live: ", "main", agent, branch, "");
-        live_names(live, nlive, "main", -1, &b, false);
-        hier_expand(&h, rf->agent, feature, -1, agent, sizeof agent);
-        hier_expand(&h, rf->branch, feature, -1, branch, sizeof branch);
-        hier_expand(&h, rf->base, feature, -1, base, sizeof base);
-        char basecol[540];
-        snprintf(basecol, sizeof basecol, "← %s", base);
-        sb_printf(&b, "\n%-9s %-20s %-28s %-24s live: ", "feature", agent,
-                  branch, basecol);
-        live_names(live, nlive, "feature", -1, &b, false);
+        live_names(live, nlive, "main", -1, NULL, &b, false);
         sb_putc(&b, '\n');
     }
-    long lastw = -1;
-    int nw = 0;
-    for (int i = 0; i < nt; i++) {
+    /* One manager row per wave that still has work (one for the whole
+     * feature in the old shape), and under it a worker row per task (per
+     * wave in the old shape) with the tasks it owns. */
+    int nm = 0;
+    for (int i = 0; i < nt; ) {
         long w = tasks[i].wave;
-        if (w != lastw) {
-            hier_expand(&h, rw->agent, feature, w, agent, sizeof agent);
-            hier_expand(&h, rw->branch, feature, w, branch, sizeof branch);
-            hier_expand(&h, rw->base, feature, w, base, sizeof base);
+        int j = i;
+        bool open = false;
+        while (j < nt && tasks[j].wave == w) {
+            if (strcmp(tasks[j].status, "done") != 0) open = true;
+            j++;
+        }
+        if (!per_wave) j = nt;               /* one manager owns every wave */
+        else if (!open) { i = j; continue; } /* a finished wave has no one */
+        long mw = per_wave ? w : -1;
+        hier_expand(&h, rf->agent, feature, mw, agent, sizeof agent);
+        hier_expand(&h, rf->branch, feature, mw, branch, sizeof branch);
+        hier_expand(&h, rf->base, feature, mw, base, sizeof base);
+        if (json) {
+            if (nm) sb_putc(&b, ',');
+            if (mw >= 0) sb_printf(&b, "{\"wave\":%ld", mw);
+            else sb_puts(&b, "{\"wave\":null");
+            sb_puts(&b, ",\"agent\":"); sb_json_str(&b, agent);
+            sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
+            sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
+            sb_puts(&b, ",\"live\":[");
+            live_names(live, nlive, "feature", mw, NULL, &b, true);
+            sb_puts(&b, "],\"workers\":[");
+        } else {
+            char ml[32], basecol[540];
+            if (mw >= 0) snprintf(ml, sizeof ml, "wave %ld", mw);
+            else snprintf(ml, sizeof ml, "feature");
+            snprintf(basecol, sizeof basecol, "← %s", base);
+            sb_printf(&b, "%-9s %-20s %-28s %-24s live: ", ml, agent, branch,
+                      basecol);
+            live_names(live, nlive, "feature", mw, NULL, &b, false);
+            sb_putc(&b, '\n');
+        }
+        nm++;
+        int nwk = 0;
+        for (int k = i; k < j; ) {
+            /* the tasks one worker owns: one task, or the whole wave */
+            int e = k + 1;
+            if (!per_task)
+                while (e < j && tasks[e].wave == tasks[k].wave) e++;
+            long tw = tasks[k].wave;
+            const char *tid = per_task ? tasks[k].id : NULL;
+            hier_expand_task(&h, rw->agent, feature, tw, tid, agent, sizeof agent);
+            hier_expand_task(&h, rw->branch, feature, tw, tid, branch, sizeof branch);
+            hier_expand_task(&h, rw->base, feature, tw, tid, base, sizeof base);
             if (json) {
-                if (nw) sb_puts(&b, "]}");
-                if (nw++) sb_putc(&b, ',');
-                sb_printf(&b, "{\"wave\":%ld,\"agent\":", w);
-                sb_json_str(&b, agent);
+                if (nwk) sb_putc(&b, ',');
+                sb_printf(&b, "{\"wave\":%ld,\"task\":", tw);
+                if (tid) sb_json_str(&b, tid); else sb_puts(&b, "null");
+                sb_puts(&b, ",\"agent\":"); sb_json_str(&b, agent);
                 sb_puts(&b, ",\"branch\":"); sb_json_str(&b, branch);
                 sb_puts(&b, ",\"base\":"); sb_json_str(&b, base);
                 sb_puts(&b, ",\"live\":[");
-                live_names(live, nlive, "worker", w, &b, true);
+                live_names(live, nlive, "worker", tw, tid, &b, true);
                 sb_puts(&b, "],\"tasks\":[");
+                for (int t = k; t < e; t++) {
+                    if (t > k) sb_putc(&b, ',');
+                    sb_puts(&b, "{\"id\":");      sb_json_str(&b, tasks[t].id);
+                    sb_puts(&b, ",\"status\":");  sb_json_str(&b, tasks[t].status);
+                    sb_puts(&b, ",\"title\":");   sb_json_str(&b, tasks[t].title);
+                    sb_putc(&b, '}');
+                }
+                sb_puts(&b, "]}");
+            } else if (tid) {
+                sb_printf(&b, "  %-7s %-12s %-20s %-28s live: ", tid,
+                          tasks[k].status, agent, branch);
+                live_names(live, nlive, "worker", tw, tid, &b, false);
+                sb_printf(&b, "\n          %s\n", tasks[k].title);
             } else {
-                char wl[24], basecol[540];
-                snprintf(wl, sizeof wl, "wave %ld", w);
+                char wl[32], basecol[540];
+                snprintf(wl, sizeof wl, "  wave %ld", tw);
                 snprintf(basecol, sizeof basecol, "← %s", base);
                 sb_printf(&b, "%-9s %-20s %-28s %-24s live: ", wl, agent,
                           branch, basecol);
-                live_names(live, nlive, "worker", w, &b, false);
+                live_names(live, nlive, "worker", tw, NULL, &b, false);
                 sb_putc(&b, '\n');
-                nw++;
+                for (int t = k; t < e; t++)
+                    sb_printf(&b, "          %-8s %-12s %s\n", tasks[t].id,
+                              tasks[t].status, tasks[t].title);
             }
-            lastw = w;
+            nwk++;
+            k = e;
         }
-        if (json) {
-            const char *prev = b.p + b.len - 1;
-            if (*prev != '[') sb_putc(&b, ',');
-            sb_puts(&b, "{\"id\":");      sb_json_str(&b, tasks[i].id);
-            sb_puts(&b, ",\"status\":");  sb_json_str(&b, tasks[i].status);
-            sb_puts(&b, ",\"title\":");   sb_json_str(&b, tasks[i].title);
-            sb_putc(&b, '}');
-        } else {
-            sb_printf(&b, "          %-8s %-12s %s\n", tasks[i].id,
-                      tasks[i].status, tasks[i].title);
-        }
+        if (json) sb_puts(&b, "]}");
+        i = j;
     }
     if (json) {
-        if (nw) sb_puts(&b, "]}");
         sb_puts(&b, "]}\n");
     } else if (!nt) {
         sb_puts(&b, "no tasks with a wave\n");
+    } else if (!nm) {
+        sb_puts(&b, "every wave is done\n");
     }
     fputs(b.p, stdout);
     sb_free(&b);
-    for (int i = 0; i < nlive; i++) { free(live[i].agent); free(live[i].role); }
+    for (int i = 0; i < nlive; i++) {
+        free(live[i].agent); free(live[i].role); free(live[i].task);
+    }
     free(live);
     for (int i = 0; i < nt; i++) {
         free(tasks[i].id); free(tasks[i].title); free(tasks[i].status);
@@ -1156,6 +1310,7 @@ typedef struct {
     const char *tree;          /* cg->shared */
     int gates_ok;              /* 1 green in this command, -1 not run here */
     int merge_fd;              /* the feature's merge lock while held; else -1 */
+    long wave;                 /* the wave a land or pr is for; -1: the feature */
 } Lifecycle;
 
 static void lifecycle_close(Lifecycle *c) {
@@ -1205,6 +1360,7 @@ static int lifecycle_open(Cg *cg, const char *feature_ov, Lifecycle *c) {
     c->tree = cg->shared;
     c->gates_ok = -1;
     c->merge_fd = -1;
+    c->wave = -1;
     config_workflow_path(c->tree, c->wfpath, sizeof c->wfpath);
     c->wf = kvx_parse(c->wfpath);
     if (!c->wf) {
@@ -1420,7 +1576,8 @@ int fleet_worker_begin(Cg *cg, const char *id, const char *feature_ov,
     else hier_expand_task(&c.h, rw->agent, c.feature, wave, id, agent, sizeof agent);
     hier_expand_task(&c.h, rw->branch, c.feature, wave, id, branch, sizeof branch);
     hier_expand_task(&c.h, rw->base, c.feature, wave, id, base, sizeof base);
-    hier_expand(&c.h, rf->agent, c.feature, -1, parent, sizeof parent);
+    hier_expand(&c.h, rf->agent, c.feature, hier_manager_wave(&c.h, wave),
+                parent, sizeof parent);
 
     StrBuf err; sb_init(&err);
     bool base_created = false;
@@ -1795,6 +1952,7 @@ static void pr_event(Cg *cg, const Lifecycle *c, const char *outcome,
                      const char *error) {
     StrBuf e; sb_init(&e);
     ev_str(&e, "feature", c->feature); ev_str(&e, "outcome", outcome);
+    if (c->wave >= 0) ev_long(&e, "wave", c->wave);
     ev_str(&e, "branch", branch); ev_str(&e, "base", c->h.main_branch);
     ev_str(&e, "url", url && url[0] ? url : NULL);
     if (number > 0) ev_long(&e, "number", number);
@@ -1807,6 +1965,7 @@ static void land_event(Cg *cg, const Lifecycle *c, const char *outcome,
                        char **conflicts, int nconf, const char *red_gate) {
     StrBuf e; sb_init(&e);
     ev_str(&e, "feature", c->feature); ev_str(&e, "outcome", outcome);
+    if (c->wave >= 0) ev_long(&e, "wave", c->wave);
     ev_str(&e, "branch", branch); ev_str(&e, "main", c->h.main_branch);
     ev_str(&e, "head", head && head[0] ? head : NULL);
     ev_long(&e, "commits", commits);
@@ -1815,25 +1974,196 @@ static void land_event(Cg *cg, const Lifecycle *c, const char *outcome,
     fleet_event(cg, "fleet.land", c->feature, &e);
 }
 
-/* cg fleet land <feature>: the feature branch into local main, behind the
- * test and lint gates. Red means main is reset to where it was — landing is
- * all or nothing, and a half-landed main is the one state nobody can reason
- * about. Green opens the pull request when the policy says auto, and prints
- * the exact commands when it says manual. */
+/* What a land or a pull request is about: the feature in the old shape,
+ * one wave of it when every wave has its own manager. Also the approval
+ * subject, so two waves never ride one approval. */
+static void lifecycle_subject(const Lifecycle *c, char *out, size_t cap) {
+    if (c->wave >= 0) snprintf(out, cap, "%s/wave-%ld", c->feature, c->wave);
+    else snprintf(out, cap, "%s", c->feature);
+}
+
+/* the manager's branch the land or pull request is for */
+static void lifecycle_branch(const Lifecycle *c, char *out, size_t cap) {
+    hier_expand(&c->h, c->h.roles[FLEET_FEATURE].branch, c->feature, c->wave,
+                out, cap);
+}
+
+/* the spec as committed on <branch>; NULL when the branch has none */
+static Kvx *spec_on_branch(const Lifecycle *c, const char *branch) {
+    StrBuf a; sb_init(&a);
+    sb_printf(&a, "%s:%s/%s/spec.kvx", branch, config_spec_rel(c->tree),
+              c->feature);
+    StrBuf q; sb_init(&q);
+    sb_puts(&q, "show ");
+    sb_shquote(&q, a.p);
+    sb_free(&a);
+    StrBuf out; sb_init(&out);
+    int rc = git_run(c->tree, q.p, &out);
+    sb_free(&q);
+    if (rc != 0) { sb_free(&out); return NULL; }
+    char dir[4700], tmp[4800];
+    snprintf(dir, sizeof dir, "%s/%s/fleet", c->tree, CG_DIR);
+    mkdirs(dir);
+    snprintf(tmp, sizeof tmp, "%s/land-%ld.kvx", dir, (long)getpid());
+    Kvx *k = write_entire_file(tmp, out.p, out.len) == 0 ? kvx_parse(tmp) : NULL;
+    unlink(tmp);
+    sb_free(&out);
+    return k;
+}
+
+/* The tasks of <wave> (every wave when -1) not done on the main tree nor on
+ * the wave's branch, as "2.1 (in_progress), 2.2 (pending)"; how many. */
+static int wave_open_tasks(const Lifecycle *c, long wave, const char *branch,
+                           StrBuf *names) {
+    Kvx *f = kvx_parse(c->specpath);
+    if (!f) return 0;
+    Kvx *tip = branch ? spec_on_branch(c, branch) : NULL;
+    char **ids = NULL;
+    int nids = kvx_subsections(f, "task", &ids);
+    kvx_sort_dotted(ids, nids);
+    int open = 0;
+    for (int i = 0; i < nids; i++) {
+        char sec[300];
+        snprintf(sec, sizeof sec, "task.%s", ids[i]);
+        if (kvx_raw(f, sec, "wave") &&
+            (wave < 0 || kvx_long(f, sec, "wave", 0) == wave)) {
+            char *st = kvx_str(f, sec, "status");
+            char *bt = tip ? kvx_str(tip, sec, "status") : NULL;
+            bool done = (st && strcmp(st, "done") == 0) ||
+                        (bt && strcmp(bt, "done") == 0);
+            if (!done) {
+                if (names) {
+                    if (open) sb_puts(names, ", ");
+                    sb_printf(names, "%s (%s)", ids[i],
+                              bt && bt[0] ? bt : st && st[0] ? st : "pending");
+                }
+                open++;
+            }
+            free(st); free(bt);
+        }
+        free(ids[i]);
+    }
+    free(ids);
+    kvx_free(tip);
+    kvx_free(f);
+    return open;
+}
+
+/* The wave a land or pr names. <what> is a wave number or a task id in it;
+ * nothing means CG_WAVE (a Wave Manager lands its own wave). In the old
+ * shape there is one branch for the feature, so any of them means it. */
+static int lifecycle_target(Lifecycle *c, const char *what, const char *verb) {
+    if (!hier_per_wave(&c->h)) { c->wave = -1; return 0; }
+    const char *env = getenv("CG_WAVE");
+    if (!what && env && env[0]) what = env;
+    if (!what || !what[0]) {
+        StrBuf w; sb_init(&w);
+        Kvx *f = kvx_parse(c->specpath);
+        char **ids = NULL;
+        int nids = f ? kvx_subsections(f, "task", &ids) : 0;
+        long seen[64];
+        int ns = 0;
+        for (int i = 0; i < nids; i++) {
+            char sec[300];
+            snprintf(sec, sizeof sec, "task.%s", ids[i]);
+            if (kvx_raw(f, sec, "wave")) {
+                long wv = kvx_long(f, sec, "wave", 0);
+                bool dup = false;
+                for (int k = 0; k < ns; k++) dup |= seen[k] == wv;
+                if (!dup && ns < 64) seen[ns++] = wv;
+            }
+            free(ids[i]);
+        }
+        free(ids);
+        kvx_free(f);
+        for (int i = 0; i < ns; i++)
+            for (int k = i + 1; k < ns; k++)
+                if (seen[k] < seen[i]) { long t = seen[i]; seen[i] = seen[k]; seen[k] = t; }
+        for (int i = 0; i < ns; i++) sb_printf(&w, "%s%ld", i ? ", " : "", seen[i]);
+        fprintf(stderr, "cg fleet: %s takes a wave of %s — every wave has its "
+                        "own manager and branch (waves: %s); cg fleet %s "
+                        "<wave> or <task-id>\n", verb, c->feature,
+                w.len ? w.p : "none", verb);
+        sb_free(&w);
+        return 1;
+    }
+    bool digits = true;
+    for (const char *p = what; *p; p++) if (*p < '0' || *p > '9') digits = false;
+    if (digits) { c->wave = atol(what); return 0; }
+    char status[64];
+    long wave = -1;
+    if (!task_wave_status(c->specpath, what, &wave, status, sizeof status)) {
+        fprintf(stderr, "cg fleet: %s is neither a wave nor a task with a wave "
+                        "in %s\n", what, c->specpath);
+        return 1;
+    }
+    c->wave = wave;
+    return 0;
+}
+
+/* cg fleet land <feature> in the old shape */
 int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
+    return fleet_land(cg, NULL, feature_ov, no_pr, json);
+}
+
+/* cg fleet land <wave|task-id>: the wave branch into local main, behind the
+ * test and lint gates, once every task of the wave is done (the feature
+ * branch, in the old shape of one manager per feature). Red means main is
+ * reset to where it was — landing is all or nothing, and a half-landed main
+ * is the one state nobody can reason about. Green opens the pull request
+ * when the policy says auto, and prints the exact commands when it says
+ * manual. */
+/* a wave number or a task id ("2", "2.1"), not a feature name */
+static bool names_wave_or_task(const char *s) {
+    if (!s || !isdigit((unsigned char)s[0])) return false;
+    for (; *s; s++)
+        if (!isdigit((unsigned char)*s) && *s != '.') return false;
+    return true;
+}
+
+int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
+               bool json) {
+    /* `land <feature>` still names a feature: it is the old shape's form */
+    if (what && !feature_ov) {
+        char p[4700];
+        struct stat fst;
+        config_feature_path(cg->shared, what, p, sizeof p);
+        if (stat(p, &fst) == 0 || !names_wave_or_task(what)) {
+            feature_ov = what;
+            what = NULL;
+        }
+    }
     Lifecycle c;
     if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
+    if (lifecycle_target(&c, what, "land") != 0) { lifecycle_close(&c); return 1; }
     if (lifecycle_merge_lock(&c) != 0) { lifecycle_close(&c); return 1; }
-    const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
-    char branch[512];
-    hier_expand(&c.h, rf->branch, c.feature, -1, branch, sizeof branch);
+    char branch[512], subject[300];
+    lifecycle_branch(&c, branch, sizeof branch);
+    lifecycle_subject(&c, subject, sizeof subject);
     if (!git_branch_exists(c.tree, branch)) {
         fprintf(stderr, "cg fleet: no branch %s — nothing has been merged up "
-                        "for %s yet\n", branch, c.feature);
+                        "for %s yet\n", branch, subject);
         lifecycle_close(&c);
         return 1;
     }
-    {
+    if (c.wave >= 0) {
+        /* a wave lands whole: a task still open would land half-done or
+         * strand its work on a branch main has moved past */
+        StrBuf open; sb_init(&open);
+        int n = wave_open_tasks(&c, c.wave, branch, &open);
+        if (n) {
+            fprintf(stderr, "cg fleet: wave %ld of %s is not done — %d task%s "
+                            "open: %s\n", c.wave, c.feature, n,
+                    n == 1 ? "" : "s", open.p);
+            sb_free(&open);
+            land_event(cg, &c, "open", branch, NULL, 0, NULL, 0, NULL);
+            lifecycle_close(&c);
+            return 1;
+        }
+        sb_free(&open);
+    }
+    /* coverage is the feature's: checked by the land that finishes it */
+    if (c.wave < 0 || wave_open_tasks(&c, -1, branch, NULL) == 0) {
         /* every acceptance criterion traced to a qualified task, before
          * anything lands; a person decides only where the workflow asked
          * (approve = ["coverage"]) */
@@ -1846,7 +2176,7 @@ int fleet_feature_land(Cg *cg, const char *feature_ov, bool no_pr, bool json) {
         }
         sb_free(&r);
     }
-    int gate = fleet_gate(cg, "land", c.feature);
+    int gate = fleet_gate(cg, "land", subject);
     if (gate) { lifecycle_close(&c); return gate; }
     char on[256], pre[65];
     if (!git_head(c.tree, on, sizeof on, pre, sizeof pre) ||
@@ -2130,16 +2460,17 @@ static void write_pr_body(Cg *cg, const Lifecycle *c, const char *branch,
 static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
                         bool json) {
     if (!dry_run) {
-        int gate = fleet_gate(cg, "pr", c->feature);
+        char subject[300];
+        lifecycle_subject(c, subject, sizeof subject);
+        int gate = fleet_gate(cg, "pr", subject);
         if (gate) {
             if (json) sb_printf(jb, "{\"opened\":false,\"waiting\":%s}",
                                 gate == CG_EXIT_APPROVAL ? "\"approval\"" : "\"rejected\"");
             return gate;
         }
     }
-    const FleetRole *rf = &c->h.roles[FLEET_FEATURE];
     char branch[512], title[300], bodypath[4800], gh[4096];
-    hier_expand(&c->h, rf->branch, c->feature, -1, branch, sizeof branch);
+    lifecycle_branch(c, branch, sizeof branch);
     write_pr_body(cg, c, branch, title, sizeof title, bodypath,
                   sizeof bodypath);
     bool have_gh = find_gh(gh, sizeof gh);
@@ -2271,11 +2602,22 @@ static int pr_open_core(Cg *cg, Lifecycle *c, bool dry_run, StrBuf *jb,
 }
 
 int fleet_pr_open(Cg *cg, const char *feature_ov, bool dry_run, bool json) {
+    /* pr <feature> names a feature; pr <wave|task-id> a wave of it */
+    const char *what = NULL;
+    if (feature_ov) {
+        char p[4700];
+        struct stat fst;
+        config_feature_path(cg->shared, feature_ov, p, sizeof p);
+        if (stat(p, &fst) != 0 && names_wave_or_task(feature_ov)) {
+            what = feature_ov;
+            feature_ov = NULL;
+        }
+    }
     Lifecycle c;
     if (lifecycle_open(cg, feature_ov, &c) != 0) return 1;
-    const FleetRole *rf = &c.h.roles[FLEET_FEATURE];
+    if (lifecycle_target(&c, what, "pr") != 0) { lifecycle_close(&c); return 1; }
     char branch[512];
-    hier_expand(&c.h, rf->branch, c.feature, -1, branch, sizeof branch);
+    lifecycle_branch(&c, branch, sizeof branch);
     if (!git_branch_exists(c.tree, branch)) {
         fprintf(stderr, "cg fleet: no branch %s to open a pull request "
                         "from\n", branch);
@@ -2512,7 +2854,7 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
              : fleet_merge_up(cg, pos, feature, force, keep, json);
     }
     if (strcmp(sub, "land") == 0)
-        return fleet_feature_land(cg, pos ? pos : feature, no_pr, json);
+        return fleet_land(cg, pos, feature, no_pr, json);
     if (strcmp(sub, "pr") == 0)
         return fleet_pr_open(cg, pos ? pos : feature, dry, json);
     if (strcmp(sub, "checkpoint") == 0) return fleet_checkpoint(cg, dry, json);
@@ -2573,8 +2915,8 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
     }
     fprintf(stderr, "usage: cg fleet roles | status | plan [-f F] | "
                     "tree [-f F] | begin <id> [-f F] [--agent A] | "
-                    "merge-up <id> [--force] [--keep] | land <feature> "
-                    "[--no-pr] | pr <feature> [--dry-run] | checkpoint "
+                    "merge-up <id> [--force] [--keep] | land <wave|id> "
+                    "[-f F] [--no-pr] | pr <wave|id> [--dry-run] | checkpoint "
                     "[--dry-run]\n");
     return 1;
 }

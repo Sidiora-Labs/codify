@@ -276,7 +276,7 @@ status  = "pending"
 
 [task.4.1]
 title      = "Wave managers and task workers: the default hierarchy, plan, begin, merge-up, land, and the supervisor's manager array"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["hier_defaults", "fleet_plan", "fleet_worker_begin", "fleet_merge_up", "fleet_land", "orch_spawn_manager", "sup_tick"]
 touches    = ["src/fleet.c", "src/orchestrate.c", "src/cg.h", "src/help.c", "spec/workflow.kvx", "editors/vscode/fleet.js", "tests/integration/26_fleet.sh", "tests/integration/32_supervisor.sh", "tests/integration/35_fleet_e2e.sh", "tests/integration/14_vscode.sh", "docs/hierarchy.md"]

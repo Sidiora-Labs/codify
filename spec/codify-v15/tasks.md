@@ -74,7 +74,7 @@
 ## A manager per wave, a worker per task, and waves that run side by side on the projection
 
 - [ ] 4. Fleet shape
-  - [ ] 4.1 Wave managers and task workers: the default hierarchy, plan, begin, merge-up, land, and the supervisor's manager array
+  - [-] 4.1 Wave managers and task workers: the default hierarchy, plan, begin, merge-up, land, and the supervisor's manager array
     - fleet.c: the new defaults and titles, [role.manager] as an alias of [role.feature], {wave} in the manager templates (per-wave managers when present, one per feature otherwise), fleet plan and fleet tree --json with a manager per wave, begin cutting task/ from the wave branch and creating the wave branch from main, merge-up into the wave branch, land taking a wave and refusing while tasks are open; spec/workflow.kvx on the new templates.
     - orchestrate.c: the supervisor's single manager becomes an array keyed by wave; spawn per wave with pending tasks under the manager max; workers under their wave's manager; the per-wave serialization only without {task}; state, fleet_nodes, status output and resume carry the managers; fleet.js labels managers by wave.
     - 26_fleet.sh, 32_supervisor.sh, 35_fleet_e2e.sh, 14_vscode.sh per req 10.6 (all but the parallel-wave clauses); docs/hierarchy.md.
