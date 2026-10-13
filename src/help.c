@@ -434,8 +434,9 @@ static const HelpCmd HELP[] = {
   .flags = "--prompt\ta paste-ready briefing built from the graph\n"
     "--budget N\ttoken budget for --prompt (default 6000)\n",
   .related = "handoff,brief" },
-{ .group = "agentic", .name = "hook", .args = "install|post-edit",
-  .usage = "hook install | post-edit",
+{ .group = "agentic", .name = "hook",
+  .args = "install|post-edit|event|pre-bash",
+  .usage = "hook install | post-edit | event | pre-bash",
   .summary = "agent and git hooks that keep the graph fresh",
   .related = "integrate,sync" },
 { .group = "agentic", .name = "hook install", .args = "",
@@ -491,12 +492,15 @@ static const HelpCmd HELP[] = {
   .usage = "tool call <name> [json-args|-]",
   .summary = "call one tool; - reads the arguments from stdin",
   .hide = true },
-{ .group = "agentic", .name = "integrate", .args = "[detect|plan|apply|doctor]",
-  .usage = "integrate [detect|plan|apply|doctor]",
+{ .group = "agentic", .name = "integrate",
+  .args = "[detect|plan|apply|doctor] [--no-plugin]",
+  .usage = "integrate [detect|plan|apply|doctor] [--no-plugin]",
   .summary = "configure and diagnose every agent host",
   .detail = "Codex, Claude Code, Copilot/VS Code, Cursor, Gemini CLI, "
     "OpenCode, Zed, Windsurf, Cline, and Continue. Planning is read-only; "
-    "apply is idempotent and backed up.",
+    "apply is idempotent and backed up. Apply also renders the Claude Code "
+    "plugin under ~/.codify/plugins/claude-code and installs it with the "
+    "claude CLI, and writes .codex/hooks.json; --no-plugin skips both.",
   .related = "mcp-install,hook install" },
 { .group = "agentic", .name = "integrate detect", .args = "",
   .usage = "integrate detect",

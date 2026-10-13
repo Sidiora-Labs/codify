@@ -1024,7 +1024,15 @@ int cmd_hook_install(Cg *cg)
     snprintf(dir, sizeof dir, "%s/.claude", cg->root);
     snprintf(path, sizeof path, "%s/settings.json", dir);
     char *existing = read_entire_file(path, NULL);
-    if (existing && strstr(existing, "\"hooks\"")) {
+    PluginState plugin;
+    plugin_state(&plugin);
+    if (plugin.installed) {
+        /* the plugin's hooks.json already runs post-edit on every edit */
+        printf("  .  claude-code  the Codify plugin (codify@codify %s) is "
+               "installed and registers PostToolUse -> %s hook post-edit;\n"
+               "        %s left alone so no hook fires twice\n",
+               plugin.version, bin, path);
+    } else if (existing && strstr(existing, "\"hooks\"")) {
         printf("  .  claude-code  %s already defines hooks - add manually:\n"
                "        PostToolUse Edit|Write -> %s hook post-edit\n",
                path, bin);

@@ -728,6 +728,33 @@ int integrate_plan(Cg *cg, bool json);
 int integrate_apply(Cg *cg, bool json);
 int integrate_doctor(Cg *cg, bool json);
 int integrate_apply_portable(Cg *cg, bool quiet);
+/* codify-v15 2.1 */
+/* the Claude Code plugin under $HOME/.codify/plugins/claude-code and the
+ * Codex <root>/.codex/hooks.json (src/plugin.c) */
+typedef struct {
+    char root[4700];              /* the rendered marketplace */
+    bool rendered;                /* plugin.json there and codify-owned */
+    char rendered_version[32];
+    bool registered;              /* known_marketplaces.json names codify */
+    char registered_path[4700];
+    bool entry;                   /* installed_plugins.json has codify@codify */
+    bool installed;               /* registered and entry */
+    char version[32];             /* the installed version */
+    bool current;                 /* installed at CG_VERSION */
+} PluginState;
+void integrate_self(char out[4096]);
+const char *integrate_skill_body(void);
+void integrate_skip_plugin(bool skip);
+void plugin_root(char out[4700]);
+int  plugin_render(const char *bin, bool json, StrBuf *out, int *changed,
+                   int *conflicts);
+int  plugin_install(bool json, StrBuf *out);
+void plugin_state(PluginState *st);
+void plugin_state_json(const PluginState *st, StrBuf *b);
+char *plugin_codex_hooks_body(const char *bin);
+int  plugin_codex_hooks(const Cg *cg, const char *bin, char path[4700]);
+const char *plugin_codex_state(const Cg *cg, char path[4700]);
+const char *plugin_file_state(const char *path, const char *mark);
 /* structured session handoff stored as a superseding task memory */
 int cmd_handoff(Cg *cg, const char *task, const char *done, const char *next,
                 const char *blocked, const char *note, bool json);
