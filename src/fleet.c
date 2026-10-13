@@ -1752,12 +1752,13 @@ static void merge_event(Cg *cg, const Lifecycle *c, const char *id,
     fleet_event(cg, "fleet.merge", subj, &e);
 }
 
-/* cg fleet merge-up <id>: the wave branch into the feature branch, in the
- * feature manager's worktree. Refused until the branch tip says the task
+/* cg fleet merge-up <id>: the task's branch into its base — the wave branch
+ * in the current shape, the feature branch under the older templates — in
+ * the base's worktree. Refused until the branch tip says the task
  * qualified — a merge of unproven work is what the hierarchy exists to
- * prevent. A conflict leaves the feature worktree as it was (or, with
- * --keep, mid-merge for the manager to resolve). On success the wave's
- * memories move up with its code, so the base keeps what was learned. */
+ * prevent. A conflict leaves the base worktree as it was (or, with --keep,
+ * mid-merge for the manager to resolve). On success the task's memories
+ * move up with its code, so the base keeps what was learned. */
 int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
                    bool keep, bool json) {
     Lifecycle c;

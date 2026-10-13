@@ -224,7 +224,8 @@ not with the size of the repository, wherever it can.
   untracked files with `git status --porcelain=v2 -z`, plus a `git diff --name-only`
   since the head the last pass recorded. Only those files are stat'ed and
   hashed. Several events force a full walk: a changed ignore file, a moved
-  head the diff cannot reach, a candidate list over 256K entries, or every
+  head the diff cannot reach, a dirty set from the last pass too large to
+  have kept (past 256 KiB of paths it is recorded as `*`), or every
   twentieth pass. See [[index] walk](config.md#index-walk).
 - **The body index is contentless** on SQLite 3.43 and later
   (`content=''`, `contentless_delete=1`). It stores the index but not a
