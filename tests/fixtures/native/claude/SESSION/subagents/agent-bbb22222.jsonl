@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"bbb22222","type":"user","message":{"role":"user","content":"Survey the tree for task 2.4 and list the files."},"uuid":"t1","timestamp":"2026-10-13T01:03:00.000Z","cwd":"@PROJ@","sessionId":"@SID@"}
+{"parentUuid":"t1","isSidechain":true,"agentId":"bbb22222","type":"assistant","message":{"model":"claude-haiku-4-5","role":"assistant","content":[{"type":"text","text":"src/a.ts"}]},"uuid":"t2","timestamp":"2026-10-13T01:03:30.000Z","cwd":"@PROJ@","sessionId":"@SID@"}

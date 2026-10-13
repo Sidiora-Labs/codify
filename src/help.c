@@ -828,7 +828,7 @@ static const HelpCmd HELP[] = {
   .summary = "the paths the projection changes against the base" },
 { .group = "fleet", .name = "fleet", .args = "<subcommand>",
   .usage = "fleet roles | status | plan [-f F] | "
-    "tree [-f F] | begin <id> [-f F] [--agent A] | "
+    "tree [-f F] | discover [--since DUR] | begin <id> [-f F] [--agent A] | "
     "merge-up <id> [--force] [--keep] | land <wave|id> [-f F] "
     "[--no-pr] | pr <wave|id> [--dry-run] | checkpoint [--dry-run]",
   .summary = "a hierarchy of agents: main, a manager per wave, a worker per task",
@@ -856,11 +856,25 @@ static const HelpCmd HELP[] = {
   .usage = "fleet runs",
   .summary = "runs, their state, whether a supervisor lives" },
 { .group = "fleet", .name = "fleet status", .args = "",
-  .usage = "fleet status",
+  .usage = "fleet status [--all] [--no-discover]",
   .summary = "who is alive in which role, on which task" },
 { .group = "fleet", .name = "fleet tree", .args = "[-f F]",
-  .usage = "fleet tree [-f F]",
+  .usage = "fleet tree [-f F] [--no-discover]",
   .summary = "the live tree with progress and heartbeats" },
+/* codify-v15 2.4 */
+{ .group = "fleet", .name = "fleet discover", .args = "[--since DUR]",
+  .usage = "fleet discover [--since DUR] [--json]",
+  .summary = "native sessions and subagents from the hosts' transcripts",
+  .detail = "Reads Claude Code session transcripts, each session's "
+    "subagents/agent-*.meta.json, and Codex rollouts of this project, and "
+    "creates or completes the native agent rows hooks did not report, never "
+    "overwriting a field a hook wrote. Worktrees named in meta.json are "
+    "registered; a transcript untouched for 15 minutes marks its agent "
+    "stale. fleet status, fleet tree, cg serve and cg watch --fleet run it "
+    "first under [fleet] discover (default true), at most once per 10 s; "
+    "--no-discover skips that.",
+  .flags = "--since DUR\ttranscripts changed within DUR (default 24h)\n",
+  .related = "fleet status,hook event,recap" },
 { .group = "fleet", .name = "fleet plan", .args = "[-f F]",
   .usage = "fleet plan [-f F]",
   .summary = "which manager and worker own what, planned and live" },

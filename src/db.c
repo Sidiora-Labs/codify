@@ -453,6 +453,35 @@ int cg_schema_upgrade(Cg *cg) {
      * on every open. Refuse, and name the fix. */
     long stored = ver ? atol(ver) : 0;
     free(ver);
+    /* v18 (codify-v15 2.2, 2.4): native agents widen the durable agents
+     * table in place, every existing row kept; a column already there is
+     * skipped. This runs on every open, before the version check: a DB
+     * stamped v18 by a build that predates these columns is otherwise
+     * stuck at "the graph predates native agents" with nothing to run. */
+    static const char *V18[][2] = {
+        {"kind", "TEXT"}, {"host_kind", "TEXT"}, {"agent_id", "TEXT"},
+        {"agent_type", "TEXT"}, {"description", "TEXT"}, {"model", "TEXT"},
+        {"depth", "INTEGER"}, {"state", "TEXT"}, {"started", "INTEGER"},
+        {"ended", "INTEGER"}, {"transcript", "TEXT"}, {"cwd", "TEXT"},
+        {"task", "TEXT"}, {"task_source", "TEXT"}, {"last_tool", "TEXT"},
+        {"tool_calls", "INTEGER"}, {"discovered", "TEXT"},
+    };
+    for (size_t i = 0; i < sizeof V18 / sizeof *V18; i++) {
+        sqlite3_stmt *q = NULL;
+        bool have = false;
+        if (sqlite3_prepare_v2(cg->db, "SELECT 1 FROM pragma_table_info("
+                               "'agents') WHERE name=?", -1, &q, NULL)
+            == SQLITE_OK) {
+            sqlite3_bind_text(q, 1, V18[i][0], -1, SQLITE_STATIC);
+            have = sqlite3_step(q) == SQLITE_ROW;
+            sqlite3_finalize(q);
+        }
+        if (have) continue;
+        char sql[128];
+        snprintf(sql, sizeof sql, "ALTER TABLE agents ADD COLUMN %s %s",
+                 V18[i][0], V18[i][1]);
+        sqlite3_exec(cg->db, sql, NULL, NULL, NULL);
+    }
     if (current) return 0;
     if (stored > atol(SCHEMA_VERSION)) {
         fprintf(stderr,
@@ -484,32 +513,6 @@ int cg_schema_upgrade(Cg *cg) {
     };
     for (size_t i = 0; i < sizeof V16 / sizeof *V16; i++)
         sqlite3_exec(cg->db, V16[i], NULL, NULL, NULL);
-    /* v18 (codify-v15 2.2): native agents widen the durable agents table in
-     * place, every existing row kept; a column already there is skipped */
-    static const char *V18[][2] = {
-        {"kind", "TEXT"}, {"host_kind", "TEXT"}, {"agent_id", "TEXT"},
-        {"agent_type", "TEXT"}, {"description", "TEXT"}, {"model", "TEXT"},
-        {"depth", "INTEGER"}, {"state", "TEXT"}, {"started", "INTEGER"},
-        {"ended", "INTEGER"}, {"transcript", "TEXT"}, {"cwd", "TEXT"},
-        {"task", "TEXT"}, {"task_source", "TEXT"}, {"last_tool", "TEXT"},
-        {"tool_calls", "INTEGER"},
-    };
-    for (size_t i = 0; i < sizeof V18 / sizeof *V18; i++) {
-        sqlite3_stmt *q = NULL;
-        bool have = false;
-        if (sqlite3_prepare_v2(cg->db, "SELECT 1 FROM pragma_table_info("
-                               "'agents') WHERE name=?", -1, &q, NULL)
-            == SQLITE_OK) {
-            sqlite3_bind_text(q, 1, V18[i][0], -1, SQLITE_STATIC);
-            have = sqlite3_step(q) == SQLITE_ROW;
-            sqlite3_finalize(q);
-        }
-        if (have) continue;
-        char sql[128];
-        snprintf(sql, sizeof sql, "ALTER TABLE agents ADD COLUMN %s %s",
-                 V18[i][0], V18[i][1]);
-        sqlite3_exec(cg->db, sql, NULL, NULL, NULL);
-    }
     /* meta rows mean an existing project DB, not a freshly created one */
     long nmeta = 0;
     sqlite3_stmt *st = NULL;

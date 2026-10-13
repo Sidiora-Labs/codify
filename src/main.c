@@ -149,6 +149,7 @@ int main(int argc, char **argv) {
     const char *cmd = argv[1];
     journal_set_command(cmd, argc > 2 ? argv[2] : NULL);
     bool json = flag(&argc, argv, "--json");
+    native_no_discover = flag(&argc, argv, "--no-discover"); /* codify-v15 2.4 */
     bool no_soft = flag(&argc, argv, "--no-soft");
     bool all_branches = flag(&argc, argv, "--all-branches");
     const char *scope_branch = opt(&argc, argv, "--branch", NULL);

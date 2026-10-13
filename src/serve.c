@@ -247,12 +247,6 @@ static void serve_push(Cg *cg, Sub *s) {
 
 /* ---------------- snapshot (codify-v15 2.3) ---------------- */
 
-/* Transcript discovery (task 2.4) finds the native agents no hook reported.
- * Until it lands this weak no-op stands in; a strong native_discover_hook in
- * native.c replaces it at link time, with no change here. */
-__attribute__((weak)) void native_discover_hook(Cg *cg);
-__attribute__((weak)) void native_discover_hook(Cg *cg) { (void)cg; }
-
 /* {head, native:[...], counts}: what an editor's refresh starts from. The
  * rows are the same tree cg fleet tree --json carries; head is the event
  * sequence they are current to, so a client subscribes from it and folds
@@ -263,7 +257,7 @@ static void serve_snapshot(Cg *cg, const char *id, const char *params) {
     free(raw);
     bool was = native_show_all;
     native_show_all = all;
-    native_discover_hook(cg);
+    native_discover_auto(cg);           /* transcripts first (codify-v15 2.4) */
     long head = events_head(cg);
     int live = 0, subs = 0, brs = 0;
     native_counts(cg, &live, &subs, &brs);
@@ -557,6 +551,7 @@ int cmd_serve(Cg *cg, const SysInfo *si) {
             long period = ino >= 0 ? SERVE_SAFETY_MS : SERVE_POLL_MS;
             bool due = now - last_check >= period;
             if ((dirty && now - last_push >= SERVE_MIN_GAP_MS) || due) {
+                native_discover_auto(cg);       /* codify-v15 2.4 */
                 for (int i = 0; i < sv.nsubs; i++) serve_push(cg, &sv.subs[i]);
                 last_push = last_check = now;
                 dirty = false;

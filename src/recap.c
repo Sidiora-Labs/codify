@@ -441,17 +441,69 @@ static long file_mtime(const char *path) {
     return stat(path, &st) == 0 ? (long)st.st_mtime : 0;
 }
 
-/* Claude Code's project directory name: the cwd with every character that
- * is not a letter or digit replaced by "-" */
-static void claude_dir(const char *root, char *out, size_t cap) {
-    const char *e = getenv("CG_RECAP_CLAUDE_DIR");
-    if (e && e[0]) { snprintf(out, cap, "%s", e); return; }
+/* The transcript directories of the project at root — the one lookup recap
+ * and cg fleet discover (native.c) share. Claude Code: its project directory
+ * is the cwd with every character that is not a letter or digit replaced by
+ * "-" under ~/.claude/projects (CG_RECAP_CLAUDE_DIR overrides). Codex: the
+ * rollouts under ~/.codex/sessions/YYYY/MM/DD (CG_RECAP_CODEX_DIR overrides);
+ * a rollout says which project it belongs to in its first record, read by
+ * transcript_codex_head. Either out may be NULL. */
+void transcript_dirs(const char *root, char *claude, size_t ccap,
+                     char *codex, size_t xcap) {
     const char *home = getenv("HOME");
-    char m[4200]; size_t k = 0;
-    for (const char *p = root; *p && k + 1 < sizeof m; p++)
-        m[k++] = isalnum((unsigned char)*p) ? *p : '-';
-    m[k] = 0;
-    snprintf(out, cap, "%s/.claude/projects/%s", home ? home : "", m);
+    if (claude && ccap) {
+        const char *e = getenv("CG_RECAP_CLAUDE_DIR");
+        if (e && e[0]) snprintf(claude, ccap, "%s", e);
+        else {
+            char m[4200]; size_t k = 0;
+            for (const char *p = root; *p && k + 1 < sizeof m; p++)
+                m[k++] = isalnum((unsigned char)*p) ? *p : '-';
+            m[k] = 0;
+            snprintf(claude, ccap, "%s/.claude/projects/%s", home ? home : "", m);
+        }
+    }
+    if (codex && xcap) {
+        const char *e = getenv("CG_RECAP_CODEX_DIR");
+        if (e && e[0]) snprintf(codex, xcap, "%s", e);
+        else snprintf(codex, xcap, "%s/.codex/sessions", home ? home : "");
+    }
+}
+
+/* A Codex rollout's first record (session_meta): the session's working
+ * directory, id, and start timestamp. False when it is not one. */
+bool transcript_codex_head(const char *path, char *cwd, size_t ccap,
+                           char *id, size_t icap, char *ts, size_t tcap) {
+    if (cwd && ccap) cwd[0] = 0;
+    if (id && icap) id[0] = 0;
+    if (ts && tcap) ts[0] = 0;
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    char *line = NULL; size_t cap = 0;
+    bool ok = false;
+    if (getline(&line, &cap, f) > 0) {
+        char *pl = json_get_object(line, "payload");
+        char *c = pl ? json_get_string(pl, "cwd") : NULL;
+        if (c) {
+            ok = true;
+            if (cwd && ccap) snprintf(cwd, ccap, "%s", c);
+            char *v = json_get_string(pl, "id");
+            if (!v) v = json_get_string(pl, "session_id");
+            if (v && id && icap) snprintf(id, icap, "%s", v);
+            free(v);
+            v = json_get_string(pl, "timestamp");
+            if (!v) v = json_get_string(line, "timestamp");
+            if (v && ts && tcap) snprintf(ts, tcap, "%s", v);
+            free(v);
+        }
+        free(c); free(pl);
+    }
+    free(line);
+    fclose(f);
+    return ok;
+}
+
+static void claude_dir(const char *root, char *out, size_t cap) {
+    transcript_dirs(root, out, cap, NULL, 0);
 }
 
 static void find_claude(const char *root, long oldest, Sessions *out) {
@@ -476,22 +528,11 @@ static void find_claude(const char *root, long oldest, Sessions *out) {
 /* a rollout belongs to this project when its first record's cwd is the
  * root or somewhere under it (a fleet worktree counts) */
 static bool codex_owned(const char *path, const char *root) {
-    FILE *f = fopen(path, "r");
-    if (!f) return false;
-    char *line = NULL; size_t cap = 0;
-    bool ok = false;
-    if (getline(&line, &cap, f) > 0) {
-        char *pl = json_get_object(line, "payload");
-        char *cwd = pl ? json_get_string(pl, "cwd") : NULL;
-        if (cwd) {
-            size_t rl = strlen(root);
-            ok = strncmp(cwd, root, rl) == 0 && (cwd[rl] == 0 || cwd[rl] == '/');
-        }
-        free(cwd); free(pl);
-    }
-    free(line);
-    fclose(f);
-    return ok;
+    char cwd[4096];
+    if (!transcript_codex_head(path, cwd, sizeof cwd, NULL, 0, NULL, 0))
+        return false;
+    size_t rl = strlen(root);
+    return strncmp(cwd, root, rl) == 0 && (cwd[rl] == 0 || cwd[rl] == '/');
 }
 
 static void find_codex_in(const char *dir, const char *root, long oldest,
@@ -524,13 +565,8 @@ static void find_codex_in(const char *dir, const char *root, long oldest,
 }
 
 static void find_codex(const char *root, long oldest, Sessions *out) {
-    const char *e = getenv("CG_RECAP_CODEX_DIR");
     char dir[4300];
-    if (e && e[0]) snprintf(dir, sizeof dir, "%s", e);
-    else {
-        const char *home = getenv("HOME");
-        snprintf(dir, sizeof dir, "%s/.codex/sessions", home ? home : "");
-    }
+    transcript_dirs(root, NULL, 0, dir, sizeof dir);
     find_codex_in(dir, root, oldest, 0, out);
 }
 
