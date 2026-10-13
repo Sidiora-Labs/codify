@@ -470,6 +470,9 @@ int main(int argc, char **argv) {
             rc = cmd_hook_install(&cg);
         else if (argc >= 3 && strcmp(argv[2], "post-edit") == 0)
             rc = cmd_hook_post_edit(&cg, &si, json);
+        else if (argc >= 3 && strcmp(argv[2], "event") == 0)
+            rc = cmd_hook_event(&cg, opt(&argc, argv, "--host", "claude"),
+                                json);
         else {          /* hooks never fail the host: drain, note, exit 0 */
             char drain[4096];
             if (!isatty(STDIN_FILENO))

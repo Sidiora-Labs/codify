@@ -191,7 +191,7 @@ reqs       = ["5.1", "5.2", "5.3", "5.4", "5.5"]
 
 [task.2.2]
 title      = "cg hook event: native sessions and subagents in the agents registry, their worktrees, tasks, and events"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["cmd_hook_event", "native_record", "native_attribute_task", "native_worktree"]
 touches    = ["src/native.c", "src/db.c", "src/main.c", "src/help.c", "src/fleet.c", "src/cg.h", "tests/integration/49_native.sh", "docs/events.md"]

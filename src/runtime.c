@@ -147,6 +147,7 @@ int cmd_state(Cg *cg, bool json) {
         if (jpending || jfailed)
             sb_printf(&b, ",\"journal\":{\"pending\":%d,\"failed\":%d}",
                       jpending, jfailed);
+        native_summary(cg, &b, true);
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -168,6 +169,10 @@ int cmd_state(Cg *cg, bool json) {
         if (jpending || jfailed)
             printf("Write journal: %d write(s) queued behind a busy database, "
                    "%d refused — cg journal list\n", jpending, jfailed);
+        StrBuf nb; sb_init(&nb);
+        native_summary(cg, &nb, false);
+        fputs(nb.p, stdout);
+        sb_free(&nb);
     }
     free(snapshot); free(declaration); free(stale);
     return 0;

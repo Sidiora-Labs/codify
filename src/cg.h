@@ -781,6 +781,24 @@ int cmd_guard(Cg *cg, int npath, char **pathv, bool json, bool strict);
 int cmd_review(Cg *cg, bool json);
 int cmd_hook_install(Cg *cg);
 int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json);
+/* codify-v15 2.2 */
+/* native agents (native.c): host sessions and their own subagents in the
+ * agents registry (kind 'native'), fed by `cg hook event --host H` */
+extern bool native_show_all;            /* --all: stopped > 1 day shown too */
+int  cmd_hook_event(Cg *cg, const char *host, bool json);   /* always 0 */
+int  native_record(Cg *cg, const char *host, const char *payload,
+                   char *agent_out, size_t cap);
+const char *native_attribute_task(Cg *cg, const char *session,
+                                  const char *description, const char *prompt,
+                                  const char *parent, char *task, size_t cap);
+bool native_worktree(Cg *cg, const char *cwd, char *wt, size_t wcap,
+                     char *branch, size_t bcap, char *head, size_t hcap);
+void native_tree_json(Cg *cg, StrBuf *b);           /* [...] */
+void native_fleet_section(Cg *cg, StrBuf *b, bool json);
+int  native_fleet_tree_json(Cg *cg, const char *feature);
+bool native_counts(Cg *cg, int *live, int *subs, int *branches);
+void native_summary(Cg *cg, StrBuf *b, bool json);  /* brief/state line */
+void native_flags(int argc, char **argv);
 int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility);
 int integrate_plan(Cg *cg, bool json);
 int integrate_apply(Cg *cg, bool json);

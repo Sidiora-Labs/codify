@@ -800,9 +800,9 @@ static int fleet_status(Cg *cg, bool json) {
         "  SELECT a.agent agent, ifnull(a.role,'') role, "
         "         ifnull(a.parent,'') parent, ifnull(a.feature,'') feature, "
         "         ifnull(a.wave,-1) wave, a.seen seen FROM agents a "
-        "  WHERE a.seen > strftime('%s','now') - ? "
+        "  WHERE ifnull(a.kind,'')<>'native' AND (a.seen > strftime('%s','now') - ? "
         "     OR EXISTS(SELECT 1 FROM attempts t WHERE t.agent=a.agent "
-        "               AND t.state='running' AND t.expires>strftime('%s','now'))"
+        "               AND t.state='running' AND t.expires>strftime('%s','now')))"
         "  UNION "
         "  SELECT t.agent, '', '', '', -1, max(t.heartbeat) FROM attempts t "
         "  WHERE t.state='running' AND t.expires>strftime('%s','now') "
@@ -891,10 +891,13 @@ static int fleet_status(Cg *cg, bool json) {
         sqlite3_finalize(st);
     }
     if (json) {
-        sb_puts(&b, "]}\n");
+        sb_putc(&b, ']');
+        native_fleet_section(cg, &b, true);     /* codify-v15 2.2 */
+        sb_puts(&b, "}\n");
     } else if (!n) {
         sb_puts(&b, "no live agents\n");
     }
+    if (!json) native_fleet_section(cg, &b, false);
     fputs(b.p, stdout);
     sb_free(&b);
     hier_free(&h);
@@ -2494,12 +2497,15 @@ int cmd_fleet(Cg *cg, int argc, char **argv, bool json) {
         else if (strcmp(argv[i], "--dry-run") == 0) dry = true;
         else if (argv[i][0] != '-' && !pos) pos = argv[i];
     }
+    native_flags(argc, argv);                   /* --all: old sessions too */
     if (strcmp(sub, "roles") == 0) return fleet_roles(cg, json);
     if (strcmp(sub, "status") == 0) return fleet_status(cg, json);
     if (strcmp(sub, "plan") == 0) return fleet_plan(cg, feature, json);
     /* the running shape of the fleet — main, its managers, their workers —
      * belongs to the orchestrator that spawned them (orchestrate.c) */
-    if (strcmp(sub, "tree") == 0) return orch_tree_status(cg, feature, json);
+    if (strcmp(sub, "tree") == 0)
+        return json ? native_fleet_tree_json(cg, feature)
+                    : orch_tree_status(cg, feature, json);
     if (strcmp(sub, "begin") == 0 || strcmp(sub, "merge-up") == 0) {
         if (!pos) {
             fprintf(stderr, "usage: cg fleet %s <task-id> [-f <feature>]%s\n",

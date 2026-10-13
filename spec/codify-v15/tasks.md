@@ -37,7 +37,7 @@
     - integrate.c: apply calls plugin_install (runs claude plugin marketplace add and install when claude is on PATH, prints the commands otherwise, --no-plugin), detect and doctor report installed and version state; cg hook install skips settings.json hooks when the plugin is installed.
     - 48_plugin.sh per req 5.5 under a temporary HOME; docs/integrate.md.
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
-  - [ ] 2.2 cg hook event: native sessions and subagents in the agents registry, their worktrees, tasks, and events
+  - [-] 2.2 cg hook event: native sessions and subagents in the agents registry, their worktrees, tasks, and events
     - db.c: the agents columns of req 6.6 via ALTER TABLE at upgrade; native.c: cmd_hook_event parsing the payload (hook_event_name, session_id, agent_id, agent_type, tool_name, tool_input, tool_use_id, cwd, agent_transcript_path, last_assistant_message), the rows per req 6.1, pending spawns matched by type or tool_use_id, heartbeats, stops, and the pass-through to runtime_event_ingest.
     - Worktree detection from cwd (cg_find_root_at, git_head) and branch_register with the session's branch as base; task attribution per req 6.3 with task_source; the agent.native.* events.
     - fleet.c: fleet_status prints the native tree, fleet tree --json carries native[]; brief and state lines; 49_native.sh per req 6.7.

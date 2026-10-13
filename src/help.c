@@ -497,7 +497,7 @@ static const HelpCmd HELP[] = {
   .related = "handoff,brief" },
 { .group = "agentic", .name = "hook",
   .args = "install|post-edit|event|pre-bash",
-  .usage = "hook install | post-edit | event | pre-bash",
+  .usage = "hook install | post-edit | event [--host claude|codex] | pre-bash",
   .summary = "agent and git hooks that keep the graph fresh",
   .related = "integrate,sync" },
 { .group = "agentic", .name = "hook install", .args = "",
@@ -510,6 +510,17 @@ static const HelpCmd HELP[] = {
   .detail = "Reads the host's payload on stdin and does one targeted "
     "background sync plus a guard of the edited path, in one process. "
     "Outside a Codify project it does nothing and succeeds.",
+  .hide = true },
+{ .group = "agentic", .name = "hook event", .args = "[--host claude|codex]",
+  .usage = "hook event [--host claude|codex] [--json]",
+  .summary = "the wired lifecycle hook: native sessions and subagents",
+  .detail = "Reads one hook payload on stdin (SessionStart, PreToolUse, "
+    "PostToolUse, SubagentStart, SubagentStop, Stop, SessionEnd, "
+    "WorktreeCreate, WorktreeRemove, ...) and records the session and its "
+    "subagents in the agents registry with their worktree, branch, task, "
+    "and last tool, emits agent.native.* events, and feeds the payload to "
+    "cg event ingest --source <host>. Always exits 0; a malformed payload "
+    "is logged to .codegraph/hooks.log.",
   .hide = true },
 { .group = "agentic", .name = "journal", .args = "list|apply|drop",
   .usage = "journal [list | apply | drop <id> | --failed | --all] [--json]",
