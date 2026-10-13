@@ -179,10 +179,10 @@ status  = "pending"
 
 [task.2.1]
 title      = "The Claude Code plugin and the Codex hooks, installed by cg integrate"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["plugin_render", "plugin_install", "plugin_state"]
-touches    = ["src/plugin.c", "src/integrate.c", "src/govern.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/48_plugin.sh", "tests/integration/21_grounding.sh", "docs/integrate.md"]
+touches    = ["src/plugin.c", "src/integrate.c", "src/govern.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/48_plugin.sh", "docs/integrate.md"]
 verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/48_plugin.sh && CG=$PWD/cg tests/integration/21_grounding.sh && CG=$PWD/cg tests/integration/03_agentic.sh"
 do_1       = "plugin.c: render the marketplace tree (marketplace.json, plugin.json with cg's version, hooks/hooks.json per req 5.2, .mcp.json, the skill, the three commands) under $HOME/.codify/plugins/claude-code/ with codify-owned markers, idempotent regeneration on version change, conflicts reported and kept; the Codex .codex/hooks.json."
 do_2       = "integrate.c: apply calls plugin_install (runs claude plugin marketplace add and install when claude is on PATH, prints the commands otherwise, --no-plugin), detect and doctor report installed and version state; cg hook install skips settings.json hooks when the plugin is installed."
@@ -233,7 +233,7 @@ status  = "pending"
 
 [task.3.1]
 title      = "cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["cmd_projection", "projection_build", "projection_branches", "projection_shadow_commit", "git_merge_tree"]
 touches    = ["src/projection.c", "src/gitint.c", "src/db.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/51_projection.sh", "docs/projection.md", "docs/config.md"]

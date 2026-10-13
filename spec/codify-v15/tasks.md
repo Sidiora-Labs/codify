@@ -32,7 +32,7 @@
 ## The Claude Code plugin, native agents in the fleet, and transcript discovery
 
 - [ ] 2. Presence
-  - [-] 2.1 The Claude Code plugin and the Codex hooks, installed by cg integrate
+  - [x] 2.1 The Claude Code plugin and the Codex hooks, installed by cg integrate
     - plugin.c: render the marketplace tree (marketplace.json, plugin.json with cg's version, hooks/hooks.json per req 5.2, .mcp.json, the skill, the three commands) under $HOME/.codify/plugins/claude-code/ with codify-owned markers, idempotent regeneration on version change, conflicts reported and kept; the Codex .codex/hooks.json.
     - integrate.c: apply calls plugin_install (runs claude plugin marketplace add and install when claude is on PATH, prints the commands otherwise, --no-plugin), detect and doctor report installed and version state; cg hook install skips settings.json hooks when the plugin is installed.
     - 48_plugin.sh per req 5.5 under a temporary HOME; docs/integrate.md.
@@ -55,7 +55,7 @@
 ## The projection branch and the conflicts it reveals before any merge
 
 - [ ] 3. Projection
-  - [-] 3.1 cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index
+  - [x] 3.1 cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index
     - gitint.c: merge-tree --write-tree --messages -z, commit-tree, write-tree from a copied index (shadow commit), ref update, git version check; projection.c: the branch set per req 8.1 from the registry and the agents table, [projection] base/stale/exclude/index in config.c.
     - The fold, the conflict records with their earlier-branch attribution, --strict, the projections table, the fingerprint no-op and --force, the projection lock and --wait, text and --json, status, diff, show.
     - --index: the detached worktree under .codegraph/worktrees/projection indexed as branch codify/projection; 51_projection.sh per req 8.9; docs/projection.md.
