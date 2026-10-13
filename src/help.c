@@ -826,13 +826,21 @@ static const HelpCmd HELP[] = {
     "--index\tcheck the projection out under .codegraph/worktrees/projection "
     "and index it as branch codify/projection ([projection] index)\n"
     "--branch NAME\tfold this branch too, active or not (repeatable)\n"
-    "--wait MS\twait this long for a build already running (default 5000)\n",
+    "--wait MS\twait this long for a build already running (default 5000)\n"
+    "--quiet\tbackground use: print nothing; a build already running is "
+    "left to it\n",
   .examples = "cg projection build\ncg projection build --index --json\n"
     "cg search Handler --branch codify/projection",
   .related = "projection status,projection diff,projection show,branches" },
 { .group = "fleet", .name = "projection status", .args = "",
   .usage = "projection status",
-  .summary = "the last build, without rebuilding" },
+  .summary = "the last build and the live findings by branch",
+  .detail = "The last build and its age, then every live finding grouped by "
+    "the branch it involves, with that branch's worktree. Nothing is "
+    "rebuilt: hooks, cg watch, cg serve and the fleet supervisor start a "
+    "background build when work happens, at most once per [projection] "
+    "min_interval (15s), unless [projection] auto = false.",
+  .related = "projection findings,brief,state" },
 { .group = "fleet", .name = "projection diff", .args = "[branch]",
   .usage = "projection diff [branch]",
   .summary = "git diff --stat of the projection against the base or a branch" },

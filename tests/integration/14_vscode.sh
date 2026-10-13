@@ -1926,6 +1926,127 @@ JS
     out="$("$CG" symbol FleetView)"
     has "$out" "class FleetView"
     has "$out" "fleet.js"
+    # ---- (codify-v15 3.3) the Projection node: a real fleet whose two task
+    #      branches change one function, a real build, and the view driven
+    #      by the real cg — the findings with their branches, a path that
+    #      opens the file in each branch's worktree, and a badge on the rows
+    #      that own an involved branch
+    rm -rf "$TMP/pfleet"
+    mkdir -p "$TMP/pfleet/src"
+    cd "$TMP/pfleet"
+    git init -q -b main . 2>/dev/null || git init -q .
+    git config user.email t@t; git config user.name t
+    printf 'export function alpha(x) {\n  const a = x + 1;\n  const b = a * 2;\n  const c = b - 3;\n  const d = c + 4;\n  const e = d * 5;\n  const f = e - 6;\n  return f;\n}\n' > src/a.ts
+    "$CG" spec new fleet >/dev/null
+    "$CG" spec mode parallel >/dev/null
+    "$CG" spec add 2.1 --title "Alpha head" --wave 1 --touches 'src/a.ts' >/dev/null
+    "$CG" spec add 2.2 --title "Alpha tail" --wave 1 --touches 'src/b.ts' >/dev/null
+    "$CG" init >/dev/null
+    printf '.codegraph/\n*.lock\n' > .gitignore
+    printf '\n[hierarchy]\nmain = "main"\n' >> spec/workflow.kvx
+    git add -A >/dev/null; git commit -qm base >/dev/null
+    "$CG" fleet begin 2.1 >/dev/null
+    "$CG" fleet begin 2.2 >/dev/null
+    pwt="$(pwd -P)/.codegraph/worktrees"
+    (cd "$pwt/task-fleet-2.1" && sed -i 's/x + 1;/x + 10;/' src/a.ts &&
+     git commit -qam head && "$CG" sync >/dev/null)
+    (cd "$pwt/task-fleet-2.2" && sed -i 's/e - 6;/e - 60;/' src/a.ts &&
+     git commit -qam tail && "$CG" sync >/dev/null)
+    "$CG" projection build >/dev/null
+    node - "$EXT" "$CG" "$TMP/pfleet" "$pwt" <<'JS'
+const path = require('path'), fs = require('fs'), cp = require('child_process');
+const Module = require('module');
+const [, , dir, CG, repo, wt] = process.argv;
+const eq = (got, want, what) => {
+    if (got !== want) throw new Error(`${what}: ${JSON.stringify(got)} != ${JSON.stringify(want)}`);
+};
+class TreeItem { constructor(label, state) { this.label = label; this.collapsibleState = state; } }
+const stub = {
+    EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
+    TreeItem,
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
+    ThemeColor: class { constructor(id) { this.id = id; } },
+    MarkdownString: class { constructor() { this.value = ''; }
+        appendMarkdown(s) { this.value += s; return this; } },
+    Uri: { file: (p) => ({ scheme: 'file', fsPath: p }), parse: (u) => ({ url: u }) },
+    commands: { executeCommand: () => {}, registerCommand: () => ({ dispose() {} }) },
+    window: {},
+};
+const load = Module._load;
+Module._load = function (req) {
+    if (req === 'vscode') return stub;
+    return load.apply(this, arguments);
+};
+const { FleetView, projectionNodes, findingBadge } = require(path.join(dir, 'fleet.js'));
+const run = (args) => cp.spawnSync(CG, args, { cwd: repo, encoding: 'utf8' });
+const tree = JSON.parse(run(['fleet', 'tree', '--json']).stdout);
+
+// ---- the pure model, from the JSON the real cg printed
+const p = projectionNodes(tree.projection);
+eq(p.count, 1, 'one finding');
+eq(p.folded, 2, 'two branches folded');
+const f = p.findings[0];
+eq(f.kind, 'symbol', 'kind');
+eq(f.symbol, 'alpha', 'symbol');
+eq(f.path, 'src/a.ts', 'path');
+eq(String(f.branches.map((b) => b.name)), 'task/fleet/2.1,task/fleet/2.2', 'branches');
+for (const b of f.branches) {
+    const want = path.join(wt, b.name.replace(/\//g, '-'), 'src/a.ts');
+    eq(fs.realpathSync(b.open), fs.realpathSync(want), `${b.name} opens its own copy`);
+}
+eq(fs.readFileSync(f.branches[0].open, 'utf8').includes('x + 10'), true, '2.1 copy');
+eq(fs.readFileSync(f.branches[1].open, 'utf8').includes('e - 60'), true, '2.2 copy');
+eq(p.badges['task/fleet/2.1'], 1, 'badge 2.1');
+eq(p.badges['task/fleet/2.2'], 1, 'badge 2.2');
+eq(findingBadge(p, 'task/fleet/2.1'), '1 finding', 'badge text');
+eq(findingBadge(p, 'main'), null, 'no badge on an uninvolved branch');
+eq(projectionNodes(null), null, 'no build, no node');
+
+// ---- the view, driven by the real cg
+const view = new FleetView({
+    cgJson: async (args) => {
+        const r = run([...args, '--json']);
+        try { return r.status === 0 ? JSON.parse(r.stdout) : null; } catch { return null; }
+    },
+    cg: async (args) => { const r = run(args); return { code: r.status, stdout: r.stdout, stderr: r.stderr }; },
+});
+(async () => {
+    await view.refresh();
+    eq(view.state, 'ready', 'refreshed');
+    const top = view.getChildren();
+    const root = top.find((t) => t.label === 'Projection');
+    if (!root) throw new Error('no Projection node: ' + top.map((t) => t.label));
+    eq(top.indexOf(root), top.length - 1, 'Projection sits after the fleet tree');
+    if (!/^1 finding · 2 branches folded · built /.test(root.description)) {
+        throw new Error('root description: ' + root.description);
+    }
+    const kids = view.getChildren(root);
+    eq(kids.length, 1, 'one finding row');
+    eq(kids[0].label, 'symbol alpha in src/a.ts', 'finding label');
+    eq(kids[0].description, 'task/fleet/2.1, task/fleet/2.2', 'finding branches');
+    eq(kids[0].command.command, 'vscode.open', 'a finding opens its file');
+    const brs = view.getChildren(kids[0]);
+    eq(String(brs.map((b) => b.label)), 'task/fleet/2.1,task/fleet/2.2', 'branch rows');
+    for (const b of brs) {
+        eq(b.command.command, 'vscode.open', `${b.label} opens`);
+        eq(b.command.arguments[0].fsPath, b.node.open, `${b.label} opens its worktree's file`);
+        eq(fs.existsSync(b.command.arguments[0].fsPath), true, `${b.label} file exists`);
+    }
+    // the rows that own an involved branch carry the badge
+    const rows = [];
+    const walk = (it) => { rows.push(it); for (const c of it.childItems || []) walk(c); };
+    walk(view.nodeItem(view.model.main));
+    const w = rows.find((r) => r.node && r.node.branch === 'task/fleet/2.1');
+    if (!w || !/1 finding/.test(w.description)) {
+        throw new Error('no badge on 2.1: ' + (w && w.description));
+    }
+    const m = rows.find((r) => r.node && r.node.kind === 'main');
+    if (/finding/.test(m.description)) throw new Error('badge on main: ' + m.description);
+    console.log('fleet projection ok');
+})().catch((e) => { console.error(e); process.exit(1); });
+JS
+    [ $? -eq 0 ] || fail "fleet projection"
 fi
 
 echo "14_vscode ok ($section)"

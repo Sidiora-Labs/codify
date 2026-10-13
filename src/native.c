@@ -893,6 +893,18 @@ int cmd_hook_event(Cg *cg, const char *host, bool json) {
         rc = -2;
     }
     sqlite3_busy_timeout(cg->db, (int)cg->lock_wait_ms);
+    /* codify-v15 3.3: work events mark the projection dirty and may start a
+     * background build; session starts and prompts are not work */
+    if (rc == 0) {
+        char *ev = jstr(payload, "hook_event_name");
+        if (ev && (!strcmp(ev, "PostToolUse") || !strcmp(ev, "Stop") ||
+                   !strcmp(ev, "SubagentStop") || !strcmp(ev, "SessionEnd") ||
+                   !strcmp(ev, "WorktreeCreate") || !strcmp(ev, "WorktreeRemove"))) {
+            projection_mark_dirty(cg, ev);
+            projection_auto_build(cg, ev, NULL);
+        }
+        free(ev);
+    }
     if (rc == -1)
         hook_log(cg, "payload without hook_event_name or session_id", payload);
     else if (rc == -2)
@@ -1122,6 +1134,7 @@ int native_fleet_tree_json(Cg *cg, const char *feature) {
     if (!configured) {
         sb_puts(&b, "{\"hierarchy\":false");
         native_fleet_section(cg, &b, true);
+        projection_tree_json(cg, &b);           /* codify-v15 3.3 */
         sb_puts(&b, "}\n");
     } else {
         TreeCall t = { cg, feature };
@@ -1133,6 +1146,7 @@ int native_fleet_tree_json(Cg *cg, const char *feature) {
             out[len - 1] = 0;
             sb_puts(&b, out);
             native_fleet_section(cg, &b, true);
+            projection_tree_json(cg, &b);       /* codify-v15 3.3 */
             sb_puts(&b, "}\n");
         } else if (out) {
             sb_puts(&b, out);

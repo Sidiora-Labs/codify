@@ -164,6 +164,12 @@ static int t_routes(void *v) {
 }
 static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c->cg, true); }
 static int t_state(void *v)   { CallCtx *c = v; return cmd_state(c->cg, true); }
+/* codify-v15 3.3: the projection's last build and its live findings by branch */
+static int t_projection_status(void *v) {
+    CallCtx *c = v;
+    char *argv[] = { "status", NULL };
+    return cmd_projection(c->cg, c->si, 1, argv, NULL, true);
+}
 static int t_integrate(void *v) {
     CallCtx *c = v;
     char *action = c->args ? json_get_string(c->args, "action") : NULL;
@@ -883,6 +889,12 @@ static const struct {
       "Codify snapshot, spec declarations, this agent's live attempt, and "
       "stale declarations. Use this when diagnosing apparent task drift.",
       S_EMPTY, A_READ, "Agent control-plane state", t_state, false },
+    { "projection_status",
+      "The projection of every in-flight branch folded onto the base: the "
+      "last build and its age, and the live conflict findings grouped by "
+      "branch with each branch's worktree. Read it before editing code "
+      "another branch is changing.",
+      S_EMPTY, A_READ, "Projection status", t_projection_status, false },
     { "integrate",
       "Detect capabilities, plan exact paths without writes, apply "
       "recoverable agent integrations, or diagnose incomplete and stale "

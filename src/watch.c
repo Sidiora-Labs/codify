@@ -180,11 +180,17 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
             printf("sync: %ld updated, %ld removed (%ldms)\n",
                    st.files_indexed, st.files_removed, st.ms);
     }
+    long proj_at = 0;                   /* codify-v15 3.3: a held-back build */
     for (;;) {
         int timeout = -1;
         if (pending) {
             long left = deadline - now_ms();
             timeout = left > 0 ? (int)left : 0;
+        }
+        if (proj_at) {
+            long left = proj_at - now_ms();
+            if (left < 0) left = 0;
+            if (timeout < 0 || left < timeout) timeout = (int)left;
         }
         struct pollfd pfd = { .fd = w.fd, .events = POLLIN };
         int pr = poll(&pfd, 1, timeout);
@@ -207,7 +213,16 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
                     printf("sync: %ld updated, %ld removed, %ld symbols (%ldms)\n",
                            st.files_indexed, st.files_removed, st.symbols,
                            st.ms);
+                if (st.files_indexed || st.files_removed) {
+                    projection_mark_dirty(cg, "watch");
+                    proj_at = now_ms();
+                }
             }
+        }
+        if (proj_at && now_ms() >= proj_at) {
+            long retry = 0;
+            proj_at = projection_auto_build(cg, "watch", &retry) < 0
+                      ? now_ms() + retry : 0;
         }
     }
 }
@@ -335,6 +350,7 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
     printf("watching every worktree of %s (debounce %dms, background passes) "
            "— ctrl-c to stop\n", cg->shared, debounce_ms);
     fflush(stdout);
+    long proj_at = 0;                   /* codify-v15 3.3: a held-back build */
     for (;;) {
         if (now_ms() >= next_scan) {
             native_discover_auto(cg);           /* codify-v15 2.4 */
@@ -345,6 +361,7 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
         long until = next_scan;
         for (int i = 0; i < n; i++)
             if (v[i]->armed && v[i]->deadline < until) until = v[i]->deadline;
+        if (proj_at && proj_at < until) until = proj_at;
         long left = until - now_ms();
         int timeout = left > 0 ? (int)left : 0;
 
@@ -387,7 +404,16 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
                 printf("%s: %ld updated (%ld reused), %ld removed (%ldms)\n",
                        v[i]->cg.branch, st.files_indexed, st.files_reused,
                        st.files_removed, st.ms);
+            if (st.files_indexed || st.files_removed) {
+                projection_mark_dirty(cg, "watch --fleet");
+                proj_at = now_ms();
+            }
             fflush(stdout);
+        }
+        if (proj_at && now_ms() >= proj_at) {
+            long retry = 0;
+            proj_at = projection_auto_build(cg, "watch --fleet", &retry) < 0
+                      ? now_ms() + retry : 0;
         }
     }
 }

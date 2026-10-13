@@ -507,6 +507,7 @@ int cmd_brief(Cg *cg, bool json)
         brief_branches(cg, &b, true);
         fleet_brief(cg, &b, true);
         native_summary(cg, &b, true);
+        projection_summary(cg, &b, true);       /* codify-v15 3.3 */
         {
             char *feat = brief_feature(cg, task);
             if (feat) {
@@ -537,6 +538,7 @@ int cmd_brief(Cg *cg, bool json)
         brief_branches(cg, &b, false);
         fleet_brief(cg, &b, false);
         native_summary(cg, &b, false);
+        projection_summary(cg, &b, false);      /* codify-v15 3.3 */
         {
             /* drift found so far on this feature: what a reader should
              * know moved outside a declaration or under another branch */
@@ -1175,6 +1177,9 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
     else       o.max_age_ms = 5000;
     IndexStats st;
     if (config_auto_sync(cg->root)) cg_index_ex(cg, si, &o, &st);
+    /* codify-v15 3.3: the projection follows the edit, in the background */
+    projection_mark_dirty(cg, "post-edit");
+    projection_auto_build(cg, "post-edit", NULL);
 
     /* Operator messages for this agent (cg fleet steer) reach a Claude Code
      * session here, at its next edit: PostToolUse additionalContext is

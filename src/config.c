@@ -82,6 +82,13 @@ static const struct {
     [CFG_INDEX_WALK]   = { "index", "walk", CFG_ENUM, "auto",
                            "how a whole-tree pass finds changes: auto, git, "
                            "or full" },
+    /* codify-v15 3.3 */
+    [CFG_PROJ_AUTO]    = { "projection", "auto", CFG_BOOL, "true",
+                           "hooks, watch, serve and the supervisor start a "
+                           "background build when work happens" },
+    [CFG_PROJ_MIN_INTERVAL] = { "projection", "min_interval", CFG_DUR, "15s",
+                           "an automatic build waits this long after the "
+                           "last one" },
 };
 
 static const char CFG_TEMPLATE[] =
@@ -105,6 +112,8 @@ static const char CFG_TEMPLATE[] =
 "# exclude = []              # branch-name globs never folded in\n"
 "# index   = false           # check the projection out and index it as branch codify/projection\n"
 "# steer   = true            # steer the agents on both branches when a build finds a new conflict\n"
+"# auto    = true            # hooks, watch, serve and the supervisor start a background build when work happens\n"
+"# min_interval = \"15s\"     # an automatic build waits this long after the last one\n"
 "\n"
 "[fleet]\n"
 "# discover = true           # fleet status/tree, serve and watch --fleet run cg fleet discover first (once per 10s)\n"
@@ -259,6 +268,10 @@ static void cfg_defaults(CgConfig *c, const char *root) {
     c->shell_advice = true;
     snprintf(c->proj_stale_s, sizeof c->proj_stale_s, "24h");
     c->proj_stale = 86400;
+    /* codify-v15 3.3 */
+    c->proj_auto = true;
+    snprintf(c->proj_min_interval_s, sizeof c->proj_min_interval_s, "15s");
+    c->proj_min_interval = 15;
     for (int i = 0; i < CFG_NKEYS; i++) {
         char *s = cfg_slot(c, i);
         if (s) snprintf(s, sizeof c->spec, "%s", CFG_KEYS[i].dflt);
@@ -335,6 +348,7 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
                 else if (i == CFG_FLEET_DISCOVER) c->fleet_discover = b == 1;
                 else if (i == CFG_PROJ_STEER) c->proj_steer = b == 1;
                 else if (i == CFG_HOOKS_SHELL_ADVICE) c->shell_advice = b == 1;
+                else if (i == CFG_PROJ_AUTO) c->proj_auto = b == 1;  /* 3.3 */
                 else c->sync_auto = b == 1;
                 c->from_file[i] = true;
             }
@@ -354,7 +368,12 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
                           "%s: [%s] %s = %s is not a duration (90s, 30m, 24h, "
                           "2d) — using the default %s", c->file, x->section,
                           x->key, x->raw, CFG_KEYS[i].dflt);
-            else {
+            else if (i == CFG_PROJ_MIN_INTERVAL) {     /* codify-v15 3.3 */
+                snprintf(c->proj_min_interval_s,
+                         sizeof c->proj_min_interval_s, "%s", v);
+                c->proj_min_interval = d;
+                c->from_file[i] = true;
+            } else {
                 snprintf(c->proj_stale_s, sizeof c->proj_stale_s, "%s", v);
                 c->proj_stale = d;
                 c->from_file[i] = true;
@@ -463,6 +482,13 @@ bool config_projection_steer(const char *root) {   /* codify-v15 3.2 */
 }
 bool config_shell_advice(const char *root) {    /* codify-v15 1.4 */
     return config_load(root)->shell_advice;
+}
+/* codify-v15 3.3 */
+bool config_projection_auto(const char *root) {
+    return config_load(root)->proj_auto;
+}
+long config_projection_min_interval(const char *root) {
+    return config_load(root)->proj_min_interval;
 }
 int config_projection_exclude(const char *root, char ***out) {
     *out = NULL;
@@ -618,6 +644,8 @@ static const char *cfg_value(const CgConfig *c, int i) {
     if (i == CFG_FLEET_DISCOVER) return c->fleet_discover ? "true" : "false";
     if (i == CFG_PROJ_STEER) return c->proj_steer ? "true" : "false";
     if (i == CFG_HOOKS_SHELL_ADVICE) return c->shell_advice ? "true" : "false";
+    if (i == CFG_PROJ_AUTO) return c->proj_auto ? "true" : "false";  /* 3.3 */
+    if (i == CFG_PROJ_MIN_INTERVAL) return c->proj_min_interval_s;
     if (i == CFG_PROJ_BASE) return c->proj_base;
     if (i == CFG_PROJ_STALE) return c->proj_stale_s;
     if (i == CFG_PROJ_EXCLUDE) return c->proj_exclude;
