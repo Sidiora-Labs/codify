@@ -47,7 +47,7 @@
     - Worktree detection from cwd (cg_find_root_at, git_head) and branch_register with the session's branch as base; task attribution per req 6.3 with task_source; the agent.native.* events.
     - fleet.c: fleet_status prints the native tree, fleet tree --json carries native[]; brief and state lines; 49_native.sh per req 6.7.
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
-  - [-] 2.3 Native agents in the editor and the serve stream
+  - [x] 2.3 Native agents in the editor and the serve stream
     - fleet.js: a Sessions root under the fleet tree built from fleet tree --json native[], with ages, state, worktree branch merge state, task, last tool; agent.native.* events patch the rows live through the serve reducer; commands to open the worktree and the transcript.
     - serve.c: the refresh runs the discovery hook (a no-op until 2.4 lands) and carries native rows in its snapshot; 14_vscode.sh fleet section and 31_serve.sh assert the model from real cg output.
     - _Requirements: 6.4, 6.5_
