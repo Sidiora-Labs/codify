@@ -486,3 +486,313 @@ int git_commit_mirror(Cg *cg, const char *message) {
     printf("git: committed\n");
     return 0;
 }
+
+/* ---------------- codify-v15 3.1: plumbing for the projection ---------------- */
+#include <ctype.h>
+
+/* The identity projection and shadow commits are written under. They are
+ * synthetic — nobody authored them — and a fixed identity keeps a commit id
+ * a function of its tree, parents, and date, which is what lets an unchanged
+ * dirty worktree produce the same shadow commit twice. */
+#define GIT_PROJ_IDENT "GIT_AUTHOR_NAME='Codify projection' " \
+    "GIT_AUTHOR_EMAIL='projection@codify.local' " \
+    "GIT_COMMITTER_NAME='Codify projection' " \
+    "GIT_COMMITTER_EMAIL='projection@codify.local' "
+
+/* `[env] git -C <tree> <args>`, stdout captured byte for byte (NULs kept,
+ * which git_run's string buffer cannot do); stderr discarded unless
+ * keep_err folds it in. Returns the exit status, -1 when git did not start. */
+static int git_capture(const char *tree, const char *env, const char *args,
+                       StrBuf *out, bool keep_err) {
+    StrBuf cmd; sb_init(&cmd);
+    if (env && env[0]) { sb_puts(&cmd, env); sb_putc(&cmd, ' '); }
+    sb_puts(&cmd, "git -C ");
+    sb_shquote(&cmd, tree);
+    sb_putc(&cmd, ' ');
+    sb_puts(&cmd, args);
+    sb_puts(&cmd, keep_err ? " 2>&1" : " 2>/dev/null");
+    FILE *f = popen(cmd.p, "r");
+    sb_free(&cmd);
+    if (!f) return -1;
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0)
+        if (out) for (size_t i = 0; i < n; i++) sb_putc(out, buf[i]);
+    int st = pclose(f);
+    if (st == -1) return -1;
+    if (WIFEXITED(st)) return WEXITSTATUS(st);
+    return 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
+}
+
+/* the leading 40- or 64-hex object id of s into out; false when absent */
+static bool git_take_oid(const char *s, char *out, size_t cap) {
+    out[0] = 0;
+    while (*s == ' ' || *s == '\n') s++;
+    size_t n = 0;
+    while (isxdigit((unsigned char)s[n])) n++;
+    if ((n != 40 && n != 64) || n >= cap) return false;
+    memcpy(out, s, n);
+    out[n] = 0;
+    return true;
+}
+
+int git_version(int *major, int *minor) {
+    *major = *minor = 0;
+    FILE *f = popen("git --version 2>/dev/null", "r");
+    if (!f) return -1;
+    char line[256] = "";
+    if (!fgets(line, sizeof line, f)) line[0] = 0;
+    int st = pclose(f);
+    if (st == -1 || !WIFEXITED(st) || WEXITSTATUS(st) != 0) return -1;
+    const char *p = strstr(line, "version ");
+    if (!p || sscanf(p + 8, "%d.%d", major, minor) != 2) return -1;
+    return 0;
+}
+
+int git_rev_commit(const char *tree, const char *rev, char *sha, size_t cap) {
+    StrBuf r; sb_init(&r);
+    sb_printf(&r, "%s^{commit}", rev);
+    StrBuf a; sb_init(&a);
+    sb_puts(&a, "rev-parse --verify --quiet ");
+    sb_shquote(&a, r.p);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, NULL, a.p, &o, false);
+    bool ok = rc == 0 && o.p && git_take_oid(o.p, sha, cap);
+    if (!ok) sha[0] = 0;
+    sb_free(&a); sb_free(&r); sb_free(&o);
+    return ok ? 0 : -1;
+}
+
+bool git_is_ancestor(const char *tree, const char *a, const char *b) {
+    StrBuf args; sb_init(&args);
+    sb_printf(&args, "merge-base --is-ancestor %s %s", a, b);
+    int rc = git_capture(tree, NULL, args.p, NULL, false);
+    sb_free(&args);
+    return rc == 0;
+}
+
+long git_count_commits(const char *tree, const char *from, const char *to) {
+    StrBuf args; sb_init(&args);
+    sb_printf(&args, "rev-list --count %s..%s", from, to);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, NULL, args.p, &o, false);
+    long n = rc == 0 && o.p ? atol(o.p) : 0;
+    sb_free(&args); sb_free(&o);
+    return n;
+}
+
+/* NUL-separated git output into a vector of malloc'd strings */
+static int git_split_z(const StrBuf *o, char ***out) {
+    *out = NULL;
+    int n = 0, cap = 0;
+    size_t i = 0;
+    while (o->p && i < o->len) {
+        size_t s = i;
+        while (i < o->len && o->p[i]) i++;
+        if (i > s) {
+            if (n == cap) {
+                cap = cap ? cap * 2 : 16;
+                *out = xrealloc(*out, (size_t)cap * sizeof **out);
+            }
+            char *v = xmalloc(i - s + 1);
+            memcpy(v, o->p + s, i - s);
+            v[i - s] = 0;
+            (*out)[n++] = v;
+        }
+        i++;
+    }
+    return n;
+}
+
+int git_changed_paths(const char *tree, const char *from, const char *to,
+                      char ***out) {
+    *out = NULL;
+    StrBuf args; sb_init(&args);
+    sb_printf(&args, "diff --no-renames --name-only -z %s %s", from, to);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, NULL, args.p, &o, false);
+    int n = rc == 0 ? git_split_z(&o, out) : 0;
+    sb_free(&args); sb_free(&o);
+    return n;
+}
+
+/* the word inside a message's "CONFLICT (...)", normalised: git says
+ * "content" in the message and "contents" in the type field, and tells
+ * add/add apart only in the message */
+static void git_conflict_kind(const char *msg, char *out, size_t cap) {
+    const char *p = strstr(msg, "CONFLICT (");
+    if (!p) { snprintf(out, cap, "content"); return; }
+    p += 10;
+    const char *e = strchr(p, ')');
+    size_t n = e ? (size_t)(e - p) : strlen(p);
+    if ((n == 7 && !strncmp(p, "content", 7)) ||
+        (n == 8 && !strncmp(p, "contents", 8)))
+        snprintf(out, cap, "content");
+    else
+        snprintf(out, cap, "%.*s", (int)n, p);
+}
+
+int git_merge_tree(const char *tree, const char *a, const char *b,
+                   char *tree_out, size_t cap, ProjectionConflict **conf,
+                   int *nconf) {
+    *conf = NULL;
+    *nconf = 0;
+    tree_out[0] = 0;
+    StrBuf args; sb_init(&args);
+    sb_printf(&args, "merge-tree --write-tree --messages -z %s %s", a, b);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, NULL, args.p, &o, false);
+    sb_free(&args);
+    if ((rc != 0 && rc != 1) || !o.p || !git_take_oid(o.p, tree_out, cap)) {
+        sb_free(&o);
+        tree_out[0] = 0;
+        return -1;
+    }
+    if (rc == 0) { sb_free(&o); return 0; }
+    /* -z layout: <tree> NUL, one "<mode> <oid> <stage>\t<path>" NUL per
+     * conflicted stage, an empty field, then each message as
+     * <npaths> NUL <path>... NUL <type> NUL <text> NUL */
+    size_t i = strlen(o.p) + 1;
+    int vcap = 0, n = 0;
+    ProjectionConflict *v = NULL;
+    while (i < o.len && o.p[i]) {
+        const char *ent = o.p + i;
+        i += strlen(ent) + 1;
+        const char *tab = strchr(ent, '\t');
+        if (!tab) continue;
+        const char *path = tab + 1;
+        bool seen = false;
+        for (int k = 0; k < n && !seen; k++) seen = !strcmp(v[k].path, path);
+        if (seen) continue;
+        if (n == vcap) {
+            vcap = vcap ? vcap * 2 : 8;
+            v = xrealloc(v, (size_t)vcap * sizeof *v);
+        }
+        memset(&v[n], 0, sizeof v[n]);
+        v[n].path = xstrdup(path);
+        snprintf(v[n].kind, sizeof v[n].kind, "content");
+        n++;
+    }
+    i++;                                    /* the empty separator */
+    while (i < o.len) {
+        long np = atol(o.p + i);
+        i += strlen(o.p + i) + 1;
+        const char *paths[16];
+        int got = 0;
+        for (long k = 0; k < np && i < o.len; k++) {
+            if (got < 16) paths[got++] = o.p + i;
+            i += strlen(o.p + i) + 1;
+        }
+        if (i >= o.len) break;
+        const char *type = o.p + i;
+        i += strlen(type) + 1;
+        const char *msg = i < o.len ? o.p + i : "";
+        i += strlen(msg) + 1;
+        if (strncmp(type, "CONFLICT", 8) != 0) continue;
+        char kind[32];
+        git_conflict_kind(msg, kind, sizeof kind);
+        for (int k = 0; k < got; k++)
+            for (int c = 0; c < n; c++)
+                if (!strcmp(v[c].path, paths[k]))
+                    snprintf(v[c].kind, sizeof v[c].kind, "%s", kind);
+    }
+    sb_free(&o);
+    *conf = v;
+    *nconf = n;
+    return 1;
+}
+
+int git_commit_tree(const char *tree, const char *treeid,
+                    const char *const *parents, int nparents,
+                    const char *msg, long date, char *out, size_t cap) {
+    StrBuf env; sb_init(&env);
+    sb_puts(&env, GIT_PROJ_IDENT);
+    if (date > 0)
+        sb_printf(&env, "GIT_AUTHOR_DATE='@%ld +0000' "
+                  "GIT_COMMITTER_DATE='@%ld +0000'", date, date);
+    StrBuf a; sb_init(&a);
+    sb_printf(&a, "commit-tree %s", treeid);
+    for (int i = 0; i < nparents; i++) sb_printf(&a, " -p %s", parents[i]);
+    sb_puts(&a, " -m ");
+    sb_shquote(&a, msg);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, env.p, a.p, &o, false);
+    bool ok = rc == 0 && o.p && git_take_oid(o.p, out, cap);
+    if (!ok) out[0] = 0;
+    sb_free(&env); sb_free(&a); sb_free(&o);
+    return ok ? 0 : -1;
+}
+
+int git_update_ref(const char *tree, const char *ref, const char *sha) {
+    StrBuf a; sb_init(&a);
+    sb_puts(&a, "update-ref ");
+    sb_shquote(&a, ref);
+    sb_printf(&a, " %s", sha);
+    int rc = git_capture(tree, NULL, a.p, NULL, false);
+    sb_free(&a);
+    return rc == 0 ? 0 : -1;
+}
+
+long git_commit_time(const char *tree, const char *rev) {
+    StrBuf a; sb_init(&a);
+    sb_printf(&a, "show -s --format=%%ct %s", rev);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, NULL, a.p, &o, false);
+    long t = rc == 0 && o.p ? atol(o.p) : 0;
+    sb_free(&a); sb_free(&o);
+    return t;
+}
+
+int git_shadow_tree(const char *worktree, const char *tmp_index,
+                    char *tree_out, size_t cap) {
+    tree_out[0] = 0;
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(worktree, NULL, "rev-parse --git-path index", &o,
+                         false);
+    char idx[4600] = "";
+    if (rc == 0 && o.p) {
+        chomp(o.p);
+        if (o.p[0] == '/') snprintf(idx, sizeof idx, "%s", o.p);
+        else snprintf(idx, sizeof idx, "%s/%s", worktree, o.p);
+    }
+    sb_free(&o);
+    size_t len = 0;
+    char *data = idx[0] ? read_entire_file(idx, &len) : NULL;
+    unlink(tmp_index);
+    if (data) {
+        int w = write_entire_file(tmp_index, data, len);
+        free(data);
+        if (w != 0) return -1;
+    }
+    StrBuf env; sb_init(&env);
+    sb_puts(&env, "GIT_OPTIONAL_LOCKS=0 GIT_INDEX_FILE=");
+    sb_shquote(&env, tmp_index);
+    rc = git_capture(worktree, env.p,
+                     "add -A -- . ':(exclude)" CG_DIR "'", NULL, false);
+    if (rc == 0) {
+        sb_init(&o);
+        rc = git_capture(worktree, env.p, "write-tree", &o, false);
+        if (rc != 0 || !o.p || !git_take_oid(o.p, tree_out, cap)) rc = -1;
+        sb_free(&o);
+    }
+    sb_free(&env);
+    unlink(tmp_index);
+    return rc == 0 ? 0 : -1;
+}
+
+int git_tree_diff_count(const char *tree, const char *a, const char *b) {
+    StrBuf args; sb_init(&args);
+    sb_printf(&args, "diff-tree -r --no-renames --name-only -z %s %s", a, b);
+    StrBuf o; sb_init(&o);
+    int rc = git_capture(tree, NULL, args.p, &o, false);
+    char **v = NULL;
+    int n = rc == 0 ? git_split_z(&o, &v) : 0;
+    for (int i = 0; i < n; i++) free(v[i]);
+    free(v);
+    sb_free(&args); sb_free(&o);
+    return n;
+}
+
+int git_capture_text(const char *tree, const char *args, StrBuf *out) {
+    return git_capture(tree, NULL, args, out, true);
+}

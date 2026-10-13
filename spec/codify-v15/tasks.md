@@ -55,7 +55,7 @@
 ## The projection branch and the conflicts it reveals before any merge
 
 - [ ] 3. Projection
-  - [ ] 3.1 cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index
+  - [-] 3.1 cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index
     - gitint.c: merge-tree --write-tree --messages -z, commit-tree, write-tree from a copied index (shadow commit), ref update, git version check; projection.c: the branch set per req 8.1 from the registry and the agents table, [projection] base/stale/exclude/index in config.c.
     - The fold, the conflict records with their earlier-branch attribution, --strict, the projections table, the fingerprint no-op and --force, the projection lock and --wait, text and --json, status, diff, show.
     - --index: the detached worktree under .codegraph/worktrees/projection indexed as branch codify/projection; 51_projection.sh per req 8.9; docs/projection.md.

@@ -29,7 +29,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-typedef enum { CFG_BOOL, CFG_PATH, CFG_INT } CfgType;
+typedef enum { CFG_BOOL, CFG_PATH, CFG_INT,
+               CFG_STR, CFG_DUR, CFG_LIST } CfgType;   /* codify-v15 3.1 */
 
 /* The schema. Order is the order of every listing and of `cg config init`. */
 static const struct {
@@ -51,6 +52,18 @@ static const struct {
                            "written by cg codemap" },
     [CFG_INDEX_WORKERS] = { "index", "workers", CFG_INT, "auto",
                            "parse workers per index pass: 1-64, or auto" },
+    /* codify-v15 3.1 */
+    [CFG_PROJ_BASE]    = { "projection", "base", CFG_STR, "",
+                           "branch the projection folds onto; empty: "
+                           "[hierarchy] main, else main" },
+    [CFG_PROJ_STALE]   = { "projection", "stale", CFG_DUR, "24h",
+                           "a branch without a live agent stays active this "
+                           "long after its last index" },
+    [CFG_PROJ_EXCLUDE] = { "projection", "exclude", CFG_LIST, "",
+                           "branch-name globs never folded in" },
+    [CFG_PROJ_INDEX]   = { "projection", "index", CFG_BOOL, "false",
+                           "check the projection out and index it as branch "
+                           "codify/projection" },
 };
 
 static const char CFG_TEMPLATE[] =
@@ -65,7 +78,13 @@ static const char CFG_TEMPLATE[] =
 "codemap = \"CODEMAP.md\"      # written by cg codemap\n"
 "\n"
 "[index]\n"
-"# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine\n";
+"# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine\n"
+"\n"
+"[projection]\n"
+"# base    = \"main\"          # branch the projection folds onto; default [hierarchy] main, else main\n"
+"# stale   = \"24h\"           # a branch without a live agent stays active this long after its last index\n"
+"# exclude = []              # branch-name globs never folded in\n"
+"# index   = false           # check the projection out and index it as branch codify/projection\n";
 
 /* ---------------- reading and validating ---------------- */
 
@@ -195,6 +214,8 @@ static void cfg_defaults(CgConfig *c, const char *root) {
     snprintf(c->root, sizeof c->root, "%s", root);
     snprintf(c->file, sizeof c->file, "%s/%s", root, CG_CONFIG_FILE);
     c->sync_auto = true;
+    snprintf(c->proj_stale_s, sizeof c->proj_stale_s, "24h");
+    c->proj_stale = 86400;
     for (int i = 0; i < CFG_NKEYS; i++) {
         char *s = cfg_slot(c, i);
         if (s) snprintf(s, sizeof c->spec, "%s", CFG_KEYS[i].dflt);
@@ -256,9 +277,45 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
                           "the default %s", c->file, x->section, x->key,
                           x->raw, CFG_KEYS[i].dflt);
             else {
-                c->sync_auto = b == 1;
+                if (i == CFG_PROJ_INDEX) c->proj_index = b == 1;
+                else c->sync_auto = b == 1;
                 c->from_file[i] = true;
             }
+        } else if (CFG_KEYS[i].type == CFG_STR) {
+            if (!v || !v[0] || strpbrk(v, " \t"))
+                cfg_issue(is, "bad_value", x->section, x->key,
+                          "%s: [%s] %s = %s is not a branch name — using "
+                          "the default", c->file, x->section, x->key, x->raw);
+            else {
+                snprintf(c->proj_base, sizeof c->proj_base, "%s", v);
+                c->from_file[i] = true;
+            }
+        } else if (CFG_KEYS[i].type == CFG_DUR) {
+            long d = hier_duration(v);
+            if (d < 0)
+                cfg_issue(is, "bad_value", x->section, x->key,
+                          "%s: [%s] %s = %s is not a duration (90s, 30m, 24h, "
+                          "2d) — using the default %s", c->file, x->section,
+                          x->key, x->raw, CFG_KEYS[i].dflt);
+            else {
+                snprintf(c->proj_stale_s, sizeof c->proj_stale_s, "%s", v);
+                c->proj_stale = d;
+                c->from_file[i] = true;
+            }
+        } else if (CFG_KEYS[i].type == CFG_LIST) {
+            char **items = NULL;
+            int n = kvx_list(k, x->section, x->key, &items);
+            size_t used = 0;
+            c->proj_exclude[0] = 0;
+            for (int j = 0; j < n; j++) {
+                used += (size_t)snprintf(c->proj_exclude + used,
+                    used < sizeof c->proj_exclude
+                        ? sizeof c->proj_exclude - used : 0,
+                    "%s%s", used ? "," : "", items[j]);
+                free(items[j]);
+            }
+            free(items);
+            c->from_file[i] = true;
         } else {
             char norm[1024];
             const char *why = cfg_path_check(v, norm, sizeof norm);
@@ -329,6 +386,33 @@ const char *config_codemap_rel(const char *root) {
 }
 int config_index_workers(const char *root) {
     return config_load(root)->index_workers;
+}
+/* codify-v15 3.1 */
+const char *config_projection_base(const char *root) {
+    return config_load(root)->proj_base;
+}
+long config_projection_stale(const char *root) {
+    return config_load(root)->proj_stale;
+}
+bool config_projection_index(const char *root) {
+    return config_load(root)->proj_index;
+}
+int config_projection_exclude(const char *root, char ***out) {
+    *out = NULL;
+    const char *s = config_load(root)->proj_exclude;
+    int n = 0;
+    while (*s) {
+        const char *e = strchr(s, ',');
+        size_t len = e ? (size_t)(e - s) : strlen(s);
+        if (len) {
+            *out = xrealloc(*out, sizeof **out * (size_t)(n + 1));
+            (*out)[n] = xmalloc(len + 1);
+            memcpy((*out)[n], s, len);
+            (*out)[n++][len] = 0;
+        }
+        s += len + (e ? 1 : 0);
+    }
+    return n;
 }
 
 bool config_spec_dir(const char *root, char *out, size_t cap) {
@@ -460,6 +544,10 @@ static void cfg_root(char *out, size_t cap) {
 
 static const char *cfg_value(const CgConfig *c, int i) {
     if (i == CFG_SYNC_AUTO) return c->sync_auto ? "true" : "false";
+    if (i == CFG_PROJ_INDEX) return c->proj_index ? "true" : "false";
+    if (i == CFG_PROJ_BASE) return c->proj_base;
+    if (i == CFG_PROJ_STALE) return c->proj_stale_s;
+    if (i == CFG_PROJ_EXCLUDE) return c->proj_exclude;
     if (i == CFG_INDEX_WORKERS) {
         static char num[16];           /* cg config is one thread */
         if (!c->index_workers) return "auto";
@@ -476,6 +564,24 @@ static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {
              CFG_KEYS[i].key);
     sb_json_str(b, dotted);
     sb_puts(b, ",\"value\":");
+    if (CFG_KEYS[i].type == CFG_LIST) {        /* codify-v15 3.1 */
+        sb_putc(b, '[');
+        const char *s = c->proj_exclude;
+        bool first = true;
+        while (*s) {
+            const char *e = strchr(s, ',');
+            size_t len = e ? (size_t)(e - s) : strlen(s);
+            char item[1024];
+            snprintf(item, sizeof item, "%.*s", (int)len, s);
+            if (item[0]) {
+                if (!first) sb_putc(b, ',');
+                sb_json_str(b, item);
+                first = false;
+            }
+            s += len + (e ? 1 : 0);
+        }
+        sb_putc(b, ']');
+    } else
     /* a worker count is a number in JSON; auto stays the string "auto" */
     if (CFG_KEYS[i].type == CFG_BOOL ||
         (CFG_KEYS[i].type == CFG_INT && c->index_workers))
@@ -483,6 +589,7 @@ static void cfg_setting_json(const CgConfig *c, int i, StrBuf *b) {
     else sb_json_str(b, cfg_value(c, i));
     sb_puts(b, ",\"default\":");
     if (CFG_KEYS[i].type == CFG_BOOL) sb_puts(b, CFG_KEYS[i].dflt);
+    else if (CFG_KEYS[i].type == CFG_LIST) sb_puts(b, "[]");
     else sb_json_str(b, CFG_KEYS[i].dflt);
     sb_printf(b, ",\"origin\":\"%s\"}",
               c->from_file[i] ? CG_CONFIG_FILE : "default");
@@ -588,6 +695,38 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
             return 1;
         }
         snprintf(norm, sizeof norm, "%s", b ? "true" : "false");
+    } else if (CFG_KEYS[i].type == CFG_STR) {     /* codify-v15 3.1 */
+        if (!value[0] || strpbrk(value, " \t")) {
+            fprintf(stderr, "cg config: %s takes a branch name, not '%s'\n",
+                    dotted, value);
+            return 1;
+        }
+        snprintf(norm, sizeof norm, "%s", value);
+    } else if (CFG_KEYS[i].type == CFG_DUR) {
+        if (hier_duration(value) < 0) {
+            fprintf(stderr, "cg config: %s takes a duration (90s, 30m, 24h, "
+                    "2d), not '%s'\n", dotted, value);
+            return 1;
+        }
+        snprintf(norm, sizeof norm, "%s", value);
+    } else if (CFG_KEYS[i].type == CFG_LIST) {
+        /* "a,b" is written as the list ["a", "b"] */
+        StrBuf l; sb_init(&l);
+        sb_putc(&l, '[');
+        char tmp[1024];
+        snprintf(tmp, sizeof tmp, "%s", value);
+        char *save = NULL;
+        int n = 0;
+        for (char *t = strtok_r(tmp, ",", &save); t;
+             t = strtok_r(NULL, ",", &save)) {
+            while (*t == ' ') t++;
+            if (!*t) continue;
+            if (n++) sb_puts(&l, ", ");
+            sb_json_str(&l, t);
+        }
+        sb_putc(&l, ']');
+        snprintf(norm, sizeof norm, "%s", l.p);
+        sb_free(&l);
     } else {
         const char *why = cfg_path_check(value, norm, sizeof norm);
         if (why) {
@@ -608,7 +747,7 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
         }
     }
     /* a count is written bare (workers = 8); auto is quoted like a path */
-    bool raw = CFG_KEYS[i].type == CFG_BOOL ||
+    bool raw = CFG_KEYS[i].type == CFG_BOOL || CFG_KEYS[i].type == CFG_LIST ||
                (CFG_KEYS[i].type == CFG_INT && strcmp(norm, "auto"));
     int rc = raw
            ? kvx_set_raw(path, CFG_KEYS[i].section, CFG_KEYS[i].key, norm)

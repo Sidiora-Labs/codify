@@ -233,7 +233,7 @@ status  = "pending"
 
 [task.3.1]
 title      = "cg projection build: active branches, shadow commits, the merge-tree fold, the ref, the worktree index"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["cmd_projection", "projection_build", "projection_branches", "projection_shadow_commit", "git_merge_tree"]
 touches    = ["src/projection.c", "src/gitint.c", "src/db.c", "src/config.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/51_projection.sh", "docs/projection.md", "docs/config.md"]
