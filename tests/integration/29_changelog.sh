@@ -156,7 +156,7 @@ n="$(ls "$OPENAI_FAKE_DIR"/req-*.json | wc -l)"
 python3 - "$OPENAI_FAKE_DIR/req-1.json" "$OPENAI_FAKE_DIR/cfg-1.txt" <<'EOF2' || fail "request shape"
 import json, sys
 d = json.load(open(sys.argv[1]))
-assert d["model"].startswith("openrouter/ling-3.0-flash-sante:free"), d["model"]
+assert d["model"].startswith("openrouter/anthropic/claude-haiku-5.5"), d["model"]
 c = d["messages"][0]["content"]
 assert "Drop the old flag" in c and "BREAKING" in c and "Explain gauges" in c, c
 assert "Documentation:" in c and "Features:" in c, c
@@ -196,7 +196,7 @@ has "$(cat "$lastcfg")" "example.test"
 has "$(cat "$lastcfg")" "Bearer sk-env"
 # -o reports what it did
 out="$("$CG" changelog -o notes.md)"
-has "$out" "highlights by openrouter/ling-3.0-flash-sante:free"
+has "$out" "highlights by openrouter/anthropic/claude-haiku-5.5"
 has "$out" "from the cache"
 # a reply that repeats the heading is not printed with it twice
 : > "$OPENAI_FAKE_DIR/heading"

@@ -159,6 +159,20 @@ static bool g_per_task;
 static bool g_waves_parallel, g_per_wave;
 /* a land not yet merged forward into every live wave branch */
 static bool g_fwd_pending;
+/* whether main is in a wave's branch, redone each tick by sup_forward_lands
+ * (sequential waves only). A land merges into main first and emits its
+ * event only after the gates, so the main tree's spec says "done" before the
+ * land is known: a task whose requirement just landed must not be cut from
+ * a wave branch that has not had main merged forward — its done would be
+ * refused for the unmet requires. A wave without a branch yet counts as
+ * fresh: it is cut from main. */
+static struct { long wave; bool fresh; } g_wave_fresh[256];
+static int g_nwave_fresh;
+static bool sup_wave_fresh(long wave) {
+    for (int i = 0; i < g_nwave_fresh; i++)
+        if (g_wave_fresh[i].wave == wave) return g_wave_fresh[i].fresh;
+    return true;
+}
 static char g_waves_why[160];
 /* the attempt a worker being spawned is on: 0 first, else a retry */
 static int g_retry_attempt;
@@ -2100,7 +2114,8 @@ static bool orch_task_slots(const OrchTask *t, const OrchFleetSlot *slots,
  * against the projection and its done waits for the land; a requirement
  * nobody is on would hold the slot for nothing. Sequential: when it is
  * where t's branch is cut from — main for another wave's (with a manager
- * per wave), the wave branch for its own. */
+ * per wave, and main already merged forward into t's wave branch), the
+ * wave branch for its own. */
 static bool orch_req_ready(const OrchTask *v, int n, const OrchTask *t,
                            const char *rid, const OrchFleetSlot *slots,
                            int nslots) {
@@ -2117,7 +2132,8 @@ static bool orch_req_ready(const OrchTask *v, int n, const OrchTask *t,
                 return true;
         return false;
     }
-    if (g_per_wave && r->wave != t->wave) return r->landed && !g_fwd_pending;
+    if (g_per_wave && r->wave != t->wave)
+        return r->landed && !g_fwd_pending && sup_wave_fresh(t->wave);
     return g_per_task ? r->merged : r->finished;
 }
 
@@ -2497,8 +2513,38 @@ static int sup_forward_merge(Sup *s, long wave) {
     return 2;
 }
 
+/* <wave>'s branch by the manager template */
+static void sup_wave_branch(Sup *s, long wave, char *br, size_t cap) {
+    Hierarchy h;
+    Kvx *wf = orch_hier(s->g->shared, &h);
+    hier_expand(&h, h.roles[FLEET_FEATURE].branch, s->feature, wave, br, cap);
+    hier_free(&h);
+    kvx_free(wf);
+}
+
+/* record for orch_req_ready whether main is in <wave>'s branch */
+static void sup_wave_mark_fresh(Sup *s, long wave) {
+    if (g_nwave_fresh >= (int)(sizeof g_wave_fresh / sizeof *g_wave_fresh))
+        return;
+    char br[256];
+    sup_wave_branch(s, wave, br, sizeof br);
+    bool fresh = true;
+    if (git_branch_exists(s->g->shared, br)) {
+        StrBuf a; sb_init(&a);
+        sb_puts(&a, "merge-base --is-ancestor ");
+        sb_shquote(&a, s->mainbr);
+        sb_putc(&a, ' ');
+        sb_shquote(&a, br);
+        fresh = git_run(s->g->shared, a.p, NULL) == 0;
+        sb_free(&a);
+    }
+    g_wave_fresh[g_nwave_fresh].wave = wave;
+    g_wave_fresh[g_nwave_fresh++].fresh = fresh;
+}
+
 /* a land seen in the events marks every live wave for a forward merge,
- * carried out as each manager is between turns */
+ * carried out as each manager is between turns; sequential waves also
+ * learn here whether main is in their branch yet */
 static void sup_forward_lands(Sup *s) {
     if (!s->per_wave) return;
     Cg *g = s->g;
@@ -2520,19 +2566,24 @@ static void sup_forward_lands(Sup *s) {
     }
     sqlite3_finalize(q);
     static bool retry;                    /* a conflicted wave, escalated */
-    if (!g_fwd_pending && !retry) return;
+    bool merge = g_fwd_pending || retry;
+    if (!merge && g_waves_parallel) return;
     OrchTask *v = NULL;
     int n = orch_tasks_load(g, s->feature, NULL, &v);
     bool again = false, conflicted = false;
+    g_nwave_fresh = 0;
     for (int i = 0; i < n; i++) {
         if (i && v[i - 1].wave == v[i].wave) continue;
         bool unfinished = false;          /* live: work left, or not landed */
         for (int t = i; t < n && v[t].wave == v[i].wave; t++)
             unfinished |= !v[t].landed;
         if (!unfinished) continue;
-        int frc = sup_forward_merge(s, v[i].wave);
-        if (frc == 1) again = true;           /* not yet: the gate waits */
-        else if (frc == 2) conflicted = true; /* the manager's now */
+        if (merge) {
+            int frc = sup_forward_merge(s, v[i].wave);
+            if (frc == 1) again = true;           /* not yet: the gate waits */
+            else if (frc == 2) conflicted = true; /* the manager's now */
+        }
+        if (!g_waves_parallel) sup_wave_mark_fresh(s, v[i].wave);
     }
     orch_tasks_free(v, n);
     g_fwd_pending = again;
