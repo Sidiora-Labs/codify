@@ -291,8 +291,9 @@ int main(int argc, char **argv) {
      * hit. Writes are never redirected — the indexer always writes here. */
     /* on memory export --branch names the branch a memory carries, which
      * need not be one this graph tracks: a filter, not a read scope */
-    bool mem_export = strcmp(cmd, "memory") == 0 && argc > 2 &&
-                      strcmp(argv[2], "export") == 0;
+    bool mem_export = (strcmp(cmd, "memory") == 0 && argc > 2 &&
+                       strcmp(argv[2], "export") == 0) ||
+                      strcmp(cmd, "projection") == 0;  /* --branch adds */
     if (cg_scope_set(&cg, mem_export ? NULL : scope_branch,
                      all_branches) != 0) {
         fprintf(stderr, "cg: no branch named '%s' in this graph "
@@ -549,6 +550,8 @@ int main(int argc, char **argv) {
         rc = cmd_lsp(&cg, &si);
     } else if (strcmp(cmd, "mcp") == 0) {
         rc = cmd_mcp(&cg, &si);
+    } else if (strcmp(cmd, "projection") == 0) {     /* codify-v15 3.1 */
+        rc = cmd_projection(&cg, &si, argc - 2, argv + 2, scope_branch, json);
     } else if (strcmp(cmd, "serve") == 0) {
         rc = cmd_serve(&cg, &si);
     } else if (strcmp(cmd, "tool") == 0) {

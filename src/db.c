@@ -198,10 +198,17 @@ static const char *SCHEMA =
      * comments.id, so path, kind, and the bound symbol come from the join
      * rather than from duplicated UNINDEXED columns on every row. */
     "CREATE VIRTUAL TABLE IF NOT EXISTS comment_fts USING fts5("
-    "  body, tokenize='unicode61');";
+    "  body, tokenize='unicode61');"
+    /* codify-v15 3.1: one row per projection build — the fold of every
+     * active branch onto the base (projection.c). Durable: never dropped
+     * by a schema upgrade. branches and conflicts are JSON arrays. */
+    "CREATE TABLE IF NOT EXISTS projections("
+    "  id INTEGER PRIMARY KEY, built INTEGER NOT NULL, base TEXT,"
+    "  base_head TEXT, commit_id TEXT, fingerprint TEXT, branches TEXT,"
+    "  conflicts TEXT, ms INTEGER);";
 
 /* the schema above, as stored in meta.schema_version */
-#define SCHEMA_VERSION "17"
+#define SCHEMA_VERSION "18"
 
 /* Does `base/name` exist at all? `.git` is a file in worktrees and
  * submodules, so existence — not directory-ness — is the boundary test. */

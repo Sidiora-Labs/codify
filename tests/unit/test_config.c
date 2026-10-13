@@ -85,8 +85,22 @@ int main(void) {
             "skills  = tools/skills\n"
             "codemap = \"docs/MAP.md\"\n"
             "[index]\n"
-            "workers = 8   # a bigger machine\n");
+            "workers = 8   # a bigger machine\n"
+            "[projection]\n"
+            "base = \"trunk\"\n"
+            "stale = \"2h\"\n"
+            "exclude = [\"tmp/*\", \"wip-*\"]\n"
+            "index = true\n");
     c = config_load(root);
+    ok_str(c->proj_base, "trunk");
+    ok(c->proj_stale == 7200, "stale = 2h parsed (%ld)", c->proj_stale);
+    ok(c->proj_index, "projection index = true parsed");
+    char **globs = NULL;
+    int nglobs = config_projection_exclude(root, &globs);
+    ok(nglobs == 2 && !strcmp(globs[0], "tmp/*") && !strcmp(globs[1], "wip-*"),
+       "exclude globs parsed (%d)", nglobs);
+    for (int i = 0; i < nglobs; i++) free(globs[i]);
+    free(globs);
     ok(c->present, "file present");
     ok(c->index_workers == 8, "workers = 8 parsed (%d)", c->index_workers);
     ok(config_index_workers(root) == 8, "workers accessor agrees");

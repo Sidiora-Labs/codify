@@ -712,6 +712,44 @@ static const HelpCmd HELP[] = {
   .related = "docs" },
 
 /* ---------------- fleet ---------------- */
+/* codify-v15 3.1 */
+{ .group = "fleet", .name = "projection", .args = "build | status | diff | show",
+  .usage = "projection build [--force] [--strict] [--index] [--branch NAME] "
+    "[--wait MS] | status | diff [branch] | show",
+  .summary = "every active branch folded onto the base, at a real ref",
+  .detail = "Folds each active branch onto the base with git merge-tree and "
+    "writes the result to refs/codify/projection: what main would be if "
+    "every branch in flight merged now. Uncommitted work counts, through a "
+    "shadow commit from a copy of the worktree's index; conflicts are folded "
+    "with markers and reported by path with the branches involved. Needs git "
+    "2.38 or newer. See docs/projection.md.",
+  .related = "branches,fleet,config", .hide = true },
+{ .group = "fleet", .name = "projection build", .args = "[--index] [--strict]",
+  .usage = "projection build [--force] [--strict] [--index] [--branch NAME] "
+    "[--wait MS]",
+  .summary = "fold the active branches onto the base; write the ref",
+  .detail = "Active branches are those in the registry whose worktree exists "
+    "and that have a live agent or were indexed within [projection] stale "
+    "(24h). The base is [projection] base, else [hierarchy] main, else main. "
+    "When nothing changed since the last build it says so and does nothing.",
+  .flags = "--force\trebuild even when the inputs are unchanged\n"
+    "--strict\tleave a conflicting branch out instead of folding markers\n"
+    "--index\tcheck the projection out under .codegraph/worktrees/projection "
+    "and index it as branch codify/projection ([projection] index)\n"
+    "--branch NAME\tfold this branch too, active or not (repeatable)\n"
+    "--wait MS\twait this long for a build already running (default 5000)\n",
+  .examples = "cg projection build\ncg projection build --index --json\n"
+    "cg search Handler --branch codify/projection",
+  .related = "projection status,projection diff,projection show,branches" },
+{ .group = "fleet", .name = "projection status", .args = "",
+  .usage = "projection status",
+  .summary = "the last build, without rebuilding" },
+{ .group = "fleet", .name = "projection diff", .args = "[branch]",
+  .usage = "projection diff [branch]",
+  .summary = "git diff --stat of the projection against the base or a branch" },
+{ .group = "fleet", .name = "projection show", .args = "",
+  .usage = "projection show",
+  .summary = "the paths the projection changes against the base" },
 { .group = "fleet", .name = "fleet", .args = "<subcommand>",
   .usage = "fleet roles | status | plan [-f F] | "
     "tree [-f F] | begin <id> [-f F] [--agent A] | "

@@ -128,7 +128,7 @@ db.execute("UPDATE meta SET value='14' WHERE key='schema_version'")
 db.commit()
 EOF
     err="$("$CG" branches 2>&1 >/dev/null)"
-    has "$err" "schema upgraded to v17"
+    has "$err" "schema upgraded to v18"
     out="$("$CG" branches --json)"
     echo "$out" | pyjson "
 b = {x['name']: x for x in d['branches']}

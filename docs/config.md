@@ -28,6 +28,12 @@ codemap = "CODEMAP.md"      # written by cg codemap
 
 [index]
 # workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine
+
+[projection]
+# base    = "main"          # branch the projection folds onto; default [hierarchy] main, else main
+# stale   = "24h"           # a branch without a live agent stays active this long after its last index
+# exclude = []              # branch-name globs never folded in
+# index   = false           # check the projection out and index it as branch codify/projection
 ```
 
 | Key | Default | Controls |
@@ -38,6 +44,10 @@ codemap = "CODEMAP.md"      # written by cg codemap
 | `paths.skills` | `.agents/skills` | The directory for generated `SKILL.md` files (`cg skills`, and the `codify-workflow` skill from `cg integrate`). |
 | `paths.codemap` | `CODEMAP.md` | The file `cg codemap` writes. |
 | `index.workers` | `auto` | Parse workers per index pass for `cg init`, `cg index` and `cg sync`: `1` to `64`, or `auto` (also `0`) for the machine's choice. See [[index] workers](#index-workers). |
+| `projection.base` | *(empty)* | The branch `cg projection build` folds onto. Empty means `[hierarchy] main` from `workflow.kvx`, else `main`. See [docs/projection.md](projection.md). |
+| `projection.stale` | `24h` | How long after its last index a branch with no live agent still counts as active: `90s`, `30m`, `24h`, `2d`, or plain seconds. |
+| `projection.exclude` | `[]` | Branch-name globs (`fnmatch`) never folded into the projection, even when named with `--branch`. `cg config set projection.exclude "tmp/*,wip-*"` writes the list. |
+| `projection.index` | `false` | Whether every build also checks the projection out under `.codegraph/worktrees/projection` and indexes it as branch `codify/projection`, as `--index` does. |
 
 The file is read once per process for each root, and the result is cached.
 It belongs to the tree it sits in, so it travels with the branch in the same

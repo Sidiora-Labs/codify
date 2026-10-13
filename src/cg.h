@@ -265,7 +265,10 @@ int  cg_schema_upgrade(Cg *cg);
  * is the built-in default. Paths are root-relative and normalized. */
 #define CG_CONFIG_FILE "codify.kvx"
 enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
-       CFG_PATH_CODEMAP, CFG_INDEX_WORKERS, CFG_NKEYS };
+       CFG_PATH_CODEMAP, CFG_INDEX_WORKERS,
+       /* codify-v15 3.1 */
+       CFG_PROJ_BASE, CFG_PROJ_STALE, CFG_PROJ_EXCLUDE, CFG_PROJ_INDEX,
+       CFG_NKEYS };
 typedef struct {
     char root[4096];
     char file[4200];           /* <root>/codify.kvx */
@@ -273,6 +276,12 @@ typedef struct {
     bool sync_auto;            /* [sync] auto: implicit syncs run */
     char spec[1024], context[1024], skills[1024], codemap[1024];
     int  index_workers;        /* [index] workers: 1..CG_MAX_WORKERS, 0 = auto */
+    /* codify-v15 3.1: [projection] */
+    char proj_base[256];       /* "" = [hierarchy] main, else main */
+    char proj_stale_s[64];     /* as written: "24h" */
+    long proj_stale;           /* seconds */
+    char proj_exclude[1024];   /* globs, comma-joined */
+    bool proj_index;           /* check out and index the projection */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -1193,10 +1202,68 @@ int  cg_branch_resolve(Cg *cg);
 long branch_register(Cg *cg, const char *name, const char *worktree,
                      const char *head, const char *base);
 int  cmd_branches(Cg *cg, int argc, char **argv, bool json);
+/* codify-v15 3.1 */
+/* The projection (projection.c): every active branch folded onto the base
+ * with git merge-tree, uncommitted work included through shadow commits,
+ * written to refs/codify/projection. See docs/projection.md. */
+#define PROJECTION_REF    "refs/codify/projection"
+#define PROJECTION_BRANCH "codify/projection"
+/* One conflicted path of one fold step. git_merge_tree fills path and kind;
+ * the fold adds the branch whose step reported it and the earlier folded
+ * branches that changed the same path against the base. Task 3.2 extends
+ * this record with symbol-level findings. */
+typedef struct {
+    char  *path;          /* repository-relative, malloc'd */
+    char   kind[32];      /* content | modify/delete | add/add | git's word */
+    char  *branch;        /* the branch being folded, malloc'd */
+    char **earlier;       /* earlier folded branches touching path */
+    int    nearlier;
+} ProjectionConflict;
+void projection_conflicts_free(ProjectionConflict *v, int n);
+/* cg projection build|status|diff|show; argv after "projection" */
+int  cmd_projection(Cg *cg, const SysInfo *si, int argc, char **argv,
+                    const char *first_branch, bool json);
+/* [projection] in codify.kvx (config.c): base ("" = [hierarchy] main, else
+ * main), stale seconds (default 24h), exclude globs, index */
+const char *config_projection_base(const char *root);
+long config_projection_stale(const char *root);
+int  config_projection_exclude(const char *root, char ***out);  /* malloc'd */
+bool config_projection_index(const char *root);
 /* Run `git -C <tree> <args>` (args already shell-quoted), stdout and
  * stderr appended to out (may be NULL). Returns the exit status, -1 when
  * git could not be started. */
 int  git_run(const char *tree, const char *args, StrBuf *out);
+/* codify-v15 3.1: plumbing for the projection (gitint.c). Commits and
+ * trees are written under a fixed "Codify projection" identity. */
+int  git_version(int *major, int *minor);          /* 0, or -1: no git */
+/* rev resolved to a commit id; 0, or -1 (sha empty) */
+int  git_rev_commit(const char *tree, const char *rev, char *sha, size_t cap);
+bool git_is_ancestor(const char *tree, const char *a, const char *b);
+long git_count_commits(const char *tree, const char *from, const char *to);
+/* paths `git diff from to` names (to may be "a...b" style), malloc'd */
+int  git_changed_paths(const char *tree, const char *from, const char *to,
+                       char ***out);
+/* merge-tree --write-tree --messages -z of two COMMITS (trees are refused
+ * by git): 0 clean, 1 conflicted (records in *conf, path and kind set),
+ * -1 failure. tree_out gets the merged tree, markers in conflicted files. */
+int  git_merge_tree(const char *tree, const char *a, const char *b,
+                    char *tree_out, size_t cap, ProjectionConflict **conf,
+                    int *nconf);
+/* commit-tree; date > 0 pins author and committer dates (deterministic ids) */
+int  git_commit_tree(const char *tree, const char *treeid,
+                     const char *const *parents, int nparents,
+                     const char *msg, long date, char *out, size_t cap);
+int  git_update_ref(const char *tree, const char *ref, const char *sha);
+long git_commit_time(const char *tree, const char *rev);   /* 0 unknown */
+/* worktree's files as a tree object, staged into a copy of its index at
+ * tmp_index (GIT_INDEX_FILE, add -A honoring .gitignore, write-tree); the
+ * real index and the worktree are never touched. 0, or -1. */
+int  git_shadow_tree(const char *worktree, const char *tmp_index,
+                     char *tree_out, size_t cap);
+/* how many paths differ between two tree-ish */
+int  git_tree_diff_count(const char *tree, const char *a, const char *b);
+/* `git -C tree args` with stderr folded in, for output shown as is */
+int  git_capture_text(const char *tree, const char *args, StrBuf *out);
 bool git_branch_exists(const char *tree, const char *branch);
 /* Make sure <path> is a worktree of <tree> on <branch>: an existing <path>
  * is reused as it stands — nothing here checks it is really on <branch>, so
