@@ -884,6 +884,46 @@ function withTimeout(p, ms, onTimeout) {
  * nothing. Every one of those calls is raced against CALL_TIMEOUT_MS, and the
  * loading, error and unconfigured states each render something the user can
  * act on, so the view cannot sit on a spinner. */
+/* codify-v15 3.3: the Projection node's model, from `projection` in cg fleet
+ * tree --json. Each finding names its branches, and each branch the file in
+ * its own worktree (null when cg knows no worktree for it); `badges` is the
+ * live finding count per branch, for the rows that own those branches. */
+function projectionNodes(proj, now) {
+    if (!proj) return null;
+    const trees = {};
+    const badges = {};
+    for (const b of proj.branches || []) {
+        trees[b.name] = b.worktree || null;
+        if (b.findings) badges[b.name] = b.findings;
+    }
+    const findings = (proj.findings || []).map((f) => ({
+        kind: f.kind,
+        path: f.path,
+        symbol: f.symbol || null,
+        advice: f.advice || '',
+        lines: f.lines || '',
+        branches: (f.branches || []).map((name) => ({
+            name,
+            worktree: trees[name] || null,
+            open: trees[name] && f.path ? path.join(trees[name], f.path) : null,
+        })),
+    }));
+    return {
+        commit: proj.commit || null,
+        built: proj.built || 0,
+        age: relAge(proj.built, now),
+        folded: proj.folded || 0,
+        count: proj.count !== undefined ? proj.count : findings.length,
+        findings,
+        badges,
+    };
+}
+
+function findingBadge(projection, branch) {
+    const n = projection && branch ? projection.badges[branch] : 0;
+    return n ? `${n} finding${n === 1 ? '' : 's'}` : null;
+}
+
 class FleetView {
     constructor(deps) {
         this.deps = deps;
@@ -898,6 +938,7 @@ class FleetView {
         this.force = false;           /* one pass even while the view is hidden */
         this.view = null;
         this.sessions = null;         /* codify-v15 2.3: the Sessions root */
+        this.projection = null;       /* codify-v15 3.3: the Projection root */
     }
 
     /* One pass of the fleet's own cg calls, run inside the extension's
@@ -935,6 +976,7 @@ class FleetView {
             },
         });
         this.sessions = await this.nativeModel(status, tree, branches, call);
+        this.projection = projectionNodes(tree && tree.projection);
         /* v11: what the supervisor and the agents have been doing */
         if (configured) {
             const runs = await call(['fleet', 'runs']);
@@ -992,7 +1034,71 @@ class FleetView {
         for (const a of m.approvals || []) top.push(this.approvalItem(a));
         top.push(this.nodeItem(m.main));
         if (sessions) top.push(sessions);
+        const projection = this.projectionRoot();
+        if (projection) top.push(projection);
         return top;
+    }
+
+    /* ---- the projection's findings (codify-v15 3.3) ---- */
+
+    /* Every finding with the branches it involves; a branch row opens the
+     * file in that branch's worktree. Absent until a build has run. */
+    projectionRoot() {
+        const p = this.projection;
+        if (!p) return null;
+        const kids = p.findings.map((f, i) => this.findingItem(f, i));
+        const it = new vscode.TreeItem('Projection', kids.length
+            ? vscode.TreeItemCollapsibleState.Expanded
+            : vscode.TreeItemCollapsibleState.None);
+        it.id = 'fleet:projection';
+        it.childItems = kids;
+        it.node = p;
+        it.description = `${p.count} finding${p.count === 1 ? '' : 's'} · ` +
+            `${p.folded} branch${p.folded === 1 ? '' : 'es'} folded · built ${p.age.text}`;
+        it.iconPath = new vscode.ThemeIcon('git-merge', p.count
+            ? new vscode.ThemeColor('list.warningForeground') : undefined);
+        it.tooltip = `refs/codify/projection${p.commit ? ` @ ${p.commit.slice(0, 12)}` : ''}` +
+            ' — every branch in flight folded onto the base; cg projection status';
+        it.contextValue = 'fleet-projection';
+        return it;
+    }
+
+    findingItem(f, i) {
+        const kids = f.branches.map((b) => this.findingBranchItem(f, b, i));
+        const label = `${f.kind} ${f.symbol ? `${f.symbol} in ` : ''}${f.path}`;
+        const it = new vscode.TreeItem(label, kids.length
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None);
+        it.id = `fleet:projection:${i}:${f.kind}:${f.path}`;
+        it.childItems = kids;
+        it.node = f;
+        it.description = f.branches.map((b) => b.name).join(', ');
+        it.tooltip = [f.advice, f.lines].filter(Boolean).join('\n');
+        it.iconPath = new vscode.ThemeIcon('warning',
+            new vscode.ThemeColor('list.warningForeground'));
+        it.contextValue = 'fleet-finding';
+        const first = f.branches.find((b) => b.open);
+        if (first) {
+            it.command = { command: 'vscode.open', title: 'Open file',
+                           arguments: [vscode.Uri.file(first.open)] };
+        }
+        return it;
+    }
+
+    findingBranchItem(f, b, i) {
+        const it = new vscode.TreeItem(b.name, vscode.TreeItemCollapsibleState.None);
+        it.id = `fleet:projection:${i}:${f.kind}:${f.path}:${b.name}`;
+        it.childItems = [];
+        it.node = b;
+        it.description = b.worktree || 'no worktree';
+        it.iconPath = new vscode.ThemeIcon('git-branch');
+        it.contextValue = 'fleet-finding-branch';
+        if (b.open) {
+            it.tooltip = b.open;
+            it.command = { command: 'vscode.open', title: 'Open file',
+                           arguments: [vscode.Uri.file(b.open)] };
+        }
+        return it;
     }
 
     /* ---- native sessions (codify-v15 2.3) ---- */
@@ -1068,6 +1174,8 @@ class FleetView {
         if (n.merge.worktreeMissing) bits.push('worktree gone');
         if (n.task) bits.push(`task ${n.task}${n.taskSource ? ` (${n.taskSource})` : ''}`);
         if (n.lastTool) bits.push(`› ${n.lastTool}`);
+        const nfs = findingBadge(this.projection, n.branch);
+        if (nfs) bits.push(nfs);
         it.description = bits.join(' · ');
         const icon = n.kind === 'session' ? 'terminal' : 'person';
         const color = n.state === 'live' ? 'testing.iconPassed'
@@ -1154,6 +1262,8 @@ class FleetView {
             bits.push('unmerged');
         }
         if (n.merge && n.merge.worktreeMissing) bits.push('worktree gone');
+        const nf = findingBadge(this.projection, n.branch);
+        if (nf) bits.push(nf);
         it.description = bits.join(' · ');
         it.iconPath = this.agentIcon(n);
         it.tooltip = this.agentTooltip(n);
@@ -1833,4 +1943,4 @@ function register(ctx, d) {
 
 module.exports = { register, FleetView, fleetTree, relAge, mergeState,
                    treeFacts, parentsFromTree, startPlan, liveDecorate,
-                   nativeNodes, patchSessions };
+                   nativeNodes, patchSessions, projectionNodes, findingBadge };

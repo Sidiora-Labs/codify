@@ -272,6 +272,8 @@ enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PROJ_STEER,            /* codify-v15 3.2 */
        /* codify-v15 1.4 */
        CFG_HOOKS_SHELL_ADVICE,
+       /* codify-v15 3.3 */
+       CFG_PROJ_AUTO, CFG_PROJ_MIN_INTERVAL,
        CFG_NKEYS };
 typedef struct {
     char root[4096];
@@ -289,6 +291,10 @@ typedef struct {
     bool fleet_discover;       /* codify-v15 2.4: [fleet] discover */
     bool proj_steer;           /* codify-v15 3.2: steer on new findings */
     bool shell_advice;         /* codify-v15 1.4: [hooks] shell_advice */
+    /* codify-v15 3.3: [projection] auto, min_interval */
+    bool proj_auto;
+    char proj_min_interval_s[64];
+    long proj_min_interval;    /* seconds */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -1428,6 +1434,32 @@ void conflicts_free(ProjectionFinding *f, int n);
 int  conflicts_print(Cg *cg, bool json, StrBuf *out);
 int  cmd_projection_findings(Cg *cg, int argc, char **argv, bool json);
 bool config_projection_steer(const char *root);   /* [projection] steer */
+/* codify-v15 3.3 */
+/* The projection follows the work (projection.c, docs/projection.md#live).
+ * projection_mark_dirty notes that something an active branch holds moved;
+ * projection_auto_build starts one detached `cg projection build --quiet`
+ * when the note is set, [projection] auto is not false, another branch is
+ * registered, no build holds the lock, and the last build (or launch) is
+ * older than [projection] min_interval. It returns 1 when it started one,
+ * 0 when there is nothing to do, and -1 when the interval holds it back —
+ * *retry_ms (may be NULL) then says when it would go. It never waits and
+ * never fails the caller. */
+void projection_mark_dirty(Cg *cg, const char *why);
+int  projection_auto_build(Cg *cg, const char *why, long *retry_ms);
+/* Callers that see work only as events (the supervisor, serve): mark the
+ * projection dirty when fleet.merge, fleet.land, orch.spawn, fleet.begin or
+ * a native spawn/worktree event landed since the last call in this process,
+ * then try projection_auto_build. */
+void projection_follow(Cg *cg, const char *why);
+/* the live findings that name branch, one line each ("" when none);
+ * returns how many — merge-up and land print them before merging */
+int  projection_branch_findings(Cg *cg, const char *branch, StrBuf *out);
+/* cg brief / cg state: ",\"projection\":{...}" or the one text line */
+void projection_summary(Cg *cg, StrBuf *b, bool json);
+/* fleet tree --json: ",\"projection\":{commit, built, findings, branches}" */
+void projection_tree_json(Cg *cg, StrBuf *b);
+bool config_projection_auto(const char *root);           /* default true */
+long config_projection_min_interval(const char *root);   /* seconds, 15 */
 /* Run `git -C <tree> <args>` (args already shell-quoted), stdout and
  * stderr appended to out (may be NULL). Returns the exit status, -1 when
  * git could not be started. */

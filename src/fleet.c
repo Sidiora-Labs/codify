@@ -1755,6 +1755,14 @@ int fleet_merge_up(Cg *cg, const char *id, const char *feature_ov, bool force,
         lifecycle_close(&c);
         return 1;
     }
+    {   /* codify-v15 3.3: the projection's findings on this branch, first */
+        StrBuf pf; sb_init(&pf);
+        if (projection_branch_findings(cg, branch, &pf)) {
+            fputs(pf.p, json ? stderr : stdout);
+            fflush(json ? stderr : stdout);
+        }
+        sb_free(&pf);
+    }
 
     StrBuf err; sb_init(&err);
     bool base_created = false;
@@ -2148,6 +2156,14 @@ int fleet_land(Cg *cg, const char *what, const char *feature_ov, bool no_pr,
                         "for %s yet\n", branch, subject);
         lifecycle_close(&c);
         return 1;
+    }
+    {   /* codify-v15 3.3: the projection's findings on this branch, first */
+        StrBuf pf; sb_init(&pf);
+        if (projection_branch_findings(cg, branch, &pf)) {
+            fputs(pf.p, json ? stderr : stdout);
+            fflush(json ? stderr : stdout);
+        }
+        sb_free(&pf);
     }
     if (c.wave >= 0) {
         /* a wave lands whole: a task still open would land half-done or

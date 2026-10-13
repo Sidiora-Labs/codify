@@ -20,12 +20,14 @@
  * this file writes; task 3.3 triggers builds.
  */
 #include "cg.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #define PROJ_MIN_MAJOR 2
 #define PROJ_MIN_MINOR 38
@@ -693,6 +695,484 @@ static void proj_unlock(int fd) {
     close(fd);
 }
 
+/* ---------------- following the work (codify-v15 3.3) ---------------- */
+
+/* Purpose: the projection should be current without anyone running a
+ * build. Every place work happens (an edit hook, a host's hook event, a
+ * watcher, serve, the supervisor) leaves a dirty note under .codegraph and
+ * asks projection_auto_build to act on it; a build consumes the note when it
+ * takes the lock, so an edit that lands mid-build is picked up next time.
+ * Contract: the callers are hooks the host waits on, so nothing here waits —
+ * the build runs in a detached grandchild whose stdio is /dev/null (the host
+ * waits for the hook's stdout pipe to close, not for its pid), the lock is
+ * probed without blocking, and [projection] min_interval keeps a burst of
+ * edits to one build. See docs/projection.md#live. */
+
+static void proj_cg_path(Cg *cg, const char *name, char *out, size_t cap) {
+    snprintf(out, cap, "%.4000s/%s/%s", cg->shared, CG_DIR, name);
+}
+
+void projection_mark_dirty(Cg *cg, const char *why) {
+    char p[4200];
+    proj_cg_path(cg, "projection.dirty", p, sizeof p);
+    int fd = open(p, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    char line[300];
+    int n = snprintf(line, sizeof line, "%ld %s\n", (long)time(NULL),
+                     why ? why : "");
+    if (n > 0 && write(fd, line, (size_t)n) < 0) { /* best effort */ }
+    close(fd);
+}
+
+static bool proj_dirty(Cg *cg) {
+    char p[4200];
+    struct stat st;
+    proj_cg_path(cg, "projection.dirty", p, sizeof p);
+    return stat(p, &st) == 0;
+}
+
+static void proj_dirty_clear(Cg *cg) {
+    char p[4200];
+    proj_cg_path(cg, "projection.dirty", p, sizeof p);
+    unlink(p);
+}
+
+/* when the projection was last built or a background build was last
+ * started: the projections row, the projection.built event (a no-op build
+ * writes no row), and the launch stamp, whichever is newest */
+static long proj_last_activity(Cg *cg) {
+    long last = 0;
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT ifnull(max(built),0) FROM "
+                           "projections", -1, &st, NULL) == SQLITE_OK &&
+        sqlite3_step(st) == SQLITE_ROW)
+        last = (long)sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    st = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT ifnull(max(at),0) FROM events "
+                           "WHERE kind='projection.built'", -1, &st, NULL)
+            == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW) {
+        long at = (long)sqlite3_column_int64(st, 0);
+        if (at > 100000000000L) at /= 1000;           /* stored in ms */
+        if (at > last) last = at;
+    }
+    sqlite3_finalize(st);
+    char p[4200];
+    struct stat sb;
+    proj_cg_path(cg, "projection.launched", p, sizeof p);
+    if (stat(p, &sb) == 0 && (long)sb.st_mtime > last) last = (long)sb.st_mtime;
+    return last;
+}
+
+/* Is there anything to fold, or anything a build would resolve? A
+ * repository with one branch and no live findings has no projection worth
+ * a process. */
+static bool proj_worth_building(Cg *cg) {
+    char base[256];
+    proj_base_name(cg, base, sizeof base);
+    sqlite3_stmt *st = NULL;
+    bool any = false;
+    if (sqlite3_prepare_v2(cg->db,
+            "SELECT (SELECT count(*) FROM branches WHERE name<>?1 AND "
+            "name<>?2 AND substr(name,1,1)<>'(' AND ifnull(worktree,'')<>'')"
+            " + (SELECT count(*) FROM projection_findings WHERE resolved IS "
+            "NULL)", -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, base, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, PROJECTION_BRANCH, -1, SQLITE_TRANSIENT);
+        any = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int64(st, 0) > 0;
+    }
+    sqlite3_finalize(st);
+    return any;
+}
+
+/* fork, setsid, fork again; the grandchild drops every descriptor it
+ * inherited (0-2 to /dev/null) before exec, so whoever reads our stdout
+ * sees it close when we exit, not when the build does */
+static int proj_spawn_background(Cg *cg) {
+    char self[4096];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    if (n > 0) self[n] = 0;
+    else snprintf(self, sizeof self, "cg");
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        setsid();
+        pid_t g = fork();
+        if (g != 0) _exit(g < 0 ? 1 : 0);
+        int dn = open("/dev/null", O_RDWR);
+        if (dn >= 0) {
+            dup2(dn, STDIN_FILENO);
+            dup2(dn, STDOUT_FILENO);
+            dup2(dn, STDERR_FILENO);
+        }
+        long maxfd = sysconf(_SC_OPEN_MAX);
+        if (maxfd < 0 || maxfd > 65536) maxfd = 65536;
+        for (int fd = 3; fd < (int)maxfd; fd++) close(fd);
+        if (chdir(cg->shared) != 0) _exit(126);
+        char *av[] = { self, (char *)"projection", (char *)"build",
+                       (char *)"--quiet", NULL };
+        execv(self, av);
+        _exit(127);
+    }
+    int st;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    return 0;
+}
+
+int projection_auto_build(Cg *cg, const char *why, long *retry_ms) {
+    (void)why;
+    if (retry_ms) *retry_ms = 0;
+    if (!cg || !cg->db || !config_projection_auto(cg->shared)) return 0;
+    if (!proj_dirty(cg) || !dir_has_git(cg->shared)) return 0;
+    if (!proj_worth_building(cg)) return 0;
+    long now = (long)time(NULL);
+    long gap = config_projection_min_interval(cg->shared);
+    long last = proj_last_activity(cg);
+    if (gap > 0 && last > 0 && now - last < gap) {
+        if (retry_ms) *retry_ms = (last + gap - now) * 1000;
+        return -1;
+    }
+    /* a build in flight already has the lock: it, or the next trigger
+     * after it, takes the note */
+    char lp[4200];
+    proj_cg_path(cg, "projection.lock", lp, sizeof lp);
+    int fd = open(lp, O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+    if (fd < 0) return 0;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); return 0; }
+    flock(fd, LOCK_UN);
+    close(fd);
+    char sp[4200];
+    proj_cg_path(cg, "projection.launched", sp, sizeof sp);
+    int sfd = open(sp, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0644);
+    if (sfd >= 0) {
+        futimens(sfd, NULL);
+        close(sfd);
+    }
+    return proj_spawn_background(cg) == 0 ? 1 : 0;
+}
+
+void projection_follow(Cg *cg, const char *why) {
+    static long cursor = -1;
+    if (!cg || !cg->db) return;
+    long head = events_head(cg);
+    if (cursor < 0) cursor = head;
+    if (head > cursor) {
+        sqlite3_stmt *st = NULL;
+        bool hit = false;
+        if (sqlite3_prepare_v2(cg->db,
+                "SELECT 1 FROM events WHERE seq>?1 AND seq<=?2 AND kind IN "
+                "('fleet.merge','fleet.land','fleet.begin','orch.spawn',"
+                "'agent.native.spawn','agent.native.worktree') LIMIT 1",
+                -1, &st, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(st, 1, cursor);
+            sqlite3_bind_int64(st, 2, head);
+            hit = sqlite3_step(st) == SQLITE_ROW;
+        }
+        sqlite3_finalize(st);
+        cursor = head;
+        if (hit) projection_mark_dirty(cg, why);
+    }
+    projection_auto_build(cg, why, NULL);
+}
+
+/* ---------------- the findings, by branch ---------------- */
+
+static void proj_age(char *out, size_t cap, long s) {
+    if (s < 0) s = 0;
+    if (s < 60) snprintf(out, cap, "%lds", s);
+    else if (s < 3600) snprintf(out, cap, "%ldm", s / 60);
+    else if (s < 86400) snprintf(out, cap, "%ldh", s / 3600);
+    else snprintf(out, cap, "%ldd", s / 86400);
+}
+
+/* the branches of a comma-joined set other than me, ", "-joined */
+static void proj_others(const char *csv, const char *me, StrBuf *b) {
+    int k = 0;
+    size_t ml = me ? strlen(me) : 0;
+    for (const char *s = csv; s && *s; ) {
+        const char *e = strchr(s, ',');
+        size_t len = e ? (size_t)(e - s) : strlen(s);
+        if (!(me && ml == len && !strncmp(s, me, len)))
+            sb_printf(b, "%s%.*s", k++ ? ", " : "", (int)len, s);
+        s = e ? e + 1 : NULL;
+    }
+}
+
+/* the live findings naming branch, two lines each; returns how many */
+static int proj_findings_of(Cg *cg, const char *branch, const char *indent,
+                            StrBuf *out) {
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(cg->db,
+            "SELECT kind, path, symbol, branches, ifnull(advice,''), "
+            "first_seen FROM projection_findings WHERE resolved IS NULL AND "
+            "(','||branches||',') LIKE '%,'||?1||',%' ORDER BY first_seen, id",
+            -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_finalize(st);
+        return 0;
+    }
+    sqlite3_bind_text(st, 1, branch, -1, SQLITE_TRANSIENT);
+    long now = (long)time(NULL);
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const char *kind = (const char *)sqlite3_column_text(st, 0);
+        const char *path = (const char *)sqlite3_column_text(st, 1);
+        const char *sym = (const char *)sqlite3_column_text(st, 2);
+        const char *csv = (const char *)sqlite3_column_text(st, 3);
+        const char *adv = (const char *)sqlite3_column_text(st, 4);
+        char age[32];
+        proj_age(age, sizeof age, now - (long)sqlite3_column_int64(st, 5));
+        sb_printf(out, "%s%-9s %s", indent, kind ? kind : "?",
+                  path ? path : "?");
+        if (sym && sym[0]) sb_printf(out, "  %s", sym);
+        sb_puts(out, "  with ");
+        proj_others(csv, branch, out);
+        sb_printf(out, "  (%s)\n", age);
+        if (adv && adv[0]) sb_printf(out, "%s    %s\n", indent, adv);
+        n++;
+    }
+    sqlite3_finalize(st);
+    return n;
+}
+
+int projection_branch_findings(Cg *cg, const char *branch, StrBuf *out) {
+    if (!cg || !cg->db || !branch || !branch[0]) return 0;
+    StrBuf body; sb_init(&body);
+    int n = proj_findings_of(cg, branch, "  ", &body);
+    if (n) {
+        sb_printf(out, "projection: %d known finding%s on %s — read them "
+                  "before this merge (cg projection findings):\n", n,
+                  n == 1 ? "" : "s", branch);
+        sb_puts(out, body.p);
+    }
+    sb_free(&body);
+    return n;
+}
+
+static long proj_count_for(Cg *cg, const char *branch) {
+    sqlite3_stmt *st = NULL;
+    long n = 0;
+    if (sqlite3_prepare_v2(cg->db,
+            "SELECT count(*) FROM projection_findings WHERE resolved IS NULL "
+            "AND (','||branches||',') LIKE '%,'||?1||',%'", -1, &st, NULL)
+            == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, branch, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW)
+            n = (long)sqlite3_column_int64(st, 0);
+    }
+    sqlite3_finalize(st);
+    return n;
+}
+
+/* the branches a build folded, plus any branch a live finding names that
+ * the build did not */
+static int proj_branch_names(Cg *cg, const char *branches_json, char ***out) {
+    char **v = NULL;
+    int n = 0;
+    char **items = NULL;
+    int ni = json_array_items(branches_json, &items);
+    for (int i = 0; i < ni; i++) {
+        char *name = json_get_string(items[i], "name");
+        char *skip = json_get_string(items[i], "skipped");
+        if (name && !skip) {
+            v = xrealloc(v, sizeof *v * (size_t)(n + 1));
+            v[n++] = name;
+            name = NULL;
+        }
+        free(name); free(skip); free(items[i]);
+    }
+    free(items);
+    sqlite3_stmt *st = NULL;
+    if (sqlite3_prepare_v2(cg->db, "SELECT branches FROM projection_findings "
+                           "WHERE resolved IS NULL", -1, &st, NULL)
+            == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *csv = (const char *)sqlite3_column_text(st, 0);
+            for (const char *s = csv; s && *s; ) {
+                const char *e = strchr(s, ',');
+                size_t len = e ? (size_t)(e - s) : strlen(s);
+                bool have = false;
+                for (int k = 0; k < n && !have; k++)
+                    have = strlen(v[k]) == len && !strncmp(v[k], s, len);
+                if (!have) {
+                    char *x = xmalloc(len + 1);
+                    memcpy(x, s, len);
+                    x[len] = 0;
+                    v = xrealloc(v, sizeof *v * (size_t)(n + 1));
+                    v[n++] = x;
+                }
+                s = e ? e + 1 : NULL;
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    *out = v;
+    return n;
+}
+
+static void proj_names_free(char **v, int n) {
+    for (int i = 0; i < n; i++) free(v[i]);
+    free(v);
+}
+
+/* the worktree the last build recorded for a branch ("" when none) */
+static void proj_worktree_of(const char *branches_json, const char *name,
+                             char *out, size_t cap) {
+    out[0] = 0;
+    char **items = NULL;
+    int ni = json_array_items(branches_json, &items);
+    for (int i = 0; i < ni; i++) {
+        char *nm = json_get_string(items[i], "name");
+        if (nm && !strcmp(nm, name) && !out[0]) {
+            char *wt = json_get_string(items[i], "worktree");
+            if (wt) snprintf(out, cap, "%s", wt);
+            free(wt);
+        }
+        free(nm);
+        free(items[i]);
+    }
+    free(items);
+}
+
+static long proj_live_findings(Cg *cg) {
+    sqlite3_stmt *st = NULL;
+    long n = 0;
+    if (sqlite3_prepare_v2(cg->db, "SELECT count(*) FROM projection_findings "
+                           "WHERE resolved IS NULL", -1, &st, NULL)
+            == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW)
+        n = (long)sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+    return n;
+}
+
+static int proj_folded(const char *branches_json) {
+    char **items = NULL;
+    int ni = json_array_items(branches_json, &items), n = 0;
+    for (int i = 0; i < ni; i++) {
+        char *skip = json_get_string(items[i], "skipped");
+        n += !skip && raw_true(items[i], "merged");
+        free(skip);
+        free(items[i]);
+    }
+    free(items);
+    return n;
+}
+
+void projection_summary(Cg *cg, StrBuf *b, bool json) {
+    ProjRow r;
+    proj_last(cg, &r);
+    if (!r.found) {
+        if (json) sb_puts(b, ",\"projection\":null");
+        return;
+    }
+    int folded = proj_folded(r.branches);
+    long nf = proj_live_findings(cg);
+    long now = (long)time(NULL);
+    if (json) {
+        sb_puts(b, ",\"projection\":{\"commit\":");
+        sb_json_str(b, r.commit);
+        sb_printf(b, ",\"built\":%ld,\"age\":%ld,\"branches\":%d,"
+                  "\"findings\":%ld,\"first\":[", r.built, now - r.built,
+                  folded, nf);
+    } else {
+        sb_printf(b, "projection: %d branch%s folded, %ld finding%s", folded,
+                  folded == 1 ? "" : "es", nf, nf == 1 ? "" : "s");
+    }
+    sqlite3_stmt *st = NULL;
+    int k = 0;
+    if (sqlite3_prepare_v2(cg->db,
+            "SELECT kind, path, symbol, branches FROM projection_findings "
+            "WHERE resolved IS NULL ORDER BY first_seen, id LIMIT 2", -1, &st,
+            NULL) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *kind = (const char *)sqlite3_column_text(st, 0);
+            const char *path = (const char *)sqlite3_column_text(st, 1);
+            const char *sym = (const char *)sqlite3_column_text(st, 2);
+            const char *csv = (const char *)sqlite3_column_text(st, 3);
+            if (json) {
+                if (k) sb_putc(b, ',');
+                sb_puts(b, "{\"kind\":");
+                sb_json_str(b, kind ? kind : "");
+                sb_puts(b, ",\"path\":");
+                sb_json_str(b, path ? path : "");
+                sb_puts(b, ",\"symbol\":");
+                if (sym && sym[0]) sb_json_str(b, sym);
+                else sb_puts(b, "null");
+                sb_puts(b, ",\"branches\":[");
+                int nb = 0;
+                for (const char *s = csv; s && *s; ) {
+                    const char *e = strchr(s, ',');
+                    size_t len = e ? (size_t)(e - s) : strlen(s);
+                    char one[512];
+                    snprintf(one, sizeof one, "%.*s", (int)len, s);
+                    if (nb++) sb_putc(b, ',');
+                    sb_json_str(b, one);
+                    s = e ? e + 1 : NULL;
+                }
+                sb_puts(b, "]}");
+            } else {
+                sb_printf(b, "%s%s ", k ? "; " : " — ", kind ? kind : "?");
+                if (sym && sym[0]) sb_printf(b, "%s in ", sym);
+                sb_printf(b, "%s (", path ? path : "?");
+                proj_others(csv, NULL, b);
+                sb_putc(b, ')');
+            }
+            k++;
+        }
+    }
+    sqlite3_finalize(st);
+    if (json) {
+        sb_puts(b, "]}");
+    } else {
+        char age[32];
+        proj_age(age, sizeof age, now - r.built);
+        sb_printf(b, "%s — built %s ago; cg projection status\n",
+                  nf > k ? "; …" : "", age);
+    }
+    proj_row_free(&r);
+}
+
+void projection_tree_json(Cg *cg, StrBuf *b) {
+    ProjRow r;
+    proj_last(cg, &r);
+    if (!r.found) {
+        sb_puts(b, ",\"projection\":null");
+        return;
+    }
+    sb_puts(b, ",\"projection\":{\"ref\":\"" PROJECTION_REF "\",\"commit\":");
+    sb_json_str(b, r.commit);
+    sb_puts(b, ",\"base\":");
+    sb_json_str(b, r.base);
+    sb_printf(b, ",\"built\":%ld,\"age\":%ld,\"folded\":%d", r.built,
+              (long)time(NULL) - r.built, proj_folded(r.branches));
+    StrBuf fj; sb_init(&fj);
+    conflicts_print(cg, true, &fj);
+    char *arr = json_get_raw(fj.p, "findings");
+    sb_printf(b, ",\"findings\":%s,\"count\":%ld", arr ? arr : "[]",
+              json_get_int(fj.p, "count", 0));
+    free(arr);
+    sb_free(&fj);
+    /* per branch: its worktree (where a finding's path opens) and how many
+     * live findings name it */
+    sb_puts(b, ",\"branches\":[");
+    char **names = NULL;
+    int nn = proj_branch_names(cg, r.branches, &names);
+    for (int i = 0; i < nn; i++) {
+        char wt[4096];
+        proj_worktree_of(r.branches, names[i], wt, sizeof wt);
+        if (i) sb_putc(b, ',');
+        sb_puts(b, "{\"name\":");
+        sb_json_str(b, names[i]);
+        sb_puts(b, ",\"worktree\":");
+        if (wt[0]) sb_json_str(b, wt); else sb_puts(b, "null");
+        sb_printf(b, ",\"findings\":%ld}", proj_count_for(cg, names[i]));
+    }
+    proj_names_free(names, nn);
+    sb_puts(b, "]}");
+    proj_row_free(&r);
+}
+
 /* ---------------- commands ---------------- */
 
 /* req 8.8: a repository and a git that can merge without a worktree */
@@ -742,6 +1222,9 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
     if (rc) return rc;
     bool waited = false;
     int fd = proj_lock(cg, o->wait_ms, &waited);
+    /* codify-v15 3.3: a quiet (background) build that finds another build
+     * running leaves it to that one — someone else has it, not an error */
+    if (fd < 0 && o->quiet) return 0;
     if (fd < 0) {
         fprintf(stderr, "cg projection: another build held the projection "
                 "lock for %ld ms — showing the last build\n", o->wait_ms);
@@ -752,6 +1235,7 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
         return CG_EXIT_BUSY;
     }
     long t0 = now_ms();
+    proj_dirty_clear(cg);              /* codify-v15 3.3: this build takes it */
     Projection p;
     memset(&p, 0, sizeof p);
     p.built = (long)time(NULL);
@@ -795,7 +1279,7 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
         int irc = 0;
         if (o->index)
             irc = proj_index(cg, si, last.commit, last.base, &ij, json);
-        if (!json) {
+        if (!json && !o->quiet) {
             printf("projection unchanged — inputs match the build of %.12s; "
                    "--force rebuilds\n", last.commit);
         }
@@ -806,9 +1290,11 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
         conflicts_store(cg, NULL, 0, nb, last.commit, now_ms() - t0, true);
         StrBuf fj; sb_init(&fj);
         conflicts_print(cg, json, &fj);
-        proj_print_row(&last, true, json, o->index ? ij.p : NULL,
-                       json ? fj.p : NULL);
-        if (!json) fputs(fj.p, stdout);
+        if (!o->quiet) {
+            proj_print_row(&last, true, json, o->index ? ij.p : NULL,
+                           json ? fj.p : NULL);
+            if (!json) fputs(fj.p, stdout);
+        }
         sb_free(&fj);
         sb_free(&ij);
         proj_row_free(&last);
@@ -868,14 +1354,16 @@ static int projection_build(Cg *cg, const SysInfo *si, const ProjOpts *o, bool j
         sb_puts(&out, fj.p);
     }
     sb_free(&fj);
-    fputs(out.p, stdout);
+    if (!o->quiet) fputs(out.p, stdout);
     sb_free(&out); sb_free(&ij); sb_free(&bj); sb_free(&cj);
     proj_free(&p);
     proj_unlock(fd);
     return irc != 0 ? 1 : 0;
 }
 
-static int proj_status(Cg *cg, bool json) {
+/* the last build, then (codify-v15 3.3) the live findings grouped by the
+ * branches they name, with ages — only branch's group when one is named */
+static int proj_status(Cg *cg, bool json, const char *branch) {
     ProjRow r;
     proj_last(cg, &r);
     if (!r.found) {
@@ -883,11 +1371,53 @@ static int proj_status(Cg *cg, bool json) {
         else printf("no projection built yet — cg projection build\n");
         return 0;
     }
-    if (!json) {
-        long d = (long)time(NULL) - r.built;
-        printf("last build %ld s ago\n", d < 0 ? 0 : d);
+    long now = (long)time(NULL);
+    char **names = NULL;
+    int nn = proj_branch_names(cg, r.branches, &names);
+    if (json) {
+        /* {"findings":[...],"count":N,"by_branch":{name:{worktree,findings}}} */
+        StrBuf fj; sb_init(&fj);
+        conflicts_print(cg, true, &fj);
+        if (fj.len && fj.p[fj.len - 1] == '}') fj.p[--fj.len] = 0;
+        sb_puts(&fj, ",\"by_branch\":{");
+        int k = 0;
+        for (int i = 0; i < nn; i++) {
+            if (branch && strcmp(branch, names[i])) continue;
+            char wt[4096];
+            proj_worktree_of(r.branches, names[i], wt, sizeof wt);
+            if (k++) sb_putc(&fj, ',');
+            sb_json_str(&fj, names[i]);
+            sb_puts(&fj, ":{\"worktree\":");
+            if (wt[0]) sb_json_str(&fj, wt); else sb_puts(&fj, "null");
+            sb_printf(&fj, ",\"findings\":%ld}", proj_count_for(cg, names[i]));
+        }
+        sb_puts(&fj, "}}");
+        proj_print_row(&r, false, true, NULL, fj.p);
+        sb_free(&fj);
+    } else {
+        printf("last build %ld s ago\n", now - r.built < 0 ? 0 : now - r.built);
+        proj_print_row(&r, false, false, NULL, NULL);
+        StrBuf b; sb_init(&b);
+        int total = 0;
+        for (int i = 0; i < nn; i++) {
+            if (branch && strcmp(branch, names[i])) continue;
+            StrBuf body; sb_init(&body);
+            int n = proj_findings_of(cg, names[i], "    ", &body);
+            char wt[4096];
+            proj_worktree_of(r.branches, names[i], wt, sizeof wt);
+            sb_printf(&b, "  %s%s%s — %d finding%s\n", names[i],
+                      wt[0] ? " at " : "", wt, n, n == 1 ? "" : "s");
+            if (n) sb_puts(&b, body.p);
+            total += n;
+            sb_free(&body);
+        }
+        if (b.len) {
+            printf("findings by branch:\n%s", b.p);
+            if (!total) printf("  (no live findings)\n");
+        }
+        sb_free(&b);
     }
-    proj_print_row(&r, false, json, NULL, NULL);
+    proj_names_free(names, nn);
     proj_row_free(&r);
     return 0;
 }
@@ -1014,13 +1544,20 @@ int cmd_projection(Cg *cg, const SysInfo *si, int argc, char **argv,
         o.extra[o.nextra++] = (char *)first_branch;
     }
     const char *pos = NULL;
+    bool wait_set = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--force")) o.force = true;
         else if (!strcmp(argv[i], "--strict")) o.strict = true;
         else if (!strcmp(argv[i], "--index")) o.index = true;
         else if (!strcmp(argv[i], "--no-index")) o.index = false;
-        else if (!strcmp(argv[i], "--wait") && i + 1 < argc)
+        else if (!strcmp(argv[i], "--quiet")) {         /* codify-v15 3.3 */
+            o.quiet = true;
+            if (!wait_set) o.wait_ms = 0;
+        }
+        else if (!strcmp(argv[i], "--wait") && i + 1 < argc) {
             o.wait_ms = atol(argv[++i]);
+            wait_set = true;
+        }
         else if (!strcmp(argv[i], "--branch") && i + 1 < argc) {
             o.extra = xrealloc(o.extra,
                                sizeof *o.extra * (size_t)(o.nextra + 1));
@@ -1035,7 +1572,7 @@ int cmd_projection(Cg *cg, const SysInfo *si, int argc, char **argv,
     if (o.wait_ms < 0) o.wait_ms = 0;
     int rc;
     if (!strcmp(sub, "build")) rc = projection_build(cg, si, &o, json);
-    else if (!strcmp(sub, "status")) rc = proj_status(cg, json);
+    else if (!strcmp(sub, "status")) rc = proj_status(cg, json, pos);
     else if (!strcmp(sub, "diff")) rc = proj_diff(cg, pos ? pos : first_branch,
                                                    json);
     else if (!strcmp(sub, "show")) rc = proj_show(cg, json);

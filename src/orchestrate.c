@@ -3115,6 +3115,7 @@ static int supervisor_tick(Sup *s) {
         }
         sqlite3_finalize(cq);
     }
+    projection_follow(g, "supervisor");     /* codify-v15 3.3 */
     if (!s->stopping && !s->paused && !sub.complete && ap == 0 &&
         now - s->last_wake >= ORCH_WAKE_BACKOFF) {
         int wrc = sup_wake_managers(s, &sub, now);

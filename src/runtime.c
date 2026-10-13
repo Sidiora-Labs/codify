@@ -148,6 +148,7 @@ int cmd_state(Cg *cg, bool json) {
             sb_printf(&b, ",\"journal\":{\"pending\":%d,\"failed\":%d}",
                       jpending, jfailed);
         native_summary(cg, &b, true);
+        projection_summary(cg, &b, true);       /* codify-v15 3.3 */
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -171,6 +172,7 @@ int cmd_state(Cg *cg, bool json) {
                    "%d refused — cg journal list\n", jpending, jfailed);
         StrBuf nb; sb_init(&nb);
         native_summary(cg, &nb, false);
+        projection_summary(cg, &nb, false);     /* codify-v15 3.3 */
         fputs(nb.p, stdout);
         sb_free(&nb);
     }

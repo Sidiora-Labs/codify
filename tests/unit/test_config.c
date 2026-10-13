@@ -96,8 +96,15 @@ int main(void) {
             "[fleet]\n"
             "discover = false\n"
             "[hooks]\n"
-            "shell_advice = false\n");
+            "shell_advice = false\n"
+            "[projection]\n"                    /* codify-v15 3.3 */
+            "auto = false\n"
+            "min_interval = \"2m\"\n");
     c = config_load(root);
+    ok(!c->proj_auto && !config_projection_auto(root),
+       "projection auto = false parsed");
+    ok(c->proj_min_interval == 120 && config_projection_min_interval(root) == 120,
+       "projection min_interval = 2m parsed (%ld)", c->proj_min_interval);
     ok(!c->fleet_discover && !config_fleet_discover(root),
        "fleet discover = false parsed");
     ok(!c->shell_advice, "hooks shell_advice = false parsed");

@@ -252,3 +252,65 @@ to Codify; do not edit it.
 | `steer` | `true` | Steer the agents on both branches when a build finds a new conflict. |
 
 The liveness window for agents is `[agents] ttl` in `spec/workflow.kvx`.
+
+## Following the work {#live}
+
+Nobody has to run `cg projection build`. Work marks the projection dirty
+(the note is `.codegraph/projection.dirty`), and the next trigger starts one
+background `cg projection build --quiet`. The build is detached, prints
+nothing, and gives way to a build that already holds the lock.
+
+| Trigger | When |
+|---|---|
+| `cg hook post-edit` | after every edit, once the graph is synced |
+| `cg hook event` | on `PostToolUse`, `Stop`, `SubagentStop`, `SessionEnd`, `WorktreeCreate`, and `WorktreeRemove`; session starts and prompts are not work |
+| `cg watch`, `cg watch --fleet` | when edits settle and the sync has run |
+| `cg serve` | on its refresh, after a `fleet.merge`, `fleet.land`, `fleet.begin`, or spawn event |
+| the fleet supervisor | on its tick, after the same events |
+
+A trigger starts a build only when all of these hold:
+
+- the projection is dirty
+- `[projection] auto` is not `false`
+- the repository has another branch in a worktree, or live findings
+- the last build, or the last build started, is older than `[projection] min_interval` (15s)
+
+A trigger held back by the interval is not lost. The note stays, so the
+next trigger after the interval builds. `cg watch` also retries on its own
+when the interval ends.
+
+### Where the findings show
+
+- **`cg projection status`** shows the last build and its age, then every
+  live finding grouped under each branch it involves, with that branch's
+  worktree. `--json` adds
+  `findings: {findings, count, by_branch: {name: {worktree, findings}}}`.
+- **`cg brief` and `cg state`** add the line
+  `projection: N branches folded, M findings — the first two named — built
+  Ns ago`. Under `--json` this is
+  `projection: {commit, built, age, branches, findings, first}`, or `null`
+  before the first build.
+- **`cg fleet tree --json`** adds
+  `projection: {ref, commit, base, built, age, folded, findings, count,
+  branches: [{name, worktree, findings}]}`. The `findings` field inside
+  `branches` is that branch's count.
+- **The MCP tool `projection_status`** returns the same JSON as
+  `cg projection status --json`.
+- **`cg serve`** pushes `projection.built`, `projection.conflict`, and
+  `projection.resolved` to subscribers, for example with
+  `{"kinds": "projection.*"}`.
+- **The editor's fleet view** shows a Projection node. It lists each finding
+  with its branches, and each branch row opens the file in that branch's
+  worktree. Agent and session rows on an involved branch carry an
+  `N findings` badge.
+- **`cg fleet merge-up` and `cg fleet land`** print the branch's known
+  findings before they merge. With `--json` the findings go to stderr. The
+  findings are advice and never block the merge.
+
+The steer a build sends reaches a Claude Code session in the
+`additionalContext` of its next post-edit hook.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `auto` | `true` | Hooks, watch, serve, and the supervisor start a background build when work happens. |
+| `min_interval` | `15s` | An automatic build waits this long after the last one. |
