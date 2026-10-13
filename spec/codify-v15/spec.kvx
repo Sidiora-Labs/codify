@@ -179,7 +179,7 @@ status  = "pending"
 
 [task.2.1]
 title      = "The Claude Code plugin and the Codex hooks, installed by cg integrate"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["plugin_render", "plugin_install", "plugin_state"]
 touches    = ["src/plugin.c", "src/integrate.c", "src/govern.c", "src/main.c", "src/help.c", "src/cg.h", "tests/integration/48_plugin.sh", "tests/integration/21_grounding.sh", "docs/integrate.md"]

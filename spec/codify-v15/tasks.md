@@ -32,7 +32,7 @@
 ## The Claude Code plugin, native agents in the fleet, and transcript discovery
 
 - [ ] 2. Presence
-  - [ ] 2.1 The Claude Code plugin and the Codex hooks, installed by cg integrate
+  - [-] 2.1 The Claude Code plugin and the Codex hooks, installed by cg integrate
     - plugin.c: render the marketplace tree (marketplace.json, plugin.json with cg's version, hooks/hooks.json per req 5.2, .mcp.json, the skill, the three commands) under $HOME/.codify/plugins/claude-code/ with codify-owned markers, idempotent regeneration on version change, conflicts reported and kept; the Codex .codex/hooks.json.
     - integrate.c: apply calls plugin_install (runs claude plugin marketplace add and install when claude is on PATH, prints the commands otherwise, --no-plugin), detect and doctor report installed and version state; cg hook install skips settings.json hooks when the plugin is installed.
     - 48_plugin.sh per req 5.5 under a temporary HOME; docs/integrate.md.

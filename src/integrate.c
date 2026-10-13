@@ -51,7 +51,7 @@ typedef struct {
     char protocol[64];
 } ConfigState;
 
-static void integrate_self(char out[4096]) {
+void integrate_self(char out[4096]) {
     const char *ov = getenv("CG_BINARY");
     if (ov && ov[0]) { snprintf(out, 4096, "%s", ov); return; }
     ssize_t n = readlink("/proc/self/exe", out, 4095);
@@ -265,6 +265,89 @@ static int apply_asset(const char *path, const char *body, bool executable) {
     return executable ? chmod(path, 0755) : 0;
 }
 
+/* the portable skill, for the Claude Code plugin's copy (src/plugin.c) */
+const char *integrate_skill_body(void) { return SKILL_BODY; }
+
+/* --no-plugin: apply leaves the Claude Code plugin and the Codex hooks out */
+static bool skip_plugin;
+void integrate_skip_plugin(bool skip) { skip_plugin = skip; }
+
+/* Apply's plugin step: render the marketplace tree, install it through the
+ * claude CLI, and write the Codex hooks. JSON adds the "plugin" and
+ * "codex_hooks" members; text adds lines. Conflicts count as errors, like
+ * every other generated asset; an install claude refused is reported, not
+ * failed (warn, don't block). */
+static void integrate_plugin_apply(Cg *cg, const char *bin, bool json,
+                                   StrBuf *b, int *changed, int *errors) {
+    if (skip_plugin) {
+        if (json) sb_puts(b, ",\"plugin\":{\"result\":\"skipped\"},"
+                             "\"codex_hooks\":{\"result\":\"skipped\"}");
+        else sb_printf(b, "  %-20s skipped (--no-plugin)\n",
+                       "Claude Code plugin");
+        return;
+    }
+    char root[4700];
+    plugin_root(root);
+    StrBuf files; sb_init(&files);
+    int pchanged = 0, pconflicts = 0;
+    int perr = plugin_render(bin, json, &files, &pchanged, &pconflicts);
+    *changed += pchanged;
+    *errors += perr + pconflicts;
+    StrBuf inst; sb_init(&inst);
+    plugin_install(json, &inst);
+    char cpath[4700];
+    int crc = plugin_codex_hooks(cg, bin, cpath);
+    const char *cres = crc == 0 ? "configured" : crc == 1
+        ? "already configured" : crc == 2 ? "conflict" : "error";
+    if (crc == 0) (*changed)++;
+    if (crc < 0 || crc == 2) (*errors)++;
+    if (json) {
+        sb_puts(b, ",\"plugin\":{\"root\":"); sb_json_str(b, root);
+        sb_printf(b, ",\"changed\":%d,\"conflicts\":%d,\"files\":[%s],"
+                     "\"install\":%s}", pchanged, pconflicts, files.p,
+                  inst.p);
+        sb_puts(b, ",\"codex_hooks\":{\"path\":"); sb_json_str(b, cpath);
+        sb_puts(b, ",\"result\":"); sb_json_str(b, cres);
+        sb_puts(b, ",\"note\":\"Codex runs these hooks only after they are "
+                   "trusted once through /hooks\"}");
+    } else {
+        sb_printf(b, "  %-20s %d written, %d conflict(s)  %s\n",
+                  "Claude Code plugin", pchanged, pconflicts, root);
+        sb_puts(b, files.p);
+        sb_puts(b, inst.p);
+        sb_printf(b, "  %-20s %-20s %s\n", "Codex hooks", cres, cpath);
+        if (crc == 0)
+            sb_puts(b, "      trust them once in Codex through /hooks\n");
+    }
+    sb_free(&files); sb_free(&inst);
+}
+
+/* detect and doctor: the plugin and the Codex hooks as they stand */
+static void integrate_plugin_report(Cg *cg, bool json, StrBuf *b) {
+    PluginState ps;
+    plugin_state(&ps);
+    char cpath[4700];
+    const char *cs = plugin_codex_state(cg, cpath);
+    if (json) {
+        sb_puts(b, ",\"plugin\":"); plugin_state_json(&ps, b);
+        sb_puts(b, ",\"codex_hooks\":{\"path\":"); sb_json_str(b, cpath);
+        sb_puts(b, ",\"state\":"); sb_json_str(b, cs);
+        sb_puts(b, ",\"trust\":\"Codex runs these hooks only after they are "
+                   "trusted once through /hooks\"}");
+    } else {
+        sb_printf(b, "  %-20s %-10s %s%s%s\n", "Claude Code plugin",
+                  ps.installed ? "installed" : ps.rendered ? "rendered"
+                  : "missing", ps.installed ? "codify@codify " : "",
+                  ps.installed ? ps.version : "",
+                  ps.installed && !ps.current ? " (cg is " CG_VERSION ")"
+                  : "");
+        sb_printf(b, "    %s\n", ps.root);
+        sb_printf(b, "  %-20s %-10s %s\n", "Codex hooks", cs, cpath);
+        sb_puts(b, "    Codex runs them only after they are trusted once "
+                   "through /hooks\n");
+    }
+}
+
 static char *host_shim_body(const char *host) {
     StrBuf b; sb_init(&b);
     sb_printf(&b, "#!/bin/sh\n# codify-owned: %s-event-shim v1\n"
@@ -457,7 +540,9 @@ int integrate_apply(Cg *cg, bool json) {
     }
     arc = integrate_agent_context(cg);
     if (arc == 0) changed++; else if (arc < 0 || arc == 2) errors++;
-    if (json) sb_printf(&b, "],\"changed\":%d,\"errors\":%d}\n",
+    if (json) sb_putc(&b, ']');
+    integrate_plugin_apply(cg, bin, json, &b, &changed, &errors);
+    if (json) sb_printf(&b, ",\"changed\":%d,\"errors\":%d}\n",
                         changed, errors);
     else sb_printf(&b, "portable assets: %s (%d change(s), %d conflict(s))\n",
                    errors ? "attention needed" : "ready", changed, errors);
@@ -562,12 +647,37 @@ int integrate_doctor(Cg *cg, bool json) {
         free(sf[i]);
     }
     free(sf);
+    /* The plugin and the Codex hooks: a foreign file at one of their paths
+     * or an installed plugin older than cg is a finding; not installed is
+     * a state, reported beside the findings, since --no-plugin is a choice. */
+    PluginState ps;
+    plugin_state(&ps);
+    if (ps.installed && !ps.current)
+        doctor_find(&findings, &n, json,
+                    "Claude Code plugin codify@codify is %s but cg is %s: "
+                    "run cg integrate apply", ps.version, CG_VERSION);
+    char ppath[4800];
+    snprintf(ppath, sizeof ppath,
+             "%s/plugins/codify/.claude-plugin/plugin.json", ps.root);
+    if (strcmp(plugin_file_state(ppath, "codify-owned:"), "conflict") == 0)
+        doctor_find(&findings, &n, json,
+                    "Claude Code plugin has conflicting ownership: %s", ppath);
+    char cpath[4700];
+    if (strcmp(plugin_codex_state(cg, cpath), "conflict") == 0)
+        doctor_find(&findings, &n, json,
+                    "Codex hooks have conflicting ownership: %s", cpath);
+    StrBuf extra; sb_init(&extra);
+    integrate_plugin_report(cg, json, &extra);
     if (json) {
-        printf("{\"ok\":%s,\"findings\":[%s]}\n", n ? "false" : "true",
-               findings.p);
-    } else if (n) {
-        printf("integration doctor — %d finding(s):\n%s", n, findings.p);
-    } else printf("integration doctor — healthy\n");
+        printf("{\"ok\":%s,\"findings\":[%s]%s}\n", n ? "false" : "true",
+               findings.p, extra.p);
+    } else {
+        if (n) printf("integration doctor — %d finding(s):\n%s", n,
+                      findings.p);
+        else printf("integration doctor — healthy\n");
+        fputs(extra.p, stdout);
+    }
+    sb_free(&extra);
     sb_free(&findings);
     return n ? 1 : 0;
 }
@@ -582,7 +692,9 @@ static int integrate_detect(Cg *cg, bool json) {
             if (i) sb_putc(&b, ',');
             adapter_json(&ADAPTERS[i], path, &s, &b);
         }
-        sb_puts(&b, "]}\n"); fputs(b.p, stdout); sb_free(&b);
+        sb_putc(&b, ']');
+        integrate_plugin_report(cg, true, &b);
+        sb_puts(&b, "}\n"); fputs(b.p, stdout); sb_free(&b);
     } else {
         printf("Codify host capability registry:\n");
         for (int i = 0; i < NADAPTERS; i++) {
@@ -596,6 +708,9 @@ static int integrate_detect(Cg *cg, bool json) {
                    ADAPTERS[i].cloud);
             printf("    %s\n", path);
         }
+        StrBuf b; sb_init(&b);
+        integrate_plugin_report(cg, false, &b);
+        fputs(b.p, stdout); sb_free(&b);
     }
     return 0;
 }
@@ -608,6 +723,6 @@ int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility) {
     if (strcmp(action, "plan") == 0) return integrate_plan(cg, json);
     if (strcmp(action, "apply") == 0) return integrate_apply(cg, json);
     if (strcmp(action, "doctor") == 0) return integrate_doctor(cg, json);
-    fprintf(stderr, "usage: cg integrate [detect|plan|apply|doctor]\n");
+    help_usage("integrate");
     return 1;
 }

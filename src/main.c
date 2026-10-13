@@ -253,13 +253,19 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* an agent host fires the edit hook in whatever directory it runs in;
-     * outside a Codify project there is nothing to do, and a failing hook
-     * would be reported to the agent as an error on every edit */
+    /* an agent host fires its hooks in whatever directory it runs in (the
+     * Claude Code plugin is user-scoped, so everywhere); outside a Codify
+     * project there is nothing to do, and a failing hook would be reported
+     * to the agent as an error on every event */
     if (strcmp(cmd, "hook") == 0 && argc >= 3 &&
-        strcmp(argv[2], "post-edit") == 0) {
+        strcmp(argv[2], "install") != 0) {
         char root[4096];
-        if (cg_find_root(root, sizeof root) != 0) return 0;
+        if (cg_find_root(root, sizeof root) != 0) {
+            char drain[4096];
+            if (!isatty(STDIN_FILENO))
+                while (fread(drain, 1, sizeof drain, stdin) > 0) {}
+            return 0;
+        }
     }
 
     /* jev doctor is how an operator finds out why Jev is unavailable, so
@@ -426,7 +432,13 @@ int main(int argc, char **argv) {
             rc = cmd_hook_install(&cg);
         else if (argc >= 3 && strcmp(argv[2], "post-edit") == 0)
             rc = cmd_hook_post_edit(&cg, &si, json);
-        else { help_usage("hook"); rc = 1; }
+        else {          /* hooks never fail the host: drain, note, exit 0 */
+            char drain[4096];
+            if (!isatty(STDIN_FILENO))
+                while (fread(drain, 1, sizeof drain, stdin) > 0) {}
+            help_usage("hook");
+            rc = 0;
+        }
     } else if (strcmp(cmd, "check") == 0) {
         bool strict = flag(&argc, argv, "--strict");
         rc = cmd_check(&cg, json, strict);
@@ -556,6 +568,7 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "mcp-install") == 0) {
         rc = cmd_mcp_install(&cg);
     } else if (strcmp(cmd, "integrate") == 0) {
+        integrate_skip_plugin(flag(&argc, argv, "--no-plugin"));
         rc = cmd_integrate(&cg, argc >= 3 ? argv[2] : "detect", json, false);
     } else if (strcmp(cmd, "changelog") == 0) {
         ChangelogOpts o = {0};
