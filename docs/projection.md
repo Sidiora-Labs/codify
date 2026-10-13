@@ -13,7 +13,8 @@ markers in the affected files, and the path is recorded with every branch
 that touched it. Two agents learn they collide before either of them merges.
 
 The implementation is in `src/projection.c`, with the git plumbing in
-`src/gitint.c`. The test is `tests/integration/51_projection.sh`.
+`src/gitint.c` and the findings in `src/conflicts.c`. The tests are
+`tests/integration/51_projection.sh` and `52_conflicts.sh`.
 
 ## Commands
 
@@ -28,6 +29,7 @@ The implementation is in `src/projection.c`, with the git plumbing in
 | `cg projection status` | The last build, from the database, without rebuilding. |
 | `cg projection diff [branch]` | `git diff --stat` of the projection against the base head it was built on, or against the named branch. |
 | `cg projection show` | The paths the projection changes against the base, with git's status letter. |
+| `cg projection findings` | The live conflict findings between branches, with their branches, agents, lines, advice, and age (see [Findings](#findings)). |
 
 Every command takes `--json`. The projection needs git 2.38 or newer, the
 release that added `git merge-tree --write-tree`. Without a git repository,
@@ -120,6 +122,100 @@ time, the second one finds the inputs unchanged and reports the fresh
 result. If not, it prints the last stored build and exits 75 (busy; safe to
 retry).
 
+## Findings
+
+The fold only knows lines. Two branches can change different hunks of one
+function, or one can change a signature another just started calling, and
+the merge is clean. Every `build` therefore reads the fold again with the
+graph in hand (`src/conflicts.c`) and reports *findings*:
+
+| Kind | When |
+|---|---|
+| `symbol` | Two active branches change the same symbol (path and name) against the base, even when the merge is clean. |
+| `interface` | One branch changes the signature of, or removes, a public symbol, and another branch references it in code it changed: a new call, or an existing one it rewrote. |
+| `near` | Two branches edit one file within three lines of each other (and the fold did not already report the path for that pair). |
+| `content`, `delete`, `add-add` | The fold's own conflicts, from the `ProjectionConflict` records: a content conflict, a modify/delete, an add/add. Rarer kinds git reports are `conflict`. |
+
+How they are found:
+
+- **Hunks.** For each folded branch, the zero-context diff
+  `base...contribution` (so uncommitted work counts through the shadow
+  commit), with both sides' line ranges. Codify's own bookkeeping (the spec
+  directory, `AGENTS.md`, `CLAUDE.md`, `.codify/`, `codify.kvx`, …) is left
+  out, as spec drift leaves it out, so every worker flipping a task status
+  does not collide.
+- **Symbols.** Each hunk's head-side lines are mapped onto the symbol spans
+  the graph holds for *that branch* (`files.branch_id`), keeping the
+  innermost symbol (a method, not the class around it). A branch the index
+  does not know yet, or a file its index lacks, falls back to the base's
+  spans with the hunk's base-side lines: right for every symbol the branch
+  did not move. The spans are as fresh as the branch's last index; a
+  worktree's hooks keep that current.
+- **Pairs.** `symbol` and `near` are pairwise. A pair where one branch
+  already carries the other's commits (a wave cut from an active feature
+  branch) is one line of work and is not compared. `near` compares
+  base-side lines, the one coordinate system two branches share, and stays
+  quiet when the two hunks already share a symbol (that is the `symbol`
+  finding).
+- **Interface.** The same machinery as [interface drift](drift.md#interface-drift-across-branches)
+  (`drift_interface_changes`): the public definitions of each changed file
+  are parsed at the merge base and at the contribution; a changed definition
+  line or a missing one is a change. The references are read from the
+  other branch's rows in the unified graph and count when they sit inside
+  that branch's own hunks. A branch that is not indexed has no references to
+  read.
+
+Each finding carries `kind`, `path`, `symbol` (null when none), `lines`
+(each branch's hunks, `feat-a 3-5; feat-b 9`), `branches`, `agents` (the
+live fleet and native agents on those branches, by branch or worktree) and a
+one-line `advice`; an interface finding also names its `changer`.
+
+```
+$ cg projection findings
+findings:
+  symbol    src/core.c  compute  — feat-a (agent claude:aaaaaaaa), feat-b (agent claude:bbbbbbbb)  (2m)
+      lines: feat-a 2; feat-b 8
+      both branches change compute: agree who owns it, or merge feat-a and rebase feat-b onto it
+  interface src/api.c  helper  — feat-a (agent claude:aaaaaaaa), feat-b (agent claude:bbbbbbbb)  (2m)
+      lines: feat-a now int helper(int x, int y); feat-b references it at src/use.c:2
+      feat-a changes helper and feat-b references it: agree on the signature, or merge feat-a first and update the call
+```
+
+`build` prints the same list after the fold; `build --json` and
+`findings --json` carry `findings: {findings: [...], count}`, each with
+`first_seen`, `last_seen`, and `age` in seconds.
+
+### Stored, announced once, resolved
+
+Findings live in the `projection_findings` table, one row per kind, path,
+symbol, and branch set, with `first_seen`, `last_seen`, and `resolved`
+(null while a build still finds it). Each build diffs against it:
+
+- a finding that is new (or back after it resolved) emits
+  `projection.conflict` with the finding as payload;
+- a finding that persists emits nothing and updates `last_seen`;
+- a live finding the build no longer finds is marked resolved and emits
+  `projection.resolved`;
+- every build emits `projection.built` (`branches`, `conflicts` live,
+  `new`, `resolved`, `ms`, `commit`, `unchanged`). A no-op build leaves the
+  findings as they are and still emits it.
+
+### Steering the agents involved
+
+When a finding appears, every live agent on each of its branches is
+steered once, through the channel `cg fleet steer` uses (`driver_steer`, an
+`agent.steer` event), which a Claude Code session reads at its next
+post-edit hook:
+
+```
+Projection: your branch feat-a and feat-b (agent claude:bbbbbbbb) both change compute
+in src/core.c — coordinate or merge feat-b before you qualify; see cg projection findings
+```
+
+Nothing blocks. `[projection] steer = false` keeps the findings and events
+and stops the messages. The compute, store, and steer functions print
+nothing, so a background build calls them the same way.
+
 ## The projection worktree and its index
 
 With `--index`, or `[projection] index = true`, the build also checks the
@@ -153,5 +249,6 @@ to Codify; do not edit it.
 | `stale` | `24h` | How long a branch without a live agent stays active after its last index. |
 | `exclude` | `[]` | Branch-name globs never folded in. |
 | `index` | `false` | Check out and index the projection on every build. |
+| `steer` | `true` | Steer the agents on both branches when a build finds a new conflict. |
 
 The liveness window for agents is `[agents] ttl` in `spec/workflow.kvx`.

@@ -258,7 +258,7 @@ reqs       = ["8.1", "8.2", "8.3", "8.4", "8.5", "8.6", "8.7", "8.8", "8.9"]
 
 [task.3.2]
 title      = "Symbol, interface, and near findings; projection events; steering the agents involved"
-status     = "pending"
+status     = "in_progress"
 wave       = 2
 requires   = ["3.1"]
 symbols    = ["conflicts_compute", "conflicts_store", "conflicts_steer", "cmd_projection_findings"]

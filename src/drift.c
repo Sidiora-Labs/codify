@@ -15,7 +15,7 @@
 #include <ctype.h>
 #include <fnmatch.h>
 
-typedef struct { int from, to; } Hunk;
+typedef struct { int from, to, ofrom, oto; } Hunk;   /* new side, base side */
 typedef struct { char *path; Hunk *h; int nh, ch; } FileDiff;
 
 static void list_free(char **v, int n) {
@@ -57,6 +57,8 @@ static void fd_hunk(FileDiff *f, int from, int to) {
     }
     f->h[f->nh].from = from;
     f->h[f->nh].to = to;
+    f->h[f->nh].ofrom = from;      /* drift_diff sets the base side */
+    f->h[f->nh].oto = to;
     f->nh++;
 }
 
@@ -105,6 +107,12 @@ static int drift_diff(const char *tree, const char *base, const char *head,
                 char *space = strchr(plus, ' ');
                 if (comma && (!space || comma < space)) len = atoi(comma + 1);
                 fd_hunk(cur, start, len > 0 ? start + len - 1 : start);
+                /* the base side (-a,b): where the hunk sits in the base */
+                int os = atoi(line + 4), ol = 1;
+                char *oc = strchr(line + 4, ',');
+                if (oc && oc < plus) ol = atoi(oc + 1);
+                cur->h[cur->nh - 1].ofrom = os;
+                cur->h[cur->nh - 1].oto = ol > 0 ? os + ol - 1 : os;
             }
         }
         pclose(f);
@@ -622,6 +630,95 @@ int drift_interface_check(Cg *cg, const char *tree, const char *base_branch,
     for (int i = 0; i < nf; i++) { free(fd[i].path); free(fd[i].h); }
     free(fd);
     return findings;
+}
+
+/* ---------------- the same machinery for the projection ---------------- */
+/* codify-v15 3.2: conflicts.c asks the questions drift_interface_check asks
+ * after a merge, before any merge: which lines a branch changed (both
+ * sides), and which public symbols it re-signatured or removed. Codify's
+ * own bookkeeping (drift_exempt) is left out of both, as it is here. */
+
+int drift_hunks(const char *tree, const char *base, const char *head,
+                DriftFile **out) {
+    FileDiff *fd = NULL;
+    int nf = drift_diff(tree, base, head, &fd);
+    DriftFile *v = nf ? xmalloc(sizeof *v * (size_t)nf) : NULL;
+    int n = 0;
+    for (int i = 0; i < nf; i++) {
+        if (drift_exempt(tree, fd[i].path)) {
+            free(fd[i].path); free(fd[i].h);
+            continue;
+        }
+        v[n].path = fd[i].path;
+        v[n].nh = fd[i].nh;
+        v[n].h = fd[i].nh ? xmalloc(sizeof *v[n].h * (size_t)fd[i].nh) : NULL;
+        for (int k = 0; k < fd[i].nh; k++) {
+            v[n].h[k].from = fd[i].h[k].from;
+            v[n].h[k].to = fd[i].h[k].to;
+            v[n].h[k].ofrom = fd[i].h[k].ofrom;
+            v[n].h[k].oto = fd[i].h[k].oto;
+        }
+        free(fd[i].h);
+        n++;
+    }
+    free(fd);
+    *out = v;
+    return n;
+}
+
+void drift_files_free(DriftFile *v, int n) {
+    for (int i = 0; i < n; i++) { free(v[i].path); free(v[i].h); }
+    free(v);
+}
+
+int drift_interface_changes(const char *tree, const char *pre,
+                            const char *post, DriftIface **out) {
+    *out = NULL;
+    FileDiff *fd = NULL;
+    int nf = drift_diff(tree, pre, post, &fd);
+    int n = 0, cap = 0;
+    for (int i = 0; i < nf; i++) {
+        if (drift_exempt(tree, fd[i].path)) continue;
+        ParseResult before, after;
+        bool had = blob_defs(tree, pre, fd[i].path, &before) == 0;
+        bool has = blob_defs(tree, post, fd[i].path, &after) == 0;
+        if (!had) { if (has) parse_result_free(&after); continue; }
+        for (int d = 0; d < before.ndefs; d++) {
+            const SymDef *o = &before.defs[d];
+            if (!drift_public(fd[i].path, o->name, o->kind, o->sig)) continue;
+            const SymDef *nw = has ? def_named(&after, o->name) : NULL;
+            if (nw && !strcmp(o->sig, nw->sig)) continue;
+            bool dup = false;      /* a declaration and its definition */
+            for (int k = 0; k < n && !dup; k++)
+                dup = !strcmp((*out)[k].name, o->name) &&
+                      !strcmp((*out)[k].path, fd[i].path);
+            if (dup) continue;
+            if (n == cap) {
+                cap = cap ? cap * 2 : 8;
+                *out = xrealloc(*out, sizeof **out * (size_t)cap);
+            }
+            DriftIface *x = &(*out)[n++];
+            x->name = xstrdup(o->name);
+            x->path = xstrdup(fd[i].path);
+            x->kind = xstrdup(o->kind ? o->kind : "");
+            x->old_sig = xstrdup(o->sig ? o->sig : "");
+            x->new_sig = nw ? xstrdup(nw->sig ? nw->sig : "") : NULL;
+            x->removed = !nw;
+        }
+        parse_result_free(&before);
+        if (has) parse_result_free(&after);
+    }
+    for (int i = 0; i < nf; i++) { free(fd[i].path); free(fd[i].h); }
+    free(fd);
+    return n;
+}
+
+void drift_ifaces_free(DriftIface *v, int n) {
+    for (int i = 0; i < n; i++) {
+        free(v[i].name); free(v[i].path); free(v[i].kind);
+        free(v[i].old_sig); free(v[i].new_sig);
+    }
+    free(v);
 }
 
 /* ---------------- requirement coverage ---------------- */

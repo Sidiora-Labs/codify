@@ -268,6 +268,7 @@ enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PATH_CODEMAP, CFG_INDEX_WORKERS,
        /* codify-v15 3.1 */
        CFG_PROJ_BASE, CFG_PROJ_STALE, CFG_PROJ_EXCLUDE, CFG_PROJ_INDEX,
+       CFG_PROJ_STEER,            /* codify-v15 3.2 */
        CFG_NKEYS };
 typedef struct {
     char root[4096];
@@ -282,6 +283,7 @@ typedef struct {
     long proj_stale;           /* seconds */
     char proj_exclude[1024];   /* globs, comma-joined */
     bool proj_index;           /* check out and index the projection */
+    bool proj_steer;           /* codify-v15 3.2: steer on new findings */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -1323,6 +1325,61 @@ const char *config_projection_base(const char *root);
 long config_projection_stale(const char *root);
 int  config_projection_exclude(const char *root, char ***out);  /* malloc'd */
 bool config_projection_index(const char *root);
+/* codify-v15 3.2 */
+/* The interface check's machinery, asked before a merge (drift.c): the
+ * hunks of the three-dot diff base...head with both sides' lines, and the
+ * public symbols re-signatured or removed between pre and post. Codify's
+ * own bookkeeping paths are left out of both. */
+typedef struct { int from, to, ofrom, oto; } DriftHunk; /* head side, base side */
+typedef struct { char *path; DriftHunk *h; int nh; } DriftFile;
+int  drift_hunks(const char *tree, const char *base, const char *head,
+                 DriftFile **out);
+void drift_files_free(DriftFile *v, int n);
+typedef struct {
+    char *name, *path, *kind, *old_sig, *new_sig;   /* new_sig NULL: removed */
+    bool removed;
+} DriftIface;
+int  drift_interface_changes(const char *tree, const char *pre,
+                             const char *post, DriftIface **out);
+void drift_ifaces_free(DriftIface *v, int n);
+/* Projection findings (conflicts.c, docs/projection.md): what the fold of
+ * the active branches collides on, beyond the textual conflicts. */
+typedef struct {
+    const char *name;          /* the branch */
+    const char *worktree;      /* "" when folded from its ref */
+    const char *head;          /* its branch head */
+    const char *contribution;  /* its head, or the shadow commit over it */
+} ConflictBranch;
+typedef struct {
+    char   kind[16];           /* symbol | interface | near | content |
+                                * delete | add-add */
+    char  *path, *symbol;      /* symbol "" when none */
+    char  *lines;              /* per branch, "feat-a 3-5; feat-b 9" */
+    char **branches;           /* sorted; the key's branch set */
+    int    nbranches;
+    char  *agents;             /* JSON [{branch, agent}] */
+    char  *advice;             /* one line */
+    char  *changer;            /* interface: the branch that changes it */
+    bool   fresh;              /* conflicts_store: appeared in this build */
+} ProjectionFinding;
+/* every finding of one fold; returns how many (*out malloc'd) */
+int  conflicts_compute(Cg *cg, const char *base, const char *base_head,
+                       const ConflictBranch *b, int nb,
+                       const ProjectionConflict *fold, int nfold,
+                       ProjectionFinding **out);
+/* diff against projection_findings: projection.conflict for each new one
+ * (fresh set), projection.resolved for each gone, projection.built for the
+ * build; returns the number of new findings, -1 when not stored */
+int  conflicts_store(Cg *cg, ProjectionFinding *f, int n, int nbranches,
+                     const char *commit, long ms, bool unchanged);
+/* steer the agents on the branches of every fresh finding, once, unless
+ * [projection] steer = false; returns the messages queued */
+int  conflicts_steer(Cg *cg, ProjectionFinding *f, int n);
+void conflicts_free(ProjectionFinding *f, int n);
+/* the live findings: text lines, or {"findings":[...],"count":N} */
+int  conflicts_print(Cg *cg, bool json, StrBuf *out);
+int  cmd_projection_findings(Cg *cg, int argc, char **argv, bool json);
+bool config_projection_steer(const char *root);   /* [projection] steer */
 /* Run `git -C <tree> <args>` (args already shell-quoted), stdout and
  * stderr appended to out (may be NULL). Returns the exit status, -1 when
  * git could not be started. */
