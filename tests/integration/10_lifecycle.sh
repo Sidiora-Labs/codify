@@ -142,11 +142,15 @@ assert 'changed' in d and 'symbols' in d, d
 "
 
 # ---- hook install writes agent and git hooks, and never clobbers
-out="$("$CG" hook install)"
+# (under an empty HOME: with the Codify plugin installed for the user who
+# runs the suite, hook install leaves settings.json to the plugin — 48_plugin
+# covers that; this section is about the file it writes without one)
+mkdir -p "$TMP/hookhome"
+out="$(HOME="$TMP/hookhome" "$CG" hook install)"
 has "$out" "claude-code"
 [ -f .claude/settings.json ] || fail ".claude/settings.json not written"
 grep -q "hook post-edit" .claude/settings.json || fail "post-edit hook missing"
-out="$("$CG" hook install)"
+out="$(HOME="$TMP/hookhome" "$CG" hook install)"
 has "$out" "already defines hooks"
 
 echo "10_lifecycle governance ok"
