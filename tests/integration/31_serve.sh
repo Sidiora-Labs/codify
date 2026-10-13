@@ -7,6 +7,7 @@
 #               with kind filters, backlog from a cursor, and unsubscribe
 #   async     — a long call does not hold up pushes; cancel stops it
 #   idle      — an idle server holds neither the write lock nor the gate
+#   native    — snapshot carries the native agents; agent.native.* stream
 # Run one section: 31_serve.sh events
 . "$(dirname "$0")/../lib.sh"
 section="${1:-all}"
@@ -257,6 +258,69 @@ def last():
     return dict(db.execute("SELECT key, value FROM meta WHERE key LIKE 'last_index_at%'").fetchall())
 a = last(); time.sleep(1.2); b = last()
 assert a == b, (a, b)
+s.close()
+PY
+fi
+
+if want native; then
+    # codify-v15 2.3: native agents in the snapshot and the stream
+    setup_repo
+    mkdir -p "$TMP/home"
+    client <<'PY' || fail "native"
+os.environ["HOME"] = os.path.join(os.path.dirname(os.getcwd()), "home")
+proj = os.getcwd()
+sid = "5e55105a-1111-2222-3333-444455556666"
+def hook(payload):
+    r = subprocess.run([CG, "hook", "event", "--host", "claude"],
+                       input=json.dumps(payload), capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+s = Serve()
+init = s.call("initialize")["result"]
+assert init["capabilities"].get("snapshot") is True, init
+snap0 = s.call("snapshot")["result"]
+assert snap0["native"] == [] and snap0["head"] == init["head"], snap0
+sub = s.call("subscribe", {"kinds": "agent.native."})["result"]["subscription"]
+tp = os.path.join(os.environ["HOME"], ".claude/projects/x", sid + ".jsonl")
+hook({"hook_event_name": "SessionStart", "session_id": sid, "transcript_path": tp,
+      "cwd": proj, "model": "claude-opus-4-1"})
+e, _ = s.events(lambda e, k: k == sub and e["kind"] == "agent.native.start")
+assert e and e["node"] == "claude:5e55105a", e
+assert e["payload"]["agent"] == "claude:5e55105a" and e["payload"]["model"] == "claude-opus-4-1", e
+hook({"hook_event_name": "PreToolUse", "session_id": sid, "transcript_path": tp, "cwd": proj,
+      "tool_name": "Agent", "tool_use_id": "toolu_01",
+      "tool_input": {"description": "Alpha implementer", "subagent_type": "general-purpose",
+                     "prompt": "Implement task 2.1 and report."}})
+hook({"hook_event_name": "SubagentStart", "session_id": sid, "transcript_path": tp, "cwd": proj,
+      "agent_id": "a1b2c3d4", "agent_type": "general-purpose"})
+hook({"hook_event_name": "PostToolUse", "session_id": sid, "transcript_path": tp, "cwd": proj,
+      "agent_id": "a1b2c3d4", "agent_type": "general-purpose", "tool_name": "Edit",
+      "tool_use_id": "toolu_02", "tool_input": {"file_path": proj + "/src/a.ts"}})
+e, _ = s.events(lambda e, k: k == sub and e["kind"] == "agent.native.tool")
+assert e and e["node"] == "claude:a1b2c3d4" and e["subject"] == "demo/2.1", e
+assert e["payload"]["tool"] == "Edit" and e["payload"]["tool_calls"] == 1, e
+assert e["payload"]["parent"] == "claude:5e55105a" and e["payload"]["task_source"] == "prompt", e
+kinds = {x["kind"] for m, _ in s.notes if m.get("method") == "events"
+         and m["params"]["subscription"] == sub for x in m["params"]["events"]}
+assert kinds <= {"agent.native.start", "agent.native.spawn", "agent.native.tool"}, kinds
+assert "agent.native.spawn" in kinds, kinds
+# the snapshot: the tree cg fleet tree --json carries, current to its head
+snap = s.call("snapshot")["result"]
+assert snap["head"] >= e["seq"], (snap["head"], e["seq"])
+assert snap["counts"] == {"live": 1, "subagents": 1, "worktree_branches": 0}, snap["counts"]
+assert len(snap["native"]) == 1, snap
+sess = snap["native"][0]
+assert sess["agent"] == "claude:5e55105a" and sess["state"] == "live", sess
+assert sess["transcript"] == tp and sess["host"] == "claude", sess
+kid = sess["children"][0]
+assert kid["agent"] == "claude:a1b2c3d4" and kid["last_tool"] == "Edit", kid
+assert kid["task"] == "demo/2.1" and kid["description"] == "Alpha implementer", kid
+tree = json.loads(cg("fleet", "tree", "--json").stdout)
+assert tree["native"] == snap["native"], (tree["native"], snap["native"])
+# stop: the stream says so, and the snapshot follows
+hook({"hook_event_name": "Stop", "session_id": sid, "transcript_path": tp, "cwd": proj})
+e, _ = s.events(lambda e, k: k == sub and e["kind"] == "agent.native.stop")
+assert e and e["node"] == "claude:5e55105a" and e["payload"]["state"] == "stopped", e
+assert s.call("snapshot", {"all": True})["result"]["native"][0]["state"] == "stopped"
 s.close()
 PY
 fi

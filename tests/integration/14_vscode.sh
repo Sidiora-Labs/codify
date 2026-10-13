@@ -1675,6 +1675,185 @@ fleetTree({ hierarchy: { configured: true } }, null, null, { now, tree: [{ x: 1 
 console.log('fleet join ok');
 JS
 
+    # ---- the Sessions root (codify-v15 2.3): native sessions and their
+    #      subagents, from real `cg hook event` payloads and the JSON cg
+    #      prints for them, then patched live through the serve reducer
+    cd "$TMP/fleet"
+    mkdir -p "$TMP/nhome"
+    NPROJ="$(pwd -P)"
+    NWT="$NPROJ/.claude/worktrees/agent-a1b2c3d4"
+    git worktree add -q -b worktree-agent-a1b2c3d4 "$NWT" main >/dev/null 2>&1 \
+        || fail "native worktree"
+    # this repository committed its .codegraph; a worktree shares the main one
+    rm -rf "$NWT/.codegraph"
+    NSID="5e55105a-1111-2222-3333-444455556666"
+    NTP="$TMP/nhome/.claude/projects/x/$NSID.jsonl"
+    nhook() { HOME="$TMP/nhome" "$CG" hook event --host claude >/dev/null; }
+    printf '{"hook_event_name":"SessionStart","session_id":"%s","transcript_path":"%s","cwd":"%s","model":"claude-opus-4-1"}' \
+        "$NSID" "$NTP" "$NPROJ" | nhook
+    printf '{"hook_event_name":"PreToolUse","session_id":"%s","transcript_path":"%s","cwd":"%s","tool_name":"Agent","tool_use_id":"toolu_01","tool_input":{"description":"Alpha implementer","subagent_type":"general-purpose","model":"sonnet","isolation":"worktree","prompt":"Implement task 2.2 of the active feature."}}' \
+        "$NSID" "$NTP" "$NPROJ" | nhook
+    printf '{"hook_event_name":"SubagentStart","session_id":"%s","transcript_path":"%s","cwd":"%s","agent_id":"a1b2c3d4","agent_type":"general-purpose"}' \
+        "$NSID" "$NTP" "$NWT" | nhook
+    printf '{"hook_event_name":"PostToolUse","session_id":"%s","transcript_path":"%s","cwd":"%s","agent_id":"a1b2c3d4","agent_type":"general-purpose","tool_name":"Edit","tool_use_id":"toolu_02","tool_input":{"file_path":"%s/src/a.ts"}}' \
+        "$NSID" "$NTP" "$NWT" "$NWT" | nhook
+    "$CG" fleet tree --json > "$TMP/json/ntree.json"
+    "$CG" fleet status --json > "$TMP/json/nstatus.json"
+    "$CG" branches --json > "$TMP/json/nbranches.json"
+    head="$("$CG" events --head)"
+    # what happens next reaches the editor only as events
+    printf '{"hook_event_name":"PostToolUse","session_id":"%s","transcript_path":"%s","cwd":"%s","agent_id":"a1b2c3d4","agent_type":"general-purpose","tool_name":"Bash","tool_use_id":"toolu_03","tool_input":{"command":"make"}}' \
+        "$NSID" "$NTP" "$NWT" | nhook
+    printf '{"hook_event_name":"SubagentStop","session_id":"%s","transcript_path":"%s","cwd":"%s","agent_id":"a1b2c3d4","agent_type":"general-purpose","agent_transcript_path":"%s/x/subagents/agent-a1b2c3d4.jsonl","last_assistant_message":"Task 2.2 is implemented."}' \
+        "$NSID" "$NTP" "$NWT" "$TMP/nhome" | nhook
+    "$CG" events --kind agent.native. --since "$head" --json > "$TMP/json/nevents.jsonl"
+    "$CG" fleet tree --json > "$TMP/json/ntree2.json"
+
+    node - "$EXT" "$TMP/json" "$(date +%s)" "$NWT" "$NTP" "$TMP/nhome" <<'JS'
+const path = require('path'), fs = require('fs');
+const [, , dir, out, nowArg, WT, TP, HOME] = process.argv;
+const { nativeNodes, patchSessions, fleetTree } = require(path.join(dir, 'fleet.js'));
+const { liveModel, applyEvent, applySnapshot } = require(path.join(dir, 'serve.js'));
+const now = Number(nowArg);
+const j = (n) => JSON.parse(fs.readFileSync(path.join(out, n), 'utf8'));
+const eq = (got, want, what) => {
+    if (got !== want) throw new Error(`${what}: ${JSON.stringify(got)} != ${JSON.stringify(want)}`);
+};
+
+// ---- the model from the real tree: a session with its subagent nested
+const tree = j('ntree.json');
+const s = nativeNodes(tree.native, { branches: j('nbranches.json'), now });
+eq(s.nodes.length, 1, 'one session');
+const sess = s.nodes[0];
+eq(sess.kind, 'session', 'session kind');
+eq(sess.agent, 'claude:5e55105a', 'session agent');
+eq(sess.host, 'claude', 'session host');
+eq(sess.model, 'claude-opus-4-1', 'session model');
+eq(sess.state, 'live', 'session state');
+eq(sess.transcript, TP, 'session transcript');
+if (!/just now|s ago/.test(sess.age.text)) throw new Error('session age: ' + sess.age.text);
+eq(sess.children.length, 1, 'one subagent');
+const sub = sess.children[0];
+eq(sub.kind, 'subagent', 'subagent kind');
+eq(sub.agent, 'claude:a1b2c3d4', 'subagent agent');
+eq(sub.parent, 'claude:5e55105a', 'subagent parent');
+eq(sub.agentType, 'general-purpose', 'subagent type');
+eq(sub.description, 'Alpha implementer', 'subagent description');
+eq(sub.state, 'live', 'subagent state');
+eq(sub.worktree, WT, 'subagent worktree');
+eq(sub.branch, 'worktree-agent-a1b2c3d4', 'subagent branch');
+eq(sub.base, 'main', 'branch base from the registry');
+// main's registry row has no head here, so the registry cannot prove either way
+eq(sub.merge.state, 'unknown', 'merge state only from what the registry proves');
+eq(sub.merge.label, 'main not indexed', 'and says why');
+// with heads, it can: the same head is merged, another is not
+const withHeads = (h) => ({ branches: [{ name: 'main', head: h },
+    { name: 'worktree-agent-a1b2c3d4', head: 'abc', base: 'main', worktree: WT }] });
+eq(nativeNodes(tree.native, { branches: withHeads('abc'), now }).nodes[0].children[0]
+   .merge.state, 'in-sync', 'a worktree branch already in its base');
+eq(nativeNodes(tree.native, { branches: withHeads('def'), now }).nodes[0].children[0]
+   .merge.state, 'unmerged', 'a worktree branch ahead of its base');
+eq(sub.task, 'fleet/2.2', 'subagent task');
+eq(sub.taskSource, 'prompt', 'task source');
+eq(sub.lastTool, 'Edit', 'last tool');
+eq(sub.toolCalls, 1, 'tool calls');
+// a live subagent's transcript, where the host writes it
+eq(sub.transcript, TP.replace(/\.jsonl$/, '') + '/subagents/agent-a1b2c3d4.jsonl',
+   'live subagent transcript path');
+eq(s.counts.live, 2, 'live rows');
+eq(s.counts.subagents, 1, 'subagents');
+eq(s.counts.worktrees, 1, 'worktree branches');
+// fleet status --json carries the same rows (a repository without a tree)
+eq(nativeNodes(j('nstatus.json').native, { now }).nodes[0].children[0].agent,
+   'claude:a1b2c3d4', 'status native rows');
+// and the fleet tree beside it is untouched by the native rows
+const ft = fleetTree(j('nstatus.json'), j('spec.json'), j('nbranches.json'),
+    { plan: j('plan.json'), tree, now });
+eq(ft.source, 'tree', 'fleet tree still read');
+eq(JSON.stringify(ft).includes('claude:'), false, 'native agents stay out of the fleet roles');
+
+// ---- stale: silence past two minutes reads as stale, not live
+const old = nativeNodes(tree.native, { now: now + 600 });
+eq(old.nodes[0].state, 'stale', 'a silent session is stale');
+eq(old.counts.stale, 2, 'stale rows');
+
+// ---- live: the events cg pushed after the snapshot patch the rows in
+//      place through the serve reducer, without a refresh
+const live = liveModel();
+const evs = fs.readFileSync(path.join(out, 'nevents.jsonl'), 'utf8')
+    .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+const kinds = evs.map((e) => e.kind);
+if (!kinds.includes('agent.native.tool') || !kinds.includes('agent.native.stop')) {
+    throw new Error('events: ' + kinds);
+}
+for (const ev of evs) {
+    const a = applyEvent(live, ev);
+    eq(a.view, 'fleet', `${ev.kind} goes to the fleet view`);
+    eq(a.native, ev.node, `${ev.kind} names its agent`);
+}
+eq(live.native['claude:a1b2c3d4'].last_tool, 'Bash', 'reducer: last tool');
+eq(live.native['claude:a1b2c3d4'].state, 'stopped', 'reducer: stopped');
+const t0 = Date.now();
+const n = patchSessions(s, live.native, now);
+if (Date.now() - t0 > 50) throw new Error('the patch is not instant');
+if (n < 1) throw new Error('nothing patched');
+eq(s.nodes[0].children[0], sub, 'the row is patched in place');
+eq(sub.lastTool, 'Bash', 'patched last tool');
+eq(sub.toolCalls, 2, 'patched tool calls');
+eq(sub.state, 'stopped', 'patched state');
+eq(sub.transcript, `${HOME}/x/subagents/agent-a1b2c3d4.jsonl`, 'patched transcript');
+eq(sub.lastMessage, 'Task 2.2 is implemented.', 'patched last message');
+eq(s.counts.subagents, 0, 'patched counts');
+// and it agrees with what cg says after the fact
+const after = nativeNodes(j('ntree2.json').native, { now }).nodes[0].children[0];
+for (const k of ['state', 'lastTool', 'toolCalls', 'transcript', 'branch', 'task']) {
+    eq(sub[k], after[k], `live patch matches cg on ${k}`);
+}
+// an event for an agent the model has never seen adds its row
+const fresh = { seq: 1e9, at: now, kind: 'agent.native.start', node: 'claude:ffff0000',
+    subject: null, payload: { agent: 'claude:ffff0000', host: 'claude',
+    session: 'ffff0000-x', state: 'live', depth: 0 } };
+applyEvent(live, fresh);
+patchSessions(s, live.native, now);
+eq(s.nodes.length, 2, 'a new session from an event');
+eq(s.nodes[1].state, 'live', 'the new session is live');
+// a snapshot reply replaces what the events built
+const lm = liveModel();
+eq(applySnapshot(lm, { head: 7, native: tree.native }), 2, 'snapshot rows');
+eq(lm.native['claude:a1b2c3d4'].branch, 'worktree-agent-a1b2c3d4', 'snapshot row');
+eq(lm.seq, 7, 'snapshot head');
+// nothing to show, and nothing that throws
+eq(nativeNodes(null).nodes.length, 0, 'no native');
+eq(nativeNodes([{ x: 1 }, 'junk']).nodes.length, 0, 'junk rows');
+eq(patchSessions(null, {}), 0, 'no model');
+console.log('fleet sessions ok');
+JS
+    [ $? -eq 0 ] || fail "fleet sessions"
+
+    # ---- the view surface: the root, the commands, the live patch
+    node - "$EXT" <<'JS'
+const fs = require('fs'), path = require('path');
+const dir = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+const src = fs.readFileSync(path.join(dir, 'fleet.js'), 'utf8');
+const check = (c, w) => { if (!c) throw new Error(w); };
+const declared = pkg.contributes.commands.map((c) => c.command);
+for (const c of ['codify.fleet.openSessionWorktree', 'codify.fleet.openSessionTranscript']) {
+    check(declared.includes(c), `not declared: ${c}`);
+    check(src.includes(`'${c}':`), `not registered: ${c}`);
+    check(Object.values(pkg.contributes.menus).flat().some((m) => m.command === c &&
+          /codifyFleet/.test(m.when) && /fleet-native/.test(m.when)), `no menu: ${c}`);
+}
+check(/new vscode\.TreeItem\('Sessions'/.test(src), 'a Sessions root');
+check(/top\.push\(this\.nodeItem\(m\.main\)\);\n\s+if \(sessions\) top\.push\(sessions\)/.test(src),
+      'Sessions sits beside the fleet tree');
+check(/return sessions \? \[sessions\] : \[\]/.test(src), 'Sessions shows without a [hierarchy]');
+check(/touch: \(\) => \{ view\.force = true; view\.patchLive\(\); \}/.test(src),
+      'a fleet event patches the sessions at once');
+console.log('fleet sessions surface ok');
+JS
+    [ $? -eq 0 ] || fail "fleet sessions surface"
+
     # ---- the symbol the task promises resolves in the graph
     rm -rf "$TMP/ext"
     mkdir -p "$TMP/ext"

@@ -6,6 +6,7 @@
  *   exec {args:[...]}               any cg command, as the CLI runs it
  *   cancel {id}                     stop an in-flight tools/call or exec
  *   subscribe {since?, kinds?}      push "events" notifications from seq
+ *   snapshot {all?}                 the native agents now, and the head
  *   unsubscribe {subscription}, ping, shutdown
  *
  * Every call runs in a child process (this binary, re-executed), so a
@@ -244,6 +245,38 @@ static void serve_push(Cg *cg, Sub *s) {
     }
 }
 
+/* ---------------- snapshot (codify-v15 2.3) ---------------- */
+
+/* Transcript discovery (task 2.4) finds the native agents no hook reported.
+ * Until it lands this weak no-op stands in; a strong native_discover_hook in
+ * native.c replaces it at link time, with no change here. */
+__attribute__((weak)) void native_discover_hook(Cg *cg);
+__attribute__((weak)) void native_discover_hook(Cg *cg) { (void)cg; }
+
+/* {head, native:[...], counts}: what an editor's refresh starts from. The
+ * rows are the same tree cg fleet tree --json carries; head is the event
+ * sequence they are current to, so a client subscribes from it and folds
+ * every agent.native.* event after it onto these rows. */
+static void serve_snapshot(Cg *cg, const char *id, const char *params) {
+    char *raw = params ? json_get_raw(params, "all") : NULL;
+    bool all = raw && strcmp(raw, "true") == 0;
+    free(raw);
+    bool was = native_show_all;
+    native_show_all = all;
+    native_discover_hook(cg);
+    long head = events_head(cg);
+    int live = 0, subs = 0, brs = 0;
+    native_counts(cg, &live, &subs, &brs);
+    StrBuf r; sb_init(&r);
+    sb_printf(&r, "{\"head\":%ld,\"native\":", head);
+    native_tree_json(cg, &r);
+    sb_printf(&r, ",\"counts\":{\"live\":%d,\"subagents\":%d,"
+                  "\"worktree_branches\":%d}}", live, subs, brs);
+    native_show_all = was;
+    reply(id, r.p);
+    sb_free(&r);
+}
+
 /* ---------------- requests ---------------- */
 
 typedef struct {
@@ -282,7 +315,8 @@ static void serve_dispatch(Server *sv, const char *line) {
         sb_puts(&r, ",\"branch\":"); sb_json_str(&r, cg->branch);
         sb_printf(&r, ",\"head\":%ld,\"pruned_through\":%ld,\"capabilities\":"
                       "{\"tools\":true,\"exec\":true,\"events\":true,"
-                      "\"cancel\":true,\"maxInFlight\":%d}}",
+                      "\"cancel\":true,\"snapshot\":true,"
+                      "\"maxInFlight\":%d}}",
                   events_head(cg), events_pruned_through(cg), SERVE_MAX_JOBS);
         reply(id, r.p);
         sb_free(&r);
@@ -354,6 +388,8 @@ static void serve_dispatch(Server *sv, const char *line) {
             sb_free(&r);
             serve_push(cg, s);            /* the backlog since the cursor */
         }
+    } else if (strcmp(method, "snapshot") == 0) {
+        serve_snapshot(cg, id, params);
     } else if (strcmp(method, "unsubscribe") == 0) {
         long which = params ? json_get_int(params, "subscription", -1) : -1;
         bool hit = false;

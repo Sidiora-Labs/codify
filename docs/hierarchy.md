@@ -426,6 +426,46 @@ rather than inventing one. `--json` returns `main`, `managers[]` with
 
 All the reports take `--json`.
 
+### Native sessions in the editor
+
+The fleet roles are the agents Codify spawned. A Claude Code or Codex
+session working on the project, and every subagent it spawns through its
+own Agent tool, is recorded by `cg hook event` (see
+[events.md](events.md#native-agents-cg-hook-event)) and shown in the VS Code fleet view
+under a **Sessions** root beside Main Gideon — and on its own when the
+repository has no `[hierarchy]`. One row per host session, its subagents
+nested under it, each reading:
+
+```
+Sessions                       2 live · 1 subagent · 1 worktree branch
+  claude:5e55105a              live · just now
+    general-purpose — Alpha implementer
+                               live · 12s ago · worktree-agent-a1b2c3d4 (unmerged)
+                               · task fleet/2.2 (prompt) · › Edit
+```
+
+- **state** — `live`, `stale` (no hook for 120 s), `pending` (a spawn not
+  yet started) or `stopped`, and the age since the last hook;
+- **worktree branch** — the branch of the linked worktree the agent works
+  in, with `(merged)` or `(unmerged)` when the branch registry holds heads
+  for it and its base (the session's branch), and `worktree gone` when the
+  folder was removed;
+- **task** and where it came from (`env`, `attempt`, `prompt`, `parent`);
+- **last tool**, and in the tooltip the model, tool-call count, cwd, and the
+  subagent's last message once it stopped.
+
+The rows come from `cg fleet tree --json` (`cg fleet status --json` in a
+flat repository) on each refresh. Between refreshes every
+`agent.native.*` event the `cg serve` connection pushes is folded by the
+serve reducer and patches its row in place — a tool call moves the last
+tool and the age, a stop greys the row — so the view follows a native
+agent the moment its hook fires. **Open Native Agent Worktree** opens the
+worktree folder (a new window, or added to this workspace) and **Open
+Native Agent Transcript** opens the JSONL transcript the host writes; a
+click on a row opens the transcript too. A live subagent's transcript is
+found where the host keeps it, `<session>/subagents/agent-<id>.jsonl`
+beside the session's.
+
 ## A worked example
 
 One feature, two waves, from nothing to a merged pull request.
