@@ -124,7 +124,7 @@ status  = "pending"
 
 [task.1.1]
 title      = "cg grep: trigram candidates, regex and literal scan, hits placed in their symbols, grep_code over MCP"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["cmd_grep", "grep_candidates", "grep_scan", "t_grep"]
 touches    = ["src/grep.c", "src/db.c", "src/scan.c", "src/graph.c", "src/main.c", "src/help.c", "src/mcp.c", "src/cg.h", "tests/integration/44_grep.sh", "docs/retrieval.md"]

@@ -7,7 +7,7 @@
 ## Line search, file finding, the index at scale, and agents that prefer the graph
 
 - [ ] 1. Find
-  - [ ] 1.1 cg grep: trigram candidates, regex and literal scan, hits placed in their symbols, grep_code over MCP
+  - [-] 1.1 cg grep: trigram candidates, regex and literal scan, hits placed in their symbols, grep_code over MCP
     - db.c: body_tri (content='', contentless_delete=1, detail=none, trigram) written beside body_fts in the write path, with the SQLite-version fallback and the meta fts_mode key shared with task 1.3 (coordinate: whoever lands first defines fts_mode; the other reuses it).
     - grep.c: pattern to trigrams, candidate query under the branch predicate, parallel scan of candidates from disk with regexec or memmem, enclosing-symbol lookup per file, ranking, --path/--lang/--no-tests/--symbol/--kind/-C/--files/--count/-n/--budget, text and --json.
     - main.c dispatch, help.c entry, mcp.c grep_code tool and cg tool call; 44_grep.sh per req 1.7.
