@@ -271,7 +271,7 @@ reqs       = ["9.1", "9.2", "9.3"]
 
 [task.3.3]
 title      = "The projection follows the work: hooks, watch, serve, the supervisor, merge-up, and every surface"
-status     = "in_progress"
+status     = "done"
 wave       = 3
 requires   = ["3.2", "2.3", "1.4"]
 symbols    = ["projection_mark_dirty", "projection_auto_build", "t_projection_status"]

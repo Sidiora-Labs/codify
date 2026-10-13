@@ -70,7 +70,7 @@
     - projection_findings table keyed by kind, path, symbol, branch set with first_seen/last_seen/resolved; projection.conflict once, projection.resolved on disappearance, projection.built per build; cg projection findings; steering through driver_steer with the opt-out.
     - 52_conflicts.sh per the first five clauses of req 9.6.
     - _Requirements: 9.1, 9.2, 9.3_
-  - [-] 3.3 The projection follows the work: hooks, watch, serve, the supervisor, merge-up, and every surface
+  - [x] 3.3 The projection follows the work: hooks, watch, serve, the supervisor, merge-up, and every surface
     - The dirty note and the forked background build under the projection lock with [projection] auto and min_interval; triggers from post-edit, hook event, watch (and --fleet), serve refresh, the supervisor after merge/land/spawn; merge-up and land print the branch's findings first.
     - Surfaces: projection status grouped by branch, brief and state lines, fleet tree --json projection{} and per-branch counts, the projection_status MCP tool, serve streaming the events, fleet.js Projection node with openable paths and branch badges.
     - 53_projection_live.sh per the last four clauses of req 9.6; 14_vscode.sh fleet section for the Projection node.
