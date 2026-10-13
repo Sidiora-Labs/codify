@@ -107,6 +107,35 @@ static const HelpCmd HELP[] = {
     "--no-tests\tleave test files out\n",
   .examples = "cg search \"export memory\"\ncg search index_pass -n 5 --json",
   .related = "symbol,context,show" },
+{ .group = "graph", .name = "grep", .args = "<pattern> [-E] [-i]",
+  .usage = "grep <pattern> [-E|--regex] [-i] [--path GLOB]... [--lang L] "
+    "[--no-tests] [--symbol NAME] [--kind K] [-C N] [--files] [--count] "
+    "[-n N] [--budget TOKENS]",
+  .summary = "line search, each hit placed in its symbol",
+  .detail = "Where a string or pattern occurs, instead of a shell grep: a "
+    "literal substring by default, a POSIX extended regex with -E. The "
+    "trigram index names the candidate files and only those are read, from "
+    "disk, so an edit since the last sync is still found; a pattern without "
+    "a three-character literal scans every indexed file and says so. Hits "
+    "are grouped by file under their enclosing symbol, files ranked by hit "
+    "count with source before tests, capped by -n and the token budget with "
+    "an explicit tail for what was left out. Binary files and files too "
+    "large for the index are skipped and counted.",
+  .flags = "-E, --regex\tthe pattern is a POSIX extended regex\n"
+    "-i\tcase-insensitive\n"
+    "--path GLOB\tonly files matching the glob (repeatable)\n"
+    "--lang L\tonly files of this language or extension\n"
+    "--no-tests\tleave test files out\n"
+    "--symbol NAME\tonly hits inside that symbol's span\n"
+    "--kind K\tonly hits inside symbols of that kind\n"
+    "-C N\tN lines of context around each hit\n"
+    "--files\tlist the matching files with their counts\n"
+    "--count\tthe total only\n"
+    "-n N\tmost hits shown (default 50)\n"
+    "--budget TOKENS\ttoken budget (default 4000)\n",
+  .examples = "cg grep cg_index_ex\ncg grep -E 'TODO|FIXME' --no-tests --files"
+    "\ncg grep -i 'busy timeout' --path 'src/*.c' -C 2",
+  .related = "search,context,show" },
 { .group = "graph", .name = "symbol", .args = "<name>",
   .usage = "symbol <name>",
   .summary = "definition(s), snippet, reference count",

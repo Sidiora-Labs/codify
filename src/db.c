@@ -210,7 +210,27 @@ static const char *SCHEMA =
     /* cg files: name_words(path) under trigram, rowid = files.id, so
      * "sync gate" finds syncgate.c and sync_gate.py alike */
     "CREATE VIRTUAL TABLE IF NOT EXISTS file_fts USING fts5("
-    "  words, tokenize='trigram');";
+    "  words, tokenize='trigram');"
+    /* codify-v15 1.1: trigram candidates for cg grep. Contentless (cg grep
+     * reads its hits from disk) and detail=none (it asks for each trigram
+     * alone, never a phrase), so it costs a fraction of body_fts. rowid is
+     * files.id. SQLite before 3.43 has no contentless_delete: cg_open makes
+     * the content-bearing form first and this line is then a no-op. */
+    "CREATE VIRTUAL TABLE IF NOT EXISTS body_tri USING fts5("
+    "  body, content='', contentless_delete=1, detail=none,"
+    "  tokenize='trigram');";
+
+/* codify-v15 1.1: the body_tri an SQLite before 3.43 can build (it cannot
+ * delete from a contentless table) is created before SCHEMA runs, so
+ * SCHEMA's IF NOT EXISTS skips the form it would reject. Answers the meta
+ * fts_mode that implies. */
+static const char *body_tri_compat(sqlite3 *db) {
+    if (sqlite3_libversion_number() >= 3043000) return "contentless";
+    sqlite3_exec(db, "CREATE VIRTUAL TABLE IF NOT EXISTS body_tri USING "
+                     "fts5(body, detail=none, tokenize='trigram')",
+                 NULL, NULL, NULL);
+    return "content";
+}
 
 /* the schema above, as stored in meta.schema_version */
 #define SCHEMA_VERSION "18"
@@ -387,6 +407,7 @@ int cg_open(Cg *cg, bool create) {
     sqlite3_exec(cg->db, "PRAGMA journal_mode=WAL;PRAGMA synchronous=NORMAL",
                  NULL, NULL, NULL);
     char *err = NULL;
+    body_tri_compat(cg->db);
     if (sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {
         fprintf(stderr, "cg: schema: %s\n", err ? err : "?");
         sqlite3_free(err);
@@ -473,10 +494,12 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS body_fts;DROP TABLE IF EXISTS comments;"
         "DROP TABLE IF EXISTS comment_fts;"
         "DROP TABLE IF EXISTS file_fts;"
+        "DROP TABLE IF EXISTS body_tri;"
         "DELETE FROM meta WHERE key LIKE 'last_index_%' "
         "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
     char *err = NULL;
     if (sqlite3_exec(cg->db, DROPS, NULL, NULL, &err) != SQLITE_OK ||
+        !body_tri_compat(cg->db) ||          /* codify-v15 1.1 */
         sqlite3_exec(cg->db, SCHEMA, NULL, NULL, &err) != SQLITE_OK) {
         fprintf(stderr, "cg: schema upgrade: %s\n", err ? err : "?");
         sqlite3_free(err);
@@ -486,6 +509,8 @@ int cg_schema_upgrade(Cg *cg) {
         fprintf(stderr, "cg: schema upgraded to v%s — run 'cg sync' to "
                         "rebuild the graph\n", SCHEMA_VERSION);
     cg_meta_set(cg, "schema_version", SCHEMA_VERSION);
+    /* codify-v15 1.1: which body_tri form this SQLite built */
+    cg_meta_set(cg, "fts_mode", body_tri_compat(cg->db));
     return 0;
 }
 

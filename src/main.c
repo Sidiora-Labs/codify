@@ -387,6 +387,30 @@ int main(int argc, char **argv) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         if (argc < 3) { help_usage("search"); rc = 1; }
         else rc = cmd_search(&cg, argv[2], limit > 0 ? limit : 20, json);
+    } else if (strcmp(cmd, "grep") == 0) {      /* codify-v15 1.1 */
+        GrepOpts go;
+        memset(&go, 0, sizeof go);
+        go.regex = flag(&argc, argv, "-E") | flag(&argc, argv, "--regex");
+        go.icase = flag(&argc, argv, "-i");
+        go.no_tests = flag(&argc, argv, "--no-tests");
+        go.files_only = flag(&argc, argv, "--files");
+        go.count_only = flag(&argc, argv, "--count");
+        go.lang = opt(&argc, argv, "--lang", NULL);
+        go.symbol = opt(&argc, argv, "--symbol", NULL);
+        go.kind = opt(&argc, argv, "--kind", NULL);
+        go.context = atoi(opt(&argc, argv, "-C", "0"));
+        go.limit = atoi(opt(&argc, argv, "-n", "50"));
+        go.budget = atoi(opt(&argc, argv, "--budget", "4000"));
+        const char *pg;
+        while (go.npaths < GREP_MAX_PATHS &&
+               (pg = opt(&argc, argv, "--path", NULL)))
+            go.paths[go.npaths++] = pg;
+        if (argc < 3) { help_usage("grep"); rc = 1; }
+        else {
+            go.pattern = argv[2];
+            index_fresh(&cg, &si);              /* hits are read as they are */
+            rc = cmd_grep(&cg, &si, &go, json);
+        }
     } else if (strcmp(cmd, "symbol") == 0) {
         if (argc < 3) { help_usage("symbol"); rc = 1; }
         else rc = cmd_symbol(&cg, argv[2], json);
