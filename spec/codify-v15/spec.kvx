@@ -124,9 +124,9 @@ status  = "pending"
 
 [task.1.1]
 title      = "cg grep: trigram candidates, regex and literal scan, hits placed in their symbols, grep_code over MCP"
-status     = "in_progress"
+status     = "done"
 wave       = 1
-symbols    = ["cmd_grep", "grep_candidates", "grep_scan", "t_grep"]
+symbols    = ["cmd_grep", "cands_collect", "scan_worker", "t_grep"]
 touches    = ["src/grep.c", "src/db.c", "src/scan.c", "src/graph.c", "src/main.c", "src/help.c", "src/mcp.c", "src/cg.h", "tests/integration/44_grep.sh", "docs/retrieval.md"]
 verify_cmd = "make cg && make unit && CG=$PWD/cg tests/integration/44_grep.sh && CG=$PWD/cg tests/integration/01_graph.sh && CG=$PWD/cg tests/integration/04_mcp.sh && CG=$PWD/cg tests/integration/16_retrieval.sh && CG=$PWD/cg tests/integration/27_branches.sh"
 do_1       = "db.c: body_tri (content='', contentless_delete=1, detail=none, trigram) written beside body_fts in the write path, with the SQLite-version fallback and the meta fts_mode key shared with task 1.3 (coordinate: whoever lands first defines fts_mode; the other reuses it)."
@@ -191,7 +191,7 @@ reqs       = ["5.1", "5.2", "5.3", "5.4", "5.5"]
 
 [task.2.2]
 title      = "cg hook event: native sessions and subagents in the agents registry, their worktrees, tasks, and events"
-status     = "in_progress"
+status     = "done"
 wave       = 1
 symbols    = ["cmd_hook_event", "native_record", "native_attribute_task", "native_worktree"]
 touches    = ["src/native.c", "src/db.c", "src/main.c", "src/help.c", "src/fleet.c", "src/cg.h", "tests/integration/49_native.sh", "docs/events.md"]
