@@ -593,6 +593,26 @@ int cg_schema_upgrade(Cg *cg) {
                  V18[i][0], V18[i][1]);
         sqlite3_exec(cg->db, sql, NULL, NULL, NULL);
     }
+    /* codify-v15 1.3: files.base (the last path segment, behind
+     * idx_file_base) joined the derived files table within schema v18. A
+     * database stamped v18 before that has the table without the column;
+     * widening it here and filling it from path spares the rebuild a version
+     * bump would cost, and the index in cg_open then applies. */
+    {
+        sqlite3_stmt *q = NULL;
+        bool have = true;
+        if (sqlite3_prepare_v2(cg->db, "SELECT 1 FROM pragma_table_info("
+                               "'files') WHERE name='base'", -1, &q, NULL)
+            == SQLITE_OK) {
+            have = sqlite3_step(q) == SQLITE_ROW;
+            sqlite3_finalize(q);
+        }
+        if (!have)
+            sqlite3_exec(cg->db,
+                "ALTER TABLE files ADD COLUMN base TEXT;"
+                "UPDATE files SET base = replace(path, rtrim(path, "
+                "replace(path, '/', '')), '')", NULL, NULL, NULL);
+    }
     if (current) return 0;
     if (stored > atol(SCHEMA_VERSION)) {
         fprintf(stderr,
