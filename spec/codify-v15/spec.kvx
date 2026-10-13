@@ -148,7 +148,7 @@ reqs       = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6"]
 
 [task.1.3]
 title      = "The index at scale: parallel walk, git-assisted change detection, contentless FTS, indexed lookups, the scale fixture and bench"
-status     = "pending"
+status     = "in_progress"
 wave       = 1
 symbols    = ["walk_parallel", "walk_git_candidates", "index_phase_ms"]
 touches    = ["src/walk.c", "src/scan.c", "src/gitint.c", "src/db.c", "src/config.c", "src/progress.c", "src/cg.h", "src/main.c", "tests/scale/gen.py", "tests/integration/46_scale.sh", "tests/integration/40_config.sh", "scripts/bench.sh", "docs/sync.md", "docs/config.md"]

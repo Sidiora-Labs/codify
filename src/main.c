@@ -91,6 +91,9 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
         if (ms) sb_printf(&b, ",\"last_index_ms\":%s", ms);
         if (nf) sb_printf(&b, ",\"project_files\":%s", nf);
         if (nb) sb_printf(&b, ",\"last_index_bytes\":%s", nb);
+        if (cg) sb_printf(&b, ",\"fts_mode\":\"%s\",\"sqlite\":\"%s\"",
+                          db_fts_contentless(cg) ? "contentless" : "content",
+                          sqlite3_libversion());
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -120,6 +123,13 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
         if (ms && nf)
             printf("measured project cost: %s files, last index %sms%s%s\n",
                    nf, ms, nb ? ", " : "", nb ? nb : "");
+        if (cg)
+            printf("body index: %s (SQLite %s)\n",
+                   db_fts_contentless(cg)
+                       ? "contentless, text read from disk"
+                       : "stores file content (contentless needs SQLite "
+                         "3.43.0 or newer when the graph is built)",
+                   sqlite3_libversion());
     }
     free(ms); free(nf); free(nb);
     return 0;
@@ -315,7 +325,14 @@ int main(int argc, char **argv) {
         journal_replay(&cg, JOURNAL_PROBE);     /* queued writes first */
         IndexStats st;
         progress_request(!json);
+        o.quiet = json;
         rc = cg_index_ex(&cg, &si, &o, &st);
+        if (json) {
+            StrBuf jb; sb_init(&jb);
+            index_stats_json(&st, false, &jb);
+            puts(jb.p);
+            sb_free(&jb);
+        }
         if (rc != 0 && st.busy) { cg_busy_report("The index"); rc = CG_EXIT_BUSY; }
     } else if (strcmp(cmd, "sync") == 0) {
         /* sync is what hooks, watchers, and editors call after every edit,
@@ -347,19 +364,10 @@ int main(int argc, char **argv) {
         progress_request(!json && !implicit && !o.background);
         rc = cg_index_ex(&cg, &si, &o, &st);
         if (json) {
-            printf("{\"indexed\":%ld,\"removed\":%ld,\"seen\":%ld,"
-                   "\"skipped\":%ld,\"reused\":%ld,"
-                   "\"ms\":%ld,\"workers\":%d,\"passes\":%d,"
-                   "\"fresh\":%s,\"coalesced\":%s,\"busy\":%s,"
-                   "\"scoped\":%s,\"targeted\":%s}\n",
-                   st.files_indexed, st.files_removed, st.files_seen,
-                   st.files_skipped, st.files_reused,
-                   st.ms, st.workers, st.passes,
-                   st.fresh ? "true" : "false",
-                   st.coalesced ? "true" : "false",
-                   st.busy ? "true" : "false",
-                   st.scoped ? "true" : "false",
-                   o.npaths > 0 ? "true" : "false");
+            StrBuf jb; sb_init(&jb);
+            index_stats_json(&st, o.npaths > 0, &jb);
+            puts(jb.p);
+            sb_free(&jb);
         }
         if (rc != 0 && st.busy) {
             if (!json) cg_busy_report("The sync");

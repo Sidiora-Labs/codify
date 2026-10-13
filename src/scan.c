@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <ctype.h>
+#include <stddef.h>
 #include <sys/stat.h>
 
 #define MAX_FILE_BYTES (8L * 1024 * 1024)   /* larger files: skip entirely */
@@ -58,32 +59,17 @@ static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {
     wl->n++;
 }
 
+/* The tree (or one directory of it) through the parallel walk in walk.c:
+ * the same ignore rules and the same files the recursive walk found, read
+ * by `threads` threads, appended to wl. */
 static void walk_dir(const char *root, const char *rel, const Ignore *ig,
-                     WalkList *wl) {
-    char abs[4600];
-    snprintf(abs, sizeof abs, "%s/%s", root, rel[0] ? rel : ".");
-    DIR *d = opendir(abs);
-    if (!d) return;
-    progress_tick(wl->n, 0, rel);       /* one tick per directory */
-    struct dirent *e;
-    while ((e = readdir(d))) {
-        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
-            continue;
-        char crel[4096];
-        if (rel[0]) snprintf(crel, sizeof crel, "%s/%s", rel, e->d_name);
-        else        snprintf(crel, sizeof crel, "%s", e->d_name);
-        char cabs[4900];
-        snprintf(cabs, sizeof cabs, "%s/%s", root, crel);
-        struct stat st;
-        if (lstat(cabs, &st) != 0) continue;
-        if (S_ISLNK(st.st_mode)) continue;
-        bool isdir = S_ISDIR(st.st_mode);
-        if (ignore_match(ig, crel, isdir)) continue;
-        if (isdir) walk_dir(root, crel, ig, wl);
-        else if (S_ISREG(st.st_mode) && st.st_size <= MAX_FILE_BYTES)
-            walk_push(wl, crel, (long)st.st_size, (long)st.st_mtime);
-    }
-    closedir(d);
+                     int threads, WalkList *wl) {
+    WalkSet ws = {0};
+    ws.n = 0;
+    walk_parallel(root, rel, ig, threads, MAX_FILE_BYTES, &ws);
+    for (int i = 0; i < ws.n; i++)
+        walk_push(wl, ws.v[i].rel, ws.v[i].size, ws.v[i].mtime);
+    walkset_free(&ws);
 }
 
 static int walked_cmp(const void *a, const void *b) {
@@ -169,7 +155,10 @@ static void *worker(void *arg) {
             strcmp(p->jobs[i].twin_hash, d.hash) == 0) {
             d.reuse_from  = p->jobs[i].twin_id;
             d.reuse_lines = p->jobs[i].twin_lines;
-            free(data);
+            if ((long)len <= MAX_FTS_BYTES) {   /* contentless body index */
+                d.body = data;
+                d.body_len = len;
+            } else free(data);
             ring_push(p, &d);
             continue;
         }
@@ -204,18 +193,23 @@ typedef struct {
                  *scope_path,
                  /* branch reuse: copy a twin's rows instead of parsing */
                  *cp_syms, *cp_symfts, *cp_refs, *cp_cmts, *cp_cmtfts,
-                 *cp_routes, *cp_imports, *cp_body;
+                 *cp_routes, *cp_imports, *cp_body,
+                 *has_rows, *purge_add, *purge_sym, *purge_cmt,
+                 *purge_body, *purge_clear;
+    bool contentless;      /* body_fts keeps no text (codify-v15 1.3) */
+    bool fts_purged;       /* this chunk's FTS rows went in one statement */
 } Stmts;
 
 static void stmts_init(Cg *cg, Stmts *s) {
+    s->contentless = db_fts_contentless(cg);
     /* rows belong to the branch this tree is on; the same path on another
      * branch is another row, so a worktree never overwrites its siblings */
     s->up_file = cg_prep(cg,
-        "INSERT INTO files(path,lang,size,mtime,hash,lines,branch_id) "
-        "VALUES(?,?,?,?,?,?,?7) "
+        "INSERT INTO files(path,lang,size,mtime,hash,lines,branch_id,base) "
+        "VALUES(?,?,?,?,?,?,?7,?8) "
         "ON CONFLICT(branch_id,path) DO UPDATE SET lang=excluded.lang,"
         "size=excluded.size,mtime=excluded.mtime,hash=excluded.hash,"
-        "lines=excluded.lines");
+        "lines=excluded.lines,base=excluded.base");
     s->sel_file   = cg_prep(cg, "SELECT id FROM files WHERE path=? AND branch_id=?2");
     s->del_symfts = cg_prep(cg, "DELETE FROM symbol_fts WHERE rowid IN "
                                 "(SELECT id FROM symbols WHERE file_id=?)");
@@ -295,6 +289,30 @@ static void stmts_init(Cg *cg, Stmts *s) {
     s->cp_imports = cg_prep(cg,
         "INSERT INTO imports(file_id,name,module,line,system) "
         "SELECT ?1,name,module,line,system FROM imports WHERE file_id=?2");
+    /* which FTS rows a file has: a DELETE on an FTS5 table, even one that
+     * matches nothing, flushes the table's pending inserts into a new
+     * segment, so a pass of new files that purged them first wrote one
+     * segment per file (codify-v15 1.3) */
+    s->has_rows = cg_prep(cg,
+        "SELECT EXISTS(SELECT 1 FROM symbols WHERE file_id=?1),"
+        "EXISTS(SELECT 1 FROM comments WHERE file_id=?1),"
+        "EXISTS(SELECT 1 FROM body_fts_docsize WHERE id=?1)");
+    /* and so a chunk's rewritten files leave the FTS tables in one DELETE
+     * per table, before any row of the chunk is inserted */
+    cg_exec(cg, "CREATE TEMP TABLE IF NOT EXISTS fts_purge"
+                "(id INTEGER PRIMARY KEY)");
+    s->purge_add = cg_prep(cg,
+        "INSERT OR IGNORE INTO temp.fts_purge(id) "
+        "SELECT id FROM files WHERE path=?1 AND branch_id=?2");
+    s->purge_sym = cg_prep(cg,
+        "DELETE FROM symbol_fts WHERE rowid IN (SELECT s.id FROM symbols s "
+        "WHERE s.file_id IN (SELECT id FROM temp.fts_purge))");
+    s->purge_cmt = cg_prep(cg,
+        "DELETE FROM comment_fts WHERE rowid IN (SELECT c.id FROM comments c "
+        "WHERE c.file_id IN (SELECT id FROM temp.fts_purge))");
+    s->purge_body = cg_prep(cg,
+        "DELETE FROM body_fts WHERE rowid IN (SELECT id FROM temp.fts_purge)");
+    s->purge_clear = cg_prep(cg, "DELETE FROM temp.fts_purge");
     s->cp_body = cg_prep(cg,
         "INSERT INTO body_fts(rowid,path,body) SELECT ?1,?3,body "
         "FROM body_fts WHERE rowid=?2");
@@ -334,7 +352,7 @@ static void scope_name(Stmts *s, const char *name) {
 
 static void stmts_fin(Stmts *s) {
     sqlite3_stmt **all = (sqlite3_stmt **)s;
-    for (size_t i = 0; i < sizeof(Stmts) / sizeof(sqlite3_stmt *); i++)
+    for (size_t i = 0; i < offsetof(Stmts, contentless) / sizeof(sqlite3_stmt *); i++)
         sqlite3_finalize(all[i]);
 }
 
@@ -345,13 +363,32 @@ static void step_reset(sqlite3_stmt *st) {
 }
 
 static void purge_file_children(Stmts *s, long file_id) {
-    sqlite3_bind_int64(s->del_symfts, 1, file_id); step_reset(s->del_symfts);
+    bool syms = true, cmts = true, body = true;
+    if (s->fts_purged) {
+        syms = cmts = body = false;
+    } else if (s->has_rows) {
+        sqlite3_bind_int64(s->has_rows, 1, file_id);
+        if (sqlite3_step(s->has_rows) == SQLITE_ROW) {
+            syms = sqlite3_column_int(s->has_rows, 0);
+            cmts = sqlite3_column_int(s->has_rows, 1);
+            body = sqlite3_column_int(s->has_rows, 2);
+        }
+        sqlite3_reset(s->has_rows);
+        sqlite3_clear_bindings(s->has_rows);
+    }
+    if (syms) {
+        sqlite3_bind_int64(s->del_symfts, 1, file_id); step_reset(s->del_symfts);
+    }
     sqlite3_bind_int64(s->del_syms,   1, file_id); step_reset(s->del_syms);
     sqlite3_bind_int64(s->del_refs,   1, file_id); step_reset(s->del_refs);
     sqlite3_bind_int64(s->del_routes, 1, file_id); step_reset(s->del_routes);
-    sqlite3_bind_int64(s->del_body,   1, file_id); step_reset(s->del_body);
+    if (body) {
+        sqlite3_bind_int64(s->del_body, 1, file_id); step_reset(s->del_body);
+    }
     sqlite3_bind_int64(s->del_imports,1, file_id); step_reset(s->del_imports);
-    sqlite3_bind_int64(s->del_cmtfts, 1, file_id); step_reset(s->del_cmtfts);
+    if (cmts) {
+        sqlite3_bind_int64(s->del_cmtfts, 1, file_id); step_reset(s->del_cmtfts);
+    }
     sqlite3_bind_int64(s->del_cmts,   1, file_id); step_reset(s->del_cmts);
 }
 
@@ -360,18 +397,29 @@ static void purge_file_children(Stmts *s, long file_id) {
  * baselines (hash_lines over identical lines) and the body index would all
  * come out the same, so only the ids differ. */
 static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
-                            const char *rel, IndexStats *st) {
+                            const char *rel, const Done *d, IndexStats *st) {
+    /* a contentless body index has no text to copy: the worker kept the
+     * file's bytes, and they are indexed like a parsed file's */
     sqlite3_stmt *in_order[] = { s->cp_syms, s->cp_symfts, s->cp_refs,
                                  s->cp_cmts, s->cp_cmtfts, s->cp_routes,
-                                 s->cp_imports, s->cp_body };
+                                 s->cp_imports,
+                                 s->contentless ? NULL : s->cp_body };
     long *count[] = { &st->symbols, NULL, &st->refs, &st->anchors, NULL,
                       &st->routes, NULL, NULL };
     for (size_t i = 0; i < sizeof in_order / sizeof *in_order; i++) {
+        if (!in_order[i]) continue;
         sqlite3_bind_int64(in_order[i], 1, file_id);
         sqlite3_bind_int64(in_order[i], 2, from);
         sqlite3_bind_text (in_order[i], 3, rel, -1, SQLITE_STATIC);
         step_reset(in_order[i]);
         if (count[i]) *count[i] += sqlite3_changes(cg->db);
+    }
+    if (s->contentless && d->body) {
+        sqlite3_bind_int64(s->ins_body, 1, file_id);
+        sqlite3_bind_text (s->ins_body, 2, rel, -1, SQLITE_STATIC);
+        sqlite3_bind_text (s->ins_body, 3, d->body, (int)d->body_len,
+                           SQLITE_STATIC);
+        step_reset(s->ins_body);
     }
     /* names the copy defines must re-enter the change scope, exactly as
      * scope_name does for each freshly parsed definition */
@@ -392,6 +440,9 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     sqlite3_bind_int64(s->up_file, 6, d->reuse_from ? d->reuse_lines
                                                     : d->pr.nlines);
     sqlite3_bind_int64(s->up_file, 7, cg->branch_id);
+    const char *base = strrchr(w->rel, '/');
+    sqlite3_bind_text (s->up_file, 8, base ? base + 1 : w->rel, -1,
+                       SQLITE_STATIC);
     step_reset(s->up_file);
 
     sqlite3_bind_text(s->sel_file, 1, w->rel, -1, SQLITE_STATIC);
@@ -412,7 +463,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
 
     if (d->reuse_from) {
         purge_file_children(s, file_id);
-        index_copy_rows(cg, s, file_id, d->reuse_from, w->rel, st);
+        index_copy_rows(cg, s, file_id, d->reuse_from, w->rel, d, st);
         st->files_indexed++;
         st->bytes += w->size;
         return;
@@ -647,6 +698,10 @@ static void soft_insert(sqlite3_stmt *ins, long file_id, int line,
 /* single-row existence probe; for is_path returns the resolved path */
 static bool probe(sqlite3_stmt *st, const char *tok, char *out, size_t cap) {
     sqlite3_bind_text(st, 1, tok, -1, SQLITE_TRANSIENT);
+    if (sqlite3_bind_parameter_count(st) >= 3) {     /* is_path: the base */
+        const char *b = strrchr(tok, '/');
+        sqlite3_bind_text(st, 3, b ? b + 1 : tok, -1, SQLITE_TRANSIENT);
+    }
     bool hit = sqlite3_step(st) == SQLITE_ROW;
     if (hit && out) {
         const char *p = (const char *)sqlite3_column_text(st, 0);
@@ -771,9 +826,14 @@ static void anchor_edges_run(Cg *cg, IndexStats *st, bool scoped) {
         "VALUES(?,?,?,?,?,'soft')");
     sqlite3_stmt *is_sym = cg_prep(cg,
         "SELECT 1 FROM symbols WHERE name=? LIMIT 1");
+    /* by name through idx_file_base: a full path matches itself, a partial
+     * one (main.go, src/db.c) any path it ends — the suffix test runs only
+     * on the rows whose last segment is the token's */
     sqlite3_stmt *is_path = cg_prep(cg,
-        "SELECT path FROM files WHERE branch_id=?2 AND "
-        "(path=?1 OR path LIKE '%/'||?1) LIMIT 1");
+        "SELECT path FROM files INDEXED BY idx_file_base "
+        "WHERE base=?3 AND branch_id=?2 AND "
+        "(path=?1 OR substr(path, -length(?1) - 1) = '/' || ?1) "
+        "ORDER BY path LIMIT 1");
     sqlite3_bind_int64(is_path, 2, cg->branch_id);   /* survives reset */
     sqlite3_stmt *is_route = cg_prep(cg,
         "SELECT pattern FROM routes WHERE pattern=?1 LIMIT 1");
@@ -856,15 +916,45 @@ static void anchor_edges_scoped(Cg *cg, IndexStats *st) {
 /* Write one parsed chunk under the lock. Returns -1 when the lock never came;
  * the chunk is then dropped (its files stay unhashed in the DB and are
  * re-parsed by the next run), and every result is freed either way. */
+/* Every file of the chunk whose rows write_done is about to replace (it
+ * has a row and its content changed) leaves the FTS tables here, three
+ * statements for the chunk instead of three per file. */
+static void fts_prepurge(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n) {
+    s->fts_purged = false;
+    if (!s->purge_add || !s->purge_sym || !s->purge_cmt || !s->purge_body ||
+        !s->purge_clear)
+        return;
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        const Walked *w = &jobs[chunk[i].idx];
+        if (w->dbhash[0] && strcmp(w->dbhash, chunk[i].hash) == 0) continue;
+        sqlite3_bind_text(s->purge_add, 1, w->rel, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(s->purge_add, 2, cg->branch_id);
+        step_reset(s->purge_add);
+        k++;
+    }
+    if (k) {
+        step_reset(s->purge_sym);
+        step_reset(s->purge_cmt);
+        step_reset(s->purge_body);
+        step_reset(s->purge_clear);
+    }
+    s->fts_purged = true;
+}
+
 static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
                        IndexStats *st) {
+    long t0 = now_ms();
     int rc = progress_begin_write(cg);
+    if (rc == 0) fts_prepurge(cg, s, jobs, chunk, n);
     for (int i = 0; i < n; i++) {
         if (rc == 0) write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st);
         if (chunk[i].parsed) parse_result_free(&chunk[i].pr);
         free(chunk[i].body);
     }
+    s->fts_purged = false;
     if (rc == 0) cg_exec(cg, "COMMIT");
+    index_phase_ms(st, IDX_PH_WRITE, t0);
     return rc;
 }
 
@@ -906,9 +996,9 @@ static bool targets_cover(char **t, int nt, const char *path) {
  * file target is stat'd alone. Ignore rules apply to both so an agent
  * editing something under node_modules cannot pull it into the graph. */
 static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,
-                         WalkList *wl) {
+                         int threads, WalkList *wl) {
     for (int i = 0; i < nt; i++) {
-        if (t[i][0] == 0) { walk_dir(root, "", ig, wl); continue; }
+        if (t[i][0] == 0) { walk_dir(root, "", ig, threads, wl); continue; }
         char abs[4900];
         snprintf(abs, sizeof abs, "%s/%s", root, t[i]);
         struct stat st;
@@ -925,7 +1015,7 @@ static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,
             *s = '/';
         }
         if (ignored || ignore_match(ig, t[i], isdir)) continue;
-        if (isdir) walk_dir(root, t[i], ig, wl);
+        if (isdir) walk_dir(root, t[i], ig, threads, wl);
         else if (S_ISREG(st.st_mode) && st.st_size <= MAX_FILE_BYTES)
             walk_push(wl, t[i], (long)st.st_size, (long)st.st_mtime);
     }
@@ -1001,16 +1091,37 @@ static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
  * returns 0, or -1 when the database stayed busy (a stall). */
 static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                       char **targets, int ntargets, IndexStats *st) {
+    long tw = now_ms();
     Ignore ig;
     ignore_load(&ig, cg->root);
     WalkList wl = {0};
     progress_phase("walking the tree", 0, 0);
-    if (targets) walk_targets(cg->root, &ig, targets, ntargets, &wl);
-    else         walk_dir(cg->root, "", &ig, &wl);
+    /* the walk's threads: the pass's own worker request, a quarter of it
+     * in the background, never above the cap a caller set */
+    const char *worigin;
+    int wthreads = syncgate_worker_request(cg->root, si, o->workers, &worigin);
+    if (o->workers_cap > 0 && o->workers_cap < wthreads)
+        wthreads = o->workers_cap;
+    if (o->background) wthreads = wthreads / 4 > 1 ? wthreads / 4 : 1;
+    if (targets) walk_targets(cg->root, &ig, targets, ntargets, wthreads, &wl);
+    else         walk_dir(cg->root, "", &ig, wthreads, &wl);
     ignore_free(&ig);
     progress_tick(wl.n, 0, "");
     progress_flush();                   /* the count, once known */
     qsort(wl.v, (size_t)wl.n, sizeof(Walked), walked_cmp);
+    /* a path named twice (a target and its directory, or git's status and
+     * the last pass's dirty list) is one file: a second entry would meet
+     * no row in the merge below and be rewritten as new */
+    int nu = 0;
+    for (int i = 0; i < wl.n; i++) {
+        if (nu && strcmp(wl.v[nu - 1].rel, wl.v[i].rel) == 0) {
+            free(wl.v[i].rel);
+            continue;
+        }
+        wl.v[nu++] = wl.v[i];
+    }
+    wl.n = nu;
+    index_phase_ms(st, IDX_PH_WALK, tw);
     if (!targets && wl.n > st->files_seen) st->files_seen = wl.n;
     if (targets) st->files_seen += wl.n;
 
@@ -1083,6 +1194,7 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     bool stalled = false;
 
     if (nremoved > 0) {
+        long trm = now_ms();
         progress_phase("writing the graph", 0, nremoved);
         if (progress_begin_write(cg) != 0) {
             stalled = true;
@@ -1098,10 +1210,12 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
             sqlite3_finalize(del_file);
             cg_exec(cg, "COMMIT");
         }
+        index_phase_ms(st, IDX_PH_WRITE, trm);
     }
     free(removed_ids);
 
     if (jobs.n > 0 && !stalled) {
+        long tp = now_ms(), w0 = st->phase_ms[IDX_PH_WRITE];
         Pipe pipe;
         memset(&pipe, 0, sizeof pipe);
         pipe.root = cg->root;
@@ -1157,6 +1271,9 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         pthread_cond_destroy(&pipe.can_push);
         pthread_cond_destroy(&pipe.can_pop);
         syncgate_slot_release(slot);
+        /* parse: the pipeline's wall time less the chunks written in it */
+        st->phase_ms[IDX_PH_PARSE] += now_ms() - tp -
+                                      (st->phase_ms[IDX_PH_WRITE] - w0);
     }
 
     stmts_fin(&s);
@@ -1168,6 +1285,160 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     for (int i = 0; i < ndbf; i++) free(dbf[i].path);
     free(dbf);
     return stalled ? -1 : 0;
+}
+
+/* ---------------- codify-v15 1.3: phases, memory, the git-assisted pass ---- */
+
+void index_phase_ms(IndexStats *st, int phase, long t0) {
+    if (phase >= 0 && phase < (int)(sizeof st->phase_ms / sizeof *st->phase_ms))
+        st->phase_ms[phase] += now_ms() - t0;
+}
+
+long index_peak_rss_kb(void) {
+    char *s = read_entire_file("/proc/self/status", NULL);
+    if (!s) return 0;
+    const char *p = strstr(s, "VmHWM:");
+    long kb = p ? atol(p + 6) : 0;
+    free(s);
+    return kb;
+}
+
+void index_stats_json(const IndexStats *st, bool targeted, StrBuf *b) {
+    sb_printf(b, "{\"indexed\":%ld,\"removed\":%ld,\"seen\":%ld,"
+              "\"skipped\":%ld,\"reused\":%ld,"
+              "\"ms\":%ld,\"workers\":%d,\"passes\":%d,"
+              "\"fresh\":%s,\"coalesced\":%s,\"busy\":%s,"
+              "\"scoped\":%s,\"targeted\":%s,\"walk\":\"%s\","
+              "\"phase_ms\":{\"walk\":%ld,\"parse\":%ld,\"write\":%ld,"
+              "\"resolve\":%ld,\"soft\":%ld},\"peak_rss_kb\":%ld}",
+              st->files_indexed, st->files_removed, st->files_seen,
+              st->files_skipped, st->files_reused,
+              st->ms, st->workers, st->passes,
+              st->fresh ? "true" : "false",
+              st->coalesced ? "true" : "false",
+              st->busy ? "true" : "false",
+              st->scoped ? "true" : "false",
+              targeted ? "true" : "false",
+              st->walk ? st->walk : "none",
+              st->phase_ms[IDX_PH_WALK], st->phase_ms[IDX_PH_PARSE],
+              st->phase_ms[IDX_PH_WRITE], st->phase_ms[IDX_PH_RESOLVE],
+              st->phase_ms[IDX_PH_SOFT], st->peak_rss_kb);
+}
+
+/* A path whose change alters what the walk may see: an ignore file. git
+ * reports the file, not the files it newly hides or reveals, so a pass that
+ * sees one walks the tree. */
+static bool is_ignore_file(const char *rel) {
+    const char *b = strrchr(rel, '/');
+    b = b ? b + 1 : rel;
+    return strcmp(b, ".gitignore") == 0 || strcmp(b, CG_IGNORE) == 0;
+}
+
+#define WALK_DIRTY_MAX (256 * 1024)
+
+/* A whole-tree pass asks git instead of walking when [index] walk is git,
+ * or auto with more than CG_WALK_GIT_MIN_FILES files on the branch; when
+ * git answers; when the last pass recorded the head it saw; and unless
+ * this is the CG_WALK_FULL_EVERY-th pass since the last full walk. The
+ * candidates are git's (walk_git_candidates) plus the paths that were
+ * dirty at the last pass — a file edited then and reverted since is in
+ * neither of git's lists now. Returns true with *targets set; false means
+ * walk the tree. */
+static bool index_git_plan(Cg *cg, const IndexOpts *o, const char *head,
+                           char ***targets, int *ntargets) {
+    if (o->full || !head[0]) return false;
+    int mode = config_index_walk(cg->root);
+    if (mode == CG_WALK_FULL) return false;
+    char key[64];
+    if (mode == CG_WALK_AUTO) {
+        char sql[96];
+        snprintf(sql, sizeof sql,
+                 "SELECT count(*) FROM files WHERE branch_id=%ld", cg->branch_id);
+        if (count_sql(cg, sql) <= CG_WALK_GIT_MIN_FILES) return false;
+    }
+    cg_bkey(cg, "walk_passes", key, sizeof key);
+    char *np = cg_meta_get(cg, key);
+    long passes = np ? atol(np) : 0;
+    free(np);
+    if (passes + 1 >= CG_WALK_FULL_EVERY) return false;
+    cg_bkey(cg, "walk_head", key, sizeof key);
+    char *since = cg_meta_get(cg, key);
+    if (!since || !since[0]) { free(since); return false; }
+    cg_bkey(cg, "walk_dirty", key, sizeof key);
+    char *prev = cg_meta_get(cg, key);
+    if (prev && strcmp(prev, "*") == 0) {   /* too many to have kept */
+        free(prev); free(since);
+        return false;
+    }
+    char **v = NULL;
+    int nstatus = 0;
+    int n = walk_git_candidates(cg->root, since, &v, &nstatus);
+    free(since);
+    if (n < 0) { free(prev); return false; }
+    for (const char *p = prev; p && *p; ) {
+        const char *e = strchr(p, '\n');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        if (len) {
+            v = xrealloc(v, sizeof *v * (size_t)(n + 1));
+            v[n] = xmalloc(len + 1);
+            memcpy(v[n], p, len);
+            v[n][len] = 0;
+            n++;
+        }
+        p = e ? e + 1 : NULL;
+    }
+    free(prev);
+    bool walk = false;
+    for (int i = 0; i < n && !walk; i++) walk = is_ignore_file(v[i]);
+    if (walk) { targets_free(v, n); return false; }
+    /* the dirty set the next pass must re-check: today's status paths */
+    StrBuf d; sb_init(&d);
+    for (int i = 0; i < nstatus && d.len <= WALK_DIRTY_MAX; i++)
+        sb_printf(&d, "%s\n", v[i]);
+    cg_bkey(cg, "walk_dirty_next", key, sizeof key);
+    cg_meta_set(cg, key, d.len > WALK_DIRTY_MAX ? "*" : (d.p ? d.p : ""));
+    sb_free(&d);
+    *targets = v;
+    *ntargets = n;
+    return true;
+}
+
+/* After a pass that covered the tree: the head it saw, the dirty set the
+ * next git pass must include, and the count of git passes since the last
+ * full walk. Called only when the pass completed. */
+static void index_git_record(Cg *cg, const char *head, bool gitpass) {
+    if (!head[0]) return;
+    char key[64], nkey[64];
+    cg_bkey(cg, "walk_head", key, sizeof key);
+    cg_meta_set(cg, key, head);
+    cg_bkey(cg, "walk_passes", key, sizeof key);
+    char *np = gitpass ? cg_meta_get(cg, key) : NULL;
+    char buf[32];
+    snprintf(buf, sizeof buf, "%ld", gitpass ? (np ? atol(np) : 0) + 1 : 0L);
+    free(np);
+    cg_meta_set(cg, key, buf);
+    cg_bkey(cg, "walk_dirty", key, sizeof key);
+    cg_bkey(cg, "walk_dirty_next", nkey, sizeof nkey);
+    char *next = gitpass ? cg_meta_get(cg, nkey) : NULL;
+    /* after a full walk the graph matches the tree: nothing carried over,
+     * but what is dirty now must be re-checked once it is reverted */
+    if (!gitpass) {
+        char **v = NULL;
+        int nstatus = 0;
+        int n = walk_git_candidates(cg->root, head, &v, &nstatus);
+        StrBuf d; sb_init(&d);
+        for (int i = 0; i < nstatus && d.len <= WALK_DIRTY_MAX; i++)
+            sb_printf(&d, "%s\n", v[i]);
+        if (n >= 0)
+            cg_meta_set(cg, key, d.len > WALK_DIRTY_MAX ? "*" : (d.p ? d.p : ""));
+        else
+            cg_meta_set(cg, key, "*");
+        sb_free(&d);
+        if (n > 0) targets_free(v, n);
+    } else {
+        cg_meta_set(cg, key, next ? next : "");
+    }
+    free(next);
 }
 
 /* The graph is fresh for a caller when the last whole-tree walk of its
@@ -1303,18 +1574,40 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     }
     free(note);
 
+    /* codify-v15 1.3: a whole-tree pass on a large git tree takes its
+     * candidates from git; the head is read before anything is walked, so
+     * a commit made during the pass is diffed by the next one */
+    char walk_head[65] = "", walk_branch[256];
+    bool tree_pass = whole, gitpass = false;
+    if (whole && git_head(cg->root, walk_branch, sizeof walk_branch,
+                          walk_head, sizeof walk_head) &&
+        index_git_plan(cg, o, walk_head, &targets, &ntargets)) {
+        gitpass = true;
+        whole = false;
+    }
+    st->walk = gitpass ? "git" : whole ? "full" : ntargets > 0 ? "targets"
+             : "none";
+
     index_scope_begin(cg);
     long whole_at = 0;
     bool stalled = false;
     /* every named path was outside the project: nothing to walk, and no
      * reason to fall back to the whole tree the caller did not ask for */
-    for (int pass = 0; pass < 3 && (whole || ntargets > 0); pass++) {
+    for (int pass = 0; pass < 3 && (whole || ntargets > 0 || gitpass); pass++) {
         long ps = now_ms();
         st->passes++;
-        if (whole) whole_at = ps;
+        if (whole || (gitpass && pass == 0)) whole_at = ps;
         if (index_pass(cg, si, o, whole ? NULL : targets, ntargets, st) != 0) {
             stalled = true;
             break;
+        }
+        if (gitpass && pass == 0) {
+            /* the tree's count, as a walk would have seen it */
+            char sql[96];
+            snprintf(sql, sizeof sql,
+                     "SELECT count(*) FROM files WHERE branch_id=%ld",
+                     cg->branch_id);
+            st->files_seen = count_sql(cg, sql) + st->files_skipped;
         }
         targets_free(targets, ntargets);
         targets = NULL; ntargets = 0;
@@ -1347,8 +1640,11 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
         if (progress_begin_write(cg) != 0) {
             stalled = true;
         } else {
+            long ts = now_ms();
             if (o->full || recover || !index_scope_bounded(cg)) {
                 anchor_edges(cg, st);
+                index_phase_ms(st, IDX_PH_SOFT, ts);
+                ts = now_ms();
                 progress_tick(1, 3, NULL);
                 resolve_imports(cg);
                 progress_tick(2, 3, NULL);
@@ -1356,11 +1652,14 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
             } else {
                 st->scoped = true;
                 anchor_edges_scoped(cg, st);
+                index_phase_ms(st, IDX_PH_SOFT, ts);
+                ts = now_ms();
                 progress_tick(1, 3, NULL);
                 resolve_imports_scoped(cg);
                 progress_tick(2, 3, NULL);
                 resolve_refs_scoped(cg);
             }
+            index_phase_ms(st, IDX_PH_RESOLVE, ts);
             progress_tick(3, 3, NULL);
             cg_meta_set(cg, pkey, "0");
             cg_exec(cg, "COMMIT");
@@ -1396,11 +1695,13 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
             cg_bkey(cg, "project_files", key, sizeof key);
             cg_meta_set(cg, key, buf);
         }
+        if (tree_pass) index_git_record(cg, walk_head, gitpass);
         /* the registry says where this branch was last indexed from and
          * at which commit; readers of cg branches see it move */
         branch_register(cg, cg->branch, cg->root, cg->head, NULL);
     }
     syncgate_release(gate);
+    st->peak_rss_kb = index_peak_rss_kb();
     index_report(st, o);
     return stalled ? -1 : 0;
 }

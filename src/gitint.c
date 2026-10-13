@@ -12,6 +12,7 @@
  * Everything here degrades to a no-op when the project has no git repository.
  */
 #include "cg.h"
+#include <ctype.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -241,6 +242,126 @@ int git_conflicted_paths(const char *tree, char ***out) {
         line = e ? e + 1 : NULL;
     }
     sb_free(&o);
+    return n;
+}
+
+/* ---------------- git-assisted change detection (codify-v15 1.3) ------- */
+
+/* stdout of `git -C tree <args>`, NUL bytes kept (the -z formats); stderr
+ * dropped. Returns the exit status, -1 when git could not be run. */
+static int git_capture(const char *tree, const char *args, char **out,
+                       size_t *len) {
+    *out = NULL;
+    *len = 0;
+    StrBuf cmd; sb_init(&cmd);
+    sb_puts(&cmd, "git -C ");
+    sb_shquote(&cmd, tree);
+    sb_printf(&cmd, " %s 2>/dev/null", args);
+    FILE *f = popen(cmd.p, "r");
+    sb_free(&cmd);
+    if (!f) return -1;
+    size_t cap = 65536, n = 0;
+    char *buf = xmalloc(cap);
+    size_t r;
+    while ((r = fread(buf + n, 1, cap - n - 1, f)) > 0) {
+        n += r;
+        if (cap - n < 4096) { cap *= 2; buf = xrealloc(buf, cap); }
+    }
+    buf[n] = 0;
+    int st = pclose(f);
+    *out = buf;
+    *len = n;
+    if (st == -1) return -1;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+static void cand_push(char ***v, int *n, int *cap, const char *p, size_t len) {
+    if (!len) return;
+    if (*n == *cap) {
+        *cap = *cap ? *cap * 2 : 64;
+        *v = xrealloc(*v, sizeof **v * (size_t)*cap);
+    }
+    char *s = xmalloc(len + 1);
+    memcpy(s, p, len);
+    s[len] = 0;
+    (*v)[(*n)++] = s;
+}
+
+/* Every path git can name as possibly different from the tree the last pass
+ * indexed at commit `since`: whatever the work tree holds that HEAD does not
+ * (status: modified, added, deleted, unmerged, untracked — each file, not
+ * its directory), plus every path a commit between since and HEAD touched,
+ * both sides of a rename. The status paths come first, *nstatus of them:
+ * the caller keeps them, since a file dirty at one pass and reverted by the
+ * next shows in neither list the second time. A path listed that did not in fact change costs
+ * one hash; a path missing would be a stale graph, which is why anything
+ * git cannot vouch for (an unknown commit, a failing git) is -1 and the
+ * caller walks the tree instead. */
+int walk_git_candidates(const char *root, const char *since, char ***out,
+                        int *nstatus) {
+    *out = NULL;
+    *nstatus = 0;
+    size_t sl = since ? strlen(since) : 0;
+    if (sl < 7 || sl > 64) return -1;
+    for (size_t i = 0; i < sl; i++)
+        if (!isxdigit((unsigned char)since[i])) return -1;
+    char **v = NULL;
+    int n = 0, cap = 0;
+    char *buf;
+    size_t len;
+    int rc = git_capture(root, "-c core.quotepath=off status --porcelain=v2 -z "
+                         "--untracked-files=all --no-renames --ignore-submodules=none",
+                         &buf, &len);
+    if (rc != 0) { free(buf); return -1; }
+    /* porcelain v2 -z: one NUL-terminated record per entry; the path is the
+     * last field, after a fixed number of space-separated ones; a rename
+     * record ("2") is followed by its original path as one more record */
+    for (size_t i = 0; i < len; ) {
+        const char *rec = buf + i;
+        size_t rl = strnlen(rec, len - i);
+        int skip = rec[0] == '1' ? 8 : rec[0] == '2' ? 9 : rec[0] == 'u' ? 10
+                 : (rec[0] == '?' || rec[0] == '!') ? 1 : -1;
+        if (skip > 0 && rec[0] != '!') {
+            const char *p = rec;
+            const char *end = rec + rl;
+            for (int k = 0; k < skip && p < end; k++) {
+                const char *sp = memchr(p, ' ', (size_t)(end - p));
+                p = sp ? sp + 1 : end;
+            }
+            cand_push(&v, &n, &cap, p, (size_t)(end - p));
+        }
+        i += rl + 1;
+        if (rec[0] == '2' && i < len) {          /* the rename's origin */
+            size_t ol = strnlen(buf + i, len - i);
+            cand_push(&v, &n, &cap, buf + i, ol);
+            i += ol + 1;
+        }
+    }
+    free(buf);
+    *nstatus = n;
+
+    char head[65] = "", branch[256];
+    git_head(root, branch, sizeof branch, head, sizeof head);
+    if (!head[0] || strncmp(head, since, sl) != 0 || strlen(head) != sl) {
+        StrBuf a; sb_init(&a);
+        sb_printf(&a, "-c core.quotepath=off diff --name-only -z --no-renames "
+                  "%s HEAD --", since);
+        rc = git_capture(root, a.p, &buf, &len);
+        sb_free(&a);
+        if (rc != 0) {
+            free(buf);
+            for (int k = 0; k < n; k++) free(v[k]);
+            free(v);
+            return -1;
+        }
+        for (size_t i = 0; i < len; ) {
+            size_t rl = strnlen(buf + i, len - i);
+            cand_push(&v, &n, &cap, buf + i, rl);
+            i += rl + 1;
+        }
+        free(buf);
+    }
+    *out = v;
     return n;
 }
 

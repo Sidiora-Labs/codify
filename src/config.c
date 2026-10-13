@@ -10,6 +10,8 @@
  *           codemap = "CODEMAP.md"  written by cg codemap
  *   [index] workers = auto          parse workers per index pass: 1..64,
  *                                   or auto (0) for the machine's choice
+ *           walk = auto             how a whole-tree pass finds changes:
+ *                                   git above 20000 files, else the walk
  *
  * The file belongs to the tree, exactly like the spec directory it may
  * relocate: it travels with the branch, so a linked worktree reads its own
@@ -29,7 +31,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-typedef enum { CFG_BOOL, CFG_PATH, CFG_INT } CfgType;
+typedef enum { CFG_BOOL, CFG_PATH, CFG_INT, CFG_ENUM } CfgType;
 
 /* The schema. Order is the order of every listing and of `cg config init`. */
 static const struct {
@@ -51,6 +53,10 @@ static const struct {
                            "written by cg codemap" },
     [CFG_INDEX_WORKERS] = { "index", "workers", CFG_INT, "auto",
                            "parse workers per index pass: 1-64, or auto" },
+    /* codify-v15 1.3 */
+    [CFG_INDEX_WALK]   = { "index", "walk", CFG_ENUM, "auto",
+                           "how a whole-tree pass finds changes: auto, git, "
+                           "or full" },
 };
 
 static const char CFG_TEMPLATE[] =
@@ -65,7 +71,8 @@ static const char CFG_TEMPLATE[] =
 "codemap = \"CODEMAP.md\"      # written by cg codemap\n"
 "\n"
 "[index]\n"
-"# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine\n";
+"# workers = auto            # parse workers per index pass: 1-64; auto sizes from the machine\n"
+"# walk = auto               # how sync finds changes: git (status + diff since the last pass), full (walk the tree), auto (git above 20000 files)\n";
 
 /* ---------------- reading and validating ---------------- */
 
@@ -143,6 +150,20 @@ int config_parse_workers(const char *v) {
     while (end && isspace((unsigned char)*end)) end++;
     if (errno || !end || *end || n > CG_MAX_WORKERS) return -1;
     return (int)n;
+}
+
+/* [index] walk (codify-v15 1.3): auto, git, or full; -1 for anything else */
+int config_parse_walk(const char *v) {
+    if (!v) return -1;
+    while (isspace((unsigned char)*v)) v++;
+    if (!strcasecmp(v, "auto")) return CG_WALK_AUTO;
+    if (!strcasecmp(v, "git"))  return CG_WALK_GIT;
+    if (!strcasecmp(v, "full")) return CG_WALK_FULL;
+    return -1;
+}
+
+static const char *walk_name(int w) {
+    return w == CG_WALK_GIT ? "git" : w == CG_WALK_FULL ? "full" : "auto";
 }
 
 /* Normalize a configured path to clean root-relative form ("./a//b/" ->
@@ -236,7 +257,18 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
             continue;
         }
         char *v = kvx_str(k, x->section, x->key);
-        if (CFG_KEYS[i].type == CFG_INT) {
+        if (CFG_KEYS[i].type == CFG_ENUM) {
+            int w = config_parse_walk(v);
+            if (w < 0)
+                cfg_issue(is, "bad_value", x->section, x->key,
+                          "%s: [%s] %s = %s is not auto, git, or full — "
+                          "using %s", c->file, x->section, x->key, x->raw,
+                          CFG_KEYS[i].dflt);
+            else {
+                c->index_walk = w;
+                c->from_file[i] = true;
+            }
+        } else if (CFG_KEYS[i].type == CFG_INT) {
             int n = config_parse_workers(v);
             if (n < 0)
                 cfg_issue(is, "bad_value", x->section, x->key,
@@ -329,6 +361,9 @@ const char *config_codemap_rel(const char *root) {
 }
 int config_index_workers(const char *root) {
     return config_load(root)->index_workers;
+}
+int config_index_walk(const char *root) {
+    return config_load(root)->index_walk;
 }
 
 bool config_spec_dir(const char *root, char *out, size_t cap) {
@@ -460,6 +495,7 @@ static void cfg_root(char *out, size_t cap) {
 
 static const char *cfg_value(const CgConfig *c, int i) {
     if (i == CFG_SYNC_AUTO) return c->sync_auto ? "true" : "false";
+    if (i == CFG_INDEX_WALK) return walk_name(c->index_walk);
     if (i == CFG_INDEX_WORKERS) {
         static char num[16];           /* cg config is one thread */
         if (!c->index_workers) return "auto";
@@ -570,7 +606,15 @@ static int cfg_set(const char *root, const char *dotted, const char *value) {
         return 1;
     }
     char norm[1024];
-    if (CFG_KEYS[i].type == CFG_INT) {
+    if (CFG_KEYS[i].type == CFG_ENUM) {
+        int w = config_parse_walk(value);
+        if (w < 0) {
+            fprintf(stderr, "cg config: %s takes auto, git, or full — not "
+                    "'%s'\n", dotted, value);
+            return 1;
+        }
+        snprintf(norm, sizeof norm, "%s", walk_name(w));
+    } else if (CFG_KEYS[i].type == CFG_INT) {
         int n = config_parse_workers(value);
         if (n < 0) {
             fprintf(stderr, "cg config: %s takes a worker count from 1 to "
