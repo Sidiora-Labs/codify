@@ -475,6 +475,8 @@ int main(int argc, char **argv) {
         else if (argc >= 3 && strcmp(argv[2], "event") == 0)
             rc = cmd_hook_event(&cg, opt(&argc, argv, "--host", "claude"),
                                 json);
+        else if (argc >= 3 && strcmp(argv[2], "pre-bash") == 0)
+            rc = cmd_hook_pre_bash(&cg, json);
         else {          /* hooks never fail the host: drain, note, exit 0 */
             /* A host pipes its payload and closes; a shell (an agent's
              * tool, a terminal) hands over a stdin that never closes, so

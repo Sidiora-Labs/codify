@@ -227,6 +227,8 @@ int cmd_agentmd(Cg *cg, bool write_files) {
         "```bash\n"
         "cg context <query>      # symbols + snippets + callers/callees + routes\n"
         "cg search <text>        # instant name/full-text search\n"
+        "cg grep <pattern> [-i]  # line search, each hit in its symbol\n"
+        "cg files <glob|words>   # find files; --dirs maps directories\n"
         "cg symbol <name>        # definition + snippet + reference count\n"
         "cg impact <name> -d 3   # who breaks if this changes\n"
         "cg routes [filter]      # URL pattern -> handler\n"
@@ -234,6 +236,10 @@ int cmd_agentmd(Cg *cg, bool write_files) {
         "```\n\n"
         "All of the above accept `--json`. The graph auto-syncs via "
         "`cg watch`, or connect over MCP with `cg mcp-install`.\n\n"
+        "Over MCP, use `grep_code`, `find_files`, `search_code`, and "
+        "`get_context` before any shell search: `cg grep` and `cg files` "
+        "answer what grep, rg, and find would, ranked and capped to a token "
+        "budget.\n\n"
         /* an agent that re-runs a queued write duplicates it, and one that
          * does not re-run an exit 75 loses it: the two must not blur */
         "When another process (an editor's indexer) holds the database, "

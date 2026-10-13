@@ -819,7 +819,8 @@ static const struct {
       "matches names (snake_case and camelCase words), doc comments and "
       "bodies, ranked in that order, source before tests. Returns "
       "matching definitions with locations and file hits with the "
-      "matching line.",
+      "matching line. Use this, grep_code, find_files, and get_context "
+      "before any shell search (cg search on the CLI).",
       S_QUERY, A_READ, "Search code", t_search, true },
     { "grep_code",
       "Line search: where a literal string (or, with regex=true, a POSIX "
@@ -829,7 +830,8 @@ static const struct {
       "Use this instead of a shell grep or rg: a trigram index picks the "
       "candidate files, the text is read as it is on disk, and the answer "
       "is a fraction of the tokens. Narrow with path, lang, no_tests, "
-      "symbol, or kind.",
+      "symbol, or kind. Reach for it before any shell search (cg grep on "
+      "the CLI).",
       GREP_CODE_SCHEMA, A_READ, "Grep code", t_grep, true },
     { "get_context",
       "One-call surgical context for a query: top symbol definitions with "
@@ -837,14 +839,16 @@ static const struct {
       "routes, filled to the token budget. A query naming an indexed file "
       "returns its outline (purpose, every symbol with line and signature, "
       "imports, dependents); a directory lists its files. Use this first "
-      "when exploring unfamiliar code.",
+      "when exploring unfamiliar code, before any shell search or file "
+      "read.",
       S_CTX, A_READ, "Get context", t_context, true },
     { "find_files",
       "Find files by glob (src/**/*.go), by the words of their path (sync "
       "gate finds syncgate.c and sync_gate.py), or list a directory; each "
       "row has path, language, lines and symbol count. dirs=true maps the "
       "tree instead: directories with file and line counts and dominant "
-      "language, largest first. Use instead of ls or find.",
+      "language, largest first. Use instead of ls or find, before any "
+      "shell search (cg files on the CLI).",
       S_FILES, A_READ, "Find files", t_files, true },
     { "survey",
       "Wide, cheap orientation over many files: each file's purpose line "
@@ -1154,7 +1158,9 @@ static const struct { const char *name, *title, *desc, *body; } PROMPTS[] = {
       "agents) and pick a task.\n"
       "3. Call `spec_start` with its id.\n"
       "4. Call `get_context` for the area the task names, and `why` for any "
-      "symbol you are about to change.\n"
+      "symbol you are about to change. Use `grep_code`, `find_files`, "
+      "`search_code`, and `get_context` before any shell search (on the "
+      "CLI: `cg grep`, `cg files`).\n"
       "5. Restate the task's acceptance criteria before writing code.\n"
       "Do not begin editing until you have done all five." },
     { "review-change", "Review the current change",
@@ -1183,7 +1189,9 @@ static const struct { const char *name, *title, *desc, *body; } PROMPTS[] = {
       "Orient yourself in this repository before doing anything else:\n"
       "1. Call `brief`, then read `codify://agent-context` when present.\n"
       "2. Call `list_routes` to find the externally reachable surface.\n"
-      "3. Call `get_context` for each area the task at hand touches.\n"
+      "3. Call `get_context` for each area the task at hand touches; use "
+      "`grep_code`, `find_files`, and `search_code` before any shell search "
+      "(on the CLI: `cg grep`, `cg files`).\n"
       "4. Call `recall` for decisions already made about those areas.\n"
       "Summarise what the project is, how it is laid out, and where the code "
       "you need lives — citing paths from the graph, not guesses." },

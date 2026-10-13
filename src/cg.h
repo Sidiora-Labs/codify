@@ -270,6 +270,8 @@ enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PROJ_BASE, CFG_PROJ_STALE, CFG_PROJ_EXCLUDE, CFG_PROJ_INDEX,
        CFG_FLEET_DISCOVER,                 /* codify-v15 2.4 */
        CFG_PROJ_STEER,            /* codify-v15 3.2 */
+       /* codify-v15 1.4 */
+       CFG_HOOKS_SHELL_ADVICE,
        CFG_NKEYS };
 typedef struct {
     char root[4096];
@@ -286,6 +288,7 @@ typedef struct {
     bool proj_index;           /* check out and index the projection */
     bool fleet_discover;       /* codify-v15 2.4: [fleet] discover */
     bool proj_steer;           /* codify-v15 3.2: steer on new findings */
+    bool shell_advice;         /* codify-v15 1.4: [hooks] shell_advice */
     bool from_file[CFG_NKEYS]; /* the value came from the file, not the default */
     int  nproblems;            /* unusable values (already reported on stderr) */
 } CgConfig;
@@ -796,6 +799,12 @@ int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json);
  * agents registry (kind 'native'), fed by `cg hook event --host H` */
 extern bool native_show_all;            /* --all: stopped > 1 day shown too */
 int  cmd_hook_event(Cg *cg, const char *host, bool json);   /* always 0 */
+/* codify-v15 1.4 */
+/* PreToolUse Bash advice (govern.c): a shell search answered with its cg
+ * equivalent, once per session per command; never a permission decision */
+int  cmd_hook_pre_bash(Cg *cg, bool json);                  /* always 0 */
+char *shell_advice_for(const char *root, const char *cwd, const char *cmd);
+bool config_shell_advice(const char *root);    /* [hooks] shell_advice */
 int  native_record(Cg *cg, const char *host, const char *payload,
                    char *agent_out, size_t cap);
 const char *native_attribute_task(Cg *cg, const char *session,

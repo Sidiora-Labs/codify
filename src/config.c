@@ -72,6 +72,10 @@ static const struct {
     [CFG_PROJ_STEER]   = { "projection", "steer", CFG_BOOL, "true",
                            "steer the agents on both branches when a build "
                            "finds a new conflict" },
+    /* codify-v15 1.4 */
+    [CFG_HOOKS_SHELL_ADVICE] = { "hooks", "shell_advice", CFG_BOOL, "true",
+                           "cg hook pre-bash points a shell grep/find at "
+                           "cg grep and cg files" },
 };
 
 static const char CFG_TEMPLATE[] =
@@ -96,7 +100,10 @@ static const char CFG_TEMPLATE[] =
 "# steer   = true            # steer the agents on both branches when a build finds a new conflict\n"
 "\n"
 "[fleet]\n"
-"# discover = true           # fleet status/tree, serve and watch --fleet run cg fleet discover first (once per 10s)\n";
+"# discover = true           # fleet status/tree, serve and watch --fleet run cg fleet discover first (once per 10s)\n"
+"\n"
+"[hooks]\n"
+"# shell_advice = true       # cg hook pre-bash points a shell grep/find at cg grep and cg files\n";
 
 /* ---------------- reading and validating ---------------- */
 
@@ -228,6 +235,7 @@ static void cfg_defaults(CgConfig *c, const char *root) {
     c->sync_auto = true;
     c->fleet_discover = true;                  /* codify-v15 2.4 */
     c->proj_steer = true;              /* codify-v15 3.2 */
+    c->shell_advice = true;
     snprintf(c->proj_stale_s, sizeof c->proj_stale_s, "24h");
     c->proj_stale = 86400;
     for (int i = 0; i < CFG_NKEYS; i++) {
@@ -294,6 +302,7 @@ static void cfg_read(const char *root, CgConfig *c, CfgIssues *is) {
                 if (i == CFG_PROJ_INDEX) c->proj_index = b == 1;
                 else if (i == CFG_FLEET_DISCOVER) c->fleet_discover = b == 1;
                 else if (i == CFG_PROJ_STEER) c->proj_steer = b == 1;
+                else if (i == CFG_HOOKS_SHELL_ADVICE) c->shell_advice = b == 1;
                 else c->sync_auto = b == 1;
                 c->from_file[i] = true;
             }
@@ -419,6 +428,9 @@ bool config_fleet_discover(const char *root) {
 }
 bool config_projection_steer(const char *root) {   /* codify-v15 3.2 */
     return config_load(root)->proj_steer;
+}
+bool config_shell_advice(const char *root) {    /* codify-v15 1.4 */
+    return config_load(root)->shell_advice;
 }
 int config_projection_exclude(const char *root, char ***out) {
     *out = NULL;
@@ -570,6 +582,7 @@ static const char *cfg_value(const CgConfig *c, int i) {
     if (i == CFG_PROJ_INDEX) return c->proj_index ? "true" : "false";
     if (i == CFG_FLEET_DISCOVER) return c->fleet_discover ? "true" : "false";
     if (i == CFG_PROJ_STEER) return c->proj_steer ? "true" : "false";
+    if (i == CFG_HOOKS_SHELL_ADVICE) return c->shell_advice ? "true" : "false";
     if (i == CFG_PROJ_BASE) return c->proj_base;
     if (i == CFG_PROJ_STALE) return c->proj_stale_s;
     if (i == CFG_PROJ_EXCLUDE) return c->proj_exclude;
