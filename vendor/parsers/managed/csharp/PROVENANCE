@@ -1,0 +1,5 @@
+Language: csharp
+Source: https://github.com/tree-sitter/tree-sitter-c-sharp.git
+Commit: 8c0abe0b84a3681d3e6852ce2e2a1eecb4f731c5
+License: LICENSE
+Generated grammar: parser.c (upstream)
