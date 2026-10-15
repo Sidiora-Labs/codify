@@ -241,6 +241,7 @@ void lang_global_init(void) {
 }
 
 static const LangSpec *spec_by_name(const char *name) {
+    if (!name) return NULL;
     for (int i = 0; i < NLANGS; i++)
         if (strcmp(LANGS[i].name, name) == 0) return &LANGS[i];
     return NULL;
