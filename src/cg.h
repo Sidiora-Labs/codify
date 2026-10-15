@@ -166,6 +166,12 @@ typedef struct {
     CmtDef  *cmts;   int ncmts,  ccmts;
     int first_code_line;   /* 1-based; 0 = the file is all comment or empty */
     SemResult sem;         /* owned rich source facts from syntax adapters */
+    char parser[32];       /* extractor identity; bounded and owned by result */
+    char diagnostic[64];   /* bounded reason code for partial extraction */
+    int diagnostic_line;
+    char diagnostics[256]; /* up to eight line:code entries */
+    unsigned diagnostic_count;
+    bool partial;
 } ParseResult;
 
 const char *lang_for_path(const char *path);       /* NULL if not source */
