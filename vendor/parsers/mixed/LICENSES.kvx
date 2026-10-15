@@ -1,0 +1,29 @@
+# Licence text is copied verbatim beside each parser's generated source.
+[pascal]
+license = "MIT"
+file = "pascal/LICENSE"
+
+[cobol]
+license = "MIT"
+file = "cobol/LICENSE"
+
+[vbnet]
+license = "MIT (declared by upstream package.json)"
+file = "vbnet/LICENSE"
+notice = "vbnet/NOTICE"
+
+[arkts]
+license = "MIT"
+file = "arkts/LICENSE"
+
+[cfml]
+license = "MIT"
+file = "cfml/LICENSE"
+
+[cfscript]
+license = "MIT"
+file = "cfscript/LICENSE"
+
+[cfquery]
+license = "MIT"
+file = "cfquery/LICENSE"

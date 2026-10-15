@@ -46,6 +46,12 @@ expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='channel:socket
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='channel:http:producer' AND name='/local' AND value='POST'" 'missing literal HTTP producer'
 expect_none "SELECT count(*) FROM semantic_type_facts WHERE kind LIKE 'channel:%' AND (name LIKE '%example.invalid%' OR name LIKE '%suffix%' OR name='remoteUrl')" 'dynamic or external channel was asserted'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='jsx_component' AND name='PanelView'" 'missing JSX component'
+decorators="$(count "SELECT group_concat(value, ',') FROM (SELECT value FROM semantic_type_facts WHERE kind='decorates' AND name='DecoratedPanel' ORDER BY start_byte)")"
+[ "$decorators" = 'Audit,route' ] || fail "decorator facts lack individual targets/sites: $decorators"
+expect_some "SELECT count(*) FROM semantic_type_facts a JOIN semantic_type_facts b ON a.file_id=b.file_id WHERE a.kind='decorates' AND b.kind='decorates' AND a.name='DecoratedPanel' AND b.name='DecoratedPanel' AND a.value='Audit' AND b.value='route' AND a.start_byte<>b.start_byte" 'decorators share one source site'
+expect_none "SELECT count(*) FROM semantic_type_facts WHERE kind='decorates' AND name='DynamicDecorated'" 'dynamic decorator gained an unjustified target'
+expect_some "SELECT count(*) FROM semantic_type_facts tf JOIN files f ON f.id=tf.file_id WHERE f.path='src/ambiguous.ts' AND tf.kind='decorates' AND tf.name='AmbiguousPanel' AND tf.value='Tag'" 'ambiguous decorator spelling was lost'
+expect_none "SELECT count(*) FROM semantic_bindings b JOIN files f ON f.id=b.file_id WHERE f.path='src/ambiguous.ts' AND b.local_name='Tag'" 'ambiguous decorator fabricated an import binding'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='observer_subscription' AND name='change'" 'missing literal observer registration'
 expect_some "SELECT count(*) FROM semantic_references WHERE kind='call' AND original_text='load'" 'missing call reference'
 

@@ -1,0 +1,5 @@
+Language: dart
+Source: https://github.com/UserNobody14/tree-sitter-dart.git
+Commit: 3f0c7a8309d89927e7cc6bef39569c815fddb2e5
+License: LICENSE
+Generated grammar: parser.c (upstream)

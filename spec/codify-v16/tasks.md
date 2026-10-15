@@ -28,23 +28,23 @@
     - Implement TS/TSX/JS/JSX grammar adapters, multiline functions, owner-aware methods, types, imports/exports, object actions, callbacks and JSX component facts; include negative and error-recovery cases.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.3_
-  - [ ] 2.4 Systems language syntax extraction
+  - [x] 2.4 Systems language syntax extraction
     - Implement C/C++/Objective-C/Go/Rust adapters including include/import bindings, ownership, function values/pointer facts, type relations, traits/interfaces and macro boundaries.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.4_
-  - [ ] 2.5 Python Ruby and PHP syntax extraction
+  - [x] 2.5 Python Ruby and PHP syntax extraction
     - Implement Python/Ruby/PHP scoped declarations/references, annotations/decorators, import aliases, classes/methods, docstrings and nested functions using pinned grammars.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.5_
-  - [ ] 2.6 Managed and application language syntax extraction
+  - [x] 2.6 Managed and application language syntax extraction
     - Implement Java/Kotlin/Scala/C#/Swift/Dart adapters with generics, qualified owners, result types, inheritance/interfaces, overload metadata and bounded parse recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.6_
-  - [ ] 2.7 Configuration and scripting language syntax extraction
+  - [x] 2.7 Configuration and scripting language syntax extraction
     - Implement Lua/Luau/R/Erlang/Solidity/Terraform/Nix grammar adapters with accurate coverage declarations and fixtures for declarations, references and string/comment negatives.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.7_
-  - [ ] 2.8 Legacy and mixed-format extraction adapters
+  - [x] 2.8 Legacy and mixed-format extraction adapters
     - Implement Pascal/COBOL/VB.NET/CFScript/CFQuery/ArkTS and Vue/Svelte/Astro/Liquid/Razor/CFML/Delphi-form/MyBatis adapters. Preserve offsets for embedded code; file-only formats must say so. Use separate manifests for grammar registration and licences.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.7, 2.8_
