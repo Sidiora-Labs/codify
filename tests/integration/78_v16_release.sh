@@ -6,8 +6,9 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$repo"
 
 make clean >/dev/null
-make -j2 CFLAGS='-O2 -Werror' cg
-make -j2 CFLAGS='-O2 -Werror' unit
+strict_flags='-O2 -std=gnu11 -Wall -Wextra -pthread -Werror'
+make -j2 CFLAGS="$strict_flags" cg
+make -j2 CFLAGS="$strict_flags" unit
 
 passed=0
 for test_file in tests/integration/[0-9]*.sh; do
