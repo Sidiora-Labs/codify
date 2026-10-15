@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 extern void ast_managed_register(void);
 
@@ -88,6 +89,18 @@ static void check(const char *lang, const char *path) {
         die(lang, "Kotlin alias missing");
     if (!strcmp(lang, "dart") && strcmp(r.sem.bindings[0].local_name, "math"))
         die(lang, "Dart alias missing");
+    if (!strcmp(lang, "java") &&
+        (strcmp(r.sem.bindings[0].module, "java.util") ||
+         strcmp(r.sem.bindings[0].local_name, "List")))
+        die(lang, "Java import module/name boundary wrong");
+    if (!strcmp(lang, "kotlin") &&
+        (strcmp(r.sem.bindings[0].module, "java.util") ||
+         strcmp(r.sem.bindings[0].original_name, "List")))
+        die(lang, "Kotlin import module/original boundary wrong");
+    if (!strcmp(lang, "csharp") &&
+        (strcmp(r.sem.bindings[0].module, "System.Collections") ||
+         strcmp(r.sem.bindings[0].local_name, "Generic")))
+        die(lang, "C# import module/name boundary wrong");
     parse_result_free(&r);
 
     char *damaged = xmalloc(len + 16);
@@ -122,6 +135,43 @@ static void check_namespace(const char *lang, const char *source) {
     parse_result_free(&r);
 }
 
+static void check_java_wildcard(void) {
+    const char *source = "import a.b.*;\nclass Named {}\n";
+    ParseResult r = {0};
+    if (!ast_try_parse("java", "Wildcard.java", source, strlen(source), &r))
+        die("java", "wildcard grammar unavailable");
+    if (r.sem.nbindings != 1 || strcmp(r.sem.bindings[0].module, "a.b") ||
+        strcmp(r.sem.bindings[0].local_name, "*") ||
+        strcmp(r.sem.bindings[0].original_name, "*"))
+        die("java", "wildcard import boundary wrong");
+    parse_result_free(&r);
+}
+
+static void check_wide_syntax(void) {
+    const char *line = "// ordinary comment\n";
+    const int count = 4096;
+    size_t line_len = strlen(line), length = (size_t)count * line_len + 32;
+    char *source = xmalloc(length);
+    for (int i = 0; i < count; i++) memcpy(source + (size_t)i * line_len, line, line_len);
+    strcpy(source + (size_t)count * line_len, "class Wide {}\n");
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    ParseResult r = {0};
+    if (!ast_try_parse("java", "Wide.java", source, strlen(source), &r))
+        die("java", "wide syntax parse unavailable");
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long elapsed_ms = (end.tv_sec - start.tv_sec) * 1000L +
+                      (end.tv_nsec - start.tv_nsec) / 1000000L;
+    int found = 0;
+    for (int i = 0; i < r.sem.nsymbols; i++)
+        if (!strcmp(r.sem.symbols[i].name, "Wide")) found++;
+    if (found != 1 || elapsed_ms > 12000)
+        die("java", "wide sibling traversal exceeded bound or lost declaration");
+    printf("managed wide syntax: %d siblings in %ldms\n", count, elapsed_ms);
+    parse_result_free(&r);
+    free(source);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     lang_global_init();
@@ -138,6 +188,8 @@ int main(int argc, char **argv) {
     check_namespace("kotlin", "package acme.demo\nclass Named {}\n");
     check_namespace("scala", "package acme.demo\nclass Named {}\n");
     check_namespace("csharp", "namespace acme.demo; class Named {}\n");
+    check_java_wildcard();
+    check_wide_syntax();
     puts("managed grammars: declarations, ownership, overloads, hierarchy, calls and negatives passed");
     return 0;
 }

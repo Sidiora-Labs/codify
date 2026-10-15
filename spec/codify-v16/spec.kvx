@@ -190,10 +190,10 @@ reqs = ["2.7", "2.8"]
 
 [task.3.1]
 title = "Import bindings aliases and export chains"
-status = "pending"
+status = "done"
 wave = 3
 requires = ["2.1", "2.3", "2.4", "2.5"]
-touches = ["src/sem_imports.c", "src/sem_imports.h", "src/resolve.c", "tests/integration/65_sem_imports.sh"]
+touches = ["src/sem_imports.c", "src/sem_imports.h", "tests/integration/65_sem_imports.sh"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/65_sem_imports.sh"
 do_1 = "Resolve explicit aliases/default/namespaces/reexports with cycle bounds; nearest tsconfig/jsconfig paths, workspace package roots and language-specific imports. Track configuration hashes and reverse dependencies, support config-only edits and branch isolation."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
@@ -201,7 +201,7 @@ reqs = ["3.1"]
 
 [task.3.2]
 title = "Receiver ownership and overload resolution"
-status = "pending"
+status = "done"
 wave = 3
 requires = ["2.1", "2.3", "2.4", "2.5"]
 touches = ["src/sem_resolve.c", "src/sem_resolve.h", "src/resolve.c", "tests/integration/66_sem_resolve.sh"]
@@ -212,7 +212,7 @@ reqs = ["3.2", "3.4"]
 
 [task.3.3]
 title = "Type hierarchy and semantic relation construction"
-status = "pending"
+status = "done"
 wave = 3
 requires = ["2.1", "2.4", "2.6"]
 touches = ["src/sem_types.c", "src/sem_types.h", "tests/integration/67_sem_types.sh"]
@@ -223,9 +223,10 @@ reqs = ["3.3", "3.4"]
 
 [task.3.4]
 title = "Framework route and handler graph"
-status = "pending"
+status = "done"
 wave = 3
 requires = ["2.1", "2.3", "2.5", "2.6"]
+symbols = ["sem_routes_pass"]
 touches = ["src/sem_routes.c", "src/sem_routes.h", "src/routes.c", "tests/integration/68_sem_routes.sh", "tests/fixtures/semantic/routes/**"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/68_sem_routes.sh"
 do_1 = "Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates."

@@ -286,7 +286,16 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
                  !strcmp(ctx->result->sem.symbols[method_owner].kind,"struct"))
                 ?"method":"function";
             next_owner=symbol(ctx,n,name,kind,method_owner,false,body);
-            if (next_owner>=0) type_fact(ctx,n,"returns",next_owner,"return",field(n,"type"));
+            if (next_owner>=0) {
+                type_fact(ctx,n,"returns",next_owner,"return",field(n,"type"));
+                if (!strcmp(lang,"cpp")) {
+                    TSNode modifier=child_type(d,"virtual_specifier");
+                    char *text=copy_text(ctx,modifier);
+                    if (text && !strcmp(text,"override"))
+                        type_fact(ctx,modifier,"overrides",next_owner,"method",name);
+                    free(text);
+                }
+            }
         } else if (!strcmp(t,"namespace_definition")) {
             name=field(n,"name"); next_owner=symbol(ctx,n,name,"namespace",owner,false,body);
         } else if (!strcmp(t,"class_specifier") || !strcmp(t,"struct_specifier") ||

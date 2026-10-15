@@ -380,6 +380,9 @@ static void import_binding(AstContext *c, TSNode n) {
     if (ts_node_is_null(path)) return;
     char *module = ast_text(c, path), *local = node_text(c, alias);
     if (!module || !*module) { free(module); free(local); return; }
+    bool wildcard = is_type(c->language, "java") &&
+        !ts_node_is_null(direct_type(n, "asterisk"));
+    if (wildcard) { free(local); local = xstrdup("*"); }
     if (is_type(c->language, "dart") &&
         (module[0] == '\'' || module[0] == '"')) {
         size_t len = strlen(module);
@@ -390,13 +393,18 @@ static void import_binding(AstContext *c, TSNode n) {
     }
     const char *tail = strrchr(module, '.');
     if (!tail) tail = strrchr(module, '/');
-    const char *original = tail ? tail + 1 : module;
-    SemBinding *b = sem_binding_add(&c->result->sem, module,
+    const char *original = wildcard ? "*" : (tail ? tail + 1 : module);
+    bool split_symbol = !wildcard && (is_type(c->language, "java") ||
+        is_type(c->language, "kotlin") || is_type(c->language, "csharp"));
+    char *module_part = split_symbol && tail ? ast_slice(c,
+        ts_node_start_byte(path), ts_node_start_byte(path) + (uint32_t)(tail - module)) : NULL;
+    SemBinding *b = sem_binding_add(&c->result->sem,
+                                    module_part ? module_part : module,
                                     local ? local : original, span(n));
     b->kind = xstrdup("import");
     b->original_name = xstrdup(original);
     b->evidence = xstrdup("syntax");
-    free(module); free(local);
+    free(module_part); free(module); free(local);
 }
 
 static TSNode last_identifier(TSNode n) {
@@ -505,11 +513,16 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
         dart_selector_call(c, n, parent);
     add_type_reference(c, n, parent);
     import_binding(c, n);
-    uint32_t count = ts_node_named_child_count(n);
     int pending_method = -1;
     int file_namespace = -1;
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(n, i);
+    TSTreeCursor cursor = ts_tree_cursor_new(n);
+    if (!ts_tree_cursor_goto_first_child(&cursor)) {
+        ts_tree_cursor_delete(&cursor);
+        return;
+    }
+    do {
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        if (!ts_node_is_named(child)) continue;
         const char *ct = ts_node_type(child);
         int child_owner = file_namespace >= 0 ? file_namespace : owner;
         if (is_type(c->language, "dart") && pending_method >= 0 &&
@@ -525,7 +538,8 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
              is_type(ct, "package_clause") || is_type(ct, "file_scoped_namespace_declaration")) &&
             c->result->sem.nsymbols > before)
             file_namespace = c->result->sem.nsymbols - 1;
-    }
+    } while (ts_tree_cursor_goto_next_sibling(&cursor));
+    ts_tree_cursor_delete(&cursor);
 }
 
 static void extract(AstContext *c) {
