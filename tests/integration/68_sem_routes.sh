@@ -23,6 +23,18 @@ q=lambda sql,*args: d.execute(sql,args).fetchall()
 assert q("SELECT count(*) FROM semantic_route_facts")[0][0] >= 12
 assert q("SELECT method,pattern FROM semantic_route_facts WHERE framework='nextjs-app' ORDER BY method") == [('GET','/orders'),('POST','/orders')]
 assert q("SELECT method,pattern FROM semantic_route_facts WHERE framework='sveltekit' AND method='GET'") == [('GET','/notes')]
+for framework,method,path,handler in [
+ ('expo-router','PAGE','/report','reportHandler'),
+ ('sveltekit','PAGE','/report','load'),
+ ('axum','GET','/rust/lifetime','lifetimeHandler'),
+ ('react-router','PAGE','/react/object','RouteObjectHandler')]:
+    assert q("SELECT s.name FROM semantic_route_facts r JOIN symbols s ON s.id=r.handler_symbol_id "
+             "WHERE r.framework=? AND r.method=? AND r.pattern=? AND r.status='resolved'",
+             framework,method,path) == [(handler,)],(framework,path)
+    assert q("SELECT e.provenance FROM semantic_edges e "
+             "JOIN semantic_route_facts r ON r.route_symbol_id=e.source_id "
+             "WHERE e.kind='route_handler' AND r.framework=? AND r.method=? "
+             "AND e.channel=?",framework,method,path) == [('resolved',)],path
 for framework,path in [('express','/express/multiline'),('fastapi','/fastapi/multiline'),
                        ('spring','/spring/multiline'),('gin/echo','/gin/multiline')]:
     assert q("SELECT status FROM semantic_route_facts WHERE framework=? AND pattern=?",framework,path) == [('resolved',)],(framework,path)
@@ -98,5 +110,22 @@ import sqlite3,sys
 d=sqlite3.connect(sys.argv[1])
 assert d.execute("SELECT status FROM semantic_route_facts WHERE pattern='/express/changed'").fetchone() == ('ambiguous',)
 assert not d.execute("SELECT 1 FROM semantic_edges WHERE kind='route_handler' AND channel='/express/changed'").fetchone()
+PY
+
+# A statement that exceeds the bounded buffer must degrade file coverage.
+python3 - <<'PY'
+with open('src/overflow.js','w') as f:
+    f.write('function overflowHandler() {}\napp.get(\n')
+    f.write('/*' + 'x'*8300 + '*/\n')
+    f.write("  '/overflow', overflowHandler\n);\n")
+PY
+"$CG" sync >/dev/null
+python3 - "$db" <<'PY'
+import sqlite3,sys
+d=sqlite3.connect(sys.argv[1])
+row=d.execute("SELECT status,diagnostics FROM extraction_health "
+              "WHERE path='src/overflow.js'").fetchone()
+assert row and row[0]=='partial' and 'route_statement_limit' in row[1],row
+assert not d.execute("SELECT 1 FROM semantic_route_facts WHERE pattern='/overflow'").fetchone()
 PY
 echo "semantic route graph: OK"

@@ -128,7 +128,7 @@ static long resolve_handler(Cg *cg,long file,const char *fw,const char *handler,
 
 static long adjacent_handler(Cg *cg,long file,int line,int *count) {
     sqlite3_stmt *q=cg_prep(cg,"SELECT id,line FROM symbols WHERE file_id=?1 "
-        "AND kind IN ('function','method') AND decl=0 AND line>?2 "
+        "AND kind IN ('function','method') AND decl=0 AND line>=?2 "
         "AND line<=?3 ORDER BY line LIMIT 3");
     sqlite3_bind_int64(q,1,file);sqlite3_bind_int(q,2,line);
     sqlite3_bind_int(q,3,line+5);
@@ -145,7 +145,10 @@ static long adjacent_handler(Cg *cg,long file,int line,int *count) {
 static long sole_default_handler(Cg *cg,long file,int *count) {
     sqlite3_stmt *q=cg_prep(cg,"SELECT id FROM symbols WHERE file_id=?1 "
         "AND kind IN ('function','method') AND decl=0 "
-        "AND sig LIKE '%export default%' LIMIT 2");
+        "AND (sig LIKE '%export default%' OR EXISTS("
+        "SELECT 1 FROM semantic_bindings b WHERE b.file_id=?1 "
+        "AND b.is_export=1 AND b.exported_name='default' "
+        "AND b.local_name=symbols.name)) LIMIT 2");
     sqlite3_bind_int64(q,1,file);int n=0;long id=0;
     while(sqlite3_step(q)==SQLITE_ROW){id=sqlite3_column_int64(q,0);n++;}
     sqlite3_finalize(q);*count=n;return n==1?id:0;
@@ -441,6 +444,16 @@ int sem_routes_pass(Cg *cg,const long *changed_files,int nfiles) {
             strcmp(fw,"expo-router")==0 || strcmp(fw,"nextjs-app")==0 ||
             strcmp(fw,"nuxt")==0))
             target=sole_default_handler(cg,fid,&matches);
+        if(!handler && fw && strcmp(fw,"sveltekit")==0 &&
+           strcmp(method?method:"","PAGE")==0 &&
+           source_path && strstr(source_path,"/+page.server.")) {
+            sqlite3_stmt *q=cg_prep(cg,"SELECT 1 FROM semantic_bindings "
+                "WHERE file_id=?1 AND is_export=1 AND exported_name='load' LIMIT 1");
+            sqlite3_bind_int64(q,1,fid);
+            bool exported=sqlite3_step(q)==SQLITE_ROW;
+            sqlite3_finalize(q);
+            if(exported)target=exact_symbol(cg,fid,"load",&matches);
+        }
         const char *status=strcmp(method?method:"","DYNAMIC")==0?"dynamic":
             target?"resolved":matches>1?"ambiguous":handler?"unresolved":"dynamic";
         char evidence[768]; snprintf(evidence,sizeof evidence,

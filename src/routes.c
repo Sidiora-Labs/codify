@@ -8,6 +8,7 @@
  * Gin/Echo (Go), Fiber/Chi (Go), Actix, Axum.
  */
 #include "cg.h"
+#include "index_health.h"
 #include <regex.h>
 #include <ctype.h>
 
@@ -223,6 +224,10 @@ static void scrub_route_line(const char *lang,const char *path,int line,
         if(python&&c=='#'){
             memset(out+i,' ',n-i);break;
         }
+        /* A Rust lifetime such as &'static is not a character literal. */
+        if(c=='\''&&strcmp(lang,"rust")==0 &&
+           !(a=='\\' ? (i+3<n&&raw[i+3]=='\'') : (i+2<n&&raw[i+2]=='\'')))
+            continue;
         if(c=='\''||c=='\"'||c=='`') {
             lex.quote=c;
             if(python&&a==c&&b==c){lex.triple=true;i+=2;}
@@ -259,16 +264,15 @@ static bool route_statement_complete(const char *s,size_t start) {
     return false;
 }
 
-extern void parse_diagnostic_add(ParseResult *,const char *,int)
-    __attribute__((weak));
-
 static void route_limit(ParseResult *pr,int line) {
-    if(parse_diagnostic_add)parse_diagnostic_add(pr,"route_statement_limit",line);
-    else fprintf(stderr,"cg: route statement exceeds 8192-byte scan limit at line %d\n",line);
+    parse_diagnostic_add(pr,"route_statement_limit",line);
 }
 
 void routes_scan_line(const char *lang, const char *path, int lineno,
                       const char *orig, ParseResult *pr) {
+    const char *route_lang=(strcmp(lang,"javascript")==0 ||
+        strcmp(lang,"typescript")==0 || strcmp(lang,"tsx")==0 ||
+        strcmp(lang,"jsx")==0)?"js":lang;
     size_t length=strlen(orig);
     if(length>1048576)return;
     char *scan=xmalloc(length+1);
@@ -312,7 +316,7 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
        !route_statement_complete(source,lex.pending_open))continue;
     for (int i = 0; i < NRP; i++) {
         RoutePat *r = &RP[i];
-        if (!lang_in(r->langs, lang)) continue;
+        if (!lang_in(r->langs, route_lang)) continue;
         if (r->file_hint && !strstr(path, r->file_hint)) continue;
         regmatch_t m[8];
         if (regexec(&r->re, source, 8, m, 0) != 0) continue;
@@ -367,7 +371,12 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
         }
         if(strcmp(r->framework,"react-router")==0) {
             const char *h=strstr(source,"element={<");
-            if(h){h+=10;size_t n=0;
+            if(h)h+=10;
+            else if((h=strstr(source,"element:"))!=NULL){
+                h+=8;while(*h==' '||*h=='\t')h++;
+                if(*h=='<')h++;else h=NULL;
+            }
+            if(h){size_t n=0;
                 while((isalnum((unsigned char)h[n])||h[n]=='_')&&n<sizeof handler-1)n++;
                 if(n){memcpy(handler,h,n);handler[n]=0;}}
         } else if(strcmp(r->framework,"vue-router")==0) {
@@ -453,14 +462,21 @@ void routes_scan_file(const char *path, ParseResult *pr) {
         char url[512];snprintf(url,sizeof url,"/%s",p+4);
         char *cut=strstr(url,"/page.");if(cut)*cut=0;
         route_add(pr,"nextjs-app","PAGE",url[0]?url:"/",NULL,1);
-    } else if ((p=strstr(path,"src/routes/"))!=NULL && strstr(path,"/+page.")) {
+    } else if ((p=strstr(path,"src/routes/"))!=NULL &&
+               (strstr(path,"/+page.")||strstr(path,"/+page.server."))) {
         char url[512];snprintf(url,sizeof url,"/%s",p+11);
-        char *cut=strstr(url,"/+page.");if(cut)*cut=0;
+        char *cut=strstr(url,"/+page");if(cut)*cut=0;
         route_add(pr,"sveltekit","PAGE",url[0]?url:"/",NULL,1);
     } else if ((p=strstr(path,"app/"))!=NULL &&
                (strstr(path,"/index.tsx")||strstr(path,"/index.jsx"))) {
         char url[512];snprintf(url,sizeof url,"/%s",p+4);
         char *cut=strstr(url,"/index.");if(cut)*cut=0;
+        route_add(pr,"expo-router","PAGE",url[0]?url:"/",NULL,1);
+    } else if ((p=strstr(path,"app/"))!=NULL &&
+               (strstr(path,".tsx")||strstr(path,".jsx"))) {
+        char url[512];snprintf(url,sizeof url,"/%s",p+4);
+        char *dot=strrchr(url,'.');if(dot)*dot=0;
+        if(strchr(url,'(')||strchr(url,')'))return;
         route_add(pr,"expo-router","PAGE",url[0]?url:"/",NULL,1);
     }
 }
