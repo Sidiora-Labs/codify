@@ -54,6 +54,12 @@ expect_some "SELECT count(*) FROM semantic_type_facts tf JOIN files f ON f.id=tf
 expect_none "SELECT count(*) FROM semantic_bindings b JOIN files f ON f.id=b.file_id WHERE f.path='src/ambiguous.ts' AND b.local_name='Tag'" 'ambiguous decorator fabricated an import binding'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='observer_subscription' AND name='change'" 'missing literal observer registration'
 expect_some "SELECT count(*) FROM semantic_references WHERE kind='call' AND original_text='load'" 'missing call reference'
+expect_some "SELECT count(*) FROM semantic_references WHERE kind='call' AND original_text='arityZero' AND argc=0" 'zero-argument call lost arity'
+expect_some "SELECT count(*) FROM semantic_references WHERE kind='call' AND original_text='arityTwo' AND argc=2" 'trailing comma increased call arity'
+two="$(count "SELECT count(*) FROM semantic_references WHERE kind='call' AND original_text='arityTwo' AND argc=2")"
+[ "$two" -eq 2 ] || fail "comment or trailing comma changed argument count ($two exact calls)"
+expect_some "SELECT count(*) FROM semantic_references WHERE kind='call' AND original_text='arityTwo' AND argc=-1" 'spread call asserted a fixed arity'
+expect_some "SELECT count(*) FROM refs WHERE name='arityTwo' AND argc=2" 'legacy resolution did not receive syntax arity'
 
 # Strings, comments and type names do not become executable declarations/calls.
 expect_none "SELECT count(*) FROM symbols WHERE name IN ('Phantom','Bogus','FakeClass','Pretend')" 'comment/string created definition'

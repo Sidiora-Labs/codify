@@ -46,7 +46,7 @@ $(LIB): $(filter-out $(BUILD)/main.o,$(OBJS))
 	ar rcs $@ $^
 
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB)
-	$(CC) $(CFLAGS) -Isrc -o $@ $< $(LIB) $(LDLIBS)
+	$(CC) $(CFLAGS) -Isrc -o $@ $< $(filter-out $(BUILD)/main.o,$(OBJS)) $(LDLIBS)
 
 $(BUILD):
 	mkdir -p $(BUILD)

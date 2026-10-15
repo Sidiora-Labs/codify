@@ -121,10 +121,38 @@ static int symbol(AstContext *c, TSNode n, TSNode name, const char *kind,
     free(sname);
     return index;
 }
+static const char *bare_call_boundary(AstContext *c, TSNode site, const char *name) {
+    for (TSNode parent=ts_node_parent(site); !ts_node_is_null(parent);
+         parent=ts_node_parent(parent)) {
+        if (is(parent,"if_statement")) {
+            TSNode condition=ast_field(parent,"condition");
+            if (!ts_node_is_null(condition) &&
+                ts_node_end_byte(condition)<=ts_node_start_byte(site) &&
+                ts_node_end_point(condition).row==ts_node_start_point(site).row) {
+                char *value=text(c,condition);
+                bool local=contains_word(value,name);
+                free(value);
+                if (local) return "(local)";
+            }
+        }
+        if (is(parent,"function_declaration") || is(parent,"method_definition") ||
+            is(parent,"arrow_function") || is(parent,"function_expression")) {
+            TSNode params=ast_field(parent,"parameters");
+            char *value=text(c,params);
+            bool parameter=contains_word(value,name);
+            free(value);
+            if (parameter) return "(param)";
+            break;
+        }
+    }
+    return NULL;
+}
 static void reference(AstContext *c, TSNode site, TSNode name, const char *kind,
                       int owner, const char *qualifier) {
     char *s=text(c,name);
     if (!s || !*s || strlen(s)>512) { free(s); return; }
+    if (!qualifier && strcmp(kind,"call")==0)
+        qualifier=bare_call_boundary(c,site,s);
     SemResult *r=&c->result->sem;
     SemReference *ref=sem_reference_add(r,s,kind,span(site));
     if (ref) {
@@ -375,6 +403,19 @@ static void channel_fact(AstContext *c, TSNode n, TSNode fn,
     }
     free(literal);free(receiver);free(method);free(callee);
 }
+static int call_arity(TSNode args) {
+    if (!is(args,"arguments") || ts_node_has_error(args)) return -1;
+    uint32_t children=ts_node_named_child_count(args);
+    if (children>512) return -1;
+    int count=0;
+    for (uint32_t i=0;i<children;i++) {
+        TSNode arg=ts_node_named_child(args,i);
+        if (is(arg,"spread_element") || ts_node_is_error(arg) ||
+            ts_node_is_missing(arg)) return -1;
+        if (!ts_node_is_extra(arg) && ++count>256) return -1;
+    }
+    return count;
+}
 static void visit(AstContext *c, TSNode n, int owner, int depth) {
     if (c->cancelled || c->truncated) return;
     if (c->cancel_flag && *c->cancel_flag) { c->cancelled=true; return; }
@@ -414,6 +455,17 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
         child_owner=symbol(c,n,name,"method",owner,exported,body);
     else if (is(n,"variable_declarator")) {
         TSNode v=ast_field(n,"value");
+        if (is(v,"call_expression")) {
+            TSNode fn=ast_field(v,"function"), args=ast_field(v,"arguments");
+            char *callee=text(c,fn);
+            TSNode first=ts_node_named_child(args,0);
+            if (callee && strcmp(callee,"require")==0 && is(first,"string")) {
+                char *module=unquote(c,first), *local=text(c,name);
+                if (module) binding(c,n,module,local,"*","require",NULL,false);
+                free(module); free(local);
+            }
+            free(callee);
+        }
         if (is(v,"arrow_function") || is(v,"function_expression") || is(v,"function"))
             child_owner=symbol(c,n,name,"function",owner,export_context(ts_node_parent(n)),v);
         else if (is(v,"object"))
@@ -451,14 +503,20 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
     else if (is(n,"export_statement")) exports(c,n);
     else if (is(n,"call_expression")) {
         TSNode fn=ast_field(n,"function");
+        int before=c->result->sem.nreferences;
         if (is(fn,"identifier")) reference(c,n,fn,"call",owner,NULL);
         else if (is(fn,"member_expression")) {
             TSNode prop=ast_field(fn,"property"),obj=ast_field(fn,"object");
             char *qual=text(c,obj);
-            reference(c,n,prop,"call",owner,qual);
+            const char *boundary=(!is(obj,"identifier") &&
+                                  !is(obj,"this") && !is(obj,"super") &&
+                                  !is(obj,"member_expression")) ? "(expr)" : qual;
+            reference(c,n,prop,"call",owner,boundary);
             free(qual);
         }
         TSNode args=ast_field(n,"arguments");
+        if (c->result->sem.nreferences>before)
+            c->result->sem.references[c->result->sem.nreferences-1].argc=call_arity(args);
         channel_fact(c,n,fn,args,owner);
         char *callee=text(c,fn);
         TSNode first=ts_node_named_child(args,0), second=ts_node_named_child(args,1);
