@@ -234,7 +234,7 @@ reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
 
 [task.3.5]
 title = "Callback interface and runtime dispatch synthesis"
-status = "pending"
+status = "in_progress"
 wave = 3
 requires = ["3.2", "3.3"]
 touches = ["src/sem_dispatch.c", "src/sem_dispatch.h", "tests/integration/69_sem_dispatch.sh", "tests/fixtures/semantic/dispatch/**"]
