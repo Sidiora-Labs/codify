@@ -37,6 +37,8 @@ int main(void) {
         "CREATE TABLE semantic_type_facts(owner_id INTEGER,file_id INTEGER,name TEXT,"
         "kind TEXT,value TEXT,evidence TEXT,id INTEGER PRIMARY KEY,start_byte INTEGER,"
         "end_byte INTEGER,start_line INTEGER,start_column INTEGER,end_line INTEGER,end_column INTEGER);"
+        "CREATE TABLE semantic_dependencies(branch_id INTEGER,file_id INTEGER,"
+        "dependency_key TEXT,kind TEXT,UNIQUE(branch_id,file_id,dependency_key,kind));"
         "CREATE TABLE semantic_edges(branch_id INTEGER,source_file_id INTEGER,"
         "target_file_id INTEGER,source_id INTEGER,target_id INTEGER,kind TEXT,"
         "original_text TEXT,strategy TEXT,provenance TEXT,evidence TEXT,"
@@ -59,9 +61,9 @@ int main(void) {
         "(17,4,NULL,'Base','public',0,5,1,0,1,5);"
         "INSERT INTO semantic_bindings VALUES(2,10),(2,15);"
         "INSERT INTO semantic_type_facts VALUES"
-        "(11,2,'base','inherits','Base','extends clause',1,0,4,1,9,1,13),"
+        "(11,2,'base','inherits',': public Base','extends clause',1,0,4,1,9,1,13),"
         "(16,2,'interface','implements','I','implements clause',2,20,21,4,5,4,6),"
-        "(12,2,'result','returns','Base','return annotation',3,8,12,2,4,2,8),"
+        "(12,2,'result','returns','-> Base','return annotation',3,8,12,2,4,2,8),"
         "(11,2,'ambiguous','type','Twin','type annotation',4,30,34,5,0,5,4);");
     assert(sem_types_register()==0);
     assert(sem_types_run(&cg,NULL,0)==0);
@@ -70,15 +72,22 @@ int main(void) {
     assert(count(&cg,"branch_id=1 AND kind='returns' AND source_id=12 AND target_id=10")==1);
     assert(count(&cg,"branch_id=1 AND kind='contains' AND source_id=11 AND target_id=12")==1);
     assert(count(&cg,"kind='type' OR target_id=17")==0);
+    sqlite3_stmt *deps=cg_prep(&cg,"SELECT count(*) FROM semantic_dependencies "
+        "WHERE branch_id=1 AND file_id=2 AND dependency_key='type:Base'");
+    assert(sqlite3_step(deps)==SQLITE_ROW && sqlite3_column_int(deps,0)==1);
+    sqlite3_finalize(deps);
     long ids[8];
     assert(sem_type_ancestors(&cg,11,ids,8)==1 && ids[0]==10);
     assert(sem_type_subtypes(&cg,10,ids,8)==1 && ids[0]==11);
     assert(sem_type_implementations(&cg,15,ids,8)==1 && ids[0]==16);
     long empty[1]={0}; assert(sem_types_run(&cg,empty,0)==0);
     assert(count(&cg,"branch_id=1")==4);
+    sql(&cg,"INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
+        "source_id,target_id,kind,strategy) VALUES(1,1,1,10,15,'type','type_hierarchy');");
     sql(&cg,"DELETE FROM semantic_type_facts WHERE id=1;");
-    assert(sem_types_run(&cg,empty,1)==0);
+    long changed[1]={2}; assert(sem_types_run(&cg,changed,1)==0);
     assert(count(&cg,"kind='inherits'")==0);
+    assert(count(&cg,"source_file_id=1 AND kind='type'")==1);
     assert(sem_type_ancestors(&cg,11,ids,8)==0);
     cg.branch_id=2;
     assert(sem_type_subtypes(&cg,10,ids,8)==0);

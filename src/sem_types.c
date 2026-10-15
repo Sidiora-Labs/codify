@@ -29,6 +29,11 @@ static bool is_type_kind(const char *s) {
 static bool canonical_name(const char *src, char out[256]) {
     if (!src) return false;
     while (isspace((unsigned char)*src)) src++;
+    if (*src==':') { src++; while (isspace((unsigned char)*src)) src++; }
+    if (src[0]=='-' && src[1]=='>') {
+        src+=2; while (isspace((unsigned char)*src)) src++;
+    }
+    if (!strncmp(src,"virtual ",8)) src+=8;
     if (!strncmp(src,"public ",7)) src += 7;
     else if (!strncmp(src,"protected ",10)) src += 10;
     else if (!strncmp(src,"private ",8)) src += 8;
@@ -139,20 +144,56 @@ static int insert_edge(Cg *cg, sqlite3_stmt *q, long source_file,
 int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
     if (changed_files && nfiles==0) return 0;
     if (!cg || !cg->branch_id) return -1;
-    /* All type facts are cheap to revisit; this also retries previously
-     * ambiguous facts and removes incoming edges after target replacement. */
-    sqlite3_stmt *del=cg_prep(cg,"DELETE FROM semantic_edges WHERE branch_id=?1 "
-         "AND strategy='type_hierarchy'");
+    if (changed_files) {
+        sqlite3_stmt *scope=cg_prep(cg,
+            "CREATE TEMP TABLE IF NOT EXISTS sem_type_scope(file_id INTEGER PRIMARY KEY)");
+        int rc=sqlite3_step(scope); sqlite3_finalize(scope);
+        if (rc!=SQLITE_DONE) return -1;
+        scope=cg_prep(cg,"DELETE FROM temp.sem_type_scope");
+        rc=sqlite3_step(scope); sqlite3_finalize(scope);
+        if (rc!=SQLITE_DONE) return -1;
+        scope=cg_prep(cg,"INSERT OR IGNORE INTO temp.sem_type_scope(file_id) VALUES(?1)");
+        for (int i=0;i<nfiles;i++) {
+            if (changed_files[i]<=0) continue;
+            sqlite3_reset(scope); sqlite3_clear_bindings(scope);
+            sqlite3_bind_int64(scope,1,changed_files[i]);
+            if (sqlite3_step(scope)!=SQLITE_DONE) { sqlite3_finalize(scope); return -1; }
+        }
+        sqlite3_finalize(scope);
+    }
+    /* Replace source-owned edges only. The caller supplies changed files and
+     * their reverse dependents; a full pass recomputes the whole branch. */
+    sqlite3_stmt *del=cg_prep(cg,changed_files ?
+         "DELETE FROM semantic_edges WHERE branch_id=?1 AND strategy='type_hierarchy' "
+         "AND source_file_id IN (SELECT file_id FROM temp.sem_type_scope)" :
+         "DELETE FROM semantic_edges WHERE branch_id=?1 AND strategy='type_hierarchy'");
     sqlite3_bind_int64(del,1,cg->branch_id);
     int rc=sqlite3_step(del)==SQLITE_DONE ? 0 : -1;
     sqlite3_finalize(del);
     if (rc) return rc;
+    sqlite3_stmt *depdel=cg_prep(cg,changed_files ?
+        "DELETE FROM semantic_dependencies WHERE branch_id=?1 AND kind='type_relation' "
+        "AND file_id IN (SELECT file_id FROM temp.sem_type_scope)" :
+        "DELETE FROM semantic_dependencies WHERE branch_id=?1 AND kind='type_relation'");
+    sqlite3_bind_int64(depdel,1,cg->branch_id);
+    rc=sqlite3_step(depdel)==SQLITE_DONE ? 0 : -1;
+    sqlite3_finalize(depdel);
+    if (rc) return rc;
+    sqlite3_stmt *dep=cg_prep(cg,
+        "INSERT OR IGNORE INTO semantic_dependencies(branch_id,file_id,"
+        "dependency_key,kind) VALUES(?1,?2,?3,'type_relation')");
     sqlite3_stmt *edge=cg_prep(cg,
         "INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
         "source_id,target_id,kind,original_text,strategy,provenance,evidence,"
         "start_byte,end_byte,start_line,start_column,end_line,end_column) "
         "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)");
-    sqlite3_stmt *parents=cg_prep(cg,
+    sqlite3_stmt *parents=cg_prep(cg,changed_files ?
+        "SELECT ss.symbol_id,ss.file_id,ss.parent_id,NULL,NULL,NULL,NULL,"
+        "ss.start_byte,ss.end_byte,ss.start_line,ss.start_column,"
+        "ss.end_line,ss.end_column FROM semantic_symbols ss "
+        "JOIN files f ON f.id=ss.file_id WHERE f.branch_id=?1 "
+        "AND ss.parent_id IS NOT NULL "
+        "AND ss.file_id IN (SELECT file_id FROM temp.sem_type_scope)" :
         "SELECT ss.symbol_id,ss.file_id,ss.parent_id,NULL,NULL,NULL,NULL,"
         "ss.start_byte,ss.end_byte,ss.start_line,ss.start_column,"
         "ss.end_line,ss.end_column FROM semantic_symbols ss "
@@ -167,7 +208,13 @@ int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
                        "type_hierarchy","lexical ownership",parents);
     }
     sqlite3_finalize(parents);
-    sqlite3_stmt *facts=cg_prep(cg,
+    sqlite3_stmt *facts=cg_prep(cg,changed_files ?
+        "SELECT tf.owner_id,tf.file_id,tf.kind,tf.value,tf.evidence,"
+        "tf.name,tf.id,tf.start_byte,tf.end_byte,tf.start_line,"
+        "tf.start_column,tf.end_line,tf.end_column FROM semantic_type_facts tf "
+        "JOIN files f ON f.id=tf.file_id WHERE f.branch_id=?1 "
+        "AND tf.owner_id IS NOT NULL "
+        "AND tf.file_id IN (SELECT file_id FROM temp.sem_type_scope)" :
         "SELECT tf.owner_id,tf.file_id,tf.kind,tf.value,tf.evidence,"
         "tf.name,tf.id,tf.start_byte,tf.end_byte,tf.start_line,"
         "tf.start_column,tf.end_line,tf.end_column FROM semantic_type_facts tf "
@@ -181,6 +228,15 @@ int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
         const char *value=(const char *)sqlite3_column_text(facts,3);
         const char *evidence=(const char *)sqlite3_column_text(facts,4);
         if (!relation_kind(kind) || !value) continue;
+        char normalized[256];
+        if (!canonical_name(value,normalized)) continue;
+        char key[262];
+        snprintf(key,sizeof key,"type:%s",normalized);
+        sqlite3_reset(dep); sqlite3_clear_bindings(dep);
+        sqlite3_bind_int64(dep,1,cg->branch_id);
+        sqlite3_bind_int64(dep,2,file);
+        sqlite3_bind_text(dep,3,key,-1,SQLITE_TRANSIENT);
+        if (sqlite3_step(dep)!=SQLITE_DONE) { rc=-1; break; }
         const char *resolution=NULL;
         long target=resolve_target(cg,owner,file,kind,value,&resolution);
         if (!target) continue;
@@ -196,6 +252,7 @@ int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
     }
     sqlite3_finalize(target_file);
     sqlite3_finalize(facts);
+    sqlite3_finalize(dep);
     sqlite3_finalize(edge);
     return rc;
 }
