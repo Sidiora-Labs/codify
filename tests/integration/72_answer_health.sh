@@ -74,4 +74,16 @@ h = json.load(open(sys.argv[1]))['index_health']['source_validation']
 assert h['unchecked'] == 1 and h['files'][0]['state'] == 'unchecked', h
 PY
 
+python3 - <<'PY'
+with open('partial.go', 'w') as f:
+    f.write('package sample\n// ' + 'x' * 5000 + '\n')
+PY
+"$CG" sync partial.go > /dev/null
+"$CG" tool call index_status '{}' > "$TMP/partial.json"
+python3 - "$TMP/partial.json" <<'PY'
+import json, sys
+h = json.load(open(sys.argv[1]))['index_health']
+assert h['coverage']['partial'] >= 1 and h['degraded'], h
+PY
+
 echo "ok: answer health"

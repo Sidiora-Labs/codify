@@ -340,7 +340,8 @@ int main(int argc, char **argv) {
          strcmp(cmd, "routes") == 0 || strcmp(cmd, "files") == 0 ||
          strcmp(cmd, "survey") == 0 || strcmp(cmd, "show") == 0 ||
          strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
-         strcmp(cmd, "test-impact") == 0);
+         strcmp(cmd, "test-impact") == 0 ||
+         strcmp(cmd, "inspect") == 0 || strcmp(cmd, "flow") == 0);
     AnswerCapture answer_capture = {0};
     if (health_answer) answer_health_capture_begin(&answer_capture);
 

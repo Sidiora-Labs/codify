@@ -1348,7 +1348,10 @@ int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
          strcmp(name, "grep_code") == 0 ||
          strcmp(name, "get_symbol") == 0 ||
          strcmp(name, "impact_analysis") == 0 ||
-         strcmp(name, "list_routes") == 0)) {
+         strcmp(name, "list_routes") == 0 ||
+         strcmp(name, "inspect_hierarchy") == 0 ||
+         strcmp(name, "inspect_unreferenced") == 0 ||
+         strcmp(name, "flow") == 0)) {
         char *enriched = answer_health_json(cg, *out);
         free(*out);
         *out = enriched;
