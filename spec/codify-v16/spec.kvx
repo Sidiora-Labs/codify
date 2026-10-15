@@ -69,7 +69,7 @@ heading = "Implementation Plan: Codify 1.6"
 
 [task.1.1]
 title = "Subsecond change detection and explicit-dirty hashing"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/scan.c", "src/walk.c", "src/cg.h", "src/db.c", "tests/integration/54_freshness.sh"]
