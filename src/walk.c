@@ -11,8 +11,8 @@
  * Contract, the same as the walk it replaced:
  *   - the ignore rules are applied exactly as before, to every entry, with
  *     the entry's directory-ness, before anything else is done with it;
- *   - symbolic links are never followed or listed; only regular files of
- *     at most max_bytes are kept;
+ *   - symbolic links are never followed or listed; regular files of any
+ *     size are reported so the caller can record explicit skipped coverage;
  *   - the result is sorted by path (strcmp), so callers see one list no
  *     matter how many threads produced it or in which order.
  * The directory entry's d_type decides directory, link, or file without a
@@ -51,7 +51,16 @@ typedef struct {
     int n, cap;
 } WalkLocal;
 
-static void local_push(WalkLocal *l, const char *rel, long size, long mtime) {
+static long stat_mtime_ns(const struct stat *st) {
+#ifdef __APPLE__
+    return (long)st->st_mtimespec.tv_sec * 1000000000L + st->st_mtimespec.tv_nsec;
+#else
+    return (long)st->st_mtim.tv_sec * 1000000000L + st->st_mtim.tv_nsec;
+#endif
+}
+
+static void local_push(WalkLocal *l, const char *rel, long size, long mtime,
+                       long mtime_ns) {
     if (l->n == l->cap) {
         l->cap = l->cap ? l->cap * 2 : 256;
         l->v = xrealloc(l->v, sizeof *l->v * (size_t)l->cap);
@@ -59,6 +68,7 @@ static void local_push(WalkLocal *l, const char *rel, long size, long mtime) {
     l->v[l->n].rel = xstrdup(rel);
     l->v[l->n].size = size;
     l->v[l->n].mtime = mtime;
+    l->v[l->n].mtime_ns = mtime_ns;
     l->n++;
 }
 
@@ -114,8 +124,9 @@ static void walk_one(WalkLocal *l, const char *rel) {
         if (!have_st &&
             fstatat(dfd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
             continue;
-        if (!S_ISREG(st.st_mode) || st.st_size > sh->max_bytes) continue;
-        local_push(l, crel, (long)st.st_size, (long)st.st_mtime);
+        if (!S_ISREG(st.st_mode)) continue;
+        local_push(l, crel, (long)st.st_size, (long)st.st_mtime,
+                   stat_mtime_ns(&st));
         atomic_fetch_add(&sh->nfiles, 1);
     }
     closedir(d);
