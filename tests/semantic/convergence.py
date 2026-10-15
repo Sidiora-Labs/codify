@@ -41,8 +41,8 @@ def write(root: Path, rel: str, body: str) -> None:
 
 
 def sym_key(path: str, name: str, kind: str, qualified: str, start: int,
-            end: int, line: int, column: int) -> tuple:
-    return (path, name, kind, qualified, start, end, line, column)
+            end: int, line: int, column: int, *rich: object) -> tuple:
+    return (path, name, kind, qualified, start, end, line, column, *rich)
 
 
 def graph_set(db: sqlite3.Connection, branch: str | None = None) -> dict[str, set]:
@@ -55,8 +55,9 @@ def graph_set(db: sqlite3.Connection, branch: str | None = None) -> dict[str, se
     bid = branch_ids[0]
     files = {r["id"]: r["path"] for r in db.execute(
         "SELECT id,path FROM files WHERE branch_id=?", (bid,))}
-    tables = {name: set() for name in ("files", "health", "symbols", "symbol_fts",
-                                      "references", "bindings", "types", "edges", "routes")}
+    tables = {name: set() for name in ("files", "health", "symbols", "ownership", "symbol_fts",
+                                      "references", "bindings", "types", "edges", "routes",
+                                      "route_facts", "route_compositions", "dependencies")}
     for row in db.execute("SELECT id,path,lang,hash FROM files WHERE branch_id=?", (bid,)):
         tables["files"].add((row["path"], row["lang"], row["hash"]))
     for row in db.execute(
@@ -66,15 +67,30 @@ def graph_set(db: sqlite3.Connection, branch: str | None = None) -> dict[str, se
         tables["health"].add(tuple(row))
     symbols = {}
     for row in db.execute(
-        """SELECT s.id,s.file_id,s.name,s.kind,ss.qualified_name,
-                  ss.start_byte,ss.end_byte,ss.start_line,ss.start_column
-             FROM symbols s JOIN semantic_symbols ss ON ss.symbol_id=s.id
+        """SELECT s.id,s.file_id,s.name,s.kind,s.line,s.end_line,s.sig,s.decl,
+                  ss.qualified_name,ss.start_byte,ss.end_byte,ss.start_line,
+                  ss.start_column,ss.end_line AS rich_end_line,ss.end_column,
+                  ss.documentation,ss.visibility,ss.modifiers,ss.decorators,
+                  ss.generic_params,ss.result_type,ss.scope_key,ss.exported,
+                  ss.parser_id,ss.parent_id
+             FROM symbols s LEFT JOIN semantic_symbols ss ON ss.symbol_id=s.id
              JOIN files f ON f.id=s.file_id WHERE f.branch_id=?""", (bid,)):
         key = sym_key(files[row["file_id"]], row["name"], row["kind"],
-                      row["qualified_name"], row["start_byte"], row["end_byte"],
-                      row["start_line"], row["start_column"])
+                      row["qualified_name"] or row["name"], row["start_byte"],
+                      row["end_byte"], row["start_line"] or row["line"],
+                      row["start_column"], row["end_line"], row["sig"],
+                      row["decl"], row["rich_end_line"], row["end_column"],
+                      row["documentation"], row["visibility"], row["modifiers"],
+                      row["decorators"], row["generic_params"], row["result_type"],
+                      row["scope_key"], row["exported"], row["parser_id"])
         symbols[row["id"]] = key
         tables["symbols"].add(key)
+    for row in db.execute(
+        """SELECT child.symbol_id,child.parent_id FROM semantic_symbols child
+             JOIN symbols s ON s.id=child.symbol_id JOIN files f ON f.id=s.file_id
+            WHERE f.branch_id=? AND child.parent_id IS NOT NULL""", (bid,)):
+        tables["ownership"].add((symbols.get(row["symbol_id"]),
+                                  symbols.get(row["parent_id"])))
     for row in db.execute(
         """SELECT s.id,t.name,t.kind,t.path,t.sig,t.words
              FROM symbols s JOIN files f ON f.id=s.file_id
@@ -119,11 +135,39 @@ def graph_set(db: sqlite3.Connection, branch: str | None = None) -> dict[str, se
             row["registration_path"], row["start_byte"], row["end_byte"],
             row["registration_start_byte"], row["registration_end_byte"],
             row["synthesized"]))
+    routes = {}
     for row in db.execute(
         """SELECT r.file_id,r.framework,r.method,r.pattern,r.handler,r.line
+                  ,r.id
              FROM routes r JOIN files f ON f.id=r.file_id WHERE f.branch_id=?""", (bid,)):
-        tables["routes"].add((files[row["file_id"]], row["framework"], row["method"],
-                               row["pattern"], row["handler"], row["line"]))
+        key = (files[row["file_id"]], row["framework"], row["method"],
+               row["pattern"], row["handler"], row["line"])
+        routes[row["id"]] = key
+        tables["routes"].add(key)
+    for row in db.execute(
+        """SELECT route_id,route_symbol_id,registration_file_id,framework,
+                  method,pattern,handler_symbol_id,handler_file_id,status,
+                  evidence,registration_line,registration_column
+             FROM semantic_route_facts WHERE branch_id=?""", (bid,)):
+        tables["route_facts"].add((routes.get(row["route_id"]),
+            symbols.get(row["route_symbol_id"]), files[row["registration_file_id"]],
+            row["framework"], row["method"], row["pattern"],
+            symbols.get(row["handler_symbol_id"]), files.get(row["handler_file_id"]),
+            row["status"], row["evidence"], row["registration_line"],
+            row["registration_column"]))
+    for row in db.execute(
+        """SELECT mount_route_id,child_route_id,method,pattern,route_symbol_id,
+                  handler_symbol_id,registration_file_id,registration_line
+             FROM semantic_route_compositions WHERE branch_id=?""", (bid,)):
+        tables["route_compositions"].add((routes.get(row["mount_route_id"]),
+            routes.get(row["child_route_id"]), row["method"], row["pattern"],
+            symbols.get(row["route_symbol_id"]), symbols.get(row["handler_symbol_id"]),
+            files[row["registration_file_id"]], row["registration_line"]))
+    for row in db.execute(
+        """SELECT file_id,dependency_key,dependency_hash,kind
+             FROM semantic_dependencies WHERE branch_id=?""", (bid,)):
+        tables["dependencies"].add((files[row["file_id"]], row["dependency_key"],
+                                     row["dependency_hash"], row["kind"]))
     return tables
 
 

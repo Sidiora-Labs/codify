@@ -211,8 +211,8 @@ def score_framework(cg: Path, work: Path, case) -> dict:
               e["target_name"].lower() == case.handler.lower() and
               e["source_kind"] == "route" and
               e["kind"] == "route_handler" and
-              e["strategy"] == "route-registration" and
-              e["provenance"] == "resolved" and
+              e["strategy"] == case.strategy and
+              e["provenance"] == case.provenance and
               e["channel"] == case.path and
               isinstance(e["registration_line"], int) and e["registration_line"] > 0 and
               e["evidence"]]

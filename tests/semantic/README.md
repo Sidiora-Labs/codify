@@ -19,9 +19,12 @@ must identify their limited coverage and emit no structural symbol.
 set after edits, competing definitions, rename, deletion, configuration and
 registration changes, sequential commits, an interrupted semantic write and
 a linked worktree. Each checkpoint rebuilds a separate copy of the same
-source tree. Set comparison includes files, symbols, references, bindings,
-type facts, typed edges and routes with locations and provenance; it excludes
-database IDs and insertion order. The interruption trigger only fails a write;
+source tree. Set comparison includes files, extraction health, symbols,
+ownership, name postings, references, bindings, type facts, typed edges,
+route facts, compositions and dependency keys with locations and provenance;
+it excludes database IDs and insertion order. It also checks name search
+after a semantic version refresh over unchanged source bytes. The interruption
+trigger only fails a write;
 it does not insert fake symbols or relationships.
 
 Run `CG=/absolute/path/to/cg bash tests/integration/76_semantic_conformance.sh`.
