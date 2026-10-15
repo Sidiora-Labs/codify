@@ -4,3 +4,4 @@ struct Card {
     Text('hello')
   }
 }
+// struct Phantom {}

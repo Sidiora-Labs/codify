@@ -10,3 +10,4 @@ begin
   WriteLn('ready');
 end;
 end.
+// procedure Ghost;

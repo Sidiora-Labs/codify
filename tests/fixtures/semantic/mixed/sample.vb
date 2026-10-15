@@ -4,3 +4,4 @@ Public Class Worker
         Return value + 1
     End Function
 End Class
+' Public Class Ghost

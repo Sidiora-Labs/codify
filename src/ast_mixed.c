@@ -31,7 +31,15 @@ static SemSpan span_node(AstContext *c, TSNode n) {
 }
 
 static bool eq(const char *a, const char *b) { return strcmp(a,b)==0; }
+static void decl(AstContext *c,const char *name,const char *kind,size_t lo,size_t hi,int owner);
+static void identify(AstContext *c,const char *prefix) {
+    if(c->result->sem.parser_id)return;
+    size_t n=strlen(prefix)+strlen(c->language)+2;
+    c->result->sem.parser_id=xmalloc(n);
+    snprintf(c->result->sem.parser_id,n,"%s:%s",prefix,c->language);
+}
 static char *node_name(AstContext *c, TSNode n) {
+    if(eq(ts_node_type(n),"program_name")) return ast_text(c,n);
     TSNode f=ast_field(n,"name");
     if (ts_node_is_null(f)) f=ast_field(n,"header");
     if (!ts_node_is_null(f) && eq(ts_node_type(f),"declProc")) f=ast_field(f,"name");
@@ -70,6 +78,18 @@ static int add_symbol(AstContext *c, TSNode n, const char *kind, int parent) {
     if (!ts_node_is_null(f)) s->decorators=ast_text(c,f);
     f=ast_field(n,"type_parameters");
     if (!ts_node_is_null(f)) s->generic_params=ast_text(c,f);
+    static const struct {const char *field,*kind;} facts[]={
+        {"inherits","inherits"},{"implements","implements"},
+        {"parent","inherits"}
+    };
+    for(size_t i=0;i<sizeof facts/sizeof *facts;i++) {
+        f=ast_field(n,facts[i].field);
+        if(ts_node_is_null(f))continue;
+        char *target=ast_text(c,f);if(!target)continue;
+        SemTypeFact *tf=sem_type_fact_add(&c->result->sem,name,facts[i].kind,span_node(c,f));
+        if(tf){tf->owner=id;tf->value=target;tf->evidence=xstrdup(ts_node_type(n));}
+        else free(target);
+    }
     free(name); return id;
 }
 
@@ -100,7 +120,9 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
     if (eq(lang,"pascal")) {
         if (eq(t,"unit") || eq(t,"program")) kind="module";
         else if (eq(t,"declType") || eq(t,"declClass")) kind="type";
-        else if (eq(t,"declProc") || eq(t,"defProc")) kind="function";
+        else if (eq(t,"declProc") || eq(t,"defProc")) {
+            if (!(eq(t,"declProc") && eq(ts_node_type(ts_node_parent(n)),"defProc"))) kind="function";
+        }
         else if (eq(t,"exprCall")) add_ref(c,n,ast_field(n,"entity"),"call");
         else if (eq(t,"declUses")) {
             for (uint32_t i=0;i<ts_node_named_child_count(n);i++) {
@@ -113,9 +135,13 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
             }
         }
     } else if (eq(lang,"cobol")) {
-        if (eq(t,"program_definition")) kind="program";
-        else if (eq(t,"paragraph_header")) kind="paragraph";
-        else if (eq(t,"section_header")) kind="section";
+        if (eq(t,"program_name")) kind="program";
+        else if (eq(t,"paragraph_header") || eq(t,"section_header")) {
+            char *v=ast_text(c,n);
+            if(v){size_t len=strlen(v);while(len&&(isspace((unsigned char)v[len-1])||v[len-1]=='.'))v[--len]=0;
+                if(len)decl(c,v,eq(t,"paragraph_header")?"paragraph":"section",ts_node_start_byte(n),ts_node_start_byte(n)+len,owner_for(c,n));
+                free(v);}
+        }
         else if (eq(t,"copy_statement")) {
             TSNode f=ast_field(n,"book"); char *v=ast_text(c,f);
             if (v) {SemBinding *b=sem_binding_add(&c->result->sem,v,v,span_node(c,f));
@@ -147,13 +173,14 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
         if (eq(t,"component")) kind="component";
         else if (eq(t,"function_declaration") || eq(t,"method_definition") || eq(t,"cf_function_tag")) kind="function";
         else if (eq(t,"cf_query_tag") || eq(t,"query_expression")) kind="query";
+        else if (eq(lang,"cfquery") && eq(t,"query_identifier")) add_ref(c,n,n,"sql-identifier");
         else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call");
     }
     if (kind) add_symbol(c,n,kind,owner_for(c,n));
     return true;
 }
 
-static void grammar_extract(AstContext *c) { ast_walk(c,c->root,grammar_visit,NULL); }
+static void grammar_extract(AstContext *c) { identify(c,"tree-sitter"); ast_walk(c,c->root,grammar_visit,NULL); }
 
 /* Search helpers operate on the original byte buffer, never on a normalized
  * copy; every recorded site can therefore be mapped back to the source. */
@@ -192,10 +219,36 @@ static void ref(AstContext *c,const char *text,const char *kind,size_t lo,size_t
     if(r) {r->owner=owner;r->strategy=xstrdup("declarative");r->evidence=xstrdup(why);}
 }
 
+static void embedded_fallback(AstContext *c,size_t a,size_t b) {
+    /* Small scanner for a script block before its language family is linked.
+     * Only an unquoted function declaration is structurally evident here. */
+    char quote=0;bool line_comment=false,block_comment=false;
+    for(size_t p=a;p<b;p++) {
+        char ch=c->source[p],nx=p+1<b?c->source[p+1]:0;
+        if(line_comment) {if(ch=='\n')line_comment=false;continue;}
+        if(block_comment) {if(ch=='*'&&nx=='/')block_comment=false,p++;continue;}
+        if(quote) {if(ch==quote && (p==a||c->source[p-1]!='\\'))quote=0;continue;}
+        if(ch=='/'&&nx=='/') {line_comment=true;p++;continue;}
+        if(ch=='/'&&nx=='*') {block_comment=true;p++;continue;}
+        if(ch=='\''||ch=='"'||ch=='`') {quote=ch;continue;}
+        if(p+8<b && !memcmp(c->source+p,"function",8) &&
+           (p==a||!isalnum((unsigned char)c->source[p-1])) &&
+           !isalnum((unsigned char)c->source[p+8])) {
+            size_t q=p+8;while(q<b&&isspace((unsigned char)c->source[q]))q++;
+            size_t start=q;while(q<b&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
+            if(q>start) {char *name=strndup(c->source+start,q-start);
+                decl(c,name,"function",start,q,-1);free(name);}
+            p=q;
+        }
+    }
+}
+
 static void parse_embedded(AstContext *c,const char *language,size_t a,size_t b) {
     if(b<=a || b-a>8*1024*1024)return;
     ParseResult sub={0};
-    if(!ast_try_parse(language,c->path,c->source+a,b-a,&sub)) {parse_result_free(&sub);return;}
+    if(!ast_try_parse(language,c->path,c->source+a,b-a,&sub)) {
+        parse_result_free(&sub);embedded_fallback(c,a,b);return;
+    }
     SemResult *dst=&c->result->sem,*src=&sub.sem;
     int symbase=dst->nsymbols, refbase=dst->nreferences;
     for(int i=0;i<src->nsymbols;i++) {
@@ -237,9 +290,15 @@ static void parse_embedded(AstContext *c,const char *language,size_t a,size_t b)
 }
 
 static void markup_extract(AstContext *c) {
+    identify(c,"declarative");
     const char *lang=c->language;int owner=-1;
     bool mapping=eq(lang,"xml") && strstr(c->source,"<mapper")!=NULL;
-    for(size_t p=0;p<c->length;) {
+    size_t begin=0;
+    if(eq(lang,"astro") && c->length>=6 && !strncmp(c->source,"---",3)) {
+        size_t q=3;while(q+4<c->length && strncmp(c->source+q,"\n---",4))q++;
+        if(q+4<c->length) {parse_embedded(c,"typescript",3,q);begin=q+4;}
+    }
+    for(size_t p=begin;p<c->length;) {
         if(at(c,p,"<!--")) {size_t q=p+4;while(q+3<=c->length&&!at(c,q,"-->"))q++;p=q+3;continue;}
         if(c->source[p]!='<') {p++;continue;}
         size_t e=until(c,p+1,'>');if(e>=c->length)break;
@@ -253,6 +312,8 @@ static void markup_extract(AstContext *c) {
                 owner=c->result->sem.nsymbols-1;
             } else if(mapping&&(!strcasecmp(tag,"select")||!strcasecmp(tag,"insert")||!strcasecmp(tag,"update")||!strcasecmp(tag,"delete")||!strcasecmp(tag,"sql"))) {
                 name=attr(c,z,e,"id",&site);if(name)decl(c,name,"statement",site,site+strlen(name),owner);
+                free(name);name=attr(c,z,e,"resultMap",&site);
+                if(name)ref(c,name,"reference",site,site+strlen(name),owner,"result mapping");
             } else if(mapping&&(!strcasecmp(tag,"include")||!strcasecmp(tag,"resultMap"))) {
                 name=attr(c,z,e,!strcasecmp(tag,"include")?"refid":"extends",&site);
                 if(name)ref(c,name,"reference",site,site+strlen(name),owner,"mapping attribute");
@@ -265,6 +326,12 @@ static void markup_extract(AstContext *c) {
                 name=attr(c,z,e,"name",&site);if(name)decl(c,name,"query",site,site+strlen(name),owner);
                 size_t q=e+1;while(q<c->length&&!at(c,q,"</cfquery"))q++;
                 parse_embedded(c,"cfquery",e+1,q);
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfinvoke")) {
+                name=attr(c,z,e,"method",&site);
+                if(name)ref(c,name,"call",site,site+strlen(name),owner,"CFML invocation");
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfinclude")) {
+                name=attr(c,z,e,"template",&site);
+                if(name)ref(c,name,"template",site,site+strlen(name),owner,"CFML include");
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfscript")) {
                 size_t q=e+1;while(q<c->length&&!at(c,q,"</cfscript"))q++;
                 parse_embedded(c,"cfscript",e+1,q);
@@ -281,10 +348,6 @@ static void markup_extract(AstContext *c) {
         }
         free(tag);p=e+1;
     }
-    if(eq(lang,"astro") && c->length>=6 && !strncmp(c->source,"---",3)) {
-        size_t q=3;while(q+4<c->length && strncmp(c->source+q,"\n---",4))q++;
-        if(q+4<c->length)parse_embedded(c,"typescript",3,q);
-    }
 }
 
 static bool boundary(const AstContext *c,size_t p,size_t n) {
@@ -292,13 +355,34 @@ static bool boundary(const AstContext *c,size_t p,size_t n) {
            (p+n>=c->length||!isalnum((unsigned char)c->source[p+n]));
 }
 static void text_extract(AstContext *c) {
+    identify(c,"declarative");
     const char *lang=c->language;
     for(size_t p=0;p<c->length;) {
+        if(eq(lang,"razor") && at(c,p,"@*")) {
+            p+=2;while(p+2<c->length&&!at(c,p,"*@"))p++;
+            p+=2;continue;
+        }
+        if(eq(lang,"razor") && at(c,p,"<!--")) {
+            p+=4;while(p+3<c->length&&!at(c,p,"-->"))p++;
+            p+=3;continue;
+        }
+        if(eq(lang,"delphi_form") && c->source[p]=='{') {
+            p++;while(p<c->length&&c->source[p]!='}')p++;
+            p++;continue;
+        }
         if(eq(lang,"delphi_form")) {
             if(at(c,p,"object ")||at(c,p,"inherited ")||at(c,p,"inline ")) {
                 size_t a=p+(at(c,p,"object ")?7:at(c,p,"inline ")?7:10),q=a;
                 while(q<c->length && (isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
                 if(q>a) {char *n=strndup(c->source+a,q-a);decl(c,n,"component",a,q,-1);free(n);}
+                while(q<c->length && c->source[q]!='\n' && isspace((unsigned char)c->source[q]))q++;
+                if(q<c->length && c->source[q]==':') {
+                    q++;while(q<c->length&&isspace((unsigned char)c->source[q]))q++;
+                    size_t start=q;
+                    while(q<c->length&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
+                    if(q>start){char *n=strndup(c->source+start,q-start);
+                        ref(c,n,"type",start,q,c->result->sem.nsymbols-1,"form component type");free(n);}
+                }
             }
         } else if(eq(lang,"razor")) {
             if(at(c,p,"@model ")||at(c,p,"@inherits ")||at(c,p,"@inject ")) {
@@ -310,9 +394,12 @@ static void text_extract(AstContext *c) {
             if(at(c,p,"{%")) {
                 size_t q=p+2;while(q+2<c->length&&!at(c,q,"%}"))q++;
                 size_t a=p+2;while(a<q&&isspace((unsigned char)c->source[a]))a++;
-                if(at(c,a,"comment") && boundary(c,a,7)) {
-                    p=q+2;while(p+16<c->length&&!at(c,p,"{% endcomment"))p++;
-                    if(p+16<c->length) {while(p+2<c->length&&!at(c,p,"%}"))p++;p+=2;}
+                if((at(c,a,"comment") && boundary(c,a,7)) ||
+                   (at(c,a,"raw") && boundary(c,a,3))) {
+                    bool raw=at(c,a,"raw");
+                    const char *end=raw?"{% endraw":"{% endcomment";
+                    p=q+2;while(p+strlen(end)<c->length&&!at(c,p,end))p++;
+                    if(p+strlen(end)<c->length) {while(p+2<c->length&&!at(c,p,"%}"))p++;p+=2;}
                     continue;
                 }
                 if((at(c,a,"render")&&boundary(c,a,6))||(at(c,a,"include")&&boundary(c,a,7))) {
@@ -328,6 +415,12 @@ static void text_extract(AstContext *c) {
     }
 }
 
+static void file_only(AstContext *c) {
+    size_t n=strlen(c->language)+11;
+    c->result->sem.parser_id=xmalloc(n);
+    snprintf(c->result->sem.parser_id,n,"file-only:%s",c->language);
+}
+
 void ast_mixed_register(void) {
     static const AstAdapter a[]={
         {"pascal",tree_sitter_pascal,grammar_extract},
@@ -341,6 +434,8 @@ void ast_mixed_register(void) {
         {"astro",NULL,markup_extract},{"xml",NULL,markup_extract},
         {"liquid",NULL,text_extract},{"razor",NULL,text_extract},
         {"delphi_form",NULL,text_extract},
+        {"json",NULL,file_only},{"yaml",NULL,file_only},
+        {"twig",NULL,file_only},{"properties",NULL,file_only},
     };
     for(size_t i=0;i<sizeof a/sizeof *a;i++)ast_register(&a[i]);
 }

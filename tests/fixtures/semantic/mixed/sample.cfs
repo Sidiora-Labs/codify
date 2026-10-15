@@ -3,3 +3,4 @@ component {
         return value;
     }
 }
+// function ghost() {}
