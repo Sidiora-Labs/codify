@@ -2712,7 +2712,10 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
                  * the budget, so more symbols survive the same cap */
                 /* a documented hit stays doc plus signature (doc-first:
                  * `cg show --full` is the deep view); the rest grow */
-                int span = open;
+                /* A documented hit carries its signature and opening body
+                 * lines; the remaining lines are counted below. This keeps
+                 * documentation useful under a tight shared budget. */
+                int span = docd ? 2 : open;
                 char *snip = !detail ? NULL
                     : file_snippet(cg, r->branch_id, r->path, r->line,
                           r->end_line > r->line + span ? r->line + span
