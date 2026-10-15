@@ -44,8 +44,8 @@ def assert_fact(file, kind, value):
                   (f'src/{file}',kind,f'%{value}%')), (file,kind,value)
 
 for file, symbols in {
-  'fixture.c': [('increment','function'),('invoke','function'),('dispatch','function'),('Meter','struct'),('WRAP','macro')],
-  'fixture.cpp': [('demo','namespace'),('Worker','class'),('run','method'),('execute','function')],
+  'fixture.c': [('increment','function'),('invoke','function'),('dispatch','function'),('Meter','struct'),('WRAP','macro'),('Forward','struct'),('Future','enum'),('Level','typedef'),('Count','typedef'),('Anonymous','typedef')],
+  'fixture.cpp': [('demo','namespace'),('Worker','class'),('run','method'),('execute','function'),('Abstract','struct'),('area','method')],
   'fixture.m': [('Counter','class'),('inc','method'),('invoke','function')],
   'fixture.go': [('Worker','struct'),('Runner','interface'),('Run','method'),('helper','function')],
   'fixture.rs': [('Runner','trait'),('Worker','struct'),('helper','function'),('invoke','function')],
@@ -57,11 +57,28 @@ for language in ('c','cpp','objc','go','rust'):
 assert_binding('fixture.c','stdio.h','include')
 assert_binding('fixture.cpp','vector','include')
 assert_binding('fixture.m','Foundation/Foundation.h','include')
-assert_binding('fixture.go','fmt','import')
-assert_binding('fixture.rs','std::fmt','use')
+assert_binding('fixture.go','fmt','module_import')
+assert_binding('fixture.go','encoding/json','module_import')
+assert_binding('fixture.rs','std','use')
+for local in ('c','d'):
+    assert exists('''SELECT 1 FROM semantic_bindings b JOIN files f ON f.id=b.file_id
+                     WHERE f.path='src/fixture.rs' AND b.module='a::b'
+                     AND b.local_name=? AND b.kind='use' ''', (local,)), local
+assert exists('''SELECT 1 FROM semantic_bindings b JOIN files f ON f.id=b.file_id
+                 WHERE f.path='src/fixture.rs' AND b.module='x::y'
+                 AND b.local_name='z' AND b.kind='use' ''')
 assert_ref('fixture.cpp','helper','run')
 assert_ref('fixture.go','helper','Run')
 assert_ref('fixture.rs','helper','run')
+assert exists('''SELECT 1 FROM semantic_references r JOIN files f ON f.id=r.file_id
+                 WHERE f.path='src/fixture.rs' AND r.original_text='load'
+                 AND r.qualifier='Config' ''')
+for call in ('fn','done'):
+    assert exists('''SELECT 1 FROM semantic_references r JOIN files f ON f.id=r.file_id
+                     WHERE f.path='src/fixture.c' AND r.original_text=?
+                     AND r.qualifier='(param)' ''', (call,)), call
+assert exists('''SELECT 1 FROM symbols s JOIN files f ON f.id=s.file_id
+                 WHERE f.path='src/fixture.cpp' AND s.name='area' AND s.decl=1 ''')
 assert exists('''SELECT 1 FROM symbols m JOIN semantic_symbols sm ON sm.symbol_id=m.id
                  JOIN symbols owner ON owner.id=sm.parent_id
                  JOIN files f ON f.id=m.file_id
