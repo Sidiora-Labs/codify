@@ -16,6 +16,8 @@ PY
 q() { sqlite3 .codegraph/graph.db "$1"; }
 symbol() { q "SELECT name FROM symbols WHERE file_id=(SELECT id FROM files WHERE path='source.c') AND kind='function'"; }
 [ "$(symbol)" = alpha ] || fail "initial symbol missing"
+plan="$(q "EXPLAIN QUERY PLAN SELECT count(*) FROM files WHERE branch_id=1 AND mtime_ns IS NULL")"
+has "$plan" "idx_file_legacy_time"
 
 # Same byte count and same whole second, but a different fractional timestamp.
 printf 'int bravo(void) { return 1; }\n' > source.c
@@ -69,7 +71,7 @@ out="$("$CG" sync --json)"
 case "$out" in *'"indexed":0'*) : ;; *) fail "no-op walk rewrote unchanged content: $out" ;; esac
 
 # Simulate opening an older database whose files table lacks the new column.
-sqlite3 .codegraph/graph.db "ALTER TABLE files DROP COLUMN mtime_ns"
+sqlite3 .codegraph/graph.db "DROP INDEX idx_file_legacy_time; ALTER TABLE files DROP COLUMN mtime_ns"
 printf 'int omega(void) { return 1; }\n' > source.c
 python3 - <<'PY'
 import os

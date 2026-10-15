@@ -449,6 +449,16 @@ int cg_open(Cg *cg, bool create) {
         "CREATE INDEX IF NOT EXISTS idx_file_base ON files(base, branch_id);"
         "CREATE INDEX IF NOT EXISTS idx_import_target ON imports(target_file_id)",
         NULL, NULL, NULL);
+    /* The freshness preflight only needs legacy rows. Keep its lookup
+     * proportional to those rows, rather than all files on the branch. */
+    if (sqlite3_exec(cg->db,
+            "CREATE INDEX IF NOT EXISTS idx_file_legacy_time "
+            "ON files(branch_id) WHERE mtime_ns IS NULL",
+            NULL, NULL, NULL) != SQLITE_OK) {
+        fprintf(stderr, "cg: cannot create legacy timestamp index: %s\n",
+                sqlite3_errmsg(cg->db));
+        return -1;
+    }
     events_install(cg);
     /* a branch never seen before is registered here, so the first cg call
      * from a fresh worktree needs one small write; a busy database leaves
