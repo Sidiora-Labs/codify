@@ -6,7 +6,7 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$repo"
 
 make clean >/dev/null
-strict_flags='-O2 -std=gnu11 -Wall -Wextra -pthread -Werror'
+strict_flags='-O2 -std=gnu11 -Wall -Wextra -pthread -Werror -Ivendor/tree-sitter/lib/include -Ivendor/tree-sitter/lib/src'
 make -j2 CFLAGS="$strict_flags" cg
 make -j2 CFLAGS="$strict_flags" unit
 

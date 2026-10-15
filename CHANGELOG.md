@@ -4,6 +4,32 @@ All notable changes to this project are recorded here, generated from git histor
 A release is a tag or a version bump; a group is the commit-subject prefix; a task
 reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
+## [v1.6.0] - 2026-10-15
+
+### Highlights
+
+Codify 1.6 adds bounded native syntax extraction across the supported language
+families, durable source spans and parser status, and a branch-scoped semantic
+graph. Named imports, lexical ownership, receiver types and call arity constrain
+resolution; ambiguous or dynamic targets remain unresolved with evidence.
+Route, callback, event, queue, HTTP and type relationships are recorded where
+source registrations or declarations support them. Index health and answer
+freshness make partial extraction, reconciliation debt and unchecked files
+visible. Incremental updates retry affected relationships after edits, deletion
+and branch changes.
+
+- `cg info --json`, `cg status --json` and the `index_status` MCP tool report
+  parser coverage and reconciliation state. Code answers include bounded
+  source-freshness evidence.
+- The labelled conformance gate covers 43 adapter, 37 typed relation and 16
+  framework micro-fixtures; 13 incremental/rebuild checkpoints found no graph
+  set differences. These fixture results are not repository-wide accuracy
+  estimates.
+- The resource gate checks cold, no-op, edit, delete, rename and replay work,
+  peak memory, database growth, diagnostics and source-to-query time with fixed
+  workers. [The indexing guide](docs/indexing.md) records the measured run,
+  extraction boundaries and reproducible commands.
+
 ## [v1.5.0] - 2026-10-13
 
 ### Highlights
