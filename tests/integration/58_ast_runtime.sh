@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+scripts/vendor-parsers.sh
 make -s build/libcg.a
 test_bin="$(mktemp)"
 trap 'rm -f "$test_bin"' EXIT

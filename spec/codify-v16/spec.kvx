@@ -91,10 +91,10 @@ reqs = ["1.1", "1.2", "1.3", "1.4", "1.5"]
 
 [task.1.3]
 title = "Extraction diagnostics and semantic version freshness"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
-touches = ["src/index_health.c", "src/index_health.h", "src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "tests/integration/56_index_health.sh"]
+touches = ["src/index_health.c", "src/index_health.h", "src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "src/walk.c", "tests/integration/56_index_health.sh"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/56_index_health.sh"
 do_1 = "Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
@@ -113,7 +113,7 @@ reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
 
 [task.2.2]
 title = "Native syntax-tree runtime and adapter registry"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/ast.c", "src/ast.h", "src/lang.c", "src/cg.h", "Makefile", "vendor/tree-sitter/**", "scripts/vendor-parsers.*", "tests/integration/58_ast_runtime.sh"]

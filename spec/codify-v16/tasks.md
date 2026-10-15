@@ -12,7 +12,7 @@
     - Handle overflow/root loss/registration errors, persist reconciliation debt and expose coverage health. Implement safe portable polling fallback; test injected loss, retries and directory moves.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
-  - [ ] 1.3 Extraction diagnostics and semantic version freshness
+  - [x] 1.3 Extraction diagnostics and semantic version freshness
     - Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
@@ -20,7 +20,7 @@
     - Define the shared rich extraction contract and branch-safe typed graph schema; wire persistence, migration, deletion, identical-content reuse and cross-worktree copy. Publish API to sibling workers early; extend existing symbols/refs rather than duplicating ownership inconsistently.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
-  - [ ] 2.2 Native syntax-tree runtime and adapter registry
+  - [x] 2.2 Native syntax-tree runtime and adapter registry
     - Vendor pinned licensed parser runtime into the single binary, define grammar/adapter registry and common tree walker. Coordinate the semantic contract with 2.1. Support worker-local parsers, bounded recovery, fallback and dynamic line lengths. Publish the adapter API immediately for language workers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
