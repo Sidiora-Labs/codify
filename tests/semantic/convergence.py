@@ -197,7 +197,7 @@ def main() -> int:
         execute(cg, root, "sync")
         reports["edit"] = compare(cg, root, work, "edit", "main")
 
-        git(root, "mv", "src/zeta.ts", "src/renamed.ts")
+        (root / "src/zeta.ts").rename(root / "src/renamed.ts")
         execute(cg, root, "sync")
         reports["rename"] = compare(cg, root, work, "rename", "main")
 
