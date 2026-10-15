@@ -35,6 +35,7 @@ static char *copy_text(AstContext *ctx, TSNode n) {
 static char *slice_until(AstContext *ctx, TSNode n, TSNode end) {
     uint32_t a=ts_node_start_byte(n), b=ts_node_start_byte(end);
     if (ts_node_is_null(end) || b<a) b=ts_node_end_byte(n);
+    if (b-a>4096) return NULL;
     return ast_slice(ctx, a, b);
 }
 
@@ -354,7 +355,9 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
                 !strcmp(t,"protocol_declaration")?"interface":"class",owner,false,body);
             if (next_owner>=0) type_fact(ctx,n,"inherits",next_owner,"base",field(n,"superclass"));
         } else if (objc && (!strcmp(t,"method_definition") || !strcmp(t,"method_declaration"))) {
-            name=objc_name(n); next_owner=symbol(ctx,n,name,"method",owner,
+            name=objc_name(n);
+            if (ts_node_is_null(body)) body=child_type(n,"compound_statement");
+            next_owner=symbol(ctx,n,name,"method",owner,
                 !strcmp(t,"method_declaration"),body);
         } else if (objc && !strcmp(t,"message_expression")) {
             ref(ctx,n,field(n,"method"),"call",owner,field(n,"receiver"));
