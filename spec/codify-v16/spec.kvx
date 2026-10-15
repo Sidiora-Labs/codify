@@ -62,7 +62,7 @@ include = "design.body.md"
 mode = "auto"
 status = "pending"
 audiences = ["user", "developer"]
-targets = ["README.md", "docs/**"]
+targets = ["README.md", "CONTRIBUTING.md", "editors/vscode/README.md", "tests/semantic/README.md", "tests/scale/results/README.md", "docs/**"]
 
 [tasks]
 heading = "Implementation Plan: Codify 1.6"
