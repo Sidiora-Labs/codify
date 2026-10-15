@@ -1,0 +1,24 @@
+# Pinned grammar provenance for the native web-language adapters.
+[javascript]
+source = "https://github.com/tree-sitter/tree-sitter-javascript"
+revision = "3a837b6f3658ca3618f2022f8707e29739c91364"
+license = "MIT"
+license_file = "javascript/LICENSE"
+grammar = "javascript/src/parser.c"
+scanner = "javascript/src/scanner.c"
+
+[typescript]
+source = "https://github.com/tree-sitter/tree-sitter-typescript"
+revision = "f975a621f4e7f532fe322e13c4f79495e0a7b2e7"
+license = "MIT"
+license_file = "typescript/LICENSE"
+grammar = "typescript/typescript/src/parser.c"
+scanner = "typescript/typescript/src/scanner.c"
+
+[tsx]
+source = "https://github.com/tree-sitter/tree-sitter-typescript"
+revision = "f975a621f4e7f532fe322e13c4f79495e0a7b2e7"
+license = "MIT"
+license_file = "typescript/LICENSE"
+grammar = "typescript/tsx/src/parser.c"
+scanner = "typescript/tsx/src/scanner.c"
