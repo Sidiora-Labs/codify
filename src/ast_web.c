@@ -52,6 +52,14 @@ static bool contains_word(const char *s, const char *word) {
             !(isalnum((unsigned char)p[n]) || p[n]=='_')) return true;
     return false;
 }
+static char *decorator_target(AstContext *c, TSNode decorator) {
+    TSNode expr=ts_node_named_child(decorator,0);
+    if (is(expr,"call_expression")) expr=ast_field(expr,"function");
+    if (!is(expr,"identifier") && !is(expr,"member_expression")) return NULL;
+    char *target=text(c,expr);
+    if (!target || !*target || strlen(target)>255) { free(target); return NULL; }
+    return target;
+}
 static int symbol(AstContext *c, TSNode n, TSNode name, const char *kind,
                   int parent, bool exported, TSNode body) {
     char *sname = text(c,name);
@@ -91,6 +99,13 @@ static int symbol(AstContext *c, TSNode n, TSNode name, const char *kind,
                          memcpy(s->decorators+a,d,b+1); }
                 free(d);
             }
+            char *target=decorator_target(c,child);
+            if (target) {
+                SemTypeFact *f=sem_type_fact_add(r,s->name,"decorates",span(child));
+                if (f) { f->owner=index; f->value=strdup(target);
+                    f->evidence=strdup("decorator"); }
+                free(target);
+            }
         }
     }
     if (s->result_type) {
@@ -102,11 +117,6 @@ static int symbol(AstContext *c, TSNode n, TSNode name, const char *kind,
         SemTypeFact *f=sem_type_fact_add(r,s->name,"exports",span(name));
         if (f) { f->owner=index; f->value=strdup(s->name);
             f->evidence=strdup("export_statement"); }
-    }
-    if (s->decorators) {
-        SemTypeFact *f=sem_type_fact_add(r,s->name,"decorates",span(n));
-        if (f) { f->owner=index; f->value=strdup(s->decorators);
-            f->evidence=strdup("decorator"); }
     }
     free(sname);
     return index;
