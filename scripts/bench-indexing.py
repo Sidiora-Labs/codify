@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import platform
 import resource
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -26,7 +27,8 @@ def command(args, cwd, env=None, timeout_s=None):
     start = time.perf_counter_ns()
     before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     p = subprocess.Popen(args, cwd=cwd, env=env, text=True,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         start_new_session=True)
     peak = 0
     deadline = time.monotonic() + timeout_s if timeout_s else None
     while True:
@@ -35,7 +37,7 @@ def command(args, cwd, env=None, timeout_s=None):
             break
         except subprocess.TimeoutExpired:
             if deadline and time.monotonic() > deadline:
-                p.kill()
+                os.killpg(p.pid, signal.SIGKILL)
                 p.communicate()
                 raise RuntimeError(f"{args!r} exceeded {timeout_s}s")
             try:
@@ -140,6 +142,7 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--max-rss-mb", type=int, default=1024)
     ap.add_argument("--max-db-ratio", type=float, default=500)
+    ap.add_argument("--stage-timeout-sec", type=int, default=120)
     ap.add_argument("--shape-timeout-sec", type=int, default=30)
     ap.add_argument("--baseline", type=Path)
     ap.add_argument("--regression-factor", type=float, default=2.0)
@@ -148,7 +151,8 @@ def main():
     ap.add_argument("--keep", type=Path)
     a = ap.parse_args()
     if a.workers < 1 or a.workers > 64 or a.max_rss_mb < 1 or \
-       a.max_db_ratio <= 0 or a.shape_timeout_sec < 1:
+       a.max_db_ratio <= 0 or a.stage_timeout_sec < 1 or \
+       a.shape_timeout_sec < 1:
         ap.error("resource limits and workers must be positive (workers <=64)")
     files = a.files or (40 if a.profile == "small" else 1000)
     lines = a.lines or (2000 if a.profile == "small" else 100000)
@@ -184,7 +188,8 @@ def main():
     source_bytes = sum(p.stat().st_size for p in project.rglob("*")
                        if p.is_file() and ".git" not in p.parts)
     db = project / ".codegraph" / "graph.db"
-    init_out, cold = command([str(cg), "init"], project, env)
+    init_out, cold = command([str(cg), "init"], project, env,
+                             a.stage_timeout_sec)
     if not db.exists():
         raise RuntimeError("cold index did not create a graph database")
     info_out, _ = command([str(cg), "info", "--json"], project, env)
@@ -208,32 +213,38 @@ def main():
                     "git_base": base.strip()},
         "settings": {"workers": a.workers, "profile": a.profile,
                      "max_rss_mb": a.max_rss_mb,
-                     "max_db_ratio": a.max_db_ratio},
+                     "max_db_ratio": a.max_db_ratio,
+                     "stage_timeout_sec": a.stage_timeout_sec,
+                     "shape_timeout_sec": a.shape_timeout_sec},
         "stages": {"cold": {**cold, "output": init_out.strip(),
                              "database": db_size(db), "coverage": coverage(db, "main")}},
     }
     stages = result["stages"]
-    stages["noop"] = stage(cg, project, db, "noop", ["sync", "--workers", str(a.workers)], env)
+    stages["noop"] = stage(cg, project, db, "noop", ["sync", "--workers", str(a.workers)],
+                            env, timeout_s=a.stage_timeout_sec)
     ts_files = sorted(project.rglob("*.ts"))
     if len(ts_files) < 3:
         raise RuntimeError("fixture did not contain enough TypeScript files")
     edit, delete, rename = ts_files[:3]
     edit.write_text(edit.read_text() + "\nexport function ResourceProbe(): number { return 7; }\n")
     stamp = time.perf_counter_ns()
-    stages["edit"] = stage(cg, project, db, "edit", ["sync", "--workers", str(a.workers)], env)
+    stages["edit"] = stage(cg, project, db, "edit", ["sync", "--workers", str(a.workers)],
+                            env, timeout_s=a.stage_timeout_sec)
     search, search_timing = command([str(cg), "search", "ResourceProbe", "--json"], project, env)
     if not json.loads(search).get("symbols"):
         raise RuntimeError("edited symbol did not reach query results")
     result["source_to_query_ms"] = (time.perf_counter_ns() - stamp) // 1_000_000
     result["query_wall_ms"] = search_timing["wall_ms"]
     delete.unlink()
-    stages["delete"] = stage(cg, project, db, "delete", ["sync", "--workers", str(a.workers)], env)
+    stages["delete"] = stage(cg, project, db, "delete", ["sync", "--workers", str(a.workers)],
+                              env, timeout_s=a.stage_timeout_sec)
     with sqlite3.connect(db) as c:
         if c.execute("SELECT 1 FROM files WHERE path=?", (str(delete.relative_to(project)),)).fetchone():
             raise RuntimeError("deleted path remained in file index")
     renamed = rename.with_name(rename.stem + "_moved.ts")
     rename.rename(renamed)
-    stages["rename"] = stage(cg, project, db, "rename", ["sync", "--workers", str(a.workers)], env)
+    stages["rename"] = stage(cg, project, db, "rename", ["sync", "--workers", str(a.workers)],
+                              env, timeout_s=a.stage_timeout_sec)
     with sqlite3.connect(db) as c:
         if c.execute("SELECT 1 FROM files WHERE path=?", (str(rename.relative_to(project)),)).fetchone():
             raise RuntimeError("renamed old path remained in file index")
@@ -246,24 +257,28 @@ def main():
     result["fixture"]["git_changed"] = changed.strip()
     command(["git", "reset", "--hard", base.strip()], project, env)
     stages["replay_back"] = stage(cg, project, db, "replay_back",
-                                  ["sync", "--workers", str(a.workers)], env)
+                                  ["sync", "--workers", str(a.workers)], env,
+                                  timeout_s=a.stage_timeout_sec)
     old_query, _ = command([str(cg), "search", "ResourceProbe", "--json"], project, env)
     if json.loads(old_query).get("symbols"):
         raise RuntimeError("replay to base retained changed symbol")
     command(["git", "reset", "--hard", changed.strip()], project, env)
     stages["replay_forward"] = stage(cg, project, db, "replay_forward",
-                                     ["sync", "--workers", str(a.workers)], env)
+                                     ["sync", "--workers", str(a.workers)], env,
+                                     timeout_s=a.stage_timeout_sec)
     new_query, _ = command([str(cg), "search", "ResourceProbe", "--json"], project, env)
     if not json.loads(new_query).get("symbols"):
         raise RuntimeError("replay to changed commit lost changed symbol")
     stages["full"] = stage(cg, project, db, "full",
-                            ["index", "--full", "--workers", str(a.workers)], env)
+                            ["index", "--full", "--workers", str(a.workers)], env,
+                            timeout_s=a.stage_timeout_sec)
     sibling = work / "sibling"
     command(["git", "worktree", "add", "-q", "-b", "bench-sibling",
              str(sibling), "HEAD"], project, env)
     stages["branch_reuse"] = stage(cg, sibling, db, "branch_reuse",
                                     ["index", "--workers", str(a.workers)],
-                                    env, branch="bench-sibling")
+                                    env, branch="bench-sibling",
+                                    timeout_s=a.stage_timeout_sec)
 
     # Separate the pathological syntax shapes from the ordinary latency runs.
     shapes = work / "shapes"

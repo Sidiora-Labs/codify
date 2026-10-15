@@ -69,6 +69,13 @@ baseline = {'stages': {'noop': {'wall_ms': 1,
 findings = mod.compare_baseline(d, baseline, 1.1, 1)
 assert any(f['metric'] == 'wall_ms' for f in findings), findings
 assert any(f['metric'] == 'peak_rss_kb' for f in findings), findings
+try:
+    mod.command([sys.executable, '-c', 'import time; time.sleep(2)'],
+                Path(sys.argv[2]), timeout_s=0.05)
+except RuntimeError as e:
+    assert 'exceeded' in str(e), e
+else:
+    raise AssertionError('subprocess resource deadline did not fire')
 PY
 
 # A deliberately impossible memory cap must fail with measured evidence.
