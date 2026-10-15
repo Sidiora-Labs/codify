@@ -1,7 +1,9 @@
 # Semantic conformance corpus
 
 `catalog.py` labels one real declaration and one non-code decoy for each
-advertised language or file-level adapter. `edge_catalog.py` labels a real
+structural adapter. Its Liquid case instead labels a render reference and a
+commented-out decoy; symbol precision is not applicable there. File-only
+formats have explicit limited-coverage labels. `edge_catalog.py` labels a real
 caller-to-target relation and a real unrelated source for each structural
 adapter. `frameworks.py` labels a route, a named handler, their typed link and
 a commented-out decoy registration for every advertised route adapter.

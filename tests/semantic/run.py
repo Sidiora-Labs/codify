@@ -21,7 +21,7 @@ from edge_catalog import EDGES
 from frameworks import FRAMEWORKS, REQUIRED_FRAMEWORKS
 
 
-REQUIRED_TABLES = {"files", "symbols", "semantic_symbols", "semantic_edges",
+REQUIRED_TABLES = {"files", "symbols", "semantic_symbols", "semantic_references", "semantic_edges",
                    "routes", "extraction_health"}
 ADAPTERS_ALLOWED_TO_USE_FALLBACK = {
     "pascal", "cobol", "vbnet", "cfscript", "cfquery", "arkts",
@@ -144,6 +144,24 @@ def score_language(cg: Path, work: Path, case) -> dict:
         return {"adapter": case.adapter, "support": case.support, "coverage": coverage,
                 "symbol_tp": 0, "symbol_fp": 0, "symbol_fn": 0, "rows": rows,
                 "unresolved": unresolved}
+    if case.support == "reference-only":
+        with db_open(root) as db:
+            refs = [dict(r) for r in db.execute(
+                """SELECT r.original_text,r.kind,r.start_line,r.evidence
+                     FROM semantic_references r JOIN files f ON f.id=r.file_id
+                    WHERE f.path=?""", (case.path,))]
+        expected_line = symbol_line(case.source, case.symbol)
+        positive = [r for r in refs if r["original_text"] == case.symbol
+                    and r["kind"] == case.kind and r["start_line"] == expected_line]
+        false = [r for r in refs if r["original_text"] == case.absent]
+        return {"adapter": case.adapter, "support": case.support, "coverage": coverage,
+                "symbol_tp": 0, "symbol_fp": 0, "symbol_fn": 0,
+                "reference_tp": int(bool(positive)),
+                "reference_fp": len(false) + max(0, len(positive) - 1),
+                "reference_fn": int(not positive), "actual_positive": positive,
+                "actual_negative": false, "unresolved": unresolved,
+                "coverage_ok": coverage["status"] == "complete" and
+                               coverage["last_success_hash"] == coverage["hash"] and not rows}
     line = symbol_line(case.source, case.symbol)
     positive = [r for r in rows if r["name"] == case.symbol and r["line"] == line
                 and r["kind"] == case.kind]
@@ -242,7 +260,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--catalog-only", action="store_true")
     args = parser.parse_args()
-    structural = {c.adapter for c in CASES if c.support != "file-only"}
+    structural = {c.adapter for c in CASES if c.support == "structural"}
     edge_adapters = {e.adapter for e in EDGES}
     if edge_adapters != structural:
         raise AssertionError(f"language edge label gap: missing={sorted(structural-edge_adapters)}, "
@@ -293,6 +311,16 @@ def main() -> int:
             "false_positives": fp, "false_negatives": fn,
             "unresolved_references": row["unresolved"],
         }
+        if row["support"] == "reference-only":
+            rtp, rfp, rfn = row["reference_tp"], row["reference_fp"], row["reference_fn"]
+            by_adapter[row["adapter"]].update({
+                "reference_precision": ratio(rtp, rtp + rfp),
+                "reference_recall": ratio(rtp, rtp + rfn),
+                "reference_false_positives": rfp,
+                "reference_false_negatives": rfn,
+            })
+            if rfp or rfn:
+                failures.append(f"reference {row['adapter']}: {by_adapter[row['adapter']]}")
         edge = edge_by_adapter.get(row["adapter"])
         if edge:
             by_adapter[row["adapter"]].update({
