@@ -249,6 +249,72 @@ char *answer_health_json(Cg *cg, const char *answer) {
     return out.p;
 }
 
+/* Reserve room in a requested query budget for a small truthful health
+ * summary. The underlying query still has enough room for its skeleton. */
+int answer_health_query_budget(int requested) {
+    if (requested <= 0) return requested;
+    int reserve = requested > 160 ? 96 : requested / 3;
+    int effective = requested - reserve;
+    return effective < 64 ? 64 : effective;
+}
+
+char *answer_health_json_limit(Cg *cg, const char *answer, size_t max_bytes) {
+    char *full = answer_health_json(cg, answer);
+    if (!full || !max_bytes || strlen(full) <= max_bytes) return full;
+    char *h = json_get_object(full, "index_health");
+    char *branch = h ? json_get_string(h, "branch") : NULL;
+    char *coverage = h ? json_get_object(h, "coverage") : NULL;
+    char *source = h ? json_get_object(h, "source_validation") : NULL;
+    char *state = h ? json_get_string(h, "state") : NULL;
+    char *reason = h ? json_get_string(h, "reason") : NULL;
+    if (!h || !branch || !coverage || !source) {
+        free(h); free(branch); free(coverage); free(source);
+        free(state); free(reason);
+        return full;
+    }
+    size_t n = strlen(answer);
+    while (n && (answer[n - 1] == '\n' || answer[n - 1] == ' ')) n--;
+    if (!n || answer[n - 1] != '}') {
+        free(h); free(branch); free(coverage); free(source);
+        free(state); free(reason);
+        return full;
+    }
+    StrBuf b; sb_init(&b);
+    for (size_t i = 0; i < n - 1; i++) sb_putc(&b, answer[i]);
+    if (n > 2) sb_putc(&b, ',');
+    sb_puts(&b, "\"index_health\":{\"branch\":");
+    sb_json_str(&b, branch);
+    sb_puts(&b, ",\"coverage\":"); sb_puts(&b, coverage);
+    char *pending = json_get_raw(h, "pending");
+    char *degraded = json_get_raw(h, "degraded");
+    sb_puts(&b, ",\"pending\":");
+    sb_puts(&b, pending && strcmp(pending, "true") == 0 ? "true" : "false");
+    sb_puts(&b, ",\"degraded\":");
+    sb_puts(&b, degraded && strcmp(degraded, "true") == 0 ? "true" : "false");
+    sb_puts(&b, ",\"state\":"); sb_json_str(&b, state ? state : "unknown");
+    if (reason && reason[0]) {
+        sb_puts(&b, ",\"reason\":"); sb_json_str(&b, reason);
+    }
+    char *files = json_get_raw(source, "files");
+    char **items = NULL;
+    int details = files ? json_array_items(files, &items) : 0;
+    for (int i = 0; i < details; i++) free(items[i]);
+    free(items); free(files);
+    sb_printf(&b, ",\"source_validation\":{\"verified\":%ld,"
+              "\"stale\":%ld,\"unchecked\":%ld,\"omitted\":%ld,"
+              "\"details_omitted\":%d},\"omitted\":["
+              "\"parser_inventory\",\"source_details\","
+              "\"validation_limits\",\"last_index_at\"]}}\n",
+              json_get_int(source, "verified", 0),
+              json_get_int(source, "stale", 0),
+              json_get_int(source, "unchecked", 0),
+              json_get_int(source, "omitted", 0), details);
+    free(pending); free(degraded);
+    free(h); free(branch); free(coverage); free(source);
+    free(state); free(reason); free(full);
+    return b.p;
+}
+
 int answer_health_status(Cg *cg, bool json) {
     if (!json) {
         int rc = cmd_status(cg, false);
@@ -282,8 +348,9 @@ void answer_health_text(Cg *cg) {
     free(h); free(coverage); free(reason); free(branch); sb_free(&b);
 }
 
-void answer_health_capture_begin(AnswerCapture *cap) {
+void answer_health_capture_begin(AnswerCapture *cap, size_t max_bytes) {
     cap->saved_stdout = -1;
+    cap->max_bytes = max_bytes;
     cap->stream = tmpfile();
     if (!cap->stream) return;
     fflush(stdout);
@@ -313,7 +380,7 @@ void answer_health_capture_end(AnswerCapture *cap, Cg *cg) {
         char *raw = xmalloc((size_t)len + 1);
         size_t n = fread(raw, 1, (size_t)len, cap->stream);
         raw[n] = 0;
-        char *out = answer_health_json(cg, raw);
+        char *out = answer_health_json_limit(cg, raw, cap->max_bytes);
         if (out) fputs(out, stdout);
         free(out); free(raw);
     }
