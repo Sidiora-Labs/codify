@@ -1,0 +1,67 @@
+[pascal]
+level = "structural"
+parser = "tree-sitter"
+
+[cobol]
+level = "structural"
+parser = "tree-sitter"
+
+[vbnet]
+level = "structural"
+parser = "tree-sitter"
+
+[cfscript]
+level = "structural"
+parser = "tree-sitter"
+
+[cfquery]
+level = "structural"
+parser = "tree-sitter"
+
+[arkts]
+level = "structural"
+parser = "tree-sitter"
+
+[vue]
+level = "embedded"
+parser = "declarative + script tree"
+
+[svelte]
+level = "embedded"
+parser = "declarative + script tree"
+
+[astro]
+level = "embedded"
+parser = "declarative + script tree"
+
+[liquid]
+level = "declarative"
+parser = "bounded scanner"
+
+[razor]
+level = "declarative"
+parser = "bounded scanner"
+
+[cfml]
+level = "embedded"
+parser = "tree-sitter + declarative tags"
+
+[delphi_form]
+level = "declarative"
+parser = "bounded scanner"
+
+[xml]
+level = "conditional"
+parser = "MyBatis mapping scanner when mapper present; otherwise file-only"
+
+[json]
+level = "file-only"
+
+[yaml]
+level = "file-only"
+
+[twig]
+level = "file-only"
+
+[properties]
+level = "file-only"

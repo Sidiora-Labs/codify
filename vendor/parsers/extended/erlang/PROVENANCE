@@ -1,0 +1,5 @@
+source=https://github.com/WhatsApp/tree-sitter-erlang.git
+revision=0386a11c835950f5e1ebfbcbf49863d8495de4e0
+license=LICENSE
+parser=src/parser.c
+scanner=src/scanner.c
