@@ -290,7 +290,7 @@ reqs = ["4.1", "4.2"]
 
 [task.4.3]
 title = "Bounded flow traversal and dynamic boundaries"
-status = "in_progress"
+status = "done"
 wave = 4
 requires = ["3.3", "3.7"]
 touches = ["src/sem_flow.c", "src/sem_flow.h", "src/main.c", "src/mcp.c", "src/help.c", "README.md", "tests/integration/74_sem_flow.sh"]
