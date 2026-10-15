@@ -1104,10 +1104,13 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
                 };
                 index_health_record(cg, w->rel, &hr);
                 if (!chunk[i].failed_read) {
+                    long before_removed = st->files_removed;
                     if (drop_skipped_file(cg, s, w, st) != 0) {
                         st->semantic_failed = true;
                         rc = -1;
-                    } else wrote = true;
+                    } else if (st->files_removed > before_removed) {
+                        wrote = true;
+                    }
                 }
                 st->files_skipped++;
             } else if (write_done(cg, s, w, &chunk[i], st) != 0) {
