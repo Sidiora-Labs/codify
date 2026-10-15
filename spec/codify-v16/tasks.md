@@ -24,7 +24,7 @@
     - Vendor pinned licensed parser runtime into the single binary, define grammar/adapter registry and common tree walker. Coordinate the semantic contract with 2.1. Support worker-local parsers, bounded recovery, fallback and dynamic line lengths. Publish the adapter API immediately for language workers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.2_
-  - [-] 2.3 TypeScript and JavaScript syntax extraction
+  - [x] 2.3 TypeScript and JavaScript syntax extraction
     - Implement TS/TSX/JS/JSX grammar adapters, multiline functions, owner-aware methods, types, imports/exports, object actions, callbacks and JSX component facts; include negative and error-recovery cases.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.3_
