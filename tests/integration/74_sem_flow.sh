@@ -35,6 +35,12 @@ db.execute("INSERT INTO semantic_references(ref_id,file_id,ordinal,owner_id,"
            "target_id,original_text,kind,strategy,evidence,start_line) "
            "VALUES(900001,?,1,?,NULL,'dynamic_target','call','unresolved',"
            "'receiver type unknown',2)",(file_id,syms['middle_node']))
+for endpoint, index in [('source_id','idx_sem_edge_source'),
+                        ('target_id','idx_sem_edge_target')]:
+    plan = db.execute('EXPLAIN QUERY PLAN SELECT id FROM semantic_edges '
+                      f'WHERE branch_id=? AND {endpoint}=? '
+                      'ORDER BY kind,id LIMIT 4',(branch,syms['middle_node'])).fetchall()
+    assert any(index in row[3] for row in plan), plan
 db.commit()
 PY
 

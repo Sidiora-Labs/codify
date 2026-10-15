@@ -166,7 +166,8 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         "JOIN files f ON f.id=e.source_file_id "
         "WHERE e.branch_id=?1 AND e.source_id=?2 "
         "AND (?3=0 OR e.kind IN ('calls','call','callback','dispatch',"
-        "'event','http','queue','route_handler')) ORDER BY e.id LIMIT ?4";
+        "'event','http','queue','route_handler')) "
+        "ORDER BY e.kind,e.id LIMIT ?4";
     const char *edge_sql_reverse =
         "SELECT e.id,e.source_id,e.target_id,e.kind,e.provenance,e.strategy,"
         "e.evidence,e.original_text,e.channel,e.registration_path,e.start_line,"
@@ -174,7 +175,8 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         "JOIN files f ON f.id=e.source_file_id "
         "WHERE e.branch_id=?1 AND e.target_id=?2 "
         "AND (?3=0 OR e.kind IN ('calls','call','callback','dispatch',"
-        "'event','http','queue','route_handler')) ORDER BY e.id LIMIT ?4";
+        "'event','http','queue','route_handler')) "
+        "ORDER BY e.kind,e.id LIMIT ?4";
     sqlite3_stmt *edgeq=cg_prep(cg,reverse?edge_sql_reverse:edge_sql_forward);
     sqlite3_stmt *boundaryq=cg_prep(cg,
         "SELECT r.original_text,r.kind,r.strategy,r.evidence,f.path,r.start_line "
