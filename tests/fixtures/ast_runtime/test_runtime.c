@@ -25,6 +25,12 @@ static void extract(AstContext *ctx) {
     ast_walk(ctx, ctx->root, visit, &pairs);
     assert(pairs == 1);
     assert(!ctx->truncated && !ctx->cancelled);
+    SemSpan span = { .line = 2, .column = 2, .end_line = 2,
+                     .end_column = 8, .start_byte = 4, .end_byte = 10 };
+    SemSymbol *symbol = sem_symbol_add(&ctx->result->sem, "item", "property", span);
+    assert(symbol);
+    SemReference *reference = sem_reference_add(&ctx->result->sem, "item", "call", span);
+    assert(reference);
 }
 
 static const AstAdapter JSON = { "runtime_fixture", tree_sitter_json, extract };
@@ -35,6 +41,11 @@ static void *run_parse(void *unused) {
     ParseResult result = {0};
     assert(ast_try_parse("runtime_fixture", "sample.fixture", source,
                          sizeof source - 1, &result));
+    assert(result.ndefs == 1 && result.nrefs == 1);
+    assert(result.sem.symbols[0].legacy_def == 0);
+    assert(result.sem.references[0].legacy_ref == 0);
+    assert(result.nlines == 3 && result.first_code_line == 1);
+    assert(strcmp(result.sem.parser_id, "tree-sitter:runtime_fixture") == 0);
     parse_result_free(&result);
     return NULL;
 }
