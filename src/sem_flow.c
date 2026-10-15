@@ -28,15 +28,21 @@ static long monotonic_ms(void) {
     return (long)ts.tv_sec*1000L+ts.tv_nsec/1000000L;
 }
 
-static char *bounded_text(sqlite3_stmt *q, int col) {
+static char *bounded_text_n(sqlite3_stmt *q, int col, size_t cap) {
     const char *s = (const char *)sqlite3_column_text(q, col);
     if (!s) return xstrdup("");
-    size_t n = strlen(s);
-    if (n > 256) n = 256;
+    size_t len = strlen(s), n = len < cap ? len : cap;
     char *p = xmalloc(n + 1);
     memcpy(p, s, n);
+    if (len > cap && n >= 3) memcpy(p+n-3,"...",3);
     p[n] = 0;
     return p;
+}
+static char *bounded_text(sqlite3_stmt *q, int col) {
+    return bounded_text_n(q,col,256);
+}
+static char *path_text(sqlite3_stmt *q, int col) {
+    return bounded_text_n(q,col,4096);
 }
 static void field(StrBuf *b, const char *key, const char *val) {
     sb_printf(b, ",\"%s\":", key);
@@ -59,7 +65,7 @@ static bool node_load(Cg *cg, long branch, long id, FlowNode *n) {
         n->id = id;
         n->name = bounded_text(q, 0);
         n->kind = bounded_text(q, 1);
-        n->path = bounded_text(q, 2);
+        n->path = path_text(q, 2);
         n->line = sqlite3_column_int(q, 3);
         n->qualified = bounded_text(q, 4);
         n->file_id = sqlite3_column_int64(q, 5);
@@ -225,7 +231,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
                 v->text=bounded_text(boundaryq,0); v->kind=bounded_text(boundaryq,1);
                 v->strategy=bounded_text(boundaryq,2);
                 v->evidence=bounded_text(boundaryq,3);
-                v->path=bounded_text(boundaryq,4);
+                v->path=path_text(boundaryq,4);
                 v->line=sqlite3_column_int(boundaryq,5);
             }
         }
@@ -246,7 +252,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
                     v->text=bounded_text(edgeq,7); v->kind=bounded_text(edgeq,3);
                     v->strategy=bounded_text(edgeq,5);
                     v->evidence=bounded_text(edgeq,6);
-                    v->path=bounded_text(edgeq,14);
+                    v->path=path_text(edgeq,14);
                     v->line=sqlite3_column_int(edgeq,10);
                 } else trunc_edges=true;
                 continue;
@@ -258,12 +264,12 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
             e->kind=bounded_text(edgeq,3); e->provenance=bounded_text(edgeq,4);
             e->strategy=bounded_text(edgeq,5); e->evidence=bounded_text(edgeq,6);
             e->original=bounded_text(edgeq,7); e->channel=bounded_text(edgeq,8);
-            e->registration=bounded_text(edgeq,9); e->line=sqlite3_column_int(edgeq,10);
+            e->registration=path_text(edgeq,9); e->line=sqlite3_column_int(edgeq,10);
             e->column=sqlite3_column_int(edgeq,11);
             e->registration_line=sqlite3_column_int(edgeq,12);
             e->heuristic=sqlite3_column_int(edgeq,13)!=0 ||
                          strcmp(e->provenance,"heuristic")==0;
-            e->path=bounded_text(edgeq,14);
+            e->path=path_text(edgeq,14);
             if (ni<0) {
                 if (node_load(cg,branch,next,&nv[nn])) {
                     nv[nn].depth=cur->depth+1; nv[nn].parent=head;
