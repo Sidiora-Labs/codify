@@ -162,11 +162,8 @@ static void relation_leaf(AstContext *c, int owner, TSNode n, const char *kind) 
     if (!value || !*value) { free(value); return; }
     SemTypeFact *f = sem_type_fact_add(&c->result->sem, value, kind, span(n));
     f->owner = owner;
+    f->value = xstrdup(value);
     f->evidence = xstrdup("syntax");
-    SemEdge *e = sem_edge_add(&c->result->sem, kind, owner, -1, span(n));
-    e->original_text = xstrdup(value);
-    e->strategy = xstrdup("syntax");
-    e->provenance = xstrdup("ast");
     free(value);
 }
 
@@ -317,6 +314,7 @@ static int add_symbol(AstContext *c, TSNode n, const char *kind, int parent) {
         SemTypeFact *f = sem_type_fact_add(&c->result->sem,
                                           sym->result_type, "returns", span(n));
         f->owner = idx;
+        f->value = xstrdup(sym->result_type);
         f->evidence = xstrdup("syntax");
     }
     if (is_type(c->language, "java") && is_type(kind, "method") &&

@@ -53,6 +53,8 @@ static void check(const char *lang, const char *path) {
         SemTypeFact *f = &r.sem.type_facts[i];
         if (f->owner == box && (!strcmp(f->kind, "inherits") ||
                                 !strcmp(f->kind, "implements"))) {
+            if (!f->value || strcmp(f->name, f->value))
+                die(lang, "type target value missing");
             hierarchy++;
             if (strstr(f->name, "Base")) base++;
             if (strstr(f->name, "Runnable")) contract++;
@@ -60,6 +62,11 @@ static void check(const char *lang, const char *path) {
     }
     if (hierarchy < 2 || !base || !contract)
         die(lang, "individual inheritance facts missing");
+    for (int i = 0; i < r.sem.ntype_facts; i++) {
+        SemTypeFact *f = &r.sem.type_facts[i];
+        if (!strcmp(f->kind, "returns") && !f->value)
+            die(lang, "result type value missing");
+    }
     for (int i = 0; i < r.sem.nreferences; i++) {
         SemReference *v = &r.sem.references[i];
         if (!strcasecmp(v->text, "get")) {
