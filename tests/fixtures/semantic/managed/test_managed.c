@@ -88,6 +88,18 @@ static void check(const char *lang, const char *path) {
         die(lang, "Kotlin alias missing");
     if (!strcmp(lang, "dart") && strcmp(r.sem.bindings[0].local_name, "math"))
         die(lang, "Dart alias missing");
+    if (!strcmp(lang, "java") &&
+        (strcmp(r.sem.bindings[0].module, "java.util") ||
+         strcmp(r.sem.bindings[0].local_name, "List")))
+        die(lang, "Java import module/name boundary wrong");
+    if (!strcmp(lang, "kotlin") &&
+        (strcmp(r.sem.bindings[0].module, "java.util") ||
+         strcmp(r.sem.bindings[0].original_name, "List")))
+        die(lang, "Kotlin import module/original boundary wrong");
+    if (!strcmp(lang, "csharp") &&
+        (strcmp(r.sem.bindings[0].module, "System.Collections") ||
+         strcmp(r.sem.bindings[0].local_name, "Generic")))
+        die(lang, "C# import module/name boundary wrong");
     parse_result_free(&r);
 
     char *damaged = xmalloc(len + 16);
@@ -122,6 +134,18 @@ static void check_namespace(const char *lang, const char *source) {
     parse_result_free(&r);
 }
 
+static void check_java_wildcard(void) {
+    const char *source = "import a.b.*;\nclass Named {}\n";
+    ParseResult r = {0};
+    if (!ast_try_parse("java", "Wildcard.java", source, strlen(source), &r))
+        die("java", "wildcard grammar unavailable");
+    if (r.sem.nbindings != 1 || strcmp(r.sem.bindings[0].module, "a.b") ||
+        strcmp(r.sem.bindings[0].local_name, "*") ||
+        strcmp(r.sem.bindings[0].original_name, "*"))
+        die("java", "wildcard import boundary wrong");
+    parse_result_free(&r);
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     lang_global_init();
@@ -138,6 +162,7 @@ int main(int argc, char **argv) {
     check_namespace("kotlin", "package acme.demo\nclass Named {}\n");
     check_namespace("scala", "package acme.demo\nclass Named {}\n");
     check_namespace("csharp", "namespace acme.demo; class Named {}\n");
+    check_java_wildcard();
     puts("managed grammars: declarations, ownership, overloads, hierarchy, calls and negatives passed");
     return 0;
 }
