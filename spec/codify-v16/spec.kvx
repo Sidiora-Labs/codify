@@ -300,7 +300,7 @@ reqs = ["4.3"]
 
 [task.4.4]
 title = "Hierarchy and conservative dead-code inspection"
-status = "pending"
+status = "in_progress"
 wave = 4
 requires = ["3.3", "3.7"]
 touches = ["src/sem_inspect.c", "src/sem_inspect.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/75_sem_inspect.sh"]
