@@ -1,5 +1,6 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
+#include "sem_search.h"
 #include <poll.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -395,8 +396,12 @@ int main(int argc, char **argv) {
         }
     } else if (strcmp(cmd, "search") == 0) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
+        const char *kind = opt(&argc, argv, "--kind", NULL);
+        const char *name = opt(&argc, argv, "--name", NULL);
+        sem_search_filter_set(&cg, kind, name);
         if (argc < 3) { help_usage("search"); rc = 1; }
         else rc = cmd_search(&cg, argv[2], limit > 0 ? limit : 20, json);
+        sem_search_filter_set(&cg, NULL, NULL);
     } else if (strcmp(cmd, "grep") == 0) {      /* codify-v15 1.1 */
         GrepOpts go;
         memset(&go, 0, sizeof go);
@@ -433,9 +438,13 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "context") == 0) {
         int budget = atoi(opt(&argc, argv, "--budget", "4000"));
         int limit = atoi(opt(&argc, argv, "-n", "8"));
+        const char *kind = opt(&argc, argv, "--kind", NULL);
+        const char *name = opt(&argc, argv, "--name", NULL);
+        sem_search_filter_set(&cg, kind, name);
         if (argc < 3) { help_usage("context"); rc = 1; }
         else rc = cmd_context(&cg, argv[2], budget > 0 ? budget : 4000,
                               limit > 0 ? limit : 8, json);
+        sem_search_filter_set(&cg, NULL, NULL);
     } else if (strcmp(cmd, "show") == 0) {
         bool full = flag(&argc, argv, "--full");
         if (argc < 3) { help_usage("show");

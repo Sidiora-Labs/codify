@@ -4,6 +4,7 @@
  * Every command has --json output.
  */
 #include "cg.h"
+#include "sem_search.h"
 #include <ctype.h>
 #include <strings.h>
 
@@ -1291,6 +1292,50 @@ static int rank_query(Cg *cg, const char *q, SymRow *out, int cap,
     return n;
 }
 
+/* Structured symbol candidates lead, while the established doc/body ranking
+ * remains available for prose queries and file hits. */
+static int structured_query(Cg *cg, const char *q, SymRow *out, int cap,
+                            FileHit *fh, int *nfh, int *weak) {
+    const char *kind = sem_search_filter_kind(cg);
+    const char *name = sem_search_filter_name(cg);
+    SemSearchHit hits[64];
+    int nh = 0, n = 0;
+    if (!strchr(q, ' ')) {
+        sqlite3_stmt *available = cg_prep(cg,
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='semantic_identifier_postings'");
+        bool indexed = sqlite3_step(available) == SQLITE_ROW;
+        sqlite3_finalize(available);
+        if (indexed) nh = sem_search_lookup(cg, q, kind, name, hits, 64);
+    }
+    for (int i = 0; i < nh && n < cap; i++) {
+        sqlite3_stmt *st = prep_scoped(cg,
+            "SELECT " SYM_COLS " FROM symbols s JOIN files f ON f.id=s.file_id "
+            "WHERE s.id=?", "");
+        sqlite3_bind_int64(st, 1, hits[i].symbol_id);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            SymRow r; sym_from_stmt(st, &r);
+            if ((!kind || strcmp(kind, r.kind) == 0) &&
+                (!name || ci_has(r.name, name))) {
+                out[n++] = r;
+                if (hits[i].match == SEM_MATCH_TYPO) (*weak)++;
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    SymRow ranked[64];
+    int nr = rank_query(cg, q, ranked, 64, fh, nfh);
+    for (int i = 0; i < nr && n < cap; i++) {
+        SymRow *r = &ranked[i];
+        if (kind && strcmp(kind, r->kind) != 0) continue;
+        if (name && !ci_has(r->name, name)) continue;
+        bool dup = false;
+        for (int j = 0; j < n; j++) if (out[j].id == r->id) dup = true;
+        if (!dup) out[n++] = *r;
+    }
+    return n;
+}
+
 /* Entry points that actually relate to the query: handlers of routes whose
  * pattern or handler name matches, then call-graph roots found by walking up
  * from the matched symbols. main() is a fallback the caller applies only when
@@ -1437,10 +1482,13 @@ static void filehit_put(Cg *cg, StrBuf *b, const FileHit *f, bool json) {
 }
 
 int cmd_search(Cg *cg, const char *q, int limit, bool json) {
+    if (limit <= 0) limit = 20;
+    if (limit > 64) limit = 64;
     SymRow *rows = xmalloc(sizeof(SymRow) * (size_t)limit);
     FileHit fh[FILE_SCAN];
     int nfh = 0;
-    int n = rank_query(cg, q, rows, limit, fh, &nfh);
+    int weak = 0;
+    int n = structured_query(cg, q, rows, limit, fh, &nfh, &weak);
 
     StrBuf files; sb_init(&files);
     int nf = 0;
@@ -1460,7 +1508,7 @@ int cmd_search(Cg *cg, const char *q, int limit, bool json) {
             if (i) sb_putc(&b, ',');
             json_sym(cg, &b, &rows[i]);
         }
-        sb_puts(&b, "],\"files\":[");
+        sb_printf(&b, "],\"weak_matches\":%d,\"files\":[", weak);
         sb_puts(&b, files.p);
         sb_puts(&b, "]}\n");
         fputs(b.p, stdout);
@@ -2278,9 +2326,16 @@ static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {
         char purpose[512];
         file_purpose(cg, fid, purpose, sizeof purpose);
         int nsym = 0;
-        st = cg_prep(cg, "SELECT COUNT(*) FROM symbols WHERE file_id=?");
+        const char *kind_filter = sem_search_filter_kind(cg);
+        const char *name_filter = sem_search_filter_name(cg);
+        st = cg_prep(cg, "SELECT kind,name FROM symbols WHERE file_id=?");
         sqlite3_bind_int64(st, 1, fid);
-        if (sqlite3_step(st) == SQLITE_ROW) nsym = sqlite3_column_int(st, 0);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *k = (const char *)sqlite3_column_text(st, 0);
+            const char *n = (const char *)sqlite3_column_text(st, 1);
+            if ((!kind_filter || (k && strcmp(k, kind_filter) == 0)) &&
+                (!name_filter || (n && ci_has(n, name_filter)))) nsym++;
+        }
         sqlite3_finalize(st);
 
         /* the skeleton (query, path, section keys, markers) always ships; a
@@ -2393,6 +2448,8 @@ static int context_path_outline(Cg *cg, const char *q, int budget, bool json) {
         while (sqlite3_step(st) == SQLITE_ROW) {
             SymRow r;
             sym_from_stmt(st, &r);
+            if ((kind_filter && strcmp(kind_filter, r.kind) != 0) ||
+                (name_filter && !ci_has(r.name, name_filter))) continue;
             StrBuf it; sb_init(&it);
             if (json) json_sym(cg, &it, &r);
             else sb_printf(&it, "  %-9s %-28s :%-5d %.140s\n",
@@ -2573,10 +2630,14 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
     /* the closing tokens_used/omitted keys are part of the budget too */
     if (cap > CTX_TAIL) cap -= CTX_TAIL;
     int omitted_total = 0;
-    SymRow *rows = xmalloc(sizeof(SymRow) * (size_t)limit);
+    SymRow *rows = xmalloc(sizeof(SymRow) * (size_t)(limit + 1));
     FileHit fh[FILE_SCAN];
     int nfh = 0;
-    int n = rank_query(cg, q, rows, limit, fh, &nfh);
+    int weak = 0;
+    int n = structured_query(cg, q, rows, limit + 1, fh, &nfh, &weak);
+    int omitted_symbols = n > limit ? 1 : 0;
+    if (n > limit) n = limit;
+    omitted_total += omitted_symbols;
     SeenSet *seen = xmalloc(sizeof *seen);
     seen->n = 0;
 
@@ -2584,6 +2645,8 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
     if (json) {
         sb_puts(&b, "{\"query\":");
         sb_json_str(&b, q);
+        sb_printf(&b, ",\"weak_matches\":%d,\"symbols_omitted\":%d",
+                  weak, omitted_symbols);
     } else {
         sb_printf(&b, "context for '%s'\n", q);
     }
@@ -2620,7 +2683,7 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
         if (json) sb_puts(&b, ",\"symbols\":[");
         for (int i = 0; i < n; i++) {
             SymRow *r = &rows[i];
-            bool repeat = seen_has(seen, r->name);
+            bool repeat = false; /* same-name overloads carry distinct bodies */
             /* every hit expands — doc, then opening lines — for as long as
              * the budget lasts; the top three also carry their edges */
             bool detail = !repeat;
@@ -2649,7 +2712,7 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
                  * the budget, so more symbols survive the same cap */
                 /* a documented hit stays doc plus signature (doc-first:
                  * `cg show --full` is the deep view); the rest grow */
-                int span = docd ? 0 : open;
+                int span = open;
                 char *snip = !detail ? NULL
                     : file_snippet(cg, r->branch_id, r->path, r->line,
                           r->end_line > r->line + span ? r->line + span
@@ -2664,11 +2727,22 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
                     sb_printf(&it, ",\"line\":%d,\"end_line\":%d,\"sig\":",
                               r->line, r->end_line);
                     sb_json_str(&it, r->sig);
+                    int coloc = 0;
+                    for (int k = 0; k < n; k++)
+                        if (k != i && strcmp(rows[k].path, r->path) == 0) coloc++;
+                    sb_printf(&it, ",\"co_located_hits\":%d,\"match_strength\":",
+                              coloc);
+                    sb_json_str(&it, ci_has(r->name, q) ? "strong" : "weak");
                     if (docd) doc_json(&it, &d);
                     if (snip) {
                         sb_puts(&it, ",\"snippet\":");
                         sb_json_str(&it, snip);
                     }
+                    int omitted_lines = r->end_line > r->line + span
+                                      ? r->end_line - r->line - span : 0;
+                    if (omitted_lines)
+                        sb_printf(&it, ",\"body_omitted_lines\":%d",
+                                  omitted_lines);
                     if (ncal) {                /* edge lists stay compact */
                         sb_puts(&it, ",\"callers\":[");
                         for (int j = 0; j < ncal; j++) {
@@ -2727,6 +2801,46 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
         }
         omitted_total += omitted;
         if (json) sb_putc(&b, ']');
+    }
+
+    /* Direct paths among the named hits explain a relationship without
+     * expanding an unrelated repository-wide traversal. */
+    if (json && n > 1 && b.len + 40 < cap) {
+        StrBuf paths; sb_init(&paths);
+        int np = 0, omitted_paths = 0;
+        sqlite3_stmt *ps = cg_prep(cg,
+            "SELECT target_id,kind,line FROM refs "
+            "WHERE sym_id=? AND target_id IS NOT NULL LIMIT 24");
+        for (int i = 0; i < n && i < 8; i++) {
+            sqlite3_bind_int64(ps, 1, rows[i].id);
+            while (sqlite3_step(ps) == SQLITE_ROW) {
+                long target = sqlite3_column_int64(ps, 0);
+                int j = 0;
+                for (; j < n; j++) if (rows[j].id == target) break;
+                if (j == n) continue;
+                StrBuf item; sb_init(&item);
+                sb_puts(&item, "{\"from\":"); sb_json_str(&item, rows[i].name);
+                sb_puts(&item, ",\"to\":"); sb_json_str(&item, rows[j].name);
+                sb_puts(&item, ",\"kind\":");
+                sb_json_str(&item, (const char *)sqlite3_column_text(ps, 1));
+                sb_printf(&item, ",\"line\":%d}", sqlite3_column_int(ps, 2));
+                if (b.len + paths.len + item.len + 48 > cap) omitted_paths++;
+                else {
+                    if (np++) sb_putc(&paths, ',');
+                    sb_puts(&paths, item.p);
+                }
+                sb_free(&item);
+            }
+            sqlite3_reset(ps);
+        }
+        sqlite3_finalize(ps);
+        if (np || omitted_paths) {
+            sb_puts(&b, ",\"paths\":[");
+            sb_puts(&b, paths.p ? paths.p : "");
+            sb_printf(&b, "],\"paths_omitted\":%d", omitted_paths);
+            omitted_total += omitted_paths;
+        }
+        sb_free(&paths);
     }
 
     /* entry points: derived from the query — route handlers that match it,

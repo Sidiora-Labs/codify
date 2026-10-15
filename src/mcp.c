@@ -9,6 +9,7 @@
  *                    Gemini CLI, Codex CLI).
  */
 #include "cg.h"
+#include "sem_search.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -67,9 +68,14 @@ static int t_search(void *v) {
     int limit = (int)json_get_int(c->args, "limit", 20);
     QueryFilter f;
     mcp_filter(c, &f);
+    char *kind = json_get_string(c->args, "kind");
+    char *name = json_get_string(c->args, "name");
+    sem_search_filter_set(c->cg, kind, name);
     cg_filter_set(c->cg, &f);
     int rc = cmd_search(c->cg, q, limit > 0 ? limit : 20, true);
     cg_filter_set(c->cg, NULL);
+    sem_search_filter_set(c->cg, NULL, NULL);
+    free(kind); free(name);
     free(q);
     return rc;
 }
@@ -81,10 +87,15 @@ static int t_context(void *v) {
     int limit = (int)json_get_int(c->args, "limit", 8);
     QueryFilter f;
     mcp_filter(c, &f);
+    char *kind = json_get_string(c->args, "kind");
+    char *name = json_get_string(c->args, "name");
+    sem_search_filter_set(c->cg, kind, name);
     cg_filter_set(c->cg, &f);
     int rc = cmd_context(c->cg, q, budget > 0 ? budget : 4000,
                          limit > 0 ? limit : 8, true);
     cg_filter_set(c->cg, NULL);
+    sem_search_filter_set(c->cg, NULL, NULL);
+    free(kind); free(name);
     free(q);
     return rc;
 }
@@ -638,7 +649,9 @@ static int t_codemap(void *v) {
                  "this glob or directory (a string or a list)\"},\"lang\":" \
                  "{\"type\":\"string\",\"description\":\"only files of this " \
                  "language (c, python, ts, ...)\"},\"no_tests\":{\"type\":" \
-                 "\"boolean\",\"description\":\"leave test files out\"},"
+                 "\"boolean\",\"description\":\"leave test files out\"}," \
+                 "\"kind\":{\"type\":\"string\",\"description\":\"symbol kind\"}," \
+                 "\"name\":{\"type\":\"string\",\"description\":\"symbol name filter\"},"
 #define S_QUERY  "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}," \
                  S_QFILTER \
                  "\"limit\":{\"type\":\"integer\"}},\"required\":[\"query\"]}"
