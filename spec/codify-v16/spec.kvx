@@ -146,7 +146,7 @@ reqs = ["2.4"]
 
 [task.2.5]
 title = "Python Ruby and PHP syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_dynamic.c", "vendor/parsers/dynamic/**", "tests/integration/61_ast_dynamic.sh", "tests/fixtures/semantic/dynamic/**"]
