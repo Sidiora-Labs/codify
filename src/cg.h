@@ -342,6 +342,7 @@ typedef struct {
     /* the database stayed busy past lock_wait_ms; the graph is whatever the
      * last index left (any chunks written before the stall are kept) */
     bool busy;
+    bool semantic_failed;  /* file facts or a semantic pass failed to persist */
     /* the walk was skipped: the last pass is younger than the caller's
      * freshness window and nothing is pending or marked dirty */
     bool fresh;
