@@ -56,21 +56,24 @@ def db_size(db):
     }
 
 
-def coverage(db):
+def coverage(db, branch):
     with sqlite3.connect(db) as c:
         table = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
                           "AND name='extraction_health'").fetchone()
         if not table:
             return {"available": False}
         rows = c.execute("SELECT status,count(*) FROM extraction_health "
-                         "GROUP BY status").fetchall()
+                         "WHERE branch_id=(SELECT id FROM branches WHERE name=?) "
+                         "GROUP BY status", (branch,)).fetchall()
         diagnostics = c.execute("SELECT count(*) FROM extraction_health "
-                                "WHERE reason<>''").fetchone()[0]
-        return {"available": True, "status": dict(rows),
+                                "WHERE reason<>'' AND branch_id="
+                                "(SELECT id FROM branches WHERE name=?)",
+                                (branch,)).fetchone()[0]
+        return {"available": True, "branch": branch, "status": dict(rows),
                 "diagnostic_files": diagnostics}
 
 
-def stage(cg, root, db, name, flags, env):
+def stage(cg, root, db, name, flags, env, branch="main"):
     out, timing = command([str(cg), *flags, "--json"], root, env)
     try:
         stats = json.loads(out)
@@ -79,7 +82,7 @@ def stage(cg, root, db, name, flags, env):
     if stats.get("busy") or stats.get("coalesced"):
         raise RuntimeError(f"{name} did not complete: {stats}")
     return {**timing, "stats": stats, "database": db_size(db),
-            "coverage": coverage(db)}
+            "coverage": coverage(db, branch)}
 
 
 def compare_baseline(current, baseline, factor, floor_ms):
@@ -197,7 +200,7 @@ def main():
                      "max_rss_mb": a.max_rss_mb,
                      "max_db_ratio": a.max_db_ratio},
         "stages": {"cold": {**cold, "output": init_out.strip(),
-                             "database": db_size(db), "coverage": coverage(db)}},
+                             "database": db_size(db), "coverage": coverage(db, "main")}},
     }
     stages = result["stages"]
     stages["noop"] = stage(cg, project, db, "noop", ["sync", "--workers", str(a.workers)], env)
@@ -245,6 +248,12 @@ def main():
         raise RuntimeError("replay to changed commit lost changed symbol")
     stages["full"] = stage(cg, project, db, "full",
                             ["index", "--full", "--workers", str(a.workers)], env)
+    sibling = work / "sibling"
+    command(["git", "worktree", "add", "-q", "-b", "bench-sibling",
+             str(sibling), "HEAD"], project, env)
+    stages["branch_reuse"] = stage(cg, sibling, db, "branch_reuse",
+                                    ["index", "--workers", str(a.workers)],
+                                    env, branch="bench-sibling")
 
     errors = []
     if stages["cold"].get("child_peak_rss_kb", 0) > a.max_rss_mb * 1024:
@@ -273,6 +282,8 @@ def main():
     if stages["replay_back"]["stats"].get("indexed", 0) < 1 or \
        stages["replay_forward"]["stats"].get("indexed", 0) < 1:
         errors.append("commit replay did not refresh changed source")
+    if stages["branch_reuse"]["stats"].get("reused", 0) < 1:
+        errors.append("linked branch did not reuse indexed facts")
     if a.baseline:
         errors.extend(compare_baseline(result, json.loads(a.baseline.read_text()),
                                        a.regression_factor, a.latency_floor_ms))

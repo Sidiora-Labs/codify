@@ -28,7 +28,7 @@ assert d['source_to_query_ms'] >= d['stages']['edit']['wall_ms']
 assert d['stages']['cold']['database']['main_bytes'] > 0
 assert d['stages']['cold']['child_peak_rss_kb'] is not None
 for name in ('noop', 'edit', 'delete', 'rename', 'replay_back',
-             'replay_forward', 'full'):
+             'replay_forward', 'full', 'branch_reuse'):
     s = d['stages'][name]
     assert s['wall_ms'] >= 0 and s['stats']['workers'] <= 2, (name, s)
     assert set(s['stats']['phase_ms']) == {'walk', 'parse', 'write',
@@ -43,6 +43,9 @@ assert d['stages']['delete']['stats']['removed'] >= 1
 assert d['stages']['rename']['stats']['removed'] >= 1
 assert d['stages']['replay_back']['stats']['indexed'] >= 1
 assert d['stages']['replay_forward']['stats']['indexed'] >= 1
+assert d['stages']['branch_reuse']['stats']['reused'] >= 1
+assert d['stages']['branch_reuse']['coverage']['branch'] == 'bench-sibling'
+assert d['stages']['branch_reuse']['coverage']['status']
 
 # Baseline regression reporting is a real gate, independent of host speed.
 spec = importlib.util.spec_from_file_location(
