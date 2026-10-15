@@ -1,0 +1,5 @@
+source=https://github.com/nix-community/tree-sitter-nix.git
+revision=32c3ce98afdafc2ec9aedf0280a678750f76254c
+license=LICENSE
+parser=src/parser.c
+scanner=src/scanner.c

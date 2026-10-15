@@ -1,0 +1,5 @@
+source=https://github.com/r-lib/tree-sitter-r.git
+revision=58a22794466c0fc15b0d3b40531db751593721e8
+license=LICENSE
+parser=src/parser.c
+scanner=src/scanner.c
