@@ -13,7 +13,8 @@ a commented-out decoy registration for every advertised route adapter.
 resulting database. It scores labelled facts by source path, name, kind,
 location and relationship endpoints. Its precision and recall are **over the
 labelled facts**, not an estimate of all code in a repository. It reports
-unresolved semantic references and extraction status/parser by adapter. The
+unresolved semantic references and extraction status/parser by language and
+framework adapter. The
 gate requires every labelled positive and negative to pass; missing semantic
 tables, parser identity, evidence or coverage are failures. File-only formats
 must identify their limited coverage with a `file-only:` parser and emit no

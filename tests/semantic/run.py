@@ -234,6 +234,8 @@ def score_framework(cg: Path, work: Path, case) -> dict:
         routes = route_rows(db)
         edges = edge_rows(db)
         symbols = {path: symbol_rows(db, path) for path in case.files}
+    coverage_ok = all(h["status"] == "complete" and h["parser"] and
+                      h["last_success_hash"] == h["hash"] for h in files.values())
     positive = [r for r in routes if r["pattern"] == case.path
                 and r["framework"] == (case.framework_id or case.name)
                 and (r["method"] or "").upper() == case.method]
@@ -261,7 +263,7 @@ def score_framework(cg: Path, work: Path, case) -> dict:
     wrong_handler_links = [e for e in edges if e["kind"] == "route_handler" and
                            e["channel"] == case.path and e["target_name"] and
                            e["target_name"].lower() != case.handler.lower()]
-    return {"framework": case.name, "coverage": files,
+    return {"framework": case.name, "coverage": files, "coverage_ok": coverage_ok,
             "route_tp": int(bool(positive)),
             "route_fp": len(negative) + len(wrong_links) + len(wrong_handler_links),
             "route_fn": int(not positive), "handler_tp": int(bool(handler_symbols)),
@@ -326,6 +328,7 @@ def main() -> int:
     for row in language:
         tp, fp, fn = row["symbol_tp"], row["symbol_fp"], row["symbol_fn"]
         by_adapter[row["adapter"]] = {
+            "support": row["support"],
             "symbol_precision": ratio(tp, tp + fp), "symbol_recall": ratio(tp, tp + fn),
             "parser": row["coverage"]["parser"], "coverage": row["coverage"]["status"],
             "false_positives": fp, "false_negatives": fn,
@@ -361,8 +364,11 @@ def main() -> int:
         fp = row["route_fp"]
         by_framework[row["framework"]] = {"precision": ratio(tp, tp + fp),
                                            "recall": ratio(tp, tp + fn),
-                                           "false_positives": fp, "false_negatives": fn}
-        if fp or fn:
+                                           "false_positives": fp, "false_negatives": fn,
+                                           "coverage": {p: {"status": h["status"],
+                                                            "parser": h["parser"]}
+                                                        for p, h in row["coverage"].items()}}
+        if fp or fn or not row["coverage_ok"]:
             failures.append(f"framework {row['framework']}: {by_framework[row['framework']]}")
     result = {"languages": by_adapter, "frameworks": by_framework,
               "labelled_language_cases": len(CASES),
