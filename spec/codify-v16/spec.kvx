@@ -146,7 +146,7 @@ reqs = ["2.4"]
 
 [task.2.5]
 title = "Python Ruby and PHP syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_dynamic.c", "vendor/parsers/dynamic/**", "tests/integration/61_ast_dynamic.sh", "tests/fixtures/semantic/dynamic/**"]
@@ -157,7 +157,7 @@ reqs = ["2.5"]
 
 [task.2.6]
 title = "Managed and application language syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_managed.c", "vendor/parsers/managed/**", "tests/integration/62_ast_managed.sh", "tests/fixtures/semantic/managed/**"]
@@ -168,7 +168,7 @@ reqs = ["2.6"]
 
 [task.2.7]
 title = "Configuration and scripting language syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_extended.c", "vendor/parsers/extended/**", "tests/integration/63_ast_extended.sh", "tests/fixtures/semantic/extended/**"]
@@ -179,7 +179,7 @@ reqs = ["2.7"]
 
 [task.2.8]
 title = "Legacy and mixed-format extraction adapters"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_mixed.c", "vendor/parsers/mixed/**", "tests/integration/64_ast_mixed.sh", "tests/fixtures/semantic/mixed/**"]

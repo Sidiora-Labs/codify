@@ -1,0 +1,6 @@
+source=https://github.com/polychromatist/tree-sitter-luau.git
+revision=71b03e66b2c8dd04e0133c9b998a54a58f239ca4
+license=LICENSE
+parser=src/parser.c
+scanner=src/scanner.c
+local_patch=scanner name-buffer growth retains the realloc result and aborts on allocation failure

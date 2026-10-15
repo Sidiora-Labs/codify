@@ -1,0 +1,5 @@
+source=https://github.com/tree-sitter-grammars/tree-sitter-hcl.git
+revision=64ad62785d442eb4d45df3a1764962dafd5bc98b
+license=LICENSE
+parser=src/parser.c
+scanner=src/scanner.c
