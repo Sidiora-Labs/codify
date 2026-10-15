@@ -122,7 +122,11 @@ negatives, and its 13 incremental/rebuild checkpoints had no graph-set
 differences. These are narrow micro-fixtures; they do not measure recall or
 precision on arbitrary repositories.
 
-The release resource run used two workers, generator seed 15, Linux 6.8 on
+The recorded resource run used binary SHA-256
+`ab11a0a34cecd3427aa57cdd543d27d1e1891c45ea008fe6352f48172e31e92f`.
+It predates the final retrieval follow-ups, so its timings are fixture observations
+for that recorded binary rather than final-binary performance claims.
+The run used two workers, generator seed 15, Linux 6.8 on
 x86_64 with six effective cores, and SQLite 3.45.1 in contentless FTS mode.
 The small fixture had 20 requested source files and 17,170 source bytes; the
 large fixture had 1,000 files, 97,484 actual lines and 2,485,542 source bytes.
@@ -149,7 +153,7 @@ figures describe those fixtures on that host, not a throughput guarantee.
 The raw output is reproducible with `scripts/bench-indexing.py`; wall time is
 authoritative because the phase timers do not include every semantic pass.
 
-The strict release build produced one `cg` executable of 68,341,216 bytes
+The strict release build produced one `cg` executable of 68,345,504 bytes
 (about 65.2 MiB). The vendored parser source tree occupies 341,397,866 bytes
 in this checkout (about 325.6 MiB) and increases checkout and build cost;
 it adds no runtime parser package or service. These sizes are build artifacts
