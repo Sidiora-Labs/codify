@@ -312,7 +312,7 @@ reqs = ["4.4"]
 
 [task.5.1]
 title = "Labelled extraction and graph convergence corpus"
-status = "pending"
+status = "done"
 wave = 5
 requires = ["3.7"]
 touches = ["tests/semantic/**", "tests/integration/76_semantic_conformance.sh"]

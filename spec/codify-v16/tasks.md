@@ -92,7 +92,7 @@
     - Expose ancestors/subtypes/implementations and unreferenced candidates with exclusion reasons for exports, framework roots, reflection, generated files and uncertain incoming boundaries. Never equate missing graph edges with safe deletion.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.4_
-  - [ ] 5.1 Labelled extraction and graph convergence corpus
+  - [x] 5.1 Labelled extraction and graph convergence corpus
     - Build source-labelled positive/negative cases across every advertised language/framework; report precision/recall/coverage by adapter. Compare canonical graph sets after edit/delete/rename/config changes and commit replay against true clean rebuilds across worktrees and failure recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 5.1, 5.2_
