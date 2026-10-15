@@ -1,0 +1,5 @@
+Language: kotlin
+Source: https://github.com/tree-sitter-grammars/tree-sitter-kotlin.git
+Commit: 3dea6dfa9c0129deb7c4315afbda806c85c41667
+License: LICENSE
+Generated grammar: parser.c (tree-sitter CLI 0.25.9)
