@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
+#include <time.h>
 
 extern const TSLanguage *tree_sitter_json(void);
 
@@ -80,6 +81,27 @@ int main(void) {
     for (int i = 0; i < 4; i++) assert(pthread_create(&threads[i], NULL,
                                                         run_parse, NULL) == 0);
     for (int i = 0; i < 4; i++) assert(pthread_join(threads[i], NULL) == 0);
+    /* A flat syntax list used to make indexed child lookup quadratic. */
+    size_t capacity = 100000, used = 0;
+    char *wide = malloc(capacity);
+    assert(wide);
+    used += (size_t)snprintf(wide, capacity, "{\n  \"item\": [");
+    for (int i = 0; i < 20000; i++) {
+        wide[used++] = '0';
+        if (i != 19999) wide[used++] = ',';
+    }
+    used += (size_t)snprintf(wide + used, capacity - used, "]\n}\n");
+    struct timespec begin, end;
+    clock_gettime(CLOCK_MONOTONIC, &begin);
+    ParseResult wide_result = {0};
+    assert(ast_try_parse("runtime_fixture", "wide.fixture", wide, used,
+                         &wide_result));
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long elapsed_ms = (end.tv_sec - begin.tv_sec) * 1000L +
+                      (end.tv_nsec - begin.tv_nsec) / 1000000L;
+    assert(elapsed_ms < 10000);
+    parse_result_free(&wide_result);
+    free(wide);
     size_t cancelled = 1;
     ParseResult result = {0};
     assert(!ast_try_parse_ex("runtime_fixture", "sample.fixture", "{}", 2,
