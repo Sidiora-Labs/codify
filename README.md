@@ -768,11 +768,11 @@ The database lock decides who *writes*. A separate gate decides who *walks*: `.c
 
 ## Notes and limitations
 
-- Ignore rules combine sensible defaults (VCS directories, `node_modules`, build output, binaries) with a `.cgignore` file using one glob per line.
-- Symbol extraction is heuristic. A comment-aware and string-aware pattern engine per language is tuned for recall on definitions and call sites. It is not a full type-checked resolver.
-- Snapshots store every non-ignored file up to 32 MB, including binaries. The graph indexes text files up to 8 MB.
-- A coalesced sync returns without a fresh graph: it queued its change for the process holding the gate and answers from the last completed index.
-- Queries answer for the branch you are on. `--branch <name>` asks another and `--all-branches` asks them all; a hit is labelled `@branch` only when more than one branch is in scope, so single-branch output is unchanged.
+- Ignore rules combine built-in defaults (VCS directories, `node_modules`, build output and binaries), root and nested `.gitignore` files, and `.cgignore` patterns.
+- Native syntax-tree adapters extract structural facts; embedded and declarative adapters recognize selected constructs, and file-only formats have no symbol graph. A labelled heuristic fallback handles parser failures. Resolution uses syntax evidence but is not a full type checker. Dynamic calls and ambiguous targets remain unresolved ([coverage](docs/indexing.md#extraction-coverage)).
+- Snapshots store non-ignored files up to 32 MiB, including binaries. The graph scans text files up to 8 MiB; parser depth and node limits are separate.
+- A coalesced sync queues its changes for the index holder and returns before those changes are guaranteed visible. Reads may see already committed index chunks; answer health reports pending work and checks contributing source files within a bounded budget.
+- Queries default to the current branch. Many accept `--branch <name>` and `--all-branches`, but graph traversal and inspection require one branch; cross-branch hits are labelled where supported. See each command's help for its scope.
 - `cg fleet` drives `git` and `gh` as subprocesses. Without `gh`, `pr` and `checkpoint` print the commands instead of running them, and `checkpoint` only treats `feature/*` head branches as Codify's own.
 - Jev needs the network and `OPENROUTER_API_KEY`. Nothing in the core loop depends on it, and no Jev answer changes an exit code.
 - The fleet supervisor is one per project and spawns agents through their CLIs; it does not authenticate them. A `spend` budget depends on the cost the driver reports, only Claude Code can be steered mid-turn, and the `retry` approval gate is accepted but not yet enforced. The rest is in [docs/hierarchy.md](docs/hierarchy.md#limitations).

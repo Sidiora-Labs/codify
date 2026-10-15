@@ -416,11 +416,11 @@ Le graphe est un fichier SQLite en mode WAL dans lequel écrit chaque processus 
 
 ## Notes et limites
 
-- Les règles d'exclusion combinent des valeurs par défaut raisonnables (répertoires VCS, `node_modules`, artefacts de build, binaires) avec un fichier `.cgignore` à raison d'un glob par ligne.
-- L'extraction des symboles est heuristique. Un moteur de motifs par langage, conscient des commentaires et des chaînes, est réglé pour maximiser le rappel sur les définitions et les sites d'appel. Ce n'est pas un résolveur avec vérification de types complète.
-- Les instantanés stockent tout fichier non exclu jusqu'à 32 Mo, binaires compris. Le graphe indexe les fichiers texte jusqu'à 8 Mo.
-- Une synchronisation fusionnée revient sans graphe frais : elle a confié son changement au processus qui tient la porte et répond depuis le dernier index terminé.
-- Les requêtes répondent pour la branche courante. `--branch <name>` en interroge une autre et `--all-branches` toutes ; un résultat n'est étiqueté `@branch` que si plusieurs branches sont concernées.
+- Les exclusions combinent les valeurs intégrées, les fichiers `.gitignore` de la racine et des sous-dossiers et les motifs `.cgignore`.
+- Les adaptateurs syntaxiques extraient des faits structurels ; un repli heuristique identifié intervient si le parseur échoue. La résolution utilise les preuves syntaxiques sans être un vérificateur de types complet ; les cibles dynamiques ou ambiguës restent indéterminées. Les adaptateurs intégrés et déclaratifs reconnaissent certains éléments, tandis que les formats suivis uniquement comme fichiers n’ont pas de graphe de symboles ; voir les [limites de couverture](../indexing.md#extraction-coverage).
+- Les instantanés conservent les fichiers non exclus jusqu’à 32 MiB, binaires compris. Le graphe parcourt le texte jusqu’à 8 MiB ; profondeur et nombre de nœuds ont leurs propres limites.
+- Une synchronisation regroupée met les changements en attente et revient avant de garantir leur visibilité. Les lectures peuvent voir des parties déjà validées ; l’état de la réponse signale les travaux en attente et les contrôles bornés des sources.
+- Les requêtes ciblent la branche courante par défaut. Beaucoup acceptent `--branch <name>` et `--all-branches`, mais le parcours et l’inspection du graphe exigent une seule branche ; consulter l’aide de chaque commande.
 - `cg fleet` pilote `git` et `gh` comme sous-processus. Sans `gh`, `pr` et `checkpoint` affichent les commandes au lieu de les exécuter, et `checkpoint` ne considère comme siennes que les branches `feature/*`.
 - Jev nécessite le réseau et `OPENROUTER_API_KEY`. Rien dans la boucle principale n'en dépend, et aucune réponse de Jev ne change un code de sortie.
 - Le superviseur de flotte est unique par projet et lance les agents via leurs CLI sans les authentifier. Un budget `spend` dépend du coût rapporté par le pilote, seul Claude Code peut être piloté en cours de tour, et la porte d'approbation `retry` est acceptée mais pas encore appliquée ([docs/hierarchy.md](../../docs/hierarchy.md#limitations)).

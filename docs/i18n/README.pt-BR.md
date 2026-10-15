@@ -438,11 +438,11 @@ O grafo é um único arquivo SQLite em modo WAL, e todo processo `cg` de um chec
 
 ## Notas e limitações
 
-- As regras de exclusão combinam padrões sensatos (diretórios de VCS, `node_modules`, artefatos de build, binários) com um arquivo `.cgignore` de um glob por linha.
-- A extração de símbolos é heurística. Um motor de padrões por linguagem, ciente de comentários e strings, é ajustado para maximizar o recall em definições e pontos de chamada. Não é um resolvedor com checagem de tipos completa.
-- Os snapshots armazenam todo arquivo não ignorado de até 32 MB, incluindo binários. O grafo indexa arquivos de texto de até 8 MB.
-- Uma sincronização aglutinada retorna sem um grafo novo: ela enfileira a mudança para o processo que segura o gate e responde a partir do último índice concluído.
-- As consultas respondem pela branch em que você está. `--branch <name>` consulta outra e `--all-branches` consulta todas; um resultado só é rotulado `@branch` quando há mais de uma branch no escopo, então a saída de uma única branch não muda.
+- As exclusões combinam padrões internos, arquivos `.gitignore` da raiz e de subdiretórios, e padrões `.cgignore`.
+- Adaptadores sintáticos extraem fatos estruturais; um fallback heurístico identificado atua se o parser falhar. A resolução usa evidência sintática sem ser um verificador de tipos completo; alvos dinâmicos ou ambíguos permanecem sem resolução. Adaptadores embutidos e declarativos reconhecem construções selecionadas, enquanto formatos apenas de arquivo não têm grafo de símbolos; veja os [limites de cobertura](../indexing.md#extraction-coverage).
+- Snapshots guardam arquivos não ignorados de até 32 MiB, inclusive binários. O grafo examina texto de até 8 MiB; profundidade e número de nós têm limites separados.
+- Um sync agrupado enfileira mudanças e retorna antes de garantir sua visibilidade. Leituras podem ver partes já confirmadas; a saúde da resposta relata trabalho pendente e checagens limitadas do código-fonte.
+- Consultas usam a branch atual por padrão. Muitas aceitam `--branch <name>` e `--all-branches`, mas travessia e inspeção do grafo exigem uma branch só; consulte a ajuda de cada comando.
 - `cg fleet` conduz `git` e `gh` como subprocessos. Sem `gh`, `pr` e `checkpoint` imprimem os comandos em vez de executá-los, e `checkpoint` só trata branches head `feature/*` como do próprio Codify.
 - O Jev precisa de rede e de `OPENROUTER_API_KEY`. Nada no ciclo central depende dele, e nenhuma resposta do Jev muda um código de saída.
 - O supervisor da frota é um por projeto e inicia agentes por suas CLIs; ele não os autentica. Um orçamento `spend` depende do custo reportado pelo driver, só o Claude Code pode ser direcionado no meio de um turno, e o gate de aprovação `retry` é aceito, mas ainda não aplicado. O resto está em [docs/hierarchy.md](../../docs/hierarchy.md#limitations).

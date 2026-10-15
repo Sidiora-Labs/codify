@@ -55,6 +55,7 @@ class ServeClient {
             return false;
         }
         const proc = this.proc;
+        const closed = new Promise((resolve) => proc.once('close', resolve));
         proc.on('error', (e) => this.log(`cg serve error: ${e.message}`));
         /* a server that has exited makes the next write an EPIPE: the exit
          * handler below is the answer to that, not a crash */
@@ -83,6 +84,13 @@ class ServeClient {
             if (!this.cursor && this.info) this.cursor = this.info.head || 0;
             return true;
         } catch (e) {
+            // Exit can reject initialize before the child's stderr stream drains.
+            if (proc.exitCode !== null) {
+                await new Promise((resolve) => {
+                    const timer = setTimeout(resolve, 100);
+                    closed.then(() => { clearTimeout(timer); resolve(); });
+                });
+            }
             if (!this.unsupported && !/unknown command/.test(stderr))
                 this.log(`cg serve handshake failed: ${e.message}`);
             if (/unknown command/.test(stderr)) this.unsupported = true;

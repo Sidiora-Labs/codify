@@ -51,9 +51,15 @@ if want serve; then
 exec "$CG" "\$@"
 EOF
     chmod +x "$TMP/oldcg"
-    node - "$EXT" "$CG" "$TMP/sv" "$TMP/oldcg" <<'JS'
+    cat > "$TMP/delayedcg" <<EOF
+#!/bin/sh
+[ "\$1" = serve ] && { (sleep 0.03; echo "cg: unknown command 'serve'" >&2) & exit 1; }
+exec "$CG" "\$@"
+EOF
+    chmod +x "$TMP/delayedcg"
+    node - "$EXT" "$CG" "$TMP/sv" "$TMP/oldcg" "$TMP/delayedcg" <<'JS'
 const path = require('path'), cp = require('child_process');
-const [dir, CG, cwd, OLD] = process.argv.slice(2);
+const [dir, CG, cwd, OLD, DELAYED] = process.argv.slice(2);
 const { ServeClient, liveModel, applyEvent } = require(path.join(dir, 'serve.js'));
 const { patchRows, mergeTasks } = require(path.join(dir, 'tasks.js'));
 const check = (c, w) => { if (!c) throw new Error(w); };
@@ -140,6 +146,13 @@ const cgRun = (...a) => cp.spawnSync(CG, a, { cwd, encoding: 'utf8' });
     check(old.unsupported === true, 'old cg: reported as unsupported');
     check(old.proc === null, 'old cg: no process left');
     old.dispose();
+    // The wrapper exits before its child writes stderr, so exit and stream
+    // closure occur in a known order. Unsupported detection must drain it.
+    const delayed = new ServeClient(DELAYED, cwd, () => {});
+    check(await delayed.start() === false, 'delayed old cg: start is false');
+    check(delayed.unsupported === true, 'delayed old cg: reported as unsupported');
+    check(delayed.proc === null, 'delayed old cg: no process left');
+    delayed.dispose();
     console.log('serve client ok');
 })().catch((e) => { console.error(e.stack || e); process.exit(1); });
 JS

@@ -449,11 +449,11 @@ El grafo es un único archivo SQLite en modo WAL en el que escriben todos los pr
 
 ## Notas y limitaciones
 
-- Las reglas de exclusión combinan valores por defecto razonables (directorios de VCS, `node_modules`, artefactos de compilación, binarios) con un archivo `.cgignore` de un glob por línea.
-- La extracción de símbolos es heurística. Un motor de patrones por lenguaje, consciente de comentarios y cadenas, está ajustado para maximizar el recall en definiciones y sitios de llamada. No es un resolvedor con verificación de tipos completa.
-- Las instantáneas almacenan todo archivo no ignorado de hasta 32 MB, incluidos los binarios. El grafo indexa archivos de texto de hasta 8 MB.
-- Una sincronización agrupada vuelve sin un grafo fresco: deja su cambio en cola para el proceso que tiene la puerta y responde con el último índice completado.
-- Las consultas responden para la rama actual. `--branch <name>` pregunta a otra y `--all-branches` a todas; un resultado solo se etiqueta `@branch` cuando hay más de una rama en el alcance.
+- Las exclusiones combinan valores integrados, archivos `.gitignore` de la raíz y subdirectorios, y patrones de `.cgignore`.
+- Los adaptadores sintácticos extraen hechos estructurales; un respaldo heurístico identificado actúa si falla el parser. La resolución usa evidencia sintáctica, sin ser un verificador de tipos completo; los destinos dinámicos o ambiguos quedan sin resolver. Los adaptadores incrustados y declarativos reconocen construcciones seleccionadas, mientras que los formatos de solo archivo no ofrecen un grafo de símbolos; consulte los [límites de cobertura](../indexing.md#extraction-coverage).
+- Las instantáneas guardan archivos no excluidos de hasta 32 MiB, incluidos binarios. El grafo examina texto de hasta 8 MiB; profundidad y número de nodos tienen límites aparte.
+- Una sincronización agrupada encola cambios y vuelve antes de garantizar que sean visibles. Las lecturas pueden ver partes ya confirmadas; la salud de la respuesta informa trabajo pendiente y comprobaciones acotadas de archivos fuente.
+- Las consultas usan la rama actual por defecto. Muchas aceptan `--branch <name>` y `--all-branches`, pero el recorrido y la inspección del grafo requieren una sola rama; consulte la ayuda de cada comando.
 - `cg fleet` usa `git` y `gh` como subprocesos. Sin `gh`, `pr` y `checkpoint` imprimen los comandos en lugar de ejecutarlos, y `checkpoint` solo trata como propias las ramas `feature/*`.
 - Jev necesita red y `OPENROUTER_API_KEY`. Nada del ciclo principal depende de él y ninguna respuesta de Jev cambia un código de salida.
 - El supervisor de flota es uno por proyecto y lanza los agentes mediante sus CLI; no los autentica. Un presupuesto `spend` depende del coste que informe el driver, solo Claude Code puede recibir steering a mitad de turno y la puerta de aprobación `retry` se acepta pero aún no se aplica. El resto está en [docs/hierarchy.md](../../docs/hierarchy.md#limitations).
