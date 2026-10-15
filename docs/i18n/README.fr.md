@@ -355,8 +355,8 @@ La barre latérale Codify porte une vue **Agent** persistante : l'extension est 
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produit codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produit codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Développement

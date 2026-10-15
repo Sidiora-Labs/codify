@@ -22,4 +22,8 @@ done
     echo 'release gate: binary version is not 1.6.0' >&2
     exit 1
 }
+[ "$(node -p "require('./editors/vscode/package.json').version")" = 1.6.0 ] || {
+    echo 'release gate: extension package version is not 1.6.0' >&2
+    exit 1
+}
 echo "release gate: strict clean build, units, $passed integration fixtures and spec lint passed"

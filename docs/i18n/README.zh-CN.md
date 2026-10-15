@@ -368,8 +368,8 @@ Codify 侧边栏有一个常驻的 **Agent** 聊天视图:扩展是一个 [Agent
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # 生成 codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # 生成 codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 Marketplace 标识为 `SidioraLabs.codify-workflow`。详见 [editors/vscode/README.md](../../editors/vscode/README.md)。

@@ -227,14 +227,14 @@ No build step and no dependencies — the extension is plain JavaScript, includi
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. In a Remote SSH,
 WSL, or container window, install the VSIX on the **remote** extension host,
 not only the local UI side. The Agent header shows the running version (for
-example `v1.4.0`), so a stale host is immediately visible after reload.
+example `v1.6.0`), so a stale host is immediately visible after reload.
 
 For development, open `editors/vscode/` in VS Code and press F5.
 

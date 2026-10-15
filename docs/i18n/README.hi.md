@@ -384,8 +384,8 @@ Codify sidebar में एक स्थायी **Agent** chat view है: �
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # codify-workflow-1.4.0.vsix बनाता है
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # codify-workflow-1.6.0.vsix बनाता है
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 Marketplace पहचान `SidioraLabs.codify-workflow` है। देखें [editors/vscode/README.md](../../editors/vscode/README.md)।

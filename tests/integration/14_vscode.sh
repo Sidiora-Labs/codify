@@ -485,9 +485,13 @@ const readme = fs.readFileSync(path.join(dir, 'README.md'), 'utf8');
 if (!readme.includes('`SidioraLabs.codify-workflow`')) {
     throw new Error('README does not name the Marketplace identity SidioraLabs.codify-workflow');
 }
-const changelog = fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');
-if (!changelog.includes(`extension ${pkg.version}`)) {
-    throw new Error(`CHANGELOG has no entry for extension ${pkg.version}`);
+const example = `codify-workflow-${pkg.version}.vsix`;
+if (!readme.includes(example)) {
+    throw new Error(`extension README does not show packaged version ${pkg.version}`);
+}
+const rootReadme = fs.readFileSync(path.join(dir, '..', '..', 'README.md'), 'utf8');
+if (!rootReadme.includes(example)) {
+    throw new Error(`root README does not show packaged version ${pkg.version}`);
 }
 if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
     throw new Error(`invalid installed extension version: ${pkg.version}`);

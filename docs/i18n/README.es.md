@@ -390,8 +390,8 @@ La extensión no tiene dependencias ni paso de compilación; su identidad en el 
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produce codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produce codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Desarrollo
