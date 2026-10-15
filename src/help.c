@@ -170,6 +170,24 @@ static const HelpCmd HELP[] = {
   .examples = "cg flow callees parse_file --json\n"
     "cg flow paths handler save_record --depth 5 --json",
   .related = "impact,symbol,context" },
+{ .group = "graph", .name = "inspect", .args = "<hierarchy|unused>",
+  .usage = "inspect <hierarchy|unused> [name] [-n N] [--path GLOB]",
+  .summary = "type hierarchy and cautious unreferenced-code inspection",
+  .detail = "Hierarchy reads bounded typed relations. Unused distinguishes "
+    "symbols without known incoming references from internally referenced "
+    "islands outside known roots, with explicit exclusion reasons. "
+    "A missing graph edge never proves code safe to delete.",
+  .examples = "cg inspect hierarchy Service --json\n"
+    "cg inspect unused --path 'src/*' -n 20 --json",
+  .related = "symbol,impact" },
+{ .group = "graph", .name = "inspect hierarchy", .args = "<name> [-n N]",
+  .usage = "inspect hierarchy <name> [-n N]",
+  .summary = "bounded ancestors, subtypes and implementations",
+  .related = "inspect,symbol", .hide = true },
+{ .group = "graph", .name = "inspect unused", .args = "[-n N] [--path GLOB]",
+  .usage = "inspect unused [-n N] [--path GLOB]",
+  .summary = "unreferenced symbols with exclusion reasons",
+  .related = "inspect,impact", .hide = true },
 { .group = "graph", .name = "context", .args = "<query>",
   .usage = "context <query> [--budget N] [-n K] [--path GLOB] [--lang L] "
     "[--kind K] [--name N] "
