@@ -24,10 +24,19 @@
  * hash the worker computes equals twin_hash, the parse is skipped and the
  * twin's rows are copied — the whole point of one graph for many branches. */
 typedef struct {
-    char *rel; long size, mtime; char dbhash[65];
+    char *rel; long size, mtime, mtime_ns; char dbhash[65];
     long twin_id, twin_lines; char twin_hash[65];
 } Walked;
-typedef struct { char *path; long id, size, mtime; char hash[65]; } DbFile;
+typedef struct { char *path; long id, size, mtime_ns; bool legacy_time;
+                 char hash[65]; } DbFile;
+
+static long stat_mtime_ns(const struct stat *st) {
+#ifdef __APPLE__
+    return (long)st->st_mtimespec.tv_sec * 1000000000L + st->st_mtimespec.tv_nsec;
+#else
+    return (long)st->st_mtim.tv_sec * 1000000000L + st->st_mtim.tv_nsec;
+#endif
+}
 
 typedef struct {
     int idx;                 /* -1 = skipped (binary/unreadable/too big) */
@@ -44,7 +53,8 @@ typedef struct {
 
 typedef struct { Walked *v; int n, cap; } WalkList;
 
-static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {
+static void walk_push(WalkList *wl, const char *rel, long size, long mtime,
+                      long mtime_ns) {
     if (wl->n == wl->cap) {
         wl->cap = wl->cap ? wl->cap * 2 : 256;
         wl->v = xrealloc(wl->v, sizeof(Walked) * (size_t)wl->cap);
@@ -52,6 +62,7 @@ static void walk_push(WalkList *wl, const char *rel, long size, long mtime) {
     wl->v[wl->n].rel = xstrdup(rel);
     wl->v[wl->n].size = size;
     wl->v[wl->n].mtime = mtime;
+    wl->v[wl->n].mtime_ns = mtime_ns;
     wl->v[wl->n].dbhash[0] = 0;
     wl->v[wl->n].twin_hash[0] = 0;
     wl->v[wl->n].twin_id = 0;
@@ -68,7 +79,8 @@ static void walk_dir(const char *root, const char *rel, const Ignore *ig,
     ws.n = 0;
     walk_parallel(root, rel, ig, threads, MAX_FILE_BYTES, &ws);
     for (int i = 0; i < ws.n; i++)
-        walk_push(wl, ws.v[i].rel, ws.v[i].size, ws.v[i].mtime);
+        walk_push(wl, ws.v[i].rel, ws.v[i].size, ws.v[i].mtime,
+                  ws.v[i].mtime_ns);
     walkset_free(&ws);
 }
 
@@ -209,10 +221,11 @@ static void stmts_init(Cg *cg, Stmts *s) {
     /* rows belong to the branch this tree is on; the same path on another
      * branch is another row, so a worktree never overwrites its siblings */
     s->up_file = cg_prep(cg,
-        "INSERT INTO files(path,lang,size,mtime,hash,lines,branch_id,base) "
-        "VALUES(?,?,?,?,?,?,?7,?8) "
+        "INSERT INTO files(path,lang,size,mtime,hash,lines,branch_id,base,mtime_ns) "
+        "VALUES(?,?,?,?,?,?,?7,?8,?9) "
         "ON CONFLICT(branch_id,path) DO UPDATE SET lang=excluded.lang,"
-        "size=excluded.size,mtime=excluded.mtime,hash=excluded.hash,"
+        "size=excluded.size,mtime=excluded.mtime,mtime_ns=excluded.mtime_ns,"
+        "hash=excluded.hash,"
         "lines=excluded.lines,base=excluded.base");
     s->sel_file   = cg_prep(cg, "SELECT id FROM files WHERE path=? AND branch_id=?2");
     s->del_symfts = cg_prep(cg, "DELETE FROM symbol_fts WHERE rowid IN "
@@ -376,7 +389,11 @@ static void step_reset(sqlite3_stmt *st) {
     sqlite3_clear_bindings(st);
 }
 
-static void purge_file_children(Stmts *s, long file_id) {
+static int purge_file_children(Cg *cg, Stmts *s, long file_id) {
+    /* Shared semantic facts and incoming targets are invalidated before
+     * legacy symbols disappear. Both operations use the current chunk's
+     * write transaction. */
+    if (sem_file_purge(cg, file_id) != 0) return -1;
     bool syms = true, cmts = true, body = true;
     if (s->fts_purged) {
         syms = cmts = body = false;
@@ -407,13 +424,14 @@ static void purge_file_children(Stmts *s, long file_id) {
         sqlite3_bind_int64(s->del_cmtfts, 1, file_id); step_reset(s->del_cmtfts);
     }
     sqlite3_bind_int64(s->del_cmts,   1, file_id); step_reset(s->del_cmts);
+    return 0;
 }
 
 /* Copy every child row of `from` onto `file_id` — the branch-reuse path.
  * Truthful because the two files hold the same bytes: the parse, the doc
  * baselines (hash_lines over identical lines) and the body index would all
  * come out the same, so only the ids differ. */
-static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
+static int index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
                             const char *rel, const Done *d, IndexStats *st) {
     /* a contentless body index has no text to copy: the worker kept the
      * file's bytes, and they are indexed like a parsed file's */
@@ -431,6 +449,7 @@ static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
         step_reset(in_order[i]);
         if (count[i]) *count[i] += sqlite3_changes(cg->db);
     }
+    if (sem_file_copy(cg, file_id, from) != 0) return -1;
     if (s->contentless && d->body) {
         sqlite3_bind_int64(s->ins_body, 1, file_id);
         sqlite3_bind_text (s->ins_body, 2, rel, -1, SQLITE_STATIC);
@@ -443,9 +462,10 @@ static void index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
     sqlite3_bind_int64(s->scope_syms, 1, file_id);   step_reset(s->scope_syms);
     sqlite3_bind_int64(s->scope_routes, 1, file_id); step_reset(s->scope_routes);
     st->files_reused++;
+    return 0;
 }
 
-static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
+static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
                        IndexStats *st) {
     const char *lang = lang_for_path(w->rel);
     sqlite3_bind_text (s->up_file, 1, w->rel, -1, SQLITE_STATIC);
@@ -460,6 +480,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     const char *base = strrchr(w->rel, '/');
     sqlite3_bind_text (s->up_file, 8, base ? base + 1 : w->rel, -1,
                        SQLITE_STATIC);
+    sqlite3_bind_int64(s->up_file, 9, w->mtime_ns);
     step_reset(s->up_file);
 
     sqlite3_bind_text(s->sel_file, 1, w->rel, -1, SQLITE_STATIC);
@@ -469,7 +490,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
         file_id = sqlite3_column_int64(s->sel_file, 0);
     sqlite3_reset(s->sel_file);
     sqlite3_clear_bindings(s->sel_file);
-    if (!file_id) return;
+    if (!file_id) return -1;
     {                                             /* codify-v15 1.2 */
         char pw[2048];
         name_words(w->rel, pw, sizeof pw);
@@ -481,13 +502,14 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     /* size/mtime changed but content did not (touch, branch switch): the
      * upsert above refreshed the metadata; keep the child rows — and with
      * them, stable symbol rowids. */
-    if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return;
+    if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return 0;
 
     scope_record_file(s, file_id, w->dbhash[0] == 0);
 
     if (d->reuse_from) {
-        purge_file_children(s, file_id);
-        index_copy_rows(cg, s, file_id, d->reuse_from, w->rel, d, st);
+        if (purge_file_children(cg, s, file_id) != 0 ||
+            index_copy_rows(cg, s, file_id, d->reuse_from, w->rel, d, st) != 0)
+            return -1;
         /* codify-v15 1.1: body_tri keeps no content to copy from the twin;
          * the worker kept these bytes for it */
         if (d->body) {
@@ -498,7 +520,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
         }
         st->files_indexed++;
         st->bytes += w->size;
-        return;
+        return 0;
     }
 
     /* Drift baselines about to be purged with the rows: a doc whose text
@@ -520,11 +542,16 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     sqlite3_reset(s->sel_docs);
     sqlite3_clear_bindings(s->sel_docs);
 
-    purge_file_children(s, file_id);
+    if (purge_file_children(cg, s, file_id) != 0) {
+        for (int i = 0; i < noldd; i++) { free(oldd[i].body); free(oldd[i].hash); }
+        free(oldd);
+        return -1;
+    }
 
     if (d->parsed) {
         ParseResult *pr = &d->pr;
         long *rowids = pr->ndefs ? xmalloc(sizeof(long) * (size_t)pr->ndefs) : NULL;
+        long *refids = pr->nrefs ? xmalloc(sizeof(long) * (size_t)pr->nrefs) : NULL;
         int  *ends   = pr->ndefs ? xmalloc(sizeof(int) * (size_t)pr->ndefs) : NULL;
         for (int i = 0; i < pr->ndefs; i++) {
             int end = pr->defs[i].end_line;
@@ -586,6 +613,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             sqlite3_bind_text(s->ins_ref, 6, "call", -1, SQLITE_STATIC);
             sqlite3_bind_int(s->ins_ref, 7, pr->refs[i].argc);
             step_reset(s->ins_ref);
+            refids[i] = sqlite3_last_insert_rowid(cg->db);
             st->refs++;
         }
         /* Comment classification, against the very extents that attributed
@@ -666,8 +694,16 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
             }
             st->anchors++;
         }
+        int sem_rc = sem_file_replace(cg, file_id, &pr->sem, rowids, pr->ndefs,
+                                      refids, pr->nrefs);
         free(rowids);
+        free(refids);
         free(ends);
+        if (sem_rc != 0) {
+            for (int i = 0; i < noldd; i++) { free(oldd[i].body); free(oldd[i].hash); }
+            free(oldd);
+            return -1;
+        }
         for (int i = 0; i < pr->nroutes; i++) {
             sqlite3_bind_int64(s->ins_route, 1, file_id);
             sqlite3_bind_text (s->ins_route, 2, pr->routes[i].framework, -1, SQLITE_STATIC);
@@ -707,6 +743,7 @@ static void write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     free(oldd);
     st->files_indexed++;
     st->bytes += w->size;
+    return 0;
 }
 
 /* ---------------- top level ---------------- */
@@ -978,18 +1015,41 @@ static void fts_prepurge(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n) {
     s->fts_purged = true;
 }
 
+/* A committed chunk needs resolution, even if a later chunk or the final
+ * resolution transaction cannot complete. Keep this marker branch scoped. */
+static void semantic_retry_debt(Cg *cg) {
+    char key[64];
+    cg_bkey(cg, "index_pending_resolve", key, sizeof key);
+    cg_meta_set(cg, key, "1");
+}
+
 static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
                        IndexStats *st) {
     long t0 = now_ms();
     int rc = progress_begin_write(cg);
+    bool tx_started = rc == 0;
     if (rc == 0) fts_prepurge(cg, s, jobs, chunk, n);
+    bool wrote = false;
     for (int i = 0; i < n; i++) {
-        if (rc == 0) write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st);
+        if (rc == 0) {
+            if (write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st) != 0) {
+                st->semantic_failed = true;
+                rc = -1;
+            }
+            else
+                wrote = true;
+        }
         if (chunk[i].parsed) parse_result_free(&chunk[i].pr);
         free(chunk[i].body);
     }
     s->fts_purged = false;
-    if (rc == 0) cg_exec(cg, "COMMIT");
+    if (rc == 0) {
+        if (wrote) semantic_retry_debt(cg);
+        cg_exec(cg, "COMMIT");
+    } else if (tx_started) {
+        cg_exec(cg, "ROLLBACK");
+        semantic_retry_debt(cg);
+    }
     index_phase_ms(st, IDX_PH_WRITE, t0);
     return rc;
 }
@@ -1053,7 +1113,8 @@ static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,
         if (ignored || ignore_match(ig, t[i], isdir)) continue;
         if (isdir) walk_dir(root, t[i], ig, threads, wl);
         else if (S_ISREG(st.st_mode) && st.st_size <= MAX_FILE_BYTES)
-            walk_push(wl, t[i], (long)st.st_size, (long)st.st_mtime);
+            walk_push(wl, t[i], (long)st.st_size, (long)st.st_mtime,
+                      stat_mtime_ns(&st));
     }
 }
 
@@ -1126,7 +1187,8 @@ static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
  * already parsed there is copied rather than parsed again. Adds to st;
  * returns 0, or -1 when the database stayed busy (a stall). */
 static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
-                      char **targets, int ntargets, IndexStats *st) {
+                      char **targets, int ntargets, char **dirty, int ndirty,
+                      bool dirty_all, IndexStats *st) {
     long tw = now_ms();
     Ignore ig;
     ignore_load(&ig, cg->root);
@@ -1166,7 +1228,7 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     DbFile *dbf = NULL;
     int ndbf = 0, cdbf = 0;
     sqlite3_stmt *sel = cg_prep(cg,
-        "SELECT id,path,size,mtime,hash FROM files WHERE branch_id=?");
+        "SELECT id,path,size,mtime_ns,hash FROM files WHERE branch_id=?");
     sqlite3_bind_int64(sel, 1, cg->branch_id);
     while (sqlite3_step(sel) == SQLITE_ROW) {
         const char *path = (const char *)sqlite3_column_text(sel, 1);
@@ -1178,7 +1240,8 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         dbf[ndbf].id    = sqlite3_column_int64(sel, 0);
         dbf[ndbf].path  = xstrdup(path);
         dbf[ndbf].size  = sqlite3_column_int64(sel, 2);
-        dbf[ndbf].mtime = sqlite3_column_int64(sel, 3);
+        dbf[ndbf].legacy_time = sqlite3_column_type(sel, 3) == SQLITE_NULL;
+        dbf[ndbf].mtime_ns = sqlite3_column_int64(sel, 3);
         const char *h = (const char *)sqlite3_column_text(sel, 4);
         snprintf(dbf[ndbf].hash, 65, "%s", h ? h : "");
         ndbf++;
@@ -1195,9 +1258,12 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         int c = (wi >= wl.n) ? 1 : (di >= ndbf) ? -1
               : strcmp(wl.v[wi].rel, dbf[di].path);
         if (c == 0) {
-            if (o->full || wl.v[wi].size != dbf[di].size ||
-                wl.v[wi].mtime != dbf[di].mtime) {
-                walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size, wl.v[wi].mtime);
+            if (o->full || targets || dirty_all ||
+                (ndirty && targets_cover(dirty, ndirty, wl.v[wi].rel)) ||
+                dbf[di].legacy_time || wl.v[wi].size != dbf[di].size ||
+                wl.v[wi].mtime_ns != dbf[di].mtime_ns) {
+                walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size,
+                          wl.v[wi].mtime, wl.v[wi].mtime_ns);
                 /* remember the stored hash so unchanged content can skip the
                  * purge+reinsert; --full keeps its force-reparse meaning */
                 if (!o->full)
@@ -1207,7 +1273,8 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
             }
             wi++; di++;
         } else if (c < 0) {
-            walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size, wl.v[wi].mtime);
+            walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size,
+                      wl.v[wi].mtime, wl.v[wi].mtime_ns);
             wi++;
         } else {
             removed_ids[nremoved++] = dbf[di].id;
@@ -1238,7 +1305,11 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
             sqlite3_stmt *del_file = cg_prep(cg, "DELETE FROM files WHERE id=?");
             for (int i = 0; i < nremoved; i++) {
                 scope_record_file(&s, removed_ids[i], false);
-                purge_file_children(&s, removed_ids[i]);
+                if (purge_file_children(cg, &s, removed_ids[i]) != 0) {
+                    st->semantic_failed = true;
+                    stalled = true;
+                    break;
+                }
                 sqlite3_bind_int64(del_file, 1, removed_ids[i]);
                 step_reset(del_file);
                 sqlite3_bind_int64(s.del_filefts, 1, removed_ids[i]);
@@ -1246,7 +1317,13 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                 st->files_removed++;
             }
             sqlite3_finalize(del_file);
-            cg_exec(cg, "COMMIT");
+            if (stalled) {
+                cg_exec(cg, "ROLLBACK");
+                semantic_retry_debt(cg);
+            } else {
+                semantic_retry_debt(cg);
+                cg_exec(cg, "COMMIT");
+            }
         }
         index_phase_ms(st, IDX_PH_WRITE, trm);
     }
@@ -1470,7 +1547,14 @@ static bool is_ignore_file(const char *rel) {
  * walk the tree. */
 static bool index_git_plan(Cg *cg, const IndexOpts *o, const char *head,
                            char ***targets, int *ntargets) {
-    if (o->full || !head[0]) return false;
+    if (o->full || o->force_walk || !head[0]) return false;
+    /* Legacy rows need one whole-tree verification before Git candidates
+     * can safely narrow the walk. */
+    char migration_sql[128];
+    snprintf(migration_sql, sizeof migration_sql,
+             "SELECT count(*) FROM files WHERE branch_id=%ld AND mtime_ns IS NULL",
+             cg->branch_id);
+    if (count_sql(cg, migration_sql) > 0) return false;
     int mode = config_index_walk(cg->root);
     if (mode == CG_WALK_FULL) return false;
     char key[64];
@@ -1573,6 +1657,11 @@ static void index_git_record(Cg *cg, const char *head, bool gitpass) {
 static bool index_is_fresh(Cg *cg, long max_age_ms) {
     if (max_age_ms <= 0) return false;
     if (syncgate_is_dirty(cg)) return false;
+    char migration_sql[128];
+    snprintf(migration_sql, sizeof migration_sql,
+             "SELECT count(*) FROM files WHERE branch_id=%ld AND mtime_ns IS NULL",
+             cg->branch_id);
+    if (count_sql(cg, migration_sql) > 0) return false;
     char key[64];
     cg_bkey(cg, "index_pending_resolve", key, sizeof key);
     char *p = cg_meta_get(cg, key);
@@ -1592,9 +1681,13 @@ static void index_report(const IndexStats *st, const IndexOpts *o) {
     progress_end();                     /* the summary replaces the line */
     if (o->quiet) return;
     if (st->busy) {
-        fprintf(stderr, "cg: index stalled — the database stayed busy; "
-                        "%ld file%s written before the stall are kept\n",
-                st->files_indexed, st->files_indexed == 1 ? "" : "s");
+        if (st->semantic_failed)
+            fprintf(stderr, "cg: index stalled — semantic storage failed; "
+                            "retry debt retained\n");
+        else
+            fprintf(stderr, "cg: index stalled — the database stayed busy; "
+                            "%ld file%s written before the stall are kept\n",
+                    st->files_indexed, st->files_indexed == 1 ? "" : "s");
     } else if (st->coalesced) {
         printf("index in progress in another cg process — change queued for it\n");
     } else if (st->fresh) {
@@ -1680,24 +1773,33 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     char **targets = NULL;
     int ntargets = 0;
     bool whole = o->npaths <= 0;
+    char **dirty = NULL;
+    int ndirty = 0;
+    bool dirty_all = false;
     if (!whole) {
         for (int i = 0; i < o->npaths; i++) {
             char rel[4096];
             if (!target_rel(cg->root, o->paths[i], rel, sizeof rel)) continue;
             targets = xrealloc(targets, sizeof *targets * (size_t)(ntargets + 1));
             targets[ntargets++] = xstrdup(rel);
+            dirty = xrealloc(dirty, sizeof *dirty * (size_t)(ndirty + 1));
+            dirty[ndirty++] = xstrdup(rel);
         }
-        if (note) {
-            char **nt = NULL;
-            bool nwhole = false;
-            int nn = note_targets(cg->root, note, &nt, &nwhole);
-            if (nwhole) whole = true;
-            for (int i = 0; i < nn; i++) {
+    }
+    if (note) {
+        char **nt = NULL;
+        bool nwhole = false;
+        int nn = note_targets(cg->root, note, &nt, &nwhole);
+        if (nwhole) { whole = true; dirty_all = true; }
+        for (int i = 0; i < nn; i++) {
+            dirty = xrealloc(dirty, sizeof *dirty * (size_t)(ndirty + 1));
+            dirty[ndirty++] = xstrdup(nt[i]);
+            if (!whole) {
                 targets = xrealloc(targets, sizeof *targets * (size_t)(ntargets + 1));
                 targets[ntargets++] = nt[i];
-            }
-            free(nt);
+            } else free(nt[i]);
         }
+        free(nt);
     }
     free(note);
 
@@ -1724,7 +1826,8 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
         long ps = now_ms();
         st->passes++;
         if (whole || (gitpass && pass == 0)) whole_at = ps;
-        if (index_pass(cg, si, o, whole ? NULL : targets, ntargets, st) != 0) {
+        if (index_pass(cg, si, o, whole ? NULL : targets, ntargets,
+                       dirty, ndirty, dirty_all, st) != 0) {
             stalled = true;
             break;
         }
@@ -1738,6 +1841,8 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
         }
         targets_free(targets, ntargets);
         targets = NULL; ntargets = 0;
+        targets_free(dirty, ndirty);
+        dirty = NULL; ndirty = 0; dirty_all = false;
         /* a note left while we walked: an agent wrote during the pass.
          * Drain it now rather than leave it for a fourth process. Three
          * passes bound the loop; anything after that stays queued. */
@@ -1749,6 +1854,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
         if (!whole && ntargets == 0) break;
     }
     targets_free(targets, ntargets);
+    targets_free(dirty, ndirty);
     /* codify-v15 1.5: a whole walk also puts back missing body_tri rows */
     if (!stalled && whole_at > 0) index_tri_repair(cg, &st->tri_repaired);
 
@@ -1790,8 +1896,29 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
             }
             index_phase_ms(st, IDX_PH_RESOLVE, ts);
             progress_tick(3, 3, NULL);
-            cg_meta_set(cg, pkey, "0");
-            cg_exec(cg, "COMMIT");
+            bool full_sem = o->full || recover || !st->scoped;
+            long *changed = NULL;
+            int nchanged = 0;
+            if (!full_sem) {
+                sqlite3_stmt *q = cg_prep(cg,
+                    "SELECT id FROM temp.scope_files ORDER BY id");
+                while (sqlite3_step(q) == SQLITE_ROW) {
+                    changed = xrealloc(changed,
+                        sizeof *changed * (size_t)(nchanged + 1));
+                    changed[nchanged++] = sqlite3_column_int64(q, 0);
+                }
+                sqlite3_finalize(q);
+            }
+            int sem_rc = sem_pass_run(cg, full_sem ? NULL : changed, nchanged);
+            free(changed);
+            if (sem_rc == 0) {
+                cg_meta_set(cg, pkey, "0");
+                cg_exec(cg, "COMMIT");
+            } else {
+                cg_exec(cg, "ROLLBACK");
+                st->semantic_failed = true;
+                stalled = true;
+            }
         }
     }
     index_scope_end(cg);

@@ -4,11 +4,11 @@
 
 ## Tasks
 
-  - [ ] 1.1 Subsecond change detection and explicit-dirty hashing
+  - [x] 1.1 Subsecond change detection and explicit-dirty hashing
     - Fix same-size same-second and preserved-metadata dirty edits in full and targeted passes; migrate timestamps; preserve hash reuse, branch isolation and Git candidate behavior.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1_
-  - [ ] 1.2 Watcher reconciliation and coverage health
+  - [x] 1.2 Watcher reconciliation and coverage health
     - Handle overflow/root loss/registration errors, persist reconciliation debt and expose coverage health. Implement safe portable polling fallback; test injected loss, retries and directory moves.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.2_
@@ -16,7 +16,7 @@
     - Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.3, 1.4_
-  - [ ] 2.1 Shared semantic records, storage and lifecycle
+  - [x] 2.1 Shared semantic records, storage and lifecycle
     - Define the shared rich extraction contract and branch-safe typed graph schema; wire persistence, migration, deletion, identical-content reuse and cross-worktree copy. Publish API to sibling workers early; extend existing symbols/refs rather than duplicating ownership inconsistently.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 3.3, 3.4_
