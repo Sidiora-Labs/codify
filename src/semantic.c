@@ -137,6 +137,7 @@ static const char *SEM_SCHEMA =
     "CREATE INDEX IF NOT EXISTS idx_sem_edge_file ON semantic_edges(branch_id,source_file_id);"
     "CREATE INDEX IF NOT EXISTS idx_sem_edge_target_file ON semantic_edges(branch_id,target_file_id);"
     "CREATE INDEX IF NOT EXISTS idx_sem_edge_channel ON semantic_edges(branch_id,channel,kind);"
+    "CREATE INDEX IF NOT EXISTS idx_sem_edge_ref ON semantic_edges(branch_id,source_ref_id,provenance);"
     "CREATE TABLE IF NOT EXISTS semantic_dependencies("
     "id INTEGER PRIMARY KEY,branch_id INTEGER NOT NULL,file_id INTEGER NOT NULL,"
     "dependency_key TEXT NOT NULL,dependency_hash TEXT,kind TEXT NOT NULL,"

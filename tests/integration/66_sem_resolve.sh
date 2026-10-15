@@ -85,6 +85,28 @@ assert c.execute("SELECT original_text,strategy,provenance FROM semantic_edges W
 assert c.execute('SELECT count(*) FROM semantic_edges').fetchone()[0]==5
 assert c.execute('SELECT verdict,target_id FROM refs WHERE id=103').fetchone()==('unknown',None)
 assert 'unknown receiver' in c.execute('SELECT evidence FROM semantic_references WHERE ref_id=103').fetchone()[0]
+evidence=c.execute('SELECT evidence FROM semantic_references WHERE ref_id=101').fetchone()[0]
+assert 'target=app.ts:2' in evidence and 'owner=' not in evidence,evidence
+# An adapter's exact-site syntax edge wins. Another site for the same target
+# must still get its own resolved edge.
+c.executemany('INSERT INTO refs VALUES(?,?,?,?,?,?,?,?,?)', [
+    (110,1,'go','this',1,'call',None,None,None),
+    (111,1,'go','this',1,'call',None,None,None)])
+c.executemany('''INSERT INTO semantic_references
+    (ref_id,owner_id,qualifier,original_text,start_line,start_column)
+    VALUES(?,?,?,?,?,?)''', [
+    (110,13,'this','go',20,2),(111,13,'this','go',21,2)])
+c.executemany('''INSERT INTO semantic_edges
+    (branch_id,source_file_id,target_file_id,source_id,target_id,
+     source_ref_id,kind,original_text,strategy,provenance,evidence,
+     start_line,start_column,synthesized) VALUES(1,1,1,13,11,?,
+     'calls','go','syntax','syntax','exact site',?,?,0)''', [
+    (110,20,2),(111,21,3)])
+c.commit()
+subprocess.run([runner,db,'1','1'],check=True)
+assert c.execute("SELECT count(*) FROM semantic_edges WHERE source_ref_id=110").fetchone()[0]==1
+assert c.execute("SELECT provenance FROM semantic_edges WHERE source_ref_id=110").fetchone()[0]=='syntax'
+assert c.execute("SELECT count(*) FROM semantic_edges WHERE source_ref_id=111").fetchone()[0]==2
 # A newly introduced competing receiver leaves an unchanged caller unresolved.
 c.execute("INSERT INTO symbols VALUES(25,2,'go','method',0,'go(x)',6)")
 c.execute("INSERT INTO semantic_symbols(symbol_id,parent_id,visibility) VALUES(25,20,'public')")
@@ -124,6 +146,9 @@ python3 - "$tmp/source" <<'PY'
 import pathlib, sqlite3, sys
 root = pathlib.Path(sys.argv[1])
 db = sqlite3.connect(next(root.glob('.*/*.db')))
+plan=' '.join(str(row) for row in db.execute('''EXPLAIN QUERY PLAN DELETE FROM semantic_edges
+    WHERE branch_id=1 AND source_ref_id=1 AND provenance='resolved-receiver' '''))
+assert 'idx_sem_edge_ref' in plan,plan
 rows = db.execute('''SELECT r.argc, r.qual, r.verdict, r.conf, s.sig,
                            sr.evidence
                      FROM refs r JOIN semantic_references sr ON sr.ref_id=r.id
@@ -203,4 +228,47 @@ assert terraform.execute('''SELECT e.kind,ss.qualified_name FROM semantic_edges 
                             WHERE e.provenance='resolved-receiver' ''').fetchall() == [
                                 ('references','resource.null_resource.first')]
 assert terraform.execute("SELECT target_id FROM semantic_references WHERE original_text='null_resource.missing'").fetchone()[0] is None
+PY
+
+# Declarative adapters can prove the same target at extraction time. Retain
+# that exact syntax edge and do not add another edge at its source site.
+mkdir "$tmp/mixed"
+cat >"$tmp/mixed/flow.cfc" <<'EOF'
+<cfscript>
+  function target() { return 1; }
+  function caller() { return target(); }
+  function unrelated() { /* target() */ return 0; }
+</cfscript>
+EOF
+cat >"$tmp/mixed/flow.cfm" <<'EOF'
+<cffunction name="target"><cfreturn 1></cffunction>
+<cffunction name="caller"><cfreturn target()></cffunction>
+<cffunction name="unrelated"><!--- target() ---><cfreturn 0></cffunction>
+EOF
+cat >"$tmp/mixed/flow.xml" <<'EOF'
+<mapper namespace="Flow">
+  <sql id="target">SELECT 1</sql>
+  <select id="caller"><include refid="target"/></select>
+  <select id="unrelated">SELECT 0</select>
+  <!-- <include refid="target"/> -->
+</mapper>
+EOF
+(cd "$tmp/mixed" && "$CG" init >/dev/null)
+python3 - "$tmp/mixed" <<'PY'
+import pathlib, sqlite3, sys
+db=sqlite3.connect(next(pathlib.Path(sys.argv[1]).glob('.*/*.db')))
+for path in ('flow.cfc','flow.cfm','flow.xml'):
+    rows=db.execute('''SELECT e.source_ref_id,e.source_id,e.target_id,e.kind,
+                             e.start_line,e.start_column,e.provenance
+                       FROM semantic_edges e JOIN files f ON f.id=e.source_file_id
+                       WHERE f.path=? AND e.provenance='syntax'
+                         AND e.source_ref_id IS NOT NULL''',(path,)).fetchall()
+    assert rows,(path,rows)
+    for rid,source,target,kind,line,column,provenance in rows:
+        sites=db.execute('''SELECT provenance FROM semantic_edges
+                            WHERE source_ref_id=? AND source_id IS ?
+                              AND target_id=? AND kind=? AND start_line=?
+                              AND start_column=?''',
+                         (rid,source,target,kind,line,column)).fetchall()
+        assert sites==[(provenance,)],(path,rid,sites)
 PY
