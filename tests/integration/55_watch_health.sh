@@ -5,6 +5,7 @@
 cp -r "$FIXTURES/sample" "$TMP/proj"
 cd "$TMP/proj"
 "$CG" init >/dev/null
+db_file="$(ls -d .*/graph.db)"
 
 cat > "$TMP/health_probe.c" <<'EOF'
 #include "watch_health.h"
@@ -65,14 +66,14 @@ has "$(probe read)" 'reconciled'
 mkdir -p src/moving
 printf 'export function movedSentinel() { return 1; }\n' > src/moving/test.ts
 for _ in $(seq 1 80); do
-    count="$(sqlite3 .codegraph/graph.db "SELECT count(*) FROM symbols WHERE name='movedSentinel'")"
+    count="$(sqlite3 "$db_file" "SELECT count(*) FROM symbols WHERE name='movedSentinel'")"
     [ "$count" -ge 1 ] && break
     sleep 0.1
 done
 [ "$count" -ge 1 ] || fail 'new directory was not indexed'
 mv src/moving src/relocated
 for _ in $(seq 1 80); do
-    count="$(sqlite3 .codegraph/graph.db "SELECT count(*) FROM files WHERE path='src/relocated/test.ts'")"
+    count="$(sqlite3 "$db_file" "SELECT count(*) FROM files WHERE path='src/relocated/test.ts'")"
     [ "$count" -ge 1 ] && break
     sleep 0.1
 done
