@@ -34,8 +34,8 @@ flowchart LR
 The parser identity and status are stored per file. Native grammar support
 means that the file is parsed into syntax nodes; it does not mean that every
 language construct is modeled. If parsing fails, the heuristic fallback is
-identified separately. Syntax recovery, excessive depth or node count, long
-lines, unreadable files, and unsupported input appear as partial, skipped, or
+identified separately. Syntax recovery, excessive depth or node count,
+unreadable files, and unsupported input appear as partial, skipped, or
 failed coverage with reason codes. The scanner skips files above 8 MiB; the
 syntax runtime also bounds source size to 32 MiB, traversal to 500,000 nodes
 and depth 512, and applies a two-second timeout to the parse stage. That
@@ -60,6 +60,23 @@ unresolved. Callback, event, queue and HTTP relations are heuristic when
 they depend on registration or matching rules; their evidence records the
 channel or registration site. These links are navigation aids, not proof of
 all possible runtime flows.
+
+`cg flow callers <name>`, `cg flow callees <name>`, `cg flow impact <name>`
+and `cg flow paths <source> <target>` traverse typed branch-scoped relations.
+The query bounds depth, nodes, edges, elapsed time and output bytes; JSON
+includes source sites, provenance, dynamic boundaries and truncation reasons.
+A missing path within those limits is not proof that no runtime path exists.
+`cg search` and `cg context` accept path, language, kind and exact-name
+filters. Identifier postings make compound names searchable by segment;
+weaker typo-tolerant matches remain labelled as such.
+
+`cg inspect hierarchy <name>` reports bounded ancestors, subtypes and
+implementations from the typed graph. `cg inspect unused` identifies symbols
+with no known incoming reference and internally referenced islands outside
+known entry roots. Its results carry reasons for excluding exports, framework
+roots, reflection candidates, generated files and uncertain incoming
+boundaries. The CLI and MCP inspection surfaces use the current branch;
+absence from the known graph is never a safe-deletion verdict.
 
 ## Freshness and migrations
 

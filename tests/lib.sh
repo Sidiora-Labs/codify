@@ -17,6 +17,13 @@ trap 'rm -rf "$TMP"' EXIT
 # assertion fails on an empty result. 50_discover showed it 2 runs in 20.
 sqlite3() { command sqlite3 -cmd '.timeout 5000' "$@"; }
 
+# Integration fixtures discover the index location after initialization.
+graph_db() {
+    local paths=(.*/graph.db)
+    [ "${#paths[@]}" -eq 1 ] && [ -f "${paths[0]}" ] || return 1
+    printf '%s\n' "${paths[0]}"
+}
+
 fail() {
     echo "FAIL: $*" >&2
     exit 1

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-from run import execute
+from run import database_path, execute
 
 
 SOURCE = {
@@ -172,12 +172,7 @@ def graph_set(db: sqlite3.Connection, branch: str | None = None) -> dict[str, se
 
 
 def snapshot(root: Path, branch: str | None = None) -> dict[str, set]:
-    db_path = root / '.codegraph/graph.db'
-    if not db_path.exists() and (root / '.git').exists():
-        common = git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir')
-        db_path = Path(common).parent / '.codegraph/graph.db'
-    if not db_path.exists():
-        raise AssertionError(f"index database absent for {root}: {db_path}")
+    db_path = database_path(root)
     with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as db:
         db.row_factory = sqlite3.Row
         return graph_set(db, branch)
@@ -185,8 +180,9 @@ def snapshot(root: Path, branch: str | None = None) -> dict[str, set]:
 
 def rebuild(cg: Path, root: Path, work: Path, label: str) -> Path:
     fresh = work / f"rebuild-{label}"
+    index_dir = database_path(root).parent.name
     def ignore(directory: str, names: list[str]) -> list[str]:
-        return [name for name in names if name in {".git", ".codegraph"}]
+        return [name for name in names if name in {".git", index_dir}]
     shutil.copytree(root, fresh, ignore=ignore)
     execute(cg, fresh, "init")
     return fresh
@@ -234,7 +230,7 @@ def main() -> int:
         # The index is local state. Keep later fixture commits from copying
         # it into the linked worktree as tracked project content.
         with (root / ".git/info/exclude").open("a", encoding="utf-8") as out:
-            out.write("\n.codegraph/\n")
+            out.write(f"\n{database_path(root).parent.name}/\n")
         reports["initial"] = compare(cg, root, work, "initial", "main")
         initial = snapshot(root, "main")
         if not any(e[4] == "calls" and e[0] == "src/caller.ts" and
@@ -292,7 +288,7 @@ def main() -> int:
         # The trigger injects a write failure only; all source facts still
         # come from the parser. Retry must converge without manually editing
         # a graph row or declaring the interrupted pass current.
-        db_path = root / '.codegraph/graph.db'
+        db_path = database_path(root)
         with sqlite3.connect(db_path) as db:
             count = db.execute("SELECT count(*) FROM semantic_edges").fetchone()[0]
             if count == 0:

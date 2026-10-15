@@ -20,7 +20,7 @@ truncate -s 8388609 src/huge.ts
 git add src
 git commit -qm baseline
 "$CG" init >/dev/null
-DB=.codegraph/graph.db
+DB="$(graph_db)"
 q() { sqlite3 "$DB" "$1"; }
 
 row="$(q "SELECT status,reason,parser,diagnostic_line,extraction_version IS NULL FROM extraction_health WHERE path='src/long.ts'")"

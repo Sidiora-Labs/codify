@@ -50,8 +50,26 @@ def project(work: Path, name: str, files: dict[str, str]) -> Path:
     return root
 
 
+def database_path(root: Path) -> Path:
+    locations = [root]
+    if (root / ".git").exists():
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=root, text=True, capture_output=True,
+        )
+        if common.returncode == 0:
+            locations.append(Path(common.stdout.strip()).parent)
+    for location in locations:
+        paths = list(location.glob(".*/*.db"))
+        if len(paths) == 1:
+            return paths[0]
+        if len(paths) > 1:
+            raise AssertionError(f"multiple index databases under {location}: {paths}")
+    raise AssertionError(f"index database absent for {root}")
+
+
 def db_open(root: Path) -> sqlite3.Connection:
-    db = sqlite3.connect(f"file:{root / '.codegraph/graph.db'}?mode=ro", uri=True)
+    db = sqlite3.connect(f"file:{database_path(root)}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     missing = REQUIRED_TABLES - tables

@@ -41,14 +41,14 @@ for name in ('budget-cli.json', 'budget-mcp.json'):
     assert obj['tokens_used'] <= 200 and obj['index_health'], obj
 PY
 
-printf '1 1 overflow\n' > .codegraph/watch.reconcile
+printf '1 1 overflow\n' > $(dirname "$(graph_db)")/watch.reconcile
 "$CG" tool call index_status '{}' > "$TMP/pending.json"
 python3 - "$TMP/pending.json" <<'PY'
 import json, sys
 h = json.load(open(sys.argv[1]))['index_health']
 assert h['pending'] and h['degraded'] and h['reason'] == 'overflow', h
 PY
-rm .codegraph/watch.reconcile
+rm $(dirname "$(graph_db)")/watch.reconcile
 
 cat > main.go <<'EOF'
 package sample

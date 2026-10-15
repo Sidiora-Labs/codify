@@ -19,7 +19,7 @@ cp "$root/tests/fixtures/semantic/dispatch/web.tsx" \
    "$root/tests/fixtures/semantic/dispatch/Flow.pas" "$project/src/"
 cd "$project"
 "$CG" init >/dev/null
-db=".codegraph/graph.db"
+db="$(printf '%s\n' .*/graph.db | head -1)"
 count() { sqlite3 "$db" "$1"; }
 require() {
   local got

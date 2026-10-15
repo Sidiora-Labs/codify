@@ -6,14 +6,15 @@ command -v sqlite3 >/dev/null || { echo "54_freshness: SKIP (no sqlite3 CLI)"; e
 mkdir -p "$TMP/proj"
 cd "$TMP/proj"
 git init -q .
-printf '.codegraph/\n' > .gitignore
+printf '.*/\n' > .gitignore
 printf 'int alpha(void) { return 1; }\n' > source.c
 python3 - <<'PY'
 import os
 os.utime('source.c', ns=(1_700_000_000_100_000_000,)*2)
 PY
 "$CG" init >/dev/null
-q() { sqlite3 .codegraph/graph.db "$1"; }
+DB="$(graph_db)"
+q() { sqlite3 "$DB" "$1"; }
 symbol() { q "SELECT name FROM symbols WHERE file_id=(SELECT id FROM files WHERE path='source.c') AND kind='function'"; }
 [ "$(symbol)" = alpha ] || fail "initial symbol missing"
 plan="$(q "EXPLAIN QUERY PLAN SELECT count(*) FROM files WHERE branch_id=1 AND mtime_ns IS NULL")"
@@ -51,13 +52,13 @@ python3 - <<'PY'
 import os
 os.utime('source.c', ns=(1_700_000_000_800_000_000,)*2)
 PY
-printf 'source.c\n' > .codegraph/index.dirty
+printf 'source.c\n' > $(dirname "$DB")/index.dirty
 out="$("$CG" sync --json)"
 [ "$(symbol)" = theta ] || fail "queued dirty path was skipped: $out"
 
 # NULL in an upgraded row forces content verification even when the legacy
 # whole-second timestamp and file size would have matched.
-sqlite3 .codegraph/graph.db "UPDATE files SET mtime_ns=NULL WHERE path='source.c'"
+sqlite3 "$DB" "UPDATE files SET mtime_ns=NULL WHERE path='source.c'"
 printf 'int gamma(void) { return 1; }\n' > source.c
 python3 - <<'PY'
 import os
@@ -71,7 +72,7 @@ out="$("$CG" sync --json)"
 case "$out" in *'"indexed":0'*) : ;; *) fail "no-op walk rewrote unchanged content: $out" ;; esac
 
 # Simulate opening an older database whose files table lacks the new column.
-sqlite3 .codegraph/graph.db "DROP INDEX idx_file_legacy_time; ALTER TABLE files DROP COLUMN mtime_ns"
+sqlite3 "$DB" "DROP INDEX idx_file_legacy_time; ALTER TABLE files DROP COLUMN mtime_ns"
 printf 'int omega(void) { return 1; }\n' > source.c
 python3 - <<'PY'
 import os
