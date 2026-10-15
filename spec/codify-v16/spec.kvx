@@ -113,7 +113,7 @@ reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
 
 [task.2.2]
 title = "Native syntax-tree runtime and adapter registry"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/ast.c", "src/ast.h", "src/lang.c", "src/cg.h", "Makefile", "vendor/tree-sitter/**", "scripts/vendor-parsers.*", "tests/integration/58_ast_runtime.sh"]
