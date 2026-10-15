@@ -1363,7 +1363,7 @@ int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
              strcmp(name, "impact_analysis") == 0) ?
             (int)json_get_int(args_json, "budget", 0) : 0;
         size_t max_bytes = requested > 0 && requested < 1000000 ?
-            (size_t)requested * 4 + 400 : 0;
+            (size_t)requested * 4 : 0;
         char *enriched = answer_health_json_limit(cg, *out, max_bytes);
         free(*out);
         *out = enriched;

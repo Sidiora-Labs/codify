@@ -15,6 +15,8 @@ printf '[sync]\nauto = false\n' > codify.kvx
 "$CG" tool call index_status '{}' > "$TMP/index.json"
 "$CG" tool call get_symbol '{"name":"Greeting"}' > "$TMP/fresh.json"
 "$CG" search Greeting --json > "$TMP/cli.json"
+"$CG" context Greeting --budget 200 --json > "$TMP/budget-cli.json"
+"$CG" tool call get_context '{"query":"Greeting","budget":200}' > "$TMP/budget-mcp.json"
 python3 - "$TMP" <<'PY'
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
@@ -32,6 +34,11 @@ assert fresh['index_health']['source_validation']['files'][0]['state'] == 'verif
 assert cli['index_health']['source_validation']['verified'] == 1, cli
 assert fresh['index_health']['source_validation']['limits'] == {
     'files': 16, 'bytes': 4194304, 'ms': 25}, fresh
+for name in ('budget-cli.json', 'budget-mcp.json'):
+    raw = (p / name).read_text().rstrip('\n')
+    obj = json.loads(raw)
+    assert len(raw.encode()) <= 800 and obj['budget'] == 200, (name, len(raw), obj)
+    assert obj['tokens_used'] <= 200 and obj['index_health'], obj
 PY
 
 printf '1 1 overflow\n' > .codegraph/watch.reconcile
@@ -63,11 +70,11 @@ assert h['verified'] == 1 and h['stale'] == 0, h
 PY
 
 python3 - <<'PY'
-with open('large.go', 'w') as f:
-    f.write('package sample\n' + '// data\n' * 160000)
+with open('large.properties', 'w') as f:
+    f.write('padding=' + 'x' * 1100000 + '\n')
 PY
-"$CG" sync large.go > /dev/null
-"$CG" tool call find_files '{"pattern":"large.go"}' > "$TMP/large.json"
+"$CG" sync large.properties > /dev/null
+"$CG" tool call find_files '{"pattern":"large.properties"}' > "$TMP/large.json"
 python3 - "$TMP/large.json" <<'PY'
 import json, sys
 h = json.load(open(sys.argv[1]))['index_health']['source_validation']

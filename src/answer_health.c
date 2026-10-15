@@ -253,14 +253,46 @@ char *answer_health_json(Cg *cg, const char *answer) {
  * summary. The underlying query still has enough room for its skeleton. */
 int answer_health_query_budget(int requested) {
     if (requested <= 0) return requested;
-    int reserve = requested > 160 ? 96 : requested / 3;
+    int reserve = requested > 96 ? 32 : requested / 3;
     int effective = requested - reserve;
     return effective < 64 ? 64 : effective;
 }
 
+static char *replace_number(const char *json, const char *key, long value) {
+    char pattern[64];
+    snprintf(pattern, sizeof pattern, "\"%s\":", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return xstrdup(json);
+    const char *digits = p + strlen(pattern), *end = digits;
+    if (*end == '-') end++;
+    while (*end >= '0' && *end <= '9') end++;
+    if (end == digits) return xstrdup(json);
+    StrBuf b; sb_init(&b);
+    for (const char *s = json; s < digits; s++) sb_putc(&b, *s);
+    sb_printf(&b, "%ld", value);
+    sb_puts(&b, end);
+    return b.p;
+}
+
+static char *final_tokens(char *json) {
+    for (int i = 0; i < 2; i++) {
+        char *next = replace_number(json, "tokens_used",
+                                    (long)((strlen(json) + 3) / 4));
+        free(json);
+        json = next;
+    }
+    return json;
+}
+
 char *answer_health_json_limit(Cg *cg, const char *answer, size_t max_bytes) {
-    char *full = answer_health_json(cg, answer);
-    if (!full || !max_bytes || strlen(full) <= max_bytes) return full;
+    char *raw = max_bytes ? replace_number(answer, "budget", (long)(max_bytes / 4)) :
+                 xstrdup(answer);
+    char *full = answer_health_json(cg, raw);
+    full = final_tokens(full);
+    if (!full || !max_bytes || strlen(full) <= max_bytes) {
+        free(raw);
+        return full;
+    }
     char *h = json_get_object(full, "index_health");
     char *branch = h ? json_get_string(h, "branch") : NULL;
     char *coverage = h ? json_get_object(h, "coverage") : NULL;
@@ -270,17 +302,19 @@ char *answer_health_json_limit(Cg *cg, const char *answer, size_t max_bytes) {
     if (!h || !branch || !coverage || !source) {
         free(h); free(branch); free(coverage); free(source);
         free(state); free(reason);
+        free(raw);
         return full;
     }
-    size_t n = strlen(answer);
-    while (n && (answer[n - 1] == '\n' || answer[n - 1] == ' ')) n--;
-    if (!n || answer[n - 1] != '}') {
+    size_t n = strlen(raw);
+    while (n && (raw[n - 1] == '\n' || raw[n - 1] == ' ')) n--;
+    if (!n || raw[n - 1] != '}') {
         free(h); free(branch); free(coverage); free(source);
         free(state); free(reason);
+        free(raw);
         return full;
     }
     StrBuf b; sb_init(&b);
-    for (size_t i = 0; i < n - 1; i++) sb_putc(&b, answer[i]);
+    for (size_t i = 0; i < n - 1; i++) sb_putc(&b, raw[i]);
     if (n > 2) sb_putc(&b, ',');
     sb_puts(&b, "\"index_health\":{\"branch\":");
     sb_json_str(&b, branch);
@@ -309,10 +343,40 @@ char *answer_health_json_limit(Cg *cg, const char *answer, size_t max_bytes) {
               json_get_int(source, "stale", 0),
               json_get_int(source, "unchecked", 0),
               json_get_int(source, "omitted", 0), details);
+    char *summary = final_tokens(b.p);
+    if (strlen(summary) <= max_bytes) {
+        free(pending); free(degraded);
+        free(h); free(branch); free(coverage); free(source);
+        free(state); free(reason); free(full); free(raw);
+        return summary;
+    }
+    free(summary);
+    /* Under very small budgets, the ordered arrays keep every state count:
+     * c = complete,partial,skipped,failed,unchecked; f = verified,stale,
+     * unchecked. x bits mean pending (1) and degraded (2). o=1 declares
+     * that parser inventory, file detail, limits and timestamps were left
+     * out. The full names remain available from info/index_status. */
+    StrBuf tiny; sb_init(&tiny);
+    for (size_t i = 0; i < n - 1; i++) sb_putc(&tiny, raw[i]);
+    if (n > 2) sb_putc(&tiny, ',');
+    sb_puts(&tiny, "\"index_health\":{\"b\":");
+    sb_json_str(&tiny, branch);
+    sb_printf(&tiny, ",\"c\":[%ld,%ld,%ld,%ld,%ld],\"f\":[%ld,%ld,%ld],"
+              "\"x\":%d,\"o\":1}}\n",
+              json_get_int(coverage, "complete", 0),
+              json_get_int(coverage, "partial", 0),
+              json_get_int(coverage, "skipped", 0),
+              json_get_int(coverage, "failed", 0),
+              json_get_int(coverage, "unchecked", 0),
+              json_get_int(source, "verified", 0),
+              json_get_int(source, "stale", 0),
+              json_get_int(source, "unchecked", 0),
+              (pending && strcmp(pending, "true") == 0 ? 1 : 0) |
+              (degraded && strcmp(degraded, "true") == 0 ? 2 : 0));
     free(pending); free(degraded);
     free(h); free(branch); free(coverage); free(source);
-    free(state); free(reason); free(full);
-    return b.p;
+    free(state); free(reason); free(full); free(raw);
+    return final_tokens(tiny.p);
 }
 
 int answer_health_status(Cg *cg, bool json) {

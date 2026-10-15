@@ -351,7 +351,7 @@ int main(int argc, char **argv) {
     int requested_budget = json && (strcmp(cmd, "context") == 0 ||
         strcmp(cmd, "impact") == 0) ? query_budget_arg(argc, argv) : 0;
     size_t answer_max = requested_budget > 0 && requested_budget < 1000000 ?
-        (size_t)requested_budget * 4 + 400 : 0;
+        (size_t)requested_budget * 4 : 0;
     if (health_answer) answer_health_capture_begin(&answer_capture, answer_max);
 
     if (strcmp(cmd, "journal") == 0) {
