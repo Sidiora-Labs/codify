@@ -12,6 +12,8 @@ int middle_node(void) { return 2; }
 int end_node(void) { return 3; }
 int side_node(void) { return 4; }
 EOF
+printf 'int duplicate_node(void) { return 1; }\n' > one.c
+printf 'int duplicate_node(void) { return 2; }\n' > two.c
 cat > Hierarchy.java <<'EOF'
 class Base { }
 class Child extends Base { }
@@ -83,6 +85,11 @@ PY
 python3 - "$TMP/nodes.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); assert len(d['nodes'])==1 and d['truncated']['nodes'],d
+PY
+"$CG" flow callees duplicate_node --max-nodes 1 --json > "$TMP/ambiguous.json"
+python3 - "$TMP/ambiguous.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); assert d['ambiguous_roots'] and d['truncated']['nodes'],d
 PY
 "$CG" flow callees start_node --json > "$TMP/callees.json"
 python3 - "$TMP/callees.json" <<'PY'

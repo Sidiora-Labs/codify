@@ -161,7 +161,11 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         "ORDER BY s.id LIMIT 17");
     sqlite3_bind_int64(q,1,branch); sqlite3_bind_text(q,2,name,-1,SQLITE_STATIC);
     while (sqlite3_step(q)==SQLITE_ROW) {
-        if (nn>=16 || nn>=lim.nodes) { ambiguous=true; break; }
+        if (nn>=16 || nn>=lim.nodes) {
+            ambiguous=true;
+            if (nn>=lim.nodes) trunc_nodes=true;
+            break;
+        }
         long id=sqlite3_column_int64(q,0);
         if (node_load(cg,branch,id,&nv[nn])) { nv[nn].parent=-1; nn++; }
     }
