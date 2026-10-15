@@ -3,6 +3,7 @@
 #define WRAP(x) (x)
 typedef int (*Callback)(int);
 struct Meter { int count; };
+struct External *opaque;
 int increment(int x) { return x + 1; }
 struct Ops { Callback run; };
 static struct Ops ops = { .run = increment };

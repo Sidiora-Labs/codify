@@ -67,6 +67,7 @@ assert exists('''SELECT 1 FROM symbols m JOIN semantic_symbols sm ON sm.symbol_i
                  JOIN files f ON f.id=m.file_id
                  WHERE f.path='src/fixture.go' AND m.name='Run' AND owner.name='Worker' ''')
 assert_fact('fixture.c','pointer','Callback')
+assert_fact('fixture.c','function_value','increment')
 assert_fact('fixture.c','pointer_slot','increment')
 assert_fact('fixture.c','pointer_call','ops.run')
 assert_fact('fixture.c','macro_boundary','WRAP')
@@ -77,6 +78,7 @@ assert_fact('fixture.rs','implements','Runner')
 assert not exists('''SELECT 1 FROM semantic_references r JOIN files f ON f.id=r.file_id
                      WHERE f.path=? AND r.original_text=?''',
                   ('src/fixture.c','phantom_call'))
+assert not sym('fixture.c','External')
 assert_sym('broken.c','good','function')
 assert_sym('broken.c','after','function')
 con.close()
