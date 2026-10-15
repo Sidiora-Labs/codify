@@ -1,3 +1,4 @@
+import Foundation
 class Box<T>: Base, Runnable {
     func get(_ value: T) -> T { return value }
     func get(_ index: Int) -> T? { return nil }

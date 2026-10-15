@@ -1,3 +1,4 @@
+import java.util.List as JList
 class Box<T> : Base(), Runnable {
     fun get(value: T): T = value
     fun get(index: Int): T? = null

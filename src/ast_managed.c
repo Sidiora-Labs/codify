@@ -60,7 +60,8 @@ static char *limited_text(AstContext *c, TSNode n, TSNode body) {
 static const char *decl_kind(const char *lang, const char *t) {
     if (is_type(t, "namespace_declaration") ||
         is_type(t, "file_scoped_namespace_declaration") ||
-        is_type(t, "package_declaration") || is_type(t, "package_clause")) return "namespace";
+        is_type(t, "package_declaration") || is_type(t, "package_clause") ||
+        is_type(t, "package_header")) return "namespace";
     if (is_type(t, "class_declaration") || is_type(t, "class_definition") ||
         is_type(t, "record_declaration") || is_type(t, "extension_type_declaration")) return "class";
     if (is_type(t, "interface_declaration")) return "interface";
@@ -106,7 +107,9 @@ static TSNode name_node(TSNode n) {
         TSNode c = ts_node_named_child(n, i);
         const char *t = ts_node_type(c);
         if (is_type(t, "identifier") || is_type(t, "simple_identifier") ||
-            is_type(t, "type_identifier") || is_type(t, "name")) return c;
+            is_type(t, "type_identifier") || is_type(t, "name") ||
+            is_type(t, "scoped_identifier") || is_type(t, "qualified_identifier") ||
+            is_type(t, "package_identifier")) return c;
     }
     TSNode sig = direct_type(n, "function_signature");
     if (!ts_node_is_null(sig)) return name_node(sig);
@@ -153,7 +156,7 @@ static char *result_type(AstContext *c, TSNode n) {
     return NULL;
 }
 
-static void relation(AstContext *c, int owner, TSNode n, const char *kind) {
+static void relation_leaf(AstContext *c, int owner, TSNode n, const char *kind) {
     if (ts_node_is_null(n) || owner < 0) return;
     char *value = ast_text(c, n);
     if (!value || !*value) { free(value); return; }
@@ -166,12 +169,27 @@ static void relation(AstContext *c, int owner, TSNode n, const char *kind) {
     free(value);
 }
 
+static void relation(AstContext *c, int owner, TSNode n, const char *kind,
+                     unsigned depth) {
+    if (ts_node_is_null(n) || depth > 24) return;
+    const char *t = ts_node_type(n);
+    if (is_type(t, "type_identifier") || is_type(t, "user_type") ||
+        is_type(t, "identifier") || is_type(t, "simple_identifier")) {
+        relation_leaf(c, owner, n, kind);
+        return;
+    }
+    uint32_t count = ts_node_named_child_count(n);
+    if (!count) { relation_leaf(c, owner, n, kind); return; }
+    for (uint32_t i = 0; i < count; i++)
+        relation(c, owner, ts_node_named_child(n, i), kind, depth + 1);
+}
+
 static void type_relations(AstContext *c, TSNode n, int owner) {
     const char *fields[] = {"superclass", "interfaces", "extend", "derive", "class"};
     for (size_t i = 0; i < 5; i++) {
         TSNode x = ast_field(n, fields[i]);
         if (!ts_node_is_null(x)) relation(c, owner, x,
-            i == 1 ? "implements" : "inherits");
+            i == 1 ? "implements" : "inherits", 0);
     }
     const char *types[] = {"superclass", "super_interfaces", "extends_interfaces",
                            "inheritance_specifier", "delegation_specifiers",
@@ -188,7 +206,7 @@ static void type_relations(AstContext *c, TSNode n, int owner) {
         for (size_t j = 0; j < sizeof(types)/sizeof(types[0]); j++)
             if (is_type(ts_node_type(x), types[j])) {
                 relation(c, owner, x, j == 1 || j == 2 || j == 6 ?
-                         "implements" : "inherits");
+                         "implements" : "inherits", 0);
                 break;
             }
     }
@@ -314,6 +332,69 @@ static bool call_type(const char *lang, const char *t) {
     return is_type(lang, "dart") && is_type(t, "constructor_invocation");
 }
 
+static void import_binding(AstContext *c, TSNode n) {
+    const char *t = ts_node_type(n);
+    bool directive = is_type(t, "import_declaration") || is_type(t, "import") ||
+        is_type(t, "using_directive") || is_type(t, "import_or_export");
+    if (!directive) return;
+    TSNode path = (TSNode){0}, alias = (TSNode){0};
+    if (is_type(c->language, "java") || is_type(c->language, "kotlin") ||
+        is_type(c->language, "swift")) {
+        path = ts_node_named_child(n, 0);
+        if (is_type(c->language, "kotlin") && ts_node_named_child_count(n) > 1)
+            alias = ts_node_named_child(n, 1);
+    } else if (is_type(c->language, "csharp")) {
+        path = direct_type(n, "qualified_name");
+        if (ts_node_is_null(path)) path = ts_node_named_child(n, 0);
+    } else if (is_type(c->language, "dart")) {
+        TSNode specification = direct_type(direct_type(n, "library_import"),
+                                           "import_specification");
+        if (ts_node_is_null(specification)) return;
+        TSNode uri = direct_type(specification, "configurable_uri");
+        path = direct_type(uri, "uri");
+        if (ts_node_named_child_count(specification) > 1)
+            alias = ts_node_named_child(specification,
+                                        ts_node_named_child_count(specification) - 1);
+    } else if (is_type(c->language, "scala")) {
+        /* Scala's path fields are repeated; take the source span after import. */
+        TSNode first = ts_node_named_child(n, 0);
+        TSNode last = ts_node_named_child(n, ts_node_named_child_count(n) - 1);
+        if (!ts_node_is_null(first) && !ts_node_is_null(last)) {
+            char *module = ast_slice(c, ts_node_start_byte(first), ts_node_end_byte(last));
+            if (module) {
+                const char *tail = strrchr(module, '.');
+                SemBinding *b = sem_binding_add(&c->result->sem, module,
+                                                tail ? tail + 1 : module, span(n));
+                b->kind = xstrdup("import");
+                b->original_name = xstrdup(tail ? tail + 1 : module);
+                b->evidence = xstrdup("syntax");
+                free(module);
+            }
+        }
+        return;
+    }
+    if (ts_node_is_null(path)) return;
+    char *module = ast_text(c, path), *local = node_text(c, alias);
+    if (!module || !*module) { free(module); free(local); return; }
+    if (is_type(c->language, "dart") &&
+        (module[0] == '\'' || module[0] == '"')) {
+        size_t len = strlen(module);
+        if (len > 1 && module[len - 1] == module[0]) {
+            memmove(module, module + 1, len - 2);
+            module[len - 2] = 0;
+        }
+    }
+    const char *tail = strrchr(module, '.');
+    if (!tail) tail = strrchr(module, '/');
+    const char *original = tail ? tail + 1 : module;
+    SemBinding *b = sem_binding_add(&c->result->sem, module,
+                                    local ? local : original, span(n));
+    b->kind = xstrdup("import");
+    b->original_name = xstrdup(original);
+    b->evidence = xstrdup("syntax");
+    free(module); free(local);
+}
+
 static TSNode last_identifier(TSNode n) {
     if (ts_node_is_null(n)) return n;
     const char *t = ts_node_type(n);
@@ -393,12 +474,14 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
     } else if (call_type(c->language, t)) add_call(c, n, parent);
     else if (is_type(c->language, "dart") && is_type(t, "selector"))
         dart_selector_call(c, n, parent);
+    import_binding(c, n);
     uint32_t count = ts_node_named_child_count(n);
     int pending_method = -1;
+    int file_namespace = -1;
     for (uint32_t i = 0; i < count; i++) {
         TSNode child = ts_node_named_child(n, i);
         const char *ct = ts_node_type(child);
-        int child_owner = owner;
+        int child_owner = file_namespace >= 0 ? file_namespace : owner;
         if (is_type(c->language, "dart") && pending_method >= 0 &&
             is_type(ct, "function_body")) child_owner = pending_method;
         int before = c->result->sem.nsymbols;
@@ -408,6 +491,10 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
             c->result->sem.nsymbols > before)
             pending_method = c->result->sem.nsymbols - 1;
         else if (is_type(ct, "function_body")) pending_method = -1;
+        if ((is_type(ct, "package_declaration") || is_type(ct, "package_header") ||
+             is_type(ct, "package_clause") || is_type(ct, "file_scoped_namespace_declaration")) &&
+            c->result->sem.nsymbols > before)
+            file_namespace = c->result->sem.nsymbols - 1;
     }
 }
 
