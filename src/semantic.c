@@ -437,7 +437,7 @@ static int npasses;
  * A missing module leaves its capability absent, without a link failure. */
 extern void sem_imports_register(void) __attribute__((weak));
 extern void sem_resolve_register(void) __attribute__((weak));
-extern void sem_types_register(void) __attribute__((weak));
+extern int sem_types_register(void) __attribute__((weak));
 extern void sem_routes_register(void) __attribute__((weak));
 extern void sem_dispatch_register(void) __attribute__((weak));
 extern void sem_channels_register(void) __attribute__((weak));
