@@ -28,12 +28,24 @@ require "SELECT count(*) FROM semantic_edges WHERE kind='callback' AND channel='
 require "SELECT count(*) FROM semantic_edges WHERE kind='observer_dispatch'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='pointer_dispatch' AND channel='ops.run'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='native_dispatch' AND channel='nativeOpen'" 1
+require "SELECT count(*) FROM semantic_edges e JOIN semantic_symbols src ON src.symbol_id=e.source_id JOIN semantic_symbols dst ON dst.symbol_id=e.target_id WHERE e.kind='interface_dispatch' AND src.qualified_name='Worker.invoke' AND dst.qualified_name='Concrete.work'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='renders_component'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='state_render' AND source_id=target_id" 1
 require "SELECT count(*) FROM semantic_edges WHERE strategy LIKE 'dispatch:%' AND (provenance<>'heuristic' OR registration_path='' OR registration_line IS NULL)" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='callback' AND original_text='unproved'" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='observer_dispatch' AND original_text='unknownObserver'" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='native_dispatch' AND channel='computed'" 0
+
+# A same-name overload has no safe target without signature evidence.
+sed -i 's/public void work() {}/public void work() {} public void work(int x) {}/' src/Worker.java
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='interface_dispatch'" 0
+sed -i 's/ public void work(int x) {}//' src/Worker.java
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='interface_dispatch'" 1
+sed -i 's/implements Worker//' src/Worker.java
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='interface_dispatch'" 0
 
 # Rewiring a registration removes the old edge from an unchanged caller.
 sed -i "s/addObserver('changed'/addObserver('other'/" src/observer.js
