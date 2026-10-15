@@ -4,3 +4,10 @@ resource "local_file" "output" {
   # fake = phantom()
   note = "fake()"
 }
+resource "null_resource" "v16_edge_target" {}
+resource "null_resource" "v16_edge_caller" {
+  depends_on = [null_resource.v16_edge_target]
+}
+resource "null_resource" "v16_edge_unrelated" {
+  # depends_on = [null_resource.v16_edge_target]
+}

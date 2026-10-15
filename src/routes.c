@@ -173,6 +173,7 @@ typedef struct {
     char path[4096];
     int last_line;
     bool block, triple;
+    bool flask_hint, fastapi_hint;
     char quote;
     char pending[8192];
     int pending_line;
@@ -278,6 +279,12 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
     char *scan=xmalloc(length+1);
     scrub_route_line(lang,path,lineno,pr,orig,scan);
     const char *trim=scan;while (*trim==' '||*trim=='\t')trim++;
+    if(strcmp(route_lang,"python")==0) {
+        if(strncmp(trim,"from flask import ",18)==0 ||
+           strncmp(trim,"import flask",12)==0)lex.flask_hint=true;
+        if(strncmp(trim,"from fastapi import ",20)==0 ||
+           strncmp(trim,"import fastapi",14)==0)lex.fastapi_hint=true;
+    }
     if (strncmp(trim,"//",2)==0 || strncmp(trim,"# ",2)==0 ||
         strncmp(trim,"* ",2)==0) {free(scan);return;}
     /* File routers encode path in the directory and method in the exported
@@ -409,7 +416,10 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
                 size_t n=0;while((isalnum((unsigned char)h[n])||h[n]=='_')&&n<sizeof handler-1)n++;
                 if(n){memcpy(handler,h,n);handler[n]=0;}}
         }
-        route_add(pr, r->framework, method, pattern,
+        const char *framework=r->framework;
+        if(strcmp(framework,"fastapi")==0 && lex.flask_hint &&
+           !lex.fastapi_hint)framework="flask";
+        route_add(pr, framework, method, pattern,
                   handler[0] ? handler : NULL, site_line);
         lex.pending_active=false;
         free(scan);return;   /* first matching framework wins for a line */

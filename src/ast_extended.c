@@ -75,6 +75,64 @@ static void add_ref(AstContext *c, TSNode node, TSNode id,
         r->evidence=strdup(ts_node_type(node)); }
     free(name);
 }
+/* HCL represents a static address as adjacent variable_expr/get_attr children
+ * of expression. Keep the spelling and span from source, and supply the exact
+ * resource address separately for same-file resolution. */
+static void terraform_reference(AstContext *c, TSNode expression, int owner) {
+    TSTreeCursor cursor=ts_tree_cursor_new(expression);
+    if(!ts_tree_cursor_goto_first_child(&cursor)) {
+        ts_tree_cursor_delete(&cursor);return;
+    }
+    TSNode base={0},instance={0};
+    unsigned seen=0;
+    do {
+        if(c->cancel_flag && *c->cancel_flag){c->cancelled=true;break;}
+        if(++seen>500000u){c->truncated=true;break;}
+        TSNode node=ts_tree_cursor_current_node(&cursor);
+        if(!ts_node_is_named(node))continue;
+        if(ts_node_is_null(base)) {
+            if(is(node,"variable_expr"))base=first_named(node);
+            else break;
+        } else if(ts_node_is_null(instance) && is(node,"get_attr")) {
+            instance=first_named(node);break;
+        } else break;
+    } while(ts_tree_cursor_goto_next_sibling(&cursor));
+    ts_tree_cursor_delete(&cursor);
+    if(ts_node_is_null(base))return;
+    if(ts_node_is_null(instance)) {
+        add_ref(c,expression,base,"reference",owner);return;
+    }
+    char *root=ast_text(c,base),*item=ast_text(c,instance);
+    char *raw=ast_slice(c,ts_node_start_byte(base),ts_node_end_byte(instance));
+    if(!root || !item || !raw){free(root);free(item);free(raw);return;}
+    SemReference *r=sem_reference_add(&c->result->sem,raw,"reference",
+        (SemSpan){.line=ast_line(base),.column=ast_column(base),
+            .end_line=(int)ts_node_end_point(instance).row+1,
+            .end_column=(int)ts_node_end_point(instance).column,
+            .start_byte=ts_node_start_byte(base),.end_byte=ts_node_end_byte(instance)});
+    if(r) {
+        r->owner=owner;
+        r->strategy=strdup("syntax");
+        r->evidence=strdup("attribute_path");
+        if(strcmp(root,"var") && strcmp(root,"local") &&
+           strcmp(root,"module") && strcmp(root,"data") &&
+           strcmp(root,"path") && strcmp(root,"terraform") &&
+           strcmp(root,"each") && strcmp(root,"count")) {
+            size_t cap=strlen(root)+strlen(item)+11;
+            r->qualifier=malloc(cap);
+            if(r->qualifier) {
+                snprintf(r->qualifier,cap,"resource.%s.%s",root,item);
+                free(r->evidence);r->evidence=strdup("resource_address");
+                for(int depth=0;r->owner>=0 && depth<32;depth++) {
+                    SemSymbol *s=&c->result->sem.symbols[r->owner];
+                    if(!strcmp(s->kind,"block"))break;
+                    r->owner=s->parent;
+                }
+            }
+        }
+    }
+    free(root);free(item);free(raw);
+}
 /* Keep only statically named identifiers; expression calls remain an explicit
  * boundary until receiver resolution can establish their target. */
 static TSNode simple_id(TSNode node) {
@@ -140,7 +198,7 @@ static bool visit(AstContext *c, TSNode n, void *unused) {
             if(!ts_node_is_null(label) && (is(label,"identifier")||is(label,"string_lit"))){id=label;kind="block";}
         } else if(!strcmp(t,"attribute")) {id=first_named(n);kind="attribute";}
         else if(!strcmp(t,"function_call")) add_ref(c,n,simple_id(first_named(n)),"call",owner);
-        else if(!strcmp(t,"variable_expr"))add_ref(c,n,simple_id(first_named(n)),"reference",owner);
+        else if(!strcmp(t,"expression"))terraform_reference(c,n,owner);
     } else if(!strcmp(lang,"nix")) {
         if(!strcmp(t,"binding")) {
             TSNode path=ast_field(n,"attrpath"),value=ast_field(n,"expression");
