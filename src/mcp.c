@@ -10,6 +10,7 @@
  *                    Gemini CLI, Codex CLI).
  */
 #include "cg.h"
+#include "sem_flow.h"
 #include "answer_health.h"
 #include <unistd.h>
 #include <sys/stat.h>
@@ -161,6 +162,22 @@ static int t_impact(void *v) {
     int rc = cmd_impact(c->cg, n, depth > 0 ? depth : 3,
                         budget > 0 ? budget : 8000, true);
     free(n);
+    return rc;
+}
+static int t_flow(void *v) {
+    CallCtx *c = v;
+    char *mode = c->args ? json_get_string(c->args, "mode") : NULL;
+    char *name = c->args ? json_get_string(c->args, "name") : NULL;
+    char *target = c->args ? json_get_string(c->args, "target") : NULL;
+    SemFlowLimits lim = {
+        .depth = (int)json_get_int(c->args, "depth", 3),
+        .nodes = (int)json_get_int(c->args, "max_nodes", 64),
+        .edges = (int)json_get_int(c->args, "max_edges", 128),
+        .time_ms = (int)json_get_int(c->args, "max_ms", 200),
+        .output_bytes = (int)json_get_int(c->args, "max_output", 16000),
+    };
+    int rc = sem_flow_query(c->cg, mode, name, target, lim, true);
+    free(mode); free(name); free(target);
     return rc;
 }
 static int t_routes(void *v) {
@@ -684,6 +701,12 @@ static int t_codemap(void *v) {
                  "\"depth\":{\"type\":\"integer\"}," \
                  "\"budget\":{\"type\":\"integer\",\"description\":" \
                  "\"token budget, default 8000\"}},\"required\":[\"name\"]}"
+#define S_FLOW "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\"," \
+               "\"enum\":[\"callers\",\"callees\",\"impact\",\"paths\"]}," \
+               "\"name\":{\"type\":\"string\"},\"target\":{\"type\":\"string\"}," \
+               "\"depth\":{\"type\":\"integer\"},\"max_nodes\":{\"type\":\"integer\"}," \
+               "\"max_edges\":{\"type\":\"integer\"},\"max_ms\":{\"type\":\"integer\"}," \
+               "\"max_output\":{\"type\":\"integer\"}},\"required\":[\"mode\",\"name\"]}"
 #define S_FILTER "{\"type\":\"object\",\"properties\":{\"filter\":{\"type\":\"string\"}}}"
 #define S_EMPTY  "{\"type\":\"object\",\"properties\":{}}"
 #define S_INTEGRATE "{\"type\":\"object\",\"properties\":{" \
@@ -891,6 +914,11 @@ static const struct {
       "Impact radius of a symbol before changing it: transitive callers "
       "(who breaks) and callees (what it depends on) to the given depth.",
       S_IMPACT, A_READ, "Impact analysis", t_impact, true },
+    { "flow",
+      "Traverse typed relations among symbols with bounded depth, nodes, "
+      "edges, time and output. Includes source evidence, heuristic labels "
+      "and unresolved dynamic boundaries.",
+      S_FLOW, A_READ, "Semantic flow", t_flow, true },
     { "list_routes",
       "Framework-aware HTTP routes (URL pattern -> handler) detected across "
       "the codebase, optionally filtered.",

@@ -84,7 +84,7 @@
     - Add branch-aware identifier postings, composable kind/lang/path/name filters, exact-name precedence and bounded fuzzy fallback. Return source bodies and overloads with co-location evidence, weak-query confidence and omission budgets while preserving existing text ranking.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.1, 4.2_
-  - [ ] 4.3 Bounded flow traversal and dynamic boundaries
+  - [x] 4.3 Bounded flow traversal and dynamic boundaries
     - Expose bounded paths among named symbols, callers/callees/impact over typed relations with source evidence and heuristic labels, depth/node/edge/time budgets and explicit unresolved dynamic boundaries through CLI and MCP.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.3_

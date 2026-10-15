@@ -148,6 +148,24 @@ static const HelpCmd HELP[] = {
   .flags = "-d N\tdepth (default 3)\n"
     "--budget N\ttoken budget (default 8000)\n",
   .related = "symbol,changes,test-impact" },
+{ .group = "graph", .name = "flow", .args = "<mode> <name> [target]",
+  .usage = "flow <callers|callees|impact|paths> <name> [target] "
+    "[--depth N] [--max-nodes N] [--max-edges N] [--max-ms N] "
+    "[--max-output BYTES]",
+  .summary = "bounded typed-relation traversal with source evidence",
+  .detail = "Traverses branch-scoped semantic relations. Paths follows "
+    "directed relations from name to target. Unresolved references are "
+    "reported as dynamic boundaries; --json includes provenance, source "
+    "locations, limits and truncation reasons.",
+  .flags = "--depth N\tmaximum traversal depth (1 to 8)\n"
+    "--max-nodes N\tmaximum symbols (up to 256)\n"
+    "--max-edges N\tmaximum relations (up to 512)\n"
+    "--max-ms N\tmaximum traversal time (up to 2000 ms)\n"
+    "--max-output BYTES\tmaximum traversal JSON bytes (1024 to 131072); "
+    "source-health metadata is additional\n",
+  .examples = "cg flow callees parse_file --json\n"
+    "cg flow paths handler save_record --depth 5 --json",
+  .related = "impact,symbol,context" },
 { .group = "graph", .name = "context", .args = "<query>",
   .usage = "context <query> [--budget N] [-n K] [--path GLOB] [--lang L] "
     "[--no-tests]",

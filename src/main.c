@@ -1,5 +1,6 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
+#include "sem_flow.h"
 #include "answer_health.h"
 #include <poll.h>
 #include <unistd.h>
@@ -343,6 +344,7 @@ int main(int argc, char **argv) {
     bool health_answer = json &&
         (strcmp(cmd, "search") == 0 || strcmp(cmd, "context") == 0 ||
          strcmp(cmd, "symbol") == 0 || strcmp(cmd, "impact") == 0 ||
+         strcmp(cmd, "flow") == 0 ||
          strcmp(cmd, "routes") == 0 || strcmp(cmd, "files") == 0 ||
          strcmp(cmd, "survey") == 0 || strcmp(cmd, "show") == 0 ||
          strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
@@ -454,6 +456,17 @@ int main(int argc, char **argv) {
         if (argc < 3) { help_usage("impact"); rc = 1; }
         else rc = cmd_impact(&cg, argv[2], depth > 0 ? depth : 3,
                              budget > 0 ? budget : 8000, json);
+    } else if (strcmp(cmd, "flow") == 0) {
+        SemFlowLimits lim = {
+            .depth = atoi(opt(&argc, argv, "--depth", "3")),
+            .nodes = atoi(opt(&argc, argv, "--max-nodes", "64")),
+            .edges = atoi(opt(&argc, argv, "--max-edges", "128")),
+            .time_ms = atoi(opt(&argc, argv, "--max-ms", "200")),
+            .output_bytes = atoi(opt(&argc, argv, "--max-output", "16000")),
+        };
+        if (argc < 4) { help_usage("flow"); rc = 1; }
+        else rc = sem_flow_query(&cg, argv[2], argv[3],
+                                 argc > 4 ? argv[4] : NULL, lim, json);
     } else if (strcmp(cmd, "context") == 0) {
         int budget = atoi(opt(&argc, argv, "--budget", "4000"));
         if (json && requested_budget > 0)
