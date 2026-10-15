@@ -9,12 +9,14 @@ Read this first. It is derived from the code graph: purpose lines are the code's
 
 | Language | Files | Lines |
 |---|---:|---:|
-| c | 56 | 59,900 |
+| c | 93 | 70,524 |
 | javascript | 11 | 8,551 |
+| python | 8 | 2,038 |
+| json | 8 | 1,603 |
 | go | 3 | 523 |
-| python | 2 | 714 |
+| yaml | 2 | 41 |
 
-72 source files, 69,688 lines (test fixtures not counted: 38 more).
+125 source files, 83,280 lines (test fixtures not counted: 142 more).
 
 Build and test:
 
@@ -27,24 +29,25 @@ Build and test:
 
 - `docs/` — 24 files
   - `docs/i18n/` — 6 files
-- `editors/` — 19 files, 8,551 lines, mostly javascript
-  - `editors/vscode/` — 19 files, 8,551 lines, mostly javascript. The whole Codify workflow, inside the editor.
-- `kvx/` — 25 files, 523 lines, mostly go. KVX is an ordered, sectioned key/value document format for specs, workflows, schemas, and interface declarations — designed for determinism …
-  - `kvx/.github/` — 1 file
-  - `kvx/editors/` — 3 files
+- `editors/` — 19 files, 9,031 lines, mostly javascript
+  - `editors/vscode/` — 19 files, 9,031 lines, mostly javascript. The whole Codify workflow, inside the editor.
+- `kvx/` — 25 files, 721 lines, mostly go. KVX is an ordered, sectioned key/value document format for specs, workflows, schemas, and interface declarations — designed for determinism …
+  - `kvx/.github/` — 1 file, 21 lines, mostly yaml
+  - `kvx/editors/` — 3 files, 177 lines, mostly json
   - `kvx/examples/` — 2 files
   - `kvx/impl/` — 4 files, 523 lines, mostly go
   - `kvx/spec/` — 2 files
   - `kvx/testdata/` — 10 files (test fixtures)
-- `scripts/` — 5 files, 481 lines, mostly python
-- `spec/` — 57 files
-  - 14 subdirectories: `codify-v03/`, `codify-v04/`, `codify-v05/`, `codify-v06/`, `codify-v07/`, `codify-v07.5/`, `codify-v08/`, `codify-v09/`, `codify-v10/`, `codify-v11/`, `codify-v12/`, `codify-v13/`, `codify-v14/`, `codify-v15/`
-- `src/` — 48 files, 58,361 lines, mostly c
-- `tests/` — 133 files, 3,722 lines, mostly c (test fixtures)
-  - `tests/fixtures/` — 69 files, 1,950 lines, mostly typescript (test fixtures)
-  - `tests/integration/` — 53 files (tests)
-  - `tests/scale/` — 1 file, 233 lines, mostly python (tests)
-  - `tests/unit/` — 8 files, 1,539 lines, mostly c (tests)
+- `scripts/` — 7 files, 847 lines, mostly python
+- `spec/` — 62 files
+  - 15 subdirectories: `codify-v03/`, `codify-v04/`, `codify-v05/`, `codify-v06/`, `codify-v07/`, `codify-v07.5/`, `codify-v08/`, `codify-v09/`, `codify-v10/`, `codify-v11/`, `codify-v12/`, `codify-v13/`, `codify-v14/`, `codify-v15/`, `codify-v16/`
+- `src/` — 84 files, 68,870 lines, mostly c
+- `tests/` — 270 files, 8,362 lines, mostly typescript (test fixtures)
+  - `tests/fixtures/` — 171 files, 4,571 lines, mostly typescript (test fixtures)
+  - `tests/integration/` — 78 files, 114 lines, mostly c (tests)
+  - `tests/scale/` — 4 files, 1,179 lines, mostly json
+  - `tests/semantic/` — 7 files, 958 lines, mostly python (tests). `catalog.py` labels one real declaration and one non-code decoy for each structural adapter.
+  - `tests/unit/` — 8 files, 1,540 lines, mostly c (tests)
 
 Root files: `.gitignore`, `CHANGELOG.md`, `CITATION.cff`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `LICENSE`, `MAINTAINERS.md`, `Makefile`, `README.md`, `SECURITY.md`, `WHY.md`, `cliff.toml`, `codify.kvx`
 
@@ -52,106 +55,111 @@ Hidden directories: `.github/` (1)
 
 ## Entry points
 
-- `main` — `scripts/format_changelog.py:410` `def main(argv: list[str] | None = None) -> int`
-- `main` — `src/main.c:155` `int main(int argc, char **argv)`
-- Commands dispatched in `src/main.c`: `version`, `spec`, `root`, `config`, `info`, `init`, `hook`, `jev`, `memory`, `projection`, `search`, `context`, `survey`, `journal`, `index`, `sync`, `grep`, `symbol`, `impact`, `show`, `test-impact`, `why`, `routes`, `anchors`, `files`, `watch`, `brief`, `fleet`, `branches`, `review`, `guard`, `check`, `git-sync`, `commit`, `log`, `status`, `state`, `event`, `events`, `drift`, `work`, `diff`, `checkout`, `changes`, `remember`, `recall`, `skills`, `forget`, `lsp`, `mcp`, `serve`, `tool`, `mcp-install`, `integrate`, `changelog`, `recap`, `agentmd`, `codemap`, `docs`, `handoff`, `resume`
+- `main` — `editors/vscode/fleet.js:529` `main`
+- `main` — `scripts/bench-indexing.py:135` `def main()`
+- `main` — `scripts/format_changelog.py:410` `(argv: list[str] | None = None)`
+- `main` — `src/main.c:167` `int main(int argc, char **argv)`
+- Commands dispatched in `src/main.c`: `version`, `spec`, `root`, `config`, `info`, `init`, `hook`, `jev`, `memory`, `projection`, `search`, `context`, `survey`, `symbol`, `impact`, `flow`, `routes`, `files`, `show`, `why`, `grep`, `test-impact`, `inspect`, `journal`, `index`, `sync`, `anchors`, `watch`, `brief`, `fleet`, `branches`, `review`, `guard`, `check`, `git-sync`, `commit`, `log`, `status`, `state`, `event`, `events`, `drift`, `work`, `diff`, `checkout`, `changes`, `remember`, `recall`, `skills`, `forget`, `lsp`, `mcp`, `serve`, `tool`, `mcp-install`, `integrate`, `changelog`, `recap`, `agentmd`, `codemap`, `docs`, `handoff`, `resume`
 - `editors/vscode/package.json`: main `./extension.js`
 
 ## Modules
 
 Product source by directory, most referenced first: key files by the references they receive, then the symbols the rest of the code calls most.
 
-### `src/` — 48 files, 58,361 lines, c
+### `src/` — 84 files, 68,870 lines, c
 
 Key files:
 
-- `src/util.c` (6,622 inbound refs)
-- `src/db.c` (578 inbound refs)
-- `src/json.c` (523 inbound refs) — Minimal JSON reading — just enough to serve MCP requests and peek into package.json.
-- `src/kvx.c` (374 inbound refs) — kvx: parser for the Ion .kvx sectioned key/value format, mirroring the grammar of ion-agent's spec/specgen/kvx.go — one `key = value` per line, [section] / …
-- `src/config.c` (163 inbound refs) — codify.kvx — project configuration, one optional file at the root of a tree.
-- `src/gitint.c` (108 inbound refs) — Git interop.
-- `src/lang.c` (99 inbound refs) — Language layer: heuristic symbol + reference extraction.
+- `src/util.c` (6,670 inbound refs)
+- `src/cg.h` (1,033 inbound refs) — Codify — agent-native code graph + content-addressed version control.
+- `src/json.c` (591 inbound refs) — Minimal JSON reading — just enough to serve MCP requests and peek into package.json.
+- `src/kvx.c` (375 inbound refs) — kvx: parser for the Ion .kvx sectioned key/value format, mirroring the grammar of ion-agent's spec/specgen/kvx.go — one `key = value` per line, [section] / …
+- `src/ast.c` (233 inbound refs)
+- `src/db.c` (196 inbound refs)
+- `src/config.c` (166 inbound refs) — codify.kvx — project configuration, one optional file at the root of a tree.
+- `src/lang.c` (125 inbound refs) — Language layer: heuristic symbol + reference extraction.
+- `src/gitint.c` (110 inbound refs) — Git interop.
 - `src/memory.c` (96 inbound refs) — cg remember / recall / forget — durable agent memory.
-- `src/fleet.c` (65 inbound refs) — Fleet: the hierarchy that turns one repository into a tree of agents.
-- `src/cg.h` (54 inbound refs) — Codify — agent-native code graph + content-addressed version control.
-- `src/graph.c` (54 inbound refs) — Graph queries: full-text search, symbol lookup, impact analysis, and `context` — the one-call answer for coding agents.
+- `src/fleet.c` (67 inbound refs) — Fleet: the hierarchy that turns one repository into a tree of agents.
+- `src/graph.c` (56 inbound refs) — Graph queries: full-text search, symbol lookup, impact analysis, and `context` — the one-call answer for coding agents.
+- `src/semantic.c` (52 inbound refs)
 - `src/journal.c` (46 inbound refs) — The write journal: lifecycle writes that survive a busy database.
+- `src/spec.c` (41 inbound refs) — cg spec — C port of ion-agent's spec/specgen plus a task engine.
 - `src/drivers.c` (40 inbound refs) — Agent drivers: how a Codex, Claude Code, or custom agent is launched, and how what it does comes back into Codify.
 - `src/events.c` (40 inbound refs) — The event log: one append-only table every state change lands in, so an editor, a supervisor, or a terminal can follow the fleet by sequence number instead of …
 - `src/progress.c` (39 inbound refs) — Progress for the passes a person waits on: cg init, cg index, cg sync.
-- `src/spec.c` (39 inbound refs) — cg spec — C port of ion-agent's spec/specgen plus a task engine.
 - `src/vcs.c` (33 inbound refs) — Content-addressed version control, integrated with the code graph.
-- `src/sha256.c` (28 inbound refs) — SHA-256, straightforward FIPS 180-4 implementation.
+- `src/sha256.c` (31 inbound refs) — SHA-256, straightforward FIPS 180-4 implementation.
+- `src/help.c` (27 inbound refs) — cg help — the command table and the four views drawn from it.
 - `src/resolve.c` (27 inbound refs) — Import resolution: resolve module strings to repository files and classify origin as repo, manifest, system, or unknown.
 - `src/govern.c` (24 inbound refs) — Governance: the commands that make Codify present at every step rather than only at the bookends.
 - `src/jev.c` (24 inbound refs) — Jev: TypeSafe AI's System One decision model, over curl.
-- `src/help.c` (23 inbound refs) — cg help — the command table and the four views drawn from it.
 - `src/projection.c` (22 inbound refs) — The projection: what main would look like if every branch in flight merged right now.
-- `src/files.c` (18 inbound refs) — cg files — finding files by glob, by the words of their path, or by directory, answered from the files table and file_fts; and the shared QueryFilter (--path …
+- `src/files.c` (20 inbound refs) — cg files — finding files by glob, by the words of their path, or by directory, answered from the files table and file_fts; and the shared QueryFilter (--path …
+- `src/index_health.c` (19 inbound refs)
 - `src/drift.c` (17 inbound refs) — Drift: where work parts from what was declared, found before it merges.
+- `src/scan.c` (17 inbound refs) — Indexing pipeline: walk -> parallel parse workers -> single DB writer.
+- `src/sem_search.c` (17 inbound refs)
 - `src/native.c` (16 inbound refs) — Native agents: the Claude Code and Codex sessions working on this project, and the subagents they spawn through their own Agent tool, recorded in the same …
-- `src/scan.c` (16 inbound refs) — Indexing pipeline: walk -> parallel parse workers -> single DB writer.
+- `src/semantic.h` (15 inbound refs)
 - `src/runtime.c` (14 inbound refs) — cg state — one truthful view across the independent state machines an agent otherwise conflates: Git, Codify snapshots, spec declarations, and live execution …
 - `src/syncgate.c` (14 inbound refs) — Sync gate: one indexer per project, one core budget per machine.
+- `src/sem_types.c` (13 inbound refs)
+- `src/answer_health.c` (12 inbound refs)
+- `src/ast.h` (11 inbound refs)
 - `src/plugin.c` (11 inbound refs) — The Claude Code plugin and the Codex hooks that cg integrate installs.
 - `src/conflicts.c` (10 inbound refs) — Projection findings: what the branches in flight collide on, found while every agent involved is still at the keyboard. git's merge-tree only sees lines; two …
-- `src/integrate.c` (6 inbound refs) — cg integrate — vendor-neutral installation and diagnostics for coding agents.
-- `src/orchestrate.c` (6 inbound refs) — cg spec run — the orchestrator that turns a parallel spec into running agents.
-- `src/recap.c` (6 inbound refs) — cg recap: a resume brief built from what past agent sessions said.
-- `src/sysinfo.c` (6 inbound refs) — Machine detection: container-aware core counts, honest available RAM.
-- `src/mcp.c` (4 inbound refs) — MCP (Model Context Protocol) stdio server + auto-install.
-- `src/routes.c` (4 inbound refs) — Framework-aware route detection.
-- `src/skills.c` (4 inbound refs) — cg skills — the memories worth carrying, rendered as Agent Skills.
-- `src/changelog.c` (3 inbound refs) — cg changelog — release notes from git history, the way cliff.toml says.
-- `src/codemap.c` (3 inbound refs) — cg codemap: CODEMAP.md, the repository in one read — what the project is and how to build and test it, its layout, entry points, the modules and the symbols …
+- `src/sem_dispatch.c` (8 inbound refs)
 
 Most-referenced symbols:
 
-- `sb_puts` function — `src/util.c:49`, 1,698 refs
+- `sb_puts` function — `src/util.c:49`, 1,772 refs
   `void sb_puts(StrBuf *b, const char *s)`
-- `sb_printf` function — `src/util.c:55`, 1,130 refs
+- `sb_printf` function — `src/util.c:55`, 1,170 refs
   `void sb_printf(StrBuf *b, const char *fmt, ...)`
-- `sb_json_str` function — `src/util.c:68`, 843 refs
+- `sb_json_str` function — `src/util.c:68`, 880 refs
   `void sb_json_str(StrBuf *b, const char *s)`
-- `sb_free` function — `src/util.c:42`, 688 refs
+- `sb_free` function — `src/util.c:42`, 712 refs
   `void sb_free(StrBuf *b)`
-- `sb_init` function — `src/util.c:41`, 661 refs
+- `sb_init` function — `src/util.c:41`, 686 refs
   `void sb_init(StrBuf *b)`
-- `sb_putc` function — `src/util.c:48`, 618 refs
+- `sb_putc` function — `src/util.c:48`, 646 refs
   `void sb_putc(StrBuf *b, char c)`
-- `cg_prep` function — `src/db.c:688`, 345 refs
-  `sqlite3_stmt *cg_prep(Cg *cg, const char *sql)`
-- `json_get_string` function — `src/json.c:118`, 278 refs
+- `json_get_string` function — `src/json.c:118`, 300 refs
   `char *json_get_string(const char *obj, const char *key)`
-- `xstrdup` function — `src/util.c:34`, 275 refs
-  `char *xstrdup(const char *s)`
-- `xmalloc` function — `src/util.c:24`, 145 refs
+- `xmalloc` function — `src/util.c:24`, 171 refs
   `void *xmalloc(size_t n)`
-- `xrealloc` function — `src/util.c:29`, 118 refs
+- `ast_field` function — `src/ast.c:197`, 145 refs
+  `TSNode ast_field(TSNode node, const char *field)`
+- `xrealloc` function — `src/util.c:29`, 138 refs
   `void *xrealloc(void *p, size_t n)`
-- `read_entire_file` function — `src/util.c:118`, 94 refs
+- `is_type` function — `src/ast_managed.c:20`, 116 refs
+  `static bool is_type(const char *t, const char *s)`
+- `read_entire_file` function — `src/util.c:118`, 100 refs
   `char *read_entire_file(const char *path, size_t *out_len)`
 
-_Also 8 files, 2,222 symbols — `cg survey src/`_
+_Also 44 files, 2,781 symbols — `cg survey src/`_
 
-### `editors/vscode/` — 11 files, 8,551 lines, javascript
+### `editors/vscode/` — 14 files, 9,031 lines, javascript
 
 The whole Codify workflow, inside the editor.
 
 Key files:
 
-- `editors/vscode/acp.js` (24 inbound refs) — Codify ACP sessions — drive Codex or Claude Code through the Agent Client Protocol and render the conversation in a Codify-native panel.
-- `editors/vscode/agents.js` (12 inbound refs) — Codify agent sessions — run Codex or Claude CLI sessions on spec tasks.
+- `editors/vscode/acp.js` (21 inbound refs) — Codify ACP sessions — drive Codex or Claude Code through the Agent Client Protocol and render the conversation in a Codify-native panel.
 - `editors/vscode/extension.js` (8 inbound refs) — Codify VS Code extension — the whole workflow, in the editor.
-- `editors/vscode/serve.js` (4 inbound refs) — One `cg serve` connection for the whole extension.
-- `editors/vscode/client.js` (2 inbound refs) — A minimal Language Server client for `cg lsp`.
-- `editors/vscode/memories.js` (2 inbound refs) — Codify memory browser — project memory as a place you can search, not a list you scroll.
-- `editors/vscode/refresh.js` (2 inbound refs)
-- `editors/vscode/fleet.js` (1 inbound ref) — Codify fleet view — the agent hierarchy, live, in the sidebar.
-- `editors/vscode/kvx.js` (1 inbound ref) — kvx editing support.
-- `editors/vscode/language.js` (1 inbound ref) — VS Code language features backed by `cg lsp`.
-- `editors/vscode/tasks.js` (1 inbound ref) — Codify task UI — the plan as a tree you can work from, and a detail panel that shows why a task is or is not done.
+- `editors/vscode/agents.js` (7 inbound refs) — Codify agent sessions — run Codex or Claude CLI sessions on spec tasks.
+- `editors/vscode/serve.js` (2 inbound refs) — One `cg serve` connection for the whole extension.
+- `editors/vscode/memories.js` (1 inbound ref) — Codify memory browser — project memory as a place you can search, not a list you scroll.
+- `editors/vscode/refresh.js` (1 inbound ref)
+- `editors/vscode/client.js` — A minimal Language Server client for `cg lsp`.
+- `editors/vscode/fleet.js` — Codify fleet view — the agent hierarchy, live, in the sidebar.
+- `editors/vscode/kvx.js` — kvx editing support.
+- `editors/vscode/language-configuration.json`
+- `editors/vscode/language.js` — VS Code language features backed by `cg lsp`.
+- `editors/vscode/package.json`
+- `editors/vscode/syntaxes/kvx.tmLanguage.json`
+- `editors/vscode/tasks.js` — Codify task UI — the plan as a tree you can work from, and a detail panel that shows why a task is or is not done.
 
 Most-referenced symbols:
 
@@ -162,7 +170,7 @@ Most-referenced symbols:
 - `panelPost` function — `editors/vscode/acp.js:507`, 37 refs
   `function panelPost(sess, msg)`
 - `str` function — `editors/vscode/fleet.js:117`, 32 refs
-  `const str = (v) => (typeof v === 'string' && v) ? v : null`
+  `str`
 - `cg` function — `editors/vscode/extension.js:80`, 29 refs
   `function cg(args)`
 - `show` function — `editors/vscode/extension.js:174`, 19 refs
@@ -172,15 +180,15 @@ Most-referenced symbols:
 - `config` function — `editors/vscode/acp.js:282`, 14 refs
   `function config()`
 - `num` function — `editors/vscode/fleet.js:118`, 14 refs
-  `const num = (v) => (typeof v === 'number' && Number.isFinite(v)) ? v : null`
+  `num`
 - `arr` function — `editors/vscode/fleet.js:203`, 13 refs
-  `const arr = (v) => Array.isArray(v) ? v : []`
+  `arr`
 - `walk` function — `editors/vscode/fleet.js:176`, 12 refs
-  `const walk = (n, parent) =>`
+  `walk`
 - `icon` function — `editors/vscode/tasks.js:831`, 12 refs
   `function icon(name, color)`
 
-_Also 488 symbols — `cg survey editors/vscode/`_
+_Also 634 symbols — `cg survey editors/vscode/`_
 
 ### `kvx/impl/` — 2 files, 354 lines, go
 
@@ -211,70 +219,100 @@ Most-referenced symbols:
   `func (d *Doc) Canonical() string`
 - `Hash` method — `kvx/impl/go/canonical.go:41`
   `func (d *Doc) Hash() string`
-- `Doc` type — `kvx/impl/go/kvx.go:35`
-  `type Doc struct`
+- `Doc` struct — `kvx/impl/go/kvx.go:35`
+  `Doc`
 - `ensure` method — `kvx/impl/go/kvx.go:108`
   `func (d *Doc) ensure(section string)`
 
 _Also 11 symbols — `cg survey kvx/impl/`_
 
-### `scripts/` — 1 file, 481 lines, python
+### `tests/scale/` — 2 files, 946 lines, json
 
 Key files:
 
-- `scripts/format_changelog.py` — Preview a changelog grouped by date and type without inventing metadata.
+- `tests/scale/results/v16-large.json`
+- `tests/scale/results/v16-small.json`
+
+### `scripts/` — 2 files, 847 lines, python
+
+Key files:
+
+- `scripts/bench-indexing.py`
+- `scripts/format_changelog.py`
 
 Most-referenced symbols:
 
+- `command` function — `scripts/bench-indexing.py:26`, 19 refs
+  `def command(args, cwd, env=None, timeout_s=None)`
 - `FormatError` class — `scripts/format_changelog.py:90`, 16 refs
-  `class FormatError(ValueError)`
+  `FormatError`
+- `stage` function — `scripts/bench-indexing.py:83`, 10 refs
+  `def stage(cg, root, db, name, flags, env, branch="main", timeout_s=None)`
 - `quoted_subject` function — `scripts/format_changelog.py:211`, 6 refs
-  `def quoted_subject(subject: str) -> str`
+  `(subject: str)`
 - `git` function — `scripts/format_changelog.py:94`, 4 refs
-  `def git(repo: Path, *args: str) -> str`
+  `(repo: Path, *args: str)`
+- `db_size` function — `scripts/bench-indexing.py:58`, 2 refs
+  `def db_size(db)`
+- `coverage` function — `scripts/bench-indexing.py:66`, 2 refs
+  `def coverage(db, branch)`
 - `atomic_output` function — `scripts/format_changelog.py:396`, 2 refs
-  `def atomic_output(path: Path, content: bytes, mode: int = 0o644) -> None`
+  `(path: Path, content: bytes, mode: int = 0o644)`
+- `compare_baseline` function — `scripts/bench-indexing.py:95`, 1 ref
+  `def compare_baseline(current, baseline, factor, floor_ms)`
+- `main` function — `scripts/bench-indexing.py:135`, 1 ref
+  `def main()`
 - `Dates` class — `scripts/format_changelog.py:105`, 1 ref
-  `class Dates`
+  `Dates`
 - `metadata_token` function — `scripts/format_changelog.py:205`, 1 ref
-  `def metadata_token(value: str) -> str`
-- `entry_type` function — `scripts/format_changelog.py:223`, 1 ref
-  `def entry_type(subject: str) -> str`
-- `Entry` class — `scripts/format_changelog.py:244`, 1 ref
-  `class Entry`
-- `parse_entry` function — `scripts/format_changelog.py:250`, 1 ref
-  `def parse_entry(`
-- `section` function — `scripts/format_changelog.py:282`, 1 ref
-  `def section(body: str, dates: Dates, newline: str, missing_metadata: str) -> str`
-- `format_changelog` function — `scripts/format_changelog.py:375`, 1 ref
-  `def format_changelog(text: str, repo: Path, missing_metadata: str = "recover") -> str`
-- `main` function — `scripts/format_changelog.py:410`, 1 ref
-  `def main(argv: list[str] | None = None) -> int`
+  `(value: str)`
 
-_Also 4 symbols — `cg survey scripts/`_
+_Also 10 symbols — `cg survey scripts/`_
 
-_Not shown: 8 files, 2,725 symbols._
+### `kvx/editors/` — 3 files, 177 lines, json
+
+Key files:
+
+- `kvx/editors/vscode/language-configuration.json`
+- `kvx/editors/vscode/package.json`
+- `kvx/editors/vscode/syntaxes/kvx.tmLanguage.json`
+
+### `kvx/.github/` — 1 file, 21 lines, yaml
+
+Key files:
+
+- `kvx/.github/workflows/ci.yml`
+
+### `.github/workflows/` — 1 file, 20 lines, yaml
+
+Key files:
+
+- `.github/workflows/ci.yml`
+
+_Not shown: 44 files, 3,436 symbols._
 
 ## Dependencies
 
 Between top-level directories, from resolved imports and calls (`.` is the root):
 
-- `tests/` → `src/`: 10 imports, 238 calls
-- `tests/` → `editors/`: 27 calls
-- `scripts/` → `src/`: 1 import
+- `tests/` → `src/`: 22 imports, 307 calls
+- `tests/` → `editors/`: 24 calls
+- `editors/` → `src/`: 2 calls
+- `scripts/` → `src/`: 2 imports
 
 ## Tests
 
 Run: `make test`, `go test ./...`
 
-Test code calls 79 of the 2,302 functions in product source directly (tests that drive a built binary are not counted).
+Test code calls 99 of the 2,654 functions in product source directly (tests that drive a built binary are not counted).
 
 - `kvx/impl/` — 1 test file; calls into `kvx/impl/` (3)
   - `go/kvx_test.go`
 - `tests/` — 2 test files
   - `lib.sh` — shared helpers for integration tests — source from integration/*.sh
   - `run.sh` — Codify integration test runner.
-- `tests/integration/` — 53 test files
+- `tests/integration/` — 78 test files; calls into `src/` (5)
+  - `67_sem_types_case.c`
   - `01_graph.sh` — init, index, search, symbol, impact, context, routes, info
   - `02_vcs.sh` — commit, log, status, diff, changes, checkout
   - `03_agentic.sh` — changelog, agentmd, mcp-install (sandboxed HOME)
@@ -314,10 +352,16 @@ Test code calls 79 of the 2,302 functions in product source directly (tests that
   - `37_explore.sh` — explore: prototypes are declarations that answer through their definitions, a path query gets the file's or directory's outline, phrase queries rank names over …
   - `38_codemap.sh` — cg codemap: CODEMAP.md from the graph — sections in order, byte-stable, budget-fitted with omission counts, marker-owned, --check, -o, --json, the MCP tool …
   - `39_memory_port.sh` — memory transport: cg memory export / import and the MCP tools over them. export   — header + one object per memory, content ids, filters, -o, byte-identical …
-  - `40_config.sh` — codify.kvx — project configuration: defaults, relocated spec, context and skills paths, rejected paths, [sync] auto=false, [index] workers, and the cg config …
-  - _+13 more_
+  - _+38 more_
 - `tests/scale/` — 1 test file
-  - `gen.py` — Deterministic scale fixture for the Codify index (codify-v15 req 3.6).
+  - `gen.py`
+- `tests/semantic/` — 6 test files
+  - `.gitignore`
+  - `catalog.py` — Reviewable source labels for the 1.6 structural extraction corpus.
+  - `convergence.py`
+  - `edge_catalog.py` — Source-labelled call edges and deliberately absent calls by language.
+  - `frameworks.py` — Small, source-backed route registrations for each required adapter.
+  - `run.py`
 - `tests/unit/` — 8 test files; calls into `src/` (63)
   - `test_config.c` — unit tests for src/config.c — defaults, parsing, path validation, the [index] workers count, the per-root cache, and spec root discovery
   - `test_kvx.c` — unit tests for src/kvx.c — parser grammar, accessors, sort, surgical write
@@ -328,14 +372,14 @@ Test code calls 79 of the 2,302 functions in product source directly (tests that
   - `test_sha256.c` — unit tests for src/sha256.c against FIPS 180-4 known-answer vectors
   - `tap.h` — minimal single-header test harness for Codify unit tests
 - `kvx/testdata/` — 10 fixture files: `invalid/`, `valid/`
-- `tests/fixtures/` — 69 fixture files: `acp/`, `anchors/`, `codemap/`, `explore/`, `fleet/`, `grounding/`, `jev/`, `native/`, `recap/`, `sample/`, `specrepo/`
+- `tests/fixtures/` — 171 fixture files: `acp/`, `anchors/`, `ast_runtime/`, `codemap/`, `explore/`, `fleet/`, `grounding/`, `jev/`, `native/`, `recap/`, `sample/`, `semantic/`, `specrepo/`
 
-_Not shown: 13 test files._
+_Not shown: 38 test files._
 
 ## Workflow and agent files
 
 - `spec/workflow.kvx` — the spec workflow: principles, the session loop (`cg brief`, `cg spec next`, `cg spec start <id>`, `cg spec done <id>`), and hard rules
-- `spec/codify-v15/spec.kvx` — the active feature: requirements, acceptance criteria, and the task list in waves
+- `spec/codify-v16/spec.kvx` — the active feature: requirements, acceptance criteria, and the task list in waves
 - `CONTRIBUTING.md` — how to contribute
 
 Docs:
