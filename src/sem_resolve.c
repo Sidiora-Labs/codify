@@ -145,15 +145,41 @@ static void bind_nullable_id(sqlite3_stmt *q, int colno, long id) {
 
 int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
     if (changed_files && nfiles==0) return 0;
-    /* Revisit all semantic references when definitions change. This includes
-     * unchanged callers of deleted or newly introduced candidates. */
+    /* The orchestrator expands the source set with unchanged callers of old
+     * and new definition keys. A NULL set is an explicit full rebuild. */
+    {
+        char *error=NULL;
+        if (sqlite3_exec(cg->db,
+                "CREATE TEMP TABLE IF NOT EXISTS sem_resolve_scope_files("
+                "file_id INTEGER PRIMARY KEY);"
+                "DELETE FROM temp.sem_resolve_scope_files;",
+                NULL,NULL,&error)!=SQLITE_OK) {
+            fprintf(stderr,"cg: receiver scope: %s\n",error?error:"unknown error");
+            sqlite3_free(error); return -1;
+        }
+        if (changed_files) {
+            sqlite3_stmt *ins=cg_prep(cg,
+                "INSERT OR IGNORE INTO temp.sem_resolve_scope_files(file_id) VALUES(?)");
+            for (int i=0;i<nfiles;i++) {
+                sqlite3_bind_int64(ins,1,changed_files[i]);
+                if (sqlite3_step(ins)!=SQLITE_DONE) {
+                    sqlite3_finalize(ins); return -1;
+                }
+                sqlite3_reset(ins); sqlite3_clear_bindings(ins);
+            }
+            sqlite3_finalize(ins);
+        }
+    }
     sqlite3_stmt *refs=cg_prep(cg,
         "SELECT r.id,r.file_id,r.name,ifnull(sr.qualifier,r.qual),r.argc,"
         "ifnull(sr.owner_id,0),ifnull(sr.original_text,r.name),"
         "sr.start_line,sr.start_column FROM semantic_references sr "
         "JOIN refs r ON r.id=sr.ref_id JOIN files f ON f.id=r.file_id "
-        "WHERE f.branch_id=? AND r.kind='call' ORDER BY r.id");
+        "WHERE f.branch_id=? AND r.kind='call' "
+        "AND (? OR r.file_id IN (SELECT file_id FROM temp.sem_resolve_scope_files)) "
+        "ORDER BY r.id");
     sqlite3_bind_int64(refs,1,cg->branch_id);
+    sqlite3_bind_int(refs,2,changed_files==NULL);
     sqlite3_stmt *upd=cg_prep(cg,
         "UPDATE semantic_references SET target_id=?,strategy=?,evidence=? WHERE ref_id=?");
     sqlite3_stmt *legacy=cg_prep(cg,

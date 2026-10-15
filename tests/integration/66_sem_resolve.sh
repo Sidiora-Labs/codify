@@ -19,10 +19,12 @@ int sem_pass_register(const char *name,int order,SemPassFn fn) {
     (void)name;(void)order;(void)fn;return 0;
 }
 int main(int argc,char **argv) {
-    if (argc!=3) return 2;
+    if (argc<3 || argc>35) return 2;
     Cg cg={0}; cg.branch_id=atol(argv[2]);
     if (sqlite3_open(argv[1],&cg.db)!=SQLITE_OK) return 2;
-    int rc=sem_resolve_run(&cg,NULL,0);
+    long changed[32];
+    for (int i=3;i<argc;i++) changed[i-3]=atol(argv[i]);
+    int rc=sem_resolve_run(&cg,argc>3?changed:NULL,argc-3);
     sqlite3_close(cg.db);
     return rc;
 }
@@ -62,37 +64,43 @@ INSERT INTO refs VALUES
  (105,1,'go','mod',1,'call',21,'internal','same-name'),
  (106,1,'free','',0,'call',22,'internal','same-name'),
  (107,1,'privateCall','',0,'call',23,'internal','same-name'),
- (108,1,'go','object',2,'call',21,'internal','same-name');
+ (108,1,'go','object',2,'call',21,'internal','same-name'),
+ (109,2,'go','self',1,'call',11,'internal','same-name');
 INSERT INTO semantic_references(ref_id,owner_id,qualifier,original_text,start_line,start_column) VALUES
  (101,13,'this','this.go(1)',5,2),(102,13,'this','this.go(1,2)',6,2),
  (103,13,'mystery','mystery.go(1)',7,2),(104,13,'object','object.go(1)',8,2),
  (105,13,'mod','mod.go(1)',9,2),(106,13,'','free()',10,2),
- (107,13,'','privateCall()',11,2),(108,13,'object','object.go(1,2)',12,2);
+ (107,13,'','privateCall()',11,2),(108,13,'object','object.go(1,2)',12,2),
+ (109,21,'self','self.go(1)',7,2);
 INSERT INTO semantic_type_facts VALUES(1,'object','constructor',13,4,'B');
 INSERT INTO semantic_bindings VALUES(1,'mod',0,0,NULL,3);
 ''')
 c.commit()
 subprocess.run([runner,db,'1'],check=True)
 rows=dict(c.execute('SELECT ref_id,target_id FROM semantic_references'))
-expected={101:11,102:12,103:None,104:21,105:30,106:None,107:None,108:None}
+expected={101:11,102:12,103:None,104:21,105:30,106:None,107:None,108:None,109:21}
 assert rows==expected,(rows,expected)
 assert c.execute("SELECT original_text,strategy,provenance FROM semantic_edges WHERE source_ref_id=101").fetchone()==('this.go(1)','receiver-owner','resolved-receiver')
-assert c.execute('SELECT count(*) FROM semantic_edges').fetchone()[0]==4
+assert c.execute('SELECT count(*) FROM semantic_edges').fetchone()[0]==5
 assert c.execute('SELECT verdict,target_id FROM refs WHERE id=103').fetchone()==('unknown',None)
 assert 'unknown receiver' in c.execute('SELECT evidence FROM semantic_references WHERE ref_id=103').fetchone()[0]
 # A newly introduced competing receiver leaves an unchanged caller unresolved.
 c.execute("INSERT INTO symbols VALUES(25,2,'go','method',0,'go(x)',6)")
 c.execute("INSERT INTO semantic_symbols VALUES(25,20,'public')")
 c.commit()
-subprocess.run([runner,db,'1'],check=True)
+subprocess.run([runner,db,'1','1'],check=True)
 assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=104').fetchone()[0] is None
 assert c.execute('SELECT count(*) FROM semantic_edges WHERE source_ref_id=104').fetchone()[0]==0
+assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=109').fetchone()[0]==21
+subprocess.run([runner,db,'1'],check=True)
+assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=109').fetchone()[0] is None
 # Removing it restores the original link, with no duplicate edge.
 c.execute('DELETE FROM semantic_symbols WHERE symbol_id=25')
 c.execute('DELETE FROM symbols WHERE id=25')
 c.commit()
-subprocess.run([runner,db,'1'],check=True)
+subprocess.run([runner,db,'1','1','2'],check=True)
 assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=104').fetchone()[0]==21
 assert c.execute('SELECT count(*) FROM semantic_edges WHERE source_ref_id=104').fetchone()[0]==1
-print('receiver and overload resolution: owner, arity, import, type, ambiguity, visibility, branch and retry passed')
+assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=109').fetchone()[0]==21
+print('receiver and overload resolution: owner, arity, import, type, ambiguity, visibility, branch and scoped retry passed')
 PY
