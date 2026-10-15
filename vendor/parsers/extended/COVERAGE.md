@@ -12,7 +12,7 @@ while indexing.
 | R | `r` | Assignment-defined functions and variables, direct calls | Nonstandard evaluation is not resolved. |
 | Erlang | `erlang` | Modules, records, function clauses, direct calls | Runtime messaging and dynamic module calls are not resolved. |
 | Solidity | `solidity` | Contracts, functions, events, modifiers, state variables, inheritance, direct calls | Dynamic dispatch and deployed contract targets are unresolved. |
-| Terraform | `hcl` | Blocks, attributes, variable and function references | Provider values and computed expressions remain unresolved. |
+| Terraform | `hcl` | Blocks, attributes, literal resource addresses, variable and function references | Provider values and computed expressions remain unresolved. |
 | Nix | `nix` | Attribute bindings, function bindings, direct application and variable references | Laziness and dynamic attribute selection are not evaluated. |
 
 Coverage is structural for the listed facts. Syntax errors, missing grammar

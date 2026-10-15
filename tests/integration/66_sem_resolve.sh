@@ -39,9 +39,10 @@ c.executescript('''
 CREATE TABLE files(id INTEGER PRIMARY KEY,branch_id INTEGER,path TEXT);
 CREATE TABLE symbols(id INTEGER PRIMARY KEY,file_id INTEGER,name TEXT,kind TEXT,decl INTEGER,sig TEXT,line INTEGER);
 CREATE TABLE refs(id INTEGER PRIMARY KEY,file_id INTEGER,name TEXT,qual TEXT,argc INTEGER,kind TEXT,target_id INTEGER,verdict TEXT,conf TEXT);
-CREATE TABLE semantic_symbols(symbol_id INTEGER PRIMARY KEY,parent_id INTEGER,visibility TEXT);
+CREATE TABLE semantic_symbols(symbol_id INTEGER PRIMARY KEY,parent_id INTEGER,visibility TEXT,qualified_name TEXT);
 CREATE TABLE semantic_references(ref_id INTEGER PRIMARY KEY,owner_id INTEGER,qualifier TEXT,original_text TEXT,start_line INTEGER,start_column INTEGER,target_id INTEGER,strategy TEXT,evidence TEXT);
-CREATE TABLE semantic_bindings(file_id INTEGER,local_name TEXT,is_export INTEGER,is_system INTEGER,target_symbol_id INTEGER,target_file_id INTEGER);
+CREATE TABLE semantic_bindings(file_id INTEGER,local_name TEXT,original_name TEXT,module TEXT,is_export INTEGER,is_system INTEGER,target_symbol_id INTEGER,target_file_id INTEGER);
+CREATE TABLE imports(file_id INTEGER,module TEXT,target_file_id INTEGER);
 CREATE TABLE semantic_type_facts(file_id INTEGER,name TEXT,kind TEXT,owner_id INTEGER,start_line INTEGER,value TEXT);
 CREATE TABLE semantic_edges(branch_id INTEGER,source_file_id INTEGER,target_file_id INTEGER,source_id INTEGER,target_id INTEGER,source_ref_id INTEGER,kind TEXT,original_text TEXT,strategy TEXT,provenance TEXT,evidence TEXT,start_line INTEGER,start_column INTEGER,synthesized INTEGER);
 INSERT INTO files VALUES(1,1,'app.ts'),(2,1,'service.ts'),(3,1,'other.ts'),(4,2,'service.ts');
@@ -52,7 +53,7 @@ INSERT INTO symbols VALUES
  (22,2,'free','function',0,'free()',3),(23,2,'privateCall','function',0,'privateCall()',4),
  (24,2,'free','function',0,'free()',5),(30,3,'go','function',0,'go(x)',2),
  (40,4,'go','function',0,'go(x)',1);
-INSERT INTO semantic_symbols VALUES
+INSERT INTO semantic_symbols(symbol_id,parent_id,visibility) VALUES
  (10,NULL,NULL),(11,10,'public'),(12,10,'public'),(13,10,'public'),
  (20,NULL,NULL),(21,20,'public'),(22,NULL,'public'),(23,NULL,'private'),
  (24,NULL,'public'),(30,NULL,'public'),(40,NULL,'public');
@@ -73,7 +74,7 @@ INSERT INTO semantic_references(ref_id,owner_id,qualifier,original_text,start_li
  (107,13,'','privateCall()',11,2),(108,13,'object','object.go(1,2)',12,2),
  (109,21,'self','self.go(1)',7,2);
 INSERT INTO semantic_type_facts VALUES(1,'object','constructor',13,4,'B');
-INSERT INTO semantic_bindings VALUES(1,'mod',0,0,NULL,3);
+INSERT INTO semantic_bindings(file_id,local_name,is_export,is_system,target_symbol_id,target_file_id) VALUES(1,'mod',0,0,NULL,3);
 ''')
 c.commit()
 subprocess.run([runner,db,'1'],check=True)
@@ -86,7 +87,7 @@ assert c.execute('SELECT verdict,target_id FROM refs WHERE id=103').fetchone()==
 assert 'unknown receiver' in c.execute('SELECT evidence FROM semantic_references WHERE ref_id=103').fetchone()[0]
 # A newly introduced competing receiver leaves an unchanged caller unresolved.
 c.execute("INSERT INTO symbols VALUES(25,2,'go','method',0,'go(x)',6)")
-c.execute("INSERT INTO semantic_symbols VALUES(25,20,'public')")
+c.execute("INSERT INTO semantic_symbols(symbol_id,parent_id,visibility) VALUES(25,20,'public')")
 c.commit()
 subprocess.run([runner,db,'1','1'],check=True)
 assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=104').fetchone()[0] is None
@@ -136,4 +137,70 @@ assert rows[2][1:4] == ('unknown', 'unknown', 'semantic-unresolved'), rows
 assert 'unknown receiver' in rows[2][5], rows
 assert db.execute("SELECT count(*) FROM semantic_edges WHERE provenance='resolved-receiver' AND kind='calls'").fetchone()[0] == 2
 print('production extractor, storage and receiver pass: arity and unknown receiver passed')
+PY
+
+# Container kinds outside class/struct still establish lexical ownership.
+mkdir "$tmp/scala" "$tmp/solidity"
+cat >"$tmp/scala/Flow.scala" <<'EOF'
+object Flow {
+  def target(): Int = 1
+  def caller(): Int = target()
+}
+EOF
+cat >"$tmp/solidity/Flow.sol" <<'EOF'
+pragma solidity ^0.8.0;
+contract Flow {
+  function target() public pure returns(uint) { return 1; }
+  function caller() public pure returns(uint) { return target(); }
+}
+EOF
+for family in scala solidity; do
+    (cd "$tmp/$family" && "$CG" init >/dev/null)
+done
+python3 - "$tmp/scala" "$tmp/solidity" <<'PY'
+import pathlib, sqlite3, sys
+for path in sys.argv[1:]:
+    db = sqlite3.connect(next(pathlib.Path(path).glob('.*/*.db')))
+    row = db.execute('''SELECT r.verdict,r.conf,s.name,ss.parent_id
+                        FROM refs r LEFT JOIN symbols s ON s.id=r.target_id
+                        LEFT JOIN semantic_symbols ss ON ss.symbol_id=s.id
+                        WHERE r.kind='call' AND r.name='target' ''').fetchone()
+    assert row and row[:3] == ('internal','lexical-owner','target') and row[3], (path,row)
+PY
+
+# An unqualified value reference resolves only to a unique lexical target.
+mkdir "$tmp/nix" "$tmp/terraform"
+cat >"$tmp/nix/flow.nix" <<'EOF'
+{ }: let
+  target = 1;
+  caller = target;
+  unrelated = 0; # target
+in caller
+EOF
+cat >"$tmp/terraform/flow.tf" <<'EOF'
+resource "null_resource" "first" {}
+resource "null_resource" "second" {
+  depends_on = [null_resource.first, null_resource.missing]
+}
+EOF
+for family in nix terraform; do
+    (cd "$tmp/$family" && "$CG" init >/dev/null)
+done
+python3 - "$tmp/nix" "$tmp/terraform" <<'PY'
+import pathlib, sqlite3, sys
+def database(path):
+    return sqlite3.connect(next(pathlib.Path(path).glob('.*/*.db')))
+nix = database(sys.argv[1])
+assert nix.execute('''SELECT e.kind,s.name,o.name FROM semantic_edges e
+                      JOIN symbols s ON s.id=e.target_id
+                      JOIN symbols o ON o.id=e.source_id
+                      WHERE e.provenance='resolved-receiver' ''').fetchall() == [
+                          ('references','target','caller')]
+assert nix.execute("SELECT count(*) FROM semantic_references WHERE original_text='target'").fetchone()[0] == 1
+terraform = database(sys.argv[2])
+assert terraform.execute('''SELECT e.kind,ss.qualified_name FROM semantic_edges e
+                            JOIN semantic_symbols ss ON ss.symbol_id=e.target_id
+                            WHERE e.provenance='resolved-receiver' ''').fetchall() == [
+                                ('references','resource.null_resource.first')]
+assert terraform.execute("SELECT target_id FROM semantic_references WHERE original_text='null_resource.missing'").fetchone()[0] is None
 PY

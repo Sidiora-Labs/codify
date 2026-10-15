@@ -170,10 +170,21 @@ EOF
     out="$("$CG" sync --json)"
     [ "$(json_field "$out" scoped)" = true ] || fail "expected a scoped resolution: $out"
     [ "$(json_field "$out" indexed)" = 1 ] || fail "expected one file reindexed: $out"
+    [ "$(db_query "SELECT value FROM meta WHERE key LIKE 'index_pending_resolve:%'")" = 0 ] || \
+        fail "ordinary edit left resolution debt"
     has "$("$CG" impact alphaOne -d 1)" "betaCaller"
     has "$(db_query "SELECT r.name, r.verdict FROM refs r JOIN files f ON f.id=r.file_id WHERE f.path='src/beta.ts' AND r.name='alphaOne'")" "alphaOne|internal"
     dangling="$(db_query "SELECT count(*) FROM refs WHERE target_id IS NOT NULL AND target_id NOT IN (SELECT id FROM symbols)")"
     [ "$dangling" = 0 ] || fail "dangling ref targets after a scoped pass: $dangling"
+
+    # Debt that predates a command requires a full retry even when no source
+    # file changes. A marker created by the current edit must not do that.
+    sqlite3 "$(ls .*/graph.db)" \
+        "UPDATE meta SET value='1' WHERE key LIKE 'index_pending_resolve:%'"
+    out="$("$CG" sync --json)"
+    [ "$(json_field "$out" scoped)" = false ] || fail "preexisting debt did not force recovery: $out"
+    [ "$(db_query "SELECT value FROM meta WHERE key LIKE 'index_pending_resolve:%'")" = 0 ] || \
+        fail "recovery did not clear resolution debt"
 
     # (b) renaming the callee in its own file unresolves the caller's ref
     #     without touching the caller's file

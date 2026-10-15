@@ -55,6 +55,30 @@ static char *decorators_text(AstContext *ctx, TSNode wrapper) {
     return end > start ? ast_slice(ctx, (uint32_t)start, (uint32_t)end) : NULL;
 }
 
+static char *python_signature(AstContext *ctx, TSNode declaration, TSNode body) {
+    if (ts_node_is_null(body)) return NULL;
+    uint32_t start = ts_node_start_byte(declaration);
+    uint32_t end = ts_node_start_byte(body);
+    TSTreeCursor cursor = ts_tree_cursor_new(declaration);
+    if (ts_tree_cursor_goto_first_child(&cursor)) {
+        do {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            if (is(child, ":") && ts_node_start_byte(child) < end) {
+                end = ts_node_end_byte(child);
+                break;
+            }
+        } while (ts_tree_cursor_goto_next_sibling(&cursor));
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (end <= start || end - start > 8192) return NULL;
+    char *sig = ast_slice(ctx, start, end);
+    if (!sig) return NULL;
+    size_t n = strlen(sig);
+    while (n && (sig[n-1] == ' ' || sig[n-1] == '\t' ||
+                 sig[n-1] == '\r' || sig[n-1] == '\n')) sig[--n] = 0;
+    return sig;
+}
+
 static int add_symbol(DynWalk *w, TSNode node, TSNode name_node,
                       const char *kind, TSNode params, TSNode result,
                       TSNode decorators) {
@@ -380,6 +404,8 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
             SemSymbol *s = &w->ctx->result->sem.symbols[child_owner];
             TSNode body = ast_field(n, "body");
             if (py) {
+                char *header = python_signature(w->ctx, n, body);
+                if (header) { free(s->signature); s->signature = header; }
                 TSNode doc = python_doc_node(body);
                 s->documentation = text(w->ctx, doc);
                 python_capture_doc(w->ctx, doc);

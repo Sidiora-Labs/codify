@@ -14,6 +14,32 @@ extern const TSLanguage *tree_sitter_tsx(void);
 static bool is(TSNode n, const char *type) {
     return !ts_node_is_null(n) && strcmp(ts_node_type(n), type) == 0;
 }
+typedef struct { TSTreeCursor cursor; bool valid; } WebChildren;
+static WebChildren children(TSNode parent) {
+    WebChildren it = { .cursor=ts_tree_cursor_new(parent) };
+    it.valid=ts_tree_cursor_goto_first_child(&it.cursor);
+    return it;
+}
+static bool next_named(WebChildren *it, TSNode *out) {
+    while (it->valid) {
+        *out=ts_tree_cursor_current_node(&it->cursor);
+        it->valid=ts_tree_cursor_goto_next_sibling(&it->cursor);
+        if (ts_node_is_named(*out)) return true;
+    }
+    return false;
+}
+static void children_done(WebChildren *it) { ts_tree_cursor_delete(&it->cursor); }
+static TSNode argument_at(TSNode args, unsigned wanted) {
+    if (!is(args,"arguments")) return (TSNode){0};
+    WebChildren it=children(args); TSNode child, found={0};
+    unsigned position=0;
+    while (next_named(&it,&child)) {
+        if (ts_node_is_extra(child)) continue;
+        if (position++==wanted) { found=child; break; }
+    }
+    children_done(&it);
+    return found;
+}
 static SemSpan span(TSNode n) {
     TSPoint a = ts_node_start_point(n), b = ts_node_end_point(n);
     return (SemSpan){(int)a.row+1, (int)a.column, (int)b.row+1,
@@ -71,6 +97,20 @@ static int symbol(AstContext *c, TSNode n, TSNode name, const char *kind,
     s->parent=parent; s->exported=exported;
     s->qualified_name=qualified(r,parent,sname);
     s->signature=head(c,n,body);
+    TSNode wrapper=ts_node_parent(n);
+    if (is(wrapper,"export_statement") && s->signature &&
+        ts_node_start_byte(n)-ts_node_start_byte(wrapper)<=256) {
+        char *written=ast_slice(c,ts_node_start_byte(wrapper),ts_node_start_byte(n));
+        if (contains_word(written,"export")) {
+            size_t z=strlen(written)+strlen(s->signature)+1;
+            char *full=malloc(z);
+            if (full) {
+                snprintf(full,z,"%s%s",written,s->signature);
+                free(s->signature); s->signature=full;
+            }
+        }
+        free(written);
+    }
     s->scope_key=s->qualified_name ? strdup(s->qualified_name) : NULL;
     char *prefix=ast_slice(c,ts_node_start_byte(n),ts_node_start_byte(name));
     static const char *mods[]={"async","static","abstract","readonly","override","declare"};
@@ -301,9 +341,13 @@ static bool locally_constructed(AstContext *c, TSNode root,
         free(s);
         if (match) return true;
     }
-    for (uint32_t i=0;i<ts_node_named_child_count(root);i++)
-        if (locally_constructed(c,ts_node_named_child(root,i),receiver,depth+1,budget))
+    WebChildren it=children(root); TSNode child;
+    while (*budget>0 && next_named(&it,&child))
+        if (locally_constructed(c,child,receiver,depth+1,budget)) {
+            children_done(&it);
             return true;
+        }
+    children_done(&it);
     return false;
 }
 static int declaration_count(AstContext *c, TSNode root,
@@ -319,8 +363,10 @@ static int declaration_count(AstContext *c, TSNode root,
         char *s=text(c,root);
         count=s && strcmp(s,name)==0; free(s);
     }
-    for (uint32_t i=0;i<ts_node_named_child_count(root);i++)
-        count+=declaration_count(c,ts_node_named_child(root,i),name,depth+1,budget);
+    WebChildren it=children(root); TSNode child;
+    while (*budget>0 && next_named(&it,&child))
+        count+=declaration_count(c,child,name,depth+1,budget);
+    children_done(&it);
     return count;
 }
 static bool imported_receiver(AstContext *c, const char *receiver) {
@@ -333,7 +379,7 @@ static bool imported_receiver(AstContext *c, const char *receiver) {
 }
 static void channel_fact(AstContext *c, TSNode n, TSNode fn,
                          TSNode args, int owner) {
-    TSNode first=ts_node_named_child(args,0);
+    TSNode first=argument_at(args,0);
     if (!is(first,"string")) return;
     char *literal=unquote(c,first);
     if (!literal) return;
@@ -371,22 +417,25 @@ static void channel_fact(AstContext *c, TSNode n, TSNode fn,
         const char *http=NULL;
         if (callee && strcmp(callee,"fetch")==0) {
             http="GET";
-            TSNode options=ts_node_named_child(args,1);
-            for (uint32_t i=0;i<ts_node_named_child_count(options);i++) {
-                TSNode pair=ts_node_named_child(options,i);
-                TSNode key=ast_field(pair,"key"),value=ast_field(pair,"value");
-                char *key_name=text(c,key);
-                if (key_name && strcmp(key_name,"method")==0 && is(value,"string")) {
-                    char *m=unquote(c,value);
-                    if (m) {
-                        static const char *methods[]={"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"};
-                        http=NULL;
-                        for (size_t j=0;j<sizeof(methods)/sizeof(methods[0]);j++)
-                            if (strcasecmp(m,methods[j])==0) { http=methods[j]; break; }
-                        free(m);
+            TSNode options=argument_at(args,1);
+            if (!ts_node_is_null(options)) {
+                WebChildren properties=children(options); TSNode pair;
+                while (next_named(&properties,&pair)) {
+                    TSNode key=ast_field(pair,"key"),value=ast_field(pair,"value");
+                    char *key_name=text(c,key);
+                    if (key_name && strcmp(key_name,"method")==0 && is(value,"string")) {
+                        char *m=unquote(c,value);
+                        if (m) {
+                            static const char *methods[]={"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"};
+                            http=NULL;
+                            for (size_t j=0;j<sizeof(methods)/sizeof(methods[0]);j++)
+                                if (strcasecmp(m,methods[j])==0) { http=methods[j]; break; }
+                            free(m);
+                        }
                     }
+                    free(key_name);
                 }
-                free(key_name);
+                children_done(&properties);
             }
         } else if (receiver && method &&
                    (strcmp(receiver,"axios")==0 || strcmp(receiver,"http")==0)) {
@@ -519,7 +568,7 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
             c->result->sem.references[c->result->sem.nreferences-1].argc=call_arity(args);
         channel_fact(c,n,fn,args,owner);
         char *callee=text(c,fn);
-        TSNode first=ts_node_named_child(args,0), second=ts_node_named_child(args,1);
+        TSNode first=argument_at(args,0), second=argument_at(args,1);
         TSNode method=is(fn,"member_expression")?ast_field(fn,"property"):fn;
         char *method_name=text(c,method);
         char *channel=is(first,"string")?unquote(c,first):NULL;
@@ -543,14 +592,19 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
             named_fact(c,n,channel,"observer_notify",owner,NULL);
         if (callee && strncmp(callee,"set",3)==0 && isupper((unsigned char)callee[3]))
             named_fact(c,n,callee,"state_setter_call",owner,NULL);
-        for (uint32_t i=0;i<ts_node_named_child_count(args);i++) {
-            TSNode arg=ts_node_named_child(args,i);
-            if (is(arg,"arrow_function") || is(arg,"function_expression") ||
-                (i>0 && is(arg,"identifier"))) {
-                char *callback=is(arg,"identifier")?text(c,arg):strdup("<inline>");
-                named_fact(c,arg,callee,"callback_registration",owner,callback);
-                free(callback);
+        if (!ts_node_is_null(args)) {
+            WebChildren arguments=children(args); TSNode arg; unsigned i=0;
+            while (next_named(&arguments,&arg)) {
+                if (ts_node_is_extra(arg)) continue;
+                if (is(arg,"arrow_function") || is(arg,"function_expression") ||
+                    (i>0 && is(arg,"identifier"))) {
+                    char *callback=is(arg,"identifier")?text(c,arg):strdup("<inline>");
+                    named_fact(c,arg,callee,"callback_registration",owner,callback);
+                    free(callback);
+                }
+                i++;
             }
+            children_done(&arguments);
         }
         free(callee);free(method_name);free(channel);
     } else if (is(n,"new_expression")) {
@@ -571,8 +625,10 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
         if (!ts_node_eq(n,ast_field(p,"name"))) reference(c,n,n,"type",owner,NULL);
     }
     (void)kind;
-    for (uint32_t i=0;i<ts_node_named_child_count(n);i++)
-        visit(c,ts_node_named_child(n,i),child_owner,depth+1);
+    WebChildren it=children(n); TSNode child;
+    while (next_named(&it,&child) && !c->cancelled && !c->truncated)
+        visit(c,child,child_owner,depth+1);
+    children_done(&it);
 }
 static void extract(AstContext *c) { visit(c,c->root,-1,0); }
 void ast_web_register(void) {

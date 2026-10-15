@@ -57,6 +57,10 @@ for ext in ('py', 'rb', 'php'):
     assert bindings, (ext, bindings)
 
 py = fileid('src/example.py')
+py_signature = rows('SELECT sig FROM symbols WHERE file_id=? AND name=?', py, 'run')
+assert py_signature == [{'sig':'def run(self, value: int) -> str:'}], py_signature
+later_signature = rows('SELECT sig FROM symbols WHERE file_id=? AND name=?', py, 'later')
+assert later_signature == [{'sig':'def later():'}], later_signature
 py_bind = rows('SELECT module,local_name,original_name FROM semantic_bindings WHERE file_id=?', py)
 assert {'module':'services.core','local_name':'Runner','original_name':'Engine'} in py_bind, py_bind
 assert {'module':'os.path','local_name':'paths','original_name':None} in py_bind, py_bind
