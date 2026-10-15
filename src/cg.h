@@ -365,6 +365,7 @@ enum { IDX_PH_WALK, IDX_PH_PARSE, IDX_PH_WRITE, IDX_PH_RESOLVE, IDX_PH_SOFT };
  * wait cg->lock_wait_ms for the gate, full machine budget, foreground. */
 typedef struct {
     bool full;             /* reparse every file (cg index --full) */
+    bool force_walk;       /* discover from filesystem; retain content reuse */
     /* skip the walk when meta.last_index_at is younger than this and no
      * resolve is pending and no dirty note exists; 0 = always walk */
     long max_age_ms;

@@ -7,6 +7,7 @@
  * save-storm (branch switch, format-on-save across files) syncs once.
  */
 #include "cg.h"
+#include "watch_health.h"
 
 #ifdef __linux__
 #include <sys/inotify.h>
@@ -14,6 +15,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 typedef struct { int wd; char *rel; } Watch;
 typedef struct {
@@ -22,28 +24,55 @@ typedef struct {
     int n, cap;
     Ignore ig;
     const char *root;
+    const Cg *cg;
+    bool bad;
 } Watcher;
 
 #define IN_MASK (IN_CREATE | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM | \
-                 IN_MOVED_TO | IN_DELETE_SELF)
+                 IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF)
+
+static void watch_loss(Watcher *w, const char *reason) {
+    w->bad = true;
+    if (!watch_health_mark(w->cg, reason))
+        fprintf(stderr, "cg watch: unable to persist %s reconciliation debt\n", reason);
+    fprintf(stderr, "cg watch: coverage degraded (%s); full reconciliation pending\n", reason);
+}
 
 static void watch_add_dir(Watcher *w, const char *rel) {
+    static bool injected_registration_failure;
+    const char *fail_rel = getenv("CG_WATCH_TEST_REG_FAIL_ONCE");
+    if (!injected_registration_failure && fail_rel &&
+        strcmp(fail_rel, rel) == 0) {
+        injected_registration_failure = true;
+        watch_loss(w, "registration_error");
+        return;
+    }
     char abs[4900];
     snprintf(abs, sizeof abs, "%s/%s", w->root, rel[0] ? rel : ".");
     int wd = inotify_add_watch(w->fd, abs, IN_MASK);
-    if (wd < 0) return;
-    for (int i = 0; i < w->n; i++)
-        if (w->v[i].wd == wd) { free(w->v[i].rel); w->v[i].rel = xstrdup(rel); return; }
-    if (w->n == w->cap) {
+    if (wd < 0) { watch_loss(w, "registration_error"); return; }
+    bool known = false;
+    for (int i = 0; i < w->n; i++) {
+        if (w->v[i].wd != wd) continue;
+        if (strcmp(w->v[i].rel, rel) != 0) {
+            free(w->v[i].rel);
+            w->v[i].rel = xstrdup(rel);
+        }
+        known = true;
+        break;
+    }
+    if (!known && w->n == w->cap) {
         w->cap = w->cap ? w->cap * 2 : 64;
         w->v = xrealloc(w->v, sizeof(Watch) * (size_t)w->cap);
     }
-    w->v[w->n].wd = wd;
-    w->v[w->n].rel = xstrdup(rel);
-    w->n++;
+    if (!known) {
+        w->v[w->n].wd = wd;
+        w->v[w->n].rel = xstrdup(rel);
+        w->n++;
+    }
 
     DIR *d = opendir(abs);
-    if (!d) return;
+    if (!d) { watch_loss(w, "registration_error"); return; }
     struct dirent *e;
     while ((e = readdir(d))) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
@@ -59,6 +88,17 @@ static void watch_add_dir(Watcher *w, const char *rel) {
         watch_add_dir(w, crel);
     }
     closedir(d);
+}
+
+static void watch_forget(Watcher *w, int wd) {
+    for (int i = 0; i < w->n; i++) {
+        if (w->v[i].wd != wd) continue;
+        free(w->v[i].rel);
+        memmove(&w->v[i], &w->v[i + 1],
+                sizeof *w->v * (size_t)(w->n - i - 1));
+        w->n--;
+        return;
+    }
 }
 
 static const char *wd_rel(Watcher *w, int wd) {
@@ -102,7 +142,20 @@ static bool watch_drain(Watcher *w, Pending *pend) {
         while (off < len) {
             struct inotify_event *e = (struct inotify_event *)(buf + off);
             off += (ssize_t)sizeof(*e) + e->len;
+            if (e->mask & IN_Q_OVERFLOW) {
+                watch_loss(w, "queue_overflow");
+                pend->whole = any = true;
+                continue;
+            }
             const char *dir = wd_rel(w, e->wd);
+            if (e->mask & (IN_IGNORED | IN_DELETE_SELF | IN_MOVE_SELF)) {
+                bool root = dir && dir[0] == '\0';
+                watch_loss(w, root ? "root_loss" : "directory_loss");
+                pend->whole = any = true;
+                if (e->mask & IN_IGNORED) watch_forget(w, e->wd);
+                else inotify_rm_watch(w->fd, e->wd);
+                continue;
+            }
             if (!dir || e->len == 0) continue;
             char crel[4096];
             if (dir[0]) snprintf(crel, sizeof crel, "%s/%s", dir, e->name);
@@ -115,7 +168,77 @@ static bool watch_drain(Watcher *w, Pending *pend) {
             any = true;
         }
     }
+    if (len < 0 && errno != EAGAIN && errno != EINTR) {
+        watch_loss(w, "read_error");
+        pend->whole = any = true;
+    }
     return any;
+}
+
+#define WATCH_RECONCILE_MS 30000
+static int watch_sync(Cg *cg, const SysInfo *si, const Pending *p,
+                      IndexStats *st);
+static long watch_interval(void) {
+    const char *env = getenv("CG_WATCH_POLL_MS");
+    if (env && *env) {
+        char *end = NULL;
+        long v = strtol(env, &end, 10);
+        if (end && !*end && v >= 100 && v <= 300000) return v;
+    }
+    return WATCH_RECONCILE_MS;
+}
+
+static void watch_rearm(Watcher *w, Pending *pend) {
+    w->bad = false;
+    if (w->fd < 0) w->fd = inotify_init1(IN_NONBLOCK);
+    watch_add_dir(w, "");
+    WatchHealth health;
+    if (watch_health_read(w->cg, &health) && health.pending) pend->whole = true;
+}
+
+static bool watch_attempt(Cg *cg, const SysInfo *si, Watcher *w,
+                          Pending *pend, IndexStats *st) {
+    static bool injected_sync_failure;
+    if (!injected_sync_failure && getenv("CG_WATCH_TEST_SYNC_FAIL_ONCE")) {
+        injected_sync_failure = true;
+        memset(st, 0, sizeof *st);
+        watch_loss(w, "sync_error");
+        pend->whole = true;
+        return false;
+    }
+    struct stat root_st;
+    if (stat(cg->root, &root_st) != 0 || !S_ISDIR(root_st.st_mode)) {
+        watch_loss(w, "root_loss");
+        pend->whole = true;
+        memset(st, 0, sizeof *st);
+        return false;
+    }
+    WatchHealth before = {0};
+    if (!watch_health_read(cg, &before)) {
+        watch_loss(w, "health_io_error");
+        pend->whole = true;
+    }
+    if (before.pending) pend->whole = true;
+    bool whole = pend->whole || pend->n == 0;
+    int rc = watch_sync(cg, si, pend, st);
+    if (rc != 0 || st->coalesced) {
+        if (rc != 0) watch_loss(w, "sync_error");
+        else watch_loss(w, "coalesced_pass");
+        pend->whole = true;
+        return false;
+    }
+    if (whole && before.pending &&
+        (!st->walk || strcmp(st->walk, "full") != 0)) {
+        watch_loss(w, "incomplete_walk");
+        pend->whole = true;
+        return false;
+    }
+    if (whole && !w->bad && before.pending &&
+        watch_health_clear_if(cg, before.generation)) {
+        printf("cg watch: coverage recovered after full reconciliation\n");
+        fflush(stdout);
+    }
+    return true;
 }
 
 /* One background pass over the pending paths (or the tree). The gate is
@@ -127,6 +250,7 @@ static int watch_sync(Cg *cg, const SysInfo *si, const Pending *p,
     o.background = true;
     o.lock_wait_ms = 0;
     o.quiet = true;
+    o.force_walk = p->whole;
     if (!p->whole && p->n > 0) {
         o.paths = (const char *const *)p->v;
         o.npaths = p->n;
@@ -149,13 +273,20 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
     Watcher w;
     memset(&w, 0, sizeof w);
     w.root = cg->root;
+    w.cg = cg;
     w.fd = inotify_init1(IN_NONBLOCK);
     if (w.fd < 0) {
-        perror("cg: inotify_init1");
-        return 1;
+        watch_loss(&w, "registration_error");
+        fprintf(stderr, "cg watch: using periodic filesystem reconciliation\n");
     }
     ignore_load(&w.ig, cg->root);
     watch_add_dir(&w, "");
+    /* Deterministic fault injection for the integration suite. */
+    const char *inject = getenv("CG_WATCH_TEST_EVENT");
+    if (inject && (!strcmp(inject, "queue_overflow") ||
+                   !strcmp(inject, "registration_error") ||
+                   !strcmp(inject, "root_loss")))
+        watch_loss(&w, inject);
     printf("watching %s (%d dirs, debounce %dms, background passes) — "
            "ctrl-c to stop\n", cg->root, w.n, debounce_ms);
 
@@ -170,8 +301,8 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
     /* catch up on anything that changed while we weren't looking */
     IndexStats st;
     pend.whole = true;
-    if (watch_sync(cg, si, &pend, &st) != 0 && st.busy) {
-        printf("sync deferred: database busy, retrying in %dms\n", debounce_ms);
+    if (!watch_attempt(cg, si, &w, &pend, &st)) {
+        printf("sync deferred: retrying in %dms\n", debounce_ms);
         pending = true;
         deadline = now_ms() + debounce_ms;
     } else {
@@ -181,11 +312,14 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
                    st.files_indexed, st.files_removed, st.ms);
     }
     long proj_at = 0;                   /* codify-v15 3.3: a held-back build */
+    long next_reconcile = now_ms() + watch_interval();
     for (;;) {
-        int timeout = -1;
+        long until = next_reconcile - now_ms();
+        int timeout = until > 0 ? (int)until : 0;
         if (pending) {
             long left = deadline - now_ms();
-            timeout = left > 0 ? (int)left : 0;
+            int wait = left > 0 ? (int)left : 0;
+            if (wait < timeout) timeout = wait;
         }
         if (proj_at) {
             long left = proj_at - now_ms();
@@ -194,14 +328,30 @@ int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
         }
         struct pollfd pfd = { .fd = w.fd, .events = POLLIN };
         int pr = poll(&pfd, 1, timeout);
+        if (pr < 0 && errno != EINTR) {
+            watch_loss(&w, "poll_error");
+            pend.whole = pending = true;
+            deadline = now_ms();
+        }
+        if (pr > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+            watch_loss(&w, "poll_error");
+            pend.whole = pending = true;
+            deadline = now_ms() + debounce_ms;
+        }
         if (pr > 0 && (pfd.revents & POLLIN) && watch_drain(&w, &pend)) {
             pending = true;
             deadline = now_ms() + debounce_ms;
         }
+        if (now_ms() >= next_reconcile) {
+            watch_rearm(&w, &pend);
+            pend.whole = pending = true;
+            deadline = now_ms();
+            next_reconcile = now_ms() + watch_interval();
+        }
         if (pending && now_ms() >= deadline) {
             pending = false;
-            if (watch_sync(cg, si, &pend, &st) != 0 && st.busy) {
-                printf("sync deferred: database busy, retrying in %dms\n",
+            if (!watch_attempt(cg, si, &w, &pend, &st)) {
+                printf("sync deferred: retrying in %dms\n",
                        debounce_ms);
                 pending = true;                 /* keeps its paths */
                 deadline = now_ms() + debounce_ms;
@@ -238,6 +388,7 @@ typedef struct {
     Pending pend;
     bool armed, live;
     long deadline;
+    long next_reconcile;
     long id;
 } FleetWatch;
 
@@ -260,19 +411,21 @@ static FleetWatch *fleet_watch_open(const Cg *parent, long id,
     f->cg.scope_branch = 0;
     f->id = id;
     f->w.fd = inotify_init1(IN_NONBLOCK);
-    if (f->w.fd < 0) { free(f); return NULL; }
     f->w.root = f->cg.root;     /* stable: entries are never moved */
+    f->w.cg = &f->cg;
+    if (f->w.fd < 0) watch_loss(&f->w, "registration_error");
     ignore_load(&f->w.ig, f->cg.root);
     watch_add_dir(&f->w, "");
     /* a tree just picked up is caught up once, whole */
     f->pend.whole = true;
     f->armed = true;
     f->deadline = now_ms();
+    f->next_reconcile = now_ms() + watch_interval();
     return f;
 }
 
 static void fleet_watch_close(FleetWatch *f) {
-    close(f->w.fd);
+    if (f->w.fd >= 0) close(f->w.fd);
     for (int i = 0; i < f->w.n; i++) free(f->w.v[i].rel);
     free(f->w.v);
     ignore_free(&f->w.ig);
@@ -328,6 +481,7 @@ static void fleet_scan(Cg *cg, FleetWatch ***pv, int *pn) {
         bool gone = !v[i]->live || stat(v[i]->cg.root, &sb) != 0 ||
                     !S_ISDIR(sb.st_mode);
         if (!gone) { i++; continue; }
+        if (v[i]->live) watch_loss(&v[i]->w, "root_loss");
         printf("dropped %s (%s is gone)\n", v[i]->cg.branch, v[i]->cg.root);
         fleet_watch_close(v[i]);
         memmove(&v[i], &v[i + 1], sizeof *v * (size_t)(n - i - 1));
@@ -361,6 +515,8 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
         long until = next_scan;
         for (int i = 0; i < n; i++)
             if (v[i]->armed && v[i]->deadline < until) until = v[i]->deadline;
+        for (int i = 0; i < n; i++)
+            if (v[i]->next_reconcile < until) until = v[i]->next_reconcile;
         if (proj_at && proj_at < until) until = proj_at;
         long left = until - now_ms();
         int timeout = left > 0 ? (int)left : 0;
@@ -374,13 +530,33 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
             }
         }
         int pr = poll(n > 0 ? pfd : NULL, (nfds_t)n, timeout);
-        if (pr > 0)
-            for (int i = 0; i < n; i++)
-                if ((pfd[i].revents & POLLIN) &&
+        if (pr < 0 && errno != EINTR)
+            for (int i = 0; i < n; i++) {
+                watch_loss(&v[i]->w, "poll_error");
+                v[i]->pend.whole = v[i]->armed = true;
+                v[i]->deadline = now_ms() + debounce_ms;
+            }
+        if (pr > 0) {
+            for (int i = 0; i < n; i++) {
+                if (pfd[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                    watch_loss(&v[i]->w, "poll_error");
+                    v[i]->pend.whole = v[i]->armed = true;
+                    v[i]->deadline = now_ms() + debounce_ms;
+                } else if ((pfd[i].revents & POLLIN) &&
                     watch_drain(&v[i]->w, &v[i]->pend)) {
                     v[i]->armed = true;
                     v[i]->deadline = now_ms() + debounce_ms;
                 }
+            }
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (now_ms() < v[i]->next_reconcile) continue;
+            watch_rearm(&v[i]->w, &v[i]->pend);
+            v[i]->pend.whole = v[i]->armed = true;
+            v[i]->deadline = now_ms();
+            v[i]->next_reconcile = now_ms() + watch_interval();
+        }
 
         for (int i = 0; i < n; i++) {
             if (!v[i]->armed || now_ms() < v[i]->deadline) continue;
@@ -391,7 +567,7 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
                 continue;
             }
             IndexStats st;
-            if (watch_sync(&v[i]->cg, si, &v[i]->pend, &st) != 0 && st.busy) {
+            if (!watch_attempt(&v[i]->cg, si, &v[i]->w, &v[i]->pend, &st)) {
                 v[i]->armed = true;             /* keeps its paths */
                 v[i]->deadline = now_ms() + debounce_ms;
                 continue;
@@ -419,26 +595,59 @@ int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
 }
 
 #else  /* !__linux__ */
+#include <time.h>
+
+static void portable_pause(int ms) {
+    struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
+}
+
+static void portable_sync(Cg *cg, const SysInfo *si) {
+    WatchHealth before = {0};
+    watch_health_read(cg, &before);
+    IndexOpts opts = {0};
+    IndexStats stats = {0};
+    opts.background = true;
+    opts.quiet = true;
+    opts.lock_wait_ms = 0;
+    opts.force_walk = true;
+    if (cg_index_ex(cg, si, &opts, &stats) != 0 || stats.coalesced) {
+        watch_health_mark(cg, "sync_error");
+        return;
+    }
+    if (before.pending) watch_health_clear_if(cg, before.generation);
+}
 
 int watch_fleet(Cg *cg, const SysInfo *si, int debounce_ms) {
-    (void)cg; (void)si; (void)debounce_ms;
-    fprintf(stderr, "cg: watch --fleet needs inotify; this binary was built "
-                    "for another platform\n");
-    return 1;
+    if (!config_auto_sync(cg->root)) return 0;
+    int interval = debounce_ms > 3000 ? debounce_ms : 3000;
+    fprintf(stderr, "cg watch --fleet: periodic filesystem reconciliation every %dms\n",
+            interval);
+    for (;;) {
+        sqlite3_stmt *st = cg_prep(cg,
+            "SELECT id,name,worktree FROM branches WHERE worktree IS NOT NULL");
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *root = (const char *)sqlite3_column_text(st, 2);
+            if (!root || !root[0]) continue;
+            Cg tree = *cg;
+            snprintf(tree.root, sizeof tree.root, "%s", root);
+            snprintf(tree.branch, sizeof tree.branch, "%s",
+                     (const char *)sqlite3_column_text(st, 1));
+            tree.branch_id = sqlite3_column_int64(st, 0);
+            tree.worktree = strcmp(tree.root, tree.shared) != 0;
+            if (config_auto_sync(tree.root)) portable_sync(&tree, si);
+        }
+        sqlite3_finalize(st);
+        portable_pause(interval);
+    }
 }
 
 int cmd_watch(Cg *cg, const SysInfo *si, int debounce_ms) {
-    (void)cg; (void)si; (void)debounce_ms;
-#ifdef __APPLE__
-    fprintf(stderr, "cg: watch on macOS (FSEvents) is not built into this "
-                    "binary yet; run `cg sync` after edits\n");
-#elif defined(_WIN32)
-    fprintf(stderr, "cg: watch on Windows (ReadDirectoryChangesW) is not built "
-                    "into this binary yet; run `cg sync` after edits\n");
-#else
-    fprintf(stderr, "cg: watch is unsupported on this platform\n");
-#endif
-    return 1;
+    if (!config_auto_sync(cg->root)) return 0;
+    int interval = debounce_ms > 3000 ? debounce_ms : 3000;
+    fprintf(stderr, "cg watch: periodic filesystem reconciliation every %dms\n",
+            interval);
+    for (;;) { portable_sync(cg, si); portable_pause(interval); }
 }
 
 #endif

@@ -1491,7 +1491,7 @@ static bool is_ignore_file(const char *rel) {
  * walk the tree. */
 static bool index_git_plan(Cg *cg, const IndexOpts *o, const char *head,
                            char ***targets, int *ntargets) {
-    if (o->full || !head[0]) return false;
+    if (o->full || o->force_walk || !head[0]) return false;
     /* Legacy rows need one whole-tree verification before Git candidates
      * can safely narrow the walk. */
     char migration_sql[128];
