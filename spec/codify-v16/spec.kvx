@@ -135,7 +135,7 @@ reqs = ["2.3"]
 
 [task.2.4]
 title = "Systems language syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_systems.c", "vendor/parsers/systems/**", "tests/integration/60_ast_systems.sh", "tests/fixtures/semantic/systems/**"]
