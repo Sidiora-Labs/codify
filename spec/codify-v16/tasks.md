@@ -60,7 +60,7 @@
     - Resolve containment/inheritance/implements/types/returns/instantiation/overrides/decorators/exports as typed relations with sites and evidence. Respect branch and scope; provide reusable type hierarchy helpers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.3, 3.4_
-  - [ ] 3.4 Framework route and handler graph
+  - [x] 3.4 Framework route and handler graph
     - Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.5_
