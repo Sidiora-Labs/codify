@@ -245,7 +245,7 @@ reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
 
 [task.3.6]
 title = "HTTP queue and message channel synthesis"
-status = "pending"
+status = "in_progress"
 wave = 3
 requires = ["3.4"]
 touches = ["src/sem_channels.c", "src/sem_channels.h", "tests/integration/70_sem_channels.sh", "tests/fixtures/semantic/channels/**"]

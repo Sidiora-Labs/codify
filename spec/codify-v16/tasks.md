@@ -68,7 +68,7 @@
     - Build bounded callback/observer/event/interface/C-function-pointer/React-render/component and native-bridge passes from explicit registration/type evidence. Stamp heuristic provenance and wiring sites, preserve dynamic boundaries and transactional replacement.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
-  - [ ] 3.6 HTTP queue and message channel synthesis
+  - [-] 3.6 HTTP queue and message channel synthesis
     - Connect literal HTTP method/path to unique routes and compatible named queue/bus/socket producers/consumers; reject ambiguous or computed inputs. Record channel/tier/registration evidence and avoid duplicate or unbounded fanout.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
