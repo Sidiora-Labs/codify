@@ -64,6 +64,8 @@ assert any(f['name']=='Worker' and f['kind']=='inherits' and f['value']=='Base' 
 php = fileid('src/example.php')
 php_bind = rows('SELECT module,local_name FROM semantic_bindings WHERE file_id=?', php)
 assert {'module':'Vendor\\Runtime\\Engine','local_name':'Runner'} in php_bind, php_bind
+assert {'module':'Vendor\\Tool\\Alpha','local_name':'Alpha'} in php_bind, php_bind
+assert {'module':'Vendor\\Tool\\Beta','local_name':'Named'} in php_bind, php_bind
 php_run = rows('''SELECT q.decorators,q.visibility,q.result_type,q.documentation
                   FROM semantic_symbols q JOIN symbols s ON s.id=q.symbol_id
                   WHERE s.file_id=? AND s.name='run' ''', php)

@@ -1,6 +1,7 @@
 <?php
 namespace Services;
 use Vendor\Runtime\Engine as Runner;
+use Vendor\Tool\{Alpha, Beta as Named};
 
 #[Service]
 class Worker extends Base implements Runnable {

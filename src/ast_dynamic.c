@@ -1,7 +1,6 @@
 #include "ast.h"
 #include "semantic.h"
 
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,17 +23,6 @@ static SemSpan span(TSNode n) {
 
 static char *text(AstContext *c, TSNode n) {
     return ts_node_is_null(n) ? NULL : ast_text(c, n);
-}
-
-static char *trim_copy(const char *s) {
-    if (!s) return NULL;
-    while (isspace((unsigned char)*s)) s++;
-    size_t n = strlen(s);
-    while (n && isspace((unsigned char)s[n - 1])) n--;
-    char *p = malloc(n + 1);
-    if (!p) return NULL;
-    memcpy(p, s, n); p[n] = 0;
-    return p;
 }
 
 static char *short_name(const char *s) {
@@ -210,7 +198,9 @@ static void python_channel(DynWalk *w, TSNode call, TSNode callee, TSNode args) 
     free(receiver); free(verb); free(literal);
 }
 
-static TSNode first_named(TSNode n) { return ts_node_named_child(n, 0); }
+static TSNode first_named(TSNode n) {
+    return ts_node_is_null(n) ? (TSNode){0} : ts_node_named_child(n, 0);
+}
 
 static void python_import(DynWalk *w, TSNode node) {
     bool from = is(node, "import_from_statement");
