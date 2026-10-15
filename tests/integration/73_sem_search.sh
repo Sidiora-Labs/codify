@@ -5,6 +5,7 @@
 mkdir -p "$TMP/proj/src" "$TMP/proj/tests"
 cd "$TMP/proj"
 cat > src/alpha.c <<'EOF'
+/** Keep the decoder contract stable for account records. */
 int parseUserRecord(int raw) {
     int decoded = raw + 7;
     return decoded * 2;
@@ -20,6 +21,24 @@ int overload(int x) {
 int parseUserReceipt(int x) {
     return overload(x);
 }
+EOF
+cat > src/alpha.h <<'EOF'
+/** Keep the decoder contract stable for account records. */
+int parseUserRecord(int raw);
+EOF
+cat > src/owners.cpp <<'EOF'
+struct Alpha {
+    int process(int value);
+};
+struct Beta {
+    int process(int value) { return value; }
+};
+int reshape(int value) { return value; }
+int reshape(double value);
+int braceDefault(const char *text = "{");
+int braceDefault(const char *text = "{", int depth = 1) { return depth; }
+int semiDefault(const char *text = ";");
+int semiDefault(const char *text = ";", int depth = 1) { return depth; }
 EOF
 cat > tests/fixture.c <<'EOF'
 int parseUserRecord(int raw) {
@@ -62,6 +81,26 @@ import json,sys
 d=json.loads(sys.argv[1])
 assert [x['name'] for x in d['symbols']]==['parseUserRecord'], d
 PY
+out="$("$CG" search process --json --path src/owners.cpp)"
+python3 - "$out" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']=='process']
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+out="$("$CG" search reshape --json --path src/owners.cpp)"
+python3 - "$out" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']=='reshape']
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+for query in braceDefault semiDefault; do
+    out="$("$CG" search "$query" --json --path src/owners.cpp)"
+    python3 - "$out" "$query" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']==sys.argv[2]]
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+done
 out="$("$CG" search parseUserRecorb --json)"
 python3 - "$out" <<'PY'
 import json,sys
@@ -99,6 +138,22 @@ d=json.loads(sys.argv[1]); r=[x for x in d['symbols'] if x.get('name')=='overloa
 assert len(r)==2, r
 assert all('return ' in x.get('snippet','') for x in r), r
 assert d['tokens_used']<=d['budget'], d
+PY
+out="$("$CG" context parseUserRecord --json --budget 1000)"
+python3 - "$out" <<'PY'
+import json,sys
+d=json.loads(sys.argv[1]); r=next(x for x in d['symbols']
+                                if x.get('name')=='parseUserRecord')
+assert r.get('doc') and 'contract' in r['doc'], r
+assert 'int decoded' not in r.get('snippet',''), r
+assert r.get('body_omitted_lines',0)>0, r
+PY
+out="$("$CG" symbol parseUserRecord --json)"
+python3 - "$out" <<'PY'
+import json,sys
+d=json.loads(sys.argv[1]); r=next(x for x in d['definitions']
+                                if x['path']=='src/alpha.c')
+assert 'int decoded' in r['snippet'], r
 PY
 out="$("$CG" context src/alpha.c --json --kind function --name overload)"
 python3 - "$out" <<'PY'
