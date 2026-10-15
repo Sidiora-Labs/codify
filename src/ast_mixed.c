@@ -292,7 +292,7 @@ static void parse_embedded(AstContext *c,const char *language,size_t a,size_t b)
 static void markup_extract(AstContext *c) {
     identify(c,"declarative");
     const char *lang=c->language;int owner=-1;
-    bool mapping=eq(lang,"xml") && strstr(c->source,"<mapper")!=NULL;
+    bool mapping=false;
     size_t begin=0;
     if(eq(lang,"astro") && c->length>=6 && !strncmp(c->source,"---",3)) {
         size_t q=3;while(q+4<c->length && strncmp(c->source+q,"\n---",4))q++;
@@ -305,9 +305,11 @@ static void markup_extract(AstContext *c) {
         size_t a=p+1;bool closing=false;if(a<e&&c->source[a]=='/')a++,closing=true;
         size_t z=a;while(z<e&&(isalnum((unsigned char)c->source[z])||c->source[z]=='-'||c->source[z]==':'))z++;
         char *tag=strndup(c->source+a,z-a);
+        if(closing && eq(lang,"xml") && !strcasecmp(tag,"mapper")) mapping=false;
         if(!closing&&*tag) {
             size_t site=0;char *name=NULL;
-            if(mapping&& !strcasecmp(tag,"mapper")) {
+            if(eq(lang,"xml")&& !strcasecmp(tag,"mapper")) {
+                mapping=true;
                 name=attr(c,z,e,"namespace",&site);if(name)decl(c,name,"mapper",site,site+strlen(name),-1);
                 owner=c->result->sem.nsymbols-1;
             } else if(mapping&&(!strcasecmp(tag,"select")||!strcasecmp(tag,"insert")||!strcasecmp(tag,"update")||!strcasecmp(tag,"delete")||!strcasecmp(tag,"sql"))) {
