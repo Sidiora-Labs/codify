@@ -162,6 +162,7 @@ static void relation_leaf(AstContext *c, int owner, TSNode n, const char *kind) 
     if (!value || !*value) { free(value); return; }
     SemTypeFact *f = sem_type_fact_add(&c->result->sem, value, kind, span(n));
     f->owner = owner;
+    f->evidence = xstrdup("syntax");
     SemEdge *e = sem_edge_add(&c->result->sem, kind, owner, -1, span(n));
     e->original_text = xstrdup(value);
     e->strategy = xstrdup("syntax");
@@ -218,6 +219,8 @@ static void symbol_metadata(AstContext *c, TSNode n, SemSymbol *s) {
         TSNode x = ts_node_named_child(n, i);
         const char *t = ts_node_type(x);
         if (is_type(t, "modifiers") || is_type(t, "modifier") ||
+            is_type(t, "access_modifier") || is_type(t, "member_modifier") ||
+            is_type(t, "class_modifier") ||
             is_type(t, "function_modifier") || is_type(t, "visibility_modifier") ||
             is_type(t, "inheritance_modifier")) {
             char *v = ast_text(c, x);
@@ -308,17 +311,20 @@ static int add_symbol(AstContext *c, TSNode n, const char *kind, int parent) {
     if (parent >= 0) {
         SemEdge *e = sem_edge_add(&c->result->sem, "contains", parent, idx, span(n));
         e->strategy = xstrdup("syntax"); e->provenance = xstrdup("ast");
+        e->evidence = xstrdup("lexical ownership");
     }
     if (sym->result_type) {
         SemTypeFact *f = sem_type_fact_add(&c->result->sem,
                                           sym->result_type, "returns", span(n));
         f->owner = idx;
+        f->evidence = xstrdup("syntax");
     }
     if (is_type(c->language, "java") && is_type(kind, "method") &&
         sym->modifiers && strstr(sym->modifiers, "native")) {
         SemTypeFact *f = sem_type_fact_add(&c->result->sem, s,
                                           "native_bridge_call", span(n));
         f->owner = idx;
+        f->evidence = xstrdup("native modifier");
     }
     type_relations(c, n, idx);
     free(s);
