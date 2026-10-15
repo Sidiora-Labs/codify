@@ -1,4 +1,5 @@
 #include "sem_flow.h"
+#include <time.h>
 
 /* Every allocation below is capped by the request limits. Traversal uses
  * branch-scoped endpoint indexes and never follows an unknown endpoint. */
@@ -20,6 +21,12 @@ typedef struct {
     char *text, *kind, *strategy, *evidence, *path;
     int line;
 } FlowBoundary;
+
+static long monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC,&ts);
+    return (long)ts.tv_sec*1000L+ts.tv_nsec/1000000L;
+}
 
 static char *bounded_text(sqlite3_stmt *q, int col) {
     const char *s = (const char *)sqlite3_column_text(q, col);
@@ -133,7 +140,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         }
         sqlite3_finalize(bq);
     }
-    long start = now_ms();
+    long start = monotonic_ms();
     FlowNode *nv = calloc((size_t)lim.nodes,sizeof *nv);
     FlowEdge *ev = calloc((size_t)lim.edges,sizeof *ev);
     FlowBoundary *bv = calloc((size_t)lim.edges,sizeof *bv);
@@ -184,7 +191,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         "WHERE f.branch_id=?1 AND r.file_id=?2 AND r.owner_id=?3 "
         "AND r.target_id IS NULL ORDER BY r.ref_id LIMIT ?4");
     while (head<nn) {
-        if (now_ms()-start>=lim.time_ms) { trunc_time=true; break; }
+        if (monotonic_ms()-start>=lim.time_ms) { trunc_time=true; break; }
         FlowNode *cur=&nv[head];
         if (paths && (strcmp(cur->name,target)==0 ||
                       strcmp(cur->qualified,target)==0)) { found=head; break; }
@@ -228,7 +235,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         sqlite3_bind_int(edgeq,3,calls);
         sqlite3_bind_int(edgeq,4,lim.edges-ne+1);
         while (sqlite3_step(edgeq)==SQLITE_ROW) {
-            if (now_ms()-start>=lim.time_ms) { trunc_time=true; break; }
+            if (monotonic_ms()-start>=lim.time_ms) { trunc_time=true; break; }
             if (ne>=lim.edges) { trunc_edges=true; break; }
             long src=sqlite3_column_int64(edgeq,1);
             long dst=sqlite3_column_int64(edgeq,2);
