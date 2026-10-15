@@ -2,6 +2,7 @@
 #include "ast.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 extern void ast_extended_register(void);
 
@@ -76,6 +77,29 @@ int main(void) {
             !has_symbol(&result.sem,"value","attribute")) failed++;
         parse_result_free(&result); free(source);
     }
+    /* Thousands of flat siblings exposed repeated child indexing and
+     * all-prior-symbol ownership scans. Include comments as inert siblings. */
+    char *wide=malloc(4000u*96u+1u);
+    if (!wide) return 2;
+    size_t used=0;
+    for (int i=0;i<4000;i++)
+        used+=(size_t)snprintf(wide+used,4000u*96u+1u-used,
+            "-- ignored_%d()\nfunction defined_%d() return called_%d() end\n",i,i,i);
+    struct timespec started,finished;
+    clock_gettime(CLOCK_MONOTONIC,&started);
+    ParseResult wide_result={0};
+    int parsed=ast_try_parse("lua","wide.lua",wide,used,&wide_result);
+    clock_gettime(CLOCK_MONOTONIC,&finished);
+    double elapsed=(double)(finished.tv_sec-started.tv_sec)+
+        (double)(finished.tv_nsec-started.tv_nsec)/1000000000.0;
+    if (!parsed || wide_result.sem.nsymbols!=4000 ||
+        wide_result.sem.nreferences!=4000 ||
+        has_ref(&wide_result.sem,"ignored_3999") || elapsed>10.0) {
+        fprintf(stderr,"wide Lua extraction: parsed=%d symbols=%d refs=%d time=%.3fs\n",
+                parsed,wide_result.sem.nsymbols,wide_result.sem.nreferences,elapsed);
+        failed++;
+    }
+    parse_result_free(&wide_result);free(wide);
     if (failed) fprintf(stderr,"extended AST: %d failed assertions\n",failed);
     else puts("extended AST: seven grammars and structural positive/negative fixtures passed");
     return failed?1:0;
