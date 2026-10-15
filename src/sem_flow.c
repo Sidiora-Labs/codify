@@ -13,6 +13,7 @@ typedef struct {
     char *kind, *provenance, *strategy, *evidence, *original;
     char *channel, *registration, *path;
     int line, column, registration_line;
+    bool heuristic;
 } FlowEdge;
 typedef struct {
     long owner;
@@ -80,8 +81,9 @@ static void write_node(StrBuf *b, const FlowNode *n) {
 }
 static void write_edge(StrBuf *b, const FlowEdge *e) {
     sb_printf(b,"{\"id\":%ld,\"source\":%ld,\"target\":%ld,"
-              "\"line\":%d,\"column\":%d,\"registration_line\":%d",
-              e->id,e->source,e->target,e->line,e->column,e->registration_line);
+              "\"line\":%d,\"column\":%d,\"registration_line\":%d,"
+              "\"heuristic\":%s",e->id,e->source,e->target,e->line,
+              e->column,e->registration_line,e->heuristic?"true":"false");
     field(b,"kind",e->kind); field(b,"provenance",e->provenance);
     field(b,"strategy",e->strategy); field(b,"evidence",e->evidence);
     field(b,"original_text",e->original); field(b,"channel",e->channel);
@@ -160,7 +162,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
     const char *edge_sql_forward =
         "SELECT e.id,e.source_id,e.target_id,e.kind,e.provenance,e.strategy,"
         "e.evidence,e.original_text,e.channel,e.registration_path,e.start_line,"
-        "e.start_column,e.registration_line,f.path FROM semantic_edges e "
+        "e.start_column,e.registration_line,e.synthesized,f.path FROM semantic_edges e "
         "JOIN files f ON f.id=e.source_file_id "
         "WHERE e.branch_id=?1 AND e.source_id=?2 "
         "AND (?3=0 OR e.kind IN ('calls','call','callback','dispatch',"
@@ -168,7 +170,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
     const char *edge_sql_reverse =
         "SELECT e.id,e.source_id,e.target_id,e.kind,e.provenance,e.strategy,"
         "e.evidence,e.original_text,e.channel,e.registration_path,e.start_line,"
-        "e.start_column,e.registration_line,f.path FROM semantic_edges e "
+        "e.start_column,e.registration_line,e.synthesized,f.path FROM semantic_edges e "
         "JOIN files f ON f.id=e.source_file_id "
         "WHERE e.branch_id=?1 AND e.target_id=?2 "
         "AND (?3=0 OR e.kind IN ('calls','call','callback','dispatch',"
@@ -184,7 +186,24 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
         FlowNode *cur=&nv[head];
         if (paths && (strcmp(cur->name,target)==0 ||
                       strcmp(cur->qualified,target)==0)) { found=head; break; }
-        if (cur->depth>=lim.depth) { trunc_depth=true; head++; continue; }
+        if (cur->depth>=lim.depth) {
+            sqlite3_reset(edgeq); sqlite3_clear_bindings(edgeq);
+            sqlite3_bind_int64(edgeq,1,branch);
+            sqlite3_bind_int64(edgeq,2,cur->id);
+            sqlite3_bind_int(edgeq,3,calls);
+            sqlite3_bind_int(edgeq,4,1);
+            if (sqlite3_step(edgeq)==SQLITE_ROW) trunc_depth=true;
+            if (!reverse) {
+                sqlite3_reset(boundaryq); sqlite3_clear_bindings(boundaryq);
+                sqlite3_bind_int64(boundaryq,1,branch);
+                sqlite3_bind_int64(boundaryq,2,cur->file_id);
+                sqlite3_bind_int64(boundaryq,3,cur->id);
+                sqlite3_bind_int(boundaryq,4,1);
+                if (sqlite3_step(boundaryq)==SQLITE_ROW) trunc_depth=true;
+            }
+            head++;
+            continue;
+        }
         if (!reverse && nb<lim.edges) {
             sqlite3_reset(boundaryq); sqlite3_clear_bindings(boundaryq);
             sqlite3_bind_int64(boundaryq,1,branch);
@@ -218,7 +237,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
                     v->text=bounded_text(edgeq,7); v->kind=bounded_text(edgeq,3);
                     v->strategy=bounded_text(edgeq,5);
                     v->evidence=bounded_text(edgeq,6);
-                    v->path=bounded_text(edgeq,13);
+                    v->path=bounded_text(edgeq,14);
                     v->line=sqlite3_column_int(edgeq,10);
                 } else trunc_edges=true;
                 continue;
@@ -233,10 +252,24 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
             e->registration=bounded_text(edgeq,9); e->line=sqlite3_column_int(edgeq,10);
             e->column=sqlite3_column_int(edgeq,11);
             e->registration_line=sqlite3_column_int(edgeq,12);
-            e->path=bounded_text(edgeq,13);
-            if (ni<0 && node_load(cg,branch,next,&nv[nn])) {
-                nv[nn].depth=cur->depth+1; nv[nn].parent=head;
-                nv[nn].via=e->id; nn++;
+            e->heuristic=sqlite3_column_int(edgeq,13)!=0 ||
+                         strcmp(e->provenance,"heuristic")==0;
+            e->path=bounded_text(edgeq,14);
+            if (ni<0) {
+                if (node_load(cg,branch,next,&nv[nn])) {
+                    nv[nn].depth=cur->depth+1; nv[nn].parent=head;
+                    nv[nn].via=e->id; nn++;
+                } else {
+                    if (nb<lim.edges) {
+                        FlowBoundary *v=&bv[nb++]; v->owner=cur->id;
+                        v->text=xstrdup(e->original); v->kind=xstrdup(e->kind);
+                        v->strategy=xstrdup("missing_target");
+                        v->evidence=xstrdup(e->evidence);
+                        v->path=xstrdup(e->path); v->line=e->line;
+                    } else trunc_edges=true;
+                    edge_free(e);
+                    ne--;
+                }
             }
         }
         if (trunc_time) break;

@@ -161,7 +161,8 @@ static const HelpCmd HELP[] = {
     "--max-nodes N\tmaximum symbols (up to 256)\n"
     "--max-edges N\tmaximum relations (up to 512)\n"
     "--max-ms N\tmaximum traversal time (up to 2000 ms)\n"
-    "--max-output BYTES\tmaximum JSON bytes (1024 to 131072)\n",
+    "--max-output BYTES\tmaximum traversal JSON bytes (1024 to 131072); "
+    "source-health metadata is additional\n",
   .examples = "cg flow callees parse_file --json\n"
     "cg flow paths handler save_record --depth 5 --json",
   .related = "impact,symbol,context" },

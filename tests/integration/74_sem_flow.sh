@@ -23,9 +23,11 @@ branch, file_id = db.execute("SELECT branch_id,id FROM files WHERE path='flow.c'
 def edge(src, dst, kind='calls', provenance='syntax'):
     db.execute("INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
                "source_id,target_id,kind,original_text,strategy,provenance,evidence,"
-               "start_line,start_column) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+               "channel,registration_path,registration_line,start_line,start_column,"
+               "synthesized) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                (branch,file_id,file_id,syms[src],syms[dst],kind,dst,
-                'exact_owner',provenance,'registration at flow.c:1',1,4))
+                'exact_owner',provenance,'registration at flow.c:3',
+                'dispatch','flow.c',3,1,4,provenance=='heuristic'))
 edge('start_node','middle_node')
 edge('middle_node','end_node','calls','heuristic')
 edge('start_node','side_node','type','syntax')
@@ -40,7 +42,9 @@ PY
 python3 - "$TMP/path.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); assert d['found'] and len(d['path'])==3,d
-assert any(e['provenance']=='heuristic' and e['evidence'] and e['path']=='flow.c'
+assert any(e['provenance']=='heuristic' and e['heuristic'] and
+           e['evidence'] and e['path']=='flow.c'
+           and e['registration_path']=='flow.c' and e['registration_line']==3
            for e in d['edges']),d
 assert any(b['text']=='dynamic_target' and b['strategy']=='unresolved'
            for b in d['boundaries']),d
@@ -55,6 +59,18 @@ PY
 python3 - "$TMP/cap.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); assert len(d['edges'])<=1 and d['truncated']['edges'],d
+PY
+"$CG" flow callees start_node --max-nodes 1 --json > "$TMP/nodes.json"
+python3 - "$TMP/nodes.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); assert len(d['nodes'])==1 and d['truncated']['nodes'],d
+PY
+"$CG" flow callees start_node --json > "$TMP/callees.json"
+python3 - "$TMP/callees.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); names={n['name'] for n in d['nodes']}
+assert 'middle_node' in names and 'side_node' not in names,d
+assert all(e['kind']=='calls' for e in d['edges']),d
 PY
 "$CG" flow impact end_node --json > "$TMP/impact.json"
 python3 - "$TMP/impact.json" <<'PY'
@@ -71,7 +87,9 @@ PY
 python3 - "$TMP/output.json" <<'PY'
 import json,sys
 p=open(sys.argv[1]).read(); d=json.loads(p)
-assert len(p.encode())<=1024 and (d.get('truncated',{}).get('output') or d.get('error')),d
+d.pop('index_health',None)
+payload=json.dumps(d,separators=(',',':')).encode()
+assert len(payload)<=1024 and (d.get('truncated',{}).get('output') or d.get('error')),d
 PY
 "$CG" tool call flow '{"mode":"paths","name":"start_node","target":"end_node"}' \
     > "$TMP/mcp.json"
