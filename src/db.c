@@ -435,6 +435,7 @@ int cg_open(Cg *cg, bool create) {
         return -1;
     }
     if (cg_schema_upgrade(cg) != 0) return -1;
+    if (sem_schema_init(cg) != 0) return -1;
     if (db_fts_create(cg) != 0) return -1;
     /* callers, reference counts and dependents all ask "who resolved to
      * this symbol": without it each such question scans every ref. Created
@@ -678,6 +679,13 @@ int cg_schema_upgrade(Cg *cg) {
         sqlite3_finalize(st);
     }
     static const char *DROPS =
+        "DROP TABLE IF EXISTS semantic_identifier_postings;"
+        "DROP TABLE IF EXISTS semantic_dependencies;"
+        "DROP TABLE IF EXISTS semantic_edges;"
+        "DROP TABLE IF EXISTS semantic_type_facts;"
+        "DROP TABLE IF EXISTS semantic_bindings;"
+        "DROP TABLE IF EXISTS semantic_references;"
+        "DROP TABLE IF EXISTS semantic_symbols;"
         "DROP TABLE IF EXISTS files;DROP TABLE IF EXISTS symbols;"
         "DROP TABLE IF EXISTS refs;DROP TABLE IF EXISTS routes;"
         "DROP TABLE IF EXISTS imports;DROP TABLE IF EXISTS symbol_fts;"
