@@ -388,7 +388,7 @@ make release     # 静态发布二进制 -> 测试 -> 发布到 web 根目录
 仓库结构:
 
 ```
-src/                 每个模块一个 .c 文件;src/cg.h 是唯一的头文件
+src/                 C 模块与专用头文件；src/cg.h 是共享的核心头文件
 src/govern.c         brief、review、guard、check、handoff、resume——治理层
 src/orchestrate.c    cg spec run 与 fleet 监督进程(cg fleet up):持久运行、三级同时运行、停滞、预算、重试、升级
 src/syncgate.c       单写者索引关卡与机器级解析槽位

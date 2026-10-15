@@ -373,7 +373,7 @@ make release     # binaire statique de release -> testé -> publié à la racine
 Structure du dépôt :
 
 ```
-src/                 un fichier .c par module ; src/cg.h est le seul en-tête
+src/                 modules C et en-têtes spécialisés ; src/cg.h est l’en-tête central partagé
 src/govern.c         brief, review, guard, check, handoff, resume — la couche de gouvernance
 src/orchestrate.c    cg spec run et le superviseur de flotte (cg fleet up) : exécutions
                      durables, trois niveaux, blocages, budgets, retries, escalade

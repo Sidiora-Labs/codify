@@ -398,7 +398,7 @@ make release     # binário estático de release -> testado -> publicado na raiz
 Estrutura do repositório:
 
 ```
-src/                 um arquivo .c por módulo; src/cg.h é o único header
+src/                 módulos C e cabeçalhos específicos; src/cg.h é o cabeçalho central compartilhado
 src/govern.c         brief, review, guard, check, handoff, resume — a camada de governança
 src/orchestrate.c    cg spec run e o supervisor da frota (cg fleet up): execuções duráveis,
                      três níveis ao mesmo tempo, travamentos, orçamentos, retentativas, escalonamento

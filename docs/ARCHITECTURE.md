@@ -339,7 +339,8 @@ waits and for how long.
   see the live state, so they keep waiting and exit 75.
 - Long-lived servers (`cg lsp`, `cg watch`) set a short `lock_wait_ms`
   and never exit on busy: their index is deferred and retried later, and
-  they keep answering from the last completed index meanwhile.
+  they keep answering from the currently committed graph meanwhile; queued
+  changes are not certified visible until reconciliation finishes.
 - Read-only paths must not take the write lock: `spec_attempt_sweep`
   checks for expired attempts before it opens a write, so editor board
   polling of `cg spec status` does not compete with agents' writes.

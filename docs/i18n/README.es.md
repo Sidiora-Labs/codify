@@ -408,7 +408,7 @@ make release     # binario estático de release -> probado -> publicado en la ra
 Estructura del repositorio:
 
 ```
-src/                 un .c por módulo; src/cg.h es la única cabecera
+src/                 módulos C y cabeceras especializadas; src/cg.h es la cabecera central compartida
 src/govern.c         brief, review, guard, check, handoff, resume — la capa de gobernanza
 src/orchestrate.c    cg spec run y el supervisor de flota (cg fleet up): ejecuciones
                      duraderas, tres niveles, estancamientos, presupuestos, reintentos, escalada

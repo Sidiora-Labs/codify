@@ -716,7 +716,7 @@ make release     # static release binary -> tested -> published to the web root
 Repository layout:
 
 ```
-src/                 one .c file per module; src/cg.h is the only header
+src/                 C modules and focused headers; src/cg.h is the shared core header
 src/govern.c         brief, review, guard, check, handoff, resume — the governance layer
 src/orchestrate.c    cg spec run and the fleet supervisor (cg fleet up): durable
                      runs, three levels at once, stalls, budgets, retries, escalation

@@ -404,7 +404,7 @@ make release     # स्टैटिक रिलीज़ बाइनरी -
 रिपॉज़िटरी संरचना:
 
 ```
-src/                 प्रति मॉड्यूल एक .c फ़ाइल; src/cg.h एकमात्र हेडर है
+src/                 C मॉड्यूल और विशिष्ट हेडर; src/cg.h साझा मुख्य हेडर है
 src/govern.c         brief, review, guard, check, handoff, resume — गवर्नेंस परत
 src/orchestrate.c    cg spec run और fleet supervisor (cg fleet up): टिकाऊ runs, तीनों स्तर साथ, stalls, बजट, retries, escalation
 src/syncgate.c       single-writer इंडेक्स gate और मशीन-व्यापी parse slots
