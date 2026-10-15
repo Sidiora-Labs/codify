@@ -39,19 +39,37 @@ static void watch_loss(Watcher *w, const char *reason) {
 }
 
 static void watch_add_dir(Watcher *w, const char *rel) {
+    static bool injected_registration_failure;
+    const char *fail_rel = getenv("CG_WATCH_TEST_REG_FAIL_ONCE");
+    if (!injected_registration_failure && fail_rel &&
+        strcmp(fail_rel, rel) == 0) {
+        injected_registration_failure = true;
+        watch_loss(w, "registration_error");
+        return;
+    }
     char abs[4900];
     snprintf(abs, sizeof abs, "%s/%s", w->root, rel[0] ? rel : ".");
     int wd = inotify_add_watch(w->fd, abs, IN_MASK);
     if (wd < 0) { watch_loss(w, "registration_error"); return; }
-    for (int i = 0; i < w->n; i++)
-        if (w->v[i].wd == wd) { free(w->v[i].rel); w->v[i].rel = xstrdup(rel); return; }
-    if (w->n == w->cap) {
+    bool known = false;
+    for (int i = 0; i < w->n; i++) {
+        if (w->v[i].wd != wd) continue;
+        if (strcmp(w->v[i].rel, rel) != 0) {
+            free(w->v[i].rel);
+            w->v[i].rel = xstrdup(rel);
+        }
+        known = true;
+        break;
+    }
+    if (!known && w->n == w->cap) {
         w->cap = w->cap ? w->cap * 2 : 64;
         w->v = xrealloc(w->v, sizeof(Watch) * (size_t)w->cap);
     }
-    w->v[w->n].wd = wd;
-    w->v[w->n].rel = xstrdup(rel);
-    w->n++;
+    if (!known) {
+        w->v[w->n].wd = wd;
+        w->v[w->n].rel = xstrdup(rel);
+        w->n++;
+    }
 
     DIR *d = opendir(abs);
     if (!d) { watch_loss(w, "registration_error"); return; }
@@ -209,6 +227,12 @@ static bool watch_attempt(Cg *cg, const SysInfo *si, Watcher *w,
         pend->whole = true;
         return false;
     }
+    if (whole && before.pending &&
+        (!st->walk || strcmp(st->walk, "full") != 0)) {
+        watch_loss(w, "incomplete_walk");
+        pend->whole = true;
+        return false;
+    }
     if (whole && !w->bad && before.pending &&
         watch_health_clear_if(cg, before.generation)) {
         printf("cg watch: coverage recovered after full reconciliation\n");
@@ -226,6 +250,7 @@ static int watch_sync(Cg *cg, const SysInfo *si, const Pending *p,
     o.background = true;
     o.lock_wait_ms = 0;
     o.quiet = true;
+    o.force_walk = p->whole;
     if (!p->whole && p->n > 0) {
         o.paths = (const char *const *)p->v;
         o.npaths = p->n;
@@ -585,6 +610,7 @@ static void portable_sync(Cg *cg, const SysInfo *si) {
     opts.background = true;
     opts.quiet = true;
     opts.lock_wait_ms = 0;
+    opts.force_walk = true;
     if (cg_index_ex(cg, si, &opts, &stats) != 0 || stats.coalesced) {
         watch_health_mark(cg, "sync_error");
         return;

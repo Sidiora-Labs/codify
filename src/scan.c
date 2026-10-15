@@ -1470,7 +1470,7 @@ static bool is_ignore_file(const char *rel) {
  * walk the tree. */
 static bool index_git_plan(Cg *cg, const IndexOpts *o, const char *head,
                            char ***targets, int *ntargets) {
-    if (o->full || !head[0]) return false;
+    if (o->full || o->force_walk || !head[0]) return false;
     int mode = config_index_walk(cg->root);
     if (mode == CG_WALK_FULL) return false;
     char key[64];

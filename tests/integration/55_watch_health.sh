@@ -4,8 +4,15 @@
 
 cp -r "$FIXTURES/sample" "$TMP/proj"
 cd "$TMP/proj"
+git init -q
+git config user.name Test
+git config user.email test@example.invalid
+printf '[index]\nwalk = git\n' > codify.kvx
+git add .
+git commit -qm baseline
 "$CG" init >/dev/null
 db_file="$(ls -d .*/graph.db)"
+has "$("$CG" sync --json)" '"walk":"git"'
 
 cat > "$TMP/health_probe.c" <<'EOF'
 #include "watch_health.h"
@@ -95,4 +102,29 @@ for event in registration_error root_loss; do
     kill "$watch_pid" 2>/dev/null || true
     wait "$watch_pid" 2>/dev/null || true
 done
+
+# A failed child registration must be retried even when the root already has
+# a watch. The edit after recovery must arrive before the next periodic walk.
+mkdir -p src/blocked/deep
+printf 'export function beforeRepair() { return 1; }\n' > src/blocked/deep/edit.ts
+"$CG" sync >/dev/null
+CG_WATCH_POLL_MS=5000 CG_WATCH_TEST_REG_FAIL_ONCE=src/blocked \
+    "$CG" watch --debounce 100 >"$TMP/child.log" 2>&1 &
+watch_pid=$!
+for _ in $(seq 1 90); do
+    grep -q 'coverage recovered' "$TMP/child.log" && break
+    sleep 0.1
+done
+has "$(cat "$TMP/child.log")" 'coverage degraded (registration_error)'
+has "$(cat "$TMP/child.log")" 'coverage recovered after full reconciliation'
+printf 'export function afterRepair() { return 2; }\n' > src/blocked/deep/edit.ts
+count=0
+for _ in $(seq 1 20); do
+    count="$(sqlite3 "$db_file" "SELECT count(*) FROM symbols WHERE name='afterRepair'")"
+    [ "$count" -ge 1 ] && break
+    sleep 0.1
+done
+[ "$count" -ge 1 ] || fail 'edit below recovered child watch was missed'
+kill "$watch_pid" 2>/dev/null || true
+wait "$watch_pid" 2>/dev/null || true
 echo ok
