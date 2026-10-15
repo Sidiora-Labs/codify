@@ -166,6 +166,12 @@ typedef struct {
     CmtDef  *cmts;   int ncmts,  ccmts;
     int first_code_line;   /* 1-based; 0 = the file is all comment or empty */
     SemResult sem;         /* owned rich source facts from syntax adapters */
+    char parser[32];       /* extractor identity; bounded and owned by result */
+    char diagnostic[64];   /* bounded reason code for partial extraction */
+    int diagnostic_line;
+    char diagnostics[256]; /* up to eight line:code entries */
+    unsigned diagnostic_count;
+    bool partial;
 } ParseResult;
 
 const char *lang_for_path(const char *path);       /* NULL if not source */
@@ -368,6 +374,7 @@ enum { IDX_PH_WALK, IDX_PH_PARSE, IDX_PH_WRITE, IDX_PH_RESOLVE, IDX_PH_SOFT };
  * wait cg->lock_wait_ms for the gate, full machine budget, foreground. */
 typedef struct {
     bool full;             /* reparse every file (cg index --full) */
+    bool force_walk;       /* discover from filesystem; retain content reuse */
     /* skip the walk when meta.last_index_at is younger than this and no
      * resolve is pending and no dirty note exists; 0 = always walk */
     long max_age_ms;
@@ -396,7 +403,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);
  * rules applied as ever) under root/rel ("" = the tree), walked by `threads`
  * threads over a shared directory list and appended to out, which comes back
  * sorted by path. Ticks the progress line per directory (main thread). */
-typedef struct { char *rel; long size, mtime; } WalkEntry;
+typedef struct { char *rel; long size, mtime, mtime_ns; } WalkEntry;
 typedef struct { WalkEntry *v; int n, cap; long dirs; } WalkSet;
 void walk_parallel(const char *root, const char *rel, const Ignore *ig,
                    int threads, long max_bytes, WalkSet *out);

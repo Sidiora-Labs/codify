@@ -13,7 +13,7 @@ int alpha(void) { return 1; }
 int caller(void) { return alpha(); }
 EOF
 "$CG" init >/dev/null
-DB=.codegraph/graph.db
+DB="$(ls .*/graph.db)"
 q() { sqlite3 "$DB" "$1"; }
 branch="$(q 'SELECT id FROM branches LIMIT 1')"
 [ -n "$branch" ] || fail "no branch"
@@ -62,4 +62,16 @@ rm src/one.c
 [ "$(debt)" = 0 ] || fail "deletion debt remains"
 "$CG" sync >/dev/null
 [ "$(debt)" = 0 ] || fail "no-op recreated debt"
+
+# A binary source with no indexed rows can be seen on every full walk. Its
+# coverage update must not manufacture semantic work or retry debt.
+g4="$(generation)"
+printf '\000' > src/blob.c
+for attempt in 1 2; do
+    "$CG" sync >/dev/null
+    [ "$(generation)" = "$g4" ] || fail "binary no-op published semantics ($attempt)"
+    [ "$(debt)" = 0 ] || fail "binary no-op created semantic debt ($attempt)"
+    [ "$(q "SELECT value FROM meta WHERE key='index_pending_resolve:$branch'")" = 0 ] || \
+        fail "binary no-op created resolution debt ($attempt)"
+done
 echo "PASS: semantic debt, generation, deletion and no-op"

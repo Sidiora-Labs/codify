@@ -213,7 +213,8 @@ int sem_incremental_run(Cg *cg, int force_full) {
     int rc = sem_pass_run ? sem_pass_run(cg, full ? NULL : ids, n) : -1;
     free(ids);
     if (rc != 0) return rc;
-    if (getenv("CG_SEM_FAIL_BEFORE_PUBLISH")) return -1;
+    const char *failpoint = getenv("CG_SEM_FAIL_BEFORE_PUBLISH");
+    if (failpoint && strcmp(failpoint,"1")==0) return -1;
     sqlite3_stmt *q = cg_prep(cg,
         "DELETE FROM semantic_change_debt WHERE branch_id=?1");
     sqlite3_bind_int64(q,1,cg->branch_id);

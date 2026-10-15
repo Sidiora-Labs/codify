@@ -1,0 +1,43 @@
+# Pinned parser sources compiled into the Codify executable.
+# Each revision is an exact upstream commit. No network access at runtime.
+[pascal]
+source = "https://github.com/Isopod/tree-sitter-pascal"
+revision = "042119eca2e18a60e56317fb06ee3ba5c32cb447"
+entry = "tree_sitter_pascal"
+abi = 14
+
+[cobol]
+source = "https://github.com/yutaro-sakamoto/tree-sitter-cobol"
+revision = "550020ddf42ef9b718ad897868a9308d2afcda35"
+entry = "tree_sitter_COBOL"
+abi = 14
+
+[vbnet]
+source = "https://github.com/CodeAnt-AI/tree-sitter-vb-dotnet"
+revision = "cfca210ce8fdcb5245bd9cd5c47ce0a21a8488d5"
+entry = "tree_sitter_vb_dotnet"
+abi = 15
+
+[arkts]
+source = "https://github.com/harmony-contrib/tree-sitter-arkts"
+revision = "9a97c1e6ac93bc07732c15050a0e560bc63c8d78"
+entry = "tree_sitter_arkts"
+abi = 14
+
+[cfml]
+source = "https://github.com/cfmleditor/tree-sitter-cfml"
+revision = "ffdd4d763b037a1ecbc1635ee1b5510a9f3425df"
+entry = "tree_sitter_cfml"
+abi = 15
+
+[cfscript]
+source = "https://github.com/cfmleditor/tree-sitter-cfml"
+revision = "ffdd4d763b037a1ecbc1635ee1b5510a9f3425df"
+entry = "tree_sitter_cfscript"
+abi = 15
+
+[cfquery]
+source = "https://github.com/cfmleditor/tree-sitter-cfml"
+revision = "ffdd4d763b037a1ecbc1635ee1b5510a9f3425df"
+entry = "tree_sitter_cfquery"
+abi = 15

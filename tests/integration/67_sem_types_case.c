@@ -49,7 +49,10 @@ int main(void) {
         "(10,1,'Base','class'),(11,2,'Derived','class'),"
         "(12,2,'run','method'),(13,1,'Twin','class'),"
         "(14,3,'Twin','class'),(15,1,'I','interface'),"
-        "(16,2,'Impl','class'),(17,4,'Base','class');"
+        "(16,2,'Impl','class'),(17,4,'Base','class'),"
+        "(18,2,'Audit','class'),(19,1,'Tag','class'),(20,3,'Tag','class'),"
+        "(21,1,'run','method'),(22,2,'run','method'),(23,2,'run','method'),"
+        "(24,2,'SubImpl','class');"
         "INSERT INTO semantic_symbols VALUES"
         "(10,1,NULL,'Base','public',0,5,1,0,1,5),"
         "(11,2,NULL,'Derived','public',0,7,1,0,1,7),"
@@ -58,20 +61,33 @@ int main(void) {
         "(14,3,NULL,'Twin','public',0,4,1,0,1,4),"
         "(15,1,NULL,'I','public',6,7,3,0,3,1),"
         "(16,2,NULL,'Impl','public',20,24,4,0,4,4),"
-        "(17,4,NULL,'Base','public',0,5,1,0,1,5);"
+        "(17,4,NULL,'Base','public',0,5,1,0,1,5),"
+        "(18,2,NULL,'Audit','public',30,35,6,0,6,5),"
+        "(19,1,NULL,'Tag','public',30,33,5,0,5,3),"
+        "(20,3,NULL,'Tag','public',30,33,5,0,5,3),"
+        "(21,1,10,'Base.run','public',40,43,7,0,7,3),"
+        "(22,2,11,'Derived.run','public',45,48,8,0,8,3),"
+        "(23,2,16,'Impl.run','public',50,53,9,0,9,3),"
+        "(24,2,NULL,'SubImpl','public',55,62,10,0,10,7);"
         "INSERT INTO semantic_bindings VALUES(2,10),(2,15);"
         "INSERT INTO semantic_type_facts VALUES"
         "(11,2,'base','inherits',': public Base','extends clause',1,0,4,1,9,1,13),"
         "(16,2,'interface','implements','I','implements clause',2,20,21,4,5,4,6),"
         "(12,2,'result','returns','-> Base','return annotation',3,8,12,2,4,2,8),"
-        "(11,2,'ambiguous','type','Twin','type annotation',4,30,34,5,0,5,4);");
+        "(11,2,'ambiguous','type','Twin','type annotation',4,30,34,5,0,5,4),"
+        "(12,2,'run','decorates','@Audit','decorator',5,36,42,7,0,7,6),"
+        "(12,2,'run','decorates','@Tag','decorator',6,43,47,8,0,8,4),"
+        "(22,2,'run','overrides','run','override modifier',7,45,48,8,0,8,3),"
+        "(24,2,'base','inherits','Impl','extends clause',8,55,62,10,0,10,7);");
     assert(sem_types_register()==0);
     assert(sem_types_run(&cg,NULL,0)==0);
     assert(count(&cg,"branch_id=1 AND kind='inherits' AND source_id=11 AND target_id=10")==1);
     assert(count(&cg,"branch_id=1 AND kind='implements' AND source_id=16 AND target_id=15")==1);
     assert(count(&cg,"branch_id=1 AND kind='returns' AND source_id=12 AND target_id=10")==1);
     assert(count(&cg,"branch_id=1 AND kind='contains' AND source_id=11 AND target_id=12")==1);
-    assert(count(&cg,"kind='type' OR target_id=17")==0);
+    assert(count(&cg,"branch_id=1 AND kind='decorates' AND source_id=12 AND target_id=18")==1);
+    assert(count(&cg,"branch_id=1 AND kind='overrides' AND source_id=22 AND target_id=21")==1);
+    assert(count(&cg,"kind='type' OR target_id=17 OR target_id=19 OR target_id=20")==0);
     sqlite3_stmt *deps=cg_prep(&cg,"SELECT count(*) FROM semantic_dependencies "
         "WHERE branch_id=1 AND file_id=2 AND dependency_key='type:Base'");
     assert(sqlite3_step(deps)==SQLITE_ROW && sqlite3_column_int(deps,0)==1);
@@ -79,14 +95,15 @@ int main(void) {
     long ids[8];
     assert(sem_type_ancestors(&cg,11,ids,8)==1 && ids[0]==10);
     assert(sem_type_subtypes(&cg,10,ids,8)==1 && ids[0]==11);
-    assert(sem_type_implementations(&cg,15,ids,8)==1 && ids[0]==16);
+    assert(sem_type_implementations(&cg,15,ids,8)==2 &&
+           ((ids[0]==16 && ids[1]==24) || (ids[0]==24 && ids[1]==16)));
     long empty[1]={0}; assert(sem_types_run(&cg,empty,0)==0);
-    assert(count(&cg,"branch_id=1")==4);
+    assert(count(&cg,"branch_id=1")==10);
     sql(&cg,"INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
         "source_id,target_id,kind,strategy) VALUES(1,1,1,10,15,'type','type_hierarchy');");
     sql(&cg,"DELETE FROM semantic_type_facts WHERE id=1;");
     long changed[1]={2}; assert(sem_types_run(&cg,changed,1)==0);
-    assert(count(&cg,"kind='inherits'")==0);
+    assert(count(&cg,"kind='inherits' AND source_id=11 AND target_id=10")==0);
     assert(count(&cg,"source_file_id=1 AND kind='type'")==1);
     assert(sem_type_ancestors(&cg,11,ids,8)==0);
     cg.branch_id=2;

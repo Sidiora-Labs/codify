@@ -137,6 +137,7 @@ static const char *SEM_SCHEMA =
     "CREATE INDEX IF NOT EXISTS idx_sem_edge_file ON semantic_edges(branch_id,source_file_id);"
     "CREATE INDEX IF NOT EXISTS idx_sem_edge_target_file ON semantic_edges(branch_id,target_file_id);"
     "CREATE INDEX IF NOT EXISTS idx_sem_edge_channel ON semantic_edges(branch_id,channel,kind);"
+    "CREATE INDEX IF NOT EXISTS idx_sem_edge_ref ON semantic_edges(branch_id,source_ref_id,provenance);"
     "CREATE TABLE IF NOT EXISTS semantic_dependencies("
     "id INTEGER PRIMARY KEY,branch_id INTEGER NOT NULL,file_id INTEGER NOT NULL,"
     "dependency_key TEXT NOT NULL,dependency_hash TEXT,kind TEXT NOT NULL,"
@@ -170,6 +171,7 @@ extern int sem_search_file_replace(Cg *cg, long file_id) __attribute__((weak));
 extern int sem_search_file_copy(Cg *cg, long source_file_id,
                                 long dest_file_id) __attribute__((weak));
 extern int sem_search_file_purge(Cg *cg, long file_id) __attribute__((weak));
+extern int sem_routes_purge_file(Cg *cg, long file_id) __attribute__((weak));
 int sem_schema_init(Cg *cg) {
     cg_exec(cg, SEM_SCHEMA);
     return sem_search_schema_init ? sem_search_schema_init(cg) : 0;
@@ -203,6 +205,8 @@ static void done(Cg *cg, sqlite3_stmt *q) {
  * must lose stale targets even when their source files are unchanged. */
 int sem_file_purge(Cg *cg, long file_id) {
     semantic_error = 0;
+    if (sem_routes_purge_file && sem_routes_purge_file(cg,file_id)!=0)
+        return -1;
     if (sem_search_file_purge && sem_search_file_purge(cg,file_id)!=0)
         return -1;
     sqlite3_stmt *q = cg_prep(cg,
@@ -437,7 +441,7 @@ static int npasses;
  * A missing module leaves its capability absent, without a link failure. */
 extern void sem_imports_register(void) __attribute__((weak));
 extern void sem_resolve_register(void) __attribute__((weak));
-extern void sem_types_register(void) __attribute__((weak));
+extern int sem_types_register(void) __attribute__((weak));
 extern void sem_routes_register(void) __attribute__((weak));
 extern void sem_dispatch_register(void) __attribute__((weak));
 extern void sem_channels_register(void) __attribute__((weak));

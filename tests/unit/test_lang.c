@@ -85,6 +85,7 @@ int main(void) {
         "  return 2;\n"
         "}\n";
     lang_parse("typescript", "src/a.ts", js, sizeof js - 1, &parsed);
+    ok_str(parsed.parser, "tree-sitter:typescript");
     const SymDef *alpha = definition(&parsed, "alpha");
     const SymDef *beta = definition(&parsed, "beta");
     ok(alpha && alpha->end_line == 3, "brace scope: alpha ends at its brace");

@@ -4,6 +4,8 @@
  * definition patterns run against comment/string-stripped lines.
  */
 #include "cg.h"
+#include "ast.h"
+#include "index_health.h"
 #include <regex.h>
 #include <ctype.h>
 
@@ -143,6 +145,7 @@ static const struct { const char *ext, *lang, *spec; } EXTMAP[] = {
     {".c","c","c"},           {".h","c","cpp"},
     {".cpp","cpp","cpp"},     {".cc","cpp","cpp"},   {".cxx","cpp","cpp"},
     {".hpp","cpp","cpp"},     {".hh","cpp","cpp"},   {".hxx","cpp","cpp"},
+    {".m","objc","c"},        {".mm","objc","cpp"},
     {".py","python","python"},{".pyw","python","python"},
     {".js","javascript","js"},{".jsx","javascript","js"},
     {".mjs","javascript","js"},{".cjs","javascript","js"},
@@ -150,11 +153,29 @@ static const struct { const char *ext, *lang, *spec; } EXTMAP[] = {
     {".mts","typescript","js"},{".cts","typescript","js"},
     {".go","go","go"},        {".rs","rust","rust"},
     {".java","java","java"},  {".cs","csharp","csharp"},
+    {".scala","scala",NULL},   {".sc","scala",NULL},
+    {".dart","dart",NULL},
     {".vb","vbnet","vbnet"},  {".php","php","php"},
     {".rb","ruby","ruby"},    {".swift","swift","swift"},
     {".kt","kotlin","kotlin"},{".kts","kotlin","kotlin"},
     {".erl","erlang","erlang"},{".hrl","erlang","erlang"},
     {".sol","solidity","solidity"},
+    {".lua","lua",NULL},       {".luau","luau",NULL},
+    {".r","r",NULL},           {".R","r",NULL},
+    {".tf","terraform",NULL}, {".tfvars","terraform",NULL},
+    {".nix","nix",NULL},
+    {".pas","pascal",NULL},    {".dpr","pascal",NULL},
+    {".dpk","pascal",NULL},    {".lpr","pascal",NULL},
+    {".dfm","delphi_form",NULL}, {".fmx","delphi_form",NULL},
+    {".cbl","cobol",NULL},     {".cob","cobol",NULL},
+    {".cobol","cobol",NULL},   {".cpy","cobol",NULL},
+    {".cfs","cfscript",NULL},  {".cfm","cfml",NULL},
+    {".cfc","cfml",NULL},      {".ets","arkts",NULL},
+    {".liquid","liquid",NULL}, {".cshtml","razor",NULL},
+    {".razor","razor",NULL},   {".xml","xml",NULL},
+    {".json","json",NULL},     {".yaml","yaml",NULL},
+    {".yml","yaml",NULL},      {".twig","twig",NULL},
+    {".properties","properties",NULL},
     {".svelte","svelte","js"},{".vue","vue","js"},   {".astro","astro","js"},
     {NULL,NULL,NULL}
 };
@@ -220,6 +241,7 @@ void lang_global_init(void) {
 }
 
 static const LangSpec *spec_by_name(const char *name) {
+    if (!name) return NULL;
     for (int i = 0; i < NLANGS; i++)
         if (strcmp(LANGS[i].name, name) == 0) return &LANGS[i];
     return NULL;
@@ -912,8 +934,9 @@ static void lang_scan_imports(const LangSpec *L, const char *line, int lineno,
 
 void lang_parse(const char *lang, const char *path, const char *src,
                 size_t len, ParseResult *pr) {
-    (void)lang;
     memset(pr, 0, sizeof *pr);
+    snprintf(pr->parser, sizeof pr->parser, "heuristic");
+    if (ast_try_parse(lang, path, src, len, pr)) return;
     const LangSpec *L = spec_for_path(path);
     if (!L) return;
     bool cfam_protos = strcmp(L->name, "c") == 0 || strcmp(L->name, "cpp") == 0;
@@ -934,7 +957,8 @@ void lang_parse(const char *lang, const char *path, const char *src,
     int impstate = 0;
     int lineno = 0;
     size_t pos = 0;
-    char orig[4096], clean[4096];
+    char *orig = NULL, *clean = NULL;
+    size_t line_cap = 0;
     char **clines = NULL;              /* cleaned lines, for scope tracking */
     int ccl = 0;
 
@@ -951,12 +975,12 @@ void lang_parse(const char *lang, const char *path, const char *src,
             if (ccl < lineno) ccl = lineno;
             clines = xrealloc(clines, sizeof(char *) * (size_t)ccl);
         }
-        if (ll >= sizeof orig) {           /* minified / generated: skip */
-            /* advance the stripper state so later lines stay in sync */
-            clean_line(L, ls, ll, NULL, &cs, NULL);
-            clines[lineno - 1] = xstrdup("");
-            cmt_flush(&acc, pr);
-            continue;
+        if (ll + 1 > line_cap) {
+            size_t next = line_cap ? line_cap : 4096;
+            while (next < ll + 1) next *= 2;
+            orig = xrealloc(orig, next);
+            clean = xrealloc(clean, next);
+            line_cap = next;
         }
         memcpy(orig, ls, ll);
         orig[ll] = 0;
@@ -1298,5 +1322,7 @@ void lang_parse(const char *lang, const char *path, const char *src,
     }
     for (int i = 0; i < lineno; i++) free(clines[i]);
     free(clines);
+    free(orig);
+    free(clean);
     pr->nlines = lineno;
 }

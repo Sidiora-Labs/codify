@@ -1,6 +1,7 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
 #include "sem_inspect.h"
+#include "answer_health.h"
 #include <poll.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -53,6 +54,12 @@ static bool workers_opt(int *argc, char **argv, const char *cmd, int *out) {
     return true;
 }
 
+static int query_budget_arg(int argc, char **argv) {
+    for (int i = 2; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--budget") == 0) return atoi(argv[i + 1]);
+    return 0;
+}
+
 static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
     /* the count an unbounded foreground pass would ask for, and who chose
      * it; background passes, the file count, and the slot gate bound it
@@ -96,6 +103,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
         if (cg) sb_printf(&b, ",\"fts_mode\":\"%s\",\"sqlite\":\"%s\"",
                           db_fts_contentless(cg) ? "contentless" : "content",
                           sqlite3_libversion());
+        if (cg) { sb_putc(&b, ','); answer_health_append(&b, cg, NULL); }
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -132,6 +140,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
                        : "stores file content (contentless needs SQLite "
                          "3.43.0 or newer when the graph is built)",
                    sqlite3_libversion());
+        if (cg) answer_health_text(cg);
     }
     free(ms); free(nf); free(nb);
     return 0;
@@ -332,6 +341,19 @@ int main(int argc, char **argv) {
         cg_filter_set(&cg, &qf);
     }
     int rc = 0;
+    bool health_answer = json &&
+        (strcmp(cmd, "search") == 0 || strcmp(cmd, "context") == 0 ||
+         strcmp(cmd, "symbol") == 0 || strcmp(cmd, "impact") == 0 ||
+         strcmp(cmd, "routes") == 0 || strcmp(cmd, "files") == 0 ||
+         strcmp(cmd, "survey") == 0 || strcmp(cmd, "show") == 0 ||
+         strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
+         strcmp(cmd, "test-impact") == 0 || strcmp(cmd, "inspect") == 0);
+    AnswerCapture answer_capture = {0};
+    int requested_budget = json && (strcmp(cmd, "context") == 0 ||
+        strcmp(cmd, "impact") == 0) ? query_budget_arg(argc, argv) : 0;
+    size_t answer_max = requested_budget > 0 && requested_budget < 1000000 ?
+        (size_t)requested_budget * 4 : 0;
+    if (health_answer) answer_health_capture_begin(&answer_capture, answer_max);
 
     if (strcmp(cmd, "journal") == 0) {
         rc = cmd_journal(&cg, argc - 2, argv + 2, json);
@@ -428,11 +450,15 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "impact") == 0) {
         int depth = atoi(opt(&argc, argv, "-d", "3"));
         int budget = atoi(opt(&argc, argv, "--budget", "8000"));
+        if (json && requested_budget > 0)
+            budget = answer_health_query_budget(budget);
         if (argc < 3) { help_usage("impact"); rc = 1; }
         else rc = cmd_impact(&cg, argv[2], depth > 0 ? depth : 3,
                              budget > 0 ? budget : 8000, json);
     } else if (strcmp(cmd, "context") == 0) {
         int budget = atoi(opt(&argc, argv, "--budget", "4000"));
+        if (json && requested_budget > 0)
+            budget = answer_health_query_budget(budget);
         int limit = atoi(opt(&argc, argv, "-n", "8"));
         if (argc < 3) { help_usage("context"); rc = 1; }
         else rc = cmd_context(&cg, argv[2], budget > 0 ? budget : 4000,
@@ -551,7 +577,7 @@ int main(int argc, char **argv) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         rc = cmd_log(&cg, limit > 0 ? limit : 20, json);
     } else if (strcmp(cmd, "status") == 0) {
-        rc = cmd_status(&cg, json);
+        rc = answer_health_status(&cg, json);
     } else if (strcmp(cmd, "state") == 0) {
         rc = cmd_state(&cg, json);
     } else if (strcmp(cmd, "event") == 0) {
@@ -708,6 +734,7 @@ int main(int argc, char **argv) {
         help_suggest(cmd);
         rc = 1;
     }
+    if (health_answer) answer_health_capture_end(&answer_capture, &cg);
     cg_close(&cg);
     return rc;
 }
