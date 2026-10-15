@@ -1,0 +1,6 @@
+component {
+    function run(value) {
+        return value;
+    }
+}
+// function ghost() {}

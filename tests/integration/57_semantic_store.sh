@@ -176,8 +176,9 @@ int sem_search_file_replace(Cg *cg, long file_id) {
     return rc==SQLITE_DONE ? 0 : -1;
 }
 C
+mapfile -d '' -t vendor_objects < <(find "$repo/build/vendor" -name '*.o' -print0)
 cc -std=gnu11 -Wall -Wextra -pthread -I"$repo/src" "$tmp/failhook.c" \
-  "$repo"/build/*.o -lsqlite3 -lpthread -lm -o "$tmp/cg-fail"
+  "$repo"/build/*.o "${vendor_objects[@]}" -lsqlite3 -lpthread -lm -o "$tmp/cg-fail"
 printf 'function bravo() { return 2; }\n' > case.ts
 if "$tmp/cg-fail" index --full >/dev/null 2>&1; then
     echo 'semantic write fault unexpectedly indexed successfully' >&2

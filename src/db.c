@@ -693,6 +693,7 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS comment_fts;"
         "DROP TABLE IF EXISTS file_fts;"
         "DROP TABLE IF EXISTS body_tri;"
+        "DROP TABLE IF EXISTS extraction_health;"
         "DELETE FROM meta WHERE key='fts_mode';"
         "DELETE FROM meta WHERE key LIKE 'last_index_%' OR key LIKE 'walk_%' "
         "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
