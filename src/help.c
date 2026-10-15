@@ -94,16 +94,20 @@ static const HelpCmd HELP[] = {
   .examples = "cg sync\ncg sync src/main.c --json\ncg sync --auto --background",
   .related = "index,watch,hook" },
 { .group = "graph", .name = "search", .args = "<query> [-n N]",
-  .usage = "search <query> [-n N] [--path GLOB] [--lang L] [--no-tests]",
+  .usage = "search <query> [-n N] [--path GLOB] [--lang L] [--kind K] "
+    "[--name N] [--no-tests]",
   .summary = "find code by name, doc comment, or body",
   .detail = "Symbol and full-text search (FTS5 trigram + full text). A "
     "phrase matches names (export memory finds memory_export and "
     "exportMemory), doc comments, and bodies, ranked in that order with "
     "source before tests; file hits show the matching line. Definitions "
-    "answer, never their prototypes.",
+    "answer, never their prototypes. Identifier segments and exact names "
+    "lead; a bounded typo fallback applies when those find nothing.",
   .flags = "-n N\tmaximum results (default 20)\n"
     "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
     "--lang L\tonly files of language L (c, python, go, ts...)\n"
+    "--kind K\tonly symbols of kind K\n"
+    "--name N\tonly symbols whose name contains N\n"
     "--no-tests\tleave test files out\n",
   .examples = "cg search \"export memory\"\ncg search index_pass -n 5 --json",
   .related = "symbol,context,show" },
@@ -168,6 +172,7 @@ static const HelpCmd HELP[] = {
   .related = "impact,symbol,context" },
 { .group = "graph", .name = "context", .args = "<query>",
   .usage = "context <query> [--budget N] [-n K] [--path GLOB] [--lang L] "
+    "[--kind K] [--name N] "
     "[--no-tests]",
   .summary = "one call: symbols, snippets, edges, routes",
   .detail = "The context bundle for an agent: memories, symbols, snippets, "
@@ -175,11 +180,14 @@ static const HelpCmd HELP[] = {
     "explicit omitted counts (and tokens_used in --json). A file path gets "
     "the file's outline (purpose, symbols, imports, dependents); a "
     "directory gets its files, or, when they overflow the budget, its "
-    "subdirectories with counts first and then the files that fit.",
+    "subdirectories with counts first and then the files that fit. Named "
+    "overloads carry separate source bodies and direct path evidence.",
   .flags = "--budget N\ttoken budget (default 4000)\n"
     "-n K\ttop K symbols (default 8)\n"
     "--path GLOB\tonly paths under GLOB or a directory (repeatable)\n"
     "--lang L\tonly files of language L (c, python, go, ts...)\n"
+    "--kind K\tonly symbols of kind K\n"
+    "--name N\tonly symbols whose name contains N\n"
     "--no-tests\tleave test files out\n",
   .examples = "cg context \"journal replay\"\ncg context src/help.c",
   .related = "survey,search,show" },

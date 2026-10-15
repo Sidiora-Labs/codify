@@ -279,10 +279,10 @@ reqs = ["4.5"]
 
 [task.4.2]
 title = "Structured search and context sufficiency"
-status = "pending"
+status = "done"
 wave = 4
 requires = ["2.1", "3.1"]
-touches = ["src/sem_search.c", "src/sem_search.h", "src/graph.c", "src/mcp.c", "tests/integration/73_sem_search.sh"]
+touches = ["src/sem_search.c", "src/sem_search.h", "src/graph.c", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/73_sem_search.sh"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/73_sem_search.sh"
 do_1 = "Add branch-aware identifier postings, composable kind/lang/path/name filters, exact-name precedence and bounded fuzzy fallback. Return source bodies and overloads with co-location evidence, weak-query confidence and omission budgets while preserving existing text ranking."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."

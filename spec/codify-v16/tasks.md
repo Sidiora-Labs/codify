@@ -80,7 +80,7 @@
     - Expose file coverage/parser inventory/index state and pending/degraded health through info/status and MCP. Validate contributing source hashes under explicit file/byte/time caps; distinguish verified/stale/unchecked and partial extraction.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.5_
-  - [ ] 4.2 Structured search and context sufficiency
+  - [x] 4.2 Structured search and context sufficiency
     - Add branch-aware identifier postings, composable kind/lang/path/name filters, exact-name precedence and bounded fuzzy fallback. Return source bodies and overloads with co-location evidence, weak-query confidence and omission budgets while preserving existing text ranking.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.1, 4.2_
