@@ -96,7 +96,7 @@
     - Build source-labelled positive/negative cases across every advertised language/framework; report precision/recall/coverage by adapter. Compare canonical graph sets after edit/delete/rename/config changes and commit replay against true clean rebuilds across worktrees and failure recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 5.1, 5.2_
-  - [-] 5.2 Index resource and latency regression gates
+  - [x] 5.2 Index resource and latency regression gates
     - Benchmark bounded cold/no-op/edit/delete/rename/replay with fixed workers, memory and database growth, skip/diagnostic counts and source-to-query freshness. Keep default tests small and an opt-in large profile; publish raw reproducible output without fabricated numbers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 5.3_
