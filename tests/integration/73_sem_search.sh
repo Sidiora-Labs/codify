@@ -22,6 +22,10 @@ int parseUserReceipt(int x) {
     return overload(x);
 }
 EOF
+cat > src/alpha.h <<'EOF'
+/** Keep the decoder contract stable for account records. */
+int parseUserRecord(int raw);
+EOF
 cat > tests/fixture.c <<'EOF'
 int parseUserRecord(int raw) {
     return -raw;

@@ -1315,8 +1315,21 @@ static int structured_query(Cg *cg, const char *q, SymRow *out, int cap,
         sqlite3_bind_int64(st, 1, hits[i].symbol_id);
         if (sqlite3_step(st) == SQLITE_ROW) {
             SymRow r; sym_from_stmt(st, &r);
+            bool folded = false;
+            if (r.decl) {
+                /* Search presents a definition once, while symbol/show can
+                 * still expose its prototypes. Keep a declaration only if
+                 * no definition survives the same branch/file filters. */
+                sqlite3_stmt *def = prep_scoped(cg,
+                    "SELECT 1 FROM symbols s JOIN files f ON f.id=s.file_id "
+                    "WHERE s.name=? AND s.kind=? AND s.decl=0", " LIMIT 1");
+                sqlite3_bind_text(def, 1, r.name, -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(def, 2, r.kind, -1, SQLITE_TRANSIENT);
+                folded = sqlite3_step(def) == SQLITE_ROW;
+                sqlite3_finalize(def);
+            }
             if ((!kind || strcmp(kind, r.kind) == 0) &&
-                (!name || ci_has(r.name, name))) {
+                (!name || ci_has(r.name, name)) && !folded) {
                 out[n++] = r;
                 if (hits[i].match == SEM_MATCH_TYPO) (*weak)++;
             }
