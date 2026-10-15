@@ -11,10 +11,53 @@ extern const TSLanguage *tree_sitter_cfscript(void);
 extern const TSLanguage *tree_sitter_cfquery(void);
 extern const TSLanguage *tree_sitter_arkts(void);
 
+#define MIXED_LINE_STEP 4096u
+typedef struct {uint32_t line, start;} MixedLinePoint;
+typedef struct MixedLines {
+    const AstContext *ctx;
+    MixedLinePoint *points;
+    size_t count;
+    struct MixedLines *previous;
+} MixedLines;
+static _Thread_local MixedLines *current_lines;
+
+static void lines_begin(MixedLines *m,const AstContext *c) {
+    memset(m,0,sizeof *m);m->ctx=c;m->previous=current_lines;
+    m->count=c->length/MIXED_LINE_STEP+1;
+    m->points=xmalloc(m->count*sizeof *m->points);
+    uint32_t line=1,start=0;
+    for(size_t block=0;block<m->count;block++) {
+        m->points[block]=(MixedLinePoint){line,start};
+        size_t lo=block*MIXED_LINE_STEP,hi=lo+MIXED_LINE_STEP;
+        if(hi>c->length)hi=c->length;
+        for(size_t i=lo;i<hi;i++)if(c->source[i]=='\n') {
+            line++;start=(uint32_t)(i+1);
+        }
+    }
+    current_lines=m;
+}
+static void lines_end(MixedLines *m) {
+    current_lines=m->previous;free(m->points);
+}
+static void line_pos(const MixedLines *m,size_t byte,int *line,int *column) {
+    size_t block=byte/MIXED_LINE_STEP;
+    if(block>=m->count)block=m->count-1;
+    uint32_t count=m->points[block].line,start=m->points[block].start;
+    for(size_t i=block*MIXED_LINE_STEP;i<byte;i++)if(m->ctx->source[i]=='\n') {
+        count++;start=(uint32_t)(i+1);
+    }
+    *line=(int)count;*column=(int)(byte-start);
+}
 static SemSpan span_bytes(const AstContext *c, size_t lo, size_t hi) {
-    SemSpan s = {.start_byte=lo, .end_byte=hi, .line=1, .end_line=1};
+    SemSpan s = {.line=1, .end_line=1};
     if (hi > c->length) hi = c->length;
     if (lo > hi) lo = hi;
+    s.start_byte=lo;s.end_byte=hi;
+    if(current_lines && current_lines->ctx==c) {
+        line_pos(current_lines,lo,&s.line,&s.column);
+        line_pos(current_lines,hi,&s.end_line,&s.end_column);
+        return s;
+    }
     for (size_t i=0; i<hi; i++) {
         if (c->source[i]=='\n') {
             if (i < lo) s.line++;
@@ -27,11 +70,16 @@ static SemSpan span_bytes(const AstContext *c, size_t lo, size_t hi) {
 }
 
 static SemSpan span_node(AstContext *c, TSNode n) {
-    return span_bytes(c, ts_node_start_byte(n), ts_node_end_byte(n));
+    (void)c;
+    TSPoint a=ts_node_start_point(n), b=ts_node_end_point(n);
+    return (SemSpan){.line=(int)a.row+1,.column=(int)a.column,
+                     .end_line=(int)b.row+1,.end_column=(int)b.column,
+                     .start_byte=ts_node_start_byte(n),.end_byte=ts_node_end_byte(n)};
 }
 
 static bool eq(const char *a, const char *b) { return strcmp(a,b)==0; }
 static void decl(AstContext *c,const char *name,const char *kind,size_t lo,size_t hi,int owner);
+static bool boundary(const AstContext *c,size_t p,size_t n);
 static void identify(AstContext *c,const char *prefix) {
     if(c->result->sem.parser_id)return;
     size_t n=strlen(prefix)+strlen(c->language)+2;
@@ -44,11 +92,14 @@ static char *node_name(AstContext *c, TSNode n) {
     if (ts_node_is_null(f)) f=ast_field(n,"header");
     if (!ts_node_is_null(f) && eq(ts_node_type(f),"declProc")) f=ast_field(f,"name");
     if (ts_node_is_null(f)) {
-        for (uint32_t i=0;i<ts_node_named_child_count(n);i++) {
-            TSNode ch=ts_node_named_child(n,i);
+        TSTreeCursor cursor=ts_tree_cursor_new(n);
+        if(ts_tree_cursor_goto_first_child(&cursor))do {
+            TSNode ch=ts_tree_cursor_current_node(&cursor);
             const char *t=ts_node_type(ch);
-            if (eq(t,"identifier") || eq(t,"program_name") || eq(t,"moduleName") || eq(t,"paragraph_name")) {f=ch;break;}
-        }
+            if (ts_node_is_named(ch) && (eq(t,"identifier") || eq(t,"program_name") ||
+                eq(t,"moduleName") || eq(t,"paragraph_name"))) {f=ch;break;}
+        } while(ts_tree_cursor_goto_next_sibling(&cursor));
+        ts_tree_cursor_delete(&cursor);
     }
     if (ts_node_is_null(f)) return NULL;
     char *s=ast_text(c,f);
@@ -62,6 +113,7 @@ static int add_symbol(AstContext *c, TSNode n, const char *kind, int parent) {
     if (!s) {free(name);return -1;}
     int id=c->result->sem.nsymbols-1;
     s->parent=parent;
+    s->declaration=eq(ts_node_type(n),"declProc");
     s->scope_key=xstrdup(name);
     if (parent>=0 && parent<id) {
         const char *p=c->result->sem.symbols[parent].qualified_name;
@@ -93,29 +145,30 @@ static int add_symbol(AstContext *c, TSNode n, const char *kind, int parent) {
     free(name); return id;
 }
 
-static int owner_for(AstContext *c, TSNode n) {
-    uint32_t start=ts_node_start_byte(n);
-    int best=-1; size_t width=(size_t)-1;
-    for (int i=0;i<c->result->sem.nsymbols;i++) {
-        SemSpan sp=c->result->sem.symbols[i].span;
-        if (sp.start_byte<start && sp.end_byte>=ts_node_end_byte(n) && sp.end_byte-sp.start_byte<width)
-            best=i,width=sp.end_byte-sp.start_byte;
-    }
-    return best;
-}
-
-static void add_ref(AstContext *c, TSNode n, TSNode name, const char *kind) {
+static void add_ref(AstContext *c, TSNode n, TSNode name, const char *kind,int owner) {
     if (ts_node_is_null(name)) return;
     char *text=ast_text(c,name);
     if (!text || !*text || strlen(text)>256) {free(text);return;}
     SemReference *r=sem_reference_add(&c->result->sem,text,kind,span_node(c,name));
-    if (r) {r->owner=owner_for(c,n);r->strategy=xstrdup("syntax");r->evidence=xstrdup(ts_node_type(n));}
+    if (r) {r->owner=owner;r->strategy=xstrdup("syntax");r->evidence=xstrdup(ts_node_type(n));}
     free(text);
 }
 
+typedef struct {
+    int symbols[512];
+    uint32_t ends[512];
+    unsigned depth;
+    int cobol_paragraph;
+} MixedOwners;
 static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
-    (void)unused;
+    MixedOwners *owners=unused;
+    uint32_t start=ts_node_start_byte(n),end=ts_node_end_byte(n);
+    while(owners->depth && owners->ends[owners->depth-1]<=start)owners->depth--;
+    int owner=owners->depth?owners->symbols[owners->depth-1]:-1;
     const char *t=ts_node_type(n), *lang=c->language;
+    if(eq(lang,"cobol") && owners->cobol_paragraph>=0 &&
+       !eq(t,"paragraph_header") && !eq(t,"section_header"))
+        owner=owners->cobol_paragraph;
     const char *kind=NULL;
     if (eq(lang,"pascal")) {
         if (eq(t,"unit") || eq(t,"program")) kind="module";
@@ -123,23 +176,27 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
         else if (eq(t,"declProc") || eq(t,"defProc")) {
             if (!(eq(t,"declProc") && eq(ts_node_type(ts_node_parent(n)),"defProc"))) kind="function";
         }
-        else if (eq(t,"exprCall")) add_ref(c,n,ast_field(n,"entity"),"call");
+        else if (eq(t,"exprCall")) add_ref(c,n,ast_field(n,"entity"),"call",owner);
         else if (eq(t,"declUses")) {
-            for (uint32_t i=0;i<ts_node_named_child_count(n);i++) {
-                TSNode ch=ts_node_named_child(n,i);
+            TSTreeCursor cursor=ts_tree_cursor_new(n);
+            if(ts_tree_cursor_goto_first_child(&cursor))do {
+                TSNode ch=ts_tree_cursor_current_node(&cursor);
                 if (!eq(ts_node_type(ch),"moduleName")) continue;
                 char *v=ast_text(c,ch);
                 if (v) {SemBinding *b=sem_binding_add(&c->result->sem,v,v,span_node(c,ch));
                     if (b) b->kind=xstrdup("import");
                     free(v);}
-            }
+            } while(ts_tree_cursor_goto_next_sibling(&cursor));
+            ts_tree_cursor_delete(&cursor);
         }
     } else if (eq(lang,"cobol")) {
-        if (eq(t,"program_name")) kind="program";
+        if (eq(t,"program_definition")) owners->cobol_paragraph=-1;
+        else if (eq(t,"program_name")) kind="program";
         else if (eq(t,"paragraph_header") || eq(t,"section_header")) {
             char *v=ast_text(c,n);
             if(v){size_t len=strlen(v);while(len&&(isspace((unsigned char)v[len-1])||v[len-1]=='.'))v[--len]=0;
-                if(len)decl(c,v,eq(t,"paragraph_header")?"paragraph":"section",ts_node_start_byte(n),ts_node_start_byte(n)+len,owner_for(c,n));
+                if(len)decl(c,v,eq(t,"paragraph_header")?"paragraph":"section",start,start+len,owner);
+                if(len)owners->cobol_paragraph=c->result->sem.nsymbols-1;
                 free(v);}
         }
         else if (eq(t,"copy_statement")) {
@@ -149,7 +206,7 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
                 free(v);}
         } else if (eq(t,"perform_procedure")) {
             TSNode f=ast_field(n,"label"); if (ts_node_is_null(f)) f=ts_node_named_child(n,0);
-            add_ref(c,n,f,"call");
+            add_ref(c,n,f,"call",owner);
         }
     } else if (eq(lang,"vbnet")) {
         if (eq(t,"class_block") || eq(t,"interface_block") || eq(t,"structure_block") || eq(t,"module_block") || eq(t,"enum_block")) kind="class";
@@ -157,7 +214,7 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
         else if (eq(t,"method_declaration") || eq(t,"constructor_declaration")) kind="method";
         else if (eq(t,"property_declaration")) kind="property";
         else if (eq(t,"event_declaration")) kind="event";
-        else if (eq(t,"invocation")) add_ref(c,n,ast_field(n,"target"),"call");
+        else if (eq(t,"invocation")) add_ref(c,n,ast_field(n,"target"),"call",owner);
         else if (eq(t,"imports_statement")) {
             TSNode f=ast_field(n,"namespace"); char *v=ast_text(c,f);
             if (v) {SemBinding *b=sem_binding_add(&c->result->sem,v,v,span_node(c,f));
@@ -168,19 +225,28 @@ static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
         if (eq(t,"struct_declaration") || eq(t,"class_declaration")) kind="class";
         else if (eq(t,"function_declaration")) kind="function";
         else if (eq(t,"method_definition")) kind="method";
-        else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call");
+        else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call",owner);
     } else if (eq(lang,"cfscript") || eq(lang,"cfml") || eq(lang,"cfquery")) {
         if (eq(t,"component")) kind="component";
         else if (eq(t,"function_declaration") || eq(t,"method_definition") || eq(t,"cf_function_tag")) kind="function";
         else if (eq(t,"cf_query_tag") || eq(t,"query_expression")) kind="query";
-        else if (eq(lang,"cfquery") && eq(t,"query_identifier")) add_ref(c,n,n,"sql-identifier");
-        else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call");
+        else if (eq(lang,"cfquery") && eq(t,"query_identifier")) add_ref(c,n,n,"sql-identifier",owner);
+        else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call",owner);
     }
-    if (kind) add_symbol(c,n,kind,owner_for(c,n));
+    if (kind) {
+        int id=add_symbol(c,n,kind,owner);
+        if(id>=0 && end>start && owners->depth<512) {
+            owners->symbols[owners->depth]=id;
+            owners->ends[owners->depth++]=end;
+        }
+    }
     return true;
 }
 
-static void grammar_extract(AstContext *c) { identify(c,"tree-sitter"); ast_walk(c,c->root,grammar_visit,NULL); }
+static void grammar_extract(AstContext *c) {
+    MixedOwners owners={.cobol_paragraph=-1};
+    identify(c,"tree-sitter");ast_walk(c,c->root,grammar_visit,&owners);
+}
 
 /* Search helpers operate on the original byte buffer, never on a normalized
  * copy; every recorded site can therefore be mapped back to the source. */
@@ -297,11 +363,65 @@ static void parse_embedded(AstContext *c,const char *language,size_t a,size_t b)
     parse_result_free(&sub);
 }
 
+typedef struct {const char *kind,*name;int id;} MixedLiteralTarget;
+static int literal_target_cmp(const void *a,const void *b) {
+    const MixedLiteralTarget *x=a,*y=b;
+    int by_kind=strcmp(x->kind,y->kind);
+    return by_kind?by_kind:strcmp(x->name,y->name);
+}
+static void link_local_literals(AstContext *c,const char *lang) {
+    SemResult *r=&c->result->sem;
+    MixedLiteralTarget *targets=xmalloc((size_t)(r->nsymbols?r->nsymbols:1)*sizeof *targets);
+    int ntargets=0;
+    for(int i=0;i<r->nsymbols;i++) {
+        SemSymbol *sym=&r->symbols[i];
+        if(!sym->kind || !sym->name)continue;
+        if(!eq(sym->kind,"statement") && !eq(sym->kind,"function") && !eq(sym->kind,"query"))continue;
+        targets[ntargets++]=(MixedLiteralTarget){sym->kind,sym->name,i};
+    }
+    qsort(targets,(size_t)ntargets,sizeof *targets,literal_target_cmp);
+    for(int i=0;i<r->nreferences;i++) {
+        SemReference *ref=&r->references[i];
+        if(ref->owner<0 || ref->target>=0 || !ref->text)continue;
+        bool mapping=eq(lang,"xml") && eq(ref->kind,"reference");
+        bool call=eq(lang,"cfml") && eq(ref->kind,"call");
+        bool query=eq(lang,"cfml") && eq(ref->kind,"sql-identifier");
+        if(!mapping&&!call&&!query)continue;
+        MixedLiteralTarget key={mapping?"statement":call?"function":"query",ref->text,-1};
+        MixedLiteralTarget *found=bsearch(&key,targets,(size_t)ntargets,sizeof *targets,literal_target_cmp);
+        if(!found)continue;
+        size_t at=(size_t)(found-targets);
+        if((at>0 && literal_target_cmp(&targets[at-1],&key)==0) ||
+           (at+1<(size_t)ntargets && literal_target_cmp(&targets[at+1],&key)==0))continue;
+        int target=found->id;
+        ref->target=target;
+        SemEdge *edge=sem_edge_add(r,call?"calls":"references",ref->owner,target,ref->span);
+        if(edge) {
+            edge->source_ref=i;
+            edge->original_text=xstrdup(ref->text);
+            edge->strategy=xstrdup("unique-local-literal");
+            edge->provenance=xstrdup("syntax");
+            edge->evidence=xstrdup(ref->evidence?ref->evidence:"declarative binding");
+        }
+    }
+    free(targets);
+}
+
 static void markup_extract(AstContext *c) {
+    MixedLines lines;lines_begin(&lines,c);
     identify(c,"declarative");
-    const char *lang=c->language;int owner=-1;
+    const char *lang=c->language;int owner=-1,statement=-1,cf_function=-1;
     bool mapping=false;
     size_t begin=0;
+    if(eq(lang,"cfml")) {
+        size_t q=0;while(q<c->length&&isspace((unsigned char)c->source[q]))q++;
+        if(at(c,q,"component") && boundary(c,q,9)) {
+            parse_embedded(c,"cfscript",0,c->length);
+            free(c->result->sem.parser_id);
+            c->result->sem.parser_id=xstrdup("embedded:cfscript");
+            lines_end(&lines);return;
+        }
+    }
     if(eq(lang,"astro") && c->length>=6 && !strncmp(c->source,"---",3)) {
         size_t q=3;while(q+4<c->length && strncmp(c->source+q,"\n---",4))q++;
         if(q+4<c->length) {parse_embedded(c,"typescript",3,q);begin=q+4;}
@@ -313,7 +433,13 @@ static void markup_extract(AstContext *c) {
         size_t a=p+1;bool closing=false;if(a<e&&c->source[a]=='/')a++,closing=true;
         size_t z=a;while(z<e&&(isalnum((unsigned char)c->source[z])||c->source[z]=='-'||c->source[z]==':'))z++;
         char *tag=strndup(c->source+a,z-a);
-        if(closing && eq(lang,"xml") && !strcasecmp(tag,"mapper")) mapping=false;
+        if(closing && eq(lang,"xml")) {
+            if(!strcasecmp(tag,"mapper")) mapping=false,owner=-1;
+            else if(!strcasecmp(tag,"select")||!strcasecmp(tag,"insert")||
+                    !strcasecmp(tag,"update")||!strcasecmp(tag,"delete")||
+                    !strcasecmp(tag,"sql"))statement=-1;
+        }
+        if(closing && eq(lang,"cfml") && !strcasecmp(tag,"cffunction"))cf_function=-1;
         if(!closing&&*tag) {
             size_t site=0;char *name=NULL;
             if(eq(lang,"xml")&& !strcasecmp(tag,"mapper")) {
@@ -322,26 +448,41 @@ static void markup_extract(AstContext *c) {
                 owner=c->result->sem.nsymbols-1;
             } else if(mapping&&(!strcasecmp(tag,"select")||!strcasecmp(tag,"insert")||!strcasecmp(tag,"update")||!strcasecmp(tag,"delete")||!strcasecmp(tag,"sql"))) {
                 name=attr(c,z,e,"id",&site);if(name)decl(c,name,"statement",site,site+strlen(name),owner);
+                if(name)statement=c->result->sem.nsymbols-1;
                 free(name);name=attr(c,z,e,"resultMap",&site);
-                if(name)ref(c,name,"reference",site,site+strlen(name),owner,"result mapping");
+                if(name)ref(c,name,"reference",site,site+strlen(name),statement>=0?statement:owner,"result mapping");
             } else if(mapping&&(!strcasecmp(tag,"include")||!strcasecmp(tag,"resultMap"))) {
                 name=attr(c,z,e,!strcasecmp(tag,"include")?"refid":"extends",&site);
-                if(name)ref(c,name,"reference",site,site+strlen(name),owner,"mapping attribute");
+                if(name)ref(c,name,"reference",site,site+strlen(name),statement>=0?statement:owner,"mapping attribute");
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfcomponent")) {
                 name=attr(c,z,e,"name",&site);if(name)decl(c,name,"component",site,site+strlen(name),-1);
                 owner=c->result->sem.nsymbols-1;
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cffunction")) {
                 name=attr(c,z,e,"name",&site);if(name)decl(c,name,"function",site,site+strlen(name),owner);
+                if(name)cf_function=c->result->sem.nsymbols-1;
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfquery")) {
-                name=attr(c,z,e,"name",&site);if(name)decl(c,name,"query",site,site+strlen(name),owner);
+                name=attr(c,z,e,"name",&site);if(name)decl(c,name,"query",site,site+strlen(name),cf_function>=0?cf_function:owner);
                 size_t q=e+1;while(q<c->length&&!at(c,q,"</cfquery"))q++;
+                int query_id=name?c->result->sem.nsymbols-1:-1;
+                int first_ref=c->result->sem.nreferences;
                 parse_embedded(c,"cfquery",e+1,q);
+                for(int ri=first_ref;ri<c->result->sem.nreferences;ri++)
+                    if(c->result->sem.references[ri].owner<0)
+                        c->result->sem.references[ri].owner=query_id;
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfinvoke")) {
                 name=attr(c,z,e,"method",&site);
-                if(name)ref(c,name,"call",site,site+strlen(name),owner,"CFML invocation");
+                if(name)ref(c,name,"call",site,site+strlen(name),cf_function>=0?cf_function:owner,"CFML invocation");
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfinclude")) {
                 name=attr(c,z,e,"template",&site);
-                if(name)ref(c,name,"template",site,site+strlen(name),owner,"CFML include");
+                if(name)ref(c,name,"template",site,site+strlen(name),cf_function>=0?cf_function:owner,"CFML include");
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfreturn")) {
+                size_t q=z;while(q<e&&isspace((unsigned char)c->source[q]))q++;
+                size_t call=q;while(q<e&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
+                if(q>call && q<e && c->source[q]=='(') {
+                    char *method=strndup(c->source+call,q-call);
+                    ref(c,method,"call",call,q,cf_function>=0?cf_function:owner,"CFML return call");
+                    free(method);
+                }
             } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfscript")) {
                 size_t q=e+1;while(q<c->length&&!at(c,q,"</cfscript"))q++;
                 parse_embedded(c,"cfscript",e+1,q);
@@ -358,6 +499,8 @@ static void markup_extract(AstContext *c) {
         }
         free(tag);p=e+1;
     }
+    link_local_literals(c,lang);
+    lines_end(&lines);
 }
 
 static bool boundary(const AstContext *c,size_t p,size_t n) {
@@ -421,9 +564,10 @@ static void delphi_extract(AstContext *c) {
     }
 }
 static void text_extract(AstContext *c) {
+    MixedLines lines;lines_begin(&lines,c);
     identify(c,"declarative");
     const char *lang=c->language;
-    if(eq(lang,"delphi_form")) {delphi_extract(c);return;}
+    if(eq(lang,"delphi_form")) {delphi_extract(c);lines_end(&lines);return;}
     for(size_t p=0;p<c->length;) {
         if(eq(lang,"razor") && at(c,p,"@*")) {
             p+=2;while(p+2<c->length&&!at(c,p,"*@"))p++;
@@ -462,6 +606,7 @@ static void text_extract(AstContext *c) {
         }
         p++;
     }
+    lines_end(&lines);
 }
 
 static void file_only(AstContext *c) {
