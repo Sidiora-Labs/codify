@@ -21,4 +21,5 @@ message = "def phantom():\n    pass; phantom()"
 # def commented(): pass
 
 def later():
+    # Header must end before this body comment.
     return 3
