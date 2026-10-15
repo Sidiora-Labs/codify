@@ -34,6 +34,19 @@ static void extract(AstContext *ctx) {
 }
 
 static const AstAdapter JSON = { "runtime_fixture", tree_sitter_json, extract };
+static void extract_recovery(AstContext *ctx) {
+    assert(ctx->tree && ts_node_has_error(ctx->root));
+}
+static const AstAdapter RECOVERY = {
+    "runtime_recovery", tree_sitter_json, extract_recovery
+};
+static void extract_file_only(AstContext *ctx) {
+    assert(!ctx->tree && ts_node_is_null(ctx->root));
+    ctx->result->sem.parser_id = xstrdup("file-only:fixture");
+}
+static const AstAdapter FILE_ONLY = {
+    "runtime_file_only", NULL, extract_file_only
+};
 
 static void *run_parse(void *unused) {
     (void)unused;
@@ -52,6 +65,8 @@ static void *run_parse(void *unused) {
 
 int main(void) {
     assert(ast_register(&JSON));
+    assert(ast_register(&RECOVERY));
+    assert(ast_register(&FILE_ONLY));
     assert(!ast_register(&JSON));
     assert(!ast_adapter("absent"));
     assert(ast_adapter("runtime_fixture") == &JSON);
@@ -64,6 +79,14 @@ int main(void) {
     assert(!ast_try_parse_ex("runtime_fixture", "sample.fixture", "{}", 2,
                               &result, &cancelled));
     assert(!ast_try_parse("absent", "sample.fixture", "{}", 2, &result));
+    parse_result_free(&result);
+    assert(ast_try_parse("runtime_recovery", "broken.fixture", "{", 1, &result));
+    assert(result.partial && strcmp(result.diagnostic, "syntax_recovery") == 0);
+    assert(strcmp(result.parser, "tree-sitter:runtime_recovery") == 0);
+    parse_result_free(&result);
+    assert(ast_try_parse("runtime_file_only", "plain.fixture", "{}", 2, &result));
+    assert(strcmp(result.parser, "file-only:fixture") == 0);
+    parse_result_free(&result);
     /* A long source line must still be parsed by the labelled fallback. */
     char large[8192];
     memset(large, ' ', sizeof large);
@@ -74,6 +97,7 @@ int main(void) {
     lang_global_init();
     lang_parse("javascript", "wide.js", large, sizeof large - 1, &result);
     assert(result.ndefs >= 1);
+    assert(strcmp(result.parser, "heuristic") == 0 && !result.partial);
     parse_result_free(&result);
     return 0;
 }
