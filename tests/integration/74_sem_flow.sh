@@ -117,6 +117,8 @@ d.pop('index_health',None)
 payload=json.dumps(d,separators=(',',':')).encode()
 assert len(payload)<=1024 and (d.get('truncated',{}).get('output') or d.get('error')),d
 PY
+"$CG" flow paths start_node end_node --max-output 1024 > "$TMP/output.txt"
+test "$(wc -c < "$TMP/output.txt")" -le 1024
 "$CG" tool call flow '{"mode":"paths","name":"start_node","target":"end_node"}' \
     > "$TMP/mcp.json"
 python3 - "$TMP/mcp.json" <<'PY'

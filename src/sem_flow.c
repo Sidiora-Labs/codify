@@ -353,13 +353,28 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
     }
     if (json) puts(b.p);
     else {
-        printf("flow %s %s: %d symbol(s), %d relation(s), %d boundary(ies)%s\n",
-               mode,name,nn,ne,nb,found>=0?", path found":"");
-        for (int i=0;i<ne && i<16;i++)
-            printf("  %ld -> %ld  %s  %s:%d  %s\n",ev[i].source,ev[i].target,
-                   ev[i].kind,ev[i].path,ev[i].line,ev[i].evidence);
+        StrBuf plain; sb_init(&plain);
+        sb_printf(&plain,"flow %s %s: %d symbol(s), %d relation(s), %d boundary(ies)%s\n",
+                  mode,name,nn,ne,nb,found>=0?", path found":"");
+        for (int i=0;i<ne && i<16;i++) {
+            StrBuf line; sb_init(&line);
+            sb_printf(&line,"  %ld -> %ld  %s  %s:%d  %s\n",
+                      ev[i].source,ev[i].target,ev[i].kind,ev[i].path,
+                      ev[i].line,ev[i].evidence);
+            if (plain.len+line.len+80>(size_t)lim.output_bytes) {
+                trunc_output=true;
+                sb_free(&line);
+                break;
+            }
+            sb_puts(&plain,line.p);
+            sb_free(&line);
+        }
         if (trunc_nodes||trunc_edges||trunc_depth||trunc_time||trunc_output)
-            puts("  traversal limited; use --json for exact limits and omissions");
+            sb_puts(&plain,"  traversal limited; use --json for exact limits and omissions\n");
+        if (plain.len>(size_t)lim.output_bytes) plain.len=(size_t)lim.output_bytes;
+        plain.p[plain.len]=0;
+        fputs(plain.p,stdout);
+        sb_free(&plain);
     }
     sb_free(&b);
     for (int i=0;i<nn;i++) node_free(&nv[i]);
