@@ -28,7 +28,7 @@
     - Implement TS/TSX/JS/JSX grammar adapters, multiline functions, owner-aware methods, types, imports/exports, object actions, callbacks and JSX component facts; include negative and error-recovery cases.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
-  - [ ] 2.4 Systems language syntax extraction
+  - [-] 2.4 Systems language syntax extraction
     - Implement C/C++/Objective-C/Go/Rust adapters including include/import bindings, ownership, function values/pointer facts, type relations, traits/interfaces and macro boundaries.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
