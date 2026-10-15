@@ -2715,7 +2715,7 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
                 /* A documented hit carries its signature and opening body
                  * lines; the remaining lines are counted below. This keeps
                  * documentation useful under a tight shared budget. */
-                int span = docd ? 2 : open;
+                int span = docd ? (budget < 500 ? 0 : 2) : open;
                 char *snip = !detail ? NULL
                     : file_snippet(cg, r->branch_id, r->path, r->line,
                           r->end_line > r->line + span ? r->line + span
@@ -2790,7 +2790,33 @@ int cmd_context(Cg *cg, const char *q, int budget, int limit, bool json) {
                 free(snip);
                 free(d.body);
             }
-            if (b.len + it.len > cap) { omitted = n - i; sb_free(&it); break; }
+            if (b.len + it.len > cap) {
+                if (i > 0) {
+                    omitted = n - i;
+                    sb_free(&it);
+                    break;
+                }
+                /* A large body, doc or edge list must not erase a direct
+                 * symbol match under a small budget. Keep its identity and
+                 * location, and state that detail was omitted. */
+                sb_free(&it); sb_init(&it);
+                if (json) {
+                    sb_puts(&it, "{\"name\":"); sb_json_str(&it, r->name);
+                    sb_puts(&it, ",\"kind\":"); sb_json_str(&it, r->kind);
+                    sb_puts(&it, ",\"path\":"); sb_json_str(&it, r->path);
+                    sb_printf(&it, ",\"line\":%d,\"detail_omitted\":true}",
+                              r->line);
+                } else {
+                    sb_printf(&it, "\n● %s %s — %s:%d (detail omitted)\n",
+                              r->kind, r->name, r->path, r->line);
+                }
+                if (b.len + it.len > cap) {
+                    omitted = n - i;
+                    sb_free(&it);
+                    break;
+                }
+                omitted_total++;
+            }
             if (json && emitted) sb_putc(&b, ',');
             sb_puts(&b, it.p);
             sb_free(&it);

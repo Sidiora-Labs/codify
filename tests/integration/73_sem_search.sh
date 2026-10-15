@@ -82,6 +82,13 @@ import json,sys
 d=json.loads(json.loads(sys.argv[1])['result']['content'][0]['text'])
 assert [x['path'] for x in d['symbols']]==['src/alpha.c'], d
 PY
+out="$(req '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_context","arguments":{"query":"parseUserRecord","budget":200,"limit":2}}}')"
+python3 - "$out" <<'PY'
+import json,sys
+d=json.loads(json.loads(sys.argv[1])['result']['content'][0]['text'])
+assert any(s.get('name')=='parseUserRecord' for s in d['symbols']), d
+assert d['tokens_used']<=d['budget']==200, d
+PY
 
 out="$("$CG" context overload --json --budget 1200)"
 python3 - "$out" <<'PY'
