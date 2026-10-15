@@ -21,7 +21,7 @@ static void check(const char *lang, const char *path) {
     snprintf(parser_id, sizeof parser_id, "tree-sitter:%s", lang);
     if (!r.sem.parser_id || strcmp(r.sem.parser_id, parser_id))
         die(lang, "parser identity missing");
-    int box = -1, overloads = 0, calls = 0, false_calls = 0;
+    int box = -1, overloads = 0, calls = 0, type_refs = 0, false_calls = 0;
     const char *overload_keys[2] = {0};
     for (int i = 0; i < r.sem.nsymbols; i++) {
         SemSymbol *s = &r.sem.symbols[i];
@@ -69,8 +69,10 @@ static void check(const char *lang, const char *path) {
                 die(lang, "call owner missing");
         }
         if (!strcmp(v->text, "ghostCall")) false_calls++;
+        if (!strcmp(v->kind, "type")) type_refs++;
     }
     if (!calls) die(lang, "call missing");
+    if (!type_refs) die(lang, "type references missing");
     if (false_calls) die(lang, "string/comment interpreted as call");
     if (r.sem.nbindings < 1 || !r.sem.bindings[0].module ||
         !r.sem.bindings[0].local_name)

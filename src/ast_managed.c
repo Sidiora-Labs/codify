@@ -456,6 +456,31 @@ static void dart_selector_call(AstContext *c, TSNode n, int owner) {
     free(name);
 }
 
+static void add_type_reference(AstContext *c, TSNode n, int owner) {
+    if (owner < 0) return;
+    const char *t = ts_node_type(n);
+    TSNode parent = ts_node_parent(n);
+    if (ts_node_is_null(parent)) return;
+    const char *pt = ts_node_type(parent);
+    if (is_type(pt, "type_parameter") || is_type(pt, "type_parameters")) return;
+    if (!ts_node_is_null(name_node(parent)) && ts_node_eq(name_node(parent), n) &&
+        decl_kind(c->language, pt)) return;
+    bool type_node = is_type(t, "type_identifier") ||
+        (is_type(c->language, "kotlin") && is_type(t, "user_type"));
+    if (!type_node && is_type(c->language, "csharp") && is_type(t, "identifier"))
+        type_node = ts_node_eq(ast_field(parent, "type"), n) ||
+                    ts_node_eq(ast_field(parent, "returns"), n) ||
+                    is_type(pt, "base_list");
+    if (!type_node) return;
+    char *name = ast_text(c, n);
+    if (!name || !*name) { free(name); return; }
+    SemReference *r = sem_reference_add(&c->result->sem, name, "type", span(n));
+    r->owner = owner;
+    r->strategy = xstrdup("syntax");
+    r->evidence = xstrdup(pt);
+    free(name);
+}
+
 static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
     AstContext *c = m->ctx;
     if (depth > 256 || c->cancelled || c->truncated) return;
@@ -480,6 +505,7 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
     } else if (call_type(c->language, t)) add_call(c, n, parent);
     else if (is_type(c->language, "dart") && is_type(t, "selector"))
         dart_selector_call(c, n, parent);
+    add_type_reference(c, n, parent);
     import_binding(c, n);
     uint32_t count = ts_node_named_child_count(n);
     int pending_method = -1;
