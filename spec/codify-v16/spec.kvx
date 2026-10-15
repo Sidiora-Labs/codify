@@ -69,7 +69,7 @@ heading = "Implementation Plan: Codify 1.6"
 
 [task.1.1]
 title = "Subsecond change detection and explicit-dirty hashing"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/scan.c", "src/walk.c", "src/cg.h", "src/db.c", "tests/integration/54_freshness.sh"]
@@ -80,7 +80,7 @@ reqs = ["1.1"]
 
 [task.1.2]
 title = "Watcher reconciliation and coverage health"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/watch.c", "src/watch_health.c", "src/watch_health.h", "tests/integration/55_watch_health.sh"]
@@ -91,10 +91,10 @@ reqs = ["1.2"]
 
 [task.1.3]
 title = "Extraction diagnostics and semantic version freshness"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
-touches = ["src/index_health.c", "src/index_health.h", "src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "tests/integration/56_index_health.sh"]
+touches = ["src/index_health.c", "src/index_health.h", "src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "src/walk.c", "tests/integration/56_index_health.sh"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/56_index_health.sh"
 do_1 = "Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
@@ -102,7 +102,7 @@ reqs = ["1.3", "1.4"]
 
 [task.2.1]
 title = "Shared semantic records, storage and lifecycle"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/semantic.c", "src/semantic.h", "src/cg.h", "src/db.c", "src/scan.c", "tests/integration/57_semantic_store.sh"]
@@ -113,7 +113,7 @@ reqs = ["2.1", "3.3", "3.4"]
 
 [task.2.2]
 title = "Native syntax-tree runtime and adapter registry"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1"]
 touches = ["src/ast.c", "src/ast.h", "src/lang.c", "src/cg.h", "Makefile", "vendor/tree-sitter/**", "scripts/vendor-parsers.*", "tests/integration/58_ast_runtime.sh"]
@@ -124,7 +124,7 @@ reqs = ["2.2"]
 
 [task.2.3]
 title = "TypeScript and JavaScript syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_web.c", "vendor/parsers/web/**", "tests/integration/59_ast_web.sh", "tests/fixtures/semantic/web/**"]
@@ -135,7 +135,7 @@ reqs = ["2.3"]
 
 [task.2.4]
 title = "Systems language syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_systems.c", "vendor/parsers/systems/**", "tests/integration/60_ast_systems.sh", "tests/fixtures/semantic/systems/**"]
@@ -146,7 +146,7 @@ reqs = ["2.4"]
 
 [task.2.5]
 title = "Python Ruby and PHP syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_dynamic.c", "vendor/parsers/dynamic/**", "tests/integration/61_ast_dynamic.sh", "tests/fixtures/semantic/dynamic/**"]
@@ -157,7 +157,7 @@ reqs = ["2.5"]
 
 [task.2.6]
 title = "Managed and application language syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_managed.c", "vendor/parsers/managed/**", "tests/integration/62_ast_managed.sh", "tests/fixtures/semantic/managed/**"]
@@ -168,7 +168,7 @@ reqs = ["2.6"]
 
 [task.2.7]
 title = "Configuration and scripting language syntax extraction"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_extended.c", "vendor/parsers/extended/**", "tests/integration/63_ast_extended.sh", "tests/fixtures/semantic/extended/**"]
@@ -179,7 +179,7 @@ reqs = ["2.7"]
 
 [task.2.8]
 title = "Legacy and mixed-format extraction adapters"
-status = "pending"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_mixed.c", "vendor/parsers/mixed/**", "tests/integration/64_ast_mixed.sh", "tests/fixtures/semantic/mixed/**"]
@@ -212,7 +212,7 @@ reqs = ["3.2", "3.4"]
 
 [task.3.3]
 title = "Type hierarchy and semantic relation construction"
-status = "pending"
+status = "done"
 wave = 3
 requires = ["2.1", "2.4", "2.6"]
 touches = ["src/sem_types.c", "src/sem_types.h", "tests/integration/67_sem_types.sh"]
@@ -267,7 +267,7 @@ reqs = ["1.5", "3.8"]
 
 [task.4.1]
 title = "Freshness and coverage on CLI and MCP answers"
-status = "pending"
+status = "done"
 wave = 4
 requires = ["1.1", "1.2", "1.3", "2.1"]
 touches = ["src/answer_health.c", "src/answer_health.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/72_answer_health.sh"]

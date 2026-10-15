@@ -1,0 +1,5 @@
+Language: swift
+Source: https://github.com/alex-pinkus/tree-sitter-swift.git
+Commit: 9e3b87f66f1fd2f3b931376fd3723ab788e337c3
+License: LICENSE
+Generated grammar: parser.c (tree-sitter CLI 0.25.9)
