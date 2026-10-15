@@ -100,7 +100,7 @@
     - Benchmark bounded cold/no-op/edit/delete/rename/replay with fixed workers, memory and database growth, skip/diagnostic counts and source-to-query freshness. Keep default tests small and an opt-in large profile; publish raw reproducible output without fabricated numbers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 5.3_
-  - [-] 5.3 Integrated release qualification and documentation
+  - [x] 5.3 Integrated release qualification and documentation
     - Bump version to 1.6.0 after integrated gates; document actual per-language/framework coverage, migrations, health, provenance, commands, limits and measured resource checks. Verify clean offline build, all unit/integration tests and strict compile; do not claim unverified completion.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 5.4, 5.5_

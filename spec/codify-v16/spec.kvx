@@ -334,7 +334,7 @@ reqs = ["5.3"]
 
 [task.5.3]
 title = "Integrated release qualification and documentation"
-status = "in_progress"
+status = "done"
 wave = 5
 requires = ["4.1", "4.2", "4.3", "4.4", "5.1", "5.2"]
 touches = ["Makefile", "src/cg.h", "src/index_health.h", "editors/vscode/package.json", "editors/vscode/README.md", "editors/vscode/serve.js", "CONTRIBUTING.md", "README.md", "docs/**", "scripts/bench-indexing.py", "tests/lib.sh", "tests/semantic/**", "tests/scale/results/**", "tests/integration/14_vscode.sh", "tests/integration/54_freshness.sh", "tests/integration/56_index_health.sh", "tests/integration/57_semantic_store.sh", "tests/integration/60_ast_systems.sh", "tests/integration/64_ast_mixed.sh", "tests/integration/69_sem_dispatch.sh", "tests/integration/70_sem_channels.sh", "tests/integration/72_answer_health.sh", "tests/integration/73_sem_search.sh", "tests/integration/74_sem_flow.sh", "tests/integration/78_v16_release.sh"]
