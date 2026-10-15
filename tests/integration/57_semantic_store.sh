@@ -116,6 +116,25 @@ int main(void) {
     assert(scalar(&cg,"SELECT count(*) FROM semantic_edges")==0);
     cg_exec(&cg,"ROLLBACK");
     assert(scalar(&cg,"SELECT count(*) FROM semantic_edges")==1);
+    cg.branch_id=original_branch;
+    assert(cg_begin_write(&cg)==0);
+    insert_file(&cg,original_branch,"projected.ts");
+    long projected_file=sqlite3_last_insert_rowid(cg.db);
+    q=cg_prep(&cg,"INSERT INTO symbols(file_id,name,kind,line,end_line,sig,decl) "
+                  "VALUES(?1,'projected','function',1,1,'function projected(){}',0)");
+    sqlite3_bind_int64(q,1,projected_file);
+    assert(sqlite3_step(q)==SQLITE_DONE); sqlite3_finalize(q);
+    long projected_symbol=sqlite3_last_insert_rowid(cg.db);
+    SemResult projected={0};
+    SemSymbol *p=sem_symbol_add(&projected,"projected","function",class_span);
+    p->legacy_def=0;
+    assert(sem_file_replace(&cg,projected_file,&projected,&projected_symbol,1,
+                            NULL,0)==0);
+    assert(scalar(&cg,"SELECT count(*) FROM symbols WHERE name='projected'")==1);
+    assert(scalar(&cg,"SELECT count(*) FROM semantic_symbols "
+                       "WHERE file_id=(SELECT id FROM files WHERE path='projected.ts')")==1);
+    cg_exec(&cg,"COMMIT");
+    sem_result_free(&projected);
     sem_result_free(&r);
     cg_close(&cg);
     return 0;
@@ -126,3 +145,56 @@ make -C "$repo" -j2 build/libcg.a >/dev/null
 cc -std=gnu11 -Wall -Wextra -pthread -I"$repo/src" "$tmp/check.c" \
   "$repo/build/libcg.a" -lsqlite3 -lpthread -lm -o "$tmp/check"
 "$tmp/check"
+
+# A storage failure after legacy rows have been rewritten must roll the
+# entire file transaction back and leave branch-scoped retry debt. The hook
+# writes through a SQLite trigger so the failure is a real statement error.
+mkdir "$tmp/retry"
+cd "$tmp/retry"
+printf 'function alpha() { return 1; }\n' > case.ts
+"${CG:-$repo/cg}" init --nested >/dev/null
+"${CG:-$repo/cg}" index --full >/dev/null
+python3 - <<'PY'
+import sqlite3
+db = sqlite3.connect('.codegraph/graph.db')
+assert db.execute("select count(*) from symbols where name='alpha'").fetchone()[0] == 1
+PY
+cat > "$tmp/failhook.c" <<'C'
+#include "cg.h"
+int sem_search_schema_init(Cg *cg) {
+    cg_exec(cg,"CREATE TABLE IF NOT EXISTS semantic_test_fault(value INTEGER);"
+               "CREATE TRIGGER IF NOT EXISTS semantic_test_abort "
+               "BEFORE INSERT ON semantic_test_fault "
+               "BEGIN SELECT RAISE(ABORT,'injected semantic write failure'); END;");
+    return 0;
+}
+int sem_search_file_replace(Cg *cg, long file_id) {
+    (void)file_id;
+    sqlite3_stmt *q=cg_prep(cg,"INSERT INTO semantic_test_fault(value) VALUES(1)");
+    int rc=sqlite3_step(q);
+    sqlite3_finalize(q);
+    return rc==SQLITE_DONE ? 0 : -1;
+}
+C
+cc -std=gnu11 -Wall -Wextra -pthread -I"$repo/src" "$tmp/failhook.c" \
+  "$repo"/build/*.o -lsqlite3 -lpthread -lm -o "$tmp/cg-fail"
+printf 'function bravo() { return 2; }\n' > case.ts
+if "$tmp/cg-fail" index --full >/dev/null 2>&1; then
+    echo 'semantic write fault unexpectedly indexed successfully' >&2
+    exit 1
+fi
+python3 - <<'PY'
+import sqlite3
+db = sqlite3.connect('.codegraph/graph.db')
+assert db.execute("select count(*) from symbols where name='alpha'").fetchone()[0] == 1
+assert db.execute("select count(*) from symbols where name='bravo'").fetchone()[0] == 0
+assert db.execute("select count(*) from meta where key like 'index_pending_resolve:%' and value='1'").fetchone()[0] == 1
+PY
+"${CG:-$repo/cg}" index --full >/dev/null
+python3 - <<'PY'
+import sqlite3
+db = sqlite3.connect('.codegraph/graph.db')
+assert db.execute("select count(*) from symbols where name='bravo'").fetchone()[0] == 1
+assert db.execute("select count(*) from symbols where name='alpha'").fetchone()[0] == 0
+assert db.execute("select count(*) from meta where key like 'index_pending_resolve:%' and value='1'").fetchone()[0] == 0
+PY
