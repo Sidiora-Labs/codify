@@ -31,6 +31,7 @@ La versión 1.1.0 (v11) convierte la flota en algo a lo que entregas una spec y 
 **Qué es el código.** Codify indexa archivos fuente de varios lenguajes en un grafo consultable: símbolos, aristas de llamadas, rutas conscientes del framework y búsqueda instantánea de texto completo, todo almacenado localmente en SQLite. `cg context <consulta>` responde a "ponme al día sobre esta zona" en una sola llamada. Y más allá de lo que ve un parser, los comentarios se indexan como nodos de primera clase — la capa de intención: propósito, contratos, peligros y los acoplamientos que solo viven en prosa.
 
 La cobertura varía entre extracción estructural y seguimiento de archivos; consulte la [guía de indexación](../indexing.md) para conocer los límites.
+La guía también describe `cg flow` para recorrer relaciones y `cg inspect` para jerarquías y símbolos sin referencias conocidas.
 
 **Cómo llegó hasta aquí.** Un sistema integrado de instantáneas direccionadas por contenido te da commits, historial, diffs y restauración sin necesidad de un VCS externo; `cg changes` informa del radio de impacto de tus ediciones sin confirmar. `cg changelog` redacta las notas de versión: por defecto a partir del historial de git — una versión por tag o por cambio de número de versión, grupos según el prefijo del asunto del commit, la referencia a la tarea conservada y, con una clave, un breve párrafo de Highlights escrito por un modelo — y a partir de la cadena de instantáneas, con diffs a nivel de símbolo, con `--snapshots` o si el proyecto no usa git.
 
