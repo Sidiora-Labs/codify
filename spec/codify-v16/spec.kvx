@@ -1,0 +1,343 @@
+# Codify 1.6 — structured, reliable and evidence-backed code indexing.
+
+[meta]
+feature = "codify-v16"
+intro = "Extend Codify into a structured multi-language code index with precise cross-file relationships, reliable incremental updates and explicit evidence. Preserve its single-executable deployment, branch-aware storage, bounded resource use and local operation."
+
+[req.1]
+title = "Reliable incremental indexing"
+story = "As an agent or repository maintainer, I want reliable incremental indexing so that code navigation and change analysis can be trusted."
+ac_1 = "WHEN the index is built or queried THE system Source changes SHALL be detected at subsecond timestamp precision; explicitly dirty paths SHALL be content-hashed even when size and timestamp are unchanged. Migration SHALL force older metadata through a verification pass."
+ac_2 = "WHEN the index is built or queried THE system Watcher overflow, registration failure, root loss, and persistent synchronization errors SHALL produce durable reconciliation debt and visible degraded coverage, retained until successful reconciliation. Polling fallback SHALL keep supported non-Linux platforms fresh."
+ac_3 = "WHEN the index is built or queried THE system Each indexed file SHALL expose complete, partial, skipped, or failed extraction with bounded reason codes, parser identity, diagnostics, generated status, and last successful content hash. Long lines and parser recovery SHALL never silently imply full coverage."
+ac_4 = "WHEN the index is built or queried THE system Extractor-output version SHALL be independent of database schema version and branch-scoped. Semantic upgrades SHALL re-extract stale content, and failed or partial passes SHALL not stamp it current."
+ac_5 = "WHEN the index is built or queried THE system Incremental indexing SHALL invalidate symbol bindings, export chains, configuration dependencies, route registrations and synthesized relations; interrupted updates SHALL retain retryable debt and converge to a clean rebuild."
+
+[req.2]
+title = "Structured extraction and language coverage"
+story = "As an agent or repository maintainer, I want structured extraction and language coverage so that code navigation and change analysis can be trusted."
+ac_1 = "WHEN the index is built or queried THE system A common extraction contract SHALL record symbol kind, qualified name, parent ownership, byte and line/column spans, signature, documentation, visibility, exports, modifiers, decorators, generic parameters and result type when syntax provides them. Unknown information SHALL remain unknown."
+ac_2 = "WHEN the index is built or queried THE system A native syntax-tree backend SHALL be compiled into the executable from pinned, licensed sources; core indexing SHALL require no network, external parser process, language server, package installation or model call at runtime. Parser instances SHALL be worker-local, bounded, cancellable and freed after use; the heuristic fallback SHALL identify itself."
+ac_3 = "WHEN the index is built or queried THE system TypeScript, TSX, JavaScript and JSX SHALL extract multiline declarations, classes and methods, object-literal actions, imports, exports, type references, callbacks and components using syntax nodes with positive and negative fixtures."
+ac_4 = "WHEN the index is built or queried THE system C, C++, Objective-C, Go and Rust SHALL extract structural declarations, methods, type relations, imports/includes, function values and calls with language-specific scope and macro/error-boundary reporting."
+ac_5 = "WHEN the index is built or queried THE system Python, Ruby and PHP SHALL extract nested definitions, classes, methods, decorated declarations, imports, documentation and scope-aware references without treating strings/comments as code."
+ac_6 = "WHEN the index is built or queried THE system Java, Kotlin, Scala, C#, Swift and Dart SHALL extract ownership, types, generics, inheritance, methods and call/reference relationships, with syntax recovery and overloaded names explicitly represented."
+ac_7 = "WHEN the index is built or queried THE system Lua, Luau, R, Erlang, Solidity, Terraform and Nix SHALL provide grammar-backed structural extraction; Pascal, COBOL, VB.NET, CFScript, CFQuery and ArkTS SHALL have tested extraction adapters. Grammar provenance and per-language coverage SHALL be inspectable; recognition alone SHALL not count as structural support."
+ac_8 = "WHEN the index is built or queried THE system Vue, Svelte, Astro, Liquid, Razor, CFML, Delphi forms and MyBatis mappings SHALL expose embedded-code or declarative relationships with original source coordinates; JSON, YAML, Twig and properties SHALL be accurately labelled when only file-level tracking is available."
+
+[req.3]
+title = "Precise cross-file relationships"
+story = "As an agent or repository maintainer, I want precise cross-file relationships so that code navigation and change analysis can be trusted."
+ac_1 = "WHEN the index is built or queried THE system Imports SHALL preserve local/original/default/namespace bindings and exports, follow bounded cyclic-safe re-export chains, and support nearest project aliases and workspace package roots. Configuration changes SHALL invalidate dependent bindings."
+ac_2 = "WHEN the index is built or queried THE system Receiver resolution SHALL use this/self ownership, explicit imported namespaces, constructors and declared receiver types before conservative name matching. Ambiguous equal candidates SHALL remain unresolved with candidate evidence; overloads and language visibility SHALL be respected."
+ac_3 = "WHEN the index is built or queried THE system Typed graph relations SHALL include containment, calls, imports, exports, inheritance, implementation, references, types, returns, instantiation, overrides and decorators with branch-scoped endpoints and source locations."
+ac_4 = "WHEN the index is built or queried THE system Every resolved or inferred relation SHALL retain original reference text, resolution strategy and evidence; synthesized relations SHALL be labelled heuristic with registration location and channel. Numeric confidence SHALL not be represented as calibrated probability."
+ac_5 = "WHEN the index is built or queried THE system Framework adapters SHALL connect routes to handlers and composition/mounts for Express, Next.js, React Router, Expo Router, SvelteKit, Vue/Nuxt, FastAPI, Django, Flask, Laravel, Rails, Spring, Gin, Axum, ASP.NET and Vapor. File-based routes SHALL retain method and path semantics."
+ac_6 = "WHEN the index is built or queried THE system Callback registration/invocation, observers, named event channels, interface dispatch, C function-pointer tables, React state-to-render/component relationships and native bridge registrations SHALL produce bounded evidence-backed relationships with invalidation on wiring changes."
+ac_7 = "WHEN the index is built or queried THE system Literal HTTP method/path calls SHALL resolve only to uniquely matching local routes; literal queue, bus and socket channels SHALL connect only compatible producers/consumers. Dynamic values, ambiguous registrations and external boundaries SHALL remain explicit boundaries."
+ac_8 = "WHEN the index is built or queried THE system Synthesis SHALL be dependency-gated, fan-out bounded, transactionally replaced and skipped on unrelated/no-op updates. Failed-reference retry SHALL preserve original references and avoid stale incoming edges after deletion or replacement."
+
+[req.4]
+title = "Retrieval that exposes evidence and limits"
+story = "As an agent or repository maintainer, I want retrieval that exposes evidence and limits so that code navigation and change analysis can be trusted."
+ac_1 = "WHEN the index is built or queried THE system Existing body/comment/trigram search and branch isolation SHALL be retained while symbol search gains composable kind/language/path/name filters, identifier-segment lookup, exact-match precedence and bounded typo fallback."
+ac_2 = "WHEN the index is built or queried THE system Context SHALL combine query symbols and co-location evidence, return useful source bodies and all relevant overloads within explicit budgets, attach bounded paths among named symbols, and report weak matches and omitted content."
+ac_3 = "WHEN the index is built or queried THE system Graph traversal SHALL enforce depth, node, edge, time and output budgets, explain paths with evidence and dynamic boundaries, and expose ancestors, subtypes and implementations."
+ac_4 = "WHEN the index is built or queried THE system Dead-code candidates SHALL distinguish unreachable from merely unreferenced; exported, reflective, framework, generated and uncertain boundaries SHALL provide exclusion reasons rather than definitive deletion advice."
+ac_5 = "WHEN the index is built or queried THE system CLI and MCP responses SHALL expose branch, extraction coverage and source freshness. Bounded source hash validation SHALL distinguish verified, stale and unchecked contributing files, without presenting a coalesced or failed refresh as fresh."
+
+[req.5]
+title = "Correctness, resource and release gates"
+story = "As an agent or repository maintainer, I want correctness, resource and release gates so that code navigation and change analysis can be trusted."
+ac_1 = "WHEN the index is built or queried THE system A deterministic labelled corpus SHALL measure positive and negative symbol/edge expectations by language and framework, precision, recall, unresolved counts and parser coverage; test success SHALL not depend only on name matches or edge counts."
+ac_2 = "WHEN the index is built or queried THE system Full graph-set differential tests SHALL compare incremental edits and commit replay with fresh rebuilds across additions, deletions, renames, competing names, configuration changes, branch switches, synthesis and interrupted writes."
+ac_3 = "WHEN the index is built or queried THE system Performance tests SHALL record cold index, no-op sync, one-file edits, deletion/rename, source-to-query freshness, peak memory, database size and phase times under fixed workers. Bounded queues and branch reuse SHALL be preserved; regressions SHALL be reported with reproducible inputs."
+ac_4 = "WHEN the index is built or queried THE system Each task SHALL be owned by one worker on an isolated branch, verified before merge to main, with task-tagged evidence and strict dependency qualification. Final qualification SHALL run unit/integration suites, strict compilation, spec lint and documentation closure."
+ac_5 = "WHEN the index is built or queried THE system Version 1.6 documentation SHALL state actual language/framework coverage, fallback and inference limits, migration behavior, commands and measured resource results. No speculative capability SHALL be described as shipped."
+
+[design]
+include = "design.body.md"
+
+[documentation]
+mode = "auto"
+status = "pending"
+audiences = ["user", "developer"]
+targets = ["README.md", "CHANGELOG.md", "docs/**"]
+
+[tasks]
+heading = "Implementation Plan: Codify 1.6"
+
+[task.1.1]
+title = "Subsecond change detection and explicit-dirty hashing"
+status = "pending"
+wave = 1
+requires = []
+touches = ["src/scan.c", "src/walk.c", "src/cg.h", "src/db.c", "tests/integration/54_freshness.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/54_freshness.sh"
+do_1 = "Fix same-size same-second and preserved-metadata dirty edits in full and targeted passes; migrate timestamps; preserve hash reuse, branch isolation and Git candidate behavior."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["1.1", "1.2", "1.3", "1.4", "1.5"]
+
+[task.1.2]
+title = "Watcher reconciliation and coverage health"
+status = "pending"
+wave = 1
+requires = []
+touches = ["src/watch.c", "src/watch_health.c", "src/watch_health.h", "tests/integration/55_watch_health.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/55_watch_health.sh"
+do_1 = "Handle overflow/root loss/registration errors, persist reconciliation debt and expose coverage health. Implement safe portable polling fallback; test injected loss, retries and directory moves."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["1.1", "1.2", "1.3", "1.4", "1.5"]
+
+[task.1.3]
+title = "Extraction diagnostics and semantic version freshness"
+status = "pending"
+wave = 1
+requires = []
+touches = ["src/index_health.c", "src/index_health.h", "src/lang.c", "src/scan.c", "src/db.c", "src/cg.h", "tests/integration/56_index_health.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/56_index_health.sh"
+do_1 = "Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["1.1", "1.2", "1.3", "1.4", "1.5"]
+
+[task.2.1]
+title = "Shared semantic records, storage and lifecycle"
+status = "pending"
+wave = 1
+requires = []
+touches = ["src/semantic.c", "src/semantic.h", "src/cg.h", "src/db.c", "src/scan.c", "tests/integration/57_semantic_store.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/57_semantic_store.sh"
+do_1 = "Define the shared rich extraction contract and branch-safe typed graph schema; wire persistence, migration, deletion, identical-content reuse and cross-worktree copy. Publish API to sibling workers early; extend existing symbols/refs rather than duplicating ownership inconsistently."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.2]
+title = "Native syntax-tree runtime and adapter registry"
+status = "pending"
+wave = 1
+requires = []
+touches = ["src/ast.c", "src/ast.h", "src/lang.c", "src/cg.h", "Makefile", "vendor/tree-sitter/**", "scripts/vendor-parsers.*", "tests/integration/58_ast_runtime.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/58_ast_runtime.sh"
+do_1 = "Vendor pinned licensed parser runtime into the single binary, define grammar/adapter registry and common tree walker. Coordinate the semantic contract with 2.1. Support worker-local parsers, bounded recovery, fallback and dynamic line lengths. Publish the adapter API immediately for language workers."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.3]
+title = "TypeScript and JavaScript syntax extraction"
+status = "pending"
+wave = 2
+requires = ["2.1", "2.2"]
+touches = ["src/ast_web.c", "vendor/parsers/web/**", "tests/integration/59_ast_web.sh", "tests/fixtures/semantic/web/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/59_ast_web.sh"
+do_1 = "Implement TS/TSX/JS/JSX grammar adapters, multiline functions, owner-aware methods, types, imports/exports, object actions, callbacks and JSX component facts; include negative and error-recovery cases."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.4]
+title = "Systems language syntax extraction"
+status = "pending"
+wave = 2
+requires = ["2.1", "2.2"]
+touches = ["src/ast_systems.c", "vendor/parsers/systems/**", "tests/integration/60_ast_systems.sh", "tests/fixtures/semantic/systems/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/60_ast_systems.sh"
+do_1 = "Implement C/C++/Objective-C/Go/Rust adapters including include/import bindings, ownership, function values/pointer facts, type relations, traits/interfaces and macro boundaries."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.5]
+title = "Python Ruby and PHP syntax extraction"
+status = "pending"
+wave = 2
+requires = ["2.1", "2.2"]
+touches = ["src/ast_dynamic.c", "vendor/parsers/dynamic/**", "tests/integration/61_ast_dynamic.sh", "tests/fixtures/semantic/dynamic/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/61_ast_dynamic.sh"
+do_1 = "Implement Python/Ruby/PHP scoped declarations/references, annotations/decorators, import aliases, classes/methods, docstrings and nested functions using pinned grammars."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.6]
+title = "Managed and application language syntax extraction"
+status = "pending"
+wave = 2
+requires = ["2.1", "2.2"]
+touches = ["src/ast_managed.c", "vendor/parsers/managed/**", "tests/integration/62_ast_managed.sh", "tests/fixtures/semantic/managed/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/62_ast_managed.sh"
+do_1 = "Implement Java/Kotlin/Scala/C#/Swift/Dart adapters with generics, qualified owners, result types, inheritance/interfaces, overload metadata and bounded parse recovery."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.7]
+title = "Configuration and scripting language syntax extraction"
+status = "pending"
+wave = 2
+requires = ["2.1", "2.2"]
+touches = ["src/ast_extended.c", "vendor/parsers/extended/**", "tests/integration/63_ast_extended.sh", "tests/fixtures/semantic/extended/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/63_ast_extended.sh"
+do_1 = "Implement Lua/Luau/R/Erlang/Solidity/Terraform/Nix grammar adapters with accurate coverage declarations and fixtures for declarations, references and string/comment negatives."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.2.8]
+title = "Legacy and mixed-format extraction adapters"
+status = "pending"
+wave = 2
+requires = ["2.1", "2.2"]
+touches = ["src/ast_mixed.c", "vendor/parsers/mixed/**", "tests/integration/64_ast_mixed.sh", "tests/fixtures/semantic/mixed/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/64_ast_mixed.sh"
+do_1 = "Implement Pascal/COBOL/VB.NET/CFScript/CFQuery/ArkTS and Vue/Svelte/Astro/Liquid/Razor/CFML/Delphi-form/MyBatis adapters. Preserve offsets for embedded code; file-only formats must say so. Use separate manifests for grammar registration and licences."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
+
+[task.3.1]
+title = "Import bindings aliases and export chains"
+status = "pending"
+wave = 3
+requires = ["2.1", "2.3", "2.4", "2.5"]
+touches = ["src/sem_imports.c", "src/sem_imports.h", "src/resolve.c", "tests/integration/65_sem_imports.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/65_sem_imports.sh"
+do_1 = "Resolve explicit aliases/default/namespaces/reexports with cycle bounds; nearest tsconfig/jsconfig paths, workspace package roots and language-specific imports. Track configuration hashes and reverse dependencies, support config-only edits and branch isolation."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.3.2]
+title = "Receiver ownership and overload resolution"
+status = "pending"
+wave = 3
+requires = ["2.1", "2.3", "2.4", "2.5"]
+touches = ["src/sem_resolve.c", "src/sem_resolve.h", "src/resolve.c", "tests/integration/66_sem_resolve.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/66_sem_resolve.sh"
+do_1 = "Resolve this/self, imported namespaces and known constructor/declared receivers; apply owner/visibility/signature evidence and abstain on equal ambiguity. Preserve original reference and resolution provenance; retry affected unchanged callers."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.3.3]
+title = "Type hierarchy and semantic relation construction"
+status = "pending"
+wave = 3
+requires = ["2.1", "2.4", "2.6"]
+touches = ["src/sem_types.c", "src/sem_types.h", "tests/integration/67_sem_types.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/67_sem_types.sh"
+do_1 = "Resolve containment/inheritance/implements/types/returns/instantiation/overrides/decorators/exports as typed relations with sites and evidence. Respect branch and scope; provide reusable type hierarchy helpers."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.3.4]
+title = "Framework route and handler graph"
+status = "pending"
+wave = 3
+requires = ["2.1", "2.3", "2.5", "2.6"]
+touches = ["src/sem_routes.c", "src/sem_routes.h", "src/routes.c", "tests/integration/68_sem_routes.sh", "tests/fixtures/semantic/routes/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/68_sem_routes.sh"
+do_1 = "Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.3.5]
+title = "Callback interface and runtime dispatch synthesis"
+status = "pending"
+wave = 3
+requires = ["3.2", "3.3"]
+touches = ["src/sem_dispatch.c", "src/sem_dispatch.h", "tests/integration/69_sem_dispatch.sh", "tests/fixtures/semantic/dispatch/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/69_sem_dispatch.sh"
+do_1 = "Build bounded callback/observer/event/interface/C-function-pointer/React-render/component and native-bridge passes from explicit registration/type evidence. Stamp heuristic provenance and wiring sites, preserve dynamic boundaries and transactional replacement."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.3.6]
+title = "HTTP queue and message channel synthesis"
+status = "pending"
+wave = 3
+requires = ["3.4"]
+touches = ["src/sem_channels.c", "src/sem_channels.h", "tests/integration/70_sem_channels.sh", "tests/fixtures/semantic/channels/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/70_sem_channels.sh"
+do_1 = "Connect literal HTTP method/path to unique routes and compatible named queue/bus/socket producers/consumers; reject ambiguous or computed inputs. Record channel/tier/registration evidence and avoid duplicate or unbounded fanout."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.3.7]
+title = "Incremental semantic dependency invalidation"
+status = "pending"
+wave = 4
+requires = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6"]
+touches = ["src/sem_incremental.c", "src/sem_incremental.h", "src/semantic.c", "src/scan.c", "tests/integration/71_sem_incremental.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/71_sem_incremental.sh"
+do_1 = "Integrate all semantic passes with changed-definition/configuration/registration dependency sets, persistent failed refs, stale-target resurrection and no-op skipping. Publish complete generations transactionally and recover interrupted work."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8"]
+
+[task.4.1]
+title = "Freshness and coverage on CLI and MCP answers"
+status = "pending"
+wave = 4
+requires = ["1.1", "1.2", "1.3", "2.1"]
+touches = ["src/answer_health.c", "src/answer_health.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/72_answer_health.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/72_answer_health.sh"
+do_1 = "Expose file coverage/parser inventory/index state and pending/degraded health through info/status and MCP. Validate contributing source hashes under explicit file/byte/time caps; distinguish verified/stale/unchecked and partial extraction."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["4.1", "4.2", "4.3", "4.4", "4.5"]
+
+[task.4.2]
+title = "Structured search and context sufficiency"
+status = "pending"
+wave = 4
+requires = ["2.1", "3.1"]
+touches = ["src/sem_search.c", "src/sem_search.h", "src/graph.c", "src/mcp.c", "tests/integration/73_sem_search.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/73_sem_search.sh"
+do_1 = "Add branch-aware identifier postings, composable kind/lang/path/name filters, exact-name precedence and bounded fuzzy fallback. Return source bodies and overloads with co-location evidence, weak-query confidence and omission budgets while preserving existing text ranking."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["4.1", "4.2", "4.3", "4.4", "4.5"]
+
+[task.4.3]
+title = "Bounded flow traversal and dynamic boundaries"
+status = "pending"
+wave = 4
+requires = ["3.3", "3.7"]
+touches = ["src/sem_flow.c", "src/sem_flow.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/74_sem_flow.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/74_sem_flow.sh"
+do_1 = "Expose bounded paths among named symbols, callers/callees/impact over typed relations with source evidence and heuristic labels, depth/node/edge/time budgets and explicit unresolved dynamic boundaries through CLI and MCP."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["4.1", "4.2", "4.3", "4.4", "4.5"]
+
+[task.4.4]
+title = "Hierarchy and conservative dead-code inspection"
+status = "pending"
+wave = 4
+requires = ["3.3", "3.7"]
+touches = ["src/sem_inspect.c", "src/sem_inspect.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/75_sem_inspect.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/75_sem_inspect.sh"
+do_1 = "Expose ancestors/subtypes/implementations and unreferenced candidates with exclusion reasons for exports, framework roots, reflection, generated files and uncertain incoming boundaries. Never equate missing graph edges with safe deletion."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["4.1", "4.2", "4.3", "4.4", "4.5"]
+
+[task.5.1]
+title = "Labelled extraction and graph convergence corpus"
+status = "pending"
+wave = 5
+requires = ["3.7"]
+touches = ["tests/semantic/**", "tests/integration/76_semantic_conformance.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/76_semantic_conformance.sh"
+do_1 = "Build source-labelled positive/negative cases across every advertised language/framework; report precision/recall/coverage by adapter. Compare canonical graph sets after edit/delete/rename/config changes and commit replay against true clean rebuilds across worktrees and failure recovery."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["5.1", "5.2", "5.3", "5.4", "5.5"]
+
+[task.5.2]
+title = "Index resource and latency regression gates"
+status = "pending"
+wave = 5
+requires = ["3.7"]
+touches = ["scripts/bench-indexing.py", "tests/integration/77_index_resources.sh", "tests/scale/**"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/77_index_resources.sh"
+do_1 = "Benchmark bounded cold/no-op/edit/delete/rename/replay with fixed workers, memory and database growth, skip/diagnostic counts and source-to-query freshness. Keep default tests small and an opt-in large profile; publish raw reproducible output without fabricated numbers."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["5.1", "5.2", "5.3", "5.4", "5.5"]
+
+[task.5.3]
+title = "Integrated release qualification and documentation"
+status = "pending"
+wave = 5
+requires = ["4.1", "4.2", "4.3", "4.4", "5.1", "5.2"]
+touches = ["src/cg.h", "editors/vscode/package.json", "README.md", "CHANGELOG.md", "docs/**", "tests/integration/78_v16_release.sh"]
+verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/78_v16_release.sh"
+do_1 = "Bump version to 1.6.0 after integrated gates; document actual per-language/framework coverage, migrations, health, provenance, commands, limits and measured resource checks. Verify clean offline build, all unit/integration tests and strict compile; do not claim unverified completion."
+do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
+reqs = ["5.1", "5.2", "5.3", "5.4", "5.5"]
