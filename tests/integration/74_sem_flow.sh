@@ -123,4 +123,13 @@ python3 - "$TMP/mcp.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); assert d['found'] and len(d['path'])==3,d
 PY
+"$CG" tool list --json > "$TMP/tools.json"
+python3 - "$TMP/tools.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+tools=d.get('tools',d) if isinstance(d,dict) else d
+flow=next(x for x in tools if x['name']=='flow')
+assert {'mode','name'} <= set(flow['inputSchema']['required']),flow
+assert flow['annotations']['readOnlyHint'],flow
+PY
 echo "74_sem_flow: ok"
