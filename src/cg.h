@@ -394,7 +394,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st);
  * rules applied as ever) under root/rel ("" = the tree), walked by `threads`
  * threads over a shared directory list and appended to out, which comes back
  * sorted by path. Ticks the progress line per directory (main thread). */
-typedef struct { char *rel; long size, mtime; } WalkEntry;
+typedef struct { char *rel; long size, mtime, mtime_ns; } WalkEntry;
 typedef struct { WalkEntry *v; int n, cap; long dirs; } WalkSet;
 void walk_parallel(const char *root, const char *rel, const Ignore *ig,
                    int threads, long max_bytes, WalkSet *out);
