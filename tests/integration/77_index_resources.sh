@@ -21,6 +21,8 @@ assert d['format'] == 'codify-index-benchmark-v1'
 assert d['fixture']['files'] == 20 and d['fixture']['seed'] == 15
 assert d['fixture']['source_bytes'] > 0
 assert d['settings']['workers'] == 2
+assert len(d['runtime']['binary_sha256']) == 64
+assert d['runtime']['profile'] and d['runtime']['sqlite']
 assert not d['regressions'], d['regressions']
 assert d['source_to_query_ms'] >= d['stages']['edit']['wall_ms']
 assert d['stages']['cold']['database']['main_bytes'] > 0
