@@ -23,6 +23,7 @@ q=lambda sql,*args: d.execute(sql,args).fetchall()
 assert q("SELECT count(*) FROM semantic_route_facts")[0][0] >= 12
 assert q("SELECT method,pattern FROM semantic_route_facts WHERE framework='nextjs-app' ORDER BY method") == [('GET','/orders'),('POST','/orders')]
 assert q("SELECT method,pattern FROM semantic_route_facts WHERE framework='sveltekit' AND method='GET'") == [('GET','/notes')]
+assert q("SELECT framework,method FROM semantic_route_facts WHERE pattern='/flask/get'") == [('flask','GET')]
 for framework,method,path,handler in [
  ('expo-router','PAGE','/report','reportHandler'),
  ('sveltekit','PAGE','/report','load'),
@@ -73,6 +74,23 @@ for framework,path in [('express','/express/items'),('nextjs','/api/items'),
  ('axum','/axum/list'),('vapor','/vapor/show')]:
     assert q("SELECT status FROM semantic_route_facts WHERE framework=? AND pattern=? LIMIT 1",framework,path) == [('resolved',)],(framework,path)
 assert q("SELECT status FROM semantic_route_facts WHERE framework='nuxt' AND pattern='/account'") == [('dynamic',)]
+PY
+
+# Replacing a registration file must retire its old synthetic node before
+# SQLite may reuse its row ID for an ordinary handler declaration.
+printf '\n// comment-only edit\n' >> api.js
+"$CG" sync >/dev/null
+python3 - "$db" <<'PY'
+import sqlite3,sys
+d=sqlite3.connect(sys.argv[1])
+bad=d.execute("SELECT r.pattern,r.route_symbol_id,s.kind,s.name "
+              "FROM semantic_route_facts r LEFT JOIN symbols s ON s.id=r.route_symbol_id "
+              "WHERE s.id IS NULL OR s.kind!='route' OR s.file_id!=r.registration_file_id "
+              "OR s.name!=r.method||' '||r.pattern").fetchall()
+assert not bad,bad
+assert d.execute("SELECT count(*) FROM semantic_edges e JOIN semantic_route_facts r "
+                 "ON r.route_symbol_id=e.source_id WHERE e.kind='route_handler' "
+                 "AND e.channel='/express/items' AND e.target_id=r.handler_symbol_id").fetchone()==(1,)
 PY
 
 edge_before="$(python3 - "$db" <<'PY'
@@ -127,5 +145,19 @@ row=d.execute("SELECT status,diagnostics FROM extraction_health "
               "WHERE path='src/overflow.js'").fetchone()
 assert row and row[0]=='partial' and 'route_statement_limit' in row[1],row
 assert not d.execute("SELECT 1 FROM semantic_route_facts WHERE pattern='/overflow'").fetchone()
+PY
+
+rm src/flask_get.py
+"$CG" sync >/dev/null
+python3 - "$db" <<'PY'
+import sqlite3,sys
+d=sqlite3.connect(sys.argv[1])
+assert not d.execute("SELECT 1 FROM semantic_route_facts WHERE pattern='/flask/get'").fetchone()
+assert not d.execute("SELECT 1 FROM semantic_edges WHERE kind='route_handler' "
+                     "AND channel='/flask/get'").fetchone()
+assert not d.execute("SELECT 1 FROM semantic_route_compositions c "
+                     "LEFT JOIN semantic_route_facts r ON r.route_id=c.child_route_id "
+                     "WHERE r.route_id IS NULL").fetchone()
+assert not d.execute("SELECT 1 FROM semantic_route_dirty").fetchone()
 PY
 echo "semantic route graph: OK"

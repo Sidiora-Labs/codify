@@ -150,8 +150,30 @@ static void binding(AstContext *ctx, TSNode n, const char *kind,
     SemBinding *b=sem_binding_add(&ctx->result->sem,module,local,span(n));
     b->kind=xstrdup(kind); b->is_system=system;
     b->owner=-1; b->evidence=xstrdup("syntax");
-    if (local && *local) b->original_name=xstrdup(local);
+    if (local && *local && strcmp(kind,"module_import"))
+        b->original_name=xstrdup(local);
     free(module); free(local);
+}
+
+static bool is_c_parameter(AstContext *ctx, TSNode call, const char *name) {
+    TSNode fn=call;
+    while (!ts_node_is_null(fn) && !is(fn,"function_definition"))
+        fn=ts_node_parent(fn);
+    if (ts_node_is_null(fn)) return false;
+    TSNode d=field(fn,"declarator");
+    while (!ts_node_is_null(d) && !is(d,"function_declarator"))
+        d=field(d,"declarator");
+    TSNode params=field(d,"parameters");
+    unsigned count=ts_node_named_child_count(params);
+    for (unsigned i=0;i<count;i++) {
+        TSNode p=named(params,i);
+        if (!is(p,"parameter_declaration")) continue;
+        char *candidate=copy_text(ctx,name_leaf(field(p,"declarator")));
+        bool match=candidate && !strcmp(candidate,name);
+        free(candidate);
+        if (match) return true;
+    }
+    return false;
 }
 
 static void ref(AstContext *ctx, TSNode n, TSNode target, const char *kind,
@@ -164,6 +186,10 @@ static void ref(AstContext *ctx, TSNode n, TSNode target, const char *kind,
     r->owner=owner; r->target=-1; r->legacy_ref=-1; r->argc=-1;
     r->strategy=xstrdup("syntax"); r->evidence=xstrdup("syntax");
     r->qualifier=copy_text(ctx,qualifier);
+    if (!r->qualifier && !strcmp(kind,"call") &&
+        (!strcmp(ctx->language,"c") || !strcmp(ctx->language,"cpp") ||
+         !strcmp(ctx->language,"objc")) && is_c_parameter(ctx,n,name))
+        r->qualifier=xstrdup("(param)");
     free(name);
 }
 
@@ -176,12 +202,6 @@ static TSNode child_type(TSNode n, const char *type) {
     return (TSNode){0};
 }
 
-static bool inside_error(TSNode n) {
-    for (TSNode p=n;!ts_node_is_null(p);p=ts_node_parent(p))
-        if (ts_node_is_error(p) || ts_node_is_missing(p)) return true;
-    return false;
-}
-
 static TSNode callee_qualifier(TSNode n) {
     const char *t=ts_node_type(n);
     if (!strcmp(t,"field_expression") || !strcmp(t,"selector_expression") ||
@@ -191,6 +211,7 @@ static TSNode callee_qualifier(TSNode n) {
         if (ts_node_is_null(q)) q=field(n,"operand");
         if (ts_node_is_null(q)) q=field(n,"object");
         if (ts_node_is_null(q)) q=field(n,"scope");
+        if (ts_node_is_null(q)) q=field(n,"path");
         return q;
     }
     return (TSNode){0};
@@ -206,6 +227,25 @@ static TSNode objc_name(TSNode n) {
 
 static TSNode first_named(TSNode n) { return named(n,0); }
 
+static void rust_use(AstContext *ctx, TSNode n) {
+    TSNode arg=field(n,"argument");
+    if (is(arg,"scoped_identifier")) {
+        binding(ctx,n,"use",field(arg,"path"),field(arg,"name"),false);
+    } else if (is(arg,"scoped_use_list")) {
+        TSNode path=field(arg,"path"), list=field(arg,"list");
+        unsigned count=ts_node_named_child_count(list);
+        for (unsigned i=0;i<count;i++) {
+            TSNode item=named(list,i);
+            if (is(item,"identifier"))
+                binding(ctx,item,"use",path,item,false);
+            else if (is(item,"scoped_identifier"))
+                binding(ctx,item,"use",field(item,"path"),field(item,"name"),false);
+        }
+    } else if (!ts_node_is_null(arg)) {
+        binding(ctx,n,"use",arg,(TSNode){0},false);
+    }
+}
+
 static TSNode find_table(TSNode n, const char *table, AstContext *ctx,
                          int depth, unsigned *visited) {
     if (depth>128 || ts_node_is_null(n) || ++*visited>100000 ||
@@ -217,11 +257,17 @@ static TSNode find_table(TSNode n, const char *table, AstContext *ctx,
         free(name);
         if (match) return v;
     }
-    unsigned count=ts_node_named_child_count(n);
-    for (unsigned i=0;i<count;i++) {
-        TSNode got=find_table(named(n,i),table,ctx,depth+1,visited);
-        if (!ts_node_is_null(got)) return got;
-    }
+    TSTreeCursor cursor=ts_tree_cursor_new(n);
+    if (ts_tree_cursor_goto_first_child(&cursor)) do {
+        TSNode child=ts_tree_cursor_current_node(&cursor);
+        if (!ts_node_is_named(child)) continue;
+        TSNode got=find_table(child,table,ctx,depth+1,visited);
+        if (!ts_node_is_null(got)) {
+            ts_tree_cursor_delete(&cursor);
+            return got;
+        }
+    } while (ts_tree_cursor_goto_next_sibling(&cursor));
+    ts_tree_cursor_delete(&cursor);
     return (TSNode){0};
 }
 
@@ -265,7 +311,9 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
     if (ctx->cancelled || ctx->truncated) return;
     if (ts_node_is_error(n)) ctx->errors++;
     if (ts_node_is_missing(n)) ctx->missing++;
-    if (inside_error(n)) return; /* recovery is represented by parser coverage */
+    /* This preorder walk never descends into an error node, so checking
+     * ancestors on every sibling would add quadratic work on flat files. */
+    if (ts_node_is_error(n) || ts_node_is_missing(n)) return;
     const char *lang=ctx->language, *t=ts_node_type(n);
     bool c_family=!strcmp(lang,"c") || !strcmp(lang,"cpp") || !strcmp(lang,"objc");
     bool go=!strcmp(lang,"go"), rust=!strcmp(lang,"rust"), objc=!strcmp(lang,"objc");
@@ -273,7 +321,17 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
     TSNode body=field(n,"body"), name=(TSNode){0};
 
     if (c_family) {
-        if (!strcmp(t,"function_definition")) {
+        if (!strcmp(t,"type_definition")) {
+            TSNode d=field(n,"declarator"), ty=field(n,"type");
+            name=is(d,"primitive_type")?d:name_leaf(d);
+            char *alias=copy_text(ctx,name);
+            char *tag=copy_text(ctx,field(ty,"name"));
+            if (alias && (!tag || strcmp(alias,tag))) {
+                next_owner=symbol(ctx,n,name,"typedef",owner,false,(TSNode){0});
+                if (next_owner>=0) type_fact(ctx,n,"type",next_owner,"underlying",ty);
+            }
+            free(alias); free(tag);
+        } else if (!strcmp(t,"function_definition")) {
             TSNode d=field(n,"declarator"); name=name_leaf(d);
             int method_owner=owner;
             TSNode q=field(d,"declarator");
@@ -301,9 +359,12 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
         } else if (!strcmp(t,"class_specifier") || !strcmp(t,"struct_specifier") ||
                    !strcmp(t,"union_specifier") || !strcmp(t,"enum_specifier")) {
             name=field(n,"name");
-            if (!ts_node_is_null(body)) {
+            TSNode parent=ts_node_parent(n);
+            bool forward=ts_node_is_null(body) &&
+                (is(parent,"translation_unit") || is(parent,"declaration_list"));
+            if (!ts_node_is_null(body) || forward) {
                 next_owner=symbol(ctx,n,name,!strcmp(t,"class_specifier")?"class":
-                    !strcmp(t,"enum_specifier")?"enum":"struct",owner,false,body);
+                    !strcmp(t,"enum_specifier")?"enum":"struct",owner,forward,body);
                 if (next_owner>=0) type_fact(ctx,n,"inherits",next_owner,"base",child_type(n,"base_class_clause"));
             }
         } else if (!strcmp(t,"preproc_include")) {
@@ -340,6 +401,12 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
                     TSNode var=name_leaf(d);
                     next_owner=symbol(ctx,d,var,"variable",owner,false,value);
                 }
+            }
+        } else if (!strcmp(lang,"cpp") && !strcmp(t,"field_declaration")) {
+            TSNode d=field(n,"declarator");
+            if (is(d,"function_declarator")) {
+                name=name_leaf(d);
+                next_owner=symbol(ctx,n,name,"method",owner,true,(TSNode){0});
             }
         } else if (!strcmp(t,"initializer_pair")) {
             TSNode designator=field(n,"designator"), value=field(n,"value");
@@ -396,7 +463,7 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
             name=field(n,"name");
             next_owner=symbol(ctx,n,name,"method",owner,true,(TSNode){0});
         } else if (!strcmp(t,"import_spec")) {
-            binding(ctx,n,"import",field(n,"path"),field(n,"name"),false);
+            binding(ctx,n,"module_import",field(n,"path"),field(n,"name"),false);
         } else if (!strcmp(t,"var_spec") || !strcmp(t,"const_spec")) {
             TSNode value=field(n,"value"), n0=field(n,"name");
             if (ts_node_is_null(n0)) n0=first_named(n);
@@ -427,7 +494,7 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
             if (next_owner>=0 && !strcmp(t,"trait_item"))
                 type_fact(ctx,n,"inherits",next_owner,"bounds",field(n,"bounds"));
         } else if (!strcmp(t,"use_declaration")) {
-            binding(ctx,n,"use",field(n,"argument"),(TSNode){0},false);
+            rust_use(ctx,n);
         } else if (!strcmp(t,"extern_crate_declaration")) {
             binding(ctx,n,"extern",field(n,"name"),(TSNode){0},false);
         } else if (!strcmp(t,"macro_invocation")) {
@@ -468,13 +535,16 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
         }
     }
     if (next_owner<0) next_owner=owner;
-    unsigned count=ts_node_named_child_count(n);
-    for (unsigned i=0;i<count;i++) {
-        TSNode c=named(n,i);
+    TSTreeCursor cursor=ts_tree_cursor_new(n);
+    if (ts_tree_cursor_goto_first_child(&cursor)) do {
+        TSNode c=ts_tree_cursor_current_node(&cursor);
+        if (!ts_node_is_named(c)) continue;
         /* A declaration's name is already captured; nested calls in bodies
          * still receive their lexical owner. */
         extract_node(ctx,c,next_owner,depth+1);
-    }
+        if (ctx->cancelled || ctx->truncated) break;
+    } while (ts_tree_cursor_goto_next_sibling(&cursor));
+    ts_tree_cursor_delete(&cursor);
 }
 
 static void systems_extract(AstContext *ctx) {
