@@ -1,0 +1,5 @@
+source=https://github.com/JoranHonig/tree-sitter-solidity.git
+revision=048fe686cb1fde267243739b8bdbec8fc3a55272
+license=LICENSE
+parser=src/parser.c
+scanner=none
