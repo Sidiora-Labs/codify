@@ -1,5 +1,6 @@
 import Main, { fetchItem as load, type Result } from './service';
 import * as API from './api';
+import { bus as socket } from './channels';
 export { load as reload };
 export * from './shared';
 
@@ -34,6 +35,8 @@ export function Screen(
   const remoteUrl = '/dynamic';
   bus.on('saved', handleSaved);
   bus.emit('saved', count);
+  socket.on('shared', handleSaved);
+  socket.emit('shared', count);
   bus.emit('saved' + suffix, count);
   fetch('/local', { method: 'POST' });
   fetch(remoteUrl);

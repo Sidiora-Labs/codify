@@ -268,6 +268,23 @@ static bool locally_constructed(AstContext *c, TSNode root,
             return true;
     return false;
 }
+static int declaration_count(AstContext *c, TSNode root,
+                             const char *name, int depth, int *budget) {
+    if (depth>64 || *budget<=0) return 0;
+    --*budget;
+    int count=0;
+    if (is(root,"variable_declarator") || is(root,"required_parameter") ||
+        is(root,"optional_parameter")) {
+        TSNode id=ast_field(root,"name"); char *s=text(c,id);
+        count=s && strcmp(s,name)==0; free(s);
+    } else if (is(root,"identifier") && is(ts_node_parent(root),"formal_parameters")) {
+        char *s=text(c,root);
+        count=s && strcmp(s,name)==0; free(s);
+    }
+    for (uint32_t i=0;i<ts_node_named_child_count(root);i++)
+        count+=declaration_count(c,ts_node_named_child(root,i),name,depth+1,budget);
+    return count;
+}
 static bool imported_receiver(AstContext *c, const char *receiver) {
     SemResult *r=&c->result->sem;
     for (int i=0;i<r->nbindings;i++)
@@ -297,8 +314,12 @@ static void channel_fact(AstContext *c, TSNode n, TSNode fn,
         if (direction) {
             char kind[48]; snprintf(kind,sizeof(kind),"channel:%s:%s",medium,direction);
             int budget=4096;
-            bool local=c->path && locally_constructed(c,c->root,receiver,0,&budget);
-            bool imported=!local && imported_receiver(c,receiver);
+            int competing=declaration_count(c,c->root,receiver,0,&budget);
+            if (budget<=0) competing=-1;
+            budget=4096;
+            bool local=c->path && competing==1 &&
+                locally_constructed(c,c->root,receiver,0,&budget);
+            bool imported=!local && competing==0 && imported_receiver(c,receiver);
             size_t z=(local?strlen(c->path):strlen("import"))+strlen(receiver)+2;
             char *identity=malloc(z);
             if (identity && (local || imported)) {
@@ -387,6 +408,8 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
             child_owner=symbol(c,n,name,"function",owner,export_context(ts_node_parent(n)),v);
         else if (is(v,"object"))
             child_owner=symbol(c,n,name,"object",owner,export_context(ts_node_parent(n)),v);
+        else if (is(v,"new_expression"))
+            child_owner=symbol(c,n,name,"variable",owner,export_context(ts_node_parent(n)),v);
         TSNode type=ast_field(n,"type");
         if (!ts_node_is_null(type)) {
             char *value=text(c,type);

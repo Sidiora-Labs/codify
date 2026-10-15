@@ -13,6 +13,8 @@ expect_none() { local n; n="$(count "$1")"; [ "$n" -eq 0 ] || fail "$2 (got $n)"
 # A complete statement above a malformed tail still yields sound facts.
 expect_some "SELECT count(*) FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path='src/broken.ts' AND s.name='intact'" 'lost complete declaration during recovery'
 expect_none "SELECT count(*) FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path='src/broken.ts' AND s.name='unfinished'" 'fabricated incomplete declaration'
+health="$(sqlite3 "$DB" "SELECT status || ':' || reason FROM extraction_health WHERE path='src/broken.ts'")"
+has "$health" 'partial:syntax_recovery'
 
 # Multiline declaration, owner-aware class method and object actions.
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Panel.render' AND start_line<end_line" 'missing multiline class method'
@@ -21,12 +23,14 @@ expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Screen.
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Screen.actions.cancel'" 'missing object shorthand method'
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='View.actions.open'" 'missing JSX file action'
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Counter.increment'" 'missing plain JavaScript method'
+expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='bus' AND exported=1" 'missing exported constructed receiver'
 one="$(count "SELECT count(*) FROM symbols WHERE name='Screen'")"
 [ "$one" -eq 1 ] || fail "semantic projection duplicated Screen ($one definitions)"
 
 # Aliases and reexports retain both written and local names.
 expect_some "SELECT count(*) FROM semantic_bindings WHERE module='./service' AND local_name='load' AND original_name='fetchItem' AND kind='import'" 'missing named import alias'
 expect_some "SELECT count(*) FROM semantic_bindings WHERE module='./api' AND local_name='API' AND kind='namespace'" 'missing namespace import'
+expect_some "SELECT count(*) FROM semantic_bindings WHERE module='./channels' AND local_name='socket' AND original_name='bus'" 'missing receiver import alias'
 expect_some "SELECT count(*) FROM semantic_bindings WHERE local_name='load' AND exported_name='reload' AND is_export=1" 'missing local export alias'
 expect_some "SELECT count(*) FROM semantic_bindings WHERE module='./shared' AND kind='export_all'" 'missing star reexport'
 expect_some "SELECT count(*) FROM semantic_bindings WHERE local_name='View' AND exported_name='default' AND is_export=1" 'missing default export binding'
@@ -38,6 +42,7 @@ expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='callback_regis
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='event_subscription' AND name='saved'" 'missing literal subscription'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='channel:bus:consumer' AND name='saved' AND value='src/main.tsx:bus'" 'missing proven bus consumer'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='channel:bus:producer' AND name='saved' AND value='src/main.tsx:bus'" 'missing proven bus producer'
+expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='channel:socket:consumer' AND name='shared' AND value='import:socket'" 'missing imported receiver consumer'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='channel:http:producer' AND name='/local' AND value='POST'" 'missing literal HTTP producer'
 expect_none "SELECT count(*) FROM semantic_type_facts WHERE kind LIKE 'channel:%' AND (name LIKE '%example.invalid%' OR name LIKE '%suffix%' OR name='remoteUrl')" 'dynamic or external channel was asserted'
 expect_some "SELECT count(*) FROM semantic_type_facts WHERE kind='jsx_component' AND name='PanelView'" 'missing JSX component'
