@@ -220,6 +220,13 @@ def score_edge(cg: Path, work: Path, case) -> dict:
         isinstance(e["start_line"], int) and e["start_line"] > 0
         for e in positive
     )
+    if case.kind == "form_event_dispatch":
+        evidence_ok = evidence_ok and all(
+            e["registration_path"] == case.path and
+            isinstance(e["registration_line"], int) and e["registration_line"] > 0 and
+            e["provenance"] == "heuristic" and e["synthesized"] == 1
+            for e in positive
+        )
     return {"adapter": case.adapter, "edge_tp": int(bool(positive)),
             "edge_fp": len(negative) + max(0, len(positive) - 1),
             "edge_fn": int(not positive), "missing_nodes": sorted(missing_nodes),
