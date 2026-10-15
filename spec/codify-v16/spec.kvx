@@ -102,7 +102,7 @@ reqs = ["1.1", "1.2", "1.3", "1.4", "1.5"]
 
 [task.2.1]
 title = "Shared semantic records, storage and lifecycle"
-status = "in_progress"
+status = "done"
 wave = 1
 requires = []
 touches = ["src/semantic.c", "src/semantic.h", "src/cg.h", "src/db.c", "src/scan.c", "tests/integration/57_semantic_store.sh"]
