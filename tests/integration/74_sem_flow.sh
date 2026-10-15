@@ -12,7 +12,19 @@ int middle_node(void) { return 2; }
 int end_node(void) { return 3; }
 int side_node(void) { return 4; }
 EOF
+cat > Hierarchy.java <<'EOF'
+class Base { }
+class Child extends Base { }
+EOF
 "$CG" init >/dev/null
+"$CG" flow paths Child Base --json > "$TMP/hierarchy.json"
+python3 - "$TMP/hierarchy.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+assert d['found'] and len(d['path_edges'])==1,d
+assert any(e['id']==d['path_edges'][0] and e['kind']=='inherits' and
+           e['strategy']=='type_hierarchy' for e in d['edges']),d
+PY
 python3 - <<'PY'
 import sqlite3
 db = sqlite3.connect('.codegraph/graph.db')
