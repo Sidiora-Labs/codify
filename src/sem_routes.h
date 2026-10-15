@@ -13,6 +13,7 @@ typedef struct {
  * handler definition causes route facts and links to be rebuilt. */
 void sem_routes_register(void);
 int sem_routes_pass(Cg *cg, const long *changed_files, int nfiles);
+int sem_routes_purge_file(Cg *cg, long file_id);
 
 /* Exact local method/path lookup. 1 = one route, 0 = none, -1 = ambiguous.
  * A wildcard method is never proof of a method-specific handler. */

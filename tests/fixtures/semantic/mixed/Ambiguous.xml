@@ -1,0 +1,5 @@
+<mapper namespace="site.Ambiguous">
+  <sql id="fragment">A</sql>
+  <sql id="fragment">B</sql>
+  <select id="caller"><include refid="fragment" /></select>
+</mapper>

@@ -23,6 +23,9 @@ expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Screen.
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Screen.actions.cancel'" 'missing object shorthand method'
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='View.actions.open'" 'missing JSX file action'
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Counter.increment'" 'missing plain JavaScript method'
+expect_some "SELECT count(*) FROM symbols WHERE name='Screen' AND sig LIKE 'export function Screen%'" 'exported function lost written modifier in signature'
+expect_some "SELECT count(*) FROM symbols WHERE name='View' AND sig LIKE 'export default function View%'" 'default export lost written modifier in signature'
+expect_none "SELECT count(*) FROM symbols WHERE name='arityZero' AND sig LIKE '%export%'" 'private function gained export modifier'
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='bus' AND exported=1" 'missing exported constructed receiver'
 one="$(count "SELECT count(*) FROM symbols WHERE name='Screen'")"
 [ "$one" -eq 1 ] || fail "semantic projection duplicated Screen ($one definitions)"
@@ -72,4 +75,12 @@ sed -i 's/async render(/async draw(/' src/main.tsx
 "$CG" sync >/dev/null
 expect_some "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Panel.draw'" 'edit did not replace method'
 expect_none "SELECT count(*) FROM semantic_symbols WHERE qualified_name='Panel.render'" 'stale method survived edit'
+
+# A wide syntax tree must reach a declaration after thousands of sibling comments.
+mkdir -p "$TMP/wide"
+awk 'BEGIN { for (i=0; i<32000; i++) print "// note"; print "export function tail() { return 1 }" }' > "$TMP/wide/wide.ts"
+cd "$TMP/wide"
+timeout 20 "$CG" init --workers 1 >/dev/null || fail 'wide web syntax exceeded traversal budget'
+DB="$(printf '%s\n' .*/graph.db | head -1)"
+expect_some "SELECT count(*) FROM symbols WHERE name='tail'" 'wide web syntax lost trailing declaration'
 echo ok
