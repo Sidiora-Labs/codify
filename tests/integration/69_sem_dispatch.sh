@@ -14,7 +14,9 @@ cp "$root/tests/fixtures/semantic/dispatch/web.tsx" \
    "$root/tests/fixtures/semantic/dispatch/observer.js" \
    "$root/tests/fixtures/semantic/dispatch/native.c" \
    "$root/tests/fixtures/semantic/dispatch/Bridge.java" \
-   "$root/tests/fixtures/semantic/dispatch/Worker.java" "$project/src/"
+   "$root/tests/fixtures/semantic/dispatch/Worker.java" \
+   "$root/tests/fixtures/semantic/dispatch/Flow.dfm" \
+   "$root/tests/fixtures/semantic/dispatch/Flow.pas" "$project/src/"
 cd "$project"
 "$CG" init >/dev/null
 db=".codegraph/graph.db"
@@ -29,6 +31,7 @@ require "SELECT count(*) FROM semantic_edges WHERE kind='observer_dispatch'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='pointer_dispatch' AND channel='ops.run'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='native_dispatch' AND channel='nativeOpen'" 1
 require "SELECT count(*) FROM semantic_edges e JOIN semantic_symbols src ON src.symbol_id=e.source_id JOIN semantic_symbols dst ON dst.symbol_id=e.target_id WHERE e.kind='interface_dispatch' AND src.qualified_name='Worker.invoke' AND dst.qualified_name='Concrete.work'" 1
+require "SELECT count(*) FROM semantic_edges e JOIN symbols src ON src.id=e.source_id JOIN symbols dst ON dst.id=e.target_id JOIN files f ON f.id=dst.file_id WHERE e.kind='form_event_dispatch' AND src.name='SaveButton' AND dst.name='HandleSave' AND f.path='src/Flow.pas'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='renders_component'" 1
 require "SELECT count(*) FROM semantic_edges WHERE kind='state_render' AND source_id=target_id" 1
 require "SELECT count(*) FROM semantic_edges WHERE strategy LIKE 'dispatch:%' AND (provenance<>'heuristic' OR registration_path='' OR registration_line IS NULL)" 0
@@ -36,6 +39,20 @@ require "SELECT count(*) FROM semantic_edges WHERE kind='callback' AND original_
 require "SELECT count(*) FROM semantic_edges WHERE kind='observer_dispatch' AND original_text='unknownObserver'" 0
 require "SELECT count(*) FROM semantic_edges e JOIN symbols s ON s.id=e.source_id WHERE e.kind='observer_dispatch' AND s.name='shadow'" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='native_dispatch' AND channel='computed'" 0
+
+# Form handlers follow the owning form type and exact companion unit.
+sed -i 's/OnClick = HandleSave/OnClick = UnknownHandler/' src/Flow.dfm
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='form_event_dispatch'" 0
+sed -i 's/OnClick = UnknownHandler/OnClick = HandleSave/' src/Flow.dfm
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='form_event_dispatch'" 1
+sed -i 's/procedure HandleSave(Sender: TObject);/procedure OtherHandler(Sender: TObject);/' src/Flow.pas
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='form_event_dispatch'" 0
+sed -i 's/procedure OtherHandler(Sender: TObject);/procedure HandleSave(Sender: TObject);/' src/Flow.pas
+"$CG" sync >/dev/null
+require "SELECT count(*) FROM semantic_edges WHERE kind='form_event_dispatch'" 1
 
 # A same-name overload has no safe target without signature evidence.
 sed -i 's/public void work() {}/public void work() {} public void work(int x) {}/' src/Worker.java

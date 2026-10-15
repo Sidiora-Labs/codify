@@ -45,7 +45,8 @@ static void addfact(Cg *cg,int file,int owner,const char *kind,const char *key,
 
 int main(void) {
     Cg cg={0};assert(sqlite3_open(":memory:",&cg.db)==SQLITE_OK);cg.branch_id=1;
-    cg_exec(&cg,"CREATE TABLE files(id INTEGER PRIMARY KEY,branch_id INTEGER,path TEXT);"
+    cg_exec(&cg,"CREATE TABLE files(id INTEGER PRIMARY KEY,branch_id INTEGER,"
+        "path TEXT,lang TEXT DEFAULT 'typescript');"
         "CREATE TABLE symbols(id INTEGER PRIMARY KEY,file_id INTEGER,"
         "name TEXT,kind TEXT DEFAULT 'function',sig TEXT DEFAULT '');"
         "CREATE TABLE semantic_symbols(symbol_id INTEGER PRIMARY KEY,file_id INTEGER,"
@@ -62,7 +63,7 @@ int main(void) {
         "provenance TEXT,evidence TEXT,channel TEXT,registration_path TEXT,"
         "start_line INTEGER,start_column INTEGER,registration_line INTEGER,"
         "registration_column INTEGER,synthesized INTEGER,registration_end_line INTEGER);"
-        "INSERT INTO files VALUES(1,1,'caller.ts'),(2,1,'target.ts'),"
+        "INSERT INTO files(id,branch_id,path) VALUES(1,1,'caller.ts'),(2,1,'target.ts'),"
         "(3,1,'impl.ts'),(4,2,'other.ts');"
         "INSERT INTO symbols(id,file_id,name) VALUES(10,1,'caller'),(11,1,'producer'),"
         "(12,1,'Parent'),(13,1,'update'),(14,1,'observer'),(20,2,'callback'),"

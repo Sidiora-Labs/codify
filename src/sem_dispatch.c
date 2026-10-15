@@ -66,6 +66,7 @@ static const char *edge_evidence(const char *kind) {
     if (!strcmp(kind,"renders_component")) return "component syntax and unique component definition";
     if (!strcmp(kind,"state_render")) return "state setter call and owning component";
     if (!strcmp(kind,"interface_dispatch")) return "resolved interface method and implementation relation";
+    if (!strcmp(kind,"form_event_dispatch")) return "literal form event, owning form type and matching handler declaration";
     return "explicit structural relationship";
 }
 
@@ -110,6 +111,9 @@ static int relevant(Cg *cg,const long *files,int n) {
         "AND (source_file_id=?2 OR target_file_id=?2 "
         "OR registration_path=(SELECT path FROM files WHERE id=?2)) LIMIT 1");
     sqlite3_stmt *missing=cg_prep(cg,"SELECT 1 FROM files WHERE id=?1");
+    sqlite3_stmt *forms=cg_prep(cg,"SELECT 1 FROM files f WHERE f.id=?1 AND ("
+        "f.lang='delphi_form' OR (f.lang='pascal' AND EXISTS(SELECT 1 FROM files d "
+        "WHERE d.branch_id=f.branch_id AND d.path=substr(f.path,1,length(f.path)-4)||'.dfm'))) LIMIT 1");
     sqlite3_stmt *refs=cg_prep(cg,
         "SELECT 1 FROM semantic_references v JOIN semantic_symbols m "
         "ON m.symbol_id=v.target_id JOIN semantic_edges i "
@@ -119,23 +123,27 @@ static int relevant(Cg *cg,const long *files,int n) {
         sqlite3_reset(q); sqlite3_clear_bindings(q);
         sqlite3_bind_int64(q,1,files[i]); if(sqlite3_step(q)==SQLITE_ROW) {
             sqlite3_finalize(q); sqlite3_finalize(e);
-            sqlite3_finalize(missing);sqlite3_finalize(refs);return 1;
+            sqlite3_finalize(missing);sqlite3_finalize(refs);sqlite3_finalize(forms);return 1;
         }
         sqlite3_reset(e); sqlite3_clear_bindings(e);
         sqlite3_bind_int64(e,1,cg->branch_id); sqlite3_bind_int64(e,2,files[i]);
         if(sqlite3_step(e)==SQLITE_ROW) { sqlite3_finalize(q); sqlite3_finalize(e);
-            sqlite3_finalize(missing);sqlite3_finalize(refs);return 1; }
+            sqlite3_finalize(missing);sqlite3_finalize(refs);sqlite3_finalize(forms);return 1; }
         sqlite3_reset(refs);sqlite3_clear_bindings(refs);
         sqlite3_bind_int64(refs,1,files[i]);sqlite3_bind_int64(refs,2,cg->branch_id);
         if(sqlite3_step(refs)==SQLITE_ROW) {sqlite3_finalize(q);sqlite3_finalize(e);
-            sqlite3_finalize(missing);sqlite3_finalize(refs);return 1;}
+            sqlite3_finalize(missing);sqlite3_finalize(refs);sqlite3_finalize(forms);return 1;}
+        sqlite3_reset(forms);sqlite3_clear_bindings(forms);
+        sqlite3_bind_int64(forms,1,files[i]);
+        if(sqlite3_step(forms)==SQLITE_ROW) {sqlite3_finalize(q);sqlite3_finalize(e);
+            sqlite3_finalize(missing);sqlite3_finalize(refs);sqlite3_finalize(forms);return 1;}
         sqlite3_reset(missing);sqlite3_clear_bindings(missing);
         sqlite3_bind_int64(missing,1,files[i]);
         if(sqlite3_step(missing)!=SQLITE_ROW) {sqlite3_finalize(q);sqlite3_finalize(e);
-            sqlite3_finalize(missing);sqlite3_finalize(refs);return 1;}
+            sqlite3_finalize(missing);sqlite3_finalize(refs);sqlite3_finalize(forms);return 1;}
     }
     sqlite3_finalize(q);sqlite3_finalize(e);
-    sqlite3_finalize(missing);sqlite3_finalize(refs);return 0;
+    sqlite3_finalize(missing);sqlite3_finalize(refs);sqlite3_finalize(forms);return 0;
 }
 
 static char *local_observer(Cg *cg,long file,int line) {
@@ -309,6 +317,71 @@ static int interfaces(Cg *cg,long branch) {
     sqlite3_finalize(r);sqlite3_finalize(c);return 0;
 }
 
+static int form_events(Cg *cg,long branch) {
+    sqlite3_stmt *events=cg_prep(cg,
+        "SELECT v.owner_id,v.original_text,v.file_id,v.start_line,v.start_column,f.path "
+        "FROM semantic_references v JOIN files f ON f.id=v.file_id "
+        "WHERE f.branch_id=?1 AND f.lang='delphi_form' AND v.kind='call' "
+        "AND v.owner_id IS NOT NULL AND v.original_text IS NOT NULL");
+    sqlite3_bind_int64(events,1,branch);
+    sqlite3_stmt *root=cg_prep(cg,
+        "WITH RECURSIVE owners(id,parent_id,depth) AS ("
+        "SELECT symbol_id,parent_id,0 FROM semantic_symbols WHERE symbol_id=?1 "
+        "UNION ALL SELECT p.symbol_id,p.parent_id,owners.depth+1 "
+        "FROM semantic_symbols p JOIN owners ON p.symbol_id=owners.parent_id "
+        "WHERE owners.depth<32) SELECT id FROM owners WHERE parent_id IS NULL LIMIT 2");
+    sqlite3_stmt *type=cg_prep(cg,
+        "SELECT original_text FROM semantic_references WHERE owner_id=?1 "
+        "AND kind='type' AND file_id=?2 LIMIT 2");
+    sqlite3_stmt *klass=cg_prep(cg,
+        "SELECT s.id FROM symbols s JOIN files f ON f.id=s.file_id "
+        "WHERE f.branch_id=?1 AND f.path=?2 AND s.name=?3 "
+        "AND s.kind IN ('class','type') LIMIT 2");
+    sqlite3_stmt *method=cg_prep(cg,
+        "SELECT s.id FROM semantic_symbols ss JOIN symbols s ON s.id=ss.symbol_id "
+        "WHERE ss.parent_id=?1 AND s.name=?2 "
+        "AND s.kind IN ('method','function') LIMIT 2");
+    int rc=0;
+    while(sqlite3_step(events)==SQLITE_ROW) {
+        long source=sqlite3_column_int64(events,0);
+        const char *handler=(const char*)sqlite3_column_text(events,1);
+        long file=sqlite3_column_int64(events,2);
+        int line=sqlite3_column_int(events,3),col=sqlite3_column_int(events,4);
+        const char *dfm=(const char*)sqlite3_column_text(events,5);
+        if(!handler || !*handler || !dfm) continue;
+        size_t len=strlen(dfm);
+        if(len<5 || len+1>=4096 || strcasecmp(dfm+len-4,".dfm")!=0) continue;
+        char pas[4096];memcpy(pas,dfm,len-4);memcpy(pas+len-4,".pas",5);
+        sqlite3_reset(root);sqlite3_clear_bindings(root);
+        sqlite3_bind_int64(root,1,source);
+        if(sqlite3_step(root)!=SQLITE_ROW) continue;
+        long form=sqlite3_column_int64(root,0);
+        if(sqlite3_step(root)==SQLITE_ROW) continue;
+        sqlite3_reset(type);sqlite3_clear_bindings(type);
+        sqlite3_bind_int64(type,1,form);sqlite3_bind_int64(type,2,file);
+        if(sqlite3_step(type)!=SQLITE_ROW) continue;
+        const char *form_type=(const char*)sqlite3_column_text(type,0);
+        if(!form_type || !*form_type) continue;
+        sqlite3_reset(klass);sqlite3_clear_bindings(klass);
+        sqlite3_bind_int64(klass,1,branch);
+        sqlite3_bind_text(klass,2,pas,-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text(klass,3,form_type,-1,SQLITE_TRANSIENT);
+        if(sqlite3_step(type)==SQLITE_ROW || sqlite3_step(klass)!=SQLITE_ROW) continue;
+        long class_id=sqlite3_column_int64(klass,0);
+        if(sqlite3_step(klass)==SQLITE_ROW) continue;
+        sqlite3_reset(method);sqlite3_clear_bindings(method);
+        sqlite3_bind_int64(method,1,class_id);
+        sqlite3_bind_text(method,2,handler,-1,SQLITE_TRANSIENT);
+        if(sqlite3_step(method)!=SQLITE_ROW) continue;
+        long target=sqlite3_column_int64(method,0);
+        if(sqlite3_step(method)==SQLITE_ROW) continue;
+        if(edge(cg,branch,source,target,file,"form_event_dispatch",handler,
+                handler,dfm,line,col,line,col)) {rc=-1;break;}
+    }
+    sqlite3_finalize(events);sqlite3_finalize(root);sqlite3_finalize(type);
+    sqlite3_finalize(klass);sqlite3_finalize(method);return rc;
+}
+
 int sem_dispatch_run(Cg *cg,const long *changed_files,int nfiles) {
     if (!cg || !cg->branch_id || !relevant(cg,changed_files,nfiles)) return 0;
     /* Savepoint permits this pass to be called inside the scan writer's
@@ -328,6 +401,7 @@ int sem_dispatch_run(Cg *cg,const long *changed_files,int nfiles) {
     /* A state setter call triggers the component that owns the hook. */
     if (!rc) rc=paired(cg,cg->branch_id,"state_setter_call","state_setter","state_render",1,0);
     if (!rc) rc=interfaces(cg,cg->branch_id);
+    if (!rc) rc=form_events(cg,cg->branch_id);
     cg_exec(cg,rc?"ROLLBACK TO sem_dispatch; RELEASE sem_dispatch":"RELEASE sem_dispatch");
     return rc;
 }
