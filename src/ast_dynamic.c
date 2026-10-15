@@ -69,7 +69,11 @@ static int add_symbol(DynWalk *w, TSNode node, TSNode name_node,
     s->signature = text(w->ctx, params);
     s->result_type = text(w->ctx, result);
     s->decorators = decorators_text(w->ctx, decorators);
-    s->exported = w->owner < 0 || (strcmp(w->ctx->language, "python") == 0 && name[0] != '_');
+    bool module_owner = w->owner >= 0 &&
+        !strcmp(r->symbols[w->owner].kind, "module") &&
+        strcmp(w->ctx->language, "python") != 0;
+    s->exported = (w->owner < 0 || module_owner) &&
+                  (strcmp(w->ctx->language, "python") != 0 || name[0] != '_');
     s->scope_key = s->qualified_name ? strdup(s->qualified_name) : NULL;
     if (name[0] == '_' && strcmp(w->ctx->language, "python") == 0)
         s->visibility = strdup("private-convention");
@@ -374,8 +378,23 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
                 uint32_t count = ts_node_named_child_count(attrs);
                 for (uint32_t i = 0; i < count; i++) {
                     TSNode decorator = ts_node_named_child(attrs, i);
-                    if (is(decorator, "decorator"))
-                        add_relation(w->ctx, child_owner, decorator, "decorates", decorator);
+                    if (is(decorator, "decorator")) {
+                        TSNode target = first_named(decorator);
+                        if (is(target, "call")) target = ast_field(target, "function");
+                        add_relation(w->ctx, child_owner, decorator, "decorates", target);
+                    }
+                }
+            }
+            if (php && !ts_node_is_null(attrs)) {
+                uint32_t groups = ts_node_named_child_count(attrs);
+                for (uint32_t i = 0; i < groups; i++) {
+                    TSNode group = ts_node_named_child(attrs, i);
+                    for (uint32_t j = 0; j < ts_node_named_child_count(group); j++) {
+                        TSNode attribute = ts_node_named_child(group, j);
+                        if (is(attribute, "attribute"))
+                            add_relation(w->ctx, child_owner, attribute,
+                                         "decorates", first_named(attribute));
+                    }
                 }
             }
         } else child_owner = w->owner;

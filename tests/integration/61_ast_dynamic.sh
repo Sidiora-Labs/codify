@@ -60,6 +60,7 @@ assert 'Run documentation.' in py_doc[0]['documentation'], py_doc
 py_fact = rows('SELECT name,kind,value FROM semantic_type_facts WHERE file_id=?', py)
 assert any(f['name']=='engine' and f['kind']=='variable_type' and f['value']=='Runner' for f in py_fact), py_fact
 assert any(f['name']=='Worker' and f['kind']=='inherits' and f['value']=='Base' for f in py_fact), py_fact
+assert any(f['name']=='run' and f['kind']=='decorates' and f['value']=='cached' for f in py_fact), py_fact
 
 php = fileid('src/example.php')
 php_bind = rows('SELECT module,local_name FROM semantic_bindings WHERE file_id=?', php)
@@ -73,6 +74,8 @@ assert 'Route' in php_run[0]['decorators'], php_run
 assert 'public' in php_run[0]['visibility'], php_run
 assert 'string' in php_run[0]['result_type'], php_run
 assert 'Run documentation.' in php_run[0]['documentation'], php_run
+php_fact = rows('SELECT name,kind,value FROM semantic_type_facts WHERE file_id=?', php)
+assert any(f['name']=='run' and f['kind']=='decorates' and f['value']=='Route' for f in php_fact), php_fact
 
 db.close()
 PY
