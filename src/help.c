@@ -151,8 +151,9 @@ static const HelpCmd HELP[] = {
 { .group = "graph", .name = "inspect", .args = "<hierarchy|unused>",
   .usage = "inspect <hierarchy|unused> [name] [-n N] [--path GLOB]",
   .summary = "type hierarchy and cautious unreferenced-code inspection",
-  .detail = "Hierarchy reads bounded typed relations. Unused lists symbols "
-    "without known incoming references, with explicit exclusion reasons. "
+  .detail = "Hierarchy reads bounded typed relations. Unused distinguishes "
+    "symbols without known incoming references from internally referenced "
+    "islands outside known roots, with explicit exclusion reasons. "
     "A missing graph edge never proves code safe to delete.",
   .examples = "cg inspect hierarchy Service --json\n"
     "cg inspect unused --path 'src/*' -n 20 --json",

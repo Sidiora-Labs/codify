@@ -903,8 +903,9 @@ static const struct {
       "including ambiguous symbol matches.",
       S_INSPECT_HIERARCHY, A_READ, "Inspect hierarchy", t_inspect_hierarchy, true },
     { "inspect_unreferenced",
-      "Unreferenced symbols with export, framework, reflection, generated "
-      "and uncertain-coverage exclusions. No deletion proof.",
+      "Unreferenced symbols and bounded reachability from known roots, with "
+      "export, framework, reflection, generated and uncertainty exclusions. "
+      "No deletion proof.",
       S_INSPECT_UNUSED, A_READ, "Inspect unreferenced symbols", t_inspect_unreferenced, true },
     { "list_routes",
       "Framework-aware HTTP routes (URL pattern -> handler) detected across "
