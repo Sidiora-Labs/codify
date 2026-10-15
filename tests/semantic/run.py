@@ -143,7 +143,8 @@ def score_language(cg: Path, work: Path, case) -> dict:
         raise AssertionError(f"{case.adapter}: parser identity missing")
     if case.support == "file-only":
         # File-level tracking must be labelled and must not invent a symbol.
-        if rows or not coverage["parser"].startswith("file-only:") or \
+        if coverage["status"] != "complete" or rows or \
+           not coverage["parser"].startswith("file-only:") or \
            coverage["last_success_hash"] != coverage["hash"]:
             raise AssertionError(f"{case.adapter}: file-only input has unlabelled structural coverage")
         return {"adapter": case.adapter, "support": case.support, "coverage": coverage,
@@ -241,7 +242,9 @@ def score_framework(cg: Path, work: Path, case) -> dict:
                 and (r["method"] or "").upper() == case.method]
     forbidden_paths = {case.decoy_path, *case.extra_decoy_paths}
     negative = [r for r in routes if r["pattern"] in forbidden_paths or
-                (r["pattern"] == case.path and r["framework"] != (case.framework_id or case.name)) or
+                (r["pattern"] == case.path and
+                 (r["framework"] != (case.framework_id or case.name) or
+                  (r["method"] or "").upper() != case.method)) or
                 (str(r["pattern"] or "").startswith("/v16") and r["pattern"] != case.path)]
     handler_symbols = [(p, r) for p, rows in symbols.items() for r in rows
                        if r["name"].lower() == case.handler.lower()]
@@ -265,7 +268,9 @@ def score_framework(cg: Path, work: Path, case) -> dict:
                            e["target_name"].lower() != case.handler.lower()]
     return {"framework": case.name, "coverage": files, "coverage_ok": coverage_ok,
             "route_tp": int(bool(positive)),
-            "route_fp": len(negative) + len(wrong_links) + len(wrong_handler_links),
+            "route_fp": len(negative) + max(0, len(positive) - 1) +
+                        len(wrong_links) + len(wrong_handler_links) +
+                        max(0, len(linked) - 1),
             "route_fn": int(not positive), "handler_tp": int(bool(handler_symbols)),
             "handler_fn": int(not handler_symbols), "edge_tp": int(bool(linked)),
             "edge_fn": int(not linked), "actual_routes": routes,
