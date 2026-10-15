@@ -57,6 +57,10 @@ for ext in ('py', 'rb', 'php'):
     assert bindings, (ext, bindings)
 
 py = fileid('src/example.py')
+py_signature = rows('SELECT sig FROM symbols WHERE file_id=? AND name=?', py, 'run')
+assert py_signature == [{'sig':'def run(self, value: int) -> str:'}], py_signature
+later_signature = rows('SELECT sig FROM symbols WHERE file_id=? AND name=?', py, 'later')
+assert later_signature == [{'sig':'def later():'}], later_signature
 py_bind = rows('SELECT module,local_name,original_name FROM semantic_bindings WHERE file_id=?', py)
 assert {'module':'services.core','local_name':'Runner','original_name':'Engine'} in py_bind, py_bind
 assert {'module':'os.path','local_name':'paths','original_name':None} in py_bind, py_bind
@@ -101,6 +105,28 @@ db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 names = {r[0] for r in db.execute('''SELECT s.name FROM symbols s JOIN files f ON f.id=s.file_id
                                      WHERE f.path='src/recovery.py' ''')}
 assert {'before', 'after'} <= names, names
+db.close()
+PY
+
+# A broad syntax tree must walk siblings linearly. The generated comments are
+# separate named nodes, which exposes accidental repeated child-index scans.
+python3 - <<'PY'
+from pathlib import Path
+Path('src/wide.py').write_text(''.join(f'# note {i}\n' for i in range(12000)) +
+                               'def wide_target():\n    return 7\n')
+PY
+python3 - <<'PY'
+import os, sqlite3, subprocess, time
+from pathlib import Path
+start = time.monotonic()
+subprocess.run([os.environ['CG'], 'sync'], check=True, stdout=subprocess.DEVNULL,
+               timeout=25)
+elapsed = time.monotonic() - start
+db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
+found = db.execute('''SELECT count(*) FROM symbols s JOIN files f ON f.id=s.file_id
+                      WHERE f.path='src/wide.py' AND s.name='wide_target' ''').fetchone()[0]
+assert found == 1, found
+assert elapsed < 25, elapsed
 db.close()
 PY
 

@@ -48,11 +48,11 @@
     - Implement Pascal/COBOL/VB.NET/CFScript/CFQuery/ArkTS and Vue/Svelte/Astro/Liquid/Razor/CFML/Delphi-form/MyBatis adapters. Preserve offsets for embedded code; file-only formats must say so. Use separate manifests for grammar registration and licences.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.7, 2.8_
-  - [ ] 3.1 Import bindings aliases and export chains
+  - [x] 3.1 Import bindings aliases and export chains
     - Resolve explicit aliases/default/namespaces/reexports with cycle bounds; nearest tsconfig/jsconfig paths, workspace package roots and language-specific imports. Track configuration hashes and reverse dependencies, support config-only edits and branch isolation.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.1_
-  - [ ] 3.2 Receiver ownership and overload resolution
+  - [x] 3.2 Receiver ownership and overload resolution
     - Resolve this/self, imported namespaces and known constructor/declared receivers; apply owner/visibility/signature evidence and abstain on equal ambiguity. Preserve original reference and resolution provenance; retry affected unchanged callers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.2, 3.4_
@@ -60,15 +60,15 @@
     - Resolve containment/inheritance/implements/types/returns/instantiation/overrides/decorators/exports as typed relations with sites and evidence. Respect branch and scope; provide reusable type hierarchy helpers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.3, 3.4_
-  - [ ] 3.4 Framework route and handler graph
+  - [x] 3.4 Framework route and handler graph
     - Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.5_
-  - [ ] 3.5 Callback interface and runtime dispatch synthesis
+  - [x] 3.5 Callback interface and runtime dispatch synthesis
     - Build bounded callback/observer/event/interface/C-function-pointer/React-render/component and native-bridge passes from explicit registration/type evidence. Stamp heuristic provenance and wiring sites, preserve dynamic boundaries and transactional replacement.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.6, 3.8_
-  - [ ] 3.6 HTTP queue and message channel synthesis
+  - [x] 3.6 HTTP queue and message channel synthesis
     - Connect literal HTTP method/path to unique routes and compatible named queue/bus/socket producers/consumers; reject ambiguous or computed inputs. Record channel/tier/registration evidence and avoid duplicate or unbounded fanout.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.7, 3.8_

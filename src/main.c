@@ -54,6 +54,12 @@ static bool workers_opt(int *argc, char **argv, const char *cmd, int *out) {
     return true;
 }
 
+static int query_budget_arg(int argc, char **argv) {
+    for (int i = 2; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--budget") == 0) return atoi(argv[i + 1]);
+    return 0;
+}
+
 static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
     /* the count an unbounded foreground pass would ask for, and who chose
      * it; background passes, the file count, and the slot gate bound it
@@ -344,7 +350,11 @@ int main(int argc, char **argv) {
          strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
          strcmp(cmd, "test-impact") == 0);
     AnswerCapture answer_capture = {0};
-    if (health_answer) answer_health_capture_begin(&answer_capture);
+    int requested_budget = json && (strcmp(cmd, "context") == 0 ||
+        strcmp(cmd, "impact") == 0) ? query_budget_arg(argc, argv) : 0;
+    size_t answer_max = requested_budget > 0 && requested_budget < 1000000 ?
+        (size_t)requested_budget * 4 : 0;
+    if (health_answer) answer_health_capture_begin(&answer_capture, answer_max);
 
     if (strcmp(cmd, "journal") == 0) {
         rc = cmd_journal(&cg, argc - 2, argv + 2, json);
@@ -441,6 +451,8 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "impact") == 0) {
         int depth = atoi(opt(&argc, argv, "-d", "3"));
         int budget = atoi(opt(&argc, argv, "--budget", "8000"));
+        if (json && requested_budget > 0)
+            budget = answer_health_query_budget(budget);
         if (argc < 3) { help_usage("impact"); rc = 1; }
         else rc = cmd_impact(&cg, argv[2], depth > 0 ? depth : 3,
                              budget > 0 ? budget : 8000, json);
@@ -457,6 +469,8 @@ int main(int argc, char **argv) {
                                  argc > 4 ? argv[4] : NULL, lim, json);
     } else if (strcmp(cmd, "context") == 0) {
         int budget = atoi(opt(&argc, argv, "--budget", "4000"));
+        if (json && requested_budget > 0)
+            budget = answer_health_query_budget(budget);
         int limit = atoi(opt(&argc, argv, "-n", "8"));
         if (argc < 3) { help_usage("context"); rc = 1; }
         else rc = cmd_context(&cg, argv[2], budget > 0 ? budget : 4000,
