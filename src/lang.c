@@ -5,6 +5,7 @@
  */
 #include "cg.h"
 #include "ast.h"
+#include "index_health.h"
 #include <regex.h>
 #include <ctype.h>
 
@@ -240,6 +241,7 @@ void lang_global_init(void) {
 }
 
 static const LangSpec *spec_by_name(const char *name) {
+    if (!name) return NULL;
     for (int i = 0; i < NLANGS; i++)
         if (strcmp(LANGS[i].name, name) == 0) return &LANGS[i];
     return NULL;
@@ -933,6 +935,7 @@ static void lang_scan_imports(const LangSpec *L, const char *line, int lineno,
 void lang_parse(const char *lang, const char *path, const char *src,
                 size_t len, ParseResult *pr) {
     memset(pr, 0, sizeof *pr);
+    snprintf(pr->parser, sizeof pr->parser, "heuristic");
     if (ast_try_parse(lang, path, src, len, pr)) return;
     const LangSpec *L = spec_for_path(path);
     if (!L) return;
