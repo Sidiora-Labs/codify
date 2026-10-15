@@ -121,5 +121,11 @@ int main(void) {
     assert(sem_dispatch_run(&cg,&changed,1)==0);
     equal(&cg,"SELECT count(*) FROM semantic_edges WHERE kind='pointer_dispatch'",0);
     equal(&cg,"SELECT count(*) FROM semantic_edges WHERE kind='implements'",1);
+    /* A same-name overload without signature evidence is not a target. */
+    cg_exec(&cg,"INSERT INTO symbols VALUES(34,3,'work');"
+                "INSERT INTO semantic_symbols(symbol_id,file_id,qualified_name,"
+                "parent_id) VALUES(34,3,'Concrete.work#2',32)");
+    long changed_type=3;assert(sem_dispatch_run(&cg,&changed_type,1)==0);
+    equal(&cg,"SELECT count(*) FROM semantic_edges WHERE kind='interface_dispatch'",0);
     sqlite3_close(cg.db);puts("ok");return 0;
 }

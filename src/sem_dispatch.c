@@ -189,7 +189,10 @@ static int interfaces(Cg *cg,long branch) {
         "JOIN symbols m ON m.id=method.symbol_id "
         "JOIN files f ON f.id=m.file_id "
         "WHERE e.branch_id=?1 AND e.kind='implements' AND e.target_id=?2 "
-        "AND m.name=?3 ORDER BY m.id LIMIT 33");
+        "AND m.name=?3 AND (SELECT count(*) FROM semantic_symbols other "
+        "JOIN symbols os ON os.id=other.symbol_id WHERE "
+        "other.parent_id=child.symbol_id AND os.name=?3)=1 "
+        "ORDER BY m.id LIMIT 33");
     while(sqlite3_step(r)==SQLITE_ROW) {
         long source=sqlite3_column_int64(r,0),file=sqlite3_column_int64(r,1);
         const char *text=(const char*)sqlite3_column_text(r,2);
