@@ -55,6 +55,30 @@ static char *decorators_text(AstContext *ctx, TSNode wrapper) {
     return end > start ? ast_slice(ctx, (uint32_t)start, (uint32_t)end) : NULL;
 }
 
+static char *python_signature(AstContext *ctx, TSNode declaration, TSNode body) {
+    if (ts_node_is_null(body)) return NULL;
+    uint32_t start = ts_node_start_byte(declaration);
+    uint32_t end = ts_node_start_byte(body);
+    TSTreeCursor cursor = ts_tree_cursor_new(declaration);
+    if (ts_tree_cursor_goto_first_child(&cursor)) {
+        do {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            if (is(child, ":") && ts_node_start_byte(child) < end) {
+                end = ts_node_end_byte(child);
+                break;
+            }
+        } while (ts_tree_cursor_goto_next_sibling(&cursor));
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (end <= start || end - start > 8192) return NULL;
+    char *sig = ast_slice(ctx, start, end);
+    if (!sig) return NULL;
+    size_t n = strlen(sig);
+    while (n && (sig[n-1] == ' ' || sig[n-1] == '\t' ||
+                 sig[n-1] == '\r' || sig[n-1] == '\n')) sig[--n] = 0;
+    return sig;
+}
+
 static int add_symbol(DynWalk *w, TSNode node, TSNode name_node,
                       const char *kind, TSNode params, TSNode result,
                       TSNode decorators) {
@@ -231,14 +255,14 @@ static void python_import(DynWalk *w, TSNode node) {
             char *orig = text(w->ctx, ast_field(child, "name"));
             char *local = text(w->ctx, ast_field(child, "alias"));
             add_binding(w, child, from ? module : orig, from ? orig : NULL,
-                        local, from ? "from-import" : "import");
+                        local, from ? "from-import" : "module_import");
             free(orig); free(local);
         } else if (is(child, "dotted_name")) {
             char *orig = text(w->ctx, child);
             char *local = from ? short_name(orig) : strdup(orig);
             if (!from && local) { char *dot = strchr(local, '.'); if (dot) *dot = 0; }
             add_binding(w, child, from ? module : orig, from ? orig : NULL,
-                        local, from ? "from-import" : "import");
+                        local, from ? "from-import" : "module_import");
             free(orig); free(local);
         } else if (is(child, "wildcard_import")) {
             add_binding(w, child, module, "*", "*", "wildcard-import");
@@ -303,11 +327,26 @@ static void ruby_import(DynWalk *w, TSNode node) {
     free(verb);
 }
 
-static char *python_doc(AstContext *c, TSNode body) {
+static TSNode python_doc_node(TSNode body) {
     TSNode value = first_named(body);
     if (is(value, "expression_statement")) value = first_named(value);
-    if (!is(value, "string") && !is(value, "concatenated_string")) return NULL;
-    return text(c, value);
+    return is(value, "string") || is(value, "concatenated_string") ?
+           value : (TSNode){0};
+}
+
+static void python_capture_doc(AstContext *ctx, TSNode node) {
+    if (ts_node_is_null(node)) return;
+    ParseResult *pr = ctx->result;
+    if (pr->ncmts == pr->ccmts) {
+        pr->ccmts = pr->ccmts ? pr->ccmts * 2 : 16;
+        pr->cmts = xrealloc(pr->cmts, sizeof *pr->cmts * (size_t)pr->ccmts);
+    }
+    CmtDef *c = &pr->cmts[pr->ncmts++];
+    c->body = text(ctx, node);
+    c->line = ast_line(node);
+    c->end_line = (int)ts_node_end_point(node).row + 1;
+    c->below = true;
+    c->pure = true;
 }
 
 static char *preceding_comment(AstContext *c, TSNode n) {
@@ -364,7 +403,13 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
         if (child_owner >= 0) {
             SemSymbol *s = &w->ctx->result->sem.symbols[child_owner];
             TSNode body = ast_field(n, "body");
-            if (py) s->documentation = python_doc(w->ctx, body);
+            if (py) {
+                char *header = python_signature(w->ctx, n, body);
+                if (header) { free(s->signature); s->signature = header; }
+                TSNode doc = python_doc_node(body);
+                s->documentation = text(w->ctx, doc);
+                python_capture_doc(w->ctx, doc);
+            }
             else s->documentation = preceding_comment(w->ctx, n);
             if (php && !strcmp(t, "method_declaration")) {
                 uint32_t count = ts_node_child_count(n);
@@ -416,6 +461,8 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
                 }
             }
         } else child_owner = w->owner;
+    } else if (py && is(n, "module")) {
+        python_capture_doc(w->ctx, python_doc_node(n));
     } else if (py && (is(n, "import_statement") || is(n, "import_from_statement"))) {
         python_import(w, n);
     } else if (php && is(n, "namespace_use_declaration")) {
@@ -482,17 +529,21 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
             add_ref(w, n, target, receiver, ast_field(n, "arguments"));
     }
     DynWalk nested = {w->ctx, child_owner};
-    uint32_t count = ts_node_named_child_count(n);
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(n, i);
-        int before = w->ctx->result->sem.nsymbols;
-        if (!ts_node_is_null(child)) walk(&nested, child, depth + 1);
-        if (php && is(child, "namespace_definition") &&
-            ts_node_is_null(ast_field(child, "body")) &&
-            w->ctx->result->sem.nsymbols > before)
-            nested.owner = before;
-        if (w->ctx->truncated) break;
+    TSTreeCursor cursor = ts_tree_cursor_new(n);
+    if (ts_tree_cursor_goto_first_child(&cursor)) {
+        do {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            if (!ts_node_is_named(child)) continue;
+            int before = w->ctx->result->sem.nsymbols;
+            walk(&nested, child, depth + 1);
+            if (php && is(child, "namespace_definition") &&
+                ts_node_is_null(ast_field(child, "body")) &&
+                w->ctx->result->sem.nsymbols > before)
+                nested.owner = before;
+            if (w->ctx->truncated) break;
+        } while (ts_tree_cursor_goto_next_sibling(&cursor));
     }
+    ts_tree_cursor_delete(&cursor);
 }
 
 static void extract(AstContext *ctx) {

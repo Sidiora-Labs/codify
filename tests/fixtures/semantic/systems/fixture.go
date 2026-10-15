@@ -1,5 +1,8 @@
 package sample
-import "fmt"
+import (
+    "fmt"
+    j "encoding/json"
+)
 type Runner interface { Run(int) int }
 type Worker struct { n int }
 func (w Worker) Run(value int) int { return helper(value) }

@@ -513,11 +513,16 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
         dart_selector_call(c, n, parent);
     add_type_reference(c, n, parent);
     import_binding(c, n);
-    uint32_t count = ts_node_named_child_count(n);
     int pending_method = -1;
     int file_namespace = -1;
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(n, i);
+    TSTreeCursor cursor = ts_tree_cursor_new(n);
+    if (!ts_tree_cursor_goto_first_child(&cursor)) {
+        ts_tree_cursor_delete(&cursor);
+        return;
+    }
+    do {
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        if (!ts_node_is_named(child)) continue;
         const char *ct = ts_node_type(child);
         int child_owner = file_namespace >= 0 ? file_namespace : owner;
         if (is_type(c->language, "dart") && pending_method >= 0 &&
@@ -533,7 +538,8 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
              is_type(ct, "package_clause") || is_type(ct, "file_scoped_namespace_declaration")) &&
             c->result->sem.nsymbols > before)
             file_namespace = c->result->sem.nsymbols - 1;
-    }
+    } while (ts_tree_cursor_goto_next_sibling(&cursor));
+    ts_tree_cursor_delete(&cursor);
 }
 
 static void extract(AstContext *c) {
