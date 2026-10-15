@@ -54,8 +54,8 @@ int main(void) {
         "owner_id INTEGER,kind TEXT,name TEXT,value TEXT,evidence TEXT,start_line INTEGER,"
         "start_column INTEGER);"
         "CREATE TABLE semantic_references(id INTEGER PRIMARY KEY,file_id INTEGER,"
-        "owner_id INTEGER,target_id INTEGER,original_text TEXT,start_line INTEGER,"
-        "start_column INTEGER);"
+        "owner_id INTEGER,target_id INTEGER,original_text TEXT,kind TEXT,"
+        "qualifier TEXT,start_line INTEGER,start_column INTEGER);"
         "CREATE TABLE semantic_edges(id INTEGER PRIMARY KEY,branch_id INTEGER,"
         "source_file_id INTEGER,target_file_id INTEGER,source_id INTEGER,"
         "target_id INTEGER,kind TEXT,original_text TEXT,strategy TEXT,"
@@ -82,12 +82,16 @@ int main(void) {
         "source_id,target_id,kind,strategy,provenance,synthesized,start_line) "
         "VALUES(1,3,3,32,30,'implements','type','resolved',0,9);"
         "INSERT INTO semantic_references(file_id,owner_id,target_id,original_text,"
-        "start_line,start_column) VALUES(1,10,31,'api.work()',15,4);");
+        "kind,qualifier,start_line,start_column) "
+        "VALUES(1,10,31,'api.work()','call','api',15,4),"
+        "(1,11,NULL,'notifyObservers','call','observer',5,2),"
+        "(1,10,NULL,'addObserver','call','observer',6,2);");
     addfact(&cg,1,10,"callback_registration","addEventListener","callback",2);
     addfact(&cg,1,11,"event_emit","saved",NULL,3);
     addfact(&cg,2,20,"event_subscription","saved","callback",4);
     addfact(&cg,1,11,"observer_notify","changed",NULL,5);
-    addfact(&cg,2,21,"observer_subscription","changed","observer",6);
+    addfact(&cg,1,10,"observer_subscription","changed","observer",6);
+    addfact(&cg,1,10,"constructor","observer","Observer",1);
     addfact(&cg,1,11,"pointer_call","table.slot",NULL,7);
     addfact(&cg,1,11,"pointer_slot","table.slot","slotTarget",8);
     addfact(&cg,1,11,"pointer_call","remote.slot",NULL,8);

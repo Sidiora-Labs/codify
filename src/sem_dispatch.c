@@ -61,7 +61,8 @@ static int edge(Cg *cg,long branch,long source,long target,long source_file,
                 const char *kind,const char *channel,const char *text,
                 const char *registration_path,int site_line,int site_col,
                 int registration_line,int registration_col) {
-    if (!source || !target || source==target || !source_file) return 0;
+    if (!source || !target || !source_file ||
+        (source==target && strcmp(kind,"state_render")!=0)) return 0;
     long target_file=symbol_file(cg,target); if (!target_file) return 0;
     sqlite3_stmt *q=cg_prep(cg,
         "INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
@@ -125,11 +126,33 @@ static int relevant(Cg *cg,const long *files,int n) {
     sqlite3_finalize(missing);sqlite3_finalize(refs);return 0;
 }
 
+static char *local_observer(Cg *cg,long file,int line) {
+    sqlite3_stmt *q=cg_prep(cg,"SELECT DISTINCT qualifier FROM semantic_references "
+                              "WHERE file_id=?1 AND start_line=?2 AND kind='call' "
+                              "AND qualifier IS NOT NULL AND qualifier<>'' LIMIT 2");
+    sqlite3_bind_int64(q,1,file);sqlite3_bind_int(q,2,line);
+    char *receiver=NULL;
+    if(sqlite3_step(q)==SQLITE_ROW) {
+        const char *v=(const char*)sqlite3_column_text(q,0);
+        if(v && *v) receiver=xstrdup(v);
+        if(sqlite3_step(q)==SQLITE_ROW) {free(receiver);receiver=NULL;}
+    }
+    sqlite3_finalize(q);
+    if(!receiver) return NULL;
+    q=cg_prep(cg,"SELECT count(*) FROM semantic_type_facts WHERE file_id=?1 "
+                 "AND kind='constructor' AND name=?2");
+    sqlite3_bind_int64(q,1,file);sqlite3_bind_text(q,2,receiver,-1,SQLITE_TRANSIENT);
+    int count=0;if(sqlite3_step(q)==SQLITE_ROW)count=sqlite3_column_int(q,0);
+    sqlite3_finalize(q);
+    if(count!=1){free(receiver);return NULL;}
+    return receiver;
+}
+
 /* Pair a literal invocation with exactly one registration. Multiple
  * registrations or targets are an explicit ambiguity, never a guessed edge. */
 static int paired(Cg *cg,long branch,const char *invoke_kind,
                   const char *register_kind,const char *edge_kind,
-                  int same_file,int require_identity) {
+                  int same_file,int identity_mode) {
     sqlite3_stmt *inv=cg_prep(cg,
         "SELECT t.name,t.owner_id,t.file_id,t.start_line,t.start_column,t.evidence "
         "FROM semantic_type_facts t JOIN files f ON f.id=t.file_id "
@@ -141,34 +164,47 @@ static int paired(Cg *cg,long branch,const char *invoke_kind,
         "FROM semantic_type_facts t JOIN files f ON f.id=t.file_id "
         "WHERE f.branch_id=?1 AND t.kind=?2 AND t.name=?3 AND t.value IS NOT NULL "
         "AND t.value<>'' AND (?4=0 OR t.file_id=?4) "
-        "AND (?5=0 OR t.evidence=?6) LIMIT 2");
+        "AND (?5<>1 OR t.evidence=?6) AND (?7 IS NULL OR EXISTS "
+        "(SELECT 1 FROM semantic_references rr WHERE rr.file_id=t.file_id "
+        "AND rr.start_line=t.start_line AND rr.qualifier=?7)) LIMIT 2");
     while(sqlite3_step(inv)==SQLITE_ROW) {
         const char *key=(const char*)sqlite3_column_text(inv,0);
-        const char *identity=(const char*)sqlite3_column_text(inv,5);
-        if (require_identity && (!identity || !strchr(identity,':'))) continue;
         long source=sqlite3_column_int64(inv,1),source_file=sqlite3_column_int64(inv,2);
         int line=sqlite3_column_int(inv,3),col=sqlite3_column_int(inv,4);
+        char *local=identity_mode==2?local_observer(cg,source_file,line):NULL;
+        const char *identity=identity_mode==2?local:(const char*)sqlite3_column_text(inv,5);
+        if ((identity_mode==1 && (!identity || !strchr(identity,':'))) ||
+            (identity_mode==2 && !local)) {free(local);continue;}
         sqlite3_reset(reg); sqlite3_clear_bindings(reg);
         sqlite3_bind_int64(reg,1,branch);
         sqlite3_bind_text(reg,2,register_kind,-1,SQLITE_STATIC);
         sqlite3_bind_text(reg,3,key,-1,SQLITE_TRANSIENT);
         sqlite3_bind_int64(reg,4,same_file?source_file:0);
-        sqlite3_bind_int(reg,5,require_identity);
+        sqlite3_bind_int(reg,5,identity_mode);
         if (identity) sqlite3_bind_text(reg,6,identity,-1,SQLITE_TRANSIENT);
-        if (sqlite3_step(reg)!=SQLITE_ROW) continue;
+        if(local)sqlite3_bind_text(reg,7,local,-1,SQLITE_TRANSIENT);
+        if (sqlite3_step(reg)!=SQLITE_ROW) {free(local);continue;}
         const char *value=(const char*)sqlite3_column_text(reg,0);
         long reg_file=sqlite3_column_int64(reg,1);
         int rline=sqlite3_column_int(reg,2),rcol=sqlite3_column_int(reg,3);
         const char *path=(const char*)sqlite3_column_text(reg,4);
         const char *registered_identity=(const char*)sqlite3_column_text(reg,5);
-        if (require_identity && (!registered_identity ||
-            strcmp(identity,registered_identity)!=0)) continue;
+        if (identity_mode==1 && (!registered_identity ||
+            strcmp(identity,registered_identity)!=0)) {free(local);continue;}
+        if (identity_mode==2) {
+            char *other=local_observer(cg,reg_file,rline);
+            int match=other && strcmp(local,other)==0;
+            free(other);
+            if(!match){free(local);continue;}
+        }
         long target=unique_symbol(cg,branch,reg_file,value);
         char *path_copy=xstrdup(path?path:"");
-        if (sqlite3_step(reg)==SQLITE_ROW || !target) { free(path_copy); continue; }
+        if (sqlite3_step(reg)==SQLITE_ROW || !target) {
+            free(local);free(path_copy);continue;
+        }
         int erc=edge(cg,branch,source,target,source_file,edge_kind,key,key,
                      path_copy,line,col,rline,rcol);
-        free(path_copy);
+        free(local);free(path_copy);
         if (erc) { sqlite3_finalize(inv); sqlite3_finalize(reg); return -1; }
     }
     sqlite3_finalize(inv); sqlite3_finalize(reg); return 0;
@@ -257,7 +293,7 @@ int sem_dispatch_run(Cg *cg,const long *changed_files,int nfiles) {
     if (!rc) rc=direct(cg,cg->branch_id,"callback_registration","callback",0);
     if (!rc) rc=direct(cg,cg->branch_id,"jsx_component","renders_component",1);
     if (!rc) rc=paired(cg,cg->branch_id,"event_emit","event_subscription","event_dispatch",0,1);
-    if (!rc) rc=paired(cg,cg->branch_id,"observer_notify","observer_subscription","observer_dispatch",0,1);
+    if (!rc) rc=paired(cg,cg->branch_id,"observer_notify","observer_subscription","observer_dispatch",1,2);
     if (!rc) rc=paired(cg,cg->branch_id,"pointer_call","pointer_slot","pointer_dispatch",1,0);
     if (!rc) rc=paired(cg,cg->branch_id,"native_bridge_call","native_bridge_registration","native_dispatch",0,0);
     /* A state setter call triggers the component that owns the hook. */
