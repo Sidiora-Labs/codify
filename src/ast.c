@@ -66,7 +66,12 @@ static void project_semantic(ParseResult *result) {
                                                        (size_t)result->cimports);
         }
         ImportDef *im = &result->imports[result->nimports++];
-        im->name = xstrdup(b->local_name ? b->local_name : "*");
+        /* The existing import index stores namespace/whole-module bindings
+         * as *, while the semantic binding keeps the local alias. */
+        im->name = xstrdup(b->kind &&
+                           (strcmp(b->kind, "namespace") == 0 ||
+                            strcmp(b->kind, "require") == 0)
+                           ? "*" : (b->local_name ? b->local_name : "*"));
         im->module = xstrdup(b->module);
         im->line = b->span.line;
         im->system = b->is_system;
