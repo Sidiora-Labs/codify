@@ -12,7 +12,7 @@
     - Handle overflow/root loss/registration errors, persist reconciliation debt and expose coverage health. Implement safe portable polling fallback; test injected loss, retries and directory moves.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
-  - [ ] 1.3 Extraction diagnostics and semantic version freshness
+  - [-] 1.3 Extraction diagnostics and semantic version freshness
     - Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_

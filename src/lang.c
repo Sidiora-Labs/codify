@@ -4,6 +4,7 @@
  * definition patterns run against comment/string-stripped lines.
  */
 #include "cg.h"
+#include "index_health.h"
 #include <regex.h>
 #include <ctype.h>
 
@@ -913,6 +914,7 @@ void lang_parse(const char *lang, const char *path, const char *src,
                 size_t len, ParseResult *pr) {
     (void)lang;
     memset(pr, 0, sizeof *pr);
+    snprintf(pr->parser, sizeof pr->parser, "heuristic");
     const LangSpec *L = spec_for_path(path);
     if (!L) return;
     bool cfam_protos = strcmp(L->name, "c") == 0 || strcmp(L->name, "cpp") == 0;
@@ -951,6 +953,7 @@ void lang_parse(const char *lang, const char *path, const char *src,
             clines = xrealloc(clines, sizeof(char *) * (size_t)ccl);
         }
         if (ll >= sizeof orig) {           /* minified / generated: skip */
+            parse_diagnostic_add(pr, "long_line", lineno);
             /* advance the stripper state so later lines stay in sync */
             clean_line(L, ls, ll, NULL, &cs, NULL);
             clines[lineno - 1] = xstrdup("");
