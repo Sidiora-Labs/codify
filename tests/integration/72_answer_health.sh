@@ -14,6 +14,7 @@ printf '[sync]\nauto = false\n' > codify.kvx
 "$CG" status --json > "$TMP/status.json"
 "$CG" tool call index_status '{}' > "$TMP/index.json"
 "$CG" tool call get_symbol '{"name":"Greeting"}' > "$TMP/fresh.json"
+"$CG" search Greeting --json > "$TMP/cli.json"
 python3 - "$TMP" <<'PY'
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
@@ -21,12 +22,14 @@ info = json.loads((p / 'info.json').read_text())
 status = json.loads((p / 'status.json').read_text())
 idx = json.loads((p / 'index.json').read_text())
 fresh = json.loads((p / 'fresh.json').read_text())
-for obj in (info, status, idx, fresh):
+cli = json.loads((p / 'cli.json').read_text())
+for obj in (info, status, idx, fresh, cli):
     h = obj['index_health']
     assert h['branch'] and 'coverage' in h and 'parsers' in h, h
     assert 'pending' in h and 'degraded' in h, h
 assert fresh['index_health']['source_validation']['files'], fresh
 assert fresh['index_health']['source_validation']['files'][0]['state'] == 'verified', fresh
+assert cli['index_health']['source_validation']['verified'] == 1, cli
 assert fresh['index_health']['source_validation']['limits'] == {
     'files': 16, 'bytes': 4194304, 'ms': 25}, fresh
 PY
