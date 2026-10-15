@@ -334,6 +334,15 @@ int main(int argc, char **argv) {
         cg_filter_set(&cg, &qf);
     }
     int rc = 0;
+    bool health_answer = json &&
+        (strcmp(cmd, "search") == 0 || strcmp(cmd, "context") == 0 ||
+         strcmp(cmd, "symbol") == 0 || strcmp(cmd, "impact") == 0 ||
+         strcmp(cmd, "routes") == 0 || strcmp(cmd, "files") == 0 ||
+         strcmp(cmd, "survey") == 0 || strcmp(cmd, "show") == 0 ||
+         strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
+         strcmp(cmd, "test-impact") == 0);
+    AnswerCapture answer_capture = {0};
+    if (health_answer) answer_health_capture_begin(&answer_capture);
 
     if (strcmp(cmd, "journal") == 0) {
         rc = cmd_journal(&cg, argc - 2, argv + 2, json);
@@ -696,6 +705,7 @@ int main(int argc, char **argv) {
         help_suggest(cmd);
         rc = 1;
     }
+    if (health_answer) answer_health_capture_end(&answer_capture, &cg);
     cg_close(&cg);
     return rc;
 }

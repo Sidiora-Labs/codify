@@ -10,4 +10,8 @@ int answer_health_status(Cg *cg, bool json);
 void answer_health_append(StrBuf *out, Cg *cg, const char *answer);
 void answer_health_text(Cg *cg);
 
+typedef struct { int saved_stdout; FILE *stream; } AnswerCapture;
+void answer_health_capture_begin(AnswerCapture *cap);
+void answer_health_capture_end(AnswerCapture *cap, Cg *cg);
+
 #endif

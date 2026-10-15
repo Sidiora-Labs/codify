@@ -281,3 +281,42 @@ void answer_health_text(Cg *cg) {
            reason && reason[0] ? reason : "");
     free(h); free(coverage); free(reason); free(branch); sb_free(&b);
 }
+
+void answer_health_capture_begin(AnswerCapture *cap) {
+    cap->saved_stdout = -1;
+    cap->stream = tmpfile();
+    if (!cap->stream) return;
+    fflush(stdout);
+    cap->saved_stdout = dup(STDOUT_FILENO);
+    if (cap->saved_stdout < 0 ||
+        dup2(fileno(cap->stream), STDOUT_FILENO) < 0) {
+        if (cap->saved_stdout >= 0) close(cap->saved_stdout);
+        cap->saved_stdout = -1;
+        fclose(cap->stream);
+        cap->stream = NULL;
+    }
+}
+
+void answer_health_capture_end(AnswerCapture *cap, Cg *cg) {
+    if (cap->saved_stdout < 0 || !cap->stream) return;
+    fflush(stdout);
+    dup2(cap->saved_stdout, STDOUT_FILENO);
+    close(cap->saved_stdout);
+    cap->saved_stdout = -1;
+    long len = ftell(cap->stream);
+    rewind(cap->stream);
+    if (len < 0 || len > 8 * 1024 * 1024) {
+        char buf[8192]; size_t n;
+        while ((n = fread(buf, 1, sizeof buf, cap->stream)) > 0)
+            fwrite(buf, 1, n, stdout);
+    } else {
+        char *raw = xmalloc((size_t)len + 1);
+        size_t n = fread(raw, 1, (size_t)len, cap->stream);
+        raw[n] = 0;
+        char *out = answer_health_json(cg, raw);
+        if (out) fputs(out, stdout);
+        free(out); free(raw);
+    }
+    fclose(cap->stream);
+    cap->stream = NULL;
+}
