@@ -7,111 +7,111 @@
   - [ ] 1.1 Subsecond change detection and explicit-dirty hashing
     - Fix same-size same-second and preserved-metadata dirty edits in full and targeted passes; migrate timestamps; preserve hash reuse, branch isolation and Git candidate behavior.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+    - _Requirements: 1.1_
   - [ ] 1.2 Watcher reconciliation and coverage health
     - Handle overflow/root loss/registration errors, persist reconciliation debt and expose coverage health. Implement safe portable polling fallback; test injected loss, retries and directory moves.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+    - _Requirements: 1.2_
   - [ ] 1.3 Extraction diagnostics and semantic version freshness
     - Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+    - _Requirements: 1.3, 1.4_
   - [ ] 2.1 Shared semantic records, storage and lifecycle
     - Define the shared rich extraction contract and branch-safe typed graph schema; wire persistence, migration, deletion, identical-content reuse and cross-worktree copy. Publish API to sibling workers early; extend existing symbols/refs rather than duplicating ownership inconsistently.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.1, 3.3, 3.4_
   - [ ] 2.2 Native syntax-tree runtime and adapter registry
     - Vendor pinned licensed parser runtime into the single binary, define grammar/adapter registry and common tree walker. Coordinate the semantic contract with 2.1. Support worker-local parsers, bounded recovery, fallback and dynamic line lengths. Publish the adapter API immediately for language workers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.2_
   - [ ] 2.3 TypeScript and JavaScript syntax extraction
     - Implement TS/TSX/JS/JSX grammar adapters, multiline functions, owner-aware methods, types, imports/exports, object actions, callbacks and JSX component facts; include negative and error-recovery cases.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.3_
   - [ ] 2.4 Systems language syntax extraction
     - Implement C/C++/Objective-C/Go/Rust adapters including include/import bindings, ownership, function values/pointer facts, type relations, traits/interfaces and macro boundaries.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.4_
   - [ ] 2.5 Python Ruby and PHP syntax extraction
     - Implement Python/Ruby/PHP scoped declarations/references, annotations/decorators, import aliases, classes/methods, docstrings and nested functions using pinned grammars.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.5_
   - [ ] 2.6 Managed and application language syntax extraction
     - Implement Java/Kotlin/Scala/C#/Swift/Dart adapters with generics, qualified owners, result types, inheritance/interfaces, overload metadata and bounded parse recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.6_
   - [ ] 2.7 Configuration and scripting language syntax extraction
     - Implement Lua/Luau/R/Erlang/Solidity/Terraform/Nix grammar adapters with accurate coverage declarations and fixtures for declarations, references and string/comment negatives.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.7_
   - [ ] 2.8 Legacy and mixed-format extraction adapters
     - Implement Pascal/COBOL/VB.NET/CFScript/CFQuery/ArkTS and Vue/Svelte/Astro/Liquid/Razor/CFML/Delphi-form/MyBatis adapters. Preserve offsets for embedded code; file-only formats must say so. Use separate manifests for grammar registration and licences.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
+    - _Requirements: 2.7, 2.8_
   - [ ] 3.1 Import bindings aliases and export chains
     - Resolve explicit aliases/default/namespaces/reexports with cycle bounds; nearest tsconfig/jsconfig paths, workspace package roots and language-specific imports. Track configuration hashes and reverse dependencies, support config-only edits and branch isolation.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 3.1_
   - [ ] 3.2 Receiver ownership and overload resolution
     - Resolve this/self, imported namespaces and known constructor/declared receivers; apply owner/visibility/signature evidence and abstain on equal ambiguity. Preserve original reference and resolution provenance; retry affected unchanged callers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 3.2, 3.4_
   - [ ] 3.3 Type hierarchy and semantic relation construction
     - Resolve containment/inheritance/implements/types/returns/instantiation/overrides/decorators/exports as typed relations with sites and evidence. Respect branch and scope; provide reusable type hierarchy helpers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 3.3, 3.4_
   - [ ] 3.4 Framework route and handler graph
     - Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 3.5_
   - [ ] 3.5 Callback interface and runtime dispatch synthesis
     - Build bounded callback/observer/event/interface/C-function-pointer/React-render/component and native-bridge passes from explicit registration/type evidence. Stamp heuristic provenance and wiring sites, preserve dynamic boundaries and transactional replacement.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 3.6, 3.8_
   - [ ] 3.6 HTTP queue and message channel synthesis
     - Connect literal HTTP method/path to unique routes and compatible named queue/bus/socket producers/consumers; reject ambiguous or computed inputs. Record channel/tier/registration evidence and avoid duplicate or unbounded fanout.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 3.7, 3.8_
   - [ ] 3.7 Incremental semantic dependency invalidation
     - Integrate all semantic passes with changed-definition/configuration/registration dependency sets, persistent failed refs, stale-target resurrection and no-op skipping. Publish complete generations transactionally and recover interrupted work.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+    - _Requirements: 1.5, 3.8_
   - [ ] 4.1 Freshness and coverage on CLI and MCP answers
     - Expose file coverage/parser inventory/index state and pending/degraded health through info/status and MCP. Validate contributing source hashes under explicit file/byte/time caps; distinguish verified/stale/unchecked and partial extraction.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+    - _Requirements: 4.5_
   - [ ] 4.2 Structured search and context sufficiency
     - Add branch-aware identifier postings, composable kind/lang/path/name filters, exact-name precedence and bounded fuzzy fallback. Return source bodies and overloads with co-location evidence, weak-query confidence and omission budgets while preserving existing text ranking.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+    - _Requirements: 4.1, 4.2_
   - [ ] 4.3 Bounded flow traversal and dynamic boundaries
     - Expose bounded paths among named symbols, callers/callees/impact over typed relations with source evidence and heuristic labels, depth/node/edge/time budgets and explicit unresolved dynamic boundaries through CLI and MCP.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+    - _Requirements: 4.3_
   - [ ] 4.4 Hierarchy and conservative dead-code inspection
     - Expose ancestors/subtypes/implementations and unreferenced candidates with exclusion reasons for exports, framework roots, reflection, generated files and uncertain incoming boundaries. Never equate missing graph edges with safe deletion.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+    - _Requirements: 4.4_
   - [ ] 5.1 Labelled extraction and graph convergence corpus
     - Build source-labelled positive/negative cases across every advertised language/framework; report precision/recall/coverage by adapter. Compare canonical graph sets after edit/delete/rename/config changes and commit replay against true clean rebuilds across worktrees and failure recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
+    - _Requirements: 5.1, 5.2_
   - [ ] 5.2 Index resource and latency regression gates
     - Benchmark bounded cold/no-op/edit/delete/rename/replay with fixed workers, memory and database growth, skip/diagnostic counts and source-to-query freshness. Keep default tests small and an opt-in large profile; publish raw reproducible output without fabricated numbers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
+    - _Requirements: 5.3_
   - [ ] 5.3 Integrated release qualification and documentation
     - Bump version to 1.6.0 after integrated gates; document actual per-language/framework coverage, migrations, health, provenance, commands, limits and measured resource checks. Verify clean offline build, all unit/integration tests and strict compile; do not claim unverified completion.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
-    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
+    - _Requirements: 5.4, 5.5_
 
 ## Task Dependency Graph
 
 ```json
 {
   "waves": [
-    { "id": 1,  "tasks": ["1.1", "1.2", "1.3", "2.1", "2.2"] },
-    { "id": 2,  "tasks": ["2.3", "2.4", "2.5", "2.6", "2.7", "2.8"] },
+    { "id": 1,  "tasks": ["1.1", "1.2", "1.3", "2.1"] },
+    { "id": 2,  "tasks": ["2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"] },
     { "id": 3,  "tasks": ["3.1", "3.2", "3.3", "3.4", "3.5", "3.6"] },
     { "id": 4,  "tasks": ["3.7", "4.1", "4.2", "4.3", "4.4"] },
     { "id": 5,  "tasks": ["5.1", "5.2", "5.3"] }
