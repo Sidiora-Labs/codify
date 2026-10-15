@@ -22,13 +22,20 @@ by_symbol={(r['path'],r['name']) for r in symbols}
 by_ref={(r['path'],r['name']) for r in refs}
 for item in [('sample.pas','Sample'),('sample.pas','TWorker'),('sample.cbl','HELLO'),('sample.cbl','MAIN-PARA'),('sample.vb','Worker'),('sample.vb','Run'),('sample.cfs','run'),('sample.ets','Card'),('Sample.vue','multi'),('Sample.svelte','load'),('Sample.astro','front'),('Sample.dfm','MainForm'),('Mapper.xml','find'),('Sample.cfm','run')]:
     assert item in by_symbol,(item,symbols)
-for item in [('Sample.vue','Card'),('Sample.svelte','Card'),('Sample.astro','Card'),('Sample.liquid','card'),('Sample.razor','Site.Pages.CardModel'),('Sample.dfm','TMainForm'),('Sample.cfm','users'),('Mapper.xml','fragment')]:
+for item in [('Sample.vue','Card'),('Sample.svelte','Card'),('Sample.astro','Card'),('Sample.liquid','card'),('Sample.razor','Site.Pages.CardModel'),('Sample.dfm','TMainForm'),('Sample.dfm','Button1Click'),('Sample.cfm','users'),('Mapper.xml','fragment')]:
     assert item in by_ref,(item,refs)
 assert ('Sample.vue','Ghost') not in by_ref
 for path,name in [('sample.pas','Ghost'),('sample.vb','Ghost'),('sample.cfs','ghost'),('sample.ets','Phantom')]:
     assert (path,name) not in by_symbol,(path,name)
 assert ('Sample.liquid','ghost') not in by_ref
 assert ('Plain.xml','notAMapping') not in by_symbol
+assert ('Sample.dfm','GhostHandler') not in by_ref
+assert ('Sample.dfm','nil') not in by_ref
+owner=c.execute("""SELECT s.name FROM semantic_references x
+ JOIN refs r ON r.id=x.ref_id JOIN files f ON f.id=r.file_id
+ JOIN symbols s ON s.id=x.owner_id
+ WHERE f.path='Sample.dfm' AND r.name='Button1Click'""").fetchone()
+assert owner and owner[0]=='Button1',owner
 assert ('sample.cbl','WORK-PARA') in by_ref
 assert ('sample.pas','SysUtils') in {(b['path'],b['module']) for b in bindings}
 assert ('sample.vb','System') in {(b['path'],b['module']) for b in bindings}
