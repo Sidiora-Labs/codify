@@ -69,6 +69,12 @@ int main(void) {
     assert(ast_register(&FILE_ONLY));
     assert(!ast_register(&JSON));
     assert(!ast_adapter("absent"));
+    assert(strcmp(lang_for_path("settings.yml"), "yaml") == 0);
+    ParseResult file_only_fallback = {0};
+    lang_parse("yaml", "settings.yml", "key: value\n", 11,
+               &file_only_fallback);
+    assert(file_only_fallback.ndefs == 0);
+    parse_result_free(&file_only_fallback);
     assert(ast_adapter("runtime_fixture") == &JSON);
     pthread_t threads[4];
     for (int i = 0; i < 4; i++) assert(pthread_create(&threads[i], NULL,
