@@ -57,6 +57,18 @@ static long symbol_file(Cg *cg,long id) {
     sqlite3_finalize(q); return f;
 }
 
+static const char *edge_evidence(const char *kind) {
+    if (!strcmp(kind,"callback")) return "recognized callback registration and callable target";
+    if (!strcmp(kind,"observer_dispatch")) return "constructed receiver, matching observer call and literal key";
+    if (!strcmp(kind,"event_dispatch")) return "matching receiver identity and literal event key";
+    if (!strcmp(kind,"pointer_dispatch")) return "same-file pointer slot and indirect call";
+    if (!strcmp(kind,"native_dispatch")) return "literal native registration and native declaration";
+    if (!strcmp(kind,"renders_component")) return "component syntax and unique component definition";
+    if (!strcmp(kind,"state_render")) return "state setter call and owning component";
+    if (!strcmp(kind,"interface_dispatch")) return "resolved interface method and implementation relation";
+    return "explicit structural relationship";
+}
+
 static int edge(Cg *cg,long branch,long source,long target,long source_file,
                 const char *kind,const char *channel,const char *text,
                 const char *registration_path,int site_line,int site_col,
@@ -69,16 +81,16 @@ static int edge(Cg *cg,long branch,long source,long target,long source_file,
         "source_id,target_id,kind,original_text,strategy,provenance,evidence,"
         "channel,registration_path,start_line,start_column,registration_line,"
         "registration_column,synthesized) VALUES(?1,?2,?3,?4,?5,?6,?7,"
-        "'dispatch:explicit','heuristic','literal registration and syntax fact',"
-        "?8,?9,?10,?11,?12,?13,1)");
+        "'dispatch:explicit','heuristic',?8,?9,?10,?11,?12,?13,?14,1)");
     sqlite3_bind_int64(q,1,branch); sqlite3_bind_int64(q,2,source_file);
     sqlite3_bind_int64(q,3,target_file); sqlite3_bind_int64(q,4,source);
     sqlite3_bind_int64(q,5,target); sqlite3_bind_text(q,6,kind,-1,SQLITE_STATIC);
     sqlite3_bind_text(q,7,text?text:"",-1,SQLITE_TRANSIENT);
-    sqlite3_bind_text(q,8,channel?channel:"",-1,SQLITE_TRANSIENT);
-    sqlite3_bind_text(q,9,registration_path?registration_path:"",-1,SQLITE_TRANSIENT);
-    sqlite3_bind_int(q,10,site_line); sqlite3_bind_int(q,11,site_col);
-    sqlite3_bind_int(q,12,registration_line); sqlite3_bind_int(q,13,registration_col);
+    sqlite3_bind_text(q,8,edge_evidence(kind),-1,SQLITE_STATIC);
+    sqlite3_bind_text(q,9,channel?channel:"",-1,SQLITE_TRANSIENT);
+    sqlite3_bind_text(q,10,registration_path?registration_path:"",-1,SQLITE_TRANSIENT);
+    sqlite3_bind_int(q,11,site_line); sqlite3_bind_int(q,12,site_col);
+    sqlite3_bind_int(q,13,registration_line); sqlite3_bind_int(q,14,registration_col);
     return done(q);
 }
 
