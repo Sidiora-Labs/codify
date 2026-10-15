@@ -17,6 +17,10 @@ static void check(const char *lang, const char *path) {
     if (!src) die(lang, "fixture unreadable");
     ParseResult r = {0};
     if (!ast_try_parse(lang, path, src, len, &r)) die(lang, "grammar unavailable");
+    char parser_id[64];
+    snprintf(parser_id, sizeof parser_id, "tree-sitter:%s", lang);
+    if (!r.sem.parser_id || strcmp(r.sem.parser_id, parser_id))
+        die(lang, "parser identity missing");
     int box = -1, overloads = 0, calls = 0, false_calls = 0;
     const char *overload_keys[2] = {0};
     for (int i = 0; i < r.sem.nsymbols; i++) {

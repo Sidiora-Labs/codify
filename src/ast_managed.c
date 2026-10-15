@@ -507,7 +507,6 @@ static void visit(Managed *m, TSNode n, int parent, unsigned depth) {
 static void extract(AstContext *c) {
     Managed m = {.ctx = c};
     visit(&m, c->root, -1, 0);
-    c->result->sem.parser_id = xstrdup("tree-sitter/managed");
 }
 
 void ast_managed_register(void) {
