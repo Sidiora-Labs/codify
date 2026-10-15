@@ -1,0 +1,5 @@
+The source package's package.json declares MIT and identifies CodeAnt AI as
+author. The upstream checkout at the pinned commit has no standalone LICENSE
+file. This distribution includes the standard MIT permission notice above
+with the attribution supplied by package.json. The text is reproduced here
+for downstream distribution, not copied from a nonexistent upstream file.
