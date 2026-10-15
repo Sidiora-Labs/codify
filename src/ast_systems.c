@@ -98,14 +98,28 @@ static int symbol(AstContext *ctx, TSNode n, TSNode name_node,
     s->declaration=decl;
     s->qualified_name=qualified(owner>=0 ? r->symbols[owner].qualified_name : NULL,name);
     s->signature=slice_until(ctx,n,body);
+    if (!strcmp(ctx->language,"go") && name[0]>='A' && name[0]<='Z')
+        s->exported=true;
     TSNode result=field(n,"return_type");
     if (ts_node_is_null(result)) result=field(n,"result");
     s->result_type=copy_text(ctx,result);
+    s->generic_params=copy_text(ctx,field(n,"type_parameters"));
+    TSNode previous=ts_node_prev_named_sibling(n);
+    if (!ts_node_is_null(previous) && strstr(ts_node_type(previous),"comment") &&
+        ts_node_end_point(previous).row+1 >= ts_node_start_point(n).row)
+        s->documentation=copy_text(ctx,previous);
     unsigned count=ts_node_named_child_count(n);
     for (unsigned i=0;i<count;i++) {
         TSNode c=named(n,i);
         if (is(c,"visibility_modifier")) {
             s->visibility=copy_text(ctx,c); s->exported=true; break;
+        }
+        if (is(c,"storage_class_specifier")) {
+            char *modifier=copy_text(ctx,c);
+            if (modifier && !strcmp(modifier,"static")) {
+                s->visibility=xstrdup("file"); s->exported=false;
+            }
+            s->modifiers=modifier;
         }
     }
     free(name);
