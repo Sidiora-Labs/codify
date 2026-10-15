@@ -231,14 +231,14 @@ static void python_import(DynWalk *w, TSNode node) {
             char *orig = text(w->ctx, ast_field(child, "name"));
             char *local = text(w->ctx, ast_field(child, "alias"));
             add_binding(w, child, from ? module : orig, from ? orig : NULL,
-                        local, from ? "from-import" : "import");
+                        local, from ? "from-import" : "module_import");
             free(orig); free(local);
         } else if (is(child, "dotted_name")) {
             char *orig = text(w->ctx, child);
             char *local = from ? short_name(orig) : strdup(orig);
             if (!from && local) { char *dot = strchr(local, '.'); if (dot) *dot = 0; }
             add_binding(w, child, from ? module : orig, from ? orig : NULL,
-                        local, from ? "from-import" : "import");
+                        local, from ? "from-import" : "module_import");
             free(orig); free(local);
         } else if (is(child, "wildcard_import")) {
             add_binding(w, child, module, "*", "*", "wildcard-import");
@@ -303,11 +303,26 @@ static void ruby_import(DynWalk *w, TSNode node) {
     free(verb);
 }
 
-static char *python_doc(AstContext *c, TSNode body) {
+static TSNode python_doc_node(TSNode body) {
     TSNode value = first_named(body);
     if (is(value, "expression_statement")) value = first_named(value);
-    if (!is(value, "string") && !is(value, "concatenated_string")) return NULL;
-    return text(c, value);
+    return is(value, "string") || is(value, "concatenated_string") ?
+           value : (TSNode){0};
+}
+
+static void python_capture_doc(AstContext *ctx, TSNode node) {
+    if (ts_node_is_null(node)) return;
+    ParseResult *pr = ctx->result;
+    if (pr->ncmts == pr->ccmts) {
+        pr->ccmts = pr->ccmts ? pr->ccmts * 2 : 16;
+        pr->cmts = xrealloc(pr->cmts, sizeof *pr->cmts * (size_t)pr->ccmts);
+    }
+    CmtDef *c = &pr->cmts[pr->ncmts++];
+    c->body = text(ctx, node);
+    c->line = ast_line(node);
+    c->end_line = (int)ts_node_end_point(node).row + 1;
+    c->below = true;
+    c->pure = true;
 }
 
 static char *preceding_comment(AstContext *c, TSNode n) {
@@ -364,7 +379,11 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
         if (child_owner >= 0) {
             SemSymbol *s = &w->ctx->result->sem.symbols[child_owner];
             TSNode body = ast_field(n, "body");
-            if (py) s->documentation = python_doc(w->ctx, body);
+            if (py) {
+                TSNode doc = python_doc_node(body);
+                s->documentation = text(w->ctx, doc);
+                python_capture_doc(w->ctx, doc);
+            }
             else s->documentation = preceding_comment(w->ctx, n);
             if (php && !strcmp(t, "method_declaration")) {
                 uint32_t count = ts_node_child_count(n);
@@ -416,6 +435,8 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
                 }
             }
         } else child_owner = w->owner;
+    } else if (py && is(n, "module")) {
+        python_capture_doc(w->ctx, python_doc_node(n));
     } else if (py && (is(n, "import_statement") || is(n, "import_from_statement"))) {
         python_import(w, n);
     } else if (php && is(n, "namespace_use_declaration")) {
