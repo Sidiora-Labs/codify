@@ -697,8 +697,8 @@ The extension has no dependencies and no build step — including its Language S
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.6.0.vsix
-code --install-extension codify-workflow-1.6.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.4.0.vsix
+code --install-extension codify-workflow-1.4.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.

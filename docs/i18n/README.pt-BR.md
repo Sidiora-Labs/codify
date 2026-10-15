@@ -380,8 +380,8 @@ A extensão não tem dependências nem etapa de build — nem mesmo no cliente d
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produz codify-workflow-1.6.0.vsix
-code --install-extension codify-workflow-1.6.0.vsix --force
+npx @vscode/vsce package        # produz codify-workflow-1.4.0.vsix
+code --install-extension codify-workflow-1.4.0.vsix --force
 ```
 
 ## Desenvolvimento

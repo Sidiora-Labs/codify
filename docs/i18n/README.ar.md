@@ -351,8 +351,8 @@ cmd         = ""             # المشغّل المخصص: قالب صدفة م
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # ينتج codify-workflow-1.6.0.vsix
-code --install-extension codify-workflow-1.6.0.vsix --force
+npx @vscode/vsce package        # ينتج codify-workflow-1.4.0.vsix
+code --install-extension codify-workflow-1.4.0.vsix --force
 ```
 
 لا اعتماديات للامتداد ولا خطوة بناء، بما في ذلك عميل خادم اللغة المكتوب يدويًا. هوية المتجر هي `SidioraLabs.codify-workflow`. انظر [editors/vscode/README.md](../../editors/vscode/README.md).
