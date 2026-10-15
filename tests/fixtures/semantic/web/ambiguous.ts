@@ -1,0 +1,2 @@
+@Tag
+class AmbiguousPanel {}
