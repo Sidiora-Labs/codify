@@ -66,7 +66,13 @@ static void project_semantic(ParseResult *result) {
                                                        (size_t)result->cimports);
         }
         ImportDef *im = &result->imports[result->nimports++];
-        im->name = xstrdup(b->local_name ? b->local_name : "*");
+        /* The existing import index stores namespace/whole-module bindings
+         * as *, while the semantic binding keeps the local alias. */
+        im->name = xstrdup(b->kind &&
+                           (strcmp(b->kind, "namespace") == 0 ||
+                            strcmp(b->kind, "require") == 0 ||
+                            strcmp(b->kind, "module_import") == 0)
+                           ? "*" : (b->local_name ? b->local_name : "*"));
         im->module = xstrdup(b->module);
         im->line = b->span.line;
         im->system = b->is_system;
@@ -82,8 +88,17 @@ static bool collect_comment(AstContext *ctx, TSNode node, void *unused) {
     if (strcmp(type, "comment") != 0 && !strstr(type, "comment")) {
         if (!ts_node_eq(node, ctx->root)) {
             int line = ast_line(node);
-            if (!ctx->result->first_code_line ||
-                line < ctx->result->first_code_line)
+            int end = (int)ts_node_end_point(node).row + 1;
+            bool documentation = false;
+            for (int i = 0; i < ctx->result->ncmts; i++) {
+                CmtDef *c = &ctx->result->cmts[i];
+                if (c->below && line >= c->line && end <= c->end_line) {
+                    documentation = true;
+                    break;
+                }
+            }
+            if (!documentation && (!ctx->result->first_code_line ||
+                                   line < ctx->result->first_code_line))
                 ctx->result->first_code_line = line;
         }
         return true;
@@ -92,19 +107,35 @@ static bool collect_comment(AstContext *ctx, TSNode node, void *unused) {
     uint32_t end = ts_node_end_byte(node);
     if (end <= start || end - start > 4000 || end > ctx->length) return false;
     ParseResult *pr = ctx->result;
+    int line = ast_line(node), end_line = (int)ts_node_end_point(node).row + 1;
+    bool pure = true;
+    for (size_t at = start; at > 0 && ctx->source[at - 1] != '\n'; at--)
+        if (ctx->source[at - 1] != ' ' && ctx->source[at - 1] != '\t' &&
+            ctx->source[at - 1] != '\r') { pure = false; break; }
+    char *body = ast_slice(ctx, start, end);
+    if (pure && pr->ncmts) {
+        CmtDef *prior = &pr->cmts[pr->ncmts - 1];
+        size_t a = strlen(prior->body), b = strlen(body);
+        if (prior->pure && !prior->below && prior->end_line + 1 == line &&
+            a + b + 1 <= 4000) {
+            prior->body = xrealloc(prior->body, a + b + 2);
+            prior->body[a] = '\n';
+            memcpy(prior->body + a + 1, body, b + 1);
+            prior->end_line = end_line;
+            free(body);
+            return false;
+        }
+    }
     if (pr->ncmts == pr->ccmts) {
         pr->ccmts = pr->ccmts ? pr->ccmts * 2 : 16;
         pr->cmts = xrealloc(pr->cmts, sizeof(CmtDef) * (size_t)pr->ccmts);
     }
     CmtDef *c = &pr->cmts[pr->ncmts++];
-    c->body = ast_slice(ctx, start, end);
-    c->line = ast_line(node);
-    c->end_line = (int)ts_node_end_point(node).row + 1;
+    c->body = body;
+    c->line = line;
+    c->end_line = end_line;
     c->below = false;
-    c->pure = true;
-    for (size_t at = start; at > 0 && ctx->source[at - 1] != '\n'; at--)
-        if (ctx->source[at - 1] != ' ' && ctx->source[at - 1] != '\t' &&
-            ctx->source[at - 1] != '\r') { c->pure = false; break; }
+    c->pure = pure;
     return false;
 }
 
@@ -186,36 +217,43 @@ char *ast_text(const AstContext *ctx, TSNode node) {
 int ast_line(TSNode node) { return (int)ts_node_start_point(node).row + 1; }
 int ast_column(TSNode node) { return (int)ts_node_start_point(node).column; }
 
-/* Iterative depth-first traversal bounds both stack use and malformed-tree
- * work. Children are visited in source order. */
+/* Cursor movement is constant-time between siblings. Indexed ts_node_child
+ * lookup rescans preceding siblings and is quadratic on wide source files. */
 void ast_walk(AstContext *ctx, TSNode root, AstVisitFn visit, void *user) {
     if (!ctx || !visit || ts_node_is_null(root)) return;
-    typedef struct { TSNode node; uint32_t next; bool entered; } Frame;
-    Frame stack[AST_MAX_DEPTH];
-    unsigned depth = 1;
-    stack[0] = (Frame){ .node = root };
-    while (depth) {
+    TSTreeCursor cursor = ts_tree_cursor_new(root);
+    unsigned depth = 0;
+    for (;;) {
         if (ctx->cancel_flag && *ctx->cancel_flag) {
             ctx->cancelled = true;
-            return;
+            break;
         }
-        Frame *f = &stack[depth - 1];
-        if (!f->entered) {
-            f->entered = true;
-            if (++ctx->visited > AST_MAX_NODES) { ctx->truncated = true; return; }
-            if (ts_node_is_error(f->node)) ctx->errors++;
-            if (ts_node_is_missing(f->node)) ctx->missing++;
-            if (ts_node_is_named(f->node) && !visit(ctx, f->node, user)) {
-                depth--;
+        TSNode node = ts_tree_cursor_current_node(&cursor);
+        if (++ctx->visited > AST_MAX_NODES) {
+            ctx->truncated = true;
+            break;
+        }
+        if (ts_node_is_error(node)) ctx->errors++;
+        if (ts_node_is_missing(node)) ctx->missing++;
+        bool descend = !ts_node_is_named(node) || visit(ctx, node, user);
+        if (descend) {
+            if (depth == AST_MAX_DEPTH - 1 && ts_node_child_count(node)) {
+                ctx->truncated = true;
+                break;
+            }
+            if (depth < AST_MAX_DEPTH - 1 &&
+                ts_tree_cursor_goto_first_child(&cursor)) {
+                depth++;
                 continue;
             }
         }
-        uint32_t count = ts_node_child_count(f->node);
-        if (f->next == count) { depth--; continue; }
-        TSNode child = ts_node_child(f->node, f->next++);
-        if (depth == AST_MAX_DEPTH) { ctx->truncated = true; return; }
-        stack[depth++] = (Frame){ .node = child };
+        while (depth > 0 && !ts_tree_cursor_goto_next_sibling(&cursor)) {
+            ts_tree_cursor_goto_parent(&cursor);
+            depth--;
+        }
+        if (depth == 0) break;
     }
+    ts_tree_cursor_delete(&cursor);
 }
 
 bool ast_try_parse_ex(const char *language, const char *path,

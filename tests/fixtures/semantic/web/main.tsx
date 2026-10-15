@@ -1,6 +1,7 @@
 import Main, { fetchItem as load, type Result } from './service';
 import * as API from './api';
 import { bus as socket } from './channels';
+import { Audit, route } from './decorators';
 export { load as reload };
 export * from './shared';
 
@@ -12,6 +13,14 @@ class LocalBus {
 }
 const bus = new LocalBus();
 function handleSaved() {}
+
+@Audit
+@route('/panel')
+class DecoratedPanel {}
+
+@factory()()
+class DynamicDecorated {}
+// @Ghost class Imaginary {}
 
 export class Panel<T> extends BasePanel implements Runnable {
   private active: boolean = true;
