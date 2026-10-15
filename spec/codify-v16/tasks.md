@@ -44,7 +44,7 @@
     - Implement Lua/Luau/R/Erlang/Solidity/Terraform/Nix grammar adapters with accurate coverage declarations and fixtures for declarations, references and string/comment negatives.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
-  - [ ] 2.8 Legacy and mixed-format extraction adapters
+  - [-] 2.8 Legacy and mixed-format extraction adapters
     - Implement Pascal/COBOL/VB.NET/CFScript/CFQuery/ArkTS and Vue/Svelte/Astro/Liquid/Razor/CFML/Delphi-form/MyBatis adapters. Preserve offsets for embedded code; file-only formats must say so. Use separate manifests for grammar registration and licences.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_

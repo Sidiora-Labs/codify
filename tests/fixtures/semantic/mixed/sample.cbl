@@ -1,0 +1,8 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HELLO.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM WORK-PARA.
+           STOP RUN.
+       WORK-PARA.
+           DISPLAY "OK".

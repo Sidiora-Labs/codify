@@ -1,0 +1,346 @@
+#include "ast.h"
+#include "semantic.h"
+#include <ctype.h>
+#include <strings.h>
+
+extern const TSLanguage *tree_sitter_pascal(void);
+extern const TSLanguage *tree_sitter_COBOL(void);
+extern const TSLanguage *tree_sitter_vb_dotnet(void);
+extern const TSLanguage *tree_sitter_cfml(void);
+extern const TSLanguage *tree_sitter_cfscript(void);
+extern const TSLanguage *tree_sitter_cfquery(void);
+extern const TSLanguage *tree_sitter_arkts(void);
+
+static SemSpan span_bytes(const AstContext *c, size_t lo, size_t hi) {
+    SemSpan s = {.start_byte=lo, .end_byte=hi, .line=1, .end_line=1};
+    if (hi > c->length) hi = c->length;
+    if (lo > hi) lo = hi;
+    for (size_t i=0; i<hi; i++) {
+        if (c->source[i]=='\n') {
+            if (i < lo) s.line++;
+            s.end_line++;
+        }
+    }
+    size_t x=lo; while (x && c->source[x-1]!='\n') x--; s.column=(int)(lo-x);
+    x=hi; while (x && c->source[x-1]!='\n') x--; s.end_column=(int)(hi-x);
+    return s;
+}
+
+static SemSpan span_node(AstContext *c, TSNode n) {
+    return span_bytes(c, ts_node_start_byte(n), ts_node_end_byte(n));
+}
+
+static bool eq(const char *a, const char *b) { return strcmp(a,b)==0; }
+static char *node_name(AstContext *c, TSNode n) {
+    TSNode f=ast_field(n,"name");
+    if (ts_node_is_null(f)) f=ast_field(n,"header");
+    if (!ts_node_is_null(f) && eq(ts_node_type(f),"declProc")) f=ast_field(f,"name");
+    if (ts_node_is_null(f)) {
+        for (uint32_t i=0;i<ts_node_named_child_count(n);i++) {
+            TSNode ch=ts_node_named_child(n,i);
+            const char *t=ts_node_type(ch);
+            if (eq(t,"identifier") || eq(t,"program_name") || eq(t,"moduleName") || eq(t,"paragraph_name")) {f=ch;break;}
+        }
+    }
+    if (ts_node_is_null(f)) return NULL;
+    char *s=ast_text(c,f);
+    if (s && strlen(s)>256) { free(s); return NULL; }
+    return s;
+}
+
+static int add_symbol(AstContext *c, TSNode n, const char *kind, int parent) {
+    char *name=node_name(c,n); if (!name || !*name) {free(name);return -1;}
+    SemSymbol *s=sem_symbol_add(&c->result->sem,name,kind,span_node(c,n));
+    if (!s) {free(name);return -1;}
+    int id=c->result->sem.nsymbols-1;
+    s->parent=parent;
+    s->scope_key=xstrdup(name);
+    if (parent>=0 && parent<id) {
+        const char *p=c->result->sem.symbols[parent].qualified_name;
+        if (!p) p=c->result->sem.symbols[parent].name;
+        size_t len=strlen(p)+strlen(name)+2; s->qualified_name=xmalloc(len);
+        snprintf(s->qualified_name,len,"%s.%s",p,name);
+    } else s->qualified_name=xstrdup(name);
+    TSNode f=ast_field(n,"return_type");
+    if (ts_node_is_null(f)) f=ast_field(n,"type");
+    if (!ts_node_is_null(f)) s->result_type=ast_text(c,f);
+    f=ast_field(n,"modifiers");
+    if (!ts_node_is_null(f)) s->modifiers=ast_text(c,f);
+    f=ast_field(n,"decorator");
+    if (!ts_node_is_null(f)) s->decorators=ast_text(c,f);
+    f=ast_field(n,"type_parameters");
+    if (!ts_node_is_null(f)) s->generic_params=ast_text(c,f);
+    free(name); return id;
+}
+
+static int owner_for(AstContext *c, TSNode n) {
+    uint32_t start=ts_node_start_byte(n);
+    int best=-1; size_t width=(size_t)-1;
+    for (int i=0;i<c->result->sem.nsymbols;i++) {
+        SemSpan sp=c->result->sem.symbols[i].span;
+        if (sp.start_byte<start && sp.end_byte>=ts_node_end_byte(n) && sp.end_byte-sp.start_byte<width)
+            best=i,width=sp.end_byte-sp.start_byte;
+    }
+    return best;
+}
+
+static void add_ref(AstContext *c, TSNode n, TSNode name, const char *kind) {
+    if (ts_node_is_null(name)) return;
+    char *text=ast_text(c,name);
+    if (!text || !*text || strlen(text)>256) {free(text);return;}
+    SemReference *r=sem_reference_add(&c->result->sem,text,kind,span_node(c,name));
+    if (r) {r->owner=owner_for(c,n);r->strategy=xstrdup("syntax");r->evidence=xstrdup(ts_node_type(n));}
+    free(text);
+}
+
+static bool grammar_visit(AstContext *c, TSNode n, void *unused) {
+    (void)unused;
+    const char *t=ts_node_type(n), *lang=c->language;
+    const char *kind=NULL;
+    if (eq(lang,"pascal")) {
+        if (eq(t,"unit") || eq(t,"program")) kind="module";
+        else if (eq(t,"declType") || eq(t,"declClass")) kind="type";
+        else if (eq(t,"declProc") || eq(t,"defProc")) kind="function";
+        else if (eq(t,"exprCall")) add_ref(c,n,ast_field(n,"entity"),"call");
+        else if (eq(t,"declUses")) {
+            for (uint32_t i=0;i<ts_node_named_child_count(n);i++) {
+                TSNode ch=ts_node_named_child(n,i);
+                if (!eq(ts_node_type(ch),"moduleName")) continue;
+                char *v=ast_text(c,ch);
+                if (v) {SemBinding *b=sem_binding_add(&c->result->sem,v,v,span_node(c,ch));
+                    if (b) b->kind=xstrdup("import");
+                    free(v);}
+            }
+        }
+    } else if (eq(lang,"cobol")) {
+        if (eq(t,"program_definition")) kind="program";
+        else if (eq(t,"paragraph_header")) kind="paragraph";
+        else if (eq(t,"section_header")) kind="section";
+        else if (eq(t,"copy_statement")) {
+            TSNode f=ast_field(n,"book"); char *v=ast_text(c,f);
+            if (v) {SemBinding *b=sem_binding_add(&c->result->sem,v,v,span_node(c,f));
+                if (b) b->kind=xstrdup("copy");
+                free(v);}
+        } else if (eq(t,"perform_procedure")) {
+            TSNode f=ast_field(n,"label"); if (ts_node_is_null(f)) f=ts_node_named_child(n,0);
+            add_ref(c,n,f,"call");
+        }
+    } else if (eq(lang,"vbnet")) {
+        if (eq(t,"class_block") || eq(t,"interface_block") || eq(t,"structure_block") || eq(t,"module_block") || eq(t,"enum_block")) kind="class";
+        else if (eq(t,"namespace_block")) kind="namespace";
+        else if (eq(t,"method_declaration") || eq(t,"constructor_declaration")) kind="method";
+        else if (eq(t,"property_declaration")) kind="property";
+        else if (eq(t,"event_declaration")) kind="event";
+        else if (eq(t,"invocation")) add_ref(c,n,ast_field(n,"target"),"call");
+        else if (eq(t,"imports_statement")) {
+            TSNode f=ast_field(n,"namespace"); char *v=ast_text(c,f);
+            if (v) {SemBinding *b=sem_binding_add(&c->result->sem,v,v,span_node(c,f));
+                if (b) b->kind=xstrdup("import");
+                    free(v);}
+        }
+    } else if (eq(lang,"arkts")) {
+        if (eq(t,"struct_declaration") || eq(t,"class_declaration")) kind="class";
+        else if (eq(t,"function_declaration")) kind="function";
+        else if (eq(t,"method_definition")) kind="method";
+        else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call");
+    } else if (eq(lang,"cfscript") || eq(lang,"cfml") || eq(lang,"cfquery")) {
+        if (eq(t,"component")) kind="component";
+        else if (eq(t,"function_declaration") || eq(t,"method_definition") || eq(t,"cf_function_tag")) kind="function";
+        else if (eq(t,"cf_query_tag") || eq(t,"query_expression")) kind="query";
+        else if (eq(t,"call_expression")) add_ref(c,n,ast_field(n,"function"),"call");
+    }
+    if (kind) add_symbol(c,n,kind,owner_for(c,n));
+    return true;
+}
+
+static void grammar_extract(AstContext *c) { ast_walk(c,c->root,grammar_visit,NULL); }
+
+/* Search helpers operate on the original byte buffer, never on a normalized
+ * copy; every recorded site can therefore be mapped back to the source. */
+static bool at(const AstContext *c,size_t p,const char *s) {
+    size_t n=strlen(s);return p+n<=c->length && !strncasecmp(c->source+p,s,n);
+}
+static size_t until(const AstContext *c,size_t p,char end) {
+    char quote=0; for(;p<c->length;p++) { char x=c->source[p];
+        if (quote) {if (x==quote && (!p || c->source[p-1]!='\\')) quote=0;}
+        else if (x=='\'' || x=='"') quote=x;
+        else if (x==end) return p;
+    } return c->length;
+}
+static char *attr(const AstContext *c,size_t a,size_t b,const char *key,size_t *site) {
+    size_t k=strlen(key);
+    for(size_t p=a;p+k<b;p++) {
+        if (strncasecmp(c->source+p,key,k) || (p>a && (isalnum((unsigned char)c->source[p-1])||c->source[p-1]=='-'))) continue;
+        size_t q=p+k;while(q<b && isspace((unsigned char)c->source[q]))q++;
+        if(q>=b || c->source[q++]!='=')continue;
+        while(q<b && isspace((unsigned char)c->source[q]))q++;
+        if(q>=b)break;
+        char quote=c->source[q]; if(quote=='\''||quote=='"')q++; else quote=0;
+        size_t start=q;while(q<b && (quote?c->source[q]!=quote:!isspace((unsigned char)c->source[q])&&c->source[q]!='>'))q++;
+        if(site)*site=start;
+        return strndup(c->source+start,q-start);
+    } return NULL;
+}
+static void decl(AstContext *c,const char *name,const char *kind,size_t lo,size_t hi,int owner) {
+    if(!name||!*name)return;
+    SemSymbol *s=sem_symbol_add(&c->result->sem,name,kind,span_bytes(c,lo,hi));
+    if(s) {s->parent=owner;s->qualified_name=xstrdup(name);s->scope_key=xstrdup(name);}
+}
+static void ref(AstContext *c,const char *text,const char *kind,size_t lo,size_t hi,int owner,const char *why) {
+    if(!text||!*text)return;
+    SemReference *r=sem_reference_add(&c->result->sem,text,kind,span_bytes(c,lo,hi));
+    if(r) {r->owner=owner;r->strategy=xstrdup("declarative");r->evidence=xstrdup(why);}
+}
+
+static void parse_embedded(AstContext *c,const char *language,size_t a,size_t b) {
+    if(b<=a || b-a>8*1024*1024)return;
+    ParseResult sub={0};
+    if(!ast_try_parse(language,c->path,c->source+a,b-a,&sub)) {parse_result_free(&sub);return;}
+    SemResult *dst=&c->result->sem,*src=&sub.sem;
+    int symbase=dst->nsymbols, refbase=dst->nreferences;
+    for(int i=0;i<src->nsymbols;i++) {
+        SemSymbol x=src->symbols[i]; x.span=span_bytes(c,a+x.span.start_byte,a+x.span.end_byte);
+        if(x.parent>=0)x.parent+=symbase;
+        x.legacy_def=-1;
+        if(dst->nsymbols==dst->csymbols)dst->symbols=xrealloc(dst->symbols,(size_t)(dst->csymbols=dst->csymbols?dst->csymbols*2:16)*sizeof(*dst->symbols));
+        dst->symbols[dst->nsymbols++]=x; memset(&src->symbols[i],0,sizeof x);
+    }
+    for(int i=0;i<src->nreferences;i++) {
+        SemReference x=src->references[i];x.span=span_bytes(c,a+x.span.start_byte,a+x.span.end_byte);
+        if(x.owner>=0)x.owner+=symbase;
+        if(x.target>=0)x.target+=symbase;
+        x.legacy_ref=-1;
+        if(dst->nreferences==dst->creferences)dst->references=xrealloc(dst->references,(size_t)(dst->creferences=dst->creferences?dst->creferences*2:16)*sizeof(*dst->references));
+        dst->references[dst->nreferences++]=x;memset(&src->references[i],0,sizeof x);
+    }
+    for(int i=0;i<src->nbindings;i++) {
+        SemBinding x=src->bindings[i];x.span=span_bytes(c,a+x.span.start_byte,a+x.span.end_byte);
+        if(x.owner>=0)x.owner+=symbase;
+        if(dst->nbindings==dst->cbindings)dst->bindings=xrealloc(dst->bindings,(size_t)(dst->cbindings=dst->cbindings?dst->cbindings*2:8)*sizeof(*dst->bindings));
+        dst->bindings[dst->nbindings++]=x;memset(&src->bindings[i],0,sizeof x);
+    }
+    for(int i=0;i<src->ntype_facts;i++) {
+        SemTypeFact x=src->type_facts[i];x.span=span_bytes(c,a+x.span.start_byte,a+x.span.end_byte);
+        if(x.owner>=0)x.owner+=symbase;
+        if(dst->ntype_facts==dst->ctype_facts)dst->type_facts=xrealloc(dst->type_facts,(size_t)(dst->ctype_facts=dst->ctype_facts?dst->ctype_facts*2:8)*sizeof(*dst->type_facts));
+        dst->type_facts[dst->ntype_facts++]=x;memset(&src->type_facts[i],0,sizeof x);
+    }
+    for(int i=0;i<src->nedges;i++) {
+        SemEdge x=src->edges[i];x.site=span_bytes(c,a+x.site.start_byte,a+x.site.end_byte);
+        if(x.source>=0)x.source+=symbase;
+        if(x.target>=0)x.target+=symbase;
+        if(x.source_ref>=0)x.source_ref+=refbase;
+        if(dst->nedges==dst->cedges)dst->edges=xrealloc(dst->edges,(size_t)(dst->cedges=dst->cedges?dst->cedges*2:8)*sizeof(*dst->edges));
+        dst->edges[dst->nedges++]=x;memset(&src->edges[i],0,sizeof x);
+    }
+    parse_result_free(&sub);
+}
+
+static void markup_extract(AstContext *c) {
+    const char *lang=c->language;int owner=-1;
+    bool mapping=eq(lang,"xml") && strstr(c->source,"<mapper")!=NULL;
+    for(size_t p=0;p<c->length;) {
+        if(at(c,p,"<!--")) {size_t q=p+4;while(q+3<=c->length&&!at(c,q,"-->"))q++;p=q+3;continue;}
+        if(c->source[p]!='<') {p++;continue;}
+        size_t e=until(c,p+1,'>');if(e>=c->length)break;
+        size_t a=p+1;bool closing=false;if(a<e&&c->source[a]=='/')a++,closing=true;
+        size_t z=a;while(z<e&&(isalnum((unsigned char)c->source[z])||c->source[z]=='-'||c->source[z]==':'))z++;
+        char *tag=strndup(c->source+a,z-a);
+        if(!closing&&*tag) {
+            size_t site=0;char *name=NULL;
+            if(mapping&& !strcasecmp(tag,"mapper")) {
+                name=attr(c,z,e,"namespace",&site);if(name)decl(c,name,"mapper",site,site+strlen(name),-1);
+                owner=c->result->sem.nsymbols-1;
+            } else if(mapping&&(!strcasecmp(tag,"select")||!strcasecmp(tag,"insert")||!strcasecmp(tag,"update")||!strcasecmp(tag,"delete")||!strcasecmp(tag,"sql"))) {
+                name=attr(c,z,e,"id",&site);if(name)decl(c,name,"statement",site,site+strlen(name),owner);
+            } else if(mapping&&(!strcasecmp(tag,"include")||!strcasecmp(tag,"resultMap"))) {
+                name=attr(c,z,e,!strcasecmp(tag,"include")?"refid":"extends",&site);
+                if(name)ref(c,name,"reference",site,site+strlen(name),owner,"mapping attribute");
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfcomponent")) {
+                name=attr(c,z,e,"name",&site);if(name)decl(c,name,"component",site,site+strlen(name),-1);
+                owner=c->result->sem.nsymbols-1;
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cffunction")) {
+                name=attr(c,z,e,"name",&site);if(name)decl(c,name,"function",site,site+strlen(name),owner);
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfquery")) {
+                name=attr(c,z,e,"name",&site);if(name)decl(c,name,"query",site,site+strlen(name),owner);
+                size_t q=e+1;while(q<c->length&&!at(c,q,"</cfquery"))q++;
+                parse_embedded(c,"cfquery",e+1,q);
+            } else if(eq(lang,"cfml") && !strcasecmp(tag,"cfscript")) {
+                size_t q=e+1;while(q<c->length&&!at(c,q,"</cfscript"))q++;
+                parse_embedded(c,"cfscript",e+1,q);
+            } else if(eq(lang,"vue")||eq(lang,"svelte")||eq(lang,"astro")) {
+                if(isupper((unsigned char)tag[0])) ref(c,tag,"component",a,z,owner,"component tag");
+                if(!strcasecmp(tag,"script")) {
+                    size_t q=e+1;while(q<c->length&&!at(c,q,"</script"))q++;
+                    size_t langsite=0;char *sl=attr(c,z,e,"lang",&langsite);
+                    parse_embedded(c,sl && (!strcasecmp(sl,"ts")||!strcasecmp(sl,"typescript"))?"typescript":"javascript",e+1,q);
+                    free(sl);free(name);free(tag);p=q;continue;
+                }
+            }
+            free(name);
+        }
+        free(tag);p=e+1;
+    }
+    if(eq(lang,"astro") && c->length>=6 && !strncmp(c->source,"---",3)) {
+        size_t q=3;while(q+4<c->length && strncmp(c->source+q,"\n---",4))q++;
+        if(q+4<c->length)parse_embedded(c,"typescript",3,q);
+    }
+}
+
+static bool boundary(const AstContext *c,size_t p,size_t n) {
+    return (p==0||!isalnum((unsigned char)c->source[p-1])) &&
+           (p+n>=c->length||!isalnum((unsigned char)c->source[p+n]));
+}
+static void text_extract(AstContext *c) {
+    const char *lang=c->language;
+    for(size_t p=0;p<c->length;) {
+        if(eq(lang,"delphi_form")) {
+            if(at(c,p,"object ")||at(c,p,"inherited ")||at(c,p,"inline ")) {
+                size_t a=p+(at(c,p,"object ")?7:at(c,p,"inline ")?7:10),q=a;
+                while(q<c->length && (isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
+                if(q>a) {char *n=strndup(c->source+a,q-a);decl(c,n,"component",a,q,-1);free(n);}
+            }
+        } else if(eq(lang,"razor")) {
+            if(at(c,p,"@model ")||at(c,p,"@inherits ")||at(c,p,"@inject ")) {
+                size_t a=p+(at(c,p,"@model ")?7:at(c,p,"@inject ")?8:10),q=a;
+                while(q<c->length && (isalnum((unsigned char)c->source[q])||c->source[q]=='_'||c->source[q]=='.'))q++;
+                if(q>a){char *n=strndup(c->source+a,q-a);ref(c,n,"type",a,q,-1,"razor directive");free(n);}
+            }
+        } else if(eq(lang,"liquid")) {
+            if(at(c,p,"{%")) {
+                size_t q=p+2;while(q+2<c->length&&!at(c,q,"%}"))q++;
+                size_t a=p+2;while(a<q&&isspace((unsigned char)c->source[a]))a++;
+                if(at(c,a,"comment") && boundary(c,a,7)) {
+                    p=q+2;while(p+16<c->length&&!at(c,p,"{% endcomment"))p++;
+                    if(p+16<c->length) {while(p+2<c->length&&!at(c,p,"%}"))p++;p+=2;}
+                    continue;
+                }
+                if((at(c,a,"render")&&boundary(c,a,6))||(at(c,a,"include")&&boundary(c,a,7))) {
+                    a+=at(c,a,"render")?6:7;while(a<q&&isspace((unsigned char)c->source[a]))a++;
+                    if(a<q&&(c->source[a]=='\''||c->source[a]=='"')) {
+                        char quote=c->source[a++];size_t b=a;while(b<q&&c->source[b]!=quote)b++;
+                        if(b>a){char *n=strndup(c->source+a,b-a);ref(c,n,"template",a,b,-1,"liquid include");free(n);}
+                    }
+                } p=q+2;continue;
+            }
+        }
+        p++;
+    }
+}
+
+void ast_mixed_register(void) {
+    static const AstAdapter a[]={
+        {"pascal",tree_sitter_pascal,grammar_extract},
+        {"cobol",tree_sitter_COBOL,grammar_extract},
+        {"vbnet",tree_sitter_vb_dotnet,grammar_extract},
+        {"cfscript",tree_sitter_cfscript,grammar_extract},
+        {"cfquery",tree_sitter_cfquery,grammar_extract},
+        {"arkts",tree_sitter_arkts,grammar_extract},
+        {"cfml",tree_sitter_cfml,markup_extract},
+        {"vue",NULL,markup_extract},{"svelte",NULL,markup_extract},
+        {"astro",NULL,markup_extract},{"xml",NULL,markup_extract},
+        {"liquid",NULL,text_extract},{"razor",NULL,text_extract},
+        {"delphi_form",NULL,text_extract},
+    };
+    for(size_t i=0;i<sizeof a/sizeof *a;i++)ast_register(&a[i]);
+}
