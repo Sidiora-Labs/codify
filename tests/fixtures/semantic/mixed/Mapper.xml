@@ -1,4 +1,4 @@
 <mapper namespace="site.Mapper">
-  <select id="find">SELECT 1</select>
-  <include refid="fragment" />
+  <sql id="fragment">SELECT 1</sql>
+  <select id="find"><include refid="fragment" /></select>
 </mapper>
