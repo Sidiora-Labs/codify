@@ -26,6 +26,16 @@ cat > src/alpha.h <<'EOF'
 /** Keep the decoder contract stable for account records. */
 int parseUserRecord(int raw);
 EOF
+cat > src/owners.cpp <<'EOF'
+struct Alpha {
+    int process(int value);
+};
+struct Beta {
+    int process(int value) { return value; }
+};
+int reshape(int value) { return value; }
+int reshape(double value);
+EOF
 cat > tests/fixture.c <<'EOF'
 int parseUserRecord(int raw) {
     return -raw;
@@ -64,6 +74,18 @@ python3 - "$out" <<'PY'
 import json,sys
 d=json.loads(sys.argv[1])
 assert [x['name'] for x in d['symbols']]==['parseUserRecord'], d
+PY
+out="$("$CG" search process --json --path src/owners.cpp)"
+python3 - "$out" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']=='process']
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+out="$("$CG" search reshape --json --path src/owners.cpp)"
+python3 - "$out" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']=='reshape']
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
 PY
 out="$("$CG" search parseUserRecorb --json)"
 python3 - "$out" <<'PY'
