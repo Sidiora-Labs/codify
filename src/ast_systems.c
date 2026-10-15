@@ -205,6 +205,59 @@ static TSNode objc_name(TSNode n) {
 
 static TSNode first_named(TSNode n) { return named(n,0); }
 
+static TSNode find_table(TSNode n, const char *table, AstContext *ctx,
+                         int depth, unsigned *visited) {
+    if (depth>128 || ts_node_is_null(n) || ++*visited>100000 ||
+        (ctx->cancel_flag && *ctx->cancel_flag)) return (TSNode){0};
+    if (is(n,"init_declarator")) {
+        TSNode d=field(n,"declarator"), v=field(n,"value");
+        char *name=copy_text(ctx,name_leaf(d));
+        bool match=name && !strcmp(name,table) && is(v,"initializer_list");
+        free(name);
+        if (match) return v;
+    }
+    unsigned count=ts_node_named_child_count(n);
+    for (unsigned i=0;i<count;i++) {
+        TSNode got=find_table(named(n,i),table,ctx,depth+1,visited);
+        if (!ts_node_is_null(got)) return got;
+    }
+    return (TSNode){0};
+}
+
+static void native_registration(AstContext *ctx, TSNode call, int owner) {
+    TSNode callee=field(call,"function"), args=field(call,"arguments");
+    if (!is(callee,"identifier") || !is(args,"argument_list")) return;
+    char *name=copy_text(ctx,callee);
+    bool recognized=name && !strcmp(name,"RegisterNatives");
+    free(name);
+    if (!recognized || ts_node_named_child_count(args)<3) return;
+    TSNode arg=named(args,2);
+    if (!is(arg,"identifier")) return;
+    char *table=copy_text(ctx,arg);
+    unsigned visited=0;
+    TSNode init=find_table(ctx->root,table,ctx,0,&visited);
+    free(table);
+    if (ts_node_is_null(init)) return;
+    unsigned rows=ts_node_named_child_count(init);
+    for (unsigned i=0;i<rows && i<256;i++) {
+        TSNode row=named(init,i);
+        if (!is(row,"initializer_list") || ts_node_named_child_count(row)<3)
+            continue;
+        TSNode key_node=named(row,0), target=named(row,2);
+        if (!is(key_node,"string_literal") || !is(target,"cast_expression"))
+            continue;
+        target=field(target,"value");
+        if (!is(target,"identifier")) continue;
+        char *key=copy_text(ctx,key_node);
+        size_t len=key?strlen(key):0;
+        if (len>=2 && key[0]=='"' && key[len-1]=='"') {
+            key[len-1]=0;
+            type_fact(ctx,row,"native_bridge_registration",owner,key+1,target);
+        }
+        free(key);
+    }
+}
+
 static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
     if (ctx->cancel_flag && *ctx->cancel_flag) { ctx->cancelled=true; return; }
     if (depth>256 || ++ctx->visited>2000000) { ctx->truncated=true; return; }
@@ -380,6 +433,7 @@ static void extract_node(AstContext *ctx, TSNode n, int owner, int depth) {
     if (!strcmp(t,"call_expression")) {
         TSNode callee=field(n,"function");
         ref(ctx,n,callee,"call",owner,callee_qualifier(callee));
+        if (c_family) native_registration(ctx,n,owner);
         if (is(callee,"field_expression")) {
             TSNode table=field(callee,"argument"), slot=field(callee,"field");
             char *a=copy_text(ctx,table), *b=copy_text(ctx,slot);

@@ -71,6 +71,10 @@ assert_fact('fixture.c','function_value','increment')
 assert_fact('fixture.c','pointer_slot','increment')
 assert_fact('fixture.c','pointer_call','ops.run')
 assert_fact('fixture.c','macro_boundary','WRAP')
+assert_fact('fixture.c','native_bridge_registration','nativeOpen')
+assert not exists('''SELECT 1 FROM semantic_type_facts t JOIN files f ON f.id=t.file_id
+                     WHERE f.path='src/fixture.c' AND t.kind='native_bridge_registration'
+                     AND t.name='runtimeName' ''')
 assert_fact('fixture.cpp','inherits','Base')
 assert_fact('fixture.go','receiver','Worker')
 assert_fact('fixture.rs','implements','Runner')

@@ -14,3 +14,12 @@ int dispatch(void) {
 }
 /* phantom_call() is a comment, not executable syntax. */
 const char *text = "phantom_call()";
+typedef struct { const char *name; const char *sig; void *fn; } NativeMethod;
+int nativeOpen(void) { return 1; }
+NativeMethod methods[] = {{"nativeOpen", "()V", (void*)nativeOpen}};
+const char *dynamicName = "runtimeName";
+NativeMethod dynamicMethods[] = {{dynamicName, "()V", (void*)nativeOpen}};
+int registerMethods(void *env, void *klass) {
+    return RegisterNatives(env, klass, methods, 1)
+         + RegisterNatives(env, klass, dynamicMethods, 1);
+}
