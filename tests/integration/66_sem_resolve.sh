@@ -85,6 +85,8 @@ assert c.execute("SELECT original_text,strategy,provenance FROM semantic_edges W
 assert c.execute('SELECT count(*) FROM semantic_edges').fetchone()[0]==5
 assert c.execute('SELECT verdict,target_id FROM refs WHERE id=103').fetchone()==('unknown',None)
 assert 'unknown receiver' in c.execute('SELECT evidence FROM semantic_references WHERE ref_id=103').fetchone()[0]
+evidence=c.execute('SELECT evidence FROM semantic_references WHERE ref_id=101').fetchone()[0]
+assert 'target=app.ts:2' in evidence and 'owner=' not in evidence,evidence
 # An adapter's exact-site syntax edge wins. Another site for the same target
 # must still get its own resolved edge.
 c.executemany('INSERT INTO refs VALUES(?,?,?,?,?,?,?,?,?)', [
@@ -144,6 +146,9 @@ python3 - "$tmp/source" <<'PY'
 import pathlib, sqlite3, sys
 root = pathlib.Path(sys.argv[1])
 db = sqlite3.connect(next(root.glob('.*/*.db')))
+plan=' '.join(str(row) for row in db.execute('''EXPLAIN QUERY PLAN DELETE FROM semantic_edges
+    WHERE branch_id=1 AND source_ref_id=1 AND provenance='resolved-receiver' '''))
+assert 'idx_sem_edge_ref' in plan,plan
 rows = db.execute('''SELECT r.argc, r.qual, r.verdict, r.conf, s.sig,
                            sr.evidence
                      FROM refs r JOIN semantic_references sr ON sr.ref_id=r.id
