@@ -1029,7 +1029,10 @@ static const HelpCmd HELP[] = {
   .summary = "machine profile, index coverage and parser inventory",
   .detail = "Reports branch-scoped extraction coverage, parser inventory "
     "and pending reconciliation. Query tools validate contributing source "
-    "files under explicit file, byte and time limits.",
+    "files under explicit file, byte and time limits. With a tight query "
+    "budget, index_health uses b=branch, c=[complete,partial,skipped,"
+    "failed,unchecked], f=[verified,stale,unchecked], x=pending/degraded "
+    "bits (1/2), and o=1 for omitted parser and file details.",
   .related = "config,root" },
 { .group = "config", .name = "version", .args = "",
   .usage = "version", .aliases = "--version",
