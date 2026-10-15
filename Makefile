@@ -11,6 +11,7 @@ BUILD     = build
 
 BIN       = cg
 SRCS      = $(wildcard src/*.c)
+SRC_HEADERS = $(wildcard src/*.h)
 OBJS      = $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 TS_RUNTIME = $(BUILD)/vendor/tree-sitter-lib.o
 # Family-owned grammar directories are discovered without a shared manifest
@@ -28,7 +29,7 @@ all: $(BIN)
 $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
-$(BUILD)/%.o: src/%.c src/cg.h | $(BUILD)
+$(BUILD)/%.o: src/%.c $(SRC_HEADERS) | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/vendor/tree-sitter-lib.o: vendor/tree-sitter/lib/src/lib.c | $(BUILD)
@@ -37,7 +38,9 @@ $(BUILD)/vendor/tree-sitter-lib.o: vendor/tree-sitter/lib/src/lib.c | $(BUILD)
 
 $(BUILD)/vendor/%.o: vendor/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
-	$(CC) -I$(dir $<) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function -c -o $@ $<
+	$(CC) -I$(dir $<) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function \
+		-Wno-unused-value -Wno-unused-const-variable -Wno-implicit-fallthrough \
+		-Wno-missing-field-initializers -c -o $@ $<
 
 $(LIB): $(filter-out $(BUILD)/main.o,$(OBJS))
 	ar rcs $@ $^

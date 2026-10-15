@@ -18,7 +18,7 @@ static const char *SCHEMA =
     "CREATE TABLE IF NOT EXISTS files("
     "  id INTEGER PRIMARY KEY, branch_id INTEGER NOT NULL DEFAULT 0,"
     "  path TEXT NOT NULL, lang TEXT,"
-    "  size INTEGER, mtime INTEGER, hash TEXT, lines INTEGER,"
+    "  size INTEGER, mtime INTEGER, mtime_ns INTEGER, hash TEXT, lines INTEGER,"
     "  base TEXT,"                       /* last path segment (1.3) */
     "  UNIQUE(branch_id, path));"
     "CREATE INDEX IF NOT EXISTS idx_file_path ON files(path);"
@@ -450,6 +450,16 @@ int cg_open(Cg *cg, bool create) {
         "CREATE INDEX IF NOT EXISTS idx_file_base ON files(base, branch_id);"
         "CREATE INDEX IF NOT EXISTS idx_import_target ON imports(target_file_id)",
         NULL, NULL, NULL);
+    /* The freshness preflight only needs legacy rows. Keep its lookup
+     * proportional to those rows, rather than all files on the branch. */
+    if (sqlite3_exec(cg->db,
+            "CREATE INDEX IF NOT EXISTS idx_file_legacy_time "
+            "ON files(branch_id) WHERE mtime_ns IS NULL",
+            NULL, NULL, NULL) != SQLITE_OK) {
+        fprintf(stderr, "cg: cannot create legacy timestamp index: %s\n",
+                sqlite3_errmsg(cg->db));
+        return -1;
+    }
     events_install(cg);
     /* a branch never seen before is registered here, so the first cg call
      * from a fresh worktree needs one small write; a busy database leaves
@@ -614,6 +624,21 @@ int cg_schema_upgrade(Cg *cg) {
                 "UPDATE files SET base = replace(path, rtrim(path, "
                 "replace(path, '/', '')), '')", NULL, NULL, NULL);
     }
+    /* NULL marks legacy rows: a first walk must verify their content before
+     * trusting metadata. Do not backfill nanoseconds from whole seconds. */
+    {
+        sqlite3_stmt *q = NULL;
+        bool have = true;
+        if (sqlite3_prepare_v2(cg->db, "SELECT 1 FROM pragma_table_info("
+                               "'files') WHERE name='mtime_ns'", -1, &q, NULL)
+            == SQLITE_OK) {
+            have = sqlite3_step(q) == SQLITE_ROW;
+            sqlite3_finalize(q);
+        }
+        if (!have && sqlite3_exec(cg->db,
+                "ALTER TABLE files ADD COLUMN mtime_ns INTEGER",
+                NULL, NULL, NULL) != SQLITE_OK) return -1;
+    }
     if (current) return 0;
     if (stored > atol(SCHEMA_VERSION)) {
         fprintf(stderr,
@@ -668,6 +693,7 @@ int cg_schema_upgrade(Cg *cg) {
         "DROP TABLE IF EXISTS comment_fts;"
         "DROP TABLE IF EXISTS file_fts;"
         "DROP TABLE IF EXISTS body_tri;"
+        "DROP TABLE IF EXISTS extraction_health;"
         "DELETE FROM meta WHERE key='fts_mode';"
         "DELETE FROM meta WHERE key LIKE 'last_index_%' OR key LIKE 'walk_%' "
         "OR key LIKE 'project_files%' OR key LIKE 'index_pending_resolve%';";
