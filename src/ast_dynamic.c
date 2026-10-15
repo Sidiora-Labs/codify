@@ -503,17 +503,21 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
             add_ref(w, n, target, receiver, ast_field(n, "arguments"));
     }
     DynWalk nested = {w->ctx, child_owner};
-    uint32_t count = ts_node_named_child_count(n);
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(n, i);
-        int before = w->ctx->result->sem.nsymbols;
-        if (!ts_node_is_null(child)) walk(&nested, child, depth + 1);
-        if (php && is(child, "namespace_definition") &&
-            ts_node_is_null(ast_field(child, "body")) &&
-            w->ctx->result->sem.nsymbols > before)
-            nested.owner = before;
-        if (w->ctx->truncated) break;
+    TSTreeCursor cursor = ts_tree_cursor_new(n);
+    if (ts_tree_cursor_goto_first_child(&cursor)) {
+        do {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            if (!ts_node_is_named(child)) continue;
+            int before = w->ctx->result->sem.nsymbols;
+            walk(&nested, child, depth + 1);
+            if (php && is(child, "namespace_definition") &&
+                ts_node_is_null(ast_field(child, "body")) &&
+                w->ctx->result->sem.nsymbols > before)
+                nested.owner = before;
+            if (w->ctx->truncated) break;
+        } while (ts_tree_cursor_goto_next_sibling(&cursor));
     }
+    ts_tree_cursor_delete(&cursor);
 }
 
 static void extract(AstContext *ctx) {
