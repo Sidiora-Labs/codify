@@ -1,5 +1,6 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
+#include "answer_health.h"
 #include <poll.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -95,6 +96,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
         if (cg) sb_printf(&b, ",\"fts_mode\":\"%s\",\"sqlite\":\"%s\"",
                           db_fts_contentless(cg) ? "contentless" : "content",
                           sqlite3_libversion());
+        if (cg) { sb_putc(&b, ','); answer_health_append(&b, cg, NULL); }
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -131,6 +133,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
                        : "stores file content (contentless needs SQLite "
                          "3.43.0 or newer when the graph is built)",
                    sqlite3_libversion());
+        if (cg) answer_health_text(cg);
     }
     free(ms); free(nf); free(nb);
     return 0;
@@ -331,6 +334,15 @@ int main(int argc, char **argv) {
         cg_filter_set(&cg, &qf);
     }
     int rc = 0;
+    bool health_answer = json &&
+        (strcmp(cmd, "search") == 0 || strcmp(cmd, "context") == 0 ||
+         strcmp(cmd, "symbol") == 0 || strcmp(cmd, "impact") == 0 ||
+         strcmp(cmd, "routes") == 0 || strcmp(cmd, "files") == 0 ||
+         strcmp(cmd, "survey") == 0 || strcmp(cmd, "show") == 0 ||
+         strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
+         strcmp(cmd, "test-impact") == 0);
+    AnswerCapture answer_capture = {0};
+    if (health_answer) answer_health_capture_begin(&answer_capture);
 
     if (strcmp(cmd, "journal") == 0) {
         rc = cmd_journal(&cg, argc - 2, argv + 2, json);
@@ -536,7 +548,7 @@ int main(int argc, char **argv) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         rc = cmd_log(&cg, limit > 0 ? limit : 20, json);
     } else if (strcmp(cmd, "status") == 0) {
-        rc = cmd_status(&cg, json);
+        rc = answer_health_status(&cg, json);
     } else if (strcmp(cmd, "state") == 0) {
         rc = cmd_state(&cg, json);
     } else if (strcmp(cmd, "event") == 0) {
@@ -693,6 +705,7 @@ int main(int argc, char **argv) {
         help_suggest(cmd);
         rc = 1;
     }
+    if (health_answer) answer_health_capture_end(&answer_capture, &cg);
     cg_close(&cg);
     return rc;
 }
