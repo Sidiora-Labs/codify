@@ -170,6 +170,7 @@ extern int sem_search_file_replace(Cg *cg, long file_id) __attribute__((weak));
 extern int sem_search_file_copy(Cg *cg, long source_file_id,
                                 long dest_file_id) __attribute__((weak));
 extern int sem_search_file_purge(Cg *cg, long file_id) __attribute__((weak));
+extern int sem_routes_purge_file(Cg *cg, long file_id) __attribute__((weak));
 int sem_schema_init(Cg *cg) {
     cg_exec(cg, SEM_SCHEMA);
     return sem_search_schema_init ? sem_search_schema_init(cg) : 0;
@@ -203,6 +204,8 @@ static void done(Cg *cg, sqlite3_stmt *q) {
  * must lose stale targets even when their source files are unchanged. */
 int sem_file_purge(Cg *cg, long file_id) {
     semantic_error = 0;
+    if (sem_routes_purge_file && sem_routes_purge_file(cg,file_id)!=0)
+        return -1;
     if (sem_search_file_purge && sem_search_file_purge(cg,file_id)!=0)
         return -1;
     sqlite3_stmt *q = cg_prep(cg,

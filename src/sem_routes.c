@@ -24,7 +24,9 @@ static const char *SCHEMA =
     "registration_file_id INTEGER NOT NULL,registration_line INTEGER NOT NULL,"
     "PRIMARY KEY(mount_route_id,child_route_id));"
     "CREATE INDEX IF NOT EXISTS idx_sem_route_composed_match ON "
-    "semantic_route_compositions(branch_id,method,pattern);";
+    "semantic_route_compositions(branch_id,method,pattern);"
+    "CREATE TABLE IF NOT EXISTS semantic_route_dirty("
+    "branch_id INTEGER PRIMARY KEY);";
 
 static void ensure_route_schema(Cg *cg) {
     cg_exec(cg,SCHEMA);
@@ -43,6 +45,41 @@ static int step_done(sqlite3_stmt *q) {
     int rc=sqlite3_step(q);
     sqlite3_reset(q); sqlite3_clear_bindings(q);
     return rc==SQLITE_DONE ? 0 : -1;
+}
+
+/* File replacement happens before legacy symbol IDs may be reused. Remove
+ * route nodes and their relations while their old registration still exists.
+ * The dirty branch key survives deletion of the final route in a file. */
+int sem_routes_purge_file(Cg *cg,long file_id) {
+    ensure_route_schema(cg);
+    const char *sql[] = {
+        "INSERT OR IGNORE INTO semantic_route_dirty(branch_id) "
+        "SELECT branch_id FROM files WHERE id=?1 AND EXISTS("
+        "SELECT 1 FROM semantic_route_facts WHERE registration_file_id=?1 "
+        "OR handler_file_id=?1)",
+        "DELETE FROM semantic_edges WHERE source_id IN ("
+        "SELECT route_symbol_id FROM semantic_route_facts WHERE registration_file_id=?1) "
+        "OR target_id IN (SELECT route_symbol_id FROM semantic_route_facts "
+        "WHERE registration_file_id=?1)",
+        "DELETE FROM semantic_route_compositions WHERE mount_route_id IN ("
+        "SELECT route_id FROM semantic_route_facts WHERE registration_file_id=?1) "
+        "OR child_route_id IN (SELECT route_id FROM semantic_route_facts "
+        "WHERE registration_file_id=?1) OR registration_file_id=?1",
+        "DELETE FROM symbol_fts WHERE rowid IN (SELECT s.id FROM symbols s "
+        "JOIN semantic_route_facts r ON r.route_symbol_id=s.id "
+        "WHERE r.registration_file_id=?1 AND s.file_id=?1 AND s.kind='route')",
+        "DELETE FROM symbols WHERE id IN (SELECT s.id FROM symbols s "
+        "JOIN semantic_route_facts r ON r.route_symbol_id=s.id "
+        "WHERE r.registration_file_id=?1 AND s.file_id=?1 AND s.kind='route')",
+        "UPDATE semantic_route_facts SET handler_symbol_id=NULL,handler_file_id=NULL,"
+        "status='unresolved' WHERE handler_file_id=?1 AND registration_file_id!=?1",
+        "DELETE FROM semantic_route_facts WHERE registration_file_id=?1"
+    };
+    for(size_t i=0;i<sizeof sql/sizeof sql[0];i++) {
+        sqlite3_stmt *q=cg_prep(cg,sql[i]);sqlite3_bind_int64(q,1,file_id);
+        int rc=step_done(q);sqlite3_finalize(q);if(rc)return -1;
+    }
+    return 0;
 }
 
 static long exact_symbol(Cg *cg, long file, const char *name, int *count) {
@@ -211,6 +248,7 @@ static bool affected(Cg *cg,const long *changed,int n) {
     if(n==0)return false;
     sqlite3_stmt *q=cg_prep(cg,
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM routes WHERE file_id=?1) "
+        "OR EXISTS(SELECT 1 FROM semantic_route_dirty WHERE branch_id=?2) "
         "OR EXISTS(SELECT 1 FROM semantic_route_facts WHERE branch_id=?2 "
         "AND (registration_file_id=?1 OR handler_file_id=?1)) "
         "OR EXISTS(SELECT 1 FROM imports i JOIN routes r ON r.file_id=i.file_id "
@@ -364,8 +402,10 @@ int sem_routes_pass(Cg *cg,const long *changed_files,int nfiles) {
     sqlite3_bind_int64(clear,1,cg->branch_id);
     if (step_done(clear)) {sqlite3_finalize(clear);return -1;}
     sqlite3_finalize(clear);
-    sqlite3_stmt *old=cg_prep(cg,"SELECT route_symbol_id FROM semantic_route_facts "
-        "WHERE branch_id=?1 AND route_id NOT IN (SELECT r.id FROM routes r "
+    sqlite3_stmt *old=cg_prep(cg,"SELECT rf.route_symbol_id FROM semantic_route_facts rf "
+        "JOIN symbols s ON s.id=rf.route_symbol_id AND s.kind='route' "
+        "AND s.file_id=rf.registration_file_id WHERE rf.branch_id=?1 "
+        "AND rf.route_id NOT IN (SELECT r.id FROM routes r "
         "JOIN files f ON f.id=r.file_id WHERE f.branch_id=?1)");
     sqlite3_bind_int64(old,1,cg->branch_id);
     sqlite3_stmt *del_fts=cg_prep(cg,"DELETE FROM symbol_fts WHERE rowid=?1");
@@ -391,7 +431,7 @@ int sem_routes_pass(Cg *cg,const long *changed_files,int nfiles) {
         "ON f.id=r.file_id LEFT JOIN semantic_route_facts rf ON rf.route_id=r.id "
         "WHERE f.branch_id=?1 ORDER BY r.id LIMIT 50000");
     sqlite3_bind_int64(routes,1,cg->branch_id);
-    sqlite3_stmt *exists=cg_prep(cg,"SELECT 1 FROM symbols WHERE id=?1");
+    sqlite3_stmt *exists=cg_prep(cg,"SELECT file_id,name,kind,line FROM symbols WHERE id=?1");
     sqlite3_stmt *insert_sym=cg_prep(cg,"INSERT INTO symbols(file_id,name,kind,line,"
         "end_line,sig,decl) VALUES(?1,?2,'route',?3,?3,?4,0)");
     sqlite3_stmt *insert_fts=cg_prep(cg,"INSERT INTO symbol_fts(rowid,name,kind,"
@@ -429,6 +469,16 @@ int sem_routes_pass(Cg *cg,const long *changed_files,int nfiles) {
         if (route_sym) {
             sqlite3_bind_int64(exists,1,route_sym);
             if (sqlite3_step(exists)!=SQLITE_ROW) route_sym=0;
+            else {
+                const char *name=(const char*)sqlite3_column_text(exists,1);
+                const char *kind=(const char*)sqlite3_column_text(exists,2);
+                char expected[640];snprintf(expected,sizeof expected,"%s %s",
+                    method?method:"*",path?path:"");
+                if(sqlite3_column_int64(exists,0)!=fid || !name ||
+                   strcmp(name,expected)!=0 || !kind ||
+                   strcmp(kind,"route")!=0 ||
+                   sqlite3_column_int(exists,3)!=line)route_sym=0;
+            }
             sqlite3_reset(exists);sqlite3_clear_bindings(exists);
         }
         if (!route_sym) {
@@ -508,7 +558,13 @@ int sem_routes_pass(Cg *cg,const long *changed_files,int nfiles) {
     sqlite3_finalize(fact);sqlite3_finalize(edge);sqlite3_finalize(target_file);
     if(rc)return rc;
     rc=compose_mounts(cg);
-    return rc?rc:link_navigation(cg);
+    if(!rc)rc=link_navigation(cg);
+    if(!rc){
+        sqlite3_stmt *clean=cg_prep(cg,"DELETE FROM semantic_route_dirty WHERE branch_id=?1");
+        sqlite3_bind_int64(clean,1,cg->branch_id);
+        rc=step_done(clean);sqlite3_finalize(clean);
+    }
+    return rc;
 }
 
 void sem_routes_register(void) { sem_pass_register("routes",40,sem_routes_pass); }
