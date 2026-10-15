@@ -4,47 +4,47 @@
 
 ## Tasks
 
-  - [ ] 1.1 Subsecond change detection and explicit-dirty hashing
+  - [x] 1.1 Subsecond change detection and explicit-dirty hashing
     - Fix same-size same-second and preserved-metadata dirty edits in full and targeted passes; migrate timestamps; preserve hash reuse, branch isolation and Git candidate behavior.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1_
-  - [ ] 1.2 Watcher reconciliation and coverage health
+  - [x] 1.2 Watcher reconciliation and coverage health
     - Handle overflow/root loss/registration errors, persist reconciliation debt and expose coverage health. Implement safe portable polling fallback; test injected loss, retries and directory moves.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.2_
-  - [ ] 1.3 Extraction diagnostics and semantic version freshness
+  - [x] 1.3 Extraction diagnostics and semantic version freshness
     - Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.3, 1.4_
-  - [ ] 2.1 Shared semantic records, storage and lifecycle
+  - [x] 2.1 Shared semantic records, storage and lifecycle
     - Define the shared rich extraction contract and branch-safe typed graph schema; wire persistence, migration, deletion, identical-content reuse and cross-worktree copy. Publish API to sibling workers early; extend existing symbols/refs rather than duplicating ownership inconsistently.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 3.3, 3.4_
-  - [ ] 2.2 Native syntax-tree runtime and adapter registry
+  - [x] 2.2 Native syntax-tree runtime and adapter registry
     - Vendor pinned licensed parser runtime into the single binary, define grammar/adapter registry and common tree walker. Coordinate the semantic contract with 2.1. Support worker-local parsers, bounded recovery, fallback and dynamic line lengths. Publish the adapter API immediately for language workers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.2_
-  - [ ] 2.3 TypeScript and JavaScript syntax extraction
+  - [x] 2.3 TypeScript and JavaScript syntax extraction
     - Implement TS/TSX/JS/JSX grammar adapters, multiline functions, owner-aware methods, types, imports/exports, object actions, callbacks and JSX component facts; include negative and error-recovery cases.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.3_
-  - [ ] 2.4 Systems language syntax extraction
+  - [x] 2.4 Systems language syntax extraction
     - Implement C/C++/Objective-C/Go/Rust adapters including include/import bindings, ownership, function values/pointer facts, type relations, traits/interfaces and macro boundaries.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.4_
-  - [ ] 2.5 Python Ruby and PHP syntax extraction
+  - [x] 2.5 Python Ruby and PHP syntax extraction
     - Implement Python/Ruby/PHP scoped declarations/references, annotations/decorators, import aliases, classes/methods, docstrings and nested functions using pinned grammars.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.5_
-  - [ ] 2.6 Managed and application language syntax extraction
+  - [x] 2.6 Managed and application language syntax extraction
     - Implement Java/Kotlin/Scala/C#/Swift/Dart adapters with generics, qualified owners, result types, inheritance/interfaces, overload metadata and bounded parse recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.6_
-  - [ ] 2.7 Configuration and scripting language syntax extraction
+  - [x] 2.7 Configuration and scripting language syntax extraction
     - Implement Lua/Luau/R/Erlang/Solidity/Terraform/Nix grammar adapters with accurate coverage declarations and fixtures for declarations, references and string/comment negatives.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.7_
-  - [ ] 2.8 Legacy and mixed-format extraction adapters
+  - [x] 2.8 Legacy and mixed-format extraction adapters
     - Implement Pascal/COBOL/VB.NET/CFScript/CFQuery/ArkTS and Vue/Svelte/Astro/Liquid/Razor/CFML/Delphi-form/MyBatis adapters. Preserve offsets for embedded code; file-only formats must say so. Use separate manifests for grammar registration and licences.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.7, 2.8_
@@ -76,7 +76,7 @@
     - Integrate all semantic passes with changed-definition/configuration/registration dependency sets, persistent failed refs, stale-target resurrection and no-op skipping. Publish complete generations transactionally and recover interrupted work.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.5, 3.8_
-  - [ ] 4.1 Freshness and coverage on CLI and MCP answers
+  - [x] 4.1 Freshness and coverage on CLI and MCP answers
     - Expose file coverage/parser inventory/index state and pending/degraded health through info/status and MCP. Validate contributing source hashes under explicit file/byte/time caps; distinguish verified/stale/unchecked and partial extraction.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.5_
