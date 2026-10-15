@@ -196,7 +196,11 @@ static void python_channel(DynWalk *w, TSNode call, TSNode callee, TSNode args) 
         if (requests_bound && literal[0] == '/' && literal[1] != '/' &&
             (!strcmp(verb, "get") || !strcmp(verb, "post") ||
              !strcmp(verb, "put") || !strcmp(verb, "patch") || !strcmp(verb, "delete"))) {
-            kind = "channel:http:producer"; value = verb;
+            kind = "channel:http:producer";
+            value = !strcmp(verb, "get") ? "GET" :
+                    !strcmp(verb, "post") ? "POST" :
+                    !strcmp(verb, "put") ? "PUT" :
+                    !strcmp(verb, "patch") ? "PATCH" : "DELETE";
         }
         if (kind) {
             SemTypeFact *f = sem_type_fact_add(&w->ctx->result->sem, literal, kind, span(call));
@@ -238,16 +242,37 @@ static void python_import(DynWalk *w, TSNode node) {
 
 static void php_import(DynWalk *w, TSNode node) {
     uint32_t n = ts_node_named_child_count(node);
+    char *prefix = NULL;
+    TSNode group = ast_field(node, "body");
+    if (!ts_node_is_null(group)) {
+        for (uint32_t i = 0; i < n; i++) {
+            TSNode ch = ts_node_named_child(node, i);
+            if (is(ch, "namespace_name")) { prefix = text(w->ctx, ch); break; }
+        }
+    }
     for (uint32_t i = 0; i < n; i++) {
         TSNode child = ts_node_named_child(node, i);
-        if (!is(child, "namespace_use_clause")) continue;
-        TSNode path = first_named(child);
-        char *module = text(w->ctx, path);
-        char *alias = text(w->ctx, ast_field(child, "alias"));
-        char *local = alias ? strdup(alias) : short_name(module);
-        add_binding(w, child, module, module, local, "namespace-use");
-        free(module); free(alias); free(local);
+        bool grouped = is(child, "namespace_use_group");
+        uint32_t clauses = grouped ? ts_node_named_child_count(child) : 1;
+        for (uint32_t j = 0; j < clauses; j++) {
+            TSNode clause = grouped ? ts_node_named_child(child, j) : child;
+            if (!is(clause, "namespace_use_clause")) continue;
+            char *part = text(w->ctx, first_named(clause));
+            if (!part) continue;
+            char *module = part;
+            if (prefix && *prefix) {
+                size_t a = strlen(prefix), b = strlen(part);
+                module = malloc(a + b + 2);
+                if (module) { memcpy(module, prefix, a); module[a] = '\\'; memcpy(module+a+1, part, b+1); }
+            }
+            char *alias = text(w->ctx, ast_field(clause, "alias"));
+            char *local = alias ? strdup(alias) : short_name(module);
+            add_binding(w, clause, module, module, local, "namespace-use");
+            if (module != part) free(module);
+            free(part); free(alias); free(local);
+        }
     }
+    free(prefix);
 }
 
 static void ruby_import(DynWalk *w, TSNode node) {
@@ -272,9 +297,8 @@ static void ruby_import(DynWalk *w, TSNode node) {
 }
 
 static char *python_doc(AstContext *c, TSNode body) {
-    TSNode expr = first_named(body);
-    if (!is(expr, "expression_statement")) return NULL;
-    TSNode value = first_named(expr);
+    TSNode value = first_named(body);
+    if (is(value, "expression_statement")) value = first_named(value);
     if (!is(value, "string") && !is(value, "concatenated_string")) return NULL;
     return text(c, value);
 }
@@ -312,13 +336,14 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
     if (def) {
         bool type = strstr(t, "class") || strstr(t, "interface") || strstr(t, "trait") ||
                     !strcmp(t, "module") || !strcmp(t, "namespace_definition");
+        const char *parent_kind = w->owner >= 0 ?
+            w->ctx->result->sem.symbols[w->owner].kind : NULL;
+        bool class_scope = parent_kind &&
+            (!strcmp(parent_kind, "class") || !strcmp(parent_kind, "module"));
         const char *kind = type ? (!strcmp(t, "module") || !strcmp(t, "namespace_definition")
                                     ? "module" : "class") :
-                            (w->owner >= 0 && (!strcmp(t, "method") ||
-                             !strcmp(t, "singleton_method") || !strcmp(t, "method_declaration") ||
-                             (py && !strcmp(t, "function_definition") &&
-                              !strcmp(w->ctx->result->sem.symbols[w->owner].kind, "class")))
-                             ? "method" : "function");
+                            ((php && !strcmp(t, "method_declaration")) ||
+                             (class_scope && (py || rb)) ? "method" : "function");
         TSNode name = ast_field(n, "name");
         TSNode params = ast_field(n, "parameters");
         TSNode result = ast_field(n, "return_type");

@@ -59,6 +59,7 @@ py_doc = rows('''SELECT q.documentation FROM semantic_symbols q JOIN symbols s O
 assert 'Run documentation.' in py_doc[0]['documentation'], py_doc
 py_fact = rows('SELECT name,kind,value FROM semantic_type_facts WHERE file_id=?', py)
 assert any(f['name']=='engine' and f['kind']=='variable_type' and f['value']=='Runner' for f in py_fact), py_fact
+assert any(f['name']=='Worker' and f['kind']=='inherits' and f['value']=='Base' for f in py_fact), py_fact
 
 php = fileid('src/example.php')
 php_bind = rows('SELECT module,local_name FROM semantic_bindings WHERE file_id=?', php)
@@ -83,7 +84,7 @@ from pathlib import Path
 db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 names = {r[0] for r in db.execute('''SELECT s.name FROM symbols s JOIN files f ON f.id=s.file_id
                                      WHERE f.path='src/recovery.py' ''')}
-assert 'before' in names, names
+assert {'before', 'after'} <= names, names
 db.close()
 PY
 
