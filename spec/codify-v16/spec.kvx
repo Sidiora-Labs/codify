@@ -157,7 +157,7 @@ reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
 
 [task.2.6]
 title = "Managed and application language syntax extraction"
-status = "pending"
+status = "in_progress"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_managed.c", "vendor/parsers/managed/**", "tests/integration/62_ast_managed.sh", "tests/fixtures/semantic/managed/**"]

@@ -36,7 +36,7 @@
     - Implement Python/Ruby/PHP scoped declarations/references, annotations/decorators, import aliases, classes/methods, docstrings and nested functions using pinned grammars.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
-  - [ ] 2.6 Managed and application language syntax extraction
+  - [-] 2.6 Managed and application language syntax extraction
     - Implement Java/Kotlin/Scala/C#/Swift/Dart adapters with generics, qualified owners, result types, inheritance/interfaces, overload metadata and bounded parse recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
