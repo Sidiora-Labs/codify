@@ -296,7 +296,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
     sb_printf(&b,",\"ambiguous_roots\":%s,\"nodes\":[",ambiguous?"true":"false");
     for (int i=0;i<nn;i++) {
         StrBuf item; sb_init(&item); write_node(&item,&nv[i]);
-        if (b.len+item.len+320>(size_t)lim.output_bytes) { trunc_output=true; sb_free(&item); break; }
+        if (b.len+item.len+512>(size_t)lim.output_bytes) { trunc_output=true; sb_free(&item); break; }
         if (i) sb_puts(&b,",");
         sb_puts(&b,item.p);
         sb_free(&item);
@@ -305,7 +305,7 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
     int emitted_edges=0;
     for (int i=0;i<ne;i++) {
         StrBuf item; sb_init(&item); write_edge(&item,&ev[i]);
-        if (b.len+item.len+320>(size_t)lim.output_bytes) { trunc_output=true; sb_free(&item); break; }
+        if (b.len+item.len+512>(size_t)lim.output_bytes) { trunc_output=true; sb_free(&item); break; }
         if (emitted_edges++) sb_puts(&b,",");
         sb_puts(&b,item.p);
         sb_free(&item);
@@ -314,18 +314,24 @@ int sem_flow_query(Cg *cg, const char *mode, const char *name,
     int emitted_boundaries=0;
     for (int i=0;i<nb;i++) {
         StrBuf item; sb_init(&item); write_boundary(&item,&bv[i]);
-        if (b.len+item.len+320>(size_t)lim.output_bytes) { trunc_output=true; sb_free(&item); break; }
+        if (b.len+item.len+512>(size_t)lim.output_bytes) { trunc_output=true; sb_free(&item); break; }
         if (emitted_boundaries++) sb_puts(&b,",");
         sb_puts(&b,item.p);
         sb_free(&item);
     }
     sb_puts(&b,"],\"path\":[");
+    long chain[9], path_edges[9]; int nchain=0;
     if (found>=0) {
-        long chain[9]; int nchain=0;
-        for (int at=found; at>=0 && nchain<9; at=nv[at].parent)
-            chain[nchain++]=nv[at].id;
+        for (int at=found; at>=0 && nchain<9; at=nv[at].parent) {
+            chain[nchain]=nv[at].id;
+            path_edges[nchain]=nv[at].via;
+            nchain++;
+        }
         for (int i=nchain-1;i>=0;i--) sb_printf(&b,"%s%ld",i==nchain-1?"":",",chain[i]);
     }
+    sb_puts(&b,"],\"path_edges\":[");
+    for (int i=nchain-2;i>=0;i--)
+        sb_printf(&b,"%s%ld",i==nchain-2?"":",",path_edges[i]);
     sb_printf(&b,"],\"found\":%s,\"truncated\":{\"depth\":%s,"
               "\"nodes\":%s,\"edges\":%s,\"time\":%s,\"output\":%s}}",
               found>=0?"true":"false",trunc_depth?"true":"false",

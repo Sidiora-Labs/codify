@@ -48,6 +48,7 @@ PY
 python3 - "$TMP/path.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); assert d['found'] and len(d['path'])==3,d
+assert len(d['path_edges'])==2 and set(d['path_edges']) <= {e['id'] for e in d['edges']},d
 assert any(e['provenance']=='heuristic' and e['heuristic'] and
            e['evidence'] and e['path']=='flow.c'
            and e['registration_path']=='flow.c' and e['registration_line']==3
