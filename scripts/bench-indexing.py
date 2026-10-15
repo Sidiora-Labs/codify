@@ -63,6 +63,13 @@ def db_size(db):
     }
 
 
+def database_path(root):
+    paths = list(root.glob(".*/*.db"))
+    if len(paths) != 1:
+        raise RuntimeError(f"expected one index database under {root}, got {paths}")
+    return paths[0]
+
+
 def coverage(db, branch):
     with sqlite3.connect(db) as c:
         table = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
@@ -179,7 +186,7 @@ def main():
     gen, _ = command([sys.executable, str(ROOT / "tests/scale/gen.py"),
                       str(project), "--files", str(files), "--lines", str(lines),
                       "--seed", str(a.seed)], project, env)
-    (project / ".gitignore").write_text(".codegraph/\n")
+    (project / ".gitignore").write_text(".*/\n")
     command(["git", "init", "-q", "-b", "main", "."], project, env)
     command(["git", "add", "-A"], project, env)
     command(["git", "-c", "user.email=bench@local", "-c", "user.name=Bench",
@@ -187,11 +194,9 @@ def main():
     base, _ = command(["git", "rev-parse", "HEAD"], project, env)
     source_bytes = sum(p.stat().st_size for p in project.rglob("*")
                        if p.is_file() and ".git" not in p.parts)
-    db = project / ".codegraph" / "graph.db"
     init_out, cold = command([str(cg), "init"], project, env,
                              a.stage_timeout_sec)
-    if not db.exists():
-        raise RuntimeError("cold index did not create a graph database")
+    db = database_path(project)
     info_out, _ = command([str(cg), "info", "--json"], project, env)
     info = json.loads(info_out)
     digest = hashlib.sha256()
@@ -216,7 +221,7 @@ def main():
                      "max_db_ratio": a.max_db_ratio,
                      "stage_timeout_sec": a.stage_timeout_sec,
                      "shape_timeout_sec": a.shape_timeout_sec},
-        "stages": {"cold": {**cold, "output": init_out.strip(),
+        "stages": {"cold": {**cold, "output": init_out.strip().replace(str(db.parent), "<index>"),
                              "database": db_size(db), "coverage": coverage(db, "main")}},
     }
     stages = result["stages"]
@@ -283,10 +288,10 @@ def main():
     # Separate the pathological syntax shapes from the ordinary latency runs.
     shapes = work / "shapes"
     shapes.mkdir()
-    (shapes / ".gitignore").write_text(".codegraph/\n")
+    (shapes / ".gitignore").write_text(".*/\n")
     command(["git", "init", "-q", "-b", "main", "."], shapes, env)
     command([str(cg), "init"], shapes, env, a.shape_timeout_sec)
-    shape_db = shapes / ".codegraph" / "graph.db"
+    shape_db = database_path(shapes)
     wide_lines = 20000 if a.profile == "small" else 160000
     (shapes / "wide.go").write_text("package shapes\n" +
                                     "// wide syntax item\n" * wide_lines +

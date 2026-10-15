@@ -3,17 +3,17 @@
     "files": 1000,
     "generator": "tests/scale/gen.py",
     "generator_output": "1000 files, 97484 lines, 2485538 bytes",
-    "git_base": "8f47fc7ac5211c255797159b146e33cd04c2379e",
-    "git_changed": "f69d722d26a283661bd2740fde05a6c2ed01760e",
+    "git_base": "ddfee0d731427844801740b6610bc4445e651698",
+    "git_changed": "6a8b0cbcce9c53b26d328e12e5dafd7b6c1c4f71",
     "lines_requested": 100000,
     "seed": 15,
-    "source_bytes": 2485550
+    "source_bytes": 2485542
   },
   "format": "codify-index-benchmark-v1",
-  "query_wall_ms": 60,
+  "query_wall_ms": 21,
   "regressions": [],
   "runtime": {
-    "binary_sha256": "30dafde0268c643402267181753a475330e207dce27768d7c96b38660ff4fdc7",
+    "binary_sha256": "ab11a0a34cecd3427aa57cdd543d27d1e1891c45ea008fe6352f48172e31e92f",
     "cores_effective": 6,
     "fts_mode": "contentless",
     "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
@@ -35,7 +35,7 @@
     "source_bytes": 3202461,
     "stages": {
       "deep": {
-        "child_peak_rss_kb": 9464,
+        "child_peak_rss_kb": 9608,
         "coverage": {
           "available": true,
           "branch": "main",
@@ -47,23 +47,23 @@
           }
         },
         "database": {
-          "main_bytes": 7675904,
-          "wal_bytes": 177192
+          "main_bytes": 7696384,
+          "wal_bytes": 193672
         },
         "stats": {
           "busy": false,
           "coalesced": false,
           "fresh": false,
           "indexed": 1,
-          "ms": 78,
+          "ms": 30,
           "passes": 1,
-          "peak_rss_kb": 9448,
+          "peak_rss_kb": 9676,
           "phase_ms": {
-            "parse": 23,
-            "resolve": 3,
-            "soft": 0,
+            "parse": 5,
+            "resolve": 0,
+            "soft": 1,
             "walk": 1,
-            "write": 27
+            "write": 9
           },
           "removed": 0,
           "reused": 0,
@@ -74,10 +74,10 @@
           "walk": "full",
           "workers": 1
         },
-        "wall_ms": 130
+        "wall_ms": 41
       },
       "wide": {
-        "child_peak_rss_kb": 88996,
+        "child_peak_rss_kb": 89340,
         "coverage": {
           "available": true,
           "branch": "main",
@@ -88,7 +88,7 @@
           }
         },
         "database": {
-          "main_bytes": 7675904,
+          "main_bytes": 7696384,
           "wal_bytes": 0
         },
         "stats": {
@@ -96,15 +96,15 @@
           "coalesced": false,
           "fresh": false,
           "indexed": 1,
-          "ms": 1131,
+          "ms": 818,
           "passes": 1,
-          "peak_rss_kb": 88832,
+          "peak_rss_kb": 89088,
           "phase_ms": {
-            "parse": 804,
+            "parse": 671,
             "resolve": 0,
             "soft": 2,
-            "walk": 0,
-            "write": 284
+            "walk": 1,
+            "write": 136
           },
           "removed": 0,
           "reused": 0,
@@ -115,16 +115,16 @@
           "walk": "full",
           "workers": 1
         },
-        "wall_ms": 1181
+        "wall_ms": 835
       }
     },
     "timeout_sec": 30,
     "wide_comment_lines": 160000
   },
-  "source_to_query_ms": 7360,
+  "source_to_query_ms": 4385,
   "stages": {
     "branch_reuse": {
-      "child_peak_rss_kb": 51432,
+      "child_peak_rss_kb": 53184,
       "coverage": {
         "available": true,
         "branch": "bench-sibling",
@@ -135,23 +135,23 @@
         }
       },
       "database": {
-        "main_bytes": 30400512,
-        "wal_bytes": 11292952
+        "main_bytes": 31772672,
+        "wal_bytes": 11449512
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 1000,
-        "ms": 44447,
+        "ms": 34199,
         "passes": 1,
-        "peak_rss_kb": 51432,
+        "peak_rss_kb": 53184,
         "phase_ms": {
-          "parse": 11,
-          "resolve": 317,
-          "soft": 183,
-          "walk": 18,
-          "write": 12200
+          "parse": 7,
+          "resolve": 331,
+          "soft": 153,
+          "walk": 13,
+          "write": 11182
         },
         "removed": 0,
         "reused": 998,
@@ -162,10 +162,10 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 44554
+      "wall_ms": 34265
     },
     "cold": {
-      "child_peak_rss_kb": 40356,
+      "child_peak_rss_kb": 41648,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -176,14 +176,14 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
+        "main_bytes": 16424960,
         "wal_bytes": 0
       },
-      "output": "indexed 1001 files (0 unchanged, 0 removed, 0 skipped) in 27249ms \u2014 4163 symbols, 18448 refs, 0 routes, 5158 comments, 3997 soft [2 workers]\ninitialized /tmp/codify-index-bench-zzscm9w9/project/.codegraph [constrained profile]",
-      "wall_ms": 27423
+      "output": "indexed 1001 files (0 unchanged, 0 removed, 0 skipped) in 19381ms \u2014 4163 symbols, 18448 refs, 0 routes, 5158 comments, 3997 soft [2 workers]\ninitialized <index> [constrained profile]",
+      "wall_ms": 19483
     },
     "delete": {
-      "child_peak_rss_kb": 26660,
+      "child_peak_rss_kb": 27976,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -194,23 +194,23 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
-        "wal_bytes": 2150672
+        "main_bytes": 16424960,
+        "wal_bytes": 2175392
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 0,
-        "ms": 5572,
+        "ms": 4091,
         "passes": 1,
-        "peak_rss_kb": 26660,
+        "peak_rss_kb": 27976,
         "phase_ms": {
           "parse": 0,
-          "resolve": 34,
-          "soft": 11,
-          "walk": 18,
-          "write": 29
+          "resolve": 16,
+          "soft": 5,
+          "walk": 13,
+          "write": 22
         },
         "removed": 1,
         "reused": 0,
@@ -221,10 +221,10 @@
         "walk": "full",
         "workers": 0
       },
-      "wall_ms": 5609
+      "wall_ms": 4113
     },
     "edit": {
-      "child_peak_rss_kb": 29136,
+      "child_peak_rss_kb": 30272,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -235,7 +235,7 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
+        "main_bytes": 16424960,
         "wal_bytes": 0
       },
       "stats": {
@@ -243,15 +243,15 @@
         "coalesced": false,
         "fresh": false,
         "indexed": 1,
-        "ms": 7163,
+        "ms": 4299,
         "passes": 1,
-        "peak_rss_kb": 29132,
+        "peak_rss_kb": 30272,
         "phase_ms": {
-          "parse": 17,
-          "resolve": 36,
-          "soft": 16,
-          "walk": 29,
-          "write": 43
+          "parse": 4,
+          "resolve": 16,
+          "soft": 8,
+          "walk": 14,
+          "write": 26
         },
         "removed": 0,
         "reused": 0,
@@ -262,10 +262,10 @@
         "walk": "full",
         "workers": 1
       },
-      "wall_ms": 7268
+      "wall_ms": 4361
     },
     "full": {
-      "child_peak_rss_kb": 56544,
+      "child_peak_rss_kb": 59308,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -276,23 +276,23 @@
         }
       },
       "database": {
-        "main_bytes": 16994304,
-        "wal_bytes": 11292952
+        "main_bytes": 17657856,
+        "wal_bytes": 11449512
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 1000,
-        "ms": 28584,
+        "ms": 21907,
         "passes": 1,
-        "peak_rss_kb": 56064,
+        "peak_rss_kb": 59308,
         "phase_ms": {
-          "parse": 423,
-          "resolve": 253,
-          "soft": 52,
-          "walk": 29,
-          "write": 9953
+          "parse": 133,
+          "resolve": 254,
+          "soft": 57,
+          "walk": 13,
+          "write": 6617
         },
         "removed": 0,
         "reused": 0,
@@ -303,10 +303,10 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 28666
+      "wall_ms": 21948
     },
     "noop": {
-      "child_peak_rss_kb": 13700,
+      "child_peak_rss_kb": 13976,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -317,7 +317,7 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
+        "main_bytes": 16424960,
         "wal_bytes": 16512
       },
       "stats": {
@@ -325,14 +325,14 @@
         "coalesced": false,
         "fresh": false,
         "indexed": 0,
-        "ms": 96,
+        "ms": 50,
         "passes": 1,
-        "peak_rss_kb": 13700,
+        "peak_rss_kb": 13976,
         "phase_ms": {
           "parse": 0,
           "resolve": 0,
           "soft": 0,
-          "walk": 26,
+          "walk": 14,
           "write": 0
         },
         "removed": 0,
@@ -344,10 +344,10 @@
         "walk": "full",
         "workers": 0
       },
-      "wall_ms": 178
+      "wall_ms": 88
     },
     "rename": {
-      "child_peak_rss_kb": 28276,
+      "child_peak_rss_kb": 29444,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -358,23 +358,23 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
-        "wal_bytes": 4630912
+        "main_bytes": 16424960,
+        "wal_bytes": 4729792
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 1,
-        "ms": 7352,
+        "ms": 4002,
         "passes": 1,
-        "peak_rss_kb": 28272,
+        "peak_rss_kb": 29444,
         "phase_ms": {
-          "parse": 8,
-          "resolve": 26,
-          "soft": 15,
-          "walk": 26,
-          "write": 34
+          "parse": 4,
+          "resolve": 14,
+          "soft": 5,
+          "walk": 13,
+          "write": 20
         },
         "removed": 1,
         "reused": 0,
@@ -385,10 +385,10 @@
         "walk": "full",
         "workers": 1
       },
-      "wall_ms": 7471
+      "wall_ms": 4028
     },
     "replay_back": {
-      "child_peak_rss_kb": 29184,
+      "child_peak_rss_kb": 30464,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -399,23 +399,23 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
-        "wal_bytes": 4630912
+        "main_bytes": 16424960,
+        "wal_bytes": 4729792
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 3,
-        "ms": 6295,
+        "ms": 4317,
         "passes": 1,
-        "peak_rss_kb": 29184,
+        "peak_rss_kb": 30464,
         "phase_ms": {
-          "parse": 12,
-          "resolve": 26,
-          "soft": 16,
-          "walk": 29,
-          "write": 61
+          "parse": 8,
+          "resolve": 16,
+          "soft": 10,
+          "walk": 13,
+          "write": 36
         },
         "removed": 1,
         "reused": 0,
@@ -426,10 +426,10 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 6354
+      "wall_ms": 4342
     },
     "replay_forward": {
-      "child_peak_rss_kb": 28668,
+      "child_peak_rss_kb": 30044,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -440,23 +440,23 @@
         }
       },
       "database": {
-        "main_bytes": 15753216,
-        "wal_bytes": 4721552
+        "main_bytes": 16424960,
+        "wal_bytes": 4902832
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 2,
-        "ms": 6844,
+        "ms": 4146,
         "passes": 1,
-        "peak_rss_kb": 28668,
+        "peak_rss_kb": 30044,
         "phase_ms": {
-          "parse": 15,
-          "resolve": 23,
-          "soft": 27,
-          "walk": 35,
-          "write": 129
+          "parse": 4,
+          "resolve": 14,
+          "soft": 8,
+          "walk": 14,
+          "write": 72
         },
         "removed": 2,
         "reused": 0,
@@ -467,7 +467,7 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 6897
+      "wall_ms": 4172
     }
   }
 }

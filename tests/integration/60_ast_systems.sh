@@ -8,8 +8,9 @@ cd "$TMP/proj"
 "$CG" sync >/dev/null
 python3 - <<'PY'
 import sqlite3
+from pathlib import Path
 
-con = sqlite3.connect('.codegraph/graph.db')
+con = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 con.row_factory = sqlite3.Row
 
 def exists(query, args=()):

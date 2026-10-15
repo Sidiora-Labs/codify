@@ -41,6 +41,7 @@ $(BUILD)/vendor/%.o: vendor/%.c | $(BUILD)
 	$(CC) -I$(dir $<) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function \
 		-Wno-unused-value -Wno-unused-const-variable -Wno-implicit-fallthrough \
 		-Wno-sign-compare \
+		-Wno-unused-variable \
 		-Wno-missing-field-initializers -c -o $@ $<
 
 $(LIB): $(filter-out $(BUILD)/main.o,$(OBJS))

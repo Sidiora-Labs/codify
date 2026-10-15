@@ -54,10 +54,12 @@ git config user.name t
 git add -A
 git commit -qm base
 "$CG" init >/dev/null
+DB="$(graph_db)"
 
 python3 - <<'PY'
 import sqlite3
-db=sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db=sqlite3.connect(next(Path('.').glob('.*/*.db')))
 rows=db.execute('SELECT p.segment,f.path FROM semantic_identifier_postings p '
                 'JOIN files f ON f.id=p.file_id WHERE p.segment="record"').fetchall()
 assert ('record','src/alpha.c') in rows, rows
@@ -168,8 +170,9 @@ PY
 git worktree add -q "$TMP/wt" -b variant
 cd "$TMP/wt"
 "$CG" init >/dev/null
-python3 - "$TMP/proj/.codegraph/graph.db" <<'PY'
+python3 - "$TMP/proj/$DB" <<'PY'
 import sqlite3,sys
+from pathlib import Path
 db=sqlite3.connect(sys.argv[1])
 rows=db.execute('SELECT b.name,count(*) FROM semantic_identifier_postings p '
                 'JOIN files f ON f.id=p.file_id JOIN branches b ON b.id=f.branch_id '
@@ -195,7 +198,8 @@ EOF
 "$CG" sync >/dev/null
 python3 - <<'PY'
 import sqlite3
-db=sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db=sqlite3.connect(next(Path('.').glob('.*/*.db')))
 rows=db.execute('SELECT p.segment FROM semantic_identifier_postings p '
                 'JOIN files f ON f.id=p.file_id WHERE f.path="src/alpha.c"').fetchall()
 segments={x[0] for x in rows}
@@ -205,7 +209,8 @@ rm src/beta.c
 "$CG" sync >/dev/null
 python3 - <<'PY'
 import sqlite3
-db=sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db=sqlite3.connect(next(Path('.').glob('.*/*.db')))
 assert not db.execute('SELECT 1 FROM semantic_identifier_postings p '
                       'JOIN files f ON f.id=p.file_id '
                       'JOIN branches b ON b.id=f.branch_id '

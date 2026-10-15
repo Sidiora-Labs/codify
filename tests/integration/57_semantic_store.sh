@@ -156,19 +156,20 @@ printf 'function alpha() { return 1; }\n' > case.ts
 "${CG:-$repo/cg}" index --full >/dev/null
 python3 - <<'PY'
 import sqlite3
-db = sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 assert db.execute("select count(*) from symbols where name='alpha'").fetchone()[0] == 1
 PY
 cat > "$tmp/failhook.c" <<'C'
 #include "cg.h"
-int sem_search_schema_init(Cg *cg) {
+int __wrap_sem_search_schema_init(Cg *cg) {
     cg_exec(cg,"CREATE TABLE IF NOT EXISTS semantic_test_fault(value INTEGER);"
                "CREATE TRIGGER IF NOT EXISTS semantic_test_abort "
                "BEFORE INSERT ON semantic_test_fault "
                "BEGIN SELECT RAISE(ABORT,'injected semantic write failure'); END;");
     return 0;
 }
-int sem_search_file_replace(Cg *cg, long file_id) {
+int __wrap_sem_search_file_replace(Cg *cg, long file_id) {
     (void)file_id;
     sqlite3_stmt *q=cg_prep(cg,"INSERT INTO semantic_test_fault(value) VALUES(1)");
     int rc=sqlite3_step(q);
@@ -178,7 +179,9 @@ int sem_search_file_replace(Cg *cg, long file_id) {
 C
 mapfile -d '' -t vendor_objects < <(find "$repo/build/vendor" -name '*.o' -print0)
 cc -std=gnu11 -Wall -Wextra -pthread -I"$repo/src" "$tmp/failhook.c" \
-  "$repo"/build/*.o "${vendor_objects[@]}" -lsqlite3 -lpthread -lm -o "$tmp/cg-fail"
+  "$repo"/build/*.o "${vendor_objects[@]}" \
+  -Wl,--wrap=sem_search_schema_init,--wrap=sem_search_file_replace \
+  -lsqlite3 -lpthread -lm -o "$tmp/cg-fail"
 printf 'function bravo() { return 2; }\n' > case.ts
 if "$tmp/cg-fail" index --full >/dev/null 2>&1; then
     echo 'semantic write fault unexpectedly indexed successfully' >&2
@@ -186,7 +189,8 @@ if "$tmp/cg-fail" index --full >/dev/null 2>&1; then
 fi
 python3 - <<'PY'
 import sqlite3
-db = sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 assert db.execute("select count(*) from symbols where name='alpha'").fetchone()[0] == 1
 assert db.execute("select count(*) from symbols where name='bravo'").fetchone()[0] == 0
 assert db.execute("select count(*) from meta where key like 'index_pending_resolve:%' and value='1'").fetchone()[0] == 1
@@ -194,7 +198,8 @@ PY
 "${CG:-$repo/cg}" index --full >/dev/null
 python3 - <<'PY'
 import sqlite3
-db = sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 assert db.execute("select count(*) from symbols where name='bravo'").fetchone()[0] == 1
 assert db.execute("select count(*) from symbols where name='alpha'").fetchone()[0] == 0
 assert db.execute("select count(*) from meta where key like 'index_pending_resolve:%' and value='1'").fetchone()[0] == 0

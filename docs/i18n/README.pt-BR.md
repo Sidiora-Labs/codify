@@ -28,7 +28,10 @@ O Codify (invocado como `cg`) é um motor de fluxo de trabalho para agentes em u
 
 A versão 1.1.0 (v11) transforma a frota em algo a que você entrega uma spec e deixa rodando: `cg fleet up` inicia um supervisor durável, que se recupera de falhas, e executa ao mesmo tempo o agente principal, um gerente por funcionalidade e workers por tarefa, administrando cada processo do Codex ou do Claude Code até que seu trabalho esteja qualificado e mesclado. Os agentes recebem briefings a partir do grafo, o desvio (drift) é detectado entre branches antes do merge, toda mudança de estado vai para um log de eventos, e `cg serve` envia tudo ao editor por uma única conexão. Isso se apoia nas fundações da frota: um indexador que aglutina em vez de cinquenta, a hierarquia Main Gideon / gerente de funcionalidade / worker com fluxo de branch, merge, PR e checkpoint, um grafo unificado para todas as branches e worktrees, e as decisões Jev — a única chamada remota de uma ferramenta de resto local.
 
-**O que o código é.** O Codify indexa 19 linguagens em um grafo consultável: símbolos, arestas de chamada, rotas cientes do framework e busca instantânea em texto completo, tudo armazenado localmente em SQLite. `cg context <consulta>` responde a "me atualize sobre esta área" em uma única chamada: pontos de entrada, símbolos correspondentes com trechos, chamadores, chamados e rotas relacionadas. E, além do que um parser enxerga, os comentários são indexados como nós de primeira classe — a camada de intenção: propósito, contratos, perigos e os acoplamentos que só existem em prosa.
+**O que o código é.** O Codify indexa arquivos-fonte de várias linguagens em um grafo consultável: símbolos, arestas de chamada, rotas cientes do framework e busca instantânea em texto completo, tudo armazenado localmente em SQLite. `cg context <consulta>` responde a "me atualize sobre esta área" em uma única chamada: pontos de entrada, símbolos correspondentes com trechos, chamadores, chamados e rotas relacionadas. E, além do que um parser enxerga, os comentários são indexados como nós de primeira classe — a camada de intenção: propósito, contratos, perigos e os acoplamentos que só existem em prosa.
+
+A cobertura varia da extração estrutural ao rastreamento apenas de arquivos; veja os limites no [guia de indexação](../indexing.md).
+O guia também descreve `cg flow` para percorrer relações e `cg inspect` para hierarquias e símbolos sem referências conhecidas.
 
 **Como ele chegou até aqui.** Um sistema embutido de snapshots endereçados por conteúdo oferece commits, histórico, diffs e restauração sem exigir nenhum VCS externo. Como os snapshots compartilham o banco com o grafo, `cg changes` reporta o raio de impacto das suas edições não commitadas. `cg changelog` escreve as notas de versão: por padrão a partir do histórico do git — uma release por tag ou por mudança de versão, grupos pelo prefixo do assunto do commit, cada referência de tarefa preservada e, com uma chave, um breve parágrafo de Highlights escrito por um modelo para cada release — e a partir da cadeia de snapshots, com diffs em nível de símbolo, quando você passa `--snapshots` ou o projeto não tem git.
 
@@ -378,8 +381,8 @@ A extensão não tem dependências nem etapa de build — nem mesmo no cliente d
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produz codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produz codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Desenvolvimento
@@ -395,7 +398,7 @@ make release     # binário estático de release -> testado -> publicado na raiz
 Estrutura do repositório:
 
 ```
-src/                 um arquivo .c por módulo; src/cg.h é o único header
+src/                 módulos C e cabeçalhos específicos; src/cg.h é o cabeçalho central compartilhado
 src/govern.c         brief, review, guard, check, handoff, resume — a camada de governança
 src/orchestrate.c    cg spec run e o supervisor da frota (cg fleet up): execuções duráveis,
                      três níveis ao mesmo tempo, travamentos, orçamentos, retentativas, escalonamento
@@ -436,11 +439,11 @@ O grafo é um único arquivo SQLite em modo WAL, e todo processo `cg` de um chec
 
 ## Notas e limitações
 
-- As regras de exclusão combinam padrões sensatos (diretórios de VCS, `node_modules`, artefatos de build, binários) com um arquivo `.cgignore` de um glob por linha.
-- A extração de símbolos é heurística. Um motor de padrões por linguagem, ciente de comentários e strings, é ajustado para maximizar o recall em definições e pontos de chamada. Não é um resolvedor com checagem de tipos completa.
-- Os snapshots armazenam todo arquivo não ignorado de até 32 MB, incluindo binários. O grafo indexa arquivos de texto de até 8 MB.
-- Uma sincronização aglutinada retorna sem um grafo novo: ela enfileira a mudança para o processo que segura o gate e responde a partir do último índice concluído.
-- As consultas respondem pela branch em que você está. `--branch <name>` consulta outra e `--all-branches` consulta todas; um resultado só é rotulado `@branch` quando há mais de uma branch no escopo, então a saída de uma única branch não muda.
+- As exclusões combinam padrões internos, arquivos `.gitignore` da raiz e de subdiretórios, e padrões `.cgignore`.
+- Adaptadores sintáticos extraem fatos estruturais; um fallback heurístico identificado atua se o parser falhar. A resolução usa evidência sintática sem ser um verificador de tipos completo; alvos dinâmicos ou ambíguos permanecem sem resolução. Adaptadores embutidos e declarativos reconhecem construções selecionadas, enquanto formatos apenas de arquivo não têm grafo de símbolos; veja os [limites de cobertura](../indexing.md#extraction-coverage).
+- Snapshots guardam arquivos não ignorados de até 32 MiB, inclusive binários. O grafo examina texto de até 8 MiB; profundidade e número de nós têm limites separados.
+- Um sync agrupado enfileira mudanças e retorna antes de garantir sua visibilidade. Leituras podem ver partes já confirmadas; a saúde da resposta relata trabalho pendente e checagens limitadas do código-fonte.
+- Consultas usam a branch atual por padrão. Muitas aceitam `--branch <name>` e `--all-branches`, mas travessia e inspeção do grafo exigem uma branch só; consulte a ajuda de cada comando.
 - `cg fleet` conduz `git` e `gh` como subprocessos. Sem `gh`, `pr` e `checkpoint` imprimem os comandos em vez de executá-los, e `checkpoint` só trata branches head `feature/*` como do próprio Codify.
 - O Jev precisa de rede e de `OPENROUTER_API_KEY`. Nada no ciclo central depende dele, e nenhuma resposta do Jev muda um código de saída.
 - O supervisor da frota é um por projeto e inicia agentes por suas CLIs; ele não os autentica. Um orçamento `spend` depende do custo reportado pelo driver, só o Claude Code pode ser direcionado no meio de um turno, e o gate de aprovação `retry` é aceito, mas ainda não aplicado. O resto está em [docs/hierarchy.md](../../docs/hierarchy.md#limitations).

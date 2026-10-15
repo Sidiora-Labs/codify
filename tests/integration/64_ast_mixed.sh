@@ -8,11 +8,12 @@ mkdir -p "$TMP_MIXED/repo"
 cp "$ROOT"/tests/fixtures/semantic/mixed/* "$TMP_MIXED/repo/"
 cd "$TMP_MIXED/repo"
 git init -q -b main .
-printf '.codegraph/\n' > .gitignore
+printf '.*/\n' > .gitignore
 git add -A
 git -c user.name=Test -c user.email=test@example.invalid commit -qm fixtures
 "$CG" init >/dev/null
-python3 - .codegraph/graph.db <<'PY'
+db="$(printf '%s\n' .*/graph.db | head -1)"
+python3 - "$db" <<'PY'
 import sqlite3,sys
 c=sqlite3.connect(sys.argv[1]);c.row_factory=sqlite3.Row
 symbols=[dict(r) for r in c.execute('SELECT f.path,s.name,s.kind,x.start_byte,x.start_line,x.start_column,x.parser_id FROM symbols s JOIN files f ON f.id=s.file_id JOIN semantic_symbols x ON x.symbol_id=s.id')]

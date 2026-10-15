@@ -28,7 +28,10 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 
 1.1.0 版本(v11)让 fleet 变成了一个"交给它一份 spec 就可以放手"的东西:`cg fleet up` 启动一个持久、可在崩溃后恢复的监督进程(supervisor),同时运行主智能体、每个特性一个管理者、每个任务一个工作者,并管理每一个 Codex 或 Claude Code 进程,直到其工作通过资格确认并完成合并。智能体从图中获得简报,跨分支的漂移在合并前被捕获,每一次状态变化都写入事件日志,`cg serve` 通过一条连接将这一切推送给编辑器。它建立在 fleet 的基础之上:一个合并式的索引器取代五十个、Main Gideon / 特性管理者 / 工作者的层级结构及其分支、合并、PR 与检查点流程、跨所有分支和 worktree 的统一图,以及 Jev 决策——这个本地工具中唯一的远程调用。
 
-**代码是什么。** Codify 将 19 种语言索引成一个可查询的图:符号、调用边、框架感知的路由,以及即时全文检索,全部本地存储在 SQLite 中。`cg context <query>` 一次调用即可回答"帮我快速了解这一块":入口点、匹配的符号及代码片段、调用者、被调用者,以及相关路由。在解析器所见之外,注释也被作为一等节点索引——即意图层:目的、契约、危险,以及只存在于文字中的耦合。
+**代码是什么。** Codify 将 多种语言的源文件索引成一个可查询的图:符号、调用边、框架感知的路由,以及即时全文检索,全部本地存储在 SQLite 中。`cg context <query>` 一次调用即可回答"帮我快速了解这一块":入口点、匹配的符号及代码片段、调用者、被调用者,以及相关路由。在解析器所见之外,注释也被作为一等节点索引——即意图层:目的、契约、危险,以及只存在于文字中的耦合。
+
+覆盖范围从结构化提取到仅跟踪文件；具体边界见[索引指南](../indexing.md)。
+该指南还介绍用于关系遍历的 `cg flow`，以及用于层级和无已知引用符号的 `cg inspect`。
 
 **它是如何走到今天的。** 内置的内容寻址快照系统提供提交、历史、差异和恢复能力,无需任何外部版本控制系统。由于快照与图共享同一个数据库,`cg changes` 能报告未提交修改的影响范围。`cg changelog` 负责写发布说明:默认基于 git 历史——每个 tag 或每次版本号变更对应一个发布,按提交标题前缀分组,保留每条任务引用;配置密钥后,每个发布还会附上一段由模型撰写的简短 Highlights——传入 `--snapshots` 或项目根本没有 git 时,则基于快照链生成符号级差异。
 
@@ -366,8 +369,8 @@ Codify 侧边栏有一个常驻的 **Agent** 聊天视图:扩展是一个 [Agent
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # 生成 codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # 生成 codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 Marketplace 标识为 `SidioraLabs.codify-workflow`。详见 [editors/vscode/README.md](../../editors/vscode/README.md)。
@@ -385,7 +388,7 @@ make release     # 静态发布二进制 -> 测试 -> 发布到 web 根目录
 仓库结构:
 
 ```
-src/                 每个模块一个 .c 文件;src/cg.h 是唯一的头文件
+src/                 C 模块与专用头文件；src/cg.h 是共享的核心头文件
 src/govern.c         brief、review、guard、check、handoff、resume——治理层
 src/orchestrate.c    cg spec run 与 fleet 监督进程(cg fleet up):持久运行、三级同时运行、停滞、预算、重试、升级
 src/syncgate.c       单写者索引关卡与机器级解析槽位
@@ -419,11 +422,11 @@ spec 渲染的黄金输出由原始的 Go 版 specgen 生成,因此渲染一致�
 ## 说明与限制
 
 - **在编辑器与智能体之间共享图:** 图是一个 WAL 模式的 SQLite 文件,检出目录中的每个 `cg` 进程都会写它。写者只短暂持锁,CLI 命令最多等待 `CG_BUSY_TIMEOUT_MS`(默认 30000)毫秒;锁一直不释放时,命令以 75 退出并说明未做任何更改、可安全重试。`.codegraph/index.lock` 由正在执行索引的那个进程持有,其他调用者把路径留在 `.codegraph/index.dirty` 中并立即返回;解析线程通过 `/tmp/codify-<uid>` 下的槽位文件在全机范围内配给(`CG_INDEX_SLOTS`、`CG_INDEX_WORKERS`、`CG_SLOT_DIR`)。完整约定见 [docs/sync.md](../../docs/sync.md)。
-- 忽略规则由合理的默认值(VCS 目录、`node_modules`、构建产物、二进制文件)加上 `.cgignore` 文件(每行一个 glob)组成。
-- 符号提取是启发式的。每种语言配有感知注释与字符串的模式引擎,针对定义与调用点的召回率进行调优,并非完整的类型检查解析器。
-- 快照存储所有不超过 32 MB 的非忽略文件,包括二进制文件;图只索引不超过 8 MB 的文本文件。
-- 被合并的同步返回时图并不是最新的:它把改动排给持有关卡的进程,并基于上一次完成的索引作答。
-- 查询默认回答当前分支。`--branch <name>` 查询其他分支,`--all-branches` 查询全部;只有多个分支在范围内时命中才标注 `@branch`,因此单分支输出不变。
+- 忽略规则结合内置默认值、根目录和子目录的 `.gitignore`，以及 `.cgignore` 模式。
+- 原生语法适配器提取结构化事实；解析失败时会使用明确标记的启发式回退。解析器依据语法证据关联目标，但并非完整类型检查器；动态或有歧义的目标保持未解析。 嵌入式和声明式适配器只识别选定结构；仅跟踪文件的格式没有符号图。参见[覆盖范围](../indexing.md#extraction-coverage)。
+- 快照保存不超过 32 MiB 的非忽略文件，包括二进制文件。图扫描不超过 8 MiB 的文本；解析深度和节点数另有限制。
+- 合并的同步将变更排队并在保证可见之前返回。读取可能看到已提交的索引片段；回答状态会报告待处理工作并进行有界的源文件检查。
+- 查询默认使用当前分支。许多命令接受 `--branch <name>` 和 `--all-branches`，但图遍历和检查要求单一分支；请参阅各命令帮助。
 - `cg fleet` 以子进程方式调用 `git` 与 `gh`。没有 `gh` 时,`pr` 与 `checkpoint` 只打印命令而不执行,且 `checkpoint` 只把 `feature/*` 头分支视为 Codify 自己的分支。
 - Jev 需要网络和 `OPENROUTER_API_KEY`。核心循环不依赖它,Jev 的回答也不会改变任何退出码。
 - fleet 监督进程每个项目只有一个,通过各智能体的 CLI 派生它们,但不负责其认证。`spend` 预算依赖驱动上报的花费,只有 Claude Code 能在一轮中途被引导,`retry` 审批关卡可被接受但尚未强制执行。其余见 [docs/hierarchy.md](../../docs/hierarchy.md#limitations)。

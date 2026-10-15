@@ -1,17 +1,26 @@
 # Architecture
 
-One binary (`cg`), one SQLite database (`.codegraph/graph.db`), no
-dependencies beyond libsqlite3. C11 + POSIX. Every module is a single
-`.c` file; `src/cg.h` is the only header.
+One binary (`cg`), one local SQLite database, and no new runtime library
+beyond libsqlite3 and libc. The native grammar sources are vendored and linked
+into that binary. C11 + POSIX. `src/cg.h` remains the shared core header;
+semantic, parser and inspection modules also have focused headers.
 
 ## Data flow
 
+```mermaid
+flowchart LR
+    A[Walk or Git candidates] --> B[Metadata and content verification]
+    B --> C[Bounded worker extraction]
+    C --> D[Native syntax, embedded adapter or labelled fallback]
+    D --> E[Chunked SQLite writes]
+    E --> F[Branch-scoped semantic passes and retry debt]
+    F --> G[Search, flow, inspection and answer health]
 ```
-        walk (ignore rules)            pthread workers            single writer
-files ───────────────────────► jobs ──────────────────► parsed ───────────────► SQLite
-                                        (regex-based                 (short chunked
-                                         language specs)              transactions)
-```
+
+The [indexing guide](indexing.md) gives the coverage matrix and parser limits.
+The sections below describe both the existing graph tables and the newer
+semantic layer; language-specific syntax coverage does not imply complete
+runtime dispatch knowledge.
 
 - **`sysinfo.c`** sizes the pipeline before anything runs: effective cores =
   min(online, affinity mask, cgroup v1/v2 CPU quota); honest memory =
@@ -25,8 +34,8 @@ files ───────────────────────► j
   and names its origin.
 - **`scan.c`** walks the tree (in parallel, through `walk.c`, or asks git
   for the candidates; see [Walk and the index at scale](#walk-and-the-index-at-scale-walkc-scanc)),
-  diffs (mtime, size) against the `files`
-  table, fans changed files out to a worker pool through a bounded ring
+  checks subsecond metadata and content when paths are dirty or suspect against
+  the `files` table, fans changed files out to a worker pool through a bounded ring
   buffer, and writes results back on the main thread in short chunked
   transactions (`INDEX_CHUNK` files per `BEGIN IMMEDIATE`). Parsing happens
   outside the lock, so the write lock is held for milliseconds at a time
@@ -35,26 +44,26 @@ files ───────────────────────► j
   boundary, records `index_pending_resolve` so the next run finishes edge
   resolution, and returns busy instead of exiting — the LSP and the
   watcher defer and retry; CLI commands report it (see below).
-- **`lang.c` / `routes.c`** are table-driven: a language is a comment/string
-  spec plus POSIX ERE definition patterns; a framework route is one regex
-  row. Adding a language or framework is adding a table entry. Extraction
-  is scope-aware: each definition gets a real `end_line` (brace-depth
-  tracking for brace languages, indentation for Python), each call ref
-  records its immediate receiver qualifier (`recv.name(` / `recv->name(` /
-  `Recv::name(`) and a ref kind, and per-language import patterns fill an
-  `imports` table (one row per imported name; `*` for whole-module).
-  `clean_line` keeps persistent state across lines for block comments *and*
-  multi-line strings (Python triple quotes, JS/TS template literals), so
-  string continuation lines never emit junk symbols.
-- **`scan.c`** attribution uses those scopes: a ref belongs to the innermost
-  *function-like* definition whose `[line, end_line]` contains it, and refs
-  contained by no definition get a NULL symbol — a call between two
-  functions is no longer credited to the one above it. A rescan whose
-  content hash is unchanged (touch, branch switch) updates size/mtime only,
-  so symbol rowids stay stable.
+- **`lang.c` / `routes.c`** retain comment-aware, string-aware heuristic
+  extraction and route recognition for fallback and older formats. Native
+  syntax adapters in `ast_*.c` parse supported language families with bounded
+  tree traversal. Embedded and declarative adapters recognize selected
+  constructs; file-only formats have no structural graph. `semantic.c` stores
+  syntax facts, while `sem_imports.c`, `sem_resolve.c`, `sem_types.c`,
+  `sem_routes.c` and `sem_channels.c` derive branch-scoped relationships from
+  evidence. Ambiguous targets stay unresolved. `sem_incremental.c` tracks
+  dependencies and retries affected callers when definitions or bindings
+  change. These modules are coordinated by `sem_dispatch.c`.
+- **`scan.c`** attributes extracted references to source owners where the
+  adapter has lexical evidence, and records parser identity and coverage.
+  A metadata match or unchanged content hash can reuse extraction only when
+  its extraction version is current; a version bump or retained semantic
+  debt forces the needed refresh. Durable source spans and original reference
+  text remain available for later resolution.
 - **`db.c`** owns the schema: `branches`, `files` (scoped by `branch_id`,
   `UNIQUE(branch_id, path)`), `symbols`, `refs` (with `qual` and `kind`),
-  `imports`, `routes`, `meta`, `memories` (with `branch`, `class`,
+  `imports`, `routes`, `meta`, the semantic symbols, references, bindings,
+  type facts, edges and dependencies, and `memories` (with `branch`, `class`,
   `confidence`), `memory_superseded`, `git_commits`, `git_churn`,
   `leases`, fenced `attempts` (with `branch`, `worktree`, `parent`),
   the `agents` registry, normalized `runtime_events`, incremental
@@ -330,7 +339,8 @@ waits and for how long.
   see the live state, so they keep waiting and exit 75.
 - Long-lived servers (`cg lsp`, `cg watch`) set a short `lock_wait_ms`
   and never exit on busy: their index is deferred and retried later, and
-  they keep answering from the last completed index meanwhile.
+  they keep answering from the currently committed graph meanwhile; queued
+  changes are not certified visible until reconciliation finishes.
 - Read-only paths must not take the write lock: `spec_attempt_sweep`
   checks for expired attempts before it opens a write, so editor board
   polling of `cg spec status` does not compete with agents' writes.

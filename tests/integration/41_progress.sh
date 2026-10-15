@@ -159,7 +159,7 @@ c.execute("COMMIT")
 PY
     sleep 0.4
     echo "# tty" >> lib/tasks.py
-    script -qc "\"$CG\" index" /dev/null >"$TMP/tty" 2>&1 || true
+    TERM=xterm script -qc "\"$CG\" index" /dev/null >"$TMP/tty" 2>&1 || true
     wait
     tty="$(cat "$TMP/tty")"
     has "$tty" "${ESC}[K"
@@ -167,7 +167,7 @@ PY
     has "$tty" "$(printf '\r')${ESC}[Kindexed 1 file"
     # CG_PROGRESS=0 on a terminal: no escape codes at all
     echo "# tty0" >> lib/tasks.py
-    CG_PROGRESS=0 script -qc "\"$CG\" index --full" /dev/null >"$TMP/tty" 2>&1 || true
+    TERM=xterm CG_PROGRESS=0 script -qc "\"$CG\" index --full" /dev/null >"$TMP/tty" 2>&1 || true
     hasnt "$(cat "$TMP/tty")" "$ESC"
 fi
 

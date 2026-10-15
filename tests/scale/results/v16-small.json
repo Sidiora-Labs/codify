@@ -3,17 +3,17 @@
     "files": 20,
     "generator": "tests/scale/gen.py",
     "generator_output": "20 files, 701 lines, 17166 bytes",
-    "git_base": "f3ef7dc9459f80ee70be7cdcca2e54f22c528a1c",
-    "git_changed": "56949ff3662e37c8c72b00d4a9323dd7ce854004",
+    "git_base": "08a79b6fb2b62b0ed5237bcadd3375bf291b478b",
+    "git_changed": "4840a9713860b1575834e1b5fa64447d2af2d9ab",
     "lines_requested": 700,
     "seed": 15,
-    "source_bytes": 17178
+    "source_bytes": 17170
   },
   "format": "codify-index-benchmark-v1",
-  "query_wall_ms": 13,
+  "query_wall_ms": 12,
   "regressions": [],
   "runtime": {
-    "binary_sha256": "30dafde0268c643402267181753a475330e207dce27768d7c96b38660ff4fdc7",
+    "binary_sha256": "ab11a0a34cecd3427aa57cdd543d27d1e1891c45ea008fe6352f48172e31e92f",
     "cores_effective": 6,
     "fts_mode": "contentless",
     "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
@@ -35,7 +35,7 @@
     "source_bytes": 402461,
     "stages": {
       "deep": {
-        "child_peak_rss_kb": 9552,
+        "child_peak_rss_kb": 9456,
         "coverage": {
           "available": true,
           "branch": "main",
@@ -47,23 +47,23 @@
           }
         },
         "database": {
-          "main_bytes": 1540096,
-          "wal_bytes": 185432
+          "main_bytes": 1560576,
+          "wal_bytes": 197792
         },
         "stats": {
           "busy": false,
           "coalesced": false,
           "fresh": false,
           "indexed": 1,
-          "ms": 35,
+          "ms": 22,
           "passes": 1,
-          "peak_rss_kb": 9552,
+          "peak_rss_kb": 9652,
           "phase_ms": {
             "parse": 5,
             "resolve": 1,
             "soft": 0,
-            "walk": 3,
-            "write": 16
+            "walk": 1,
+            "write": 8
           },
           "removed": 0,
           "reused": 0,
@@ -74,10 +74,10 @@
           "walk": "full",
           "workers": 1
         },
-        "wall_ms": 49
+        "wall_ms": 33
       },
       "wide": {
-        "child_peak_rss_kb": 18632,
+        "child_peak_rss_kb": 18560,
         "coverage": {
           "available": true,
           "branch": "main",
@@ -88,7 +88,7 @@
           }
         },
         "database": {
-          "main_bytes": 1540096,
+          "main_bytes": 1560576,
           "wal_bytes": 0
         },
         "stats": {
@@ -96,15 +96,15 @@
           "coalesced": false,
           "fresh": false,
           "indexed": 1,
-          "ms": 164,
+          "ms": 122,
           "passes": 1,
           "peak_rss_kb": 18560,
           "phase_ms": {
-            "parse": 85,
-            "resolve": 1,
-            "soft": 0,
+            "parse": 72,
+            "resolve": 0,
+            "soft": 1,
             "walk": 1,
-            "write": 68
+            "write": 40
           },
           "removed": 0,
           "reused": 0,
@@ -115,16 +115,16 @@
           "walk": "full",
           "workers": 1
         },
-        "wall_ms": 189
+        "wall_ms": 146
       }
     },
     "timeout_sec": 30,
     "wide_comment_lines": 20000
   },
-  "source_to_query_ms": 62,
+  "source_to_query_ms": 60,
   "stages": {
     "branch_reuse": {
-      "child_peak_rss_kb": 9764,
+      "child_peak_rss_kb": 9836,
       "coverage": {
         "available": true,
         "branch": "bench-sibling",
@@ -135,23 +135,23 @@
         }
       },
       "database": {
-        "main_bytes": 851968,
-        "wal_bytes": 4429032
+        "main_bytes": 872448,
+        "wal_bytes": 4577352
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 20,
-        "ms": 149,
+        "ms": 189,
         "passes": 1,
-        "peak_rss_kb": 9764,
+        "peak_rss_kb": 9836,
         "phase_ms": {
-          "parse": 1,
-          "resolve": 3,
-          "soft": 5,
+          "parse": 2,
+          "resolve": 4,
+          "soft": 6,
           "walk": 2,
-          "write": 101
+          "write": 129
         },
         "removed": 0,
         "reused": 18,
@@ -162,10 +162,10 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 167
+      "wall_ms": 210
     },
     "cold": {
-      "child_peak_rss_kb": 13036,
+      "child_peak_rss_kb": 13240,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -176,14 +176,14 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
+        "main_bytes": 704512,
         "wal_bytes": 0
       },
-      "output": "indexed 21 files (0 unchanged, 0 removed, 0 skipped) in 110ms \u2014 41 symbols, 117 refs, 0 routes, 66 comments, 51 soft [2 workers]\ninitialized /tmp/codify-index-bench-2ke3fwgq/project/.codegraph [constrained profile]",
-      "wall_ms": 190
+      "output": "indexed 21 files (0 unchanged, 0 removed, 0 skipped) in 115ms \u2014 41 symbols, 117 refs, 0 routes, 66 comments, 51 soft [2 workers]\ninitialized <index> [constrained profile]",
+      "wall_ms": 247
     },
     "delete": {
-      "child_peak_rss_kb": 8864,
+      "child_peak_rss_kb": 8836,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -194,23 +194,23 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
-        "wal_bytes": 922912
+        "main_bytes": 704512,
+        "wal_bytes": 955872
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 0,
-        "ms": 21,
+        "ms": 18,
         "passes": 1,
-        "peak_rss_kb": 8868,
+        "peak_rss_kb": 8836,
         "phase_ms": {
           "parse": 0,
           "resolve": 1,
           "soft": 1,
-          "walk": 1,
-          "write": 4
+          "walk": 2,
+          "write": 3
         },
         "removed": 1,
         "reused": 0,
@@ -221,10 +221,10 @@
         "walk": "full",
         "workers": 0
       },
-      "wall_ms": 40
+      "wall_ms": 33
     },
     "edit": {
-      "child_peak_rss_kb": 10540,
+      "child_peak_rss_kb": 10656,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -235,22 +235,22 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
-        "wal_bytes": 482072
+        "main_bytes": 704512,
+        "wal_bytes": 498552
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 1,
-        "ms": 28,
+        "ms": 27,
         "passes": 1,
-        "peak_rss_kb": 10540,
+        "peak_rss_kb": 10656,
         "phase_ms": {
-          "parse": 2,
+          "parse": 3,
           "resolve": 1,
           "soft": 1,
-          "walk": 1,
+          "walk": 2,
           "write": 6
         },
         "removed": 0,
@@ -262,10 +262,10 @@
         "walk": "full",
         "workers": 1
       },
-      "wall_ms": 47
+      "wall_ms": 46
     },
     "full": {
-      "child_peak_rss_kb": 13464,
+      "child_peak_rss_kb": 13728,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -276,23 +276,23 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
-        "wal_bytes": 3914032
+        "main_bytes": 704512,
+        "wal_bytes": 4041752
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 20,
-        "ms": 122,
+        "ms": 131,
         "passes": 1,
-        "peak_rss_kb": 13464,
+        "peak_rss_kb": 13728,
         "phase_ms": {
-          "parse": 21,
+          "parse": 13,
           "resolve": 4,
-          "soft": 0,
-          "walk": 1,
-          "write": 53
+          "soft": 1,
+          "walk": 2,
+          "write": 66
         },
         "removed": 0,
         "reused": 0,
@@ -303,10 +303,10 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 142
+      "wall_ms": 152
     },
     "noop": {
-      "child_peak_rss_kb": 8072,
+      "child_peak_rss_kb": 8260,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -317,7 +317,7 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
+        "main_bytes": 704512,
         "wal_bytes": 16512
       },
       "stats": {
@@ -325,9 +325,9 @@
         "coalesced": false,
         "fresh": false,
         "indexed": 0,
-        "ms": 10,
+        "ms": 6,
         "passes": 1,
-        "peak_rss_kb": 8076,
+        "peak_rss_kb": 8260,
         "phase_ms": {
           "parse": 0,
           "resolve": 0,
@@ -344,10 +344,10 @@
         "walk": "full",
         "workers": 0
       },
-      "wall_ms": 46
+      "wall_ms": 40
     },
     "rename": {
-      "child_peak_rss_kb": 10512,
+      "child_peak_rss_kb": 10752,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -358,23 +358,23 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
-        "wal_bytes": 1664512
+        "main_bytes": 704512,
+        "wal_bytes": 1718072
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 1,
-        "ms": 29,
+        "ms": 28,
         "passes": 1,
-        "peak_rss_kb": 10512,
+        "peak_rss_kb": 10752,
         "phase_ms": {
-          "parse": 2,
-          "resolve": 2,
-          "soft": 0,
+          "parse": 3,
+          "resolve": 1,
+          "soft": 1,
           "walk": 1,
-          "write": 8
+          "write": 9
         },
         "removed": 1,
         "reused": 0,
@@ -388,7 +388,7 @@
       "wall_ms": 47
     },
     "replay_back": {
-      "child_peak_rss_kb": 10648,
+      "child_peak_rss_kb": 10916,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -399,23 +399,23 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
-        "wal_bytes": 2496752
+        "main_bytes": 704512,
+        "wal_bytes": 2579152
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 3,
-        "ms": 34,
+        "ms": 41,
         "passes": 1,
-        "peak_rss_kb": 10648,
+        "peak_rss_kb": 10916,
         "phase_ms": {
-          "parse": 3,
-          "resolve": 2,
-          "soft": 1,
-          "walk": 1,
-          "write": 14
+          "parse": 4,
+          "resolve": 1,
+          "soft": 2,
+          "walk": 3,
+          "write": 15
         },
         "removed": 1,
         "reused": 0,
@@ -426,10 +426,10 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 52
+      "wall_ms": 63
     },
     "replay_forward": {
-      "child_peak_rss_kb": 10644,
+      "child_peak_rss_kb": 10776,
       "coverage": {
         "available": true,
         "branch": "main",
@@ -440,23 +440,23 @@
         }
       },
       "database": {
-        "main_bytes": 684032,
-        "wal_bytes": 3304272
+        "main_bytes": 704512,
+        "wal_bytes": 3423752
       },
       "stats": {
         "busy": false,
         "coalesced": false,
         "fresh": false,
         "indexed": 2,
-        "ms": 34,
+        "ms": 32,
         "passes": 1,
-        "peak_rss_kb": 10624,
+        "peak_rss_kb": 10776,
         "phase_ms": {
-          "parse": 5,
-          "resolve": 1,
-          "soft": 0,
-          "walk": 1,
-          "write": 13
+          "parse": 2,
+          "resolve": 0,
+          "soft": 1,
+          "walk": 2,
+          "write": 14
         },
         "removed": 2,
         "reused": 0,
@@ -467,7 +467,7 @@
         "walk": "full",
         "workers": 2
       },
-      "wall_ms": 52
+      "wall_ms": 49
     }
   }
 }

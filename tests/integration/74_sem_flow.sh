@@ -5,7 +5,7 @@
 mkdir -p "$TMP/proj"
 cd "$TMP/proj"
 git init -q .
-printf '.codegraph/\n' > .gitignore
+printf '.*/\n' > .gitignore
 cat > flow.c <<'EOF'
 int start_node(void) { return 1; }
 int middle_node(void) { return 2; }
@@ -29,7 +29,8 @@ assert any(e['id']==d['path_edges'][0] and e['kind']=='inherits' and
 PY
 python3 - <<'PY'
 import sqlite3
-db = sqlite3.connect('.codegraph/graph.db')
+from pathlib import Path
+db = sqlite3.connect(next(Path('.').glob('.*/*.db')))
 syms = dict(db.execute("SELECT name,id FROM symbols WHERE name IN "
                        "('start_node','middle_node','end_node','side_node')"))
 assert len(syms) == 4, syms

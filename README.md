@@ -27,9 +27,9 @@ Pure C11. One binary. One SQLite database. Nothing leaves your machine.
 
 Codify (invoked as `cg`) is an agent workflow engine in a single binary. It maintains the four things a project needs beyond the code itself — what the code **is**, how it got **here**, what happens **next**, and what was **learned** along the way — and serves all four to humans and AI agents alike.
 
-Version 1.1.0 (v11) turns the fleet into something you hand a spec to and leave running: `cg fleet up` starts a durable, crash-resumable supervisor that runs the main agent, a manager per feature, and workers per task at the same time, and manages every Codex or Claude Code process until its work is qualified and merged. Agents are briefed from the graph, drift is caught across branches before it merges, every state change lands in an event log, and `cg serve` pushes it all to the editor over one connection. It builds on the fleet foundations: one coalescing indexer instead of fifty, the Main Gideon / feature manager / worker hierarchy with branch, merge, PR and checkpoint flow, one unified graph across every branch and worktree, and Jev decisions — the single remote call in an otherwise local tool.
+`cg fleet up` starts a durable, crash-resumable supervisor for the main agent, feature managers and task workers. It manages each Codex or Claude Code process until work is qualified and merged. Agents receive graph context, branch drift is checked before integration, and `cg serve` streams events to the editor. Indexing is coalesced across workers; the graph and memory cover every branch and worktree. Jev decisions are the one optional remote call in an otherwise local tool.
 
-**What the code is.** Codify indexes 19 languages into a queryable graph: symbols, call edges, framework-aware routes, and instant full-text search, all stored locally in SQLite. `cg context <query>` answers "catch me up on this area" in one call: entry points, matching symbols with snippets, callers, callees, and related routes. And beyond what a parser sees, comments are indexed as first-class nodes — the intent layer: purpose, contracts, dangers, and the couplings that live only in prose.
+**What the code is.** Codify indexes source files into a queryable graph: symbols, calls, imports, types, routes, and full-text search, all stored locally in SQLite. Language coverage ranges from native syntax extraction to file-only tracking; [the coverage matrix](docs/indexing.md#extraction-coverage) states the boundary for each family. `cg context <query>` answers "catch me up on this area" in one call: matching symbols with snippets, callers, callees, and related routes. Comments are indexed as first-class nodes for purpose, contracts, dangers, and couplings that live only in prose.
 
 **How it got here.** A built-in content-addressed snapshot system gives you commits, history, diffs, and restore with no external VCS required. Because snapshots share a database with the graph, `cg changes` reports the blast radius of your uncommitted edits. `cg changelog` writes the release notes: from git history by default — a release per tag or version bump, groups from the commit-subject prefix, each task reference carried through, and, with a key, a short model-written Highlights paragraph per release — and from the snapshot chain with symbol-level diffs when you pass `--snapshots` or the project has no git at all.
 
@@ -65,7 +65,7 @@ There are no background services you did not start and no telemetry — the flee
 
 **Search is instant and layered.** An FTS5 trigram index over symbol names gives case-insensitive substring matching with no warm-up, backed by a word index over full file bodies for everything else.
 
-**The index never goes stale — and never storms.** `cg watch` listens for native OS events (inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows, all behind one platform layer) and auto-syncs with debouncing. MCP tool calls also sync before reading, so a connected agent always queries fresh data. Under fifty agents that would be fifty indexers, so it is not: one process holds the gate and walks, the others leave a dirty note and coalesce into it, a caller whose freshness window is already satisfied skips the walk, and machine-wide slots cap the parse threads across every project at once.
+**The index reports when coverage or freshness is uncertain.** `cg watch` observes file changes and requests debounced syncs. A lost watcher event or failed registration leaves durable reconciliation debt. CLI and MCP answers expose extraction coverage and bounded source checks as verified, stale or unchecked; a coalesced update does not by itself certify freshness. One process holds the index gate while other callers leave dirty notes, and machine-wide slots cap parse threads across projects ([indexing details](docs/indexing.md#freshness-and-migrations)).
 
 **It adapts to the hardware it runs on.** At startup, `cg` sizes its worker pool and SQLite caches from what the system actually provides: container-aware core counts (the intersection of cgroup v1/v2 CPU quota, the affinity mask, and online CPUs), honest available RAM (`MemAvailable` intersected with cgroup memory limits), and measured per-project cost. A 16-core workstation gets the full parallel pipeline. A 2-core VPS gets one tuned to finish reliably. Run `cg info` to see exactly how the pipeline was sized.
 
@@ -138,9 +138,9 @@ Every command in that loop is also an MCP tool, so a connected agent can run it 
 
 ## Supported languages and frameworks
 
-**Languages:** TypeScript, JavaScript, Python, Go, Rust, Java, C#, VB.NET, PHP, Ruby, C, C++, Swift, Kotlin, Erlang, Solidity, Svelte, Vue, Astro.
+Native syntax adapters cover JavaScript/JSX, TypeScript/TSX, C, C++, Objective-C, Go, Rust, Python, Ruby, PHP, Java, Kotlin, Scala, C#, Swift, Dart, Lua, Luau, R, Erlang, Solidity, Terraform, Nix, Pascal, COBOL, VB.NET, CFScript, CFQuery, and ArkTS. Mixed-format adapters cover selected CFML, Vue, Svelte, Astro, Liquid, Razor, Delphi form, and MyBatis XML constructs. JSON, YAML, Twig and properties are tracked at file level. The [indexing guide](docs/indexing.md) explains supported facts, fallback, limits and unresolved boundaries.
 
-**Framework-aware routing:** `cg` links URL patterns to their handlers across Express, Koa, Fastify, Hapi, NestJS, Next.js, SvelteKit, Flask, FastAPI, Django, Rails, Sinatra, Laravel, Spring, ASP.NET, Gin, Echo, Fiber, Chi, Actix, and Axum.
+Framework-aware routing records supported literal registrations and links a uniquely identified handler where evidence permits. It covers Express, Next.js, React Router, Expo Router, SvelteKit, Vue/Nuxt, FastAPI, Django, Flask, Laravel, Rails, Spring, Gin, Axum, ASP.NET and Vapor, plus selected registrations in Koa, Fastify, Hapi, NestJS, Sinatra, Echo, Fiber, Chi and Actix. Computed paths and ambiguous handlers remain unresolved.
 
 ## Installation
 
@@ -697,8 +697,8 @@ The extension has no dependencies and no build step — including its Language S
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produces codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produces codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 The Marketplace identity is `SidioraLabs.codify-workflow`. See [editors/vscode/README.md](editors/vscode/README.md). Any other editor gets the same navigation by pointing its LSP client at `cg lsp`.
@@ -716,7 +716,7 @@ make release     # static release binary -> tested -> published to the web root
 Repository layout:
 
 ```
-src/                 one .c file per module; src/cg.h is the only header
+src/                 C modules and focused headers; src/cg.h is the shared core header
 src/govern.c         brief, review, guard, check, handoff, resume — the governance layer
 src/orchestrate.c    cg spec run and the fleet supervisor (cg fleet up): durable
                      runs, three levels at once, stalls, budgets, retries, escalation
@@ -768,11 +768,11 @@ The database lock decides who *writes*. A separate gate decides who *walks*: `.c
 
 ## Notes and limitations
 
-- Ignore rules combine sensible defaults (VCS directories, `node_modules`, build output, binaries) with a `.cgignore` file using one glob per line.
-- Symbol extraction is heuristic. A comment-aware and string-aware pattern engine per language is tuned for recall on definitions and call sites. It is not a full type-checked resolver.
-- Snapshots store every non-ignored file up to 32 MB, including binaries. The graph indexes text files up to 8 MB.
-- A coalesced sync returns without a fresh graph: it queued its change for the process holding the gate and answers from the last completed index.
-- Queries answer for the branch you are on. `--branch <name>` asks another and `--all-branches` asks them all; a hit is labelled `@branch` only when more than one branch is in scope, so single-branch output is unchanged.
+- Ignore rules combine built-in defaults (VCS directories, `node_modules`, build output and binaries), root and nested `.gitignore` files, and `.cgignore` patterns.
+- Native syntax-tree adapters extract structural facts; embedded and declarative adapters recognize selected constructs, and file-only formats have no symbol graph. A labelled heuristic fallback handles parser failures. Resolution uses syntax evidence but is not a full type checker. Dynamic calls and ambiguous targets remain unresolved ([coverage](docs/indexing.md#extraction-coverage)).
+- Snapshots store non-ignored files up to 32 MiB, including binaries. The graph scans text files up to 8 MiB; parser depth and node limits are separate.
+- A coalesced sync queues its changes for the index holder and returns before those changes are guaranteed visible. Reads may see already committed index chunks; answer health reports pending work and checks contributing source files within a bounded budget.
+- Queries default to the current branch. Many accept `--branch <name>` and `--all-branches`, but graph traversal and inspection require one branch; cross-branch hits are labelled where supported. See each command's help for its scope.
 - `cg fleet` drives `git` and `gh` as subprocesses. Without `gh`, `pr` and `checkpoint` print the commands instead of running them, and `checkpoint` only treats `feature/*` head branches as Codify's own.
 - Jev needs the network and `OPENROUTER_API_KEY`. Nothing in the core loop depends on it, and no Jev answer changes an exit code.
 - The fleet supervisor is one per project and spawns agents through their CLIs; it does not authenticate them. A `spend` budget depends on the cost the driver reports, only Claude Code can be steered mid-turn, and the `retry` approval gate is accepted but not yet enforced. The rest is in [docs/hierarchy.md](docs/hierarchy.md#limitations).

@@ -28,7 +28,10 @@ Codify (se invoca como `cg`) es un motor de flujo de trabajo para agentes en un 
 
 La versión 1.1.0 (v11) convierte la flota en algo a lo que entregas una spec y dejas funcionando: `cg fleet up` arranca un supervisor duradero y reanudable tras un fallo que ejecuta a la vez el agente principal, un gestor por funcionalidad y trabajadores por tarea, y gestiona cada proceso de Codex o Claude Code hasta que su trabajo queda cualificado y fusionado. Los agentes reciben briefings desde el grafo, la deriva entre ramas se detecta antes de fusionar, cada cambio de estado queda en un registro de eventos y `cg serve` lo envía todo al editor por una sola conexión. Se apoya en los cimientos de la flota: un único indexador que agrupa pasadas en lugar de cincuenta, la jerarquía Main Gideon / gestor de funcionalidad / trabajador con su flujo de ramas, merges, PR y checkpoints, un grafo unificado para todas las ramas y worktrees, y las decisiones de Jev — la única llamada remota de una herramienta por lo demás local.
 
-**Qué es el código.** Codify indexa 19 lenguajes en un grafo consultable: símbolos, aristas de llamadas, rutas conscientes del framework y búsqueda instantánea de texto completo, todo almacenado localmente en SQLite. `cg context <consulta>` responde a "ponme al día sobre esta zona" en una sola llamada. Y más allá de lo que ve un parser, los comentarios se indexan como nodos de primera clase — la capa de intención: propósito, contratos, peligros y los acoplamientos que solo viven en prosa.
+**Qué es el código.** Codify indexa archivos fuente de varios lenguajes en un grafo consultable: símbolos, aristas de llamadas, rutas conscientes del framework y búsqueda instantánea de texto completo, todo almacenado localmente en SQLite. `cg context <consulta>` responde a "ponme al día sobre esta zona" en una sola llamada. Y más allá de lo que ve un parser, los comentarios se indexan como nodos de primera clase — la capa de intención: propósito, contratos, peligros y los acoplamientos que solo viven en prosa.
+
+La cobertura varía entre extracción estructural y seguimiento de archivos; consulte la [guía de indexación](../indexing.md) para conocer los límites.
+La guía también describe `cg flow` para recorrer relaciones y `cg inspect` para jerarquías y símbolos sin referencias conocidas.
 
 **Cómo llegó hasta aquí.** Un sistema integrado de instantáneas direccionadas por contenido te da commits, historial, diffs y restauración sin necesidad de un VCS externo; `cg changes` informa del radio de impacto de tus ediciones sin confirmar. `cg changelog` redacta las notas de versión: por defecto a partir del historial de git — una versión por tag o por cambio de número de versión, grupos según el prefijo del asunto del commit, la referencia a la tarea conservada y, con una clave, un breve párrafo de Highlights escrito por un modelo — y a partir de la cadena de instantáneas, con diffs a nivel de símbolo, con `--snapshots` o si el proyecto no usa git.
 
@@ -388,8 +391,8 @@ La extensión no tiene dependencias ni paso de compilación; su identidad en el 
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produce codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produce codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Desarrollo
@@ -405,7 +408,7 @@ make release     # binario estático de release -> probado -> publicado en la ra
 Estructura del repositorio:
 
 ```
-src/                 un .c por módulo; src/cg.h es la única cabecera
+src/                 módulos C y cabeceras especializadas; src/cg.h es la cabecera central compartida
 src/govern.c         brief, review, guard, check, handoff, resume — la capa de gobernanza
 src/orchestrate.c    cg spec run y el supervisor de flota (cg fleet up): ejecuciones
                      duraderas, tres niveles, estancamientos, presupuestos, reintentos, escalada
@@ -447,11 +450,11 @@ El grafo es un único archivo SQLite en modo WAL en el que escriben todos los pr
 
 ## Notas y limitaciones
 
-- Las reglas de exclusión combinan valores por defecto razonables (directorios de VCS, `node_modules`, artefactos de compilación, binarios) con un archivo `.cgignore` de un glob por línea.
-- La extracción de símbolos es heurística. Un motor de patrones por lenguaje, consciente de comentarios y cadenas, está ajustado para maximizar el recall en definiciones y sitios de llamada. No es un resolvedor con verificación de tipos completa.
-- Las instantáneas almacenan todo archivo no ignorado de hasta 32 MB, incluidos los binarios. El grafo indexa archivos de texto de hasta 8 MB.
-- Una sincronización agrupada vuelve sin un grafo fresco: deja su cambio en cola para el proceso que tiene la puerta y responde con el último índice completado.
-- Las consultas responden para la rama actual. `--branch <name>` pregunta a otra y `--all-branches` a todas; un resultado solo se etiqueta `@branch` cuando hay más de una rama en el alcance.
+- Las exclusiones combinan valores integrados, archivos `.gitignore` de la raíz y subdirectorios, y patrones de `.cgignore`.
+- Los adaptadores sintácticos extraen hechos estructurales; un respaldo heurístico identificado actúa si falla el parser. La resolución usa evidencia sintáctica, sin ser un verificador de tipos completo; los destinos dinámicos o ambiguos quedan sin resolver. Los adaptadores incrustados y declarativos reconocen construcciones seleccionadas, mientras que los formatos de solo archivo no ofrecen un grafo de símbolos; consulte los [límites de cobertura](../indexing.md#extraction-coverage).
+- Las instantáneas guardan archivos no excluidos de hasta 32 MiB, incluidos binarios. El grafo examina texto de hasta 8 MiB; profundidad y número de nodos tienen límites aparte.
+- Una sincronización agrupada encola cambios y vuelve antes de garantizar que sean visibles. Las lecturas pueden ver partes ya confirmadas; la salud de la respuesta informa trabajo pendiente y comprobaciones acotadas de archivos fuente.
+- Las consultas usan la rama actual por defecto. Muchas aceptan `--branch <name>` y `--all-branches`, pero el recorrido y la inspección del grafo requieren una sola rama; consulte la ayuda de cada comando.
 - `cg fleet` usa `git` y `gh` como subprocesos. Sin `gh`, `pr` y `checkpoint` imprimen los comandos en lugar de ejecutarlos, y `checkpoint` solo trata como propias las ramas `feature/*`.
 - Jev necesita red y `OPENROUTER_API_KEY`. Nada del ciclo principal depende de él y ninguna respuesta de Jev cambia un código de salida.
 - El supervisor de flota es uno por proyecto y lanza los agentes mediante sus CLI; no los autentica. Un presupuesto `spend` depende del coste que informe el driver, solo Claude Code puede recibir steering a mitad de turno y la puerta de aprobación `retry` se acepta pero aún no se aplica. El resto está en [docs/hierarchy.md](../../docs/hierarchy.md#limitations).
