@@ -403,6 +403,19 @@ static void channel_fact(AstContext *c, TSNode n, TSNode fn,
     }
     free(literal);free(receiver);free(method);free(callee);
 }
+static int call_arity(TSNode args) {
+    if (!is(args,"arguments") || ts_node_has_error(args)) return -1;
+    uint32_t children=ts_node_named_child_count(args);
+    if (children>512) return -1;
+    int count=0;
+    for (uint32_t i=0;i<children;i++) {
+        TSNode arg=ts_node_named_child(args,i);
+        if (is(arg,"spread_element") || ts_node_is_error(arg) ||
+            ts_node_is_missing(arg)) return -1;
+        if (!ts_node_is_extra(arg) && ++count>256) return -1;
+    }
+    return count;
+}
 static void visit(AstContext *c, TSNode n, int owner, int depth) {
     if (c->cancelled || c->truncated) return;
     if (c->cancel_flag && *c->cancel_flag) { c->cancelled=true; return; }
@@ -490,6 +503,7 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
     else if (is(n,"export_statement")) exports(c,n);
     else if (is(n,"call_expression")) {
         TSNode fn=ast_field(n,"function");
+        int before=c->result->sem.nreferences;
         if (is(fn,"identifier")) reference(c,n,fn,"call",owner,NULL);
         else if (is(fn,"member_expression")) {
             TSNode prop=ast_field(fn,"property"),obj=ast_field(fn,"object");
@@ -501,6 +515,8 @@ static void visit(AstContext *c, TSNode n, int owner, int depth) {
             free(qual);
         }
         TSNode args=ast_field(n,"arguments");
+        if (c->result->sem.nreferences>before)
+            c->result->sem.references[c->result->sem.nreferences-1].argc=call_arity(args);
         channel_fact(c,n,fn,args,owner);
         char *callee=text(c,fn);
         TSNode first=ts_node_named_child(args,0), second=ts_node_named_child(args,1);
