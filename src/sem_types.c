@@ -21,7 +21,9 @@ static bool is_type_kind(const char *s) {
     return s && (!strcmp(s,"class") || !strcmp(s,"interface") ||
                  !strcmp(s,"struct") || !strcmp(s,"trait") ||
                  !strcmp(s,"enum") || !strcmp(s,"type") ||
-                 !strcmp(s,"object") || !strcmp(s,"protocol"));
+                 !strcmp(s,"object") || !strcmp(s,"protocol") ||
+                 !strcmp(s,"type_alias") || !strcmp(s,"typedef") ||
+                 !strcmp(s,"record") || !strcmp(s,"union"));
 }
 
 /* Strip type arguments, nullable/array suffixes and C++ access markers.
@@ -33,6 +35,7 @@ static bool canonical_name(const char *src, char out[256]) {
     if (src[0]=='-' && src[1]=='>') {
         src+=2; while (isspace((unsigned char)*src)) src++;
     }
+    if (*src=='@') src++;
     if (!strncmp(src,"virtual ",8)) src+=8;
     if (!strncmp(src,"public ",7)) src += 7;
     else if (!strncmp(src,"protected ",10)) src += 10;
@@ -60,8 +63,10 @@ static bool candidate_allowed(const char *relation, const char *kind,
     if ((!strcmp(relation,"inherits") || !strcmp(relation,"implements") ||
          !strcmp(relation,"type") || !strcmp(relation,"returns") ||
          !strcmp(relation,"instantiates")) && !is_type_kind(kind)) return false;
-    if ((!strcmp(relation,"overrides") || !strcmp(relation,"decorates")) &&
-        is_type_kind(kind)) return false;
+    if (!strcmp(relation,"implements") && kind &&
+        strcmp(kind,"interface") && strcmp(kind,"trait") &&
+        strcmp(kind,"protocol")) return false;
+    if (!strcmp(relation,"overrides") && is_type_kind(kind)) return false;
     if (visibility && (!strcmp(visibility,"private") ||
                        !strcmp(visibility,"fileprivate")) &&
         from_file != target_file) return false;
