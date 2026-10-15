@@ -190,7 +190,7 @@ reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
 
 [task.3.1]
 title = "Import bindings aliases and export chains"
-status = "pending"
+status = "in_progress"
 wave = 3
 requires = ["2.1", "2.3", "2.4", "2.5"]
 touches = ["src/sem_imports.c", "src/sem_imports.h", "src/resolve.c", "tests/integration/65_sem_imports.sh"]
