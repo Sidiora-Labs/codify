@@ -234,6 +234,20 @@ static bool relevant_edit(Cg *cg, const long *changed_files, int nfiles) {
     return found;
 }
 
+static int edge_marker(Cg *cg, char out[64]) {
+    sqlite3_stmt *q=cg_prep(cg,"SELECT count(*),COALESCE(max(id),0) "
+        "FROM semantic_edges WHERE branch_id=?1 AND synthesized=1 "
+        "AND strategy IN ('literal_http_unique_route','literal_named_channel')");
+    sqlite3_bind_int64(q,1,cg->branch_id);
+    int rc=sqlite3_step(q);
+    if (rc==SQLITE_ROW)
+        snprintf(out,64,"%lld:%lld",
+            (long long)sqlite3_column_int64(q,0),
+            (long long)sqlite3_column_int64(q,1));
+    sqlite3_finalize(q);
+    return rc==SQLITE_ROW ? 0 : -1;
+}
+
 static bool pair_compatible(const ChannelFact *a, const ChannelFact *b) {
     if (strcmp(a->family,b->family) || strcmp(a->name,b->name) ||
         strcmp(a->value,b->value)) return false;
@@ -364,13 +378,18 @@ int sem_channels_pass(Cg *cg, const long *changed_files, int nfiles) {
     int rc=load_facts(cg,&facts,&digest);
     if (!rc) rc=hash_routes(cg,&digest);
     if (rc) { facts_free(&facts); return -1; }
-    char key[128], hex[32];
+    char key[128], state_key[128], hex[32], state[64];
     cg_bkey(cg,"sem_channels_digest",key,sizeof key);
+    cg_bkey(cg,"sem_channels_edge_state",state_key,sizeof state_key);
     snprintf(hex,sizeof hex,"%016" PRIx64,digest);
     char *prior=cg_meta_get(cg,key);
     bool unchanged=prior && !strcmp(prior,hex);
     free(prior);
-    if (unchanged && changed_files) { facts_free(&facts); return 0; }
+    char *prior_state=cg_meta_get(cg,state_key);
+    if (edge_marker(cg,state)) { free(prior_state); facts_free(&facts); return -1; }
+    bool edges_intact=prior_state && !strcmp(prior_state,state);
+    free(prior_state);
+    if (unchanged && edges_intact) { facts_free(&facts); return 0; }
     /* The caller's indexing transaction includes this savepoint.  A failed
      * synthesis leaves the former edge set and retryable digest intact. */
     cg_exec(cg,"SAVEPOINT sem_channels");
@@ -381,8 +400,12 @@ int sem_channels_pass(Cg *cg, const long *changed_files, int nfiles) {
     rc=sqlite3_step(del)==SQLITE_DONE ? 0 : -1;
     sqlite3_finalize(del);
     if (!rc) rc=synthesize(cg,&facts);
+    if (!rc) rc=edge_marker(cg,state);
     if (rc) cg_exec(cg,"ROLLBACK TO sem_channels");
-    else cg_meta_set(cg,key,hex);
+    else {
+        cg_meta_set(cg,key,hex);
+        cg_meta_set(cg,state_key,state);
+    }
     cg_exec(cg,"RELEASE sem_channels");
     facts_free(&facts);
     return rc;
