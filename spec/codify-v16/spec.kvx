@@ -179,7 +179,7 @@ reqs = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7", "2.8"]
 
 [task.2.8]
 title = "Legacy and mixed-format extraction adapters"
-status = "in_progress"
+status = "implemented"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_mixed.c", "vendor/parsers/mixed/**", "tests/integration/64_ast_mixed.sh", "tests/fixtures/semantic/mixed/**"]
