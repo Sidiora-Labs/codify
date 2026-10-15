@@ -275,6 +275,11 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
     sqlite3_stmt *del=cg_prep(cg,
         "DELETE FROM semantic_edges WHERE branch_id=? AND source_ref_id=? "
         "AND provenance='resolved-receiver'");
+    sqlite3_stmt *existing=cg_prep(cg,
+        "SELECT 1 FROM semantic_edges WHERE branch_id=? AND source_ref_id=? "
+        "AND source_file_id=? AND source_id IS ? AND target_id=? AND kind=? "
+        "AND start_line=? AND start_column=? "
+        "AND provenance<>'resolved-receiver' LIMIT 1");
     sqlite3_stmt *edge=cg_prep(cg,
         "INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
         "source_id,target_id,source_ref_id,kind,original_text,strategy,"
@@ -442,6 +447,17 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
         sqlite3_bind_int64(legacy,4,rid);
         sqlite3_step(legacy); sqlite3_reset(legacy); sqlite3_clear_bindings(legacy);
         if (target) {
+            sqlite3_bind_int64(existing,1,cg->branch_id);
+            sqlite3_bind_int64(existing,2,rid);
+            sqlite3_bind_int64(existing,3,fid);
+            bind_nullable_id(existing,4,source);
+            sqlite3_bind_int64(existing,5,target);
+            sqlite3_bind_text(existing,6,value_ref?"references":"calls",-1,SQLITE_STATIC);
+            sqlite3_bind_int(existing,7,line);
+            sqlite3_bind_int(existing,8,column);
+            int already_linked=sqlite3_step(existing)==SQLITE_ROW;
+            sqlite3_reset(existing); sqlite3_clear_bindings(existing);
+            if (already_linked) continue;
             sqlite3_bind_int64(edge,1,cg->branch_id);
             sqlite3_bind_int64(edge,2,fid);
             sqlite3_bind_int64(edge,3,target_file);
@@ -456,7 +472,7 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
         }
     }
     sqlite3_finalize(refs); sqlite3_finalize(upd); sqlite3_finalize(legacy);
-    sqlite3_finalize(del); sqlite3_finalize(edge);
+    sqlite3_finalize(del); sqlite3_finalize(existing); sqlite3_finalize(edge);
     return 0;
 }
 
