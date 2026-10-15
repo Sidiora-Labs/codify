@@ -189,11 +189,12 @@ static void bind_span(sqlite3_stmt *q, int n, SemSpan s) {
     sqlite3_bind_int(q,n++,s.line); sqlite3_bind_int(q,n++,s.column);
     sqlite3_bind_int(q,n++,s.end_line); sqlite3_bind_int(q,n,s.end_column);
 }
+static _Thread_local int semantic_error;
 static void done(Cg *cg, sqlite3_stmt *q) {
     int rc = sqlite3_step(q);
     if (rc != SQLITE_DONE) {
         fprintf(stderr, "cg: semantic store: %s\n", sqlite3_errmsg(cg->db));
-        exit(2);
+        semantic_error = 1;
     }
     sqlite3_reset(q); sqlite3_clear_bindings(q);
 }
@@ -201,6 +202,7 @@ static void done(Cg *cg, sqlite3_stmt *q) {
 /* Called before deleting symbol rows: incoming resolved edges and bindings
  * must lose stale targets even when their source files are unchanged. */
 int sem_file_purge(Cg *cg, long file_id) {
+    semantic_error = 0;
     if (sem_search_file_purge && sem_search_file_purge(cg,file_id)!=0)
         return -1;
     sqlite3_stmt *q = cg_prep(cg,
@@ -227,7 +229,7 @@ int sem_file_purge(Cg *cg, long file_id) {
         q = cg_prep(cg,sql); sqlite3_bind_int64(q,1,file_id);
         done(cg,q); sqlite3_finalize(q);
     }
-    return 0;
+    return semantic_error ? -1 : 0;
 }
 
 static long mapped(const long *ids, int n, int index) {
@@ -238,6 +240,7 @@ int sem_file_replace(Cg *cg, long file_id, const SemResult *r,
                      const long *legacy_symbol_ids, int nlegacy_symbols,
                      const long *legacy_ref_ids, int nlegacy_refs) {
     if (!r) return 0;
+    semantic_error = 0;
     long *syms = r->nsymbols ? xmalloc((size_t)r->nsymbols*sizeof *syms) : NULL;
     long *refs = r->nreferences ? xmalloc((size_t)r->nreferences*sizeof *refs) : NULL;
     sqlite3_stmt *q = cg_prep(cg,"INSERT INTO symbols(file_id,name,kind,line,end_line,sig,decl) "
@@ -348,6 +351,7 @@ int sem_file_replace(Cg *cg, long file_id, const SemResult *r,
         sqlite3_bind_int(q,26,v->synthesized); done(cg,q);
     }
     sqlite3_finalize(q); free(syms); free(refs);
+    if (semantic_error) return -1;
     return sem_search_file_replace ? sem_search_file_replace(cg,file_id) : 0;
 }
 
@@ -355,6 +359,7 @@ int sem_file_replace(Cg *cg, long file_id, const SemResult *r,
  * numbers do not uniquely identify overloads. Resolved cross-file links are
  * deliberately retried by the incremental resolver after the copy. */
 int sem_file_copy(Cg *cg, long file_id, long twin_file_id) {
+    semantic_error = 0;
     cg_exec(cg,"CREATE TEMP TABLE IF NOT EXISTS sem_copy_symbols(old_id INTEGER PRIMARY KEY,new_id INTEGER);");
     cg_exec(cg,"CREATE TEMP TABLE IF NOT EXISTS sem_copy_refs(old_id INTEGER PRIMARY KEY,new_id INTEGER);");
     cg_exec(cg,"DELETE FROM temp.sem_copy_symbols;DELETE FROM temp.sem_copy_refs;");
@@ -421,6 +426,7 @@ int sem_file_copy(Cg *cg, long file_id, long twin_file_id) {
         sqlite3_bind_int64(q,2,twin_file_id);
         sqlite3_bind_int64(q,3,cg->branch_id); done(cg,q); sqlite3_finalize(q);
     }
+    if (semantic_error) return -1;
     return sem_search_file_copy ? sem_search_file_copy(cg,twin_file_id,file_id) : 0;
 }
 
