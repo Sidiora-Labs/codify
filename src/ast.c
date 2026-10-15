@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "index_health.h"
 #include <limits.h>
 #include <pthread.h>
 #include <strings.h>
@@ -74,6 +75,9 @@ static void project_semantic(ParseResult *result) {
 
 static bool collect_comment(AstContext *ctx, TSNode node, void *unused) {
     (void)unused;
+    if ((ts_node_is_error(node) || ts_node_is_missing(node)) &&
+        !strstr(ctx->result->diagnostics, "syntax_recovery"))
+        parse_diagnostic_add(ctx->result, "syntax_recovery", ast_line(node));
     const char *type = ts_node_type(node);
     if (strcmp(type, "comment") != 0 && !strstr(type, "comment")) {
         if (!ts_node_eq(node, ctx->root)) {
@@ -217,8 +221,11 @@ void ast_walk(AstContext *ctx, TSNode root, AstVisitFn visit, void *user) {
 bool ast_try_parse_ex(const char *language, const char *path,
                       const char *source, size_t length, ParseResult *result,
                       const size_t *cancel_flag) {
-    if (!source || !result || length > AST_MAX_SOURCE || length > UINT32_MAX)
+    if (!source || !result) return false;
+    if (length > AST_MAX_SOURCE || length > UINT32_MAX) {
+        parse_diagnostic_add(result, "ast_source_limit", 0);
         return false;
+    }
     const AstAdapter *adapter = NULL;
     const char *ext = path ? path_ext(path) : NULL;
     if (ext && strcasecmp(ext, ".tsx") == 0) adapter = ast_adapter("tsx");
@@ -227,7 +234,10 @@ bool ast_try_parse_ex(const char *language, const char *path,
     AstContext ctx = { .language = language, .path = path, .source = source,
                        .length = length, .result = result,
                        .cancel_flag = cancel_flag };
-    if (cancel_flag && *cancel_flag) return false;
+    if (cancel_flag && *cancel_flag) {
+        parse_diagnostic_add(result, "ast_cancelled", 0);
+        return false;
+    }
     if (adapter->grammar) {
         const TSLanguage *grammar = adapter->grammar();
         if (!grammar) return false;
@@ -241,7 +251,12 @@ bool ast_try_parse_ex(const char *language, const char *path,
         if (cancel_flag) ts_parser_set_cancellation_flag(ctx.parser, cancel_flag);
         ctx.tree = ts_parser_parse_string(ctx.parser, NULL, source,
                                           (uint32_t)length);
-        if (!ctx.tree) { ts_parser_delete(ctx.parser); return false; }
+        if (!ctx.tree) {
+            ts_parser_delete(ctx.parser);
+            parse_diagnostic_add(result, cancel_flag && *cancel_flag ?
+                                 "ast_cancelled" : "ast_timeout", 0);
+            return false;
+        }
         ctx.root = ts_tree_root_node(ctx.tree);
     }
     adapter->extract(&ctx);
@@ -252,12 +267,20 @@ bool ast_try_parse_ex(const char *language, const char *path,
         ctx.truncated |= comments.truncated;
         ctx.cancelled |= comments.cancelled;
     }
+    if (ctx.tree && (ctx.errors || ctx.missing || ts_node_has_error(ctx.root)) &&
+        !strstr(result->diagnostics, "syntax_recovery"))
+        parse_diagnostic_add(result, "syntax_recovery", ast_line(ctx.root));
+    if (ctx.truncated)
+        parse_diagnostic_add(result, "ast_node_limit", 0);
+    if (ctx.cancelled)
+        parse_diagnostic_add(result, "ast_cancelled", 0);
     if (!result->sem.parser_id) {
         const char *prefix = adapter->grammar ? "tree-sitter:" : "adapter:";
         size_t n = strlen(prefix) + strlen(adapter->language) + 1;
         result->sem.parser_id = xmalloc(n);
         snprintf(result->sem.parser_id, n, "%s%s", prefix, adapter->language);
     }
+    snprintf(result->parser, sizeof result->parser, "%s", result->sem.parser_id);
     project_semantic(result);
     scan_routes(&ctx);
     if (ctx.tree) ts_tree_delete(ctx.tree);

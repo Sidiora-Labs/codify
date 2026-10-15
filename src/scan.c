@@ -759,7 +759,7 @@ static void drop_skipped_file(Cg *cg, Stmts *s, const Walked *w,
     sqlite3_clear_bindings(s->sel_file);
     if (!file_id) return;
     scope_record_file(s, file_id, false);
-    purge_file_children(s, file_id);
+    purge_file_children(cg, s, file_id);
     sqlite3_stmt *del = cg_prep(cg, "DELETE FROM files WHERE id=?1");
     sqlite3_bind_int64(del, 1, file_id);
     sqlite3_step(del);
