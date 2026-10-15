@@ -1132,9 +1132,9 @@ static void rank_bodies(Cg *cg, const Terms *T, Hit *h, int *nh,
 static void signature_identity(const char *sig, char *out, size_t cap) {
     size_t n = 0;
     for (const unsigned char *p = (const unsigned char *)sig; *p; p++) {
-        if (*p == '{' || *p == ';') break;
         if (!isspace(*p) && n + 1 < cap) out[n++] = (char)*p;
     }
+    if (n && (out[n - 1] == '{' || out[n - 1] == ';')) n--;
     out[n] = 0;
 }
 
