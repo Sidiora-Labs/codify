@@ -211,7 +211,15 @@ static char *attr(const AstContext *c,size_t a,size_t b,const char *key,size_t *
 static void decl(AstContext *c,const char *name,const char *kind,size_t lo,size_t hi,int owner) {
     if(!name||!*name)return;
     SemSymbol *s=sem_symbol_add(&c->result->sem,name,kind,span_bytes(c,lo,hi));
-    if(s) {s->parent=owner;s->qualified_name=xstrdup(name);s->scope_key=xstrdup(name);}
+    if(s) {
+        s->parent=owner;s->scope_key=xstrdup(name);
+        if(owner>=0 && owner<c->result->sem.nsymbols-1) {
+            const SemSymbol *parent=&c->result->sem.symbols[owner];
+            const char *prefix=parent->qualified_name?parent->qualified_name:parent->name;
+            size_t n=strlen(prefix)+strlen(name)+2;
+            s->qualified_name=xmalloc(n);snprintf(s->qualified_name,n,"%s.%s",prefix,name);
+        } else s->qualified_name=xstrdup(name);
+    }
 }
 static void ref(AstContext *c,const char *text,const char *kind,size_t lo,size_t hi,int owner,const char *why) {
     if(!text||!*text)return;
@@ -356,9 +364,66 @@ static bool boundary(const AstContext *c,size_t p,size_t n) {
     return (p==0||!isalnum((unsigned char)c->source[p-1])) &&
            (p+n>=c->length||!isalnum((unsigned char)c->source[p+n]));
 }
+static void delphi_extract(AstContext *c) {
+    int stack[128],depth=0;
+    bool comment=false;
+    for(size_t line=0;line<c->length;) {
+        size_t end=line;while(end<c->length&&c->source[end]!='\n')end++;
+        size_t p=line;while(p<end&&isspace((unsigned char)c->source[p]))p++;
+        if(comment) {
+            while(p<end&&c->source[p]!='}')p++;
+            if(p<end)comment=false;
+        } else if(p<end&&c->source[p]=='{') {
+            comment=true;while(p<end&&c->source[p]!='}')p++;
+            if(p<end)comment=false;
+        } else if(p<end) {
+            size_t keyword=0;
+            if(p+7<=end&&!strncasecmp(c->source+p,"object ",7))keyword=7;
+            else if(p+10<=end&&!strncasecmp(c->source+p,"inherited ",10))keyword=10;
+            else if(p+7<=end&&!strncasecmp(c->source+p,"inline ",7))keyword=7;
+            if(keyword) {
+                size_t a=p+keyword,q=a;
+                while(q<end&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
+                if(q>a) {
+                    char *name=strndup(c->source+a,q-a);
+                    int owner=depth?stack[depth-1]:-1;
+                    decl(c,name,"component",a,q,owner);free(name);
+                    if(depth<128)stack[depth++]=c->result->sem.nsymbols-1;
+                }
+                while(q<end&&isspace((unsigned char)c->source[q]))q++;
+                if(q<end&&c->source[q]==':') {
+                    q++;while(q<end&&isspace((unsigned char)c->source[q]))q++;
+                    size_t a=q;while(q<end&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'||c->source[q]=='.'))q++;
+                    if(q>a){char *name=strndup(c->source+a,q-a);
+                        ref(c,name,"type",a,q,depth?stack[depth-1]:-1,"form component type");free(name);}
+                }
+            } else if(p+3<=end&&!strncasecmp(c->source+p,"end",3)&&
+                      (p+3==end||isspace((unsigned char)c->source[p+3]))){
+                if(depth)depth--;
+            } else if(p+3<end&&!strncasecmp(c->source+p,"On",2)&&
+                      isalpha((unsigned char)c->source[p+2])) {
+                size_t q=p+2;while(q<end&&isalnum((unsigned char)c->source[q]))q++;
+                while(q<end&&isspace((unsigned char)c->source[q]))q++;
+                if(q<end&&c->source[q]=='=') {
+                    q++;while(q<end&&isspace((unsigned char)c->source[q]))q++;
+                    size_t a=q;while(q<end&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'||c->source[q]=='.'))q++;
+                    size_t tail=q;while(tail<end&&isspace((unsigned char)c->source[tail]))tail++;
+                    if(q>a&&(tail==end||c->source[tail]=='{')){
+                        char *handler=strndup(c->source+a,q-a);
+                        if(strcasecmp(handler,"nil"))
+                            ref(c,handler,"call",a,q,depth?stack[depth-1]:-1,"form event assignment");
+                        free(handler);
+                    }
+                }
+            }
+        }
+        line=end+(end<c->length);
+    }
+}
 static void text_extract(AstContext *c) {
     identify(c,"declarative");
     const char *lang=c->language;
+    if(eq(lang,"delphi_form")) {delphi_extract(c);return;}
     for(size_t p=0;p<c->length;) {
         if(eq(lang,"razor") && at(c,p,"@*")) {
             p+=2;while(p+2<c->length&&!at(c,p,"*@"))p++;
@@ -368,25 +433,7 @@ static void text_extract(AstContext *c) {
             p+=4;while(p+3<c->length&&!at(c,p,"-->"))p++;
             p+=3;continue;
         }
-        if(eq(lang,"delphi_form") && c->source[p]=='{') {
-            p++;while(p<c->length&&c->source[p]!='}')p++;
-            p++;continue;
-        }
-        if(eq(lang,"delphi_form")) {
-            if(at(c,p,"object ")||at(c,p,"inherited ")||at(c,p,"inline ")) {
-                size_t a=p+(at(c,p,"object ")?7:at(c,p,"inline ")?7:10),q=a;
-                while(q<c->length && (isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
-                if(q>a) {char *n=strndup(c->source+a,q-a);decl(c,n,"component",a,q,-1);free(n);}
-                while(q<c->length && c->source[q]!='\n' && isspace((unsigned char)c->source[q]))q++;
-                if(q<c->length && c->source[q]==':') {
-                    q++;while(q<c->length&&isspace((unsigned char)c->source[q]))q++;
-                    size_t start=q;
-                    while(q<c->length&&(isalnum((unsigned char)c->source[q])||c->source[q]=='_'))q++;
-                    if(q>start){char *n=strndup(c->source+start,q-start);
-                        ref(c,n,"type",start,q,c->result->sem.nsymbols-1,"form component type");free(n);}
-                }
-            }
-        } else if(eq(lang,"razor")) {
+        if(eq(lang,"razor")) {
             if(at(c,p,"@model ")||at(c,p,"@inherits ")||at(c,p,"@inject ")) {
                 size_t a=p+(at(c,p,"@model ")?7:at(c,p,"@inject ")?8:10),q=a;
                 while(q<c->length && (isalnum((unsigned char)c->source[q])||c->source[q]=='_'||c->source[q]=='.'))q++;
