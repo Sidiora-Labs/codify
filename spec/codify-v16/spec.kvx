@@ -223,9 +223,10 @@ reqs = ["3.3", "3.4"]
 
 [task.3.4]
 title = "Framework route and handler graph"
-status = "in_progress"
+status = "done"
 wave = 3
 requires = ["2.1", "2.3", "2.5", "2.6"]
+symbols = ["sem_routes_pass"]
 touches = ["src/sem_routes.c", "src/sem_routes.h", "src/routes.c", "tests/integration/68_sem_routes.sh", "tests/fixtures/semantic/routes/**"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/68_sem_routes.sh"
 do_1 = "Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates."

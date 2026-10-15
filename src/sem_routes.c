@@ -26,6 +26,19 @@ static const char *SCHEMA =
     "CREATE INDEX IF NOT EXISTS idx_sem_route_composed_match ON "
     "semantic_route_compositions(branch_id,method,pattern);";
 
+static void ensure_route_schema(Cg *cg) {
+    cg_exec(cg,SCHEMA);
+    sqlite3_stmt *q=cg_prep(cg,"PRAGMA table_info(semantic_route_facts)");
+    bool column=false;
+    while(sqlite3_step(q)==SQLITE_ROW) {
+        const char *name=(const char*)sqlite3_column_text(q,1);
+        if(name&&strcmp(name,"registration_column")==0)column=true;
+    }
+    sqlite3_finalize(q);
+    if(!column)cg_exec(cg,"ALTER TABLE semantic_route_facts "
+        "ADD COLUMN registration_column INTEGER NOT NULL DEFAULT 0");
+}
+
 static int step_done(sqlite3_stmt *q) {
     int rc=sqlite3_step(q);
     sqlite3_reset(q); sqlite3_clear_bindings(q);
@@ -342,7 +355,7 @@ static int link_navigation(Cg *cg) {
 
 int sem_routes_pass(Cg *cg,const long *changed_files,int nfiles) {
     if (changed_files && nfiles==0) return 0;
-    cg_exec(cg,SCHEMA);
+    ensure_route_schema(cg);
     if(!affected(cg,changed_files,nfiles))return 0;
     /* Remove facts for deleted/replaced registrations and their synthetic
      * graph nodes. File replacement may already have deleted the symbol. */
