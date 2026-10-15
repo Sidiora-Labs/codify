@@ -104,3 +104,36 @@ assert c.execute('SELECT count(*) FROM semantic_edges WHERE source_ref_id=104').
 assert c.execute('SELECT target_id FROM semantic_references WHERE ref_id=109').fetchone()[0]==21
 print('receiver and overload resolution: owner, arity, import, type, ambiguity, visibility, branch and scoped retry passed')
 PY
+
+# Exercise the production extractor, writer and pass registration together.
+mkdir "$tmp/source"
+cat >"$tmp/source/app.ts" <<'EOF'
+class A {
+  go(x: number) {}
+  go(x: number, y: number) {}
+  caller() {
+    this.go(1);
+    this.go(1, 2);
+    unknown.go(1);
+  }
+}
+EOF
+(cd "$tmp/source" && "$CG" init >/dev/null)
+python3 - "$tmp/source" <<'PY'
+import pathlib, sqlite3, sys
+root = pathlib.Path(sys.argv[1])
+db = sqlite3.connect(next(root.glob('.*/*.db')))
+rows = db.execute('''SELECT r.argc, r.qual, r.verdict, r.conf, s.sig,
+                           sr.evidence
+                     FROM refs r JOIN semantic_references sr ON sr.ref_id=r.id
+                     LEFT JOIN symbols s ON s.id=r.target_id
+                     WHERE r.name='go' ORDER BY r.id''').fetchall()
+assert len(rows) == 3, rows
+assert rows[0][0:4] == (1, 'this', 'internal', 'receiver-owner'), rows
+assert rows[1][0:4] == (2, 'this', 'internal', 'receiver-owner'), rows
+assert rows[0][4] != rows[1][4], rows
+assert rows[2][1:4] == ('unknown', 'unknown', 'semantic-unresolved'), rows
+assert 'unknown receiver' in rows[2][5], rows
+assert db.execute("SELECT count(*) FROM semantic_edges WHERE provenance='resolved-receiver' AND kind='calls'").fetchone()[0] == 2
+print('production extractor, storage and receiver pass: arity and unknown receiver passed')
+PY
