@@ -201,7 +201,7 @@ reqs = ["3.1"]
 
 [task.3.2]
 title = "Receiver ownership and overload resolution"
-status = "pending"
+status = "done"
 wave = 3
 requires = ["2.1", "2.3", "2.4", "2.5"]
 touches = ["src/sem_resolve.c", "src/sem_resolve.h", "src/resolve.c", "tests/integration/66_sem_resolve.sh"]
