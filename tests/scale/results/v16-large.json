@@ -1,0 +1,473 @@
+{
+  "fixture": {
+    "files": 1000,
+    "generator": "tests/scale/gen.py",
+    "generator_output": "1000 files, 97484 lines, 2485538 bytes",
+    "git_base": "8f47fc7ac5211c255797159b146e33cd04c2379e",
+    "git_changed": "f69d722d26a283661bd2740fde05a6c2ed01760e",
+    "lines_requested": 100000,
+    "seed": 15,
+    "source_bytes": 2485550
+  },
+  "format": "codify-index-benchmark-v1",
+  "query_wall_ms": 60,
+  "regressions": [],
+  "runtime": {
+    "binary_sha256": "30dafde0268c643402267181753a475330e207dce27768d7c96b38660ff4fdc7",
+    "cores_effective": 6,
+    "fts_mode": "contentless",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.39",
+    "profile": "constrained",
+    "python": "3.12.3",
+    "sqlite": "3.45.1"
+  },
+  "settings": {
+    "max_db_ratio": 500,
+    "max_rss_mb": 1024,
+    "profile": "large",
+    "shape_timeout_sec": 30,
+    "stage_timeout_sec": 120,
+    "workers": 2
+  },
+  "shape_fixture": {
+    "deep_block_levels": 600,
+    "language": "go",
+    "source_bytes": 3202461,
+    "stages": {
+      "deep": {
+        "child_peak_rss_kb": 9464,
+        "coverage": {
+          "available": true,
+          "branch": "main",
+          "diagnostic_files": 2,
+          "status": {
+            "complete": 1,
+            "partial": 1,
+            "skipped": 1
+          }
+        },
+        "database": {
+          "main_bytes": 7675904,
+          "wal_bytes": 177192
+        },
+        "stats": {
+          "busy": false,
+          "coalesced": false,
+          "fresh": false,
+          "indexed": 1,
+          "ms": 78,
+          "passes": 1,
+          "peak_rss_kb": 9448,
+          "phase_ms": {
+            "parse": 23,
+            "resolve": 3,
+            "soft": 0,
+            "walk": 1,
+            "write": 27
+          },
+          "removed": 0,
+          "reused": 0,
+          "scoped": true,
+          "seen": 3,
+          "skipped": 0,
+          "targeted": false,
+          "walk": "full",
+          "workers": 1
+        },
+        "wall_ms": 130
+      },
+      "wide": {
+        "child_peak_rss_kb": 88996,
+        "coverage": {
+          "available": true,
+          "branch": "main",
+          "diagnostic_files": 1,
+          "status": {
+            "complete": 1,
+            "skipped": 1
+          }
+        },
+        "database": {
+          "main_bytes": 7675904,
+          "wal_bytes": 0
+        },
+        "stats": {
+          "busy": false,
+          "coalesced": false,
+          "fresh": false,
+          "indexed": 1,
+          "ms": 1131,
+          "passes": 1,
+          "peak_rss_kb": 88832,
+          "phase_ms": {
+            "parse": 804,
+            "resolve": 0,
+            "soft": 2,
+            "walk": 0,
+            "write": 284
+          },
+          "removed": 0,
+          "reused": 0,
+          "scoped": true,
+          "seen": 2,
+          "skipped": 0,
+          "targeted": false,
+          "walk": "full",
+          "workers": 1
+        },
+        "wall_ms": 1181
+      }
+    },
+    "timeout_sec": 30,
+    "wide_comment_lines": 160000
+  },
+  "source_to_query_ms": 7360,
+  "stages": {
+    "branch_reuse": {
+      "child_peak_rss_kb": 51432,
+      "coverage": {
+        "available": true,
+        "branch": "bench-sibling",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 998,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 30400512,
+        "wal_bytes": 11292952
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 1000,
+        "ms": 44447,
+        "passes": 1,
+        "peak_rss_kb": 51432,
+        "phase_ms": {
+          "parse": 11,
+          "resolve": 317,
+          "soft": 183,
+          "walk": 18,
+          "write": 12200
+        },
+        "removed": 0,
+        "reused": 998,
+        "scoped": false,
+        "seen": 1000,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 2
+      },
+      "wall_ms": 44554
+    },
+    "cold": {
+      "child_peak_rss_kb": 40356,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 999,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 0
+      },
+      "output": "indexed 1001 files (0 unchanged, 0 removed, 0 skipped) in 27249ms \u2014 4163 symbols, 18448 refs, 0 routes, 5158 comments, 3997 soft [2 workers]\ninitialized /tmp/codify-index-bench-zzscm9w9/project/.codegraph [constrained profile]",
+      "wall_ms": 27423
+    },
+    "delete": {
+      "child_peak_rss_kb": 26660,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 998,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 2150672
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 0,
+        "ms": 5572,
+        "passes": 1,
+        "peak_rss_kb": 26660,
+        "phase_ms": {
+          "parse": 0,
+          "resolve": 34,
+          "soft": 11,
+          "walk": 18,
+          "write": 29
+        },
+        "removed": 1,
+        "reused": 0,
+        "scoped": true,
+        "seen": 1000,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 0
+      },
+      "wall_ms": 5609
+    },
+    "edit": {
+      "child_peak_rss_kb": 29136,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 999,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 0
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 1,
+        "ms": 7163,
+        "passes": 1,
+        "peak_rss_kb": 29132,
+        "phase_ms": {
+          "parse": 17,
+          "resolve": 36,
+          "soft": 16,
+          "walk": 29,
+          "write": 43
+        },
+        "removed": 0,
+        "reused": 0,
+        "scoped": true,
+        "seen": 1001,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 1
+      },
+      "wall_ms": 7268
+    },
+    "full": {
+      "child_peak_rss_kb": 56544,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 998,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 16994304,
+        "wal_bytes": 11292952
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 1000,
+        "ms": 28584,
+        "passes": 1,
+        "peak_rss_kb": 56064,
+        "phase_ms": {
+          "parse": 423,
+          "resolve": 253,
+          "soft": 52,
+          "walk": 29,
+          "write": 9953
+        },
+        "removed": 0,
+        "reused": 0,
+        "scoped": false,
+        "seen": 1000,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 2
+      },
+      "wall_ms": 28666
+    },
+    "noop": {
+      "child_peak_rss_kb": 13700,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 999,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 16512
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 0,
+        "ms": 96,
+        "passes": 1,
+        "peak_rss_kb": 13700,
+        "phase_ms": {
+          "parse": 0,
+          "resolve": 0,
+          "soft": 0,
+          "walk": 26,
+          "write": 0
+        },
+        "removed": 0,
+        "reused": 0,
+        "scoped": false,
+        "seen": 1001,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 0
+      },
+      "wall_ms": 178
+    },
+    "rename": {
+      "child_peak_rss_kb": 28276,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 998,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 4630912
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 1,
+        "ms": 7352,
+        "passes": 1,
+        "peak_rss_kb": 28272,
+        "phase_ms": {
+          "parse": 8,
+          "resolve": 26,
+          "soft": 15,
+          "walk": 26,
+          "write": 34
+        },
+        "removed": 1,
+        "reused": 0,
+        "scoped": true,
+        "seen": 1000,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 1
+      },
+      "wall_ms": 7471
+    },
+    "replay_back": {
+      "child_peak_rss_kb": 29184,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 999,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 4630912
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 3,
+        "ms": 6295,
+        "passes": 1,
+        "peak_rss_kb": 29184,
+        "phase_ms": {
+          "parse": 12,
+          "resolve": 26,
+          "soft": 16,
+          "walk": 29,
+          "write": 61
+        },
+        "removed": 1,
+        "reused": 0,
+        "scoped": true,
+        "seen": 1001,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 2
+      },
+      "wall_ms": 6354
+    },
+    "replay_forward": {
+      "child_peak_rss_kb": 28668,
+      "coverage": {
+        "available": true,
+        "branch": "main",
+        "diagnostic_files": 2,
+        "status": {
+          "complete": 998,
+          "skipped": 2
+        }
+      },
+      "database": {
+        "main_bytes": 15753216,
+        "wal_bytes": 4721552
+      },
+      "stats": {
+        "busy": false,
+        "coalesced": false,
+        "fresh": false,
+        "indexed": 2,
+        "ms": 6844,
+        "passes": 1,
+        "peak_rss_kb": 28668,
+        "phase_ms": {
+          "parse": 15,
+          "resolve": 23,
+          "soft": 27,
+          "walk": 35,
+          "write": 129
+        },
+        "removed": 2,
+        "reused": 0,
+        "scoped": true,
+        "seen": 1000,
+        "skipped": 0,
+        "targeted": false,
+        "walk": "full",
+        "workers": 2
+      },
+      "wall_ms": 6897
+    }
+  }
+}
