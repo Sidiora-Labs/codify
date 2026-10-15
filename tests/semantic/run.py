@@ -235,9 +235,11 @@ def score_framework(cg: Path, work: Path, case) -> dict:
         edges = edge_rows(db)
         symbols = {path: symbol_rows(db, path) for path in case.files}
     positive = [r for r in routes if r["pattern"] == case.path
+                and r["framework"] == (case.framework_id or case.name)
                 and (r["method"] or "").upper() == case.method]
     forbidden_paths = {case.decoy_path, *case.extra_decoy_paths}
     negative = [r for r in routes if r["pattern"] in forbidden_paths or
+                (r["pattern"] == case.path and r["framework"] != (case.framework_id or case.name)) or
                 (str(r["pattern"] or "").startswith("/v16") and r["pattern"] != case.path)]
     handler_symbols = [(p, r) for p, rows in symbols.items() for r in rows
                        if r["name"].lower() == case.handler.lower()]
