@@ -1018,12 +1018,14 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
     bool wrote = false;
     for (int i = 0; i < n; i++) {
         if (rc == 0) {
-            if (write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st) != 0) {
+            const Walked *w = &jobs[chunk[i].idx];
+            bool changed = !w->dbhash[0] || strcmp(w->dbhash, chunk[i].hash) != 0;
+            if (write_done(cg, s, w, &chunk[i], st) != 0) {
                 st->semantic_failed = true;
                 rc = -1;
-            }
-            else
+            } else if (changed) {
                 wrote = true;
+            }
         }
         if (chunk[i].parsed) parse_result_free(&chunk[i].pr);
         free(chunk[i].body);
