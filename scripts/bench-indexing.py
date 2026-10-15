@@ -22,17 +22,22 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def command(args, cwd, env=None):
+def command(args, cwd, env=None, timeout_s=None):
     start = time.perf_counter_ns()
     before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     p = subprocess.Popen(args, cwd=cwd, env=env, text=True,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     peak = 0
+    deadline = time.monotonic() + timeout_s if timeout_s else None
     while True:
         try:
             stdout, stderr = p.communicate(timeout=0.01)
             break
         except subprocess.TimeoutExpired:
+            if deadline and time.monotonic() > deadline:
+                p.kill()
+                p.communicate()
+                raise RuntimeError(f"{args!r} exceeded {timeout_s}s")
             try:
                 for line in Path(f"/proc/{p.pid}/status").read_text().splitlines():
                     if line.startswith("VmHWM:"):
@@ -73,8 +78,8 @@ def coverage(db, branch):
                 "diagnostic_files": diagnostics}
 
 
-def stage(cg, root, db, name, flags, env, branch="main"):
-    out, timing = command([str(cg), *flags, "--json"], root, env)
+def stage(cg, root, db, name, flags, env, branch="main", timeout_s=None):
+    out, timing = command([str(cg), *flags, "--json"], root, env, timeout_s)
     try:
         stats = json.loads(out)
     except json.JSONDecodeError as e:
@@ -96,8 +101,11 @@ def compare_baseline(current, baseline, factor, floor_ms):
         findings.append({"stage": "edit", "metric": "source_to_query_ms",
                          "actual": current_query,
                          "limit": max(floor_ms, prior_query * factor)})
-    for name, now in current["stages"].items():
-        old = baseline.get("stages", {}).get(name)
+    runs = list(current["stages"].items()) + list(
+        current.get("shape_fixture", {}).get("stages", {}).items())
+    for name, now in runs:
+        old = (baseline.get("stages", {}).get(name) or
+               baseline.get("shape_fixture", {}).get("stages", {}).get(name))
         if not old:
             continue
         prev = old.get("wall_ms")
@@ -132,13 +140,15 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--max-rss-mb", type=int, default=1024)
     ap.add_argument("--max-db-ratio", type=float, default=500)
+    ap.add_argument("--shape-timeout-sec", type=int, default=30)
     ap.add_argument("--baseline", type=Path)
     ap.add_argument("--regression-factor", type=float, default=2.0)
     ap.add_argument("--latency-floor-ms", type=int, default=250)
     ap.add_argument("--output", type=Path)
     ap.add_argument("--keep", type=Path)
     a = ap.parse_args()
-    if a.workers < 1 or a.workers > 64 or a.max_rss_mb < 1 or a.max_db_ratio <= 0:
+    if a.workers < 1 or a.workers > 64 or a.max_rss_mb < 1 or \
+       a.max_db_ratio <= 0 or a.shape_timeout_sec < 1:
         ap.error("resource limits and workers must be positive (workers <=64)")
     files = a.files or (40 if a.profile == "small" else 1000)
     lines = a.lines or (2000 if a.profile == "small" else 100000)
@@ -255,6 +265,35 @@ def main():
                                     ["index", "--workers", str(a.workers)],
                                     env, branch="bench-sibling")
 
+    # Separate the pathological syntax shapes from the ordinary latency runs.
+    shapes = work / "shapes"
+    shapes.mkdir()
+    (shapes / ".gitignore").write_text(".codegraph/\n")
+    command(["git", "init", "-q", "-b", "main", "."], shapes, env)
+    command([str(cg), "init"], shapes, env, a.shape_timeout_sec)
+    shape_db = shapes / ".codegraph" / "graph.db"
+    wide_lines = 20000 if a.profile == "small" else 160000
+    (shapes / "wide.go").write_text("package shapes\n" +
+                                    "// wide syntax item\n" * wide_lines +
+                                    "func wide() {}\n")
+    shape_runs = {}
+    shape_runs["wide"] = stage(cg, shapes, shape_db, "wide",
+                               ["sync", "--workers", str(a.workers)], env,
+                               timeout_s=a.shape_timeout_sec)
+    deep_levels = 600
+    (shapes / "deep.go").write_text("package shapes\nfunc deep() {\n" +
+                                    "{\n" * deep_levels +
+                                    "}\n" * deep_levels + "}\n")
+    shape_runs["deep"] = stage(cg, shapes, shape_db, "deep",
+                               ["sync", "--workers", str(a.workers)], env,
+                               timeout_s=a.shape_timeout_sec)
+    result["shape_fixture"] = {
+        "language": "go", "wide_comment_lines": wide_lines,
+        "deep_block_levels": deep_levels, "timeout_sec": a.shape_timeout_sec,
+        "source_bytes": sum(p.stat().st_size for p in shapes.glob("*.go")),
+        "stages": shape_runs,
+    }
+
     errors = []
     if stages["cold"].get("child_peak_rss_kb", 0) > a.max_rss_mb * 1024:
         errors.append(f"cold: peak RSS exceeds {a.max_rss_mb} MiB")
@@ -271,6 +310,17 @@ def main():
         for phase, ms in stats.get("phase_ms", {}).items():
             if ms < 0:
                 errors.append(f"{name}: negative {phase} phase")
+    for name, run in shape_runs.items():
+        stats = run["stats"]
+        if stats.get("workers", 0) > a.workers:
+            errors.append(f"{name}: workers exceed configured bound")
+        if stats.get("peak_rss_kb", 0) > a.max_rss_mb * 1024:
+            errors.append(f"{name}: peak RSS exceeds {a.max_rss_mb} MiB")
+        if stats.get("indexed", 0) < 1:
+            errors.append(f"{name}: adversarial source was not indexed")
+        if sum(run["database"].values()) > \
+           result["shape_fixture"]["source_bytes"] * a.max_db_ratio:
+            errors.append(f"{name}: database growth exceeds configured source ratio")
     if stages["noop"]["stats"].get("indexed") != 0:
         errors.append("no-op sync indexed files")
     if stages["edit"]["stats"].get("indexed", 0) < 1:

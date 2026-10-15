@@ -46,6 +46,18 @@ assert d['stages']['replay_forward']['stats']['indexed'] >= 1
 assert d['stages']['branch_reuse']['stats']['reused'] >= 1
 assert d['stages']['branch_reuse']['coverage']['branch'] == 'bench-sibling'
 assert d['stages']['branch_reuse']['coverage']['status']
+shapes = d['shape_fixture']
+assert shapes['language'] == 'go'
+assert shapes['wide_comment_lines'] == 20000
+assert shapes['deep_block_levels'] == 600
+for name in ('wide', 'deep'):
+    s = shapes['stages'][name]
+    assert s['wall_ms'] < shapes['timeout_sec'] * 1000, (name, s)
+    assert s['stats']['indexed'] >= 1, (name, s)
+    assert s['stats']['workers'] <= 2, (name, s)
+    assert s['coverage']['available'] and s['coverage']['status'], (name, s)
+assert shapes['stages']['wide']['coverage']['status'].get('complete', 0) >= 1
+assert shapes['stages']['deep']['coverage']['status'].get('partial', 0) >= 1
 
 # Baseline regression reporting is a real gate, independent of host speed.
 spec = importlib.util.spec_from_file_location(
