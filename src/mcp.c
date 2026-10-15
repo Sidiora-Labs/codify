@@ -3,13 +3,15 @@
  *
  * `cg mcp`         — newline-delimited JSON-RPC 2.0 on stdin/stdout,
  *                    exposing the graph as tools. The graph is incrementally
- *                    synced before every read so answers are always fresh.
+ *                    refreshed before reads when configured, with source
+ *                    validation reported independently of refresh status.
  * `cg mcp-install` — writes/merges Codify into the MCP configs of popular
  *                    coding agents (Claude Code, Cursor, VS Code, Windsurf,
  *                    Gemini CLI, Codex CLI).
  */
 #include "cg.h"
 #include "sem_flow.h"
+#include "answer_health.h"
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -179,7 +181,14 @@ static int t_routes(void *v) {
     free(f);
     return rc;
 }
-static int t_status(void *v)  { CallCtx *c = v; return cmd_status(c->cg, true); }
+static int t_status(void *v)  { CallCtx *c = v; return answer_health_status(c->cg, true); }
+static int t_index_status(void *v) {
+    CallCtx *c = v;
+    StrBuf b; sb_init(&b);
+    sb_putc(&b, '{'); answer_health_append(&b, c->cg, NULL);
+    sb_putc(&b, '}'); puts(b.p); sb_free(&b);
+    return 0;
+}
 static int t_state(void *v)   { CallCtx *c = v; return cmd_state(c->cg, true); }
 /* codify-v15 3.3: the projection's last build and its live findings by branch */
 static int t_projection_status(void *v) {
@@ -912,6 +921,11 @@ static const struct {
       "Working-tree status vs the last Codify snapshot (added/modified/"
       "deleted files).",
       S_EMPTY, A_READ, "Working tree status", t_status, false },
+    { "index_status",
+      "Branch-scoped extraction coverage, parser inventory, durable pending "
+      "reconciliation and bounded source-validation limits. Query tools "
+      "also report freshness for their contributing files.",
+      S_EMPTY, A_READ, "Index status", t_index_status, false },
     { "state",
       "Truthful state across independent authorities: Git working tree, "
       "Codify snapshot, spec declarations, this agent's live attempt, and "
@@ -1354,6 +1368,22 @@ int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
     }
     CallCtx ctx = { cg, si, args_json && args_json[0] ? args_json : NULL };
     int rc = cg_capture(out, TOOLS[ti].fn, &ctx);
+    if (rc == 0 && *out &&
+        (strcmp(name, "search_code") == 0 ||
+         strcmp(name, "get_context") == 0 ||
+         strcmp(name, "find_files") == 0 ||
+         strcmp(name, "survey") == 0 ||
+         strcmp(name, "grep_code") == 0 ||
+         strcmp(name, "get_symbol") == 0 ||
+         strcmp(name, "impact_analysis") == 0 ||
+         strcmp(name, "list_routes") == 0 ||
+         strcmp(name, "inspect_hierarchy") == 0 ||
+         strcmp(name, "inspect_unreferenced") == 0 ||
+         strcmp(name, "flow") == 0)) {
+        char *enriched = answer_health_json(cg, *out);
+        free(*out);
+        *out = enriched;
+    }
     return rc == 0 ? 0 : 1;
 }
 

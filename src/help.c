@@ -288,7 +288,9 @@ static const HelpCmd HELP[] = {
   .related = "commit,diff,checkout" },
 { .group = "vc", .name = "status", .args = "",
   .usage = "status",
-  .summary = "working tree vs HEAD",
+  .summary = "working tree vs HEAD and index coverage",
+  .detail = "Also reports branch-scoped extraction coverage and pending "
+    "reconciliation. JSON includes bounded source-validation metadata.",
   .related = "diff,changes,state" },
 { .group = "vc", .name = "diff", .args = "[A] [B]",
   .usage = "diff [A] [B]",
@@ -1041,7 +1043,10 @@ static const HelpCmd HELP[] = {
   .summary = "unknown keys and unusable values", .hide = true },
 { .group = "config", .name = "info", .args = "",
   .usage = "info",
-  .summary = "machine profile and how the pipeline was sized",
+  .summary = "machine profile, index coverage and parser inventory",
+  .detail = "Reports branch-scoped extraction coverage, parser inventory "
+    "and pending reconciliation. Query tools validate contributing source "
+    "files under explicit file, byte and time limits.",
   .related = "config,root" },
 { .group = "config", .name = "version", .args = "",
   .usage = "version", .aliases = "--version",

@@ -4,6 +4,7 @@
  * Bounded ring buffer keeps memory flat on huge repos.
  */
 #include "cg.h"
+#include "index_health.h"
 #include <dirent.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -25,7 +26,8 @@
  * twin's rows are copied — the whole point of one graph for many branches. */
 typedef struct {
     char *rel; long size, mtime, mtime_ns; char dbhash[65];
-    long twin_id, twin_lines; char twin_hash[65];
+    long twin_id, twin_lines; char twin_hash[65], twin_parser[32];
+    bool semantic_stale;
 } Walked;
 typedef struct { char *path; long id, size, mtime_ns; bool legacy_time;
                  char hash[65]; } DbFile;
@@ -45,6 +47,7 @@ typedef struct {
     size_t body_len;
     ParseResult pr;
     bool parsed;
+    bool failed_read, binary, oversized, generated;
     long reuse_from;         /* file id whose rows this one copies (0 = none) */
     long reuse_lines;
 } Done;
@@ -65,8 +68,10 @@ static void walk_push(WalkList *wl, const char *rel, long size, long mtime,
     wl->v[wl->n].mtime_ns = mtime_ns;
     wl->v[wl->n].dbhash[0] = 0;
     wl->v[wl->n].twin_hash[0] = 0;
+    wl->v[wl->n].twin_parser[0] = 0;
     wl->v[wl->n].twin_id = 0;
     wl->v[wl->n].twin_lines = 0;
+    wl->v[wl->n].semantic_stale = false;
     wl->n++;
 }
 
@@ -148,17 +153,24 @@ static void *worker(void *arg) {
         Done d;
         memset(&d, 0, sizeof d);
         d.idx = i;
+        if (p->jobs[i].size > MAX_FILE_BYTES) {
+            d.oversized = true;
+            ring_push(p, &d);
+            continue;
+        }
 
         char abs[4900];
         snprintf(abs, sizeof abs, "%s/%s", p->root, p->jobs[i].rel);
         size_t len = 0;
         char *data = read_entire_file(abs, &len);
         if (!data || looks_binary(data, len)) {
+            d.failed_read = !data;
+            d.binary = data != NULL;
             free(data);
-            d.idx = -1;
             ring_push(p, &d);
             continue;
         }
+        d.generated = index_health_generated(p->jobs[i].rel, data, len);
         sha256_hex(data, len, d.hash);
         /* identical bytes to a twin on another branch: the parse would
          * rebuild rows the graph already holds, so hand the writer the
@@ -467,6 +479,18 @@ static int index_copy_rows(Cg *cg, Stmts *s, long file_id, long from,
 
 static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
                        IndexStats *st) {
+    IndexHealthResult hr = {
+        .status = d->parsed && d->pr.partial ? "partial" :
+                  d->parsed || d->reuse_from ? "complete" : "skipped",
+        .reason = d->parsed ? d->pr.diagnostic :
+                  d->reuse_from ? "" : "unsupported_language",
+        .parser = d->parsed ? (d->pr.sem.parser_id ? d->pr.sem.parser_id : d->pr.parser) :
+                  d->reuse_from ? w->twin_parser : "none",
+        .diagnostic_line = d->pr.diagnostic_line,
+        .diagnostics = d->pr.diagnostics,
+        .generated = d->generated,
+        .content_hash = d->hash,
+    };
     const char *lang = lang_for_path(w->rel);
     sqlite3_bind_text (s->up_file, 1, w->rel, -1, SQLITE_STATIC);
     if (lang) sqlite3_bind_text(s->up_file, 2, lang, -1, SQLITE_STATIC);
@@ -502,7 +526,8 @@ static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     /* size/mtime changed but content did not (touch, branch switch): the
      * upsert above refreshed the metadata; keep the child rows — and with
      * them, stable symbol rowids. */
-    if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0) return 0;
+    if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0 &&
+        !w->semantic_stale) return 0;
 
     scope_record_file(s, file_id, w->dbhash[0] == 0);
 
@@ -520,6 +545,7 @@ static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
         }
         st->files_indexed++;
         st->bytes += w->size;
+        index_health_record(cg, w->rel, &hr);
         return 0;
     }
 
@@ -743,6 +769,35 @@ static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     free(oldd);
     st->files_indexed++;
     st->bytes += w->size;
+    index_health_record(cg, w->rel, &hr);
+    return 0;
+}
+
+/* A file that became binary or exceeded the read budget cannot keep old
+ * source facts. A transient read failure takes a different path and keeps
+ * those facts with failed coverage until the retry succeeds. */
+static int drop_skipped_file(Cg *cg, Stmts *s, const Walked *w,
+                              IndexStats *st) {
+    sqlite3_bind_text(s->sel_file, 1, w->rel, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(s->sel_file, 2, cg->branch_id);
+    long file_id = sqlite3_step(s->sel_file) == SQLITE_ROW
+        ? sqlite3_column_int64(s->sel_file, 0) : 0;
+    sqlite3_reset(s->sel_file);
+    sqlite3_clear_bindings(s->sel_file);
+    if (!file_id) return 0;
+    scope_record_file(s, file_id, false);
+    bool prepurged = s->fts_purged;
+    s->fts_purged = false;
+    int rc = purge_file_children(cg, s, file_id);
+    s->fts_purged = prepurged;
+    if (rc != 0) return -1;
+    sqlite3_stmt *del = cg_prep(cg, "DELETE FROM files WHERE id=?1");
+    sqlite3_bind_int64(del, 1, file_id);
+    sqlite3_step(del);
+    sqlite3_finalize(del);
+    sqlite3_bind_int64(s->del_filefts, 1, file_id);
+    step_reset(s->del_filefts);
+    st->files_removed++;
     return 0;
 }
 
@@ -999,7 +1054,9 @@ static void fts_prepurge(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n) {
     int k = 0;
     for (int i = 0; i < n; i++) {
         const Walked *w = &jobs[chunk[i].idx];
-        if (w->dbhash[0] && strcmp(w->dbhash, chunk[i].hash) == 0) continue;
+        if (chunk[i].failed_read || chunk[i].binary || chunk[i].oversized) continue;
+        if (w->dbhash[0] && strcmp(w->dbhash, chunk[i].hash) == 0 &&
+            !w->semantic_stale) continue;
         sqlite3_bind_text(s->purge_add, 1, w->rel, -1, SQLITE_STATIC);
         sqlite3_bind_int64(s->purge_add, 2, cg->branch_id);
         step_reset(s->purge_add);
@@ -1032,12 +1089,30 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
     bool wrote = false;
     for (int i = 0; i < n; i++) {
         if (rc == 0) {
-            if (write_done(cg, s, &jobs[chunk[i].idx], &chunk[i], st) != 0) {
+            const Walked *w = &jobs[chunk[i].idx];
+            bool changed = w->semantic_stale || !w->dbhash[0] ||
+                strcmp(w->dbhash, chunk[i].hash) != 0;
+            if (chunk[i].failed_read || chunk[i].binary || chunk[i].oversized) {
+                IndexHealthResult hr = {
+                    .status = chunk[i].failed_read ? "failed" : "skipped",
+                    .reason = chunk[i].failed_read ? "read_error" :
+                              chunk[i].oversized ? "size_limit" : "binary_file",
+                    .parser = "none", .generated = false,
+                };
+                index_health_record(cg, w->rel, &hr);
+                if (!chunk[i].failed_read) {
+                    if (drop_skipped_file(cg, s, w, st) != 0) {
+                        st->semantic_failed = true;
+                        rc = -1;
+                    } else wrote = true;
+                }
+                st->files_skipped++;
+            } else if (write_done(cg, s, w, &chunk[i], st) != 0) {
                 st->semantic_failed = true;
                 rc = -1;
-            }
-            else
+            } else if (changed) {
                 wrote = true;
+            }
         }
         if (chunk[i].parsed) parse_result_free(&chunk[i].pr);
         free(chunk[i].body);
@@ -1112,7 +1187,7 @@ static void walk_targets(const char *root, const Ignore *ig, char **t, int nt,
         }
         if (ignored || ignore_match(ig, t[i], isdir)) continue;
         if (isdir) walk_dir(root, t[i], ig, threads, wl);
-        else if (S_ISREG(st.st_mode) && st.st_size <= MAX_FILE_BYTES)
+        else if (S_ISREG(st.st_mode))
             walk_push(wl, t[i], (long)st.st_size, (long)st.st_mtime,
                       stat_mtime_ns(&st));
     }
@@ -1160,9 +1235,13 @@ static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
     if (o->full || jobs->n == 0) return;
     if (count_sql(cg, "SELECT count(*) FROM branches") < 2) return;
     sqlite3_stmt *q = cg_prep(cg,
-        "SELECT id,hash,lines FROM files "
-        "WHERE path=?1 AND branch_id<>?2 AND hash IS NOT NULL LIMIT 1");
+        "SELECT f.id,f.hash,f.lines,h.parser FROM files f "
+        "JOIN extraction_health h ON h.branch_id=f.branch_id AND h.path=f.path "
+        "WHERE f.path=?1 AND f.branch_id<>?2 AND f.hash IS NOT NULL "
+        "AND h.status='complete' AND h.extraction_version="
+        "CAST(?3 AS INTEGER) LIMIT 1");
     sqlite3_bind_int64(q, 2, cg->branch_id);      /* survives reset */
+    sqlite3_bind_int(q, 3, CG_EXTRACTION_VERSION);
     for (int i = 0; i < jobs->n; i++) {
         sqlite3_bind_text(q, 1, jobs->v[i].rel, -1, SQLITE_STATIC);
         if (sqlite3_step(q) == SQLITE_ROW) {
@@ -1172,6 +1251,9 @@ static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
                 jobs->v[i].twin_lines = sqlite3_column_int64(q, 2);
                 snprintf(jobs->v[i].twin_hash, sizeof jobs->v[i].twin_hash,
                          "%s", h);
+                const char *parser = (const char *)sqlite3_column_text(q, 3);
+                snprintf(jobs->v[i].twin_parser, sizeof jobs->v[i].twin_parser,
+                         "%s", parser ? parser : "");
             }
         }
         sqlite3_reset(q);
@@ -1189,6 +1271,7 @@ static void index_find_twins(Cg *cg, WalkList *jobs, const IndexOpts *o) {
 static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                       char **targets, int ntargets, char **dirty, int ndirty,
                       bool dirty_all, IndexStats *st) {
+    if (index_health_init(cg) != 0) return -1;
     long tw = now_ms();
     Ignore ig;
     ignore_load(&ig, cg->root);
@@ -1258,12 +1341,14 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         int c = (wi >= wl.n) ? 1 : (di >= ndbf) ? -1
               : strcmp(wl.v[wi].rel, dbf[di].path);
         if (c == 0) {
-            if (o->full || targets || dirty_all ||
+            bool semantic_stale = index_health_stale(cg, wl.v[wi].rel);
+            if (semantic_stale || o->full || targets || dirty_all ||
                 (ndirty && targets_cover(dirty, ndirty, wl.v[wi].rel)) ||
                 dbf[di].legacy_time || wl.v[wi].size != dbf[di].size ||
                 wl.v[wi].mtime_ns != dbf[di].mtime_ns) {
                 walk_push(&jobs, wl.v[wi].rel, wl.v[wi].size,
                           wl.v[wi].mtime, wl.v[wi].mtime_ns);
+                jobs.v[jobs.n - 1].semantic_stale = semantic_stale;
                 /* remember the stored hash so unchanged content can skip the
                  * purge+reinsert; --full keeps its force-reparse meaning */
                 if (!o->full)
@@ -1310,6 +1395,7 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
                     stalled = true;
                     break;
                 }
+                index_health_remove(cg, removed_ids[i]);
                 sqlite3_bind_int64(del_file, 1, removed_ids[i]);
                 step_reset(del_file);
                 sqlite3_bind_int64(s.del_filefts, 1, removed_ids[i]);
@@ -1361,7 +1447,6 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         while (ring_pop(&pipe, &d)) {
             popped++;
             progress_tick(popped, jobs.n, d.idx >= 0 ? jobs.v[d.idx].rel : NULL);
-            if (d.idx < 0) { st->files_skipped++; continue; }
             if (stalled) {                 /* drain so the workers can exit */
                 if (d.parsed) parse_result_free(&d.pr);
                 free(d.body);
@@ -1392,6 +1477,7 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
     }
 
     stmts_fin(&s);
+    if (!stalled) index_health_prune_missing(cg);
 
     for (int i = 0; i < wl.n; i++) free(wl.v[i].rel);
     free(wl.v);
@@ -1555,6 +1641,7 @@ static bool index_git_plan(Cg *cg, const IndexOpts *o, const char *head,
              "SELECT count(*) FROM files WHERE branch_id=%ld AND mtime_ns IS NULL",
              cg->branch_id);
     if (count_sql(cg, migration_sql) > 0) return false;
+    if (index_health_branch_stale(cg)) return false;
     int mode = config_index_walk(cg->root);
     if (mode == CG_WALK_FULL) return false;
     char key[64];
@@ -1656,6 +1743,7 @@ static void index_git_record(Cg *cg, const char *head, bool gitpass) {
  * unindexed branch is fresh because a sibling walked seconds ago. */
 static bool index_is_fresh(Cg *cg, long max_age_ms) {
     if (max_age_ms <= 0) return false;
+    if (index_health_branch_stale(cg)) return false;
     if (syncgate_is_dirty(cg)) return false;
     char migration_sql[128];
     snprintf(migration_sql, sizeof migration_sql,
@@ -1912,6 +2000,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
             int sem_rc = sem_pass_run(cg, full_sem ? NULL : changed, nchanged);
             free(changed);
             if (sem_rc == 0) {
+                index_health_finish(cg);
                 cg_meta_set(cg, pkey, "0");
                 cg_exec(cg, "COMMIT");
             } else {
