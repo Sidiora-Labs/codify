@@ -16,7 +16,7 @@
     - Add per-file bounded diagnostics, generated detection and version-based semantic invalidation. Do not stamp partial/failed passes current; preserve prior successful facts on failed reads and report stale state.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
-  - [ ] 2.1 Shared semantic records, storage and lifecycle
+  - [-] 2.1 Shared semantic records, storage and lifecycle
     - Define the shared rich extraction contract and branch-safe typed graph schema; wire persistence, migration, deletion, identical-content reuse and cross-worktree copy. Publish API to sibling workers early; extend existing symbols/refs rather than duplicating ownership inconsistently.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8_
