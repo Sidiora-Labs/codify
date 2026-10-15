@@ -174,8 +174,9 @@ typedef struct {
     bool block, triple;
     char quote;
     char pending[8192];
-    int pending_line, pending_lines;
-    size_t pending_head;
+    int pending_line;
+    size_t pending_head,pending_open;
+    bool pending_active;
 } RouteLex;
 static _Thread_local RouteLex lex;
 
@@ -229,15 +230,41 @@ static void scrub_route_line(const char *lang,const char *path,int line,
     }
 }
 
-static bool route_opener(const char *s,const char *lang) {
+static const char *route_opener(const char *s,const char *lang) {
     const char *keys[]={".get(",".post(",".put(",".patch(",".delete(",
         ".route(",".MapGet(",".MapPost(","Route::", "path(",
         ".GET(",".POST(",".use(","Mapping(","HttpGet("};
     for(size_t i=0;i<sizeof keys/sizeof keys[0];i++) {
         const char *p=strstr(s,keys[i]);
-        if(p&&code_at(s,(size_t)(p-s),lang))return true;
+        if(p&&code_at(s,(size_t)(p-s),lang))return p;
+    }
+    return NULL;
+}
+
+static bool route_statement_complete(const char *s,size_t start) {
+    char quote=0;bool escape=false,opened=false;
+    int depth=0;
+    for(size_t i=start;s[i];i++) {
+        char c=s[i];
+        if(quote){
+            if(escape){escape=false;continue;}
+            if(c=='\\'){escape=true;continue;}
+            if(c==quote)quote=0;
+            continue;
+        }
+        if(c=='\''||c=='\"'||c=='`'){quote=c;continue;}
+        if(c=='('){opened=true;depth++;}
+        else if(c==')'&&opened){depth--;if(depth==0)return true;}
     }
     return false;
+}
+
+extern void parse_diagnostic_add(ParseResult *,const char *,int)
+    __attribute__((weak));
+
+static void route_limit(ParseResult *pr,int line) {
+    if(parse_diagnostic_add)parse_diagnostic_add(pr,"route_statement_limit",line);
+    else fprintf(stderr,"cg: route statement exceeds 8192-byte scan limit at line %d\n",line);
 }
 
 void routes_scan_line(const char *lang, const char *path, int lineno,
@@ -267,19 +294,22 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
             free(scan);return;
         }
     }
-    bool pending=lex.pending_lines>0;
+    bool pending=lex.pending_active;
     if(pending){
         size_t used=strlen(lex.pending);
         if(used+length+2<sizeof lex.pending){
             lex.pending[used++]=' ';
             memcpy(lex.pending+used,scan,length+1);
-            lex.pending_lines++;
-        } else {lex.pending_lines=0;pending=false;}
+        } else {
+            route_limit(pr,lex.pending_line);
+            lex.pending_active=false;pending=false;
+        }
     }
     for(int attempt=0;attempt<(pending?2:1);attempt++) {
     const char *source=pending&&attempt==0?lex.pending:scan;
     int site_line=pending&&attempt==0?lex.pending_line:lineno;
-    if(pending&&attempt==0&&!strchr(source,')'))continue;
+    if(pending&&attempt==0&&
+       !route_statement_complete(source,lex.pending_open))continue;
     for (int i = 0; i < NRP; i++) {
         RoutePat *r = &RP[i];
         if (!lang_in(r->langs, lang)) continue;
@@ -372,16 +402,22 @@ void routes_scan_line(const char *lang, const char *path, int lineno,
         }
         route_add(pr, r->framework, method, pattern,
                   handler[0] ? handler : NULL, site_line);
-        lex.pending_lines=0;
+        lex.pending_active=false;
         free(scan);return;   /* first matching framework wins for a line */
     }
     }
-    if(lex.pending_lines>=5)lex.pending_lines=0;
-    if(!lex.pending_lines&&route_opener(scan,lang)&&length<sizeof lex.pending-1){
+    if(pending&&route_statement_complete(lex.pending,lex.pending_open))
+        lex.pending_active=false;
+    const char *opener=!lex.pending_active?route_opener(scan,lang):NULL;
+    if(opener&&!route_statement_complete(scan,(size_t)(opener-scan))&&
+       length<sizeof lex.pending-1){
         memcpy(lex.pending,scan,length+1);
         lex.pending_line=lineno;
-        lex.pending_lines=1;
         lex.pending_head=length;
+        lex.pending_open=(size_t)(opener-scan);
+        lex.pending_active=true;
+    } else if(opener&&length>=sizeof lex.pending-1) {
+        route_limit(pr,lineno);
     }
     free(scan);
 }

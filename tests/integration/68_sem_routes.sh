@@ -26,6 +26,7 @@ assert q("SELECT method,pattern FROM semantic_route_facts WHERE framework='svelt
 for framework,path in [('express','/express/multiline'),('fastapi','/fastapi/multiline'),
                        ('spring','/spring/multiline'),('gin/echo','/gin/multiline')]:
     assert q("SELECT status FROM semantic_route_facts WHERE framework=? AND pattern=?",framework,path) == [('resolved',)],(framework,path)
+assert q("SELECT status FROM semantic_route_facts WHERE framework='express' AND pattern='/express/long'") == [('resolved',)]
 assert q("SELECT method,pattern FROM semantic_route_facts WHERE framework='nuxt' AND method='GET'") == [('GET','/api/widgets')]
 assert not q("SELECT 1 FROM semantic_route_facts WHERE pattern IN "
              "('/ghost','/block-ghost','/template-ghost','/python-ghost',"
