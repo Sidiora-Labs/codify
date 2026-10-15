@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <sqlite3.h>
+#include "semantic.h"
 
 #define CG_DIR      ".codegraph"
 #define CG_DB       ".codegraph/graph.db"
@@ -164,6 +165,7 @@ typedef struct {
     ImportDef *imports; int nimports, cimports;
     CmtDef  *cmts;   int ncmts,  ccmts;
     int first_code_line;   /* 1-based; 0 = the file is all comment or empty */
+    SemResult sem;         /* owned rich source facts from syntax adapters */
 } ParseResult;
 
 const char *lang_for_path(const char *path);       /* NULL if not source */
@@ -181,7 +183,7 @@ void route_add(ParseResult *pr, const char *framework, const char *method,
                const char *pattern, const char *handler, int line);
 
 /* ---------------- database ---------------- */
-typedef struct {
+typedef struct Cg {
     sqlite3 *db;
     /* The tree cg operates on: files are read, walked, and git-queried
      * here, and spec/ is read from here because it travels with the branch.
@@ -340,6 +342,7 @@ typedef struct {
     /* the database stayed busy past lock_wait_ms; the graph is whatever the
      * last index left (any chunks written before the stall are kept) */
     bool busy;
+    bool semantic_failed;  /* file facts or a semantic pass failed to persist */
     /* the walk was skipped: the last pass is younger than the caller's
      * freshness window and nothing is pending or marked dirty */
     bool fresh;

@@ -460,6 +460,7 @@ void parse_result_free(ParseResult *pr) {
     for (int i = 0; i < pr->ncmts; i++) free(pr->cmts[i].body);
     free(pr->defs); free(pr->refs); free(pr->routes); free(pr->imports);
     free(pr->cmts);
+    sem_result_free(&pr->sem);
     memset(pr, 0, sizeof *pr);
 }
 
