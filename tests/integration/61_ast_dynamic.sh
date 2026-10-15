@@ -48,6 +48,11 @@ for ext in ('py', 'rb', 'php'):
     assert not any(r['name'] in ('phantom', 'commented') for r in refs), (ext, refs)
     assert all(r['end_byte'] > r['start_byte'] for r in refs), (ext, refs)
     assert any(r['name'] == 'nested' and r['owner_id'] is not None for r in refs), (ext, refs)
+    reads = rows('''SELECT original_text,owner_id FROM semantic_references
+                    WHERE file_id=? AND kind='read' ''', fid)
+    assert any(r['original_text'].endswith('value') and r['owner_id'] is not None
+               for r in reads), (ext, reads)
+    assert not any(r['original_text'] in ('phantom', 'commented') for r in reads), (ext, reads)
     bindings = rows('SELECT module,local_name,original_name,kind FROM semantic_bindings WHERE file_id=?', fid)
     assert bindings, (ext, bindings)
 

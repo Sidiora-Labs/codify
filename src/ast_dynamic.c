@@ -106,6 +106,19 @@ static void add_ref(DynWalk *w, TSNode site, TSNode target, TSNode receiver,
     free(raw); free(name);
 }
 
+static void add_read(DynWalk *w, TSNode node) {
+    char *name = text(w->ctx, node);
+    if (!name || !*name) { free(name); return; }
+    SemReference *ref = sem_reference_add(&w->ctx->result->sem, name,
+                                          "read", span(node));
+    if (ref) {
+        ref->owner = w->owner;
+        ref->strategy = strdup("syntax-read");
+        ref->evidence = strdup(name);
+    }
+    free(name);
+}
+
 static void add_binding(DynWalk *w, TSNode site, const char *module,
                         const char *original, const char *local, const char *kind) {
     if (!local || !*local) return;
@@ -432,6 +445,24 @@ static void walk(DynWalk *w, TSNode n, unsigned depth) {
             if (is(ctor, "name") || is(ctor, "qualified_name"))
                 add_type(w, n, left, ctor, "constructor");
         }
+    } else if (py && is(n, "identifier")) {
+        TSNode parent = ts_node_parent(n);
+        if (is(parent, "argument_list") || is(parent, "return_statement") ||
+            (is(parent, "attribute") && ts_node_eq(n, ast_field(parent, "object"))) ||
+            (is(parent, "assignment") && ts_node_eq(n, ast_field(parent, "right"))))
+            add_read(w, n);
+    } else if (rb && is(n, "identifier")) {
+        TSNode parent = ts_node_parent(n);
+        if (is(parent, "argument_list") ||
+            (is(parent, "call") && ts_node_eq(n, ast_field(parent, "receiver"))) ||
+            (is(parent, "assignment") && ts_node_eq(n, ast_field(parent, "right"))))
+            add_read(w, n);
+    } else if (php && is(n, "variable_name")) {
+        TSNode parent = ts_node_parent(n);
+        if (is(parent, "argument") || is(parent, "return_statement") ||
+            ((is(parent, "member_call_expression") || is(parent, "nullsafe_member_call_expression")) &&
+             ts_node_eq(n, ast_field(parent, "object"))))
+            add_read(w, n);
     } else if (py && is(n, "call")) {
         TSNode callee = ast_field(n, "function");
         TSNode receiver = is(callee, "attribute") ? ast_field(callee, "object") : (TSNode){0};
