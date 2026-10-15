@@ -1,5 +1,6 @@
 /* Codify CLI — see README.md */
 #include "cg.h"
+#include "answer_health.h"
 #include <poll.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -95,6 +96,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
         if (cg) sb_printf(&b, ",\"fts_mode\":\"%s\",\"sqlite\":\"%s\"",
                           db_fts_contentless(cg) ? "contentless" : "content",
                           sqlite3_libversion());
+        if (cg) { sb_putc(&b, ','); answer_health_append(&b, cg, NULL); }
         sb_puts(&b, "}\n");
         fputs(b.p, stdout);
         sb_free(&b);
@@ -131,6 +133,7 @@ static int cmd_info(const SysInfo *si, Cg *cg, bool json, int flag_workers) {
                        : "stores file content (contentless needs SQLite "
                          "3.43.0 or newer when the graph is built)",
                    sqlite3_libversion());
+        if (cg) answer_health_text(cg);
     }
     free(ms); free(nf); free(nb);
     return 0;
@@ -536,7 +539,7 @@ int main(int argc, char **argv) {
         int limit = atoi(opt(&argc, argv, "-n", "20"));
         rc = cmd_log(&cg, limit > 0 ? limit : 20, json);
     } else if (strcmp(cmd, "status") == 0) {
-        rc = cmd_status(&cg, json);
+        rc = answer_health_status(&cg, json);
     } else if (strcmp(cmd, "state") == 0) {
         rc = cmd_state(&cg, json);
     } else if (strcmp(cmd, "event") == 0) {
