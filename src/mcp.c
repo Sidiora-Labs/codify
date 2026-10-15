@@ -12,6 +12,7 @@
 #include "cg.h"
 #include "sem_flow.h"
 #include "sem_search.h"
+#include "sem_inspect.h"
 #include "answer_health.h"
 #include <unistd.h>
 #include <sys/stat.h>
@@ -189,6 +190,23 @@ static int t_flow(void *v) {
     };
     int rc = sem_flow_query(c->cg, mode, name, target, lim, true);
     free(mode); free(name); free(target);
+    return rc;
+}
+static int t_inspect_hierarchy(void *v) {
+    CallCtx *c=v;
+    char *name=c->args?json_get_string(c->args,"name"):NULL;
+    if (!name || !*name) { free(name); puts("{\"error\":\"missing name\"}"); return 1; }
+    int limit=c->args?(int)json_get_int(c->args,"limit",20):20;
+    int rc=cmd_sem_hierarchy(c->cg,name,limit,true);
+    free(name);
+    return rc;
+}
+static int t_inspect_unreferenced(void *v) {
+    CallCtx *c=v;
+    char *path=c->args?json_get_string(c->args,"path"):NULL;
+    int limit=c->args?(int)json_get_int(c->args,"limit",20):20;
+    int rc=cmd_sem_unreferenced(c->cg,path,limit,true);
+    free(path);
     return rc;
 }
 static int t_routes(void *v) {
@@ -720,6 +738,10 @@ static int t_codemap(void *v) {
                "\"depth\":{\"type\":\"integer\"},\"max_nodes\":{\"type\":\"integer\"}," \
                "\"max_edges\":{\"type\":\"integer\"},\"max_ms\":{\"type\":\"integer\"}," \
                "\"max_output\":{\"type\":\"integer\"}},\"required\":[\"mode\",\"name\"]}"
+#define S_INSPECT_HIERARCHY "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}," \
+                            "\"limit\":{\"type\":\"integer\"}},\"required\":[\"name\"]}"
+#define S_INSPECT_UNUSED "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}," \
+                         "\"limit\":{\"type\":\"integer\"}}}"
 #define S_FILTER "{\"type\":\"object\",\"properties\":{\"filter\":{\"type\":\"string\"}}}"
 #define S_EMPTY  "{\"type\":\"object\",\"properties\":{}}"
 #define S_INTEGRATE "{\"type\":\"object\",\"properties\":{" \
@@ -932,6 +954,15 @@ static const struct {
       "edges, time and output. Includes source evidence, heuristic labels "
       "and unresolved dynamic boundaries.",
       S_FLOW, A_READ, "Semantic flow", t_flow, true },
+    { "inspect_hierarchy",
+      "Bounded ancestors, subtypes and implementations from typed relations, "
+      "including ambiguous symbol matches.",
+      S_INSPECT_HIERARCHY, A_READ, "Inspect hierarchy", t_inspect_hierarchy, true },
+    { "inspect_unreferenced",
+      "Unreferenced symbols and bounded reachability from known roots, with "
+      "export, framework, reflection, generated and uncertainty exclusions. "
+      "No deletion proof.",
+      S_INSPECT_UNUSED, A_READ, "Inspect unreferenced symbols", t_inspect_unreferenced, true },
     { "list_routes",
       "Framework-aware HTTP routes (URL pattern -> handler) detected across "
       "the codebase, optionally filtered.",

@@ -2,6 +2,7 @@
 #include "cg.h"
 #include "sem_flow.h"
 #include "sem_search.h"
+#include "sem_inspect.h"
 #include "answer_health.h"
 #include <poll.h>
 #include <unistd.h>
@@ -349,7 +350,7 @@ int main(int argc, char **argv) {
          strcmp(cmd, "routes") == 0 || strcmp(cmd, "files") == 0 ||
          strcmp(cmd, "survey") == 0 || strcmp(cmd, "show") == 0 ||
          strcmp(cmd, "why") == 0 || strcmp(cmd, "grep") == 0 ||
-         strcmp(cmd, "test-impact") == 0);
+         strcmp(cmd, "test-impact") == 0 || strcmp(cmd, "inspect") == 0);
     AnswerCapture answer_capture = {0};
     int requested_budget = json && (strcmp(cmd, "context") == 0 ||
         strcmp(cmd, "impact") == 0) ? query_budget_arg(argc, argv) : 0;
@@ -494,6 +495,20 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "why") == 0) {
         if (argc < 3) { help_usage("why"); rc = 1; }
         else rc = cmd_why(&cg, argv[2], json);
+    } else if (strcmp(cmd, "inspect") == 0) {
+        int limit = atoi(opt(&argc, argv, "-n", "20"));
+        const char *path = opt(&argc, argv, "--path", NULL);
+        if (argc < 3) { help_usage("inspect"); rc = 1; }
+        else if (strcmp(argv[2], "hierarchy") == 0) {
+            if (argc < 4) { help_usage("inspect hierarchy"); rc = 1; }
+            else {
+                index_fresh(&cg, &si);
+                rc = cmd_sem_hierarchy(&cg, argv[3], limit, json);
+            }
+        } else if (strcmp(argv[2], "unused") == 0) {
+            index_fresh(&cg, &si);
+            rc = cmd_sem_unreferenced(&cg, path, limit, json);
+        } else { help_usage("inspect"); rc = 1; }
     } else if (strcmp(cmd, "routes") == 0) {
         rc = cmd_routes(&cg, argc >= 3 ? argv[2] : NULL, json);
     } else if (strcmp(cmd, "anchors") == 0) {

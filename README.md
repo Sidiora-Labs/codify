@@ -195,6 +195,9 @@ See [docs/sync.md](docs/sync.md#progress).
 | `cg symbol <name>` | Definition, snippet, and reference count |
 | `cg impact <name> [-d N] [--budget N]` | Transitive callers and callees, fitted to a token budget (default 8000) |
 | `cg flow <callers\|callees\|impact\|paths> <name> [target]` | Bounded typed-relation traversal with source evidence, dynamic boundaries and explicit limits |
+| `cg inspect` | Hierarchy and cautious unreferenced-code inspection; see the subcommands below |
+| `cg inspect hierarchy <name> [-n N]` | Bounded ancestors, subtypes, and implementations from typed relations |
+| `cg inspect unused [-n N] [--path GLOB]` | Unreferenced symbols and bounded reachability from known roots, with exclusion reasons; never a deletion verdict |
 | `cg context <q> [--budget N] [-n K]` | One-call context bundle for agents: memories, symbols, entry points, routes — top K symbols (default 8), filled to a token budget (default 4000) with explicit omitted counts and, in `--json`, `tokens_used`. A file path gets the file's outline (purpose, symbols, imports, dependents); a directory gets its files |
 | `cg survey [path\|query] [--budget N]` | The tier below bodies: file purpose lines and symbol docs with signatures across ~100 files per call — never a body. Uncovered files and symbols are named, and anything cut by the budget (default 16000) is an explicit omitted count |
 | `cg files [pattern] [--dirs] [--depth N] [-n N]` | Files by glob (`src/**/*.go`), by the words of their path (`sync gate`), or by directory, each with language, lines and symbol count; `--dirs` maps directories with file and line counts and dominant language. `--path`, `--lang` and `--no-tests` narrow it, as they narrow `search`, `context` and `survey` |

@@ -301,10 +301,10 @@ reqs = ["4.3"]
 
 [task.4.4]
 title = "Hierarchy and conservative dead-code inspection"
-status = "pending"
+status = "done"
 wave = 4
 requires = ["3.3", "3.7"]
-touches = ["src/sem_inspect.c", "src/sem_inspect.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/75_sem_inspect.sh"]
+touches = ["src/sem_inspect.c", "src/sem_inspect.h", "src/main.c", "src/mcp.c", "src/help.c", "README.md", "tests/integration/75_sem_inspect.sh"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/75_sem_inspect.sh"
 do_1 = "Expose ancestors/subtypes/implementations and unreferenced candidates with exclusion reasons for exports, framework roots, reflection, generated files and uncertain incoming boundaries. Never equate missing graph edges with safe deletion."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
