@@ -22,6 +22,24 @@ int parseUserReceipt(int x) {
     return overload(x);
 }
 EOF
+cat > src/alpha.h <<'EOF'
+/** Keep the decoder contract stable for account records. */
+int parseUserRecord(int raw);
+EOF
+cat > src/owners.cpp <<'EOF'
+struct Alpha {
+    int process(int value);
+};
+struct Beta {
+    int process(int value) { return value; }
+};
+int reshape(int value) { return value; }
+int reshape(double value);
+int braceDefault(const char *text = "{");
+int braceDefault(const char *text = "{", int depth = 1) { return depth; }
+int semiDefault(const char *text = ";");
+int semiDefault(const char *text = ";", int depth = 1) { return depth; }
+EOF
 cat > tests/fixture.c <<'EOF'
 int parseUserRecord(int raw) {
     return -raw;
@@ -61,6 +79,26 @@ import json,sys
 d=json.loads(sys.argv[1])
 assert [x['name'] for x in d['symbols']]==['parseUserRecord'], d
 PY
+out="$("$CG" search process --json --path src/owners.cpp)"
+python3 - "$out" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']=='process']
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+out="$("$CG" search reshape --json --path src/owners.cpp)"
+python3 - "$out" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']=='reshape']
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+for query in braceDefault semiDefault; do
+    out="$("$CG" search "$query" --json --path src/owners.cpp)"
+    python3 - "$out" "$query" <<'PY'
+import json,sys
+rows=[x for x in json.loads(sys.argv[1])['symbols'] if x['name']==sys.argv[2]]
+assert len(rows)==2 and {x.get('decl',False) for x in rows}=={True,False}, rows
+PY
+done
 out="$("$CG" search parseUserRecorb --json)"
 python3 - "$out" <<'PY'
 import json,sys

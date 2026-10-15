@@ -1126,6 +1126,80 @@ static void rank_bodies(Cg *cg, const Terms *T, Hit *h, int *nh,
     sqlite3_finalize(sq);
 }
 
+/* A declaration folds into a definition only when its written signature and
+ * qualified owner agree. Parameter spelling is retained deliberately: if the
+ * index cannot prove identity, search keeps the declaration visible. */
+static void signature_identity(const char *sig, char *out, size_t cap) {
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)sig; *p; p++) {
+        if (!isspace(*p) && n + 1 < cap) out[n++] = (char)*p;
+    }
+    if (n && (out[n - 1] == '{' || out[n - 1] == ';')) n--;
+    out[n] = 0;
+}
+
+static bool signature_static(const char *sig) {
+    const char *p = sig;
+    while ((p = strstr(p, "static")) != NULL) {
+        bool left = p == sig || !(isalnum((unsigned char)p[-1]) || p[-1] == '_');
+        bool right = !(isalnum((unsigned char)p[6]) || p[6] == '_');
+        if (left && right) return true;
+        p += 6;
+    }
+    return false;
+}
+
+static bool prototype_matches(Cg *cg, const SymRow *decl, const SymRow *def) {
+    if (!decl->decl || def->decl || decl->branch_id != def->branch_id ||
+        strcmp(decl->name, def->name) || strcmp(decl->kind, def->kind) ||
+        !decl->sig[0] || !def->sig[0] ||
+        strlen(decl->sig) >= sizeof decl->sig - 1 ||
+        strlen(def->sig) >= sizeof def->sig - 1) return false;
+    char ds[sizeof decl->sig], fs[sizeof def->sig];
+    signature_identity(decl->sig, ds, sizeof ds);
+    signature_identity(def->sig, fs, sizeof fs);
+    if (!ds[0] || strcmp(ds, fs)) return false;
+    if (strcmp(decl->path, def->path) &&
+        (signature_static(decl->sig) || signature_static(def->sig)))
+        return false;
+    char qn[2][512] = {{0}}, scope[2][256] = {{0}};
+    bool found[2] = {false, false}, complete[2] = {true, true};
+    long ids[2] = {decl->id, def->id};
+    sqlite3_stmt *st = cg_prep(cg,
+        "SELECT qualified_name,scope_key FROM semantic_symbols "
+        "WHERE symbol_id=?");
+    for (int i = 0; i < 2; i++) {
+        sqlite3_bind_int64(st, 1, ids[i]);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            found[i] = true;
+            const char *q = (const char *)sqlite3_column_text(st, 0);
+            const char *s = (const char *)sqlite3_column_text(st, 1);
+            size_t qlen = q ? strlen(q) : 0, slen = s ? strlen(s) : 0;
+            if (qlen >= sizeof qn[i] || slen >= sizeof scope[i])
+                complete[i] = false;
+            else {
+                if (q) memcpy(qn[i], q, qlen + 1);
+                if (s) memcpy(scope[i], s, slen + 1);
+            }
+        }
+        sqlite3_reset(st);
+    }
+    sqlite3_finalize(st);
+    if (!found[0] || !found[1] || !complete[0] || !complete[1] ||
+        !qn[0][0] || !qn[1][0]) return false;
+    if (strcmp(qn[0], qn[1]) || strcmp(scope[0], scope[1])) return false;
+    return true;
+}
+
+static bool declaration_has_definition(Cg *cg, const SymRow *decl) {
+    if (!decl->decl) return false;
+    SymRow defs[64];
+    int n = defs_named(cg, decl->name, defs, 64);
+    for (int i = 0; i < n; i++)
+        if (prototype_matches(cg, decl, &defs[i])) return true;
+    return false;
+}
+
 /* Free-text ranking for search and context. A symbol scores for each query
  * word by where it carries it — its name (300) over its doc (120) over its
  * body (40) — plus a bonus per distinct word and for carrying them all;
@@ -1219,11 +1293,15 @@ static int rank_query(Cg *cg, const char *q, SymRow *out, int cap,
         if (!h[i].r.decl) continue;
         Hit *d = NULL;
         for (int j = 0; j < nh && !d; j++)
-            if (!h[j].r.decl && strcmp(h[j].r.name, h[i].r.name) == 0)
+            if (prototype_matches(cg, &h[i].r, &h[j].r))
                 d = &h[j];
         if (!d) {
-            int nd = defs_named(cg, h[i].r.name, tmp, 1);
-            if (nd == 1 && !tmp[0].decl) h[i].r = tmp[0];
+            int nd = defs_named(cg, h[i].r.name, tmp, 64);
+            for (int j = 0; j < nd; j++)
+                if (prototype_matches(cg, &h[i].r, &tmp[j])) {
+                    h[i].r = tmp[j];
+                    break;
+                }
             continue;
         }
         d->nm |= h[i].nm;
@@ -1315,8 +1393,9 @@ static int structured_query(Cg *cg, const char *q, SymRow *out, int cap,
         sqlite3_bind_int64(st, 1, hits[i].symbol_id);
         if (sqlite3_step(st) == SQLITE_ROW) {
             SymRow r; sym_from_stmt(st, &r);
+            bool folded = declaration_has_definition(cg, &r);
             if ((!kind || strcmp(kind, r.kind) == 0) &&
-                (!name || ci_has(r.name, name))) {
+                (!name || ci_has(r.name, name)) && !folded) {
                 out[n++] = r;
                 if (hits[i].match == SEM_MATCH_TYPO) (*weak)++;
             }
@@ -1329,6 +1408,7 @@ static int structured_query(Cg *cg, const char *q, SymRow *out, int cap,
         SymRow *r = &ranked[i];
         if (kind && strcmp(kind, r->kind) != 0) continue;
         if (name && !ci_has(r->name, name)) continue;
+        if (declaration_has_definition(cg, r)) continue;
         bool dup = false;
         for (int j = 0; j < n; j++) if (out[j].id == r->id) dup = true;
         if (!dup) out[n++] = *r;
