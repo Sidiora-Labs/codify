@@ -2,7 +2,8 @@
 
 `catalog.py` labels one real declaration and one non-code decoy for each
 structural adapter. Its Liquid case instead labels a render reference and a
-commented-out decoy; symbol precision is not applicable there. File-only
+commented-out decoy; symbol precision is not applicable there. Razor likewise
+labels a directive type reference, not a structural symbol. File-only
 formats have explicit limited-coverage labels. `edge_catalog.py` labels a real
 caller-to-target relation and a real unrelated source for each structural
 adapter. `frameworks.py` labels a route, a named handler, their typed link and
@@ -15,7 +16,8 @@ labelled facts**, not an estimate of all code in a repository. It reports
 unresolved semantic references and extraction status/parser by adapter. The
 gate requires every labelled positive and negative to pass; missing semantic
 tables, parser identity, evidence or coverage are failures. File-only formats
-must identify their limited coverage and emit no structural symbol.
+must identify their limited coverage with a `file-only:` parser and emit no
+structural symbol.
 
 `convergence.py` indexes real files, then compares the whole normalized graph
 set after edits, competing definitions, rename, deletion, configuration and

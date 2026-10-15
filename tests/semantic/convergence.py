@@ -231,7 +231,19 @@ def main() -> int:
         git(root, "add", "-A")
         git(root, "commit", "-qm", "initial")
         execute(cg, root, "init")
+        # The index is local state. Keep later fixture commits from copying
+        # it into the linked worktree as tracked project content.
+        with (root / ".git/info/exclude").open("a", encoding="utf-8") as out:
+            out.write("\n.codegraph/\n")
         reports["initial"] = compare(cg, root, work, "initial", "main")
+        initial = snapshot(root, "main")
+        if not any(e[4] == "calls" and e[0] == "src/caller.ts" and
+                   e[1] == "src/lib.ts" for e in initial["edges"]):
+            raise AssertionError("initial fixture lacks a resolved cross-file call edge")
+        if not any(e[4] == "route_handler" for e in initial["edges"]):
+            raise AssertionError("initial fixture lacks a route-handler edge")
+        if not initial["dependencies"]:
+            raise AssertionError("initial fixture lacks semantic dependency keys")
 
         write(root, "src/zeta.ts", "export function v16_target(n: number): number { return n * 2; }\n")
         execute(cg, root, "sync")

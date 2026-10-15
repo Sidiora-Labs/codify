@@ -101,15 +101,19 @@ def edge_rows(db: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in db.execute(
         """SELECT sf.path AS source_path,ss.name AS source_name,
                   ss.kind AS source_kind,
+                  ssm.qualified_name AS source_qualified,
                   tf.path AS target_path,ts.name AS target_name,
+                  tsm.qualified_name AS target_qualified,
                   e.kind,e.original_text,e.strategy,e.provenance,e.evidence,
                   e.start_line,e.start_column,e.channel,e.registration_path,
                   e.registration_line,e.synthesized
              FROM semantic_edges e
              JOIN files sf ON sf.id=e.source_file_id
              LEFT JOIN symbols ss ON ss.id=e.source_id
+             LEFT JOIN semantic_symbols ssm ON ssm.symbol_id=e.source_id
              LEFT JOIN files tf ON tf.id=e.target_file_id
              LEFT JOIN symbols ts ON ts.id=e.target_id
+             LEFT JOIN semantic_symbols tsm ON tsm.symbol_id=e.target_id
             ORDER BY sf.path,e.start_line,e.kind,tf.path,ts.name"""
     )]
 
@@ -139,7 +143,8 @@ def score_language(cg: Path, work: Path, case) -> dict:
         raise AssertionError(f"{case.adapter}: parser identity missing")
     if case.support == "file-only":
         # File-level tracking must be labelled and must not invent a symbol.
-        if coverage["status"] == "complete" or rows or not coverage["reason"]:
+        if rows or not coverage["parser"].startswith("file-only:") or \
+           coverage["last_success_hash"] != coverage["hash"]:
             raise AssertionError(f"{case.adapter}: file-only input has unlabelled structural coverage")
         return {"adapter": case.adapter, "support": case.support, "coverage": coverage,
                 "symbol_tp": 0, "symbol_fp": 0, "symbol_fn": 0, "rows": rows,
@@ -162,10 +167,12 @@ def score_language(cg: Path, work: Path, case) -> dict:
                 "actual_negative": false, "unresolved": unresolved,
                 "coverage_ok": coverage["status"] == "complete" and
                                coverage["last_success_hash"] == coverage["hash"] and not rows}
-    line = symbol_line(case.source, case.symbol)
+    line = case.line or symbol_line(case.source, case.symbol)
     positive = [r for r in rows if r["name"] == case.symbol and r["line"] == line
-                and r["kind"] == case.kind]
-    false = [r for r in rows if r["name"] == case.absent]
+                and r["kind"] == case.kind and
+                (case.qualified is None or r["qualified_name"] == case.qualified)]
+    false = [r for r in rows if r["name"] == case.absent or
+             (case.qualified is not None and case.absent in r["qualified_name"])]
     # Duplicate declarations of a uniquely labelled site are also false positives.
     extra = max(0, len(positive) - 1)
     parser = str(coverage["parser"]).lower()
@@ -190,12 +197,23 @@ def score_edge(cg: Path, work: Path, case) -> dict:
         unresolved = db.execute(
             """SELECT count(*) FROM semantic_references r JOIN files f ON f.id=r.file_id
                 WHERE f.path=? AND r.target_id IS NULL""", (case.path,)).fetchone()[0]
-    names = {row["name"] for row in symbols}
-    missing_nodes = {case.target, case.caller, case.unrelated} - names
+    def node_exists(name: str, qualified: str | None) -> bool:
+        return any(r["name"] == name and
+                   (qualified is None or r["qualified_name"] == qualified)
+                   for r in symbols)
+    missing_nodes = [name for name, qualified in (
+        (case.target, case.target_qualified),
+        (case.caller, case.caller_qualified),
+        (case.unrelated, case.unrelated_qualified),
+    ) if not node_exists(name, qualified)]
     positive = [e for e in rows if e["source_name"] == case.caller
-                and e["target_name"] == case.target and e["kind"] == case.kind]
+                and e["target_name"] == case.target and e["kind"] == case.kind
+                and (case.caller_qualified is None or e["source_qualified"] == case.caller_qualified)
+                and (case.target_qualified is None or e["target_qualified"] == case.target_qualified)]
     negative = [e for e in rows if e["source_name"] == case.unrelated
-                and e["target_name"] == case.target]
+                and e["target_name"] == case.target
+                and (case.unrelated_qualified is None or e["source_qualified"] == case.unrelated_qualified)
+                and (case.target_qualified is None or e["target_qualified"] == case.target_qualified)]
     evidence_ok = bool(positive) and all(
         e["original_text"] and e["strategy"] and e["provenance"] and
         isinstance(e["start_line"], int) and e["start_line"] > 0

@@ -17,6 +17,8 @@ class Case:
     kind: str
     absent: str
     support: str = "structural"
+    line: int | None = None
+    qualified: str | None = None
 
 
 CASES = [
@@ -41,21 +43,21 @@ CASES = [
     Case("lua", "src/core.lua", "-- function v16_decoy_lua() end\nfunction v16_lua()\n  return 1\nend\n", "v16_lua", "function", "v16_decoy_lua"),
     Case("luau", "src/core.luau", "-- function v16_decoy_luau() end\nfunction v16_luau(): number\n  return 1\nend\n", "v16_luau", "function", "v16_decoy_luau"),
     Case("r", "src/core.R", "# v16_decoy_r <- function() 0\nv16_r <- function() {\n  1\n}\n", "v16_r", "function", "v16_decoy_r"),
-    Case("erlang", "src/core.erl", "-module(core).\n-export([v16_erlang/0]).\n% v16_decoy_erlang() -> 0.\nv16_erlang() -> 1.\n", "v16_erlang", "function", "v16_decoy_erlang"),
+    Case("erlang", "src/core.erl", "-module(core).\n-export([v16_erlang/0]).\n% v16_decoy_erlang() -> 0.\nv16_erlang() -> 1.\n", "v16_erlang", "function", "v16_decoy_erlang", line=4),
     Case("solidity", "src/Core.sol", "pragma solidity ^0.8.0;\ncontract Core {\n  // function v16_decoy_solidity() public pure returns(uint) { return 0; }\n  function v16_solidity() public pure returns(uint) { return 1; }\n}\n", "v16_solidity", "function", "v16_decoy_solidity"),
-    Case("terraform", "src/main.tf", "# resource \"null_resource\" \"v16_decoy_tf\" {}\nresource \"null_resource\" \"v16_tf\" {}\n", "v16_tf", "resource", "v16_decoy_tf"),
-    Case("nix", "src/default.nix", "{ }: let\n  # v16_decoy_nix = 0;\n  v16_nix = 1;\nin v16_nix\n", "v16_nix", "binding", "v16_decoy_nix"),
+    Case("terraform", "src/main.tf", "# resource \"null_resource\" \"v16_decoy_tf\" {}\nresource \"null_resource\" \"v16_tf\" {}\n", "null_resource", "block", "v16_decoy_tf", qualified="resource.null_resource.v16_tf"),
+    Case("nix", "src/default.nix", "{ }: let\n  # v16_decoy_nix = 0;\n  v16_nix = 1;\nin v16_nix\n", "v16_nix", "attribute", "v16_decoy_nix"),
     Case("pascal", "src/core.pas", "unit Core;\ninterface\n// procedure v16_decoy_pascal;\nprocedure v16_pascal;\nimplementation\nprocedure v16_pascal; begin end;\nend.\n", "v16_pascal", "function", "v16_decoy_pascal"),
     Case("cobol", "src/core.cbl", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CORE.\n       PROCEDURE DIVISION.\n      *    V16-DECOY-COBOL.\n       V16-COBOL.\n           DISPLAY 'ok'.\n", "V16-COBOL", "paragraph", "V16-DECOY-COBOL"),
     Case("vbnet", "src/Core.vb", "Public Class Core\n    ' Public Sub v16_decoy_vbnet()\n    Public Sub v16_vbnet()\n    End Sub\nEnd Class\n", "v16_vbnet", "method", "v16_decoy_vbnet"),
-    Case("cfscript", "src/core.cfc", "component {\n  // function v16_decoy_cfscript() {}\n  function v16_cfscript() { return 1; }\n}\n", "v16_cfscript", "function", "v16_decoy_cfscript"),
+    Case("cfscript", "src/core.cfc", "<cfscript>\n  // function v16_decoy_cfscript() {}\n  function v16_cfscript() { return 1; }\n</cfscript>\n", "v16_cfscript", "function", "v16_decoy_cfscript"),
     Case("cfquery", "src/core.cfm", "<cfquery name=\"v16_cfquery\" datasource=\"main\">\nSELECT 1\n</cfquery>\n<!--- <cfquery name=\"v16_decoy_cfquery\"> --->\n", "v16_cfquery", "query", "v16_decoy_cfquery"),
     Case("arkts", "src/core.ets", "// function v16_decoy_arkts() {}\nexport function v16_arkts(): number {\n  return 1;\n}\n", "v16_arkts", "function", "v16_decoy_arkts"),
     Case("vue", "src/Widget.vue", "<script setup lang=\"ts\">\n// function v16_decoy_vue() {}\nfunction v16_vue() { return 1; }\n</script>\n<template><button @click=\"v16_vue\">run</button></template>\n", "v16_vue", "function", "v16_decoy_vue"),
     Case("svelte", "src/Widget.svelte", "<script lang=\"ts\">\n// function v16_decoy_svelte() {}\nfunction v16_svelte() { return 1; }\n</script>\n<button on:click={v16_svelte}>run</button>\n", "v16_svelte", "function", "v16_decoy_svelte"),
     Case("astro", "src/Widget.astro", "---\n// function v16_decoy_astro() {}\nfunction v16_astro() { return 1; }\n---\n<button>{v16_astro()}</button>\n", "v16_astro", "function", "v16_decoy_astro"),
     Case("liquid", "src/widget.liquid", "{% comment %}{% render 'v16_decoy_liquid' %}{% endcomment %}\n{% render 'v16_liquid' %}\n", "v16_liquid", "template", "v16_decoy_liquid", "reference-only"),
-    Case("razor", "src/Widget.cshtml", "@functions {\n  // int v16_decoy_razor() => 0;\n  int v16_razor() { return 1; }\n}\n<p>@v16_razor()</p>\n", "v16_razor", "method", "v16_decoy_razor"),
+    Case("razor", "src/Widget.cshtml", "@* @model v16_decoy_razor *@\n@model v16_razor\n", "v16_razor", "type", "v16_decoy_razor", "reference-only"),
     Case("cfml", "src/widget.cfm", "<!--- <cffunction name=\"v16_decoy_cfml\"> --->\n<cffunction name=\"v16_cfml\"><cfreturn 1></cffunction>\n", "v16_cfml", "function", "v16_decoy_cfml"),
     Case("delphi_form", "src/Widget.dfm", "object v16_form: TForm\n  Caption = 'v16_decoy_form'\n  OnClick = v16_on_click\nend\n", "v16_form", "component", "v16_decoy_form"),
     Case("mybatis", "src/Widget.xml", "<mapper namespace=\"Widget\">\n  <!-- <select id=\"v16_decoy_mybatis\">x</select> -->\n  <select id=\"v16_mybatis\">SELECT 1</select>\n</mapper>\n", "v16_mybatis", "statement", "v16_decoy_mybatis"),
