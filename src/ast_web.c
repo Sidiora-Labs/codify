@@ -372,7 +372,8 @@ static void channel_fact(AstContext *c, TSNode n, TSNode fn,
         if (callee && strcmp(callee,"fetch")==0) {
             http="GET";
             TSNode options=ts_node_named_child(args,1);
-            for (uint32_t i=0;i<ts_node_named_child_count(options);i++) {
+            for (uint32_t i=0;!ts_node_is_null(options) &&
+                               i<ts_node_named_child_count(options);i++) {
                 TSNode pair=ts_node_named_child(options,i);
                 TSNode key=ast_field(pair,"key"),value=ast_field(pair,"value");
                 char *key_name=text(c,key);
