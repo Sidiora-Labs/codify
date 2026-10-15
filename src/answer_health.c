@@ -373,10 +373,43 @@ char *answer_health_json_limit(Cg *cg, const char *answer, size_t max_bytes) {
               json_get_int(source, "unchecked", 0),
               (pending && strcmp(pending, "true") == 0 ? 1 : 0) |
               (degraded && strcmp(degraded, "true") == 0 ? 2 : 0));
+    char *result = final_tokens(tiny.p);
+    if (strlen(result) > max_bytes) {
+        const char *start = strstr(result, "\"index_health\":");
+        char *health = start ? xstrdup(start) : NULL;
+        char *query = json_get_string(raw, "query");
+        char *path = json_get_string(raw, "path");
+        char *kind = json_get_string(raw, "kind");
+        if (health) {
+            StrBuf reduced; sb_init(&reduced);
+            sb_puts(&reduced, "{\"query\":");
+            sb_json_str(&reduced, query ? query : "");
+            if (path) { sb_puts(&reduced, ",\"path\":"); sb_json_str(&reduced, path); }
+            if (kind) { sb_puts(&reduced, ",\"kind\":"); sb_json_str(&reduced, kind); }
+            sb_printf(&reduced, ",\"omitted\":%ld,\"budget\":%zu,"
+                      "\"tokens_used\":0,", json_get_int(raw, "omitted", 0) + 1,
+                      max_bytes / 4);
+            sb_puts(&reduced, health);
+            free(result);
+            result = final_tokens(reduced.p);
+            if (strlen(result) > max_bytes) {
+                /* A long branch or path can consume the remaining space. */
+                sb_init(&reduced);
+                sb_puts(&reduced, "{\"omitted\":");
+                sb_printf(&reduced, "%ld,\"budget\":%zu,\"tokens_used\":0,",
+                          json_get_int(raw, "omitted", 0) + 1, max_bytes / 4);
+                sb_puts(&reduced, health);
+                free(result);
+                result = final_tokens(reduced.p);
+            }
+        }
+        free(query); free(path); free(kind);
+        free(health);
+    }
     free(pending); free(degraded);
     free(h); free(branch); free(coverage); free(source);
     free(state); free(reason); free(full); free(raw);
-    return final_tokens(tiny.p);
+    return result;
 }
 
 int answer_health_status(Cg *cg, bool json) {
