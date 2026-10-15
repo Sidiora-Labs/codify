@@ -24,9 +24,13 @@ DB=.codegraph/graph.db
 q() { sqlite3 "$DB" "$1"; }
 
 row="$(q "SELECT status,reason,parser,diagnostic_line,extraction_version IS NULL FROM extraction_health WHERE path='src/long.ts'")"
-[ "$row" = 'partial|long_line|heuristic|2|1' ] || fail "long-line coverage: $row"
+case "$row" in
+    'complete||heuristic|0|0'|'complete||tree-sitter:typescript|0|0') ;;
+    *) fail "long-line coverage: $row" ;;
+esac
+[ "$(q "SELECT count(*) FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path='src/long.ts' AND s.name IN ('before','after')")" -eq 2 ] || fail 'long-line facts lost'
 row="$(q "SELECT status,generated,extraction_version FROM extraction_health WHERE path='src/generated/auto.ts'")"
-[ "$row" = 'complete|1|1' ] || fail "generated coverage: $row"
+[ "$row" = 'complete|1|2' ] || fail "generated coverage: $row"
 row="$(q "SELECT status,reason FROM extraction_health WHERE path='src/binary.ts'")"
 [ "$row" = 'skipped|binary_file' ] || fail "binary coverage: $row"
 row="$(q "SELECT status,reason FROM extraction_health WHERE path='src/huge.ts'")"
@@ -43,7 +47,10 @@ rm src/long.ts
 q "UPDATE extraction_health SET extraction_version=0 WHERE path='src/kept.ts'"
 out="$("$CG" sync --json 2>/dev/null)"
 row="$(q "SELECT status,extraction_version,last_success_hash FROM extraction_health WHERE path='src/kept.ts'")"
-[ "$row" = "complete|1|$hash" ] || fail "version refresh: $row"
+[ "$row" = "complete|2|$hash" ] || fail "version refresh: $row"
+[ "$(q "SELECT count(*) FROM symbol_fts WHERE symbol_fts MATCH 'kept'")" -eq 1 ] || fail 'version refresh duplicated symbol search'
+file_id="$(q "SELECT id FROM files WHERE path='src/kept.ts'")"
+[ "$(q "SELECT count(*) FROM body_fts WHERE rowid=$file_id")" -eq 1 ] || fail 'version refresh duplicated body search'
 has "$out" '"indexed":'
 has "$out" '"walk":"full"'
 
@@ -70,5 +77,7 @@ printf '\000binary' > src/kept.ts
 "$CG" sync >/dev/null
 [ "$(q "SELECT status,reason,last_success_hash FROM extraction_health WHERE path='src/kept.ts'")" = "skipped|binary_file|$hash" ] || fail 'binary transition health'
 [ "$(q "SELECT count(*) FROM symbols s JOIN files f ON f.id=s.file_id WHERE f.path='src/kept.ts'")" -eq 0 ] || fail 'obsolete facts after binary transition'
+[ "$(q "SELECT count(*) FROM symbol_fts WHERE symbol_fts MATCH 'kept'")" -eq 0 ] || fail 'obsolete symbol search after binary transition'
+[ "$(q "SELECT count(*) FROM body_fts WHERE rowid=$file_id")" -eq 0 ] || fail 'obsolete body search after binary transition'
 
 echo 'index health: ok'
