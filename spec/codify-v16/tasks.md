@@ -72,7 +72,7 @@
     - Connect literal HTTP method/path to unique routes and compatible named queue/bus/socket producers/consumers; reject ambiguous or computed inputs. Record channel/tier/registration evidence and avoid duplicate or unbounded fanout.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.7, 3.8_
-  - [ ] 3.7 Incremental semantic dependency invalidation
+  - [-] 3.7 Incremental semantic dependency invalidation
     - Integrate all semantic passes with changed-definition/configuration/registration dependency sets, persistent failed refs, stale-target resurrection and no-op skipping. Publish complete generations transactionally and recover interrupted work.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.5, 3.8_
