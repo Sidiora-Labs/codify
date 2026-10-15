@@ -28,7 +28,9 @@ Codify(命令为 `cg`)是一个装在单个二进制文件里的智能体工作�
 
 1.1.0 版本(v11)让 fleet 变成了一个"交给它一份 spec 就可以放手"的东西:`cg fleet up` 启动一个持久、可在崩溃后恢复的监督进程(supervisor),同时运行主智能体、每个特性一个管理者、每个任务一个工作者,并管理每一个 Codex 或 Claude Code 进程,直到其工作通过资格确认并完成合并。智能体从图中获得简报,跨分支的漂移在合并前被捕获,每一次状态变化都写入事件日志,`cg serve` 通过一条连接将这一切推送给编辑器。它建立在 fleet 的基础之上:一个合并式的索引器取代五十个、Main Gideon / 特性管理者 / 工作者的层级结构及其分支、合并、PR 与检查点流程、跨所有分支和 worktree 的统一图,以及 Jev 决策——这个本地工具中唯一的远程调用。
 
-**代码是什么。** Codify 将 19 种语言索引成一个可查询的图:符号、调用边、框架感知的路由,以及即时全文检索,全部本地存储在 SQLite 中。`cg context <query>` 一次调用即可回答"帮我快速了解这一块":入口点、匹配的符号及代码片段、调用者、被调用者,以及相关路由。在解析器所见之外,注释也被作为一等节点索引——即意图层:目的、契约、危险,以及只存在于文字中的耦合。
+**代码是什么。** Codify 将 多种语言的源文件索引成一个可查询的图:符号、调用边、框架感知的路由,以及即时全文检索,全部本地存储在 SQLite 中。`cg context <query>` 一次调用即可回答"帮我快速了解这一块":入口点、匹配的符号及代码片段、调用者、被调用者,以及相关路由。在解析器所见之外,注释也被作为一等节点索引——即意图层:目的、契约、危险,以及只存在于文字中的耦合。
+
+覆盖范围从结构化提取到仅跟踪文件；具体边界见[索引指南](../indexing.md)。
 
 **它是如何走到今天的。** 内置的内容寻址快照系统提供提交、历史、差异和恢复能力,无需任何外部版本控制系统。由于快照与图共享同一个数据库,`cg changes` 能报告未提交修改的影响范围。`cg changelog` 负责写发布说明:默认基于 git 历史——每个 tag 或每次版本号变更对应一个发布,按提交标题前缀分组,保留每条任务引用;配置密钥后,每个发布还会附上一段由模型撰写的简短 Highlights——传入 `--snapshots` 或项目根本没有 git 时,则基于快照链生成符号级差异。
 
@@ -366,8 +368,8 @@ Codify 侧边栏有一个常驻的 **Agent** 聊天视图:扩展是一个 [Agent
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # 生成 codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # 生成 codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 Marketplace 标识为 `SidioraLabs.codify-workflow`。详见 [editors/vscode/README.md](../../editors/vscode/README.md)。

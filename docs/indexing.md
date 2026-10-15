@@ -124,26 +124,26 @@ precision on arbitrary repositories.
 
 The release resource run used two workers, generator seed 15, Linux 6.8 on
 x86_64 with six effective cores, and SQLite 3.45.1 in contentless FTS mode.
-The small fixture had 20 requested source files and 17,178 source bytes; the
-large fixture had 1,000 files, 97,484 actual lines and 2,485,550 source bytes.
+The small fixture had 20 requested source files and 17,170 source bytes; the
+large fixture had 1,000 files, 97,484 actual lines and 2,485,542 source bytes.
 Measured process wall time for that single run was:
 
 | Operation | Small | Large |
 | --- | ---: | ---: |
-| Cold index | 190 ms | 27,423 ms |
-| No-op update | 46 ms | 178 ms |
-| Edit one file | 47 ms | 7,268 ms |
-| Delete one file | 40 ms | 5,609 ms |
-| Rename one file | 47 ms | 7,471 ms |
-| Replay back / forward | 52 / 52 ms | 6,354 / 6,897 ms |
-| Full reindex | 142 ms | 28,666 ms |
+| Cold index | 195 ms | 20,498 ms |
+| No-op update | 46 ms | 96 ms |
+| Edit one file | 44 ms | 4,887 ms |
+| Delete one file | 58 ms | 5,145 ms |
+| Rename one file | 43 ms | 5,135 ms |
+| Replay back / forward | 84 / 68 ms | 4,868 / 4,777 ms |
+| Full reindex | 129 ms | 23,477 ms |
 
-The large fixture's edit-to-query wall time was 7,360 ms. Its full reindex
-used about 56 MiB peak resident memory. After a sibling worktree index, its
-SQLite main file plus WAL occupied 41,693,464 bytes, about 16.8 times the
+The large fixture's edit-to-query wall time was 4,920 ms. Its full reindex
+used about 57 MiB peak resident memory. After a sibling worktree index, its
+SQLite main file plus WAL occupied 43,135,880 bytes, about 17.4 times the
 source bytes across the two branch views. The main branch ended with 998
 complete files, two skipped files and two files with diagnostics. A separate
-160,000-comment-line Go file indexed in 1,181 ms with 88,832 KiB peak
+160,000-comment-line Go file indexed in 806 ms with 89,272 KiB peak
 resident memory; a 600-block-deep Go file reported partial coverage. These
 figures describe those fixtures on that host, not a throughput guarantee.
 The raw output is reproducible with `scripts/bench-indexing.py`; wall time is

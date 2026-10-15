@@ -28,7 +28,9 @@ Codify (se invoca como `cg`) es un motor de flujo de trabajo para agentes en un 
 
 La versión 1.1.0 (v11) convierte la flota en algo a lo que entregas una spec y dejas funcionando: `cg fleet up` arranca un supervisor duradero y reanudable tras un fallo que ejecuta a la vez el agente principal, un gestor por funcionalidad y trabajadores por tarea, y gestiona cada proceso de Codex o Claude Code hasta que su trabajo queda cualificado y fusionado. Los agentes reciben briefings desde el grafo, la deriva entre ramas se detecta antes de fusionar, cada cambio de estado queda en un registro de eventos y `cg serve` lo envía todo al editor por una sola conexión. Se apoya en los cimientos de la flota: un único indexador que agrupa pasadas en lugar de cincuenta, la jerarquía Main Gideon / gestor de funcionalidad / trabajador con su flujo de ramas, merges, PR y checkpoints, un grafo unificado para todas las ramas y worktrees, y las decisiones de Jev — la única llamada remota de una herramienta por lo demás local.
 
-**Qué es el código.** Codify indexa 19 lenguajes en un grafo consultable: símbolos, aristas de llamadas, rutas conscientes del framework y búsqueda instantánea de texto completo, todo almacenado localmente en SQLite. `cg context <consulta>` responde a "ponme al día sobre esta zona" en una sola llamada. Y más allá de lo que ve un parser, los comentarios se indexan como nodos de primera clase — la capa de intención: propósito, contratos, peligros y los acoplamientos que solo viven en prosa.
+**Qué es el código.** Codify indexa archivos fuente de varios lenguajes en un grafo consultable: símbolos, aristas de llamadas, rutas conscientes del framework y búsqueda instantánea de texto completo, todo almacenado localmente en SQLite. `cg context <consulta>` responde a "ponme al día sobre esta zona" en una sola llamada. Y más allá de lo que ve un parser, los comentarios se indexan como nodos de primera clase — la capa de intención: propósito, contratos, peligros y los acoplamientos que solo viven en prosa.
+
+La cobertura varía entre extracción estructural y seguimiento de archivos; consulte la [guía de indexación](../indexing.md) para conocer los límites.
 
 **Cómo llegó hasta aquí.** Un sistema integrado de instantáneas direccionadas por contenido te da commits, historial, diffs y restauración sin necesidad de un VCS externo; `cg changes` informa del radio de impacto de tus ediciones sin confirmar. `cg changelog` redacta las notas de versión: por defecto a partir del historial de git — una versión por tag o por cambio de número de versión, grupos según el prefijo del asunto del commit, la referencia a la tarea conservada y, con una clave, un breve párrafo de Highlights escrito por un modelo — y a partir de la cadena de instantáneas, con diffs a nivel de símbolo, con `--snapshots` o si el proyecto no usa git.
 
@@ -388,8 +390,8 @@ La extensión no tiene dependencias ni paso de compilación; su identidad en el 
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produce codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produce codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Desarrollo

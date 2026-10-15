@@ -28,7 +28,9 @@ Codify (कमांड `cg`) एक ही बाइनरी में सम�
 
 वर्ज़न 1.1.0 (v11) fleet को ऐसी चीज़ बना देता है जिसे आप एक spec सौंपकर चलता छोड़ सकते हैं: `cg fleet up` एक टिकाऊ, crash के बाद resume होने वाला supervisor शुरू करता है जो main एजेंट, हर फ़ीचर का एक manager और हर टास्क के worker एक साथ चलाता है, और हर Codex या Claude Code प्रोसेस को तब तक सँभालता है जब तक उसका काम qualified और merged न हो जाए। एजेंटों को briefing ग्राफ़ से मिलती है, branches के बीच drift merge से पहले पकड़ा जाता है, हर state बदलाव एक event log में दर्ज होता है, और `cg serve` यह सब एक ही connection पर एडिटर तक पहुँचाता है। यह fleet की नींव पर बना है: पचास की जगह एक coalescing इंडेक्सर, Main Gideon / feature manager / worker की hierarchy (branch, merge, PR और checkpoint flow के साथ), हर branch और worktree के लिए एक एकीकृत ग्राफ़, और Jev decisions — वरना पूरी तरह लोकल टूल की इकलौती remote कॉल।
 
-**कोड क्या है।** Codify 19 भाषाओं को एक क्वेरी करने योग्य ग्राफ़ में इंडेक्स करता है: सिंबल, कॉल एज, फ्रेमवर्क-सचेत रूट और तुरंत फुल-टेक्स्ट सर्च — सब SQLite में लोकल। `cg context <query>` "इस हिस्से की पूरी तस्वीर दिखाओ" का जवाब एक ही कॉल में देता है। और parser जो देखता है उससे आगे, टिप्पणियाँ भी प्रथम-श्रेणी नोड के रूप में इंडेक्स होती हैं — intent layer: उद्देश्य, contract, ख़तरे, और वे couplings जो सिर्फ़ गद्य में रहती हैं।
+**कोड क्या है।** Codify कई भाषाओं की स्रोत फ़ाइलों को एक क्वेरी करने योग्य ग्राफ़ में इंडेक्स करता है: सिंबल, कॉल एज, फ्रेमवर्क-सचेत रूट और तुरंत फुल-टेक्स्ट सर्च — सब SQLite में लोकल। `cg context <query>` "इस हिस्से की पूरी तस्वीर दिखाओ" का जवाब एक ही कॉल में देता है। और parser जो देखता है उससे आगे, टिप्पणियाँ भी प्रथम-श्रेणी नोड के रूप में इंडेक्स होती हैं — intent layer: उद्देश्य, contract, ख़तरे, और वे couplings जो सिर्फ़ गद्य में रहती हैं।
+
+कवरेज संरचनात्मक निष्कर्षण से लेकर केवल फ़ाइल ट्रैकिंग तक है; सीमाओं के लिए [इंडेक्सिंग गाइड](../indexing.md) देखें।
 
 **वह यहाँ तक कैसे पहुँचा।** बिल्ट-इन कंटेंट-एड्रेस्ड स्नैपशॉट सिस्टम कमिट, इतिहास, डिफ़ और रिस्टोर देता है — किसी बाहरी VCS के बिना। स्नैपशॉट और ग्राफ़ एक ही डेटाबेस साझा करते हैं, इसलिए `cg changes` बिना कमिट किए बदलावों का प्रभाव दायरा बताता है। `cg changelog` रिलीज़ नोट लिखता है: डिफ़ॉल्ट रूप से git इतिहास से — हर tag या version bump पर एक रिलीज़, commit-subject prefix से समूह, हर टास्क रेफ़रेंस साथ में, और key होने पर हर रिलीज़ के लिए मॉडल द्वारा लिखा एक छोटा Highlights पैराग्राफ़ — और `--snapshots` देने पर या git न होने पर स्नैपशॉट चेन से, सिंबल-स्तरीय डिफ़ के साथ।
 
@@ -382,8 +384,8 @@ Codify sidebar में एक स्थायी **Agent** chat view है: �
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # codify-workflow-1.4.0.vsix बनाता है
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # codify-workflow-1.6.0.vsix बनाता है
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 Marketplace पहचान `SidioraLabs.codify-workflow` है। देखें [editors/vscode/README.md](../../editors/vscode/README.md)।

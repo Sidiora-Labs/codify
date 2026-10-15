@@ -28,7 +28,9 @@ O Codify (invocado como `cg`) é um motor de fluxo de trabalho para agentes em u
 
 A versão 1.1.0 (v11) transforma a frota em algo a que você entrega uma spec e deixa rodando: `cg fleet up` inicia um supervisor durável, que se recupera de falhas, e executa ao mesmo tempo o agente principal, um gerente por funcionalidade e workers por tarefa, administrando cada processo do Codex ou do Claude Code até que seu trabalho esteja qualificado e mesclado. Os agentes recebem briefings a partir do grafo, o desvio (drift) é detectado entre branches antes do merge, toda mudança de estado vai para um log de eventos, e `cg serve` envia tudo ao editor por uma única conexão. Isso se apoia nas fundações da frota: um indexador que aglutina em vez de cinquenta, a hierarquia Main Gideon / gerente de funcionalidade / worker com fluxo de branch, merge, PR e checkpoint, um grafo unificado para todas as branches e worktrees, e as decisões Jev — a única chamada remota de uma ferramenta de resto local.
 
-**O que o código é.** O Codify indexa 19 linguagens em um grafo consultável: símbolos, arestas de chamada, rotas cientes do framework e busca instantânea em texto completo, tudo armazenado localmente em SQLite. `cg context <consulta>` responde a "me atualize sobre esta área" em uma única chamada: pontos de entrada, símbolos correspondentes com trechos, chamadores, chamados e rotas relacionadas. E, além do que um parser enxerga, os comentários são indexados como nós de primeira classe — a camada de intenção: propósito, contratos, perigos e os acoplamentos que só existem em prosa.
+**O que o código é.** O Codify indexa arquivos-fonte de várias linguagens em um grafo consultável: símbolos, arestas de chamada, rotas cientes do framework e busca instantânea em texto completo, tudo armazenado localmente em SQLite. `cg context <consulta>` responde a "me atualize sobre esta área" em uma única chamada: pontos de entrada, símbolos correspondentes com trechos, chamadores, chamados e rotas relacionadas. E, além do que um parser enxerga, os comentários são indexados como nós de primeira classe — a camada de intenção: propósito, contratos, perigos e os acoplamentos que só existem em prosa.
+
+A cobertura varia da extração estrutural ao rastreamento apenas de arquivos; veja os limites no [guia de indexação](../indexing.md).
 
 **Como ele chegou até aqui.** Um sistema embutido de snapshots endereçados por conteúdo oferece commits, histórico, diffs e restauração sem exigir nenhum VCS externo. Como os snapshots compartilham o banco com o grafo, `cg changes` reporta o raio de impacto das suas edições não commitadas. `cg changelog` escreve as notas de versão: por padrão a partir do histórico do git — uma release por tag ou por mudança de versão, grupos pelo prefixo do assunto do commit, cada referência de tarefa preservada e, com uma chave, um breve parágrafo de Highlights escrito por um modelo para cada release — e a partir da cadeia de snapshots, com diffs em nível de símbolo, quando você passa `--snapshots` ou o projeto não tem git.
 
@@ -378,8 +380,8 @@ A extensão não tem dependências nem etapa de build — nem mesmo no cliente d
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produz codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produz codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Desenvolvimento

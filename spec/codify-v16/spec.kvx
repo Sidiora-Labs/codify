@@ -62,7 +62,7 @@ include = "design.body.md"
 mode = "auto"
 status = "pending"
 audiences = ["user", "developer"]
-targets = ["README.md", "CHANGELOG.md", "docs/**"]
+targets = ["README.md", "docs/**"]
 
 [tasks]
 heading = "Implementation Plan: Codify 1.6"
@@ -337,7 +337,7 @@ title = "Integrated release qualification and documentation"
 status = "in_progress"
 wave = 5
 requires = ["4.1", "4.2", "4.3", "4.4", "5.1", "5.2"]
-touches = ["Makefile", "src/cg.h", "src/index_health.h", "editors/vscode/package.json", "README.md", "CHANGELOG.md", "docs/**", "tests/lib.sh", "tests/semantic/**", "tests/integration/54_freshness.sh", "tests/integration/56_index_health.sh", "tests/integration/57_semantic_store.sh", "tests/integration/60_ast_systems.sh", "tests/integration/64_ast_mixed.sh", "tests/integration/69_sem_dispatch.sh", "tests/integration/70_sem_channels.sh", "tests/integration/72_answer_health.sh", "tests/integration/73_sem_search.sh", "tests/integration/74_sem_flow.sh", "tests/integration/78_v16_release.sh"]
+touches = ["Makefile", "src/cg.h", "src/index_health.h", "editors/vscode/package.json", "README.md", "docs/**", "scripts/bench-indexing.py", "tests/lib.sh", "tests/semantic/**", "tests/scale/results/**", "tests/integration/54_freshness.sh", "tests/integration/56_index_health.sh", "tests/integration/57_semantic_store.sh", "tests/integration/60_ast_systems.sh", "tests/integration/64_ast_mixed.sh", "tests/integration/69_sem_dispatch.sh", "tests/integration/70_sem_channels.sh", "tests/integration/72_answer_health.sh", "tests/integration/73_sem_search.sh", "tests/integration/74_sem_flow.sh", "tests/integration/78_v16_release.sh"]
 verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/78_v16_release.sh"
 do_1 = "Bump version to 1.6.0 after integrated gates; document actual per-language/framework coverage, migrations, health, provenance, commands, limits and measured resource checks. Verify clean offline build, all unit/integration tests and strict compile; do not claim unverified completion."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."

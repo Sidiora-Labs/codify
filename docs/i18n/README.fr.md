@@ -28,7 +28,9 @@ Codify (invoqué via `cg`) est un moteur de workflow pour agents tenant dans un 
 
 La version 1.1.0 (v11) fait de la flotte quelque chose à qui l'on confie une spec et que l'on laisse tourner : `cg fleet up` démarre un superviseur durable, capable de reprendre après un crash, qui fait tourner simultanément l'agent principal, un gestionnaire par fonctionnalité et des workers par tâche, et gère chaque processus Codex ou Claude Code jusqu'à ce que son travail soit qualifié et fusionné. Les agents sont briefés depuis le graphe, la dérive est détectée entre branches avant la fusion, chaque changement d'état arrive dans un journal d'événements, et `cg serve` pousse le tout vers l'éditeur sur une seule connexion. Cela repose sur les fondations de la flotte : un seul indexeur qui fusionne les demandes au lieu de cinquante, la hiérarchie Main Gideon / gestionnaire de fonctionnalité / worker avec son flux de branches, fusions, PR et checkpoints, un graphe unifié sur toutes les branches et worktrees, et les décisions Jev — l'unique appel distant d'un outil par ailleurs local.
 
-**Ce que le code est.** Codify indexe 19 langages sous forme de graphe interrogeable : symboles, arêtes d'appel, routes conscientes du framework et recherche plein texte instantanée, le tout stocké localement dans SQLite. `cg context <requête>` répond en un seul appel à « mets-moi à jour sur cette zone ». Au-delà de ce que voit un parseur, les commentaires sont indexés comme des nœuds à part entière — la couche d'intention : finalité, contrats, dangers, et les couplages qui n'existent qu'en prose.
+**Ce que le code est.** Codify indexe des fichiers source de plusieurs langages sous forme de graphe interrogeable : symboles, arêtes d'appel, routes conscientes du framework et recherche plein texte instantanée, le tout stocké localement dans SQLite. `cg context <requête>` répond en un seul appel à « mets-moi à jour sur cette zone ». Au-delà de ce que voit un parseur, les commentaires sont indexés comme des nœuds à part entière — la couche d'intention : finalité, contrats, dangers, et les couplages qui n'existent qu'en prose.
+
+La couverture va de l’extraction structurelle au simple suivi de fichiers ; voir le [guide d’indexation](../indexing.md) pour les limites.
 
 **Comment il en est arrivé là.** Un système d'instantanés adressés par contenu, intégré, vous donne commits, historique, diffs et restauration sans aucun VCS externe ; `cg changes` rapporte le rayon d'impact de vos modifications non validées. `cg changelog` rédige les notes de version : depuis l'historique git par défaut — une version par tag ou par changement de numéro de version, des groupes tirés du préfixe du sujet de commit, chaque référence de tâche conservée et, avec une clé, un court paragraphe Highlights rédigé par un modèle pour chaque version — et depuis la chaîne d'instantanés, avec des diffs au niveau des symboles, avec `--snapshots` ou sans git.
 
@@ -353,8 +355,8 @@ La barre latérale Codify porte une vue **Agent** persistante : l'extension est 
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # produit codify-workflow-1.4.0.vsix
-code --install-extension codify-workflow-1.4.0.vsix --force
+npx @vscode/vsce package        # produit codify-workflow-1.6.0.vsix
+code --install-extension codify-workflow-1.6.0.vsix --force
 ```
 
 ## Développement

@@ -116,9 +116,9 @@ when the installed version is cg's. These are the formats claude 2.1 writes;
 The JSON form, in `detect --json` and `doctor --json`:
 
 ```json
-"plugin": {"root": "...", "rendered": true, "rendered_version": "1.5.0",
-           "registered": true, "installed": true, "version": "1.5.0",
-           "cg_version": "1.5.0", "current": true}
+"plugin": {"root": "...", "rendered": true, "rendered_version": "1.6.0",
+           "registered": true, "installed": true, "version": "1.6.0",
+           "cg_version": "1.6.0", "current": true}
 ```
 
 Doctor reports an installed plugin older than `cg`, and a foreign file at the
