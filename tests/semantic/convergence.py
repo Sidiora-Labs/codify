@@ -21,7 +21,7 @@ from run import execute
 
 SOURCE = {
     "src/lib.ts": "export function v16_target(n: number): number { return n; }\n",
-    "src/caller.ts": "import { v16_target } from './lib';\nexport function v16_caller(): number { return v16_target(1); }\n",
+    "src/caller.ts": "import { v16_target } from '@lib/lib';\nexport function v16_caller(): number { return v16_target(1); }\n",
     "src/app.ts": "import express from 'express';\nconst app = express();\nexport function v16_handler(req: any, res: any) { res.send('ok'); }\napp.get('/v16-route', v16_handler);\n",
     "tsconfig.json": '{"compilerOptions":{"baseUrl":".","paths":{"@lib/*":["src/*"]}}}\n',
 }
@@ -249,7 +249,7 @@ def main() -> int:
         execute(cg, root, "sync")
         reports["competing_definition"] = compare(cg, root, work, "competing", "main")
 
-        write(root, "src/caller.ts", "import { v16_target } from './lib';\nexport function v16_caller(): number { return v16_target(2); }\n")
+        write(root, "src/caller.ts", "import { v16_target } from '@lib/lib';\nexport function v16_caller(): number { return v16_target(2); }\n")
         execute(cg, root, "sync")
         reports["edit"] = compare(cg, root, work, "edit", "main")
 
@@ -261,13 +261,23 @@ def main() -> int:
         execute(cg, root, "sync")
         reports["delete"] = compare(cg, root, work, "delete", "main")
 
-        write(root, "tsconfig.json", '{"compilerOptions":{"baseUrl":".","paths":{"@lib/*":["src/*","src/generated/*"]}}}\n')
+        before_config = snapshot(root, "main")
+        write(root, "tsconfig.json", '{"compilerOptions":{"baseUrl":".","paths":{"@lib/*":["src/generated/*"]}}}\n')
         execute(cg, root, "sync")
         reports["config"] = compare(cg, root, work, "config", "main")
+        after_config = snapshot(root, "main")
+        if before_config["bindings"] == after_config["bindings"] and \
+           before_config["edges"] == after_config["edges"]:
+            raise AssertionError("alias config edit did not change semantic bindings or edges")
 
+        before_wiring = snapshot(root, "main")
         write(root, "src/app.ts", SOURCE["src/app.ts"].replace("/v16-route", "/v16-changed"))
         execute(cg, root, "sync")
         reports["wiring"] = compare(cg, root, work, "wiring", "main")
+        after_wiring = snapshot(root, "main")
+        if before_wiring["routes"] == after_wiring["routes"] or \
+           before_wiring["route_facts"] == after_wiring["route_facts"]:
+            raise AssertionError("route registration edit did not change route facts")
 
         git(root, "add", "-A")
         git(root, "commit", "-qm", "route-and-config")
@@ -289,7 +299,7 @@ def main() -> int:
                 raise AssertionError("interruption fixture has no semantic edge to exercise")
             db.execute("""CREATE TRIGGER semantic_test_abort BEFORE INSERT ON semantic_edges
                           BEGIN SELECT RAISE(ABORT,'semantic test interruption'); END""")
-        write(root, "src/caller.ts", "import { v16_target } from './lib';\nexport function v16_caller(): number { return v16_target(3); }\n")
+        write(root, "src/caller.ts", "import { v16_target } from '@lib/lib';\nexport function v16_caller(): number { return v16_target(3); }\n")
         interrupted = subprocess.run([str(cg), "sync"], cwd=root, text=True,
                                      capture_output=True)
         with sqlite3.connect(db_path) as db:
