@@ -322,7 +322,7 @@ reqs = ["5.1", "5.2"]
 
 [task.5.2]
 title = "Index resource and latency regression gates"
-status = "pending"
+status = "in_progress"
 wave = 5
 requires = ["3.7"]
 touches = ["scripts/bench-indexing.py", "tests/integration/77_index_resources.sh", "tests/scale/**"]
