@@ -484,7 +484,7 @@ static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
                   d->parsed || d->reuse_from ? "complete" : "skipped",
         .reason = d->parsed ? d->pr.diagnostic :
                   d->reuse_from ? "" : "unsupported_language",
-        .parser = d->parsed ? d->pr.parser :
+        .parser = d->parsed ? (d->pr.sem.parser_id ? d->pr.sem.parser_id : d->pr.parser) :
                   d->reuse_from ? w->twin_parser : "none",
         .diagnostic_line = d->pr.diagnostic_line,
         .diagnostics = d->pr.diagnostics,
@@ -1090,6 +1090,8 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
     for (int i = 0; i < n; i++) {
         if (rc == 0) {
             const Walked *w = &jobs[chunk[i].idx];
+            bool changed = w->semantic_stale || !w->dbhash[0] ||
+                strcmp(w->dbhash, chunk[i].hash) != 0;
             if (chunk[i].failed_read || chunk[i].binary || chunk[i].oversized) {
                 IndexHealthResult hr = {
                     .status = chunk[i].failed_read ? "failed" : "skipped",
@@ -1108,7 +1110,7 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
             } else if (write_done(cg, s, w, &chunk[i], st) != 0) {
                 st->semantic_failed = true;
                 rc = -1;
-            } else {
+            } else if (changed) {
                 wrote = true;
             }
         }
