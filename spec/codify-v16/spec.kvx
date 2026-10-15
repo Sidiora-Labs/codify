@@ -212,7 +212,7 @@ reqs = ["3.2", "3.4"]
 
 [task.3.3]
 title = "Type hierarchy and semantic relation construction"
-status = "in_progress"
+status = "done"
 wave = 3
 requires = ["2.1", "2.4", "2.6"]
 touches = ["src/sem_types.c", "src/sem_types.h", "tests/integration/67_sem_types.sh"]

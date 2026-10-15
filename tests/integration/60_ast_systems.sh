@@ -76,6 +76,13 @@ assert not exists('''SELECT 1 FROM semantic_type_facts t JOIN files f ON f.id=t.
                      WHERE f.path='src/fixture.c' AND t.kind='native_bridge_registration'
                      AND t.name='runtimeName' ''')
 assert_fact('fixture.cpp','inherits','Base')
+assert_fact('fixture.cpp','overrides','run')
+overrides = con.execute('''SELECT s.name, m.qualified_name FROM semantic_type_facts t
+  JOIN files f ON f.id=t.file_id JOIN symbols s ON s.id=t.owner_id
+  JOIN semantic_symbols m ON m.symbol_id=s.id
+  WHERE f.path='src/fixture.cpp' AND t.kind='overrides' ''').fetchall()
+assert [(row['name'],row['qualified_name']) for row in overrides] == [
+    ('run','demo::Worker::run')], overrides
 assert_fact('fixture.go','receiver','Worker')
 assert_fact('fixture.rs','implements','Runner')
 # No phantom definitions or calls may originate from comments and literals.

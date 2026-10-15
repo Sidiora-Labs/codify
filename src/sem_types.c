@@ -126,6 +126,39 @@ static long resolve_target(Cg *cg, long owner_id, long file_id,
     return best.id;
 }
 
+/* An override can only target a member owned by a proven ancestor. Equal
+ * candidates, including overloads we cannot distinguish, remain unresolved. */
+static long resolve_override(Cg *cg,long method,const char *spelling) {
+    char name[256]; if (!canonical_name(spelling,name)) return 0;
+    sqlite3_stmt *q=cg_prep(cg,
+        "SELECT ss.parent_id FROM semantic_symbols ss JOIN files f ON f.id=ss.file_id "
+        "WHERE ss.symbol_id=?1 AND f.branch_id=?2");
+    sqlite3_bind_int64(q,1,method); sqlite3_bind_int64(q,2,cg->branch_id);
+    long owner=sqlite3_step(q)==SQLITE_ROW ? sqlite3_column_int64(q,0) : 0;
+    sqlite3_finalize(q);
+    if (!owner) return 0;
+    long bases[TYPE_MAX_CANDIDATES];
+    int n=sem_type_ancestors(cg,owner,bases,TYPE_MAX_CANDIDATES);
+    if (!n) return 0;
+    q=cg_prep(cg,"SELECT s.id FROM symbols s JOIN semantic_symbols ss "
+        "ON ss.symbol_id=s.id JOIN files f ON f.id=s.file_id "
+        "WHERE f.branch_id=?1 AND ss.parent_id=?2 AND s.name=?3 "
+        "AND s.kind IN ('method','function') "
+        "AND COALESCE(ss.visibility,'') NOT IN ('private','fileprivate') LIMIT 2");
+    long match=0; int matches=0;
+    for (int i=0;i<n && matches<2;i++) {
+        sqlite3_reset(q); sqlite3_clear_bindings(q);
+        sqlite3_bind_int64(q,1,cg->branch_id);
+        sqlite3_bind_int64(q,2,bases[i]);
+        sqlite3_bind_text(q,3,name,-1,SQLITE_TRANSIENT);
+        while (sqlite3_step(q)==SQLITE_ROW && matches<2) {
+            match=sqlite3_column_int64(q,0); matches++;
+        }
+    }
+    sqlite3_finalize(q);
+    return matches==1 ? match : 0;
+}
+
 static int insert_edge(Cg *cg, sqlite3_stmt *q, long source_file,
                        long target_file, long source, long target,
                        const char *kind, const char *original,
@@ -204,14 +237,23 @@ int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
         "ss.end_line,ss.end_column FROM semantic_symbols ss "
         "JOIN files f ON f.id=ss.file_id WHERE f.branch_id=?1 "
         "AND ss.parent_id IS NOT NULL");
+    sqlite3_stmt *already=cg_prep(cg,
+        "SELECT 1 FROM semantic_edges WHERE branch_id=?1 AND source_id=?2 "
+        "AND target_id=?3 AND kind='contains' LIMIT 1");
     sqlite3_bind_int64(parents,1,cg->branch_id);
     while (!rc && sqlite3_step(parents)==SQLITE_ROW) {
         long child=sqlite3_column_int64(parents,0), file=sqlite3_column_int64(parents,1);
         long parent=sqlite3_column_int64(parents,2);
+        sqlite3_reset(already); sqlite3_clear_bindings(already);
+        sqlite3_bind_int64(already,1,cg->branch_id);
+        sqlite3_bind_int64(already,2,parent);
+        sqlite3_bind_int64(already,3,child);
+        if (sqlite3_step(already)==SQLITE_ROW) continue;
         /* Containment follows stored parent identity within one file. */
         rc=insert_edge(cg,edge,file,file,parent,child,"contains",NULL,
                        "type_hierarchy","lexical ownership",parents);
     }
+    sqlite3_finalize(already);
     sqlite3_finalize(parents);
     sqlite3_stmt *facts=cg_prep(cg,changed_files ?
         "SELECT tf.owner_id,tf.file_id,tf.kind,tf.value,tf.evidence,"
@@ -232,7 +274,7 @@ int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
         const char *kind=(const char *)sqlite3_column_text(facts,2);
         const char *value=(const char *)sqlite3_column_text(facts,3);
         const char *evidence=(const char *)sqlite3_column_text(facts,4);
-        if (!relation_kind(kind) || !value) continue;
+        if (!relation_kind(kind) || !value || !strcmp(kind,"overrides")) continue;
         char normalized[256];
         if (!canonical_name(value,normalized)) continue;
         char key[262];
@@ -257,6 +299,40 @@ int sem_types_run(Cg *cg, const long *changed_files, int nfiles) {
     }
     sqlite3_finalize(target_file);
     sqlite3_finalize(facts);
+    if (!rc) {
+        sqlite3_stmt *overrides=cg_prep(cg,changed_files ?
+            "SELECT tf.owner_id,tf.file_id,tf.value,tf.evidence,tf.id,tf.name,NULL,"
+            "tf.start_byte,tf.end_byte,tf.start_line,tf.start_column,"
+            "tf.end_line,tf.end_column FROM semantic_type_facts tf "
+            "JOIN files f ON f.id=tf.file_id WHERE f.branch_id=?1 "
+            "AND tf.kind='overrides' AND tf.owner_id IS NOT NULL "
+            "AND tf.file_id IN (SELECT file_id FROM temp.sem_type_scope)" :
+            "SELECT tf.owner_id,tf.file_id,tf.value,tf.evidence,tf.id,tf.name,NULL,"
+            "tf.start_byte,tf.end_byte,tf.start_line,tf.start_column,"
+            "tf.end_line,tf.end_column FROM semantic_type_facts tf "
+            "JOIN files f ON f.id=tf.file_id WHERE f.branch_id=?1 "
+            "AND tf.kind='overrides' AND tf.owner_id IS NOT NULL");
+        sqlite3_bind_int64(overrides,1,cg->branch_id);
+        sqlite3_stmt *fileq=cg_prep(cg,"SELECT file_id FROM symbols WHERE id=?1");
+        while (!rc && sqlite3_step(overrides)==SQLITE_ROW) {
+            long source=sqlite3_column_int64(overrides,0);
+            long file=sqlite3_column_int64(overrides,1);
+            const char *value=(const char *)sqlite3_column_text(overrides,2);
+            const char *evidence=(const char *)sqlite3_column_text(overrides,3);
+            if (!value) continue;
+            long target=resolve_override(cg,source,value);
+            if (!target) continue;
+            sqlite3_reset(fileq); sqlite3_clear_bindings(fileq);
+            sqlite3_bind_int64(fileq,1,target);
+            if (sqlite3_step(fileq)!=SQLITE_ROW) continue;
+            long destination=sqlite3_column_int64(fileq,0);
+            rc=insert_edge(cg,edge,file,destination,source,target,
+                           "overrides",value,"type_hierarchy",
+                           evidence?evidence:"explicit override",overrides);
+        }
+        sqlite3_finalize(fileq);
+        sqlite3_finalize(overrides);
+    }
     sqlite3_finalize(dep);
     sqlite3_finalize(edge);
     return rc;
@@ -300,19 +376,31 @@ int sem_type_subtypes(Cg *cg,long id,long *out,int cap) {
 int sem_type_implementations(Cg *cg,long id,long *out,int cap) {
     if (!cg || !out || cap<=0 || id<=0) return 0;
     if (cap>TYPE_MAX_WALK) cap=TYPE_MAX_WALK;
+    long interfaces[TYPE_MAX_WALK]; interfaces[0]=id;
+    int ni=1+sem_type_subtypes(cg,id,interfaces+1,TYPE_MAX_WALK-1);
     sqlite3_stmt *q=cg_prep(cg,
         "SELECT e.source_id FROM semantic_edges e JOIN symbols s ON s.id=e.source_id "
         "WHERE e.branch_id=?1 AND e.target_id=?2 AND e.kind='implements' "
         "AND e.strategy='type_hierarchy' AND s.kind NOT IN ('interface','trait','protocol') "
         "LIMIT 257");
-    sqlite3_bind_int64(q,1,cg->branch_id); sqlite3_bind_int64(q,2,id);
     int n=0;
-    while (sqlite3_step(q)==SQLITE_ROW && n<cap) {
-        long implementation=sqlite3_column_int64(q,0);
-        bool seen=false;
-        for (int i=0;i<n;i++) if (out[i]==implementation) seen=true;
-        if (seen) continue;
-        out[n++]=implementation;
+    for (int j=0;j<ni && n<cap;j++) {
+        sqlite3_reset(q); sqlite3_clear_bindings(q);
+        sqlite3_bind_int64(q,1,cg->branch_id);
+        sqlite3_bind_int64(q,2,interfaces[j]);
+        while (sqlite3_step(q)==SQLITE_ROW && n<cap) {
+            long implementation=sqlite3_column_int64(q,0);
+            bool seen=false;
+            for (int i=0;i<n;i++) if (out[i]==implementation) seen=true;
+            if (!seen) out[n++]=implementation;
+            long descendants[TYPE_MAX_WALK];
+            int nd=sem_type_subtypes(cg,implementation,descendants,cap-n);
+            for (int k=0;k<nd && n<cap;k++) {
+                seen=false;
+                for (int i=0;i<n;i++) if (out[i]==descendants[k]) seen=true;
+                if (!seen) out[n++]=descendants[k];
+            }
+        }
     }
     sqlite3_finalize(q);
     return n;
