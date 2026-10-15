@@ -24,13 +24,15 @@ If `make test` passes on a clean checkout, your environment is fine.
 
 ## Project layout
 
-The codebase is deliberately flat: one `.c` file per module, and `src/cg.h` is the only header. Before adding a new file, check whether the change belongs in an existing module. Read `docs/ARCHITECTURE.md` before touching anything structural.
+The C modules live mainly in `src/`. `src/cg.h` is the shared core header, with focused headers for syntax, semantic storage, search and inspection. Native grammar sources are vendored and compiled into the single `cg` binary. Before adding a module, check its ownership in [the architecture guide](docs/ARCHITECTURE.md).
 
 ```
-src/                 modules; src/cg.h is the single shared header
-tests/unit/          C unit tests linked against build/libcg.a
-tests/integration/   shell-based end-to-end tests, each run in a sandbox
-tests/fixtures/      sample polyglot project and a spec repo with golden outputs
+src/                 core, syntax adapters, semantic passes and focused headers
+vendor/              vendored parser runtime and generated grammars
+tests/unit/          C unit tests linked with the production objects
+tests/integration/   shell-based end-to-end tests in temporary repositories
+tests/semantic/      labelled adapter, relation and convergence fixtures
+tests/scale/         reproducible resource fixtures and measured output
 ```
 
 ## Coding standards
@@ -66,13 +68,25 @@ The [source reference](docs/SOURCE-REFERENCE.md) is a navigation index of implem
 
 ## Adding language or framework support
 
-Language extractors are heuristic pattern engines, tuned for recall on definitions and call sites. A new language needs:
+Language support has several explicit levels: native syntax-tree extraction,
+selected embedded or declarative constructs, labelled heuristic fallback, and
+file tracking only. See the [coverage matrix](docs/indexing.md#extraction-coverage)
+before claiming a level. A new native adapter needs:
 
-1. A language-table entry in `src/lang.c`, aware of that language's comment and string syntax; extend the shared extractor only where the syntax requires it.
-2. A fixture in `tests/fixtures/` with representative definitions, calls, and edge cases.
-3. An integration test verifying symbols and edges land in the graph.
+1. A vendored grammar wired into the parser runtime and an `ast_*.c` adapter
+   that emits symbols, references, bindings and type facts with exact source
+   sites and ownership where syntax proves them. Preserve parser limits and
+   partial/error status rather than treating a parse as complete coverage.
+2. Semantic-pass integration for any promised relationship. Keep ambiguous
+   dispatch unresolved and retain written reference text and provenance.
+3. Positive and negative fixtures for syntax extraction and relationships in
+   `tests/semantic/`, plus an integration test of incremental edits and
+   branch isolation where the adapter introduces a new dependency type.
 
-Framework route support follows the same shape: patterns, fixture, integration test.
+For an embedded or declarative format, state the exact recognized constructs
+and test nearby unsupported forms. A file-only format must report that limit
+rather than emitting guessed symbols. Framework routes need literal-site
+fixtures, handler evidence, and competing-handler negatives.
 
 ## Commit messages
 

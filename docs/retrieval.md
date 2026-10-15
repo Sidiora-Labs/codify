@@ -1,12 +1,21 @@
 # Retrieval: search, symbol, show, context, files
 
 How `cg search`, `cg symbol`, `cg show`, `cg context` and `cg files` decide
-what to answer with, and in what order. The code lives in `src/graph.c`,
-and `cg files` and the shared filters live in `src/files.c`. The
-parsing it relies on is in `src/lang.c`, and the resolution in
-`src/resolve.c`.
+what to answer with, and in what order. The legacy query path lives in
+`src/graph.c`, with file filters in `src/files.c`. Version 1.6 also uses
+`src/sem_search.c` for structured search, `src/sem_flow.c` for typed graph
+traversal, and `src/sem_inspect.c` for hierarchy and unused-symbol queries.
+Syntax adapters in `src/ast_*.c`, a labelled `src/lang.c` fallback, and
+semantic passes in `src/sem_*.c` supply their evidence. The [indexing guide]
+(indexing.md) states coverage, inference boundaries and answer-health limits.
 
 ## Declarations
+
+The declaration details below describe the legacy C/C++ graph path and its
+prototype fallback. Native syntax adapters and semantic resolution can add
+stronger ownership, type and import evidence; equal plausible targets remain
+unresolved rather than being selected by a name-only tier.
+
 
 A C or C++ prototype (`int memory_export(Store *s, FILE *out);`) is
 recorded as a symbol with `decl=1`. Its span ends at its own `;`, even when
@@ -16,7 +25,7 @@ reference inside that span was then filed under the prototype, which
 produced phantom callers such as "memory_export calls store_close" from a
 header.
 
-- **The parser** (`callable_end` in `src/lang.c`) follows the parameter
+- **The legacy parser** (`callable_end` in `src/lang.c`) follows the parameter
   list's parentheses across lines. After the list closes, a `;` makes the
   symbol a declaration and a `{` makes it a definition, whose body is then
   brace-matched. A pure virtual `= 0;` is a declaration too. A line that
@@ -24,7 +33,7 @@ header.
   prototype, even at column 0.
 - **Attribution** never files a reference or an inline comment under a
   declaration. A declaration has no body.
-- **Resolution** first resolves a call through the usual tiers (same file,
+- **Legacy resolution** first resolves a call through the usual tiers (same file,
   import, same directory, unique). If the winner is a declaration, the call
   goes to its definition instead, chosen in this order:
   1. the one in the file with the header's stem (`store.h` → `store.c`)

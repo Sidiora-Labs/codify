@@ -130,21 +130,27 @@ Measured process wall time for that single run was:
 
 | Operation | Small | Large |
 | --- | ---: | ---: |
-| Cold index | 195 ms | 20,498 ms |
-| No-op update | 46 ms | 96 ms |
-| Edit one file | 44 ms | 4,887 ms |
-| Delete one file | 58 ms | 5,145 ms |
-| Rename one file | 43 ms | 5,135 ms |
-| Replay back / forward | 84 / 68 ms | 4,868 / 4,777 ms |
-| Full reindex | 129 ms | 23,477 ms |
+| Cold index | 247 ms | 19,483 ms |
+| No-op update | 40 ms | 88 ms |
+| Edit one file | 46 ms | 4,361 ms |
+| Delete one file | 33 ms | 4,113 ms |
+| Rename one file | 47 ms | 4,028 ms |
+| Replay back / forward | 63 / 49 ms | 4,342 / 4,172 ms |
+| Full reindex | 152 ms | 21,948 ms |
 
-The large fixture's edit-to-query wall time was 4,920 ms. Its full reindex
-used about 57 MiB peak resident memory. After a sibling worktree index, its
-SQLite main file plus WAL occupied 43,135,880 bytes, about 17.4 times the
+The large fixture's edit-to-query wall time was 4,385 ms. Its full reindex
+used about 58 MiB peak resident memory. After a sibling worktree index, its
+SQLite main file plus WAL occupied 43,222,184 bytes, about 17.4 times the
 source bytes across the two branch views. The main branch ended with 998
 complete files, two skipped files and two files with diagnostics. A separate
-160,000-comment-line Go file indexed in 806 ms with 89,272 KiB peak
+160,000-comment-line Go file indexed in 835 ms with 89,340 KiB peak
 resident memory; a 600-block-deep Go file reported partial coverage. These
 figures describe those fixtures on that host, not a throughput guarantee.
 The raw output is reproducible with `scripts/bench-indexing.py`; wall time is
 authoritative because the phase timers do not include every semantic pass.
+
+The strict release build produced one `cg` executable of 68,341,216 bytes
+(about 65.2 MiB). The vendored parser source tree occupies 341,397,866 bytes
+in this checkout (about 325.6 MiB) and increases checkout and build cost;
+it adds no runtime parser package or service. These sizes are build artifacts
+from this checkout, not limits on future builds.

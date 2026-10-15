@@ -49,11 +49,17 @@ bounded across all of them. See [branches.md](branches.md).
 
 `meta.last_index_at:<branch-id>` records when the branch's last whole-tree
 walk finished. A caller passes the age it is willing to accept, and the
-walk is skipped entirely when all three hold:
+walk is skipped entirely only when the last pass is within that window and
+none of these needs work:
 
-- the last pass is younger than that window,
-- no `index_pending_resolve` flag was left by a stalled pass,
-- no dirty note exists.
+- a dirty note or pending legacy resolution marker,
+- stale parser/extraction coverage or files needing migration to subsecond
+  metadata,
+- semantic dependency or retry debt.
+
+A recent timestamp alone does not certify the source files behind a query.
+Answer health performs a separate bounded source check and can report
+verified, stale or unchecked files ([indexing guide](indexing.md#freshness-and-migrations)).
 
 The key is scoped to the branch, so a freshly created worktree is never
 reported fresh because a sibling branch walked seconds ago.
@@ -70,8 +76,9 @@ The windows the built-in callers use:
 | `cg hook post-edit` (no path) | 5000 ms | 0 |
 | VS Code refresh | 3000 ms | 0 |
 
-`cg spec trace --no-sync` answers from the last completed index without
-touching the gate at all — that is what the editor polls.
+`cg spec trace --no-sync` reads the currently committed graph without
+touching the gate at all — that is what the editor polls. Chunked writes
+may be visible before the overall pass completes.
 
 A sync or index holds the write lock in short bursts. While one runs, other
 commands' lifecycle writes may outlast their lock wait. That covers
@@ -296,7 +303,8 @@ Some costs remain:
   writes concurrent: one writer at a time, as before.
 - A coalesced caller returns without a fresh graph. It queued its change
   for the process that holds the gate; the answer it prints is from the
-  last completed index.
+  currently committed graph; it does not certify that the queued edit is
+  visible.
 - Three drain passes bound the winner's work. Under a continuous write
   storm the tail stays queued for the next caller rather than holding the
   gate indefinitely.
