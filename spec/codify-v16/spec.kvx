@@ -326,7 +326,7 @@ status = "in_progress"
 wave = 5
 requires = ["3.7"]
 touches = ["scripts/bench-indexing.py", "tests/integration/77_index_resources.sh", "tests/scale/**"]
-verify_cmd = "make -j2 cg && CG=$PWD/cg bash tests/integration/77_index_resources.sh"
+verify_cmd = "make -j1 cg && CG=$PWD/cg bash tests/integration/77_index_resources.sh"
 do_1 = "Benchmark bounded cold/no-op/edit/delete/rename/replay with fixed workers, memory and database growth, skip/diagnostic counts and source-to-query freshness. Keep default tests small and an opt-in large profile; publish raw reproducible output without fabricated numbers."
 do_2 = "Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope."
 reqs = ["5.3"]

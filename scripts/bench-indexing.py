@@ -6,9 +6,11 @@ All source bytes come from tests/scale/gen.py and a fixed seed. JSON contains
 raw runs, fixture parameters, per-phase timers, coverage and database sizes.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import resource
 import sqlite3
 import subprocess
@@ -172,8 +174,21 @@ def main():
     init_out, cold = command([str(cg), "init"], project, env)
     if not db.exists():
         raise RuntimeError("cold index did not create a graph database")
+    info_out, _ = command([str(cg), "info", "--json"], project, env)
+    info = json.loads(info_out)
+    digest = hashlib.sha256()
+    with cg.open("rb") as binary:
+        for block in iter(lambda: binary.read(1024 * 1024), b""):
+            digest.update(block)
     result = {
         "format": "codify-index-benchmark-v1",
+        "runtime": {"platform": platform.platform(),
+                    "python": platform.python_version(),
+                    "binary_sha256": digest.hexdigest(),
+                    "profile": info.get("profile"),
+                    "cores_effective": info.get("cores_effective"),
+                    "sqlite": info.get("sqlite"),
+                    "fts_mode": info.get("fts_mode")},
         "fixture": {"generator": "tests/scale/gen.py", "files": files,
                     "lines_requested": lines, "seed": a.seed,
                     "source_bytes": source_bytes, "generator_output": gen.strip(),
