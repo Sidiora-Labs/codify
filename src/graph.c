@@ -1131,11 +1131,21 @@ static void rank_bodies(Cg *cg, const Terms *T, Hit *h, int *nh,
  * index cannot prove identity, search keeps the declaration visible. */
 static void signature_identity(const char *sig, char *out, size_t cap) {
     size_t n = 0;
-    for (const unsigned char *p = (const unsigned char *)sig; *p; p++) {
+    const unsigned char *start = (const unsigned char *)sig;
+    if (strncmp(sig, "extern", 6) == 0 && isspace(start[6])) start += 6;
+    for (const unsigned char *p = start; *p; p++) {
         if (!isspace(*p) && n + 1 < cap) out[n++] = (char)*p;
     }
     if (n && (out[n - 1] == '{' || out[n - 1] == ';')) n--;
     out[n] = 0;
+    /* A weak extern declaration names the same callable signature. These
+     * declaration-only wrappers do not distinguish an overload. */
+    static const char weak[] = "__attribute__((weak))";
+    size_t nw = sizeof weak - 1;
+    if (n >= nw && strcmp(out + n - nw, weak) == 0) {
+        n -= nw;
+        out[n] = 0;
+    }
 }
 
 static bool signature_static(const char *sig) {
