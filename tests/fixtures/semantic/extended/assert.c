@@ -21,6 +21,31 @@ static int has_ref(const SemResult *r, const char *name) {
         if (!strcmp(r->references[i].text,name)) return 1;
     return 0;
 }
+static int has_terraform_address(const SemResult *r) {
+    for(int i=0;i<r->nreferences;i++) {
+        const SemReference *v=&r->references[i];
+        if(strcmp(v->text,"null_resource.v16_edge_target") ||
+           !v->qualifier || strcmp(v->qualifier,
+               "resource.null_resource.v16_edge_target"))continue;
+        if(v->owner<0 || v->owner>=r->nsymbols)return 0;
+        const SemSymbol *owner=&r->symbols[v->owner];
+        return owner->qualified_name &&
+            !strcmp(owner->qualified_name,
+                    "resource.null_resource.v16_edge_caller") &&
+            !strcmp(v->evidence,"resource_address");
+    }
+    return 0;
+}
+static int has_nix_reference(const SemResult *r) {
+    for(int i=0;i<r->nreferences;i++) {
+        const SemReference *v=&r->references[i];
+        if(strcmp(v->text,"v16_edge_target"))continue;
+        if(v->owner<0 || v->owner>=r->nsymbols)return 0;
+        return !strcmp(r->symbols[v->owner].name,"v16_edge_caller") &&
+            !strcmp(v->kind,"reference");
+    }
+    return 0;
+}
 
 int main(void) {
     static const Case cases[] = {
@@ -69,12 +94,14 @@ int main(void) {
             (!has_symbol(&result.sem,"Updated","event") ||
              !has_symbol(&result.sem,"launch","function"))) failed++;
         if (!strcmp(cases[i].language,"terraform") &&
-            !has_symbol(&result.sem,"filename","attribute")) failed++;
+            (!has_symbol(&result.sem,"filename","attribute") ||
+             !has_terraform_address(&result.sem))) failed++;
         if (!strcmp(cases[i].language,"erlang") &&
             (!has_symbol(&result.sem,"sample","module") ||
              !has_symbol(&result.sem,"state","record"))) failed++;
         if (!strcmp(cases[i].language,"nix") &&
-            !has_symbol(&result.sem,"value","attribute")) failed++;
+            (!has_symbol(&result.sem,"value","attribute") ||
+             !has_nix_reference(&result.sem))) failed++;
         parse_result_free(&result); free(source);
     }
     /* Thousands of flat siblings exposed repeated child indexing and
