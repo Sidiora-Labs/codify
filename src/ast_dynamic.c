@@ -298,11 +298,16 @@ static char *python_doc(AstContext *c, TSNode body) {
 }
 
 static char *preceding_comment(AstContext *c, TSNode n) {
-    TSNode prev = ts_node_prev_named_sibling(n);
-    if (!is(prev, "comment")) return NULL;
-    TSPoint end = ts_node_end_point(prev), start = ts_node_start_point(n);
-    if (end.row + 1 < start.row) return NULL;
-    return text(c, prev);
+    TSPoint start = ts_node_start_point(n);
+    for (TSNode current = n; !ts_node_is_null(current);
+         current = ts_node_parent(current)) {
+        TSNode prev = ts_node_prev_named_sibling(current);
+        if (ts_node_is_null(prev)) continue;
+        if (!is(prev, "comment")) return NULL;
+        TSPoint end = ts_node_end_point(prev);
+        return end.row + 1 >= start.row ? text(c, prev) : NULL;
+    }
+    return NULL;
 }
 
 static TSNode py_decorators(TSNode n) {

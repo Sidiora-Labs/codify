@@ -39,6 +39,7 @@ for ext in ('py', 'rb', 'php'):
     assert method['qualified_name'].endswith('Worker.run'), (ext, method)
     nested = next(r for r in syms if r['name'] == 'nested')
     assert nested['parent_id'] is not None and nested['qualified_name'].endswith('run.nested'), (ext, nested)
+    assert nested['kind'] == 'function', (ext, nested)
     refs = rows('''SELECT r.name,q.owner_id,q.qualifier,q.start_byte,q.end_byte
                    FROM refs r JOIN semantic_references q ON q.ref_id=r.id
                    WHERE r.file_id=?''', fid)
@@ -61,6 +62,11 @@ py_fact = rows('SELECT name,kind,value FROM semantic_type_facts WHERE file_id=?'
 assert any(f['name']=='engine' and f['kind']=='variable_type' and f['value']=='Runner' for f in py_fact), py_fact
 assert any(f['name']=='Worker' and f['kind']=='inherits' and f['value']=='Base' for f in py_fact), py_fact
 assert any(f['name']=='run' and f['kind']=='decorates' and f['value']=='cached' for f in py_fact), py_fact
+
+rb = fileid('src/example.rb')
+rb_doc = rows('''SELECT q.documentation FROM semantic_symbols q JOIN symbols s ON s.id=q.symbol_id
+                 WHERE s.file_id=? AND s.name='run' ''', rb)
+assert 'Run documentation.' in rb_doc[0]['documentation'], rb_doc
 
 php = fileid('src/example.php')
 php_bind = rows('SELECT module,local_name FROM semantic_bindings WHERE file_id=?', php)
