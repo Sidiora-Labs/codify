@@ -5,6 +5,7 @@
 mkdir -p "$TMP/proj/src" "$TMP/proj/tests"
 cd "$TMP/proj"
 cat > src/alpha.c <<'EOF'
+/** Keep the decoder contract stable for account records. */
 int parseUserRecord(int raw) {
     int decoded = raw + 7;
     return decoded * 2;
@@ -97,6 +98,22 @@ d=json.loads(sys.argv[1]); r=[x for x in d['symbols'] if x.get('name')=='overloa
 assert len(r)==2, r
 assert all('return ' in x.get('snippet','') for x in r), r
 assert d['tokens_used']<=d['budget'], d
+PY
+out="$("$CG" context parseUserRecord --json --budget 1000)"
+python3 - "$out" <<'PY'
+import json,sys
+d=json.loads(sys.argv[1]); r=next(x for x in d['symbols']
+                                if x.get('name')=='parseUserRecord')
+assert r.get('doc') and 'contract' in r['doc'], r
+assert 'int decoded' not in r.get('snippet',''), r
+assert r.get('body_omitted_lines',0)>0, r
+PY
+out="$("$CG" symbol parseUserRecord --json)"
+python3 - "$out" <<'PY'
+import json,sys
+d=json.loads(sys.argv[1]); r=next(x for x in d['definitions']
+                                if x['path']=='src/alpha.c')
+assert 'int decoded' in r['snippet'], r
 PY
 out="$("$CG" context src/alpha.c --json --kind function --name overload)"
 python3 - "$out" <<'PY'
