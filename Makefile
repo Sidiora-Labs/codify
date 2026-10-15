@@ -40,13 +40,14 @@ $(BUILD)/vendor/%.o: vendor/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) -I$(dir $<) $(CFLAGS) -Wno-unused-parameter -Wno-unused-function \
 		-Wno-unused-value -Wno-unused-const-variable -Wno-implicit-fallthrough \
+		-Wno-sign-compare \
 		-Wno-missing-field-initializers -c -o $@ $<
 
 $(LIB): $(filter-out $(BUILD)/main.o,$(OBJS))
 	ar rcs $@ $^
 
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB)
-	$(CC) $(CFLAGS) -Isrc -o $@ $< $(LIB) $(LDLIBS)
+	$(CC) $(CFLAGS) -Isrc -o $@ $< $(filter-out $(BUILD)/main.o,$(OBJS)) $(LDLIBS)
 
 $(BUILD):
 	mkdir -p $(BUILD)

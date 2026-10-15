@@ -1,0 +1,5 @@
+Language: scala
+Source: https://github.com/tree-sitter/tree-sitter-scala.git
+Commit: db390f312a54b04b13790e1767bfac32665c17ac
+License: LICENSE
+Generated grammar: parser.c (upstream)
