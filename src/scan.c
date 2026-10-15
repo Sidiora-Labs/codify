@@ -4,6 +4,7 @@
  * Bounded ring buffer keeps memory flat on huge repos.
  */
 #include "cg.h"
+#include "sem_incremental.h"
 #include "index_health.h"
 #include <dirent.h>
 #include <pthread.h>
@@ -529,6 +530,7 @@ static int write_done(Cg *cg, Stmts *s, const Walked *w, Done *d,
     if (w->dbhash[0] && strcmp(w->dbhash, d->hash) == 0 &&
         !w->semantic_stale) return 0;
 
+    sem_incremental_note(cg, file_id);
     scope_record_file(s, file_id, w->dbhash[0] == 0);
 
     if (d->reuse_from) {
@@ -785,6 +787,7 @@ static int drop_skipped_file(Cg *cg, Stmts *s, const Walked *w,
     sqlite3_reset(s->sel_file);
     sqlite3_clear_bindings(s->sel_file);
     if (!file_id) return 0;
+    sem_incremental_note(cg, file_id);
     scope_record_file(s, file_id, false);
     bool prepurged = s->fts_purged;
     s->fts_purged = false;
@@ -1101,10 +1104,13 @@ static int flush_chunk(Cg *cg, Stmts *s, Walked *jobs, Done *chunk, int n,
                 };
                 index_health_record(cg, w->rel, &hr);
                 if (!chunk[i].failed_read) {
+                    long before_removed = st->files_removed;
                     if (drop_skipped_file(cg, s, w, st) != 0) {
                         st->semantic_failed = true;
                         rc = -1;
-                    } else wrote = true;
+                    } else if (st->files_removed > before_removed) {
+                        wrote = true;
+                    }
                 }
                 st->files_skipped++;
             } else if (write_done(cg, s, w, &chunk[i], st) != 0) {
@@ -1389,6 +1395,7 @@ static int index_pass(Cg *cg, const SysInfo *si, const IndexOpts *o,
         } else {
             sqlite3_stmt *del_file = cg_prep(cg, "DELETE FROM files WHERE id=?");
             for (int i = 0; i < nremoved; i++) {
+                sem_incremental_note(cg, removed_ids[i]);
                 scope_record_file(&s, removed_ids[i], false);
                 if (purge_file_children(cg, &s, removed_ids[i]) != 0) {
                     st->semantic_failed = true;
@@ -1745,6 +1752,7 @@ static bool index_is_fresh(Cg *cg, long max_age_ms) {
     if (max_age_ms <= 0) return false;
     if (index_health_branch_stale(cg)) return false;
     if (syncgate_is_dirty(cg)) return false;
+    if (sem_incremental_needs_run(cg)) return false;
     char migration_sql[128];
     snprintf(migration_sql, sizeof migration_sql,
              "SELECT count(*) FROM files WHERE branch_id=%ld AND mtime_ns IS NULL",
@@ -1857,6 +1865,15 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     snprintf(pragma, sizeof pragma, "PRAGMA mmap_size=%ld;", si->mmap_bytes);
     cg_exec(cg, pragma);
 
+    /* New chunks set the retry marker before commit. Only debt that was
+     * already present on entry requires an all-file recovery pass. */
+    char recovery_key[64];
+    cg_bkey(cg, "index_pending_resolve", recovery_key, sizeof recovery_key);
+    char *prior_pending = cg_meta_get(cg, recovery_key);
+    bool recover = (prior_pending && prior_pending[0] == '1') ||
+                   sem_incremental_pending(cg);
+    free(prior_pending);
+
     /* first pass: the caller's targets plus whatever the note names */
     char **targets = NULL;
     int ntargets = 0;
@@ -1905,6 +1922,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     st->walk = gitpass ? "git" : whole ? "full" : ntargets > 0 ? "targets"
              : "none";
 
+    sem_incremental_init(cg);
     index_scope_begin(cg);
     long whole_at = 0;
     bool stalled = false;
@@ -1953,8 +1971,8 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
     cg_bkey(cg, "index_pending_resolve", pkey, sizeof pkey);
     char *pending = cg_meta_get(cg, pkey);
     bool need_resolve = st->files_indexed + st->files_removed > 0 ||
-                        (pending && pending[0] == '1');
-    bool recover = pending && pending[0] == '1';
+                        (pending && pending[0] == '1') ||
+                        sem_incremental_needs_run(cg);
     free(pending);
     if (!stalled && need_resolve) {
         progress_workers(0);
@@ -1984,22 +2002,7 @@ int cg_index_ex(Cg *cg, const SysInfo *si, const IndexOpts *o, IndexStats *st) {
             }
             index_phase_ms(st, IDX_PH_RESOLVE, ts);
             progress_tick(3, 3, NULL);
-            bool full_sem = o->full || recover || !st->scoped;
-            long *changed = NULL;
-            int nchanged = 0;
-            if (!full_sem) {
-                sqlite3_stmt *q = cg_prep(cg,
-                    "SELECT id FROM temp.scope_files ORDER BY id");
-                while (sqlite3_step(q) == SQLITE_ROW) {
-                    changed = xrealloc(changed,
-                        sizeof *changed * (size_t)(nchanged + 1));
-                    changed[nchanged++] = sqlite3_column_int64(q, 0);
-                }
-                sqlite3_finalize(q);
-            }
-            int sem_rc = sem_pass_run(cg, full_sem ? NULL : changed, nchanged);
-            free(changed);
-            if (sem_rc == 0) {
+            if (sem_incremental_run(cg, o->full || recover) == 0) {
                 index_health_finish(cg);
                 cg_meta_set(cg, pkey, "0");
                 cg_exec(cg, "COMMIT");

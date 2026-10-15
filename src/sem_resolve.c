@@ -10,6 +10,7 @@
 #define MAX_CANDIDATES 128
 typedef struct {
     long id, file_id, parent_id;
+    int line;
     char path[512], qualified[512], visibility[32], signature[512];
     int declaration, min_args, max_args;
 } Candidate;
@@ -196,14 +197,14 @@ static int candidates(Cg *cg, const char *name, Candidate *out, int address) {
     sqlite3_stmt *q=cg_prep(cg,address ?
         "SELECT s.id,s.file_id,ifnull(ss.parent_id,0),f.path,"
         "ifnull(ss.visibility,''),ifnull(s.sig,''),s.decl,"
-        "ifnull(ss.qualified_name,'') "
+        "ifnull(ss.qualified_name,''),s.line "
         "FROM symbols s JOIN files f ON f.id=s.file_id "
         "JOIN semantic_symbols ss ON ss.symbol_id=s.id "
         "WHERE f.branch_id=? AND ss.qualified_name=? AND s.kind='block' "
         "ORDER BY f.path,s.line,s.id LIMIT 129" :
         "SELECT s.id,s.file_id,ifnull(ss.parent_id,0),f.path,"
         "ifnull(ss.visibility,''),ifnull(s.sig,''),s.decl,"
-        "ifnull(ss.qualified_name,'') "
+        "ifnull(ss.qualified_name,''),s.line "
         "FROM symbols s JOIN files f ON f.id=s.file_id "
         "JOIN semantic_symbols ss ON ss.symbol_id=s.id "
         "WHERE f.branch_id=? AND s.name=? ORDER BY f.path,s.line,s.id LIMIT 129");
@@ -220,6 +221,7 @@ static int candidates(Cg *cg, const char *name, Candidate *out, int address) {
         snprintf(c->signature,sizeof c->signature,"%s",col(q,5));
         c->declaration=sqlite3_column_int(q,6);
         snprintf(c->qualified,sizeof c->qualified,"%s",col(q,7));
+        c->line=sqlite3_column_int(q,8);
         signature_arity(c->signature,&c->min_args,&c->max_args);
     }
     sqlite3_finalize(q); return n;
@@ -275,6 +277,11 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
     sqlite3_stmt *del=cg_prep(cg,
         "DELETE FROM semantic_edges WHERE branch_id=? AND source_ref_id=? "
         "AND provenance='resolved-receiver'");
+    sqlite3_stmt *existing=cg_prep(cg,
+        "SELECT 1 FROM semantic_edges WHERE branch_id=? AND source_ref_id=? "
+        "AND source_file_id=? AND source_id IS ? AND target_id=? AND kind=? "
+        "AND start_line=? AND start_column=? "
+        "AND provenance<>'resolved-receiver' LIMIT 1");
     sqlite3_stmt *edge=cg_prep(cg,
         "INSERT INTO semantic_edges(branch_id,source_file_id,target_file_id,"
         "source_id,target_id,source_ref_id,kind,original_text,strategy,"
@@ -403,14 +410,14 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
         long target_file=target ? c[best].file_id : 0;
         char evidence[768];
         if (target)
-            snprintf(evidence,sizeof evidence,"receiver=%.160s; owner=%ld; argc=%d; target=%.400s:%ld",
-                     *qual?qual:"(unqualified)",owner,argc,c[best].path,target);
+            snprintf(evidence,sizeof evidence,"receiver=%.160s; argc=%d; target=%.400s:%d",
+                     *qual?qual:"(unqualified)",argc,c[best].path,c[best].line);
         else {
             snprintf(evidence,sizeof evidence,"receiver=%.160s; argc=%d; candidates=%d; reason=%.256s",
                      *qual?qual:"(unqualified)",argc,matches,why);
             if (matches>1) {
                 size_t used=strlen(evidence);
-                used+=(size_t)snprintf(evidence+used,sizeof evidence-used,"; candidate_ids=");
+                used+=(size_t)snprintf(evidence+used,sizeof evidence-used,"; candidate_sites=");
                 int listed=0;
                 for (int i=0;i<nc && i<MAX_CANDIDATES && listed<8;i++) {
                     Candidate *v=&c[i];
@@ -420,9 +427,9 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
                     if (!*qual && !owner && v->parent_id) continue;
                     if (argc>=0 && v->min_args>=0 &&
                         (argc<v->min_args || (v->max_args>=0 && argc>v->max_args))) continue;
-                    if (used+32>=sizeof evidence) break;
+                    if (used+80>=sizeof evidence) break;
                     used+=(size_t)snprintf(evidence+used,sizeof evidence-used,
-                                           "%s%ld",listed?",":"",v->id);
+                                           "%s%.64s:%d",listed?",":"",v->path,v->line);
                     listed++;
                 }
             }
@@ -442,6 +449,17 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
         sqlite3_bind_int64(legacy,4,rid);
         sqlite3_step(legacy); sqlite3_reset(legacy); sqlite3_clear_bindings(legacy);
         if (target) {
+            sqlite3_bind_int64(existing,1,cg->branch_id);
+            sqlite3_bind_int64(existing,2,rid);
+            sqlite3_bind_int64(existing,3,fid);
+            bind_nullable_id(existing,4,source);
+            sqlite3_bind_int64(existing,5,target);
+            sqlite3_bind_text(existing,6,value_ref?"references":"calls",-1,SQLITE_STATIC);
+            sqlite3_bind_int(existing,7,line);
+            sqlite3_bind_int(existing,8,column);
+            int already_linked=sqlite3_step(existing)==SQLITE_ROW;
+            sqlite3_reset(existing); sqlite3_clear_bindings(existing);
+            if (already_linked) continue;
             sqlite3_bind_int64(edge,1,cg->branch_id);
             sqlite3_bind_int64(edge,2,fid);
             sqlite3_bind_int64(edge,3,target_file);
@@ -456,7 +474,7 @@ int sem_resolve_run(Cg *cg, const long *changed_files, int nfiles) {
         }
     }
     sqlite3_finalize(refs); sqlite3_finalize(upd); sqlite3_finalize(legacy);
-    sqlite3_finalize(del); sqlite3_finalize(edge);
+    sqlite3_finalize(del); sqlite3_finalize(existing); sqlite3_finalize(edge);
     return 0;
 }
 

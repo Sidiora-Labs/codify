@@ -64,15 +64,15 @@
     - Implement framework route adapters and mount composition for all req 3.5 frameworks, method-specific file routes, page/navigation relationships and handler-symbol links. Test ambiguity and registration-only updates.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.5_
-  - [ ] 3.5 Callback interface and runtime dispatch synthesis
+  - [x] 3.5 Callback interface and runtime dispatch synthesis
     - Build bounded callback/observer/event/interface/C-function-pointer/React-render/component and native-bridge passes from explicit registration/type evidence. Stamp heuristic provenance and wiring sites, preserve dynamic boundaries and transactional replacement.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.6, 3.8_
-  - [ ] 3.6 HTTP queue and message channel synthesis
+  - [x] 3.6 HTTP queue and message channel synthesis
     - Connect literal HTTP method/path to unique routes and compatible named queue/bus/socket producers/consumers; reject ambiguous or computed inputs. Record channel/tier/registration evidence and avoid duplicate or unbounded fanout.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.7, 3.8_
-  - [ ] 3.7 Incremental semantic dependency invalidation
+  - [x] 3.7 Incremental semantic dependency invalidation
     - Integrate all semantic passes with changed-definition/configuration/registration dependency sets, persistent failed refs, stale-target resurrection and no-op skipping. Publish complete generations transactionally and recover interrupted work.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.5, 3.8_
@@ -80,11 +80,11 @@
     - Expose file coverage/parser inventory/index state and pending/degraded health through info/status and MCP. Validate contributing source hashes under explicit file/byte/time caps; distinguish verified/stale/unchecked and partial extraction.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.5_
-  - [ ] 4.2 Structured search and context sufficiency
+  - [x] 4.2 Structured search and context sufficiency
     - Add branch-aware identifier postings, composable kind/lang/path/name filters, exact-name precedence and bounded fuzzy fallback. Return source bodies and overloads with co-location evidence, weak-query confidence and omission budgets while preserving existing text ranking.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.1, 4.2_
-  - [ ] 4.3 Bounded flow traversal and dynamic boundaries
+  - [x] 4.3 Bounded flow traversal and dynamic boundaries
     - Expose bounded paths among named symbols, callers/callees/impact over typed relations with source evidence and heuristic labels, depth/node/edge/time budgets and explicit unresolved dynamic boundaries through CLI and MCP.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.3_
@@ -92,7 +92,7 @@
     - Expose ancestors/subtypes/implementations and unreferenced candidates with exclusion reasons for exports, framework roots, reflection, generated files and uncertain incoming boundaries. Never equate missing graph edges with safe deletion.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.4_
-  - [ ] 5.1 Labelled extraction and graph convergence corpus
+  - [x] 5.1 Labelled extraction and graph convergence corpus
     - Build source-labelled positive/negative cases across every advertised language/framework; report precision/recall/coverage by adapter. Compare canonical graph sets after edit/delete/rename/config changes and commit replay against true clean rebuilds across worktrees and failure recovery.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 5.1, 5.2_
