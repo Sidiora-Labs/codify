@@ -34,6 +34,7 @@ require "SELECT count(*) FROM semantic_edges WHERE kind='state_render' AND sourc
 require "SELECT count(*) FROM semantic_edges WHERE strategy LIKE 'dispatch:%' AND (provenance<>'heuristic' OR registration_path='' OR registration_line IS NULL)" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='callback' AND original_text='unproved'" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='observer_dispatch' AND original_text='unknownObserver'" 0
+require "SELECT count(*) FROM semantic_edges e JOIN symbols s ON s.id=e.source_id WHERE e.kind='observer_dispatch' AND s.name='shadow'" 0
 require "SELECT count(*) FROM semantic_edges WHERE kind='native_dispatch' AND channel='computed'" 0
 
 # A same-name overload has no safe target without signature evidence.

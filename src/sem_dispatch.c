@@ -127,14 +127,15 @@ static int relevant(Cg *cg,const long *files,int n) {
 }
 
 static char *local_observer(Cg *cg,long file,int line) {
-    sqlite3_stmt *q=cg_prep(cg,"SELECT DISTINCT qualifier FROM semantic_references "
+    sqlite3_stmt *q=cg_prep(cg,"SELECT DISTINCT qualifier,owner_id FROM semantic_references "
                               "WHERE file_id=?1 AND start_line=?2 AND kind='call' "
                               "AND qualifier IS NOT NULL AND qualifier<>'' LIMIT 2");
     sqlite3_bind_int64(q,1,file);sqlite3_bind_int(q,2,line);
-    char *receiver=NULL;
+    char *receiver=NULL;long owner=0;
     if(sqlite3_step(q)==SQLITE_ROW) {
         const char *v=(const char*)sqlite3_column_text(q,0);
         if(v && *v) receiver=xstrdup(v);
+        owner=sqlite3_column_int64(q,1);
         if(sqlite3_step(q)==SQLITE_ROW) {free(receiver);receiver=NULL;}
     }
     sqlite3_finalize(q);
@@ -145,6 +146,22 @@ static char *local_observer(Cg *cg,long file,int line) {
     int count=0;if(sqlite3_step(q)==SQLITE_ROW)count=sqlite3_column_int(q,0);
     sqlite3_finalize(q);
     if(count!=1){free(receiver);return NULL;}
+    q=cg_prep(cg,"SELECT count(*) FROM symbols WHERE file_id=?1 AND name=?2");
+    sqlite3_bind_int64(q,1,file);sqlite3_bind_text(q,2,receiver,-1,SQLITE_TRANSIENT);
+    count=0;if(sqlite3_step(q)==SQLITE_ROW)count=sqlite3_column_int(q,0);
+    sqlite3_finalize(q);
+    if(count!=1){free(receiver);return NULL;}
+    if(owner) {
+        q=cg_prep(cg,"SELECT sig FROM symbols WHERE id=?1");
+        sqlite3_bind_int64(q,1,owner);
+        int shadow=0;
+        if(sqlite3_step(q)==SQLITE_ROW) {
+            const char *sig=(const char*)sqlite3_column_text(q,0);
+            shadow=sig && strstr(sig,receiver)!=NULL;
+        }
+        sqlite3_finalize(q);
+        if(shadow){free(receiver);return NULL;}
+    }
     return receiver;
 }
 
