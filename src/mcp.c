@@ -80,6 +80,9 @@ static int t_context(void *v) {
     char *q = c->args ? json_get_string(c->args, "query") : NULL;
     if (!q) { printf("{\"error\":\"missing query\"}\n"); return 1; }
     int budget = (int)json_get_int(c->args, "budget", 4000);
+    char *budget_raw = c->args ? json_get_raw(c->args, "budget") : NULL;
+    if (budget_raw) budget = answer_health_query_budget(budget);
+    free(budget_raw);
     int limit = (int)json_get_int(c->args, "limit", 8);
     QueryFilter f;
     mcp_filter(c, &f);
@@ -152,6 +155,9 @@ static int t_impact(void *v) {
     if (!n) { printf("{\"error\":\"missing name\"}\n"); return 1; }
     int depth = (int)json_get_int(c->args, "depth", 3);
     int budget = (int)json_get_int(c->args, "budget", 8000);
+    char *budget_raw = c->args ? json_get_raw(c->args, "budget") : NULL;
+    if (budget_raw) budget = answer_health_query_budget(budget);
+    free(budget_raw);
     int rc = cmd_impact(c->cg, n, depth > 0 ? depth : 3,
                         budget > 0 ? budget : 8000, true);
     free(n);
@@ -1352,7 +1358,13 @@ int mcp_call_tool(Cg *cg, const SysInfo *si, const char *name,
          strcmp(name, "inspect_hierarchy") == 0 ||
          strcmp(name, "inspect_unreferenced") == 0 ||
          strcmp(name, "flow") == 0)) {
-        char *enriched = answer_health_json(cg, *out);
+        int requested = args_json &&
+            (strcmp(name, "get_context") == 0 ||
+             strcmp(name, "impact_analysis") == 0) ?
+            (int)json_get_int(args_json, "budget", 0) : 0;
+        size_t max_bytes = requested > 0 && requested < 1000000 ?
+            (size_t)requested * 4 : 0;
+        char *enriched = answer_health_json_limit(cg, *out, max_bytes);
         free(*out);
         *out = enriched;
     }
