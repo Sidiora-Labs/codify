@@ -267,7 +267,7 @@ reqs = ["1.5", "3.8"]
 
 [task.4.1]
 title = "Freshness and coverage on CLI and MCP answers"
-status = "pending"
+status = "done"
 wave = 4
 requires = ["1.1", "1.2", "1.3", "2.1"]
 touches = ["src/answer_health.c", "src/answer_health.h", "src/main.c", "src/mcp.c", "src/help.c", "tests/integration/72_answer_health.sh"]

@@ -76,7 +76,7 @@
     - Integrate all semantic passes with changed-definition/configuration/registration dependency sets, persistent failed refs, stale-target resurrection and no-op skipping. Publish complete generations transactionally and recover interrupted work.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 1.5, 3.8_
-  - [ ] 4.1 Freshness and coverage on CLI and MCP answers
+  - [x] 4.1 Freshness and coverage on CLI and MCP answers
     - Expose file coverage/parser inventory/index state and pending/degraded health through info/status and MCP. Validate contributing source hashes under explicit file/byte/time caps; distinguish verified/stale/unchecked and partial extraction.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.5_
