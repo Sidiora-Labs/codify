@@ -56,7 +56,7 @@
     - Resolve this/self, imported namespaces and known constructor/declared receivers; apply owner/visibility/signature evidence and abstain on equal ambiguity. Preserve original reference and resolution provenance; retry affected unchanged callers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.2, 3.4_
-  - [-] 3.3 Type hierarchy and semantic relation construction
+  - [x] 3.3 Type hierarchy and semantic relation construction
     - Resolve containment/inheritance/implements/types/returns/instantiation/overrides/decorators/exports as typed relations with sites and evidence. Respect branch and scope; provide reusable type hierarchy helpers.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 3.3, 3.4_
