@@ -1,0 +1,5 @@
+source=https://github.com/tree-sitter-grammars/tree-sitter-lua.git
+revision=10fe0054734eec83049514ea2e718b2a56acd0c9
+license=LICENSE.md
+parser=src/parser.c
+scanner=src/scanner.c
