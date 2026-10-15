@@ -83,6 +83,14 @@ def stage(cg, root, db, name, flags, env):
 def compare_baseline(current, baseline, factor, floor_ms):
     """Report measured regressions; latency floor absorbs timer granularity."""
     findings = []
+    prior_query = baseline.get("source_to_query_ms")
+    current_query = current.get("source_to_query_ms")
+    if isinstance(prior_query, (int, float)) and prior_query > 0 and \
+       isinstance(current_query, (int, float)) and \
+       current_query > max(floor_ms, prior_query * factor):
+        findings.append({"stage": "edit", "metric": "source_to_query_ms",
+                         "actual": current_query,
+                         "limit": max(floor_ms, prior_query * factor)})
     for name, now in current["stages"].items():
         old = baseline.get("stages", {}).get(name)
         if not old:
@@ -99,6 +107,13 @@ def compare_baseline(current, baseline, factor, floor_ms):
             if isinstance(prior, (int, float)) and prior > 0 and actual > prior * factor:
                 findings.append({"stage": name, "metric": metric,
                                  "actual": actual, "limit": prior * factor})
+        prior_db = old.get("database", {})
+        now_db = now.get("database", {})
+        prior_size = prior_db.get("main_bytes", 0) + prior_db.get("wal_bytes", 0)
+        actual_size = now_db.get("main_bytes", 0) + now_db.get("wal_bytes", 0)
+        if prior_size > 0 and actual_size > prior_size * factor:
+            findings.append({"stage": name, "metric": "database_bytes",
+                             "actual": actual_size, "limit": prior_size * factor})
     return findings
 
 
@@ -178,16 +193,24 @@ def main():
     edit.write_text(edit.read_text() + "\nexport function ResourceProbe(): number { return 7; }\n")
     stamp = time.perf_counter_ns()
     stages["edit"] = stage(cg, project, db, "edit", ["sync", "--workers", str(a.workers)], env)
-    search, search_timing = command([str(cg), "search", "ResourceProbe"], project, env)
-    if "ResourceProbe" not in search:
+    search, search_timing = command([str(cg), "search", "ResourceProbe", "--json"], project, env)
+    if not json.loads(search).get("symbols"):
         raise RuntimeError("edited symbol did not reach query results")
     result["source_to_query_ms"] = (time.perf_counter_ns() - stamp) // 1_000_000
     result["query_wall_ms"] = search_timing["wall_ms"]
     delete.unlink()
     stages["delete"] = stage(cg, project, db, "delete", ["sync", "--workers", str(a.workers)], env)
+    with sqlite3.connect(db) as c:
+        if c.execute("SELECT 1 FROM files WHERE path=?", (str(delete.relative_to(project)),)).fetchone():
+            raise RuntimeError("deleted path remained in file index")
     renamed = rename.with_name(rename.stem + "_moved.ts")
     rename.rename(renamed)
     stages["rename"] = stage(cg, project, db, "rename", ["sync", "--workers", str(a.workers)], env)
+    with sqlite3.connect(db) as c:
+        if c.execute("SELECT 1 FROM files WHERE path=?", (str(rename.relative_to(project)),)).fetchone():
+            raise RuntimeError("renamed old path remained in file index")
+        if not c.execute("SELECT 1 FROM files WHERE path=?", (str(renamed.relative_to(project)),)).fetchone():
+            raise RuntimeError("renamed new path missing from file index")
     command(["git", "add", "-A"], project, env)
     command(["git", "-c", "user.email=bench@local", "-c", "user.name=Bench",
              "commit", "-qm", "changes"], project, env)
@@ -196,14 +219,24 @@ def main():
     command(["git", "reset", "--hard", base.strip()], project, env)
     stages["replay_back"] = stage(cg, project, db, "replay_back",
                                   ["sync", "--workers", str(a.workers)], env)
+    old_query, _ = command([str(cg), "search", "ResourceProbe", "--json"], project, env)
+    if json.loads(old_query).get("symbols"):
+        raise RuntimeError("replay to base retained changed symbol")
     command(["git", "reset", "--hard", changed.strip()], project, env)
     stages["replay_forward"] = stage(cg, project, db, "replay_forward",
                                      ["sync", "--workers", str(a.workers)], env)
+    new_query, _ = command([str(cg), "search", "ResourceProbe", "--json"], project, env)
+    if not json.loads(new_query).get("symbols"):
+        raise RuntimeError("replay to changed commit lost changed symbol")
     stages["full"] = stage(cg, project, db, "full",
                             ["index", "--full", "--workers", str(a.workers)], env)
 
     errors = []
+    if stages["cold"].get("child_peak_rss_kb", 0) > a.max_rss_mb * 1024:
+        errors.append(f"cold: peak RSS exceeds {a.max_rss_mb} MiB")
     for name, run in stages.items():
+        if sum(run["database"].values()) > source_bytes * a.max_db_ratio:
+            errors.append(f"{name}: database growth exceeds configured source ratio")
         stats = run.get("stats")
         if not stats:
             continue
@@ -225,9 +258,6 @@ def main():
     if stages["replay_back"]["stats"].get("indexed", 0) < 1 or \
        stages["replay_forward"]["stats"].get("indexed", 0) < 1:
         errors.append("commit replay did not refresh changed source")
-    final_bytes = sum(stages["full"]["database"].values())
-    if final_bytes > source_bytes * a.max_db_ratio:
-        errors.append("database growth exceeds configured source ratio")
     if a.baseline:
         errors.extend(compare_baseline(result, json.loads(a.baseline.read_text()),
                                        a.regression_factor, a.latency_floor_ms))

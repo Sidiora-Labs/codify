@@ -14,6 +14,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+sys.dont_write_bytecode = True
 
 d = json.loads(Path(sys.argv[1]).read_text())
 assert d['format'] == 'codify-index-benchmark-v1'
@@ -51,6 +52,19 @@ baseline = {'stages': {'noop': {'wall_ms': 1,
 findings = mod.compare_baseline(d, baseline, 1.1, 1)
 assert any(f['metric'] == 'wall_ms' for f in findings), findings
 assert any(f['metric'] == 'peak_rss_kb' for f in findings), findings
+PY
+
+# A deliberately impossible memory cap must fail with measured evidence.
+LOW="$TMP/low-cap.json"
+rc=0
+python3 "$HERE/scripts/bench-indexing.py" --cg "$CG" \
+    --files 20 --lines 700 --workers 1 --max-rss-mb 1 \
+    --output "$LOW" >/dev/null || rc=$?
+[ "$rc" -eq 1 ] || fail "memory cap returned $rc"
+python3 - "$LOW" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert any('peak RSS' in str(x) for x in d['regressions']), d['regressions']
 PY
 
 echo 'index resources: ok'
