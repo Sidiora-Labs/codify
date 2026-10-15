@@ -26,6 +26,9 @@ cat > src/alpha.h <<'EOF'
 /** Keep the decoder contract stable for account records. */
 int parseUserRecord(int raw);
 EOF
+cat > src/weak.c <<'EOF'
+extern int parseUserRecord(int raw) __attribute__((weak));
+EOF
 cat > src/owners.cpp <<'EOF'
 struct Alpha {
     int process(int value);
