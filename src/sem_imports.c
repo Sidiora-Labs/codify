@@ -568,7 +568,9 @@ int sem_imports_pass(Cg *cg,const long *changed_files,int nfiles) {
     sqlite3_finalize(p.add_dependency);
     return 0;
 }
-int sem_imports_register(void) { return sem_pass_register("imports",10,sem_imports_pass); }
+void sem_imports_register(void) {
+    (void)sem_pass_register("imports",10,sem_imports_pass);
+}
 
 bool sem_imports_config_changed(Cg *cg) {
     sqlite3_stmt *q=cg_prep(cg,"SELECT DISTINCT dependency_key,dependency_hash "

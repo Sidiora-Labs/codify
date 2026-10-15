@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+CG=${CG:-$PWD/cg}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/tree/src" "$work/tree/app" "$work/tree/packages/pkg/src"
@@ -193,4 +194,53 @@ w=pathlib.Path(sys.argv[1]);db=sqlite3.connect(w/'graph.db')
 row=db.execute('SELECT target_file_id,target_symbol_id FROM semantic_bindings WHERE id=204').fetchone()
 assert row==(4,104),row
 print('sem_imports: explicit aliases, reexports, cycles, namespace, workspace, config invalidation, branch scope OK')
+PY
+mkdir -p "$work/live/src" "$work/live/app"
+cat > "$work/live/src/a.ts" <<'TS'
+export function foo() { return 1; }
+TS
+cat > "$work/live/src/alt.ts" <<'TS'
+export function foo() { return 2; }
+TS
+cat > "$work/live/src/bar.ts" <<'TS'
+export { foo as bar } from './a';
+TS
+cat > "$work/live/app/main.ts" <<'TS'
+import { bar as local } from '../src/bar';
+import { foo as aliasFoo } from '@/a';
+local(); aliasFoo();
+TS
+cat > "$work/live/app/tsconfig.json" <<'JSON'
+{"compilerOptions":{"paths":{"@/*":["../src/*"]}}}
+JSON
+(cd "$work/live" && "$CG" init --nested >/dev/null)
+python3 - "$work" <<'PY'
+import pathlib,sqlite3,sys
+root=pathlib.Path(sys.argv[1])/'live'
+paths=list(root.glob('.*/*.db'))
+assert len(paths)==1,paths
+db=sqlite3.connect(paths[0])
+rows=dict(db.execute('''SELECT b.local_name,tf.path FROM semantic_bindings b
+ JOIN files f ON f.id=b.file_id LEFT JOIN files tf ON tf.id=b.target_file_id
+ WHERE f.path='app/main.ts' '''))
+assert rows['local']=='src/bar.ts',rows
+assert rows['aliasFoo']=='src/a.ts',rows
+assert db.execute('''SELECT b.target_symbol_id FROM semantic_bindings b
+ JOIN files f ON f.id=b.file_id WHERE f.path='app/main.ts'
+ AND b.local_name='local' ''').fetchone()[0] is not None
+db.close()
+PY
+cat > "$work/live/app/tsconfig.json" <<'JSON'
+{"compilerOptions":{"paths":{"@/*":["../src/alt"]}}}
+JSON
+(cd "$work/live" && "$CG" sync >/dev/null)
+python3 - "$work" <<'PY'
+import pathlib,sqlite3,sys
+root=pathlib.Path(sys.argv[1])/'live'
+db=sqlite3.connect(next(root.glob('.*/*.db')))
+row=db.execute('''SELECT tf.path FROM semantic_bindings b
+ JOIN files f ON f.id=b.file_id LEFT JOIN files tf ON tf.id=b.target_file_id
+ WHERE f.path='app/main.ts' AND b.local_name='aliasFoo' ''').fetchone()
+assert row==('src/alt.ts',),row
+print('sem_imports: parsed bindings and configuration-only sync OK')
 PY
