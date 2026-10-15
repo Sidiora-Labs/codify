@@ -88,7 +88,7 @@
     - Expose bounded paths among named symbols, callers/callees/impact over typed relations with source evidence and heuristic labels, depth/node/edge/time budgets and explicit unresolved dynamic boundaries through CLI and MCP.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.3_
-  - [ ] 4.4 Hierarchy and conservative dead-code inspection
+  - [x] 4.4 Hierarchy and conservative dead-code inspection
     - Expose ancestors/subtypes/implementations and unreferenced candidates with exclusion reasons for exports, framework roots, reflection, generated files and uncertain incoming boundaries. Never equate missing graph edges with safe deletion.
     - Implement only this task in an isolated worktree. Run meaningful positive and negative regression tests, record evidence in the task-tagged commit, and qualify dependencies before declaring done. Coordinate shared APIs with their owners; do not weaken tests or silently reduce the acceptance scope.
     - _Requirements: 4.4_
