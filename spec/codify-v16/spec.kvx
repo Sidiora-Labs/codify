@@ -168,7 +168,7 @@ reqs = ["2.6"]
 
 [task.2.7]
 title = "Configuration and scripting language syntax extraction"
-status = "in_progress"
+status = "done"
 wave = 2
 requires = ["2.1", "2.2"]
 touches = ["src/ast_extended.c", "vendor/parsers/extended/**", "tests/integration/63_ast_extended.sh", "tests/fixtures/semantic/extended/**"]
