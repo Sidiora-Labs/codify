@@ -53,7 +53,7 @@ files=[(1,1,'src/a.ts','typescript'),(2,1,'src/bar.ts','typescript'),
  (14,1,'app/use.py','python'),(15,1,'pkg/mod.py','python'),
  (16,1,'app/helpers.py','python'),(17,1,'src/Foo/Bar.php','php'),
  (18,1,'src/main.php','php'),(19,1,'src/lib.rs','rust'),
- (20,1,'src/foo.rs','rust')]
+ (20,1,'src/foo.rs','rust'),(21,1,'isolated/entry.ts','typescript')]
 db.executemany('INSERT INTO files VALUES(?,?,?,?)',files)
 db.executemany('INSERT INTO symbols VALUES(?,?,?,0)',[(101,1,'foo'),(104,4,'foo'),(105,5,'foo'),(901,9,'foo'),(111,11,'pyfoo')])
 db.executemany('INSERT INTO semantic_symbols VALUES(?,1)',[(101,),(104,),(105,),(901,)])
@@ -79,7 +79,8 @@ bindings=[
  (219,14,'.helpers','relativeModule',None,'import',None,0,0),
  (220,14,'..pymod','parentModule',None,'import',None,0,0),
  (221,18,'Foo\\Bar','Bar','Foo\\Bar','namespace-use',None,0,0),
- (222,19,'crate::foo::Item','Item','Item','use',None,0,0)]
+ (222,19,'crate::foo::Item','Item','Item','use',None,0,0),
+ (998,21,'./later','later','*','namespace',None,0,0)]
 db.executemany('''INSERT INTO semantic_bindings(id,file_id,module,local_name,original_name,
  kind,exported_name,is_export,is_system) VALUES(?,?,?,?,?,?,?,?,?)''',bindings)
 db.commit();db.close()
@@ -106,8 +107,62 @@ assert get(219)==(16,None), get(219)
 assert get(220)==(11,None), get(220)
 assert get(221)==(17,None), get(221)
 assert get(222)==(20,None), get(222)
+assert get(998)==(None,None), get(998)
 assert db.execute('SELECT COUNT(*) FROM semantic_dependencies WHERE branch_id=1 AND kind="project-config" AND dependency_hash IS NOT NULL').fetchone()[0]>=1
 assert db.execute('SELECT COUNT(*) FROM semantic_dependencies WHERE branch_id=2').fetchone()[0]==0
+db.close()
+PY
+python3 - "$work" <<'PY'
+import pathlib,sqlite3,sys
+db=sqlite3.connect(pathlib.Path(sys.argv[1])/'graph.db')
+db.execute('DELETE FROM symbols WHERE id=101')
+db.execute('DELETE FROM semantic_symbols WHERE symbol_id=101')
+db.execute('INSERT INTO symbols VALUES(102,1,"foo",0)')
+db.execute('INSERT INTO semantic_symbols VALUES(102,1)')
+db.execute('''INSERT INTO semantic_bindings(id,file_id,module,local_name,original_name,
+ kind,is_export,is_system,target_file_id,target_symbol_id)
+ VALUES(999,21,'./missing','unrelated','foo','import',0,0,17,111)''')
+db.commit();db.close()
+PY
+cat > "$work/scoped.c" <<'C'
+#include "cg.h"
+#include "sem_imports.h"
+#include "semantic.h"
+__attribute__((weak)) int sem_pass_register(const char *name,int order,SemPassFn fn) {
+    (void)name;(void)order;(void)fn;return 0;
+}
+int main(int argc,char **argv) {
+ Cg cg={0}; if(argc!=4 || sqlite3_open(argv[1],&cg.db)!=SQLITE_OK) return 2;
+ snprintf(cg.root,sizeof cg.root,"%s",argv[2]);cg.branch_id=1;
+ long changed=atol(argv[3]);int rc=sem_imports_pass(&cg,&changed,1);
+ sqlite3_close(cg.db);return rc;
+}
+C
+cc -std=gnu11 -Isrc -o "$work/scoped" "$work/scoped.c" build/libcg.a -lsqlite3 -lpthread -lm
+"$work/scoped" "$work/graph.db" "$work/tree" 1
+python3 - "$work" <<'PY'
+import pathlib,sqlite3,sys
+db=sqlite3.connect(pathlib.Path(sys.argv[1])/'graph.db')
+get=lambda i:db.execute('SELECT target_file_id,target_symbol_id FROM semantic_bindings WHERE id=?',(i,)).fetchone()
+assert get(201)==(None,102),get(201)
+assert get(202)==(1,102),get(202)
+assert get(203)==(2,102),get(203)
+assert get(204)==(1,102),get(204)
+assert get(999)==(17,111),get(999)
+db.close()
+PY
+python3 - "$work" <<'PY'
+import pathlib,sqlite3,sys
+db=sqlite3.connect(pathlib.Path(sys.argv[1])/'graph.db')
+db.execute('INSERT INTO files VALUES(22,1,"isolated/later.ts","typescript")')
+db.commit();db.close()
+PY
+"$work/scoped" "$work/graph.db" "$work/tree" 22
+python3 - "$work" <<'PY'
+import pathlib,sqlite3,sys
+db=sqlite3.connect(pathlib.Path(sys.argv[1])/'graph.db')
+row=db.execute('SELECT target_file_id,target_symbol_id FROM semantic_bindings WHERE id=998').fetchone()
+assert row==(22,None),row
 db.close()
 PY
 python3 - "$work" <<'PY'

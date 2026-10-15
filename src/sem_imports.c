@@ -24,6 +24,43 @@ typedef struct {
     sqlite3_stmt *find_file, *update_binding, *add_dependency;
 } ImportPass;
 
+static void make_scope(Cg *cg,const long *changed,int n) {
+    cg_exec(cg,"CREATE TEMP TABLE IF NOT EXISTS sem_import_scope(id INTEGER PRIMARY KEY)");
+    cg_exec(cg,"DELETE FROM temp.sem_import_scope");
+    sqlite3_stmt *put=cg_prep(cg,"INSERT OR IGNORE INTO temp.sem_import_scope(id) VALUES(?1)");
+    for (int i=0;i<n;i++) {
+        sqlite3_bind_int64(put,1,changed[i]);
+        if (sqlite3_step(put)!=SQLITE_DONE) {
+            fprintf(stderr,"cg: import scope: %s\n",sqlite3_errmsg(cg->db)); exit(2);
+        }
+        sqlite3_reset(put); sqlite3_clear_bindings(put);
+    }
+    sqlite3_finalize(put);
+    /* Follow reverse file dependencies until the export chain closes.
+     * The depth bound protects an index damaged by arbitrary cycles. */
+    sqlite3_stmt *more=cg_prep(cg,
+        "INSERT OR IGNORE INTO temp.sem_import_scope(id) "
+        "SELECT d.file_id FROM semantic_dependencies d "
+        "JOIN files source ON source.id=d.file_id AND source.branch_id=?1 "
+        "JOIN files target ON target.branch_id=?1 "
+        "AND target.path=d.dependency_key "
+        "JOIN temp.sem_import_scope scope ON scope.id=target.id "
+        "WHERE d.branch_id=?1 AND d.kind='module-file' "
+        "UNION SELECT b.file_id FROM semantic_bindings b "
+        "JOIN files source ON source.id=b.file_id AND source.branch_id=?1 "
+        "JOIN temp.sem_import_scope scope ON scope.id=b.target_file_id");
+    for (int depth=0;depth<EXPORT_DEPTH;depth++) {
+        sqlite3_bind_int64(more,1,cg->branch_id);
+        if (sqlite3_step(more)!=SQLITE_DONE) {
+            fprintf(stderr,"cg: import scope: %s\n",sqlite3_errmsg(cg->db)); exit(2);
+        }
+        int added=sqlite3_changes(cg->db);
+        sqlite3_reset(more); sqlite3_clear_bindings(more);
+        if (!added) break;
+    }
+    sqlite3_finalize(more);
+}
+
 static char *copy_col(sqlite3_stmt *q, int col) {
     const char *s=(const char *)sqlite3_column_text(q,col);
     return s ? xstrdup(s) : NULL;
@@ -104,6 +141,31 @@ static void dependency(ImportPass *p, long fid, const char *key, const char *has
     sqlite3_bind_int64(q,1,p->cg->branch_id);
     sqlite3_bind_int64(q,2,fid); bind_str(q,3,key); bind_str(q,4,hash);
     bind_str(q,5,kind); checked_step(p->cg,q);
+}
+static void file_dependency(ImportPass *p,long source,long target) {
+    sqlite3_stmt *q=cg_prep(p->cg,
+        "SELECT path FROM files WHERE id=?1 AND branch_id=?2");
+    sqlite3_bind_int64(q,1,target); sqlite3_bind_int64(q,2,p->cg->branch_id);
+    if (sqlite3_step(q)==SQLITE_ROW) {
+        const char *path=(const char *)sqlite3_column_text(q,0);
+        if (path) dependency(p,source,path,NULL,"module-file");
+    }
+    sqlite3_finalize(q);
+}
+static void unresolved_candidates(ImportPass *p,long source,const char *from,
+                                  const char *module,const char *lang) {
+    if (!module || module[0]!='.' ||
+        (strcmp(lang,"typescript") && strcmp(lang,"javascript"))) return;
+    char base[PATH_CAP]; if (!dirname_join(from,module,base)) return;
+    static const char *exts[]={".ts",".tsx",".js",".jsx",".mts",".cts",
+                                ".mjs",".cjs",NULL};
+    for (int i=0;exts[i];i++) {
+        char path[PATH_CAP];
+        if (path_format(path,sizeof path,"%s%s",base,exts[i]))
+            dependency(p,source,path,NULL,"module-file");
+        if (path_format(path,sizeof path,"%s/index%s",base,exts[i]))
+            dependency(p,source,path,NULL,"module-file");
+    }
 }
 static char *config_data(ImportPass *p, long fid, const char *relative,
                          const char *kind) {
@@ -413,6 +475,7 @@ static void update(ImportPass *p,long id,long file,long symbol) {
 }
 int sem_imports_pass(Cg *cg,const long *changed_files,int nfiles) {
     if (changed_files && nfiles==0) return 0;
+    if (changed_files) make_scope(cg,changed_files,nfiles);
     ImportPass p={.cg=cg};
     p.find_file=cg_prep(cg,"SELECT id FROM files WHERE path=?1 AND branch_id=?2 LIMIT 1");
     p.update_binding=cg_prep(cg,"UPDATE semantic_bindings SET target_file_id=?1,"
@@ -421,8 +484,12 @@ int sem_imports_pass(Cg *cg,const long *changed_files,int nfiles) {
         "branch_id,file_id,dependency_key,dependency_hash,kind) VALUES(?1,?2,?3,?4,?5) "
         "ON CONFLICT(branch_id,file_id,dependency_key,kind) DO UPDATE SET "
         "dependency_hash=excluded.dependency_hash");
-    load_packages(&p);
-    sqlite3_stmt *q=cg_prep(cg,
+    sqlite3_stmt *q=cg_prep(cg,changed_files ?
+       "SELECT b.id,b.file_id,b.module,b.local_name,b.original_name,b.kind,"
+       "b.exported_name,b.is_export,b.is_system,b.target_file_id "
+       "FROM semantic_bindings b JOIN files f ON f.id=b.file_id "
+       "JOIN temp.sem_import_scope scope ON scope.id=b.file_id "
+       "WHERE f.branch_id=?1 ORDER BY b.id" :
        "SELECT b.id,b.file_id,b.module,b.local_name,b.original_name,b.kind,"
        "b.exported_name,b.is_export,b.is_system,b.target_file_id "
        "FROM semantic_bindings b JOIN files f ON f.id=b.file_id "
@@ -441,9 +508,13 @@ int sem_imports_pass(Cg *cg,const long *changed_files,int nfiles) {
             .target_file_id=sqlite3_column_int64(q,9)};
     }
     sqlite3_finalize(q);
+    if (p.nbindings) load_packages(&p);
     /* Every nonempty pass checks current source and config state. Replacing
-     * dependencies for this branch avoids stale reverse keys. */
-    q=cg_prep(cg,"DELETE FROM semantic_dependencies WHERE branch_id=?1");
+     * dependencies for affected files avoids stale reverse keys. */
+    q=cg_prep(cg,changed_files ?
+        "DELETE FROM semantic_dependencies WHERE branch_id=?1 AND file_id "
+        "IN (SELECT id FROM temp.sem_import_scope)" :
+        "DELETE FROM semantic_dependencies WHERE branch_id=?1");
     sqlite3_bind_int64(q,1,cg->branch_id); checked_step(cg,q); sqlite3_finalize(q);
     for (int i=0;i<p.nbindings;i++) {
         Binding *b=&p.bindings[i];
@@ -454,7 +525,9 @@ int sem_imports_pass(Cg *cg,const long *changed_files,int nfiles) {
         long file=0,symbol=0;
         if (!b->is_system && b->module && lang)
             file=module_file(&p,b->file_id,from,b->module,lang);
-        if (file) dependency(&p,b->file_id,b->module,NULL,"module");
+        if (file) file_dependency(&p,b->file_id,file);
+        else if (b->module && lang)
+            unresolved_candidates(&p,b->file_id,from,b->module,lang);
         /* A namespace import has a file target, deliberately no symbol. */
         if (file && (b->original || (b->kind && !strcmp(b->kind,"default"))) &&
             (!b->original || strcmp(b->original,"*")) &&
