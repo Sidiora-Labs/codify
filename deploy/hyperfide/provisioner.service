@@ -1,0 +1,23 @@
+[Unit]
+Description=Hyperfide provider provisioner
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=hyperfide-provisioner
+Group=hyperfide
+WorkingDirectory=/opt/hyperfide/current
+EnvironmentFile=/etc/hyperfide/provisioner.env
+ExecStart=/opt/hyperfide/current/runtime/node /opt/hyperfide/current/services/dist/provisioner.js --mode daemon --policy /etc/hyperfide/provisioner-policy.json --spec-revision ${HYPERFIDE_SPEC_REVISION}
+Restart=on-failure
+KillMode=control-group
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hyperfide
+Environment=LD_LIBRARY_PATH=/opt/hyperfide/current/lib/hyperfide
+UMask=0077
+[Install]
+WantedBy=multi-user.target
