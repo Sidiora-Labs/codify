@@ -11,7 +11,8 @@
   "actions": [
     "recovery.worker.describe",
     "recovery.worker.loss",
-    "recovery.worker.inventory"
+    "recovery.worker.inventory",
+    "recovery.worker.restoration.inspect"
   ],
   "requires": [
     "4.2",

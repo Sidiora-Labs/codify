@@ -33,12 +33,14 @@ export function createComponent(_context:ComponentContext):Component{
      // Revocation makes the task eligible for the normal scheduler; unresolved process/capacity stays held.
      await tx.query("UPDATE hyperfide.tasks SET state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND current_attempt_id=$4 AND generation=$5 AND state NOT IN ('INTEGRATED','CANCELLED')",[scope.organisation_id,scope.run_id,row.task_id,attempt,generation]);
     }
+    if(custody.rows.length===0)await tx.query("INSERT INTO hyperfide.recovery_replacement_requests(organisation_id,run_id,id,task_id,source_attempt_id,source_attempt_generation,source_boot_generation,authority_epoch) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[scope.organisation_id,scope.run_id,id,row.task_id,attempt,generation,boot,scope.authority_epoch]);
     const result={scope,attempt_id:attempt,compute_authority:['CURRENT','EXPIRED'].includes(String(row.compute_authority))?'REVOKED':row.compute_authority,preserved_submission_custody:custody.rows,qualification_jobs_requeued:expiredJobs.rows,
-     replacement_gate:replacementGate,normal_scheduler_recovery_pending:custody.rows.length===0,recovery_operation_id:id,task_id:row.task_id,replacement_authorized:false,requires: custody.rows.length?'RECOVER_QUALIFICATION_UNDER_ITS_OWN_LEASE':'EXTERNAL_INVENTORY_AND_COMPATIBLE_CHECKPOINT',
+     restoration_request:custody.rows.length===0?{id,state:'WAITING_INVENTORY',authority:'NONE'}:null,replacement_gate:replacementGate,normal_scheduler_recovery_pending:custody.rows.length===0,recovery_operation_id:id,task_id:row.task_id,replacement_authorized:false,requires: custody.rows.length?'RECOVER_QUALIFICATION_UNDER_ITS_OWN_LEASE':'EXTERNAL_INVENTORY_AND_COMPATIBLE_CHECKPOINT',
      stale_outputs:'ARCHIVE_PROVENANCE_ONLY',publication_authorized:false};
     await finishOperation(tx,scope,id,result);return result;
    });
   },
+  'recovery.worker.restoration.inspect':async(input,context)=>{const value=record(input,['scope','loss_operation_id']),scope=scopeOf(value.scope),id=uuid(value.loss_operation_id);return recoveryTransaction(context,scope,async tx=>{const rows=await tx.query('SELECT id,task_id,source_attempt_id,source_attempt_generation,source_boot_generation,authority_epoch,state,state_version,created_at,updated_at FROM hyperfide.recovery_replacement_requests WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,id]);if(!rows.rows.length)throw new FoundationError('RECOVERY_REQUEST_NOT_FOUND','No durable worker restoration request');return {request:rows.rows[0],replacement_authorized:false,context_restored:false,authority:'NONE'};},false,true);},
   'recovery.worker.inventory':(input,context)=>{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=>capability(context,'24.1','recovery.snapshots.v1',isRecoverySnapshotReader).read(tx,scope),false,true);}
  }};
 }
