@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-4-v1",
+  "campaign_id": "hyperfide-driver-component-27-4-v2",
   "case_ids": [
     "V-002",
     "V-003",
@@ -24,7 +24,10 @@
   ],
   "expected_assertion_ids": [
     "campaign.faults.complete-composite-schedule",
-    "campaign.faults.actual-canonical-receipt-check",
+    "campaign.faults.actual-overlap-reference",
+    "campaign.faults.independent-state-reference",
+    "campaign.faults.actual-canonical-component-receipt",
+    "campaign.faults.component-receipt-not-full-proof",
     "campaign.faults.incomplete-inventory",
     "campaign.faults.orphan-resource",
     "campaign.faults.lost-git-ack-unknown",
@@ -36,10 +39,17 @@
     "campaign.faults.duplicate-accepted-effect",
     "campaign.faults.conflicting-owners",
     "campaign.faults.unqualified-publications",
+    "campaign.faults.source-revision-drift",
+    "campaign.faults.repository-manifest-drift",
     "campaign.faults.missing-fault-observation",
     "campaign.faults.controller-only-recovery",
-    "campaign.faults.rto-exceeded",
+    "campaign.faults.rto-invented",
+    "campaign.faults.rpo-exceeded",
     "campaign.faults.unverified-recovery",
+    "campaign.faults.missing-observed-timing",
+    "campaign.faults.duration-mismatch",
+    "campaign.faults.duplicate-observation",
+    "campaign.faults.sequential-real-drills-not-composite",
     "campaign.faults.external-anchor-required",
     "campaign.faults.observer-cannot-invent-anchor",
     "campaign.faults.pass-label-not-proof",
@@ -47,6 +57,8 @@
     "campaign.faults.single-fault-only-rejected",
     "campaign.faults.duplicate-fault-id",
     "campaign.faults.unknown-fault-kind",
+    "campaign.faults.approved-composites-required",
+    "campaign.faults.tolerance-cannot-erase-duration",
     "campaign.faults.independent-observer",
     "campaign.faults.no-implicit-execution"
   ],
@@ -73,18 +85,18 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "dc07481704f5e1020a9fd15f72ddf77525d83154913522b5a444ec946a2d6913",
-      "size": 25259
+      "sha256": "f45deed3643f1e74b542e480666049c5d68627679cfe64e8e5ac7e6ff7eefcee",
+      "size": 38730
     },
     {
       "path": "tests/hyperfide/campaigns/live.py",
-      "sha256": "7538e3360f3210c18a0de1a4a1bca70276414ab3d8446a20bad032a061f2fb21",
-      "size": 17033
+      "sha256": "44f1e3dc4c69ccb6e49d4add1d3f8bc8fb03b94530d5a1257ec5c50b65386ab1",
+      "size": 18222
     },
     {
       "path": "tests/hyperfide/campaigns/faults.py",
-      "sha256": "a7e79af9986f186a077a855222a21815bc805319ce28c057cae403c0e34f86bb",
-      "size": 10878
+      "sha256": "2833722676a76baa14eda1e8f975e65e0c14a0543ba200212ef83942aac86bcb",
+      "size": 13797
     },
     {
       "path": "tests/hyperfide/selftest_harness.py",
@@ -92,9 +104,14 @@
       "size": 31610
     },
     {
+      "path": "tests/hyperfide/test_required_artifact_receipts.py",
+      "sha256": "8a2bc11c8262a64a20604d3c74372067cc98cb40f38747d901bf63d5b4eb54cc",
+      "size": 6123
+    },
+    {
       "path": "tests/hyperfide/cases/tasks/27_4.py",
-      "sha256": "2fd160048beee33e79840808358bc24dc551aed15bac93b4f3bf0317fbced0c7",
-      "size": 7035
+      "sha256": "355a5f49b6c607845c6bf1f56e271df9902132e10b4839d7067f3a7ef84138cb",
+      "size": 10082
     }
   ],
   "policy": {

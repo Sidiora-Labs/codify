@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""27.4 driver-component tests, with real canonical receipt checking."""
+"""Component validators exercise independent state, observed timing and full proof.
+
+Synthetic validator inputs are not live fault, occupancy or recovery evidence.
+"""
 import copy
 import hashlib
 import json
@@ -16,15 +19,17 @@ FAILED=[]
 
 def check(identity,action):
     try:
-        if action()is False:raise AssertionError('false observation')
+        if action() is False:raise AssertionError('false observation')
         actual=True
     except BaseException as exc:
         actual=False;FAILED.append(identity);print(identity+': '+str(exc),file=sys.stderr)
     print(json.dumps({'type':'assertion','id':identity,'expected':True,'actual':actual}))
 
-def reject(action):
+def reject(action,message=None):
     try:action()
-    except d.CampaignError:return True
+    except d.CampaignError as exc:
+        if message is not None and message not in str(exc):raise AssertionError('wrong validation failed: '+str(exc))
+        return True
     raise AssertionError('false-success trap accepted')
 
 def pin(path):
@@ -35,23 +40,41 @@ def run():
     try:
         campaign,summary=fixture.successful()
         receipt_pin=pin(campaign/'receipts'/(summary['receipt_id']+'.json'))
-        manifest={'kind':'faults','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'profile':{'sandboxes':100,'slots':200},'inputs':{'accepted_receipts':[receipt_pin]},'adapters':{'control':{'component':'control'},'observer':{'component':'observer'},'cleanup':{'component':'cleanup'}},'faults':[{'id':'fault-'+kind,'kind':kind,'at_ms':0,'duration_ms':100}for kind in sorted(faults.FAULTS)],'slo':{'rpo_ms':1,'rto_ms':100}}
-        events=[{'sequence':1,'virtual_ms':1,'kind':'effect','operation_id':'effect1','effect_key':'once','accepted':True},{'sequence':2,'virtual_ms':2,'kind':'effect','operation_id':'effect2','effect_key':'once','accepted':False}]
-        golden={'epoch':1,'owners':{},'slots':{},'resources':[],'publications':{},'effect_count':1,'accepted_count':1,'peak_slots':0,'session_lifetimes':0,'pending_creates':[],'faults':[],'virtual_elapsed_ms':2}
-        observation={'basis':'INDEPENDENT_DURABLE_RECONSTRUCTION','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'events':events,'final_state':golden,'protected_refs':{},'resource_inventory_complete':True,'resource_ids':[],'unknown_operations':[],'unacknowledged_effects':[],'hidden_backlog':[],'resource_debts':[],'receipts':[{'pin':receipt_pin,'trusted_anchor_sha256':receipt_pin['sha256'],'verified_by':'independent-checker'}],'fault_reports':[{'fault_id':row['id'],'kind':row['kind'],'injection_observed':True,'recovery_observed':True,'basis':'INDEPENDENT_OBSERVATION','rpo_ms':0,'rto_ms':1}for row in manifest['faults']],'conflicting_accepted_owners':0,'unqualified_publications':0}
+        kinds=sorted(faults.FAULTS)
+        pairs=[kinds[index:index+2]for index in range(0,len(kinds),2)]
+        manifest={'kind':'faults','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'profile':{'sandboxes':100,'slots':200,'required_composite_pairs':pairs},'inputs':{'accepted_receipts':[receipt_pin]},'adapters':{'control':{'component':'control'},'observer':{'component':'observer'},'cleanup':{'component':'cleanup'}},'faults':[{'id':'fault-'+kind,'kind':kind,'at_ms':0,'duration_ms':100}for kind in kinds],'slo':{'rpo_ms':1,'rto_ms':100,'schedule_tolerance_ms':0}}
+        events=[{'sequence':1,'virtual_ms':1,'kind':'effect','epoch':1,'operation_id':'effect1','effect_key':'once','accepted':True},{'sequence':2,'virtual_ms':2,'kind':'effect','epoch':1,'operation_id':'effect2','effect_key':'once','accepted':False}]
+        golden={'epoch':1,'owners':{},'slots':{},'custody':{},'resources':[],'publications':{},'effect_count':1,'accepted_count':1,'peak_slots':0,'session_lifetimes':0,'pending_creates':[],'faults':[],'virtual_elapsed_ms':2}
+        observation={'basis':'INDEPENDENT_DURABLE_RECONSTRUCTION','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'events':events,'final_state':golden,'protected_refs':{},'resource_inventory_complete':True,'resource_ids':[],'unknown_operations':[],'unacknowledged_effects':[],'hidden_backlog':[],'resource_debts':[],'receipts':[{'pin':receipt_pin,'trusted_anchor_sha256':receipt_pin['sha256']}],'campaign_start_monotonic_ns':0,'fault_reports':[{'fault_id':row['id'],'kind':row['kind'],'injection_observed':True,'recovery_observed':True,'basis':'INDEPENDENT_OBSERVATION','injected_monotonic_ns':0,'cleared_monotonic_ns':100000000,'recovered_monotonic_ns':100000000,'rpo_ms':0,'rto_ms':100}for row in manifest['faults']],'conflicting_accepted_owners':0,'unqualified_publications':0}
         check('campaign.faults.complete-composite-schedule',lambda:len(faults.validate_faults(manifest))==10)
-        check('campaign.faults.actual-canonical-receipt-check',lambda:faults.inspect_reconstruction(observation,manifest,ROOT)==golden)
-        changes=[('incomplete-inventory',lambda x:x.update(resource_inventory_complete=False)),('orphan-resource',lambda x:x.update(resource_ids=['orphan'])),('lost-git-ack-unknown',lambda x:x.update(unknown_operations=['unknown-git'])),('resource-debt',lambda x:x.update(resource_debts=['unreachable-provider'])),('hidden-backlog',lambda x:x.update(hidden_backlog=['pending'])),('unacknowledged-effects',lambda x:x.update(unacknowledged_effects=['effect'])),('unqualified-ref',lambda x:x.update(protected_refs={'refs/heads/main':'b'*40})),('wrong-reference-state',lambda x:x['final_state'].update(effect_count=2)),('duplicate-accepted-effect',lambda x:x['events'][1].update(accepted=True)),('conflicting-owners',lambda x:x.update(conflicting_accepted_owners=1)),('unqualified-publications',lambda x:x.update(unqualified_publications=1)),('missing-fault-observation',lambda x:x['fault_reports'].pop()),('controller-only-recovery',lambda x:x['fault_reports'][0].update(basis='CONTROLLER_DECLARATION')),('rto-exceeded',lambda x:x['fault_reports'][0].update(rto_ms=101)),('unverified-recovery',lambda x:x['fault_reports'][0].update(recovery_observed=False))]
+        check('campaign.faults.actual-overlap-reference',lambda:faults.inspect_fault_reports(observation,manifest))
+        check('campaign.faults.independent-state-reference',lambda:faults.inspect_state(observation,manifest)==golden)
+        checked=subprocess.run([sys.executable,str(ROOT/'tests/hyperfide/check-evidence.py'),'--campaign',str(campaign),'--receipt',summary['receipt_id']],capture_output=True)
+        check('campaign.faults.actual-canonical-component-receipt',lambda:checked.returncode==0)
+        check('campaign.faults.component-receipt-not-full-proof',lambda:reject(lambda:faults.verify_recovery_receipts(observation,manifest,ROOT),'task-component or incomplete'))
+        changes=[('incomplete-inventory',lambda x:x.update(resource_inventory_complete=False)),('orphan-resource',lambda x:x.update(resource_ids=['orphan'])),('lost-git-ack-unknown',lambda x:x.update(unknown_operations=['unknown-git'])),('resource-debt',lambda x:x.update(resource_debts=['unreachable-provider'])),('hidden-backlog',lambda x:x.update(hidden_backlog=['pending'])),('unacknowledged-effects',lambda x:x.update(unacknowledged_effects=['effect'])),('unqualified-ref',lambda x:x.update(protected_refs={'refs/heads/main':'b'*40})),('wrong-reference-state',lambda x:x['final_state'].update(effect_count=2)),('duplicate-accepted-effect',lambda x:x['events'][1].update(accepted=True)),('conflicting-owners',lambda x:x.update(conflicting_accepted_owners=1)),('unqualified-publications',lambda x:x.update(unqualified_publications=1)),('source-revision-drift',lambda x:x.update(source_revision='c'*40)),('repository-manifest-drift',lambda x:x.update(source_manifest_digest='sha256:'+'c'*64))]
         for name,mutate in changes:
             changed=copy.deepcopy(observation);mutate(changed)
-            check('campaign.faults.'+name,lambda changed=changed:reject(lambda:faults.inspect_reconstruction(changed,manifest,ROOT)))
+            check('campaign.faults.'+name,lambda changed=changed:reject(lambda:faults.inspect_state(changed,manifest)))
+        report_changes=[('missing-fault-observation',lambda x:x['fault_reports'].pop()),('controller-only-recovery',lambda x:x['fault_reports'][0].update(basis='CONTROLLER_DECLARATION')),('rto-invented',lambda x:x['fault_reports'][0].update(rto_ms=1)),('rpo-exceeded',lambda x:x['fault_reports'][0].update(rpo_ms=2)),('unverified-recovery',lambda x:x['fault_reports'][0].update(recovery_observed=False)),('missing-observed-timing',lambda x:x['fault_reports'][0].pop('injected_monotonic_ns')),('duration-mismatch',lambda x:x['fault_reports'][0].update(cleared_monotonic_ns=90000000)),('duplicate-observation',lambda x:x['fault_reports'].append(copy.deepcopy(x['fault_reports'][0])))]
+        for name,mutate in report_changes:
+            changed=copy.deepcopy(observation);mutate(changed)
+            check('campaign.faults.'+name,lambda changed=changed:reject(lambda:faults.inspect_fault_reports(changed,manifest)))
+        # Both observations remain within the frozen tolerance while the actual
+        # first composite pair is sequential. Only the overlap check rejects it.
+        sequential=copy.deepcopy(manifest);sequential['slo']['schedule_tolerance_ms']=20
+        sequential['faults'][1]['at_ms']=80
+        actual=copy.deepcopy(observation)
+        actual['fault_reports'][0].update(cleared_monotonic_ns=80000000,recovered_monotonic_ns=80000000,rto_ms=80)
+        actual['fault_reports'][1].update(injected_monotonic_ns=100000000,cleared_monotonic_ns=180000000,recovered_monotonic_ns=180000000,rto_ms=80)
+        check('campaign.faults.sequential-real-drills-not-composite',lambda:reject(lambda:faults.inspect_fault_reports(actual,sequential),'actual fault intervals do not overlap'))
         no_anchor=copy.deepcopy(manifest);no_anchor['inputs']={}
-        check('campaign.faults.external-anchor-required',lambda:reject(lambda:faults.inspect_reconstruction(observation,no_anchor,ROOT)))
+        check('campaign.faults.external-anchor-required',lambda:reject(lambda:faults.verify_recovery_receipts(observation,no_anchor,ROOT),'externally approved'))
         self_anchor=copy.deepcopy(observation);self_anchor['receipts'][0]['trusted_anchor_sha256']='f'*64
-        check('campaign.faults.observer-cannot-invent-anchor',lambda:reject(lambda:faults.inspect_reconstruction(self_anchor,manifest,ROOT)))
+        check('campaign.faults.observer-cannot-invent-anchor',lambda:reject(lambda:faults.verify_recovery_receipts(self_anchor,manifest,ROOT),'approved external anchor'))
         fake=fixture.root/'fake-campaign/receipts/00000000-0000-0000-0000-000000000001.json';fake.parent.mkdir(parents=True);fake.write_text('{"schema_version":1,"status":"PASS"}')
-        fake_pin=pin(fake);fake_manifest=copy.deepcopy(manifest);fake_manifest['inputs']['accepted_receipts']=[fake_pin];fake_observation=copy.deepcopy(observation);fake_observation['receipts']=[{'pin':fake_pin,'trusted_anchor_sha256':fake_pin['sha256'],'verified_by':'independent-checker'}]
-        check('campaign.faults.pass-label-not-proof',lambda:reject(lambda:faults.inspect_reconstruction(fake_observation,fake_manifest,ROOT)))
+        fake_pin=pin(fake);fake_manifest=copy.deepcopy(manifest);fake_manifest['inputs']['accepted_receipts']=[fake_pin];fake_observation=copy.deepcopy(observation);fake_observation['receipts']=[{'pin':fake_pin,'trusted_anchor_sha256':fake_pin['sha256']}]
+        check('campaign.faults.pass-label-not-proof',lambda:reject(lambda:faults.verify_recovery_receipts(fake_observation,fake_manifest,ROOT),'task-component or incomplete'))
         missing=copy.deepcopy(manifest);missing['faults'].pop()
         check('campaign.faults.missing-fault-kind',lambda:reject(lambda:faults.validate_faults(missing)))
         serial=copy.deepcopy(manifest)
@@ -61,6 +84,10 @@ def run():
         check('campaign.faults.duplicate-fault-id',lambda:reject(lambda:faults.validate_faults(dup)))
         unknown=copy.deepcopy(manifest);unknown['faults'][0]['kind']='invented'
         check('campaign.faults.unknown-fault-kind',lambda:reject(lambda:faults.validate_faults(unknown)))
+        no_pairs=copy.deepcopy(manifest);no_pairs['profile'].pop('required_composite_pairs')
+        check('campaign.faults.approved-composites-required',lambda:reject(lambda:faults.validate_faults(no_pairs)))
+        short=copy.deepcopy(manifest);short['slo']['schedule_tolerance_ms']=50
+        check('campaign.faults.tolerance-cannot-erase-duration',lambda:reject(lambda:faults.validate_faults(short)))
         no_independence=copy.deepcopy(manifest);no_independence['adapters']['observer']=no_independence['adapters']['control']
         check('campaign.faults.independent-observer',lambda:reject(lambda:faults.validate_faults(no_independence)))
         command=subprocess.run([sys.executable,str(ROOT/'tests/hyperfide/campaigns/faults.py'),'--manifest','missing','--evidence','unused'],capture_output=True,text=True)
