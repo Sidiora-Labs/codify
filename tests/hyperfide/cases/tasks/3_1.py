@@ -123,6 +123,11 @@ def main():
    try:f.sql("UPDATE hyperfide.hierarchy_handoffs SET context='{}'");raise RuntimeError("History updated")
    except AssertionError as error:expect("immutable" in str(error).lower(),"Wrong SQL refusal")
   check("hierarchy.history.immutable",immutable)
+  def isolation():
+   for table in ("hierarchy_leaders","hierarchy_packages","hierarchy_domain_owners","hierarchy_handoffs","hierarchy_handoff_acknowledgements","hierarchy_session_packages","hierarchy_ownership_events"):
+    try:f.sql("BEGIN ISOLATION LEVEL REPEATABLE READ;INSERT INTO hyperfide."+table+" DEFAULT VALUES;ROLLBACK;");raise RuntimeError("RR hierarchy write accepted")
+    except AssertionError as error:expect('"code":"25001"' in str(error),"Wrong isolation refusal for "+table)
+  check("hierarchy.repeatable-read-write-refused",isolation)
   def race():
    def request(key):return f.invoke("hierarchy.leader.acquire",{"idempotency_key":"replace-"+key,"expected_generation":"1","reason":"Concurrent replacement"},component="3.1",key=key)[1]
    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:responses=list(pool.map(request,["leader","leader2"]))

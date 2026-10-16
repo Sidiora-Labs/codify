@@ -86,3 +86,11 @@ CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.hierarchy_packages F
 CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.hierarchy_packages FOR EACH ROW EXECUTE FUNCTION hyperfide.monotonic_fields('owner_generation');
 CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.hierarchy_domain_owners FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','feature_key');
 CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.hierarchy_domain_owners FOR EACH ROW EXECUTE FUNCTION hyperfide.monotonic_fields('generation');
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_leaders FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_packages FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_domain_owners FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_handoffs FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_handoff_acknowledgements FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_session_packages FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_ownership_events FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
