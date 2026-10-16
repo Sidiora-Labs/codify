@@ -299,7 +299,7 @@ static int protected_directory(int fd,int root_only) {
     if (st.st_uid!=0&&(root_only||st.st_uid!=geteuid())) return 0;
     return !(st.st_mode&022)||(st.st_uid==0&&(st.st_mode&S_ISVTX));
 }
-int hf_protected_read(const char *path,size_t maximum,char **data,size_t *length) {
+static int protected_read_mode(const char *path,size_t maximum,char **data,size_t *length,int public_anchor) {
     if (!data||!length) return 0;
     *data=NULL;*length=0;
     if (!path||path[0]!='/'||strlen(path)>4095||!path[1]||path[strlen(path)-1]=='/') return 0;
@@ -324,7 +324,8 @@ int hf_protected_read(const char *path,size_t maximum,char **data,size_t *length
     mode_t mode=before.st_mode&07777;
     int own=before.st_uid==geteuid()&&(mode==0600||mode==0400);
     int root_group=all_root&&before.st_uid==0&&before.st_gid==getegid()&&(mode==0640||mode==0440);
-    if (!own&&!root_group) goto done;
+    int root_public=all_root&&before.st_uid==0&&(mode==0644||mode==0444||mode==0640||mode==0440);
+    if (public_anchor?!root_public:(!own&&!root_group)) goto done;
     *length=(size_t)before.st_size;*data=malloc(*length+1);
     if (!*data) goto done;
     size_t used=0;
@@ -343,6 +344,9 @@ done:
     free(copy);
     if (!valid) {if (*data) {OPENSSL_cleanse(*data,*length);free(*data);}*data=NULL;*length=0;}
     return valid;
+}
+int hf_protected_read(const char *path,size_t maximum,char **data,size_t *length) {
+    return protected_read_mode(path,maximum,data,length,0);
 }
 int hf_private_write(const char *path,const void *data,size_t length,int replace) {
     if (!path||path[0]!='/'||strlen(path)>4000) return 0;
@@ -488,7 +492,15 @@ int hf_transport_post(const HfTransportConfig *config,int enrollment,const char 
     HF_CURL(CURLOPT_SSL_VERIFYPEER,1L);HF_CURL(CURLOPT_SSL_VERIFYHOST,2L);HF_CURL(CURLOPT_SSLVERSION,CURL_SSLVERSION_TLSv1_2);
     HF_CURL(CURLOPT_PROXY,"");HF_CURL(CURLOPT_NOSIGNAL,1L);HF_CURL(CURLOPT_CONNECTTIMEOUT_MS,config->timeout_ms);HF_CURL(CURLOPT_TIMEOUT_MS,config->timeout_ms);
     HF_CURL(CURLOPT_WRITEFUNCTION,response_write);HF_CURL(CURLOPT_WRITEDATA,response);
-    if (*config->ca_file) {HF_CURL(CURLOPT_CAINFO,config->ca_file);}
+    if (*config->ca_file) {
+        char *ca=NULL;size_t ca_size=0;
+        if (!protected_read_mode(config->ca_file,65536,&ca,&ca_size,1)||!ca_size) {
+            free(ca);curl_easy_cleanup(curl);curl_slist_free_all(headers);OPENSSL_cleanse(authorization,sizeof authorization);
+            snprintf(response->error,sizeof response->error,"INVALID_PROTECTED_CA");return 0;
+        }
+        struct curl_blob anchor={.data=ca,.len=ca_size,.flags=CURL_BLOB_COPY};
+        HF_CURL(CURLOPT_CAINFO_BLOB,&anchor);free(ca);
+    }
     if (configured) {
         code=curl_easy_perform(curl);curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&response->status);
         if (code!=CURLE_OK) {
