@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash,createPublicKey,verify} from 'node:crypto';
-import {createReadStream} from 'node:fs';
+import {createReadStream,constants} from 'node:fs';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
 import {identityTransaction,invocationOf} from '../identity/enrollment.js';
@@ -38,12 +38,32 @@ async function execute(ctx:ComponentContext,action:typeof actions[number],raw:un
  }
 
 async function trustedDetached(filename:string,limit:number):Promise<Buffer>{
+ const handles:Awaited<ReturnType<typeof fs.open>>[]=[];
  try{
  if(!path.isAbsolute(filename)||await fs.realpath(filename)!==filename)fail('Detached authentication input must be a canonical absolute file');
- const st=await fs.lstat(filename),owner=process.getuid?.();
- if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1||st.size<1||st.size>limit||(st.mode&0o022)!==0||st.uid!==0&&st.uid!==owner)fail('Detached authentication input is not protected trusted material');
- return await fs.readFile(filename);
- }catch{fail('Detached release authentication material is unavailable or unsafe');}
+ const owner=process.getuid?.(),parts=filename.split('/').filter(Boolean);
+ let directory=await fs.open('/',constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);handles.push(directory);
+ async function protectedDirectory(handle:Awaited<ReturnType<typeof fs.open>>):Promise<void>{
+ const st=await handle.stat();
+ // A root sticky ancestor such as /tmp is safe only because every following
+ // directory and leaf must independently belong to root or this service.
+ if(!st.isDirectory()||st.uid!==0&&st.uid!==owner||((st.mode&0o022)!==0&&!(st.uid===0&&(st.mode&0o1000)!==0)))fail('Unprotected authentication ancestor');
+ }
+ await protectedDirectory(directory);
+ for(const part of parts.slice(0,-1)){
+ directory=await fs.open('/proc/self/fd/'+directory.fd+'/'+part,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+ handles.push(directory);await protectedDirectory(directory);
+ }
+ const handle=await fs.open('/proc/self/fd/'+directory.fd+'/'+parts.at(-1),constants.O_RDONLY|constants.O_NOFOLLOW);handles.push(handle);
+ const st=await handle.stat({bigint:true});
+ if(!st.isFile()||st.nlink!==1n||st.size<1n||st.size>BigInt(limit)||(st.mode&0o022n)!==0n||st.uid!==0n&&st.uid!==BigInt(owner??-1))fail('Detached authentication input is not protected trusted material');
+ const bytes=Buffer.alloc(Number(st.size));let offset=0;
+ while(offset<bytes.length){const read=await handle.read(bytes,offset,bytes.length-offset,offset);if(read.bytesRead===0)fail('Detached authentication input changed');offset+=read.bytesRead;}
+ const after=await handle.stat({bigint:true}),tail=Buffer.alloc(1);
+ if((await handle.read(tail,0,1,offset)).bytesRead!==0||after.dev!==st.dev||after.ino!==st.ino||after.size!==st.size||after.mtimeNs!==st.mtimeNs||after.ctimeNs!==st.ctimeNs||after.mode!==st.mode||after.uid!==st.uid||after.gid!==st.gid||after.nlink!==1n)fail('Detached authentication input changed');
+ return bytes;
+ }catch{return fail('Detached release authentication material is unavailable or unsafe');}
+ finally{for(const handle of handles.reverse())await handle.close().catch(()=>{});}
 }
 async function authenticateManifest(env:Readonly<NodeJS.ProcessEnv>,root:string,bytes:Buffer):Promise<{mode:'UNAUTHENTICATED'}|{mode:'ED25519';key_fingerprint:string;signature_digest:string}>{
  const keyPath=env.HYPERFIDE_TRUSTED_RELEASE_KEY_FILE,signaturePath=env.HYPERFIDE_RELEASE_SIGNATURE_FILE;
@@ -93,6 +113,8 @@ export async function inspectPrebuiltRelease(env:Readonly<NodeJS.ProcessEnv>,rel
  }
  await audit(root);
  if(await checksum(filename)!==manifestDigest)fail('Release manifest changed during inspection');
+ const finalAuthentication=await authenticateManifest(env,root,manifestBytes);
+ if(JSON.stringify(finalAuthentication)!==JSON.stringify(authentication))fail('Release trust anchor changed during inspection');
  return {verified:true,manifest_digest:manifestDigest,release_version:manifest.release_version,source_commit:manifest.source_commit,files:names.size,build_on_supervision_host:false,signature_status:authentication.mode==='ED25519'?'VERIFIED':'UNVERIFIED',authentication,deployment_authorized:false};
  }
 export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(actions.map(action=>[action,async(raw:unknown,ctx:ComponentContext)=>{

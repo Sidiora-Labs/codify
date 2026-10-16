@@ -114,7 +114,8 @@ def main():
    fixture.sql('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE)',admin=True)
    absent=not fixture.sql("SELECT datname FROM pg_database WHERE datname=$1",[database],admin=True)
    check("release.migrations.actual-database-cleanup",lambda:expect(absent,"owned migration database retained"))
-  public=base/"trusted-release-public.pem";signature=base/"manifest.sig"
+  auth=base/"auth";auth.mkdir(mode=0o755)
+  public=auth/"trusted-release-public.pem";signature=auth/"manifest.sig"
   subprocess.run(["openssl","pkey","-in",str(fixture.keys["operator"]["path"]),"-pubout","-out",str(public)],check=True,capture_output=True)
   public.chmod(0o644)
   signed=subprocess.check_output(["openssl","pkeyutl","-sign","-rawin","-inkey",str(fixture.keys["operator"]["path"]),"-in",str(mf)])
@@ -143,6 +144,21 @@ def main():
    try:rejected("inspect",{"manifest":"manifest.json"})
    finally:public.chmod(0o644)
   check("release.signature.writable-anchor-refused",writable_key)
+  def writable_ancestor():
+   auth.chmod(0o777)
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:auth.chmod(0o755)
+  check("release.signature.writable-ancestor-refused",writable_ancestor)
+  def linked_key():
+   alias=base/"key-alias";os.link(public,alias)
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:alias.unlink()
+  check("release.signature.hardlinked-anchor-refused",linked_key)
+  def symlink_ancestor():
+   moved=base/"protected-auth";auth.rename(moved);auth.symlink_to(moved,target_is_directory=True)
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:auth.unlink();moved.rename(auth)
+  check("release.signature.symlink-ancestor-refused",symlink_ancestor)
   def missing_signature():
    signature.unlink()
    try:rejected("inspect",{"manifest":"manifest.json"})
