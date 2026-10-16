@@ -11,7 +11,8 @@
   "actions": [
     "graph.publish.describe",
     "graph.publish.commit",
-    "graph.publish.inspect"
+    "graph.publish.inspect",
+    "graph.publish.snapshot"
   ],
   "requires": [
     "4.2",
