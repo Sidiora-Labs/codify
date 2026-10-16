@@ -1,6 +1,9 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import type {PrimaryTransaction} from '../storage/transactions.js';
 import {authorizeReview,canonical,decimal,digest,fail,hash,obj,oid,primary,reviewError,reviewInputCurrent,lockReviewDisposition,assertReviewExecutionAllowed,reviewControlMatches,scope,text,transaction,uuid} from './coverage.js';
 import type {ReviewControl,ReviewDb,ReviewScope} from './coverage.js';
 import {buildReviewSnapshot} from './receipts.js';
@@ -196,6 +199,51 @@ export async function renewReproduction(ctx:ComponentContext,value:unknown):Prom
   return result.rows[0];
  });
 }
+export interface ReproductionJobInputRequest {
+ job_id:string;lease_generation:string;reservation_id:string;input_manifest_digest:string;
+}
+export interface ReproductionExpectedInputs {
+ authority:'EXPECTED_AUTHORITY';namespace:'REPRODUCTION';organisation_id:string;run_id:string;
+ job_id:string;lease_generation:string;reservation_id:string;input_manifest_digest:string;
+ input_packet_digest:string;input_manifest:Record<string,unknown>;execution_inputs:Record<string,unknown>;
+ task_id:string;worker_session_id:string;sandbox_id:string;sandbox_boot_generation:string;slot_id:string;allocation_generation:string;
+ recorded_runner_session_id:string|null;recorded_runner_boot_id:string|null;
+ repository_id:string;source_manifest_digest:string;source_object_id:string;source_tree_id:string;
+ profile_id:string;profile_digest:string;environment_digest:string;toolchain_digest:string;
+ registry_digest:string;criteria_digest:string;check:Record<string,unknown>;
+ custody_id:string;custody_generation:string;source_attempt_id:string;source_attempt_generation:string;
+ source_origin:'SUBMITTED_RESULT'|'INTEGRATED_PUBLICATION';publication_operation_id:string|null;
+}
+/** Expected authority only. The12 adapter must independently resolve retained11
+ * preparation receipts and measured08 runtime facts; these semantic role pins
+ * must never be returned as VERIFIED measurements by themselves.
+ */
+export async function readReproductionJobInputs(tx:PrimaryTransaction,invocation:InvocationContext,request:ReproductionJobInputRequest):Promise<ReproductionExpectedInputs>{
+ assertPrimaryTransaction(tx);assertInvocation(invocation);
+ const p=invocation.principal,binding={organisation_id:uuid(p.organisation_id),run_id:uuid(p.run_id)};
+ await lockReviewDisposition(tx,binding);await invocation.guard(tx);await primary(tx);
+ const v=obj(request,['job_id','lease_generation','reservation_id','input_manifest_digest']);
+ const id=uuid(v.job_id),generation=decimal(v.lease_generation),reservation=uuid(v.reservation_id),inputDigest=digest(v.input_manifest_digest);
+ const found=await tx.query<Data>('SELECT *,lease_expires_at>clock_timestamp() AS lease_current FROM hyperfide.review_reproduction_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[binding.organisation_id,binding.run_id,id]);
+ const job=found.rows[0];
+ if(!job||p.role!=='VERIFIER'||!['LEASED','RUNNING','OUTCOME_UNKNOWN'].includes(job.state)||job.lease_current!==true||String(job.lease_generation)!==generation||job.worker_session_id!==p.actor_id||job.sandbox_id!==p.sandbox_id||String(job.sandbox_boot_generation)!==p.boot_generation||job.reservation_id!==reservation||job.input_manifest_digest!==inputDigest)
+  fail('REPRODUCTION_INPUT_AUTHORITY_DENIED','Only the exact current reproduction verifier, lease, reservation and immutable packet may resolve expected inputs');
+ await currentJob(tx,binding,job);
+ const snapshot=job.snapshot,roles:Data={};
+ for(const key of ['dependency','toolchain','configuration','graph','contract']){
+  if(!Object.hasOwn(snapshot.execution_inputs??{},key))fail('REPRODUCTION_INPUTS_STALE','A registered expected execution role is missing');
+  roles[key]=snapshot.execution_inputs[key];
+ }
+ return {authority:'EXPECTED_AUTHORITY',namespace:'REPRODUCTION',organisation_id:binding.organisation_id,run_id:binding.run_id,job_id:id,lease_generation:generation,reservation_id:reservation,input_manifest_digest:inputDigest,
+  input_packet_digest:hash(snapshot.execution_inputs),input_manifest:roles,execution_inputs:snapshot.execution_inputs,
+  task_id:snapshot.task_id,worker_session_id:job.worker_session_id,sandbox_id:job.sandbox_id,sandbox_boot_generation:String(job.sandbox_boot_generation),slot_id:job.slot_id,allocation_generation:String(job.allocation_generation),
+  recorded_runner_session_id:job.runner_session_id??null,recorded_runner_boot_id:job.runner_boot_id??null,
+  repository_id:snapshot.repository_id,source_manifest_digest:snapshot.source_manifest_digest,source_object_id:snapshot.source_object_id,source_tree_id:snapshot.source_tree_id,
+  profile_id:snapshot.environment_profile_id,profile_digest:snapshot.environment_digest,environment_digest:snapshot.environment_digest,toolchain_digest:snapshot.toolchain_digest,
+  registry_digest:snapshot.registry_digest,criteria_digest:snapshot.criteria_digest,check:snapshot.check,
+  custody_id:uuid(snapshot.custody_id),custody_generation:decimal(snapshot.custody_generation),source_attempt_id:snapshot.attempt_id,source_attempt_generation:snapshot.attempt_generation,
+  source_origin:snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:snapshot.publication_operation_id??null};
+}
 async function measuredReproductionInputs(ctx:ComponentContext,db:ReviewDb,binding:ReviewScope,job:Data):Promise<Data>{
  // The current qualification-only supplier refuses this namespace. A genuine
  // reproduction reader must derive these bindings from its job and measured
@@ -362,7 +410,7 @@ export async function fenceReproductionJobs(db:ReviewDb,binding:ReviewScope,cont
   if(!await reviewControlMatches(db,binding,control,tasks,row.sandbox_id))continue;
   physical.push({kind:'REPRODUCTION',job_id:row.id,session_id:row.worker_session_id,runner_session_id:row.runner_session_id,reservation_id:row.reservation_id,slot_id:row.slot_id,sandbox_id:row.sandbox_id,sandbox_boot_generation:row.sandbox_boot_generation,lease_generation:row.lease_generation,operation_id:['RUNNING','OUTCOME_UNKNOWN'].includes(row.state)?row.id:null});
   const changed=await db.query(`UPDATE hyperfide.review_reproduction_jobs SET lease_generation=lease_generation+1,worker_session_id=NULL,lease_expires_at=NULL,state=$4 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation`,[binding.organisation_id,binding.run_id,row.id,control.mode==='CANCEL'?'CANCELLED':'OUTCOME_UNKNOWN']);
-  fenced.push(changed.rows[0]);
+  const fencedRow=changed.rows[0];if(!fencedRow)fail('REVIEW_FENCE_CONFLICT','Locked review authority could not be fenced');fenced.push(fencedRow);
  }
  return {fenced,physical,cleanup_status:'UNKNOWN',reassignment_authorized:false,control_operation_id:control.operation_id,control_generation:control.control_generation};
 }
