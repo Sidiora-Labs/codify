@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "10.2",
+  "task": "10.2",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/blaxel/lifetime.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "blaxel.lifetime.describe",
+    "blaxel.lifetime.plan",
+    "blaxel.lifetime.assess",
+    "blaxel.lifetime.observe"
+  ],
+  "requires": [
+    "10.1"
+  ]
+}
