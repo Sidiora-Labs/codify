@@ -13,7 +13,9 @@
     "instructions.describe",
     "instructions.issue",
     "instructions.accept",
-    "instructions.handoff"
+    "instructions.handoff",
+    "instructions.replay",
+    "instructions.ack"
   ],
   "requires": [
     "4.2",
