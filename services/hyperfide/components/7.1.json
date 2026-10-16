@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "7.1",
+  "task": "7.1",
+  "roles": [
+    "control",
+    "dispatch"
+  ],
+  "module": "graph/extraction.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "graph.extract.describe",
+    "graph.extract.create",
+    "graph.extract.inspect",
+    "graph.extract.read-chunk"
+  ],
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
+}
