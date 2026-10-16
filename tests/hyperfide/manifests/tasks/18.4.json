@@ -8,24 +8,26 @@
     "V-034"
   ],
   "expected_assertion_ids": [
+    "findings.repair.no-seeded-compute-authority",
     "findings.repair.requires-current-route",
     "findings.repair.ordinary-task-request",
     "findings.repair.request-replay",
     "findings.repair.no-duplicate-active-repair",
+    "findings.repair.real-signed-ordinary-claim",
+    "findings.repair.actual-slot-allocation",
+    "findings.repair.actual-live-primary-lease",
     "findings.repair.wrong-attempt-generation",
-    "findings.repair.current-ordinary-attempt",
-    "findings.repair.attach-idempotent-budget",
-    "findings.repair.expired-lease-replay-refused",
-    "findings.repair.wrong-intended-revision",
-    "findings.repair.compute-independent-custody",
-    "findings.repair.submission-replay",
+    "findings.repair.unknown-attempt-refused",
+    "findings.repair.reservation-not-observed-running",
+    "findings.repair.reserved-attempt-cannot-fake-running",
+    "findings.repair.refused-attach-preserves-budget",
+    "findings.repair.missing-custody-refused",
     "findings.repair.caller-qualified-boolean-refused",
-    "findings.repair.missing-independent-proof-refused",
-    "findings.repair.unqualified-remains-open",
+    "findings.repair.no-resolution-before-submission",
     "findings.repair.unqualified-blocks-publication",
     "findings.repair.accepted-condition-immutable",
     "findings.repair.request-policy-immutable",
-    "findings.repair.repair-audit-principal",
+    "findings.repair.genuine-execution-start-observed",
     "findings.repair.genuine-independent-resolution"
   ],
   "approval": {
@@ -84,8 +86,8 @@
     },
     {
       "path": "services/hyperfide/components/18.1.json",
-      "sha256": "40f40e2c0a583d00467a98563681a99519ce62d3e249140d8854d3e560d67838",
-      "size": 421
+      "sha256": "84d5276afb8e175da2f23e11282f9aadb84b9a2c705de994182b567c8826339e",
+      "size": 432
     },
     {
       "path": "services/hyperfide/components/18.2.json",
@@ -274,8 +276,8 @@
     },
     {
       "path": "services/hyperfide/dist/findings/registry.js",
-      "sha256": "c46ed78194dbcd90f95c0c6292472551e9a42c87c878b13b826fdecd9e6f76d1",
-      "size": 37209
+      "sha256": "3d45b74be4ea123e20da77158a4f5cf72dc7ab06dc3b87a123e43a2aaf97a871",
+      "size": 37454
     },
     {
       "path": "services/hyperfide/dist/findings/remediation.d.ts",
@@ -694,8 +696,8 @@
     },
     {
       "path": "services/hyperfide/src/findings/registry.ts",
-      "sha256": "44189a901fbe170649ff9addbf9201c802f78d9ed1ab33ceeb77f5278c9ffb8b",
-      "size": 36152
+      "sha256": "6602d80edd92bbe670f8d5af1b5060bf7d4fbd582648d283a63ecfd37594dee5",
+      "size": 36374
     },
     {
       "path": "services/hyperfide/src/findings/remediation.ts",
@@ -864,13 +866,13 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/18_1.py",
-      "sha256": "16343641abdc4bb772d433349651d9806ef1ac2e31d781af2e6ebe3fa84cc2e2",
-      "size": 18373
+      "sha256": "04afedde6debe9262e0cb6b1883b5624d03266c7fcccca2fc56fa3f53c7916d0",
+      "size": 19150
     },
     {
       "path": "tests/hyperfide/cases/tasks/18_4.py",
-      "sha256": "4690f055529d56c03a364ff9fa5ed9e04ec92b0e74290e1bdb42fe935b533fdf",
-      "size": 7567
+      "sha256": "59ca18db5e93a19580f6b79b5d040c13874a2ad59f141d08bed6875454ce431f",
+      "size": 11099
     },
     {
       "path": "tests/hyperfide/cases/tasks/3_1.py",
@@ -916,6 +918,7 @@
     "frontier_calls": false,
     "live_github": false,
     "upstream_review_inputs": "trusted synthetic fixture facts; does not qualify review execution",
-    "dependency_identity": "actual lockfile and reviewed source closure; full preparation qualification remains separate"
+    "dependency_identity": "actual lockfile and reviewed source closure; full preparation qualification remains separate",
+    "compute_authority": "Actual production scheduler HTTPS claim; observed RUNNING and independent16/17 proof remain mandatory unsatisfied producer gates"
   }
 }
