@@ -44,7 +44,7 @@ def main():
   check("client.local.help",lambda:expect(run(["help"]).returncode==0,"local help requires remote credentials"))
   check("client.offline.local-version",lambda:expect(run(["version"],mode="offline").returncode==0,"offline local version unavailable"))
   check("client.offline.local-spec",lambda:expect(run(["spec","status"],mode="offline").returncode!=78,"explicit offline local scope blocked"))
-  for command in [["init"],["spec","claim","1"],["spec","done","1","--force"],["spec","run"],["mcp"],["hook","post-edit"],["work","update"],["docs","legacy-close"],["projection"],["serve"],["fleet","up"]]:
+  for command in [["init"],["spec","claim","1"],["spec","done","1","--force"],["spec","run"],["mcp"],["hook","post-edit"],["work","legacy-update"],["docs","legacy-close"],["projection"],["serve"],["fleet","up"]]:
    check("client.distributed."+command[0]+("-"+command[1] if len(command)>1 else ""),lambda command=command:blocked(command,"TRANSPORT_CONFIG_REQUIRED" if command[0]=="mcp" else "DISTRIBUTED_COMMAND_UNSUPPORTED"))
   check("client.offline.remote-denied",lambda:blocked(["spec","claim","1"],"OFFLINE_AUTHORITY_UNAVAILABLE",mode="offline"))
   check("client.downgrade-denied",lambda:blocked(["spec","claim","1"],"AUTHORITY_MODE_INVALID",mode="local"))
@@ -58,6 +58,7 @@ def main():
   check("client.duplicate-descriptor-denied",lambda:blocked(["init"],"AUTHORITY_MODE_INVALID"))
   marker.unlink();marker.symlink_to(base/"private-marker");(base/"private-marker").write_text(json.dumps(descriptor));(base/"private-marker").chmod(0o600)
   check("client.symlink-descriptor-denied",lambda:blocked(["init"],"AUTHORITY_MODE_INVALID"))
+ protected_reader_checks()
  network_checks()
  mapping_checks()
  business_unknown_checks()
@@ -65,6 +66,75 @@ def main():
  (artifacts()/'cleanup.json').write_text(json.dumps(CLEANUP,sort_keys=True))
  (artifacts()/'observations.json').write_text(json.dumps({'scope':'task-component','assertion_ids':IDS,'failed_ids':FAILED,'full_cases_qualified':False},sort_keys=True))
  return 1 if FAILED else 0
+
+
+def protected_reader_checks():
+ import shutil
+ expect(os.geteuid()==0,"actual root-to-nonroot credential test requires isolated root worker")
+ with tempfile.TemporaryDirectory(prefix="hf-protected-reader-") as temporary:
+  base=Path(temporary);base.chmod(0o755);auth=base/"auth";auth.mkdir(mode=0o750);os.chown(auth,0,33025)
+  source=base/"probe.c";binary=base/"probe"
+  source.write_text('#include "transport.h"\n#include <stdlib.h>\n#include <string.h>\nint main(int n,char **v){if(n!=3)return 2;char *b=0;size_t z=0;int ok=0;if(!strcmp(v[1],"read"))ok=hf_protected_read(v[2],32768,&b,&z);else if(!strcmp(v[1],"private"))ok=hf_private_read(v[2],32768,&b,&z);else if(!strcmp(v[1],"config")){HfTransportConfig c;ok=hf_transport_config(v[2],&c);}else if(!strcmp(v[1],"sign")){char sig[87];ok=hf_transport_sign(v[2],"HYPERFIDE-REQUEST-V1","/v1/invoke","https://localhost","10000000-0000-0000-0000-000000000001","1","10000000-0000-0000-0000-000000000002","{}",sig);}free(b);return ok?0:1;}\n')
+  subprocess.run(["cc","-Wall","-Wextra","-Werror","-O2","-I",str(ROOT/"src/hyperfide"),str(source),str(ROOT/"src/hyperfide/transport.c"),"-lcurl","-lcrypto","-lpthread","-o",str(binary)],check=True,capture_output=True);binary.chmod(0o755)
+  def drop(gid=33025):
+   os.setgroups([]);os.setresgid(gid,gid,gid);os.setresuid(33025,33025,33025)
+  def run(mode,p,gid=33025):
+   return subprocess.run([str(binary),mode,str(p)],preexec_fn=lambda:drop(gid),capture_output=True,timeout=10).returncode
+  file=auth/"protected";file.write_text('{"canary":"protected"}');file.chmod(0o640);os.chown(file,0,33025)
+  check("client.protected.nonroot-primary-gid",lambda:expect(run("read",file)==0,"root-owned primary-GID read refused"))
+  check("client.protected.private-state-remains-private",lambda:expect(run("private",file)!=0,"strict supervisor state reader acquired group mode"))
+  def foreign_group():
+   os.chown(file,0,33026)
+   try:expect(run("read",file)!=0,"foreign primary GID allowed")
+   finally:os.chown(file,0,33025)
+  check("client.protected.foreign-gid-refused",foreign_group)
+  def supplementary_only():
+   def supplemental():
+    os.setgroups([33025]);os.setresgid(33026,33026,33026);os.setresuid(33025,33025,33025)
+   p=subprocess.run([str(binary),"read",str(file)],preexec_fn=supplemental,capture_output=True,timeout=10)
+   expect(p.returncode!=0,"supplementary GID granted credential authority")
+  check("client.protected.supplementary-gid-refused",supplementary_only)
+  def writable_parent():
+   auth.chmod(0o770)
+   try:expect(run("read",file)!=0,"group-writable credential ancestor accepted")
+   finally:auth.chmod(0o750)
+  check("client.protected.writable-parent-refused",writable_parent)
+  def mutable_owner_parent():
+   os.chown(auth,33025,33025)
+   try:expect(run("read",file)!=0,"child-owned ancestor permitted root-group immutable credential replacement")
+   finally:os.chown(auth,0,33025)
+  check("client.protected.child-owned-parent-refused",mutable_owner_parent)
+  def symlink_parent():
+   moved=base/"auth-real";auth.rename(moved);auth.symlink_to(moved,target_is_directory=True)
+   try:expect(run("read",file)!=0,"symlink credential ancestor accepted")
+   finally:auth.unlink();moved.rename(auth)
+  check("client.protected.symlink-parent-refused",symlink_parent)
+  def hardlink():
+   link=auth/"alias";os.link(file,link)
+   try:expect(run("read",file)!=0,"hardlinked credential accepted")
+   finally:link.unlink()
+  check("client.protected.hardlinked-file-refused",hardlink)
+  key=auth/"key.pem"
+  subprocess.run(["openssl","genpkey","-algorithm","ED25519","-out",str(key)],check=True,capture_output=True);key.chmod(0o640);os.chown(key,0,33025)
+  config=auth/"config.json";config.write_text(json.dumps({"origin":"https://localhost","key_path":str(key),"credential_id":"10000000-0000-0000-0000-000000000001"}));config.chmod(0o640);os.chown(config,0,33025)
+  check("client.protected.transport-config-nonroot",lambda:expect(run("config",config)==0,"actual transport config did not use protected reader"))
+  check("client.protected.signing-key-nonroot",lambda:expect(run("sign",key)==0,"actual Ed25519 signing key did not use protected reader"))
+  key.chmod(0o660)
+  check("client.protected.signing-key-write-refused",lambda:expect(run("sign",key)!=0,"group-writable signing key accepted"));key.chmod(0o640)
+  child=base/"child";child.mkdir(mode=0o700);os.chown(child,33025,33025);owned=child/"private";owned.write_text("private");owned.chmod(0o600);os.chown(owned,33025,33025)
+  check("client.protected.owner-private-preserved",lambda:expect(run("read",owned)==0,"existing actualowner0600 contract broken"))
+  native=base/"cg";shutil.copyfile(ROOT/"cg",native);native.chmod(0o755)
+  marker=auth/"authority.json";marker.write_text(json.dumps({"schema_version":1,"mode":"distributed","authority_epoch":"10000000-0000-0000-0000-000000000001"}));marker.chmod(0o640);os.chown(marker,0,33025)
+  policy=auth/"mcp.json";policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["spec_status"],"bootstrap_catalog":True,"target_session_id":"10000000-0000-0000-0000-000000000003","run_id":"10000000-0000-0000-0000-000000000004","target_role":"LEADER"}));policy.chmod(0o640);os.chown(policy,0,33025)
+  environment={k:v for k,v in os.environ.items() if not k.startswith(("HYPERFIDE_","CG_","CODIFY_"))};environment.update(HYPERFIDE_MODE="distributed",HYPERFIDE_AUTHORITY_DESCRIPTOR=str(marker),HYPERFIDE_MCP_TOOL_POLICY_FILE=str(policy),HYPERFIDE_TRANSPORT_CONFIG=str(auth/"pending-transport.json"))
+  def catalog():
+   requests=[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"spec_status","arguments":{"input":{},"run_id":"10000000-0000-0000-0000-000000000004","operation_id":"10000000-0000-0000-0000-000000000005","idempotency_key":"10000000-0000-0000-0000-000000000006","correlation_id":"10000000-0000-0000-0000-000000000007"}}}]
+   p=subprocess.run([str(native),"mcp"],cwd=base,env=environment,preexec_fn=drop,input="".join(json.dumps(r)+"\n" for r in requests),text=True,capture_output=True,timeout=15)
+   replies=[json.loads(line) for line in p.stdout.splitlines()]
+   expect(p.returncode==0 and [t["name"] for t in replies[0]["result"]["tools"]]==["spec_status"],"actual nonroot catalog could not read immutable root policy: "+str((p.returncode,p.stdout,p.stderr)))
+   expect(replies[1]["result"]["isError"] is True,"bootstrap catalog granted an unattached target credential")
+   expect(not (base/".codegraph").exists(),"nonroot distributed bridge reached local SQLite")
+  check("client.protected.mcp-nonroot-root-policy",catalog)
 
 def network_checks():
  sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
@@ -253,6 +323,32 @@ def mapping_checks():
    expect(p.returncode==0 and r["result"]["isError"] and json.loads(r["result"]["content"][0]["text"])["error"]["code"]=="AUTHORITY_SUBJECT_MISMATCH","operator credential acquired supervisor authority")
    policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}))
   check("client.mcp.wrong-supervisor-credential-refused",wrong_subject)
+
+  def nonroot_signed():
+   import shutil
+   with tempfile.TemporaryDirectory(prefix="hf-nonroot-signed-") as directory:
+    root=Path(directory);root.chmod(0o755);secure=root/"auth";secure.mkdir(mode=0o750);os.chown(secure,0,33025)
+    native=root/"cg";shutil.copyfile(ROOT/"cg",native);native.chmod(0o755)
+    key=secure/"key.pem";key.write_bytes(fixture.keys["operator"]["path"].read_bytes())
+    ca=secure/"ca.pem";ca.write_bytes(fixture.ca.read_bytes())
+    descriptor=secure/"authority.json";descriptor.write_bytes(marker.read_bytes())
+    credential=secure/"transport.json";credential.write_text(json.dumps({"origin":fixture.origin,"ca_file":str(ca),"key_path":str(key),"credential_id":fixture.ids["operator"],"timeout_ms":5000}))
+    toolpolicy=secure/"policy.json";toolpolicy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"],"target_session_id":fixture.ids["operator"],"run_id":fixture.ids["run"],"target_role":"OPERATOR"}))
+    for file in [key,ca,descriptor,credential,toolpolicy]:file.chmod(0o640);os.chown(file,0,33025)
+    def drop():
+     os.setgroups([]);os.setresgid(33025,33025,33025);os.setresuid(33025,33025,33025)
+    e={k:v for k,v in os.environ.items() if not k.startswith(("HYPERFIDE_","CG_","CODIFY_"))}
+    e.update(HYPERFIDE_MODE="distributed",HYPERFIDE_AUTHORITY_DESCRIPTOR=str(descriptor),HYPERFIDE_TRANSPORT_CONFIG=str(credential),HYPERFIDE_MCP_TOOL_POLICY_FILE=str(toolpolicy))
+    requests=[{"jsonrpc":"2.0","id":1,"method":"tools/list"},tool("fleet_status",2),tool("authority_invoke",3)]
+    p=subprocess.run([str(native),"mcp"],cwd=root,env=e,preexec_fn=drop,input="".join(json.dumps(r)+"\n" for r in requests),capture_output=True,text=True,timeout=25)
+    replies=[json.loads(line) for line in p.stdout.splitlines()]
+    expect(p.returncode==0 and len(replies)==3 and [t["name"] for t in replies[0]["result"]["tools"]]==["fleet_status"],"actual nonroot finite MCP catalog failed")
+    expect(replies[1]["result"]["isError"] is False,"actual nonroot root-protected credential did not reach signed HTTPS: "+str(replies[1]))
+    verify(json.loads(replies[1]["result"]["content"][0]["text"]))
+    expect(replies[2]["error"]["code"]==-32601,"nonroot protected policy granted generic operator escape")
+    expect(not (root/".codegraph").exists(),"nonroot signed bridge opened local SQLite")
+  check("client.protected.mcp-nonroot-signed-primary",nonroot_signed)
+
  finally:close_fixture(fixture,'hf-task25.3-mapping')
 
 def business_unknown_checks():

@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include "transport.h"
 
 enum { HF_LOCAL=0, HF_DISTRIBUTED=1, HF_OFFLINE=2, HF_OFFLINE_LOCAL=3, HF_MODE_INVALID=-1 };
 static const char *hf_ws25(const char *p){while(*p&&isspace((unsigned char)*p))p++;return p;}
@@ -27,9 +28,8 @@ static int hf_uuid25(const char *s){
 }
 static int hf_descriptor25(const char *filename,int *distributed){
  struct stat st;if(lstat(filename,&st)!=0)return errno==ENOENT?0:-1;
- if(!S_ISREG(st.st_mode)||S_ISLNK(st.st_mode)||st.st_uid!=geteuid()||(st.st_mode&0077)||st.st_size<2||st.st_size>4096)return -1;
- int fd=open(filename,O_RDONLY|O_NOFOLLOW|O_CLOEXEC);if(fd<0)return -1;struct stat actual;if(fstat(fd,&actual)||actual.st_dev!=st.st_dev||actual.st_ino!=st.st_ino||actual.st_size!=st.st_size){close(fd);return -1;}
- FILE *f=fdopen(fd,"rb");if(!f){close(fd);return -1;}char data[4097];size_t n=fread(data,1,sizeof(data)-1,f);int ok=!ferror(f);fclose(f);if(!ok||n!=(size_t)st.st_size||memchr(data,0,n))return -1;data[n]=0;
+ char *protected=NULL;size_t n=0;if(!hf_protected_read(filename,4096,&protected,&n)||n<2){free(protected);return -1;}
+ char data[4097];memcpy(data,protected,n+1);free(protected);
  const char *p=hf_ws25(data);if(*p++!='{')return -1;unsigned seen=0;char mode[64]="";
  for(;;){char key[64],value[128];p=hf_ws25(p);if(*p=='}'){p++;break;}if(!hf_string25(&p,key,sizeof key))return -1;p=hf_ws25(p);if(*p++!=':')return -1;p=hf_ws25(p);
  if(!strcmp(key,"schema_version")){if(seen&1||*p++!='1'||isdigit((unsigned char)*p))return -1;seen|=1;}
@@ -168,6 +168,12 @@ static const HfRoute25 hf_routes25[]={
  {"supervisor","describe","13.4.supervision","supervisor.session.describe"},
  {"supervisor","launch","13.4.supervision","supervisor.session.launch"},
  {"supervisor","inspect","13.4.supervision","supervisor.session.inspect"},
+ {"supervisor","input","13.4.supervision","supervisor.session.input"},
+ {"supervisor","stop","13.4.supervision","supervisor.session.stop"},
+ {"work","open","25.3-workflow","work.open"},
+ {"work","update","25.3-workflow","work.update"},
+ {"work","handoff","25.3-workflow","work.handoff"},
+ {"work","projection","25.3-workflow","work.projection"},
  {"hierarchy","describe","3.1","hierarchy.describe"},
  {"hierarchy","inspect","3.1","hierarchy.inspect"},
  {"hierarchy","view","3.3","hierarchy.view"},
@@ -246,7 +252,7 @@ static int hf_mcp_policy25(HfMcpPolicy25 *policy){
  memset(policy,0,sizeof *policy);
  const char *filename=getenv("HYPERFIDE_MCP_TOOL_POLICY_FILE");if(!filename)return 1;
  char *text=NULL;size_t length=0;HfJson *j=malloc(sizeof *j);if(!j)return 0;
- int valid=filename[0]=='/'&&hf_private_read(filename,32768,&text,&length)&&hf_json_parse(j,text);
+ int valid=filename[0]=='/'&&hf_protected_read(filename,32768,&text,&length)&&hf_json_parse(j,text);
  const char *const allowed[]={"schema_version","allowed_tools","bootstrap_catalog","target_session_id","run_id","target_role"};int64_t version=0;
  if(valid)valid=hf_json_only(j,0,allowed,6)&&hf_json_i64(j,hf_json_field(j,0,"schema_version"),&version)&&version==1;
  unsigned seen=0;
