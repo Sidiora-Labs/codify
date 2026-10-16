@@ -86,7 +86,22 @@
     "durability.restore_database_immutable",
     "durability.journal_replay_proof",
     "durability.journal_unknown_fork",
-    "durability.journal_unchanged_head"
+    "durability.journal_unchanged_head",
+    "durability.semantic_retry",
+    "durability.semantic_fresh",
+    "durability.semantic_wait",
+    "durability.semantic_idempotent",
+    "durability.semantic_generation",
+    "durability.semantic_upgrade",
+    "durability.semantic_missing",
+    "durability.semantic_concurrent_writes",
+    "durability.semantic_concurrent_write_read",
+    "durability.semantic_concurrent_read_write",
+    "durability.semantic_business_version",
+    "durability.semantic_business_guard",
+    "durability.semantic_monotonic",
+    "durability.semantic_single_step",
+    "durability.semantic_spec_monotonic"
   ],
   "inputs": [
     {
@@ -136,8 +151,8 @@
     },
     {
       "path": "services/hyperfide/dist/storage/dispositions.js",
-      "sha256": "2ff57383c1094cef99456e1eb7473d5e37693369150f123d4e3ede1a7635cf56",
-      "size": 2819
+      "sha256": "3af6631b377b74dd7f82d00c0f4e1357d60eedf31825bb49bccfca8d1fd15d34",
+      "size": 2929
     },
     {
       "path": "services/hyperfide/dist/storage/durability.js",
@@ -166,8 +181,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0004-durability.sql",
-      "sha256": "c7838eb6c05560dca94b637dc809f6011fa0c2700b7b0aed47d39ba1f55267cb",
-      "size": 3153
+      "sha256": "78ae25a9a07f14e67ab05f3ddc5f99a60b85e07673fa67c0bddc4b495e902908",
+      "size": 4202
     },
     {
       "path": "services/hyperfide/package-lock.json",
@@ -211,8 +226,8 @@
     },
     {
       "path": "services/hyperfide/src/storage/dispositions.ts",
-      "sha256": "b2e2af8db45a2066e803cb0381c3f79fb923f97495a1351896353f5ed8453a5c",
-      "size": 3191
+      "sha256": "6d636efb2558b7c4306abf3764c738c7995dc37c4d01fc47623e2972c4e79b19",
+      "size": 3277
     },
     {
       "path": "services/hyperfide/src/storage/durability.ts",
@@ -246,8 +261,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_4.py",
-      "sha256": "5b42a2c07be7bdcbfb518c2ac3f8c73290e9c8d746c029358066a4913f7b810b",
-      "size": 35516
+      "sha256": "c2db2594b7825b25b8ce4499f00b7c56ff533b7b000d3b72489909714cb2ce8c",
+      "size": 41677
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -266,8 +281,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/4.4.json",
-      "sha256": "aff603d673c53dbb43d7d4f9b9eac11dd3d77365aa0b3a47ce3e3712a92e868d",
-      "size": 5440
+      "sha256": "53639846f547854b151de1127310c6ec997512a79c4bf079bd4016f1795c967c",
+      "size": 6031
     }
   ],
   "policy": {

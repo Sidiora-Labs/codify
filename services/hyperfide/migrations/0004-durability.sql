@@ -48,3 +48,21 @@ ALTER TABLE hyperfide.environment_profiles ADD CONSTRAINT environment_profiles_m
 -- Every semantic writer updates this existing row before mutation. SERIALIZABLE
 -- readers lock it FOR SHARE so stale waiting snapshots abort and retry.
 ALTER TABLE hyperfide.runs ADD COLUMN semantic_generation bigint NOT NULL DEFAULT 1 CHECK(semantic_generation>0);
+
+-- Keep synchronization bookkeeping separate from business run/control revisions.
+CREATE FUNCTION hyperfide.run_monotonic_fields() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+BEGIN
+ IF NEW.spec_generation<OLD.spec_generation OR NEW.semantic_generation<OLD.semantic_generation THEN
+  RAISE EXCEPTION 'run generations cannot decrease' USING ERRCODE='23514';
+ END IF;
+ IF NEW.semantic_generation IS DISTINCT FROM OLD.semantic_generation AND NEW.semantic_generation<>OLD.semantic_generation+1 THEN
+  RAISE EXCEPTION 'semantic generation advances one step' USING ERRCODE='23514';
+ END IF;
+ IF (to_jsonb(NEW)-'semantic_generation') IS DISTINCT FROM (to_jsonb(OLD)-'semantic_generation') AND NEW.state_version<=OLD.state_version THEN
+  RAISE EXCEPTION 'business state_version must advance' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER monotonic_version ON hyperfide.runs;
+CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.runs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.run_monotonic_fields();
