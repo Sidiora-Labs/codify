@@ -101,7 +101,7 @@ export async function inspectCoverage(db:Queryable,s:CoverageScope,custodyId:str
  const applicability=registryCurrent?c.applicability:c.applicability==='CURRENT'?'STALE':c.applicability;
  const active=c.authority==='ACTIVE'&&c.current_custody_id===c.id&&c.authority_epoch===c.current_epoch&&policy.criteria_digest===c.current_criteria;
  return {submission_id:c.id,custody_generation:String(c.custody_generation),authority:c.authority,qualification_outcome:c.qualification_outcome,
-  applicability,proof_registry_current:registryCurrent,proof_source_object_id:proofManifest.source_object_id,proof_source_tree_id:proofManifest.source_tree_id,proof_source_origin:proofManifest.source_origin??'SUBMITTED_RESULT',proof_publication_operation_id:proofManifest.publication_operation_id??null,proof_source_manifest_digest:proofManifest.source_manifest_digest,
+  applicability,proof_registry_current:registryCurrent,proof_registry_digest:hash(policy),proof_source_object_id:proofManifest.source_object_id,proof_source_tree_id:proofManifest.source_tree_id,proof_source_origin:proofManifest.source_origin??'SUBMITTED_RESULT',proof_publication_operation_id:proofManifest.publication_operation_id??null,proof_source_manifest_digest:proofManifest.source_manifest_digest,
   proof_git_provenance_manifest_digest:proofManifest.git_provenance_manifest_digest??null,proof_integration_input_manifest_digest:proofManifest.integration_input_manifest_digest??null,proof_criteria_digest:policy.criteria_digest,applicability_version:String(c.applicability_version),source_object_id:c.source_object_id,
   criteria_digest:c.criteria_digest,source_manifest_digest:c.source_manifest_digest,evidence_manifest_digest:c.evidence_manifest_digest,
   receipt_digest:receipt?.receipt_digest??null,rubric_digest:policy.rubric_digest,required_check_ids:required,
@@ -110,7 +110,7 @@ export async function inspectCoverage(db:Queryable,s:CoverageScope,custodyId:str
 }
 async function inspect(ctx:ComponentContext,raw:unknown):Promise<Data>{
  const v=fields(raw,['organisation_id','run_id','submission_id']),s=scope(ctx,v),id=uuid(v.submission_id);
- return transaction(ctx,async client=>inspectCoverage(client,{organisation_id:s[0],run_id:s[1]},id));
+ return transaction(ctx,async client=>inspectCoverage(client,{organisation_id:s[0],run_id:s[1]},id),false,'READ');
 }
 async function judgement(ctx:ComponentContext,raw:unknown):Promise<Data>{
  const v=fields(raw,['organisation_id','run_id','submission_id','custody_generation','expected_state_version','clause_id',
