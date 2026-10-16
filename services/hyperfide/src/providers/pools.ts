@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
-import pg from 'pg';
+import type pg from 'pg';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import type {PrimaryTransaction,TransactionGateway} from '../storage/transactions.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
-import {getPool,databaseError} from '../storage/schema.js';
+import {databaseError} from '../storage/schema.js';
 import type {ProviderAdapter,ProviderOperation,ProviderOutcome,ProviderScope,ResourceRef} from './contract.js';
 
 export interface ProviderPersistenceHooks {
@@ -22,23 +24,40 @@ export interface QuotaObservation {
 export type ProviderQuotaObserver=(scope:ProviderScope,signal:AbortSignal)=>Promise<QuotaObservation[]>;
 export interface OwnershipObservation {matches:boolean;operation_id:string;native_sandbox_id:string;evidence_digest:string}
 export type ProviderOwnershipProbe=(scope:ProviderScope,operationId:string,nativeId:string,signal:AbortSignal)=>Promise<OwnershipObservation>;
-const adapters=new Map<string,ProviderAdapterFactory>(),observers=new Map<string,ProviderQuotaObserver>(),probes=new Map<string,ProviderOwnershipProbe>();
+export interface ProviderRunnerBindingProof {evidence_digest:string;observed_at:string}
+export type ProviderRunnerBindingVerifier=(tx:PrimaryTransaction,binding:Record<string,unknown>)=>Promise<ProviderRunnerBindingProof|null>;
+export interface ProviderRuntimeRegistry {
+ runnerBindingVerifier?:ProviderRunnerBindingVerifier;
+ adapters:Map<string,ProviderAdapterFactory>;observers:Map<string,ProviderQuotaObserver>;probes:Map<string,ProviderOwnershipProbe>;
+}
+export interface ProviderDatabase {
+ query<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[]):Promise<pg.QueryResult<R>>;
+ gateway:Pick<TransactionGateway,'withPrimaryTransaction'>;runtime:ProviderRuntimeRegistry;
+}
+export function createProviderDatabase(context:ComponentContext):ProviderDatabase {
+ const runtime:ProviderRuntimeRegistry={adapters:new Map(),observers:new Map(),probes:new Map()},gateway=context.resources.gateway;
+ return{gateway,runtime,query:<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[])=>gateway.withPrimaryTransaction(
+ {timeoutMs:10000,maxRetries:2,signal:context.signal},tx=>tx.query<R>(text,values))};
+}
 function register<T>(map:Map<string,T>,provider:string,implementation:T):()=>void {
-  if(!['railway','blaxel'].includes(provider)||typeof implementation!=='function'||map.has(provider))
-    throw new FoundationError('PROVIDER_REGISTRATION_CONFLICT','Provider implementation must be registered once by trusted service startup');
-  map.set(provider,implementation);return()=>{if(map.get(provider)===implementation)map.delete(provider);};
+ if(!['railway','blaxel'].includes(provider)||typeof implementation!=='function'||map.has(provider))
+  throw new FoundationError('PROVIDER_REGISTRATION_CONFLICT','Provider implementation must be registered once by trusted service startup');
+ map.set(provider,implementation);return()=>{if(map.get(provider)===implementation)map.delete(provider);};
 }
-export const registerProviderAdapter=(provider:'railway'|'blaxel',factory:ProviderAdapterFactory)=>register(adapters,provider,factory);
-export const registerProviderQuotaObserver=(provider:'railway'|'blaxel',observer:ProviderQuotaObserver)=>register(observers,provider,observer);
-export const registerProviderOwnershipProbe=(provider:'railway'|'blaxel',probe:ProviderOwnershipProbe)=>register(probes,provider,probe);
-export const hasProviderAdapter=(provider:string)=>adapters.has(provider);
-export function providerAdapter(scope:ProviderScope,hooks:ProviderPersistenceHooks):ProviderAdapter {
-  const factory=adapters.get(scope.provider);if(!factory)fail('PROVIDER_UNAVAILABLE','No trusted provider adapter is registered');
-  const adapter=factory(scope,hooks);if(adapter.provider!==scope.provider)fail('PROVIDER_SCOPE_MISMATCH','Adapter provider differs from persisted pool');
-  return adapter;
+export function registerProviderAdapter(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',factory:ProviderAdapterFactory){return register(runtime.adapters,provider,factory);}
+export function registerProviderQuotaObserver(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',observer:ProviderQuotaObserver){return register(runtime.observers,provider,observer);}
+export function registerProviderOwnershipProbe(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',probe:ProviderOwnershipProbe){return register(runtime.probes,provider,probe);}
+export const hasProviderAdapter=(provider:string,runtime:ProviderRuntimeRegistry)=>runtime.adapters.has(provider);
+export function providerAdapter(scope:ProviderScope,hooks:ProviderPersistenceHooks,runtime:ProviderRuntimeRegistry):ProviderAdapter {
+ const factory=runtime.adapters.get(scope.provider);if(!factory)fail('PROVIDER_UNAVAILABLE','No trusted provider adapter is registered');
+ const adapter=factory(scope,hooks);if(adapter.provider!==scope.provider)fail('PROVIDER_SCOPE_MISMATCH','Adapter provider differs from persisted pool');return adapter;
 }
-export function providerOwnershipProbe(provider:string):ProviderOwnershipProbe {
-  const probe=probes.get(provider);if(!probe)fail('OWNERSHIP_UNVERIFIED','Provider resource ownership cannot be established');return probe;
+export function providerOwnershipProbe(provider:string,runtime:ProviderRuntimeRegistry):ProviderOwnershipProbe {
+ const probe=runtime.probes.get(provider);if(!probe)fail('OWNERSHIP_UNVERIFIED','Provider resource ownership cannot be established');return probe;
+}
+export function providerDatabase(context:ComponentContext):ProviderDatabase {
+ return context.dependencies.require('8.2','provider.pools.v1',(value):value is ProviderDatabase=>
+  !!value&&typeof value==='object'&&typeof (value as ProviderDatabase).query==='function'&&!!(value as ProviderDatabase).gateway);
 }
 export function fail(code:string,message:string):never {throw new FoundationError(code,message);}
 export function obj(value:unknown,keys?:readonly string[]):Record<string,unknown> {
@@ -72,22 +91,14 @@ function canonical(value:unknown):string {
   const o=obj(value);return '{'+Object.keys(o).sort().map(k=>JSON.stringify(k)+':'+canonical(o[k])).join(',')+'}';
 }
 export const digestDocument=(value:unknown)=>'sha256:'+createHash('sha256').update(canonical(value)).digest('hex');
-export async function transaction<T>(pool:pg.Pool,body:(client:pg.PoolClient)=>Promise<T>):Promise<T>{
-  const client=await pool.connect();let committing=false;
-  try {
-    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-    if((await client.query('SELECT pg_is_in_recovery() AS replica')).rows[0]?.replica)fail('PRIMARY_REQUIRED','Provider authority requires the primary');
-    const result=await body(client);committing=true;await client.query('COMMIT');return result;
-  } catch(error) {
-    try{await client.query('ROLLBACK');}catch{/* Unknown COMMIT cannot be reclassified as rejected. */}
-    if(committing&&!(error instanceof FoundationError))fail('PROVIDER_DB_OUTCOME_UNKNOWN','Reconcile the original request on the primary before retry');
-    throw error instanceof FoundationError?error:databaseError(error);
-  }finally{client.release();}
+export async function transaction<T>(pool:ProviderDatabase,body:(client:PrimaryTransaction)=>Promise<T>):Promise<T>{
+ return pool.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2},body);
 }
 type Limits=Partial<Record<QuotaDimension,string>>;
 export interface PoolConfig {
   id:string;provider:'railway'|'blaxel';account_key:string;environment_key:string;region:string;
   profile_id:string|null;preparation_digest:string;approved_limits:Limits;planning_limits:Limits;
+  create_policy:{seed_reference:string;network:'ISOLATED'|'PRIVATE';stdin_required:boolean};
 }
 export interface DeploymentConfig {
   schema_version:1;organisation_id:string;revision:string;
@@ -114,10 +125,11 @@ export function validateDeployment(value:unknown):DeploymentConfig {
     const key=provider(a.provider)+':'+str(a.account_key,256);if(accounts.has(key))fail('POOL_CONFIG_INVALID','Duplicate account');
     accounts.add(key);limits(a.approved_limits);limits(a.planning_limits);
   }
-  for(const raw of o.pools){const p=obj(raw,['id','provider','account_key','environment_key','region','profile_id','preparation_digest','approved_limits','planning_limits']);
+  for(const raw of o.pools){const p=obj(raw,['id','provider','account_key','environment_key','region','profile_id','preparation_digest','approved_limits','planning_limits','create_policy']);
     const id=uuid(p.id);if(ids.has(id))fail('POOL_CONFIG_INVALID','Duplicate pool');ids.add(id);
     const key=provider(p.provider)+':'+str(p.account_key,256);if(!accounts.has(key))fail('POOL_CONFIG_INVALID','Pool account is not configured');
     str(p.environment_key,256);str(p.region,256);if(p.profile_id!==null)uuid(p.profile_id);dg(p.preparation_digest);
+    const cp=obj(p.create_policy,['seed_reference','network','stdin_required']);str(cp.seed_reference);if(!['ISOLATED','PRIVATE'].includes(String(cp.network))||typeof cp.stdin_required!=='boolean')fail('POOL_CONFIG_INVALID','Invalid trusted create policy');
     const budget=limits(p.approved_limits);limits(p.planning_limits);
     if(budget.SANDBOX===undefined||budget.PROVISIONING===undefined)fail('POOL_CONFIG_INVALID','Sandbox and provisioning budgets must be separate');
   }
@@ -130,13 +142,13 @@ export async function readDeployment(env:Readonly<NodeJS.ProcessEnv>):Promise<De
     fail('POOL_CONFIG_INVALID','Pool configuration must be a bounded owner-only regular file');
   return validateDeployment(JSON.parse(await fs.readFile(path,'utf8')));
 }
-export async function inspectProviderSchema(pool:pg.Pool):Promise<unknown>{
+export async function inspectProviderSchema(pool:ProviderDatabase):Promise<unknown>{
   const filename=new URL('../../migrations/0008-provider-coordination.sql',import.meta.url);
   const sql=await fs.readFile(filename,'utf8'),checksum='sha256:'+createHash('sha256').update(sql).digest('hex');
   const migration=await pool.query('SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=8');
   if(migration.rows[0]?.name!=='0008-provider-coordination'||migration.rows[0]?.checksum!==checksum)
     fail('PROVIDER_SCHEMA_NOT_READY','The dedicated migration runner must apply the pinned provider migration');
-  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes'];
+  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations'];
   const result=await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='hyperfide' AND tablename=ANY($1::text[])",[tables]);
   if(result.rows.length!==tables.length)fail('PROVIDER_SCHEMA_NOT_READY','Provider migration tables are incomplete');
   return{ready:true,version:8,name:'0008-provider-coordination',checksum};
@@ -150,13 +162,13 @@ export function configuredScope(config:DeploymentConfig,p:PoolConfig):ProviderSc
     environment_id:p.environment_key,region:p.region,configuration_digest:digestDocument({revision:config.revision,pool:p,
       account:config.accounts.find(a=>a.provider===p.provider&&a.account_key===p.account_key)})};
 }
-async function applyConfig(pool:pg.Pool,config:DeploymentConfig):Promise<unknown>{
+async function applyConfig(pool:ProviderDatabase,config:DeploymentConfig):Promise<unknown>{
   return transaction(pool,async c=>{
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[config.organisation_id]);
     for(const p of config.pools){
       const scope=configuredScope(config,p);
       const existing=await c.query('SELECT * FROM hyperfide.provider_pools WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[config.organisation_id,p.id]);
-      if(existing.rows.length&&['provider','account_key','environment_key','region'].some(k=>existing.rows[0][k]!==p[k as keyof PoolConfig]))
+      if(existing.rows.length&&['provider','account_key','environment_key','region'].some(k=>existing.rows[0]![k]!==p[k as keyof PoolConfig]))
         fail('POOL_IDENTITY_CONFLICT','A pool identity cannot be reassigned');
       await c.query('INSERT INTO hyperfide.provider_pools(organisation_id,id,provider,account_key,environment_key,region,profile_id) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(organisation_id,id) DO NOTHING',
         [config.organisation_id,p.id,p.provider,p.account_key,p.environment_key,p.region,p.profile_id]);
@@ -180,14 +192,14 @@ export function validateQuotaObservation(value:unknown,scope:ProviderScope):Quot
     Date.parse(o.observed_at as string)>=Date.parse(o.expires_at as string))fail('QUOTA_OBSERVATION_STALE','Quota observation is stale or from the future');
   return o as unknown as QuotaObservation;
 }
-export async function currentPool(client:pg.Pool|pg.PoolClient,config:DeploymentConfig,id:string):Promise<{pool:PoolConfig;scope:ProviderScope}>{
+export async function currentPool(client:Pick<PrimaryTransaction,'query'>,config:DeploymentConfig,id:string):Promise<{pool:PoolConfig;scope:ProviderScope}>{
   const p=configuredPool(config,id),scope=configuredScope(config,p);
   const rows=await client.query('SELECT p.state FROM hyperfide.provider_pools p JOIN hyperfide.provider_pool_configurations c ON c.organisation_id=p.organisation_id AND c.pool_id=p.id WHERE p.organisation_id=$1 AND p.id=$2 AND c.configuration_digest=$3 AND c.active',
     [config.organisation_id,id,scope.configuration_digest]);
   if(rows.rows[0]?.state!=='ACTIVE')fail('POOL_UNAVAILABLE','Pool is inactive, unconfigured or has a different deployment revision');
   return{pool:p,scope};
 }
-export async function poolCapacity(client:pg.Pool|pg.PoolClient,config:DeploymentConfig,id:string):Promise<unknown>{
+export async function poolCapacity(client:Pick<PrimaryTransaction,'query'>,config:DeploymentConfig,id:string):Promise<unknown>{
   const {pool:p,scope}=await currentPool(client,config,id),account=config.accounts.find(a=>a.provider===p.provider&&a.account_key===p.account_key)!;
   const observations=await client.query('SELECT q.* FROM hyperfide.provider_quota_observations q JOIN hyperfide.provider_pool_configurations c USING(organisation_id,pool_id,configuration_digest) WHERE q.organisation_id=$1 AND q.provider=$2 AND q.account_key=$3 AND c.active AND q.expires_at>clock_timestamp() ORDER BY q.observed_at DESC',
     [config.organisation_id,p.provider,p.account_key]);
@@ -197,7 +209,7 @@ export async function poolCapacity(client:pg.Pool|pg.PoolClient,config:Deploymen
     [config.organisation_id]);
   const relevant=(kind:string,key:string,dimension:string)=>{
     const rows=observations.rows.filter(r=>r.scope_kind===kind&&r.scope_key===key&&r.dimension===dimension);
-    return rows.length?rows.reduce((a,r)=>BigInt(r.quota_limit)<a?BigInt(r.quota_limit):a,BigInt(rows[0].quota_limit)):null;
+    return rows.length?rows.reduce((a,r)=>BigInt(r.quota_limit)<a?BigInt(r.quota_limit):a,BigInt(rows[0]!.quota_limit)):null;
   };
   const resourceUsage=await client.query("SELECT i.pool_id,COALESCE(sum((i.operation->'parameters'->'resources'->>'cpu_millis')::bigint),0)::text AS cpu,COALESCE(sum((i.operation->'parameters'->'resources'->>'memory_bytes')::bigint),0)::text AS memory,COALESCE(sum((i.operation->'parameters'->'resources'->>'disk_bytes')::bigint),0)::text AS disk FROM hyperfide.provisioning_intents i JOIN hyperfide.sandboxes s ON s.organisation_id=i.organisation_id AND s.id=i.sandbox_id WHERE i.organisation_id=$1 AND i.kind='CREATE' AND i.state<>'REJECTED' AND s.observed_state<>'DESTROYED' GROUP BY i.pool_id",[config.organisation_id]);
   const reservations=await client.query("SELECT a.pool_id,a.dimension,sum(r.quantity)::text AS quantity FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.state<>'RELEASED' GROUP BY a.pool_id,a.dimension",[config.organisation_id]);
@@ -224,8 +236,9 @@ export async function poolCapacity(client:pg.Pool|pg.PoolClient,config:Deploymen
   return {scope,dimensions,planning_limits:p.planning_limits,planning_grants_capacity:false,qualification:'OBSERVED_LIMITS_ONLY',
     unknown_resource_capacity:orphanRows.rows.some(r=>usage.rows.some(u=>u.pool_id===r.pool_id)&&BigInt(r.unknown)>0n),authority:'OBSERVATION_ONLY'};
 }
-export async function assertPoolCapacity(client:pg.PoolClient,config:DeploymentConfig,id:string,requested:Partial<Record<QuotaDimension,string>>,alreadyReserved=false):Promise<void>{
+export async function assertPoolCapacity(client:PrimaryTransaction,config:DeploymentConfig,id:string,requested:Partial<Record<QuotaDimension,string>>,alreadyReserved=false):Promise<void>{
   // The same account lock serialises all environment/pool provisioning requests.
+  assertPrimaryTransaction(client);
   const p=configuredPool(config,id);
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[config.organisation_id+':'+p.provider+':'+p.account_key]);
   const report=await poolCapacity(client,config,id) as {unknown_resource_capacity:boolean;dimensions:Array<{name:QuotaDimension;qualified:boolean;budgets:Array<{scope:string;approved_limit:string;observed_limit:string|null;used:string}>}>};
@@ -241,20 +254,26 @@ export async function assertPoolCapacity(client:pg.PoolClient,config:DeploymentC
 }
 
 export function createComponent(context:ComponentContext):Component {
+  const database=createProviderDatabase(context);
+  const provisioner=()=>{if(context.role!=='provisioner')fail('ROLE_FORBIDDEN','Provider administration requires the provisioner role');};
   const config=()=>readDeployment(context.env);
   const guarded=(fn:(input:unknown)=>Promise<unknown>|unknown)=>async(input:unknown)=>{
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider service is shutting down');
     try{return await fn(input);}catch(e){throw e instanceof FoundationError?e:databaseError(e);}
   };
-  return {apiVersion:1,actions:{
+  return {apiVersion:1,capabilities:{'provider.pools.v1':database,...(context.role==='provisioner'?{'provider.registry.v1':{
+ registerProviderAdapter:(provider:'railway'|'blaxel',factory:ProviderAdapterFactory)=>registerProviderAdapter(database.runtime,provider,factory),
+ registerProviderQuotaObserver:(provider:'railway'|'blaxel',observer:ProviderQuotaObserver)=>registerProviderQuotaObserver(database.runtime,provider,observer),
+ registerProviderOwnershipProbe:(provider:'railway'|'blaxel',probe:ProviderOwnershipProbe)=>registerProviderOwnershipProbe(database.runtime,provider,probe)
+ }}:{})},actions:{
     'provider.pools.describe':input=>{obj(input,[]);return{schema_version:1,dimensions:[...QUOTA_DIMENSIONS],configuration_source:'TRUSTED_PRIVATE_FILE',planning_grants_capacity:false};},
-    'provider.pools.readiness':guarded(async input=>{obj(input,[]);return inspectProviderSchema(getPool(context.env));}),
-    'provider.pools.configure':guarded(async input=>{obj(input,[]);return applyConfig(getPool(context.env),await config());}),
-    'provider.pools.list':guarded(async input=>{obj(input,[]);const c=await config();return{pools:await Promise.all(c.pools.map(p=>poolCapacity(getPool(context.env),c,p.id)))};}),
-    'provider.pools.capacity':guarded(async input=>{const i=obj(input,['pool_id']);return poolCapacity(getPool(context.env),await config(),uuid(i.pool_id));}),
+    'provider.pools.readiness':guarded(async input=>{obj(input,[]);return inspectProviderSchema(database);}),
+    'provider.pools.configure':guarded(async input=>{provisioner();obj(input,[]);return applyConfig(database,await config());}),
+    'provider.pools.list':guarded(async input=>{obj(input,[]);const c=await config();return{pools:await Promise.all(c.pools.map(p=>poolCapacity(database,c,p.id)))};}),
+    'provider.pools.capacity':guarded(async input=>{const i=obj(input,['pool_id']);return poolCapacity(database,await config(),uuid(i.pool_id));}),
     'provider.pools.observe':guarded(async input=>{
-      const i=obj(input,['pool_id']),c=await config(),pool=getPool(context.env),{scope}=await currentPool(pool,c,uuid(i.pool_id));
-      const observer=observers.get(scope.provider);if(!observer)fail('QUOTA_UNQUALIFIED','No trusted quota observer is registered');
+      provisioner();const i=obj(input,['pool_id']),c=await config(),pool=database,{scope}=await currentPool(pool,c,uuid(i.pool_id));
+      const observer=database.runtime.observers.get(scope.provider);if(!observer)fail('QUOTA_UNQUALIFIED','No trusted quota observer is registered');
       const raw=await observer(scope,context.signal);if(!Array.isArray(raw)||!raw.length||raw.length>100)fail('QUOTA_UNQUALIFIED','Quota observation is empty');
       const observations=raw.map(v=>validateQuotaObservation(v,scope));const seen=new Set<string>();
       for(const o of observations){const key=o.scope_kind+':'+o.scope_key+':'+o.dimension;if(seen.has(key))fail('QUOTA_OBSERVATION_INVALID','Duplicate quota observation');seen.add(key);}
