@@ -403,8 +403,8 @@ export function createComponent(context:ComponentContext):Component {
 /** This transport is reachable only through8.4's guarded isolation registry.
  * The caller supplies real14 isolation authority; no worker invocation is fabricated. */
 export interface RailwayIsolationTransport {
-  destroy(operation:ProviderOperation<'destroy'>,signal:AbortSignal):Promise<ProviderOutcome>;
-  observe(operation:ProviderOperation<'observe'>,signal:AbortSignal):Promise<ProviderOutcome>;
+  destroy(operation:ProviderOperation<'destroy'>,signal?:AbortSignal):Promise<ProviderOutcome<'destroy'>>;
+  observe(operation:ProviderOperation<'observe'>,signal?:AbortSignal):Promise<ProviderOutcome<'observe'>>;
 }
 export function createRailwayIsolationTransport(client:RailwayClient,fixedScope:ProviderScope):RailwayIsolationTransport {
   client.assertScope(fixedScope);
@@ -435,7 +435,15 @@ export function createRailwayIsolationTransport(client:RailwayClient,fixedScope:
       validateProviderOutcome({operation,outcome});return outcome;
     }catch{return unknown(operation,resource);}
   };
-  return {destroy:perform,observe:perform};
+  // Narrow only after the actual shared wire validator binds kind, scope and
+  // result shape. The default signal still passes through deadline bounding.
+  const checked=<K extends 'destroy'|'observe'>(operation:ProviderOperation<K>,outcome:ProviderOutcome):ProviderOutcome<K>=>{
+    validateProviderOutcome({operation,outcome});return outcome as ProviderOutcome<K>;
+  };
+  return {
+    destroy:async(operation,signal)=>checked(operation,await perform(operation,signal??new AbortController().signal)),
+    observe:async(operation,signal)=>checked(operation,await perform(operation,signal??new AbortController().signal)),
+  };
 }
 
 /** Pure provisioner boot seam.08/24 supply the independently trusted topology scope.
