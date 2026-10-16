@@ -6,8 +6,8 @@ import {lockRun} from '../events/outbox.js';
 import {FoundationError} from '../policy/programme.js';
 import {loadExecutionPacket} from '../hierarchy/packets.js';
 import {actorFor,boundedInteger,canonical,claimTask,decimal,digest,dimensions,dispatchRecipients,fail,fields,
-  gatewayFor,invocationFor,object,parseClaim,recordOutcome,requestDigest,reserveCapacity,
-  requireSchedulerAuthority,uuid,assertNoExecutionHold,requireTaskBarriers,requireProofRegistry,packetResources,approvedDimensions} from './claim.js';
+  gatewayFor,invocationFor,object,operationReplay,parseClaim,recordOutcome,requestDigest,reserveCapacity,
+  requireSchedulerAuthority,uuid,jobPolicy,allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,validateResourceVector,assertNoExecutionHold,requireTaskBarriers,requireProofRegistry,packetResources,packetPolicyResources,approvedDimensions} from './claim.js';
 import type {CapacityDimension,CapacityRequest,SchedulerActor,SchedulerScope,PacketResourceRequirements} from './claim.js';
 
 
@@ -60,7 +60,7 @@ export async function eligibleTasks(tx:PrimaryTransaction,input:SchedulerScope&{
    if(!slot||slot.pool_id!==input.pool_id||(!input.preparation&&(slot.state!=='READY'||slot.observed_state!=='RUNNING'))||slot.capacity_kind!=='AGENT'||slot.boot_generation!==runtime.sandbox_boot_generation)
     fail('SLOT_UNAVAILABLE','Pinned executor is not an available registered slot in this pool');
    await assertNoExecutionHold(tx,input,{package_id:task.feature_package_id,sandbox_id:String(runtime.sandbox_id),operation:'ADMISSION'});
-   const requirements=packetResources(mandatory.resource_requirements),demand=await approvedDimensions(tx,input,input.pool_id,requirements);
+   const requirements=packetPolicyResources(loaded.packet),demand=await approvedDimensions(tx,input,input.pool_id,requirements);
    const accounts=await tx.query<{id:string;free:string}>('SELECT id,(configured_limit-reserved-allocated)::text AS free FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND id=ANY($2::uuid[])',
     [input.organisation_id,demand.map(row=>row.capacity_account_id)]);
    if(!input.preparation&&demand.some(item=>BigInt(accounts.rows.find(row=>row.id===item.capacity_account_id)?.free??'-1')<BigInt(item.quantity)))
@@ -89,22 +89,9 @@ export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&
   maximum.memory_bytes=(BigInt(maximum.memory_bytes)>BigInt(item.resource_requirements.memory_bytes)?maximum.memory_bytes:item.resource_requirements.memory_bytes);
   maximum.disk_bytes=(BigInt(maximum.disk_bytes)>BigInt(item.resource_requirements.disk_bytes)?maximum.disk_bytes:item.resource_requirements.disk_bytes);
  }
- return {eligible_count:candidates.eligible.length,reservation_dimensions:await approvedDimensions(tx,input,input.pool_id,maximum,input.job_class,input.warm_spare),
+ return {eligible_count:candidates.eligible.length,reservation_dimensions:await approvedDimensions(tx,input,input.pool_id,maximum,input.job_class,input.warm_spare,true),
  spec_version:candidates.spec_generation,profile_version:first.profile_version,observed_at:candidates.observed_at};
 }
-export async function validateResourceVector(tx:PrimaryTransaction,input:SchedulerScope&{
- pool_id:string;attempt_id:string;dimensions:CapacityDimension[];job_class?:string;
-}):Promise<{resource_requirements:PacketResourceRequirements;dimensions:CapacityDimension[]}>{
- const attempts=await tx.query<{input_packet_digest:string}>('SELECT input_packet_digest FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
- [input.organisation_id,input.run_id,input.attempt_id]);
- if(!attempts.rows[0])fail('ATTEMPT_MISSING','Resource policy must bind an accepted attempt');
- const loaded=await loadExecutionPacket(tx,{organisation_id:input.organisation_id,run_id:input.run_id,digest:attempts.rows[0].input_packet_digest});
- const requirements=packetResources(object(object(loaded.packet).mandatory).resource_requirements);
- const expected=await approvedDimensions(tx,input,input.pool_id,requirements,input.job_class??'AGENT');
- if(canonical(expected)!==canonical(dimensions(input.dimensions)))fail('RESOURCE_VECTOR_MISMATCH','Resource vector differs from accepted immutable packet policy');
- return {resource_requirements:requirements,dimensions:expected};
-}
-
 export interface QuiescenceReceipt {id:string;digest:string;observed_at:string}
 export type ProofReader=(tx:PrimaryTransaction,input:SchedulerScope&{reservation_id:string})=>Promise<QuiescenceReceipt|null>;
 export interface DynamicCapacityRequest extends CapacityRequest {pool_id:string}
@@ -117,6 +104,9 @@ function scopeOf(input:Record<string,unknown>):SchedulerScope{
 export async function reserveDynamic(tx:PrimaryTransaction,input:DynamicCapacityRequest):Promise<unknown>{
   assertPrimaryTransaction(tx);
   const demand=dimensions(input.dimensions),physical:CapacityDimension[]=[],rates:unknown[]=[];
+  const immutable={pool_id:input.pool_id,attempt_id:input.attempt_id??null,dimensions:demand,expires_at:String(input.expires_at)};
+  const replay=await operationReplay(tx,input,'scheduler-dynamic-capacity','scheduler.capacity.dynamic',input.request_id,immutable);
+  if(replay!==undefined)return replay;
   const accountRows=await tx.query<{id:string;pool_id:string;dimension:string;configured_limit:string;qualification_state:string}>(
     'SELECT id,pool_id,dimension,configured_limit,qualification_state FROM hyperfide.capacity_accounts '+
     'WHERE organisation_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',
@@ -154,61 +144,9 @@ export async function reserveDynamic(tx:PrimaryTransaction,input:DynamicCapacity
     rates.push({capacity_account_id:item.capacity_account_id,quantity:item.quantity,window_start:start});
   }
   const reservations=physical.length?await reserveCapacity(tx,{...input,dimensions:physical}):[];
-  return {reservations,rate_receipts:rates};
-}
-
-async function jobPolicy(tx:PrimaryTransaction,scope:SchedulerScope,task_id:string,operation:'ADMISSION'|'ADVANCE'='ADVANCE'):Promise<PacketResourceRequirements>{
- const tasks=await tx.query<{id:string;feature_package_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string}>(
- 'SELECT id,feature_package_id,spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
- [scope.organisation_id,scope.run_id,task_id]);
- const task=tasks.rows[0];if(!task)fail('TASK_MISSING','Job must bind an accepted task');
- await assertNoExecutionHold(tx,scope,{package_id:task.feature_package_id,operation});
- const run=await tx.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
- if(!['READY','RUNNING'].includes(run.rows[0]?.state??''))fail('RUN_NOT_ADMITTING','Run state does not allow this resource job');
- await requireProofRegistry(tx,scope,task);
- const rows=await tx.query<{digest:string}>(
- 'SELECT digest FROM hyperfide.hierarchy_execution_packets WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND spec_revision_id=$4 AND spec_generation=$5 ORDER BY created_at DESC,id DESC LIMIT 1',
- [scope.organisation_id,scope.run_id,task_id,task.spec_revision_id,task.spec_generation]);
- if(!rows.rows[0])fail('EXECUTION_PACKET_MISSING','Job requires accepted immutable resource policy');
- const loaded=await loadExecutionPacket(tx,{...scope,digest:rows.rows[0].digest});
- return packetResources(object(object(loaded.packet).mandatory).resource_requirements);
-}
-export async function allocateReservations(tx:PrimaryTransaction,input:SchedulerScope&{reservation_ids:string[]}):Promise<void>{
- assertPrimaryTransaction(tx);await lockRun(tx,input);
- const ids=input.reservation_ids.map(id=>uuid(id,'reservation_id'));
- if(!ids.length||ids.length>64||new Set(ids).size!==ids.length)fail('INVALID_REQUEST','Allocate one to 64 distinct reservation identities');
- const accounts=await tx.query<{capacity_account_id:string}>('SELECT DISTINCT capacity_account_id FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) ORDER BY capacity_account_id',
- [input.organisation_id,input.run_id,ids]);
- for(const account of accounts.rows)await tx.query('SELECT id FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[input.organisation_id,account.capacity_account_id]);
- const rows=await tx.query<{id:string;capacity_account_id:string;quantity:string;state:string}>('SELECT id,capacity_account_id,quantity,state FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) ORDER BY id FOR UPDATE',[input.organisation_id,input.run_id,ids]);
- if(rows.rows.length!==ids.length)fail('RESERVATION_MISSING','Allocation identity is outside this run');
- for(const row of rows.rows){
-  if(row.state==='ALLOCATED')continue;
-  if(row.state!=='PROVISIONING')fail('RESERVATION_NOT_ALLOCATABLE','Only admitted provisioning reservations may be allocated');
-  const updated=await tx.query('UPDATE hyperfide.capacity_accounts SET reserved=reserved-$3::bigint,allocated=allocated+$3::bigint,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND reserved>=$3::bigint AND qualification_state=$4 RETURNING id',
-   [input.organisation_id,row.capacity_account_id,row.quantity,'QUALIFIED']);
-  if(updated.rows.length!==1)fail('ACCOUNTING_INCONSISTENT','Qualified reserved capacity does not cover this allocation');
-  await tx.query("UPDATE hyperfide.reservations SET state='ALLOCATED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[input.organisation_id,input.run_id,row.id]);
- }
-}
-export async function assertJobReservation(tx:PrimaryTransaction,input:SchedulerScope&{
- task_id:string;job_kind:string;reservation_id:string;
-}):Promise<{request_id:string;pool_id:string;reservations:unknown[];resource_requirements:PacketResourceRequirements}>{
- assertPrimaryTransaction(tx);await lockRun(tx,input);
- if(!['BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION'].includes(input.job_kind))fail('INVALID_REQUEST','Unknown qualified job kind');
- const row=await tx.query<{request_id:string;pool_id:string}>(
- "SELECT r.request_id,w.pool_id FROM hyperfide.reservations r JOIN hyperfide.resource_waiters w ON w.organisation_id=r.organisation_id AND w.run_id=r.run_id AND w.request_id=r.request_id JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id "+
- "WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND w.task_id=$4 AND w.job_kind=$5 AND w.state='ADMITTED' AND r.state='ALLOCATED' AND a.dimension=$5 AND a.qualification_state='QUALIFIED'",
- [input.organisation_id,input.run_id,input.reservation_id,input.task_id,input.job_kind]);
- const selected=row.rows[0];if(!selected)fail('JOB_RESERVATION_INVALID','Job requires its own admitted allocated reservation in a qualified account');
- const policy=await jobPolicy(tx,input,input.task_id),expected=await approvedDimensions(tx,input,selected.pool_id,policy,input.job_kind);
- const reservations=await tx.query<{id:string;capacity_account_id:string;quantity:string;state:string;qualification_state:string}>(
- 'SELECT r.id,r.capacity_account_id,r.quantity,r.state,a.qualification_state FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.request_id=$3 ORDER BY r.capacity_account_id FOR SHARE OF r,a',
- [input.organisation_id,input.run_id,selected.request_id]);
- if(reservations.rows.some(r=>r.state!=='ALLOCATED'||r.qualification_state!=='QUALIFIED')||
- canonical(reservations.rows.map(r=>({capacity_account_id:r.capacity_account_id,quantity:r.quantity})))!==canonical(expected))
-  fail('JOB_RESOURCE_VECTOR_INVALID','Full allocated resource vector must equal accepted job policy');
- return {...selected,reservations:reservations.rows,resource_requirements:policy};
+  const result={reservations,rate_receipts:rates};
+  await recordOutcome(tx,input,'scheduler-dynamic-capacity','scheduler.capacity.dynamic',input.request_id,immutable,result);
+  return result;
 }
 
 export class ResourceScheduler {
@@ -260,6 +198,18 @@ export class ResourceScheduler {
           observed_at:proof.observed_at});
       released.push(reservation.id);
     }
+    for(const attempt of [...new Set(rows.rows.map(row=>row.attempt_id).filter((id):id is string=>id!==null))]){
+      const remaining=await tx.query("SELECT id FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state<>'RELEASED' LIMIT 1",[input.organisation_id,input.run_id,attempt]);
+      if(remaining.rows.length)continue;
+      const allocations=await tx.query<{slot_id:string;sandbox_id:string;sandbox_boot_generation:string}>(
+       "UPDATE hyperfide.slot_allocations SET state='RELEASED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='RELEASE_PENDING' RETURNING slot_id,sandbox_id,sandbox_boot_generation",
+       [input.organisation_id,input.run_id,attempt]);
+      for(const allocation of allocations.rows)await tx.query(
+       "UPDATE hyperfide.worker_slots w SET state=CASE WHEN s.observed_state='DESTROYED' THEN 'RETIRED' ELSE 'READY' END,state_version=w.state_version+1 FROM hyperfide.sandboxes s "+
+       "WHERE w.organisation_id=$1 AND w.id=$2 AND w.sandbox_id=$3 AND w.boot_generation=$4 AND w.state='DRAINING' AND s.organisation_id=w.organisation_id AND s.id=w.sandbox_id AND s.boot_generation=w.boot_generation "+
+       "AND s.observed_state IN ('RUNNING','DESTROYED') AND NOT EXISTS(SELECT 1 FROM hyperfide.slot_allocations a WHERE a.organisation_id=w.organisation_id AND a.slot_id=w.id AND a.state IN ('ACTIVE','RELEASE_PENDING'))",
+       [input.organisation_id,allocation.slot_id,allocation.sandbox_id,allocation.sandbox_boot_generation]);
+    }
     return {released_reservation_ids:released};
   }
 }
@@ -276,7 +226,7 @@ async function requireQueueActor(tx:PrimaryTransaction,scope:SchedulerScope,acto
 }
 export function createComponent(_startup:ComponentContext):Component{
   const scheduler=new ResourceScheduler();
-  const capability=Object.freeze({eligibleTasks,eligibleDemand,validateResourceVector,allocate:allocateReservations,assertJobReservation,reserveCapacity:reserveDynamic,
+  const capability=Object.freeze({eligibleTasks,eligibleDemand,validateResourceVector,allocate:allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,reserveCapacity:reserveDynamic,
     release:scheduler.release.bind(scheduler),registerProofReader:scheduler.registerProofReader.bind(scheduler)});
   return {apiVersion:1,capabilities:{'scheduler.resources.v1':capability},close:()=>scheduler.close(),actions:{
     'scheduler.resources.queue':async(value,context)=>{
@@ -319,7 +269,6 @@ export function createComponent(_startup:ComponentContext):Component{
         const policyRequirements=await jobPolicy(tx,scope,task!,'ADMISSION');
         const expected=await approvedDimensions(tx,scope,pool,policyRequirements,job);
         if(canonical(expected)!==canonical(demand))fail('RESOURCE_VECTOR_MISMATCH','Queued resource vector must match accepted task policy');
-        await assertNoExecutionHold(tx,scope,{package_id,operation:'ADMISSION'});
         const id=randomUUID();
         await tx.query('INSERT INTO hyperfide.resource_waiters(organisation_id,run_id,id,request_id,pool_id,owner_session_id,task_id,job_kind,priority,'+
           'wait_reason,deadline_at,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+$11::integer*interval\'1 millisecond\',$12)',
@@ -390,8 +339,8 @@ export function createComponent(_startup:ComponentContext):Component{
         guard:tx=>invocationFor(context).guard(tx)},async tx=>{
         await requireQueueActor(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),undefined,
           input.package_id===undefined?undefined:uuid(input.package_id,'package_id'));
-        const rows=await tx.query('SELECT dimension,resource_key,configured_limit,reserved,allocated,qualification_state,state_version '+
-          'FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 ORDER BY dimension,resource_key',[scope.organisation_id,pool]);
+        const rows=await tx.query('SELECT capacity_class,dimension,resource_key,configured_limit,reserved,allocated,qualification_state,state_version '+
+          'FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 ORDER BY capacity_class,dimension,resource_key',[scope.organisation_id,pool]);
         const queued=await tx.query('SELECT job_kind,wait_reason,count(*)::text AS count,min(enqueued_at)::text AS oldest '+
           'FROM hyperfide.resource_waiters WHERE organisation_id=$1 AND run_id=$2 AND pool_id=$3 AND state=\'WAITING\' GROUP BY job_kind,wait_reason',
           [scope.organisation_id,scope.run_id,pool]);
