@@ -131,8 +131,8 @@
     },
     {
       "path": "tests/hyperfide/test_authority_campaign.py",
-      "sha256": "b33e393c41379a6e7444aa7cabd86f0ca450ac61cde5aed5fdcdfb0108f10324",
-      "size": 14383
+      "sha256": "49b9414c9c25923e8f96e926c79d0829b029c80b49037c5e3129ff81d3666d1e",
+      "size": 14728
     }
   ],
   "policy": {

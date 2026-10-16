@@ -114,7 +114,8 @@ class AuthorityMetadataTests(unittest.TestCase):
     def test_restore_cannot_reconstruct_missing_external_journal(self):
         proof, expected = fixture()
         proof["journal_before"] = None
-        with self.assertRaises(a.AuthorityError):
+        proof["journal_raw"]["before"] = None
+        with self.assertRaisesRegex(a.AuthorityError, "missing external journal cannot reconstruct"):
             a.inspect_transition(proof, expected)
 
     def test_unseen_database_lineage_rejected_even_with_valid_document_seal(self):
@@ -136,7 +137,8 @@ class AuthorityMetadataTests(unittest.TestCase):
     def test_missing_pending_cannot_be_replaced_by_active_head(self):
         proof, expected = fixture()
         proof["journal_pending"] = proof["journal_after"]
-        with self.assertRaises(a.AuthorityError):
+        proof["journal_raw"]["pending"] = a.canonical(proof["journal_pending"]).decode()
+        with self.assertRaisesRegex(a.AuthorityError, "durable PENDING changed"):
             a.inspect_transition(proof, expected)
 
     def test_resealed_history_cannot_reuse_epoch_or_drop_lineage(self):
@@ -263,7 +265,8 @@ class AuthorityMetadataTests(unittest.TestCase):
     def test_opaque_unsealed_or_unknown_contract_cannot_pass(self):
         proof, expected = fixture()
         proof["journal_after"]["document_digest"] = "sha256:" + "0" * 64
-        with self.assertRaises(a.AuthorityError):
+        proof["journal_raw"]["after"] = a.canonical(proof["journal_after"]).decode()
+        with self.assertRaisesRegex(a.AuthorityError, "journal document digest mismatch"):
             a.inspect_transition(proof, expected)
         proof, expected = fixture()
         proof["execution_passed"] = True
