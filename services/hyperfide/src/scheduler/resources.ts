@@ -4,10 +4,12 @@ import type {PrimaryTransaction} from '../storage/transactions.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {lockRun} from '../events/outbox.js';
 import {FoundationError} from '../policy/programme.js';
-import {loadExecutionPacket} from '../hierarchy/packets.js';
+import {loadExecutionPacket,loadPreparationIntent} from '../hierarchy/packets.js';
+import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
 import {actorFor,boundedInteger,canonical,claimTask,decimal,digest,dimensions,dispatchRecipients,fail,fields,
   gatewayFor,invocationFor,object,operationReplay,parseClaim,recordOutcome,requestDigest,reserveCapacity,
-  requireSchedulerAuthority,uuid,jobPolicy,allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,validateResourceVector,assertNoExecutionHold,requireTaskBarriers,requireProofRegistry,packetResources,packetPolicyResources,approvedDimensions} from './claim.js';
+  requireSchedulerAuthority,uuid,jobPolicy,allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,validateResourceVector,assertNoExecutionHold,requireTaskBarriers,requireProofRegistry,packetResources,packetPolicyResources,approvedDimensions} from './claim.js';
 import type {CapacityDimension,CapacityRequest,SchedulerActor,SchedulerScope,PacketResourceRequirements} from './claim.js';
 
 
@@ -76,22 +78,66 @@ export async function eligibleTasks(tx:PrimaryTransaction,input:SchedulerScope&{
  }
  return result;
 }
+
 export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&{
  pool_id:string;profile_id:string;job_class:'PREPARATION'|'INDEX';warm_spare:boolean;
-}):Promise<{eligible_count:number;reservation_dimensions:CapacityDimension[];spec_version:string;profile_version:string;observed_at:string}>{
- const candidates=await eligibleTasks(tx,{...input,limit:500,preparation:true});
- if(candidates.availability!=='AVAILABLE')fail(candidates.reason??'ELIGIBILITY_UNAVAILABLE','Run does not admit preparation');
- if(!candidates.eligible.length)return {eligible_count:0,reservation_dimensions:[],spec_version:candidates.spec_generation,profile_version:'',observed_at:candidates.observed_at};
- const first=candidates.eligible[0]!,maximum={...first.resource_requirements};
- for(const item of candidates.eligible){
-  if(item.profile_version!==first.profile_version)fail('PROFILE_VERSION_CONFLICT','One profile identity resolves to incompatible immutable versions');
-  maximum.cpu_millis=Math.max(maximum.cpu_millis,item.resource_requirements.cpu_millis);
-  maximum.memory_bytes=(BigInt(maximum.memory_bytes)>BigInt(item.resource_requirements.memory_bytes)?maximum.memory_bytes:item.resource_requirements.memory_bytes);
-  maximum.disk_bytes=(BigInt(maximum.disk_bytes)>BigInt(item.resource_requirements.disk_bytes)?maximum.disk_bytes:item.resource_requirements.disk_bytes);
+},invocation:InvocationContext):Promise<{
+ eligible_count:number;reservation_dimensions:CapacityDimension[];spec_version:string;profile_version:string;observed_at:string;
+ truncated:boolean;candidate_scan_limit:number;
+}>{
+ assertPrimaryTransaction(tx);assertInvocation(invocation);
+ if(invocation.principal.organisation_id!==input.organisation_id||invocation.principal.run_id!==input.run_id)
+  fail('RUN_SCOPE_DENIED','Preparation demand must match the authenticated run');
+ await invocation.guard(tx);await lockRun(tx,input);
+ if(!['LEADER','FEATURE_MANAGER'].includes(invocation.principal.role))fail('ROLE_DENIED','Preparation demand requires current leader or feature manager authority');
+ if(input.warm_spare&&invocation.principal.role!=='LEADER')fail('SPARE_DELEGATION_REQUIRED','Feature managers have no implicit global spare budget');
+ const leadership=await tx.query<{generation:string}>('SELECT generation FROM hyperfide.hierarchy_leaders WHERE organisation_id=$1 AND run_id=$2 FOR SHARE',
+ [input.organisation_id,input.run_id]);
+ if(!leadership.rows[0])fail('LEADER_UNAVAILABLE','Current leadership is required for preparation demand');
+ const actor:SchedulerActor={session_id:invocation.principal.actor_id,leader_generation:leadership.rows[0].generation};
+ let packages:string[]|null=null;
+ if(invocation.principal.role==='FEATURE_MANAGER'){
+  const owned=await tx.query<{id:string;owner_generation:string}>(
+  "SELECT p.id,h.owner_generation FROM hyperfide.feature_packages p JOIN hyperfide.hierarchy_packages h ON h.organisation_id=p.organisation_id AND h.run_id=p.run_id AND h.package_id=p.id WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.manager_session_id=$3 AND h.state NOT IN ('CLOSED','CANCELLED') ORDER BY p.id FOR SHARE OF p,h",
+  [input.organisation_id,input.run_id,actor.session_id]);
+  packages=owned.rows.map(row=>row.id);
+  for(const item of owned.rows)await requireSchedulerAuthority(tx,input,{...actor,package_generation:item.owner_generation},invocation.principal.deployment_epoch,item.id);
+ }else await requireSchedulerAuthority(tx,input,actor,invocation.principal.deployment_epoch);
+ const run=await tx.query<{state:string;spec_generation:string;observed_at:string}>('SELECT state,spec_generation,clock_timestamp()::text AS observed_at FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',
+ [input.organisation_id,input.run_id]);
+ if(!['READY','RUNNING'].includes(run.rows[0]?.state??''))fail('RUN_NOT_ADMITTING','Run does not admit preparation');
+ const pool=await tx.query<{profile_id:string}>('SELECT profile_id FROM hyperfide.provider_pools WHERE organisation_id=$1 AND id=$2 AND state=$3 FOR SHARE',
+ [input.organisation_id,input.pool_id,'ACTIVE']);
+ if(pool.rows[0]?.profile_id!==input.profile_id)fail('PROFILE_POOL_MISMATCH','Approved preparation profile must match the selected pool');
+ const tasks=await tx.query<{id:string;feature_package_id:string;current_attempt_id:string|null;wave:number}>(
+ "SELECT t.id,t.feature_package_id,t.current_attempt_id,t.wave FROM hyperfide.tasks t WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.state IN ('PENDING','READY','FAILED','STALE') "+
+ "AND ($3::uuid[] IS NULL OR t.feature_package_id=ANY($3::uuid[])) "+
+ "AND COALESCE(t.definition->>'environment_profile_id',t.definition#>>'{section,fields,environment_profile_id,value}')=$4 "+
+ "AND NOT EXISTS(SELECT 1 FROM hyperfide.attempts a WHERE a.organisation_id=t.organisation_id AND a.run_id=t.run_id AND a.task_id=t.id AND a.compute_authority='CURRENT') "+
+ "AND NOT EXISTS(SELECT 1 FROM hyperfide.submission_custodies c WHERE c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.task_id=t.id AND c.authority='ACTIVE') ORDER BY t.wave,t.task_key,t.id LIMIT 501",
+ [input.organisation_id,input.run_id,packages,input.profile_id]);
+ let count=0,maximum:PacketResourceRequirements|undefined,version='';
+ for(const task of tasks.rows.slice(0,500)){
+  try{
+   await assertNoExecutionHold(tx,input,{package_id:task.feature_package_id,...(task.current_attempt_id?{attempt_id:task.current_attempt_id}:{}),operation:'ADMISSION'});
+   await requireTaskBarriers(tx,input,task.id,task.wave);
+   const accepted=await loadPreparationIntent(tx,{organisation_id:input.organisation_id,run_id:input.run_id,task_id:task.id,profile_id:input.profile_id});
+   const requirements=packetResources(accepted.resource_requirements);
+   if(version&&version!==accepted.profile_version)fail('PROFILE_VERSION_CONFLICT','Approved profile identity resolves to incompatible immutable versions');
+   version=accepted.profile_version;count++;
+   if(!maximum)maximum={...requirements};
+   else{
+    maximum.cpu_millis=Math.max(maximum.cpu_millis,requirements.cpu_millis);
+    maximum.memory_bytes=BigInt(maximum.memory_bytes)>BigInt(requirements.memory_bytes)?maximum.memory_bytes:requirements.memory_bytes;
+    maximum.disk_bytes=BigInt(maximum.disk_bytes)>BigInt(requirements.disk_bytes)?maximum.disk_bytes:requirements.disk_bytes;
+   }
+  }catch(error){if(!(error instanceof FoundationError))throw error;}
  }
- return {eligible_count:candidates.eligible.length,reservation_dimensions:await approvedDimensions(tx,input,input.pool_id,maximum,input.job_class,input.warm_spare,true),
- spec_version:candidates.spec_generation,profile_version:first.profile_version,observed_at:candidates.observed_at};
+ return {eligible_count:count,reservation_dimensions:maximum?await approvedDimensions(tx,input,input.pool_id,maximum,input.job_class,input.warm_spare,true):[],
+ spec_version:run.rows[0]!.spec_generation,profile_version:version,observed_at:run.rows[0]!.observed_at,
+ truncated:tasks.rows.length>500,candidate_scan_limit:500};
 }
+
 export interface QuiescenceReceipt {id:string;digest:string;observed_at:string}
 export type ProofReader=(tx:PrimaryTransaction,input:SchedulerScope&{reservation_id:string})=>Promise<QuiescenceReceipt|null>;
 export interface DynamicCapacityRequest extends CapacityRequest {pool_id:string}
@@ -226,7 +272,7 @@ async function requireQueueActor(tx:PrimaryTransaction,scope:SchedulerScope,acto
 }
 export function createComponent(_startup:ComponentContext):Component{
   const scheduler=new ResourceScheduler();
-  const capability=Object.freeze({eligibleTasks,eligibleDemand,validateResourceVector,allocate:allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,reserveCapacity:reserveDynamic,
+  const capability=Object.freeze({eligibleTasks,eligibleDemand,validateResourceVector,allocate:allocateReservations,assertJobReservation,bindJobReservation,readJobAllocation,renewJobAllocation,releaseJobAllocation,reserveCapacity:reserveDynamic,
     release:scheduler.release.bind(scheduler),registerProofReader:scheduler.registerProofReader.bind(scheduler)});
   return {apiVersion:1,capabilities:{'scheduler.resources.v1':capability},close:()=>scheduler.close(),actions:{
     'scheduler.resources.queue':async(value,context)=>{
