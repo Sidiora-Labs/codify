@@ -8,7 +8,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-23.4-current-proof-final-v4",
+  "campaign_id": "hyperfide-task-23.4-fresh-signature-schedule-v5",
   "case_ids": [
     "V-016",
     "V-048"
@@ -678,8 +678,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/23_4.py",
-      "sha256": "a151f0d5761dfdbd5399936f2d6bd61f092ffec4a9832c42f3e03dbe844f79bb",
-      "size": 24691
+      "sha256": "1ff4a77b0917bcc1660b0bb979a2b9515883e80d5e6c60426e11f2a8030fc198",
+      "size": 24731
     },
     {
       "path": "tests/hyperfide/check-evidence.py",

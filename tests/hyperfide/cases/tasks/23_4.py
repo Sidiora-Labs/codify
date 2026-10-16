@@ -249,9 +249,9 @@ def main():
     # This does not advance the wall clock or qualify a live 72h campaign.
     private,credential=f.keys["OPERATOR"]
     signing="import fs from 'node:fs';import c from 'node:crypto';import {pathToFileURL} from 'node:url';const [file,origin,protocol]=process.argv.slice(1);const {signingBytes}=await import(pathToFileURL(protocol).href);let input='';for await(const chunk of process.stdin)input+=chunk;const key=fs.readFileSync(file);process.stdout.write(JSON.stringify(JSON.parse(input).map(v=>c.sign(null,signingBytes(origin,'/v1/invoke',{id:v.id,time:v.time,nonce:v.nonce},Buffer.from(v.body)),key).toString('base64url'))));"
-    for start in range(0,count,480):
+    for start in range(0,count,64):
      packets=[]
-     for _ in range(min(480,count-start)):
+     for _ in range(min(64,count-start)):
       identifier=str(uuidlib.uuid4());payload={"run_id":RUN,"component":"23.4","action":"fleet.notifications.enqueue","input":first,"expected_version":None,"authority":None};raw=json.dumps(payload,separators=(",",":")).encode()
       body=json.dumps({"protocol_version":1,"operation_id":identifier,"idempotency_key":identifier,"payload_digest":"sha256:"+hashlib.sha256(raw).hexdigest(),"correlation_id":identifier,"causation_id":None,"payload_b64":base64.urlsafe_b64encode(raw).decode().rstrip("=")},separators=(",",":"))
       packets.append({"body":body,"id":credential,"time":str(int(time.time())),"nonce":str(uuidlib.uuid4())})
@@ -260,7 +260,7 @@ def main():
      for packet,signature in zip(packets,signatures):
       client=http.client.HTTPSConnection("127.0.0.1",f.port,context=f.tls,timeout=15)
       try:
-       client.request("POST","/v1/invoke",body=packet["body"].encode(),headers={"Content-Type":"application/json","hf-credential-id":credential,"hf-request-time":packet["time"],"hf-request-nonce":packet["nonce"],"hf-request-signature":signature});reply=client.getresponse();result=json.loads(reply.read());h.expect(result.get("ok") and result.get("result",{}).get("replayed"),"Compressed alert replay failed")
+       client.request("POST","/v1/invoke",body=packet["body"].encode(),headers={"Content-Type":"application/json","hf-credential-id":credential,"hf-request-time":packet["time"],"hf-request-nonce":packet["nonce"],"hf-request-signature":signature});reply=client.getresponse();result=json.loads(reply.read());h.expect(result.get("ok") and result.get("result",{}).get("replayed"),"Compressed alert replay failed: "+str(result.get("error",{}).get("code")))
       finally:client.close()
     f.calls.append({"component":"23.4","action":"fleet.notifications.enqueue","compressed_schedule_minutes":4320,"actual_signed_https_requests":count,"all_observed_replayed":True,"wall_clock_ms":(time.monotonic()-started)*1000,"live_72h_qualification":False})
     after=h.sql("SELECT count(*)||':'||sum(state_version) FROM hyperfide.observability_notifications;").stdout.strip();h.expect(before==after)
