@@ -143,7 +143,7 @@ export function prepareCapabilities(raw:unknown,env:Readonly<NodeJS.ProcessEnv>)
   const requestLimit=Math.min(p.context_request_tokens,nativeRequestLimit??p.context_request_tokens);
   const questionLimit=Math.min(p.context_question_tokens,nativeQuestionLimit??p.context_question_tokens);
   // The byte count deliberately overestimates text tokens; the qualification identifies the actual route tokenizer.
-  const prepared=prepare(r.id,request,{types:p.extensions,body,headers});
+  const prepared=prepare(r.id,request,{...(media.length&&r.image_format==='state_parts'?{gateway_media:true as const}:{}),types:p.extensions,body,headers});
   const requestBytes=Buffer.byteLength(canonical(prepared.body));
   const questionBytes=Object.entries(questions).map(([id,q])=>Buffer.byteLength(canonical({...prepared.body,questions:{[id]:q}})));
   if(requestBytes>p.max_request_bytes||questionBytes.some(n=>n>p.max_question_bytes))fail('DECISION_LIMIT','Qualified byte budget exceeded');
