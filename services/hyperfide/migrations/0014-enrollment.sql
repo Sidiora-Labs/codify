@@ -67,6 +67,7 @@ CREATE TABLE hyperfide.identity_operation_results (
 );
 -- Secret values remain in a separate supervisor-only secret store, never these metadata rows.
 CREATE TABLE hyperfide.identity_credential_references (
+ purposes text[] NOT NULL CHECK(cardinality(purposes) BETWEEN 1 AND 4 AND purposes <@ ARRAY['WORKER_BUILD','WORKER_RUNTIME','WORKER_PROCESS','PROVIDER_API']::text[]),
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, reference_id hyperfide.name NOT NULL,
  credential_version bigint NOT NULL CHECK(credential_version>0), secret_locator hyperfide.name NOT NULL,
  refresh_owner uuid NOT NULL, allowed_layers text[] NOT NULL CHECK(cardinality(allowed_layers)>0),
@@ -93,3 +94,20 @@ CREATE TABLE hyperfide.identity_runner_status (
  state_version bigint NOT NULL DEFAULT 1 CHECK(state_version>0),
  heartbeat_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+
+-- Restoring a disk must never recycle an earlier RUNNER private-key lineage.
+CREATE UNIQUE INDEX identity_runner_key_lineage ON hyperfide.identity_principals(organisation_id,public_key_b64) WHERE role='RUNNER';
+
+-- Every durable identity mutation shares the primary Serializable authority boundary.
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_principals FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_provider_bindings FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_enrollment_grants FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_request_nonces FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_enrollment_nonces FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_operation_results FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_credential_references FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_credential_attachments FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_runner_status FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Platform reviewers use separate job leases; only coding WORKER identities carry implementation attempts.
+ALTER TABLE hyperfide.identity_principals ADD CONSTRAINT identity_worker_attempt CHECK ((role='WORKER')=(attempt_id IS NOT NULL));
