@@ -94,7 +94,7 @@ def main():
   check("packet.inspect.exact",lambda:expect(f.ok("hierarchy.packet.inspect",{"leader_generation":"1","package_generation":"2","digest":state["digest"]},key="manager",component="3.2")["packet"]==packet,"Reader changed exact packet"))
   def validate_inputs():
    actual=f.ok("hierarchy.packet.validate",{"leader_generation":"1","package_generation":"2","digest":state["digest"]},key="manager",component="3.2")
-   expect(actual["packet"]==packet and actual["execution_authority"] is False and actual["checked_inputs"]==["IMMUTABLE_PACKET","ACCEPTED_ENVIRONMENT_MANIFEST","GRAPH_EXPLICITLY_NOT_REQUIRED"],"Current-input validation changed immutable pins or granted authority")
+   expect(actual["packet"]==packet and actual["execution_authority"] is False and actual["checked_inputs"]==["IMMUTABLE_PACKET","CURRENT_ACCEPTED_TASK","CURRENT_AUTHORITY_EPOCH","ACCEPTED_ENVIRONMENT_MANIFEST","GRAPH_EXPLICITLY_NOT_REQUIRED"],"Current-input validation changed immutable pins or granted authority")
   check("packet.inputs.validate.signed",validate_inputs)
   def prepared_roles():
    manifest=f.sql("SELECT manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["profile"]])[0]["manifest"]
@@ -109,6 +109,13 @@ def main():
    changed["digest"]=identity({k:v for k,v in changed.items() if k!="digest"})
    actual=roles(changed)
    expect(actual["roles"]["configuration_digest"]!=original["roles"]["configuration_digest"] and actual["roles"]["preparation_digest"]!=f.preparation and actual["roles"]["toolchain_digest"]==original["roles"]["toolchain_digest"] and actual["roles"]["authority"]=="NONE","New prepared bytes reused old configuration or granted readiness")
+   version2=json.loads(json.dumps(manifest));version2.update(schema_version=2,symlinks=[],hardlinks=[])
+   version2["digest"]=identity({k:v for k,v in version2.items() if k!="digest"})
+   v2roles=roles(version2)["roles"]
+   expect(v2roles["preparation_digest"]==version2["digest"] and v2roles["configuration_digest"]!=original["roles"]["configuration_digest"],"V2 complete inventory schema was dropped or relabelled as V1")
+   version2["symlinks"]=[{"path":"linked","target":"actual","digest":sha(b"actual")}]
+   try:roles(version2);raise AssertionError("Unhashed V2 link inventory accepted")
+   except subprocess.CalledProcessError:pass
    changed["profile"]["profile_version"]="tampered"
    try:roles(changed);raise AssertionError("Tampered full manifest accepted")
    except subprocess.CalledProcessError:pass
@@ -185,9 +192,10 @@ def graph_inputs_regression():
    params={"leader_generation":"1","package_generation":"2","digest":state["packet"]["digest"]}
    check("packet.graph.current-inputs-valid",lambda:expect("CURRENT_REQUIRED_GRAPH_ARTIFACTS" in f.ok("hierarchy.packet.validate",params,key="manager",component="3.2")["checked_inputs"],"Required graph was not currently checked"))
    def quarantine():
-    rows=f.sql("UPDATE hyperfide.artifacts a SET state='QUARANTINED',state_version=state_version+1 FROM hyperfide.graph_bundle_inputs b WHERE b.organisation_id=a.organisation_id AND b.artifact_id=a.id AND b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND b.bundle_digest=$4 RETURNING a.id",[i["organisation"],i["run"],state["build"],state["bundle"]])
+    rows=f.sql("UPDATE hyperfide.artifacts a SET status='QUARANTINED',state_version=state_version+1 FROM hyperfide.graph_bundle_inputs b WHERE b.organisation_id=a.organisation_id AND b.run_id=a.run_id AND b.artifact_id=a.id AND b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND b.bundle_digest=$4 RETURNING a.id",[i["organisation"],i["run"],state["build"],state["bundle"]])
     expect(len(rows)==1,"Exact current graph artifact quarantine did not change one artifact")
-    f.reject("hierarchy.packet.validate",params,"GRAPH_ARTIFACT_UNAVAILABLE",key="manager",component="3.2")
+    status,response=f.invoke("hierarchy.packet.validate",params,key="manager",component="3.2")
+    expect(response.get("ok") is False and response.get("error",{}).get("code")=="GRAPH_ARTIFACT_UNAVAILABLE","Quarantined graph accepted or wrong refusal: "+json.dumps({"ok":response.get("ok"),"error":response.get("error")}))
    check("packet.graph.quarantine-admission-refused",quarantine)
    check("packet.graph.history-preserved",lambda:expect(f.ok("hierarchy.packet.inspect",params,key="manager",component="3.2")["packet"]==state["packet"]["packet"],"Quarantine rewrote or hid immutable historical packet"))
   finally:

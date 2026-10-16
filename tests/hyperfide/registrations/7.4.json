@@ -12,6 +12,7 @@
   "assertion_ids": [
     "graph.query.setup-published",
     "graph.query.exact-manifest-status",
+    "graph.query.reject-quarantined-manifest-custody",
     "graph.query.reject-missing-version",
     "graph.query.channel-status",
     "graph.query.symbol-baseline",
@@ -36,7 +37,8 @@
     "graph.query.reject-missing-authority-isolation-guard",
     "graph.query.source-delete-rename-version-isolation",
     "graph.query.reject-cross-version-context-symbol",
-    "graph.query.reject-cross-version-cursor"
+    "graph.query.reject-cross-version-cursor",
+    "graph.query.multiple-repository-namespace-and-provenance"
   ],
   "argv": [
     "python3",
