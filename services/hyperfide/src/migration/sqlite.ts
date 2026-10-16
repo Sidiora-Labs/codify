@@ -5,8 +5,8 @@ import {createHash} from 'node:crypto';
 import {DatabaseSync,backup} from 'node:sqlite';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {getPool} from '../storage/schema.js';
-import type pg from 'pg';
+import {identityTransaction,invocationOf} from '../identity/enrollment.js';
+import type {IdentityTransaction} from '../identity/enrollment.js';
 
 type Json=Record<string,unknown>;
 interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[]}
@@ -111,9 +111,12 @@ async function externalInventory(p:Profile):Promise<unknown[]>{
  for(const kind of kinds)if(!(p.external??[]).some(item=>item.kind===kind))found.push({label:kind,kind,availability:kind==='native_session'?'EXCLUDED_SENSITIVE':'UNAVAILABLE',reason:'NOT_DECLARED'});
  return found;
 }
-async function ready(pool:pg.Pool):Promise<void>{
+async function ready(pool:IdentityTransaction):Promise<void>{
  const r=await pool.query("SELECT to_regclass('hyperfide_history.imports')::text AS name");
  if(!r.rows[0]?.name)fail('MIGRATION_SCHEMA_REQUIRED','Apply the trusted 0025 migration before importing');
+ const checksum=hash(await fs.readFile(new URL('../../migrations/0025-sqlite-history.sql',import.meta.url)));
+ const applied=await pool.query("SELECT checksum FROM hyperfide.schema_migrations WHERE version=25 AND name='0025-sqlite-history'");
+ if(applied.rows[0]?.checksum!==checksum)fail('MIGRATION_SCHEMA_REQUIRED','Exact pinned 0025 migration receipt required');
  const primary=await pool.query('SELECT pg_is_in_recovery() AS standby');if(primary.rows[0]?.standby)fail('PRIMARY_REQUIRED','Historical registration requires the primary');
 }
 async function snapshot(p:Profile,ctx:ComponentContext):Promise<unknown>{
@@ -128,17 +131,19 @@ async function snapshot(p:Profile,ctx:ComponentContext):Promise<unknown>{
  const size=(await fs.stat(destination)).size;const digest=await fileHash(destination),archive=path.join(root,digest.slice(7)+'.db');
  await fs.chmod(destination,0o400);
  try{await fs.link(destination,archive);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;if(await fileHash(archive)!==digest)fail('MIGRATION_CONFLICT','Archive collision');}
- const ext=await externalInventory(p),pool=getPool(ctx.env);await ready(pool);
+ const ext=await externalInventory(p);
+ return identityTransaction(ctx,async pool=>{await ready(pool);await scoped(pool,p,ctx);
  const importId=mappedId(p.source_id,p.repository_id,'snapshot',digest);
  await pool.query("INSERT INTO hyperfide_history.imports(id,source_id,repository_id,organisation_id,snapshot_digest,archive_path,inventory,external_inventory) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING",[importId,p.source_id,p.repository_id,p.organisation_id,digest,archive,inv,JSON.stringify(ext)]);
  const existing=await pool.query('SELECT organisation_id,source_id,repository_id,snapshot_digest FROM hyperfide_history.imports WHERE id=$1',[importId]);
  const value=existing.rows[0];
  if(!value||value.organisation_id!==p.organisation_id||value.source_id!==p.source_id||value.repository_id!==p.repository_id||value.snapshot_digest!==digest)fail('MIGRATION_CONFLICT','Historical import identity conflict');
  return {import_id:importId,snapshot_digest:digest,size_bytes:String(size),archive_durability:'LOCAL_UNQUALIFIED',inventory:inv,external_inventory:ext,authority:'NONE',qualification:'UNQUALIFIED'};
+ });
  }finally{db?.close();await fs.rm(area,{recursive:true,force:true});}
 }
 async function load(p:Profile,importId:string,ctx:ComponentContext):Promise<Json>{
- const result=await getPool(ctx.env).query('SELECT * FROM hyperfide_history.imports WHERE id=$1 AND source_id=$2 AND repository_id=$3 AND organisation_id=$4',[importId,p.source_id,p.repository_id,p.organisation_id]);
+ const result=await identityTransaction(ctx,async tx=>{await ready(tx);await scoped(tx,p,ctx);return tx.query('SELECT * FROM hyperfide_history.imports WHERE id=$1 AND source_id=$2 AND repository_id=$3 AND organisation_id=$4',[importId,p.source_id,p.repository_id,p.organisation_id]);});
  if(!result.rows[0])fail('MIGRATION_SCOPE','Import not found within trusted scope');
  const value=result.rows[0] as Json;const digest=hex(value.snapshot_digest),root=await archiveRoot(ctx.env);
  const filename=await regular(root,digest.slice(7)+'.db');
@@ -186,12 +191,11 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  });
  }finally{db.close();}
  const requestDigest=hash(canonical({importId,table,offset,limit,snapshot:prior.snapshot_digest}));
- const pool=getPool(ctx.env),client=await pool.connect();let committing=false,broken=false;
- try{
- await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+ try{return await identityTransaction(ctx,async client=>{
+ await ready(client);await scoped(client,p,ctx);
  await client.query('SELECT id FROM hyperfide_history.imports WHERE id=$1 FOR UPDATE',[importId]);
  const existing=await client.query('SELECT request_digest,result FROM hyperfide_history.batches WHERE import_id=$1 AND table_name=$2 AND start_offset=$3',[importId,table,offset]);
- if(existing.rows[0]){if(existing.rows[0].request_digest!==requestDigest)fail('MIGRATION_CONFLICT','Batch replay changed the pinned request');await client.query('ROLLBACK');return {...existing.rows[0].result,replayed:true};}
+ if(existing.rows[0]){if(existing.rows[0].request_digest!==requestDigest)fail('MIGRATION_CONFLICT','Batch replay changed the pinned request');return {...existing.rows[0].result,replayed:true};}
  const checkpoint=await client.query("SELECT COALESCE(max((result->>'next_offset')::bigint),0)::text AS next FROM hyperfide_history.batches WHERE import_id=$1 AND table_name=$2",[importId,table]);
  if(checkpoint.rows[0]?.next!==offset)fail('MIGRATION_CONFLICT','Batch offset must continue the durable checkpoint');
  // The immutable snapshot and deterministic key make restart/replay independent of local process state.
@@ -201,23 +205,34 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  }
  const next=BigInt(offset)+BigInt(payloads.length),result={outcome:'SUCCEEDED',import_id:importId,table,offset,next_offset:next.toString(),imported:payloads.length,complete:next>=total,authority:'NONE',qualification:'UNQUALIFIED'};
  await client.query('INSERT INTO hyperfide_history.batches(import_id,table_name,start_offset,request_digest,result) VALUES($1,$2,$3,$4,$5)',[importId,table,offset,requestDigest,result]);
- committing=true;await client.query('COMMIT');return result;
- }catch(error){
- if(committing){broken=true;return {outcome:'UNKNOWN',import_id:importId,table,offset,reconcile:'REPLAY_IDENTICAL_BATCH',authority:'NONE',qualification:'UNQUALIFIED'};}
- try{await client.query('ROLLBACK');}catch{/* A failed connection is discarded below. */}
+ return result;
+ });}catch(error){
+ if(object(error)&&error.code==='COMMIT_AMBIGUOUS')return {outcome:'UNKNOWN',import_id:importId,table,offset,reconcile:'REPLAY_IDENTICAL_BATCH',automatic_replay:false,authority:'NONE',qualification:'UNQUALIFIED'};
  throw error;
- }finally{client.release(broken);}
+ }
 }
 export const MIGRATION_ACTIONS=['migration.sqlite.describe','migration.sqlite.snapshot','migration.sqlite.inventory','migration.sqlite.import','migration.sqlite.status'] as const;
-export function createComponent(ctx:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(MIGRATION_ACTIONS.map(action=>[action,async(raw:unknown)=>{
+async function scoped(tx:IdentityTransaction,p:Profile,ctx:ComponentContext):Promise<void>{
+ const i=invocationOf(ctx),principal=i.principal;
+ if(p.organisation_id!==principal.organisation_id)fail('MIGRATION_SCOPE','Source profile is outside authenticated organisation');
+ const r=await tx.query('SELECT repository_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[principal.organisation_id,principal.run_id,p.repository_id]);
+ if(!r.rows[0])fail('MIGRATION_SCOPE','Source repository is not part of authenticated run');
+}
+export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(MIGRATION_ACTIONS.map(action=>[action,async(raw:unknown,ctx:ComponentContext)=>{
+ const i=invocationOf(ctx);
+ if(i.payload.action!==action||i.payload.component!=='25.1'||i.payload.run_id!==i.principal.run_id)fail('MIGRATION_SCOPE','Authenticated action scope mismatch');
+ if(!['OPERATOR','LEADER','COORDINATOR'].includes(i.principal.role))fail('MIGRATION_ROLE','Migration requires an authenticated supervisory role');
  if(ctx.signal.aborted)fail('MIGRATION_CLOSED','Migration is shutting down');
+ await identityTransaction(ctx,async tx=>{await ready(tx);});
  if(action.endsWith('.describe')){input(raw,[]);return {schema_version:1,source_schema_versions:[18],snapshot:'SQLITE_BACKUP_API',authority:'NONE',qualification:'UNQUALIFIED',cutover:'SEPARATE_REQUIRED_OPERATION'};}
  const v=input(raw,['source'],action.endsWith('.snapshot')?[]:action.endsWith('.import')?['import_id','table','offset','limit']:['import_id']);
- const p=await profile(ctx.env,v.source);
+ const p=await profile(ctx.env,v.source);await identityTransaction(ctx,tx=>scoped(tx,p,ctx));
  if(action.endsWith('.snapshot'))return snapshot(p,ctx);
  const stored=await load(p,id(v.import_id),ctx);
- if(action.endsWith('.inventory'))return {import_id:stored.id,inventory:stored.inventory,external_inventory:stored.external_inventory,authority:'NONE',qualification:'UNQUALIFIED'};
+ if(action.endsWith('.inventory'))return identityTransaction(ctx,async tx=>{await scoped(tx,p,ctx);return {import_id:stored.id,inventory:stored.inventory,external_inventory:stored.external_inventory,authority:'NONE',qualification:'UNQUALIFIED'};});
  if(action.endsWith('.import'))return importBatch(p,v,ctx);
- const counts=await getPool(ctx.env).query('SELECT table_name,count(*)::text AS rows FROM hyperfide_history.rows WHERE import_id=$1 GROUP BY table_name ORDER BY table_name',[stored.id]);
+ return identityTransaction(ctx,async tx=>{await scoped(tx,p,ctx);
+ const counts=await tx.query('SELECT table_name,count(*)::text AS rows FROM hyperfide_history.rows WHERE import_id=$1 GROUP BY table_name ORDER BY table_name',[stored.id]);
  return {import_id:stored.id,tables:counts.rows,authority:'NONE',qualification:'UNQUALIFIED'};
+ });
  }]))};}

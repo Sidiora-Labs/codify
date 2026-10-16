@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Real SQLite WAL / PostgreSQL historical-import component checks. No private data."""
+"""Actual SQLite WAL/PostgreSQL history importer over signed TLS authority. Synthetic data only."""
 import os,json,sqlite3,tempfile,subprocess,sys,hashlib,uuid,shutil
 from pathlib import Path
 from urllib.parse import urlsplit,urlunsplit
 ROOT=Path(__file__).resolve().parents[4]
 DB="hf_domain25_history"
+FIXTURE=None
 IDS=[]; FAILED=[]
 def expect(v,m):
  if not v:raise AssertionError(m)
@@ -16,19 +17,20 @@ def check(name,fn):
 def env():
  e=os.environ.copy();p=urlsplit(e["DATABASE_URL"]);e["DATABASE_URL"]=urlunsplit((p.scheme,p.netloc,"/"+DB,p.query,p.fragment));e["PGDATABASE"]=DB;return e
 def sql(s,database=DB):
- p=subprocess.run(["psql","-X","-q","-A","-t","-v","ON_ERROR_STOP=1","-d",database],input=s,text=True,capture_output=True,env=env(),timeout=30)
- expect(p.returncode==0,"isolated PostgreSQL fixture query failed");return p.stdout.strip()
+ expect(FIXTURE is not None,"fixture unavailable")
+ result=FIXTURE.sql(s)
+ return "\n".join(str(next(iter(row.values()))) for row in result)
 def artifacts():
  p=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-tests"))/"migration";p.mkdir(parents=True,exist_ok=True);return p
 def cleanup():
- sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DB+"' AND pid<>pg_backend_pid();","postgres")
- sql('DROP DATABASE IF EXISTS "'+DB+'";',"postgres")
- absent=not sql("SELECT datname FROM pg_database WHERE datname='"+DB+"';","postgres")
- (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent}))
+ filename=artifacts()/"cleanup.json"
+ value=json.loads(filename.read_text()) if filename.exists() else {"observed_absent":False}
+ absent=value.get("observed_absent") is True
  print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":"hf-task25.1-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"migration/cleanup.json"}]}));return 0 if absent else 1
 def main():
- sql('CREATE DATABASE "'+DB+'";',"postgres")
- sql((ROOT/"services/hyperfide/migrations/0025-sqlite-history.sql").read_text())
+ global FIXTURE
+ sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
+ from identity_fixture import IdentityFixture,sha,uid
  with tempfile.TemporaryDirectory(prefix="hf-history-") as temp:
   base=Path(temp);source=base/"source";source.mkdir();archive=base/"archive";archive.mkdir(mode=0o700)
   c=sqlite3.connect(source/"graph.db")
@@ -56,17 +58,39 @@ INSERT INTO symbol_fts VALUES('name_test');
   c.execute("INSERT INTO memories VALUES(?,?,?,?,?)",(2,"uncommitted",b"",0,"done"))
   profiles=[{"id":"fixture","source_id":"10000000-0000-0000-0000-000000000001","repository_id":"20000000-0000-0000-0000-000000000001","organisation_id":"30000000-0000-0000-0000-000000000001","root":str(source),"database":"graph.db","external":[{"label":"missing-docs","path":"missing.json","kind":"documentation"},{"label":"session","path":"credentials","kind":"native_session","sensitive":True}]}]
   pf=base/"sources.json";pf.write_text(json.dumps(profiles))
-  components=base/"components";components.mkdir();shutil.copyfile(ROOT/"services/hyperfide/components/25.1.json",components/"25.1.json")
-  policy={"schema_version":1,"programme_id":"fixture","repository":"fixture","spec_revision":"history-v1","policy_revision":1,"status":"ACTIVE","approval":{"decision":"APPROVED","record_id":"operator","spec_revision":"history-v1","policy_revision":1},"allowed_roles":["control"],"allowed_actions":["programme.activate"]+json.loads((components/"25.1.json").read_text())["actions"]}
-  pp=base/"policy.json";pp.write_text(json.dumps(policy));e=env();e.update(HF_MIGRATION_SOURCES_FILE=str(pf),HF_MIGRATION_ARCHIVE_ROOT=str(archive))
+  def setup(fixture):
+   data=(ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes()
+   fixture.sql("BEGIN;"+data.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(25,'0025-sqlite-history','"+sha(data)+"');COMMIT;")
+   i=fixture.ids;repository=profiles[0]['repository_id'];profiles[0]['organisation_id']=i['organisation'];pf.write_text(json.dumps(profiles))
+   fixture.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'legacy','fixture:legacy')",[i['organisation'],repository,i['project']])
+   fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i['organisation'],repository,'1'*40])
+   fixture.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i['organisation'],i['run'],repository,'1'*40])
+  FIXTURE=IdentityFixture(extra_components=['25.1'],extra_env={'HF_MIGRATION_SOURCES_FILE':str(pf),'HF_MIGRATION_ARCHIVE_ROOT':str(archive)},extra_setup=setup)
+  import atexit
+  atexit.register(FIXTURE.close)
   def request(action,value):
-   p=subprocess.run(["node",str(ROOT/"services/hyperfide/dist/control.js"),"--policy",str(pp),"--spec-revision","history-v1","--components",str(components),"--module-root",str(ROOT/"services/hyperfide/dist")],input=json.dumps({"id":"history","component":"25.1","action":"migration.sqlite."+action,"input":value})+"\n",text=True,capture_output=True,env=e,timeout=45)
-   lines=p.stdout.splitlines();expect(len(lines)==1,"service did not emit one JSONL response");return json.loads(lines[0])
+   status,result=FIXTURE.invoke('migration.sqlite.'+action,value,component='25.1')
+   return result
   def ok(action,v):
    r=request(action,v);expect(r.get("ok") is True,"service rejected "+action+": "+r.get("error",{}).get("code","unknown"));return r["result"]
   def reject(action,v,code):
    r=request(action,v);expect(r.get("ok") is False and r.get("error",{}).get("code")==code,"expected "+code)
   check("migration.describe",lambda:expect(ok("describe",{})["authority"]=="NONE","authority granted"))
+  def unauthenticated():
+   import http.client,ssl
+   connection=http.client.HTTPSConnection('localhost',FIXTURE.port,context=ssl.create_default_context(cafile=str(FIXTURE.ca)))
+   try:
+    connection.request('POST','/v1/invoke',json.dumps(FIXTURE.operation('25.1','migration.sqlite.describe',{})),{'Content-Type':'application/json'})
+    response=connection.getresponse();data=json.loads(response.read())
+    expect(response.status in (401,403) and data.get('ok') is False,'unsigned migration call accepted')
+   finally:connection.close()
+  check("migration.auth.unsigned-refused",unauthenticated)
+  def wrong_scope():
+   original=profiles[0]['organisation_id'];profiles[0]['organisation_id']='30000000-0000-0000-0000-000000000099';pf.write_text(json.dumps(profiles))
+   try:reject('snapshot',{'source':'fixture'},'MIGRATION_SCOPE')
+   finally:profiles[0]['organisation_id']=original;pf.write_text(json.dumps(profiles))
+  check("migration.auth.cross-organisation-refused",wrong_scope)
+
   snap=ok("snapshot",{"source":"fixture"});iid=snap["import_id"];dg=snap["snapshot_digest"]
   frozen=sqlite3.connect(archive/(dg[7:]+".db"))
   check("migration.snapshot.wal",lambda:expect(frozen.execute("SELECT count(*) FROM memories").fetchone()[0]==1,"WAL commit missing or open transaction included"))
@@ -85,7 +109,7 @@ INSERT INTO symbol_fts VALUES('name_test');
   check("migration.import.exact-blob",lambda:expect("AP8=" in sql("SELECT payload::text FROM hyperfide_history.rows WHERE table_name='memories';"),"blob changed"))
   check("migration.import.unqualified",lambda:expect(sql("SELECT count(*) FROM hyperfide_history.imports WHERE authority<>'NONE' OR qualification<>'UNQUALIFIED';")=="0","historical import qualified"))
   check("migration.import.reconciliation",lambda:expect(sql("SELECT disposition FROM hyperfide_history.rows WHERE table_name='attempts';")=="REQUIRES_RECONCILIATION","old attempt gained live ownership"))
-  check("migration.import.no-authority-tables",lambda:expect(sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='hyperfide';")=="0","import created live authority"))
+  check("migration.import.no-authority-tables",lambda:expect(sql("SELECT count(*) FROM hyperfide.attempts;")=="0","import created live authority"))
   v={"source":"fixture","import_id":iid,"table":"memories","offset":"0","limit":50}
   check("migration.replay.restart",lambda:expect(ok("import",v)["replayed"] is True and sql("SELECT count(*) FROM hyperfide_history.rows WHERE table_name='memories';")=="1","service restart duplicated history"))
   check("migration.replay.conflict",lambda:reject("import",dict(v,limit=1),"MIGRATION_CONFLICT"))
@@ -98,7 +122,15 @@ INSERT INTO symbol_fts VALUES('name_test');
   check("migration.inventory.same-version-addition",lambda:expect(any(x["name"]=="mtime_ns" for t in changed["inventory"]["tables"] if t["name"]=="files" for x in t["columns"]),"same-v18 column missing"))
   c.execute("UPDATE meta SET value='19' WHERE key='schema_version'");c.commit()
   check("migration.version.future-refused",lambda:reject("snapshot",{"source":"fixture"},"MIGRATION_VERSION"))
-  c.close();frozen.close()
+  def wrong_schema():
+   FIXTURE.sql("UPDATE hyperfide.schema_migrations SET checksum=$1 WHERE version=25",['sha256:'+'0'*64])
+   try:reject('describe',{},'MIGRATION_SCHEMA_REQUIRED')
+   finally:FIXTURE.sql("UPDATE hyperfide.schema_migrations SET checksum=$1 WHERE version=25",[sha((ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes())])
+  check("migration.schema.checksum-refused",wrong_schema)
+  c.close();frozen.close();database=FIXTURE.database;FIXTURE.close()
+  absent=not FIXTURE.sql('SELECT datname FROM pg_database WHERE datname=$1',[database],admin=True)
+  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL pg_database after fixture close"}))
+  check("migration.cleanup.actual-absence",lambda:expect(absent,"synthetic database still exists"))
  (artifacts()/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"private_records_used":False,"full_cases_qualified":False},sort_keys=True))
  return 1 if FAILED else 0
 if __name__=="__main__":

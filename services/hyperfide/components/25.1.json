@@ -15,5 +15,8 @@
     "migration.sqlite.import",
     "migration.sqlite.status"
   ],
-  "requires": []
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
 }
