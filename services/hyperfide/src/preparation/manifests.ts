@@ -296,7 +296,7 @@ async function inventory(candidate: string, context: InventoryContext, policy: S
   const inspectedDirectories: { fd: number; before: Stat; names: string[] }[] = [];
   let total = 0;
   const openDirectory = (parent: number, name: string, strict = true): number => {
-    const fd = fs.openSync('/proc/self/fd/' + parent + '/' + name, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    const fd = fs.openSync('/proc/self/fd/' + parent + '/' + name, (strict ? fs.constants.O_RDONLY : 0x200000 /* Linux O_PATH: execute-only trusted ancestors. */) | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
     held.push(fd); const before = stat(fd);
     if (!before.isDirectory()) fail('directory type');
     links.push({ parent, name, fd, before, strict }); return fd;
@@ -521,4 +521,114 @@ export function createComponent(_context: InventoryContext): Component {
     'preparation.manifest.create': createManifest,
     'preparation.manifest.verify': verifyManifest
   } };
+}
+
+
+/** Metadata/compatibility validation grants no filesystem, runtime or ownership authority. */
+function metadataHash(value:unknown):string{return sha(canonicalJSON(value));}
+function metadataText(value:unknown,pattern:RegExp,max=256):string{
+ if(typeof value!=='string'||!value.length||value.length>max||!pattern.test(value))fail('manifest metadata');return value;
+}
+function metadataInteger(value:unknown,min:number,max:number):number{
+ if(typeof value!=='number'||!Number.isSafeInteger(value)||value<min||value>max)fail('manifest metadata');return value;
+}
+function metadataDecimal(value:unknown):string{
+ const result=metadataText(value,/^(0|[1-9][0-9]{0,18})$/,19);if(BigInt(result)>9223372036854775807n)fail('manifest metadata');return result;
+}
+export function validateManifestMetadata(value:unknown):PreparationManifest{
+ const version=value&&typeof value==='object'?(value as Record<string,unknown>).schema_version:undefined;
+ const row=record(value,version===2?['schema_version','profile','files','directories','symlinks','hardlinks','scan','digest']:['schema_version','profile','files','directories','scan','digest']);
+ if((row.schema_version!==1&&row.schema_version!==2)||!Array.isArray(row.files)||!Array.isArray(row.directories)||
+   (row.schema_version===2&&(!Array.isArray(row.symlinks)||!Array.isArray(row.hardlinks))))fail('PREPARATION_MANIFEST_INVALID');
+ validateProfile(row.profile);digest(row.digest);
+ const body={schema_version:row.schema_version,profile:row.profile,files:row.files,directories:row.directories,
+  ...(row.schema_version===2?{symlinks:row.symlinks,hardlinks:row.hardlinks}:{}),scan:row.scan};
+ if(metadataHash(body)!==row.digest)fail('PREPARATION_MANIFEST_INVALID');
+ const paths=new Set<string>(),directories=new Set<string>(),fileDigests=new Map<string,string>();let previous='';
+ const validPath=(value:unknown,root=false):string=>{
+  if(root&&value==='.')return '.';
+  const path=metadataText(value,/^[^\x00-\x1f\x7f\\]+$/,4096);
+  if(path.startsWith('/')||path.split('/').some(part=>!part||part==='.'||part==='..'))fail('PREPARATION_MANIFEST_INVALID');
+  return path;
+ };
+ if(!row.files.length||row.files.length>1000000||!row.directories.length||row.directories.length>1000000)fail('PREPARATION_MANIFEST_INVALID');
+ for(const entry of row.directories){
+  const directory=record(entry,['path','mode']),path=validPath(directory.path,true);
+  if(directories.has(path)||path<=previous)fail('PREPARATION_MANIFEST_INVALID');
+  directories.add(path);previous=path;metadataInteger(directory.mode,0,511);
+ }
+ if(!directories.has('.'))fail('PREPARATION_MANIFEST_INVALID');
+ previous='';
+ for(const entry of row.files){
+  const file=record(entry,['path','mode','size','digest']),path=validPath(file.path);
+  if(paths.has(path)||directories.has(path)||path<=previous)fail('PREPARATION_MANIFEST_INVALID');
+  paths.add(path);previous=path;metadataInteger(file.mode,0,511);metadataDecimal(file.size);fileDigests.set(path,digest(file.digest));
+ }
+ if(row.schema_version===2){
+  let previousLink='';const linked=new Set<string>();
+  for(const value of row.symlinks as unknown[]){
+   const link=record(value,['path','target','digest']),path=validPath(link.path),target=metadataText(link.target,/^[^\x00-\x1f\x7f\\]+$/,4096);
+   if(path<=previousLink||paths.has(path)||directories.has(path)||target.startsWith('/')||
+      Buffer.from(target,'utf8').toString('utf8')!==target||digest(link.digest)!=='sha256:'+createHash('sha256').update(target,'utf8').digest('hex'))fail('PREPARATION_MANIFEST_INVALID');
+   previousLink=path;paths.add(path);
+  }
+  let previousGroup='';
+  for(const value of row.hardlinks as unknown[]){
+   const group=record(value,['paths']);
+   if(!Array.isArray(group.paths)||group.paths.length<2)fail('PREPARATION_MANIFEST_INVALID');
+   let prior='';let common:string|undefined;
+   for(const item of group.paths){
+    const path=validPath(item),content=fileDigests.get(path);
+    if(path<=prior||!content||linked.has(path)||(common!==undefined&&common!==content))fail('PREPARATION_MANIFEST_INVALID');
+    linked.add(path);prior=path;common=content;
+   }
+   const first=group.paths[0] as string;
+   if(first<=previousGroup)fail('PREPARATION_MANIFEST_INVALID');previousGroup=first;
+  }
+ }
+ for(const path of [...paths,...directories]){
+  if(path==='.')continue;
+  const slash=path.lastIndexOf('/'),parent=slash<0?'.':path.slice(0,slash);
+  if(!directories.has(parent))fail('PREPARATION_MANIFEST_INVALID');
+ }
+ const scan=record(row.scan,['policy_version','canary_counts','checks']);
+ const counts=record(scan.canary_counts,['secret','identity','lease']);
+ if(scan.policy_version!==1||canonicalJSON(scan.checks)!==canonicalJSON(['sensitive_paths','private_key_markers','authority_json','designated_canaries']))fail('PREPARATION_MANIFEST_INVALID');
+ for(const kind of ['secret','identity','lease'])metadataInteger(counts[kind],0,64);
+ const profile=row.profile as EnvironmentProfile;
+ for(const pin of [profile.recipe,...profile.generated_inputs,...profile.build_config,...profile.preparation_evidence,
+   ...profile.package_managers.flatMap(manager=>manager.locks)])
+  if(fileDigests.get(pin.path)!==pin.digest)fail('PREPARATION_MANIFEST_INVALID');
+ return value as PreparationManifest;
+}
+function compatibilitySortedPins<T extends {name:string}>(values:T[]):T[]{return [...values].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);}
+function compatibilitySoftware(profile:EnvironmentProfile):unknown {
+ return {os:profile.os,recipe:profile.recipe,toolchains:compatibilitySortedPins(profile.toolchains),
+  package_managers:compatibilitySortedPins(profile.package_managers).map(manager=>({...manager,locks:[...manager.locks].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0)})),
+  native_agents:compatibilitySortedPins(profile.native_agents),connectors:compatibilitySortedPins(profile.connectors),
+  supervisor:profile.supervisor,hyperfide:profile.hyperfide,system_packages:compatibilitySortedPins(profile.system_packages),
+  repositories:[...profile.repositories].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),
+  generated_inputs:[...profile.generated_inputs].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0),
+  build_config:[...profile.build_config].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0)};
+}
+/** This compares pinned preparation inputs. It grants neither readiness nor ownership.
+ * Actual tool/resource/network/credential probes must still pass on the target boot. */
+export async function compareEnvironmentCompatibility(source:unknown,target:unknown):Promise<{
+ compatible:boolean;evidence_digest:string;source_digest:string;target_digest:string;scope:'pinned-preparation-compatibility'
+}>{
+ const from=validateManifestMetadata(source),to=validateManifestMetadata(target);
+ let compatible=canonicalJSON(compatibilitySoftware(from.profile))===canonicalJSON(compatibilitySoftware(to.profile));
+ for(const capability of from.profile.required_capabilities)if(!to.profile.required_capabilities.includes(capability))compatible=false;
+ for(const key of ['memory_bytes','disk_bytes','persistent_volume_bytes'] as const)
+  if(BigInt(to.profile.resources[key])<BigInt(from.profile.resources[key]))compatible=false;
+ if(to.profile.resources.cpu_millis<from.profile.resources.cpu_millis)compatible=false;
+ const targetFiles=new Map(to.files.map(file=>[file.path,file.digest]));
+ const pins=[...from.profile.generated_inputs,...from.profile.build_config,
+  ...from.profile.package_managers.flatMap(manager=>manager.locks)];
+ for(const pin of pins)if(targetFiles.get(pin.path)!==pin.digest)compatible=false;
+ const evidence={schema_version:1,scope:'pinned-preparation-compatibility' as const,
+  source_digest:from.digest,target_digest:to.digest,source_projection:compatibilitySoftware(from.profile),
+  target_projection:compatibilitySoftware(to.profile),compatible};
+ return {compatible,evidence_digest:metadataHash(evidence),source_digest:from.digest,target_digest:to.digest,
+  scope:'pinned-preparation-compatibility'};
 }
