@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "variant": "task:23.4",
+  "task": "23.4",
+  "scope": "task-component",
+  "cases": [
+    "V-016",
+    "V-048"
+  ],
+  "assertion_ids": [
+    "observability.notifications.registered",
+    "observability.notifications.unbound-recipient-denied",
+    "observability.notifications.nonowner-binding-denied",
+    "observability.notifications.actual-recipient-binding",
+    "observability.notifications.binding-replay",
+    "observability.notifications.credential-summary-rejected",
+    "observability.notifications.actual-enqueue",
+    "observability.notifications.dedup-replay",
+    "observability.notifications.dedup-conflict",
+    "observability.notifications.not-sent-from-queued",
+    "observability.notifications.summary-remains-data",
+    "observability.notifications.typed-action-only",
+    "observability.notifications.summary-budget",
+    "observability.notifications.no-caller-url",
+    "observability.notifications.missing-evidence-denied",
+    "observability.notifications.evidence-inverse-guard",
+    "observability.notifications.actual-targeted-outbox",
+    "observability.notifications.no-private-broadcast",
+    "observability.notifications.required-debt-preserved",
+    "observability.notifications.minute-budget-enforced",
+    "observability.notifications.real-delivery-claim",
+    "observability.notifications.fake-ack-rejected",
+    "observability.notifications.real-inbox-applied",
+    "observability.notifications.real-durable-ack",
+    "observability.notifications.ack-state-reconciled",
+    "observability.notifications.stable-evidence-reference",
+    "observability.notifications.actual-evidence-retrieval",
+    "observability.notifications.no-secrets-durable-or-public",
+    "observability.notifications.buffering-not-live",
+    "observability.notifications.bootstrap-namespaces-not-caller-controlled",
+    "observability.notifications.bootstrap-nonrecipient-denied",
+    "observability.notifications.real-primary-snapshot-activation",
+    "observability.notifications.snapshot-replay-stable",
+    "observability.notifications.snapshot-covered-real-ack",
+    "observability.notifications.72h-equivalent-no-op-flood-no-notice-writes",
+    "observability.notifications.backpressure-preserves-required-debt",
+    "observability.notifications.physical-loss-not-hidden",
+    "observability.notifications.independent-sigv4",
+    "observability.notifications.cross-run-denied",
+    "observability.notifications.unsigned-denied"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/23_4.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/observability/notifications.js",
+    "services/hyperfide/dist/events/inbox.js",
+    "services/hyperfide/dist/events/outbox.js",
+    "services/hyperfide/dist/artifacts/objects.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-23.4-database",
+      "kind": "postgresql-database",
+      "scope": "task23.4-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/23_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "observability/database-absence.json",
+    "observability/observations.json",
+    "observability/assertion-inventory.json",
+    "observability/object-store-absence.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/23.4.json",
+    "services/hyperfide/migrations/0023-observability.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/observability/notifications.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/23_1.py",
+    "tests/hyperfide/cases/tasks/23_4.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/23.4.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen",
+    "s3-sigv4.loopback.fixture"
+  ]
+}

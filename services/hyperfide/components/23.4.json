@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "23.4",
+  "task": "23.4",
+  "roles": [
+    "control"
+  ],
+  "module": "observability/notifications.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "fleet.notifications.describe",
+    "fleet.notifications.bind-recipient",
+    "fleet.notifications.enqueue",
+    "fleet.notifications.dispatch",
+    "fleet.notifications.inspect",
+    "fleet.notifications.bootstrap-recipient"
+  ],
+  "requires": [
+    "23.1",
+    "6.1",
+    "15.2",
+    "6.2"
+  ]
+}
