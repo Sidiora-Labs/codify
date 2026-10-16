@@ -9,10 +9,10 @@ import {FoundationError} from '../policy/programme.js';
 import {databaseError} from '../storage/schema.js';
 import {assertInvocation} from '../transport/protocol.js';
 import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
-import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {assertPrimaryTransaction,type PrimaryTransaction} from '../storage/transactions.js';
 
 const execute=promisify(execFile);
-export type ReviewDb=Pick<pg.PoolClient,'query'>;
+export type ReviewDb=Pick<PrimaryTransaction,'query'>;
 export interface ReviewScope {organisation_id:string;run_id:string}
 export interface ReviewCoverageQuery {
  repository_id:string;source_object_id:string;candidate_digest?:string;
@@ -102,7 +102,8 @@ export async function transaction<T>(context:ComponentContext,binding:ReviewScop
    const run=await db.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',
     [trusted.scope.organisation_id,trusted.scope.run_id]);
    if(!run.rows.length)fail('REVIEW_SCOPE_INVALID','Run does not exist in this organisation');
-   if(['STOPPING','STOPPED','SUCCEEDED','FAILED','CANCELLED'].includes(run.rows[0]!.state))
+   const auditRead=!exclusive&&['OPERATOR','COORDINATOR','LEADER'].includes(trusted.invocation.principal.role)&&['review.coverage.inspect','review.reproduction.inspect'].includes(trusted.invocation.payload.action);
+   if(['STOPPING','STOPPED','SUCCEEDED','FAILED','CANCELLED'].includes(run.rows[0]!.state)&&!auditRead)
     fail('REVIEW_RUN_CLOSED','Closed run cannot grant new review authority');
    return operation(db);
   });
