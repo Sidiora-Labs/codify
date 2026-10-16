@@ -5,12 +5,12 @@ CC       ?= cc
 CFLAGS   ?= -O2
 CFLAGS   += -std=gnu11 -Wall -Wextra -pthread
 CFLAGS   += -Ivendor/tree-sitter/lib/include -Ivendor/tree-sitter/lib/src
-LDLIBS    = -lsqlite3 -lpthread -lm
+LDLIBS    = -lsqlite3 -lpthread -lm -lcurl -lcrypto
 PREFIX   ?= /usr/local
 BUILD     = build
 
 BIN       = cg
-SRCS      = $(wildcard src/*.c) src/hyperfide/client.c
+SRCS      = $(wildcard src/*.c) src/hyperfide/client.c src/hyperfide/transport.c
 SRC_HEADERS = $(wildcard src/*.h)
 OBJS      = $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 TS_RUNTIME = $(BUILD)/vendor/tree-sitter-lib.o

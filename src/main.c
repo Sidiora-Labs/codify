@@ -1,5 +1,6 @@
 #include <stdio.h>
 extern int hf_client_authority_guard(const char *operation, FILE *output);
+extern int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err);
 extern int hf_client_authority_guard_args(const char *operation,int argc,char **argv,FILE *output);
 /* Codify CLI — see README.md */
 #include "cg.h"
@@ -185,7 +186,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    { int authority_rc = hf_client_authority_guard_args("cli", argc, argv, stderr); if (authority_rc) return authority_rc; }
+    { int remote_rc = hf_client_dispatch(argc, argv, stdout, stderr); if (remote_rc >= 0) return remote_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0) {
