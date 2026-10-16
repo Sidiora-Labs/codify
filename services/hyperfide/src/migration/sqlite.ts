@@ -1,0 +1,223 @@
+import fs from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {DatabaseSync,backup} from 'node:sqlite';
+import type {Component,ComponentContext} from '../components/registry.js';
+import {FoundationError,object} from '../policy/programme.js';
+import {getPool} from '../storage/schema.js';
+import type pg from 'pg';
+
+type Json=Record<string,unknown>;
+interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[]}
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const digestPattern=/^sha256:[0-9a-f]{64}$/;
+const known=new Set(['meta','branches','files','symbols','refs','routes','memories','memory_superseded','git_commits','git_churn','leases','attempts','agents','runtime_events','events','fleet_runs','fleet_nodes','fleet_approvals','runtime_files','work_packets','work_files','work_evidence','imports','comments','projections','projection_findings','extraction_health','journal_applied']);
+const live=new Set(['leases','attempts','agents','fleet_runs','fleet_nodes','fleet_approvals']);
+const kinds=new Set(['configuration','journal','memory','attempt','event','graph','documentation','snapshot','native_session']);
+function fail(code:string,message:string):never{throw new FoundationError(code,message);}
+export function hash(bytes:string|Buffer):string{return 'sha256:'+createHash('sha256').update(bytes).digest('hex');}
+export function canonical(value:unknown):string{
+ if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
+ if(object(value))return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';
+ return JSON.stringify(value);
+}
+export function mappedId(source:string,repository:string,table:string,key:unknown):string{
+ const raw=createHash('sha256').update(canonical(['hyperfide/sqlite-history/v1',source,repository,table,key])).digest('hex');
+ return raw.slice(0,8)+'-'+raw.slice(8,12)+'-8'+raw.slice(13,16)+'-'+((parseInt(raw[16]!,16)&3)|8).toString(16)+raw.slice(17,20)+'-'+raw.slice(20,32);
+}
+function input(value:unknown,required:string[],optional:string[]=[]):Json{
+ if(!object(value)||required.some(k=>!(k in value))||Object.keys(value).some(k=>!required.includes(k)&&!optional.includes(k)))fail('MIGRATION_INPUT','Unexpected migration fields');
+ return value;
+}
+function id(value:unknown):string{if(typeof value!=='string'||!uuid.test(value))fail('MIGRATION_INPUT','Canonical UUID required');return value;}
+function hex(value:unknown):string{if(typeof value!=='string'||!digestPattern.test(value))fail('MIGRATION_INPUT','SHA256 digest required');return value;}
+async function fileHash(filename:string):Promise<string>{const h=createHash('sha256');for await(const chunk of createReadStream(filename))h.update(chunk);return 'sha256:'+h.digest('hex');}
+function quote(name:string):string{return '"'+name.replaceAll('"','""')+'"';}
+async function regular(root:string,relative:string):Promise<string>{
+ if(!path.isAbsolute(root)||!relative||path.isAbsolute(relative)||relative.includes('\\')||relative.split('/').some(p=>p===''||p==='.'||p==='..'))fail('MIGRATION_PATH','Unsafe relative migration path');
+ const rootInfo=await fs.lstat(root);if(!rootInfo.isDirectory()||rootInfo.isSymbolicLink())fail('MIGRATION_PATH','Trusted root must be a real directory');
+ let current=root;
+ for(const segment of relative.split('/')){current=path.join(current,segment);const st=await fs.lstat(current);if(st.isSymbolicLink())fail('MIGRATION_PATH','Symlinks are forbidden');}
+ if(!(await fs.lstat(current)).isFile())fail('MIGRATION_PATH','Source is not a regular file');
+ return current;
+}
+async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
+ const filename=env.HF_MIGRATION_SOURCES_FILE;if(!filename)fail('MIGRATION_CONFIG','Trusted migration sources are required');
+ const info=await fs.lstat(filename);if(!info.isFile()||info.isSymbolicLink()||info.size>1024*1024)fail('MIGRATION_CONFIG','Invalid migration sources');
+ const raw:unknown=JSON.parse(await fs.readFile(filename,'utf8'));
+ if(!Array.isArray(raw)||raw.length>128)fail('MIGRATION_CONFIG','Invalid source profiles');
+ const result:Profile[]=[];
+ for(const item of raw){
+ if(!object(item)||typeof item.id!=='string'||!/^[a-zA-Z0-9._-]{1,64}$/.test(item.id)||typeof item.root!=='string'||typeof item.database!=='string')fail('MIGRATION_CONFIG','Invalid source profile');
+ id(item.source_id);id(item.repository_id);id(item.organisation_id);
+ if(item.external!==undefined&&(!Array.isArray(item.external)||item.external.length>512))fail('MIGRATION_CONFIG','Invalid external inventory');
+ result.push(item as unknown as Profile);
+ }
+ if(new Set(result.map(p=>p.id)).size!==result.length)fail('MIGRATION_CONFIG','Duplicate source profile');
+ return result;
+}
+async function profile(env:Readonly<NodeJS.ProcessEnv>,name:unknown):Promise<Profile>{
+ const p=(await profiles(env)).find(p=>p.id===name);if(!p)fail('MIGRATION_SCOPE','Unknown trusted source profile');return p;
+}
+async function archiveRoot(env:Readonly<NodeJS.ProcessEnv>):Promise<string>{
+ const root=env.HF_MIGRATION_ARCHIVE_ROOT;if(!root||!path.isAbsolute(root))fail('MIGRATION_CONFIG','Trusted archive root required');
+ const st=await fs.lstat(root);if(!st.isDirectory()||st.isSymbolicLink()||(st.mode&0o077)!==0)fail('MIGRATION_CONFIG','Archive root must be a private real directory');
+ return root;
+}
+function open(filename:string):DatabaseSync{
+ const db=new DatabaseSync(filename,{readOnly:true,allowExtension:false,timeout:3000,readBigInts:true});
+ db.exec('PRAGMA query_only=ON; PRAGMA trusted_schema=OFF');return db;
+}
+function rows(db:DatabaseSync,sql:string):Record<string,unknown>[] {const q=db.prepare(sql);q.setReadBigInts(true);return q.all() as Record<string,unknown>[];}
+function plain(value:unknown):unknown{
+ if(typeof value==='bigint')return value.toString();
+ if(Array.isArray(value))return value.map(plain);
+ if(object(value))return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,plain(v)]));
+ return value;
+}
+export function inventory(db:DatabaseSync):Json{
+ const ver=rows(db,"SELECT value FROM meta WHERE key='schema_version'")[0]?.value;
+ if(ver!=='18')fail('MIGRATION_VERSION','Only inventoried schema18 sources are supported; source was not upgraded');
+ const tableList=rows(db,'PRAGMA table_list');
+ const objects=rows(db,"SELECT name,type,tbl_name,sql FROM sqlite_master ORDER BY type,name").map(r=>plain(r));
+ const tables=tableList.filter(t=>t.schema==='main'&&!String(t.name).startsWith('sqlite_')).map(t=>{
+ const name=String(t.name),type=String(t.type),virtual=type==='virtual',shadow=type==='shadow';
+ const columns=rows(db,'PRAGMA table_xinfo('+quote(name)+')').map(plain);
+ let count:string|null=null,diagnostic:string|null=null;
+ try{count=String(rows(db,'SELECT count(*) AS count FROM '+quote(name))[0]?.count??'0');}catch{diagnostic='COUNT_UNAVAILABLE';}
+ return {name,type,columns,rows:count,without_rowid:String(t.wr)==='1',strict:String(t.strict)==='1',
+ disposition:shadow?'ARCHIVE_ONLY':virtual?'ARCHIVE_ONLY':known.has(name)||name.startsWith('semantic_')?'HISTORY':'UNSUPPORTED_SEMANTICS',
+ diagnostic:diagnostic??(virtual?'VIRTUAL_SEMANTICS_NOT_REBUILT':null)};
+ }).sort((a,b)=>a.name.localeCompare(b.name));
+ return {schema_version:18,sqlite_version:String(rows(db,'SELECT sqlite_version() AS version')[0]?.version),tables,objects,
+ graph_state:'UNPUBLISHED_HISTORY',search_parity:'UNQUALIFIED',authority:'NONE',qualification:'UNQUALIFIED'};
+}
+async function externalInventory(p:Profile):Promise<unknown[]>{
+ const found:unknown[]=[];
+ for(const item of p.external??[]){
+ if(!item||typeof item.label!=='string'||!kinds.has(item.kind)||typeof item.path!=='string')fail('MIGRATION_CONFIG','Invalid external source declaration');
+ if(item.sensitive||item.kind==='native_session'){found.push({label:item.label,kind:item.kind,availability:'EXCLUDED_SENSITIVE'});continue;}
+ try{
+ const filename=await regular(p.root,item.path),st=await fs.stat(filename);
+ if(st.size>16*1024*1024){found.push({label:item.label,kind:item.kind,availability:'UNAVAILABLE',reason:'SIZE_BOUND'});continue;}
+ const bytes=await fs.readFile(filename);
+ found.push({label:item.label,kind:item.kind,availability:'OBSERVED',digest:hash(bytes),size_bytes:String(bytes.length),preservation:'SOURCE_REFERENCE_ONLY'});
+ }catch(error){
+ if(error instanceof FoundationError)throw error;
+ found.push({label:item.label,kind:item.kind,availability:'UNAVAILABLE',reason:'NOT_READABLE'});
+ }
+ }
+ for(const kind of kinds)if(!(p.external??[]).some(item=>item.kind===kind))found.push({label:kind,kind,availability:kind==='native_session'?'EXCLUDED_SENSITIVE':'UNAVAILABLE',reason:'NOT_DECLARED'});
+ return found;
+}
+async function ready(pool:pg.Pool):Promise<void>{
+ const r=await pool.query("SELECT to_regclass('hyperfide_history.imports')::text AS name");
+ if(!r.rows[0]?.name)fail('MIGRATION_SCHEMA_REQUIRED','Apply the trusted 0025 migration before importing');
+ const primary=await pool.query('SELECT pg_is_in_recovery() AS standby');if(primary.rows[0]?.standby)fail('PRIMARY_REQUIRED','Historical registration requires the primary');
+}
+async function snapshot(p:Profile,ctx:ComponentContext):Promise<unknown>{
+ const root=await archiveRoot(ctx.env),source=await regular(p.root,p.database);
+ const area=await fs.mkdtemp(path.join(root,'.snapshot-')),destination=path.join(area,'source.db');
+ let db:DatabaseSync|undefined;
+ try{
+ db=open(source);await backup(db,destination);db.close();db=undefined;
+ const archived=open(destination);
+ let inv:Json;
+ try{if(rows(archived,'PRAGMA quick_check')[0]?.quick_check!=='ok')fail('MIGRATION_CORRUPT','Snapshot integrity check failed');inv=inventory(archived);}finally{archived.close();}
+ const size=(await fs.stat(destination)).size;const digest=await fileHash(destination),archive=path.join(root,digest.slice(7)+'.db');
+ await fs.chmod(destination,0o400);
+ try{await fs.link(destination,archive);}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;if(await fileHash(archive)!==digest)fail('MIGRATION_CONFLICT','Archive collision');}
+ const ext=await externalInventory(p),pool=getPool(ctx.env);await ready(pool);
+ const importId=mappedId(p.source_id,p.repository_id,'snapshot',digest);
+ await pool.query("INSERT INTO hyperfide_history.imports(id,source_id,repository_id,organisation_id,snapshot_digest,archive_path,inventory,external_inventory) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING",[importId,p.source_id,p.repository_id,p.organisation_id,digest,archive,inv,JSON.stringify(ext)]);
+ const existing=await pool.query('SELECT organisation_id,source_id,repository_id,snapshot_digest FROM hyperfide_history.imports WHERE id=$1',[importId]);
+ const value=existing.rows[0];
+ if(!value||value.organisation_id!==p.organisation_id||value.source_id!==p.source_id||value.repository_id!==p.repository_id||value.snapshot_digest!==digest)fail('MIGRATION_CONFLICT','Historical import identity conflict');
+ return {import_id:importId,snapshot_digest:digest,size_bytes:String(size),archive_durability:'LOCAL_UNQUALIFIED',inventory:inv,external_inventory:ext,authority:'NONE',qualification:'UNQUALIFIED'};
+ }finally{db?.close();await fs.rm(area,{recursive:true,force:true});}
+}
+async function load(p:Profile,importId:string,ctx:ComponentContext):Promise<Json>{
+ const result=await getPool(ctx.env).query('SELECT * FROM hyperfide_history.imports WHERE id=$1 AND source_id=$2 AND repository_id=$3 AND organisation_id=$4',[importId,p.source_id,p.repository_id,p.organisation_id]);
+ if(!result.rows[0])fail('MIGRATION_SCOPE','Import not found within trusted scope');
+ const value=result.rows[0] as Json;const digest=hex(value.snapshot_digest),root=await archiveRoot(ctx.env);
+ const filename=await regular(root,digest.slice(7)+'.db');
+ if(await fileHash(filename)!==digest)fail('MIGRATION_CORRUPT','Snapshot digest mismatch');
+ return {...value,archive_path:filename};
+}
+function cell(value:unknown):unknown {
+ if(value===null)return {type:'null'};
+ if(typeof value==='bigint')return {type:'integer',value:value.toString()};
+ if(typeof value==='number'){const b=Buffer.alloc(8);b.writeDoubleBE(value);return {type:'real',ieee754:b.toString('hex')};}
+ if(typeof value==='string')return {type:'text',utf8_base64:Buffer.from(value).toString('base64')};
+ if(value instanceof Uint8Array)return {type:'blob',base64:Buffer.from(value).toString('base64')};
+ return fail('MIGRATION_UNSUPPORTED','Unsupported SQLite value representation');
+}
+async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<unknown>{
+ const importId=id(value.import_id),offset=value.offset,limit=value.limit,table=value.table;
+ if(typeof offset!=='string'||!/^(0|[1-9][0-9]{0,14})$/.test(offset)||typeof limit!=='number'||!Number.isSafeInteger(limit)||limit<1||limit>500||typeof table!=='string')fail('MIGRATION_INPUT','Bounded table, decimal offset and batch limit required');
+ const prior=await load(p,importId,ctx),db=open(String(prior.archive_path));let payloads:{key:unknown;data:unknown;mapped:string;digest:string;disposition:string}[]=[];
+ let total=0n;
+ try{
+ const inv=inventory(db),tables=inv.tables as Json[],meta=tables.find(t=>t.name===table);
+ if(!meta||meta.disposition==='ARCHIVE_ONLY')fail('MIGRATION_UNSUPPORTED','Only inventoried ordinary tables can import logical history');
+ const cols=rows(db,'PRAGMA table_xinfo('+quote(table)+')').filter(c=>String(c.hidden)!=='1');
+ const primary=cols.filter(c=>BigInt(String(c.pk))>0n).sort((a,b)=>Number(a.pk)-Number(b.pk));
+ const keyNames=primary.map(c=>String(c.name));
+ const names=cols.map(c=>String(c.name));
+ const rowidAlias=['rowid','_rowid_','oid'].find(n=>!names.includes(n));
+ if(!keyNames.length&&!rowidAlias)fail('MIGRATION_UNSUPPORTED','No unambiguous stable legacy key');
+ const rowid=!keyNames.length;
+ const order=rowid?quote(rowidAlias!):keyNames.map(quote).join(',');
+ const expressions=names.flatMap((n,i)=>['typeof('+quote(n)+') AS '+quote('type_'+i),quote(n)+' AS '+quote('value_'+i),'CAST('+quote(n)+' AS BLOB) AS '+quote('bytes_'+i)]);
+ if(rowid)expressions.push(quote(rowidAlias!)+' AS "__hf_rowid"');
+ const q=db.prepare('SELECT '+expressions.join(',')+' FROM '+quote(table)+' ORDER BY '+order+' LIMIT ? OFFSET ?');q.setReadBigInts(true);
+ const fetched=q.all(BigInt(limit),BigInt(offset)) as Record<string,unknown>[];
+ total=BigInt(String(meta.rows));
+ if(BigInt(offset)>total)fail('MIGRATION_INPUT','Offset exceeds immutable source row count');
+ payloads=fetched.map(r=>{
+ const values=names.map((_n,i)=>r['type_'+i]==='text'?{type:'text',utf8_base64:Buffer.from(r['bytes_'+i] as Uint8Array).toString('base64')}:cell(r['value_'+i]));
+ const key=rowid?[cell(r.__hf_rowid)]:keyNames.map(n=>values[names.indexOf(n)]);
+ const data=names.map((n,i)=>({column:n,value:values[i]}));
+ const encoded=canonical(data);
+ if(Buffer.byteLength(encoded)>8*1024*1024)fail('MIGRATION_UNSUPPORTED','Logical row exceeds bounded representation; original archive preserved');
+ return {key,data,mapped:mappedId(p.source_id,p.repository_id,table,key),digest:hash(encoded),
+ disposition:live.has(table)?'REQUIRES_RECONCILIATION':String(meta.disposition)};
+ });
+ }finally{db.close();}
+ const requestDigest=hash(canonical({importId,table,offset,limit,snapshot:prior.snapshot_digest}));
+ const pool=getPool(ctx.env),client=await pool.connect();let committing=false,broken=false;
+ try{
+ await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+ await client.query('SELECT id FROM hyperfide_history.imports WHERE id=$1 FOR UPDATE',[importId]);
+ const existing=await client.query('SELECT request_digest,result FROM hyperfide_history.batches WHERE import_id=$1 AND table_name=$2 AND start_offset=$3',[importId,table,offset]);
+ if(existing.rows[0]){if(existing.rows[0].request_digest!==requestDigest)fail('MIGRATION_CONFLICT','Batch replay changed the pinned request');await client.query('ROLLBACK');return {...existing.rows[0].result,replayed:true};}
+ const checkpoint=await client.query("SELECT COALESCE(max((result->>'next_offset')::bigint),0)::text AS next FROM hyperfide_history.batches WHERE import_id=$1 AND table_name=$2",[importId,table]);
+ if(checkpoint.rows[0]?.next!==offset)fail('MIGRATION_CONFLICT','Batch offset must continue the durable checkpoint');
+ // The immutable snapshot and deterministic key make restart/replay independent of local process state.
+ for(const row of payloads){
+ const inserted=await client.query('INSERT INTO hyperfide_history.rows(import_id,mapped_id,table_name,legacy_key,payload,payload_digest,disposition) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(import_id,mapped_id) DO UPDATE SET mapped_id=EXCLUDED.mapped_id WHERE hyperfide_history.rows.payload_digest=EXCLUDED.payload_digest RETURNING mapped_id',[importId,row.mapped,table,JSON.stringify(row.key),JSON.stringify(row.data),row.digest,row.disposition]);
+ if(inserted.rowCount!==1)fail('MIGRATION_CONFLICT','Historical row changed under an existing key');
+ }
+ const next=BigInt(offset)+BigInt(payloads.length),result={outcome:'SUCCEEDED',import_id:importId,table,offset,next_offset:next.toString(),imported:payloads.length,complete:next>=total,authority:'NONE',qualification:'UNQUALIFIED'};
+ await client.query('INSERT INTO hyperfide_history.batches(import_id,table_name,start_offset,request_digest,result) VALUES($1,$2,$3,$4,$5)',[importId,table,offset,requestDigest,result]);
+ committing=true;await client.query('COMMIT');return result;
+ }catch(error){
+ if(committing){broken=true;return {outcome:'UNKNOWN',import_id:importId,table,offset,reconcile:'REPLAY_IDENTICAL_BATCH',authority:'NONE',qualification:'UNQUALIFIED'};}
+ try{await client.query('ROLLBACK');}catch{/* A failed connection is discarded below. */}
+ throw error;
+ }finally{client.release(broken);}
+}
+export const MIGRATION_ACTIONS=['migration.sqlite.describe','migration.sqlite.snapshot','migration.sqlite.inventory','migration.sqlite.import','migration.sqlite.status'] as const;
+export function createComponent(ctx:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(MIGRATION_ACTIONS.map(action=>[action,async(raw:unknown)=>{
+ if(ctx.signal.aborted)fail('MIGRATION_CLOSED','Migration is shutting down');
+ if(action.endsWith('.describe')){input(raw,[]);return {schema_version:1,source_schema_versions:[18],snapshot:'SQLITE_BACKUP_API',authority:'NONE',qualification:'UNQUALIFIED',cutover:'SEPARATE_REQUIRED_OPERATION'};}
+ const v=input(raw,['source'],action.endsWith('.snapshot')?[]:action.endsWith('.import')?['import_id','table','offset','limit']:['import_id']);
+ const p=await profile(ctx.env,v.source);
+ if(action.endsWith('.snapshot'))return snapshot(p,ctx);
+ const stored=await load(p,id(v.import_id),ctx);
+ if(action.endsWith('.inventory'))return {import_id:stored.id,inventory:stored.inventory,external_inventory:stored.external_inventory,authority:'NONE',qualification:'UNQUALIFIED'};
+ if(action.endsWith('.import'))return importBatch(p,v,ctx);
+ const counts=await getPool(ctx.env).query('SELECT table_name,count(*)::text AS rows FROM hyperfide_history.rows WHERE import_id=$1 GROUP BY table_name ORDER BY table_name',[stored.id]);
+ return {import_id:stored.id,tables:counts.rows,authority:'NONE',qualification:'UNQUALIFIED'};
+ }]))};}

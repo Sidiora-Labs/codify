@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "variant": "task:25.1",
+  "task": "25.1",
+  "scope": "task-component",
+  "cases": [
+    "V-018",
+    "V-019",
+    "V-025"
+  ],
+  "assertion_ids": [
+    "migration.describe",
+    "migration.snapshot.wal",
+    "migration.snapshot.integrity",
+    "migration.snapshot.digest",
+    "migration.snapshot.source-unchanged",
+    "migration.inventory.shape",
+    "migration.inventory.virtual",
+    "migration.inventory.trigger",
+    "migration.external.unavailable",
+    "migration.external.session-excluded",
+    "migration.import.memories",
+    "migration.import.attempts",
+    "migration.import.custom_shape",
+    "migration.import.events",
+    "migration.import.branches",
+    "migration.import.files",
+    "migration.import.memory_superseded",
+    "migration.import.exact-integer",
+    "migration.import.exact-blob",
+    "migration.import.unqualified",
+    "migration.import.reconciliation",
+    "migration.import.no-authority-tables",
+    "migration.replay.restart",
+    "migration.replay.conflict",
+    "migration.scope.unknown",
+    "migration.path.request-root",
+    "migration.import.virtual-refused",
+    "migration.import.out-of-order",
+    "migration.inventory.same-version-addition",
+    "migration.version.future-refused"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_1.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/migration/sqlite.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task25.1-database",
+      "kind": "postgresql-database",
+      "scope": "task25.1-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "migration/cleanup.json",
+    "migration/observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/src/migration/sqlite.ts",
+    "services/hyperfide/migrations/0025-sqlite-history.sql",
+    "services/hyperfide/components/25.1.json",
+    "services/hyperfide/src/components/registry.ts",
+    "services/hyperfide/src/components/service.ts",
+    "services/hyperfide/src/policy/programme.ts",
+    "services/hyperfide/src/storage/schema.ts",
+    "services/hyperfide/src/contracts/records.ts",
+    "services/hyperfide/src/control.ts",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/25_1.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ]
+}
