@@ -8,6 +8,7 @@ import base64
 import copy
 import hashlib
 import hmac
+import inspect
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -46,7 +47,7 @@ IDS = [
  "artifacts.object.forbidden-not-absent", "artifacts.object.missing-complete",
  "artifacts.object.corrupt-complete", "artifacts.object.truncated", "artifacts.object.overlarge",
  "artifacts.object.corrupt-precondition", "artifacts.object.redirect-no-forwarding",
- "artifacts.object.binding-conflict", "artifacts.scope.before-effects", "artifacts.scope.cross-run-read",
+ "artifacts.object.binding-conflict", "artifacts.scope.before-effects", "artifacts.scope.cross-run-read", "artifacts.scope.nested-run-spoof",
  "artifacts.input.digest", "artifacts.input.size", "artifacts.input.base64",
  "artifacts.input.unknown", "artifacts.input.oversize", "artifacts.input.retention",
  "artifacts.config.endpoint", "artifacts.manifest.ordered-complete", "artifacts.manifest.read",
@@ -92,14 +93,16 @@ def digest(data):
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
-def environment(database=DATABASE):
+def environment(database=None):
+    database = DATABASE if database is None else database
     env = os.environ.copy()
     parsed = urlsplit(env["DATABASE_URL"])
     env["DATABASE_URL"] = urlunsplit((parsed.scheme, parsed.netloc, "/" + database, parsed.query, ""))
     env["PGDATABASE"] = database
     return env
 
-def sql(statement, *, database=DATABASE, allow_error=False):
+def sql(statement, *, database=None, allow_error=False):
+    database = DATABASE if database is None else database
     env = environment(database)
     result = subprocess.run(["psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1",
                              "-d", env["DATABASE_URL"]], cwd=ROOT, env=env,
@@ -116,7 +119,8 @@ def artifacts():
                 "storage_key,storage_backend,retention_class,retention_until,retention_hold,"
                 "completed_at,state_version::text,run_id::text FROM hyperfide.artifacts ORDER BY id) t;")
 
-def find(data, run=RUN):
+def find(data, run=None):
+    run = RUN if run is None else run
     matching = [r for r in artifacts() if r["digest"] == digest(data) and r["run_id"] == run]
     expect(len(matching) == 1, "expected one scoped PostgreSQL artifact row")
     return matching[0]
@@ -127,7 +131,13 @@ def output_dir():
     return target
 
 def cleanup():
+    global DATABASE
     try:
+        target = output_dir() / "database-target.json"
+        if target.exists():
+            record = json.loads(target.read_text())
+            expect(record.get("resource_id") == RESOURCE and re.fullmatch(r"hf_[a-z0-9_]{1,60}", record.get("database", "")), "invalid owned fixture resource record")
+            DATABASE = record["database"]
         sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='" + DATABASE +
             "' AND pid<>pg_backend_pid();", database="postgres")
         sql('DROP DATABASE IF EXISTS "' + DATABASE + '";', database="postgres")
@@ -267,10 +277,12 @@ class ObjectFixture:
         except (KeyError, TypeError, ValueError):
             return False
 
-    def key(self, data, run=RUN):
+    def key(self, data, run=None):
+        run = RUN if run is None else run
         return "/" + BUCKET + "/hyperfide/v1/" + ORG + "/" + run + "/sha256/" + digest(data)[7:]
 
-    def set_mode(self, data, mode, run=RUN):
+    def set_mode(self, data, mode, run=None):
+        run = RUN if run is None else run
         self.modes[self.key(data, run)] = mode
 
     def stop(self):
@@ -283,66 +295,145 @@ class ObjectFixture:
         return absent
 
 class Service:
-    def __init__(self, base, fixture):
+    """Stable facade over the actual identity HTTPS fixture, never a synthetic principal."""
+    def __init__(self, base, fixture, database=None, resource_id=None):
+        import importlib.util
         self.fixture = fixture
-        self.policy = base / "policy.json"
-        self.policy.write_text(json.dumps(POLICY))
-        self.components = base / "components"; self.components.mkdir()
-        for name in ["1.4.json", "4.1.json", "15.2.json"]:
-            (self.components / name).write_bytes((ROOT / "services/hyperfide/components" / name).read_bytes())
-        self.env = environment()
-        self.env.update({
-            "HF_ARTIFACT_S3_ENDPOINT": fixture.endpoint,
-            "HF_ARTIFACT_ALLOW_LOOPBACK_HTTP": "1",
-            "HF_ARTIFACT_S3_REGION": REGION, "HF_ARTIFACT_S3_BUCKET": BUCKET,
-            "HF_ARTIFACT_S3_ACCESS_KEY_ID": KEY, "HF_ARTIFACT_S3_SECRET_ACCESS_KEY": SECRET,
-            "HF_ARTIFACT_S3_SESSION_TOKEN": TOKEN, "HF_ARTIFACT_ORGANISATION_ID": ORG,
-            "HF_ARTIFACT_ALLOWED_RUN_IDS": json.dumps([RUN, RUN2]),
-        })
+        self.closed = False
+        module_path = ROOT / "tests/hyperfide/support/identity_fixture.py"
+        spec = importlib.util.spec_from_file_location("hyperfide_actual_identity_fixture", module_path)
+        identity = importlib.util.module_from_spec(spec); spec.loader.exec_module(identity)
+        self.identity_module = identity
+        self.second_credential = None
+        self.scope = None
+        def setup(f):
+            global ORG, RUN, RUN2, SCOPE, DATABASE, RESOURCE
+            ORG, RUN = f.ids["organisation"], f.ids["run"]
+            RUN2 = identity.uid(); SCOPE = {"organisation_id": ORG, "run_id": RUN}
+            DATABASE = f.database
+            if resource_id is not None: RESOURCE = resource_id
+            self.scope = dict(SCOPE)
+            (output_dir() / "database-target.json").write_text(json.dumps({"database": f.database, "resource_id": RESOURCE}) + "\n")
+            f.sql("INSERT INTO hyperfide.runs(organisation_id,id,project_id,spec_revision_id,policy_digest,authority_epoch,state) VALUES($1,$2,$3,$4,$5,$6,'RUNNING')",
+                  [ORG, RUN2, f.ids["project"], f.ids["spec"], digest(b"artifact-fixture-policy"), f.ids["epoch"]])
+            f.env.update({
+                "HF_ARTIFACT_S3_ENDPOINT": fixture.endpoint,
+                "HF_ARTIFACT_ALLOW_LOOPBACK_HTTP": "1",
+                "HF_ARTIFACT_S3_REGION": REGION, "HF_ARTIFACT_S3_BUCKET": BUCKET,
+                "HF_ARTIFACT_S3_ACCESS_KEY_ID": KEY, "HF_ARTIFACT_S3_SECRET_ACCESS_KEY": SECRET,
+                "HF_ARTIFACT_S3_SESSION_TOKEN": TOKEN, "HF_ARTIFACT_ORGANISATION_ID": ORG,
+                "HF_ARTIFACT_ALLOWED_RUN_IDS": json.dumps([RUN, RUN2]),
+            })
+            config = json.loads(f.identity_config.read_text())
+            for principal in config["principals"]:
+                principal["allowed_actions"].append("system.describe")
+            self.second_credential = identity.uid()
+            second = dict(config["principals"][0], credential_id=self.second_credential,
+                          actor_id=identity.uid(), run_id=RUN2)
+            config["principals"].append(second)
+            f.identity_config.write_text(json.dumps(config))
+            policy = json.loads(f.policy.read_text()); policy["allowed_actions"].append("system.describe")
+            f.policy.write_text(json.dumps(policy))
+        options = {"database": database or DATABASE} if "database" in inspect.signature(identity.IdentityFixture).parameters else {}
+        self.auth = identity.IdentityFixture(extra_components=("15.2",), extra_setup=setup, **options)
+        self.env = self.auth.env
+        self.policy = self.auth.policy
+        self.components = self.auth.components
         self.argv = ["node", str(ROOT / "services/hyperfide/dist/control.js"),
-                     "--policy", str(self.policy), "--spec-revision", POLICY["spec_revision"],
+                     "--policy", str(self.policy), "--spec-revision", "fixture-identity-v1",
                      "--components", str(self.components), "--module-root",
-                     str(ROOT / "services/hyperfide/dist")]
+                     str(ROOT / "services/hyperfide/dist"), "--mode", "stdio"]
 
-    def request(self, action, value, *, component="15.2", env=None):
-        request = {"id": "task-15.2-probe", "component": component, "action": action, "input": value}
-        child = subprocess.run(self.argv, cwd=ROOT, env=env or self.env,
-                               input=json.dumps(request) + "\n", text=True,
-                               capture_output=True, timeout=30)
-        payloads = []
-        for line in child.stdout.splitlines():
-            if line.strip(): payloads.append(json.loads(line))
-        if not payloads:
-            for line in child.stderr.splitlines():
-                try:
-                    value = json.loads(line)
-                    if value.get("ok") is False: payloads.append(value)
-                except (ValueError, AttributeError): pass
-        expect(len(payloads) == 1, "service did not emit one structured result")
-        response = payloads[0]
-        for sensitive in (SECRET, TOKEN, KEY, self.env["DATABASE_URL"]):
-            expect(sensitive not in child.stdout + child.stderr, "service exposed trusted configuration")
-        OBSERVATIONS.append({"action": action, "ok": response.get("ok"),
-                             "error_code": response.get("error", {}).get("code")})
-        return child, response
+    def request(self, action, value, *, component="15.2", env=None, principal_run=None, **obsolete):
+        # The default signed principal remains run A even if nested input claims run B.
+        run = principal_run or RUN
+        body = self.auth.operation(component, action, value, run=run)
+        credential = self.second_credential if run == RUN2 else self.auth.ids["operator"]
+        original = None
+        if env is not None:
+            self.auth.stop(); original = self.auth.env; self.auth.env = env; self.auth.start()
+        try:
+            status, response = self.auth.request(body, credential=credential)
+            encoded = json.dumps(response)
+            for sensitive in (SECRET, TOKEN, KEY, self.env["DATABASE_URL"]):
+                expect(sensitive not in encoded, "service exposed trusted configuration")
+            OBSERVATIONS.append({"action": action, "ok": response.get("ok"),
+                                 "http_status": status,
+                                 "error_code": response.get("error", {}).get("code")})
+            return status, response
+        finally:
+            if original is not None:
+                self.auth.stop(); self.auth.env = original; self.auth.start()
 
     def ok(self, action, value, **options):
-        child, response = self.request(action, value, **options)
-        expect(child.returncode == 0 and response.get("ok") is True,
-               "service refused positive operation: " + str(response.get("error", {}).get("code")))
+        status, response = self.request(action, value, **options)
+        expect(status == 200 and response.get("ok") is True,
+               "authenticated service refused positive operation: " + str(response.get("error", {}).get("code")))
         return response["result"]
 
     def reject(self, action, value, code, **options):
-        child, response = self.request(action, value, **options)
-        expect(child.returncode != 0 and response.get("ok") is False
+        _, response = self.request(action, value, **options)
+        expect(response.get("ok") is False
                and response.get("error", {}).get("code") in ({code} if isinstance(code, str) else set(code)),
-               "service rejection differs: " + str(response.get("error", {}).get("code")))
+               "authenticated rejection differs: " + str(response.get("error", {}).get("code")))
 
     def put(self, data, **changes):
-        return self.ok("artifact.object.put", upload(data, **changes))
+        return self.ok("artifact.object.put", upload(data, **changes),
+                       principal_run=changes.get("run_id", RUN))
 
     def by_id(self, result):
-        return dict(SCOPE, artifact_id=result["artifact"]["artifact_id"])
+        return dict(self.scope, artifact_id=result["artifact"]["artifact_id"])
+
+    def crash_upload(self, action, value, blob, path):
+        fixture = self.fixture
+        fixture.blocked.clear(); fixture.release.clear(); fixture.modes[path] = "crash"
+        results = []
+        def invoke():
+            try: results.append(self.request(action, value))
+            except Exception as error: results.append(type(error).__name__)
+        thread = threading.Thread(target=invoke)
+        thread.start()
+        try:
+            expect(fixture.blocked.wait(10), "authenticated service did not reach real upload crash boundary")
+            row = find(blob)
+            expect(row["status"] == "PENDING" and row["completed_at"] is None,
+                   "artifact became COMPLETE before backend acknowledgement/readback")
+            expect(fixture.objects[path] == blob, "actual upload bytes missing at crash boundary")
+            self.auth.child.kill(); self.auth.child.communicate(timeout=5)
+            expect(self.auth.child.poll() is not None, "killed service process still running")
+            self.auth.child = None
+        finally:
+            fixture.release.set(); fixture.modes[path] = ""
+            thread.join(12)
+            expect(not thread.is_alive(), "authenticated request thread survived owned service crash")
+            if self.auth.child is None:self.auth.start()
+        return row
+
+    def close(self):
+        if self.closed:return
+        self.auth.close(); self.closed = True
+        rows = self.auth.sql("SELECT datname FROM pg_database WHERE datname=$1", [self.auth.database], admin=True)
+        expect(not rows, "owned authenticated fixture database still exists")
+        with socket.socket() as probe:
+            expect(probe.connect_ex(("127.0.0.1", self.auth.port)) != 0, "owned HTTPS listener still reachable")
+
+
+class AuthenticatedArtifactFixture:
+    def __init__(self, base, database, resource_id):
+        self.objects = ObjectFixture()
+        try:self.service = Service(base, self.objects, database=database, resource_id=resource_id)
+        except BaseException:self.objects.stop();raise
+        self.scope = dict(self.service.scope)
+        self.database = self.service.auth.database
+    def close(self):
+        try:self.service.close()
+        finally:self.objects.stop()
+        return {"database_observed_absent": True, "https_observed_absent": True,
+                "object_fixture_observed_absent": True}
+
+def createAuthenticatedFixture(base, database, resource_id):
+    return AuthenticatedArtifactFixture(base, database, resource_id)
+
 
 def upload(data, **changes):
     value = dict(SCOPE, digest=digest(data), size_bytes=str(len(data)),
@@ -368,7 +459,7 @@ def verified(result, data=None):
            and receipt["completed_at"], "receipt does not bind artifact content and completion")
 
 def unavailable(service, action, value, *, availability=None, codes=()):
-    child, response = service.request(action, value)
+    status, response = service.request(action, value)
     if response.get("ok") is False:
         expect(response["error"]["code"] in codes, "unexpected failure code " + str(response["error"]["code"]))
         return
@@ -393,14 +484,12 @@ INSERT INTO hyperfide.runs(organisation_id,id,project_id,spec_revision_id,policy
 """)
 
 def main():
-    sql('CREATE DATABASE "' + DATABASE + '";', database="postgres")
     fixture = ObjectFixture()
+    service = None
     closed = False
     try:
         with tempfile.TemporaryDirectory(prefix="hyperfide-15-2-") as directory:
             service = Service(Path(directory), fixture)
-            service.ok("authority.schema.bootstrap", {}, component="4.1")
-            seed()
             def linked():
                 result = service.ok("system.describe", {}, component="system")
                 entries = [c for c in result["components"] if c["id"] == "15.2"]
@@ -436,22 +525,8 @@ def main():
             check("artifacts.object.conditional-existing", preexisting)
             crash_data = b"kill service after real upload before registration"
             def crash():
-                fixture.blocked.clear(); fixture.release.clear(); fixture.set_mode(crash_data, "crash")
-                request = {"id": "crash", "component": "15.2", "action": "artifact.object.put",
-                           "input": upload(crash_data)}
-                child = subprocess.Popen(service.argv, cwd=ROOT, env=service.env, stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                try:
-                    child.stdin.write(json.dumps(request) + "\n"); child.stdin.flush()
-                    expect(fixture.blocked.wait(10), "service did not upload at crash boundary")
-                    row = find(crash_data)
-                    expect(row["status"] == "PENDING" and row["completed_at"] is None,
-                           "registration became COMPLETE before upload acknowledgement/readback")
-                    expect(fixture.objects[fixture.key(crash_data)] == crash_data, "upload boundary not reached")
-                    child.kill(); child.communicate(timeout=5)
-                finally:
-                    if child.poll() is None: child.kill(); child.communicate(timeout=5)
-                    fixture.release.set(); fixture.set_mode(crash_data, "")
+                service.crash_upload("artifact.object.put", upload(crash_data), crash_data,
+                                     fixture.key(crash_data))
             check("artifacts.object.pending-before-http", crash)
             def reconcile_crash():
                 row = find(crash_data)
@@ -525,7 +600,8 @@ def main():
                        "scope rejection occurred after side effects")
             check("artifacts.scope.before-effects", scope)
             check("artifacts.scope.cross-run-read", lambda: service.reject("artifact.object.read",
-                  dict(SCOPE, run_id=RUN2, artifact_id=first["artifact"]["artifact_id"]), "ARTIFACT_NOT_FOUND"))
+                  dict(SCOPE, run_id=RUN2, artifact_id=first["artifact"]["artifact_id"]), "ARTIFACT_NOT_FOUND", principal_run=RUN2))
+            check("artifacts.scope.nested-run-spoof", lambda: service.reject("artifact.object.put", upload(b"wrong-local-policy-run", run_id=RUN2), "ARTIFACT_SCOPE_DENIED"))
             def invalid(field, value):
                 data = upload(b"invalid-input-" + field.encode())
                 data[field] = value
@@ -662,22 +738,7 @@ def main():
                               "truncated": False, "missing_ranges": [], "chunks": [chunk]}
                 blob = json.dumps(serialized, separators=(",", ":"), ensure_ascii=False).encode()
                 path = "/" + BUCKET + "/hyperfide/v1/" + ORG + "/" + RUN + "/manifests/sha256/" + digest(blob)[7:]
-                fixture.blocked.clear(); fixture.release.clear(); fixture.modes[path] = "crash"
-                request = {"id": "manifest-crash", "component": "15.2",
-                           "action": "artifact.manifest.commit", "input": candidate}
-                process = subprocess.Popen(service.argv, cwd=ROOT, env=service.env,
-                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE, text=True)
-                try:
-                    process.stdin.write(json.dumps(request) + "\n"); process.stdin.flush()
-                    expect(fixture.blocked.wait(10), "manifest upload did not reach actual crash boundary")
-                    row = find(blob)
-                    expect(row["status"] == "PENDING" and fixture.objects[path] == blob,
-                           "manifest completed before child registration")
-                    process.kill(); process.communicate(timeout=5)
-                finally:
-                    if process.poll() is None: process.kill(); process.communicate(timeout=5)
-                    fixture.release.set(); fixture.modes[path] = ""
+                row = service.crash_upload("artifact.manifest.commit", candidate, blob, path)
                 service.reject("artifact.object.put", upload(blob), "ARTIFACT_BINDING_CONFLICT")
                 service.reject("artifact.object.reconcile", dict(SCOPE, artifact_id=row["id"]),
                                "ARTIFACT_NOT_COMPLETE")
@@ -712,6 +773,7 @@ def main():
             "postgresql_version": sql("SHOW server_version;").stdout.strip(),
             "package_lock_sha256": hashlib.sha256((ROOT / "services/hyperfide/package-lock.json").read_bytes()).hexdigest()
         }, sort_keys=True) + "\n")
+        if service is not None:service.close()
     return 1 if FAILED else 0
 
 if __name__ == "__main__":
