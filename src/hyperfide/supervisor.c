@@ -187,6 +187,7 @@ int hf_component_12_1(const char *action,const char *request,FILE *out) {
     HfJson *json=malloc(sizeof *json);if (!json) return hf_native_error(out,"RESOURCE_LIMIT");
     if (!hf_json_parse(json,request)) {free(json);return hf_native_error(out,"INVALID_JSON");}
     int result=1;
+    if (!strcmp(action,"supervisor.serve")) {free(json);return hf_supervisor_daemon(request,out);}
     if (!strcmp(action,"supervisor.describe")) {
         const char *keys[]={NULL};
         if (!hf_json_only(json,0,keys,0)) result=hf_native_error(out,"UNKNOWN_FIELD");
