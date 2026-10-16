@@ -83,17 +83,19 @@ return pool;
 }
 let currentPool:pg.Pool|undefined;
 let currentConfig:string|undefined;
+let managedLifecycle=false;
 let managedProvider:((env:Readonly<NodeJS.ProcessEnv>)=>pg.Pool)|undefined;
 /** Registry owns the process pool lifecycle while legacy callers retain the stable facade. */
 export function bindStoragePool(provider:(env:Readonly<NodeJS.ProcessEnv>)=>pg.Pool):()=>void{
 if(managedProvider||currentPool)throw new FoundationError('DATABASE_CONFIG_CONFLICT','A process storage owner is already active');
-managedProvider=provider;
+managedProvider=provider;managedLifecycle=true;
 return ()=>{if(managedProvider===provider)managedProvider=undefined;};
 }
 
 /** Stable process resource seam; task4.2 owns the later shared lifecycle. */
 export function getPool(env:Readonly<NodeJS.ProcessEnv>):pg.Pool {
 if(managedProvider)return managedProvider(env);
+if(managedLifecycle)throw new FoundationError('DB_UNAVAILABLE','Managed process storage has closed');
 const config=storageConfig(env),signature=JSON.stringify(config);
 if(currentPool&&signature!==currentConfig)
 throw new FoundationError('DATABASE_CONFIG_CONFLICT','This process owns a different PostgreSQL configuration');
@@ -128,32 +130,15 @@ const result=await client.query<{table_name:string}>(
 "SELECT table_name FROM information_schema.tables WHERE table_schema=$1 AND table_type='BASE TABLE' ORDER BY table_name",[AUTHORITY_SCHEMA]);
 return result.rows.map(row=>row.table_name).filter(name=>name!=='schema_migrations');
 }
+// Historical name retained for callers; schema creation belongs exclusively to the migration job.
 export async function bootstrapAuthoritySchema(pool:pg.Pool):Promise<SchemaReceipt>{
-const input=await migration(),client=await pool.connect();
-try{
-await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
-await client.query('SELECT pg_advisory_xact_lock(1945824101,1)');
-const status=await client.query<{in_recovery:boolean}>('SELECT pg_is_in_recovery() AS in_recovery');
-if(status.rows[0]?.in_recovery)throw new FoundationError('PRIMARY_REQUIRED','Authority bootstrap requires the PostgreSQL primary');
-const exists=await client.query<{schema_exists:boolean;migration_exists:string|null}>(
-"SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=$1) AS schema_exists,to_regclass('hyperfide.schema_migrations')::text AS migration_exists",[AUTHORITY_SCHEMA]);
-let applied=false;
-if(exists.rows[0]?.migration_exists){
-const prior=await client.query<{checksum:string}>('SELECT checksum FROM hyperfide.schema_migrations WHERE version=$1',[AUTHORITY_SCHEMA_VERSION]);
-if(prior.rows.length!==1||prior.rows[0]!.checksum!==input.checksum)
-throw new FoundationError('SCHEMA_CONFLICT','Existing authority schema does not match the pinned migration');
-}else{
-if(exists.rows[0]?.schema_exists)throw new FoundationError('SCHEMA_CONFLICT','Unidentified authority namespace already exists');
-await client.query(input.sql);
-await client.query('INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES($1,$2,$3)',[AUTHORITY_SCHEMA_VERSION,'0001-authority',input.checksum]);
-applied=true;
-}
-const tables=await tablesOf(client);
-if(AUTHORITY_TABLES.some(table=>!tables.includes(table)))throw new FoundationError('SCHEMA_CONFLICT','Authority schema is incomplete');
-await client.query('COMMIT');
-return {schema:AUTHORITY_SCHEMA,schema_version:AUTHORITY_SCHEMA_VERSION,checksum:input.checksum,applied,tables};
-}catch(error){try{await client.query('ROLLBACK');}catch{/* Connection loss cannot establish rollback success. */}throw databaseError(error);}
-finally{client.release();}
+const input=await migration();
+let inspected:SchemaInspection;
+try{inspected=await inspectAuthoritySchema(pool);}
+catch{throw new FoundationError('MIGRATION_JOB_REQUIRED','Apply the reviewed release with the dedicated migration operator before runtime readiness');}
+if(inspected.checksum!==input.checksum||AUTHORITY_TABLES.some(table=>!inspected.tables.includes(table)))
+throw new FoundationError('SCHEMA_CONFLICT','Authority schema differs from the expected release');
+return {schema:AUTHORITY_SCHEMA,schema_version:AUTHORITY_SCHEMA_VERSION,checksum:input.checksum,applied:false,tables:inspected.tables};
 }
 export async function inspectAuthoritySchema(pool:pg.Pool):Promise<SchemaInspection>{
 const client=await pool.connect();
