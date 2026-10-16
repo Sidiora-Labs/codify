@@ -18,9 +18,7 @@ def check(name,fn):
 def sha(value):return "sha256:"+hashlib.sha256(value).hexdigest()
 def utc(ms=60000):return time.strftime("%Y-%m-%dT%H:%M:%S",time.gmtime((time.time()*1000+ms)/1000))+".000Z"
 def prepare_provider_intent_fixture(f):
- for version,name in [(5,"0005-scheduling"),(8,"0008-provider-coordination")]:
-  data=(ROOT/("services/hyperfide/migrations/"+name+".sql")).read_bytes()
-  f.sql("BEGIN;\n"+data.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(data)+"');\nCOMMIT;")
+ f.apply_migration("0005-scheduling");f.apply_migration("0008-provider-coordination")
  pre=prepared.Fixture(f.path/"source-preparation");manifest=pre.create()
  f.preparation=manifest["digest"];f.profile=str(uuid.uuid4());f.pool=str(uuid.uuid4())
  f.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,'railway','linux-x86_64',$3,$4)",[f.ids["organisation"],f.profile,f.preparation,manifest])
