@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "8.3",
+  "task": "8.3",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/reconcile.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "provider.intents.prepare-create",
+    "provider.intents.prepare-destroy",
+    "provider.intents.get",
+    "provider.intents.execute",
+    "provider.intents.reconcile",
+    "provider.orphans.list"
+  ],
+  "requires": [
+    "8.2"
+  ]
+}
