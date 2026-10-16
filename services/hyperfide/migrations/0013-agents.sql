@@ -73,6 +73,7 @@ CREATE TABLE hyperfide.supervisor_launches (
  host_id text NOT NULL,placement jsonb NOT NULL,reservations jsonb NOT NULL,
  state text NOT NULL CHECK(state IN ('STARTING','SPAWNING','RUNNING','EXITED')),
  process_identity jsonb,native_session_id text,exit_code integer,observed_at timestamptz,
+ output_sequence bigint NOT NULL DEFAULT 0 CHECK(output_sequence>=0),pending_stdout text NOT NULL DEFAULT '' CHECK(octet_length(pending_stdout)<=87384),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id)

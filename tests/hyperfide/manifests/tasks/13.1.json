@@ -37,7 +37,7 @@
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "74d9af33b02c49a373d4be3d34b9b332eda732369ad14d97f3e8a656a49ca9ed",
+      "sha256": "38443763e0211d30085a7ecdfb9073450dc850c76713fce06d081894c4421e3f",
       "size": 51496
     },
     {
@@ -77,13 +77,13 @@
     },
     {
       "path": "src/hyperfide/connectors.c",
-      "sha256": "73fb6fc8972e168d5dbcff2edbb9ab8d5d5b29872d4912b894437b808ca556e3",
-      "size": 19403
+      "sha256": "5f78fce9b7838cc20e348284a6f5f3328041b1be2fccbad7786ba8fb297c22cd",
+      "size": 19515
     },
     {
       "path": "tests/hyperfide/cases/tasks/13_1.py",
-      "sha256": "a6fc6bd7620dca3c759e8a5d7349399d57ea675058e7e5f7080789d3a14164da",
-      "size": 14101
+      "sha256": "523045328c020868ea058d86b699093cc420a89cd3b581c93b2fabe332aed92e",
+      "size": 14437
     },
     {
       "path": "tests/hyperfide/check-evidence.py",

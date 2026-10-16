@@ -8,6 +8,7 @@
     "tests/hyperfide/cases/tasks/13_4.py"
   ],
   "assertion_ids": [
+    "admission.main-startup-sizing-only",
     "admission.actual-unqualified-native-blocked",
     "admission.reject-caller-qualified-flag",
     "admission.cross-tenant-denied",
