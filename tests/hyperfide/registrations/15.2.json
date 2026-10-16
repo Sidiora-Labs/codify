@@ -26,6 +26,7 @@
     "artifacts.object.binding-conflict",
     "artifacts.scope.before-effects",
     "artifacts.scope.cross-run-read",
+    "artifacts.scope.nested-run-spoof",
     "artifacts.input.digest",
     "artifacts.input.size",
     "artifacts.input.base64",
@@ -55,7 +56,10 @@
     "artifacts.object.opaque-payload",
     "artifacts.manifest.promotion-bypass",
     "artifacts.http.independent-sigv4",
-    "artifacts.secrets.sanitized"
+    "artifacts.secrets.sanitized",
+    "artifacts.auth.stdio-required",
+    "artifacts.auth.forged-context",
+    "artifacts.auth.revoked-mid-upload"
   ],
   "argv": [
     "python3",
@@ -71,7 +75,11 @@
   "fixtures": [
     "services/hyperfide/dist/control.js",
     "services/hyperfide/dist/artifacts/objects.js",
-    "services/hyperfide/dist/storage/schema.js"
+    "services/hyperfide/dist/storage/schema.js",
+    "services/hyperfide/dist/identity/enrollment.js",
+    "services/hyperfide/dist/transport/http.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/storage/transactions.js"
   ],
   "resources": [
     {
@@ -109,7 +117,9 @@
     "tests/hyperfide/qualify.py",
     "services/hyperfide/src/artifacts/objects.ts",
     "services/hyperfide/components/15.2.json",
-    "tests/hyperfide/cases/tasks/15_2.py"
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/registry.json"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -120,6 +130,8 @@
   "actions": [
     "postgresql.fixture.create",
     "postgresql.fixture.drop",
-    "artifact.fixture.http.listen"
+    "artifact.fixture.http.listen",
+    "identity.fixture.https.listen",
+    "identity.fixture.keys.generate"
   ]
 }
