@@ -6,8 +6,8 @@ ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT capacity_accounts_dimensi
 ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT capacity_accounts_pool_identity
  UNIQUE(organisation_id,pool_id,id);
 
-CREATE FUNCTION hyperfide.scheduler_immutable_record() RETURNS trigger LANGUAGE plpgsql AS $
-BEGIN RAISE EXCEPTION 'Scheduling history is immutable' USING ERRCODE='23514'; END $;
+CREATE FUNCTION hyperfide.scheduler_immutable_record() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'Scheduling history is immutable' USING ERRCODE='23514'; END $$;
 
 CREATE TABLE hyperfide.scheduling_policies (
  organisation_id uuid NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE hyperfide.scheduler_dispatches (
  slot_id uuid NOT NULL,
  sandbox_boot_generation bigint NOT NULL CHECK(sandbox_boot_generation>=1),
  payload_digest hyperfide.digest NOT NULL,
- state text NOT NULL DEFAULT 'INTENT' CHECK(state IN ('INTENT','UNKNOWN','RUNNING','STOP_REQUESTED','STOPPED','ABSENT','FAILED')),
+ state text NOT NULL DEFAULT 'INTENT' CHECK(state IN ('INTENT','UNKNOWN','RUNNING','STOP_REQUESTED','STOPPED','ABSENT','COMPLETED','FAILED')),
  event_id uuid NOT NULL,
  spawn_receipt_id uuid,
  observation_receipt_id uuid,
@@ -201,3 +201,48 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
  EXECUTE FUNCTION hyperfide.require_authority_isolation();
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.capacity_rate_receipts FOR EACH ROW
  EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Execution controls are authoritative scheduler gates, not observations of physical quiescence.
+CREATE TABLE hyperfide.execution_controls (
+ organisation_id uuid NOT NULL, run_id uuid NOT NULL, id uuid NOT NULL,
+ scope_kind text NOT NULL CHECK(scope_kind IN ('RUN','PACKAGE','ATTEMPT','SANDBOX')),
+ scope_id uuid NOT NULL, package_id uuid, attempt_id uuid, sandbox_id uuid,
+ mode text NOT NULL CHECK(mode IN ('ACTIVE','PAUSE','DRAIN','STOP')),
+ generation bigint NOT NULL DEFAULT 1 CHECK(generation>=1),
+ state_version bigint NOT NULL DEFAULT 1 CHECK(state_version>=1),
+ PRIMARY KEY(organisation_id,run_id,id), UNIQUE(organisation_id,run_id,scope_kind,scope_id),
+ FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,run_id,package_id) REFERENCES hyperfide.feature_packages(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,attempt_id) REFERENCES hyperfide.attempts(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,sandbox_id) REFERENCES hyperfide.sandboxes(organisation_id,id),
+ CHECK((scope_kind='RUN' AND scope_id=run_id AND package_id IS NULL AND attempt_id IS NULL AND sandbox_id IS NULL)
+ OR (scope_kind='PACKAGE' AND scope_id=package_id AND package_id IS NOT NULL AND attempt_id IS NULL AND sandbox_id IS NULL)
+ OR (scope_kind='ATTEMPT' AND scope_id=attempt_id AND attempt_id IS NOT NULL AND package_id IS NULL AND sandbox_id IS NULL)
+ OR (scope_kind='SANDBOX' AND scope_id=sandbox_id AND sandbox_id IS NOT NULL AND package_id IS NULL AND attempt_id IS NULL))
+);
+CREATE TABLE hyperfide.execution_control_history (
+ organisation_id uuid NOT NULL, run_id uuid NOT NULL, operation_id uuid NOT NULL,
+ control_id uuid NOT NULL, generation bigint NOT NULL CHECK(generation>=1),
+ request_digest hyperfide.digest NOT NULL, mode text NOT NULL CHECK(mode IN ('ACTIVE','PAUSE','DRAIN','STOP')),
+ reason text NOT NULL CHECK(length(reason) BETWEEN 1 AND 4096),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,operation_id), UNIQUE(organisation_id,run_id,control_id,generation),
+ FOREIGN KEY(organisation_id,run_id,control_id) REFERENCES hyperfide.execution_controls(organisation_id,run_id,id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.execution_controls FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','scope_kind','scope_id','package_id','attempt_id','sandbox_id');
+CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.execution_controls FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.monotonic_fields('generation');
+CREATE TRIGGER immutable_history BEFORE UPDATE OR DELETE ON hyperfide.execution_control_history FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.scheduler_immutable_record();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.execution_controls FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.execution_control_history FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+ALTER TABLE hyperfide.capacity_accounts ADD COLUMN resource_key text NOT NULL DEFAULT '';
+ALTER TABLE hyperfide.capacity_accounts DROP CONSTRAINT capacity_accounts_organisation_id_pool_id_dimension_key;
+ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT named_resource_identity UNIQUE(organisation_id,pool_id,dimension,resource_key);
+ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT named_resource_scope CHECK((dimension='EXCLUSIVE_SERVICE' AND length(resource_key) BETWEEN 1 AND 128) OR (dimension<>'EXCLUSIVE_SERVICE' AND resource_key=''));
+
+ALTER TABLE hyperfide.scheduler_dispatches ADD CONSTRAINT one_dispatch_per_attempt UNIQUE(organisation_id,run_id,attempt_id,attempt_generation);

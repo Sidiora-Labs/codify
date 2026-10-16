@@ -5,6 +5,113 @@ import type {PrimaryTransaction,TransactionGateway} from '../storage/transaction
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {requireAuthority} from '../hierarchy/packages.js';
 import {enqueue,lockRun} from '../events/outbox.js';
+import {loadExecutionPacket} from '../hierarchy/packets.js';
+
+
+export type ExecutionMode='ACTIVE'|'PAUSE'|'DRAIN'|'STOP';
+export interface ExecutionControl {
+ scope_kind:'RUN'|'PACKAGE'|'ATTEMPT'|'SANDBOX';scope_id:string;mode:ExecutionMode;operation_id:string;reason:string;expected_generation?:string;resume?:boolean;
+}
+export async function applyExecutionControl(tx:PrimaryTransaction,scope:SchedulerScope,input:ExecutionControl):Promise<unknown>{
+ assertPrimaryTransaction(tx);
+ if(!['RUN','PACKAGE','ATTEMPT','SANDBOX'].includes(input.scope_kind)||!['ACTIVE','PAUSE','DRAIN','STOP'].includes(input.mode))
+  fail('INVALID_REQUEST','Execution control scope or mode is invalid');
+ uuid(input.scope_id,'scope_id');uuid(input.operation_id,'operation_id');
+ if(typeof input.reason!=='string'||input.reason.length<1||input.reason.length>4096)fail('INVALID_REQUEST','A bounded control reason is required');
+ await lockRun(tx,scope,'exclusive');
+ const prior=await tx.query<{request_digest:string;control_id:string;generation:string;mode:string}>(
+  'SELECT request_digest,control_id,generation,mode FROM hyperfide.execution_control_history WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',
+  [scope.organisation_id,scope.run_id,input.operation_id]);
+ const hash=requestDigest(input);
+ if(prior.rows[0]){
+  if(prior.rows[0].request_digest!==hash)fail('IDEMPOTENCY_CONFLICT','Control operation identity has different input');
+  return {control_id:prior.rows[0].control_id,generation:prior.rows[0].generation,mode:prior.rows[0].mode,replayed:true};
+ }
+ if(input.scope_kind==='RUN'&&input.scope_id!==scope.run_id)fail('RUN_SCOPE_DENIED','Run control must target this run');
+ if(input.scope_kind==='SANDBOX'){
+  const binding=await tx.query('SELECT id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id=$3 LIMIT 1',
+   [scope.organisation_id,scope.run_id,input.scope_id]);
+  if(!binding.rows.length)fail('RUN_SCOPE_DENIED','Sandbox is not bound to this run');
+ }
+ const current=await tx.query<{id:string;generation:string;mode:ExecutionMode}>(
+  'SELECT id,generation,mode FROM hyperfide.execution_controls WHERE organisation_id=$1 AND run_id=$2 AND scope_kind=$3 AND scope_id=$4 FOR UPDATE',
+  [scope.organisation_id,scope.run_id,input.scope_kind,input.scope_id]);
+ const old=current.rows[0];
+ if(input.expected_generation!==undefined&&decimal(input.expected_generation,'expected_generation')!==old?.generation)fail('STALE_CONTROL_GENERATION','Control changed before this transition');
+ const strength={ACTIVE:0,DRAIN:1,PAUSE:2,STOP:3};
+ if(old&&strength[input.mode]<strength[old.mode]&&(input.resume!==true||input.expected_generation!==old.generation))fail('RESUME_REVALIDATION_REQUIRED','Weakening an execution hold requires explicit verified resume and current generation');
+ const id=current.rows[0]?.id??randomUUID(),generation=(BigInt(current.rows[0]?.generation??'0')+1n).toString();
+ if(current.rows.length)await tx.query('UPDATE hyperfide.execution_controls SET mode=$4,generation=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
+  [scope.organisation_id,scope.run_id,id,input.mode,generation]);
+ else await tx.query('INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,mode,package_id,attempt_id,sandbox_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+  [scope.organisation_id,scope.run_id,id,input.scope_kind,input.scope_id,input.mode,input.scope_kind==='PACKAGE'?input.scope_id:null,input.scope_kind==='ATTEMPT'?input.scope_id:null,input.scope_kind==='SANDBOX'?input.scope_id:null]);
+ await tx.query('INSERT INTO hyperfide.execution_control_history(organisation_id,run_id,operation_id,control_id,generation,request_digest,mode,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+  [scope.organisation_id,scope.run_id,input.operation_id,id,generation,hash,input.mode,input.reason]);
+ return {control_id:id,generation,mode:input.mode,replayed:false};
+}
+export async function assertNoExecutionHold(tx:PrimaryTransaction,scope:SchedulerScope,target:{
+ package_id?:string;attempt_id?:string;sandbox_id?:string;operation:'ADMISSION'|'RENEWAL'|'ADVANCE'|'CLEANUP'
+}):Promise<void>{
+ assertPrimaryTransaction(tx);
+ if(target.operation==='CLEANUP')return;
+ const rows=await tx.query<{scope_kind:string;mode:ExecutionMode}>(
+  "SELECT scope_kind,mode FROM hyperfide.execution_controls WHERE organisation_id=$1 AND run_id=$2 AND "+
+  "((scope_kind='RUN' AND scope_id=$2) OR (scope_kind='PACKAGE' AND package_id=$3) OR "+
+  "(scope_kind='ATTEMPT' AND attempt_id=$4) OR (scope_kind='SANDBOX' AND sandbox_id=$5)) FOR SHARE",
+  [scope.organisation_id,scope.run_id,target.package_id??null,target.attempt_id??null,target.sandbox_id??null]);
+ for(const hold of rows.rows){
+  if(hold.mode==='STOP'||hold.mode==='PAUSE'&&target.operation!=='RENEWAL'||hold.mode==='DRAIN'&&target.operation==='ADMISSION')
+   fail('EXECUTION_HELD',hold.scope_kind+' execution control '+hold.mode+' forbids '+target.operation);
+ }
+}
+
+
+export interface PacketResourceRequirements {
+ agent_sessions:1;cpu_millis:number;memory_bytes:string;disk_bytes:string;build_slots:number;test_slots:number;max_descendants:number;
+}
+export function packetResources(value:unknown):PacketResourceRequirements {
+ const item=fields(value,['agent_sessions','cpu_millis','memory_bytes','disk_bytes','build_slots','test_slots','max_descendants']);
+ if(item.agent_sessions!==1)fail('RESOURCE_POLICY_INVALID','Accepted worker policy must reserve one agent session');
+ return {agent_sessions:1,cpu_millis:boundedInteger(item.cpu_millis,'cpu_millis',1,1000000000),
+ memory_bytes:decimal(item.memory_bytes,'memory_bytes'),disk_bytes:decimal(item.disk_bytes,'disk_bytes'),
+ build_slots:boundedInteger(item.build_slots,'build_slots',0,1000000),test_slots:boundedInteger(item.test_slots,'test_slots',0,1000000),
+ max_descendants:boundedInteger(item.max_descendants,'max_descendants',0,1000000)};
+}
+export async function approvedDimensions(tx:PrimaryTransaction,scope:SchedulerScope,pool_id:string,
+ requirements:PacketResourceRequirements,job_class:string='AGENT',warm_spare=false):Promise<CapacityDimension[]> {
+ assertPrimaryTransaction(tx);
+ const required:Record<string,string>={CPU_MILLIS:String(requirements.cpu_millis),MEMORY_BYTES:requirements.memory_bytes,DISK_BYTES:requirements.disk_bytes};
+ if(job_class==='AGENT'){
+  required.AGENT='1';
+  if(requirements.build_slots)required.BUILD=String(requirements.build_slots);
+  if(requirements.test_slots)required.TEST=String(requirements.test_slots);
+ }else{
+  if(!['BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION'].includes(job_class))fail('RESOURCE_POLICY_MISSING','Job has no accepted resource policy');
+  if(job_class==='BUILD'&&!requirements.build_slots||job_class==='TEST'&&!requirements.test_slots)
+   fail('RESOURCE_POLICY_DENIED','Accepted task does not allow this resource class');
+  required[job_class]='1';
+  if(job_class==='PREPARATION'||job_class==='INDEX')required.SANDBOX='1';
+ }
+ if(warm_spare)required.WARM_SPARE='1';
+ const accounts=await tx.query<{id:string;dimension:string;qualification_state:string}>(
+  'SELECT id,dimension,qualification_state FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 AND resource_key=$3 AND dimension=ANY($4::text[]) ORDER BY id FOR SHARE',
+  [scope.organisation_id,pool_id,'',Object.keys(required)]);
+ if(accounts.rows.length!==Object.keys(required).length||accounts.rows.some(row=>row.qualification_state!=='QUALIFIED'))
+  fail('CAPACITY_POLICY_UNQUALIFIED','Every required resource dimension needs a qualified account in this pool');
+ return accounts.rows.map(row=>({capacity_account_id:row.id,quantity:required[row.dimension]!})).sort((a,b)=>a.capacity_account_id.localeCompare(b.capacity_account_id));
+}
+export async function requireProofRegistry(tx:PrimaryTransaction,scope:SchedulerScope,task:{
+ id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string;
+}):Promise<{registry_digest:string;policy:unknown}> {
+ const records=await tx.query<{registry_digest:string;policy:unknown;criteria_digest:string;spec_revision_id:string}>(
+ 'SELECT registry_digest,policy,criteria_digest,spec_revision_id FROM hyperfide.proof_registries WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND spec_generation=$4',
+ [scope.organisation_id,scope.run_id,task.id,task.spec_generation]);
+ const row=records.rows[0];
+ if(!row)fail('PROOF_REGISTRY_MISSING','Accepted immutable proof registry is required before admission');
+ if(row.criteria_digest!==task.criteria_digest||row.spec_revision_id!==task.spec_revision_id||requestDigest(row.policy)!==row.registry_digest)
+  fail('PROOF_REGISTRY_INVALID','Proof registry does not match the accepted task snapshot');
+ return row;
+}
 
 export interface SchedulerScope {organisation_id:string;run_id:string}
 export interface SchedulerActor {session_id:string;leader_generation:string;package_generation?:string}
@@ -187,7 +294,7 @@ async function lockScopes(tx:PrimaryTransaction,scope:SchedulerScope,paths:strin
   }
 }
 const overlap=(a:string,b:string)=>a==='.'||b==='.'||a===b||a.startsWith(b+'/')||b.startsWith(a+'/');
-interface ClaimRequest extends SchedulerScope {
+export interface ClaimRequest extends SchedulerScope {
   request_id:string;task_id:string;attempt_id:string;attempt_generation:string;run_spec_generation:string;spec_generation:string;spec_revision_id:string;authority_epoch:string;
   leader_generation:string;package_generation?:string;sandbox_id:string;slot_id:string;
   sandbox_boot_generation:string;lease_ms:number;input_packet_digest:string;capacity:CapacityDimension[];
@@ -210,6 +317,52 @@ export function parseClaim(value:unknown):ClaimRequest{
     input_packet_digest:digest(input.input_packet_digest,'input_packet_digest'),capacity:dimensions(input.capacity)
   };
 }
+
+export async function requireMilestone(tx:PrimaryTransaction,scope:SchedulerScope,task_id:string,milestone:'QUALIFIED'|'INTEGRATED'|'RELEASED'):Promise<void>{
+ if(milestone==='RELEASED')fail('RELEASE_BARRIER_UNAVAILABLE','Programme release requires an actual release receipt');
+ const task=await tx.query<{state:string;current_custody_id:string|null}>(
+ 'SELECT state,current_custody_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
+ [scope.organisation_id,scope.run_id,task_id]);
+ const row=task.rows[0];if(!row)fail('DEPENDENCY_MISSING','Dependency is not an accepted task');
+ const published=await tx.query(
+ "SELECT p.id FROM hyperfide.publication_operations p JOIN hyperfide.candidate_custodies cc ON "+
+ "cc.organisation_id=p.organisation_id AND cc.run_id=p.run_id AND cc.candidate_id=p.candidate_id "+
+ "JOIN hyperfide.submission_custodies c ON c.organisation_id=cc.organisation_id AND c.run_id=cc.run_id AND c.id=cc.custody_id AND c.custody_generation=cc.custody_generation "+
+ "WHERE cc.organisation_id=$1 AND cc.run_id=$2 AND cc.task_id=$3 AND c.qualification_outcome='PASS' AND p.state='PUBLISHED'",
+ [scope.organisation_id,scope.run_id,task_id]);
+ if(row.state==='INTEGRATED'&&published.rows.length)return;
+ if(milestone==='INTEGRATED')fail('DEPENDENCY_NOT_INTEGRATED','Dependency lacks a confirmed publication of qualified custody');
+ const qualified=await tx.query(
+ "SELECT id FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND id=$4 AND qualification_outcome='PASS' AND authority='ACTIVE'",
+ [scope.organisation_id,scope.run_id,task_id,row.current_custody_id]);
+ if(!['QUALIFIED','INTEGRATING'].includes(row.state)||!qualified.rows.length)
+  fail('DEPENDENCY_NOT_QUALIFIED','Dependency lacks current admitted qualification');
+}
+export async function requireTaskBarriers(tx:PrimaryTransaction,scope:SchedulerScope,task_id:string,wave:number):Promise<void>{
+ const dependencies=await tx.query<{predecessor_task_id:string;predecessor_run_id:string;milestone:'QUALIFIED'|'INTEGRATED'|'RELEASED'}>(
+ 'SELECT predecessor_task_id,predecessor_run_id,milestone FROM hyperfide.task_dependencies WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 ORDER BY predecessor_run_id,predecessor_task_id',
+ [scope.organisation_id,scope.run_id,task_id]);
+ for(const dependency of dependencies.rows)await requireMilestone(tx,{organisation_id:scope.organisation_id,run_id:dependency.predecessor_run_id},dependency.predecessor_task_id,dependency.milestone);
+ const previous=await tx.query<{id:string}>('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND wave<$3 ORDER BY wave,id',
+ [scope.organisation_id,scope.run_id,wave]);
+ for(const predecessor of previous.rows)await requireMilestone(tx,scope,predecessor.id,'QUALIFIED');
+}
+export async function requirePacketAdmission(tx:PrimaryTransaction,input:ClaimRequest,task:{
+ id:string;feature_package_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string;
+}):Promise<PacketResourceRequirements>{
+ const proof=await requireProofRegistry(tx,input,task);
+ const loaded=await loadExecutionPacket(tx,{organisation_id:input.organisation_id,run_id:input.run_id,digest:input.input_packet_digest});
+ const packet=object(loaded.packet),mandatory=object(packet.mandatory),identity=object(mandatory.identity),runtime=object(mandatory.runtime),observation=object(packet.observation),intent=object(mandatory.intent);
+ const pins={organisation_id:input.organisation_id,run_id:input.run_id,authority_epoch:input.authority_epoch,task_id:input.task_id,
+ attempt_id:input.attempt_id,attempt_generation:input.attempt_generation,spec_revision_id:input.spec_revision_id,spec_generation:input.spec_generation,
+ package_id:task.feature_package_id,criteria_digest:task.criteria_digest,leader_generation:input.leader_generation};
+ if(Object.entries(pins).some(([key,value])=>identity[key]!==value)||observation.run_spec_generation!==input.run_spec_generation||
+ runtime.sandbox_id!==input.sandbox_id||runtime.slot_id!==input.slot_id||runtime.sandbox_boot_generation!==input.sandbox_boot_generation||
+ intent.registry_digest!==proof.registry_digest||input.package_generation!==undefined&&identity.package_generation!==input.package_generation)
+  fail('EXECUTION_PACKET_MISMATCH','Prospective execution packet does not pin this exact admission');
+ return packetResources(mandatory.resource_requirements);
+}
+
 export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:SchedulerActor,recipients:{consumer_ids:string[]}):Promise<unknown>{
   assertPrimaryTransaction(tx);
   await lockRun(tx,{organisation_id:input.organisation_id,run_id:input.run_id});
@@ -224,10 +377,18 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
     [input.organisation_id,input.run_id,input.task_id]);
   if(!candidate.rows[0])fail('TASK_MISSING','Task does not exist in this run');
   await requireSchedulerAuthority(tx,input,actor,input.authority_epoch,candidate.rows[0].feature_package_id);
+  await assertNoExecutionHold(tx,input,{package_id:candidate.rows[0].feature_package_id,sandbox_id:input.sandbox_id,operation:'ADMISSION'});
   const replay=await operationReplay(tx,input,actor.session_id,'scheduler.claim',input.request_id,input);
   if(replay!==undefined)return replay;
   const paths=declaredScopes(candidate.rows[0].definition);
   await lockScopes(tx,input,paths);
+  const poolObservation=await tx.query<{pool_id:string}>('SELECT pool_id FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.sandbox_id]);
+  const pool=poolObservation.rows[0]?.pool_id;if(!pool)fail('SLOT_UNAVAILABLE','Sandbox is not registered');
+  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[input.organisation_id+':'+pool+':resource-admission']);
+  const scheduling=await tx.query('SELECT pool_id FROM hyperfide.scheduling_policies WHERE organisation_id=$1 AND pool_id=$2 FOR SHARE',[input.organisation_id,pool]);
+  if(!scheduling.rows.length)fail('SCHEDULING_POLICY_MISSING','Claim needs an explicit scheduling policy');
+  const head=await tx.query<{request_id:string;run_id:string}>("SELECT w.request_id,w.run_id FROM hyperfide.resource_waiters w JOIN hyperfide.runs r ON r.organisation_id=w.organisation_id AND r.id=w.run_id JOIN hyperfide.scheduling_policies p ON p.organisation_id=w.organisation_id AND p.pool_id=w.pool_id WHERE w.organisation_id=$1 AND w.pool_id=$2 AND w.state='WAITING' AND w.deadline_at>clock_timestamp() AND r.state IN ('READY','RUNNING') ORDER BY CASE WHEN extract(epoch FROM(clock_timestamp()-w.enqueued_at))>=p.max_bypass_seconds THEN 1 ELSE 0 END DESC,CASE WHEN extract(epoch FROM(clock_timestamp()-w.enqueued_at))>=p.max_bypass_seconds THEN w.enqueued_at END,w.priority+floor(extract(epoch FROM(clock_timestamp()-w.enqueued_at))/p.aging_seconds) DESC,w.enqueued_at,w.id LIMIT 1",[input.organisation_id,pool]);
+  if(head.rows[0]&&(head.rows[0].request_id!==input.request_id||head.rows[0].run_id!==input.run_id))fail('FAIRNESS_WAIT','An earlier eligible resource waiter must be admitted first');
   // Capacity accounts lock before slot/task locks, consistently across every claim.
   for(const item of input.capacity){
     const row=await tx.query<{pool_id:string;dimension:string}>(
@@ -250,7 +411,7 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
   if(accounts.rows.some(account=>account.pool_id!==selected.pool_id)||
       !accounts.rows.some(account=>account.dimension==='AGENT'))fail('CAPACITY_SCOPE_INVALID','Claim must reserve agent capacity from the selected pool');
   const taskResult=await tx.query<{state:string;generation:string;wave:number;spec_generation:string;spec_revision_id:string;
-    current_attempt_id:string|null;current_custody_id:string|null}>(
+    id:string;feature_package_id:string;criteria_digest:string;current_attempt_id:string|null;current_custody_id:string|null}>(
     'SELECT * FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
     [input.organisation_id,input.run_id,input.task_id]);
   const task=taskResult.rows[0]!;
@@ -272,32 +433,10 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
     [input.organisation_id,input.run_id]);
   if(scopeOwners.rows.some(owner=>declaredScopes(owner.definition).some(other=>paths.some(path=>overlap(path,other)))))
     fail('WRITE_SCOPE_CONFLICT','Another current task owns overlapping declared write scope');
-  const predecessors=await tx.query<{milestone:string;state:string;id:string;current_custody_id:string|null;predecessor_run_id:string}>(
-    'SELECT d.milestone,d.predecessor_run_id,t.id,t.state,t.current_custody_id FROM hyperfide.task_dependencies d '+
-    'JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.predecessor_run_id AND t.id=d.predecessor_task_id '+
-    'WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.task_id=$3 ORDER BY t.run_id,t.id FOR SHARE OF t',
-    [input.organisation_id,input.run_id,input.task_id]);
-  for(const predecessor of predecessors.rows){
-    if(predecessor.milestone==='RELEASED')fail('RELEASE_BARRIER_UNAVAILABLE','Programme release evidence is required before this dependency can open');
-    if(predecessor.milestone==='QUALIFIED'){
-      const evidence=await tx.query('SELECT c.id FROM hyperfide.submission_custodies c WHERE organisation_id=$1 AND run_id=$2 '+
-        'AND task_id=$3 AND id=$4 AND qualification_outcome=\'PASS\' AND authority=\'ACTIVE\'',
-        [input.organisation_id,predecessor.predecessor_run_id,predecessor.id,predecessor.current_custody_id]);
-      if(!['QUALIFIED','INTEGRATING','INTEGRATED'].includes(predecessor.state)||!evidence.rows.length)
-        fail('DEPENDENCY_NOT_QUALIFIED','A dependency lacks current admitted qualification');
-    }else{
-      const publication=await tx.query('SELECT p.id FROM hyperfide.publication_operations p JOIN hyperfide.integration_candidates c ON '+
-        'c.organisation_id=p.organisation_id AND c.run_id=p.run_id AND c.id=p.candidate_id '+
-        'WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.task_id=$3 AND p.state=\'PUBLISHED\'',
-        [input.organisation_id,predecessor.predecessor_run_id,predecessor.id]);
-      if(predecessor.state!=='INTEGRATED'||!publication.rows.length)
-        fail('DEPENDENCY_NOT_INTEGRATED','A dependency lacks a confirmed publication receipt');
-    }
-  }
-  const wave=await tx.query('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND wave<$3 '+
-    'AND state NOT IN (\'QUALIFIED\',\'INTEGRATED\') LIMIT 1',
-    [input.organisation_id,input.run_id,task.wave]);
-  if(wave.rows.length)fail('WAVE_BARRIER_CLOSED','An earlier wave has not completed required qualification');
+  await requireTaskBarriers(tx,input,input.task_id,task.wave);
+  const policy=await requirePacketAdmission(tx,input,task);
+  const expected=await approvedDimensions(tx,input,selected.pool_id,policy);
+  if(canonical(expected)!==canonical(input.capacity))fail('RESOURCE_VECTOR_MISMATCH','Claim resource vector must equal the accepted immutable packet policy');
   const now=await tx.query<{expires_at:string}>('SELECT (clock_timestamp()+$1::integer*interval\'1 millisecond\')::text AS expires_at',[input.lease_ms]);
   const expires=now.rows[0]!.expires_at,attempt_id=input.attempt_id,generation=(BigInt(task.generation)+1n).toString();
   if(generation!==input.attempt_generation)fail('STALE_ATTEMPT_GENERATION','Prospective packet generation is not the next task generation');
@@ -327,7 +466,7 @@ export async function claimTask(tx:PrimaryTransaction,input:ClaimRequest,actor:S
   return result;
 }
 export function createComponent(context:ComponentContext):Component{
-  return {apiVersion:1,capabilities:{'scheduler.claims.v1':Object.freeze({claimTask,reserveCapacity,requireSchedulerAuthority})},actions:{
+  return {apiVersion:1,capabilities:{'scheduler.controls.v1':Object.freeze({applyExecutionControl,assertNoExecutionHold}),'scheduler.claims.v1':Object.freeze({claimTask,reserveCapacity,requireSchedulerAuthority})},actions:{
     'scheduler.claim':async (value,context)=>{
       const input=parseClaim(value),actor=actorFor(context,input,object(value));
       return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},
