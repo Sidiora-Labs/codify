@@ -62,6 +62,25 @@ def main():
         slot=uid();session=uid();i=f.ids
         f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES($1,$2,$3,'review-slot',1,'REVIEW')",[i["organisation"],slot,i["sandbox"]])
         f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation) VALUES($1,$2,$3,'COMMIT_WATCHER','fixture','fixture',$4,$5,$6,1)",[i["organisation"],i["run"],session,uid(),slot,i["sandbox"]])
+        def fresh_runner(target):
+            from identity_fixture import canonical
+            body=f.operation("14.1","identity.describe",{});raw=canonical(body);seconds=str(int(time.time()));nonce=uid()
+            signature=f.sign("provisioner",("\n".join(("HYPERFIDE-REQUEST-V1","POST","/v1/invoke",f.origin,i["provisioner"],seconds,nonce,sha(raw),""))).encode())
+            args={"components":str(f.components),"policy":str(f.policy),"body":b64(raw),"headers":["HF-Credential-Id",i["provisioner"],"HF-Request-Time",seconds,"HF-Request-Nonce",nonce,"HF-Request-Signature",signature],"target":target}
+            script="""import fs from 'node:fs';import {ComponentRegistry} from './services/hyperfide/dist/components/registry.js';import {validatePolicy} from './services/hyperfide/dist/policy/programme.js';const a=JSON.parse(fs.readFileSync(0,'utf8')),c=new AbortController(),r=new ComponentRegistry({role:'control',env:process.env,signal:c.signal,policy:validatePolicy(JSON.parse(fs.readFileSync(a.policy,'utf8')),'fixture-identity-v1','control')});try{await r.load(a.components,process.cwd()+'/services/hyperfide/dist');const auth=r.resolveCapability('14.1','identity.authority',v=>typeof v.verifyFreshRunner==='function'),i=await auth.authenticate(Buffer.from(a.body,'base64url'),a.headers,c.signal),g=r.resolveCapability('4.2','storage.transactions.v1',v=>typeof v.withPrimaryTransaction==='function');const observation=await g.withPrimaryTransaction({timeoutMs:5000,guard:i.guard},tx=>auth.verifyFreshRunner(i,tx,a.target));process.stdout.write(JSON.stringify({ok:true,result:observation}));}catch(e){process.stdout.write(JSON.stringify({ok:false,error:{code:e.code??'ERROR'}}));}finally{await r.close();}"""
+            result=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps(args),cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=20)
+            expect(result.returncode==0,"actual fresh enrollment process failed: "+result.stderr[:800]);return json.loads(result.stdout)
+        observed_after=f.sql("SELECT clock_timestamp() AS now")[0]["now"]
+        expect(f.invoke("identity.runner.register",{"preparation_digest":f.preparation,"inventory":[]},key="runner")[1].get("ok") is True,"real runner registration failed")
+        target={"sandbox_id":i["sandbox"],"boot_id":i["boot"],"boot_generation":"1","provisioning_intent_id":i["intent"],"credential_id":i["runner"],"observed_after":observed_after}
+        check("identity.runner-fresh.actual-signed-observation",lambda:expect(fresh_runner(target).get("result",{}).get("authority")=="NONE","actual registration lineage verification failed"))
+        check("identity.runner-fresh.wrong-boot-denied",lambda:expect(fresh_runner({**target,"boot_id":uid()}).get("ok") is False,"fresh lookup accepted wrong boot"))
+        check("identity.runner-fresh.wrong-grant-denied",lambda:expect(fresh_runner({**target,"grant_id":uid()}).get("ok") is False,"fresh lookup accepted wrong grant lineage"))
+        check("identity.runner-fresh.old-observation-denied",lambda:expect(fresh_runner({**target,"observed_after":time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+60))}).get("ok") is False,"old signed heartbeat accepted as fresh"))
+        renewal=f.invoke("identity.principal.renew",{"ttl_seconds":600},key="runner")[1]
+        check("identity.renew.platform-only",lambda:expect(renewal.get("result",{}).get("credential_version")=="2" and renewal.get("result",{}).get("compute_lease_renewed") is False,"platform renewal failed or claimed compute renewal"))
+        check("identity.renew.same-key-still-authenticates",lambda:expect(f.invoke("identity.describe",{},key="runner")[1].get("ok") is True,"renewal invalidated current key/id"))
+        check("identity.renew.ttl-ceiling",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":3601},key="runner")[1].get("ok") is False,"renewal exceeded configured ceiling"))
         delegated=f.delegate_principal("reviewer",session)
         principal=f.invoke("identity.describe",{},key="reviewer")[1].get("result",{}).get("principal",{})
         check("identity.delegate.boot-bound-reviewer",lambda:expect(principal.get("sandbox_id")==i["sandbox"] and principal.get("boot_id")==i["boot"] and principal.get("attempt_id") is None,"reviewer boot/job identity invalid"))
@@ -75,6 +94,10 @@ def main():
         f.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at) VALUES($1,$2,$3,$4,1,$5,$6,'CURRENT',$7,$8,1,clock_timestamp()+interval '5 minutes')",[i["organisation"],i["run"],attempt,task,i["epoch"],sha(b"input"),i["sandbox"],worker_slot])
         f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id) VALUES($1,$2,$3,'WORKER','fixture','fixture',$4,$5,$6,1,$7)",[i["organisation"],i["run"],worker_session,uid(),worker_slot,i["sandbox"],attempt])
         f.delegate_principal("worker",worker_session)
+        lease_before=f.sql("SELECT lease_expires_at FROM hyperfide.attempts WHERE id=$1",[attempt])[0]["lease_expires_at"]
+        renewed_worker=f.invoke("identity.principal.renew",{"ttl_seconds":600},key="worker")[1]
+        check("identity.renew.worker-compute-lease-unchanged",lambda:expect(renewed_worker.get("ok") is True and f.sql("SELECT lease_expires_at FROM hyperfide.attempts WHERE id=$1",[attempt])[0]["lease_expires_at"]==lease_before,"identity renewal changed compute lease"))
+
         check("identity.delegate.current-implementation-worker",lambda:expect(f.invoke("identity.describe",{},key="worker")[1].get("result",{}).get("principal",{}).get("attempt_id")==attempt,"worker lacks genuine attempt binding"))
         f.sql("UPDATE hyperfide.attempts SET compute_authority='RELEASED',state_version=state_version+1 WHERE id=$1",[attempt])
         # A read-only identity description may use current identity; mutation requires strict compute authority.
@@ -92,6 +115,23 @@ def main():
         f.stop();f.start()
         check("identity.closing.restart-retains-supervision",lambda:expect(f.invoke("identity.describe",{})[1].get("ok") is True,"closing run prevented authenticated supervision/restart"))
         check("identity.closing.new-grant-denied",lambda:expect(f.issue(grant=uid())[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","closing run admitted new runner grant"))
+        f.close();f=IdentityFixture();fixture=f
+        def no_runtime_seed():
+            f.stop();config=json.loads(f.identity_config.read_text());bad={**config["principals"][0],"credential_id":uid(),"actor_id":uid()};config["principals"].append(bad);f.identity_config.write_text(json.dumps(config))
+            rejected=False
+            try:f.start()
+            except AssertionError:
+                rejected=True
+                if f.child:f.child.wait(timeout=5);f.child=None
+            finally:
+                config["principals"].pop();f.identity_config.write_text(json.dumps(config))
+            expect(rejected,"runtime config silently issued a new principal")
+            expect(not f.sql("SELECT credential_id FROM hyperfide.identity_principals WHERE credential_id=$1",[bad["credential_id"]]),"runtime created missing identity")
+            f.start()
+        check("identity.bootstrap.config-cannot-issue",no_runtime_seed)
+        f.sql("UPDATE hyperfide.authority_epochs SET state='REVOKED' WHERE deployment_id=$1",[f.ids["deployment"]])
+        f.sql("INSERT INTO hyperfide.authority_epochs(deployment_id,epoch,previous_epoch,state,fence_id,proof_digest) VALUES($1,$2,$3,'ACTIVE','declared-test-rotation',$4)",[f.ids["deployment"],uid(),f.ids["epoch"],sha(b"declared fixture epoch rotation")])
+        check("identity.global-epoch.stale-run-and-key-denied",lambda:expect(f.invoke("identity.describe",{})[1].get("error",{}).get("code")=="STALE_AUTHORITY","matching stale run/key bypassed deployment epoch"))
         check("identity.shutdown.orderly",lambda:f.stop())
     finally:fixture.close()
     return int(any(actual!="observed" for _,actual in RESULTS))
