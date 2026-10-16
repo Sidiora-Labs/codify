@@ -284,8 +284,12 @@ INSERT INTO symbol_fts VALUES('name_test');
    finally:FIXTURE.sql("UPDATE hyperfide.schema_migrations SET checksum=$1 WHERE version=25",[sha((ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes())])
   check("migration.schema.checksum-refused",wrong_schema)
   c.close();frozen.close();database=FIXTURE.database;FIXTURE.close();backend_absent=backend.stop();proxy.close();proxy_absent=not Path(proxy.path).exists()
-  absent=not FIXTURE.sql('SELECT datname FROM pg_database WHERE datname=$1',[database],admin=True)
-  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL pg_database after fixture close","object_backend_observed_absent":backend_absent,"commit_proxy_observed_absent":proxy_absent}))
+  import socket
+  database_absent=not FIXTURE.sql('SELECT datname FROM pg_database WHERE datname=$1',[database],admin=True)
+  role_absent=not FIXTURE.sql('SELECT rolname FROM pg_roles WHERE rolname=$1',[FIXTURE.runtime_role],admin=True)
+  with socket.socket() as sock:sock.settimeout(1);https_absent=sock.connect_ex(("127.0.0.1",FIXTURE.port))!=0
+  absent=database_absent and role_absent and https_absent and backend_absent and proxy_absent and not FIXTURE.path.exists()
+  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL catalogue and closed listeners/private roots after fixture close","database_observed_absent":database_absent,"role_observed_absent":role_absent,"https_observed_absent":https_absent,"object_backend_observed_absent":backend_absent,"commit_proxy_observed_absent":proxy_absent}))
   check("migration.cleanup.actual-absence",lambda:expect(absent,"synthetic database still exists"))
  (artifacts()/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"private_records_used":False,"full_cases_qualified":False},sort_keys=True))
  return 1 if FAILED else 0
