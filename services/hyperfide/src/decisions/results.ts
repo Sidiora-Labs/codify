@@ -1,7 +1,7 @@
 import { FoundationError, object } from '../policy/programme.js';
 import type { ComponentContext } from '../components/registry.js';
 import { canonical, exact, fail, hash, integer, invokePrepared, prepare, record, route, strictJson, text } from './adapters.js';
-import type { DecisionRequest, Question, RouteProfile, TransportResult } from './adapters.js';
+import type { DecisionRequest, PreparedRequest, Question, RouteProfile, TransportResult } from './adapters.js';
 
 export const PROBABILITY_TOLERANCE=1e-3;
 export interface RevisionVector {
@@ -23,7 +23,7 @@ export interface ResponseValidation {
 }
 export interface ValidatedDecision extends ResponseValidation {
   identity:DecisionIdentity;status:'accepted_advice'|'abstained';abstention_reason:string|null;
-  calibration_version:string|null;transport:Omit<TransportResult,'response'>;authority:'advisory-only';
+  calibration_version:string|null;transport:Omit<TransportResult,'response'>;raw_response:Record<string,unknown>;authority:'advisory-only';
 }
 const attested=new WeakSet<object>();
 function probability(value:unknown,label:string):number {
@@ -135,8 +135,12 @@ export function assertValidatedDecision(value:unknown,expected:{decision_id:stri
     throw new FoundationError('DECISION_UNTRUSTED','Decision must originate from validated trusted transport and match identity');
 }
 export async function evaluateDecision(input:{route_id:unknown;request:unknown;identity:unknown;timeout_ms:number},env:Readonly<NodeJS.ProcessEnv>,signal?:AbortSignal):Promise<ValidatedDecision>{
-  const identity=parseIdentity(input.identity),request=prepare(input.route_id,input.request);
-  const transport=await invokePrepared(request,env,{timeout_ms:input.timeout_ms,...(signal?{signal}:{})});
+  return evaluatePreparedDecision(prepare(input.route_id,input.request),input.identity,env,{timeout_ms:input.timeout_ms,...(signal?{signal}:{})});
+}
+/** Internal capability preserves qualified media/reasoning; invokePrepared enforces private request provenance. */
+export async function evaluatePreparedDecision(request:PreparedRequest,identityInput:unknown,env:Readonly<NodeJS.ProcessEnv>,options:{timeout_ms:number;signal?:AbortSignal}):Promise<ValidatedDecision>{
+  const identity=parseIdentity(identityInput);
+  const transport=await invokePrepared(request,env,options);
   const result=validateResponse(request.route,request.source_request,transport.response);
   const cal=calibration(env,identity,transport);
   let reason:string|null=cal===null?'missing-purpose-route-model-rubric-calibration':null;
@@ -149,13 +153,13 @@ export async function evaluateDecision(input:{route_id:unknown;request:unknown;i
   }
   const {response,...metadata}=transport;void response;
   const decision:ValidatedDecision={...result,identity,status:reason?'abstained':'accepted_advice',abstention_reason:reason,
-    calibration_version:cal?.version??null,transport:metadata,authority:'advisory-only'};
+    calibration_version:cal?.version??null,transport:metadata,raw_response:transport.response,authority:'advisory-only'};
   // Only actual transport evaluation is attested. Public validation previews are never capabilities.
   const freeze=(v:unknown):void=>{if(v!==null&&typeof v==='object'){for(const child of Object.values(v))freeze(child);Object.freeze(v);}};
   freeze(decision);attested.add(decision);return decision;
 }
 export function createComponent(ctx:ComponentContext):unknown{
- return {apiVersion:1,capabilities:{'decision.results.v1':Object.freeze({schemaVersion:1,parseIdentity,validateResponse,assertValidatedDecision,evaluateDecision:(input:Parameters<typeof evaluateDecision>[0])=>evaluateDecision(input,ctx.env,ctx.signal)})},actions:{
+ return {apiVersion:1,capabilities:{'decision.results.v1':Object.freeze({schemaVersion:1,parseIdentity,validateResponse,assertValidatedDecision,evaluatePreparedDecision:(request:PreparedRequest,identity:unknown,options:{timeout_ms:number;signal?:AbortSignal})=>evaluatePreparedDecision(request,identity,ctx.env,options),evaluateDecision:(input:Parameters<typeof evaluateDecision>[0])=>evaluateDecision(input,ctx.env,ctx.signal)})},actions:{
   'decision.result.validate':(input:unknown)=>{const v=record(input,'input');exact(v,['route_id','request','response'],['route_id','request','response']);const prepared=prepare(v.route_id,v.request);return {...validateResponse(route(v.route_id),prepared.source_request,v.response),status:'abstained',abstention_reason:'untrusted-response-preview',authority:'advisory-only'};},
   'decision.result.evaluate':(input:unknown)=>{const v=record(input,'input');exact(v,['route_id','request','identity','timeout_ms'],['route_id','request','identity','timeout_ms']);return evaluateDecision({route_id:v.route_id,request:v.request,identity:v.identity,timeout_ms:integer(v.timeout_ms,'deadline',1,30000)},ctx.env,ctx.signal);},
  }};

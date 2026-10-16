@@ -27,7 +27,9 @@
     "decision.result.missing-calibration",
     "decision.result.fixture-abstention",
     "decision.result.forged-attestation",
-    "decision.result.identity-schema"
+    "decision.result.identity-schema",
+    "decision.result.prepared-preserved",
+    "decision.result.forged-prepared"
   ],
   "argv": [
     "python3",
@@ -58,6 +60,9 @@
     "services/hyperfide/dist/decisions/adapters.d.ts",
     "services/hyperfide/dist/decisions/adapters.js",
     "services/hyperfide/dist/decisions/adapters.js.map",
+    "services/hyperfide/dist/decisions/capabilities.d.ts",
+    "services/hyperfide/dist/decisions/capabilities.js",
+    "services/hyperfide/dist/decisions/capabilities.js.map",
     "services/hyperfide/dist/decisions/results.d.ts",
     "services/hyperfide/dist/decisions/results.js",
     "services/hyperfide/dist/decisions/results.js.map",
@@ -85,6 +90,7 @@
     "services/hyperfide/src/components/service.ts",
     "services/hyperfide/src/control.ts",
     "services/hyperfide/src/decisions/adapters.ts",
+    "services/hyperfide/src/decisions/capabilities.ts",
     "services/hyperfide/src/decisions/results.ts",
     "services/hyperfide/src/policy/programme.ts",
     "services/hyperfide/tsconfig.json",

@@ -18,7 +18,7 @@ IDS=["decision.result.noul-half","decision.result.noul-ninety","decision.result.
  "decision.result.score-contradiction","decision.result.wrong-legend","decision.result.missing-answer",
  "decision.result.extra-answer","decision.result.wrong-type","decision.result.nan","decision.result.out-of-range",
  "decision.result.provider-confidence","decision.result.preview-untrusted","decision.result.missing-calibration",
- "decision.result.fixture-abstention","decision.result.forged-attestation","decision.result.identity-schema"]
+ "decision.result.fixture-abstention","decision.result.forged-attestation","decision.result.identity-schema","decision.result.prepared-preserved","decision.result.forged-prepared"]
 ACTIONS=["decision.result.validate","decision.result.evaluate"]
 def request(kind="noul"):
  q={"type":kind,"instructions":"Synthetic rubric"}
@@ -106,6 +106,29 @@ console.log('untrusted record rejected');
    p,r=fixture.invoke("decision.result.evaluate",{"route_id":"span-native","request":shared.request(),"identity":bad,"timeout_ms":1000})
    shared.expect(p.returncode!=0 and r["error"]["code"]=="DECISION_SCHEMA","floating revision identity accepted")
   check(IDS[20],invalid_identity)
+  def prepared_transport(forged=False):
+   http=shared.HTTPFixture()
+   try:
+    script="""import {prepare} from './services/hyperfide/dist/decisions/adapters.js';
+import {evaluatePreparedDecision,assertValidatedDecision} from './services/hyperfide/dist/decisions/results.js';
+const source=JSON.parse(process.env.TEST_REQUEST),identity=JSON.parse(process.env.TEST_IDENTITY);
+let prepared=prepare('span-native',source,{body:{reasoning:{mode:'on',budget_ms:100},images:['synthetic-internal-preservation-sentinel']}});
+if(process.env.TEST_FORGED==='true')prepared=JSON.parse(JSON.stringify(prepared));
+try {
+ const result=await evaluatePreparedDecision(prepared,identity,process.env,{timeout_ms:1000});
+ assertValidatedDecision(result,identity);
+ if(!result.raw_response.answers.urgent||result.status!=='abstained')process.exit(2);
+ console.log('validated');
+}catch(e){if(process.env.TEST_FORGED==='true'&&e.code==='DECISION_SCHEMA')console.log('forgery rejected');else throw e;}
+"""
+    import os
+    env=os.environ.copy();env.update(http.env());env['TEST_REQUEST']=json.dumps(shared.request());env['TEST_IDENTITY']=json.dumps(identity());env['TEST_FORGED']='true'if forged else'false'
+    cp=subprocess.run(['node','--input-type=module','-e',script],cwd=ROOT,env=env,text=True,capture_output=True,timeout=10)
+    shared.expect(cp.returncode==0,f'prepared evaluation failed {cp.stderr}')
+    if forged:shared.expect(not http.received and 'forgery rejected'in cp.stdout,'forged prepared request reached transport')
+    else:shared.expect(len(http.received)==1 and http.received[0]['body']['reasoning']['budget_ms']==100 and http.received[0]['body']['images']==['synthetic-internal-preservation-sentinel'],'prepared extension was stripped')
+   finally:http.close()
+  check(IDS[21],lambda:prepared_transport(False));check(IDS[22],lambda:prepared_transport(True))
  print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
  return 1 if failed else 0
 if __name__=="__main__":sys.exit(main())
