@@ -2,7 +2,7 @@ import pg from 'pg';
 import {randomUUID} from 'node:crypto';
 import {storageConfig,createStoragePool,bindStoragePool} from './schema.js';
 import type {StorageConfig} from './schema.js';
-import {TransactionGateway,StorageError,bounded,deadlineFrom} from './transactions.js';
+import {TransactionGateway,StorageError,bounded,deadlineFrom,assertTransactionStatement} from './transactions.js';
 import type {DatabaseLease,QuerySession} from './transactions.js';
 import type {ServiceRole} from '../policy/programme.js';
 
@@ -51,9 +51,9 @@ class BoundedPool {
       const timer=setTimeout(abort,Math.max(1,Math.ceil(deadline-performance.now())));
       const release=(destroy=false)=>{if(done)return;done=true;clearTimeout(timer);
         signal?.removeEventListener('abort',abort);this.shutdown.removeEventListener('abort',abort);
-        this.leases.delete(lease);client.release(destroy);permit();};
+        this.leases.delete(lease);client.removeListener('error',abort);client.release(destroy);permit();};
       const lease:DatabaseLease={client,signal:controller.signal,release};
-      this.leases.add(lease);
+      this.leases.add(lease);client.on('error',abort);
       signal?.addEventListener('abort',abort,{once:true});this.shutdown.addEventListener('abort',abort,{once:true});
       if(signal?.aborted||this.shutdown.aborted)abort();
       return lease;
@@ -67,9 +67,19 @@ class BoundedPool {
     return new Proxy(pool,{
       get(target,key){
         if(key==='connect')return (callback?:unknown)=>{
-          const promise=owner.acquire(deadlineFrom()).then(lease=>new Proxy(lease.client,{
-            get(client,property){if(property==='release')return (destroy?:boolean)=>lease.release(destroy);const value=Reflect.get(client,property);return typeof value==='function'?value.bind(client):value;}
-          }));
+          const promise=owner.acquire(deadlineFrom()).then(lease=>{
+            let released=false;
+            return new Proxy(lease.client,{
+              get(client,property){
+                if(property==='release')return (destroy?:boolean)=>{if(released)return;released=true;lease.release(destroy);};
+                if(property==='query')return (...args:unknown[])=>{
+                  if(released||lease.signal.aborted)throw new StorageError('TX_CLOSED','Compatibility client was released');
+                  return Reflect.apply(client.query,client,args);
+                };
+                const value=Reflect.get(client,property);return typeof value==='function'?value.bind(client):value;
+              }
+            });
+          });
           if(typeof callback==='function'){void promise.then(client=>callback(null,client,client.release),error=>callback(error));return;}
           return promise;
         };
@@ -103,11 +113,13 @@ function setting(env:Readonly<NodeJS.ProcessEnv>,name:string,fallback:number,max
   return Number(text);
 }
 export interface ObservationOptions {timeoutMs?:number;signal?:AbortSignal;preferReplica?:boolean}
+export interface ListenerSession extends QuerySession {onNotification(listener:(event:{channel:string;payload?:string|undefined;processId:number})=>void):()=>void}
 export interface ServiceResources {
   readonly gateway:TransactionGateway;
   observe<T>(options:ObservationOptions,operation:(session:QuerySession)=>Promise<T>|T):Promise<{value:T;route:'primary'|'replica';observedAt:string}>;
+  withReplicaConnection<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=>Promise<T>|T):Promise<T>;
   withMigrationConnection<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=>Promise<T>|T):Promise<T>;
-  withListener<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=>Promise<T>|T):Promise<T>;
+  withListener<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:ListenerSession)=>Promise<T>|T):Promise<T>;
   describe():unknown;
   close():Promise<void>;
 }
@@ -132,7 +144,7 @@ export class ResourceContainer implements ServiceResources {
       this.env[prefix+'_PRIMARY_DATABASE_URL']??this.env.DATABASE_URL;
     if(!url)throw new StorageError('DATABASE_CONFIG_INVALID',kind==='migration'?'Explicit migration credential is required':'Database route is not configured');
     const config=storageConfig({...this.env,DATABASE_URL:url});
-    return {...config,max:kind==='migration'||kind==='listener'?1:config.max};
+    return {...config,max:kind==='migration'?1:kind==='listener'?setting(this.env,'HYPERFIDE_PG_LISTENER_MAX',1,4):config.max};
   }
   private pool(kind:'primary'|'replica'|'migration'|'listener'):BoundedPool{
     if(this.closed)throw new StorageError('DB_UNAVAILABLE','Resource container is closed');
@@ -153,12 +165,17 @@ export class ResourceContainer implements ServiceResources {
       throw new StorageError('DATABASE_CONFIG_CONFLICT','This process owns a different PostgreSQL configuration');
     return this.pool('primary').facade();
   }
+  commitMode():'on'|'remote_apply'{
+    const mode=this.env.HYPERFIDE_PG_SYNCHRONOUS_COMMIT??'on';
+    if(mode!=='on'&&mode!=='remote_apply')throw new StorageError('DATABASE_CONFIG_INVALID','Commit durability mode must be on or remote_apply');return mode;
+  }
   acquirePrimary(deadline:number,signal?:AbortSignal):Promise<DatabaseLease>{return this.pool('primary').acquire(deadline,signal);}
-  private session(lease:DatabaseLease,deadline:number):QuerySession{
+  private session(lease:DatabaseLease,deadline:number,readonly=false):QuerySession{
     let valid=true;
     const session=Object.freeze({
       query:async<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[])=>{
         if(!valid||lease.signal.aborted)throw new StorageError('TX_CLOSED','Connection capability expired');
+        if(readonly)assertTransactionStatement(text);
         return bounded(lease.client.query<R>(text,values?[...values]:undefined),deadline,lease.signal);
       },remainingMs:()=>Math.max(0,Math.floor(deadline-performance.now())),signal:lease.signal
     });
@@ -171,13 +188,39 @@ export class ResourceContainer implements ServiceResources {
     try{return await bounded(Promise.resolve().then(()=>operation(session)),deadline,lease.signal);}
     finally{this.revocations.get(session)?.();this.revocations.delete(session);lease.release(true);}
   }
+  async withReplicaConnection<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=>Promise<T>|T):Promise<T>{
+    const deadline=deadlineFrom(options.timeoutMs),lease=await this.pool('replica').acquire(deadline,options.signal);
+    const session=this.session(lease,deadline);let healthy=true;
+    try{
+      if(!(await lease.client.query<{recovery:boolean}>('SELECT pg_is_in_recovery() AS recovery')).rows[0]?.recovery)
+        throw new StorageError('REPLICA_REQUIRED','Configured observation route is not a physical replica');
+      return await bounded(Promise.resolve().then(()=>operation(session)),deadline,lease.signal);
+    }finally{
+      this.revocations.get(session)?.();this.revocations.delete(session);
+      try{await bounded(lease.client.query('ROLLBACK'),deadline,lease.signal);}catch{healthy=false;}
+      lease.release(!healthy||lease.signal.aborted);
+    }
+  }
   withMigrationConnection<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=>Promise<T>|T):Promise<T>{return this.connection('migration',options,operation);}
-  withListener<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:QuerySession)=>Promise<T>|T):Promise<T>{return this.connection('listener',options,operation);}
+  async withListener<T>(options:{timeoutMs?:number;signal?:AbortSignal},operation:(session:ListenerSession)=>Promise<T>|T):Promise<T>{
+    const deadline=deadlineFrom(options.timeoutMs),lease=await this.pool('listener').acquire(deadline,options.signal);
+    let active=true;
+    const base=this.session(lease,deadline),subscriptions=new Set<(event:{channel:string;payload?:string|undefined;processId:number})=>void>();
+    const session:ListenerSession=Object.freeze({...base,onNotification:(listener:(event:{channel:string;payload?:string|undefined;processId:number})=>void)=>{
+      if(!active||lease.signal.aborted)throw new StorageError('TX_CLOSED','Listener capability expired');
+      const guarded=(event:{channel:string;payload?:string|undefined;processId:number})=>{try{listener(event);}catch{lease.release(true);}};
+      subscriptions.add(guarded);lease.client.on('notification',guarded);
+      return ()=>{subscriptions.delete(guarded);lease.client.removeListener('notification',guarded);};
+    }});
+    try{return await bounded(Promise.resolve().then(()=>operation(session)),deadline,lease.signal);}
+    finally{active=false;for(const listener of subscriptions)lease.client.removeListener('notification',listener);
+      this.revocations.get(base)?.();this.revocations.delete(base);lease.release(true);}
+  }
   async observe<T>(options:ObservationOptions,operation:(session:QuerySession)=>Promise<T>|T):Promise<{value:T;route:'primary'|'replica';observedAt:string}>{
     const prefix='HYPERFIDE_'+this.role.toUpperCase();
     const route=options.preferReplica!==false&&this.env[prefix+'_REPLICA_DATABASE_URL']?'replica':'primary';
     const deadline=deadlineFrom(options.timeoutMs),lease=await this.pool(route).acquire(deadline,options.signal);
-    const session=this.session(lease,deadline);let healthy=true;
+    const session=this.session(lease,deadline,true);let healthy=true;
     try{
       await lease.client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const value=await bounded(Promise.resolve().then(()=>operation(session)),deadline,lease.signal);
@@ -188,7 +231,7 @@ export class ResourceContainer implements ServiceResources {
   describe():unknown{
     return {resourceId:this.resourceId,primary:this.pools.get('primary')?.metrics()??{maxActive:this.config('primary').max,maxQueued:setting(this.env,'HYPERFIDE_PG_MAX_QUEUED',32,1024),active:0,queued:0,totalCount:0,idleCount:0,waitingCount:0},
       replica:this.pools.get('replica')?.metrics()??null,migration:this.pools.get('migration')?.metrics()??null,
-      listeners:{limit:Math.min(1,setting(this.env,'HYPERFIDE_PG_LISTENER_MAX',1,4)),active:this.pools.get('listener')?.metrics().active??0},closed:this.closed};
+      listeners:{limit:setting(this.env,'HYPERFIDE_PG_LISTENER_MAX',1,4),active:this.pools.get('listener')?.metrics().active??0},closed:this.closed};
   }
   async close():Promise<void>{
     if(this.closed)return;this.closed=true;this.controller.abort();
