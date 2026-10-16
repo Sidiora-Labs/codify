@@ -1,15 +1,14 @@
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {getPool} from '../storage/schema.js';
-import {bindScope,obj,keys,scope,uuid,values,hash,canonical,fail,config,repository,git,tx,currentRun,readCandidate,type Scope,type IntegrationConfig} from './candidates.js';
+import {bindScope,primaryClient,obj,keys,scope,uuid,values,hash,canonical,fail,config,repository,git,tx,currentRun,readCandidate,type Scope,type IntegrationConfig} from './candidates.js';
 import {githubAdapter} from './github.js';
 import {evaluateClosure,closureSnapshot} from './closure.js';
-async function readBarrier(pool:Pick<pg.PoolClient,'query'>,s:Scope,id:string):Promise<Record<string,any>>{
+async function readBarrier(pool:import('./candidates.js').DB,s:Scope,id:string):Promise<Record<string,any>>{
  const result=await pool.query('SELECT * FROM hyperfide.integration_release_barriers WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...values(s),id]);const row=result.rows[0];
  if(!row||hash(canonical(row.manifest))!==row.manifest_digest)fail('RELEASE_BARRIER_UNKNOWN','Missing or invalid immutable release manifest');return row;
 }
-async function createBarrier(pool:pg.Pool,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
+async function createBarrier(pool:import('./candidates.js').DB,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
  const v=obj(input);keys(v,['organisation_id','run_id','request_id','candidate_ids','recovery_policy']);const s=scope(v);if(s.organisation_id!==cfg.organisation_id)fail('RELEASE_SCOPE_DENIED','Wrong organisation');const request=uuid(v.request_id);
  if(!Array.isArray(v.candidate_ids)||!v.candidate_ids.length||v.candidate_ids.length>100||new Set(v.candidate_ids).size!==v.candidate_ids.length)fail('RELEASE_INVALID','Explicit unique complete candidate set required');const ids=v.candidate_ids.map(uuid);
  if(!['ADVANCE_COMPATIBLE_MANIFEST','EXPLICIT_COMPENSATING_REVISION'].includes(String(v.recovery_policy)))fail('RELEASE_INVALID','Explicit non-atomic recovery policy required');
@@ -19,8 +18,8 @@ async function createBarrier(pool:pg.Pool,cfg:IntegrationConfig,input:unknown):P
  const actual=(await db.query('SELECT repository_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',values(s))).rows.map(r=>r.repository_id);
  const repos=candidates.map(c=>c.manifest.repository_id).sort();if(canonical(actual)!==canonical(repos))fail('RELEASE_SET_INCOMPLETE','Release must pin every run repository exactly once');
  const commitSet=candidates.map(c=>({repository_id:c.manifest.repository_id,candidate_head:c.manifest.candidate_head,expected_old_head:c.manifest.expected_old_head})).sort((a,b)=>a.repository_id.localeCompare(b.repository_id));
- for(const c of candidates)if(canonical(c.manifest.commit_set)!==canonical(commitSet))fail('RELEASE_SET_MISMATCH','Candidates were not verified against the same repository set');
- const manifest={version:1,request_id:request,organisation_id:s.organisation_id,run_id:s.run_id,spec_revision_id:run.spec_revision_id,spec_generation:String(run.spec_generation),authority_epoch:run.authority_epoch,policy_digest:run.policy_digest,recovery_policy:v.recovery_policy,atomic_across_repositories:false,targets:candidates.map(c=>({candidate_id:c.row.id,repository_id:c.manifest.repository_id,candidate_head:c.manifest.candidate_head,input_manifest_digest:c.row.input_manifest_digest,target_ref:c.manifest.target_ref})).sort((a,b)=>a.repository_id.localeCompare(b.repository_id))};
+ for(const c of candidates){if(c.row.state==='PUBLISHED'){const latest=(await db.query("SELECT candidate_id FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND state='PUBLISHED' AND observed_head=candidate_head ORDER BY created_at DESC,id DESC LIMIT 1",[...values(s),c.manifest.repository_id])).rows[0];if(latest?.candidate_id!==c.row.id)fail('RELEASE_BASELINE_STALE','Reused published repository must be exact latest owned head');}else if(canonical(c.manifest.commit_set)!==canonical(commitSet))fail('RELEASE_SET_MISMATCH','New candidates must pin the same complete repository set');}
+ const manifest={version:1,request_id:request,organisation_id:s.organisation_id,run_id:s.run_id,spec_revision_id:run.spec_revision_id,spec_generation:String(run.spec_generation),authority_epoch:run.authority_epoch,policy_digest:run.policy_digest,recovery_policy:v.recovery_policy,atomic_across_repositories:false,targets:candidates.map(c=>({candidate_id:c.row.id,repository_id:c.manifest.repository_id,candidate_head:c.manifest.candidate_head,input_manifest_digest:c.row.input_manifest_digest,target_ref:c.manifest.target_ref,reused_published:c.row.state==='PUBLISHED'})).sort((a,b)=>a.repository_id.localeCompare(b.repository_id))};
  const md=hash(canonical(manifest));const prior=(await db.query('SELECT * FROM hyperfide.integration_release_barriers WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...values(s),request])).rows[0];
  if(prior){if(prior.manifest_digest!==md)fail('RELEASE_IDEMPOTENCY_CONFLICT','Different release set under same request identity');return {barrier_id:prior.id,state:prior.state,replayed:true};}
  const id=randomUUID();await db.query('INSERT INTO hyperfide.integration_release_barriers(organisation_id,run_id,id,request_id,manifest_digest,manifest) VALUES($1,$2,$3,$4,$5,$6)',[...values(s),id,request,md,manifest]);
@@ -28,7 +27,7 @@ async function createBarrier(pool:pg.Pool,cfg:IntegrationConfig,input:unknown):P
  return {barrier_id:id,state:'HELD',manifest_digest:md,atomic_across_repositories:false,downstream_release_allowed:false};
  });
 }
-async function refresh(pool:pg.Pool,cfg:IntegrationConfig,s:Scope,id:string):Promise<Record<string,any>>{
+async function refresh(pool:import('./candidates.js').DB,cfg:IntegrationConfig,s:Scope,id:string):Promise<Record<string,any>>{
  const barrier=await readBarrier(pool,s,id);const observations:Record<string,any>[]=[];
  for(const target of barrier.manifest.targets){const r=repository(cfg,target.repository_id);let head:string|null=null;try{head=r.receive_path?await git(r.receive_path,['rev-parse','--verify',target.target_ref]):await (await githubAdapter(process.env,target.repository_id)).observeHead();}catch{}
   observations.push({...target,observed_head:head});
@@ -51,7 +50,7 @@ async function refresh(pool:pg.Pool,cfg:IntegrationConfig,s:Scope,id:string):Pro
  return {barrier_id:id,state,outcomes,all_published:outcomes.every(o=>o.outcome==='PUBLISHED'),atomic_across_repositories:false,downstream_release_allowed:state==='RELEASED'};
  });
 }
-async function release(pool:pg.Pool,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
+async function release(pool:import('./candidates.js').DB,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
  const v=obj(input);keys(v,['organisation_id','run_id','barrier_id']);const s=scope(v),id=uuid(v.barrier_id);if(s.organisation_id!==cfg.organisation_id)fail('RELEASE_SCOPE_DENIED','Wrong organisation');
  const observed=await refresh(pool,cfg,s,id);if(!observed.all_published)return observed;
  const waves=(await pool.query('SELECT DISTINCT wave FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 ORDER BY wave',values(s))).rows;
@@ -67,8 +66,8 @@ async function release(pool:pg.Pool,cfg:IntegrationConfig,input:unknown):Promise
 export function createComponent(ctx:ComponentContext):Component{
  let cfg:Promise<IntegrationConfig>|undefined;const settings=()=>cfg??=config(ctx.env);
  return bindScope(ctx,{apiVersion:1,actions:{
- 'integration.release.create':async input=>createBarrier(getPool(ctx.env),await settings(),input),
- 'integration.release.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','barrier_id']);return refresh(getPool(ctx.env),await settings(),scope(v),uuid(v.barrier_id));},
- 'integration.release.evaluate':async input=>release(getPool(ctx.env),await settings(),input)
+ 'integration.release.create':async input=>createBarrier(primaryClient(),await settings(),input),
+ 'integration.release.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','barrier_id']);return refresh(primaryClient(),await settings(),scope(v),uuid(v.barrier_id));},
+ 'integration.release.evaluate':async input=>release(primaryClient(),await settings(),input)
  }});
 }
