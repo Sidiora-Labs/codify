@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "16.2",
+  "task": "16.2",
+  "roles": [
+    "control"
+  ],
+  "module": "assurance/executor.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "qualification.job.assign",
+    "qualification.job.claim",
+    "qualification.execute",
+    "qualification.history.import"
+  ],
+  "requires": [
+    "16.1",
+    "12.1",
+    "5.1",
+    "12.4"
+  ]
+}
