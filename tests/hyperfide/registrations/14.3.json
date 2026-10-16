@@ -26,6 +26,8 @@
     "native.private-runtime.requires-current-credential",
     "native.private-runtime.current-reference-positive",
     "native.private-runtime-does-not-return-secret-bytes",
+    "native.abort.refuses-incomplete-probe",
+    "native.abort.waits-for-actual-child-close",
     "native.exec-time-binary-drift-refused",
     "native.shim-wrapper-cannot-stand-in-for-payload"
   ],
