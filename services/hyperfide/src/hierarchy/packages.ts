@@ -18,7 +18,46 @@ export interface AuthorityView extends Leadership {session_id:string;role:Sessio
 export interface HierarchyAuthority {
  leadership(tx:PrimaryTransaction,scope:Scope):Promise<Leadership>;
  requireAuthority(tx:PrimaryTransaction,input:AuthorityRequest):Promise<AuthorityView>;
+ requireLeaderReplacement(tx:PrimaryTransaction,input:LeaderReplacementRequest):Promise<Record<string,unknown>>;
 }
+
+export interface LeaderReplacementRequest extends Scope {
+ actor_session_id:string;current_leader_generation:string;predecessor_session_id:string;
+ predecessor_generation:string;predecessor_authority_epoch:string;
+}
+/** Immutable replacement proof for adopting an already-persisted leader-targeted intent. */
+export async function requireLeaderReplacement(tx:PrimaryTransaction,input:LeaderReplacementRequest):Promise<Record<string,unknown>>{
+ assertPrimaryTransaction(tx);await ready(tx);
+ const org=uuid(input.organisation_id),run=uuid(input.run_id),actorId=uuid(input.actor_session_id);
+ const currentGeneration=decimal(input.current_leader_generation),priorGeneration=decimal(input.predecessor_generation),priorId=uuid(input.predecessor_session_id),priorEpoch=uuid(input.predecessor_authority_epoch);
+ const current=await leadership(tx,{organisation_id:org,run_id:run});
+ await requireAuthority(tx,{organisation_id:org,run_id:run,authority_epoch:current.authority_epoch,session_id:actorId,leader_generation:currentGeneration,roles:['LEADER']});
+ if(BigInt(priorGeneration)>=BigInt(currentGeneration)||BigInt(currentGeneration)-BigInt(priorGeneration)>1024n)return refuse('LEADER_REPLACEMENT_UNPROVEN','A bounded actual replacement chain is required');
+ const selectionSchema=await tx.query("SELECT to_regclass('hyperfide.hierarchy_leadership_selections') IS NOT NULL AS ready");
+ const source="SELECT id,actor_session_id,leader_generation,payload,'OWNERSHIP_EVENT'::text AS proof_kind FROM hyperfide.hierarchy_ownership_events WHERE organisation_id=$1 AND run_id=$2 AND kind='LEADER_ACQUIRED' AND leader_generation >= $3 AND leader_generation <= $4";
+ const selections=" UNION ALL SELECT id,leader_session_id AS actor_session_id,leader_generation,jsonb_build_object('authority_epoch',authority_epoch,'predecessor_id',predecessor_session_id,'predecessor_generation',predecessor_generation::text,'predecessor_authority_epoch',predecessor_authority_epoch),'LEADERSHIP_SELECTION'::text AS proof_kind FROM hyperfide.hierarchy_leadership_selections WHERE organisation_id=$1 AND run_id=$2 AND leader_generation >= $3 AND leader_generation <= $4";
+ const found=await tx.query("SELECT id,actor_session_id,leader_generation::text,payload,proof_kind FROM ("+source+(selectionSchema.rows[0]?.ready?selections:"")+") history ORDER BY leader_generation::bigint,id",[org,run,priorGeneration,currentGeneration]);
+ const expected=Number(BigInt(currentGeneration)-BigInt(priorGeneration)+1n);
+ if(found.rowCount!==expected)return refuse('LEADER_REPLACEMENT_UNPROVEN','Immutable leadership replacement history is incomplete or ambiguous');
+ let session=priorId,epoch=priorEpoch,generation=priorGeneration;
+ const eventIds:string[]=[],proofRefs:{kind:string;id:string}[]=[];
+ for(let index=0;index<found.rows.length;index++){
+  const row=found.rows[index]!,p=row.payload;
+  if(!object(p)||row.leader_generation!==(BigInt(priorGeneration)+BigInt(index)).toString()||typeof p.authority_epoch!=='string')return refuse('LEADER_REPLACEMENT_UNPROVEN','History lacks exact platform epoch pins');
+  uuid(p.authority_epoch);
+  if(index===0){
+   if(row.actor_session_id!==priorId||p.authority_epoch!==priorEpoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Original event target is not proven by immutable history');
+  }else{
+   if(p.predecessor_id!==session||p.predecessor_generation!==generation||p.predecessor_authority_epoch!==epoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Replacement history is not a contiguous actor/generation/epoch chain');
+  }
+  session=uuid(row.actor_session_id);epoch=p.authority_epoch;generation=row.leader_generation;eventIds.push(uuid(row.id));proofRefs.push(Object.freeze({kind:String(row.proof_kind),id:uuid(row.id)}));
+ }
+ if(session!==actorId||session!==current.leader_session_id||generation!==currentGeneration||epoch!==current.authority_epoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Replacement chain does not terminate at the current primary leader');
+ const proof={organisation_id:org,run_id:run,predecessor_session_id:priorId,predecessor_generation:priorGeneration,predecessor_authority_epoch:priorEpoch,
+  current_leader_session_id:session,current_leader_generation:generation,current_authority_epoch:epoch,event_ids:eventIds,proof_refs:proofRefs};
+ return Object.freeze({authority:'LEADER_REPLACEMENT_PROOF',...proof,event_ids:Object.freeze(eventIds),proof_refs:Object.freeze(proofRefs),proof_digest:hash(proof)});
+}
+
 type Data=Record<string,unknown>;
 const MIGRATION_CHECKSUM='sha256:'+createHash('sha256').update(readFileSync(new URL('../../migrations/0003-hierarchy.sql',import.meta.url))).digest('hex');
 export function refuse(code:string,message:string):never {throw new FoundationError(code,message);}
@@ -168,11 +207,11 @@ export function createComponent(context:ComponentContext):Component {
    if(runs.rows[0]?.authority_epoch!==a.authority_epoch)return refuse('AUTHORITY_EPOCH_STALE','Run platform epoch mismatch');
    const session=await tx.query("SELECT 1 FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND role='LEADER' AND state IN ('REGISTERED','RUNNING','DISCONNECTED') FOR SHARE",[a.organisation_id,a.run_id,a.session_id]);
    if(!session.rowCount)return refuse('ROLE_DENIED','Only a registered leader session may acquire leadership');
-   const old=await tx.query('SELECT generation::text,leader_session_id FROM hyperfide.hierarchy_leaders WHERE organisation_id=$1 AND run_id=$2 FOR UPDATE',[a.organisation_id,a.run_id]);
+   const old=await tx.query('SELECT generation::text,leader_session_id,authority_epoch FROM hyperfide.hierarchy_leaders WHERE organisation_id=$1 AND run_id=$2 FOR UPDATE',[a.organisation_id,a.run_id]);
    if((old.rows[0]?.generation??'0')!==expected)return refuse('LEADER_GENERATION_STALE','Leadership compare-and-set failed');
    const next=(BigInt(expected)+1n).toString();decimal(next);
    await tx.query('INSERT INTO hyperfide.hierarchy_leaders(organisation_id,run_id,authority_epoch,leader_session_id,generation) VALUES($1,$2,$3,$4,$5) ON CONFLICT(organisation_id,run_id) DO UPDATE SET authority_epoch=EXCLUDED.authority_epoch,leader_session_id=EXCLUDED.leader_session_id,generation=EXCLUDED.generation,state_version=hyperfide.hierarchy_leaders.state_version+1',[a.organisation_id,a.run_id,a.authority_epoch,a.session_id,next]);
-   await event(tx,a,next,'LEADER_ACQUIRED',{predecessor_id:old.rows[0]?.leader_session_id??null,reason:v.reason});
+   await event(tx,a,next,'LEADER_ACQUIRED',{predecessor_id:old.rows[0]?.leader_session_id??null,predecessor_generation:old.rows[0]?.generation??null,predecessor_authority_epoch:old.rows[0]?.authority_epoch??null,authority_epoch:a.authority_epoch,reason:v.reason});
    return {organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch,leader_session_id:a.session_id,leader_generation:next};
   });
  },
@@ -287,5 +326,5 @@ export function createComponent(context:ComponentContext):Component {
    return {authority,packages:packages.rows.slice(0,256),has_more:packages.rows.length>256,dispatch_authority:false};
   });
  }};
- return {apiVersion:1,actions,capabilities:{'hierarchy.authority.v1':Object.freeze({leadership,requireAuthority}),'hierarchy.handoff.v1':Object.freeze({propose:actions['hierarchy.package.handoff.propose'],acknowledge:actions['hierarchy.package.handoff.acknowledge']})}};
+ return {apiVersion:1,actions,capabilities:{'hierarchy.authority.v1':Object.freeze({leadership,requireAuthority,requireLeaderReplacement}),'hierarchy.handoff.v1':Object.freeze({propose:actions['hierarchy.package.handoff.propose'],acknowledge:actions['hierarchy.package.handoff.acknowledge']})}};
 }
