@@ -172,7 +172,7 @@ export async function validateRestoredCheckpoint(input:RestoredCheckpointInput):
   const configFd=fs.openSync(path.join(input.workspace_path,'.git','config'),fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
   try{const st=fs.fstatSync(configFd);if(!st.isFile()||st.nlink!==1||st.size>65536)fail('CHECKPOINT_GIT_CONFIG_UNSUPPORTED');}finally{fs.closeSync(configFd);}
   const configKeys=(await git(input.workspace_path,['config','--local','--no-includes','--name-only','--null','--list'],deadline,input.signal)).toString('utf8').split('\0').filter(Boolean);
-  for(const raw of configKeys){const key=raw.toLowerCase();if(['include.','includeif.','fsck.','fetch.fsck.','receive.fsck.'].some(prefix=>key.startsWith(prefix))||key==='extensions.partialclone'||key.endsWith('.promisor'))fail('CHECKPOINT_GIT_CONFIG_UNSUPPORTED');}
+  for(const raw of configKeys){const key=raw.toLowerCase();if(['include.','includeif.','fsck.','fetch.fsck.','receive.fsck.'].some(prefix=>key.startsWith(prefix))||(key==='extensions.partialclone'||key==='extensions.worktreeconfig')||key.endsWith('.promisor'))fail('CHECKPOINT_GIT_CONFIG_UNSUPPORTED');}
   const head=(await git(input.workspace_path,['rev-parse','--verify','HEAD'],deadline,input.signal)).toString('utf8').trim();
   if(head!==meta.head_commit)fail('CHECKPOINT_HEAD_MISMATCH');
   const branch=(await git(input.workspace_path,['symbolic-ref','HEAD'],deadline,input.signal)).toString('utf8').trim();if(branch!==meta.branch_ref)fail('CHECKPOINT_BRANCH_MISMATCH');

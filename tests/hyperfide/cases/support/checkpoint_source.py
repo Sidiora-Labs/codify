@@ -147,6 +147,12 @@ def run(native_root,out):
   check("checkpoint-source.reject-local-config-include",lambda:f.rejects(include,"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
   check("checkpoint-source.reject-local-promisor",lambda:f.rejects(lambda w:f.native.git(w,"config","remote.fixture.promisor","true"),"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
   check("checkpoint-source.reject-external-object-alternates",lambda:f.rejects(lambda w:(w/".git"/"objects"/"info"/"alternates").write_text(str(base)+"\n"),"CHECKPOINT_GIT_METADATA_UNSUPPORTED"))
+  def worktree_config(w,kind):
+   f.native.git(w,"config","extensions.worktreeConfig","true")
+   content="[fsck]\n skipList = /dev/null\n" if kind=="fsck" else "[include]\n path = /dev/null\n"
+   (w/".git"/"config.worktree").write_text(content)
+  check("checkpoint-source.reject-worktree-fsck-config",lambda:f.rejects(lambda w:worktree_config(w,"fsck"),"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
+  check("checkpoint-source.reject-worktree-config-include",lambda:f.rejects(lambda w:worktree_config(w,"include"),"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
   (out/"observations.json").write_bytes(canonical(dict(scope="LOWER_BYTE_HELPER_ONLY",assertion_count=len(IDS),failures=FAILURES,observations=OBS,source_status="RESTORED_SOURCE_ONLY",authority="NONE",native_source_commit="c46892cb84657f250cc7b165e5724d2275400099",parent_manifest=f.manifest,baseline=state.get("result")))+b"\n")
  base_absent=not base.exists();(out/"cleanup.json").write_bytes(canonical({"owned_root_absent":base_absent})+b"\n")
  expect(base_absent,"Owned fixture root remains")
