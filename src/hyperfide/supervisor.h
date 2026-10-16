@@ -64,6 +64,7 @@ typedef struct {
  const char *const *argv;const char *const *environment;
  const char *home;const char *tmp;
  long long deadline_ns;size_t output_limit_bytes;
+ int (*admit_child)(void *,const HfProcessIdentity *);void *admit_child_context;
  int (*native_entry)(const char *,const char *,FILE *);
  const char *native_action;const char *native_request;
 } HfPreparationProcessSpec;
