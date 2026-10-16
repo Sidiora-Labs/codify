@@ -14,7 +14,7 @@ import path from 'node:path';
 import {createPrivateKey,sign,verify,randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {obj,keys,hash,canonical,fail,oid,git,type Scope} from './candidates.js';
+import {obj,keys,hash,canonical,fail,oid,git,isolatedPush,type Scope} from './candidates.js';
 const exec=promisify(execFile);
 const API='https://api.github.com';
 const API_VERSION='2026-03-10';
@@ -32,7 +32,7 @@ export interface GitHubIntent {
  organisation_id:string;run_id:string;operation_id:string;operation_generation:string;
  repository_id:string;target_ref:string;expected_old_head:string;candidate_head:string;candidate_digest:string;
 }
-export interface HostedResult {outcome:'PUBLISHED'|'REJECTED'|'UNKNOWN';observed_head:string;credential_revocation:'CONFIRMED'|'UNKNOWN';rules_digest:string}
+export interface HostedResult {outcome:'PUBLISHED'|'REJECTED'|'UNKNOWN';observed_head:string;credential_revocation:'CONFIRMED'|'UNKNOWN';rules_digest:string;push_issued?:boolean;credential_expires_at?:string|null;credential_custody?:'PERSISTED'|'ORPHANED';failure_stage?:string}
 export type GitHubTransport=(route:string,token:string,method?:string,body?:unknown)=>Promise<{status:number;body:unknown}>;
 async function privateBytes(filename:string,max=65536):Promise<Buffer>{
  if(!path.isAbsolute(filename))fail('GITHUB_CONFIG_INVALID','Absolute private credential path required');
@@ -125,20 +125,40 @@ export class GitHubPublicationAdapter {
  const filename=this.credentialPath(intent),temporary=filename+'.'+randomUUID();const fd=await fs.open(temporary,'wx',0o600);
  try{await fd.writeFile(JSON.stringify({intent,token:{revoked:true,expires_at:token.expires_at},revoked_at:new Date().toISOString()})+'\n');await fd.sync();}finally{await fd.close();}await fs.rename(temporary,filename);return true;
  }
+ private async preflightCustody(intent:GitHubIntent):Promise<void>{
+ const directory=await fs.lstat(this.profile.credential_directory);if(!directory.isDirectory()||directory.isSymbolicLink()||(directory.mode&0o077)!==0||await fs.realpath(this.profile.credential_directory)!==this.profile.credential_directory)fail('GITHUB_CREDENTIAL_CUSTODY_UNAVAILABLE','Canonical private gateway credential directory required');
+ for(const filename of [this.credentialPath(intent),path.join(this.profile.credential_directory,intent.operation_id+'-askpass.cjs')]){
+  try{await fs.lstat(filename);fail('GITHUB_CREDENTIAL_REPLAY_REQUIRES_RECONCILIATION','Prior credential custody must be reconciled before new token issuance');}catch(error){if((error as {code?:string}).code!=='ENOENT')throw error;}
+ }
+ }
  async publish(intent:GitHubIntent,repositoryPath:string):Promise<HostedResult>{
  if(intent.target_ref!==this.profile.target_ref)fail('GITHUB_TARGET_INVALID','Intent ref differs from configured protected ref');const before=await this.inspectProtection();
  if(before.observed_head!==intent.expected_old_head)fail('GITHUB_EXPECTED_HEAD_CHANGED','Protected target head changed');
- await git(repositoryPath,['merge-base','--is-ancestor',intent.expected_old_head,intent.candidate_head]);
+ await git(repositoryPath,['merge-base','--is-ancestor',intent.expected_old_head,intent.candidate_head]);await this.preflightCustody(intent);
  const minted=await this.request('/app/installations/'+this.profile.installation_id+'/access_tokens',await this.jwt(),'POST',{repository_ids:[this.profile.repository_numeric_id],permissions:{contents:'write',metadata:'read'}});
- const token=obj(minted.body);if(minted.status!==201||typeof token.token!=='string'||typeof token.expires_at!=='string'||!Number.isFinite(Date.parse(token.expires_at))||Date.parse(token.expires_at)<=Date.now()||obj(token.permissions).contents!=='write')fail('GITHUB_PUBLISHER_TOKEN_UNAVAILABLE','Scoped GitHub App installation token was not issued');
- await this.persistCredential(intent,token);
- const askpass=path.join(this.profile.credential_directory,intent.operation_id+'-askpass.cjs');await fs.writeFile(askpass,"#!/usr/bin/env node\nprocess.stdout.write(process.argv[2]?.includes('Username')?'x-access-token':process.env.HYPERFIDE_GITHUB_INSTALLATION_TOKEN??'');\n",{mode:0o700,flag:'wx'});
- let completed=false;
- try{await exec('git',['--no-replace-objects','-c','credential.helper=','-c','core.hooksPath=/dev/null','-c','http.followRedirects=false','push','--porcelain','--force-with-lease='+intent.target_ref+':'+intent.expected_old_head,'https://github.com/'+this.profile.owner+'/'+this.profile.repository+'.git',intent.candidate_head+':'+intent.target_ref],{cwd:repositoryPath,timeout:120000,maxBuffer:1048576,encoding:'utf8',env:{PATH:this.env.PATH,HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_ASKPASS:askpass,HYPERFIDE_GITHUB_INSTALLATION_TOKEN:token.token}});completed=true;}
- catch(error){completed=typeof (error as {code?:unknown}).code==='number';}
- finally{await fs.rm(askpass,{force:true});}
- const revoked=await this.revokeCredential(intent);const head=await this.observeHead();
- return {outcome:revoked&&head===intent.candidate_head?'PUBLISHED':revoked&&completed&&head===intent.expected_old_head?'REJECTED':'UNKNOWN',observed_head:head,credential_revocation:revoked?'CONFIRMED':'UNKNOWN',rules_digest:before.rules_digest};
+ const token=obj(minted.body);
+ if(typeof token.token!=='string'||!token.token)fail('GITHUB_PUBLISHER_TOKEN_UNAVAILABLE','Scoped GitHub App installation token was not issued');
+ const validToken=minted.status===201&&typeof token.expires_at==='string'&&Number.isFinite(Date.parse(token.expires_at))&&Date.parse(token.expires_at)>Date.now()&&token.permissions!==null&&typeof token.permissions==='object'&&!Array.isArray(token.permissions)&&(token.permissions as Record<string,unknown>).contents==='write';
+ const secretToken=token.token,expiry=typeof token.expires_at==='string'?token.expires_at:null,askpass=path.join(this.profile.credential_directory,intent.operation_id+'-askpass.cjs');
+ let persisted=false,pushIssued=false,revoked=false,stage='CREDENTIAL_PERSIST',failure='';
+ try{
+  await this.persistCredential(intent,token);persisted=true;if(!validToken){stage='TOKEN_VALIDATION';throw Error('Provider token response failed accepted scope/expiry policy');}stage='ASKPASS_CREATE';
+  await fs.writeFile(askpass,"#!/usr/bin/env node\nprocess.stdout.write(process.argv[2]?.includes('Username')?'x-access-token':process.env.HYPERFIDE_GITHUB_INSTALLATION_TOKEN??'');\n",{mode:0o700,flag:'wx'});
+  stage='PUSH';pushIssued=true;
+  await isolatedPush(repositoryPath,['--porcelain','--force-with-lease='+intent.target_ref+':'+intent.expected_old_head,'https://github.com/'+this.profile.owner+'/'+this.profile.repository+'.git',intent.candidate_head+':'+intent.target_ref],{...this.env,GIT_ASKPASS:askpass,HYPERFIDE_GITHUB_INSTALLATION_TOKEN:secretToken},'https');
+ }catch{failure=stage;}
+ finally{
+  // Revocation uses the just-minted value even when disk or askpass custody
+  // failed. A missing spool must never prevent provider cleanup.
+  try{const response=await this.request('/installation/token',secretToken,'DELETE');revoked=response.status===204||response.status===401;}catch{revoked=false;}
+  if(persisted&&revoked){try{await this.revokeCredential(intent);}catch{failure=failure||'REVOCATION_TOMBSTONE';}}
+  try{await fs.rm(askpass,{force:true});}catch{failure=failure||'ASKPASS_CLEANUP';}
+ }
+ let head=before.observed_head;try{head=await this.observeHead();}catch{failure=failure||'REMOTE_READBACK';}
+ // A nonzero Git child and an unchanged ref cannot prove remote quiescence.
+ // REJECTED is permitted only when no push was ever dispatched and its
+ // privileged token was independently revoked.
+ return {outcome:revoked&&pushIssued&&head===intent.candidate_head?'PUBLISHED':revoked&&!pushIssued?'REJECTED':'UNKNOWN',observed_head:head,credential_revocation:revoked?'CONFIRMED':'UNKNOWN',rules_digest:before.rules_digest,push_issued:pushIssued,credential_expires_at:expiry,credential_custody:persisted?'PERSISTED':'ORPHANED',failure_stage:failure||'NONE'};
  }
  async reconcile(intent:GitHubIntent):Promise<HostedResult>{
  const protection=await this.inspectProtection(),revoked=await this.revokeCredential(intent),head=await this.observeHead();

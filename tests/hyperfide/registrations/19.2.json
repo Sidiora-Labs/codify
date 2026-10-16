@@ -19,7 +19,16 @@
     "publication.github-sole-publisher",
     "publication.github-worker-bypass-refused",
     "publication.github-force-bypass-refused",
-    "publication.github-unknown-bypass-refused"
+    "publication.github-unknown-bypass-refused",
+    "publication.client-hook-suppressed",
+    "publication.server-hook-still-enforced",
+    "publication.token-persist-failure-revokes",
+    "publication.askpass-failure-revokes",
+    "publication.orphan-remains-unknown",
+    "publication.custody-preflight-no-mint",
+    "publication.source-url-rewrite-isolated",
+    "publication.https-source-config-isolated",
+    "publication.invalid-token-response-revokes"
   ],
   "argv": [
     "python3",

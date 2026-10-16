@@ -14,9 +14,12 @@
     "integration.publication.execute",
     "integration.publication.reconcile",
     "integration.publication.inspect",
-    "integration.publication.protection"
+    "integration.publication.protection",
+    "integration.publication.accept"
   ],
   "requires": [
-    "19.1"
+    "19.1",
+    "14.4",
+    "5.2"
   ]
 }
