@@ -199,6 +199,11 @@ def views_cases(f):
   sql(f"INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone) VALUES('{ORG}','{RUN}','{uid(100)}','{RUN}','{TASK_ID}','QUALIFIED'),('{ORG}','{RUN}','{uid(101)}','{RUN}','{uid(100)}','QUALIFIED')")
   r=f.ok("23.1","fleet.views.snapshot")["critical_path"];expect(r["complete"] and [n["id"] for n in r["path"]]==[TASK_ID,uid(100),uid(101)] and r["estimated_duration_ms"] is None)
  check("observability.views.actual-critical-path",graph)
+ def integrated_label():
+  sql(f"UPDATE hyperfide.tasks SET state='INTEGRATED',state_version=state_version+1 WHERE organisation_id='{ORG}' AND run_id='{RUN}' AND id='{TASK_ID}';")
+  r=f.ok("23.1","fleet.views.snapshot")["critical_path"];expect(any(n["id"]==TASK_ID for n in r["path"]) and r["terminal_basis"]=="CURRENT_INTEGRATED_PROOF_ONLY" and r["current_integrated_proof_status"]=="HELD")
+ check("observability.views.integrated-label-not-terminal-proof",integrated_label)
+
  def cycle():
   sql(f"INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone) VALUES('{ORG}','{RUN}','{TASK_ID}','{RUN}','{uid(101)}','QUALIFIED')")
   expect(f.ok("23.1","fleet.views.snapshot")["critical_path"]["complete"] is False)

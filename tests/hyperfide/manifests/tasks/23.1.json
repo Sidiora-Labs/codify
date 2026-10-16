@@ -7,7 +7,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-23.1-actual-observability-v1",
+  "campaign_id": "hyperfide-task-23.1-current-proof-final-v4",
   "case_ids": [
     "V-010",
     "V-034"
@@ -32,6 +32,7 @@
     "observability.views.evidence-unknown",
     "observability.views.no-fabricated-release-count",
     "observability.views.actual-critical-path",
+    "observability.views.integrated-label-not-terminal-proof",
     "observability.views.cycle-explicit",
     "observability.views.large-run-bounded"
   ],
@@ -88,8 +89,8 @@
     },
     {
       "path": "services/hyperfide/components/23.4.json",
-      "sha256": "919828e7c28ef32860c534cf3c0c5c8646a667744f4ab509deff4e386445206d",
-      "size": 446
+      "sha256": "50db7fec18d27973176195f192182626712aeca62914a182dce075ed8ac71224",
+      "size": 504
     },
     {
       "path": "services/hyperfide/components/4.1.json",
@@ -105,6 +106,11 @@
       "path": "services/hyperfide/components/6.1.json",
       "sha256": "382a6d80233196931b0e3aa28921f55c682cc853c8bc109adb35567c34a4fad7",
       "size": 400
+    },
+    {
+      "path": "services/hyperfide/components/6.2.json",
+      "sha256": "9e2afc3c62e9cdeb6c48191ed9d85eb2edb3ac64199f3288d515b639d31de460",
+      "size": 311
     },
     {
       "path": "services/hyperfide/components/8.1.json",
@@ -207,19 +213,34 @@
       "size": 185
     },
     {
+      "path": "services/hyperfide/dist/events/inbox.d.ts",
+      "sha256": "7b320994e45e5de06f23084bfc4c422a6e50fb2247f9ecd6dd5a10646fb927e1",
+      "size": 1103
+    },
+    {
+      "path": "services/hyperfide/dist/events/inbox.js",
+      "sha256": "a6c53f3516e763c9c840adec36f7bc76fc91acdaa654a92f7ee7bca91fa54b53",
+      "size": 14962
+    },
+    {
+      "path": "services/hyperfide/dist/events/inbox.js.map",
+      "sha256": "dbc9001575fa2ddc56a3065da71054a642c7dc1b571dca0c3112b92548efb7a7",
+      "size": 11940
+    },
+    {
       "path": "services/hyperfide/dist/events/outbox.d.ts",
-      "sha256": "d60ac50e79f00678916f18dadd0abad7ad80b27444717931350f8cfbb03d5520",
-      "size": 2914
+      "sha256": "bd451894860d859768882ff3fb9e114e0fbb3e0e6c0fbb0ce0bfd0401807f962",
+      "size": 3340
     },
     {
       "path": "services/hyperfide/dist/events/outbox.js",
-      "sha256": "664642f142d83cf69da946290b1d27900456f33b81a4cba539df3ea98eb0b76d",
-      "size": 17046
+      "sha256": "009590f09963331c3ad61dc680cc2d1c68c99e2949102529cbf82f17bd2c7adb",
+      "size": 18541
     },
     {
       "path": "services/hyperfide/dist/events/outbox.js.map",
-      "sha256": "3c531a8174e537565cc92694faf0aaf6ec50ff1fad8e4fbd2c151285fd9f4d92",
-      "size": 15750
+      "sha256": "78bdbb9c5f5a870a299153ac1a764ed94a8ead09083187c6522addbf79ac44dd",
+      "size": 17133
     },
     {
       "path": "services/hyperfide/dist/identity/authorization.d.ts",
@@ -298,18 +319,18 @@
     },
     {
       "path": "services/hyperfide/dist/observability/notifications.d.ts",
-      "sha256": "d8e52f542e1cbf5e50c7b9efd4b8e49746cd9264a457e19fd5fd3034a2aad3de",
-      "size": 931
+      "sha256": "cadfd858ad985e72cb24f9b9e0499b8bd9097a013b5252b743609819d51832eb",
+      "size": 1410
     },
     {
       "path": "services/hyperfide/dist/observability/notifications.js",
-      "sha256": "156ec96227100247f2000569c089d881f49a7d6b54174039c52a9433282f7ce1",
-      "size": 15218
+      "sha256": "f79817758c0f1723a0ec17373f35e9173b6857a81c82cfb5214a9e12880ecbde",
+      "size": 20073
     },
     {
       "path": "services/hyperfide/dist/observability/notifications.js.map",
-      "sha256": "2cc1f75bfa48368a1731134860edb5b750daa45b28020e52c854b2cf9430b631",
-      "size": 12268
+      "sha256": "1caed1f3d91701e109cea6f41536fe110042f73e3da0c5c9452cb80d01f82ba5",
+      "size": 16039
     },
     {
       "path": "services/hyperfide/dist/observability/resources.d.ts",
@@ -318,28 +339,28 @@
     },
     {
       "path": "services/hyperfide/dist/observability/resources.js",
-      "sha256": "ead0312e25f858c9bd8cf67dca4269ff3b9416e1eeb953b601c0cf7c222799d5",
-      "size": 14317
+      "sha256": "6810ee2190920db5392b6230eda9014391a206884b829f02b825a98c1fda9dbc",
+      "size": 14946
     },
     {
       "path": "services/hyperfide/dist/observability/resources.js.map",
-      "sha256": "198a5e9472de02602313ed6dd6a9e6971c0967d2d37a1688cea468063fdc6ce8",
-      "size": 11859
+      "sha256": "6458fcd798c53d8dbd9fa63ca9f59b7add8dd095652eb7c04e4c222f16a0bffd",
+      "size": 12216
     },
     {
       "path": "services/hyperfide/dist/observability/views.d.ts",
-      "sha256": "4a1f39b1c10f196a374730b6f3acac780842b46cf30abbcf8c3243de19568976",
-      "size": 2958
+      "sha256": "2426230a18d14450c2ab4f99399d4e1b30e4c4179b4b634b3cf2f2da5a8bae02",
+      "size": 3048
     },
     {
       "path": "services/hyperfide/dist/observability/views.js",
-      "sha256": "8d793ea0cd824c2abeb2f415ab595f168ca7211387586ae702be74bc42b0362f",
-      "size": 26383
+      "sha256": "bc9f4c560efb60afe74c5f888d24b4f8abf3e8d60e21e614c2f143b9045435c9",
+      "size": 27030
     },
     {
       "path": "services/hyperfide/dist/observability/views.js.map",
-      "sha256": "d9dfcaa06b0a9bf3241f764f9615b298ad517b3bbb6c22ad07b09ddcd8639bbf",
-      "size": 21868
+      "sha256": "1cc5d1e51d7e61ceb37ebfb28b6a62856b8464773e6dd260002281fa1226e5f3",
+      "size": 22521
     },
     {
       "path": "services/hyperfide/dist/policy/programme.d.ts",
@@ -532,9 +553,14 @@
       "size": 84
     },
     {
+      "path": "services/hyperfide/src/events/inbox.ts",
+      "sha256": "d623b7ba82a0ac62d23fc7b85541160a6fca5e605568fdcd34ee32d8996c849c",
+      "size": 15124
+    },
+    {
       "path": "services/hyperfide/src/events/outbox.ts",
-      "sha256": "9ae6735e25d4c563fe7d1bf05b062181073bf92490e2634f42e937ec84371de5",
-      "size": 18053
+      "sha256": "154fa93a90cabe858ada9910f7fd7751c7b34b8cad67db37b6f601cb172133df",
+      "size": 19791
     },
     {
       "path": "services/hyperfide/src/identity/authorization.ts",
@@ -563,18 +589,18 @@
     },
     {
       "path": "services/hyperfide/src/observability/notifications.ts",
-      "sha256": "f069bbd3e6f8cabf66df5a3e63a6bb513d57c8ffd1540cbda97557e89ed12455",
-      "size": 14753
+      "sha256": "2cc15d78587bcb651ae59c15f8bea629a8bd6832408a78c53b86b2950db05642",
+      "size": 19620
     },
     {
       "path": "services/hyperfide/src/observability/resources.ts",
-      "sha256": "8e29d462f86113d6d08364b1b73de4c300c82fa3e74332aa8a9a70c30f2098b6",
-      "size": 13700
+      "sha256": "d02a46aaa3a7e08c0c1b925cf5e20b542b8bf6f838bd640684b33aee6ed9da2c",
+      "size": 14308
     },
     {
       "path": "services/hyperfide/src/observability/views.ts",
-      "sha256": "0c6955ec9daaccc43c57a42aea9276e42f53127bb999133f0821264e8a5f483c",
-      "size": 26288
+      "sha256": "1ab081e1bc1b6d5a4b9da27d4263847227d23ec82472e1b5fa001ac876daae6e",
+      "size": 26929
     },
     {
       "path": "services/hyperfide/src/policy/programme.ts",
@@ -628,8 +654,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/23_1.py",
-      "sha256": "d52d39e9f8af3227aeabcb1fa1608d24c54c2828173fe62839d2a78bdfe01ca7",
-      "size": 20298
+      "sha256": "a29f2d73d36fb471b61cb99febdaff846e0c70340ec7fc504d14af22d576896e",
+      "size": 20774
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -648,8 +674,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/23.1.json",
-      "sha256": "7799005d3ffbde3cfd24d5dec711b120c58565e989046455114ae1897f3e2a55",
-      "size": 2702
+      "sha256": "4475b5cc34f72089e4ca9fe241fd6a469bed6884494e021c6c7287b0da23de56",
+      "size": 2765
     }
   ],
   "policy": {
@@ -659,7 +685,7 @@
     "execution": "remote-only",
     "frontier_calls": false,
     "full_case_status": "INCOMPLETE",
-    "simulation": "Synthetic workload values remain labelled; actual PostgreSQL and service execution; independent signed loopback object store is not live provider durability"
+    "simulation": "Synthetic workload values retain origin.4320 individually authenticated alerts compress72h schedule volume; wall clock separately measured. Independent signed loopbackS3 does not qualify live provider durability."
   },
   "registered_variant": "task:23.1",
   "resources": [

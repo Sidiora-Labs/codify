@@ -27,6 +27,7 @@
     "observability.views.evidence-unknown",
     "observability.views.no-fabricated-release-count",
     "observability.views.actual-critical-path",
+    "observability.views.integrated-label-not-terminal-proof",
     "observability.views.cycle-explicit",
     "observability.views.large-run-bounded"
   ],
