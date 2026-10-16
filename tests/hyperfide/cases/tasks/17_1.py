@@ -25,7 +25,8 @@ IDS=[
 "review.discovery.history-rewrite","review.discovery.preserve-history",
 "review.policy.replacement-generation","review.coverage.old-policy-stale",
 "review.discovery.untagged-visible","review.discovery.empty-commit-covered",
-"review.api.reject-checkout-path","review.api.cross-run-refused"
+"review.api.reject-checkout-path","review.api.cross-run-refused",
+"review.audit.closed-run-coverage-read-only","review.audit.closed-run-review-write-denied"
 ]
 def xid(n):return f"00000000-0000-4000-8000-{n:012x}"
 def expect(value,message):
@@ -94,10 +95,13 @@ class Fixture:
   if "5.1" in self.linked_components:migrations+=["0003-hierarchy","0032-execution-packets","0005-scheduling"]
   if any(name.startswith("7.") for name in self.linked_components):migrations+=["0007-graph"]
   if "12.1" in self.linked_components:migrations+=["0008-provider-coordination","0012-runner-registry"]
+  migrations+=['0017-review']
+  # The real14 fixture already ran the complete04 migration coordinator. Check
+  # exact admission evidence here; never replay DDL or replace its guards.
   for name in migrations:
    raw=(ROOT/("services/hyperfide/migrations/"+name+".sql")).read_bytes();version=int(name[:4])
-   f.sql(raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','sha256:"+hashlib.sha256(raw).hexdigest()+"');")
-  f.sql((ROOT/"services/hyperfide/migrations/0017-review.sql").read_text())
+   applied=f.sql('SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=$1',[version])
+   expect(len(applied)==1 and applied[0]['name']==name and applied[0]['checksum']=='sha256:'+hashlib.sha256(raw).hexdigest(),'trusted complete migration admission is missing or differs from exact source: '+name)
   f.sql("INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES($1,$2,$3,'review-fixture','https://example.invalid/review.git')",[ORG,f.ids["project"],REPOSITORY])
   f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[ORG,REPOSITORY,self.pinned])
   f.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[ORG,RUN,REPOSITORY,self.pinned])
@@ -138,6 +142,25 @@ class Fixture:
   return self.ok("review.coverage.inspect",dict(SCOPE,repository_id=REPOSITORY,source_object_id=commit,**fields))
  def save(self,failed):
   (evidence_dir(self.task)/"observations.json").write_text(json.dumps({"task":self.task,"scope":"task-component","frontier_reviews":0,"service_operations":self.events,"failed_ids":failed},sort_keys=True)+"\n")
+def closed_audit(f,action,body,component,write=False):
+ if not hasattr(f,'audit_keys'):
+  f.identity.add_principal('audit-coordinator','COORDINATOR')
+  f.identity.add_principal('audit-leader','LEADER')
+  f.audit_keys=[('operator','OPERATOR'),('audit-coordinator','COORDINATOR'),('audit-leader','LEADER')]
+ observed=[]
+ for state in ['STOPPING','STOPPED','SUCCEEDED','FAILED','CANCELLED']:
+  f.identity.sql("UPDATE hyperfide.runs SET state=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[ORG,RUN,state])
+  for key,role in f.audit_keys:
+   before=f.identity.sql("SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[ORG,RUN])[0]['generation']
+   if write:
+    f.reject(action,body,'AUTH_RUN_CLOSED',component=component,key=key);outcome='AUTH_RUN_CLOSED'
+   else:
+    result=f.ok(action,body,component=component,key=key);expect(result.get('status') in ['INCOMPLETE','STALE','COMPLETE'],'closed audit read lost immutable coverage history');outcome=result['status']
+   after=f.identity.sql("SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[ORG,RUN])[0]['generation']
+   expect(before==after,'closed-run audit or denied mutation advanced semantic authority')
+   observed.append({'state':state,'role':role,'outcome':outcome,'generation_before':before,'generation_after':after})
+ (evidence_dir(f.task)/('closed-run-audit-write.json' if write else 'closed-run-audit-read.json')).write_text(json.dumps({'scope':'SIGNED_PRIVILEGED_AUDIT','action':action,'observations':observed},sort_keys=True)+'\n')
+
 def cases(f):
  def configure():
   result=f.configure();expect(result["watchers"]==10 and result["mode"]=="ALL_COMMITS","configured watcher policy not exact")
@@ -199,6 +222,8 @@ def cases(f):
  check(IDS[17],empty)
  check(IDS[18],lambda:f.reject("review.commits.discover",dict(SCOPE,repository_id=REPOSITORY,checkout_path="/root"),"REVIEW_INPUT_INVALID"))
  check(IDS[19],lambda:f.reject("review.commits.discover",dict(SCOPE,run_id=xid(404),repository_id=REPOSITORY),"REVIEW_SCOPE_DENIED"))
+ check(IDS[20],lambda:closed_audit(f,'review.coverage.inspect',dict(SCOPE,repository_id=REPOSITORY,source_object_id=f.second),'17.1'))
+ check(IDS[21],lambda:closed_audit(f,'review.policy.configure',dict(SCOPE,policy=f.watcher_policy),'17.1',write=True))
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-review-17-1-") as temp:
   f=Fixture("17.1",Path(temp))

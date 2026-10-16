@@ -26,7 +26,9 @@
     "review.discovery.untagged-visible",
     "review.discovery.empty-commit-covered",
     "review.api.reject-checkout-path",
-    "review.api.cross-run-refused"
+    "review.api.cross-run-refused",
+    "review.audit.closed-run-coverage-read-only",
+    "review.audit.closed-run-review-write-denied"
   ],
   "argv": [
     "python3",
@@ -62,7 +64,9 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "review/database-absence.json",
-    "review/observations.json"
+    "review/observations.json",
+    "review/closed-run-audit-read.json",
+    "review/closed-run-audit-write.json"
   ],
   "source_files": [
     "tests/hyperfide/cases/tasks/17_1.py",

@@ -112,8 +112,8 @@ CREATE TABLE hyperfide.review_reproduction_jobs (
  execution_plane text NOT NULL DEFAULT 'REMOTE' CHECK(execution_plane='REMOTE'),
  state text NOT NULL DEFAULT 'PENDING' CHECK(state IN ('PENDING','LEASED','RUNNING','PASSED','FAILED','CANCELLED','OUTCOME_UNKNOWN')),
  last_error_code text CHECK(last_error_code IS NULL OR length(last_error_code) BETWEEN 1 AND 128),
- runner_session_id uuid, runner_boot_id uuid, workspace_path text,
- reservation_id uuid, slot_id uuid, allocation_generation bigint CHECK(allocation_generation>0), worker_session_id uuid, sandbox_id uuid, sandbox_boot_generation bigint,
+ runner_session_id uuid, runner_boot_id uuid, runner_slot_generation bigint CHECK(runner_slot_generation>0), workspace_path text,
+ reservation_id uuid, slot_id uuid, allocation_id uuid, allocation_generation bigint CHECK(allocation_generation>0), worker_session_id uuid, sandbox_id uuid, sandbox_boot_generation bigint,
  lease_generation bigint NOT NULL DEFAULT 0 CHECK(lease_generation>=0), lease_expires_at timestamptz,
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,id), UNIQUE(organisation_id,run_id,request_id),
@@ -122,9 +122,9 @@ CREATE TABLE hyperfide.review_reproduction_jobs (
  FOREIGN KEY(organisation_id,run_id,reservation_id) REFERENCES hyperfide.reservations(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,run_id,worker_session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,sandbox_id,sandbox_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
- CHECK(state<>'RUNNING' OR (runner_session_id IS NOT NULL AND runner_boot_id IS NOT NULL AND workspace_path IS NOT NULL AND length(workspace_path) BETWEEN 1 AND 4096)),
+ CHECK(state<>'RUNNING' OR (runner_session_id IS NOT NULL AND runner_boot_id IS NOT NULL AND runner_slot_generation IS NOT NULL AND workspace_path IS NOT NULL AND length(workspace_path) BETWEEN 1 AND 4096)),
  CHECK(state NOT IN ('LEASED','RUNNING') OR
- (reservation_id IS NOT NULL AND slot_id IS NOT NULL AND allocation_generation IS NOT NULL AND allocation_generation>0 AND worker_session_id IS NOT NULL AND sandbox_id IS NOT NULL AND sandbox_boot_generation IS NOT NULL AND sandbox_boot_generation>0 AND lease_generation>0 AND lease_expires_at IS NOT NULL))
+ (reservation_id IS NOT NULL AND slot_id IS NOT NULL AND allocation_id IS NOT NULL AND allocation_generation IS NOT NULL AND allocation_generation>0 AND worker_session_id IS NOT NULL AND sandbox_id IS NOT NULL AND sandbox_boot_generation IS NOT NULL AND sandbox_boot_generation>0 AND lease_generation>0 AND lease_expires_at IS NOT NULL))
 );
 CREATE TABLE hyperfide.review_reproduction_receipts (
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, id uuid NOT NULL DEFAULT gen_random_uuid(), job_id uuid NOT NULL,
@@ -166,3 +166,18 @@ CREATE TRIGGER commit_references BEFORE INSERT ON hyperfide.review_commits FOR E
 CREATE TRIGGER reproduction_identity BEFORE UPDATE OR DELETE ON hyperfide.review_reproduction_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','request_id','request_digest','candidate_digest','input_manifest_digest','snapshot','template_id','qualification_scope','execution_plane');
 
 CREATE UNIQUE INDEX review_one_active_job_per_watcher ON hyperfide.review_obligations(organisation_id,run_id,lease_session_id) WHERE state='RUNNING';
+
+CREATE FUNCTION hyperfide.review_reproduction_runner_binding_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.runner_session_id IS NOT NULL AND
+  (NEW.runner_session_id IS DISTINCT FROM OLD.runner_session_id OR NEW.runner_boot_id IS DISTINCT FROM OLD.runner_boot_id OR
+   NEW.runner_slot_generation IS DISTINCT FROM OLD.runner_slot_generation OR NEW.workspace_path IS DISTINCT FROM OLD.workspace_path OR
+   NEW.reservation_id IS DISTINCT FROM OLD.reservation_id OR NEW.allocation_id IS DISTINCT FROM OLD.allocation_id OR
+   NEW.allocation_generation IS DISTINCT FROM OLD.allocation_generation OR NEW.slot_id IS DISTINCT FROM OLD.slot_id OR
+   NEW.sandbox_id IS DISTINCT FROM OLD.sandbox_id OR NEW.sandbox_boot_generation IS DISTINCT FROM OLD.sandbox_boot_generation) THEN
+  RAISE EXCEPTION 'dispatched reproduction physical and allocation bindings are immutable' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER reproduction_runner_binding BEFORE UPDATE ON hyperfide.review_reproduction_jobs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.review_reproduction_runner_binding_guard();
