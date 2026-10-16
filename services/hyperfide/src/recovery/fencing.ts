@@ -3,9 +3,9 @@ import fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {FoundationError,object} from '../policy/programme.js';
-import type {ProviderIsolationBinding,ProviderIsolationReceipt} from '../providers/placement.js';
+import type {ProviderIsolationBinding,ProviderIsolationReceipt,ProviderIsolationObservationJournal,ProviderWriterObservation} from '../providers/placement.js';
 import {assertInvocation,type InvocationContext} from '../transport/protocol.js';
-import {assertIsolationPermit,type VerifiedIsolationPermit} from '../identity/credentials.js';
+import {assertIsolationPermit,assertWriterObservationPermit,type VerifiedWriterObservationPermit,type VerifiedIsolationPermit} from '../identity/credentials.js';
 import {assertPrimaryTransaction,type TransactionGateway} from '../storage/transactions.js';
 
 type Binding={deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string;authority_digest:string;authority_nonce:string|null};
@@ -13,7 +13,13 @@ export interface ExternalFenceReceipt {deployment_id:string;operation_id:string;
 export interface ExternalWriterFence {isolate(input:{deployment_id:string;operation_id:string;source_epoch:string|null;signal?:AbortSignal}):Promise<ExternalFenceReceipt>}
 export type WriterIsolationReceipt=ProviderIsolationReceipt;
 export type IsolationJournalBinding=ProviderIsolationBinding;
-export interface IsolationJournalRecord {binding:IsolationJournalBinding;state:'PREPARED'|'UNKNOWN'|'ISOLATED';receipt:WriterIsolationReceipt|null;observations:readonly {operation:unknown;outcome:unknown}[]}
+export interface IsolationJournalRecord {binding:IsolationJournalBinding;state:'PREPARED'|'UNKNOWN'|'ISOLATED';receipt:WriterIsolationReceipt|null;observations:readonly {operation:unknown;outcome:unknown}[];writer_observations?:readonly WriterObservationJournalEntry[]}
+export type WriterObservationReceipt=ProviderWriterObservation;
+export type WriterObservationJournalEntry=Parameters<ProviderIsolationObservationJournal['recordObservation']>[0];
+export interface WriterObservationJournal {
+ read():Promise<IsolationJournalRecord|null>;
+ recordObservation(value:WriterObservationJournalEntry):Promise<void>;
+}
 export interface IsolationJournal {
  read():Promise<IsolationJournalRecord|null>;
  prepare(binding:IsolationJournalBinding):Promise<{created:boolean;state:IsolationJournalRecord}>;
@@ -95,6 +101,12 @@ export class FileExternalFenceJournal {
  }
 
  async withOperation<T>(binding:Binding,body:(resource:(key:string)=>IsolationJournal,recordCompletion:(receipt:ExternalFenceReceipt)=>Promise<void>)=>Promise<T>):Promise<T>{
+  return this.operate(binding,body,false);
+ }
+ async withObservation<T>(binding:Binding,body:(resource:(key:string)=>WriterObservationJournal)=>Promise<T>):Promise<T>{
+  return this.operate(binding,(_resource,_completion,observations)=>body(observations),true);
+ }
+ private async operate<T>(binding:Binding,body:(resource:(key:string)=>IsolationJournal,recordCompletion:(receipt:ExternalFenceReceipt)=>Promise<void>,observations:(key:string)=>WriterObservationJournal)=>Promise<T>,existingOnly:boolean):Promise<T>{
   checkBinding(binding);
   if(!path.isAbsolute(this.directory)||path.resolve(this.directory)!==this.directory)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Canonical absolute private journal directory required');
   const info=await fs.lstat(this.directory);
@@ -106,6 +118,14 @@ export class FileExternalFenceJournal {
   try{
    try{lock=await fs.open(lockname,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);await lock.writeFile(canonical({binding,pid:process.pid}));await lock.sync();await root.sync();}
    catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')fail('EXTERNAL_FENCE_IN_PROGRESS','An existing durable operation lock requires ownership reconciliation');throw e}
+   let document:JournalDocument={schema_version:1,binding,authorizations:[{authority_digest:binding.authority_digest,authority_nonce:binding.authority_nonce}],resources:{}};
+   try{
+    const source=await fs.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+    try{const stat=await source.stat();if(!stat.isFile()||stat.nlink!==1||(stat.mode&0o077)!==0||stat.uid!==process.getuid()||stat.size>1048576)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Fence journal record is not a bounded private regular file');document=JSON.parse(await source.readFile('utf8')) as JournalDocument}
+    finally{await source.close()}
+    if(document.schema_version!==1||!object(document.binding)||canonical(coreBinding(document.binding))!==canonical(coreBinding(binding))||!Array.isArray(document.authorizations)||document.authorizations.length<1||document.authorizations.length>16||document.authorizations.some(a=>!object(a)||!digest(a.authority_digest)||a.authority_nonce!==null&&!uuid(a.authority_nonce))||!document.authorizations.some(a=>a.authority_digest===document.binding.authority_digest&&a.authority_nonce===document.binding.authority_nonce)||!object(document.resources))fail('EXTERNAL_FENCE_JOURNAL_CONFLICT','Fence operation already has a different immutable topology or epoch');
+    for(const [key,row] of Object.entries(document.resources)){if(!object(row)||!object(row.binding)||key!==row.binding.reference_key||!['PREPARED','UNKNOWN','ISOLATED'].includes(row.state))fail('EXTERNAL_FENCE_JOURNAL_INVALID','Invalid durable isolation record');checkResourceBinding(row.binding);if(!Array.isArray(row.observations)||row.observations.length>8||row.observations.some(o=>!object(o)||!object(o.operation)||!object(o.outcome)))fail('EXTERNAL_FENCE_JOURNAL_INVALID','Invalid persisted provider observations');if(row.receipt)checkReceipt(row.receipt,binding,row.binding);if(row.state==='ISOLATED'&&row.receipt?.status!=='ISOLATED')fail('EXTERNAL_FENCE_JOURNAL_INVALID','Isolation record has no physical receipt')}
+   }catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;if(existingOnly)fail('EXTERNAL_FENCE_OBSERVATION_UNPREPARED','Observation requires an existing durable isolation operation')}
    if(binding.authority_nonce!==null){
     const noncePath=path.join(anchor,'nonce-'+binding.authority_nonce+'.json');let nonce:fs.FileHandle|undefined;
     try{nonce=await fs.open(noncePath,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);await nonce.writeFile(canonical(binding));await nonce.sync();await root.sync()}
@@ -115,14 +135,6 @@ export class FileExternalFenceJournal {
      try{const stat=await prior.stat();if(!stat.isFile()||stat.nlink!==1||stat.uid!==process.getuid()||(stat.mode&0o077)!==0||stat.size>8192||await prior.readFile('utf8')!==canonical(binding))fail('EXTERNAL_FENCE_NONCE_CONFLICT','Isolation permit nonce already belongs to another durable operation')}finally{await prior.close()}
     }finally{await nonce?.close()}
    }
-   let document:JournalDocument={schema_version:1,binding,authorizations:[{authority_digest:binding.authority_digest,authority_nonce:binding.authority_nonce}],resources:{}};
-   try{
-    const source=await fs.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
-    try{const stat=await source.stat();if(!stat.isFile()||stat.nlink!==1||(stat.mode&0o077)!==0||stat.uid!==process.getuid()||stat.size>1048576)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Fence journal record is not a bounded private regular file');document=JSON.parse(await source.readFile('utf8')) as JournalDocument}
-    finally{await source.close()}
-    if(document.schema_version!==1||!object(document.binding)||canonical(coreBinding(document.binding))!==canonical(coreBinding(binding))||!Array.isArray(document.authorizations)||document.authorizations.length<1||document.authorizations.length>16||document.authorizations.some(a=>!object(a)||!digest(a.authority_digest)||a.authority_nonce!==null&&!uuid(a.authority_nonce))||!document.authorizations.some(a=>a.authority_digest===document.binding.authority_digest&&a.authority_nonce===document.binding.authority_nonce)||!object(document.resources))fail('EXTERNAL_FENCE_JOURNAL_CONFLICT','Fence operation already has a different immutable topology or epoch');
-    for(const [key,row] of Object.entries(document.resources)){if(!object(row)||!object(row.binding)||key!==row.binding.reference_key||!['PREPARED','UNKNOWN','ISOLATED'].includes(row.state))fail('EXTERNAL_FENCE_JOURNAL_INVALID','Invalid durable isolation record');checkResourceBinding(row.binding);if(!Array.isArray(row.observations)||row.observations.length>8||row.observations.some(o=>!object(o)||!object(o.operation)||!object(o.outcome)))fail('EXTERNAL_FENCE_JOURNAL_INVALID','Invalid persisted provider observations');if(row.receipt)checkReceipt(row.receipt,binding,row.binding);if(row.state==='ISOLATED'&&row.receipt?.status!=='ISOLATED')fail('EXTERNAL_FENCE_JOURNAL_INVALID','Isolation record has no physical receipt')}
-   }catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e}
    if(!document.authorizations.some(a=>a.authority_digest===binding.authority_digest&&a.authority_nonce===binding.authority_nonce)){if(document.authorizations.length>=16)fail('EXTERNAL_FENCE_AUTHORIZATION_LIMIT','Isolation operation exhausted its bounded renewed authorization history');document.authorizations.push({authority_digest:binding.authority_digest,authority_nonce:binding.authority_nonce})}
    const save=async()=>{const text=canonical(document);if(Buffer.byteLength(text)>1048576)fail('EXTERNAL_FENCE_JOURNAL_LIMIT','Fence journal exceeds its bounded record size');const temp=filename+'.'+randomUUID()+'.tmp';const target=await fs.open(temp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);try{await target.writeFile(text);await target.sync()}finally{await target.close()}try{await fs.rename(temp,filename);await root.sync()}catch(e){try{await fs.unlink(temp)}catch{}throw e}};
    const serialize=<R>(fn:()=>Promise<R>):Promise<R>=>{const result=queue.then(()=>{if(!active)fail('EXTERNAL_FENCE_JOURNAL_CLOSED','Fence journal capability has expired');return fn()});queue=result.then(()=>{},()=>{});return result};
@@ -147,12 +159,27 @@ export class FileExternalFenceJournal {
      })
     });
    };
+   const observations=(key:string):WriterObservationJournal=>{
+    const original=resource(key);
+    return Object.freeze({read:original.read,recordObservation:(value:WriterObservationJournalEntry)=>serialize(async()=>{
+     const row=Object.hasOwn(document.resources,key)?document.resources[key]:undefined;
+     if(!row||canonical(row.binding)!==canonical(value.binding))fail('EXTERNAL_FENCE_OBSERVATION_UNPREPARED','Observation cannot create or substitute a resource binding');
+     const observed=value.observation;
+     if(!object(observed)||observed.reference_key!==key||observed.operation_id!==binding.operation_id||observed.topology_digest!==row.binding.topology_digest||observed.resource_identity_digest!==row.binding.resource_identity_digest||observed.authority!=='OBSERVATION_ONLY'||!['OBSERVED','UNKNOWN'].includes(observed.status)||!['ABSENT','PRESENT','UNKNOWN'].includes(observed.observed_state)||!['LIVE_PROVIDER','COMPONENT_FIXTURE'].includes(observed.evidence_scope)||!digest(observed.evidence_digest)||value.authorization_digest!==binding.authority_digest||!object(value.provider_observation)||!object(value.provider_observation.operation)||!object(value.provider_observation.outcome))
+      fail('EXTERNAL_FENCE_OBSERVATION_INVALID','Only attributable fresh read evidence may extend the existing operation');
+     checkFresh(observed.observed_at,observed.expires_at,Date.now());
+     if(time(value.authorization_expires_at)<=Date.now())fail('EXTERNAL_FENCE_OBSERVATION_INVALID','Observation authorization expired before persistence');
+     const history=[...(row.writer_observations??[]),structuredClone(value)];
+     if(history.length>8)fail('EXTERNAL_FENCE_JOURNAL_LIMIT','Observation-only history exhausted its bounded record');
+     document.resources={...document.resources,[key]:{...row,writer_observations:history}};await save();
+    })});
+   };
    await save();
    return await body(resource,receipt=>serialize(async()=>{
     if(receipt.deployment_id!==binding.deployment_id||receipt.operation_id!==binding.operation_id||receipt.source_epoch!==binding.source_epoch||receipt.fence_id!==binding.operation_id||!digest(receipt.evidence_digest)||receipt.isolated_writer!=='topology:'+binding.topology_digest.slice(7))fail('EXTERNAL_FENCE_JOURNAL_CONFLICT','Completed fence receipt differs from its immutable topology');
     checkFresh(receipt.observed_at,receipt.expires_at,Date.now());
     document.completion_receipt=structuredClone(receipt);document.completion_receipt_json=JSON.stringify(receipt);await save();
-   }));
+   }),observations);
   }finally{
    await queue;active=false;
    try{if(lock){await lock.close();await fs.unlink(lockname);await root.sync()}}finally{await root.close()}
@@ -226,6 +253,71 @@ export function createExternalWriterFence(config:ExternalFenceTopology,providers
    if(expiresAt<=now)fail('EXTERNAL_FENCE_STALE','Full writer coverage was not observed within one proof interval');
    const completed={deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,fence_id:input.operation_id,isolated_writer:'topology:'+configDigest.slice(7),observed_at:new Date(observedAt).toISOString(),expires_at:new Date(expiresAt).toISOString(),evidence_digest:hash({topology_digest:configDigest,required_writer_ids:trusted.required_writer_ids,admission,resources:receipts,legacy:legacyReceipt})};
    await recordCompletion(completed);return completed;
+  });
+ }});
+}
+
+export interface ExternalFenceObservation {
+ schema_version:1;deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string;
+ status:'OBSERVED'|'UNKNOWN';observed_at:string;expires_at:string;evidence_digest:string;
+ journal_operation_id:string;resource_count:number;isolated_count:number;unknown_count:number;legacy_status:'ISOLATED'|'UNKNOWN';
+ destruction_authority:false;activation_authority:false;
+}
+export interface ProviderWriterObservationCapability {
+ observeConfiguredResource(referenceKey:string,operationId:string,authority:VerifiedWriterObservationPermit,signal:AbortSignal,journal:WriterObservationJournal):Promise<WriterObservationReceipt>;
+}
+/** Observation has separate identity and capability. It cannot prepare or repeat isolation. */
+export function createExternalWriterObserver(config:ExternalFenceTopology,providers:ProviderWriterObservationCapability,legacy:Pick<LegacyWriterBackend,'observeIsolation'>,journal:FileExternalFenceJournal,ownedHost?:ProviderWriterObservationCapability){
+ const trusted=topology(config),topologyDigest=hash(trusted);
+ if(trusted.evidence_scope!=='LIVE_PROVIDER')fail('EXTERNAL_FENCE_EVIDENCE_SCOPE_MISMATCH','Production observation requires live configured resources');
+ if(!providers||typeof providers.observeConfiguredResource!=='function'||!legacy||typeof legacy.observeIsolation!=='function'||!(journal instanceof FileExternalFenceJournal))fail('EXTERNAL_FENCE_BACKEND_UNAVAILABLE','Actual read-only provider observer and existing journal are required');
+ return Object.freeze({observe:async(permit:VerifiedWriterObservationPermit,signal:AbortSignal):Promise<ExternalFenceObservation>=>{
+  const expected={deployment_id:trusted.deployment_id,operation_id:permit?.operation_id,organisation_id:trusted.organisation_id,run_id:trusted.run_id,source_epoch:trusted.source_epoch,topology_digest:topologyDigest};
+  const authorize=()=>{
+   assertWriterObservationPermit(permit,expected);
+   const allowed=permit.resources.map(r=>({reference_key:r.reference_key,topology_digest:r.topology_digest})).sort((a,b)=>a.reference_key.localeCompare(b.reference_key));
+   const required=trusted.resources.map(r=>({reference_key:r.reference_key,topology_digest:r.topology_digest})).sort((a,b)=>a.reference_key.localeCompare(b.reference_key));
+   if(canonical(allowed)!==canonical(required))fail('EXTERNAL_FENCE_AUTHORITY_DENIED','Observation permit must cover exactly the configured resources');
+   signal.throwIfAborted();
+  };
+  authorize();
+  return journal.withObservation({deployment_id:trusted.deployment_id,operation_id:permit.operation_id,source_epoch:trusted.source_epoch,topology_digest:topologyDigest,authority_digest:permit.permit_digest,authority_nonce:permit.nonce},async resource=>{
+   const results:{reference_key:string;observation:WriterObservationReceipt|null;code:string|null}[]=[];
+   for(let index=0;index<trusted.resources.length;index+=8){
+    results.push(...await Promise.all(trusted.resources.slice(index,index+8).map(async target=>{
+     authorize();
+     const backend=target.backend==='PROVIDER'?providers:ownedHost;
+     if(!backend)return {reference_key:target.reference_key,observation:null,code:'EXTERNAL_FENCE_BACKEND_UNAVAILABLE'};
+     const slot=resource(target.reference_key);
+     const before=await slot.read();
+     if(!before)return {reference_key:target.reference_key,observation:null,code:'EXTERNAL_FENCE_OBSERVATION_UNPREPARED'};
+     try{
+      const observed=await backend.observeConfiguredResource(target.reference_key,permit.operation_id,permit,signal,slot);
+      const after=await slot.read(),last=after?.writer_observations?.at(-1);
+      if(!last||canonical(last.observation)!==canonical(observed)||last.authorization_digest!==permit.permit_digest||observed.topology_digest!==target.topology_digest||observed.resource_identity_digest!==before.binding.resource_identity_digest||observed.evidence_scope!=='LIVE_PROVIDER'||observed.authority!=='OBSERVATION_ONLY')
+       fail('EXTERNAL_FENCE_OBSERVATION_INVALID','New provider observation must be durably attributable to the exact resource and current read permit');
+      checkFresh(observed.observed_at,observed.expires_at,Date.now());
+      return {reference_key:target.reference_key,observation:observed,code:null};
+     }catch(error){return {reference_key:target.reference_key,observation:null,code:error instanceof FoundationError?error.code:'EXTERNAL_FENCE_OBSERVATION_UNKNOWN'}}
+    })));
+   }
+   authorize();
+   let legacyReceipt:LegacyWriterReceipt|null=null,legacyStatus:'ISOLATED'|'UNKNOWN'='UNKNOWN';
+   try{
+    const observed=await legacy.observeIsolation({deployment_id:trusted.deployment_id,operation_id:permit.operation_id,source_epoch:trusted.source_epoch,signal});
+    if(observed.deployment_id!==trusted.deployment_id||observed.operation_id!==permit.operation_id||observed.source_epoch!==trusted.source_epoch||observed.topology_digest!==trusted.legacy_topology_digest||observed.status!=='ISOLATED'||observed.visibility?.scope!=='CONFIGURED_PID_NAMESPACE'||observed.visibility.pid_namespace!==trusted.legacy_pid_namespace||observed.visibility.mount_namespace!==trusted.legacy_mount_namespace||observed.admission_disabled!==true||observed.writable_fds!==0||observed.writable_shared_mappings!==0||!Number.isSafeInteger(observed.read_only_aliases)||observed.read_only_aliases!<1||!name(observed.isolated_writer)||!trusted.required_writer_ids.includes(observed.isolated_writer!)||!digest(observed.evidence_digest)||!observed.expires_at)
+     fail('EXTERNAL_FENCE_LEGACY_UNVERIFIED','Legacy read evidence differs from trusted namespace and source');
+    checkFresh(observed.observed_at,observed.expires_at,Date.now());legacyReceipt=observed;legacyStatus='ISOLATED';
+   }catch{/* A missing legacy read is explicit uncertainty, never isolation. */}
+   authorize();
+   const now=Date.now(),isolated=results.filter(r=>r.observation?.status==='OBSERVED'&&r.observation.observed_state==='ABSENT').length;
+   const expiries=results.flatMap(r=>r.observation?[time(r.observation.expires_at)]:[]);if(legacyReceipt?.expires_at)expiries.push(time(legacyReceipt.expires_at));
+   const expires=Math.min(now+30000,time(permit.expires_at),...expiries);
+   if(expires<=now)fail('EXTERNAL_FENCE_STALE','Observation evidence expired during aggregate collection');
+   return {schema_version:1,deployment_id:trusted.deployment_id,operation_id:permit.operation_id,source_epoch:trusted.source_epoch,topology_digest:topologyDigest,
+    status:isolated===trusted.resources.length&&legacyStatus==='ISOLATED'?'OBSERVED':'UNKNOWN',observed_at:new Date(now).toISOString(),expires_at:new Date(expires).toISOString(),
+    evidence_digest:hash({topology_digest:topologyDigest,authorization_digest:permit.permit_digest,resources:results,legacy:legacyReceipt}),journal_operation_id:permit.operation_id,
+    resource_count:trusted.resources.length,isolated_count:isolated,unknown_count:trusted.resources.length-isolated,legacy_status:legacyStatus,destruction_authority:false,activation_authority:false};
   });
  }});
 }
