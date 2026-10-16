@@ -396,18 +396,20 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 11.1 — Publish content-derived environment profiles without live identity
 
-Planning baseline pending · wave 3 · owner `preparation` · clause `11.1`
+Pending · wave 3 · owner `preparation` · clause `11.1`
 
 Requires: 1.4.
 
 1. Pin OS/architecture/toolchains/lock inputs/native CLIs/runner versions and required capabilities in content-derived preparation manifests.
 2. Scan designated canary identities/secrets and active leases from candidate bases; changed recipe/toolchain/locks produce a distinct preparation identity.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+4. Extend only trusted startup configuration for bounded service protocol frame limits, retaining a default of 1 MiB and a hard cap of 64 MiB. Requests and manifest content cannot change their own limits.
+5. Qualify actual service manifest creation and verification above the default frame size using a large synthetic manifest. Reject malformed, oversized or untrusted configuration without weakening strict serialization or response bounds. Preserve the current task status and existing preparation-manifest contracts.
+6. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/preparation/manifests.ts`, `tests/hyperfide/manifests/tasks/11.1.json`, `tests/hyperfide/cases/tasks/11_1.py`, `tests/hyperfide/registrations/11.1.json`, `services/hyperfide/components/11.1.json`.
+Owns: `services/hyperfide/src/preparation/manifests.ts`, `tests/hyperfide/manifests/tasks/11.1.json`, `tests/hyperfide/cases/tasks/11_1.py`, `tests/hyperfide/registrations/11.1.json`, `services/hyperfide/components/11.1.json`, `services/hyperfide/src/components/service.ts`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/11.1.json && python3 tests/hyperfide/qualify.py --case V-040 --manifest tests/hyperfide/manifests/tasks/11.1.json
@@ -419,21 +421,25 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 2.1 — Import pinned run specifications with immutable revision identity
 
-Planning baseline pending · wave 4 · owner `specification` · clause `2.1`
+Pending · wave 4 · owner `specification` · clause `2.1`
 
 Requires: 4.1.
 
 1. Import KVX criteria, task identities, repositories, allowed actions and closure policy into one pinned run revision; export revision-labelled KVX projections.
 2. Reject stale projection writes and preserve declared legacy status as history; load both large fixtures without treating declarations as runtime proof.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+4. Retain the public synthetic V-001 and V-024 component qualifier calls, and append the required private-corpus qualification command with fail-closed shell conjunction. The selected private corpus must exist; its absence or any qualifier/checker failure returns nonzero.
+5. Implement --qualify-private-corpus inside the already-owned task probe. Resolve only trusted ignored fixture references and generate immutable private registry, registration and manifest files entirely under ignored storage. Invoke the canonical qualifier and checker using the private registry/manifest for V-024; no core harness extension is needed.
+6. Preserve the public synthetic manifest without private corpus hashes, counts, paths or provenance. Private receipts remain separate from public component/full-case status, and task verification metadata must not import private content.
+7. Use the trusted ignored source descriptor supplied by the task owner, preserving its restrictive permissions. The private mode must require every explicitly selected source and its canonical private registration; it must not silently shrink the selected corpus. No descriptor contents are copied into public metadata.
+8. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
 Owns: `services/hyperfide/src/spec/import.ts`, `tests/hyperfide/manifests/tasks/2.1.json`, `tests/hyperfide/cases/tasks/2_1.py`, `tests/hyperfide/registrations/2.1.json`, `services/hyperfide/components/2.1.json`.
 
-Verification interface:
+Planned verification:
 
 ```sh
-python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/2.1.json && python3 tests/hyperfide/qualify.py --case V-024 --manifest tests/hyperfide/manifests/tasks/2.1.json
+python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/2.1.json && python3 tests/hyperfide/qualify.py --case V-024 --manifest tests/hyperfide/manifests/tasks/2.1.json && python3 tests/hyperfide/cases/tasks/2_1.py --qualify-private-corpus
 ```
 
 Outputs: `artifacts/hyperfide/tasks/2.1/manifest.json`, `artifacts/hyperfide/tasks/2.1/evidence-index.json`.
@@ -442,7 +448,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 4.2 — Implement bounded primary transaction gateway
 
-Planning baseline pending · wave 4 · owner `storage` · clause `4.2`
+Pending · wave 4 · owner `storage` · clause `4.2`
 
 Requires: 4.1, 1.4.
 
@@ -452,11 +458,13 @@ Requires: 4.1, 1.4.
 4. Own the long-lived per-process shared resource container: bounded primary/replica PostgreSQL pools with service-specific credentials, transaction capability handles, listener connections where needed, cancellation and deterministic shutdown. Components must reuse this container rather than create hidden independent global pools.
 5. Extend the established component registry through an explicit task1.4-to4.2 ownership transfer. Resolve declared same-role dependency capabilities against initialized component instances, reject missing or role-incompatible dependencies before readiness, and dispose dependants before shared resources. Preserve control/provisioner/dispatch process separation; cross-role work remains durable queue/API communication.
 6. Exercise at least two registered components through the actual service dispatcher using the same process-owned PostgreSQL resources; verify bounded connection use, shared committed state and shutdown. Direct helper tests alone do not establish runtime composition.
-7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+7. Take storage/schema.ts ownership from qualified task 4.1 before replacing its module-owned getPool(env)/closePool lifecycle internals with the task 4.2 process-owned shared resource container. Preserve the public facade and schema contracts so other components continue to share the same bounded resources; component shutdown must not prematurely close resources still used by other components.
+8. Preserve checksummed ordered migration-engine ownership in task 4.4. Task 4.2 may expose the shared transaction/resource capability used by that engine, but must not independently implement or claim ownership of a competing migration runner.
+9. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/storage/transactions.ts`, `tests/hyperfide/manifests/tasks/4.2.json`, `tests/hyperfide/cases/tasks/4_2.py`, `tests/hyperfide/registrations/4.2.json`, `services/hyperfide/components/4.2.json`, `services/hyperfide/src/storage/runtime.ts`, `services/hyperfide/src/components/registry.ts`.
+Owns: `services/hyperfide/src/storage/transactions.ts`, `tests/hyperfide/manifests/tasks/4.2.json`, `tests/hyperfide/cases/tasks/4_2.py`, `tests/hyperfide/registrations/4.2.json`, `services/hyperfide/components/4.2.json`, `services/hyperfide/src/storage/runtime.ts`, `services/hyperfide/src/components/registry.ts`, `services/hyperfide/src/storage/schema.ts`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-002 --manifest tests/hyperfide/manifests/tasks/4.2.json && python3 tests/hyperfide/qualify.py --case V-011 --manifest tests/hyperfide/manifests/tasks/4.2.json
@@ -468,19 +476,21 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 10.1 — Build Blaxel coding images with qualified writable storage and mounts
 
-Planning baseline pending · wave 4 · owner `blaxel` · clause `10.1`
+Pending · wave 4 · owner `blaxel` · clause `10.1`
 
-Requires: 8.1, 11.1.
+Requires: 8.1, 11.1, 1.4.
 
 1. Retain sandbox API and compilers/build tools, disable incompatible slimming and size RAM-backed writable overlays versus persistent volumes.
 2. Test mount-over-preloaded paths and pnpm/uv-style symlink/hardlink templates; validate actual toolchains and package resolution after mounting.
 3. Separate deterministic image/storage contract probes from actual image creation/mount/toolchain probes. Real-provider acceptance requires an approved small live manifest with actual package resolution; a simulator receipt cannot satisfy it.
 4. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-5. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+5. Take exclusive package manifest/lock ownership from task1.4 after foundation qualification. Add the qualified pinned Blaxel SDK dependency and update its lockfile as one bounded handoff; preserve all existing runtime/dependency pins.
+6. The inspected @blaxel/core0.3.30 SDK does not expose the required image-slimming control. Use a qualified pinned native Blaxel publisher CLI execution-profile capability and generate its blaxel.toml with [build] slim=false inside the owned images.ts preparation path; SDK-only publication must not silently strip coding toolchains. No new tracked Dockerfile or install script is required by this handoff.
+7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/providers/blaxel/images.ts`, `tests/hyperfide/manifests/tasks/10.1.json`, `tests/hyperfide/cases/tasks/10_1.py`, `tests/hyperfide/registrations/10.1.json`, `services/hyperfide/components/10.1.json`.
+Owns: `services/hyperfide/src/providers/blaxel/images.ts`, `tests/hyperfide/manifests/tasks/10.1.json`, `tests/hyperfide/cases/tasks/10_1.py`, `tests/hyperfide/registrations/10.1.json`, `services/hyperfide/components/10.1.json`, `services/hyperfide/package.json`, `services/hyperfide/package-lock.json`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/10.1.json && python3 tests/hyperfide/qualify.py --case V-039 --manifest tests/hyperfide/manifests/tasks/10.1.json
@@ -492,9 +502,9 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 14.1 — Enroll role-scoped identities bound to intent and boot generation
 
-Planning baseline pending · wave 5 · owner `identity` · clause `14.1`
+Pending · wave 5 · owner `identity` · clause `14.1`
 
-Requires: 4.1, 8.1, 4.2, 1.4.
+Requires: 4.1, 8.1, 4.2, 1.4, 11.1.
 
 1. Keep provider administration credentials only in provisioner scope; exchange one-use/controlled bootstrap grants bound to provisioning intent/boot for runner identity.
 2. Replay enrollment from another sandbox/generation and forge role events; server-side authority rejects access independently of model text.
@@ -503,11 +513,14 @@ Requires: 4.1, 8.1, 4.2, 1.4.
 5. Validate TLS server identity, bounded request/response sizes, deadlines, concurrent request admission and the versioned external protocol envelope. Explicitly map operation identity, idempotency key, payload digest, correlation/causation and expected-version fields to internal dispatch; a JSONL correlation id is not durable idempotency.
 6. Bind an immutable trusted actor/run/role/attempt context to each invocation after authentication. Wire payloads cannot select or replace identity, startup policy or shared resource capabilities. Limit unauthenticated enrollment to valid scoped bootstrap grants; deny non-granted remote operations by default and provide the later task14.4 authorization module an explicit middleware/capability hook. Local stdio access must not bypass remote identity requirements.
 7. Run the listener in an explicit service mode whose lifetime does not depend on stdin remaining open. Qualify real separate-process HTTPS enrollment and authenticated requests, malformed/wrong-peer/wrong-scope requests, startup failure and orderly termination using designated test credentials only.
-8. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+8. Add the owned enrollment SQL migration for durable bootstrap-grant verification/consumption and principal key, expiry, revocation and boot-identity uniqueness under services/hyperfide/migrations/0014-enrollment.sql.
+9. Refuse enrollment service readiness when the required database schema or migration version is absent. Never run DDL or automatic schema migration from enrollment request handling or service startup. Task 14.1 tests may apply the trusted owned SQL fixture explicitly; the production ordered/checksummed runner is owned by task 4.4 and discovers the migration.
+10. Owning this migration file does not add task 4.4 as a predecessor or shift task 14.1 to a later wave. Preserve existing dependencies and the root-authorised preparation/qualification boundary.
+11. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/identity/enrollment.ts`, `tests/hyperfide/manifests/tasks/14.1.json`, `tests/hyperfide/cases/tasks/14_1.py`, `tests/hyperfide/registrations/14.1.json`, `services/hyperfide/components/14.1.json`, `services/hyperfide/src/transport/http.ts`, `services/hyperfide/src/transport/protocol.ts`, `services/hyperfide/src/components/service.ts`, `services/hyperfide/src/components/registry.ts`.
+Owns: `services/hyperfide/src/identity/enrollment.ts`, `tests/hyperfide/manifests/tasks/14.1.json`, `tests/hyperfide/cases/tasks/14_1.py`, `tests/hyperfide/registrations/14.1.json`, `services/hyperfide/components/14.1.json`, `services/hyperfide/src/transport/http.ts`, `services/hyperfide/src/transport/protocol.ts`, `services/hyperfide/src/components/service.ts`, `services/hyperfide/src/components/registry.ts`, `services/hyperfide/migrations/0014-enrollment.sql`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-015 --manifest tests/hyperfide/manifests/tasks/14.1.json && python3 tests/hyperfide/qualify.py --case V-040 --manifest tests/hyperfide/manifests/tasks/14.1.json
@@ -542,18 +555,19 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 15.1 — Publish attributable attempt source and recoverable workspace checkpoints
 
-Planning baseline pending · wave 5 · owner `artifacts` · clause `15.1`
+Pending · wave 5 · owner `artifacts` · clause `15.1`
 
 Requires: 4.1, 11.1, 15.2.
 
 1. Create immutable source/checkpoint manifests preserving repository identity, attempt branches, committed/uncommitted changes, session references and dependency/environment inputs.
 2. Lose a sandbox after a dirty checkpoint and reuse branch names across repositories; verify source identity and complete recovery envelope rather than names alone.
 3. Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.
-4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+4. Take Makefile ownership after foundation task 1.4 to link the existing src/sha256.c implementation into the native component helper path used by checkpoint qualification. Reuse the existing hash implementation and introduce no new dependency. Preserve the standalone component ABI and prior source-discovery validation.
+5. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `src/hyperfide/checkpoint.c`, `tests/hyperfide/manifests/tasks/15.1.json`, `tests/hyperfide/cases/tasks/15_1.py`, `tests/hyperfide/registrations/15.1.json`, `src/hyperfide/components/15.1.kvx`.
+Owns: `src/hyperfide/checkpoint.c`, `tests/hyperfide/manifests/tasks/15.1.json`, `tests/hyperfide/cases/tasks/15_1.py`, `tests/hyperfide/registrations/15.1.json`, `src/hyperfide/components/15.1.kvx`, `Makefile`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-012 --manifest tests/hyperfide/manifests/tasks/15.1.json && python3 tests/hyperfide/qualify.py --case V-043 --manifest tests/hyperfide/manifests/tasks/15.1.json
@@ -588,18 +602,21 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 3.1 — Register leader, manager, wave-package and execution role ownership
 
-Planning baseline pending · wave 5 · owner `hierarchy` · clause `3.1`
+Pending · wave 5 · owner `hierarchy` · clause `3.1`
 
-Requires: 2.1.
+Requires: 2.1, 4.2.
 
 1. Implement leader epochs, accountable manager packages, wave allocations and distinct worker/reviewer/integrator roles.
 2. Expose stable cross-wave manager ownership as proposed selectable policy; retain explicit wave-based manager allocation and auditable handoff.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+4. Add the owned hierarchy migration for scoped leader ownership/generation and manager-package policy, lifecycle and handoff history. Leader generation is distinct from runs.authority_epoch, which identifies restore/platform authority; do not reuse one field for both contracts.
+5. Refuse hierarchy service readiness until the required hierarchy migration is present. Trusted test setup may apply the owned fixture migration; never execute DDL inside hierarchy request handlers. The production ordered/checksummed migration engine remains task 4.4.
+6. Add task 4.2 as an explicit prerequisite because hierarchy transitions consume its primary transaction gateway. Preserve the existing wave; the owned SQL file does not itself add task 4.4 as a predecessor.
+7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/hierarchy/packages.ts`, `tests/hyperfide/manifests/tasks/3.1.json`, `tests/hyperfide/cases/tasks/3_1.py`, `tests/hyperfide/registrations/3.1.json`, `services/hyperfide/components/3.1.json`.
+Owns: `services/hyperfide/src/hierarchy/packages.ts`, `tests/hyperfide/manifests/tasks/3.1.json`, `tests/hyperfide/cases/tasks/3_1.py`, `tests/hyperfide/registrations/3.1.json`, `services/hyperfide/components/3.1.json`, `services/hyperfide/migrations/0003-hierarchy.sql`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-001 --manifest tests/hyperfide/manifests/tasks/3.1.json && python3 tests/hyperfide/qualify.py --case V-008 --manifest tests/hyperfide/manifests/tasks/3.1.json
@@ -611,18 +628,21 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 4.4 — Establish database migration, durability and old-primary fencing
 
-Planning baseline pending · wave 5 · owner `storage` · clause `4.4`
+Pending · wave 5 · owner `storage` · clause `4.4`
 
 Requires: 4.2.
 
 1. Implement checksummed schema migration coordination, authority epoch bootstrap and configurable acknowledged-write durability outside the main failure domain.
 2. Exercise primary loss and old-primary isolation before reopening writes; document and test backup retention/RPO assumptions instead of assuming async replication is lossless.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+4. Take services/hyperfide/src/storage/schema.ts ownership after task 4.2 and add the owned durability migration. Preserve the original authority migration bytes and historical task 4.1 component evidence; new current-state qualification belongs to task 4.4.
+5. Retire general-service bootstrap DDL in favor of a dedicated migration operator role. Transactional migration application uses the qualified shared advisory-lock namespace, ordered discovery and checksums; ordinary service operations must refuse schema-changing privileges and readiness must require the expected applied checksum set.
+6. Qualify privilege separation and readiness refusal against actual disposable PostgreSQL processes. Production authority epoch activation requires trusted external old-primary/control-writer fencing; caller booleans or matching epoch rows do not prove fencing. Component drills do not qualify cloud high availability or independent failure domains.
+7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/storage/durability.ts`, `tests/hyperfide/manifests/tasks/4.4.json`, `tests/hyperfide/cases/tasks/4_4.py`, `tests/hyperfide/registrations/4.4.json`, `services/hyperfide/components/4.4.json`.
+Owns: `services/hyperfide/src/storage/durability.ts`, `tests/hyperfide/manifests/tasks/4.4.json`, `tests/hyperfide/cases/tasks/4_4.py`, `tests/hyperfide/registrations/4.4.json`, `services/hyperfide/components/4.4.json`, `services/hyperfide/migrations/0004-durability.sql`, `services/hyperfide/src/storage/schema.ts`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-009 --manifest tests/hyperfide/manifests/tasks/4.4.json && python3 tests/hyperfide/qualify.py --case V-053 --manifest tests/hyperfide/manifests/tasks/4.4.json
@@ -680,9 +700,9 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 12.1 — Register supervisor boots and isolate writable worker slots
 
-Planning baseline pending · wave 6 · owner `runner` · clause `12.1`
+Pending · wave 6 · owner `runner` · clause `12.1`
 
-Requires: 14.1, 11.1, 1.4.
+Requires: 14.1, 11.1, 1.4, 15.1.
 
 1. Register boot/capability/preparation/slot inventory and allocate separate worktree/build/home/temp/ports with explicit security isolation profiles.
 2. Run colliding builds and credential-sensitive jobs; separate worktrees are not accepted as an OS boundary and unsafe co-location is refused.
@@ -691,11 +711,13 @@ Requires: 14.1, 11.1, 1.4.
 5. Extend the actual scripts/hyperfide-native-components.py build helper alongside Makefile and the native fragment schema. Its validated component source/header/library declarations must support the shared libcurl transport and export a source/link contract usable by the later public CLI build, while excluding duplicate standalone-main definitions.
 6. Implement outbound bootstrap enrollment, supervisor registration, heartbeat and reconnect against task14.1 coordinator HTTPS operations. Enforce explicit endpoint identity, request deadlines, bounded response handling, credential rotation and conservative reconnect/backoff. Sandboxes receive no general PostgreSQL credentials.
 7. Connect the real supervisor process lifecycle to authenticated network registration and slot inventory, using server-returned identity and current boot generation. Prove correct-server success and wrong-certificate/wrong-host/revoked-token failure over actual sockets in a remote disposable fixture.
-8. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+8. For the accepted Ed25519 proof direction, link the native runner/client with libcrypto in addition to libcurl and the qualified TLS backend. Use OpenSSL 3.0 or newer and libcurl 7.85 or newer when relying on EVP *_ex and CURLOPT_PROTOCOLS_STR; pin actual qualified development/runtime versions and headers in the existing remote preparation/build contract. These are native link prerequisites; the main CLI inherits them only when it actually links the native transport.
+9. Use the qualified bounded PureEd25519 EVP signing/verification interface, without homegrown cryptography, for the exact request-byte contract frozen jointly by task 14.1 and the native owner. Preserve TLS peer/hostname verification. Exercise the actual native proof against the task 14.1 HTTPS service, including modified payload, replay, wrong key and revoked identity. Wire details stay provisional until these interoperability probes pass.
+10. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
 Owns: `src/hyperfide/supervisor.c`, `tests/hyperfide/manifests/tasks/12.1.json`, `tests/hyperfide/cases/tasks/12_1.py`, `tests/hyperfide/registrations/12.1.json`, `src/hyperfide/components/12.1.kvx`, `src/hyperfide/transport.c`, `src/hyperfide/transport.h`, `Makefile`, `src/hyperfide/components/schema.kvx`, `scripts/hyperfide-native-components.py`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-015 --manifest tests/hyperfide/manifests/tasks/12.1.json && python3 tests/hyperfide/qualify.py --case V-039 --manifest tests/hyperfide/manifests/tasks/12.1.json
@@ -753,18 +775,21 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 25.1 — Inventory actual SQLite shapes and import historical state with provenance
 
-Planning baseline pending · wave 5 · owner `migration` · clause `25.1`
+Pending · wave 5 · owner `migration` · clause `25.1`
 
 Requires: 4.1, 2.1, 15.2.
 
 1. Read actual tables/columns including same-v18 additive variants; inventory external journals/config/memory/attempt/event/graph/docs evidence and WAL-safe snapshots.
 2. Map IDs by source database/repository/key deterministically, preserve unavailable provenance and import active/forced claims as reconciliation/history rather than qualification.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+4. Add the owned historical-import staging and provenance migration. Preserve historical declared task/attempt state outside live authority tables; never turn imported historical completion into current task ownership or qualification.
+5. Refuse historical-import readiness when the required migration is absent. Trusted test setup may apply the owned SQL fixture; task 4.4 owns production discovery/application. No request-handler DDL or new migration-only predecessor is introduced.
+6. Use the approved Node runtime built-in SQLite API for source snapshots; this amendment requires no package manifest or lockfile dependency change.
+7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/migration/sqlite.ts`, `tests/hyperfide/manifests/tasks/25.1.json`, `tests/hyperfide/cases/tasks/25_1.py`, `tests/hyperfide/registrations/25.1.json`, `services/hyperfide/components/25.1.json`.
+Owns: `services/hyperfide/src/migration/sqlite.ts`, `tests/hyperfide/manifests/tasks/25.1.json`, `tests/hyperfide/cases/tasks/25_1.py`, `tests/hyperfide/registrations/25.1.json`, `services/hyperfide/components/25.1.json`, `services/hyperfide/migrations/0025-sqlite-history.sql`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-018 --manifest tests/hyperfide/manifests/tasks/25.1.json && python3 tests/hyperfide/qualify.py --case V-019 --manifest tests/hyperfide/manifests/tasks/25.1.json && python3 tests/hyperfide/qualify.py --case V-025 --manifest tests/hyperfide/manifests/tasks/25.1.json
@@ -776,19 +801,20 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 9.1 — Implement Railway preparation, disk checkpoints and fresh restore enrollment
 
-Planning baseline pending · wave 7 · owner `railway` · clause `9.1`
+Pending · wave 7 · owner `railway` · clause `9.1`
 
-Requires: 8.1, 11.1, 14.1, 12.1.
+Requires: 8.1, 11.1, 14.1, 12.1, 10.1.
 
 1. Pin Railway SDK/runtime and implement templates, captures, checkpoint ID/key compatibility and same-environment/region preparation affinity.
 2. Fork a sentinel process and file: validate disk restoration and fresh runner identity without assuming process memory survives; reject contaminated preparation.
 3. Component probes may use a recorded deterministic provider contract fixture, labelled as simulated; real disk/fresh-enrollment behavior requires an explicitly approved small live provider manifest before provider acceptance. Missing live credentials block that variant and cannot become a simulator PASS.
 4. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
-5. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
+5. Take exclusive package manifest/lock ownership from completed task10.1 before adding the qualified pinned Railway SDK dependency. Preserve prior Blaxel/runtime pins and all existing task prerequisites; no concurrent shared lockfile editing.
+6. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/providers/railway/preparation.ts`, `tests/hyperfide/manifests/tasks/9.1.json`, `tests/hyperfide/cases/tasks/9_1.py`, `tests/hyperfide/registrations/9.1.json`, `services/hyperfide/components/9.1.json`.
+Owns: `services/hyperfide/src/providers/railway/preparation.ts`, `tests/hyperfide/manifests/tasks/9.1.json`, `tests/hyperfide/cases/tasks/9_1.py`, `tests/hyperfide/registrations/9.1.json`, `services/hyperfide/components/9.1.json`, `services/hyperfide/package.json`, `services/hyperfide/package-lock.json`.
 
-Verification interface:
+Planned verification:
 
 ```sh
 python3 tests/hyperfide/qualify.py --case V-036 --manifest tests/hyperfide/manifests/tasks/9.1.json && python3 tests/hyperfide/qualify.py --case V-038 --manifest tests/hyperfide/manifests/tasks/9.1.json && python3 tests/hyperfide/qualify.py --case V-041 --manifest tests/hyperfide/manifests/tasks/9.1.json

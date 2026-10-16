@@ -183,6 +183,15 @@ def task_errors(tasks: dict, clauses: set, cases: set, mode: str = 'draft') -> l
         elif task_id == '27.1':
             errors.append('task 27.1: bootstrap must run independent harness self-tests before qualification')
         expected_manifest = f'tests/hyperfide/manifests/tasks/{task_id}.json'
+        if task_id == '2.1':
+            public_segments = [
+                ['python3', 'tests/hyperfide/qualify.py', '--case', case,
+                 '--manifest', expected_manifest] for case in ['V-001', 'V-024']]
+            private_segment = ['python3', 'tests/hyperfide/cases/tasks/2_1.py',
+                               '--qualify-private-corpus']
+            if segments != public_segments + [private_segment]:
+                errors.append('task 2.1: requires ordered public V-001/V-024 qualifiers and exact private-corpus suffix joined by &&')
+            qualification_segments = segments[:2]
         if not qualification_segments or any(
                 len(part) != 6 or part[:3] != ['python3', 'tests/hyperfide/qualify.py', '--case']
                 or not re.fullmatch(r'V-\d{3}', part[3])
@@ -249,6 +258,34 @@ def negative_self_tests() -> list[dict]:
         altered = {'1.1': dict(template, **mutation)}
         observed = task_errors(altered, {'1.1'}, {'V-001'})
         checks.append({'fixture': name, 'expected_rejection_observed': any(expected in entry for entry in observed)})
+    public_commands = [
+        f'python3 tests/hyperfide/qualify.py --case {case} --manifest tests/hyperfide/manifests/tasks/2.1.json'
+        for case in ['V-001', 'V-024']]
+    private_command = 'python3 tests/hyperfide/cases/tasks/2_1.py --qualify-private-corpus'
+    exact_command = ' && '.join(public_commands + [private_command])
+    valid_private = {'2.1': dict(template, verify_cmd=exact_command)}
+    checks.append({'fixture': 'valid-task-2.1-private-corpus-suffix',
+                   'expected_rejection_observed': not task_errors(valid_private, {'1.1'}, {'V-001', 'V-024'})})
+    bad_private_commands = [
+        ('missing-private-suffix', ' && '.join(public_commands)),
+        ('missing-first-public-case', ' && '.join(public_commands[1:] + [private_command])),
+        ('missing-second-public-case', ' && '.join(public_commands[:1] + [private_command])),
+        ('reordered-public-cases', ' && '.join(list(reversed(public_commands)) + [private_command])),
+        ('reordered-private-suffix', ' && '.join([private_command] + public_commands)),
+        ('duplicate-private-suffix', exact_command + ' && ' + private_command),
+        ('duplicate-public-case', ' && '.join([public_commands[0]] + public_commands + [private_command])),
+        ('arbitrary-private-flag', ' && '.join(public_commands + [private_command.replace('--qualify-private-corpus', '--other')])),
+        ('arbitrary-private-command', ' && '.join(public_commands + ['python3 other.py'])),
+        ('non-fail-closed-conjunction', public_commands[0] + ' || ' + public_commands[1] + ' && ' + private_command),
+        ('success-after-private-suffix', exact_command + ' && true'),
+    ]
+    for name, command in bad_private_commands:
+        observed = task_errors({'2.1': dict(template, verify_cmd=command)}, {'1.1'}, {'V-001', 'V-024'})
+        checks.append({'fixture': 'task-2.1-' + name, 'expected_rejection_observed': bool(observed)})
+    other_task_command = exact_command.replace('tasks/2.1.json', 'tasks/1.1.json')
+    checks.append({'fixture': 'private-corpus-suffix-on-other-task',
+                   'expected_rejection_observed': bool(task_errors(
+                       {'1.1': dict(template, verify_cmd=other_task_command)}, {'1.1'}, {'V-001', 'V-024'}))})
     long_chain = {f'1.{number}': dict(template, requires=([f'1.{number-1}'] if number > 1 else []))
                   for number in range(1, 301)}
     checks.append({'fixture': 'valid-300-task-chain', 'expected_rejection_observed': not dependency_errors(long_chain)})
