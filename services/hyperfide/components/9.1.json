@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "9.1",
+  "task": "9.1",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/railway/preparation.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "railway.preparation.describe",
+    "railway.preparation.reference.verify",
+    "railway.preparation.restore.observe",
+    "railway.preparation.checkpoint.resolve"
+  ],
+  "requires": [
+    "8.1",
+    "11.1"
+  ]
+}
