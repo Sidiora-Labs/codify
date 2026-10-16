@@ -90,7 +90,7 @@ class Fixture:
   ORG=f.ids["organisation"];RUN=f.ids["run"];SCOPE={"organisation_id":ORG,"run_id":RUN}
   (evidence_dir(self.task)/"fixture-database.json").write_text(json.dumps({"database":f.database})+"\n")
   self.preparing_identity=f
-  migrations=["0002-spec"]
+  migrations=["0002-spec","0004-durability"]
   if "5.1" in self.linked_components:migrations+=["0003-hierarchy","0032-execution-packets","0005-scheduling"]
   if any(name.startswith("7.") for name in self.linked_components):migrations+=["0007-graph"]
   if "12.1" in self.linked_components:migrations+=["0008-provider-coordination","0012-runner-registry"]

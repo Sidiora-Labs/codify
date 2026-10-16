@@ -8,6 +8,8 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
 import {databaseError} from '../storage/schema.js';
 import {assertInvocation} from '../transport/protocol.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
 
 const execute=promisify(execFile);
 export type ReviewDb=Pick<pg.PoolClient,'query'>;
@@ -87,7 +89,8 @@ export function authorizeReview(context:ComponentContext,binding:ReviewScope,rol
  return {invocation,gateway,scope:actual};
 }
 export async function lockReviewDisposition(db:ReviewDb,binding:ReviewScope,exclusive=false):Promise<void>{
- await db.query('SELECT '+(exclusive?'pg_advisory_xact_lock':'pg_advisory_xact_lock_shared')+'(hashtextextended($1,0))',[binding.organisation_id+':'+binding.run_id+':finding-disposition']);
+ assertPrimaryTransaction(db);
+ await (exclusive?writeSemanticDisposition:readSemanticDisposition)(db,binding);
 }
 export async function transaction<T>(context:ComponentContext,binding:ReviewScope,
  operation:(db:ReviewDb)=>Promise<T>,exclusive=true):Promise<T>{
@@ -209,16 +212,16 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
  authorizeReview(context,binding,['OPERATOR','LEADER','COORDINATOR','FEATURE_MANAGER','COMMIT_WATCHER','INTEGRATOR']);
  const config=await repositoryConfig(context.env,repositoryId);
  const snapshot=await heads(config);
- const initial=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[binding.organisation_id,binding.run_id,repositoryId]));
+ const initial=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[binding.organisation_id,binding.run_id,repositoryId]),false);
  if(initial.rows.length!==1)fail('REVIEW_SCOPE_INVALID','Repository is not part of this run');
  const base=oid(initial.rows[0]!.source_object_id);
  await git(config.path,['cat-file','-e',base+'^{commit}']);
  const reachable=(await git(config.path,['rev-list','--reverse','--topo-order','--max-count=100001',...Object.values(snapshot),'--not',base])).trim().split('\n').filter(Boolean).map(oid);
  if(reachable.length>100000)fail('REVIEW_DISCOVERY_LIMIT','History exceeds the explicit discovery bound; narrow the approved branch/base range');
- const existing=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=ANY($4::text[])',[binding.organisation_id,binding.run_id,repositoryId,reachable]));
+ const existing=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=ANY($4::text[])',[binding.organisation_id,binding.run_id,repositoryId,reachable]),false);
  const known=new Set(existing.rows.map(row=>row.source_object_id));
  const selected=reachable.filter(commit=>!known.has(commit)).slice(0,Number(batch));
- const tasks=await transaction(context,binding,db=>db.query<{task_key:string}>('SELECT task_key FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2',[binding.organisation_id,binding.run_id]));
+ const tasks=await transaction(context,binding,db=>db.query<{task_key:string}>('SELECT task_key FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2',[binding.organisation_id,binding.run_id]),false);
  const taskKeys=new Set(tasks.rows.map(task=>task.task_key));
  const commits:Commit[]=[];
  for(const commit of selected){
@@ -231,7 +234,7 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
   commits.push({source_object_id:commit,tree_object_id:tree,parent_objects:parents,changed_paths:paths,
     attribution:{state:!tags.length?'UNATTRIBUTED':unknown.length?'UNKNOWN_TASK':'ATTRIBUTED',spec_tags:tags}});
  }
- const latest=await transaction(context,binding,db=>db.query<{refs:Record<string,string>}>('SELECT refs FROM hyperfide.review_head_observations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 ORDER BY observed_at DESC LIMIT 1',[binding.organisation_id,binding.run_id,repositoryId]));
+ const latest=await transaction(context,binding,db=>db.query<{refs:Record<string,string>}>('SELECT refs FROM hyperfide.review_head_observations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 ORDER BY observed_at DESC LIMIT 1',[binding.organisation_id,binding.run_id,repositoryId]),false);
  const rewrites:Array<{ref:string;previous:string;current:string}>=[];
  for(const [ref,prior]of Object.entries(latest.rows[0]?.refs??{})){
   if(snapshot[ref]&&snapshot[ref]!==prior){
@@ -335,9 +338,11 @@ export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapsho
 export interface ReviewCoverageSummary {
  status:'COMPLETE'|'INCOMPLETE'|'STALE';policy_digest:string;repository_id:string;source_object_id:string;
  required:number;complete:number;missing:Array<Record<string,unknown>>;receipt_ids:string[];limitations:string[];
- authority:'POSTGRESQL_REVIEW_OBLIGATIONS';input_bindings:Record<string,unknown>|null;
+ authority:'POSTGRESQL_REVIEW_OBLIGATIONS';authority_generation:string;input_bindings:Record<string,unknown>|null;
 }
 export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,query:ReviewCoverageQuery):Promise<ReviewCoverageSummary>{
+ assertPrimaryTransaction(db);
+ const semantic=await readSemanticDisposition(db,binding);
  await primary(db);await lockReviewDisposition(db,binding);
  const policyResult=await db.query<{digest:string;active:boolean}>('SELECT digest,active FROM hyperfide.review_policies WHERE organisation_id=$1 AND run_id=$2 AND '+(query.policy_digest?'digest=$3':'active'),query.policy_digest?[binding.organisation_id,binding.run_id,query.policy_digest]:[binding.organisation_id,binding.run_id]);
  if(policyResult.rows.length!==1)fail('REVIEW_POLICY_MISSING','Review policy is unavailable');
@@ -380,7 +385,7 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  if(!rows.rows.length)missing.push({watcher_id:'*',reason:'COMMIT_NOT_DISCOVERED'});
  return {status:stale?'STALE':missing.length?'INCOMPLETE':'COMPLETE',policy_digest:policyDigest,
   repository_id:query.repository_id,source_object_id:query.source_object_id,required:rows.rows.length,complete:receipts.length,
-  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],input_bindings:(()=>{const row=rows.rows.find(row=>row.snapshot&&row.input_manifest_digest===query.input_manifest_digest&&freshness.get(row.input_manifest_digest));if(!row?.snapshot||hash(row.snapshot)!==query.input_manifest_digest)return null;const result:Record<string,unknown>={candidate_digest:row.candidate_digest,input_manifest_digest:row.input_manifest_digest};for(const field of ['schema_version','source_set','task_versions','task_attribution_complete','spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','graph_manifest_id','graph_manifest_digest','graph_source_set','graph_provenance_verified','graph_unprojected_semantic_edge_count','environment_profile_id','environment_digest','toolchain_digest'])result[field]=row.snapshot[field]??null;return result;})(),authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
+  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],input_bindings:(()=>{const row=rows.rows.find(row=>row.snapshot&&row.input_manifest_digest===query.input_manifest_digest&&freshness.get(row.input_manifest_digest));if(!row?.snapshot||hash(row.snapshot)!==query.input_manifest_digest)return null;const result:Record<string,unknown>={candidate_digest:row.candidate_digest,input_manifest_digest:row.input_manifest_digest};for(const field of ['schema_version','source_set','task_versions','task_attribution_complete','spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','graph_manifest_id','graph_manifest_digest','graph_source_set','graph_provenance_verified','graph_unprojected_semantic_edge_count','environment_profile_id','environment_digest','toolchain_digest'])result[field]=row.snapshot[field]??null;return result;})(),authority:'POSTGRESQL_REVIEW_OBLIGATIONS',authority_generation:semantic.generation};
 }
 export function createComponent(_context:ComponentContext):Component{
  const guarded=(fn:(context:ComponentContext,input:unknown)=>Promise<unknown>)=>
@@ -393,7 +398,7 @@ export function createComponent(_context:ComponentContext):Component{
    return transaction(context,scope(v),db=>inspectReviewCoverage(db,scope(v),{repository_id:uuid(v.repository_id),source_object_id:oid(v.source_object_id),
     ...(v.candidate_digest?{candidate_digest:digest(v.candidate_digest)}:{}),
     ...(v.input_manifest_digest?{input_manifest_digest:digest(v.input_manifest_digest)}:{}),
-    ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})}));
+    ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})}),false);
   })
  }};
 }
