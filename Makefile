@@ -1,4 +1,4 @@
-# Codify — agent-native code graph + version control, pure C11.
+# Hyperfide — agent-native code graph + version control, pure C11.
 # Targets: all (default), test, unit, integration, install, uninstall, clean
 
 CC       ?= cc
@@ -9,9 +9,13 @@ LDLIBS    = -lsqlite3 -lpthread -lm
 PREFIX   ?= /usr/local
 BUILD     = build
 
-BIN       = cg
-SRCS      = $(wildcard src/*.c) src/hyperfide/client.c
-SRC_HEADERS = $(wildcard src/*.h)
+BIN       = hyperfide
+COMPAT_BIN = cg
+NATIVE_SRCS = $(shell python3 scripts/hyperfide-native-components.py --sources)
+NATIVE_HEADERS = $(shell python3 scripts/hyperfide-native-components.py --headers)
+NATIVE_LIBRARIES = $(shell python3 scripts/hyperfide-native-components.py --libraries)
+SRCS      = $(sort $(wildcard src/*.c) $(NATIVE_SRCS))
+SRC_HEADERS = $(wildcard src/*.h) $(NATIVE_HEADERS)
 OBJS      = $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 TS_RUNTIME = $(BUILD)/vendor/tree-sitter-lib.o
 # Family-owned grammar directories are discovered without a shared manifest
@@ -24,10 +28,13 @@ LIB       = $(BUILD)/libcg.a          # everything except main.o, for tests
 UNIT_SRCS = $(wildcard tests/unit/test_*.c)
 UNIT_BINS = $(patsubst tests/unit/%.c,$(BUILD)/%,$(UNIT_SRCS))
 
-all: $(BIN)
+all: $(BIN) $(COMPAT_BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,-rpath,'$$ORIGIN/../lib/hyperfide' -o $@ $(OBJS) $(LDLIBS) $(NATIVE_LIBRARIES)
+
+$(COMPAT_BIN): $(BIN)
+	cp $(BIN) $(COMPAT_BIN)
 
 $(BUILD)/%.o: src/%.c $(SRC_HEADERS) | $(BUILD)
 	@mkdir -p $(dir $@)
@@ -49,7 +56,7 @@ $(LIB): $(filter-out $(BUILD)/main.o,$(OBJS))
 	ar rcs $@ $^
 
 $(BUILD)/test_%: tests/unit/test_%.c $(LIB)
-	$(CC) $(CFLAGS) -Isrc -o $@ $< $(filter-out $(BUILD)/main.o,$(OBJS)) $(LDLIBS)
+	$(CC) $(CFLAGS) -Isrc -o $@ $< $(filter-out $(BUILD)/main.o,$(OBJS)) $(LDLIBS) $(NATIVE_LIBRARIES)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -62,14 +69,14 @@ integration: $(BIN)
 
 test: unit integration
 
-install: $(BIN)
+install: $(BIN) $(COMPAT_BIN)
 	install -m 755 $(BIN) $(PREFIX)/bin/$(BIN)
 
 uninstall:
-	rm -f $(PREFIX)/bin/$(BIN)
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(BIN) $(DESTDIR)$(PREFIX)/bin/$(COMPAT_BIN)
 
 clean:
-	rm -rf $(BUILD) $(BIN)
+	rm -rf $(BUILD) $(BIN) $(COMPAT_BIN)
 
 .PHONY: all unit integration test install uninstall clean release
 

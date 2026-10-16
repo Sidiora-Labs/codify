@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "variant": "task:26.2",
+  "task": "26.2",
+  "scope": "task-component",
+  "cases": [
+    "V-026",
+    "V-027",
+    "V-028"
+  ],
+  "assertion_ids": [
+    "entrypoint.actual-nonpublishing-construction",
+    "entrypoint.same-linked-command-digests",
+    "entrypoint.actual-native-and-service-runtime-inventory",
+    "entrypoint.actual-source-commit-pin",
+    "entrypoint.actual-install-custom-prefix",
+    "entrypoint.installed-canonical-version",
+    "entrypoint.installed-legacy-version-parity",
+    "entrypoint.installed-help-argument-parity",
+    "entrypoint.installed-error-exit-json-parity",
+    "entrypoint.idempotent-install",
+    "entrypoint.bundled-runtime-actually-executes",
+    "entrypoint.bundled-python-actual-subreaper-procfs-waitpid",
+    "entrypoint.refuses-unowned-executable",
+    "entrypoint.explicit-legacy-adoption-byte-backup",
+    "entrypoint.legacy-backup-survives-owned-uninstall",
+    "entrypoint.refuses-conflicting-prefix-alias",
+    "entrypoint.refuses-wrong-manifest-pin",
+    "entrypoint.refuses-state-directory-symlink",
+    "entrypoint.compat-shim-actual-sibling-only",
+    "entrypoint.compat-shim-refuses-path-fallback",
+    "entrypoint.compat-shim-rejects-self-recursion",
+    "entrypoint.uninstall-refuses-owner-edited-command",
+    "entrypoint.actual-owned-uninstall-both-names",
+    "entrypoint.uninstall-native-auth-preserved"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/26_2.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [],
+  "fixtures": [
+    "hyperfide",
+    "cg",
+    "build/hyperfide-native"
+  ],
+  "resources": [],
+  "source_files": [
+    "Makefile",
+    "src/help.c",
+    "scripts/install.sh",
+    "scripts/uninstall.sh",
+    "scripts/release.sh",
+    "scripts/hyperfide-entrypoint.sh",
+    "scripts/hyperfide-python.sh",
+    "tests/hyperfide/cases/tasks/26_2.py",
+    "hyperfide",
+    "cg",
+    "build/hyperfide-native"
+  ],
+  "source_roots": [
+    "src/hyperfide/components"
+  ]
+}
