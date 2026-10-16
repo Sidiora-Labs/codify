@@ -55,14 +55,16 @@ static int trusted_environment(const char *config_path){
  int ok=config&&env&&hf_private_read(config_path,65536,&raw,&n)&&hf_json_parse(config,raw)&&hf_json_get(config,"readiness_env_path",file,sizeof file)&&hf_private_read(file,65536,&env_raw,&n)&&hf_json_parse(env,env_raw);
  const char *allowed[]={"HF_PREPARATION_WORKSPACE_ROOT","HF_PREPARATION_BASE_ROOT","HF_PREPARATION_MANIFEST_ROOT","HF_READINESS_MODULE_PATH","HF_READINESS_MODULE_DIGEST","HF_READINESS_NODE_EXECUTABLE","HF_READINESS_NODE_DIGEST","HF_READINESS_SCAN_POLICY_FILE","HF_READINESS_TOOL_BINDINGS_FILE","HF_CREDENTIAL_AVAILABILITY_FILE","HF_INVOCATION_SCOPE_FILE","HF_READINESS_DIAGNOSTICS_ROOT","HF_READINESS_WORKSPACE_MANIFEST_FILE","HF_RUNNER_WORKSPACE_DIGEST"};
  if(ok)ok=hf_json_only(env,0,allowed,sizeof allowed/sizeof allowed[0]);
+ if(ok)ok=clearenv()==0&&setenv("PATH","/usr/local/bin:/usr/bin:/bin",1)==0;
  for(unsigned k=0;ok&&k<sizeof allowed/sizeof allowed[0];++k){int t=hf_json_field(env,0,allowed[k]);char value[4096];if(t>=0)ok=hf_json_string(env,t,value,sizeof value)&&setenv(allowed[k],value,1)==0;}
  free(raw);free(env_raw);free(config);free(env);return ok;
 }
 typedef struct {char commit[65],tree[65],state[72],workspace[72];} MeasuredSource;
-static int readiness(const HfJson *job,int result,const char *config_path,MeasuredSource *measured){
+static int readiness_unprivileged(const HfJson *job,int result,MeasuredSource *measured){
+ if(geteuid()==0)return 0;
  int ready=hf_json_field(job,result,"readiness"),binding=hf_json_field(job,result,"binding");
  char boot[37],profile[72],preparation[72],expected_state[72],expected_workspace[72];
- if(!hf_component_11_3||ready<0||binding<0||!trusted_environment(config_path)||!string_at(job,binding,"boot_id",boot,sizeof boot)||!string_at(job,ready,"profile_digest",profile,sizeof profile)||!string_at(job,ready,"preparation_digest",preparation,sizeof preparation)||!string_at(job,ready,"source_state_digest",expected_state,sizeof expected_state)||!string_at(job,ready,"workspace_digest",expected_workspace,sizeof expected_workspace))return 0;
+ if(!hf_component_11_3||ready<0||binding<0||!string_at(job,binding,"boot_id",boot,sizeof boot)||!string_at(job,ready,"profile_digest",profile,sizeof profile)||!string_at(job,ready,"preparation_digest",preparation,sizeof preparation)||!string_at(job,ready,"source_state_digest",expected_state,sizeof expected_state)||!string_at(job,ready,"workspace_digest",expected_workspace,sizeof expected_workspace))return 0;
  if(setenv("HF_EXECUTION_HOST_CLASS","remote",1)||setenv("HF_SANDBOX_BOOT_ID",boot,1)||setenv("HF_RUNNER_PROFILE_DIGEST",profile,1)||setenv("HF_RUNNER_PREPARATION_DIGEST",preparation,1))return 0;
  char *request=hf_json_raw(job,hf_json_field(job,ready,"readiness_input")),*output=NULL;size_t n=0;FILE *stream=open_memstream(&output,&n);int code=request&&stream?hf_component_11_3("environment.readiness",request,stream):1;if(stream&&fclose(stream))code=1;free(request);
  HfJson *observed=malloc(sizeof *observed);char actual[128];int authority=1;
@@ -79,6 +81,51 @@ static int readiness(const HfJson *job,int result,const char *config_path,Measur
  }
  free(output);free(observed);return ok;
 }
+
+/* Read configuration under the supervisor identity; all filesystem/tool/network
+ * probes run after the dedicated slot UID is dropped. The probe owns the same
+ * UID-generation lock as work and must leave that UID quiescent before return. */
+static int readiness(const HfJson *job,int result,const char *config_path,MeasuredSource *measured,
+                     uid_t uid,gid_t gid,long long deadline,const char *operation){
+ if(!trusted_environment(config_path)||mono()>=deadline)return 0;
+ int descriptor[2],watch_writer=-1;if(pipe2(descriptor,O_CLOEXEC))return 0;
+ pid_t watchdog=hf_slot_watchdog(uid,deadline,&watch_writer,operation);
+ if(watchdog<0){close(descriptor[0]);close(descriptor[1]);return 0;}
+ HfProcessIdentity list[1024];size_t count=0;
+ if(!no_processes(uid,list,&count)||count){close(descriptor[0]);close(descriptor[1]);hf_slot_watchdog_finish(watchdog,&watch_writer);return 0;}
+ int binding=hf_json_field(job,result,"binding");char home[4096],tmp[4096];
+ if(!string_at(job,binding,"home_path",home,sizeof home)||!string_at(job,binding,"tmp_path",tmp,sizeof tmp)){
+  close(descriptor[0]);close(descriptor[1]);hf_slot_watchdog_finish(watchdog,&watch_writer);return 0;
+ }
+ if(prctl(PR_SET_CHILD_SUBREAPER,1)){close(descriptor[0]);close(descriptor[1]);hf_slot_watchdog_finish(watchdog,&watch_writer);return 0;}
+ pid_t supervisor=getpid(),child=fork();
+ if(child==0){
+  close(descriptor[0]);if(descriptor[1]!=3&&dup3(descriptor[1],3,O_CLOEXEC)<0)_exit(125);
+  if(close_range(4,~0U,0)||setgroups(0,NULL)||setgid(gid)||setuid(uid)||
+     prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)||prctl(PR_SET_PDEATHSIG,SIGKILL)||getppid()!=supervisor||
+     setenv("HOME",home,1)||setenv("TMPDIR",tmp,1))_exit(125);
+  MeasuredSource actual={0};int good=readiness_unprivileged(job,result,&actual);
+  if(good&&write(3,&actual,sizeof actual)!=(ssize_t)sizeof actual)good=0;
+  _exit(good?0:1);
+ }
+ close(descriptor[1]);fcntl(descriptor[0],F_SETFL,O_NONBLOCK);
+ size_t used=0;int status=0,finished=0,ok=child>0;
+ while(ok&&!finished&&mono()<deadline){
+  ssize_t n=read(descriptor[0],((unsigned char*)measured)+used,sizeof *measured-used);
+  if(n>0)used+=(size_t)n;
+  else if(n<0&&errno!=EAGAIN&&errno!=EINTR)ok=0;
+  pid_t observed=waitpid(child,&status,WNOHANG);
+  if(observed==child)finished=1;else if(observed<0&&errno!=EINTR)ok=0;
+  if(!finished){struct pollfd fd={descriptor[0],POLLIN,0};(void)poll(&fd,1,10);}
+ }
+ if(child>0&&!finished){(void)kill(child,SIGKILL);while(waitpid(child,&status,0)<0&&errno==EINTR){}}
+ if(used<sizeof *measured){ssize_t n=read(descriptor[0],((unsigned char*)measured)+used,sizeof *measured-used);if(n>0)used+=(size_t)n;}
+ close(descriptor[0]);int absent=terminate_uid(uid);
+ int stopped=hf_slot_watchdog_finish(watchdog,&watch_writer);
+ while(waitpid(-1,NULL,WNOHANG)>0){}
+ return ok&&finished&&WIFEXITED(status)&&WEXITSTATUS(status)==0&&used==sizeof *measured&&absent&&stopped;
+}
+
 typedef struct {char *key,*value;} EnvEntry;
 static int compare_env(const void *a,const void *b){return strcmp(((const EnvEntry*)a)->key,((const EnvEntry*)b)->key);}
 static int environment(const HfJson *j,int plan,EnvEntry entries[64],int *count,char digest[65]){
@@ -117,7 +164,7 @@ int hf_runner_job_execute(const char *request,FILE *out){
  const char *tool=!strcmp(kind,"TEST")?"runner.test.execute":!strcmp(kind,"REVIEW")?"runner.review.execute":!strcmp(kind,"INTEGRATION")?"runner.integration.execute":!strcmp(kind,"INDEX")?"runner.index.execute":!strcmp(kind,"BUILD")?"runner.build.execute":NULL;
  if(!ok||!tool||!hf_runner_job_placement(config,tool)){hf_http_response_free(&response);free(job);return hf_native_error(out,"JOB_SCOPE_OR_PLACEMENT_DENIED");}
  HfProcessIdentity owned[1024];size_t owned_count=0;MeasuredSource measured={0};
- if(!no_processes((uid_t)uid,owned,&owned_count)||owned_count||!readiness(job,result,config,&measured)){hf_http_response_free(&response);free(job);return hf_native_error(out,"ACTUAL_WORKSPACE_NOT_READY_OR_SLOT_BUSY");}
+ if(!no_processes((uid_t)uid,owned,&owned_count)||owned_count||!readiness(job,result,config,&measured,(uid_t)uid,(gid_t)gid,request_started+(timeout<remaining?timeout:remaining)*1000000LL,operation)){hf_http_response_free(&response);free(job);return hf_native_error(out,"ACTUAL_WORKSPACE_NOT_READY_OR_SLOT_BUSY");}
  int root=open(workspace,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW),cwd=-1;struct stat st;if(root>=0&&!fstat(root,&st)&&st.st_uid==(uid_t)uid&&!(st.st_mode&077))cwd=!strcmp(relative_cwd,".")?dup(root):open_beneath(root,relative_cwd,1);
  int array=hf_json_field(job,plan,"argv");char **argv=NULL;int argc=0,binary=-1;char executable[65],environment_digest[65];EnvEntry env[64]={0};int env_count=0;
  ok=cwd>=0&&array>=0&&job->tokens[array].type=='a'&&job->tokens[array].count>0&&job->tokens[array].count<=256;
@@ -139,7 +186,7 @@ int hf_runner_job_execute(const char *request,FILE *out){
  if(child==0){close(gate[1]);close(pipes_in[1]);close(pipes_out[0]);close(pipes_err[0]);pid_t parent=supervisor;prctl(PR_SET_PDEATHSIG,SIGKILL);if(getppid()!=parent)_exit(125);setpgid(0,0);char release;
   if(read(gate[0],&release,1)!=1||release!='G')_exit(125);
   if(dup2(pipes_in[0],0)<0||dup2(pipes_out[1],1)<0||dup2(pipes_err[1],2)<0||fchdir(cwd))_exit(125);
-  char home[4200],tmp[4300];snprintf(home,sizeof home,"%s",workspace);char *slash=strrchr(home,'/');if(!slash)_exit(125);*slash=0;snprintf(tmp,sizeof tmp,"%s/tmp",home);size_t home_length=strlen(home);if(home_length+6>=sizeof home)_exit(125);strcat(home,"/home");
+  char home[4096],tmp[4096];if(!string_at(job,binding,"home_path",home,sizeof home)||!string_at(job,binding,"tmp_path",tmp,sizeof tmp))_exit(125);
   if(clearenv()||setenv("PATH","/usr/local/bin:/usr/bin:/bin",1)||setenv("HOME",home,1)||setenv("TMPDIR",tmp,1))_exit(125);
   for(int k=0;k<env_count;++k)if(setenv(env[k].key,env[k].value,1))_exit(125);
   if(setgroups(0,NULL)||setgid((gid_t)gid)||setuid((uid_t)uid)||prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0))_exit(125);
