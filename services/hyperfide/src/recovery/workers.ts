@@ -1,6 +1,6 @@
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
-import {record,scopeOf,uuid,positive,recoveryTransaction,operationReplay,finishOperation,readControlSnapshot,capability,isExecutionControls} from './control.js';
+import {record,scopeOf,uuid,positive,recoveryTransaction,operationReplay,finishOperation,isRecoverySnapshotReader,capability,isExecutionControls} from './control.js';
 
 export function createComponent(_context:ComponentContext):Component{
  return {apiVersion:1,actions:{
@@ -39,6 +39,6 @@ export function createComponent(_context:ComponentContext):Component{
     await finishOperation(tx,scope,id,result);return result;
    });
   },
-  'recovery.worker.inventory':(input,context)=>{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=>readControlSnapshot(tx,scope),false,true);}
+  'recovery.worker.inventory':(input,context)=>{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=>capability(context,'24.1','recovery.snapshots.v1',isRecoverySnapshotReader).read(tx,scope),false,true);}
  }};
 }
