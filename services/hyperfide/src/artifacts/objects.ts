@@ -5,13 +5,17 @@ import {FoundationError} from '../policy/programme.js';
 import {assertInvocation} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
 
 const MAX_OBJECT=256*1024,MAX_MANIFEST=512*1024,MAX_CHUNKS=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^sha256:[0-9a-f]{64}$/;
 const BACKEND='s3-v1';
 export const ARTIFACT_ACTIONS=Object.freeze(['artifact.object.put','artifact.object.read','artifact.object.inspect','artifact.object.reconcile','artifact.manifest.commit','artifact.manifest.read','artifact.pending.list','artifact.object.locate'] as const);
-type Scope={organisation_id:string;run_id:string};
+export type ArtifactScope={organisation_id:string;run_id:string};
+type Scope=ArtifactScope;
+export interface ArtifactReference{artifact_id:string;receipt_id:string;digest:string;size_bytes:string}
+export interface ArtifactReceipt extends ArtifactScope{schema_version:1;receipt_id:string;artifact_id:string;digest:string;size_bytes:string;storage_backend:string;storage_key:string;completed_at:string}
 type Invocation={principal:{organisation_id:string;run_id:string;role:string};guard:(tx:QuerySession)=>Promise<void>;signal:AbortSignal};
 type RequestContext=ComponentContext&{invocation?:Invocation};
 type Retention={retention_class:string;retention_until:string|null;retention_hold:boolean};
@@ -120,6 +124,23 @@ function receipt(row:Artifact):unknown{
  if(row.status!=='COMPLETE'||!row.completed_at)return null;
  const binding={schema_version:1,organisation_id:row.organisation_id,run_id:row.run_id,artifact_id:row.id,digest:row.digest,size_bytes:row.size_bytes,storage_backend:row.storage_backend,storage_key:row.storage_key,completed_at:iso(row.completed_at)};
  return {...binding,receipt_id:hash(JSON.stringify(binding))};
+}
+/**
+ * Pins a durable metadata binding in the caller's guarded primary transaction.
+ * Physical byte verification remains a separate artifact-store operation.
+ */
+export async function assertCompleteArtifactReference(tx:PrimaryTransaction,scope:ArtifactScope,reference:ArtifactReference):Promise<Readonly<ArtifactReceipt>>{
+ assertPrimaryTransaction(tx);
+ const organisation=uuid(scope.organisation_id),run=uuid(scope.run_id),id=uuid(reference.artifact_id);
+ const expectedDigest=digest(reference.digest),expectedReceipt=digest(reference.receipt_id);
+ const expectedSize=decimal(reference.size_bytes,9223372036854775807n);
+ const result=await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[organisation,run,id]);
+ const row=result.rows[0];
+ if(!row||row.status!=='COMPLETE'||!row.completed_at)fail('ARTIFACT_NOT_COMPLETE','Artifact reference is unavailable');
+ if(row.digest!==expectedDigest||row.size_bytes!==expectedSize)fail('ARTIFACT_BINDING_CONFLICT','Artifact reference differs from immutable metadata');
+ const binding=receipt(row) as ArtifactReceipt|null;
+ if(!binding||binding.receipt_id!==expectedReceipt)fail('ARTIFACT_BINDING_CONFLICT','Artifact receipt differs from immutable metadata');
+ return Object.freeze(binding);
 }
 function envelope(row:Artifact,availability:'VERIFIED'|'ABSENT'|'UNKNOWN',extra:Record<string,unknown>={}):Record<string,unknown>{
  return {outcome:availability==='VERIFIED'&&row.status==='COMPLETE'?'SUCCEEDED':'UNKNOWN',availability,artifact:publicArtifact(row),receipt:availability==='VERIFIED'?receipt(row):null,authority:'NONE',live_qualification:'NOT_EVALUATED',...extra};
