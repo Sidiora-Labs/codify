@@ -238,3 +238,60 @@ CREATE TABLE hyperfide.provider_remote_operations (
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,sandbox_id,boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation)
 );
+
+
+-- Live runtime evidence is separate from reusable prepared-base evidence.
+-- The actual native verifier/receipt publisher supplies facts; provider state
+-- alone cannot create a READY observation.
+CREATE TABLE hyperfide.runtime_environment_observations (
+ organisation_id uuid NOT NULL,
+ run_id uuid NOT NULL,
+ id uuid NOT NULL,
+ sandbox_id uuid NOT NULL,
+ boot_generation bigint NOT NULL CHECK(boot_generation>=1),
+ boot_id uuid NOT NULL,
+ slot_id uuid NOT NULL,
+ profile_id uuid NOT NULL,
+ profile_digest hyperfide.digest NOT NULL,
+ preparation_digest hyperfide.digest NOT NULL,
+ readiness_digest hyperfide.digest NOT NULL,
+ source_digest hyperfide.digest NOT NULL,
+ source_repository_id uuid NOT NULL,
+ source_object_id hyperfide.git_oid NOT NULL,
+ source_tree_id hyperfide.git_oid NOT NULL,
+ source_bindings jsonb NOT NULL CHECK(jsonb_typeof(source_bindings)='array' AND jsonb_array_length(source_bindings)>0 AND octet_length(source_bindings::text)<=1048576),
+ workspace_digest hyperfide.digest,
+ native_operation_id uuid NOT NULL,
+ input_digest hyperfide.digest NOT NULL,
+ command_digest hyperfide.digest NOT NULL,
+ stdout_artifact_digest hyperfide.digest NOT NULL,
+ execution_receipt_digest hyperfide.digest NOT NULL,
+ verification_receipt_digest hyperfide.digest NOT NULL,
+ manifest_artifact_digest hyperfide.digest NOT NULL,
+ state text NOT NULL CHECK(state IN ('READY','NOT_READY','STALE','REVOKED')),
+ failure_code text,
+ observed_at timestamptz NOT NULL,
+ expires_at timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK(expires_at>observed_at),
+ CHECK(state<>'READY' OR failure_code IS NULL),
+ PRIMARY KEY(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,sandbox_id,boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
+ FOREIGN KEY(organisation_id,boot_id) REFERENCES hyperfide.sandbox_boots(organisation_id,boot_id),
+ FOREIGN KEY(organisation_id,sandbox_id,slot_id,boot_generation) REFERENCES hyperfide.worker_slots(organisation_id,sandbox_id,id,boot_generation),
+ FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
+ FOREIGN KEY(organisation_id,source_repository_id,source_object_id) REFERENCES hyperfide.source_objects(organisation_id,repository_id,object_id),
+ FOREIGN KEY(organisation_id,run_id,stdout_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,run_id,manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest)
+);
+CREATE INDEX runtime_environment_latest ON hyperfide.runtime_environment_observations(organisation_id,run_id,sandbox_id,boot_generation,slot_id,observed_at DESC,created_at DESC);
+CREATE FUNCTION hyperfide.runtime_environment_immutable() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+BEGIN
+ IF (to_jsonb(NEW)-'state') IS DISTINCT FROM (to_jsonb(OLD)-'state') OR
+    (NEW.state<>OLD.state AND NOT(OLD.state='READY' AND NEW.state IN ('STALE','REVOKED'))) THEN
+  RAISE EXCEPTION 'Runtime observation identity/evidence is immutable';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER runtime_environment_immutable BEFORE UPDATE ON hyperfide.runtime_environment_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.runtime_environment_immutable();
