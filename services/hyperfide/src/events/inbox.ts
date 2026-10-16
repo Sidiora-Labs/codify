@@ -157,6 +157,11 @@ export async function bootstrapConsumer(tx:PrimaryTransaction,input:SnapshotBoot
     [s.organisation_id,s.run_id,consumer]);
   return result;
 }
+export interface EventInboxCapability {receive:typeof receive;replay:typeof replay;bootstrapConsumer:typeof bootstrapConsumer}
+export function isEventInboxCapability(value:unknown):value is EventInboxCapability {
+  const v=value as Partial<EventInboxCapability>|null;
+  return !!v&&typeof v.receive==='function'&&typeof v.replay==='function'&&typeof v.bootstrapConsumer==='function';
+}
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
   const component={apiVersion:1 as const,capabilities:{'events.inbox.v1':Object.freeze({receive,replay,bootstrapConsumer})},actions:{
