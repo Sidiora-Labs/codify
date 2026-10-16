@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "10.4",
+  "task": "10.4",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/blaxel/recovery.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "blaxel.recovery.describe",
+    "blaxel.recovery.plan",
+    "blaxel.recovery.preview",
+    "blaxel.recovery.enrollment"
+  ],
+  "requires": [
+    "10.3",
+    "8.2",
+    "14.1"
+  ]
+}
