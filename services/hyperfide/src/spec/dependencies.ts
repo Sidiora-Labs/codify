@@ -155,6 +155,24 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
     predecessor_spec_generation:targetGeneration,predecessor_spec_revision_id:targetRevision,predecessor_repository_id:repository,integration_ref:ref,milestone});
   }
  }
+
+ const acceptedBindings=await tx.query(
+ 'SELECT d.*,d.revision::text AS source_spec_generation,d.predecessor_spec_generation::text FROM hyperfide.task_dependencies d '+
+ 'JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.run_id AND t.id=d.task_id AND t.spec_generation=d.revision '+
+ 'WHERE d.organisation_id=$1 AND d.run_id=$2 LIMIT 200001',[scope.organisation_id,scope.run_id]);
+ if(acceptedBindings.rows.length>MAX_EDGES)fail('SPEC_GRAPH_LIMIT','Stored current dependency bindings exceed the validation limit');
+ const expectedBindings=new Map(edges.map(edge=>[[edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,edge.source_spec_generation].join(':'),edge]));
+ for(const binding of acceptedBindings.rows){
+  const owner=nodes.get(scope.run_id+':'+binding.task_id);
+  if(!owner)continue;
+  if(binding.binding_schema_version!==1){diagnostic('DEPENDENCY_LEGACY_BINDING_UNSUPPORTED',owner);continue;}
+  const expected=expectedBindings.get([binding.task_id,binding.predecessor_run_id,binding.predecessor_task_id,binding.milestone,binding.source_spec_generation].join(':'));
+  if(!expected){diagnostic('DEPENDENCY_UNDECLARED_BINDING',owner);continue;}
+  if(expected.predecessor_spec_generation!==binding.predecessor_spec_generation||expected.predecessor_spec_revision_id!==binding.predecessor_spec_revision_id||
+   expected.predecessor_repository_id!==binding.predecessor_repository_id||expected.integration_ref!==binding.integration_ref)
+   diagnostic('DEPENDENCY_ACCEPTED_BINDING_STALE',owner);
+ }
+
  const colors=new Map<string,number>();
  for(const start of adjacency.keys()){
   if(colors.has(start))continue;
