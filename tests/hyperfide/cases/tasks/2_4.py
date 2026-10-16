@@ -11,6 +11,7 @@ ac_1 = "An actual executable obligation"
 ac_2 = "Second exact criterion"
 [acceptance.1]
 req = "1.1"
+checks = ["actual-check"]
 [acceptance.2]
 req = "2.1"
 [req.1.extra]
@@ -19,6 +20,7 @@ ac_1 = "Unused namespace"
 notes = "No clause association"
 [acceptance.4]
 req = "1.2"
+checks = ["actual-check"]
 [task.1]
 wave = 1
 reqs = ["1.1"]
@@ -43,6 +45,22 @@ acceptance_ids = ["absent"]
 wave = 2
 reqs = ["1.1", "1.2"]
 acceptance_ids = ["1", "4"]
+[task.6]
+wave = 2
+reqs = ["1.1"]
+acceptance_ids = ["1"]
+[task.7]
+wave = 2
+reqs = ["1.1"]
+acceptance_ids = ["1"]
+verify_cmd = "printf accepted-task-command"
+artifacts = ["proof.json"]
+[task.8]
+wave = 2
+reqs = ["1.1"]
+acceptance_ids = ["1"]
+verify_cmd = "printf captured-evidence"
+artifacts = []
 '''
 OBS=[]
 FAILED=[]
@@ -56,16 +74,18 @@ def check(ident,callback):
 def artifact_root():
     path=Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/task-2.4-auth-standalone'));path.mkdir(parents=True,exist_ok=True);return path
 def setup(f):
-    for version,name in [(2,'0002-spec')]:
+    for version,name in [(2,'0002-spec'),(4,'0004-durability')]:
         raw=(ROOT/('services/hyperfide/migrations/'+name+'.sql')).read_bytes()
         f.sql("BEGIN;\n"+raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
     f.ids.update({key:str(uuid.uuid4()) for key in ['repository','accepted_spec','package','package2','task1','task2','task3','task4','task5']})
     i=f.ids
-    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=SOURCE.encode(),cwd=ROOT))
-    intent={'schema_version':1,'revision_digest':sha(b'accepted-envelope'),'source_digest':sha(SOURCE.encode()),'repositories':[{'repository_id':i['repository'],'source_object_id':'a'*40,'integration_ref':'refs/heads/main'}],'allowed_actions':f.actions,'closure_policy':{'required_evidence':['actual-check'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
+    executable=str(Path(sys.executable).resolve())
+    source=SOURCE+'\n[proof]\nrubric_digest = '+json.dumps(sha(b'rubric'))+'\n[proof.check.actual-check]\n'+''.join(key+' = '+json.dumps(value)+'\n' for key,value in {'argv':[executable,'-c','raise SystemExit(1)',''],'executable_digest':sha(Path(executable).read_bytes()),'timeout_ms':600000,'required_artifacts':['proof.json'],'input_keys':['source']}.items())+'[proof.review.1.1]\nreviewers = '+json.dumps([i['operator']])+'\nrubric_digest = '+json.dumps(sha(b'review-rubric'))+'\n'
+    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
+    intent={'schema_version':1,'revision_digest':sha(b'accepted-envelope'),'source_digest':sha(source.encode()),'repositories':[{'repository_id':i['repository'],'source_object_id':'a'*40,'integration_ref':'refs/heads/main'}],'allowed_actions':f.actions,'closure_policy':{'required_evidence':['actual-check'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
     f.sql("INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url,object_format) VALUES($1,$2,$3,'fixture','https://example.invalid/fixture.git','sha1')",[i['organisation'],i['project'],i['repository']])
     f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id,object_type) VALUES($1,$2,$3,'commit')",[i['organisation'],i['repository'],'a'*40])
-    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[i['organisation'],i['project'],i['accepted_spec'],sha(SOURCE.encode()),SOURCE,json.dumps(intent),intent['revision_digest']])
+    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[i['organisation'],i['project'],i['accepted_spec'],sha(source.encode()),source,json.dumps(intent),intent['revision_digest']])
     f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[i['organisation'],i['run'],i['accepted_spec']])
     f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$3,state='PENDING_VALIDATION',state_version=2 WHERE organisation_id=$1 AND id=$2",[i['organisation'],i['run'],i['accepted_spec']])
     f.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i['organisation'],i['run'],i['repository'],'a'*40])
@@ -92,8 +112,22 @@ def success(f,action,payload):
     return result['result']
 def refused(f,action,payload,code):
     status,result=invoke(f,action,payload)
-    expect(status==200 and result.get('ok') is False and result.get('error',{}).get('code')==code,'Real HTTPS action did not return expected '+code)
+    expect(status==200 and result.get('ok') is False and result.get('error',{}).get('code')==code,'Real HTTPS action did not return expected '+code+'; observed '+str(result.get('error',{}).get('code')))
 def inspection(value):return {key:value[key] for key in ['run_id','task_id','spec_revision_id','spec_generation']}
+
+def advance_run_snapshot(f):
+    current=f.sql("SELECT r.spec_generation::text,r.state_version::text,s.source_content,s.document FROM hyperfide.runs r JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.id=$2",[f.ids['organisation'],f.ids['run']])[0]
+    source=current['source_content']+'\n# An unrelated accepted run revision\n'
+    document=copy.deepcopy(current['document']);document['source_digest']=sha(source.encode())
+    document['parsed']=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
+    accepted={key:document[key] for key in ['schema_version','source_digest','repositories','allowed_actions','closure_policy','provenance']}
+    document['revision_digest']=sha(json.dumps(accepted,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode())
+    spec=str(uuid.uuid4());generation=str(int(current['spec_generation'])+1)
+    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[f.ids['organisation'],f.ids['project'],spec,document['source_digest'],source,json.dumps(document),document['revision_digest']])
+    f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$3,$4)",[f.ids['organisation'],f.ids['run'],generation,spec])
+    f.sql("UPDATE hyperfide.runs SET spec_generation=$3,spec_revision_id=$4,state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.ids['organisation'],f.ids['run'],generation,spec])
+    return {'run_id':f.ids['run'],'spec_revision_id':spec,'spec_generation':generation,'state_version':str(int(current['state_version'])+1)}
+
 def probe(f):
     value=proof_input(f);saved={}
     check('proof.missing-registry',lambda:refused(f,'spec.proof.inspect',inspection(value),'PROOF_REGISTRY_MISSING'))
@@ -108,7 +142,7 @@ def probe(f):
         expect(success(f,'spec.proof.inspect',inspection(value))['registry_digest']==saved['registry_digest'],'Registry was lost on service restart')
     check('proof.storage.restart',restart)
     check('proof.register.replay',lambda:expect(success(f,'spec.proof.register',value)['registry_digest']==saved['registry_digest'],'Replay changed registry'))
-    conflict=copy.deepcopy(value);conflict['policy']['rubric_digest']=sha(b'changed')
+    conflict=copy.deepcopy(value);conflict['policy']['inputs']['graph']=sha(b'changed')
     check('proof.register.immutable-conflict',lambda:refused(f,'spec.proof.register',conflict,'PROOF_REGISTRY_CONFLICT'))
     mutations=[
       ('empty-clauses',lambda p:p.update(clauses=[])),
@@ -134,6 +168,10 @@ def probe(f):
       ('empty-input-keys',lambda p:p['checks'][0].update(input_keys=[])),
       ('missing-input',lambda p:p['inputs'].pop('graph')),
       ('unidentified-input',lambda p:p['inputs'].update(graph='unknown')),
+      ('substituted-command',lambda p:p['checks'][0].update(argv=['/usr/bin/true'])),
+      ('substituted-artifact',lambda p:p['checks'][0].update(required_artifacts=['unrelated.json'])),
+      ('substituted-digest',lambda p:p['checks'][0].update(executable_digest=sha(b'unrelated'))),
+      ('substituted-rubric',lambda p:p.update(rubric_digest=sha(b'unaccepted'))),
       ('unknown-policy-key',lambda p:p.update(status='done')),
       ('unknown-mode',lambda p:p['clauses'][0].update(mode='DECLARED_DONE')),
     ]
@@ -175,11 +213,13 @@ def probe(f):
       ('empty-reviewers',lambda p:p['clauses'][0].update(reviewers=[])),
       ('non-identity-reviewer',lambda p:p['clauses'][0].update(reviewers=['reviewer'])),
       ('unknown-rubric',lambda p:p['clauses'][0].update(rubric_digest='unknown')),
+      ('unaccepted-reviewer',lambda p:p['clauses'][0].update(reviewers=[str(uuid.uuid4())])),
+      ('unaccepted-rubric',lambda p:p['clauses'][0].update(rubric_digest=sha(b'unaccepted-review'))),
     ]:
         candidate=copy.deepcopy(review);mutation(candidate['policy'])
         check('proof.review.'+name,lambda candidate=candidate:refused(f,'spec.proof.review.register',candidate,'PROOF_MAPPING_INVALID'))
     def existing_tx():
-        script="import{createRequire}from'node:module';const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg');import{loadProofObligations}from'./services/hyperfide/dist/spec/obligations.js';const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();try{await c.query('BEGIN');const r=await loadProofObligations(c,JSON.parse(process.env.HF_PROOF_PINS));if(r.registry_digest!==process.env.HF_PROOF_EXPECTED)throw Error('mismatch');await c.query('ROLLBACK');}finally{await c.end();}"
+        script="import{createResourceContainer}from'./services/hyperfide/dist/storage/runtime.js';import{loadProofObligations}from'./services/hyperfide/dist/spec/obligations.js';const c=createResourceContainer({role:'control',env:process.env,signal:new AbortController().signal});try{await c.gateway.withPrimaryTransaction({timeoutMs:5000},async tx=>{const r=await loadProofObligations(tx,JSON.parse(process.env.HF_PROOF_PINS));if(r.registry_digest!==process.env.HF_PROOF_EXPECTED)throw Error('mismatch');});}finally{await c.close();}"
         env=f.env.copy();env.update(HF_PROOF_PINS=json.dumps(dict(inspection(value),organisation_id=f.ids['organisation'])),HF_PROOF_EXPECTED=saved['registry_digest'])
         result=subprocess.run(['node','--input-type=module','-e',script],cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
         expect(result.returncode==0,'Existing primary transaction loader failed')
@@ -187,7 +227,7 @@ def probe(f):
     def concurrent():
         from concurrent.futures import ThreadPoolExecutor
         left=proof_input(f,'task5');left['policy']['clauses'].append({'id':'1.2','mode':'EXECUTABLE','acceptance_ids':['4'],'checks':['actual-check']})
-        right=copy.deepcopy(left);right['policy']['rubric_digest']=sha(b'other-concurrent')
+        right=copy.deepcopy(left);right['policy']['inputs']['graph']=sha(b'other-concurrent')
         with ThreadPoolExecutor(max_workers=2) as pool:responses=list(pool.map(lambda p:invoke(f,'spec.proof.register',p),[left,right]))
         expect(sum(status==200 and result.get('ok') is True for status,result in responses)==1,'Concurrent policies did not produce exactly one winner')
         expect(any(result.get('error',{}).get('code')=='PROOF_REGISTRY_CONFLICT' for _,result in responses),'Concurrent loser did not observe immutable conflict')
@@ -203,6 +243,42 @@ def probe(f):
         status,result=invoke(f,'spec.proof.register',value,key='provisioner')
         expect(status==200 and result.get('ok') is False and result.get('error',{}).get('code')=='ACTION_DENIED','Provisioner registered proof authority')
     check('proof.auth.role-refused',role)
+
+    def accepted_task_command():
+        candidate=proof_input(f,'task7');p=candidate['policy'];shell=str(Path('/bin/bash').resolve())
+        p['rubric_digest']=f.criteria;p['checks']=[{'id':'task-command','argv':[shell,'-c','printf accepted-task-command'],'executable_digest':sha(Path(shell).read_bytes()),'timeout_ms':600000,'required_artifacts':['proof.json'],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}]
+        p['clauses'][0]['checks']=['task-command']
+        expect(success(f,'spec.proof.register',candidate)['policy']['checks'][0]['argv'][2]=='printf accepted-task-command','Accepted whole-task command changed')
+        candidate['policy']['checks'][0]['argv'][2]='true'
+        refused(f,'spec.proof.register',candidate,'PROOF_MAPPING_INVALID')
+    check('proof.accepted-task-command.exact-adapter',accepted_task_command)
+
+    def accepted_empty_artifacts():
+        candidate=proof_input(f,'task8');p=candidate['policy'];shell=str(Path('/bin/bash').resolve())
+        p['rubric_digest']=f.criteria;p['checks']=[{'id':'captured-command','argv':[shell,'-c','printf captured-evidence'],'executable_digest':sha(Path(shell).read_bytes()),'timeout_ms':600000,'required_artifacts':[],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}]
+        p['clauses'][0]['checks']=['captured-command']
+        expect(success(f,'spec.proof.register',candidate)['policy']['checks'][0]['required_artifacts']==[],'Explicit accepted empty artifact inventory was not preserved')
+    check('proof.accepted-task-command.explicit-empty-artifacts',accepted_empty_artifacts)
+
+    def legacy_unbound():
+        candidate=proof_input(f,'task6');candidate['policy']['checks'][0]['argv']=['/usr/bin/true']
+        p=candidate['policy'];registry_digest=sha(json.dumps(p,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode())
+        f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,2,$4,$5,$6,$7)",[f.ids['organisation'],f.ids['run'],f.ids['task6'],f.ids['accepted_spec'],f.criteria,registry_digest,json.dumps(p)])
+        refused(f,'spec.proof.inspect',inspection(candidate),'PROOF_MAPPING_INVALID')
+    check('proof.legacy.unbound-registry-refused',legacy_unbound)
+
+    history={}
+    def unchanged_history():
+        history.update(advance_run_snapshot(f))
+        expect(success(f,'spec.proof.inspect',inspection(value))['registry_digest']==saved['registry_digest'],'Unrelated run revision invalidated unchanged current task proof')
+        replay=copy.deepcopy(value);replay['state_version']=history['state_version']
+        expect(success(f,'spec.proof.register',replay)['registry_digest']==saved['registry_digest'],'Historical current-task replay did not retain accepted clause authority')
+    check('proof.history.unchanged-task-retained',unchanged_history)
+    def changed_history():
+        f.sql("UPDATE hyperfide.tasks SET spec_generation=$4,spec_revision_id=$5,criteria_digest=$6,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[f.ids['organisation'],f.ids['run'],f.ids['task1'],history['spec_generation'],history['spec_revision_id'],sha(b'new-current-task-criteria')])
+        refused(f,'spec.proof.inspect',inspection(value),'PROOF_REGISTRY_MISSING')
+    check('proof.history.changed-task-rejects-old-policy',changed_history)
+
     def revoked():
         before=f.sql("SELECT count(*)::int n FROM hyperfide.proof_registries")[0]['n']
         f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED' WHERE credential_id=$1",[f.ids['operator']])

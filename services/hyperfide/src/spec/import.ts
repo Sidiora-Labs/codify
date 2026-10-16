@@ -5,7 +5,10 @@ import {createHash} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {getPool} from '../storage/schema.js';
+import {invocationOf,gatewayOf} from '../identity/enrollment.js';
+import type {InvocationContext,AuthorityTransaction} from '../transport/protocol.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 
 export interface KvxField {key:string;raw:string;value:unknown;line:number}
 export interface KvxSection {name:string;line:number;fields:Record<string,KvxField>}
@@ -43,7 +46,7 @@ export function canonical(value:unknown):string{
  return JSON.stringify(value);
 }
 export const digest=(value:string|Buffer):string=>'sha256:'+createHash('sha256').update(value).digest('hex');
-function derivedId(value:string):string{
+export function derivedId(value:string):string{
  const hex=createHash('sha256').update(value).digest('hex').slice(0,32).split('');
  hex[12]='8';hex[16]=((parseInt(hex[16]!,16)&3)|8).toString(16);
  const v=hex.join('');return v.slice(0,8)+'-'+v.slice(8,12)+'-'+v.slice(12,16)+'-'+v.slice(16,20)+'-'+v.slice(20);
@@ -174,7 +177,7 @@ export interface StoredIntent {
  closure_policy:ImportEnvelope['closure_policy'];provenance:ImportEnvelope['provenance'];parsed:KvxDocument;runtime_wave_offset:number;
 }
 function value(section:KvxSection,key:string):unknown{return section.fields[key]?.value;}
-function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feature_key:string;declared_wave:unknown;wave:number;package_key:string}[]{
+export function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feature_key:string;declared_wave:unknown;wave:number;package_key:string}[]{
  const features=new Set(parsed.sections.filter(section=>section.name.startsWith('feature.')).map(section=>section.name.slice(8)));
  const programme=String(parsed.sections.find(section=>section.name==='meta')?.fields.slug?.value??'programme');
  const offset=parsed.sections.some(section=>section.name.startsWith('task.')&&value(section,'wave')===0)?1:0;
@@ -190,7 +193,8 @@ function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feat
   return {section,key,feature_key,declared_wave,wave:Math.max(1,wave),package_key};
  });
 }
-async function primary(client:pg.PoolClient):Promise<void>{
+export interface SpecTransaction {query<Row extends pg.QueryResultRow = pg.QueryResultRow>(text:string,values?:unknown[]):Promise<pg.QueryResult<Row>>}
+async function primary(client:SpecTransaction):Promise<void>{
  const result=await client.query<{replica:boolean}>('SELECT pg_is_in_recovery() AS replica');
  if(result.rows[0]?.replica)fail('PRIMARY_REQUIRED','Specification authority requires the primary database');
 }
@@ -199,7 +203,7 @@ function storageFailure(error:unknown):never{
  fail('STORAGE_UNAVAILABLE','PostgreSQL rejected specification operation');
 }
 export interface PinnedRun {id:string;spec_revision_id:string;spec_generation:string;state_version:string;state:string;source_content:string;source_digest:string;document:StoredIntent}
-export async function loadPinnedRun(client:pg.Pool|pg.PoolClient,scope:SpecScope):Promise<PinnedRun>{
+export async function loadPinnedRun(client:SpecTransaction,scope:SpecScope):Promise<PinnedRun>{
  const rows=await client.query<PinnedRun>(
  'SELECT r.id,r.spec_revision_id,r.spec_generation::text,r.state_version::text,r.state,s.source_content,s.source_digest,s.document FROM hyperfide.runs r JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.project_id=$2 AND r.id=$3',
  [scope.organisation_id,scope.project_id,scope.run_id]);
@@ -211,18 +215,25 @@ function summary(run:PinnedRun):unknown{
  spec_generation:run.spec_generation,state_version:run.state_version,state:run.state,validation_status:run.state==='PENDING_VALIDATION'?'PENDING':'NOT_ASSERTED',
  counts:run.document.parsed.counts};
 }
-export async function importRunTransaction(client:pg.PoolClient,scope:SpecScope,raw:unknown):Promise<unknown>{
- const expected=digest(await fs.readFile(new URL('../../migrations/0002-spec.sql',import.meta.url)));
- const readiness=await client.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
- if(readiness.rows.length!==1||readiness.rows[0]!.name!=='0002-spec'||readiness.rows[0]!.checksum!==expected)
-  fail('SPEC_SCHEMA_NOT_INITIALISED','Apply the exact versioned specification migration before importing');
- const input=validateImport(raw,scope),source=await readPinnedSource(scope.root,input.source),parsed=parseKvx(source.text);
+export async function prepareAcceptedIntent(scope:SpecScope,raw:unknown,rawSource?:Buffer){
+ const input=validateImport(raw,scope);
+ const source=rawSource===undefined?await readPinnedSource(scope.root,input.source):{bytes:rawSource,text:new TextDecoder('utf-8',{fatal:true}).decode(rawSource)};
+ if(source.bytes.length!==Number(input.source.size_bytes)||digest(source.bytes)!=='sha256:'+input.source.sha256||!Buffer.from(source.text,'utf8').equals(source.bytes)||source.text.includes('\0'))fail('DIGEST_MISMATCH','Stored proposed intent differs from its immutable source pin');
+ const parsed=parseKvx(source.text);
  if(parsed.sections.some(section=>section.name==='hyperfide.projection'))fail('PROJECTION_WRITE_FORBIDDEN','Projections cannot replace authoritative specification state');
  const accepted={schema_version:1,source_digest:digest(source.bytes),repositories:[...input.repositories].sort((a,b)=>a.repository_id.localeCompare(b.repository_id)),
  allowed_actions:[...input.allowed_actions].sort(),closure_policy:input.closure_policy,provenance:input.provenance};
  const revision_digest=digest(canonical(accepted)),tasks=taskDefinitions(parsed);
  const document:StoredIntent={...accepted,schema_version:1,revision_digest,parsed,runtime_wave_offset:tasks.some(task=>task.declared_wave===0)?1:0};
  const specId=derivedId(scope.organisation_id+':'+scope.project_id+':'+revision_digest);
+ return {input,source,parsed,tasks,document,specId,revision_digest,accepted};
+}
+export async function importRunTransaction(client:SpecTransaction,scope:SpecScope,raw:unknown):Promise<unknown>{
+ const expected=digest(await fs.readFile(new URL('../../migrations/0002-spec.sql',import.meta.url)));
+ const readiness=await client.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
+ if(readiness.rows.length!==1||readiness.rows[0]!.name!=='0002-spec'||readiness.rows[0]!.checksum!==expected)
+  fail('SPEC_SCHEMA_NOT_INITIALISED','Apply the exact versioned specification migration before importing');
+ const {input,source,tasks,document,specId,revision_digest,accepted}=await prepareAcceptedIntent(scope,raw);
   await primary(client);
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id]);
   const existing=await client.query('SELECT id FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id]);
@@ -287,7 +298,7 @@ function current(run:PinnedRun,input:Record<string,unknown>):void{
  if(input.revision_digest!==run.document.revision_digest||input.spec_generation!==run.spec_generation||input.state_version!==run.state_version)
   fail('STALE_PROJECTION','Projection no longer identifies current authoritative state');
 }
-export async function exportProjection(pool:pg.Pool,scope:SpecScope,input:unknown):Promise<unknown>{
+export async function exportProjection(pool:SpecTransaction,scope:SpecScope,input:unknown):Promise<unknown>{
  const request=scoped(input,scope,['run_id','revision_digest','cursor','max_bytes']);
  if(typeof request.revision_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(request.revision_digest)||
  !Number.isSafeInteger(request.max_bytes)||(request.max_bytes as number)<1||(request.max_bytes as number)>196608)
@@ -309,21 +320,41 @@ export async function exportProjection(pool:pg.Pool,scope:SpecScope,input:unknow
  return {projection_header:header,source_digest:run.source_digest,source_size_bytes:String(bytes.length),offset_bytes:String(offset),
  chunk_base64:bytes.subarray(Number(offset),end).toString('base64'),next_cursor:end===bytes.length?null:cursor};
 }
-export function createComponent(context:ComponentContext):Component{
- const action=(execute:(pool:pg.Pool,scope:SpecScope,input:unknown)=>Promise<unknown>)=>async(input:unknown):Promise<unknown>=>{
-  if(context.signal.aborted)fail('SPEC_CLOSED','Specification component is shutting down');
-  const scope=specScope(context);try{return await execute(getPool(context.env),scope,input);}catch(error){return storageFailure(error);}
- };
+
+export async function specTransaction<T>(context:ComponentContext,mode:'READ'|'WRITE',body:(tx:AuthorityTransaction,invocation:InvocationContext)=>Promise<T>):Promise<T>{
+ const invocation=invocationOf(context),scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
+ return gatewayOf(context).withPrimaryTransaction({timeoutMs:30000,maxRetries:2,signal:invocation.signal,guard:async tx=>{
+  assertPrimaryTransaction(tx);
+  await(mode==='WRITE'?writeSemanticDisposition(tx,scope):readSemanticDisposition(tx,scope));
+  await invocation.guard(tx);
+ }},tx=>body(tx,invocation));
+}
+async function authenticatedScope(tx:AuthorityTransaction,context:ComponentContext,i:InvocationContext):Promise<SpecScope>{
+ const row=(await tx.query('SELECT project_id,authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[i.principal.organisation_id,i.principal.run_id])).rows[0];
+ if(!row||!context.env.HF_SPEC_ALLOWED_ROOT||!path.isAbsolute(context.env.HF_SPEC_ALLOWED_ROOT))fail('SPEC_CONFIG_INVALID','Trusted source root and accepted run required');
+ return {organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,project_id:row.project_id,authority_epoch:row.authority_epoch,
+ root:context.env.HF_SPEC_ALLOWED_ROOT,allowed_actions:i.principal.allowed_actions};
+}
+export function createComponent(_startup:ComponentContext):Component{
+ const action=(write:boolean,execute:(tx:SpecTransaction,scope:SpecScope,input:unknown)=>Promise<unknown>)=>
+  async(input:unknown,context:ComponentContext)=>specTransaction(context,write?'WRITE':'READ',async(tx,i)=>{
+   if(write&&!['OPERATOR','LEADER','COORDINATOR'].includes(i.principal.role))fail('ACTION_DENIED','Role cannot import accepted intent');
+   assertPrimaryTransaction(tx);
+   const scope=await authenticatedScope(tx,context,i);
+   return execute(tx,scope,input);
+  });
  return {apiVersion:1,actions:{
-  'spec.import':action(importRun),
-  'spec.inspect':action(async(pool,scope,input)=>{scoped(input,scope,['run_id']);return summary(await loadPinnedRun(pool,scope));}),
-  'spec.export':action(exportProjection),
-  'spec.projection.check':action(async(pool,scope,input)=>{
+  // Fresh intake is the explicit offline bootstrap; authenticated import may
+  // only replay the already accepted run that the current principal belongs to.
+  'spec.import':action(true,importRunTransaction),
+  'spec.inspect':action(false,async(tx,scope,input)=>{scoped(input,scope,['run_id']);return summary(await loadPinnedRun(tx,scope));}),
+  'spec.export':action(false,exportProjection),
+  'spec.projection.check':action(false,async(tx,scope,input)=>{
    const request=scoped(input,scope,['run_id','revision_digest','spec_generation','state_version']);
    if(typeof request.revision_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(request.revision_digest)||
     typeof request.spec_generation!=='string'||!DECIMAL.test(request.spec_generation)||
     typeof request.state_version!=='string'||!DECIMAL.test(request.state_version))fail('INVALID_REQUEST','Projection requires exact revision labels');
-   current(await loadPinnedRun(pool,scope),request);return {current:true,writable:false};
+   current(await loadPinnedRun(tx,scope),request);return {current:true,writable:false};
   })
  }};
 }

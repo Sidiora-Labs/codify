@@ -1,10 +1,11 @@
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import type {AuthorityTransaction} from '../transport/protocol.js';
-import {identityTransaction} from '../identity/enrollment.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {validIntegrationRef} from './import.js';
+import {validIntegrationRef,specTransaction} from './import.js';
 import {loadProofObligations} from './obligations.js';
 
 type Tx=AuthorityTransaction;
@@ -16,7 +17,8 @@ export interface AcceptedDependency {
  predecessor_spec_generation:string;predecessor_spec_revision_id:string;
  predecessor_repository_id:string|null;integration_ref:string|null;milestone:'QUALIFIED'|'INTEGRATED';
 }
-interface Task {package_key:string;package_wave:number;id:string;task_key:string;definition:Record<string,any>;wave:number;state:string;state_version:string;spec_generation:string;spec_revision_id:string;criteria_digest:string;run_id:string}
+export interface ProposedDependencyTask {package_key:string;package_wave:number;id:string;task_key:string;definition:Record<string,any>;wave:number;state:string;state_version:string;spec_generation:string;spec_revision_id:string;criteria_digest:string;run_id:string}
+type Task=ProposedDependencyTask;
 interface Snapshot {run:Record<string,any>;tasks:Task[]}
 export interface DependencyReport {
  status:'STRUCTURALLY_VALID'|'INVALID';authority:'STRUCTURAL_VALIDATION';spec_revision_id:string;spec_generation:string;state_version:string;
@@ -52,6 +54,8 @@ async function readySchema(tx:Tx):Promise<void>{
   fail('SPEC_SCHEMA_NOT_READY','Exact dependency migration must be applied by the trusted operator');
 }
 async function snapshot(tx:Tx,scope:DependencyScope,run_id:string,lock=false):Promise<Snapshot>{
+ assertPrimaryTransaction(tx);
+ try{await readSemanticDisposition(tx,{organisation_id:scope.organisation_id,run_id});}catch(error){if(error instanceof FoundationError&&error.code==='SEMANTIC_RUN_MISSING')fail('SPEC_RUN_NOT_FOUND','Accepted run does not exist in this organisation');throw error;}
  const result=await tx.query('SELECT r.*,r.spec_generation::text,r.state_version::text,pg_is_in_recovery() AS replica FROM hyperfide.runs r WHERE r.organisation_id=$1 AND r.id=$2'+(lock?' FOR UPDATE':' FOR SHARE'),[scope.organisation_id,run_id]);
  const run=result.rows[0];if(!run)fail('SPEC_RUN_NOT_FOUND','Accepted run does not exist in this organisation');
  if(run.replica)fail('PRIMARY_REQUIRED','Accepted plan authority requires primary state');
@@ -74,10 +78,12 @@ function referenceRuns(tasks:Task[],organisation_id:string):string[]{
 }
 // Graph nodes are scoped UUIDs, never human task labels. All referenced run locks and
 // reads share the caller's SERIALIZABLE transaction; admission retries revalidate it.
-export async function validateDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<DependencyReport>{
+async function validateGraph(tx:Tx,scope:DependencyScope,input:PlanPins,proposed?:Task[]):Promise<DependencyReport>{
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);
  await readySchema(tx);
- const first=await snapshot(tx,scope,scope.run_id);assertPins(first.run,request);
+ const current=await snapshot(tx,scope,scope.run_id);assertPins(current.run,request);
+ if(proposed&&(proposed.length>MAX_TASKS||proposed.some(task=>task.run_id!==scope.run_id)||new Set(proposed.map(task=>task.id)).size!==proposed.length))fail('SPEC_GRAPH_LIMIT','Proposed graph must remain bounded and exactly scoped');
+ const first=proposed?{run:current.run,tasks:proposed}:current;
  const snapshots=new Map<string,Snapshot>([[scope.run_id,first]]),queue=[scope.run_id],discovered=new Set<string>([scope.run_id]);
  let total=first.tasks.length;
  while(queue.length){const current=snapshots.get(queue.shift()!)!;
@@ -155,6 +161,24 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
     predecessor_spec_generation:targetGeneration,predecessor_spec_revision_id:targetRevision,predecessor_repository_id:repository,integration_ref:ref,milestone});
   }
  }
+
+ const acceptedBindings=await tx.query(
+ 'SELECT d.*,d.revision::text AS source_spec_generation,d.predecessor_spec_generation::text FROM hyperfide.task_dependencies d '+
+ 'JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.run_id AND t.id=d.task_id AND t.spec_generation=d.revision '+
+ 'WHERE d.organisation_id=$1 AND d.run_id=$2 LIMIT 200001',[scope.organisation_id,scope.run_id]);
+ if(acceptedBindings.rows.length>MAX_EDGES)fail('SPEC_GRAPH_LIMIT','Stored current dependency bindings exceed the validation limit');
+ const expectedBindings=new Map(edges.map(edge=>[[edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,edge.source_spec_generation].join(':'),edge]));
+ for(const binding of acceptedBindings.rows){
+  const owner=nodes.get(scope.run_id+':'+binding.task_id);
+  if(!owner||owner.spec_generation!==binding.source_spec_generation)continue;
+  if(binding.binding_schema_version!==1){diagnostic('DEPENDENCY_LEGACY_BINDING_UNSUPPORTED',owner);continue;}
+  const expected=expectedBindings.get([binding.task_id,binding.predecessor_run_id,binding.predecessor_task_id,binding.milestone,binding.source_spec_generation].join(':'));
+  if(!expected){diagnostic('DEPENDENCY_UNDECLARED_BINDING',owner);continue;}
+  if(expected.predecessor_spec_generation!==binding.predecessor_spec_generation||expected.predecessor_spec_revision_id!==binding.predecessor_spec_revision_id||
+   expected.predecessor_repository_id!==binding.predecessor_repository_id||expected.integration_ref!==binding.integration_ref)
+   diagnostic('DEPENDENCY_ACCEPTED_BINDING_STALE',owner);
+ }
+
  const colors=new Map<string,number>();
  for(const start of adjacency.keys()){
   if(colors.has(start))continue;
@@ -172,7 +196,15 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
   task_count:first.tasks.length,edge_count:edges.length,diagnostic_count:diagnosticCount,diagnostics_truncated:diagnosticCount>diagnostics.length,
   diagnostics,coordination_diagnostics:coordination,edges};
 }
+// Proposed graphs share the exact structural engine; this never grants admission.
+export async function validateProposedDependencies(tx:Tx,scope:DependencyScope,input:PlanPins,tasks:ProposedDependencyTask[]):Promise<DependencyReport>{
+ return validateGraph(tx,scope,input,tasks);
+}
+export async function validateDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<DependencyReport>{
+ return validateGraph(tx,scope,input);
+}
 export async function admitDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<Omit<DependencyReport,'edges'>&{admitted:boolean}>{
+ assertPrimaryTransaction(tx);await writeSemanticDisposition(tx,scope);
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);
  const current=await snapshot(tx,scope,scope.run_id,true);assertPins(current.run,request);
  if(current.run.state!=='PENDING_VALIDATION')fail('SPEC_ADMISSION_STATE','Only a pending-validation generation can be admitted');
@@ -212,11 +244,11 @@ export async function structuralFrontier(tx:Tx,scope:DependencyScope,input:unkno
 }
 export function createComponent(_startup:ComponentContext):Component{
  const read=(handler:(tx:Tx,scope:DependencyScope,input:unknown)=>Promise<unknown>)=>async(input:unknown,ctx:ComponentContext)=>
-  identityTransaction(ctx,async(tx,i)=>handler(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},input));
+  specTransaction(ctx,'READ',async(tx,i)=>handler(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},input));
  return {apiVersion:1,actions:{
   'spec.task.resolve':read(resolveTask),'spec.next':read(structuralFrontier),
   'spec.dependencies.check':read(async(tx,scope,input)=>{const report=await validateDependencies(tx,scope,input as PlanPins);const {edges,...result}=report;return result;}),
-  'spec.dependencies.admit':async(input,ctx)=>identityTransaction(ctx,async(tx,i)=>{
+  'spec.dependencies.admit':async(input,ctx)=>specTransaction(ctx,'WRITE',async(tx,i)=>{
    if(!['OPERATOR','LEADER','COORDINATOR'].includes(i.principal.role))fail('ACTION_DENIED','Role cannot admit an accepted plan');
    return admitDependencies(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},input as PlanPins);
   })

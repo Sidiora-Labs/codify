@@ -1,9 +1,11 @@
 import path from 'node:path';
+import {promises as fs} from 'node:fs';
 import type {AuthorityTransaction} from '../transport/protocol.js';
-import {identityTransaction} from '../identity/enrollment.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition} from '../storage/dispositions.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {canonical,digest} from './import.js';
+import {canonical,digest,specTransaction} from './import.js';
 import type {StoredIntent} from './import.js';
 
 export interface ProofPins {organisation_id:string;run_id:string;task_id:string;spec_generation:string;spec_revision_id:string}
@@ -67,7 +69,7 @@ export function validateProofPolicy(value:unknown):ProofPolicy{
    check.argv.some(arg=>typeof arg!=='string'||arg.length>8192||arg.includes('\0'))||
    typeof check.argv[0]!=='string'||!path.isAbsolute(check.argv[0])||typeof check.executable_digest!=='string'||!SHA.test(check.executable_digest)||
    !Number.isInteger(check.timeout_ms)||(check.timeout_ms as number)<100||(check.timeout_ms as number)>259200000||
-   !strings(check.required_artifacts,/^.+$/)||check.required_artifacts.some(item=>!safeArtifact(item))||
+   !strings(check.required_artifacts,/^.+$/,true)||check.required_artifacts.some(item=>!safeArtifact(item))||
    !strings(check.input_keys,/^(source|dependency|toolchain|configuration|graph|contract)$/))
    fail('PROOF_MAPPING_INVALID','Executable checks require exact identities, bounded execution and safe required artifacts');
   checks.add(check.id);
@@ -95,10 +97,12 @@ function obligations(policy:ProofPolicy,registry_digest:string):ProofObligations
 }
 export async function loadProofObligations(db:PrimaryClient,scope:ProofPins):Promise<ProofObligations>{
  pins(scope);
+ assertPrimaryTransaction(db);await readSemanticDisposition(db,scope);
  const result=await db.query(
- 'SELECT pg_is_in_recovery() AS replica,p.registry_digest,p.criteria_digest,p.policy,t.criteria_digest AS current_criteria FROM hyperfide.proof_registries p '+
+ 'SELECT pg_is_in_recovery() AS replica,p.registry_digest,p.criteria_digest,p.policy,t.criteria_digest AS current_criteria,t.definition,s.document AS accepted_document FROM hyperfide.proof_registries p '+
  'JOIN hyperfide.tasks t ON t.organisation_id=p.organisation_id AND t.run_id=p.run_id AND t.id=p.task_id '+
  'JOIN hyperfide.run_spec_revisions h ON h.organisation_id=t.organisation_id AND h.run_id=t.run_id AND h.spec_generation=t.spec_generation AND h.spec_revision_id=t.spec_revision_id '+
+ 'JOIN hyperfide.spec_revisions s ON s.organisation_id=t.organisation_id AND s.id=t.spec_revision_id '+
  'WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.task_id=$3 AND p.spec_generation=$4 AND p.spec_revision_id=$5 '+
  'AND t.spec_generation=p.spec_generation AND t.spec_revision_id=p.spec_revision_id AND h.accepted',
  [scope.organisation_id,scope.run_id,scope.task_id,scope.spec_generation,scope.spec_revision_id]);
@@ -109,6 +113,8 @@ export async function loadProofObligations(db:PrimaryClient,scope:ProofPins):Pro
  if(row.criteria_digest!==row.current_criteria||policy.criteria_digest!==row.criteria_digest||
  policy.spec_revision_id!==scope.spec_revision_id||policy.spec_generation!==scope.spec_generation||
  row.registry_digest!==digest(canonical(policy)))fail('PROOF_REGISTRY_MISMATCH','Stored proof registry does not match its immutable authority pins');
+ clauseCoverage(policy,row.definition,row.accepted_document as StoredIntent);
+ await acceptedProofAuthority(policy,row.definition,row.accepted_document as StoredIntent);
  return obligations(policy,row.registry_digest);
 }
 function clauseCoverage(policy:ProofPolicy,definition:unknown,intent:StoredIntent):void{
@@ -144,6 +150,59 @@ function clauseCoverage(policy:ProofPolicy,definition:unknown,intent:StoredInten
    fail('PROOF_MAPPING_INVALID','Proof cannot substitute unrelated accepted scenarios for a clause');
  }
 }
+
+// A registrar binds accepted executable intent; it cannot author a weaker check
+// or substitute its own reviewers while preserving only the acceptance labels.
+async function acceptedProofAuthority(policy:ProofPolicy,definition:unknown,intent:StoredIntent):Promise<void>{
+ if(!object(definition)||!object(definition.section)||!object(definition.section.fields))
+  fail('PROOF_MAPPING_INVALID','Accepted task command intent is absent');
+ const fields=definition.section.fields,sections=new Map(intent.parsed.sections.map(section=>[section.name,section]));
+ const value=(name:string,key:string):unknown=>sections.get(name)?.fields[key]?.value;
+ const taskValue=(key:string):unknown=>object(fields[key])?fields[key].value:undefined;
+ const explicit=policy.checks.every(check=>sections.has('proof.check.'+check.id));
+ if(!policy.checks.length&&value('proof','rubric_digest')!==policy.rubric_digest)
+  fail('PROOF_MAPPING_INVALID','Review registry rubric must match accepted proof intent');
+ if(explicit&&policy.checks.length){
+  if(value('proof','rubric_digest')!==policy.rubric_digest)
+   fail('PROOF_MAPPING_INVALID','Registry rubric must match accepted proof intent');
+  for(const check of policy.checks){
+   const accepted=sections.get('proof.check.'+check.id)!;
+   const expected={id:check.id,...Object.fromEntries(['argv','executable_digest','timeout_ms','required_artifacts','input_keys'].map(key=>[key,accepted.fields[key]?.value]))};
+   if(canonical(check)!==canonical(expected))
+    fail('PROOF_MAPPING_INVALID','Executable registry differs from its accepted check definition');
+  }
+ }else if(policy.checks.length){
+  const command=taskValue('verify_cmd'),artifacts=taskValue('artifacts');
+  if(typeof command!=='string'||!command.length||command.length>8192||!strings(artifacts,/^.+$/,true)||artifacts.some(item=>!safeArtifact(item))||
+   policy.checks.length!==1||policy.rubric_digest!==policy.criteria_digest)
+   fail('PROOF_MAPPING_INVALID','Accepted executable definitions or exact task command and artifacts are required');
+  let executable:string,executable_digest:string;
+  try{executable=await fs.realpath('/bin/bash');executable_digest=digest(await fs.readFile(executable));}
+  catch{fail('PROOF_MAPPING_INVALID','Trusted task command adapter is unavailable');}
+  const check=policy.checks[0]!;
+  if(canonical(check.argv)!==canonical([executable,'-c',command])||check.executable_digest!==executable_digest||
+   canonical(check.required_artifacts)!==canonical(artifacts)||canonical([...check.input_keys].sort())!==canonical([...INPUTS].sort()))
+   fail('PROOF_MAPPING_INVALID','Task command proof must preserve the exact accepted command, artifacts and input roles');
+ }
+ for(const clause of policy.clauses){
+  if(clause.mode==='REVIEW'){
+   const accepted=sections.get('proof.review.'+clause.id);
+   if(!accepted||canonical(accepted.fields.reviewers?.value)!==canonical(clause.reviewers)||
+    accepted.fields.rubric_digest?.value!==clause.rubric_digest)
+    fail('PROOF_MAPPING_INVALID','Reviewer identities and rubric must be explicitly accepted before registration');
+  }else if(explicit){
+   const required=new Set<string>();
+   for(const id of clause.acceptance_ids){
+    const section=sections.get('acceptance.'+id)??sections.get('case.'+id),checks=section?.fields.checks?.value;
+    if(!strings(checks,ID))fail('PROOF_MAPPING_INVALID','Accepted executable case must identify its exact registered checks');
+    for(const check of checks)required.add(check);
+   }
+   if(required.size!==clause.checks!.length||clause.checks!.some(id=>!required.has(id)))
+    fail('PROOF_MAPPING_INVALID','Clause check mapping substitutes unrelated accepted executable intent');
+  }else if(clause.checks!.length!==1||clause.checks![0]!==policy.checks[0]?.id)
+   fail('PROOF_MAPPING_INVALID','Whole-task command must cover every executable clause');
+ }
+}
 function operatingMaximum(context:ComponentContext):number{
  const raw=context.env.HF_PROOF_MAX_CHECK_MS??'3600000';
  if(!/^[1-9][0-9]{0,8}$/.test(raw)||Number(raw)<100||Number(raw)>259200000)
@@ -174,6 +233,7 @@ export async function registerProofPolicy(client:PrimaryClient,scope:{organisati
  const row=task.rows[0];
  if(!row||row.criteria_digest!==policy.criteria_digest)fail('PROOF_REGISTRY_MISMATCH','Proof criteria do not match current task');
  clauseCoverage(policy,row.definition,row.accepted_document as StoredIntent);
+ await acceptedProofAuthority(policy,row.definition,row.accepted_document as StoredIntent);
  const source=await client.query('SELECT 1 FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4',
   [pin.organisation_id,pin.run_id,policy.repository_id,policy.source_object_id]);
  if(source.rows.length!==1)fail('PROOF_REGISTRY_MISMATCH','Proof baseline is outside the accepted input repository revision set');
@@ -189,7 +249,7 @@ export async function registerProofPolicy(client:PrimaryClient,scope:{organisati
  return loadProofObligations(client,pin);
 }
 export function createComponent(_startup:ComponentContext):Component{
- const action=(review:boolean)=>async(input:unknown,context:ComponentContext):Promise<unknown>=>identityTransaction(context,async(tx,invocation)=>{
+ const action=(review:boolean)=>async(input:unknown,context:ComponentContext):Promise<unknown>=>specTransaction(context,'WRITE',async(tx,invocation)=>{
   if(!['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'].includes(invocation.principal.role))
    fail('ACTION_DENIED','Authenticated role cannot register accepted proof policy');
   return registerProofPolicy(tx,{organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id},input,review,operatingMaximum(context));
@@ -197,7 +257,7 @@ export function createComponent(_startup:ComponentContext):Component{
  return {apiVersion:1,actions:{
   'spec.proof.register':action(false),
   'spec.proof.review.register':action(true),
-  'spec.proof.inspect':async(input,context)=>identityTransaction(context,async(tx,invocation)=>{
+  'spec.proof.inspect':async(input,context)=>specTransaction(context,'READ',async(tx,invocation)=>{
    const request=exact(input,['run_id','task_id','spec_revision_id','spec_generation']);
    if(request.run_id!==invocation.principal.run_id||typeof request.spec_generation!=='string')fail('PROOF_REGISTRY_MISMATCH','Proof inspection is outside authenticated run scope');
    return loadProofObligations(tx,{organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id,
