@@ -392,7 +392,7 @@ do_9 = "Implement the task's registered positive/negative assertions and immutab
 
 [task.10.1]
 title = "Build Blaxel coding images with qualified writable storage and mounts"
-status = "in_progress"
+status = "done"
 wave = 4
 requires = ["8.1", "11.1", "1.4"]
 touches = ["services/hyperfide/src/providers/blaxel/images.ts", "tests/hyperfide/manifests/tasks/10.1.json", "tests/hyperfide/cases/tasks/10_1.py", "tests/hyperfide/registrations/10.1.json", "services/hyperfide/components/10.1.json", "services/hyperfide/package.json", "services/hyperfide/package-lock.json"]
