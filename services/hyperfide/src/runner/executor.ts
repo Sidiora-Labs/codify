@@ -126,6 +126,19 @@ async function persistableResult(store:ArtifactStoreCapability,i:InvocationConte
 async function wait(ms:number,signal:AbortSignal):Promise<void>{
  if(signal.aborted)return;await new Promise<void>(resolve=>{const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);done();}signal.addEventListener('abort',cancel,{once:true});});
 }
+export interface NativeControlTarget {readonly launch_id:string;readonly attempt_id:string;readonly attempt_generation:string;readonly sandbox_id:string;readonly boot_id:string;readonly boot_generation:string;readonly uid:number}
+// Coherence validation grants no authority. The runtime derives its target from
+// guarded primary state and its receipt from actual provider-captured stdout.
+export function validateNativeControlReceipt(value:unknown,target:NativeControlTarget,command_id?:string):Record<string,unknown>{
+ if(!object(value))fail('RUNNER_CONTROL_RECEIPT_INVALID','Native observation object required');
+ const receipt=value,scope=object(receipt.binding)?receipt.binding:receipt;
+ for(const field of ['launch_id','attempt_id','attempt_generation','sandbox_id','boot_id','boot_generation'] as const){const actual=field==='launch_id'?receipt.launch_id:scope[field];if(String(actual)!==String(target[field]))fail('RUNNER_CONTROL_RECEIPT_MISMATCH','Physical observation target differs');}
+ if(!['RUNNING','CONFIRMED_STOPPED','UNKNOWN'].includes(String(receipt.status))||!uuid(receipt.observation_id)||!Number.isSafeInteger(receipt.observed_at_seconds)||!Array.isArray(receipt.processes)||!Number.isSafeInteger(receipt.remaining_descendants)||Number(receipt.remaining_descendants)<0||receipt.remaining_descendants!==receipt.processes.length||typeof receipt.ipc_closed!=='boolean'||typeof receipt.cleanup_complete!=='boolean'||command_id!==undefined&&receipt.command_id!==command_id)fail('RUNNER_CONTROL_RECEIPT_INVALID','Full physical process and IPC observation required');
+ if(receipt.status==='CONFIRMED_STOPPED'&&(receipt.processes.length!==0||receipt.remaining_descendants!==0||receipt.ipc_closed!==true))fail('RUNNER_CONTROL_RECEIPT_CONTRADICTION','Stopped process observation requires an empty tree and closed IPC');
+ // Physical process absence does not discharge artifact/credential/provider debt.
+ for(const value of receipt.processes){if(!object(value)||!Number.isSafeInteger(value.pid)||Number(value.pid)<=0||!Number.isSafeInteger(value.pgid)||Number(value.pgid)<=0||value.uid!==target.uid||!decimal(value.start_time,true)||!uuid(value.os_boot_id))fail('RUNNER_CONTROL_RECEIPT_INVALID','Actual kernel process identities required');}
+ return receipt;
+}
 export async function createComponent(ctx:ComponentContext):Promise<Component>{
  if(ctx.role!=='provisioner')fail('ROLE_DENIED','Runner queue execution belongs to the provisioner');
  const authority=ctx.dependencies.require('14.1','identity.authority',isIdentityAuthority);
@@ -203,12 +216,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const observed=await provider.executeBound(request,controlSignal,proof);if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
  const captured=observed.captured;if(captured.complete!==true||captured.exit_code!==0)fail('RUNNER_CONTROL_UNKNOWN','Complete native control observation required');
  const result=strictJSON(Buffer.from(captured.stdout),MAX_CAPTURE);if(!object(result)||result.ok!==true||!object(result.result))fail('RUNNER_CONTROL_UNKNOWN','Actual native control receipt required');
- const receipt=result.result,scope=object(receipt.binding)?receipt.binding:receipt;
- for(const field of ['launch_id','attempt_id','attempt_generation','sandbox_id','boot_id','boot_generation'] as const){const actual=field==='launch_id'?receipt.launch_id:scope[field];if(String(actual)!==String(target[field]))fail('RUNNER_CONTROL_RECEIPT_MISMATCH','Physical observation target differs');}
- if(!['RUNNING','CONFIRMED_STOPPED','UNKNOWN'].includes(String(receipt.status))||!uuid(receipt.observation_id)||!Number.isSafeInteger(receipt.observed_at_seconds)||!Array.isArray(receipt.processes)||!Number.isSafeInteger(receipt.remaining_descendants)||Number(receipt.remaining_descendants)<0||receipt.remaining_descendants!==receipt.processes.length||typeof receipt.ipc_closed!=='boolean'||typeof receipt.cleanup_complete!=='boolean'||input.action==='runner.stop'&&receipt.command_id!==input.command_id)fail('RUNNER_CONTROL_RECEIPT_INVALID','Full physical process and IPC observation required');
- if(receipt.status==='CONFIRMED_STOPPED'&&(receipt.processes.length!==0||receipt.remaining_descendants!==0||receipt.ipc_closed!==true))fail('RUNNER_CONTROL_RECEIPT_CONTRADICTION','Stopped process observation requires an empty tree and closed IPC');
- // Physical process absence does not discharge artifact/credential/provider debt.
- for(const value of receipt.processes){if(!object(value)||!Number.isSafeInteger(value.pid)||Number(value.pid)<=0||!Number.isSafeInteger(value.pgid)||Number(value.pgid)<=0||value.uid!==b.uid||!decimal(value.start_time,true)||!uuid(value.os_boot_id))fail('RUNNER_CONTROL_RECEIPT_INVALID','Actual kernel process identities required');}
+ const receipt=validateNativeControlReceipt(result.result,{...target,uid:b.uid},input.action==='runner.stop'?input.command_id:undefined);
  const evidence=await storeBytes(store,proof,Buffer.from(captured.stdout));
  return {native:receipt,native_receipt:evidence,provider:{process_ref:observed.process_ref,evidence_digest:observed.evidence_digest,spool_digest:captured.spool_digest},authority:'OBSERVATION_ONLY'};
  }});

@@ -35,6 +35,7 @@ const {isIdentityAuthority}=await mod('identity/enrollment.js');
 const {isArtifactStoreCapability}=await mod('artifacts/objects.js');
 const {hash}=await mod('transport/protocol.js');
 const {runnerCanonical,runnerResultSigningBytes}=await mod('runner/bridge.js');
+const {validateNativeControlReceipt}=await mod('runner/executor.js');
 const controller=new AbortController();
 const registry=new ComponentRegistry({role:'provisioner',policy:validatePolicy(JSON.parse(await fs.readFile(policyPath,'utf8')),'fixture-identity-v1','provisioner'),signal:controller.signal,env:process.env});
 try{
@@ -53,6 +54,7 @@ try{
     if(q.op==='public')result=await registry.invoke(i.payload.component,i.payload.action,i.payload.input,i);
     else if(q.op==='native')result=await native.invokeNativeRunner(i,q.input,controller.signal);
     else if(q.op==='artifact')result=await store.invoke(q.action,q.input,i);
+    else if(q.op==='coherence')result=validateNativeControlReceipt(q.receipt,q.target,q.command_id);
     else if(q.op==='signature'){
      const key=createPrivateKey(await fs.readFile(keyPath)),publicKey=createPublicKey(key);
      const metadata={outcome:'UNKNOWN',authority:'NONE',stdout:q.reference,fixture_kind:'REFERENCE_AND_SIGNATURE_ONLY'};
@@ -193,6 +195,15 @@ def main():
             check("executor.native-stop-command-required",lambda:f.refused(f.command("native",input=dict(native,action="runner.stop")),"RUNNER_CONTROL_DENIED"))
             check("executor.native-action-allowlist",lambda:f.refused(f.command("native",input=dict(native,action="runner.execute-arbitrary")),"RUNNER_CONTROL_DENIED"))
             check("executor.native-unregistered-target-refused",lambda:f.refused(f.command("native",input=native),"RUNNER_NOT_CURRENT"))
+            # Hostile metadata fixtures exercise the exact runtime validator;
+            # they are not observations of a physical runner or stop event.
+            target={"launch_id":uid(),"attempt_id":uid(),"attempt_generation":"1","sandbox_id":uid(),"boot_id":uid(),"boot_generation":"1","uid":65534}
+            receipt={**{k:v for k,v in target.items() if k!="uid"},"status":"CONFIRMED_STOPPED","observation_id":uid(),"observed_at_seconds":int(time.time()),"processes":[],"remaining_descendants":0,"ipc_closed":True,"cleanup_complete":False}
+            coherent=f.command("coherence",target=target,receipt=receipt)
+            check("executor.metadata-coherence-is-not-full-cleanup",lambda:expect(coherent.get("ok") is True and coherent["result"]["cleanup_complete"] is False,"Physical-absence metadata discharged unrelated cleanup debt"))
+            process={"pid":999999,"pgid":999999,"uid":65534,"start_time":"123","os_boot_id":uid()}
+            for name,changed in (("stopped-with-process",dict(receipt,processes=[process],remaining_descendants=1)),("stopped-with-descendant",dict(receipt,remaining_descendants=1)),("stopped-with-open-ipc",dict(receipt,ipc_closed=False)),("inconsistent-descendant-count",dict(receipt,status="RUNNING",processes=[process],remaining_descendants=0)),("mismatched-target-boot",dict(receipt,boot_id=uid())),("invalid-kernel-process",dict(receipt,status="RUNNING",processes=[dict(process,pid=0)],remaining_descendants=1))):
+                check("executor.hostile-metadata-"+name,lambda changed=changed:expect(f.command("coherence",target=target,receipt=changed).get("ok") is False,"Contradictory hostile metadata was accepted"))
             check("executor.config-mode-refused",lambda:f.config_refused("bad-mode",mode=0o640))
             check("executor.config-symlink-refused",lambda:f.config_refused("symlink",source=f.config))
             check("executor.config-duplicate-principal-refused",lambda:f.config_refused("duplicate",dict(f.configuration,principals=f.configuration["principals"]*2)))
