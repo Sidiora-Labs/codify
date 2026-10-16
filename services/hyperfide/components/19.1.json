@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "19.1",
+  "task": "19.1",
+  "roles": [
+    "control"
+  ],
+  "module": "integration/candidates.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "integration.candidate.create",
+    "integration.candidate.bind_reviews",
+    "integration.candidate.inspect",
+    "integration.candidate.verify",
+    "integration.candidate.admit"
+  ],
+  "requires": [
+    "4.1",
+    "4.2",
+    "12.4"
+  ]
+}
