@@ -2,5 +2,5 @@
 [schema]
 version = 1
 required_fields = ["schema_version", "id", "source", "entry", "actions"]
-optional_fields = ["requires"]
+optional_fields = ["requires", "support_sources", "headers", "libraries"]
 callback = "int entry(const char *action, const char *request_json, FILE *output)"

@@ -1,0 +1,10 @@
+[component]
+schema_version = 1
+id = "11.3"
+source = "src/hyperfide/readiness.c"
+entry = "hf_component_11_3"
+actions = ["environment.readiness"]
+requires = ["11.2"]
+
+headers = ["src/hyperfide/preparation_support.h"]
+libraries = ["crypto"]

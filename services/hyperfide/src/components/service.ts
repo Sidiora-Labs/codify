@@ -96,6 +96,7 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
     // Operator-owned startup configuration is frozen before policy reads or component factories run.
     const limits = protocolLimits();
     const config = options(args);
+    if(config['--mode']==='https'&&process.env.HYPERFIDE_MIGRATION_JOB==='1')throw new FoundationError('TRANSPORT_CONFIG','A migration job cannot expose an HTTPS listener');
     const policyFile = config['--policy']!;
     let stat;
     try { stat = await fs.stat(policyFile); }
