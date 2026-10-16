@@ -1,0 +1,113 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/3_1.py"
+  ],
+  "assertion_ids": [
+    "hierarchy.auth.missing-context",
+    "hierarchy.auth.revoked-before-replay",
+    "hierarchy.auth.wrong-platform-epoch",
+    "hierarchy.describe",
+    "hierarchy.handoff.ack-replay-after-restart",
+    "hierarchy.handoff.acknowledge",
+    "hierarchy.handoff.current-owner",
+    "hierarchy.handoff.healthy-work-preserved",
+    "hierarchy.handoff.partial-stable-refusal",
+    "hierarchy.handoff.predecessor-retained",
+    "hierarchy.handoff.propose",
+    "hierarchy.handoff.relational-successor-binding",
+    "hierarchy.handoff.wrong-successor",
+    "hierarchy.history.finding-owner",
+    "hierarchy.history.immutable",
+    "hierarchy.leader.acquire",
+    "hierarchy.leader.bad-generation",
+    "hierarchy.leader.concurrent-cas",
+    "hierarchy.leader.conflicting-replay",
+    "hierarchy.leader.exact-replay",
+    "hierarchy.leader.extra-field",
+    "hierarchy.leader.old-exact-replay",
+    "hierarchy.leader.role-refusal",
+    "hierarchy.leader.stale-mutation",
+    "hierarchy.migration.provenance",
+    "hierarchy.package.assign",
+    "hierarchy.package.assign-replay",
+    "hierarchy.package.configure-10",
+    "hierarchy.package.configure-11",
+    "hierarchy.package.configure-12",
+    "hierarchy.package.no-silent-reassignment",
+    "hierarchy.policy.stable-owner",
+    "hierarchy.policy.successive-waves",
+    "hierarchy.policy.wave-allocation",
+    "hierarchy.primary.brand-refusal",
+    "hierarchy.role.bind",
+    "hierarchy.role.no-escalation"
+  ],
+  "cases": [
+    "V-001",
+    "V-008"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/hierarchy/packages.js",
+    "services/hyperfide/dist/storage/transactions.js",
+    "services/hyperfide/dist/storage/runtime.js"
+  ],
+  "required_artifacts": [
+    "hierarchy/database-absence.json",
+    "hierarchy/observations.json"
+  ],
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-3.1-database",
+      "kind": "postgresql-database",
+      "scope": "task3.1-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/src/hierarchy/packages.ts",
+    "services/hyperfide/migrations/0003-hierarchy.sql",
+    "services/hyperfide/components/3.1.json",
+    "services/hyperfide/src/storage/transactions.ts",
+    "services/hyperfide/src/storage/runtime.ts",
+    "services/hyperfide/src/storage/schema.ts",
+    "services/hyperfide/src/components/registry.ts",
+    "services/hyperfide/src/components/service.ts",
+    "services/hyperfide/src/policy/programme.ts",
+    "services/hyperfide/src/control.ts",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/registrations/3.1.json",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "3.1",
+  "timeout_seconds": 300,
+  "variant": "task:3.1"
+}
