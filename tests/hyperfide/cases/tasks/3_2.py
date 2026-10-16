@@ -20,7 +20,8 @@ def identity(value):return sha(canonical(value).encode())
 def dependencies(stems):
  fragments={}
  for p in (ROOT/"services/hyperfide/components").glob("*.json"):
-  f=json.loads(p.read_text());fragments[f["id"]]=(p.stem,f.get("requires",[]))
+  f=json.loads(p.read_text())
+  if "id" in f:fragments[f["id"]]=(p.stem,f.get("requires",[]))
  result=[];seen=set()
  def visit(stem):
   f=json.loads((ROOT/"services/hyperfide/components"/(stem+".json")).read_text())
@@ -51,8 +52,10 @@ class PacketFixture(HierarchyFixture):
    body={"schema_version":1,"profile":profile,"files":[],"directories":[],"scan":{"policy_version":1,"canary_counts":{"secret":0,"identity":0,"lease":0},"checks":["sensitive_paths","private_key_markers","authority_json","designated_canaries"]}}
    f.preparation=identity(body);manifest=dict(body,digest=f.preparation)
    f.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,content_digest,provider,runtime_platform,manifest) VALUES($1,$2,$3,'fixture','linux',$4)",[i["organisation"],i["profile"],f.preparation,json.dumps(manifest)])
-   f.sql("UPDATE hyperfide.provider_pools SET profile_id=$1,state_version=state_version+1 WHERE organisation_id=$2 AND id=$3",[i["profile"],i["organisation"],i["pool"]])
-   f.sql("UPDATE hyperfide.sandboxes SET preparation_digest=$1,state_version=state_version+1 WHERE organisation_id=$2 AND id=$3",[f.preparation,i["organisation"],i["sandbox"]])
+   i["pool"]=uid();i["sandbox"]=uid()
+   f.sql("INSERT INTO hyperfide.provider_pools(organisation_id,id,provider,account_key,environment_key,region,profile_id) VALUES($1,$2,'fixture','fixture','packet-fixture','fixture',$3)",[i["organisation"],i["pool"],i["profile"]])
+   f.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state,preparation_digest) VALUES($1,$2,$3,'packet-fixture-resource','RUNNING',$4)",[i["organisation"],i["sandbox"],i["pool"],f.preparation])
+   i["boot"]=f.sql("SELECT boot_id FROM hyperfide.sandbox_boots WHERE organisation_id=$1 AND sandbox_id=$2",[i["organisation"],i["sandbox"]])[0]["boot_id"]
    f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind,state) VALUES($1,$2,$3,'packet-slot',1,'AGENT','READY')",[i["organisation"],i["packet_slot"],i["sandbox"]])
    f.packet_definition={"feature_key":"alpha","purpose":"Actual immutable execution input fixture","touches":["src/fixture.ts"],
     "environment_profile_id":i["profile"],"resource_requirements":{"agent_sessions":1,"cpu_millis":1000,"memory_bytes":"2147483648","disk_bytes":"4294967296","build_slots":1,"test_slots":1,"max_descendants":2},
