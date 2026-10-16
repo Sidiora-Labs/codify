@@ -66,6 +66,7 @@
     "blaxel.images.template.uv-style-hardlink-denied",
     "blaxel.images.template.volume-budget-and-paths",
     "blaxel.images.process.detached-descendant-reaped",
+    "blaxel.images.process.supervisor-spawn-error-structured",
     "blaxel.images.sdk.repository-dotenv-denied",
     "blaxel.images.sdk.endpoint-override-denied"
   ],
@@ -218,13 +219,13 @@
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js",
-      "sha256": "dbe38641b3aaedd93a42142136580bfd7b285077cd0a3cfc9136a10c2d2c8fee",
-      "size": 37457
+      "sha256": "f64ff588fe30fb165ddc5d32582233ca269ec85ea1c0fbbc8e4a653be1c8de08",
+      "size": 37587
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js.map",
-      "sha256": "d0d7f8d66c25ac138ca1b449fe3f11008ab8ee7cc455c5a88a5b4ecd6b06ab30",
-      "size": 34251
+      "sha256": "a3ea735fec99862c79411c8c75329a289e8541bcb55f3d75b490f9b4076109a7",
+      "size": 34285
     },
     {
       "path": "services/hyperfide/dist/providers/contract.d.ts",
@@ -318,8 +319,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/blaxel/images.ts",
-      "sha256": "0f9f239e920af7c24838cc93cc2a926d07a0244209d59c3abb06505104a35ff8",
-      "size": 35875
+      "sha256": "6cb4351e7e1ff11b5da2e7f9829a38e3fd256a978bf28a5942e6ffee8db5b811",
+      "size": 36004
     },
     {
       "path": "services/hyperfide/src/providers/contract.ts",
@@ -343,8 +344,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/10_1.py",
-      "sha256": "b940b6906f2f83e03df9eb84f548475e9c010bb2581940f9a4cbe19e323c1e4a",
-      "size": 18628
+      "sha256": "dc6b45960521c521016e022f757ebb9c2485af66968a374d290ff4951067d44e",
+      "size": 19311
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_1.py",
@@ -368,8 +369,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/10.1.json",
-      "sha256": "5a5b73e84be8745b56e4497118b2e8a1e0abe48e5803c767f32934b4de2bbc97",
-      "size": 5486
+      "sha256": "d567b3a0040d8e7a58dc6f0225bdfe0c908ed617e351a4d6d81db9e5134cfd9b",
+      "size": 5549
     }
   ]
 }
