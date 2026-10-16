@@ -10,6 +10,7 @@
   "assertion_ids": [
     "graph.publication.reject-partial",
     "graph.publication.complete-build",
+    "graph.publication.reject-quarantined-artifact",
     "graph.publication.atomic-commit",
     "graph.publication.reject-repeatable-read-graph_bundle_inputs",
     "graph.publication.reject-repeatable-read-graph_ingestion_chunks",
@@ -31,7 +32,8 @@
     "graph.publication.exact-source-snapshot",
     "graph.publication.reject-wrong-source-snapshot",
     "graph.publication.reject-overlay-relabel",
-    "graph.publication.concurrent-cas"
+    "graph.publication.concurrent-cas",
+    "graph.publication.reject-unavailable-history-and-replay"
   ],
   "argv": [
     "python3",
