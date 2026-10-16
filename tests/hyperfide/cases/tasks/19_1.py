@@ -26,7 +26,7 @@ U=lambda n:f"00000000-0000-4000-8000-{n:012x}"
 SCOPE={"organisation_id":U(1),"run_id":U(5)}
 D="sha256:"+"c"*64
 IDS={
-"19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused"],
+"19.1":["candidate.registered-wire","candidate.strict-input","candidate.scope-denied","candidate.real-merge","candidate.deterministic-objects","candidate.conflict-refused","candidate.typed-generations","candidate.immutable-request","candidate.empty-targets-refused","candidate.authenticated-run-bound"],
 "19.2":["publication.registered-wire","publication.strict-input","publication.role-denied","publication.unsigned-push-denied","publication.target-unchanged","publication.immutable-admission","publication.target-lock-exclusive","publication.effective-hook-path-pinned","publication.github-configured-boundary","publication.github-sole-publisher","publication.github-worker-bypass-refused","publication.github-force-bypass-refused","publication.github-unknown-bypass-refused","publication.client-hook-suppressed","publication.server-hook-still-enforced","publication.token-persist-failure-revokes","publication.askpass-failure-revokes","publication.orphan-remains-unknown","publication.custody-preflight-no-mint","publication.source-url-rewrite-isolated","publication.https-source-config-isolated","publication.invalid-token-response-revokes"],
 "19.3":["closure.registered-wire","closure.level-required","closure.wave-required","closure.programme-cannot-narrow","closure.policy-requires-gates","closure.policy-requires-acceptance","closure.evaluation-immutable","closure.unregistered-assertions-refused","closure.declared-coverage-bound","closure.policy-valid-shape"],
 "19.4":["release.registered-wire","release.strict-input","release.empty-set-refused","release.caller-cannot-claim-published","release.immutable-manifest","release.partial-remains-explicit"]
@@ -128,12 +128,15 @@ class Fixture:
                 real.env.pop("DATABASE_URL",None)
                 realcfg=json.loads(json.dumps(self.cfg));realcfg["organisation_id"]=real.ids["organisation"]
                 self.config.write_text(json.dumps(realcfg))
-                policy=json.loads(real.policy.read_text());policy["allowed_actions"].append("system.describe");real.policy.write_text(json.dumps(policy))
-                identity=json.loads(real.identity_config.read_text())
-                for principal in identity["principals"]:principal["allowed_actions"].append("system.describe")
-                real.identity_config.write_text(json.dumps(identity))
-            self.auth=IdentityFixture(database=self.auth_database,components=sorted(fragment_paths[name].stem for name in needed),extra_env={k:v for k,v in self.env.items() if k.startswith('HYPERFIDE_INTEGRATION_') or k.startswith('HYPERFIDE_GATEWAY_')},extra_setup=setup)
-        except Exception as error:self.auth_error=str(error)
+                authorization=real.path/"integration-authorization.json"
+                authorization.write_text(json.dumps({"schema_version":1,"rules":[{"role":"OPERATOR","actions":real.actions,"repositories":[],"artifact_prefixes":[],"git_refs":[],"model_destinations":[],"model_profiles":[]}]}));authorization.chmod(0o600)
+                real.env["HF_AUTHORIZATION_CONFIG_FILE"]=str(authorization)
+            self.auth=IdentityFixture(extra_actions=("system.describe",),database=self.auth_database,components=sorted(fragment_paths[name].stem for name in needed),extra_env={k:v for k,v in self.env.items() if k.startswith('HYPERFIDE_INTEGRATION_') or k.startswith('HYPERFIDE_GATEWAY_')},extra_setup=setup)
+        except Exception as error:
+            messages=[];seen=set();current=error
+            while current is not None and id(current) not in seen:
+                seen.add(id(current));messages.append(type(current).__name__+": "+str(current));current=current.__cause__ or current.__context__
+            self.auth_error=" | caused by: ".join(messages)
     def close(self):
         database=self.auth_database
         if self.auth:self.auth.close()
@@ -181,6 +184,7 @@ def candidate_cases(f):
         expect(result.returncode!=0,"Actual PostgreSQL allowed request rewrite")
     check(IDS[TASK][7],immutable)
     check(IDS[TASK][8],lambda:f.reject(TASK,"integration.candidate.create",{**SCOPE,"request_id":U(102),"targets":[],"environment_digest":D,"contract_digest":D},"INTEGRATION_INVALID"))
+    check(IDS[TASK][9],lambda:f.reject(TASK,"integration.candidate.inspect",{**SCOPE,"run_id":U(998),"candidate_id":U(81)},"INTEGRATION_SCOPE_DENIED"))
 def publication_cases(f):
     check(IDS[TASK][0],f.wire)
     check(IDS[TASK][1],lambda:f.reject(TASK,"integration.publication.execute",{**SCOPE,"operation_id":U(1),"new_head":f.feature_oid},"INTEGRATION_INVALID"))

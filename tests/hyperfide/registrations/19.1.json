@@ -16,7 +16,8 @@
     "candidate.conflict-refused",
     "candidate.typed-generations",
     "candidate.immutable-request",
-    "candidate.empty-targets-refused"
+    "candidate.empty-targets-refused",
+    "candidate.authenticated-run-bound"
   ],
   "argv": [
     "python3",

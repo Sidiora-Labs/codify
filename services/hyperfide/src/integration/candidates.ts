@@ -19,7 +19,7 @@ function gateway(context:ComponentContext):Gateway{
  if(!resources?.gateway)fail('INTEGRATION_DEPENDENCY_NOT_READY','Primary transaction gateway4.2 required');
  return resources.gateway;
 }
-export async function runnerRemote(context:ComponentContext):Promise<{prepare:(db:DB,invocation:unknown,plan:Record<string,unknown>)=>Promise<unknown>;execute:(permit:unknown,signal:AbortSignal)=>Promise<Record<string,any>>}>{
+export async function runnerRemote(context:ComponentContext):Promise<{prepare:(db:DB,invocation:unknown,plan:Record<string,unknown>)=>Promise<unknown>;execute:(permit:unknown,signal:AbortSignal)=>Promise<Record<string,any>>;recover?:(db:DB,invocation:unknown,plan:Record<string,unknown>)=>Promise<unknown>}>{
  const moduleName='../runner/bridge.js';let factory:unknown;try{factory=(await import(moduleName)).requireRunnerRemote;}catch{fail('INTEGRATION_REMOTE_EXECUTOR_UNAVAILABLE','Observed runner.remote.v1 provider execution required');}
  if(typeof factory!=='function')fail('INTEGRATION_REMOTE_EXECUTOR_UNAVAILABLE','Trusted remote execution factory unavailable');
  const remote=factory(context);if(!remote||typeof remote.prepare!=='function'||typeof remote.execute!=='function')fail('INTEGRATION_REMOTE_EXECUTOR_UNAVAILABLE','Remote capability shape invalid');return remote;
@@ -32,6 +32,7 @@ export function bindScope(ctx:ComponentContext,component:Component):Component{
  if(s.organisation_id!==cfg.organisation_id)fail('INTEGRATION_SCOPE_DENIED','Organisation differs from trusted service');
  let invocation:unknown;
  try{const moduleName='../identity/enrollment.js';invocation=(await import(moduleName)).invocationOf(context);}catch{fail('AUTH_REQUIRED','Authenticated action invocation required');}
+ const principal=(invocation as {principal:{organisation_id:string;run_id:string}}).principal;if(principal.organisation_id!==s.organisation_id||principal.run_id!==s.run_id)fail('INTEGRATION_SCOPE_DENIED','Body scope differs from the authenticated invocation scope');
  return invocationStorage.run({context,invocation},()=>Promise.resolve(handler(input,context)));
  };return {...component,actions};
 }
@@ -41,6 +42,14 @@ export function currentInvocation():IntegrationInvocation{
 export async function prepareRemote(db:DB,plan:Record<string,unknown>):Promise<{remote:Awaited<ReturnType<typeof runnerRemote>>;permit:unknown;plan:Record<string,unknown>;expected_source_object_id?:string|undefined;expected_source_tree_id?:string|undefined}>{
  const active=currentInvocation(),remote=await runnerRemote(active.context);
  const env=active.context.env;const executable=env.HYPERFIDE_REMOTE_NODE_DIGEST;if(!executable)fail('INTEGRATION_REMOTE_RUNTIME_UNAVAILABLE','Observed remote Node executable digest required');digest(executable);const bridgeName='../runner/bridge.js';const bindingReader=(await import(bridgeName)).readRunnerBinding;if(typeof bindingReader!=='function')fail('INTEGRATION_REMOTE_RUNTIME_UNAVAILABLE','Actual runner source binding reader required');const identity=active.invocation as {principal:{organisation_id:string;run_id:string}};const binding=await bindingReader(db,{organisation_id:identity.principal.organisation_id,run_id:identity.principal.run_id,session_id:plan.session_id});if(binding.repository_id!==plan.repository_id||plan.expected_source_object_id!==undefined&&binding.source_object_id!==plan.expected_source_object_id||plan.expected_source_tree_id!==undefined&&binding.source_tree_id!==plan.expected_source_tree_id)fail('INTEGRATION_REMOTE_SOURCE_NOT_PREPARED','Observed runner workspace must be prepared for the exact requested Git source');const {expected_source_object_id,expected_source_tree_id,...physicalPlan}=plan;plan={...physicalPlan,source_provenance_digest:plan.source_digest,source_digest:digest(binding.source_digest),executable_digest:executable,environment_digest:hash(canonical(plan.environment??{})),artifact_paths:[]};const permit=await remote.prepare(db,active.invocation,plan);return {remote,permit,plan,expected_source_object_id:typeof expected_source_object_id==='string'?expected_source_object_id:undefined,expected_source_tree_id:typeof expected_source_tree_id==='string'?expected_source_tree_id:undefined};
+}
+export function snapshotRemote(prepared:Awaited<ReturnType<typeof prepareRemote>>):Record<string,unknown>{
+ const payload={plan:prepared.plan,expected_source_object_id:prepared.expected_source_object_id??null,expected_source_tree_id:prepared.expected_source_tree_id??null};return {...payload,digest:hash(canonical(payload))};
+}
+export async function restoreRemote(db:DB,snapshot:unknown):Promise<Awaited<ReturnType<typeof prepareRemote>>>{
+ const value=obj(snapshot);keys(value,['plan','expected_source_object_id','expected_source_tree_id','digest']);const {digest:recorded,...payload}=value;if(hash(canonical(payload))!==recorded)fail('INTEGRATION_REMOTE_PLAN_CORRUPT','Immutable remote plan snapshot digest differs');
+ const active=currentInvocation(),remote=await runnerRemote(active.context);if(typeof remote.recover!=='function')fail('INTEGRATION_REMOTE_RECOVERY_UNAVAILABLE','Actual runner.remote existing-only recovery required; no redispatch fallback');
+ const plan=obj(value.plan),permit=await remote.recover(db,active.invocation,plan);return {remote,permit,plan,expected_source_object_id:value.expected_source_object_id===null?undefined:oid(value.expected_source_object_id),expected_source_tree_id:value.expected_source_tree_id===null?undefined:oid(value.expected_source_tree_id)};
 }
 export async function executeRemote(prepared:Awaited<ReturnType<typeof prepareRemote>>):Promise<Record<string,any>>{
  const active=currentInvocation();const captured=await prepared.remote.execute(prepared.permit,active.context.signal);const decode=(value:unknown):string=>{const output=obj(value);if(!(output.bytes instanceof Uint8Array)||output.complete!==true||String(output.size_bytes)!==String(output.bytes.byteLength)||hash(Buffer.from(output.bytes))!==output.digest)fail('INTEGRATION_REMOTE_OUTPUT_INVALID','Complete independently hashed capture required');return new TextDecoder('utf-8',{fatal:true}).decode(output.bytes);};const result:Record<string,any>={...captured,stdout:decode(captured.stdout),stderr:decode(captured.stderr)};
@@ -75,7 +84,7 @@ export async function semanticDisposition(db:DB,s:{organisation_id:string;run_id
 export async function tx<T>(_pool:unknown,fn:(db:DB)=>Promise<T>,mode:'READ'|'WRITE'='WRITE'):Promise<T>{
  const active=currentInvocation(),i=active.invocation as {guard?:(db:DB)=>Promise<void>;signal?:AbortSignal};
  if(typeof i.guard!=='function')fail('AUTH_REQUIRED','Current primary invocation guard required');
- return gateway(active.context).withPrimaryTransaction({timeoutMs:10000,maxRetries:0,guard:async db=>{const principal=(active.invocation as {principal:{organisation_id:string;run_id:string}}).principal;await semanticDisposition(db,principal,mode);await i.guard!(db);},signal:active.context.signal},fn);
+ return gateway(active.context).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,guard:async db=>{const principal=(active.invocation as {principal:{organisation_id:string;run_id:string}}).principal;await semanticDisposition(db,principal,mode);await i.guard!(db);},signal:active.context.signal},fn);
 }
 /** Detached reads still use the genuine current primary guard. This facade is
  * never accepted as a branded transaction or held across remote/Git work. */
@@ -94,9 +103,10 @@ export async function prepareRemoteGate(db:DB,s:Scope,request:{session_id:string
  const expectedSource=request.mode==='CANDIDATE'?request.candidate_head:[...(request.snapshot?.publications??[])].reverse().find((p:Record<string,any>)=>p.repository_id===request.repository_id&&p.state==='PUBLISHED'&&p.observed_head===p.candidate_head)?.candidate_head;if(!expectedSource)fail('INTEGRATION_REMOTE_SOURCE_NOT_PREPARED','Exact current source object required');
  return prepareRemote(db,{session_id:request.session_id,operation_id:operationId,repository_id:request.repository_id,reservation_id:request.reservation_id,argv:['node','--input-type=module','-e',REMOTE_GATE_SCRIPT],cwd:'.',environment:{},stdin,expected_source_object_id:expectedSource,expected_source_tree_id:request.mode==='CANDIDATE'?request.snapshot?.tree:undefined,timeout_ms:request.gate.timeout_ms+60000,source_digest:hash(canonical({input_digest:request.input_digest,script_digest:hash(REMOTE_GATE_SCRIPT),gate:request.gate})),policy_digest:request.policy_digest});
 }
-export async function currentRun(db:DB,s:Scope,lock=false,admittedPublicationId?:string,observe=false):Promise<Record<string,any>>{
+export interface AdmittedIntegrationWork {kind:'CANDIDATE'|'SCOPE'|'PREPARATION';id:string}
+export async function currentRun(db:DB,s:Scope,lock=false,admittedPublicationId?:string,observe=false,admittedWork?:AdmittedIntegrationWork):Promise<Record<string,any>>{
  const r=await db.query('SELECT * FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2'+(lock?' FOR UPDATE':''),values(s));
- const row=r.rows[0];if(!row||!['READY','RUNNING',...(observe?['SUCCEEDED']:[]),...(admittedPublicationId?['DRAINING','DRAINED']:[])].includes(row.state))fail('INTEGRATION_RUN_HELD','Run does not permit integration');
+ const row=r.rows[0];if(!row||!['READY','RUNNING',...(observe?['SUCCEEDED']:[]),...(admittedPublicationId||admittedWork?['DRAINING','DRAINED']:[])].includes(row.state))fail('INTEGRATION_RUN_HELD','Run does not permit integration');
  const halted=await db.query('SELECT mode FROM hyperfide.integration_admission_halts WHERE organisation_id=$1 AND run_id=$2',values(s));
  if(halted.rowCount)fail('INTEGRATION_ADMISSION_STOPPED','Emergency control holds all new integration admissions');
  const moduleName='../recovery/control.js';let inspect:unknown;
@@ -104,7 +114,16 @@ export async function currentRun(db:DB,s:Scope,lock=false,admittedPublicationId?
  if(typeof inspect!=='function')fail('INTEGRATION_RECOVERY_UNAVAILABLE','Recovery hold inspector unavailable');
  const holds=await inspect(db,{...s,authority_epoch:row.authority_epoch});
  if(!Array.isArray(holds))fail('INTEGRATION_RECOVERY_UNAVAILABLE','Invalid recovery observation');
- for(const hold of holds.filter(h=>h.status==='ACTIVE')){if(hold.mode==='DRAIN'&&admittedPublicationId){const eligible=await db.query("SELECT 1 FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND created_at<=$4::timestamptz AND clock_timestamp()<$5::timestamptz AND state IN ('PENDING','RUNNING','OUTCOME_UNKNOWN')",[...values(s),uuid(admittedPublicationId),hold.accepted_at,hold.drain_deadline]);if(eligible.rowCount)continue;}fail('INTEGRATION_RECOVERY_HELD','Recovery control holds integration or drain authority has expired');}
+ let drainEligible=false;
+ for(const hold of holds.filter(h=>h.status==='ACTIVE')){
+  if(hold.mode==='DRAIN'&&(admittedPublicationId||admittedWork)){
+   const table=admittedPublicationId?'publication_operations':admittedWork?.kind==='CANDIDATE'?'integration_jobs':admittedWork?.kind==='SCOPE'?'integration_scope_jobs':admittedWork?.kind==='PREPARATION'?'integration_preparations':null;
+   if(!table)fail('INTEGRATION_DRAIN_AUTHORITY_MISSING','Existing admitted integration work required');const column=table==='integration_preparations'?'request_id':'id',states=table==='integration_preparations'?['PREPARING','OUTCOME_UNKNOWN']:['PENDING','RUNNING','OUTCOME_UNKNOWN'];
+   const eligible=await db.query('SELECT 1 FROM hyperfide.'+table+' WHERE organisation_id=$1 AND run_id=$2 AND '+column+'=$3 AND created_at<=$4::timestamptz AND clock_timestamp()<$5::timestamptz AND state=ANY($6::text[])',[...values(s),uuid(admittedPublicationId??admittedWork!.id),hold.accepted_at,hold.drain_deadline,states]);if(eligible.rowCount){drainEligible=true;continue;}
+  }
+  fail('INTEGRATION_RECOVERY_HELD','Recovery control holds integration or drain authority has expired');
+ }
+ if(['DRAINING','DRAINED'].includes(row.state)&&!drainEligible)fail('INTEGRATION_DRAIN_AUTHORITY_MISSING','Actual existing-work drain eligibility was not proven');
  return row;
 }
 export interface GateConfig {id:string;kind:'build'|'test';argv:string[];timeout_ms:number;proof:{manifest_path:string;manifest_digest:string;registry_path:string;registry_digest:string;expected_assertion_ids:string[];case_ids:string[]}}
@@ -155,6 +174,7 @@ export async function isolatedPush(repositoryPath:string,args:string[],environme
  }finally{await fs.rm(directory,{recursive:true,force:true});}
 }
 export async function custody(db:DB,s:Scope,id:string,expectedGeneration?:string):Promise<Record<string,any>>{
+ await semanticDisposition(db,s,'WRITE');
  const r=await db.query("SELECT c.*,t.current_custody_id,t.criteria_digest AS task_criteria,t.state AS task_state,t.spec_revision_id,t.spec_generation FROM hyperfide.submission_custodies c JOIN hyperfide.tasks t ON t.organisation_id=c.organisation_id AND t.run_id=c.run_id AND t.id=c.task_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3 FOR UPDATE OF c,t",[...values(s),id]);
  const c=r.rows[0];if(!c||c.authority!=='ACTIVE'||c.qualification_outcome!=='PASS'||c.current_custody_id!==c.id||!['QUALIFIED','INTEGRATING'].includes(c.task_state)||(expectedGeneration!==undefined&&String(c.custody_generation)!==expectedGeneration))fail('INTEGRATION_CUSTODY_STALE','Current qualified custody required');
  const moduleName='../assurance/coverage.js';let inspect:unknown;
@@ -217,6 +237,7 @@ async function bindReviews(pool:DB,input:unknown):Promise<unknown>{
  });
 }
 export async function candidateReady(db:DB,s:Scope,id:string,admittedPublicationId?:string):Promise<{row:Record<string,any>;manifest:CandidateManifest}>{
+ await semanticDisposition(db,s,'WRITE');
  const run=await currentRun(db,s,true,admittedPublicationId);const {row,manifest:m}=await readCandidate(db,s,id,true);
  if(run.spec_revision_id!==m.spec_revision_id||String(run.spec_generation)!==m.spec_generation||run.policy_digest!==m.policy_digest||run.authority_epoch!==m.authority_epoch)fail('INTEGRATION_INPUT_STALE','Run inputs changed');
  const authority=await db.query("SELECT * FROM hyperfide.branch_authorities WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE",[...values(s),m.branch_authority_id]);
@@ -254,9 +275,14 @@ async function createCandidate(pool:DB,cfg:IntegrationConfig,input:unknown):Prom
  // The primary validates/persists intent and prepares an observed runner
  // permit. Git construction happens only through actual provider execution.
  const remotePlans=await tx(pool,async db=>{
-  const run=await currentRun(db,s,true),plans:{t:typeof parsed[number];r:RepositoryConfig;a:Record<string,any>;contributors:Record<string,any>[];id:string;prepared:Awaited<ReturnType<typeof prepareRemote>>}[]=[];
-  const priorPreparation=(await db.query('SELECT request_digest,state FROM hyperfide.integration_preparations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',[...values(s),request])).rows[0];
-  if(priorPreparation){if(priorPreparation.request_digest!==requestDigest)fail('INTEGRATION_IDEMPOTENCY_CONFLICT','Pending request identity has different immutable inputs');fail('INTEGRATION_PREPARATION_PENDING','Reconcile recorded remote execution before repeating candidate preparation');}
+  const run=await currentRun(db,s,true,undefined,false,{kind:'PREPARATION',id:request}),plans:{t:typeof parsed[number];r:RepositoryConfig;a:Record<string,any>;contributors:Record<string,any>[];id:string;prepared:Awaited<ReturnType<typeof prepareRemote>>}[]=[];
+  const priorPreparation=(await db.query('SELECT request_digest,state,execution_manifest FROM hyperfide.integration_preparations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',[...values(s),request])).rows[0];
+  if(priorPreparation){
+   if(priorPreparation.request_digest!==requestDigest)fail('INTEGRATION_IDEMPOTENCY_CONFLICT','Pending request identity has different immutable inputs');
+   if(!['PREPARING','OUTCOME_UNKNOWN'].includes(priorPreparation.state)||!Array.isArray(priorPreparation.execution_manifest)||priorPreparation.execution_manifest.length!==parsed.length)fail('INTEGRATION_PREPARATION_PENDING','Recorded preparation cannot be recovered from this snapshot');
+   for(const raw of priorPreparation.execution_manifest){const recorded=obj(raw),t=parsed.find(t=>t.repository_id===recorded.repository_id);if(!t||!recorded.target||!recorded.authority||!Array.isArray(recorded.contributors)||!recorded.remote||canonical(t)!==canonical(recorded.target))fail('INTEGRATION_PREPARATION_UNRECOVERABLE','Exact original request metadata unavailable');const r=repository(cfg,t.repository_id);if(hash(canonical(r))!==recorded.repository_config_digest)fail('INTEGRATION_PREPARATION_STALE','Trusted repository construction policy changed');plans.push({t,r,a:obj(recorded.authority),contributors:recorded.contributors,id:uuid(recorded.candidate_id),prepared:await restoreRemote(db,recorded.remote)});}
+   return plans;
+  }
   for(const t of parsed){
    const r=repository(cfg,t.repository_id);
    const a=(await db.query('SELECT * FROM hyperfide.branch_authorities WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[...values(s),t.branch_authority_id])).rows[0];
@@ -266,7 +292,7 @@ async function createCandidate(pool:DB,cfg:IntegrationConfig,input:unknown):Prom
    const plan={session_id:t.session_id,operation_id:randomUUID(),repository_id:t.repository_id,reservation_id:t.reservation_id,argv:['node','--input-type=module','-e',CANDIDATE_BUILD_SCRIPT],cwd:'.',environment:{},expected_source_object_id:a.expected_old_head,timeout_ms:900000,source_digest:hash(canonical(source)),policy_digest:run.policy_digest,stdin:canonical({base:a.expected_old_head,commits:source.commits})};
    plans.push({t,r,a,contributors,id:randomUUID(),prepared:await prepareRemote(db,plan)});
   }
-  await db.query("INSERT INTO hyperfide.integration_preparations(organisation_id,run_id,request_id,request_digest,state,execution_manifest) VALUES($1,$2,$3,$4,'PREPARING',$5) ON CONFLICT DO NOTHING",[...values(s),request,requestDigest,plans.map(p=>({candidate_id:p.id,plan:p.prepared.plan}))]);
+  await db.query("INSERT INTO hyperfide.integration_preparations(organisation_id,run_id,request_id,request_digest,state,execution_manifest) VALUES($1,$2,$3,$4,'PREPARING',$5) ON CONFLICT DO NOTHING",[...values(s),request,requestDigest,plans.map(p=>({candidate_id:p.id,repository_id:p.t.repository_id,target:p.t,authority:p.a,contributors:p.contributors,repository_config_digest:hash(canonical(p.r)),remote:snapshotRemote(p.prepared)}))]);
   return plans;
  });
  const prepared:{t:typeof parsed[number];r:RepositoryConfig;a:Record<string,any>;contributors:Record<string,any>[];id:string;head:string;tree:string;parents:string[];remote_receipt_digest:string;prepared:Awaited<ReturnType<typeof prepareRemote>>}[]=[];
@@ -277,14 +303,14 @@ async function createCandidate(pool:DB,cfg:IntegrationConfig,input:unknown):Prom
   const bundle=Buffer.from(output.bundle,'base64');if(bundle.toString('base64')!==output.bundle||bundle.length>8*1024*1024||hash(bundle)!==output.bundle_digest)fail('INTEGRATION_REMOTE_OUTPUT_INVALID','Remote Git bundle bytes do not match capture');
   // Importing/verifying Git objects is publication custody, never a source
   // build or test on the control host.
-  const filename=path.join(cfg.root,'candidate-transfer-'+p.id+'.bundle');await fs.writeFile(filename,bundle,{flag:'wx',mode:0o600});
+  const filename=path.join(cfg.root,'candidate-transfer-'+p.id+'.bundle');try{await fs.writeFile(filename,bundle,{flag:'wx',mode:0o600});}catch(error){if((error as {code?:string}).code!=='EEXIST'||hash(await fs.readFile(filename))!==hash(bundle))throw error;}
   try{await git(p.r.path,['bundle','verify',filename]);await git(p.r.path,['fetch','--no-tags',filename,output.ref]);if(await git(p.r.path,['rev-parse',head+'^{tree}'])!==tree||canonical((await git(p.r.path,['show','-s','--format=%P',head])).split(' ').filter(Boolean))!==canonical(parents))fail('INTEGRATION_REMOTE_OUTPUT_INVALID','Imported candidate tree mismatch');}
   finally{await fs.rm(filename,{force:true});}
   prepared.push({...p,head,tree,parents,remote_receipt_digest:result.spool_digest});
  }
  const builtCommitSet=prepared.map(p=>({repository_id:p.t.repository_id,candidate_head:p.head,expected_old_head:String(p.a.expected_old_head)})).sort((a,b)=>a.repository_id.localeCompare(b.repository_id));
  return tx(pool,async db=>{
- const run=await currentRun(db,s,true);const existing=await db.query('SELECT request_digest,candidate_ids FROM hyperfide.integration_requests WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...values(s),request]);
+ const run=await currentRun(db,s,true,undefined,false,{kind:'PREPARATION',id:request});const existing=await db.query('SELECT request_digest,candidate_ids FROM hyperfide.integration_requests WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...values(s),request]);
  if(existing.rows[0]){if(existing.rows[0].request_digest!==requestDigest)fail('INTEGRATION_IDEMPOTENCY_CONFLICT','Changed request');return {candidate_ids:existing.rows[0].candidate_ids,replayed:true};}
  const commitSet=[...builtCommitSet];const runRepositories=(await db.query('SELECT repository_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',values(s))).rows;
  for(const registered of runRepositories){
@@ -314,22 +340,39 @@ async function runGates(pool:DB,_cfg:IntegrationConfig,_env:Readonly<NodeJS.Proc
  const v=obj(input);keys(v,['organisation_id','run_id','candidate_id','reservation_id','session_id']);const s=scope(v),id=uuid(v.candidate_id),reservation=uuid(v.reservation_id),session=uuid(v.session_id);
  const job=await tx(pool,async db=>{
   const run=await currentRun(db,s,true),candidate=await readCandidate(db,s,id,true);
+  const active=await db.query("SELECT id,state FROM hyperfide.integration_jobs WHERE organisation_id=$1 AND run_id=$2 AND candidate_id=$3 AND state IN ('RUNNING','OUTCOME_UNKNOWN') FOR UPDATE",[...values(s),id]);if(active.rows[0])return {existing_job_id:String(active.rows[0].id),state:String(active.rows[0].state)};
   const held=await db.query("SELECT 1 FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='ALLOCATED' AND attempt_id IS NULL AND quantity>0 AND expires_at>clock_timestamp() FOR UPDATE",[...values(s),reservation]);if(!held.rowCount)fail('INTEGRATION_RESERVATION_REQUIRED','Separate integration reservation required');
-  const active=await db.query("SELECT 1 FROM hyperfide.integration_jobs WHERE organisation_id=$1 AND run_id=$2 AND candidate_id=$3 AND state IN ('RUNNING','OUTCOME_UNKNOWN') FOR UPDATE",[...values(s),id]);if(active.rowCount)fail('INTEGRATION_JOB_ACTIVE','Existing remote job must be reconciled');
   const reviews=await reviewCoverage(db,s,candidate.manifest,candidate.row.input_manifest_digest,id),verificationInput=hash(canonical({candidate_input_manifest_digest:candidate.row.input_manifest_digest,review_bindings_digest:reviews.digest,source_object_id:candidate.manifest.candidate_head,tree:candidate.manifest.tree}));const jobId=randomUUID(),plans=[];
   for(const gate of candidate.manifest.required_gates)plans.push({gate,prepared:await prepareRemoteGate(db,s,{session_id:session,reservation_id:reservation,repository_id:candidate.manifest.repository_id,input_digest:verificationInput,policy_digest:run.policy_digest,gate,mode:'CANDIDATE',candidate_head:candidate.manifest.candidate_head,snapshot:{tree:candidate.manifest.tree}})});
-  if(new Set(plans.map(p=>p.prepared.plan.source_digest)).size!==1)fail('INTEGRATION_SOURCE_CHANGED','Gates require one exact prepared physical source manifest');await db.query("INSERT INTO hyperfide.integration_jobs(organisation_id,run_id,id,candidate_id,executor_id,reservation_id,state,source_manifest_digest,source_object_id,source_tree_id,review_bindings_digest,verification_input_digest) VALUES($1,$2,$3,$4,$5,$6,'RUNNING',$7,$8,$9,$10,$11)",[...values(s),jobId,id,session,reservation,plans[0]!.prepared.plan.source_digest,candidate.manifest.candidate_head,candidate.manifest.tree,reviews.digest,verificationInput]);return {id:jobId,...candidate,plans,verificationInput};
+  if(new Set(plans.map(p=>p.prepared.plan.source_digest)).size!==1)fail('INTEGRATION_SOURCE_CHANGED','Gates require one exact prepared physical source manifest');await db.query("INSERT INTO hyperfide.integration_jobs(organisation_id,run_id,id,candidate_id,executor_id,reservation_id,state,source_manifest_digest,source_object_id,source_tree_id,review_bindings_digest,verification_input_digest,execution_manifest) VALUES($1,$2,$3,$4,$5,$6,'RUNNING',$7,$8,$9,$10,$11,$12)",[...values(s),jobId,id,session,reservation,plans[0]!.prepared.plan.source_digest,candidate.manifest.candidate_head,candidate.manifest.tree,reviews.digest,verificationInput,plans.map(p=>({gate:p.gate,remote:snapshotRemote(p.prepared)}))]);return {id:jobId,...candidate,plans,verificationInput};
  });
+ if('existing_job_id' in job)return {job_id:job.existing_job_id,state:job.state,recovery_required:true,redispatched:false};
+ return executeCandidateJob(pool,s,id,job);
+}
+async function executeCandidateJob(pool:DB,s:Scope,id:string,job:{id:string;row:Record<string,any>;plans:{gate:GateConfig;prepared:Awaited<ReturnType<typeof prepareRemote>>}[];verificationInput:string}):Promise<unknown>{
  const results:Record<string,unknown>[]=[];
  for(const entry of job.plans){
+  const existing=(await pool.query('SELECT * FROM hyperfide.integration_gate_receipts WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3 AND gate_id=$4',[...values(s),job.id,entry.gate.id])).rows[0];if(existing){results.push({gate_id:entry.gate.id,outcome:existing.outcome,replayed:true});continue;}
   const capture=await executeRemote(entry.prepared),observed=obj(JSON.parse(capture.stdout));
   const stdout=String(observed.stdout??''),stderr=String(observed.stderr??''),assertions=Number(observed.assertions),proof=obj(observed.proof);
   const outcome=observed.exitCode===0&&Number.isSafeInteger(assertions)&&assertions>0&&proof.scope_digest===job.verificationInput?'PASS':'FAIL';
-  await tx(pool,async db=>{await currentRun(db,s,true);await readCandidate(db,s,id,true);await db.query('INSERT INTO hyperfide.integration_gate_receipts(organisation_id,run_id,candidate_id,job_id,gate_id,input_manifest_digest,outcome,exit_code,assertion_count,stdout_digest,stderr_digest,stdout,stderr,proof) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',[...values(s),id,job.id,entry.gate.id,job.row.input_manifest_digest,outcome,observed.exitCode,assertions,hash(stdout),hash(stderr),stdout,stderr,{...proof,remote_spool_digest:capture.spool_digest,remote_cleanup_receipt_digest:capture.cleanup.receipt_digest}]);});
+  await tx(pool,async db=>{await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:job.id});await readCandidate(db,s,id,true);await db.query('INSERT INTO hyperfide.integration_gate_receipts(organisation_id,run_id,candidate_id,job_id,gate_id,input_manifest_digest,outcome,exit_code,assertion_count,stdout_digest,stderr_digest,stdout,stderr,proof) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(organisation_id,run_id,job_id,gate_id) DO NOTHING',[...values(s),id,job.id,entry.gate.id,job.row.input_manifest_digest,outcome,observed.exitCode,assertions,hash(stdout),hash(stderr),stdout,stderr,{...proof,remote_spool_digest:capture.spool_digest,remote_cleanup_receipt_digest:capture.cleanup.receipt_digest}]);});
   results.push({gate_id:entry.gate.id,outcome,remote_process_ref:capture.process_ref,spool_digest:capture.spool_digest});
  }
- await tx(pool,async db=>{await currentRun(db,s,true);await db.query("UPDATE hyperfide.integration_jobs SET state=$4,finished_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='RUNNING'",[...values(s),job.id,results.every(r=>r.outcome==='PASS')?'SUCCEEDED':'FAILED']);});
+ await tx(pool,async db=>{await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:job.id});await db.query("UPDATE hyperfide.integration_jobs SET state=$4,finished_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('RUNNING','OUTCOME_UNKNOWN')",[...values(s),job.id,results.every(r=>r.outcome==='PASS')?'SUCCEEDED':'FAILED']);});
  return {job_id:job.id,results,scope:'CANDIDATE_GATES_ONLY',candidate_qualified:false};
+}
+async function recoverCandidateJob(pool:DB,input:unknown):Promise<unknown>{
+ const v=obj(input);keys(v,['organisation_id','run_id','job_id']);const s=scope(v),jobId=uuid(v.job_id);
+ const saved=await tx(pool,async db=>{
+  await currentRun(db,s,true,undefined,false,{kind:'CANDIDATE',id:jobId});const row=(await db.query('SELECT * FROM hyperfide.integration_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[...values(s),jobId])).rows[0];if(!row)fail('INTEGRATION_JOB_UNKNOWN','Recorded integration job required');
+  if(!['RUNNING','OUTCOME_UNKNOWN'].includes(row.state))return {terminal:true,state:row.state};
+  if(!Array.isArray(row.execution_manifest)||!row.execution_manifest.length)fail('INTEGRATION_REMOTE_RECOVERY_UNAVAILABLE','Immutable exact remote plans unavailable; no redispatch');
+  const candidate=await readCandidate(db,s,row.candidate_id),plans=[];for(const raw of row.execution_manifest){const entry=obj(raw);plans.push({gate:entry.gate as GateConfig,prepared:await restoreRemote(db,entry.remote)});}
+  return {terminal:false,state:row.state,candidate_id:row.candidate_id,job:{id:jobId,row:candidate.row,plans,verificationInput:row.verification_input_digest}};
+ });
+ if(saved.terminal)return {job_id:jobId,state:saved.state,replayed:true};
+ return executeCandidateJob(pool,s,saved.candidate_id!,saved.job!);
 }
 export function createComponent(ctx:ComponentContext):Component{
  let cfg:Promise<IntegrationConfig>|undefined;const settings=()=>cfg??=config(ctx.env);
@@ -337,6 +380,7 @@ export function createComponent(ctx:ComponentContext):Component{
  'integration.candidate.create':async input=>createCandidate(primaryClient(),await settings(),input),
  'integration.candidate.bind_reviews':async input=>bindReviews(primaryClient(),input),
  'integration.candidate.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','candidate_id']);return readCandidate(primaryClient(),scope(v),uuid(v.candidate_id));},
+ 'integration.candidate.reconcile':async input=>recoverCandidateJob(primaryClient(),input),
  'integration.candidate.verify':async input=>runGates(primaryClient(),await settings(),ctx.env,input),
  'integration.candidate.admit':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','candidate_id']);const s=scope(v),id=uuid(v.candidate_id);return tx(primaryClient(),async db=>{const c=await candidateReady(db,s,id);await db.query("UPDATE hyperfide.integration_candidates SET state='READY',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...values(s),id]);return {candidate_id:id,input_manifest_digest:c.row.input_manifest_digest,state:'READY',integrated:false,wave_closed:false,programme_qualified:false};});}
  }});

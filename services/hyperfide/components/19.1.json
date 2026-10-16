@@ -13,14 +13,16 @@
     "integration.candidate.bind_reviews",
     "integration.candidate.inspect",
     "integration.candidate.verify",
-    "integration.candidate.admit"
+    "integration.candidate.admit",
+    "integration.candidate.reconcile"
   ],
   "requires": [
     "4.1",
     "4.2",
+    "4.4",
     "12.4",
     "16.4",
     "17.4",
-    "18.4"
+    "finding-remediation"
   ]
 }

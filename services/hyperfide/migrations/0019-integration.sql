@@ -237,3 +237,12 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
 
 ALTER TABLE hyperfide.publication_acceptance_receipts ADD COLUMN manifest jsonb NOT NULL DEFAULT '{}' CHECK(jsonb_typeof(manifest)='object');
 CREATE TRIGGER immutable_publication_acceptance_proof BEFORE UPDATE ON hyperfide.publication_acceptance_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('manifest');
+
+-- Exact remote plans survive control restarts; opaque permits are never stored.
+ALTER TABLE hyperfide.integration_jobs ADD COLUMN execution_manifest jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE hyperfide.integration_scope_jobs ADD COLUMN execution_manifest jsonb NOT NULL DEFAULT '[]'::jsonb;
+CREATE TRIGGER immutable_candidate_execution_manifest BEFORE UPDATE ON hyperfide.integration_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('execution_manifest');
+CREATE TRIGGER immutable_scope_execution_manifest BEFORE UPDATE ON hyperfide.integration_scope_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('execution_manifest');
+CREATE UNIQUE INDEX one_candidate_gate_receipt_per_job ON hyperfide.integration_gate_receipts(organisation_id,run_id,job_id,gate_id);
+CREATE UNIQUE INDEX one_scope_gate_receipt_per_job ON hyperfide.integration_scope_receipts(organisation_id,run_id,job_id,gate_id);
+CREATE UNIQUE INDEX one_active_scope_job ON hyperfide.integration_scope_jobs(organisation_id,run_id,level,COALESCE(wave,0)) WHERE state IN('RUNNING','OUTCOME_UNKNOWN');
