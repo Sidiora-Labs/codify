@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 #define HF_BODY_LIMIT (1024U * 1024U)
-#define HF_JSON_TOKENS 8192
+#define HF_JSON_TOKENS 65536
 typedef struct { size_t start, end; int parent, next, count; char type; } HfJsonToken;
 typedef struct { const char *text; size_t length; int count; HfJsonToken tokens[HF_JSON_TOKENS]; } HfJson;
 int hf_json_parse(HfJson *json,const char *text);
