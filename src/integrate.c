@@ -7,7 +7,10 @@ extern int hf_client_authority_guard(const char *operation, FILE *output);
  * same native capabilities.
  */
 #include "cg.h"
+extern int hyperfide_owned_write(const char *,const char *,size_t,const char *,bool);
 #include <ctype.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -109,11 +112,14 @@ static ConfigState integrate_config_state(const Adapter *a,
     s.exists = true;
     if (a->kind != CFG_TOML) s.malformed = !json_balanced(body);
     if (a->kind == CFG_TOML)
-        s.configured = strstr(body, "[mcp_servers.codify]") &&
+        s.configured = (strstr(body, "[mcp_servers.codify]") || strstr(body, "[mcp_servers.hyperfide]")) &&
                        strstr(body, "args");
     else
-        s.configured = strstr(body, "\"codify\"") &&
+        s.configured = (strstr(body, "\"codify\"") || strstr(body, "\"hyperfide\"")) &&
                        strstr(body, "\"mcp\"");
+    bool legacy=a->kind==CFG_TOML?strstr(body,"[mcp_servers.codify]")!=NULL:strstr(body,"\"codify\"")!=NULL;
+    bool canonical=a->kind==CFG_TOML?strstr(body,"[mcp_servers.hyperfide]")!=NULL:strstr(body,"\"hyperfide\"")!=NULL;
+    if(legacy&&canonical)s.malformed=true;
     s.stale_name = strstr(body, "codegraph") != NULL;
     const char *p = strstr(body, "\"protocolVersion\"");
     if (p && (p = strchr(p, ':'))) {
@@ -143,17 +149,34 @@ static int ensure_parent(const char *path) {
     return mkdirs(dir);
 }
 
-static int backup_existing(const char *path, const char *body) {
-    if (!body) return 0;
-    char backup[4800];
-    snprintf(backup, sizeof backup, "%s.codify.bak", path);
-    if (access(backup, F_OK) == 0) return 0;
-    return write_entire_file(backup, body, strlen(body));
+static int backup_existing(const char *path,const char *body) {
+    if(!body)return 0;
+    char parent[4700],directory[4900],backup[5200],hash[65];
+    snprintf(parent,sizeof parent,"%s",path);
+    char *slash=strrchr(parent,'/');if(slash)*slash=0;else snprintf(parent,sizeof parent,".");
+    const char *leaf=strrchr(path,'/');leaf=leaf?leaf+1:path;
+    sha256_hex(body,strlen(body),hash);
+    snprintf(directory,sizeof directory,"%s/.hyperfide-backups",parent);
+    if(mkdirs(directory))return -1;
+    struct stat st;if(lstat(directory,&st)||!S_ISDIR(st.st_mode))return -1;
+    snprintf(backup,sizeof backup,"%s/%s.%s",directory,leaf,hash);
+    int fd=open(backup,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0600);
+    if(fd<0){
+        if(errno!=EEXIST||lstat(backup,&st)||!S_ISREG(st.st_mode)||st.st_nlink!=1)return -1;
+        size_t n=0;char *old=read_entire_file(backup,&n);
+        bool same=old&&n==strlen(body)&&!memcmp(old,body,n);free(old);return same?0:-1;
+    }
+    size_t n=0,len=strlen(body);while(n<len){ssize_t k=write(fd,body+n,len-n);if(k<=0){close(fd);return -1;}n+=(size_t)k;}
+    int rc=fsync(fd);if(close(fd))rc=-1;
+    int dfd=open(directory,O_RDONLY|O_DIRECTORY|O_NOFOLLOW);if(dfd<0)return -1;
+    if(fsync(dfd))rc=-1;
+    if(close(dfd))rc=-1;
+    return rc;
 }
 
 static char *integrate_entry(const char *bin, bool vscode) {
     StrBuf b; sb_init(&b);
-    sb_puts(&b, "\"codify\":{");
+    sb_puts(&b, "\"hyperfide\":{");
     if (vscode) sb_puts(&b, "\"type\":\"stdio\",");
     sb_puts(&b, "\"command\":"); sb_json_str(&b, bin);
     sb_puts(&b, ",\"args\":[\"mcp\"]}");
@@ -174,7 +197,8 @@ static int integrate_json_apply(const Adapter *a, const char *path,
         return rc;
     }
     if (!json_balanced(body)) { free(body); free(entry); return 2; }
-    if (strstr(body, "\"codify\"") && strstr(body, "\"mcp\"")) {
+    if(strstr(body,"\"codify\"")&&strstr(body,"\"hyperfide\"")){free(body);free(entry);return 2;}
+    if ((strstr(body, "\"codify\"") || strstr(body, "\"hyperfide\"")) && strstr(body, "\"mcp\"")) {
         free(body); free(entry); return 1;
     }
     char needle[128];
@@ -207,12 +231,13 @@ static int integrate_json_apply(const Adapter *a, const char *path,
 
 static int integrate_toml_apply(const char *path, const char *bin) {
     char *body = read_entire_file(path, NULL);
-    if (body && strstr(body, "[mcp_servers.codify]")) { free(body); return 1; }
+    if(body&&strstr(body,"[mcp_servers.codify]")&&strstr(body,"[mcp_servers.hyperfide]")){free(body);return 2;}
+    if (body && (strstr(body, "[mcp_servers.codify]") || strstr(body, "[mcp_servers.hyperfide]"))) { free(body); return 1; }
     ensure_parent(path);
     if (backup_existing(path, body) != 0) { free(body); return -1; }
     FILE *f = fopen(path, "a");
     if (!f) { free(body); return -1; }
-    fprintf(f, "%s[mcp_servers.codify]\ncommand = \"%s\"\n"
+    fprintf(f, "%s[mcp_servers.hyperfide]\ncommand = \"%s\"\n"
                "args = [\"mcp\"]\n", body && body[0] ? "\n" : "", bin);
     int rc = fclose(f);
     free(body);
@@ -221,31 +246,31 @@ static int integrate_toml_apply(const char *path, const char *bin) {
 
 static const char *SKILL_BODY =
 "---\nname: codify-workflow\ndescription: Ground coding work in the local "
-"Codify graph, spec, evidence, and handoff lifecycle.\n---\n\n"
-"<!-- codify-owned: portable-agent-skill v1 -->\n"
-"# Codify workflow\n\n"
-"1. Run `cg brief`, then `cg spec next` and `cg spec start <id>`.\n"
-"2. Use `cg survey` and `cg context` before broad reads. Use grep_code, "
+"Hyperfide graph, spec, evidence, and handoff lifecycle.\n---\n\n"
+"<!-- hyperfide-owned: portable-agent-skill v1 -->\n"
+"# Hyperfide workflow\n\n"
+"1. Run `hyperfide brief`, then `hyperfide spec next` and `hyperfide spec start <id>`.\n"
+"2. Use `hyperfide survey` and `hyperfide context` before broad reads. Use grep_code, "
 "find_files, search_code, and get_context (MCP) before any shell search; "
-"from the CLI, `cg grep <pattern>` and `cg files <glob>` replace grep, rg, "
+"from the CLI, `hyperfide grep <pattern>` and `hyperfide files <glob>` replace grep, rg, "
 "and find.\n"
-"3. Implement only the claimed task; record durable decisions with `cg "
+"3. Implement only the claimed task; record durable decisions with `hyperfide "
 "remember`.\n"
-"4. Run `cg review`, `cg guard`, and the task verification.\n"
-"5. Snapshot with `cg commit`, qualify with `cg spec done`, and prove with "
-"`cg spec trace`.\n"
-"6. When `cg spec next` returns `@docs`, build `cg docs packet`, update only "
+"4. Run `hyperfide review`, `hyperfide guard`, and the task verification.\n"
+"5. Snapshot with `hyperfide commit`, qualify with `hyperfide spec done`, and prove with "
+"`hyperfide spec trace`.\n"
+"6. When `hyperfide spec next` returns `@docs`, build `hyperfide docs packet`, update only "
 "the configured documentation targets and claims ledger, then finish with "
-"`cg docs close`. Never recursively run `cg spec run` from documentation "
+"`hyperfide docs close`. Never recursively run `hyperfide spec run` from documentation "
 "closure.\n"
 "Never force completion or treat a snapshot, declaration, or heartbeat as "
 "qualification.\n";
 
 static const char *EVENT_SH =
 "#!/bin/sh\n"
-"# codify-owned: portable-event-shim v1\n"
+"# hyperfide-owned: portable-event-shim v1\n"
 "source_name=${1:-generic}\n"
-"exec cg event ingest --source \"$source_name\"\n";
+"exec hyperfide event ingest --source \"$source_name\"\n";
 
 static const char *SHIM_HOSTS[] = {
     "codex", "claude", "copilot", "cursor", "gemini", NULL
@@ -255,18 +280,19 @@ static const char *asset_state(const char *path, const char *marker) {
     char *body = read_entire_file(path, NULL);
     if (!body) return "create";
     bool owned = strstr(body, marker) != NULL;
+    if(!owned&&!strncmp(marker,"codify-owned:",13)) { char modern[160];snprintf(modern,sizeof modern,"hyperfide-owned:%s",marker+13);owned=strstr(body,modern)!=NULL; }
     free(body);
     return owned ? "unchanged" : "conflict";
 }
 
 static int apply_asset(const char *path, const char *body, bool executable) {
     char *old = read_entire_file(path, NULL);
-    if (old && !strstr(old, "codify-owned:")) { free(old); return 2; }
+    if (old && !strstr(old, "codify-owned:") && !strstr(old,"hyperfide-owned:")) { free(old); return 2; }
     if (old && strcmp(old, body) == 0) { free(old); return 1; }
     ensure_parent(path);
     if (backup_existing(path, old) != 0) { free(old); return -1; }
     free(old);
-    if (write_entire_file(path, body, strlen(body)) != 0) return -1;
+    if (hyperfide_owned_write(path, body, strlen(body), "integration-asset v1", true) != 0) return -1;
     return executable ? chmod(path, 0755) : 0;
 }
 
@@ -355,7 +381,7 @@ static void integrate_plugin_report(Cg *cg, bool json, StrBuf *b) {
 
 static char *host_shim_body(const char *host) {
     StrBuf b; sb_init(&b);
-    sb_printf(&b, "#!/bin/sh\n# codify-owned: %s-event-shim v1\n"
+    sb_printf(&b, "#!/bin/sh\n# hyperfide-owned: %s-event-shim v1\n"
                   "exec \"$(dirname \"$0\")/event.sh\" %s\n", host, host);
     return b.p;
 }
@@ -374,7 +400,7 @@ static int integrate_agent_context(Cg *cg) {
     char path[4700];
     config_context_path(cg->root, "agent-context.md", path, sizeof path);
     char *before = read_entire_file(path, NULL);
-    if (before && !strstr(before, "codify-owned: graph-agent-context")) {
+    if (before && !strstr(before, "codify-owned: graph-agent-context") && !strstr(before,"hyperfide-owned: graph-agent-context")) {
         free(before); return 2;
     }
     SysInfo si;
@@ -724,7 +750,7 @@ int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility) {
     { int authority_rc = hf_client_authority_guard("integrate", stderr); if (authority_rc) return authority_rc; }
     if (!action || !action[0]) action = "detect";
     if (compatibility && !json)
-        printf("Codify compatibility installer -> `cg integrate apply`\n");
+        printf("Codify compatibility installer -> `hyperfide integrate apply`\n");
     if (strcmp(action, "detect") == 0) return integrate_detect(cg, json);
     if (strcmp(action, "plan") == 0) return integrate_plan(cg, json);
     if (strcmp(action, "apply") == 0) return integrate_apply(cg, json);

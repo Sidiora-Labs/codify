@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "26.4",
+  "task": "26.4",
+  "roles": [
+    "control"
+  ],
+  "module": "migration/generated.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "migration.generated.inspect",
+    "migration.generated.run"
+  ],
+  "requires": [
+    "26.3"
+  ]
+}

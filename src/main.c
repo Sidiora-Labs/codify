@@ -1,6 +1,7 @@
 #include <stdio.h>
 extern int hf_client_authority_guard(const char *operation, FILE *output);
 extern int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err);
+extern int hf_entrypoint_dispatch(int argc,char **argv);
 /* Codify CLI — see README.md */
 #include "cg.h"
 #include "sem_flow.h"
@@ -186,6 +187,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    { int launcher_rc = hf_entrypoint_dispatch(argc,argv); if (launcher_rc >= 0) return launcher_rc; }
     { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return remote_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
