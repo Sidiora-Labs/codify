@@ -5,7 +5,7 @@ This component receipt covers extraction and immutable transfer only. It does
 not qualify legacy state migration or central graph search parity.
 """
 from __future__ import annotations
-import base64,copy,hashlib,importlib.util,json,os,subprocess,sys,tempfile
+import base64,copy,hashlib,importlib.util,json,os,select,subprocess,sys,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 ASSERTIONS=[]
@@ -37,7 +37,7 @@ class Service:
         process(["git","config","gc.auto","0"],self.repo)
         process(["git","config","user.name","Hyperfide component fixture"],self.repo)
         process(["git","config","user.email","fixture@example.invalid"],self.repo)
-        (self.repo/"maths.py").write_text("# @contract Preserve the counted result.\ndef helper(value):\n    return value + 1\n\ndef consume(value):\n    return helper(value)\n\nBODY_SENTINEL = 'body words searchable corpus'\n")
+        (self.repo/"maths.py").write_text("# @contract Preserve the counted result.\ndef helper(value):\n    return value + 1\n\ndef consume(value):\n    return helper(value)\n\nBODY_SENTINEL = 'body words searchable corpus'\nTOP_LEVEL_SENTINEL = helper(4)\n")
         (self.repo/"route.js").write_text("export function endpoint(value) { return value; }\n// Intent: this endpoint preserves its input.\napp.get('/api/items', endpoint);\n")
         (self.repo/"README.md").write_text("Documentation corpus includes unrelated prose and Unicode café.\n")
         process(["git","add","."],self.repo);process(["git","commit","-qm","pinned fixture"],self.repo)
@@ -184,6 +184,26 @@ def main():
                 status,response=service.fixture.request(operation,key="provisioner")
                 expect(response.get("ok") is False and response.get("error",{}).get("code")=="GRAPH_ROLE_DENIED","provisioner read graph cache despite denied role")
             check("graph.extraction.reject-wrong-role",role_denied)
+            def dispatch_native():
+                f=service.fixture;argv=list(f.child.args);f.stop()
+                argv[1]=str(ROOT/"services/hyperfide/dist/dispatch.js")
+                try:
+                    f.child=subprocess.Popen(argv,cwd=ROOT,env=f.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+                    deadline=time.monotonic()+15;ready=False;diagnostic=[]
+                    while time.monotonic()<deadline:
+                        readable,_,_=select.select([f.child.stderr],[],[],0.1)
+                        if readable:
+                            line=f.child.stderr.readline();diagnostic.append(line)
+                            if '"event":"ready"' in line:ready=True;break
+                        if f.child.poll() is not None:break
+                    expect(ready,"actual dispatch TLS entrypoint did not become ready: "+"".join(diagnostic)[:1000])
+                    result=service.ok("graph.extract.create",dict(service.input,generation="11"))
+                    expect(result["identity"]["generation"]=="11" and result["identity"]["commit"]==service.commit and result["complete"],"actual dispatch native extraction did not preserve source")
+                    expect(service.ok("graph.extract.inspect",{"bundle_digest":result["bundle_digest"]})==result,"actual dispatch could not read its immutable transfer")
+                    OBSERVATIONS.append({"observation":"genuine-dispatch-entrypoint","entrypoint":"services/hyperfide/dist/dispatch.js","native_scanner_executed":True})
+                finally:
+                    f.stop();f.start()
+            check("graph.extraction.authenticated-dispatch-native",dispatch_native)
             check("graph.extraction.scratch-disposition",lambda:expect(not list(service.scratch.glob("extract-*")),"transient scanner workspace leaked"))
             artifact=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR",str(base)))/"graph"
             artifact.mkdir(parents=True,exist_ok=True)

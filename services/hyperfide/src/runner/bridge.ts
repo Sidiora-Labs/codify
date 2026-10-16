@@ -6,9 +6,11 @@ import {object} from '../policy/programme.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {assertCurrentPrincipal,gatewayOf,identityTransaction,invocationOf} from '../identity/enrollment.js';
-import {assertInvocation,DIGEST,decimal,exact,fail,hash,uuid} from '../transport/protocol.js';
+import {assertInvocation,DIGEST,decimal,exact,fail,hash,uuid,strictJSON} from '../transport/protocol.js';
 import type {InvocationContext,Principal} from '../transport/protocol.js';
 import {readRuntimeReadiness} from '../providers/pools.js';
+import {isArtifactStoreCapability} from '../artifacts/objects.js';
+import type {ArtifactStoreCapability} from '../artifacts/objects.js';
 
 export interface RunnerRemotePlan {
  session_id:string;operation_id:string;repository_id:string;reservation_id:string;
@@ -22,7 +24,7 @@ export interface RunnerRemotePermit {readonly [permitBrand]:true}
 export interface CapturedBytes {bytes:Uint8Array;digest:string;size_bytes:string;complete:boolean}
 export interface RunnerRemoteResult {
  execution_plane:'REMOTE';truncated:boolean;started_at:string;ended_at:string;duration_ms:number;
- source_manifest_digest:string;source_state_digest:string;source_provenance_digest?:string;workspace_path:string;
+ source_manifest_digest:string;source_state_digest:string;source_object_id:string;source_tree_id:string;source_provenance_digest?:string;workspace_path:string;
  outcome:'SUCCEEDED'|'FAILED'|'UNKNOWN';status:'COMPLETED'|'TIMED_OUT'|'UNKNOWN';
  operation_id:string;session_id:string;organisation_id:string;run_id:string;
  repository_id:string;sandbox_id:string;boot_id:string;boot_generation:string;
@@ -133,43 +135,104 @@ async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:Rec
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component> {
  await schema(ctx);
- const registry=Object.freeze({lookup:readRunnerBinding,verifyBinding:async(tx:PrimaryTransaction,v:Record<string,unknown>)=>{try{const r=await readRunnerBinding(tx,v as any);return {evidence_digest:r.observation_digest,observed_at:new Date(r.observed_at).toISOString()};}catch{return null;}}});
+ const registry=Object.freeze({lookup:readRunnerBinding,verifyBinding:async(tx:PrimaryTransaction,v:Record<string,unknown>)=>{try{const r=await readRunnerBinding(tx,v as any);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}}});
  return {apiVersion:1,capabilities:{'runner.registry.v1':registry,'qualification.environment.v1':Object.freeze({verify:verifyEnvironment})},actions:{
   'runner.registry.observe':(v,context)=>identityTransaction(context,(tx,i)=>{if(!object(v))fail('INVALID_REQUEST','Object required');return observe(tx as PrimaryTransaction,v,i);}),
   'runner.registry.describe':async(_v,context)=>{const i=invocationOf(context);return {protocol_version:1,organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,authority:'OBSERVATION_ONLY'};}
  }};
 }
-const permits=new WeakMap<object,{context:ComponentContext;plan:RunnerRemotePlan;binding:Binding;principal:Principal;digest:string}>();
+const permits=new WeakMap<object,{context:ComponentContext;plan:RunnerRemotePlan;binding:Binding;principal:Principal;invocation:InvocationContext;digest:string}>();
 function validatePlan(plan:RunnerRemotePlan):void {
  if(!object(plan)||![plan.session_id,plan.operation_id,plan.repository_id,plan.reservation_id].every(uuid)||plan.job_id!==undefined&&!uuid(plan.job_id)||!Array.isArray(plan.argv)||!plan.argv.length||plan.argv.length>256||typeof plan.argv[0]!=='string'||!plan.argv[0]||plan.argv.some(x=>typeof x!=='string'||x.length>4096||x.includes('\0'))||plan.cwd!=='.'&&!safeRelative(plan.cwd)||!object(plan.environment)||Object.entries(plan.environment).some(([k,v])=>!/^[A-Z][A-Z0-9_]{0,63}$/.test(k)||/^(LD_|DYLD_|HF_|HOME$|TMPDIR$|PATH$)/.test(k)||typeof v!=='string'||v.includes('\0'))||plan.stdin!==undefined&&(typeof plan.stdin!=='string'||Buffer.byteLength(plan.stdin)>65536)||!Number.isInteger(plan.timeout_ms)||plan.timeout_ms<1||plan.timeout_ms>259200000||![plan.source_digest,plan.policy_digest,plan.executable_digest,plan.environment_digest].every(digest)||!Array.isArray(plan.artifact_paths)||plan.artifact_paths.length>64||plan.artifact_paths.some(x=>typeof x!=='string'||!safeRelative(x))||new Set(plan.artifact_paths).size!==plan.artifact_paths.length)fail('INVALID_REMOTE_PLAN','Bounded immutable registered command/source/environment plan required');
  if(hash(runnerCanonical(plan.environment))!==plan.environment_digest)fail('REMOTE_ENVIRONMENT_MISMATCH','Explicit environment bytes differ from the registered digest');
 }
 export function runnerResultSigningBytes(org:string,run:string,op:string,plan:string,result:string):Buffer{return Buffer.from(`HYPERFIDE-RUNNER-RESULT-V1\n${org}\n${run}\n${op}\n${plan}\n${result}\n`);}
-function decodeResult(row:Record<string,any>):RunnerRemoteResult {
- const wire=row.result as Record<string,any>;
- if(!object(wire))fail('REMOTE_RESULT_INVALID','Captured result required');
+
+/** Read immutable15 payloads only after the SQL observation transaction closes.
+ * Every child and concatenated content digest is checked again at this boundary. */
+async function readCapturedReference(store:ArtifactStoreCapability,i:InvocationContext,ref:unknown):Promise<CapturedBytes> {
+ if(!object(ref)||!['object','manifest'].includes(String(ref.storage_kind))||!uuid(ref.artifact_id)||!digest(ref.digest)||!decimal(ref.size_bytes)||typeof ref.complete!=='boolean'||BigInt(ref.size_bytes)>16777216n)fail('REMOTE_RESULT_INVALID','Bounded immutable captured-object reference required');
+ const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};
+ const observe=async(action:string,id:string,expectedDigest:string,expectedSize?:string):Promise<Record<string,any>>=>{
+  const result=await store.invoke(action,{...scope,artifact_id:id},i);
+  if(!object(result)||result.outcome!=='SUCCEEDED'||result.availability!=='VERIFIED'||!object(result.artifact)||!object(result.receipt)||!digest(result.receipt.receipt_id)||result.artifact.artifact_id!==id||result.artifact.organisation_id!==scope.organisation_id||result.artifact.run_id!==scope.run_id||result.artifact.status!=='COMPLETE'||result.artifact.digest!==expectedDigest||expectedSize!==undefined&&result.artifact.size_bytes!==expectedSize)fail('REMOTE_RESULT_INVALID','Actual scoped COMPLETE artifact receipt required');
+  return result;
+ };
+ const objectBytes=async(id:string,wanted:string,size:string):Promise<Buffer>=>{
+  const result=await observe('artifact.object.read',id,wanted,size);
+  if(typeof result.data_base64!=='string')fail('REMOTE_RESULT_INVALID','Full captured object bytes required');
+  const bytes=Buffer.from(result.data_base64,'base64');
+  if(bytes.toString('base64')!==result.data_base64||String(bytes.length)!==size||hash(bytes)!==wanted)fail('REMOTE_RESULT_INVALID','Captured object content differs');
+  return bytes;
+ };
+ let bytes:Buffer;
+ if(ref.storage_kind==='object')bytes=await objectBytes(ref.artifact_id,ref.digest,ref.size_bytes);
+ else{
+  if(!digest(ref.manifest_digest))fail('REMOTE_RESULT_INVALID','Manifest identity required separately from raw content digest');
+  const result=await observe('artifact.manifest.read',ref.artifact_id,ref.manifest_digest),m=result.manifest;
+  if(!object(m)||m.schema_version!==1||m.kind!=='chunk-manifest'||m.organisation_id!==scope.organisation_id||m.run_id!==scope.run_id||m.complete!==true||m.truncated!==false||!Array.isArray(m.missing_ranges)||m.missing_ranges.length||m.total_size_bytes!==ref.size_bytes||m.content_digest!==ref.digest||result.manifest_digest!==ref.manifest_digest||!Array.isArray(m.chunks)||m.expected_chunks!==m.chunks.length||m.chunks.length>4096)fail('REMOTE_RESULT_INVALID','Complete ordered capture manifest required');
+  const chunks:Buffer[]=[];let offset=0;
+  for(const [index,c] of m.chunks.entries()){
+   if(!object(c)||c.sequence!==index||c.offset_bytes!==String(offset)||!uuid(c.artifact_id)||!digest(c.digest)||!decimal(c.size_bytes)||BigInt(c.size_bytes)>262144n)fail('REMOTE_RESULT_INVALID','Exact contiguous capture chunk required');
+   const part=await objectBytes(c.artifact_id,c.digest,c.size_bytes);chunks.push(part);offset+=part.length;
+   if(offset>16777216)fail('REMOTE_RESULT_INVALID','Captured content exceeds bound');
+  }
+  bytes=Buffer.concat(chunks);
+ }
+ if(String(bytes.length)!==ref.size_bytes||hash(bytes)!==ref.digest)fail('REMOTE_RESULT_INVALID','Concatenated captured bytes differ');
+ return {bytes,digest:ref.digest,size_bytes:ref.size_bytes,complete:ref.complete};
+}
+async function decodeResult(row:Record<string,any>,store:ArtifactStoreCapability,i:InvocationContext,plan:RunnerRemotePlan):Promise<RunnerRemoteResult> {
+ const wire=row.result;if(!object(wire))fail('REMOTE_RESULT_INVALID','Signed captured metadata required');
+ for(const [key,wanted] of Object.entries({operation_id:plan.operation_id,session_id:plan.session_id,repository_id:plan.repository_id,organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,argv:plan.argv,cwd:plan.cwd,source_digest:plan.source_digest,source_manifest_digest:plan.source_digest,policy_digest:plan.policy_digest,executable_digest:plan.executable_digest,environment_digest:plan.environment_digest}))if(runnerCanonical(wire[key])!==runnerCanonical(wanted))fail('REMOTE_RESULT_INVALID','Signed result differs from exact operation plan: '+key);
+ if(wire.execution_plane!=='REMOTE'||!Array.isArray(wire.artifacts)||!object(wire.cleanup))fail('REMOTE_RESULT_INVALID','Physical execution and cleanup metadata required');
+ const raw=await readCapturedReference(store,i,wire.native_receipt),native=strictJSON(Buffer.from(raw.bytes),16777216);
+ if(!object(native)||raw.digest!==wire.cleanup.receipt_digest)fail('REMOTE_RESULT_INVALID','Exact native receipt content required');
+ for(const key of ['operation_id','session_id','organisation_id','run_id','repository_id','sandbox_id','boot_id','boot_generation','slot_id','slot_generation','argv','workspace_path','source_manifest_digest','source_state_digest','executable_digest','environment_digest','policy_digest','started_at','ended_at','duration_ms','start_identity'])if(runnerCanonical(native[key])!==runnerCanonical(wire[key]))fail('REMOTE_RESULT_INVALID','Provisioner metadata differs from native bytes: '+key);
  const copy=structuredClone(wire) as Record<string,any>;
- for(const name of ['stdout','stderr']){const item=copy[name];if(!object(item)||typeof item.base64!=='string'||typeof item.digest!=='string')fail('REMOTE_RESULT_INVALID','Captured stream required');const bytes=Buffer.from(item.base64,'base64');if(bytes.toString('base64')!==item.base64||hash(bytes)!==item.digest||String(bytes.length)!==item.size_bytes||item.complete!==true)fail('REMOTE_RESULT_INVALID','Captured stream bytes/digest/completeness differs');item.bytes=bytes;delete item.base64;}
- for(const item of copy.artifacts??[]){const bytes=Buffer.from(item.base64,'base64');if(bytes.toString('base64')!==item.base64||hash(bytes)!==item.digest||String(bytes.length)!==item.size_bytes||item.complete!==true)fail('REMOTE_RESULT_INVALID','Captured artifact bytes differ');item.bytes=bytes;delete item.base64;}
+ for(const name of ['stdout','stderr']){
+  const capture=await readCapturedReference(store,i,wire[name]),observed=native[name];
+  if(!object(observed)||observed.digest!==capture.digest||observed.size_bytes!==capture.size_bytes||typeof observed.base64!=='string'||Buffer.from(observed.base64,'base64').toString('base64')!==observed.base64||!Buffer.from(observed.base64,'base64').equals(Buffer.from(capture.bytes))||capture.complete!==observed.complete&&capture.complete===true)fail('REMOTE_RESULT_INVALID','Captured stream differs from native bytes');
+  copy[name]=capture;
+ }
+ if(!Array.isArray(native.artifacts)||wire.artifacts.length!==native.artifacts.length)fail('REMOTE_RESULT_INVALID','Native artifact inventory differs');
+ copy.artifacts=[];
+ for(const [index,item] of wire.artifacts.entries()){
+  if(!object(item)||typeof item.path!=='string'||!plan.artifact_paths.includes(item.path))fail('REMOTE_RESULT_INVALID','Unexpected captured artifact');
+  const capture=await readCapturedReference(store,i,item),n=native.artifacts[index];
+  if(!object(n)||n.path!==item.path||n.digest!==capture.digest||n.size_bytes!==capture.size_bytes||typeof n.base64!=='string'||!Buffer.from(n.base64,'base64').equals(Buffer.from(capture.bytes)))fail('REMOTE_RESULT_INVALID','Captured artifact differs from native evidence');
+  copy.artifacts.push({path:item.path,...capture});
+ }
+ if(wire.outcome==='SUCCEEDED'&&(wire.cleanup_status!=='CONFIRMED'||wire.cleanup.complete!==true||wire.cleanup.observed_process_absent!==true||native.observed_process_absent!==true||native.artifacts_complete!==true||wire.output_complete!==true||wire.truncated!==false||copy.stdout.complete!==true||copy.stderr.complete!==true||copy.artifacts.length!==plan.artifact_paths.length))fail('REMOTE_RESULT_INVALID','Successful execution requires full output and confirmed cleanup');
  return copy as RunnerRemoteResult;
 }
 export async function createRemoteComponent(ctx:ComponentContext):Promise<Component> {
- await schema(ctx);const resources=ctx.dependencies.require('5.1','scheduler.allocations.v1',isResources),g=gatewayOf(ctx);
+ await schema(ctx);const resources=ctx.dependencies.require('5.1','scheduler.allocations.v1',isResources),g=gatewayOf(ctx),store=ctx.dependencies.require('15.2','artifact.store.v1',isArtifactStoreCapability);
  const remote:RunnerRemote=Object.freeze({
   prepare:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerRemotePlan)=>{
    assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);validatePlan(request);
-   const plan=structuredClone(request),p=i.principal,r=await readRunnerBinding(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:plan.session_id});await readRunnerReadiness(tx,r);
+   const plan=structuredClone(request),p=i.principal;
+   // An exact durable operation is inspectable after a disconnect without
+   // readmitting or relaunching work, even if its original allocation expired.
+   const prior=(await tx.query('SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE',[p.organisation_id,p.run_id,plan.operation_id])).rows[0];
+   if(prior){
+    if(!object(prior.plan)||!object(prior.plan.binding)||runnerCanonical(prior.plan.request)!==runnerCanonical(plan)||prior.principal.actor_id!==p.actor_id||prior.principal.role!==p.role||prior.authority_epoch!==p.deployment_epoch)fail('REMOTE_OPERATION_CONFLICT','Recorded operation identity or exact immutable plan differs');
+    const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:prior.plan.binding as Binding,principal:p,invocation:i,digest:prior.plan_digest});return permit;
+   }
+   const r=await readRunnerBinding(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:plan.session_id});await readRunnerReadiness(tx,r);
    if(r.repository_id!==plan.repository_id||r.source_digest!==plan.source_digest)fail('REMOTE_SOURCE_MISMATCH','Registered actual source/repository differs');
    const allocation=await resources.readJobAllocation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,reservation_id:plan.reservation_id});
-   if(!allocation||allocation.slot_id!==r.slot_id||allocation.sandbox_id!==r.sandbox_id||String(allocation.sandbox_boot_generation)!==r.boot_generation||String(allocation.generation)!==r.slot_generation||allocation.assignee_session_id!==p.actor_id)fail('REMOTE_JOB_ASSIGNMENT_MISMATCH','Actual dedicated reservation/slot/assignee binding required');
+   if(!allocation||allocation.slot_id!==r.slot_id||allocation.sandbox_id!==r.sandbox_id||String(allocation.sandbox_boot_generation)!==r.boot_generation||allocation.assignee_session_id!==p.actor_id)fail('REMOTE_JOB_ASSIGNMENT_MISMATCH','Actual dedicated reservation/slot/assignee binding required');
    const admitted=await resources.assertJobReservation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,task_id:allocation.task_id,job_kind:allocation.job_kind,reservation_id:plan.reservation_id});
    const reservation=(await tx.query('SELECT expires_at,clock_timestamp() AS db_now FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state=\'ALLOCATED\' FOR SHARE',[p.organisation_id,p.run_id,plan.reservation_id])).rows[0];
    if(!reservation||new Date(reservation.expires_at).getTime()<=new Date(reservation.db_now).getTime())fail('REMOTE_RESERVATION_EXPIRED','Current allocated reservation required');
    const stableBinding=Object.fromEntries(['organisation_id','run_id','session_id','credential_id','sandbox_id','boot_id','boot_generation','slot_id','slot_generation','repository_id','launch_id','state_dir','runner_binary','runner_binary_digest','workspace_path','preparation_digest','readiness_digest','source_digest','source_object_id','source_tree_id','uid','gid','provider','pool_id','external_sandbox_id'].map(key=>[key,r[key]]));
-   const packet=JSON.parse(JSON.stringify({request:plan,binding:stableBinding,allocation,reservations:admitted.reservations})) as Record<string,unknown>;const pin=hash(runnerCanonical(packet));
+   const stableAllocation=Object.fromEntries(['allocation_id','request_id','task_id','job_kind','reservation_id','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','generation'].map(key=>[key,allocation[key]]));
+   const checkedReadiness=await readRunnerReadiness(tx,r);
+   const packet=JSON.parse(JSON.stringify({request:plan,binding:stableBinding,allocation:stableAllocation,source_state_digest:checkedReadiness.source_state_digest,workspace_digest:checkedReadiness.workspace_digest})) as Record<string,unknown>;const pin=hash(runnerCanonical(packet));
    await tx.query(`INSERT INTO hyperfide.runner_remote_jobs(organisation_id,run_id,operation_id,session_id,plan,plan_digest,principal,admission_digest,authority_epoch,reservation_id,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,LEAST($11::timestamptz,$12::timestamptz)) ON CONFLICT(organisation_id,run_id,operation_id) DO NOTHING`,[p.organisation_id,p.run_id,plan.operation_id,plan.session_id,JSON.stringify(packet),pin,JSON.stringify(p),hash(runnerCanonical(admitted)),p.deployment_epoch,plan.reservation_id,reservation.expires_at,p.expires_at]);
    const stored=(await tx.query('SELECT plan_digest FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[p.organisation_id,p.run_id,plan.operation_id])).rows[0];if(stored?.plan_digest!==pin)fail('REMOTE_OPERATION_CONFLICT','Operation identity cannot change its immutable execution input');
-   const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:r,principal:p,digest:pin});return permit;
+   const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:r,principal:p,invocation:i,digest:pin});return permit;
   },
   execute:async(permit:RunnerRemotePermit,signal:AbortSignal)=>{
    const item=permits.get(permit);if(!item||item.context!==ctx)fail('REMOTE_PERMIT_REQUIRED','A genuine prepared execution permit is required');
@@ -182,7 +245,7 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
      if(!row.result||hash(runnerCanonical(row.result))!==row.result_digest||typeof row.public_key_b64!=='string'||typeof row.result_signature!=='string')fail('REMOTE_RESULT_INVALID','Signed provider-captured result required');
      const publicKey=createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),Buffer.from(row.public_key_b64,'base64url')]),format:'der',type:'spki'});
      if(!verify(null,runnerResultSigningBytes(row.organisation_id,row.run_id,row.operation_id,row.plan_digest,row.result_digest),publicKey,Buffer.from(row.result_signature,'base64url')))fail('REMOTE_RESULT_INVALID','Provisioner result signature differs');
-     return decodeResult(row);
+     return decodeResult(row,store,item.invocation,item.plan);
     }
     if(performance.now()>=deadline)fail('REMOTE_OUTCOME_UNKNOWN','Remote receipt deadline elapsed; operation remains durable for reconciliation');
     await new Promise<void>((resolve,reject)=>{const timer=setTimeout(done,250);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);reject(new Error('Remote wait interrupted'));}signal.addEventListener('abort',cancel,{once:true});});

@@ -11,7 +11,8 @@
   "actions": [
     "hierarchy.packet.describe",
     "hierarchy.packet.create",
-    "hierarchy.packet.inspect"
+    "hierarchy.packet.inspect",
+    "hierarchy.packet.validate"
   ],
   "requires": [
     "3.1",

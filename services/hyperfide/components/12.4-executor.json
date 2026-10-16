@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "12.4-executor",
+  "task": "12.4",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "runner/executor.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "runner.executor.describe"
+  ],
+  "requires": [
+    "8.3",
+    "4.2",
+    "14.1",
+    "15.2"
+  ]
+}

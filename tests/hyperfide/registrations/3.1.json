@@ -39,6 +39,7 @@
     "hierarchy.handoff.healthy-work-preserved",
     "hierarchy.handoff.current-owner",
     "hierarchy.history.immutable",
+    "hierarchy.repeatable-read-write-refused",
     "hierarchy.leader.concurrent-cas",
     "hierarchy.leader.stale-mutation",
     "hierarchy.leader.historical-replay",
@@ -57,9 +58,7 @@
   "cleanup_timeout_seconds": 60,
   "fixtures": [
     "services/hyperfide/dist/control.js",
-    "services/hyperfide/dist/hierarchy/packages.js",
-    "services/hyperfide/dist/storage/transactions.js",
-    "services/hyperfide/dist/storage/runtime.js"
+    "services/hyperfide/dist/hierarchy/packages.js"
   ],
   "required_artifacts": [],
   "required_env": [
@@ -72,24 +71,15 @@
     "services/hyperfide/src/hierarchy/packages.ts",
     "services/hyperfide/migrations/0003-hierarchy.sql",
     "services/hyperfide/components/3.1.json",
-    "services/hyperfide/src/storage/transactions.ts",
-    "services/hyperfide/src/storage/runtime.ts",
-    "services/hyperfide/src/storage/schema.ts",
-    "services/hyperfide/src/components/registry.ts",
-    "services/hyperfide/src/components/service.ts",
-    "services/hyperfide/src/policy/programme.ts",
-    "services/hyperfide/src/control.ts",
-    "services/hyperfide/package.json",
-    "services/hyperfide/package-lock.json",
-    "services/hyperfide/tsconfig.json",
     "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
     "tests/hyperfide/registrations/3.1.json",
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/support/identity_fixture.py",
-    "services/hyperfide/migrations/0014-enrollment.sql",
-    "services/hyperfide/components/14.1.json"
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json"
   ],
   "source_roots": [
     "services/hyperfide/src",

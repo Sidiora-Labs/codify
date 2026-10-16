@@ -1,0 +1,71 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/3_3.py"
+  ],
+  "assertion_ids": [
+    "views.primary.signed",
+    "views.aggregate-totals",
+    "views.page-bounded",
+    "views.budget-preserves-mandatory",
+    "views.manager-scoped",
+    "views.manager-unscoped-denied",
+    "views.unowned-package-denied",
+    "views.stale-package-generation",
+    "views.unsupported-role-denied",
+    "views.cursor-requires-pins",
+    "views.cursor-continuation",
+    "views.cursor-stale-refused",
+    "views.request-scope-spoof-refused",
+    "views.invalid-budget-refused",
+    "views.cleanup.observed"
+  ],
+  "cases": [
+    "V-010",
+    "V-016"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/3_3.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/hierarchy/views.js"
+  ],
+  "required_artifacts": [],
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/src/hierarchy/views.ts",
+    "services/hyperfide/components/3.3.json",
+    "tests/hyperfide/cases/tasks/3_3.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/registrations/3.3.json",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "3.3",
+  "timeout_seconds": 300,
+  "variant": "task:3.3"
+}
