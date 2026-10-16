@@ -1,4 +1,5 @@
 import { assertNoExecutionHold } from '../scheduler/claim.js';
+import { ready as hierarchyReady,leadership,requireAuthority } from '../hierarchy/packages.js';
 import { randomUUID } from 'node:crypto';
 import { assertInvocation } from '../transport/protocol.js';
 import type { InvocationContext, Principal } from '../transport/protocol.js';
@@ -270,12 +271,29 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
 }
 
 
+async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<void> {
+  const principal=invocation.principal;
+  if(!['LEADER','FEATURE_MANAGER'].includes(principal.role))return;
+  const i=instruction(input);await hierarchyReady(tx);
+  const current=await leadership(tx,i);
+  let owner:{package_id:string;package_generation:string}|undefined;
+  if(principal.role==='FEATURE_MANAGER') {
+    const row=(await tx.query(`SELECT t.feature_package_id,h.owner_generation::text FROM hyperfide.attempts a
+      JOIN hyperfide.tasks t ON(t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id)
+      JOIN hyperfide.hierarchy_packages h ON(h.organisation_id=t.organisation_id AND h.run_id=t.run_id AND h.package_id=t.feature_package_id)
+      WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3`,[i.organisation_id,i.run_id,i.attempt_id])).rows[0];
+    if(!row)fail('PACKAGE_UNAVAILABLE','Manager instructions require an actually assigned hierarchy package');
+    owner={package_id:uuid(row.feature_package_id),package_generation:integer(row.owner_generation)};
+  }
+  await requireAuthority(tx,{...i,authority_epoch:principal.deployment_epoch,session_id:principal.actor_id,
+    leader_generation:current.leader_generation,...owner,roles:['LEADER','FEATURE_MANAGER']});
+}
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
   const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch})},actions:{
     'instructions.describe':()=>({schema_version:1,kinds:['START','STEER','CANCEL'],identity:'stable-command-UUID',
       bounds:{body_bytes:65536,outstanding:256},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),
-    'instructions.issue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'],tx=>issue(tx,input)),
+    'instructions.issue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'],async(tx,invocation)=>{await issueAuthority(tx,input,invocation);return issue(tx,input);}),
     'instructions.accept':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acceptInstruction(tx,input)),
     'instructions.handoff':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>handoff(tx,input,invocation.principal)),
     'instructions.replay':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>replayInstructions(tx,input)),
