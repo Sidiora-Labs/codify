@@ -11,7 +11,9 @@ IDS=[
  "railway.process.confirmed-stop","railway.process.detach-is-not-exit","railway.process.detach-closes-input",
  "railway.process.detach-process-still-alive","railway.process.reattach-stop","railway.process.no-http-exec",
  "railway.process.unsupported-before-spawn","railway.process.cleanup-real-children","railway.process.unconfirmed-stop-bounded","railway.process.unconfirmed-is-alive",
- "railway.process.upload-unknown-no-retry","railway.process.upload-reconcile-bound","railway.process.binary-output-exact"
+ "railway.process.upload-unknown-no-retry","railway.process.upload-reconcile-bound","railway.process.binary-output-exact",
+ "railway.process.segmented-archive","railway.process.archive-lost-reply-recovery","railway.process.archive-boot-bound",
+ "railway.process.archive-byte-corruption","railway.process.session-index-restart","railway.process.session-index-corruption"
 ]
 def wait_exit(service,session,timeout=30):
  deadline=time.monotonic()+timeout
@@ -42,7 +44,7 @@ def reap_fixture_descendants():
  raise AssertionError("fixture descendants not reaped")
 
 def main():
- if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:3]+IDS[22:]+IDS[3:12]+IDS[20:22]+IDS[12:20]));return 0
+ if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:3]+IDS[22:24]+IDS[25:]+IDS[24:25]+IDS[3:12]+IDS[20:22]+IDS[12:20]));return 0
  c.expect(ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0,"fixture subreaper unavailable")
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway93-") as folder:
@@ -61,32 +63,38 @@ def main():
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {RailwaySessionSpool,createRailwayArtifactChunkSink} from './services/hyperfide/dist/providers/railway/processes.js';
+import {RailwaySessionSpool,createRailwayArtifactChunkSink,RailwayArtifactUploadUnknown,verifyRailwayStreamArchive} from './services/hyperfide/dist/providers/railway/processes.js';
 const root=process.argv[1],folder=process.argv[2],session=process.argv[3],size=Number(process.argv[4]);
 const spool=new RailwaySessionSpool(root),resource={native_sandbox_id:'sandbox-1',sandbox_boot_generation:'7'};
 const output=spool.readCapturedOutput(resource,session,16*1024*1024);
 let tooSmall=false;try{spool.readCapturedOutput(resource,session,1024);}catch{tooSmall=true;}
 fs.mkdirSync(folder,{recursive:true});
 let calls=0;
+const idFor=digest=>{const h=digest.slice(7,39);return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);};
+const stored=new Map();
+const envelope=(digest,bytes)=>({outcome:'SUCCEEDED',availability:'VERIFIED',
+ artifact:{artifact_id:idFor(digest),organisation_id:'org-1',run_id:'run-1',digest,size_bytes:String(bytes.length),status:'COMPLETE'},
+ receipt:{receipt_id:'sha256:'+'2'.repeat(64),artifact_id:idFor(digest),organisation_id:'org-1',run_id:'run-1',digest,size_bytes:String(bytes.length)}});
+
 const sink=createRailwayArtifactChunkSink(async(action,input)=>{
- if(action!=='object.put'||input.organisation_id!=='org-1'||input.run_id!=='run-1')throw new Error('wrong bound facade call');
+ if(action!=='artifact.object.put'||input.organisation_id!=='org-1'||input.run_id!=='run-1')throw new Error('wrong bound facade call');
  calls++;
  const bytes=Buffer.from(input.data_base64,'base64');
  if('sha256:'+createHash('sha256').update(bytes).digest('hex')!==input.digest||String(bytes.length)!==input.size_bytes)
   throw new Error('actual bytes mismatch');
  fs.writeFileSync(path.join(folder,input.digest.slice(7)),bytes);
- return {outcome:'SUCCEEDED',availability:'VERIFIED',
-  artifact:{artifact_id:'11111111-1111-1111-1111-111111111111',digest:input.digest,size_bytes:input.size_bytes,status:'COMPLETE'},
-  receipt:{receipt_id:'22222222-2222-2222-2222-222222222222',artifact_id:'11111111-1111-1111-1111-111111111111',
-   digest:input.digest,size_bytes:input.size_bytes}};
+ stored.set(idFor(input.digest),{digest:input.digest,bytes});
+ return envelope(input.digest,bytes);
 },{organisation_id:'org-1',run_id:'run-1',retention_class:'RUN',retention_until:null,retention_hold:false});
 let acceptedReceipt;
 try{await spool.uploadPending('large-output',async chunk=>{
- acceptedReceipt=await sink(chunk);throw new Error('fixture: accepted storage response lost');
+ acceptedReceipt=await sink(chunk);throw new RailwayArtifactUploadUnknown(acceptedReceipt.artifact_id);
 });}catch{}
 const pending=spool.uploadStatus('large-output'),before=calls;
 try{await spool.uploadPending('large-output',sink);}catch{}
-const unknownNoRetry=pending.pending_unknown===true&&calls===before;
+const persistedUpload=JSON.parse(fs.readFileSync(path.join(root,createHash('sha256').update('large-output').digest('hex'),'uploads.json')));
+const unknownNoRetry=pending.pending_unknown===true&&calls===before&&
+ persistedUpload.pending.candidate_artifact_id===acceptedReceipt.artifact_id;
 let mismatch=false;
 try{await spool.reconcilePendingUpload('large-output',async p=>({...acceptedReceipt,digest:'sha256:'+'0'.repeat(64)}));}
 catch{mismatch=true;}
@@ -94,8 +102,63 @@ const reconciled=await spool.reconcilePendingUpload('large-output',async()=>acce
 await spool.uploadPending('large-output',sink);
 const reconcileBound=mismatch&&reconciled&&!spool.uploadStatus('large-output').pending_unknown;
 const status=spool.uploadStatus('large-output');
+
+let manifestCalls=0,lostReply=true;
+const invoke=async(action,input)=>{
+ if(input.organisation_id!=='org-1'||input.run_id!=='run-1')throw new Error('archive scope');
+ if(action==='artifact.manifest.commit'){
+  const {organisation_id,run_id,expected_chunks,total_size_bytes,content_digest,complete,truncated,missing_ranges,chunks}=input;
+  let actual=0;const content=createHash('sha256');
+  for(const chunk of chunks){const row=stored.get(chunk.artifact_id);
+   if(!row||row.digest!==chunk.digest||String(row.bytes.length)!==chunk.size_bytes||chunk.offset_bytes!==String(actual))
+    throw new Error('archive child mismatch');
+   actual+=row.bytes.length;content.update(row.bytes);}
+  if(String(actual)!==total_size_bytes||'sha256:'+content.digest('hex')!==content_digest)throw new Error('archive actual content');
+  const manifest={schema_version:1,kind:'chunk-manifest',organisation_id,run_id,expected_chunks,total_size_bytes,
+   content_digest,complete,truncated,missing_ranges,chunks};
+  const bytes=Buffer.from(JSON.stringify(manifest)),digest='sha256:'+createHash('sha256').update(bytes).digest('hex');
+  stored.set(idFor(digest),{digest,bytes,manifest});manifestCalls++;
+  if(lostReply){lostReply=false;throw new Error('actual fixture lost committed manifest reply');}
+  return {...envelope(digest,bytes),manifest_digest:digest,content_digest,chunk_count:chunks.length};
+ }
+ if(action==='artifact.object.put'){
+  const bytes=Buffer.from(input.data_base64,'base64');
+  if('sha256:'+createHash('sha256').update(bytes).digest('hex')!==input.digest)throw new Error('index bytes');
+  stored.set(idFor(input.digest),{digest:input.digest,bytes});return envelope(input.digest,bytes);
+ }
+ const row=action==='artifact.object.locate'?[...stored.values()].find(v=>v.digest===input.digest):stored.get(input.artifact_id);
+ if(!row)throw new Error('missing actual fixture bytes');
+ return {...envelope(row.digest,row.bytes),data_base64:row.bytes.toString('base64'),
+  ...(row.manifest?{manifest:row.manifest,manifest_digest:row.digest,content_digest:row.manifest.content_digest,chunk_count:row.manifest.chunks.length}:{})};
+};
+const binding={organisation_id:'org-1',run_id:'run-1',sandbox_id:'logical-sandbox',boot_id:'boot-7',
+ boot_generation:'7',logical_process_ref:'logical-process',retention_class:'RUN',retention_until:null,retention_hold:false};
+let lostRejected=false;try{await spool.sealStreams('large-output',invoke,binding,64);}catch{lostRejected=true;}
+const archive=await spool.sealStreams('large-output',invoke,binding,64);
+const expected=Object.fromEntries(['organisation_id','run_id','sandbox_id','boot_id','boot_generation','resource',
+ 'logical_process_ref','native_process_ref','operation_id','payload_digest','scope_digest'].map(k=>[k,archive.index[k]]));
+const verified=await verifyRailwayStreamArchive(invoke,archive.reference,expected);
+const segmented=verified.complete&&archive.index.streams.stdout.segments.length>=3&&
+ archive.index.streams.stdout.digest==='sha256:'+createHash('sha256').update(Buffer.alloc(size,120)).digest('hex')&&
+ archive.index.streams.stderr.size_bytes==='0'&&archive.index.byte_count===String(size);
+const uniqueManifests=new Set([...archive.index.streams.stdout.segments,...archive.index.streams.stderr.segments].map(s=>s.digest));
+const archiveRecovery=lostRejected&&manifestCalls===uniqueManifests.size;
+let wrongBoot=false;try{await verifyRailwayStreamArchive(invoke,archive.reference,{...expected,boot_id:'copied-boot'});}catch{wrongBoot=true;}
+const child=[...stored.values()].find(v=>v.bytes.length===65536&&!v.manifest),originalChild=child.bytes;
+child.bytes=Buffer.from(originalChild);child.bytes[0]^=1;
+let archiveCorrupt=false;try{await verifyRailwayStreamArchive(invoke,archive.reference,expected);}catch{archiveCorrupt=true;}
+child.bytes=originalChild;
+const fresh=new RailwaySessionSpool(root);
+const indexRestart=fresh.find(resource,session).operation_id==='large-output';
+// Locate the actual secondary index by its explicit persisted session binding.
+const indexFile=fs.readdirSync(path.join(root,'sessions')).map(n=>path.join(root,'sessions',n)).find(p=>JSON.parse(fs.readFileSync(p)).session_name===session);
+const indexBytes=fs.readFileSync(indexFile),indexObject=JSON.parse(indexBytes);indexObject.resource.sandbox_boot_generation='8';
+fs.writeFileSync(indexFile,JSON.stringify(indexObject));
+let indexCorrupt=false;try{new RailwaySessionSpool(root).find(resource,session);}catch{indexCorrupt=true;}
+fs.writeFileSync(indexFile,indexBytes);
+
 process.stdout.write(JSON.stringify({readMatches:output.stdout.byteLength===size&&output.stderr.byteLength===0&&output.exit_code===0,
- tooSmall,calls,status,unknownNoRetry,reconcileBound}));
+ tooSmall,calls,status,unknownNoRetry,reconcileBound,segmented,archiveRecovery,wrongBoot,archiveCorrupt,indexRestart,indexCorrupt}));
 """
    upload=subprocess.run(["node","--input-type=module","-e",uploader_js,str(Path(folder)/"spool"),
       str(Path(folder)/"artifact-fixture"),session,str(size)],cwd=c.ROOT,capture_output=True,text=True,timeout=40)
@@ -108,6 +171,8 @@ process.stdout.write(JSON.stringify({readMatches:output.stdout.byteLength===size
       "actual byte reader, artifact facade uploads and manifest distinction"))
    c.check(IDS[22],lambda:c.expect(uploaded["unknownNoRetry"],"unknown accepted object put was blindly retried"))
    c.check(IDS[23],lambda:c.expect(uploaded["reconcileBound"],"upload reconciliation receipt binding"))
+   for index,key in [(25,"segmented"),(26,"archiveRecovery"),(27,"wrongBoot"),(28,"archiveCorrupt"),(29,"indexRestart"),(30,"indexCorrupt")]:
+    c.check(IDS[index],lambda key=key:c.expect(uploaded[key],"archive/session regression: "+key))
 
    binary_bytes=bytes([255,0,254,195,169])
    binary_op,binary_session=start(service,"binary-output",[sys.executable,"-c","import os;os.write(1,bytes([255,0,254,195,169]))"])
