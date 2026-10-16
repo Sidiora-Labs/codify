@@ -17,9 +17,12 @@
     "identity.principal.revoke",
     "identity.runner.register",
     "identity.runner.heartbeat",
-    "identity.principal.delegate"
+    "identity.principal.delegate",
+    "identity.principal.renew",
+    "identity.service.issue"
   ],
   "requires": [
-    "4.2"
+    "4.2",
+    "4.4"
   ]
 }
