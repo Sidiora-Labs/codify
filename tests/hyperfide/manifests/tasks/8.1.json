@@ -1,0 +1,350 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-8.1-provider-contract-v1",
+  "registered_variant": "task:8.1",
+  "scope": "task-component",
+  "case_ids": [
+    "V-036",
+    "V-041"
+  ],
+  "expected_assertion_ids": [
+    "provider.contract.real-service",
+    "provider.contract.unknown-input",
+    "provider.capabilities.match",
+    "provider.capabilities.unsupported",
+    "provider.capabilities.unknown-support",
+    "provider.capabilities.disabled",
+    "provider.capabilities.unknown-availability",
+    "provider.capabilities.documented-only",
+    "provider.capabilities.missing",
+    "provider.capabilities.unknown-required",
+    "provider.capabilities.expired",
+    "provider.capabilities.future",
+    "provider.capabilities.preparation-mismatch",
+    "provider.capabilities.os-mismatch",
+    "provider.capabilities.duplicate-profile",
+    "provider.capabilities.duplicate-required",
+    "provider.capabilities.empty-required",
+    "provider.capabilities.unknown-advertised",
+    "provider.capabilities.evidence-missing",
+    "provider.capabilities.semver-range",
+    "provider.capabilities.integrity-length",
+    "provider.capabilities.integrity-noncanonical",
+    "provider.capabilities.unknown-profile-field",
+    "provider.capabilities.noncanonical-time",
+    "provider.operation.valid-capabilities",
+    "provider.operation.valid-prepare",
+    "provider.operation.valid-create",
+    "provider.operation.valid-list",
+    "provider.operation.valid-observe",
+    "provider.operation.valid-attach",
+    "provider.operation.valid-execute",
+    "provider.operation.valid-inspect",
+    "provider.operation.valid-stop",
+    "provider.operation.valid-transfer",
+    "provider.operation.valid-lifetime",
+    "provider.operation.valid-destroy",
+    "provider.operation.payload-tamper",
+    "provider.operation.unknown-field",
+    "provider.operation.cpu-fraction",
+    "provider.operation.cpu-boolean",
+    "provider.operation.memory-zero",
+    "provider.operation.bytes-noncanonical",
+    "provider.operation.bytes-overflow",
+    "provider.operation.bytes-number",
+    "provider.operation.boot-zero",
+    "provider.operation.boot-overflow",
+    "provider.operation.create-missing-preparation",
+    "provider.operation.prepare-recipe-mismatch",
+    "provider.operation.create-existing-resource",
+    "provider.operation.inspect-missing-resource",
+    "provider.operation.raw-environment",
+    "provider.operation.path-traversal",
+    "provider.operation.relative-path",
+    "provider.operation.infinite-lifetime-with-timeout",
+    "provider.operation.list-page-too-large",
+    "provider.operation.bounded-lifetime",
+    "provider.operation.opaque-cursor",
+    "provider.operation.empty-and-multiline-argv",
+    "provider.operation.argv-nul",
+    "provider.operation.deadline-invalid",
+    "provider.outcome.succeeded-capabilities",
+    "provider.outcome.succeeded-prepare",
+    "provider.outcome.succeeded-create",
+    "provider.outcome.succeeded-list",
+    "provider.outcome.succeeded-observe",
+    "provider.outcome.succeeded-attach",
+    "provider.outcome.succeeded-execute",
+    "provider.outcome.succeeded-inspect",
+    "provider.outcome.succeeded-stop",
+    "provider.outcome.succeeded-transfer",
+    "provider.outcome.succeeded-lifetime",
+    "provider.outcome.succeeded-destroy",
+    "provider.outcome.unknown-mutation",
+    "provider.outcome.unknown-early-resource",
+    "provider.outcome.unknown-blind-retry",
+    "provider.outcome.unknown-with-result",
+    "provider.outcome.unknown-not-reconciled",
+    "provider.outcome.unknown-acceptance",
+    "provider.outcome.confirmed-rejection-retry",
+    "provider.outcome.rate-limit-unknown-acceptance",
+    "provider.outcome.nontransient-retry",
+    "provider.outcome.explicit-unsupported",
+    "provider.outcome.operation-mismatch",
+    "provider.outcome.payload-mismatch",
+    "provider.outcome.scope-mismatch",
+    "provider.outcome.configuration-mismatch",
+    "provider.outcome.boot-mismatch",
+    "provider.outcome.success-not-accepted",
+    "provider.outcome.prepare-digest-mismatch",
+    "provider.outcome.transfer-hash-mismatch",
+    "provider.outcome.transfer-incomplete",
+    "provider.outcome.lifetime-mismatch",
+    "provider.outcome.stop-not-confirmed",
+    "provider.outcome.stop-unknown-exit",
+    "provider.outcome.destroy-not-confirmed",
+    "provider.outcome.process-unknown-exit",
+    "provider.outcome.output-truncated-complete",
+    "provider.outcome.output-complete-no-hash",
+    "provider.outcome.profile-from-future",
+    "provider.outcome.page-from-future",
+    "provider.outcome.absent-running",
+    "provider.outcome.started-is-observation",
+    "provider.outcome.started-is-not-exit",
+    "provider.outcome.retention-incomplete-explicit",
+    "provider.inventory.complete-snapshot",
+    "provider.inventory.partial",
+    "provider.inventory.best-effort-never-absence",
+    "provider.inventory.empty-snapshot",
+    "provider.inventory.reject-scope",
+    "provider.inventory.reject-configuration",
+    "provider.inventory.reject-first-cursor",
+    "provider.inventory.reject-broken-chain",
+    "provider.inventory.reject-duplicate-resource",
+    "provider.inventory.reject-snapshot-mismatch",
+    "provider.inventory.reject-repeated-cursor",
+    "provider.inventory.reject-future-observation",
+    "provider.inventory.reject-regressed-time",
+    "provider.inventory.reject-missing-snapshot-id",
+    "provider.inventory.reject-best-effort-snapshot-id",
+    "provider.inventory.reject-has-more-no-cursor",
+    "provider.inventory.reject-final-extra-cursor",
+    "provider.inventory.reject-nonfinal-complete",
+    "provider.inventory.reject-unproven-boot-field",
+    "provider.inventory.reject-empty-pages"
+  ],
+  "approval": {
+    "approved": true,
+    "allowed_actions": []
+  },
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/1.4.json",
+      "sha256": "bad91dd5fb9ed7e60aaad3dfd43510a848ee86a5f95c5bb682082f029c8f1f26",
+      "size": 274
+    },
+    {
+      "path": "services/hyperfide/components/8.1.json",
+      "sha256": "0d2e5e1edf3c9ab3c6aee124b439254de431bfad00f25270bc3bc12dd1050f5d",
+      "size": 390
+    },
+    {
+      "path": "services/hyperfide/components/schema.json",
+      "sha256": "8895f135cc1ce6aad30858d5e15d0810157e49a8fa266cbd2c1ae385f76f8961",
+      "size": 1439
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.d.ts",
+      "sha256": "96d1c4eb11b3357c0f6227457c015c683e8a2025b7547d11a77a1d2c27d21d1c",
+      "size": 934
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js",
+      "sha256": "e18f7c5acaaf4db08b5ed7c796c6628f238f63b24efca730d3a500d4a9f1f6fe",
+      "size": 9048
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js.map",
+      "sha256": "a9dbdb2872c2c36f44fbc1ccb7819a7301362de71b1f835d54c5b272762b175f",
+      "size": 9123
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.d.ts",
+      "sha256": "7e1dff61f1fb8f18add6560e90f445f256bd6af7f37a4b5c0d0e2110bf1bec18",
+      "size": 526
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js",
+      "sha256": "30cbe0a3185d930cf82c832930f62c037ee844114d7e703e3994e61a05f5814c",
+      "size": 7069
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js.map",
+      "sha256": "41a476e22e6d70032200b17d3b184274233fb030b469ced882fee11d4b47c055",
+      "size": 7484
+    },
+    {
+      "path": "services/hyperfide/dist/control.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/control.js.map",
+      "sha256": "48349cca9de2de36e81e287513d65b9d7112d94f02e116fe52cde8a33ceac76f",
+      "size": 183
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js",
+      "sha256": "993b2fcdb5f4599e9475a27d29d15f861794bea9b611e85968b4d9a37cfc8216",
+      "size": 120
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js.map",
+      "sha256": "657b88f6e4c3cf5371864771b82cd7e29e42aad56b78c5c3e13ea06f508491cd",
+      "size": 185
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.d.ts",
+      "sha256": "8386faed4722998f9e3fb9b3413c6b0e7e56879a0bb497a4a19d654d11c44e86",
+      "size": 1076
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js",
+      "sha256": "2f9b0745664f79b55492989112528b423decdf553fb303778425c4f9685fa6a5",
+      "size": 4611
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js.map",
+      "sha256": "1d0832f8dbf790abd212afdfde928b6093ca4689a292315f60f1e3ab13813f38",
+      "size": 4311
+    },
+    {
+      "path": "services/hyperfide/dist/providers/contract.d.ts",
+      "sha256": "e79b39e2329ec6c225e78e2867b9c3955570d7845e2025b854331750c2ebd035",
+      "size": 8516
+    },
+    {
+      "path": "services/hyperfide/dist/providers/contract.js",
+      "sha256": "5aaf32ca10f2224ca59e5490f2cc5ee616c6e860f80a325e5f00ad9bac0587a5",
+      "size": 25558
+    },
+    {
+      "path": "services/hyperfide/dist/providers/contract.js.map",
+      "sha256": "b3ea62b1c5f218d2aae145ff5c2f133066e523dc17050df6b34027a24ab46632",
+      "size": 27646
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js",
+      "sha256": "0747f45b91ff8319ea22f6ced47d0af9c812f502d8240b543d06c7f1ba0d030a",
+      "size": 126
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js.map",
+      "sha256": "ce33225f34728722e868c0c125f9c8ccac69df9b08573c2388fa580707d4bc0e",
+      "size": 191
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "99a2fc1bea6f51c7963c5d9b692d2f4753b34161dee50da37ddef06c8af5f489",
+      "size": 19220
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "6c760a3bc5749bf5944e9618d4a1b8133c28e7bade8027a7ab09d152c53e3720",
+      "size": 570
+    },
+    {
+      "path": "services/hyperfide/src/components/registry.ts",
+      "sha256": "992079df4d9cf0e3c8c0b257987da423096bf3982f20b84894d93d6516a40736",
+      "size": 8993
+    },
+    {
+      "path": "services/hyperfide/src/components/service.ts",
+      "sha256": "a72575f0c081e56356b145746b284ba31e691c87cf9f415537f5f410d153045a",
+      "size": 6910
+    },
+    {
+      "path": "services/hyperfide/src/control.ts",
+      "sha256": "576b9b5b40fc508edf560682bc4de73f850ec590a996ad94d951f44a1c4d5cbf",
+      "size": 83
+    },
+    {
+      "path": "services/hyperfide/src/dispatch.ts",
+      "sha256": "924dc43a3711361ebb60168ae0556d1a212d10f5507bf372e4ace17c398448a6",
+      "size": 84
+    },
+    {
+      "path": "services/hyperfide/src/policy/programme.ts",
+      "sha256": "64addcffe3ccc4b106982123688e07abf19b7656ffbceaebcd7e2d581343692e",
+      "size": 5089
+    },
+    {
+      "path": "services/hyperfide/src/providers/contract.ts",
+      "sha256": "324e49080e5c69af17a8ccfcd3368aee5b4b07d958f3de3ea43441b2d2b902c5",
+      "size": 29223
+    },
+    {
+      "path": "services/hyperfide/src/provisioner.ts",
+      "sha256": "56d68c3c582bac9ed6ab73c70fa566072a48126b49111033ee70b1e6567aadb7",
+      "size": 87
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/8_1.py",
+      "sha256": "3ebb89aa8078b82b731e4b229fae7802c5416aed78035044e681a6ecbef93356",
+      "size": 27470
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "7f97dbde67eb6e0824543e8a382c745c4ef352411d7ce54d0a962c6814b75d93",
+      "size": 27891
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
+      "size": 36837
+    },
+    {
+      "path": "tests/hyperfide/registrations/8.1.json",
+      "sha256": "fdbe985c5880d0befb04e2776b8fd83e5ba817462d05e5344abbdf3aab9d291c",
+      "size": 7905
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
+      "size": 8284
+    }
+  ],
+  "resources": [],
+  "seed": 1,
+  "policy": {
+    "component_only": true,
+    "execution": "remote-only",
+    "cloud_provisioning": false,
+    "frontier_calls": false
+  }
+}

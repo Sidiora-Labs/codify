@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "8.1",
+  "task": "8.1",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/contract.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "provider.contract.describe",
+    "provider.capabilities.check",
+    "provider.operation.validate",
+    "provider.outcome.validate",
+    "provider.inventory.validate"
+  ],
+  "requires": []
+}
