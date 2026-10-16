@@ -112,13 +112,13 @@
     },
     {
       "path": "tests/hyperfide/proof_relocation.py",
-      "sha256": "1f504a5acdafa03d6f07e0fa356b4622f5ac9cfaedf9eeeadcadcdaf6456dcfc",
-      "size": 8509
+      "sha256": "4adc713acd157a99f7647e3adc188b18c59942792b9cd61b1931bb52f3fc644e",
+      "size": 8692
     },
     {
       "path": "tests/hyperfide/test_inspect_proof.py",
-      "sha256": "1853e331356e58f3b24db9a38249143ef68f89b0b3062f541299074f0a1dd998",
-      "size": 10986
+      "sha256": "de1c231d78a98871aefb329909bdc4889d53745a5f1aaa0cdce95ffbf91cf831",
+      "size": 12424
     }
   ],
   "policy": {

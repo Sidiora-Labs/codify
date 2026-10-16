@@ -188,6 +188,28 @@ class ProofInspectionTests(unittest.TestCase):
         result = self.run_inspector(root=root, environment=environment)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(marker.exists(), "environment clean filter executed during read-only inspection")
+        # Missing promised objects must fail without launching a remote helper.
+        import configparser
+        spec = importlib.util.spec_from_file_location("trusted_git_inspection", HERE / "proof_relocation.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        blob = subprocess.run(GIT + ["rev-parse", "HEAD:probe.py"], cwd=source, check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+        object_path = source / ".git/objects" / blob[:2] / blob[2:]
+        self.assertTrue(object_path.is_file(), "real loose source object missing before fault")
+        object_path.unlink()
+        parsed = configparser.ConfigParser(interpolation=None)
+        parsed.read_string(original)
+        parsed['remote "origin"']['url'] = "ext::sh -c touch% " + str(marker)
+        parsed['remote "origin"']['promisor'] = "true"
+        parsed['remote "origin"']['partialclonefilter'] = "blob:none"
+        with config.open("w") as stream:
+            parsed.write(stream)
+        def required(value, message):
+            if not value:
+                raise AssertionError(message)
+        result = module.safe_git(source, ["cat-file", "-p", blob], required, portable=True)
+        self.assertNotEqual(result.returncode, 0, "missing promised object incorrectly accepted")
+        self.assertFalse(marker.exists(), "promisor fetch helper executed during read-only inspection")
 
 if __name__ == "__main__":
     unittest.main()

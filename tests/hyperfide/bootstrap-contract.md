@@ -161,3 +161,5 @@ checkout. Changed tools, missing mappings and wrong staged revisions reject.
 They are delegated by the standard selftest entrypoint and cannot skip.
 
 Git inspection rejects non-neutral local configuration (including filters, includes and process helpers) and strips inherited Git configuration; LFS/normalising filters remain unsupported and fail closed. Check65 uses an actual configured clean filter plus environment injection and proves its marker is never written. The external receipt anchor must originate from an authenticated qualified campaign producer and actual trusted custody, never an arbitrary caller digest; server-owned staging alone does not authenticate copied bytes.
+
+Promisor metadata is inert only with forced GIT_NO_LAZY_FETCH=1 and all Git transports disabled. Missing required objects reject; inspection never fetches or executes remote helpers. Check65 also deletes an actual promised blob and proves that read fails without running its configured ext helper.

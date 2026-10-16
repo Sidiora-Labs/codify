@@ -123,7 +123,7 @@ def safe_git(workspace, arguments, require, portable=False):
         elif section == "extensions":
             allowed = {"objectformat"}
         elif re.fullmatch(r'remote "[^"\n]+"', section):
-            allowed = {"url", "fetch"}
+            allowed = {"url", "fetch", "promisor", "partialclonefilter"}
         elif re.fullmatch(r'branch "[^"\n]+"', section):
             allowed = {"remote", "merge"}
         elif section == "user":
@@ -138,8 +138,9 @@ def safe_git(workspace, arguments, require, portable=False):
     # Git's environment config can inject helpers even when .git/config is clean.
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM=os.devnull,
-               GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM="1", GIT_OPTIONAL_LOCKS="0")
+               GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM="1", GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1")
     return subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-                           "-c", "core.attributesFile=/dev/null", "-c", "maintenance.auto=false",
+                           "-c", "core.attributesFile=/dev/null", "-c", "protocol.allow=never",
+                           "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "maintenance.auto=false",
                            "-c", "gc.auto=0", "-c", "gc.autoDetach=false", "-C", str(workspace)] + arguments,
                           env=env, capture_output=True, timeout=30)
