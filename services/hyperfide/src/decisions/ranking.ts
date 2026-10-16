@@ -1,5 +1,5 @@
 import type {Component,ComponentContext} from '../components/registry.js';
-import {obj,exact,str,list,safe,input,withAuthority,storePacket,auditFor,persistProposal,registerAdvisoryPurpose,answers,noul,canonical,uuid,fail,type Data} from './audit.js';
+import {obj,exact,str,list,safe,input,withAuthority,storePacket,auditFor,persistProposal,registerAdvisoryPurpose,answers,noul,canonical,digest,uuid,fail,type Data} from './audit.js';
 
 export interface RankingSource {eligibleTasks(tx:unknown,query:{organisation_id:string;run_id:string;pool_id:string;profile_id?:string;limit?:number}):Promise<Data>}
 export function rankingSource(value:unknown):value is RankingSource {return !!value&&typeof value==='object'&&typeof(value as RankingSource).eligibleTasks==='function'}
@@ -8,10 +8,14 @@ async function findingContext(tx:unknown,scope:{organisation_id:string;run_id:st
  let reader:Data;try{const name='../findings/registry.js';reader=await import(name) as Data;}
  catch(error){if((error as {code?:string})?.code==='ERR_MODULE_NOT_FOUND')return {availability:'UNAVAILABLE',reason:'TRUSTED_FINDING_READER_NOT_INSTALLED'};throw error;}
  if(typeof reader.readFindingContext!=='function')return {availability:'UNAVAILABLE',reason:'TRUSTED_FINDING_READER_INTERFACE_UNAVAILABLE'};
- const snapshot=obj(await reader.readFindingContext(tx,scope,{limit:8}));
- if(snapshot.qualifies_findings!==false||canonical(snapshot.scope)!==canonical(scope)||!/^sha256:[0-9a-f]{64}$/.test(str(snapshot.context_digest)))fail('DECISION_INVALID','Scoped non-authoritative finding context required');
+ return findingSnapshot(await reader.readFindingContext(tx,scope,{limit:8}),scope);
+}
+export function findingSnapshot(value:unknown,scope:{organisation_id:string;run_id:string}):Data{
+ const snapshot=obj(value),{context_digest,...body}=snapshot;
+ if(snapshot.qualifies_findings!==false||snapshot.organisation_id!==scope.organisation_id||snapshot.run_id!==scope.run_id||
+ !/^sha256:[0-9a-f]{64}$/.test(str(context_digest))||digest(body)!==context_digest)fail('DECISION_INVALID','Scoped non-authoritative finding context and exact digest required');
  list(snapshot.findings,8);list(snapshot.observations,8);
- return {availability:'AVAILABLE',snapshot,context_digest:snapshot.context_digest};
+ return {availability:'AVAILABLE',snapshot,context_digest};
 }
 export function findingAdviceEntries(value:unknown):Data[]{
  const context=obj(value);if(context.availability!=='AVAILABLE')return [];

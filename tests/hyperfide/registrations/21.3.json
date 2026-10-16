@@ -18,6 +18,8 @@
     "ranking.incomplete-intent",
     "ranking.shortlist-bound",
     "ranking.typed-noul",
+    "ranking.finding-snapshot-flat-contract",
+    "ranking.finding-snapshot-scope-and-digest",
     "ranking.finding-observation-identities",
     "ranking.finding-shortlist-bound",
     "ranking.finding-unavailable-explicit",
