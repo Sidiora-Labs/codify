@@ -3,10 +3,11 @@ import {randomUUID,randomInt} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {invocationOf} from '../identity/enrollment.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {operationPayloadDigest,validateProviderOutcome} from './contract.js';
 import type {ProviderOperation,ProviderScope,ProviderOutcome} from './contract.js';
-import {providerDatabase,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
+import {providerDatabase,providerInvocation,bindProviderInvocation,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
 import type {ProviderDatabase,DeploymentConfig} from './pools.js';
 
 export interface FreshEnrollmentRequest {
@@ -123,7 +124,11 @@ export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,po
    await pool.query("UPDATE hyperfide.provider_connectivity_probes SET observation=$3,evidence_digest=$4 WHERE organisation_id=$1 AND id=$2 AND status='UNKNOWN'",
     [config.organisation_id,id,{operation:base,outcome},digestDocument({operation:base,outcome,enrollment:proof})]);
   };
-  const adapter=providerAdapter(scope,{assignedBootGeneration:unavailable,persistEarlyResource:unavailable,recordObservation:journal},pool.runtime) as ReturnType<typeof providerAdapter>&{
+  const adapter=providerAdapter(scope,{invocation:providerInvocation(pool),resolvePreparation:unavailable,assertResourceBinding:async observed=>{
+   if(digestDocument(observed)!==digestDocument(base))fail('PROVIDER_SCOPE_MISMATCH','Connectivity operation changed');
+   const current=(await pool.query('SELECT native_sandbox_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[config.organisation_id,sandboxId])).rows[0];
+   if(!current||current.native_sandbox_id!==sandbox.native_sandbox_id||String(current.boot_generation)!==String(sandbox.boot_generation))fail('STALE_SANDBOX_GENERATION','Connectivity boot binding changed');
+  },assignedBootGeneration:unavailable,persistEarlyResource:unavailable,recordObservation:journal},pool.runtime) as ReturnType<typeof providerAdapter>&{
    readCapturedOutput?:(scope:ProviderScope,resource:NonNullable<ProviderOperation['resource']>,processRef:string,maxBytes:number)=>Promise<{stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string}>;
   };
   if(typeof adapter.readCapturedOutput!=='function')fail('REMOTE_CAPTURE_UNAVAILABLE','Actual bounded probe receipt bytes are required');
@@ -231,15 +236,15 @@ export async function planRelocation(pool:ProviderDatabase,config:DeploymentConf
 }
 export function createComponent(context:ComponentContext):Component{
   const database=providerDatabase(context);
-  const guarded=(fn:(i:unknown,c:DeploymentConfig,p:ConnectivityConfig)=>Promise<unknown>)=>async(input:unknown)=>{
+  const guarded=(fn:(i:unknown,c:DeploymentConfig,p:ConnectivityConfig,database:ProviderDatabase)=>Promise<unknown>)=>async(input:unknown,requestContext:ComponentContext)=>{
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider placement is shutting down');
-    return fn(input,await readDeployment(context.env),await connectivity(context.env));
+    const config=await readDeployment(context.env);return fn(input,config,await connectivity(context.env),bindProviderInvocation(database,config,invocationOf(requestContext),['PROVISIONER','COORDINATOR','OPERATOR']));
   };
   return{apiVersion:1,actions:{
-    'provider.placement.probe':guarded((i,c,p)=>probePool(database,c,p,i,context.signal)),
-    'provider.placement.record-failure':guarded((i,c,p)=>recordPoolFailure(database,c,p,i)),
-    'provider.relocation.plan':guarded((i,c,p)=>planRelocation(database,c,p,i)),
-    'provider.relocation.confirm-enrollment':guarded(async(input,c,p)=>{
+    'provider.placement.probe':guarded((i,c,p,database)=>probePool(database,c,p,i,context.signal)),
+    'provider.placement.record-failure':guarded((i,c,p,database)=>recordPoolFailure(database,c,p,i)),
+    'provider.relocation.plan':guarded((i,c,p,database)=>planRelocation(database,c,p,i)),
+    'provider.relocation.confirm-enrollment':guarded(async(input,c,p,database)=>{
       const i=obj(input,['run_id','plan_id','sandbox_id']),run=uuid(i.run_id),planId=uuid(i.plan_id),sandboxId=uuid(i.sandbox_id);
       const plan=(await database.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[c.organisation_id,run,planId])).rows[0];
       if(!plan||!['PENDING_ADMISSION','ENROLLED'].includes(plan.state))fail('RELOCATION_PLAN_INVALID','An unadmitted relocation plan is required');
