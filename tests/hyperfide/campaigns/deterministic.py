@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import uuid
+import authority as current_authority
 
 class CampaignError(Exception):
     pass
@@ -121,6 +122,7 @@ def load_manifest(path, kind):
     if kind in {"deterministic", "faults"}:
         authority_uuid(profile.get("initial_authority_epoch"))
         authority_uuid(profile.get("deployment_id"), "deployment identity")
+        require(profile.get("authority_contract") == "04-journal-v1", "current two-lineage durable journal contract required for campaign execution")
     integer(profile.get("virtual_hours"), "virtual_hours")
     require(profile["virtual_hours"] >= 72, "72 virtual hours required")
     require(isinstance(manifest["inputs"], dict) and {"planning", "graph"} <= set(manifest["inputs"]), "approved planning and graph inputs required")
@@ -420,7 +422,9 @@ def validate_activation(proof, previous_epoch, new_epoch, deployment_id, operati
 
 class Reference:
     """Reference semantics use attempted events, never the reported accepted flag."""
-    def __init__(self, sandboxes=100, slots=200, initial_epoch=None, deployment_id=None):
+    def __init__(self, sandboxes=100, slots=200, initial_epoch=None, deployment_id=None, authority_contract="legacy-ordinary-v1"):
+        require(authority_contract in {"legacy-ordinary-v1", "04-journal-v1"}, "unsupported activation contract")
+        self.authority_contract = authority_contract
         self.limit, self.sandbox_limit = slots, sandboxes
         self.epoch = authority_uuid(initial_epoch)
         self.deployment_id = authority_uuid(deployment_id, "deployment identity")
@@ -491,7 +495,19 @@ class Reference:
             epoch = authority_uuid(event.get("new_epoch"), "restore epoch")
             accepted = event.get("epoch") == self.epoch and epoch not in self.seen_epochs and event.get("activation_proof") is not None
             if accepted:
-                validate_activation(event["activation_proof"], self.epoch, epoch, self.deployment_id, op)
+                if self.authority_contract == "04-journal-v1":
+                    require(event.get("activation_contract") == self.authority_contract, "current epoch observation lacks durable journal contract")
+                    expected = {"deployment_id": self.deployment_id, "operation_id": op,
+                        "external_previous_epoch": self.epoch,
+                        "database_previous_epoch": event.get("database_previous_epoch"),
+                        "new_epoch": epoch, "mode": event.get("activation_kind")}
+                    try:
+                        current_authority.inspect_transition(event["activation_proof"], expected)
+                    except current_authority.AuthorityError as error:
+                        raise CampaignError("current activation proof rejected: " + str(error)) from error
+                else:
+                    require(event.get("activation_contract") in (None, "legacy-ordinary-v1"), "current journal proof cannot be downgraded to legacy oracle")
+                    validate_activation(event["activation_proof"], self.epoch, epoch, self.deployment_id, op)
             if accepted:
                 self.epoch = epoch
                 self.seen_epochs.add(epoch)
@@ -548,7 +564,7 @@ class Reference:
 
 def reconstruct(events, profile):
     require(isinstance(events, list) and events, "nonempty independently observed event stream required")
-    reference = Reference(profile["sandboxes"], profile["slots"], profile.get("initial_authority_epoch"), profile.get("deployment_id"))
+    reference = Reference(profile["sandboxes"], profile["slots"], profile.get("initial_authority_epoch"), profile.get("deployment_id"), profile.get("authority_contract", "legacy-ordinary-v1"))
     for event in events:
         reference.apply(event)
     return reference.state()

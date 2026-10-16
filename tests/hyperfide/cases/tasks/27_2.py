@@ -142,7 +142,7 @@ def run():
     check("campaign.deterministic.unknown-event", lambda: reject(lambda: model([small("invented", False)])))
     check("campaign.deterministic.duplicate-json-rejected", lambda: reject(lambda: d.decode('{"same":1,"same":2}')))
     check("campaign.deterministic.nonfinite-json-rejected", lambda: reject(lambda: d.decode('{"x":NaN}')))
-    profile = {"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT}
+    profile = {"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT,"authority_contract":"04-journal-v1"}
     commands = d.schedule(profile, 17)
     check("campaign.deterministic.seeded-schedule", lambda: commands == d.schedule(profile, 17) and commands != d.schedule(profile, 19))
     check("campaign.deterministic.schedule-workload-count", lambda: len([row for row in commands if row["operation"] == "session"]) == 1500)
@@ -277,12 +277,14 @@ def run():
         repositories = [{"repository_id":"00000000-0000-0000-0000-000000000001", "candidate_head":"a"*40, "input_manifest_digest":"sha256:"+"b"*64}]
         source = folder / "source-set.json"
         source.write_bytes(d.canonical(repositories))
-        value = {"schema_version":1, "campaign_id":"component-input-validation", "kind":"deterministic", "source_revision":"a"*40, "source_manifest_digest":"sha256:"+d.digest(d.canonical(repositories)), "approval":{"approved":True,"kind":"deterministic"}, "profile":{"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT}, "inputs":{"planning":[pin(corpus)],"graph":[pin(corpus)],"source_manifest":[pin(source)]},"adapters":{},"seeds":[17,19]}
+        value = {"schema_version":1, "campaign_id":"component-input-validation", "kind":"deterministic", "source_revision":"a"*40, "source_manifest_digest":"sha256:"+d.digest(d.canonical(repositories)), "approval":{"approved":True,"kind":"deterministic"}, "profile":{"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT,"authority_contract":"04-journal-v1"}, "inputs":{"planning":[pin(corpus)],"graph":[pin(corpus)],"source_manifest":[pin(source)]},"adapters":{},"seeds":[17,19]}
         manifest_path = folder / "profile.json"
         def load(candidate):
             manifest_path.write_text(json.dumps(candidate))
             return d.load_manifest(manifest_path,"deterministic")
         check("campaign.deterministic.pinned-source-manifest",lambda:load(value)[0]["source_manifest_digest"]==value["source_manifest_digest"])
+        legacy=copy.deepcopy(value);legacy["profile"].pop("authority_contract")
+        check("campaign.authority.actual-campaign-refuses-legacy-contract",lambda:reject(lambda:load(legacy)))
         changed=copy.deepcopy(value);changed["approval"]["approved"]=False
         check("campaign.deterministic.unapproved-manifest",lambda:reject(lambda:load(changed)))
         changed=copy.deepcopy(value);changed["source_manifest_digest"]=changed["source_manifest_digest"][7:]
@@ -293,6 +295,18 @@ def run():
         check("campaign.deterministic.source-set-hash-mismatch",lambda:reject(lambda:load(changed)))
         load(value)
         check("campaign.deterministic.missing-real-bridges-block",lambda:reject(lambda:d.run(manifest_path,folder/"evidence"),d.Blocked))
+    # Exercise the same focused regression methods through the registered runner.
+    import unittest
+    sys.path.insert(0, str(ROOT / "tests/hyperfide"))
+    import test_authority_campaign
+    def authority_case(name):
+        observed=unittest.TestResult()
+        test_authority_campaign.AuthorityMetadataTests(name).run(observed)
+        if not observed.wasSuccessful():
+            raise AssertionError(str(observed.errors+observed.failures))
+        return True
+    for name in unittest.defaultTestLoader.getTestCaseNames(test_authority_campaign.AuthorityMetadataTests):
+        check("campaign.authority."+name.removeprefix("test_").replace("_","-"),lambda name=name:authority_case(name))
     if "--list-assertions" in sys.argv:
         print(json.dumps(IDS))
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}))

@@ -63,7 +63,27 @@
     "campaign.deterministic.actual19-digest-prefix",
     "campaign.deterministic.approved-corpus-required",
     "campaign.deterministic.source-set-hash-mismatch",
-    "campaign.deterministic.missing-real-bridges-block"
+    "campaign.deterministic.missing-real-bridges-block",
+    "campaign.authority.actual-campaign-refuses-legacy-contract",
+    "campaign.authority.boolean-isolation-and-wrong-operation-are-not-identity",
+    "campaign.authority.current-attestation-must-match-published-head",
+    "campaign.authority.current-contract-modes-are-metadata-only",
+    "campaign.authority.current-reference-never-downgrades-missing-journal",
+    "campaign.authority.database-predecessor-must-be-observed-revoked",
+    "campaign.authority.duplicate-nonfinite-and-invalid-timestamp-refused",
+    "campaign.authority.exact-raw-proof-bytes-are-bound",
+    "campaign.authority.fence-expiry-and-clock-skew-match-primary-milliseconds",
+    "campaign.authority.fixture-deployment-cannot-rotate-live-reference",
+    "campaign.authority.missing-pending-cannot-be-replaced-by-active-head",
+    "campaign.authority.opaque-unsealed-or-unknown-contract-cannot-pass",
+    "campaign.authority.pending-must-precede-positive-commit-and-publication",
+    "campaign.authority.reference-consumes-current-restore-and-fences-old-owner",
+    "campaign.authority.resealed-history-cannot-reuse-epoch-or-drop-lineage",
+    "campaign.authority.restore-cannot-reconstruct-missing-external-journal",
+    "campaign.authority.restored-database-is-distinct-from-external-head",
+    "campaign.authority.retained-older-candidate-can-reconcile-positive-commit",
+    "campaign.authority.sorted-request-hash-cannot-replace-actual-ordered-json-stringify",
+    "campaign.authority.unseen-database-lineage-rejected-even-with-valid-document-seal"
   ],
   "cases": [
     "V-024",
@@ -82,7 +102,9 @@
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/registry.json",
     "tests/hyperfide/campaigns/deterministic.py",
-    "tests/hyperfide/cases/tasks/27_2.py"
+    "tests/hyperfide/cases/tasks/27_2.py",
+    "tests/hyperfide/campaigns/authority.py",
+    "tests/hyperfide/test_authority_campaign.py"
   ],
   "source_roots": [
     "tests/hyperfide/campaigns"

@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-2-v3",
+  "campaign_id": "hyperfide-driver-component-27-2-v3-journal-v1",
   "case_ids": [
     "V-024",
     "V-047",
@@ -70,7 +70,27 @@
     "campaign.deterministic.actual19-digest-prefix",
     "campaign.deterministic.approved-corpus-required",
     "campaign.deterministic.source-set-hash-mismatch",
-    "campaign.deterministic.missing-real-bridges-block"
+    "campaign.deterministic.missing-real-bridges-block",
+    "campaign.authority.actual-campaign-refuses-legacy-contract",
+    "campaign.authority.boolean-isolation-and-wrong-operation-are-not-identity",
+    "campaign.authority.current-attestation-must-match-published-head",
+    "campaign.authority.current-contract-modes-are-metadata-only",
+    "campaign.authority.current-reference-never-downgrades-missing-journal",
+    "campaign.authority.database-predecessor-must-be-observed-revoked",
+    "campaign.authority.duplicate-nonfinite-and-invalid-timestamp-refused",
+    "campaign.authority.exact-raw-proof-bytes-are-bound",
+    "campaign.authority.fence-expiry-and-clock-skew-match-primary-milliseconds",
+    "campaign.authority.fixture-deployment-cannot-rotate-live-reference",
+    "campaign.authority.missing-pending-cannot-be-replaced-by-active-head",
+    "campaign.authority.opaque-unsealed-or-unknown-contract-cannot-pass",
+    "campaign.authority.pending-must-precede-positive-commit-and-publication",
+    "campaign.authority.reference-consumes-current-restore-and-fences-old-owner",
+    "campaign.authority.resealed-history-cannot-reuse-epoch-or-drop-lineage",
+    "campaign.authority.restore-cannot-reconstruct-missing-external-journal",
+    "campaign.authority.restored-database-is-distinct-from-external-head",
+    "campaign.authority.retained-older-candidate-can-reconcile-positive-commit",
+    "campaign.authority.sorted-request-hash-cannot-replace-actual-ordered-json-stringify",
+    "campaign.authority.unseen-database-lineage-rejected-even-with-valid-document-seal"
   ],
   "inputs": [
     {
@@ -80,8 +100,8 @@
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
-      "sha256": "ee8df7d7218bcfbe0229a96bd2c039fe74516bb51a7093fc85e3f1724ef019f9",
-      "size": 28641
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
     },
     {
       "path": "tests/hyperfide/manifest.schema.json",
@@ -95,13 +115,23 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "f2606c0f64787c5a5ab8bb13e08b8aafdb4230f083dd45987596eab92ee61577",
-      "size": 44458
+      "sha256": "700ecf4225c7c53a89de060d83e5a2d49cfa3fbc59cd91eb3bdaf7b7a045c9c6",
+      "size": 45929
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_2.py",
-      "sha256": "2e790430783911b2f0b050347a2fc70a4d14bf98b99ef087aff4d2df046ad319",
-      "size": 25316
+      "sha256": "95bda9619595547ec7929a133ca0985dceb85a5d06b67e5700a387ab4134f513",
+      "size": 26278
+    },
+    {
+      "path": "tests/hyperfide/campaigns/authority.py",
+      "sha256": "33346cf240c5fd06e88e3ac12db0b61d659b54434e74885e7164cdccc46e9a51",
+      "size": 16173
+    },
+    {
+      "path": "tests/hyperfide/test_authority_campaign.py",
+      "sha256": "3d0f2fb591159402be2769b74f0dee8e3ca01eca62f842abd418e0bfdef59d5b",
+      "size": 13531
     }
   ],
   "policy": {
@@ -109,7 +139,8 @@
     "fixture_scope": "Public synthetic component validation plus actual bounded subprocess/canonical-checker boundaries; no live fleet occupancy",
     "full_campaign_source_binding": "policy.source_manifest_digest must equal actual19 integratedRepositoryManifest sha256-prefixed digest",
     "full_campaigns": "UNRUN; require actual signed API bridges and approved pinned corpus/auth/profile/SLO inputs",
-    "full_case_status": "INCOMPLETE"
+    "full_case_status": "INCOMPLETE",
+    "authority_contract": "Actual campaign execution requires04-journal-v1; legacy ordinary reference is diagnostic component-only."
   },
   "registered_variant": "task:27.2",
   "resources": [],
