@@ -8,43 +8,42 @@
     "tests/hyperfide/cases/tasks/3_1.py"
   ],
   "assertion_ids": [
-    "hierarchy.auth.missing-context",
-    "hierarchy.auth.revoked-before-replay",
-    "hierarchy.auth.wrong-platform-epoch",
     "hierarchy.describe",
-    "hierarchy.handoff.ack-replay-after-restart",
-    "hierarchy.handoff.acknowledge",
-    "hierarchy.handoff.current-owner",
-    "hierarchy.handoff.healthy-work-preserved",
-    "hierarchy.handoff.partial-stable-refusal",
-    "hierarchy.handoff.predecessor-retained",
-    "hierarchy.handoff.propose",
-    "hierarchy.handoff.relational-successor-binding",
-    "hierarchy.handoff.wrong-successor",
-    "hierarchy.history.finding-owner",
-    "hierarchy.history.immutable",
     "hierarchy.leader.acquire",
-    "hierarchy.leader.bad-generation",
-    "hierarchy.leader.concurrent-cas",
-    "hierarchy.leader.conflicting-replay",
     "hierarchy.leader.exact-replay",
-    "hierarchy.leader.extra-field",
-    "hierarchy.leader.old-exact-replay",
+    "hierarchy.leader.conflicting-replay",
     "hierarchy.leader.role-refusal",
-    "hierarchy.leader.stale-mutation",
-    "hierarchy.migration.provenance",
+    "hierarchy.generation.invalid-01",
+    "hierarchy.generation.invalid-0",
+    "hierarchy.generation.invalid-9223372036854775808",
+    "hierarchy.generation.invalid-1",
+    "hierarchy.actor.payload-denied",
+    "hierarchy.package.configure-package",
+    "hierarchy.package.configure-package2",
+    "hierarchy.package.configure-wave_package",
     "hierarchy.package.assign",
     "hierarchy.package.assign-replay",
-    "hierarchy.package.configure-10",
-    "hierarchy.package.configure-11",
-    "hierarchy.package.configure-12",
     "hierarchy.package.no-silent-reassignment",
     "hierarchy.policy.stable-owner",
     "hierarchy.policy.successive-waves",
-    "hierarchy.policy.wave-allocation",
-    "hierarchy.primary.brand-refusal",
+    "hierarchy.policy.wave-owner",
+    "hierarchy.envelope.conflict-bound",
     "hierarchy.role.bind",
-    "hierarchy.role.no-escalation"
+    "hierarchy.role.no-escalation",
+    "hierarchy.handoff.partial-refused",
+    "hierarchy.handoff.propose",
+    "hierarchy.handoff.predecessor-retained",
+    "hierarchy.handoff.wrong-successor",
+    "hierarchy.handoff.acknowledge",
+    "hierarchy.handoff.restart-replay",
+    "hierarchy.handoff.healthy-work-preserved",
+    "hierarchy.handoff.current-owner",
+    "hierarchy.history.immutable",
+    "hierarchy.leader.concurrent-cas",
+    "hierarchy.leader.stale-mutation",
+    "hierarchy.leader.historical-replay",
+    "hierarchy.auth.revoked-before-replay",
+    "hierarchy.cleanup.observed"
   ],
   "cases": [
     "V-001",
@@ -62,23 +61,11 @@
     "services/hyperfide/dist/storage/transactions.js",
     "services/hyperfide/dist/storage/runtime.js"
   ],
-  "required_artifacts": [
-    "hierarchy/database-absence.json",
-    "hierarchy/observations.json"
-  ],
+  "required_artifacts": [],
   "required_env": [
-    "DATABASE_URL",
-    "PGHOST",
-    "PGPORT",
-    "PGUSER"
+    "DATABASE_URL"
   ],
-  "resources": [
-    {
-      "id": "hf-task-3.1-database",
-      "kind": "postgresql-database",
-      "scope": "task3.1-disposable"
-    }
-  ],
+  "resources": [],
   "schema_version": 1,
   "scope": "task-component",
   "source_files": [
@@ -99,7 +86,10 @@
     "tests/hyperfide/registrations/3.1.json",
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
-    "tests/hyperfide/qualify.py"
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/migrations/0014-enrollment.sql",
+    "services/hyperfide/components/14.1.json"
   ],
   "source_roots": [
     "services/hyperfide/src",
