@@ -46,6 +46,7 @@ def main():
    h.check("observability.resources.profile-density-not-session-count",distinct)
    h.check("observability.resources.observation-not-admission",lambda:h.expect(f.ok("23.2","fleet.resources.snapshot")["admission_authority"] is False))
    h.check("observability.resources.cross-run-denied",lambda:f.reject("23.2","fleet.resources.snapshot",{},run=h.RUN2))
+   h.check("observability.resources.untyped-capacity-not-inferred",lambda:h.expect(f.ok("23.2","fleet.resources.snapshot")["capacity_accounts_status"]=="UNAVAILABLE"))
   return h.finish()
  except Exception as e:print(json.dumps({"type":"fatal","error":type(e).__name__+": "+str(e)}),flush=True);return 1
 if __name__=="__main__":raise SystemExit(main())

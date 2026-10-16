@@ -33,7 +33,8 @@
     "observability.resources.old-sequence-denied",
     "observability.resources.profile-density-not-session-count",
     "observability.resources.observation-not-admission",
-    "observability.resources.cross-run-denied"
+    "observability.resources.cross-run-denied",
+    "observability.resources.untyped-capacity-not-inferred"
   ],
   "argv": [
     "python3",
