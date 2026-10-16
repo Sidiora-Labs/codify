@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
+import {invocationOf} from '../identity/enrollment.js';
 import {FoundationError,object} from '../policy/programme.js';
 import {canonical,digest,exact,fail,text,uuid,sha,validateChunk,validateManifest} from './extraction.js';
 import type {BundleManifest,ExtractionIdentity,JsonObject} from './extraction.js';
@@ -12,22 +13,32 @@ export interface GraphTransaction {
 }
 export interface GraphGateway {withPrimaryTransaction<T>(options:{timeoutMs:number;maxRetries?:number;guard?:(tx:GraphTransaction)=>void|Promise<void>;signal?:AbortSignal},fn:(tx:GraphTransaction)=>Promise<T>):Promise<T>;}
 export interface GraphScope {organisation_id:string;run_id:string;authority_epoch:string;}
-export function scopeInput(input:JsonObject):GraphScope {return {organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id),authority_epoch:uuid(input.authority_epoch)};}
+export function scopeInput(input:JsonObject,ctx:ComponentContext):GraphScope {
+ const p=invocationOf(ctx).principal,scope={organisation_id:uuid(p.organisation_id),run_id:uuid(p.run_id),authority_epoch:uuid(p.deployment_epoch)};
+ if(uuid(input.organisation_id)!==scope.organisation_id||uuid(input.run_id)!==scope.run_id||uuid(input.authority_epoch)!==scope.authority_epoch)fail('GRAPH_SCOPE_DENIED','Graph request differs from authenticated principal');
+ return scope;
+}
+export function graphRole(ctx:ComponentContext,write:boolean):void {
+ const i=invocationOf(ctx),roles=write?['INDEXER','COORDINATOR','LEADER','OPERATOR']:['INDEXER','COORDINATOR','LEADER','OPERATOR','FEATURE_MANAGER','WORKER','VERIFIER','INTEGRATOR','COMMIT_WATCHER','ISSUE_WATCHER'];
+ if(!roles.includes(i.principal.role)||!i.principal.allowed_actions.includes(i.payload.action))fail('GRAPH_ROLE_DENIED','Role/action cannot use graph capability');
+}
 export function graphGateway(ctx:ComponentContext):GraphGateway {
  const c=ctx as unknown as {dependencies?:{require:(id:string,capability:string,guard:(value:unknown)=>boolean)=>unknown}};
  if(!c.dependencies)fail('GRAPH_STORAGE_REQUIRED','Shared transaction capability is unavailable');
  return c.dependencies.require('4.2','storage.transactions.v1',v=>object(v)&&typeof v.withPrimaryTransaction==='function') as GraphGateway;
 }
 export async function graphGuard(tx:GraphTransaction,scope:GraphScope,ctx:ComponentContext,write=true):Promise<void> {
- let trusted:unknown;try{trusted=JSON.parse(ctx.env.HYPERFIDE_GRAPH_SCOPE??'');}catch{fail('GRAPH_SCOPE_REQUIRED','Trusted graph scope binding required');}
- const binding=exact(trusted,['organisation_id','run_id','authority_epoch']);
- if(canonical(scopeInput(binding))!==canonical(scope))fail('GRAPH_SCOPE_DENIED','Graph scope differs from trusted binding');
+ const i=invocationOf(ctx);graphRole(ctx,write);
+ if(scope.organisation_id!==i.principal.organisation_id||scope.run_id!==i.principal.run_id||scope.authority_epoch!==i.principal.deployment_epoch)fail('GRAPH_SCOPE_DENIED','Graph scope differs from authenticated principal');
+ await i.guard(tx);
+ const readiness=await tx.query<{ready:boolean}>("SELECT EXISTS(SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_trgm' AND n.nspname='public') AND (SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='hyperfide' AND c.relname=ANY($1::text[]) AND i.indisvalid AND i.indisready)=5 AS ready",[['graph_bodies_fts','graph_bodies_trigram','graph_facts_trigram','graph_comments_fts','graph_symbols_fts']]);
+ if(readiness.rows[0]?.ready!==true)fail('GRAPH_SCHEMA_UNAVAILABLE','Required graph migration/extension/indexes unavailable');
  const result=await tx.query<{state:string;authority_epoch:string}>('SELECT state,authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
  const row=result.rows[0];if(!row||row.authority_epoch!==scope.authority_epoch)fail('GRAPH_AUTHORITY_STALE','Graph authority epoch changed');
  if(write&&!['READY','RUNNING'].includes(row.state))fail('GRAPH_RUN_INACTIVE','Graph mutation requires a ready or running run');
 }
 export async function graphTransaction<T>(ctx:ComponentContext,scope:GraphScope,fn:(tx:GraphTransaction)=>Promise<T>,write=true):Promise<T>{
- return graphGateway(ctx).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:ctx.signal,guard:tx=>graphGuard(tx,scope,ctx,write)},fn);
+ return graphGateway(ctx).withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocationOf(ctx).signal,guard:tx=>graphGuard(tx,scope,ctx,write)},fn);
 }
 export function sourceId(build:string,bundle:string,family:string,legacy:unknown):string {
  const h=createHash('md5').update(build+':'+bundle+':'+family+':'+String(legacy)).digest('hex');
@@ -43,7 +54,7 @@ export async function graphCoverage(tx:GraphTransaction,s:GraphScope,id:string):
  return {counts:Object.fromEntries(rows.rows.map(r=>[r.family,Number(r.count)])),failed_files:Number(health.rows[0]!.failed)};
 }
 async function createBuild(input:unknown,ctx:ComponentContext):Promise<unknown> {
- const r=exact(input,['organisation_id','run_id','authority_epoch','bundles']),s=scopeInput(r);
+ const r=exact(input,['organisation_id','run_id','authority_epoch','bundles']),s=scopeInput(r,ctx);
  if(!Array.isArray(r.bundles)||!r.bundles.length||r.bundles.length>64)fail('GRAPH_INVALID','Bounded exact source set required');
  const bundles=r.bundles.map(validateManifest).sort((a,b)=>a.identity.repository_id.localeCompare(b.identity.repository_id));
  if(new Set(bundles.map(b=>b.identity.repository_id)).size!==bundles.length)fail('GRAPH_BRANCH_MIX','One revision per repository required');
@@ -70,7 +81,7 @@ async function createBuild(input:unknown,ctx:ComponentContext):Promise<unknown> 
 }
 function copyCell(value:string):string {return value.replace(/\\/g,'\\\\').replace(/\t/g,'\\t').replace(/\n/g,'\\n').replace(/\r/g,'\\r');}
 async function stageChunk(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','build_id','bundle_digest','chunk']),s=scopeInput(r),id=uuid(r.build_id),bundle=sha(r.bundle_digest),chunk=validateChunk(r.chunk);
+ const r=exact(input,['organisation_id','run_id','authority_epoch','build_id','bundle_digest','chunk']),s=scopeInput(r,ctx),id=uuid(r.build_id),bundle=sha(r.bundle_digest),chunk=validateChunk(r.chunk);
  return graphTransaction(ctx,s,async tx=>{
   const build=await getBuild(tx,s,id,true);
   const source=await tx.query<{manifest:BundleManifest;identity:ExtractionIdentity}>('SELECT manifest,identity FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND bundle_digest=$4',[s.organisation_id,s.run_id,id,bundle]);
@@ -88,7 +99,7 @@ async function stageChunk(input:unknown,ctx:ComponentContext):Promise<unknown>{
  });
 }
 async function seal(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','build_id']),s=scopeInput(r),id=uuid(r.build_id);
+ const r=exact(input,['organisation_id','run_id','authority_epoch','build_id']),s=scopeInput(r,ctx),id=uuid(r.build_id);
  return graphTransaction(ctx,s,async tx=>{
   const build=await getBuild(tx,s,id,true);if(build.state!=='STAGING')return {build_id:id,state:build.state,replayed:true};
   const inputs=await tx.query<{bundle_digest:string;manifest:BundleManifest}>('SELECT bundle_digest,manifest FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3',[s.organisation_id,s.run_id,id]);
@@ -106,7 +117,7 @@ async function seal(input:unknown,ctx:ComponentContext):Promise<unknown>{
  });
 }
 
-const PHASES=['files','symbols','refs','semantic_edges','source_bodies','TRIGRAMS','COMPLETE'];
+const PHASES=['files','symbols','refs','semantic_edges','source_bodies','COMPLETE'];
 function batchLimit(value:unknown):number {if(value===undefined)return 128;if(!Number.isSafeInteger(value)||Number(value)<1||Number(value)>256)fail('GRAPH_INVALID','Resolution limit must be1..256');return Number(value);}
 async function bodyPage(tx:GraphTransaction,s:GraphScope,id:string,bundle:string,cursor:string):Promise<{bundle:string;key:string}|null>{
  const p=[s.organisation_id,s.run_id,id];
@@ -127,7 +138,7 @@ async function bodyPage(tx:GraphTransaction,s:GraphScope,id:string,bundle:string
  return {bundle:next.bundle_digest,key:next.path};
 }
 async function resolve(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','build_id'],['limit']),s=scopeInput(r),id=uuid(r.build_id),limit=batchLimit(r.limit);
+ const r=exact(input,['organisation_id','run_id','authority_epoch','build_id'],['limit']),s=scopeInput(r,ctx),id=uuid(r.build_id),limit=batchLimit(r.limit);
  return graphTransaction(ctx,s,async tx=>{
   const build=await getBuild(tx,s,id,true);if(build.state==='READY'||build.state==='PUBLISHED')return {build_id:id,state:build.state,replayed:true};
   if(build.state!=='RESOLVING')fail('GRAPH_STATE_INVALID','Seal build before resolution');
@@ -139,7 +150,7 @@ async function resolve(input:unknown,ctx:ComponentContext):Promise<unknown>{
    const page=await bodyPage(tx,s,id,String(progress.cursor_bundle),String(progress.cursor_key));
    if(page){await tx.query('UPDATE hyperfide.graph_resolution_progress SET cursor_bundle=$4,cursor_key=$5,rows_processed=rows_processed+1 WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3',[...p,page.bundle,page.key]);return {build_id:id,state:'RESOLVING',phase,rows:1};}
   }else{
-   const family=phase==='TRIGRAMS'?['symbols','comments']:[phase];
+   const family=[phase];
    const page=await tx.query<{bundle_digest:string;fact_key:string;family:string;payload:JsonObject;identity:ExtractionIdentity;artifact_id:string}>(
     'SELECT f.bundle_digest,f.fact_key,f.family,f.payload,b.identity,b.artifact_id FROM hyperfide.graph_fact_rows f JOIN hyperfide.graph_bundle_inputs b USING(organisation_id,run_id,graph_id,bundle_digest) WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family=ANY($4::text[]) AND (f.bundle_digest::text,f.family||\':\'||f.fact_key)>($5,$6) ORDER BY f.bundle_digest,f.family,f.fact_key LIMIT $7',[...p,family,progress.cursor_bundle,progress.cursor_key,limit]);
    const rows=page.rows.map(f=>({...f.payload,bundle:f.bundle_digest,family:f.family,fact_key:f.fact_key,legacy_id:String(f.payload.id??f.payload.symbol_id??f.fact_key),
@@ -154,7 +165,7 @@ async function resolve(input:unknown,ctx:ComponentContext):Promise<unknown>{
    if(rows.length){
     const params=[...p,canonical(rows)];
     if(phase==='files'){
-     await tx.query("INSERT INTO hyperfide.parse_blobs(organisation_id,run_id,id,content_digest,parser_digest,language,parser_version,facts_artifact_id) SELECT $1,$2,x.parse_blob_id,'sha256:'||x.hash,x.parser_digest,COALESCE(x.lang,'text'),'native-context-v1',x.artifact_id FROM jsonb_to_recordset($4::jsonb) AS x(parse_blob_id uuid,hash text,parser_digest text,lang text,artifact_id uuid) ON CONFLICT(organisation_id,run_id,content_digest,parser_digest,language,parser_version) DO NOTHING",params);
+     await tx.query("INSERT INTO hyperfide.parse_blobs(organisation_id,run_id,id,content_digest,parser_digest,language,parser_version,facts_artifact_id) SELECT $1,$2,x.parse_blob_id,'sha256:'||x.hash,x.parser_digest,COALESCE(x.lang,'text'),'native-context-v1',x.artifact_id FROM jsonb_to_recordset($4::jsonb) AS x(parse_blob_id uuid,hash text,parser_digest text,lang text,artifact_id uuid) WHERE $3::uuid IS NOT NULL ON CONFLICT(organisation_id,run_id,content_digest,parser_digest,language,parser_version) DO NOTHING",params);
      await tx.query("INSERT INTO hyperfide.graph_files(organisation_id,run_id,id,graph_id,repository_id,source_object_id,path,content_digest,parse_blob_id) SELECT $1,$2,x.id,$3,x.repository_id,x.source_object_id,x.path,'sha256:'||x.hash,p.id FROM jsonb_to_recordset($4::jsonb) AS x(id uuid,repository_id uuid,source_object_id text,path text,hash text,parser_digest text,lang text) JOIN hyperfide.parse_blobs p ON p.organisation_id=$1 AND p.run_id=$2 AND p.content_digest='sha256:'||x.hash AND p.parser_digest=x.parser_digest AND p.language=COALESCE(x.lang,'text') AND p.parser_version='native-context-v1'",params);
     }else if(phase==='symbols'){
      await tx.query("INSERT INTO hyperfide.graph_symbols(organisation_id,run_id,id,graph_id,file_id,symbol_key,name,kind,start_byte,end_byte) SELECT $1,$2,x.id,$3,x.file_id,x.id::text,x.name,COALESCE(x.kind,'unknown'),COALESCE((s.payload->>'start_byte')::bigint,0),COALESCE((s.payload->>'end_byte')::bigint,0) FROM jsonb_to_recordset($4::jsonb) AS x(id uuid,file_id uuid,name text,kind text,bundle text,legacy_id text) LEFT JOIN hyperfide.graph_fact_rows s ON s.organisation_id=$1 AND s.run_id=$2 AND s.graph_id=$3 AND s.bundle_digest=x.bundle AND s.family='semantic_symbols' AND s.payload->>'symbol_id'=x.legacy_id",params);
@@ -162,8 +173,6 @@ async function resolve(input:unknown,ctx:ComponentContext):Promise<unknown>{
      await tx.query("INSERT INTO hyperfide.graph_references(organisation_id,run_id,id,graph_id,file_id,reference_key,name,resolution_state,target_symbol_id,start_byte,end_byte) SELECT $1,$2,x.id,$3,x.file_id,x.id::text,x.name,CASE WHEN t.id IS NOT NULL THEN 'RESOLVED' WHEN x.verdict='ambiguous' THEN 'AMBIGUOUS' ELSE 'UNRESOLVED' END,t.id,COALESCE((sr.payload->>'start_byte')::bigint,0),COALESCE((sr.payload->>'end_byte')::bigint,0) FROM jsonb_to_recordset($4::jsonb) AS x(id uuid,file_id uuid,name text,target_id uuid,verdict text,bundle text,legacy_id text) LEFT JOIN hyperfide.graph_symbols t ON t.organisation_id=$1 AND t.run_id=$2 AND t.graph_id=$3 AND t.id=x.target_id LEFT JOIN hyperfide.graph_fact_rows sr ON sr.organisation_id=$1 AND sr.run_id=$2 AND sr.graph_id=$3 AND sr.bundle_digest=x.bundle AND sr.family='semantic_references' AND sr.payload->>'ref_id'=x.legacy_id",params);
     }else if(phase==='semantic_edges'){
      await tx.query("INSERT INTO hyperfide.graph_edges(organisation_id,run_id,id,graph_id,source_symbol_id,target_symbol_id,kind) SELECT $1,$2,x.id,$3,s.id,t.id,x.kind FROM jsonb_to_recordset($4::jsonb) AS x(id uuid,source_symbol_id uuid,target_id uuid,kind text) JOIN hyperfide.graph_symbols s ON s.organisation_id=$1 AND s.run_id=$2 AND s.graph_id=$3 AND s.id=x.source_symbol_id JOIN hyperfide.graph_symbols t ON t.organisation_id=$1 AND t.run_id=$2 AND t.graph_id=$3 AND t.id=x.target_id ON CONFLICT DO NOTHING",params);
-    }else{
-     await tx.query("INSERT INTO hyperfide.graph_trigram_postings(organisation_id,run_id,graph_id,bundle_digest,family,fact_key,gram) SELECT DISTINCT $1::uuid,$2::uuid,$3::uuid,x.bundle,x.family,x.fact_key,substring(lower(COALESCE(x.name,x.body,'')) FROM n FOR 3) FROM jsonb_to_recordset($4::jsonb) AS x(bundle text,family text,fact_key text,name text,body text) CROSS JOIN LATERAL generate_series(1,char_length(COALESCE(x.name,x.body,''))-2) n ON CONFLICT DO NOTHING",params);
     }
     const last=page.rows[page.rows.length-1]!;
     await tx.query('UPDATE hyperfide.graph_resolution_progress SET cursor_bundle=$4,cursor_key=$5,rows_processed=rows_processed+$6 WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3',[...p,last.bundle_digest,last.family+':'+last.fact_key,rows.length]);
@@ -177,10 +186,10 @@ async function resolve(input:unknown,ctx:ComponentContext):Promise<unknown>{
  });
 }
 export function createComponent(ctx:ComponentContext):Component{
- const wrap=(fn:(value:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown)=>{try{return await fn(input,ctx);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_STORAGE_FAILED','Graph operation failed; reconcile durable build state before retry');}};
+ const wrap=(fn:(value:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown,context:ComponentContext)=>{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_STORAGE_FAILED','Graph operation failed; reconcile durable build state before retry');}};
  return {apiVersion:1,actions:{
   'graph.ingest.describe':input=>{exact(input,[]);return {schema_version:1,transport:'POSTGRESQL_COPY_FROM_STDIN',max_chunk_bytes:262144,max_resolution_batch:256,publication:false};},
   'graph.ingest.create':wrap(createBuild),'graph.ingest.chunk':wrap(stageChunk),'graph.ingest.seal':wrap(seal),'graph.ingest.resolve':wrap(resolve),
-  'graph.ingest.inspect':wrap(async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','build_id']),s=scopeInput(r),id=uuid(r.build_id);return graphTransaction(context,s,async tx=>({build:await getBuild(tx,s,id),coverage:await graphCoverage(tx,s,id)}),false);})
+  'graph.ingest.inspect':wrap(async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','build_id']),s=scopeInput(r,context),id=uuid(r.build_id);return graphTransaction(context,s,async tx=>({build:await getBuild(tx,s,id),coverage:await graphCoverage(tx,s,id)}),false);})
  }};
 }
