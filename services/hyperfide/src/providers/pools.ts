@@ -6,6 +6,7 @@ import type {PrimaryTransaction,TransactionGateway} from '../storage/transaction
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
 import {databaseError} from '../storage/schema.js';
+import {validateProfile} from '../preparation/manifests.js';
 import {assertInvocation} from '../transport/protocol.js';
 import {invocationOf} from '../identity/enrollment.js';
 import type {InvocationContext} from '../transport/protocol.js';
@@ -200,7 +201,7 @@ export async function inspectProviderSchema(pool:ProviderDatabase):Promise<unkno
   const migration=await pool.query('SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=8');
   if(migration.rows[0]?.name!=='0008-provider-coordination'||migration.rows[0]?.checksum!==checksum)
     fail('PROVIDER_SCHEMA_NOT_READY','The dedicated migration runner must apply the pinned provider migration');
-  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations'];
+  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations','provider_profile_lineage','provider_process_candidates'];
   const result=await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='hyperfide' AND tablename=ANY($1::text[])",[tables]);
   if(result.rows.length!==tables.length)fail('PROVIDER_SCHEMA_NOT_READY','Provider migration tables are incomplete');
   return{ready:true,version:8,name:'0008-provider-coordination',checksum};
@@ -305,28 +306,79 @@ export async function assertPoolCapacity(client:PrimaryTransaction,config:Deploy
   }
 }
 
+export function approvedProfilePolicyDigest(value:unknown):string{
+ validateProfile(value);const profile=JSON.parse(JSON.stringify(value)) as Record<string,unknown>;
+ delete profile.profile_id;delete profile.profile_version;
+ const pins=(raw:unknown)=>{if(!Array.isArray(raw))fail('PREPARATION_MISMATCH','Profile pin collection unavailable');return raw.map(v=>({path:obj(v).path}));};
+ profile.repositories=(profile.repositories as Array<Record<string,unknown>>).map(r=>({...r,commit:null,submodules:(r.submodules as Array<Record<string,unknown>>).map(m=>({...m,commit:null}))}));
+ profile.package_managers=(profile.package_managers as Array<Record<string,unknown>>).map(m=>({...m,locks:pins(m.locks)}));
+ profile.recipe={path:obj(profile.recipe).path};
+ for(const key of ['generated_inputs','build_config','preparation_evidence'])profile[key]=pins(profile[key]);
+ profile.caches=(profile.caches as Array<Record<string,unknown>>).map(c=>({...c,input_digest:null}));
+ return digestDocument(profile);
+}
+export interface SelectedEnvironmentInput {
+ organisation_id:string;pool_id:string;configuration_digest:string;parent_profile_id:string;parent_preparation_digest:string;
+ profile_id:string;preparation_digest:string;source_manifest_digest?:string;
+}
+export async function readSelectedEnvironmentProfile(tx:PrimaryTransaction,input:SelectedEnvironmentInput):Promise<{manifest:Record<string,unknown>;lineage:Record<string,unknown>|null}|null>{
+ assertPrimaryTransaction(tx);
+ const read=async(id:string,expected:string)=>{
+  const rows=await tx.query('SELECT manifest,content_digest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2 FOR SHARE',[input.organisation_id,id]);
+  const row=rows.rows[0];if(!row||row.content_digest!==expected)return null;
+  const raw=obj(row.manifest);if(raw.schema_version!==1&&raw.schema_version!==2)return null;
+  const manifest=obj(raw,raw.schema_version===1?['schema_version','profile','files','directories','scan','digest']:['schema_version','profile','files','directories','symlinks','scan','digest']),body={...manifest};delete body.digest;
+  if(manifest.digest!==expected||digestDocument(body)!==expected)return null;
+  validateProfile(manifest.profile);return manifest;
+ };
+ const manifest=await read(input.profile_id,input.preparation_digest);if(!manifest)return null;
+ if(input.profile_id===input.parent_profile_id&&input.preparation_digest===input.parent_preparation_digest)return{manifest,lineage:null};
+ const parent=await read(input.parent_profile_id,input.parent_preparation_digest);if(!parent)return null;
+ const rows=await tx.query("SELECT * FROM hyperfide.provider_profile_lineage WHERE organisation_id=$1 AND pool_id=$2 AND configuration_digest=$3 AND parent_profile_id=$4 AND parent_preparation_digest=$5 AND derived_profile_id=$6 AND derived_preparation_digest=$7 AND state='QUALIFIED' AND observed_at<=clock_timestamp() AND expires_at>clock_timestamp() FOR SHARE",
+ [input.organisation_id,input.pool_id,input.configuration_digest,input.parent_profile_id,input.parent_preparation_digest,input.profile_id,input.preparation_digest]);
+ if(rows.rows.length!==1)return null;const lineage=rows.rows[0]!;
+ if(input.source_manifest_digest&&lineage.source_manifest_digest!==input.source_manifest_digest)return null;
+ if(approvedProfilePolicyDigest(parent.profile)!==lineage.accepted_policy_digest||approvedProfilePolicyDigest(manifest.profile)!==lineage.accepted_policy_digest)return null;
+ const required=[...new Set([lineage.source_manifest_artifact_digest,lineage.execution_receipt_artifact_digest,lineage.verification_receipt_artifact_digest])];
+ const retained=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",[input.organisation_id,lineage.source_run_id,required]);
+ if(retained.rows.length!==required.length)return null;
+ const {state,observed_at,expires_at,created_at,lineage_digest,...identity}=lineage;
+ if(digestDocument(identity)!==lineage_digest)return null;
+ return{manifest,lineage};
+}
+
 export interface RuntimeReadinessInput {
  organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;slot_id:string;preparation_digest:string;source_digest:string;
 }
 export interface RuntimeReadinessRecord extends Record<string,unknown> {
  readiness_digest:string;profile_digest:string;preparation_digest:string;source_digest:string;source_manifest_digest:string;source_state_digest:string;
- source_object_id:string;source_tree_id:string;source_repository_id:string;source_bindings:Array<{id:string;commit:string;tree:string}>;
+ source_object_id:string;source_tree_id:string;source_repository_id:string;source_repository_key:string;execution_receipt_artifact_digest:string;verification_receipt_artifact_digest:string;source_bindings:Array<{id:string;commit:string;tree:string}>;
  execution_receipt_digest:string;verification_receipt_digest:string;observed_at:string;expires_at:string;readiness_input:Record<string,unknown>;readiness_input_digest:string;
 }
 export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeReadinessInput):Promise<RuntimeReadinessRecord|null>{
  assertPrimaryTransaction(tx);uuid(input.organisation_id);uuid(input.run_id);uuid(input.sandbox_id);dec(input.boot_generation);uuid(input.slot_id);dg(input.preparation_digest);dg(input.source_digest);
- const rows=await tx.query("SELECT o.*,s.boot_generation::text AS current_generation,s.preparation_digest AS current_preparation,b.boot_id AS current_boot_id,p.profile_id AS current_profile,w.state AS slot_state,ep.manifest AS profile_manifest,ep.content_digest AS current_profile_preparation FROM hyperfide.runtime_environment_observations o JOIN hyperfide.sandboxes s ON s.organisation_id=o.organisation_id AND s.id=o.sandbox_id JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.worker_slots w ON w.organisation_id=o.organisation_id AND w.id=o.slot_id AND w.sandbox_id=o.sandbox_id AND w.boot_generation=o.boot_generation JOIN hyperfide.environment_profiles ep ON ep.organisation_id=o.organisation_id AND ep.id=o.profile_id WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.sandbox_id=$3 AND o.boot_generation=$4 AND o.slot_id=$5 ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC LIMIT 1 FOR SHARE OF o,s,b,p,w,ep",
+ const rows=await tx.query("SELECT o.*,s.boot_generation::text AS current_generation,s.preparation_digest AS current_preparation,b.boot_id AS current_boot_id,p.profile_id AS current_profile,p.id AS current_pool,pc.configuration_digest AS current_configuration,pc.document->'pool'->>'preparation_digest' AS parent_preparation,w.state AS slot_state,ep.manifest AS profile_manifest,ep.content_digest AS current_profile_preparation FROM hyperfide.runtime_environment_observations o JOIN hyperfide.sandboxes s ON s.organisation_id=o.organisation_id AND s.id=o.sandbox_id JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.provider_pool_configurations pc ON pc.organisation_id=p.organisation_id AND pc.pool_id=p.id AND pc.active JOIN hyperfide.worker_slots w ON w.organisation_id=o.organisation_id AND w.id=o.slot_id AND w.sandbox_id=o.sandbox_id AND w.boot_generation=o.boot_generation JOIN hyperfide.environment_profiles ep ON ep.organisation_id=o.organisation_id AND ep.id=o.profile_id WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.sandbox_id=$3 AND o.boot_generation=$4 AND o.slot_id=$5 ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC LIMIT 1 FOR SHARE OF o,s,b,p,pc,w,ep",
   [input.organisation_id,input.run_id,input.sandbox_id,input.boot_generation,input.slot_id]);
- const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||row.current_profile!==row.profile_id||
+ const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||
   row.current_preparation!==input.preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
   row.source_manifest_digest!==input.source_digest||row.source_digest!==row.source_manifest_digest||!['READY','ALLOCATED'].includes(row.slot_state)||new Date(row.observed_at).getTime()>Date.now()||new Date(row.expires_at).getTime()<=Date.now())return null;
+ const selected=await readSelectedEnvironmentProfile(tx,{organisation_id:input.organisation_id,pool_id:row.current_pool,configuration_digest:row.current_configuration,parent_profile_id:row.current_profile,parent_preparation_digest:row.parent_preparation,profile_id:row.profile_id,preparation_digest:input.preparation_digest,source_manifest_digest:row.source_manifest_digest});if(!selected)return null;
  const manifest=row.profile_manifest as Record<string,unknown>,manifestBody={...manifest};delete manifestBody.digest;
  if(manifest.digest!==input.preparation_digest||digestDocument(manifestBody)!==input.preparation_digest)return null;
  const profile=manifest.profile;
  if(!profile||digestDocument(profile)!==row.profile_digest||digestDocument(row.source_bindings)!==row.source_state_digest||digestDocument(row.readiness_input)!==row.readiness_input_digest)return null;
+ if(!Array.isArray(row.source_bindings)||!Array.isArray((profile as Record<string,unknown>).repositories))return null;
+ const measured=row.source_bindings.filter((v:unknown)=>!!v&&typeof v==='object'&&(v as Record<string,unknown>).id===row.source_repository_key);
+ if(measured.length!==1||measured[0].commit!==row.source_object_id||measured[0].tree!==row.source_tree_id)return null;
+ const declared=((profile as Record<string,unknown>).repositories as Array<Record<string,unknown>>).filter(v=>v.id===row.source_repository_key);
+ if(declared.length!==1||typeof declared[0]!.url!=='string')return null;
+ // Repository keys belong to the profile; UUIDs belong to the accepted run.
+ // Resolve them through the exact approved URL, never by copying caller labels.
+ const mapped=await tx.query("SELECT r.repository_id,p.url FROM hyperfide.run_repositories r JOIN hyperfide.runs run ON run.organisation_id=r.organisation_id AND run.id=r.run_id JOIN hyperfide.repositories p ON p.organisation_id=r.organisation_id AND p.id=r.repository_id AND p.project_id=run.project_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND p.url=$3 FOR SHARE OF r,run,p",[input.organisation_id,input.run_id,declared[0]!.url]);
+ if(mapped.rows.length!==1||mapped.rows[0]!.repository_id!==row.source_repository_id)return null;
  const artifacts=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",
-  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest])]]);
- if(artifacts.rows.length!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest]).size)return null;
+  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest])]]);
+ if(artifacts.rows.length!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest]).size)return null;
  const {current_generation,current_preparation,current_boot_id,current_profile,slot_state,profile_manifest,current_profile_preparation,...proof}=row;
  return{...proof,observed_at:new Date(row.observed_at).toISOString(),expires_at:new Date(row.expires_at).toISOString()} as RuntimeReadinessRecord;
 }
