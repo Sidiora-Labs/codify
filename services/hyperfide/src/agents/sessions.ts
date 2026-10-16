@@ -97,7 +97,7 @@ export function createComponent(ctx:ComponentContext):Component{
  if(!Number.isSafeInteger(b.process_id)||Number(b.process_id)<1||Number(b.process_id)>2147483647||!['codex','claude'].includes(String(b.connector)))agentError('AGENT_INPUT_INVALID');
  return transact(invocation,async client=>{
  const admitted=await session(client,s);
- if(admitted.native_session_id!==b.native_session_id||admitted.connector!==b.connector)agentError('AGENT_NATIVE_ID_MISMATCH');
+ if(admitted.connector!==b.connector||admitted.native_session_id!==null&&admitted.native_session_id!==b.native_session_id||admitted.native_session_id===null&&admitted.state!=='REGISTERED')agentError('AGENT_NATIVE_ID_MISMATCH');
  if(['VERIFIER','COMMIT_WATCHER'].includes(String(admitted.role))&&admitted.attempt_id!==null)agentError('AGENT_REVIEW_ATTEMPT_FORBIDDEN');
  if(admitted.role==='WORKER'){
  const current=await client.query("SELECT a.id FROM hyperfide.attempts a JOIN hyperfide.tasks t ON t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id JOIN hyperfide.runs r ON r.organisation_id=a.organisation_id AND r.id=a.run_id JOIN hyperfide.sandboxes x ON x.organisation_id=a.organisation_id AND x.id=a.sandbox_id WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3 AND a.kind='IMPLEMENTATION' AND a.compute_authority='CURRENT' AND a.execution_state IN('START_REQUESTED','RUNNING') AND a.lease_expires_at>clock_timestamp() AND a.authority_epoch=r.authority_epoch AND r.state='RUNNING' AND t.current_attempt_id=a.id AND t.generation=a.generation AND a.sandbox_id=$4 AND a.slot_id=$5 AND a.sandbox_boot_generation=$6 AND x.boot_generation=a.sandbox_boot_generation",[s.organisation_id,s.run_id,admitted.attempt_id,admitted.sandbox_id,admitted.slot_id,admitted.sandbox_boot_generation]);
@@ -105,6 +105,11 @@ export function createComponent(ctx:ComponentContext):Component{
  }
  if(invocation.principal.role==='RUNNER'&&(admitted.sandbox_id!==invocation.principal.sandbox_id||String(admitted.sandbox_boot_generation)!==invocation.principal.boot_generation||b.boot_id!==invocation.principal.boot_id))agentError('AGENT_SCOPE_DENIED');
  profileMatches(await getNativeSessionProfile(ctx,b.auth_profile),admitted,b);
+ if(admitted.native_session_id===null){
+ if(!['RUNNER','OPERATOR','COORDINATOR'].includes(invocation.principal.role))agentError('AGENT_SCOPE_DENIED');
+ const observed=await client.query("UPDATE hyperfide.agent_sessions SET native_session_id=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND native_session_id IS NULL AND state='REGISTERED' RETURNING id",[...key(s),b.native_session_id]);
+ if(observed.rows.length!==1)agentError('AGENT_NATIVE_BINDING_STALE');
+ }
  const values=[...key(s),b.connector_version,b.auth_profile,b.configuration_digest,b.source_manifest_digest,b.process_id,b.process_start_time,b.boot_id];
  await client.query('INSERT INTO hyperfide.native_session_bindings(organisation_id,run_id,session_id,connector_version,auth_profile,configuration_digest,source_manifest_digest,process_id,process_start_time,boot_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING',values);
  const actual=await binding(client,s);

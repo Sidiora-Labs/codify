@@ -28,28 +28,48 @@
   "inputs": [
     {
       "path": "Makefile",
-      "sha256": "fd30922bad855fdfbdc31f0d50ba659aa101a73eb0577468cd7377c4abde8a67",
-      "size": 3448
+      "sha256": "f62744542df73f766f84e997d9516de1c91c4b7de27b2d0844ce71f3886a626f",
+      "size": 3524
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "38443763e0211d30085a7ecdfb9073450dc850c76713fce06d081894c4421e3f",
-      "size": 51496
+      "sha256": "a92996162db5ab8e8197b35b6a577529fd39e75507d36e2d05784cee6e9711f2",
+      "size": 200408
     },
     {
       "path": "scripts/hyperfide-native-components.py",
-      "sha256": "f59eaab698c71a47e3680d06bfd1581e4a9bdfe537e79578de576e1c6fa62d88",
-      "size": 7490
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
+    },
+    {
+      "path": "src/hyperfide/bootstrap.c",
+      "sha256": "3b111c682f414fa28adccb2668cc80591ab80838e79fa91716b28caa39dc2a11",
+      "size": 40122
     },
     {
       "path": "src/hyperfide/component_main.c",
-      "sha256": "4926c40a471fa077344b3fc6919920d93ae90f044064418c2b4487c8e1777cf4",
-      "size": 5873
+      "sha256": "84e1defc09cd63946d6be8401ff6d6d36ef6f609111b4d154ba16c6fe72d7224",
+      "size": 7262
     },
     {
       "path": "src/hyperfide/components.h",
       "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
       "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/11.2.kvx",
+      "sha256": "4ceaea25f04e64302c2e3ac34f10bfbf25a824f9f851e8f8eea8018137c220c1",
+      "size": 232
+    },
+    {
+      "path": "src/hyperfide/components/11.3.kvx",
+      "sha256": "264328b121a41ef71194c09a8b410185c6c63848fbfcdee25d5d0444fea1fa3b",
+      "size": 238
+    },
+    {
+      "path": "src/hyperfide/components/12.1.kvx",
+      "sha256": "cf606751aa1f5f893af179128f9fe16dfc2817350e914248652082214bd5d40b",
+      "size": 468
     },
     {
       "path": "src/hyperfide/components/13.1.kvx",
@@ -63,8 +83,8 @@
     },
     {
       "path": "src/hyperfide/components/schema.kvx",
-      "sha256": "713bd4f6473cf0067e44b2a5b6338ab557944934a02ddccaf93df3081981aea9",
-      "size": 285
+      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
+      "size": 328
     },
     {
       "path": "src/hyperfide/connector_recovery.c",
@@ -75,6 +95,36 @@
       "path": "src/hyperfide/connectors.c",
       "sha256": "5f78fce9b7838cc20e348284a6f5f3328041b1be2fccbad7786ba8fb297c22cd",
       "size": 19515
+    },
+    {
+      "path": "src/hyperfide/preparation_support.h",
+      "sha256": "a059ce2157d26830a647de8afe72c5697c7e82fbb2e66b90def39f3e48745a12",
+      "size": 16480
+    },
+    {
+      "path": "src/hyperfide/readiness.c",
+      "sha256": "41d385943d89e7edbb6d91393f8db016102376fb3a0ef51e4a810f87e7cc47e7",
+      "size": 40812
+    },
+    {
+      "path": "src/hyperfide/supervisor.c",
+      "sha256": "195e849aa0e06dad8b995b5809742682f35efb2613d3bbadfb1ad988ecc4f2dc",
+      "size": 20456
+    },
+    {
+      "path": "src/hyperfide/supervisor.h",
+      "sha256": "bfe6fc78a100ec15498357cacf7425383932636365b9613e11b71c02bd9aa7cd",
+      "size": 1475
+    },
+    {
+      "path": "src/hyperfide/transport.c",
+      "sha256": "a826656d2d12906f90d1338edbbb7141c141cd51d27119d3e375cb82708e392f",
+      "size": 26435
+    },
+    {
+      "path": "src/hyperfide/transport.h",
+      "sha256": "e8dddaef334001da21b1e278bac5c7ca8801ae999af1782a6f60f0411153895e",
+      "size": 2433
     },
     {
       "path": "tests/hyperfide/cases/tasks/13_3.py",
@@ -98,8 +148,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/13.3.json",
-      "sha256": "05456f813851524ab5ef36b1b35db010e52686eeabfc5c2989fa3ddd24e68bbe",
-      "size": 1563
+      "sha256": "1227dbd9a7e1148e13270d1bea073b5ecc3b06157dc1f5488e39d47f539194ce",
+      "size": 1929
     }
   ],
   "policy": {

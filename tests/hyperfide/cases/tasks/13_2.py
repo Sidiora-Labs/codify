@@ -69,7 +69,7 @@ class NativeHandshake:
                     self.requested_model=value.get("model");self.configured_provider=value["thread"].get("modelProvider")
                     expect(isinstance(self.requested_model,str)and isinstance(self.configured_provider,str),"actual CLI omitted configured model/provider")
         except BaseException:
-            self.terminate();self.native_folder.cleanup();drain_owned_children();raise
+            self.close();raise
         stat=Path('/proc/'+str(self.child.pid)+'/stat').read_text()
         self.process_identity={'process_id':self.child.pid,'process_start_time':stat[stat.rfind(')')+2:].split()[19],'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
     def rpc(self,message):
@@ -91,8 +91,39 @@ class NativeHandshake:
         if self.child.poll()is None:os.killpg(self.child.pid,signal.SIGTERM)
         try:self.child.communicate(timeout=5)
         except subprocess.TimeoutExpired:os.killpg(self.child.pid,signal.SIGKILL);self.child.communicate(timeout=5)
+    def native_descendants(self):
+        snapshot={}
+        for item in Path("/proc").iterdir():
+            if not item.name.isdigit():continue
+            try:
+                raw=(item/"stat").read_text();v=raw[raw.rfind(")")+2:].split()
+                snapshot[int(item.name)]=(int(v[1]),int(v[2]),v[19])
+            except (FileNotFoundError,ProcessLookupError,PermissionError):pass
+        owned={self.child.pid}
+        for _ in range(64):
+            more={pid for pid,(parent,group,start)in snapshot.items()if parent in owned or group==self.child.pid}
+            if more<=owned:break
+            owned|=more
+        return {pid:snapshot[pid][2]for pid in owned if pid in snapshot}
     def close(self):
-        self.terminate();self.native_folder.cleanup();expect(drain_owned_children(),'native descendants survived bounded handshake cleanup')
+        identities=self.native_descendants()
+        self.terminate();deadline=time.monotonic()+8
+        while time.monotonic()<deadline:
+            remaining={}
+            for pid,start in identities.items():
+                try:
+                    raw=Path("/proc/"+str(pid)+"/stat").read_text();v=raw[raw.rfind(")")+2:].split()
+                    if v[19]!=start:continue
+                    if int(v[1])==os.getpid():
+                        try:
+                            if os.waitpid(pid,os.WNOHANG)[0]:continue
+                        except ChildProcessError:pass
+                    os.kill(pid,signal.SIGKILL);remaining[pid]=start
+                except (FileNotFoundError,ProcessLookupError):pass
+            identities=remaining
+            if not identities:break
+            time.sleep(.05)
+        self.native_folder.cleanup();expect(not identities,'native descendants survived bounded handshake cleanup')
     def __enter__(self):return self
     def __exit__(self,*_):self.close()
 
@@ -106,6 +137,8 @@ class AgentFixture(NativeHandshake):
                 for key in ["repository","feature","task","attempt","slot","parent","session","second","reviewer","bad_reviewer","artifact","checkpoint"]:i[key]=uid()
                 self.scope={"organisation_id":i["organisation"],"run_id":i["run"],"session_id":i["session"]}
                 self.configuration=sha(b"controlled-native-profile-v1");self.source=sha(b"source-tree-v1");self.checkpoint_digest=sha(b"checkpoint-fixture-bytes")
+                foundation=(ROOT/"services/hyperfide/migrations/0012-runner-registry.sql").read_bytes()
+                f.sql("BEGIN;\n"+foundation.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(12,'0012-runner-registry','"+sha(foundation)+"');\nCOMMIT;")
                 migration=(ROOT/"services/hyperfide/migrations/0013-agents.sql").read_bytes()
                 f.sql("BEGIN;\n"+migration.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(13,'0013-agents','"+sha(migration)+"');\nCOMMIT;")
                 org,run=i["organisation"],i["run"]
@@ -119,7 +152,7 @@ INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_g
 INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,execution_state,compute_authority,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at) VALUES('{org}','{run}','{i["attempt"]}','{i["task"]}',1,'{i["epoch"]}','{sha(b"packet")}','RUNNING','CURRENT','{i["sandbox"]}','{i["slot"]}',1,clock_timestamp()+interval '10 minutes');
 UPDATE hyperfide.tasks SET current_attempt_id='{i["attempt"]}',state_version=state_version+1 WHERE organisation_id='{org}' AND run_id='{run}' AND id='{i["task"]}';
 INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,state) VALUES('{org}','{run}','{i["parent"]}','LEADER','codex','fixture-account','fixture-parent','RUNNING');
-INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id) VALUES('{org}','{run}','{i["session"]}','WORKER','{i["parent"]}','codex','fixture-account','{self.native_sessions[0]}','{i["slot"]}','{i["sandbox"]}',1,'{i["attempt"]}');
+INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id) VALUES('{org}','{run}','{i["session"]}','WORKER','{i["parent"]}','codex','fixture-account',NULL,'{i["slot"]}','{i["sandbox"]}',1,'{i["attempt"]}');
 INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id) VALUES('{org}','{run}','{i["second"]}','FEATURE_MANAGER','{i["parent"]}','codex','fixture-account','{self.native_sessions[1]}'),('{org}','{run}','{i["reviewer"]}','VERIFIER','{i["parent"]}','codex','fixture-account','{self.native_sessions[2]}');
 INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,attempt_id) VALUES('{org}','{run}','{i["bad_reviewer"]}','VERIFIER','{i["parent"]}','codex','fixture-account','{self.native_sessions[3]}','{i["attempt"]}');
 INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status) VALUES('{org}','{run}','{i["artifact"]}','{self.checkpoint_digest}',24,'fixture','fixture-checkpoint','COMPLETE');
@@ -188,11 +221,35 @@ def cleanup_only(resource):
     if absent:target.unlink()
     return 0 if absent else 1
 
+def handshake_isolation():
+    peer=subprocess.Popen(["/bin/sleep","30"],start_new_session=True)
+    try:
+        with NativeHandshake(count=1)as native:
+            expect(native.child.pid!=peer.pid and native.native_sessions,"actual transport identity missing")
+        expect(peer.poll()is None,"native cleanup stopped an unrelated fixture process")
+    finally:
+        if peer.poll()is None:peer.terminate()
+        peer.communicate(timeout=5)
+
 def main():
     fixture=None
     try:
+        check('sessions.handshake-cleanup-preserves-peer',handshake_isolation)
         fixture=AgentFixture();f=fixture
         check("sessions.signed-registration",lambda:expect(f.bind()["bound"]is True,"binding missing"))
+        registered_version=str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]);running_version=str(int(registered_version)+1)
+        def first_binding():
+            row=f.ok("agent.session.inspect",{"scope":f.scope})["session"]
+            expect(row["native_session_id"]==f.native_sessions[0]and row["state"]=="REGISTERED"and row["state_version"]=="2","NULL seat did not bind exactly once to actual observed native ID")
+        check("sessions.observed-null-first-binding",first_binding)
+        def refused_sql(statement):
+            try:f.inner.sql("BEGIN;\n"+statement+"\nROLLBACK;")
+            except Exception:return
+            raise AssertionError("native first-binding schema guard admitted invalid mutation")
+        org,run,session=f.inner.ids["organisation"],f.inner.ids["run"],f.inner.ids["session"]
+        check("sessions.schema-reject-native-rebind",lambda:refused_sql(f"UPDATE hyperfide.agent_sessions SET native_session_id='other-real-context',state_version=state_version+1 WHERE organisation_id='{org}' AND run_id='{run}' AND id='{session}';"))
+        check("sessions.schema-reject-native-clear",lambda:refused_sql(f"UPDATE hyperfide.agent_sessions SET native_session_id=NULL,state_version=state_version+1 WHERE organisation_id='{org}' AND run_id='{run}' AND id='{session}';"))
+        check("sessions.schema-reject-running-null",lambda:refused_sql(f"INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,state) VALUES('{org}','{run}','{uid()}','FEATURE_MANAGER','{f.inner.ids['parent']}','codex','fixture-account',NULL,'RUNNING');"))
         check("sessions.exact-binding-replay",lambda:expect(f.bind()["binding"]["process_id"]==f.child.pid,"replay changed process identity"))
         check("sessions.binding-immutable-process",lambda:f.bad("agent.session.bind",{"scope":f.scope,"binding":dict(f.binding,process_id=f.child.pid+1)},"AGENT_BINDING_CONFLICT"))
         check("sessions.native-id-mismatch",lambda:f.bad("agent.session.bind",{"scope":f.scope,"binding":dict(f.binding,native_session_id="different")},"AGENT_NATIVE_ID_MISMATCH"))
@@ -205,19 +262,19 @@ def main():
         check("sessions.review-role-null-attempt",lambda:expect(f.bind(f.inner.ids["reviewer"],f.native_sessions[2])["bound"],"reviewer without coding attempt refused"))
         check("sessions.reject-review-coding-attempt",lambda:f.bad("agent.session.bind",{"scope":dict(f.scope,session_id=f.inner.ids["bad_reviewer"]),"binding":dict(f.binding,native_session_id=f.native_sessions[3])},"AGENT_REVIEW_ATTEMPT_FORBIDDEN"))
         process={"boot_id":f.binding["boot_id"],"process_id":f.binding["process_id"],"process_start_time":f.binding["process_start_time"],"exit_observed":False}
-        running={"scope":f.scope,"operation_id":uid(),"expected_state_version":"1","state":"RUNNING","process":process}
+        running={"scope":f.scope,"operation_id":uid(),"expected_state_version":registered_version,"state":"RUNNING","process":process}
         check("sessions.exact-process-running",lambda:expect(f.ok("agent.session.transition",running)["state"]=="RUNNING","start observation lost"))
-        check("sessions.operation-replay",lambda:expect(f.ok("agent.session.transition",running)["state_version"]=="2","same operation applied twice"))
+        check("sessions.operation-replay",lambda:expect(f.ok("agent.session.transition",running)["state_version"]==running_version,"same operation applied twice"))
         check("sessions.operation-payload-conflict",lambda:f.bad("agent.session.transition",dict(running,state="DISCONNECTED"),"AGENT_OPERATION_CONFLICT"))
         check("sessions.stale-state-version",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),state="DISCONNECTED"),"AGENT_STATE_STALE"))
-        check("sessions.pid-reuse-rejected",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version="2",state="DISCONNECTED",process=dict(process,process_start_time=str(int(process["process_start_time"])+1))),"AGENT_PROCESS_MISMATCH"))
+        check("sessions.pid-reuse-rejected",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="DISCONNECTED",process=dict(process,process_start_time=str(int(process["process_start_time"])+1))),"AGENT_PROCESS_MISMATCH"))
         check("sessions.checkpoint-source-mismatch",lambda:f.bad("agent.session.checkpoint",{"scope":f.scope,"operation_id":uid(),"checkpoint":dict(f.checkpoint,source_manifest_digest=sha(b"different"))},"AGENT_CHECKPOINT_MISMATCH"))
         check("sessions.actual-checkpoint-registration",lambda:expect(f.ok("agent.session.checkpoint",{"scope":f.scope,"operation_id":uid(),"checkpoint":f.checkpoint})["context_restored"]is False,"metadata registration claimed restored context"))
         resume={"scope":f.scope,"checkpoint_id":f.inner.ids["checkpoint"],"native_session_id":f.binding["native_session_id"],"configuration_digest":f.configuration,"source_manifest_digest":f.source}
         check("sessions.live-process-reconcile",lambda:expect(f.ok("agent.session.resume-check",resume)["decision"]=="RECONCILE_PROCESS","live process duplicated"))
-        check("sessions.reject-unconfirmed-termination",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version="2",state="STOPPED"),"AGENT_TERMINATION_UNCONFIRMED"))
+        check("sessions.reject-unconfirmed-termination",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED"),"AGENT_TERMINATION_UNCONFIRMED"))
         f.terminate()
-        stopped=dict(running,operation_id=uid(),expected_state_version="2",state="STOPPED",process=dict(process,exit_observed=True))
+        stopped=dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED",process=dict(process,exit_observed=True))
         check("sessions.actual-exit-observation",lambda:expect(f.ok("agent.session.transition",stopped)["state"]=="STOPPED","actual process exit lost"))
         check("sessions.unqualified-native-resume-refused",lambda:expect(f.ok("agent.session.resume-check",resume)["decision"]=="FRESH_HANDOFF_REQUIRED","base support flag became qualified native context"))
         check("sessions.exact-checkpoint-session-only",lambda:f.bad("agent.session.resume-check",dict(resume,native_session_id="most-recent-other-session"),"AGENT_CHECKPOINT_MISMATCH"))
