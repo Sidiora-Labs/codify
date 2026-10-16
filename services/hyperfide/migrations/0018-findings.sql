@@ -145,3 +145,12 @@ CREATE TRIGGER immutable_finding_collaborator_acks BEFORE UPDATE OR DELETE ON hy
 ALTER TABLE hyperfide.finding_repairs ADD COLUMN resolution_proof jsonb;
 
 ALTER TABLE hyperfide.finding_github_mappings ADD COLUMN external_payload_digest hyperfide.digest NOT NULL;
+
+-- Authority changes require primary read-committed transactions.
+DO $$ DECLARE tab text; BEGIN
+ FOREACH tab IN ARRAY ARRAY['finding_registry_records','finding_registry_reports','finding_duplicate_links','finding_routes','finding_route_acknowledgements','finding_github_operations','finding_github_mappings','finding_github_deliveries','finding_github_checkpoints','finding_external_intake','finding_repairs','finding_repair_events','finding_route_collaborators','finding_collaborator_acknowledgements'] LOOP
+  EXECUTE format('CREATE TRIGGER authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation()',tab);
+ END LOOP;
+END $$;
+CREATE TRIGGER finding_resolution_identity BEFORE UPDATE OR DELETE ON hyperfide.finding_registry_records FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','finding_id','origin_task_id','origin_attempt_id','resolution_condition','resolution_digest','first_observed_at');
+CREATE TRIGGER finding_repair_identity BEFORE UPDATE OR DELETE ON hyperfide.finding_repairs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','finding_id','request_id','request_digest','repair_task_id','resolution_digest','baseline_source_object_id','max_attempts');
