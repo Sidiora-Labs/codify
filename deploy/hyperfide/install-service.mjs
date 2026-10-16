@@ -4,7 +4,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
+import {constants} from 'node:fs';
 const args=process.argv.slice(2),options={};let promote=false;
 function refuse(code){throw Object.assign(new Error(code),{code});}
 function parseArguments(){for(let i=0;i<args.length;i++){
@@ -24,20 +25,34 @@ async function protectedPath(filename,directory){
 }
 async function syncDirectory(directory){const h=await fs.open(directory,'r');try{await h.sync();}finally{await h.close();}}
 async function rootDirectory(directory){
+ if(!path.isAbsolute(directory)||directory==='/'||path.normalize(directory)!==directory)refuse('INSTALL_UNPROTECTED_PATH');
  try{await fs.mkdir(directory,{mode:0o755});await fs.chmod(directory,0o755);}catch(e){if(e.code!=='EEXIST')throw e;}
  await protectedPath(directory,true);const st=await fs.stat(directory);if((st.mode&0o777)!==0o755)refuse('INSTALL_PUBLIC_DIRECTORY_REQUIRED');
 }
-async function copyFile(source,destination,mode){
+async function copyFile(source,destination,mode,expectedSize){
  await protectedPath(source,false);
- const input=await fs.open(source,'r'),output=await fs.open(destination,'wx',mode);
+ const input=await fs.open(source,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK),output=await fs.open(destination,'wx',mode);
  try{
-  const before=await input.stat({bigint:true});if(before.uid!==0n||before.nlink!==1n||!before.isFile())refuse('INSTALL_UNPROTECTED_SOURCE');
+  const before=await input.stat({bigint:true});if(before.uid!==0n||before.nlink!==1n||!before.isFile()||before.size!==expectedSize)refuse('INSTALL_UNPROTECTED_SOURCE');
   const buffer=Buffer.alloc(1024*1024);let offset=0;
-  for(;;){const r=await input.read(buffer,0,buffer.length,offset);if(!r.bytesRead)break;let used=0;while(used<r.bytesRead){const w=await output.write(buffer,used,r.bytesRead-used,offset+used);if(!w.bytesWritten)refuse('INSTALL_COPY_FAILED');used+=w.bytesWritten;}offset+=r.bytesRead;}
+  while(BigInt(offset)<expectedSize){const amount=Number(expectedSize-BigInt(offset)>BigInt(buffer.length)?BigInt(buffer.length):expectedSize-BigInt(offset));const r=await input.read(buffer,0,amount,offset);if(!r.bytesRead)refuse('INSTALL_SOURCE_CHANGED');let used=0;while(used<r.bytesRead){const w=await output.write(buffer,used,r.bytesRead-used,offset+used);if(!w.bytesWritten)refuse('INSTALL_COPY_FAILED');used+=w.bytesWritten;}offset+=r.bytesRead;}
+  const tail=Buffer.alloc(1);if((await input.read(tail,0,1,offset)).bytesRead)refuse('INSTALL_SOURCE_CHANGED');
   const after=await input.stat({bigint:true});
   if(before.size!==BigInt(offset)||after.size!==before.size||after.dev!==before.dev||after.ino!==before.ino||after.mtimeNs!==before.mtimeNs||after.ctimeNs!==before.ctimeNs||after.mode!==before.mode||after.uid!==before.uid||after.nlink!==1n)refuse('INSTALL_SOURCE_CHANGED');
   await output.chmod(mode);await output.sync();
  }finally{await input.close();await output.close();}
+}
+async function readManifest(filename){
+ await protectedPath(filename,false);
+ const h=await fs.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{
+ const st=await h.stat({bigint:true});if(!st.isFile()||st.uid!==0n||st.nlink!==1n||st.size<1n||st.size>1048576n)refuse('INSTALL_MANIFEST_BOUND');
+ const bytes=Buffer.alloc(Number(st.size));let offset=0;
+ while(offset<bytes.length){const r=await h.read(bytes,offset,bytes.length-offset,offset);if(!r.bytesRead)refuse('INSTALL_SOURCE_CHANGED');offset+=r.bytesRead;}
+ const extra=Buffer.alloc(1),after=await h.stat({bigint:true});
+ if((await h.read(extra,0,1,offset)).bytesRead||after.size!==st.size||after.dev!==st.dev||after.ino!==st.ino||after.uid!==st.uid||after.mode!==st.mode||after.nlink!==1n||after.mtimeNs!==st.mtimeNs||after.ctimeNs!==st.ctimeNs)refuse('INSTALL_SOURCE_CHANGED');
+ return bytes;
+ }finally{await h.close();}
 }
 async function immutableTree(directory){
  const st=await fs.lstat(directory);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==0||(st.mode&0o777)!==0o755)refuse('INSTALL_UNPROTECTED_TARGET');
@@ -53,6 +68,7 @@ async function run(){
  if(process.geteuid?.()!==0)refuse('INSTALL_ROOT_OPERATOR_REQUIRED');
  if(Object.keys(options).length!==7||!/^sha256:[0-9a-f]{64}$/.test(options.digest)||!/^([1-9][0-9]{3,9})$/.test(options.uid)||!/^([1-9][0-9]{3,9})$/.test(options.gid)||Number(options.uid)>4294967294||Number(options.gid)>4294967294)refuse('INSTALL_ARGUMENTS');
  for(const name of ['source','key','signature'])await protectedPath(options[name],name==='source');
+ if(!path.isAbsolute(options.destination)||options.destination==='/'||path.normalize(options.destination)!==options.destination)refuse('INSTALL_UNPROTECTED_PATH');
  const parent=path.dirname(options.destination);await protectedPath(parent,true);
  const ownRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
  let module=path.join(ownRoot,'services/dist/deployment/releases.js');
@@ -62,7 +78,9 @@ async function run(){
  const env={HYPERFIDE_RELEASE_ROOT:options.source,HYPERFIDE_TRUSTED_RELEASE_KEY_FILE:options.key,HYPERFIDE_RELEASE_SIGNATURE_FILE:options.signature};
  const verified=await inspectPrebuiltRelease(env,'manifest.json');
  if(verified.signature_status!=='VERIFIED'||verified.authentication?.mode!=='ED25519'||verified.manifest_digest!==options.digest)refuse('INSTALL_AUTHENTICATED_PIN_REQUIRED');
- const manifest=JSON.parse(await fs.readFile(path.join(options.source,'manifest.json'),'utf8'));
+ const manifestBytes=await readManifest(path.join(options.source,'manifest.json'));
+ if('sha256:'+createHash('sha256').update(manifestBytes).digest('hex')!==options.digest)refuse('INSTALL_SOURCE_CHANGED');
+ const manifest=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(manifestBytes));
  let total=0n;for(const file of manifest.files){total+=BigInt(file.size_bytes);if(total>34359738368n)refuse('INSTALL_RELEASE_SIZE_BOUND');}
  await rootDirectory(options.destination);
  const releases=path.join(options.destination,'releases');await rootDirectory(releases);
@@ -71,11 +89,11 @@ async function run(){
  try{await fs.lstat(target);replayed=true;}catch(e){if(e.code!=='ENOENT')throw e;}
  if(!replayed){
   temporary=path.join(releases,'.staging-'+randomUUID());await fs.mkdir(temporary,{mode:0o755});await fs.chmod(temporary,0o755);
-  for(const file of [...manifest.files,{path:'manifest.json',mode:'0644'}]){
+  for(const file of [...manifest.files,{path:'manifest.json',mode:'0644',size_bytes:String(manifestBytes.length)}]){
    const destination=path.join(temporary,file.path),directory=path.dirname(destination);
    await fs.mkdir(directory,{recursive:true,mode:0o755});
    let parent=temporary;for(const part of path.relative(temporary,directory).split(path.sep).filter(Boolean)){parent=path.join(parent,part);await fs.chmod(parent,0o755);}
-   await copyFile(path.join(options.source,file.path),destination,parseInt(file.mode,8));
+   await copyFile(path.join(options.source,file.path),destination,parseInt(file.mode,8),BigInt(file.size_bytes));
   }
   await inspectPrebuiltRelease({...env,HYPERFIDE_RELEASE_ROOT:temporary},'manifest.json');
   await immutableTree(temporary);await syncTree(temporary);await fs.rename(temporary,target);temporary=null;await syncDirectory(releases);

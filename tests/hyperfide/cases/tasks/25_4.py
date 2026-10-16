@@ -207,6 +207,32 @@ def main():
    args=installer.copy();args[args.index("--manifest-digest")+1]="sha256:"+"0"*64
    p,r=run_install(args);expect(p.returncode==78 and r["error"]["code"]=="INSTALL_AUTHENTICATED_PIN_REQUIRED","signature bypassed explicit operator manifest pin")
   check("release.service.explicit-pinned-identity",wrong_manifest_stage)
+
+  def noncanonical_destination():
+   args=installer.copy();escaped=base/"unexpected-service-root";args[args.index("--destination-root")+1]=str(service_root)+"/../unexpected-service-root"
+   p,r=run_install(args)
+   expect(p.returncode==78 and r["error"]["code"]=="INSTALL_UNPROTECTED_PATH" and not escaped.exists(),"noncanonical destination mutated filesystem before refusal")
+  check("release.service.noncanonical-destination-before-writes",noncanonical_destination)
+  def changed_source_during_copy():
+   import threading,time
+   destination=base/"changed-source-service-root";args=installer.copy();args[args.index("--destination-root")+1]=str(destination)
+   native_file=payload/"runtime/node";original=native_file.read_bytes();seen=threading.Event();stop=threading.Event()
+   def mutate():
+    until=time.monotonic()+25
+    while not stop.is_set() and time.monotonic()<until:
+     release_dir=destination/"releases"
+     if release_dir.exists() and any(p.name.startswith(".staging-") for p in release_dir.iterdir()):
+      with native_file.open("ab") as f:f.write(b"changed after authenticated inventory"*2048);f.flush();os.fsync(f.fileno())
+      seen.set();return
+     time.sleep(0.001)
+   thread=threading.Thread(target=mutate);thread.start()
+   try:
+    p,r=run_install(args)
+    expect(seen.is_set(),"actual mutation did not occur after authenticated staging began")
+    expect(p.returncode==78 and r["outcome"]=="REFUSED" and not (destination/"current").exists(),"source growth escaped exact authenticated copy bounds")
+    expect(not any((destination/"releases").glob(".staging-*")),"failed bounded copy retained partial stage")
+   finally:stop.set();thread.join(timeout=5);native_file.write_bytes(original);native_file.chmod(0o755);shutil.rmtree(destination,ignore_errors=True)
+  check("release.service.actual-post-verification-source-growth",changed_source_during_copy)
   def child_owned_destination():
    os.chown(service_root,33025,33025)
    try:
