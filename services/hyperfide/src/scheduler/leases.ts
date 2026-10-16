@@ -206,8 +206,37 @@ export async function expireCompute(tx:PrimaryTransaction,scope:SchedulerScope,a
  return {expired_attempt_ids:expired,resources_still_counted:true};
 }
 
+
+/** Trusted offline recovery primitive. The caller validates external authority and
+ * holds the semantic WRITE fence, then persists these debt references and performs
+ * the run epoch CAS in this same transaction. This never proves process cleanup. */
+export async function revokeRunForRecovery(tx:PrimaryTransaction,input:SchedulerScope&{
+ expected_run_epoch:string;target_epoch:string;recovery_operation_id:string;
+}):Promise<{revoked_attempts:string;revoked_allocations:string;retained_debt_references:readonly string[]}>{
+ assertPrimaryTransaction(tx);
+ fields(input,['organisation_id','run_id','expected_run_epoch','target_epoch','recovery_operation_id']);
+ for(const key of ['organisation_id','run_id','expected_run_epoch','target_epoch','recovery_operation_id'] as const)uuid(input[key],key);
+ if(input.expected_run_epoch===input.target_epoch)fail('INVALID_REQUEST','Offline recovery must install a fresh epoch');
+ await lockRun(tx,input,'exclusive');
+ const run=await tx.query<{authority_epoch:string}>('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[input.organisation_id,input.run_id]);
+ if(run.rows[0]?.authority_epoch!==input.expected_run_epoch)fail('STALE_AUTHORITY_EPOCH','Offline revocation requires the exact accepted source epoch');
+ const inconsistent=await tx.query("SELECT id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND compute_authority='CURRENT' AND authority_epoch<>$3 LIMIT 1",[input.organisation_id,input.run_id,input.expected_run_epoch]);
+ if(inconsistent.rows.length)fail('STALE_AUTHORITY_EPOCH','Current compute contains a different epoch; recovery must reconcile it explicitly');
+ const attempts=await tx.query<{id:string}>("UPDATE hyperfide.attempts SET compute_authority='REVOKED',execution_state='CANCELLED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND compute_authority='CURRENT' AND authority_epoch=$3 RETURNING id",[input.organisation_id,input.run_id,input.expected_run_epoch]);
+ await tx.query("UPDATE hyperfide.compute_leases SET state='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND authority_epoch=$3 AND state='ACTIVE'",[input.organisation_id,input.run_id,input.expected_run_epoch]);
+ const ids=attempts.rows.map(row=>row.id);
+ const slots=await tx.query<{id:string}>("UPDATE hyperfide.slot_allocations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=ANY($3::uuid[]) AND state='ACTIVE' RETURNING id",[input.organisation_id,input.run_id,ids]);
+ const jobs=await tx.query<{id:string}>("UPDATE hyperfide.resource_job_allocations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND state='ACTIVE' RETURNING id",[input.organisation_id,input.run_id]);
+ await tx.query("UPDATE hyperfide.reservations r SET state='RELEASE_PENDING',state_version=r.state_version+1 WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.state IN ('PROVISIONING','ALLOCATED') AND (r.attempt_id=ANY($3::uuid[]) OR EXISTS(SELECT 1 FROM hyperfide.resource_job_allocations a WHERE a.organisation_id=r.organisation_id AND a.run_id=r.run_id AND a.request_id=r.request_id AND a.state='RELEASE_PENDING'))",[input.organisation_id,input.run_id,ids]);
+ await tx.query("UPDATE hyperfide.sandbox_execution_charges SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND state='HELD'",[input.organisation_id,input.run_id]);
+ await tx.query("UPDATE hyperfide.worker_slots w SET state='DRAINING',state_version=w.state_version+1 WHERE w.organisation_id=$1 AND w.state='ALLOCATED' AND (EXISTS(SELECT 1 FROM hyperfide.slot_allocations a WHERE a.organisation_id=w.organisation_id AND a.run_id=$2 AND a.slot_id=w.id AND a.sandbox_id=w.sandbox_id AND a.sandbox_boot_generation=w.boot_generation AND a.state='RELEASE_PENDING') OR EXISTS(SELECT 1 FROM hyperfide.resource_job_allocations a WHERE a.organisation_id=w.organisation_id AND a.run_id=$2 AND a.slot_id=w.id AND a.sandbox_id=w.sandbox_id AND a.sandbox_boot_generation=w.boot_generation AND a.state='RELEASE_PENDING'))",[input.organisation_id,input.run_id]);
+ await tx.query("UPDATE hyperfide.tasks t SET state='STALE',state_version=t.state_version+1 WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.current_attempt_id=ANY($3::uuid[]) AND NOT EXISTS(SELECT 1 FROM hyperfide.submission_custodies c WHERE c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.task_id=t.id AND c.authority='ACTIVE')",[input.organisation_id,input.run_id,ids]);
+ const debts=await tx.query<{ref:string}>("SELECT 'reservation:'||id::text AS ref FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND state<>'RELEASED' UNION ALL SELECT 'sandbox-charge:'||id::text FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND state<>'RELEASED' UNION ALL SELECT 'custody:'||id::text FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND authority='ACTIVE' UNION ALL SELECT 'slot-allocation:'||id::text FROM hyperfide.slot_allocations WHERE organisation_id=$1 AND run_id=$2 AND state<>'RELEASED' UNION ALL SELECT 'job-allocation:'||id::text FROM hyperfide.resource_job_allocations WHERE organisation_id=$1 AND run_id=$2 AND state<>'RELEASED' ORDER BY ref",[input.organisation_id,input.run_id]);
+ return {revoked_attempts:String(attempts.rows.length),revoked_allocations:String(slots.rows.length+jobs.rows.length),retained_debt_references:Object.freeze(debts.rows.map(row=>row.ref))};
+}
+
 export function createComponent(context:ComponentContext):Component{
-  return {apiVersion:1,capabilities:{'scheduler.compute.v1':Object.freeze({assertCurrentCompute,releaseCompute,renewCompute,fenceCompute,parseComputeToken})},actions:{
+  return {apiVersion:1,capabilities:{'scheduler.compute.v1':Object.freeze({assertCurrentCompute,releaseCompute,renewCompute,fenceCompute,revokeRunForRecovery,parseComputeToken})},actions:{
     'scheduler.lease.renew':async (value,context)=>{
       const input=fields(value,['token','lease_ms']),token=parseComputeToken(input.token);
       return gatewayFor(context,tx=>assertCurrentCompute(tx,token,{operation:'RENEWAL'})).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{

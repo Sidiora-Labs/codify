@@ -7,6 +7,7 @@ ROOT=Path(__file__).resolve().parents[4]
 s=importlib.util.spec_from_file_location("hf_scheduler_fixture",ROOT/"tests/hyperfide/cases/tasks/5_1.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 expect=m.expect;check=m.check;uid=m.uid
 def main():
+ m.configure_cleanup("5.4")
  f=m.SchedulerFixture();i=f.ids
  try:
   scope={"organisation_id":i["organisation"],"run_id":i["run"],"pool_id":i["pool"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","package_id":i["package"]}
@@ -48,4 +49,4 @@ def main():
  finally:
   db=f.database;path=f.path;f.close();check("resources.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))
  return 1 if m.FAILED else 0
-if __name__=="__main__":raise SystemExit(main())
+if __name__=="__main__":raise SystemExit(m.cleanup_owned("5.4") if "--cleanup" in sys.argv else main())
