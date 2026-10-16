@@ -31,6 +31,40 @@ function resourceRequirements(value:unknown):Record<string,unknown>{
  decimal(v.memory_bytes);decimal(v.disk_bytes);return v;
 }
 
+
+async function preparationManifest(tx:QuerySession,organisationId:string,profileId:string){
+ const profiles=await tx.query('SELECT content_digest,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2',[organisationId,profileId]);
+ const row=profiles.rows[0];if(!row||!object(row.manifest))return refuse('ENVIRONMENT_PROFILE_REQUIRED','An immutable preparation manifest is required');
+ const manifest=row.manifest,profile=validateProfile(manifest.profile);
+ const clock=await tx.query('SELECT clock_timestamp() AS now');
+ if(Date.parse(profile.policy.expires_at)<=new Date(clock.rows[0]!.now).getTime())return refuse('ENVIRONMENT_PROFILE_EXPIRED','Preparation profile expired before planning');
+ if(manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||manifest.digest!==row.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
+ const {digest:manifestDigest,...body}=manifest;
+ if(hash(body)!==manifestDigest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest bytes do not match its identity');
+ return {preparation_digest:digest(row.content_digest),declared_profile:profile};
+}
+/** Accepted physical preparation demand, independent of a not-yet-created executor. */
+export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;task_id:string;profile_id?:string}){
+ assertPrimaryTransaction(tx);await ready(tx);
+ const org=uuid(input.organisation_id),run=uuid(input.run_id),taskId=uuid(input.task_id);
+ const tasks=await tx.query('SELECT id,spec_revision_id,spec_generation::text,criteria_digest,definition FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[org,run,taskId]);
+ const task=tasks.rows[0];if(!task)return refuse('TASK_UNAVAILABLE','Preparation intent requires an accepted same-run task');
+ const accepted=await tx.query('SELECT 1 FROM hyperfide.run_spec_revisions WHERE organisation_id=$1 AND run_id=$2 AND spec_generation=$3 AND spec_revision_id=$4',[org,run,task.spec_generation,task.spec_revision_id]);
+ if(!accepted.rowCount)return refuse('SPEC_REVISION_UNACCEPTED','Task is not pinned to accepted immutable run history');
+ const profileId=uuid(definitionField(task.definition,'environment_profile_id'));
+ if(input.profile_id!==undefined&&uuid(input.profile_id)!==profileId)return refuse('ENVIRONMENT_PROFILE_MISMATCH','Requested profile differs from accepted task intent');
+ const proofModule=await import(new URL('../spec/obligations.js',import.meta.url).href);
+ if(typeof proofModule.loadProofObligations!=='function')return refuse('PROOF_REGISTRY_MISSING','Actual proof obligation loader is unavailable');
+ const proof:unknown=await proofModule.loadProofObligations(tx,{organisation_id:org,run_id:run,task_id:taskId,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});
+ if(!object(proof)||!Array.isArray(proof.obligations)||!proof.obligations.length)return refuse('PROOF_REGISTRY_MISSING','Accepted preparation demand requires actual proof obligations');
+ if(proof.criteria_digest!==task.criteria_digest||proof.spec_revision_id!==task.spec_revision_id||String(proof.spec_generation)!==task.spec_generation)return refuse('PROOF_REGISTRY_MISMATCH','Preparation proof policy differs from accepted task');
+ const prepared=await preparationManifest(tx,org,profileId),requirements=resourceRequirements(definitionField(task.definition,'resource_requirements'));
+ if(Number(requirements.cpu_millis)>prepared.declared_profile.resources.cpu_millis||BigInt(String(requirements.memory_bytes))>BigInt(prepared.declared_profile.resources.memory_bytes)||BigInt(String(requirements.disk_bytes))>BigInt(prepared.declared_profile.resources.disk_bytes))return refuse('RESOURCE_POLICY_INVALID','Declared agent resources exceed the accepted environment profile');
+ return freeze({task_id:taskId,spec_revision_id:task.spec_revision_id,spec_generation:task.spec_generation,criteria_digest:task.criteria_digest,
+  profile_id:profileId,profile_version:prepared.declared_profile.profile_version,...prepared,resource_requirements:requirements,
+  registry_digest:digest(proof.registry_digest),proof_policy:proof.policy,execution_authority:false as const});
+}
+
 export interface ExecutionPacketRecord {packet_id:string;digest:string;mandatory_digest:string;packet:Record<string,unknown>}
 function freeze<T>(value:T):T {
  if(value!==null&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;
@@ -81,7 +115,7 @@ export function deriveQualificationInputs(packet:unknown):{
 
 export function createComponent(context:ComponentContext):Component {
  const g=gateway(context);
- return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,deriveQualificationInputs})},actions:{
+ return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,deriveQualificationInputs})},actions:{
  'hierarchy.packet.describe':async input=>{record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
  'hierarchy.packet.create':async (input,invocation)=>{
   const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
@@ -111,13 +145,10 @@ export function createComponent(context:ComponentContext):Component {
    digest(proof.registry_digest);
    const slots=await tx.query('SELECT s.id AS sandbox_id,s.boot_generation::text,s.observed_state,p.profile_id,w.id AS slot_id,w.state AS slot_state FROM hyperfide.sandboxes s JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.worker_slots w ON w.organisation_id=s.organisation_id AND w.sandbox_id=s.id AND w.boot_generation=s.boot_generation WHERE s.organisation_id=$1 AND s.id=$2 AND w.id=$3 FOR SHARE OF s,p,w',[a.organisation_id,sandboxId,slotId]);
    const slot=slots.rows[0];if(!slot||slot.boot_generation!==boot||slot.observed_state!=='RUNNING'||slot.slot_state!=='READY'||!slot.profile_id)return refuse('ENVIRONMENT_PROFILE_REQUIRED','Prospective slot/boot/profile is unavailable');
-   const profiles=await tx.query('SELECT content_digest,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2',[a.organisation_id,slot.profile_id]);
-   const profileRow=profiles.rows[0];if(!profileRow||!object(profileRow.manifest))return refuse('ENVIRONMENT_PROFILE_REQUIRED','An immutable preparation manifest is required');
-   const manifest=profileRow.manifest,profile=validateProfile(manifest.profile);
-   const clock=await tx.query('SELECT clock_timestamp() AS now');
-   if(Date.parse(profile.policy.expires_at)<=new Date(clock.rows[0]!.now).getTime())return refuse('ENVIRONMENT_PROFILE_EXPIRED','Preparation profile expired before packet creation');
-   if(manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||manifest.digest!==profileRow.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
-   const {digest:manifestDigest,...body}=manifest;if(hash(body)!==manifestDigest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest bytes do not match its identity');
+   const acceptedProfile=uuid(definitionField(task.definition,'environment_profile_id'));
+   if(slot.profile_id!==acceptedProfile)return refuse('ENVIRONMENT_PROFILE_MISMATCH','Executor pool profile differs from accepted task environment');
+   const prepared=await preparationManifest(tx,a.organisation_id,acceptedProfile);
+   const profileRow={content_digest:prepared.preparation_digest},profile=prepared.declared_profile;
    const requirements=resourceRequirements(definitionField(task.definition,'resource_requirements'));
    if(Number(requirements.cpu_millis)>profile.resources.cpu_millis||BigInt(String(requirements.memory_bytes))>BigInt(profile.resources.memory_bytes)||BigInt(String(requirements.disk_bytes))>BigInt(profile.resources.disk_bytes))return refuse('RESOURCE_POLICY_INVALID','Per-agent declared requirements exceed the declared environment; usable capacity still requires independent admission');
    const execution=definitionField(task.definition,'execution_profile');
