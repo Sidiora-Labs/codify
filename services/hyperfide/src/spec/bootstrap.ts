@@ -7,6 +7,7 @@ import type pg from 'pg';
 import {FoundationError,object} from '../policy/programme.js';
 import type {TransactionGateway} from '../storage/transactions.js';
 import {assertCurrentAuthority} from '../storage/durability.js';
+import {writeSemanticDisposition} from '../storage/dispositions.js';
 import type {SpecTransaction} from './import.js';
 import {importRunTransaction,parseKvx,canonical,digest} from './import.js';
 import type {SpecScope} from './import.js';
@@ -189,10 +190,12 @@ export async function bootstrapAcceptedIntentWithGateway(
  const metadata=validateBootstrapMetadata(rawMetadata,scope);
  await verifySources(metadata);
  return gateway.withPrimaryTransaction({timeoutMs:30000,maxRetries:2},async tx=>{
+  if((await tx.query('SELECT 1 FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id])).rows.length)await writeSemanticDisposition(tx,scope);
   await metadataTransaction(tx,scope,metadata);
   const result=await importRunTransaction(tx,scope,input);
   if(!object(result)||typeof result.revision_digest!=='string')
    fail('BOOTSTRAP_ACCEPTANCE_MISMATCH','Importer did not return an exact accepted intake');
+  await writeSemanticDisposition(tx,scope);
   await assertAcceptedBootstrap(tx,{organisation_id:scope.organisation_id,run_id:scope.run_id,
    authority_epoch:scope.authority_epoch,accepted_revision_digest:result.revision_digest});
   await assertCurrentAuthority(tx,{deployment_id,organisation_id:scope.organisation_id,run_id:scope.run_id,authority_epoch:scope.authority_epoch});

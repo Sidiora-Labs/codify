@@ -5,7 +5,10 @@ import {createHash} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {getPool} from '../storage/schema.js';
+import {invocationOf,gatewayOf} from '../identity/enrollment.js';
+import type {InvocationContext,AuthorityTransaction} from '../transport/protocol.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 
 export interface KvxField {key:string;raw:string;value:unknown;line:number}
 export interface KvxSection {name:string;line:number;fields:Record<string,KvxField>}
@@ -317,21 +320,41 @@ export async function exportProjection(pool:SpecTransaction,scope:SpecScope,inpu
  return {projection_header:header,source_digest:run.source_digest,source_size_bytes:String(bytes.length),offset_bytes:String(offset),
  chunk_base64:bytes.subarray(Number(offset),end).toString('base64'),next_cursor:end===bytes.length?null:cursor};
 }
-export function createComponent(context:ComponentContext):Component{
- const action=(execute:(pool:pg.Pool,scope:SpecScope,input:unknown)=>Promise<unknown>)=>async(input:unknown):Promise<unknown>=>{
-  if(context.signal.aborted)fail('SPEC_CLOSED','Specification component is shutting down');
-  const scope=specScope(context);try{return await execute(getPool(context.env),scope,input);}catch(error){return storageFailure(error);}
- };
+
+export async function specTransaction<T>(context:ComponentContext,mode:'READ'|'WRITE',body:(tx:AuthorityTransaction,invocation:InvocationContext)=>Promise<T>):Promise<T>{
+ const invocation=invocationOf(context),scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
+ return gatewayOf(context).withPrimaryTransaction({timeoutMs:30000,maxRetries:2,signal:invocation.signal,guard:async tx=>{
+  assertPrimaryTransaction(tx);
+  await(mode==='WRITE'?writeSemanticDisposition(tx,scope):readSemanticDisposition(tx,scope));
+  await invocation.guard(tx);
+ }},tx=>body(tx,invocation));
+}
+async function authenticatedScope(tx:AuthorityTransaction,context:ComponentContext,i:InvocationContext):Promise<SpecScope>{
+ const row=(await tx.query('SELECT project_id,authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[i.principal.organisation_id,i.principal.run_id])).rows[0];
+ if(!row||!context.env.HF_SPEC_ALLOWED_ROOT||!path.isAbsolute(context.env.HF_SPEC_ALLOWED_ROOT))fail('SPEC_CONFIG_INVALID','Trusted source root and accepted run required');
+ return {organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,project_id:row.project_id,authority_epoch:row.authority_epoch,
+ root:context.env.HF_SPEC_ALLOWED_ROOT,allowed_actions:i.principal.allowed_actions};
+}
+export function createComponent(_startup:ComponentContext):Component{
+ const action=(write:boolean,execute:(tx:SpecTransaction,scope:SpecScope,input:unknown)=>Promise<unknown>)=>
+  async(input:unknown,context:ComponentContext)=>specTransaction(context,write?'WRITE':'READ',async(tx,i)=>{
+   if(write&&!['OPERATOR','LEADER','COORDINATOR'].includes(i.principal.role))fail('ACTION_DENIED','Role cannot import accepted intent');
+   assertPrimaryTransaction(tx);
+   const scope=await authenticatedScope(tx,context,i);
+   return execute(tx,scope,input);
+  });
  return {apiVersion:1,actions:{
-  'spec.import':action(importRun),
-  'spec.inspect':action(async(pool,scope,input)=>{scoped(input,scope,['run_id']);return summary(await loadPinnedRun(pool,scope));}),
-  'spec.export':action(exportProjection),
-  'spec.projection.check':action(async(pool,scope,input)=>{
+  // Fresh intake is the explicit offline bootstrap; authenticated import may
+  // only replay the already accepted run that the current principal belongs to.
+  'spec.import':action(true,importRunTransaction),
+  'spec.inspect':action(false,async(tx,scope,input)=>{scoped(input,scope,['run_id']);return summary(await loadPinnedRun(tx,scope));}),
+  'spec.export':action(false,exportProjection),
+  'spec.projection.check':action(false,async(tx,scope,input)=>{
    const request=scoped(input,scope,['run_id','revision_digest','spec_generation','state_version']);
    if(typeof request.revision_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(request.revision_digest)||
     typeof request.spec_generation!=='string'||!DECIMAL.test(request.spec_generation)||
     typeof request.state_version!=='string'||!DECIMAL.test(request.state_version))fail('INVALID_REQUEST','Projection requires exact revision labels');
-   current(await loadPinnedRun(pool,scope),request);return {current:true,writable:false};
+   current(await loadPinnedRun(tx,scope),request);return {current:true,writable:false};
   })
  }};
 }
