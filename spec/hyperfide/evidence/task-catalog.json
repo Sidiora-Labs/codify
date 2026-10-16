@@ -600,7 +600,8 @@
         "services/hyperfide/src/storage/schema.ts",
         "tests/hyperfide/cases/support/postgres_cluster.py",
         "services/hyperfide/src/storage/runtime.ts",
-        "services/hyperfide/src/storage/transactions.ts"
+        "services/hyperfide/src/storage/transactions.ts",
+        "services/hyperfide/src/storage/authority_journal.ts"
       ],
       "do_steps": [
         "Implement checksummed schema migration coordination, authority epoch bootstrap and configurable acknowledged-write durability outside the main failure domain.",
@@ -1603,7 +1604,8 @@
       "wave": 13,
       "requires": [
         "3.1",
-        "5.2"
+        "5.2",
+        "12.1"
       ],
       "reqs": [
         "3.4"
@@ -2677,7 +2679,8 @@
         "services/hyperfide/components/12.4-executor.json",
         "services/hyperfide/components/12.4.json",
         "services/hyperfide/src/runner/bridge.ts",
-        "src/hyperfide/job.c"
+        "src/hyperfide/job.c",
+        "services/hyperfide/src/runner/executor.ts"
       ],
       "do_steps": [
         "Implement distinct control semantics with fenced authority and artifact-safe cleanup; report confirmed and unresolved termination explicitly.",
@@ -3752,7 +3755,8 @@
         "scripts/build-hyperfide-release.sh",
         "tests/hyperfide/cases/tasks/25_4.py",
         "tests/hyperfide/registrations/25.4.json",
-        "services/hyperfide/components/25.4.json"
+        "services/hyperfide/components/25.4.json",
+        "deploy/hyperfide/migrate.mjs"
       ],
       "do_steps": [
         "Produce remote native/TS builds with pinned dependencies/SDKs/runtime, capability/schema/protocol manifests, authenticated artifacts and service definitions.",

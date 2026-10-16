@@ -163,7 +163,7 @@ These are approved implementation assignments for existing requirements, not cla
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
-| 3.4 | Register native descendants and adopt valid work after manager replacement | hierarchy | 3.1, 5.2 | V-007, V-008 |
+| 3.4 | Register native descendants and adopt valid work after manager replacement | hierarchy | 3.1, 5.2, 12.1 | V-007, V-008 |
 | 5.3 | Reconcile idempotent dispatch and uncertain external outcomes | scheduler | 5.2, 6.1, 1.1, 5.4 | V-004, V-037 |
 | 6.3 | Deliver generation-bound start, steering and cancellation instructions | delivery | 6.2, 5.2, 14.1 | V-006 |
 | 8.2 | Implement pool inventory and separately qualified account quotas | providers | 8.1, 5.4 | V-007, V-036 |
@@ -675,7 +675,7 @@ Requires: 4.2.
 6. Qualify privilege separation and readiness refusal against actual disposable PostgreSQL processes. Production authority epoch activation requires trusted external old-primary/control-writer fencing; caller booleans or matching epoch rows do not prove fencing. Component drills do not qualify cloud high availability or independent failure domains.
 7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/storage/durability.ts`, `tests/hyperfide/manifests/tasks/4.4.json`, `tests/hyperfide/cases/tasks/4_4.py`, `tests/hyperfide/registrations/4.4.json`, `services/hyperfide/components/4.4.json`, `services/hyperfide/migrations/0004-durability.sql`, `services/hyperfide/src/storage/schema.ts`, `tests/hyperfide/cases/support/postgres_cluster.py`, `services/hyperfide/src/storage/runtime.ts`, `services/hyperfide/src/storage/transactions.ts`.
+Owns: `services/hyperfide/src/storage/durability.ts`, `tests/hyperfide/manifests/tasks/4.4.json`, `tests/hyperfide/cases/tasks/4_4.py`, `tests/hyperfide/registrations/4.4.json`, `services/hyperfide/components/4.4.json`, `services/hyperfide/migrations/0004-durability.sql`, `services/hyperfide/src/storage/schema.ts`, `tests/hyperfide/cases/support/postgres_cluster.py`, `services/hyperfide/src/storage/runtime.ts`, `services/hyperfide/src/storage/transactions.ts`, `services/hyperfide/src/storage/authority_journal.ts`.
 
 Planned verification:
 
@@ -1283,7 +1283,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 13 · owner `hierarchy` · clause `3.4`
 
-Requires: 3.1, 5.2.
+Requires: 3.1, 5.2, 12.1.
 
 1. Register native-child parentage, task association, sandbox/slot and resource consumption; persist adoption/handoff requests.
 2. Replace a manager against a versioned package without duplicating owners or restarting valid children; refuse unaccounted child execution authority.
@@ -1922,7 +1922,7 @@ Requires: 12.3, 15.2, 11.3, 5.1, 8.2.
 3. Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `src/hyperfide/control.c`, `tests/hyperfide/manifests/tasks/12.4.json`, `tests/hyperfide/cases/tasks/12_4.py`, `tests/hyperfide/registrations/12.4.json`, `src/hyperfide/components/12.4.kvx`, `services/hyperfide/components/12.4-executor.json`, `services/hyperfide/components/12.4.json`, `services/hyperfide/src/runner/bridge.ts`, `src/hyperfide/job.c`.
+Owns: `src/hyperfide/control.c`, `tests/hyperfide/manifests/tasks/12.4.json`, `tests/hyperfide/cases/tasks/12_4.py`, `tests/hyperfide/registrations/12.4.json`, `src/hyperfide/components/12.4.kvx`, `services/hyperfide/components/12.4-executor.json`, `services/hyperfide/components/12.4.json`, `services/hyperfide/src/runner/bridge.ts`, `src/hyperfide/job.c`, `services/hyperfide/src/runner/executor.ts`.
 
 Verification interface:
 
@@ -2549,7 +2549,7 @@ Requires: 25.3, 4.4, 12.4, 13.4, 1.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/deployment/releases.ts`, `tests/hyperfide/manifests/tasks/25.4.json`, `deploy/hyperfide/control.service`, `deploy/hyperfide/provisioner.service`, `deploy/hyperfide/dispatch.service`, `scripts/build-hyperfide-release.sh`, `tests/hyperfide/cases/tasks/25_4.py`, `tests/hyperfide/registrations/25.4.json`, `services/hyperfide/components/25.4.json`.
+Owns: `services/hyperfide/src/deployment/releases.ts`, `tests/hyperfide/manifests/tasks/25.4.json`, `deploy/hyperfide/control.service`, `deploy/hyperfide/provisioner.service`, `deploy/hyperfide/dispatch.service`, `scripts/build-hyperfide-release.sh`, `tests/hyperfide/cases/tasks/25_4.py`, `tests/hyperfide/registrations/25.4.json`, `services/hyperfide/components/25.4.json`, `deploy/hyperfide/migrate.mjs`.
 
 Verification interface:
 
