@@ -181,13 +181,13 @@ async function submittedGitFacts(ctx:ComponentContext,v:Data,policy:Data,workspa
  if(typeof repository!=='string'||!path.isAbsolute(repository)||policy.repository_id!==v.repository_id)
   fail('QUALIFICATION_SOURCE_UNAVAILABLE','Submission repository is not the accepted trusted repository');
  const run=promisify(execFile),environment={PATH:'/usr/local/bin:/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',
-  GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_ALLOW_PROTOCOL:'file'};
+  GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_ALLOW_PROTOCOL:'file',GIT_NO_REPLACE_OBJECTS:'1'};
  try{
   const git=async(args:string[]):Promise<string>=>(await run('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',...args],
    {cwd:repository,env:environment,timeout:10000,maxBuffer:1024*1024})).stdout.trim();
   if(await git(['cat-file','-t',v.source_object_id])!=='commit')fail('QUALIFICATION_SOURCE_MISMATCH','Submission must name an actual immutable Git commit');
   const tree=await git(['rev-parse',v.source_object_id+'^{tree}']);
-  if(await git(['rev-parse','--verify',workspace.branch_ref+'^{commit}'])!==v.source_object_id)
+  if(await git(['rev-parse','--verify','--end-of-options',workspace.branch_ref+'^{commit}'])!==v.source_object_id)
    fail('QUALIFICATION_SOURCE_MISMATCH','Submitted result is not the measured head of the current attempt workspace');
   await git(['merge-base','--is-ancestor',policy.source_object_id,v.source_object_id]);
   const parents=await git(['show','-s','--format=%P',v.source_object_id]);
@@ -259,7 +259,9 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
   const computeIdentity=await compute!.assertCurrentCompute(client,token);
   const packet=await loadPacketInputs(client,s,computeIdentity.input_packet_digest);
   const packetIdentity=packet.packet.mandatory.identity;
-  if(packetIdentity.task_id!==v.task_id||packetIdentity.attempt_id!==v.attempt_id||String(packetIdentity.attempt_generation)!==v.attempt_generation)
+  if(packetIdentity.organisation_id!==s[0]||packetIdentity.run_id!==s[1]||packetIdentity.task_id!==v.task_id||packetIdentity.attempt_id!==v.attempt_id||String(packetIdentity.attempt_generation)!==v.attempt_generation||
+   packetIdentity.spec_revision_id!==task.spec_revision_id||String(packetIdentity.spec_generation)!==String(task.spec_generation)||
+   packetIdentity.criteria_digest!==task.criteria_digest||packetIdentity.authority_epoch!==task.run_epoch||packet.packet.mandatory.intent.registry_digest!==hash(policy))
    fail('QUALIFICATION_PACKET_INVALID','Execution packet does not bind the submitting attempt');
   const runtimeInputs=resultInputs(gitFacts,source.artifact.digest,packet.derived);
   const current=await client.query("SELECT a.*,a.lease_expires_at>clock_timestamp() AS alive FROM hyperfide.attempts a WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE",[...s,v.attempt_id]);
@@ -273,10 +275,16 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
   if(leases.rowCount!==1)fail('QUALIFICATION_STALE_COMPUTE','Active primary-clock worker lease is required');
   for(const id of [v.source_manifest_artifact_id,v.evidence_manifest_artifact_id,...(evidenceManifest.artifact_ids as string[])])
    await client.query('SELECT hyperfide.require_complete_artifact($1,$2,$3)',[...s,id]);
-  await compute!.releaseCompute(client,token,{execution_state:'SUBMITTED'});
-  const workspace=await client.query('SELECT id FROM hyperfide.workspaces WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND repository_id=$4 AND attempt_id=$5 AND attempt_generation=$6 AND sandbox_id=$7 AND slot_id=$8 AND sandbox_boot_generation=$9 AND writable=true FOR SHARE',
+  const workspace=await client.query('SELECT id,branch_ref,base_commit,state_version::text FROM hyperfide.workspaces WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND repository_id=$4 AND attempt_id=$5 AND attempt_generation=$6 AND sandbox_id=$7 AND slot_id=$8 AND sandbox_boot_generation=$9 AND writable=true FOR SHARE',
    [...s,sourceManifest.workspace_id,v.repository_id,v.attempt_id,v.attempt_generation,v.sandbox_id,v.slot_id,v.sandbox_boot_generation]);
-  if(!workspace.rows[0])fail('QUALIFICATION_SOURCE_MISMATCH','Attributable workspace changed before admission');
+  if(!workspace.rows[0]||workspace.rows[0].branch_ref!==preflight.workspace.branch_ref||
+   workspace.rows[0].base_commit!==preflight.workspace.base_commit||workspace.rows[0].state_version!==preflight.workspace.state_version)
+   fail('QUALIFICATION_SOURCE_MISMATCH','Attributable workspace changed before admission');
+  // Register only the actual independently read Git result; the accepted repository baseline remains unchanged.
+  await client.query("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id,object_type) VALUES($1,$2,$3,'commit') ON CONFLICT DO NOTHING",[s[0],v.repository_id,v.source_object_id]);
+  const registered=await client.query('SELECT object_type FROM hyperfide.source_objects WHERE organisation_id=$1 AND repository_id=$2 AND object_id=$3',[s[0],v.repository_id,v.source_object_id]);
+  if(registered.rows[0]?.object_type!=='commit')fail('QUALIFICATION_SOURCE_MISMATCH','Actual result Git commit metadata conflicts');
+  await compute!.releaseCompute(client,token,{execution_state:'SUBMITTED'});
   const gen=await client.query('SELECT (coalesce(max(custody_generation),0)+1)::text AS generation FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[...s,v.task_id]);
   const custody=randomUUID(),job=randomUUID();
   await client.query("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
@@ -307,12 +315,30 @@ async function revoke(ctx:ComponentContext,raw:unknown):Promise<Data>{
  return transaction(ctx,async client=>{
   const c=await custodyLock(client,s,id);currentCustody(c,generation,version);
   await executionGate(ctx,client,s,'CLEANUP');
-  await client.query("INSERT INTO hyperfide.assurance_dispositions(organisation_id,run_id,custody_id,custody_generation,actor_id,reason,disposition) VALUES($1,$2,$3,$4,$5,$6,'REVOKED')",[...s,id,generation,invocation(ctx).principal.actor_id,v.reason]);
-  await client.query("UPDATE hyperfide.submission_custodies SET authority='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,id]);
-  await client.query("UPDATE hyperfide.qualification_jobs SET state='CANCELLED',lease_generation=lease_generation+1,lease_owner=NULL,lease_expires_at=NULL,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 AND state IN ('PENDING','RUNNING')",[...s,id]);
-  await client.query("UPDATE hyperfide.tasks SET current_custody_id=NULL,state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.task_id]);
+  await revokeCustodies(client,{organisation_id:s[0],run_id:s[1]},[id],{actor_id:invocation(ctx).principal.actor_id,reason:v.reason});
   return {submission_id:id,authority:'REVOKED',state_version:(BigInt(version)+1n).toString()};
  });
+}
+/** STOP/CANCEL callers retain their guarded transaction and reconcile publication effects separately. */
+export async function revokeCustodies(db:PrimaryClient,s:{organisation_id:string;run_id:string},submissionIds:string[],
+ disposition:{actor_id:string;reason:string}):Promise<Data>{
+ uuid(disposition.actor_id);
+ if(!disposition.reason.trim()||disposition.reason.length>2048)fail('QUALIFICATION_INPUT_INVALID','Explicit custody disposition reason required');
+ await assuranceBarrier(db,s,'EXCLUSIVE');
+ const revoked:string[]=[];
+ for(const id of [...new Set(submissionIds)].sort()){
+  const c=await custodyLock(db,[s.organisation_id,s.run_id],uuid(id));
+  if(c.authority!=='ACTIVE')continue;
+  await db.query("INSERT INTO hyperfide.assurance_dispositions(organisation_id,run_id,custody_id,custody_generation,actor_id,reason,disposition) VALUES($1,$2,$3,$4,$5,$6,'REVOKED')",
+   [s.organisation_id,s.run_id,id,String(c.custody_generation),disposition.actor_id,disposition.reason]);
+  await db.query("UPDATE hyperfide.submission_custodies SET authority='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[s.organisation_id,s.run_id,id]);
+  await db.query("UPDATE hyperfide.assurance_applicability SET applicability='STALE',reasons=$4::jsonb,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3",
+   [s.organisation_id,s.run_id,id,JSON.stringify([{kind:'CUSTODY_REVOKED',reason:disposition.reason}])]);
+  await db.query("UPDATE hyperfide.tasks SET current_custody_id=NULL,state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND current_custody_id=$4",
+   [s.organisation_id,s.run_id,c.task_id,id]);
+  await fenceQualificationJobs(db,s,[id],disposition.reason);revoked.push(id);
+ }
+ return {revoked_custody_ids:revoked,released_publication_custody_changed:false,history_preserved:true};
 }
 export async function fenceQualificationJobs(db:PrimaryClient,s:{organisation_id:string;run_id:string},
  submissionIds:string[],reason:string):Promise<Data>{
@@ -329,8 +355,33 @@ export async function fenceQualificationJobs(db:PrimaryClient,s:{organisation_id
  }
  return {fenced_job_ids:fenced,custody_changed:false,history_preserved:true};
 }
+/** Immutable admission provenance; consumers must independently re-read the COMPLETE object through15.2. */
+export async function inspectSubmittedResult(db:PrimaryClient,scopeValue:{organisation_id:string;run_id:string},
+ query:{custody_id:string}):Promise<Data>{
+ const s:[string,string]=[uuid(scopeValue.organisation_id),uuid(scopeValue.run_id)],id=uuid(query.custody_id);
+ await assuranceBarrier(db,{organisation_id:s[0],run_id:s[1]},'SHARED');
+ const result=await db.query("SELECT c.id,c.task_id,c.source_attempt_id,c.source_generation::text,c.custody_generation::text,c.authority,c.repository_id,"
+  +"c.source_object_id,c.source_manifest_digest,c.authority_epoch,s.manifest,s.source_artifact_id,a.digest,a.size_bytes::text,a.status "
+  +"FROM hyperfide.submission_custodies c JOIN hyperfide.assurance_submissions s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.custody_id=c.id "
+  +"JOIN hyperfide.artifacts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.id=s.source_artifact_id "
+  +"WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3",[...s,id]);
+ const row=result.rows[0],m=row?.manifest;
+ if(!row||!object(m)||row.authority==='REVOKED'||row.status!=='COMPLETE'||row.digest!==row.source_manifest_digest||
+  m.repository_id!==row.repository_id||m.source_object_id!==row.source_object_id||m.source_manifest_digest!==row.source_manifest_digest||
+  m.task_id!==row.task_id||m.attempt_id!==row.source_attempt_id||String(m.attempt_generation)!==String(row.source_generation)||
+  m.authority_epoch!==row.authority_epoch||m.source_manifest_artifact_id!==row.source_artifact_id||
+  !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(String(m.source_tree_id??''))||!Array.isArray(m.source_parent_ids))
+  fail('QUALIFICATION_RESULT_UNAVAILABLE','Immutable admitted result provenance is unavailable or inconsistent');
+ const binding={organisation_id:s[0],run_id:s[1],custody_id:id,custody_generation:String(row.custody_generation),
+  task_id:row.task_id,source_attempt_id:row.source_attempt_id,source_attempt_generation:String(row.source_generation),
+  authority_epoch:row.authority_epoch,repository_id:row.repository_id,source_object_id:row.source_object_id,source_tree_id:m.source_tree_id,
+  baseline_source_object_id:m.baseline_source_object_id,source_parent_ids:m.source_parent_ids,workspace_id:m.workspace_id,
+  source_manifest_digest:row.source_manifest_digest,source_manifest_artifact_id:row.source_artifact_id,source_manifest_size_bytes:String(row.size_bytes),
+  input_packet_digest:m.input_packet_digest,input_manifest:m.input_manifest,registry_digest:m.registry_digest};
+ return {...binding,binding_digest:hash(binding),authority:row.authority,object_bytes_reverified:false};
+}
 export function createComponent(ctx:ComponentContext):Component & {capabilities:Record<string,unknown>}{
- return {apiVersion:1,capabilities:{'assurance.custody.v1':Object.freeze({fenceQualificationJobs})},actions:{
+ return {apiVersion:1,capabilities:{'assurance.custody.v1':Object.freeze({fenceQualificationJobs,revokeCustodies,inspectSubmittedResult})},actions:{
   'submission.submit':(input,requestContext)=>submit(requestContext,input),
   'submission.revoke':(input,requestContext)=>revoke(requestContext,input),
   'submission.inspect':async(raw,requestContext)=>{

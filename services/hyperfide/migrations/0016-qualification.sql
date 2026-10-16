@@ -26,6 +26,7 @@ CREATE TABLE hyperfide.assurance_job_assignments (
  verifier_id uuid NOT NULL, sandbox_id uuid NOT NULL, slot_id uuid NOT NULL,
  sandbox_boot_generation bigint NOT NULL CHECK(sandbox_boot_generation>=1),
  reservation_id uuid NOT NULL, environment_digest hyperfide.digest NOT NULL,
+ allocation_id uuid NOT NULL, allocation_generation bigint NOT NULL CHECK(allocation_generation>=1),
  assigned_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,job_id,assignment_generation),
  UNIQUE(organisation_id,run_id,reservation_id),
@@ -120,3 +121,6 @@ BEGIN
  END LOOP;
 END $$;
 CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.assurance_applicability FOR EACH ROW EXECUTE FUNCTION hyperfide.monotonic_fields();
+
+CREATE INDEX assurance_receipts_digest ON hyperfide.assurance_job_receipts(organisation_id,run_id,receipt_digest);
+CREATE INDEX assurance_jobs_current_custody ON hyperfide.qualification_jobs(organisation_id,run_id,custody_id,state,outcome);
