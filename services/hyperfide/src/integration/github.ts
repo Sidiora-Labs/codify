@@ -161,7 +161,7 @@ export class GitHubPublicationAdapter {
  return {outcome:revoked&&pushIssued&&head===intent.candidate_head?'PUBLISHED':revoked&&!pushIssued?'REJECTED':'UNKNOWN',observed_head:head,credential_revocation:revoked?'CONFIRMED':'UNKNOWN',rules_digest:before.rules_digest,push_issued:pushIssued,credential_expires_at:expiry,credential_custody:persisted?'PERSISTED':'ORPHANED',failure_stage:failure||'NONE'};
  }
  async reconcile(intent:GitHubIntent):Promise<HostedResult>{
- const protection=await this.inspectProtection(),revoked=await this.revokeCredential(intent),head=await this.observeHead();
+ const revoked=await this.revokeCredential(intent),protection=await this.inspectProtection(),head=await this.observeHead();
  return {outcome:revoked&&head===intent.candidate_head?'PUBLISHED':'UNKNOWN',observed_head:head,credential_revocation:revoked?'CONFIRMED':'UNKNOWN',rules_digest:protection.rules_digest};
  }
 }
