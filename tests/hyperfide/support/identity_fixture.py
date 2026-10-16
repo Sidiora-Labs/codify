@@ -110,8 +110,11 @@ class IdentityFixture:
             self.env.pop("HYPERFIDE_MIGRATION_DATABASE_URL",None);self.env.pop("HYPERFIDE_MIGRATION_JOB",None)
             _record_fixture(self)
             self.start()
-        except BaseException:
-            self.close();raise
+        except BaseException as original:
+            try:self.close()
+            except BaseException as cleanup_error:
+                original.add_note("Fixture cleanup also failed: "+str(cleanup_error)[:1500])
+            raise
     def sql(self,sql,values=None,admin=False,serial=True):
         env=self.env.copy();env["DATABASE_URL"]=self.base_url if admin else self.url
         result=subprocess.run(["node","--input-type=commonjs","-e",SQL_JS],input=json.dumps({"sql":sql,"values":values or [],"serial":serial and not admin}),text=True,cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
