@@ -17,7 +17,7 @@ IDS=["review.inputs.exact-obligation-generation","review.inputs.replay-stable","
 "review.receipt.actual-admitted-support","review.receipt.immutable-history","review.receipt.exact-replay",
 "review.coverage.limitations-prevent-completion","review.inputs.changed-policy-stales","review.inputs.reconcile-preserves-history",
 "review.observation.origin-attempt-refused","review.observation.exact-source-attribution","review.observation.history-immutable","review.inputs.partial-task-revision-stales","review.inputs.rebind-fences-old-generation"]
-IDS+=["review.execution.package-stop-denies-claim","review.execution.sandbox-stop-denies-output","review.execution.old-sandbox-stop-preserves-current-review","review.lease.owner-renewal","review.lease.wrong-owner-renewal-refused","review.lock-order.disposition-before-auth-run","review.graph-custody.quarantine-and-scope-fenced"]
+IDS+=["review.execution.package-stop-denies-claim","review.execution.sandbox-stop-denies-output","review.execution.old-sandbox-stop-preserves-current-review","review.lease.owner-renewal","review.lease.wrong-owner-renewal-refused","review.semantic-fence.current-authenticated-read","review.graph-custody.quarantine-and-scope-fenced"]
 def seed_inputs(f):
  d=f.identity;profile=m.xid(0x701);build=m.xid(0x702);graph=m.xid(0x703);artifact=m.xid(0x704);attempt=m.xid(0x705);evidence=m.xid(0x706)
  body=b"Bounded support fixture: API units are cents; no semantic proof claimed.\n"
@@ -32,38 +32,40 @@ def seed_inputs(f):
  return {"snapshot":{"source_set":[{"repository_id":m.REPOSITORY,"source_object_id":f.first}],"graph_manifest_id":graph,"contract_ids":[],"environment_profile_id":profile},"evidence_id":evidence,"attempt_id":attempt}
 
 def lock_order_probe(f):
- """Two real connections: authenticated review must wait before taking run SHARE."""
+ """Real signed reader waits on the actual14/17 run-row fence and sees committed generation."""
  import subprocess,threading,time
  js=r"""const {createRequire}=require('module'),pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg');
  const readline=require('readline');
  (async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL,statement_timeout:1500,lock_timeout:1000});await c.connect();
- try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[process.argv[1]+':'+process.argv[2]+':finding-disposition']);process.stdout.write('LOCKED\n');
+ try{await c.query('BEGIN');const held=await c.query('UPDATE hyperfide.runs SET semantic_generation=semantic_generation+1 WHERE organisation_id=$1 AND id=$2 RETURNING semantic_generation::text AS generation',[process.argv[1],process.argv[2]]);process.stdout.write('LOCKED:'+held.rows[0].generation+'\n');
  const lines=readline.createInterface({input:process.stdin});await new Promise(resolve=>lines.once('line',resolve));
  await c.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[process.argv[1],process.argv[2]]);
  await c.query('COMMIT');process.stdout.write('UPDATED\n');lines.close();}finally{await c.end();}})().catch(e=>{process.stderr.write(JSON.stringify({code:e.code??'ERROR'}));process.exitCode=1;});"""
  child=subprocess.Popen(["node","-e",js,m.ORG,m.RUN],cwd=ROOT,env=f.identity.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
- result={};errors=[]
+ result={};errors=[];observed=[];expected_generation=None
  def invoke():
   try:result.update(f.coverage(f.first))
   except Exception as error:errors.append(error)
  thread=None
  try:
-  m.expect(child.stdout.readline().strip()=="LOCKED","primary control transaction did not acquire disposition lock")
+  marker=child.stdout.readline().strip();m.expect(marker.startswith("LOCKED:"),"primary control transaction did not acquire semantic generation row");expected_generation=marker.split(":",1)[1]
   thread=threading.Thread(target=invoke);thread.start()
   waiting=False
   for _ in range(50):
-   rows=f.identity.sql("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE 'SELECT pg_advisory_xact_lock%'")
+   rows=f.identity.sql("SELECT pid,wait_event,query FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'");observed=rows or observed
+   rows=[row for row in rows if 'semantic_generation' in row['query'] or 'FROM hyperfide.identity_principals p JOIN hyperfide.runs r' in row['query']]
    if rows:waiting=True;break
    time.sleep(.05)
-  m.expect(waiting,"actual authenticated request never reached disposition barrier")
+  m.expect(waiting,"actual signed request never reached its run-row lock: "+json.dumps({"waits":observed,"errors":[str(error) for error in errors],"result":result},sort_keys=True))
   child.stdin.write("CONTINUE\n");child.stdin.flush()
   output=child.communicate(timeout=5)
-  m.expect(child.returncode==0 and "UPDATED" in output[0],"review acquired run SHARE before disposition lock: "+output[1])
+  m.expect(child.returncode==0 and "UPDATED" in output[0],"primary generation writer did not commit: "+output[1])
   thread.join(timeout=8)
-  m.expect(not thread.is_alive() and not errors and result.get("status")=="INCOMPLETE","actual authenticated review did not resume after primary commit")
+  m.expect(not thread.is_alive() and not errors and result.get("status")=="INCOMPLETE" and result.get("authority_generation")==expected_generation,"actual authenticated review retained a stale semantic generation after primary commit")
  finally:
   if child.poll() is None:child.kill();child.communicate()
   if thread:thread.join(timeout=10)
+  (m.evidence_dir(f.task)/"semantic-fence-signed-boundary.json").write_text(json.dumps({"scope":"SIGNED_BOUNDARY_FRESHNESS","claim":"Observed actual14/17 run-row lock, writer commit, then current response generation; not an isolated helper retry claim","waits":observed,"expected_generation":expected_generation,"response_generation":result.get("authority_generation"),"response_status":result.get("status"),"errors":[str(error) for error in errors]},sort_keys=True)+"\n")
 
 
 def graph_custody_probe(f,seed):
