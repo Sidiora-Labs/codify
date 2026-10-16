@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "9.2",
+  "task": "9.2",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/railway/profile.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "railway.profile.validate",
+    "railway.profile.observe"
+  ],
+  "requires": [
+    "9.1"
+  ]
+}
