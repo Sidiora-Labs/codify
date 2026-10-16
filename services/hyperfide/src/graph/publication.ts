@@ -78,6 +78,7 @@ export function createComponent(ctx:ComponentContext):Component{
  })},actions:{
   'graph.publish.describe':input=>{exact(input,[]);return {schema_version:1,atomic_manifest_and_channel:true,publication_requires:'COMPLETE_SOURCE_AND_RESOLUTION',unknown_references:'PRESERVED'};},
   'graph.publish.commit':async(input,context)=>{try{return await publish(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_PUBLICATION_UNKNOWN','Publication response uncertain; replay the same operation identity to reconcile');}},
+  'graph.publish.snapshot':async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','expected_sources']),s=scopeInput(r,context);return graphTransaction(context,s,tx=>loadGraphSnapshot(tx,s,uuid(r.manifest_id),r.expected_sources),false);},
   'graph.publish.inspect':async(input,context)=>{const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id']),s=scopeInput(r,context);return graphTransaction(context,s,tx=>publishedGraph(tx,s,uuid(r.manifest_id)),false);}
  }};
 }
