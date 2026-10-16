@@ -36,7 +36,7 @@ export function digest(value:unknown):string{return 'sha256:'+createHash('sha256
 export function safe(value:unknown,max=524288):void{
  const visit=(item:unknown,depth:number):void=>{
   if(depth>32)fail('DECISION_INVALID','Decision nesting exceeds bound');
-  if(typeof item==='string'&&(/-----BEGIN [A-Z ]*PRIVATE KEY-----|Bearer\s+[A-Za-z0-9._~+\/-]{12,}/i.test(item)))fail('DECISION_SECRET','Authentication material is excluded');
+  if(typeof item==='string'&&(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|\b(?:bearer|basic)\s+\S{4,}|\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\s*[:=]\s*\S+|\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?)[A-Za-z0-9_-]{8,}|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/i.test(item)))fail('DECISION_SECRET','Authentication material is excluded');
   if(Array.isArray(item)){for(const child of item)visit(child,depth+1);}
   else if(item&&typeof item==='object')for(const [key,child]of Object.entries(item)){
    if(/^(?:__proto__|prototype|constructor|password|api_key|access_token|refresh_token|private_key|authorization|cookie)$/i.test(key))fail('DECISION_SECRET','Sensitive/control field excluded');
@@ -54,8 +54,8 @@ export async function withAuthority<T>(ctx:ComponentContext,s:Scope,action:strin
  if(invocation.payload?.action!==action||invocation.payload.run_id!==invocation.principal.run_id||invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id||!invocation.principal.allowed_actions.includes(action))fail('AUTH_FORBIDDEN','Invocation does not permit this scope/action');
  return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:tx=>invocation.guard(tx)},work);
 }
-export async function currentRevision(client:QuerySession,s:Scope):Promise<{revision:Revision;document:Data;source_digest:string;source_content:string}>{
- const result=await client.query(`SELECT r.spec_revision_id::text,r.spec_generation::text,r.state_version::text,r.authority_epoch::text,r.policy_digest,s.document,s.source_digest,s.source_content
+export async function currentRevision(client:QuerySession,s:Scope,includeDocument=false):Promise<{revision:Revision;document?:Data;source_digest:string}>{
+ const result=await client.query(`SELECT r.spec_revision_id::text,r.spec_generation::text,r.state_version::text,r.authority_epoch::text,r.policy_digest,s.source_digest${includeDocument?',s.document':''}
  FROM hyperfide.runs r JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id
  WHERE r.organisation_id=$1 AND r.id=$2 FOR SHARE OF r`,[s.organisation_id,s.run_id]);
  if(result.rowCount!==1)fail('DECISION_SCOPE_UNKNOWN','Run is not visible in this scope');
@@ -65,7 +65,7 @@ export async function currentRevision(client:QuerySession,s:Scope):Promise<{revi
  const contract_revisions=(await client.query('SELECT id::text,contract_key,revision::text,criteria_digest FROM hyperfide.contracts WHERE organisation_id=$1 AND run_id=$2 ORDER BY contract_key,revision LIMIT 513',[s.organisation_id,s.run_id])).rows as Data[];
  if(graph_channels.length>512||contract_revisions.length>512)fail('DECISION_TOO_LARGE','Revision snapshot requires a narrower qualified packet');
  return {revision:{spec_revision_id:String(row.spec_revision_id),spec_generation:String(row.spec_generation),state_version:String(row.state_version),authority_epoch:String(row.authority_epoch),policy_digest:String(row.policy_digest),repositories,graph_channels,contract_revisions},
- document:obj(row.document),source_digest:String(row.source_digest),source_content:String(row.source_content)};
+ ...(includeDocument?{document:obj(row.document)}:{}),source_digest:String(row.source_digest)};
 }
 export async function loadPacket(client:QuerySession,s:Scope,id:string,requireFresh=true):Promise<Packet>{
  const rows=await client.query('SELECT content FROM hyperfide.decision_packets WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[s.organisation_id,s.run_id,uuid(id)]);
@@ -104,8 +104,8 @@ export async function recordAudit(client:QuerySession,s:Scope,value:unknown):Pro
  await client.query('INSERT INTO hyperfide.decision_audits(organisation_id,run_id,id,packet_id,packet_hash,payload,payload_hash,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[s.organisation_id,s.run_id,row.id,row.packet_id,row.packet_hash,row,hash,row.status]);
  return {...row,authority:'NONE'};
 }
-export function input(value:unknown,fields:string[]):{scope:Scope;data:Data}{
- const data=exact(value,['scope',...fields]);return {scope:scope(data.scope),data};
+export function input(value:unknown,fields:string[],optional:string[]=[]):{scope:Scope;data:Data}{
+ const data=exact(value,['scope',...fields,...optional],['scope',...fields]);return {scope:scope(data.scope),data};
 }
 export async function auditFor(client:QuerySession,s:Scope,id:unknown,purpose:string):Promise<{audit:Data;packet:Awaited<ReturnType<typeof loadPacket>>}>{
  const rows=await client.query('SELECT payload FROM hyperfide.decision_audits WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[s.organisation_id,s.run_id,uuid(id)]);
@@ -157,18 +157,23 @@ export function createComponent(ctx:ComponentContext):Component{
   return recordAudit(client,q.scope,{...fields,id:decision_id,packet_id:packet.id,action:{authority:'NONE',applied:false,recommendation:raw.status==='accepted_advice'?raw.interpretation:null}});
  });},
  'decision.audit.record':async (value,ctx)=>{const q=input(value,['record']);if(obj(q.data.record).status==='accepted_advice')fail('DECISION_RESULT_REQUIRED','Accepted advice requires the trusted decision job audit sink, never wire assertions');return withAuthority(ctx,q.scope,'decision.audit.record',client=>recordAudit(client,q.scope,q.data.record));},
- 'decision.audit.inspect':async (value,ctx)=>{const q=input(value,['id']);return withAuthority(ctx,q.scope,'decision.audit.inspect',async client=>{
+ 'decision.audit.inspect':async (value,ctx)=>{const q=input(value,['id'],['after']);return withAuthority(ctx,q.scope,'decision.audit.inspect',async client=>{
  const rows=await client.query('SELECT payload,payload_hash,created_at FROM hyperfide.decision_audits WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[q.scope.organisation_id,q.scope.run_id,uuid(q.data.id)]);
  if(rows.rowCount!==1)fail('DECISION_NOT_FOUND','Audit is not visible');
- const outcomes=await client.query('SELECT id,payload,payload_hash,created_at FROM hyperfide.decision_outcomes WHERE organisation_id=$1 AND run_id=$2 AND audit_id=$3 ORDER BY created_at,id',[q.scope.organisation_id,q.scope.run_id,q.data.id]);
- return {...rows.rows[0],outcomes:outcomes.rows,authority:'NONE'};});},
+ const after=q.data.after===undefined?null:exact(q.data.after,['created_at','id']);
+ if(after&&!Number.isFinite(Date.parse(str(after.created_at,'outcome cursor',64))))fail('DECISION_INVALID','Invalid outcome cursor');
+ const outcomes=await client.query("SELECT id,payload,payload_hash,created_at,created_at::text AS cursor_created_at FROM hyperfide.decision_outcomes WHERE organisation_id=$1 AND run_id=$2 AND audit_id=$3 AND ($4::timestamptz IS NULL OR (created_at,id)>($4::timestamptz,$5::uuid)) ORDER BY created_at,id LIMIT 9",[q.scope.organisation_id,q.scope.run_id,q.data.id,after?.created_at??null,after?uuid(after.id):null]);
+ const page:Data[]=[];let bytes=0;
+ for(const row of outcomes.rows){const size=Buffer.byteLength(JSON.stringify(row));if(size>262144&&!page.length)fail('DECISION_TOO_LARGE','Stored outcome exceeds bounded traversal budget');if(page.length>=8||bytes+size>262144)break;page.push(row as Data);bytes+=size;}
+ const more=page.length<outcomes.rows.length,last=page.at(-1);
+ return {...rows.rows[0],outcomes:page,has_more:more,next_after:more&&last?{created_at:last.cursor_created_at,id:last.id}:null,authority:'NONE'};});},
  'decision.audit.outcome':async (value,ctx)=>{const q=input(value,['id','audit_id','outcome']);uuid(q.data.id);uuid(q.data.audit_id);
  const outcome=exact(q.data.outcome,['observed_kind','source_id','source_digest','occurred_at','action_taken','details']);
  if(!['task','repair','verification','policy_rejection','usage_reconciliation'].includes(str(outcome.observed_kind)))fail('DECISION_INVALID','Unknown outcome kind');
  str(outcome.source_id);if(!/^sha256:[0-9a-f]{64}$/.test(str(outcome.source_digest)))fail('DECISION_INVALID','Outcome source digest required');
  if(!Number.isFinite(Date.parse(str(outcome.occurred_at))))fail('DECISION_INVALID','Observed time required');safe(outcome,131072);
- return withAuthority(ctx,q.scope,'decision.audit.outcome',async client=>{const hash=digest(outcome),old=await client.query('SELECT payload_hash FROM hyperfide.decision_outcomes WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[q.scope.organisation_id,q.scope.run_id,q.data.id]);
- if(old.rowCount){if(old.rows[0]!.payload_hash!==hash)fail('DECISION_CONFLICT','Outcome replay differs');return {id:q.data.id,replayed:true,authority:'NONE'};}
+ return withAuthority(ctx,q.scope,'decision.audit.outcome',async client=>{const hash=digest(outcome),old=await client.query('SELECT payload_hash,audit_id FROM hyperfide.decision_outcomes WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[q.scope.organisation_id,q.scope.run_id,q.data.id]);
+ if(old.rowCount){if(old.rows[0]!.payload_hash!==hash||old.rows[0]!.audit_id!==q.data.audit_id)fail('DECISION_CONFLICT','Outcome replay differs');return {id:q.data.id,replayed:true,authority:'NONE'};}
  await client.query('INSERT INTO hyperfide.decision_outcomes(organisation_id,run_id,id,audit_id,payload,payload_hash) VALUES($1,$2,$3,$4,$5,$6)',[q.scope.organisation_id,q.scope.run_id,q.data.id,q.data.audit_id,outcome,hash]);
  return {id:q.data.id,replayed:false,authority:'NONE'};});}
  }};

@@ -45,3 +45,6 @@ CREATE TRIGGER immutable_decision_audit BEFORE UPDATE OR DELETE ON hyperfide.dec
 CREATE TRIGGER immutable_decision_proposal BEFORE UPDATE OR DELETE ON hyperfide.decision_proposals FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_decision_record();
 CREATE TRIGGER immutable_decision_outcome BEFORE UPDATE OR DELETE ON hyperfide.decision_outcomes FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_decision_record();
 REVOKE ALL ON hyperfide.decision_packets,hyperfide.decision_audits,hyperfide.decision_proposals,hyperfide.decision_outcomes FROM PUBLIC;
+
+-- Audit traversal stays bounded without scanning unrelated run outcomes.
+CREATE INDEX decision_outcomes_audit_cursor ON hyperfide.decision_outcomes(organisation_id,run_id,audit_id,created_at,id);

@@ -24,6 +24,11 @@
     "audit.null-unknown-preserved",
     "audit.outcome-persist",
     "audit.capture-trusted-job",
+    "audit.freshness-skips-document",
+    "audit.outcome-cursor-bounded",
+    "audit.outcome-index-present",
+    "audit.outcome-cross-audit-replay",
+    "audit.secret-in-free-text",
     "audit.sql-history-immutable",
     "audit.stale-packet-refused",
     "audit.accepted-intent-unchanged"
@@ -44,12 +49,6 @@
       "scope": "task21.4-disposable"
     }
   ],
-  "cleanup_argv": [
-    "python3",
-    "tests/hyperfide/cases/tasks/21_4.py",
-    "--cleanup"
-  ],
-  "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "storage/database-absence.json"
   ],
@@ -73,5 +72,11 @@
   "actions": [
     "postgresql.fixture.create",
     "postgresql.fixture.drop"
-  ]
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/21_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60
 }
