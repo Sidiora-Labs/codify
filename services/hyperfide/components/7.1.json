@@ -3,8 +3,7 @@
   "id": "7.1",
   "task": "7.1",
   "roles": [
-    "control",
-    "dispatch"
+    "control"
   ],
   "module": "graph/extraction.js",
   "entry": "createComponent",
