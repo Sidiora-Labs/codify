@@ -2,6 +2,7 @@ import {readFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction,TransactionGateway} from '../storage/transactions.js';
 
 export type SessionRole='LEADER'|'FEATURE_MANAGER'|'WORKER'|'COMMIT_WATCHER'|'ISSUE_WATCHER'|'VERIFIER'|'INTEGRATOR'|'INDEXER';
@@ -63,11 +64,13 @@ export function isHierarchyAuthority(value:unknown):value is HierarchyAuthority 
  return object(value)&&typeof value.leadership==='function'&&typeof value.requireAuthority==='function';
 }
 export async function leadership(tx:PrimaryTransaction,scope:Scope):Promise<Leadership> {
+ assertPrimaryTransaction(tx);
  const result=await tx.query('SELECT authority_epoch,leader_session_id,generation::text AS leader_generation FROM hyperfide.hierarchy_leaders WHERE organisation_id=$1 AND run_id=$2 FOR SHARE',[uuid(scope.organisation_id),uuid(scope.run_id)]);
  const row=result.rows[0];if(!row)return refuse('LEADER_UNAVAILABLE','No current leader is registered');
  return {...scope,authority_epoch:row.authority_epoch,leader_session_id:row.leader_session_id,leader_generation:row.leader_generation};
 }
 export async function requireAuthority(tx:PrimaryTransaction,input:AuthorityRequest):Promise<AuthorityView> {
+ assertPrimaryTransaction(tx);
  const org=uuid(input.organisation_id),run=uuid(input.run_id),actor=uuid(input.session_id),epoch=uuid(input.authority_epoch);
  const expected=decimal(input.leader_generation);
  const runs=await tx.query('SELECT authority_epoch,state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[org,run]);
@@ -107,6 +110,7 @@ export function trustedActor(context:ComponentContext):TrustedActor {
   authority_epoch:uuid(p.deployment_epoch),guard:invocation.guard};
 }
 export async function ready(tx:PrimaryTransaction):Promise<void> {
+ assertPrimaryTransaction(tx);
  const names=['hierarchy_leaders','hierarchy_packages','hierarchy_domain_owners','hierarchy_handoffs','hierarchy_handoff_acknowledgements','hierarchy_session_packages','hierarchy_ownership_events'];
  const found=await tx.query('SELECT bool_and(to_regclass(\'hyperfide.\'||name) IS NOT NULL) AS ready FROM unnest($1::text[]) AS name',[names]);
  if(!found.rows[0]?.ready)return refuse('HIERARCHY_SCHEMA_REQUIRED','Apply the trusted hierarchy migration before using the hierarchy');
@@ -114,6 +118,7 @@ export async function ready(tx:PrimaryTransaction):Promise<void> {
  if(!version.rowCount)return refuse('HIERARCHY_SCHEMA_REQUIRED','Hierarchy migration provenance is absent or differs from the trusted bytes');
 }
 export async function event(tx:PrimaryTransaction,actor:TrustedActor,generation:string,kind:string,payload:Data):Promise<void> {
+ assertPrimaryTransaction(tx);
  await tx.query('INSERT INTO hyperfide.hierarchy_ownership_events(organisation_id,run_id,id,kind,actor_session_id,leader_generation,payload) VALUES($1,$2,$3,$4,$5,$6,$7)',
   [actor.organisation_id,actor.run_id,randomUUID(),kind,actor.session_id,generation,JSON.stringify(payload)]);
 }
