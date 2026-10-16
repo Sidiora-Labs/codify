@@ -54,7 +54,7 @@ async function trustedDetached(filename:string,limit:number):Promise<Buffer>{
  directory=await fs.open('/proc/self/fd/'+directory.fd+'/'+part,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
  handles.push(directory);await protectedDirectory(directory);
  }
- const handle=await fs.open('/proc/self/fd/'+directory.fd+'/'+parts.at(-1),constants.O_RDONLY|constants.O_NOFOLLOW);handles.push(handle);
+ const handle=await fs.open('/proc/self/fd/'+directory.fd+'/'+parts.at(-1),constants.O_RDONLY|constants.O_NONBLOCK|constants.O_NOFOLLOW);handles.push(handle);
  const st=await handle.stat({bigint:true});
  if(!st.isFile()||st.nlink!==1n||st.size<1n||st.size>BigInt(limit)||(st.mode&0o022n)!==0n||st.uid!==0n&&st.uid!==BigInt(owner??-1))fail('Detached authentication input is not protected trusted material');
  const bytes=Buffer.alloc(Number(st.size));let offset=0;

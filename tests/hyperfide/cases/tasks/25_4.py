@@ -159,6 +159,15 @@ def main():
    try:rejected("inspect",{"manifest":"manifest.json"})
    finally:auth.unlink();moved.rename(auth)
   check("release.signature.symlink-ancestor-refused",symlink_ancestor)
+  def fifo_anchor():
+   import time
+   original=public.read_bytes();public.unlink();os.mkfifo(public,0o644)
+   started=time.monotonic()
+   try:
+    rejected("inspect",{"manifest":"manifest.json"})
+    expect(time.monotonic()-started<3,"protected FIFO authentication input blocked inspection")
+   finally:public.unlink();public.write_bytes(original);public.chmod(0o644)
+  check("release.signature.fifo-anchor-nonblocking-refusal",fifo_anchor)
   def missing_signature():
    signature.unlink()
    try:rejected("inspect",{"manifest":"manifest.json"})
