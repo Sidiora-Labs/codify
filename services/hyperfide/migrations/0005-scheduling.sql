@@ -246,3 +246,57 @@ ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT named_resource_identity U
 ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT named_resource_scope CHECK((dimension='EXCLUSIVE_SERVICE' AND length(resource_key) BETWEEN 1 AND 128) OR (dimension<>'EXCLUSIVE_SERVICE' AND resource_key=''));
 
 ALTER TABLE hyperfide.scheduler_dispatches ADD CONSTRAINT one_dispatch_per_attempt UNIQUE(organisation_id,run_id,attempt_id,attempt_generation);
+
+ALTER TABLE hyperfide.capacity_accounts ADD COLUMN capacity_class text NOT NULL DEFAULT 'EXECUTION';
+UPDATE hyperfide.capacity_accounts SET capacity_class=CASE
+ WHEN dimension IN ('SANDBOX','CPU_MILLIS','MEMORY_BYTES','DISK_BYTES') THEN 'PHYSICAL'
+ WHEN dimension IN ('PROVISION_RATE','API_RATE','MODEL_RATE') THEN 'RATE'
+ WHEN dimension='EXCLUSIVE_SERVICE' THEN 'EXCLUSIVE' ELSE 'EXECUTION' END,
+ state_version=state_version+1;
+ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT capacity_class_kind CHECK(
+ (dimension='SANDBOX' AND capacity_class='PHYSICAL')
+ OR (dimension IN ('CPU_MILLIS','MEMORY_BYTES','DISK_BYTES') AND capacity_class IN ('PHYSICAL','EXECUTION'))
+ OR (dimension IN ('PROVISION_RATE','API_RATE','MODEL_RATE') AND capacity_class='RATE')
+ OR (dimension='EXCLUSIVE_SERVICE' AND capacity_class='EXCLUSIVE')
+ OR (dimension IN ('AGENT','BUILD','TEST','INDEX','REVIEW','INTEGRATION','PREPARATION','WARM_SPARE') AND capacity_class='EXECUTION'));
+ALTER TABLE hyperfide.capacity_accounts DROP CONSTRAINT named_resource_identity;
+ALTER TABLE hyperfide.capacity_accounts ADD CONSTRAINT named_resource_identity UNIQUE(organisation_id,pool_id,capacity_class,dimension,resource_key);
+CREATE TABLE hyperfide.resource_job_allocations (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL,
+ request_id uuid NOT NULL,task_id uuid NOT NULL,reservation_id uuid NOT NULL,
+ job_kind text NOT NULL CHECK(job_kind IN ('BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION')),
+ slot_id uuid NOT NULL,sandbox_id uuid NOT NULL,sandbox_boot_generation bigint NOT NULL CHECK(sandbox_boot_generation>=1),
+ assignee_session_id uuid NOT NULL,generation bigint NOT NULL DEFAULT 1 CHECK(generation>=1),
+ state text NOT NULL DEFAULT 'ACTIVE' CHECK(state IN ('ACTIVE','RELEASE_PENDING','RELEASED')),
+ state_version bigint NOT NULL DEFAULT 1 CHECK(state_version>=1),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,id),UNIQUE(organisation_id,run_id,request_id),
+ FOREIGN KEY(organisation_id,run_id,task_id) REFERENCES hyperfide.tasks(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,reservation_id) REFERENCES hyperfide.reservations(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,sandbox_id,slot_id,sandbox_boot_generation) REFERENCES hyperfide.worker_slots(organisation_id,sandbox_id,id,boot_generation),
+ FOREIGN KEY(organisation_id,run_id,assignee_session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id)
+);
+CREATE UNIQUE INDEX one_live_job_per_slot ON hyperfide.resource_job_allocations(organisation_id,slot_id)
+ WHERE state IN ('ACTIVE','RELEASE_PENDING');
+CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.resource_job_allocations FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','request_id','task_id','reservation_id','job_kind','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','generation','created_at');
+CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.resource_job_allocations FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.monotonic_fields();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.resource_job_allocations FOR EACH ROW
+ EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+ALTER TABLE hyperfide.execution_controls ADD COLUMN deadline_at timestamptz;
+ALTER TABLE hyperfide.execution_controls ADD COLUMN fallback_mode text CHECK(fallback_mode IN ('PAUSE','STOP'));
+ALTER TABLE hyperfide.execution_controls ADD CONSTRAINT bounded_drain_policy
+ CHECK((mode='DRAIN' AND deadline_at IS NOT NULL AND fallback_mode IS NOT NULL) OR (mode<>'DRAIN' AND deadline_at IS NULL AND fallback_mode IS NULL));
+ALTER TABLE hyperfide.execution_control_history ADD COLUMN deadline_at timestamptz;
+ALTER TABLE hyperfide.execution_control_history ADD COLUMN fallback_mode text CHECK(fallback_mode IN ('PAUSE','STOP'));
+ALTER TABLE hyperfide.execution_control_history ADD CONSTRAINT bounded_drain_history
+ CHECK((mode='DRAIN' AND deadline_at IS NOT NULL AND fallback_mode IS NOT NULL) OR (mode<>'DRAIN' AND deadline_at IS NULL AND fallback_mode IS NULL));
+
+ALTER TABLE hyperfide.resource_waiters ADD CONSTRAINT job_request_identity UNIQUE(organisation_id,run_id,request_id,task_id,job_kind);
+ALTER TABLE hyperfide.resource_job_allocations ADD CONSTRAINT job_waiter_binding FOREIGN KEY(organisation_id,run_id,request_id,task_id,job_kind) REFERENCES hyperfide.resource_waiters(organisation_id,run_id,request_id,task_id,job_kind);
+ALTER TABLE hyperfide.reservations ADD CONSTRAINT reservation_request_identity UNIQUE(organisation_id,run_id,id,request_id);
+ALTER TABLE hyperfide.resource_job_allocations ADD CONSTRAINT job_reservation_binding FOREIGN KEY(organisation_id,run_id,reservation_id,request_id) REFERENCES hyperfide.reservations(organisation_id,run_id,id,request_id);
+ALTER TABLE hyperfide.worker_slots DROP CONSTRAINT worker_slots_capacity_kind_check;
+ALTER TABLE hyperfide.worker_slots ADD CONSTRAINT worker_slots_capacity_kind_check CHECK(capacity_kind IN ('AGENT','BUILD','TEST','INDEX','REVIEW','INTEGRATION','PREPARATION','EXCLUSIVE_SERVICE'));
