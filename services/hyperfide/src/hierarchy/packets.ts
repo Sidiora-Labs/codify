@@ -41,7 +41,7 @@ async function preparationManifest(tx:QuerySession,organisationId:string,profile
  if(manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||manifest.digest!==row.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
  const {digest:manifestDigest,...body}=manifest;
  if(hash(body)!==manifestDigest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest bytes do not match its identity');
- return {preparation_digest:digest(row.content_digest),declared_profile:profile};
+ return {preparation_digest:digest(row.content_digest),preparation_manifest:freeze(manifest),declared_profile:profile};
 }
 /** Accepted physical preparation demand, independent of a not-yet-created executor. */
 export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;task_id:string;profile_id?:string}){
@@ -112,6 +112,26 @@ export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organ
  return freeze({...loaded,checked_inputs:checked,execution_authority:false as const});
 }
 
+
+/** Pure hashes of supplied prepared bytes. The caller must establish provenance and readiness. */
+export function derivePreparedEnvironmentRoles(manifest:unknown,context:unknown){
+ if(!object(manifest)||manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan))
+  return refuse('ENVIRONMENT_PROFILE_INVALID','Complete immutable preparation manifest required');
+ const {digest:preparationDigest,...body}=manifest;
+ if(hash(body)!==digest(preparationDigest))return refuse('ENVIRONMENT_PROFILE_INVALID','Preparation manifest bytes differ from their digest');
+ const profile=validateProfile(manifest.profile),ctx=record(context,['execution_profile','resource_requirements','policy_digest']);
+ const execution=record(ctx.execution_profile,['connector','model_profile_ref','credential_profile_ref','timeout_seconds']);
+ if(!['codex','claude-code'].includes(String(execution.connector)))return refuse('EXECUTION_PROFILE_INVALID','An explicit frontier execution profile is required');
+ text(execution.model_profile_ref);text(execution.credential_profile_ref);
+ if(!Number.isSafeInteger(execution.timeout_seconds)||Number(execution.timeout_seconds)<1||Number(execution.timeout_seconds)>profile.policy.max_process_lifetime_seconds)
+  return refuse('EXECUTION_PROFILE_INVALID','Effective execution lifetime exceeds its actual preparation policy');
+ const resources=resourceRequirements(ctx.resource_requirements),policyDigest=digest(ctx.policy_digest);
+ return freeze({preparation_digest:preparationDigest,profile_digest:hash(profile),
+  toolchain_digest:hash({os:profile.os,image:profile.image,toolchains:profile.toolchains,package_managers:profile.package_managers,native_agents:profile.native_agents,connectors:profile.connectors,supervisor:profile.supervisor,hyperfide:profile.hyperfide,system_packages:profile.system_packages}),
+  configuration_digest:hash({preparation_digest:preparationDigest,build_config:profile.build_config,generated_inputs:profile.generated_inputs,recipe:profile.recipe,execution_profile:execution,resource_requirements:resources,policy_digest:policyDigest}),
+  authority:'NONE' as const});
+}
+
 /** Hash actual non-result inputs; source-result commit/tree provenance stays distinct. */
 export function deriveQualificationInputs(packet:unknown):{
  dependency_digest:string;toolchain_digest:string;configuration_digest:string;graph_digest:string;
@@ -136,7 +156,7 @@ export function deriveQualificationInputs(packet:unknown):{
 
 export function createComponent(context:ComponentContext):Component {
  const g=gateway(context);
- return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs,deriveQualificationInputs})},actions:{
+ return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs,derivePreparedEnvironmentRoles,deriveQualificationInputs})},actions:{
  'hierarchy.packet.describe':async input=>{record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
  'hierarchy.packet.create':async (input,invocation)=>{
   const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
