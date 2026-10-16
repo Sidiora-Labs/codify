@@ -4,7 +4,7 @@ import {invocationOf} from '../identity/enrollment.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import {FoundationError} from '../policy/programme.js';
 import {canonical,digest,exact,fail,text,uuid} from './extraction.js';
-import {graphTransaction,scopeInput} from './ingestion.js';
+import {graphTransaction,scopeInput,semanticProjectionDebt} from './ingestion.js';
 import type {GraphScope,GraphTransaction} from './ingestion.js';
 import {publishedGraph} from './publication.js';
 import type {JsonObject} from './extraction.js';
@@ -61,15 +61,19 @@ async function context(input:unknown,ctx:ComponentContext):Promise<unknown>{
  const files=r.files.map(value=>{const v=exact(value,['repository_id','path']);return {repository_id:uuid(v.repository_id),path:text(v.path,'file path',4096)};});
  return graphTransaction(ctx,s,async tx=>{
   const m=await publishedGraph(tx,s,manifestId),p=[s.organisation_id,s.run_id,m.build_id,symbols,canonical(files)];
+  const requested=(await tx.query('SELECT id FROM hyperfide.graph_symbols WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND id=ANY($4::uuid[])',p.slice(0,4))).rows;
+  if(requested.length!==symbols.length)fail('GRAPH_SYMBOL_UNAVAILABLE','Requested context symbol is absent from exact graph');
   const selected=(await tx.query("SELECT DISTINCT f.* FROM hyperfide.graph_files f LEFT JOIN hyperfide.graph_symbols sy ON sy.organisation_id=f.organisation_id AND sy.run_id=f.run_id AND sy.graph_id=f.graph_id AND sy.file_id=f.id WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND (sy.id=ANY($4::uuid[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($5::jsonb) x(repository_id uuid,path text) WHERE x.repository_id=f.repository_id AND x.path=f.path)) ORDER BY f.repository_id,f.path LIMIT 257",p)).rows;
   if(selected.length>256)fail('GRAPH_QUERY_BUDGET','Selected file set exceeds packet budget');
+  if(files.some(w=>!selected.some(f=>f.repository_id===w.repository_id&&f.path===w.path)))fail('GRAPH_FILE_UNAVAILABLE','Requested context file is absent from exact graph');
   const fileIds=selected.map(v=>v.id);
   const nodes=(await tx.query('SELECT * FROM hyperfide.graph_symbols WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND file_id=ANY($4::uuid[]) ORDER BY file_id,start_byte,id LIMIT 1001',[...p.slice(0,3),fileIds])).rows;
   const references=(await tx.query('SELECT * FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND file_id=ANY($4::uuid[]) ORDER BY file_id,start_byte,id LIMIT 1001',[...p.slice(0,3),fileIds])).rows;
   const raw=(await tx.query("SELECT f.bundle_digest,f.family,f.fact_key,f.payload FROM hyperfide.graph_fact_rows f JOIN hyperfide.graph_bundle_inputs b USING(organisation_id,run_id,graph_id,bundle_digest) WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family IN ('imports','routes','comments','semantic_bindings','semantic_type_facts','extraction_health') AND EXISTS(SELECT 1 FROM hyperfide.graph_fact_rows lf JOIN hyperfide.graph_files gf ON gf.organisation_id=lf.organisation_id AND gf.run_id=lf.run_id AND gf.graph_id=lf.graph_id AND gf.repository_id=(b.identity->>'repository_id')::uuid AND gf.path=lf.payload->>'path' WHERE lf.organisation_id=f.organisation_id AND lf.run_id=f.run_id AND lf.graph_id=f.graph_id AND lf.bundle_digest=f.bundle_digest AND lf.family='files' AND gf.id=ANY($4::uuid[]) AND (f.payload->>'file_id'=lf.payload->>'id' OR f.payload->>'path'=lf.payload->>'path')) ORDER BY f.family,f.bundle_digest,f.fact_key LIMIT 1001",[...p.slice(0,3),fileIds])).rows;
-  const truncated=nodes.length>1000||references.length>1000||raw.length>1000,unknown=references.filter(v=>v.resolution_state!=='RESOLVED');
+  const semantic=await semanticProjectionDebt(tx,s,String(m.build_id));
+  const truncated=nodes.length>1000||references.length>1000||raw.length>1000||BigInt(semantic.count)>256n,unknown=references.filter(v=>v.resolution_state!=='RESOLVED');
   return packet({...provenance(m),files:selected,nodes:nodes.slice(0,1000),references:references.slice(0,1000),source_facts:raw.slice(0,1000),unknown_references:unknown.slice(0,256),
-   complete:!truncated&&unknown.length===0,truncated,unknown_edges:unknown.length>0,query_amplification:'BOUNDED_GROUPED_QUERIES'},max);
+   unknown_semantic_edges:semantic.rows,unprojected_semantic_edge_count:semantic.count,complete:!truncated&&unknown.length===0&&semantic.count==='0',truncated,unknown_edges:unknown.length>0||semantic.count!=='0',query_amplification:'BOUNDED_GROUPED_QUERIES'},max);
  },false);
 }
 async function traverse(input:unknown,ctx:ComponentContext):Promise<unknown>{
@@ -91,8 +95,9 @@ async function traverse(input:unknown,ctx:ComponentContext):Promise<unknown>{
   const nodes=(await tx.query('SELECT s.*,f.repository_id,f.path FROM hyperfide.graph_symbols s JOIN hyperfide.graph_files f ON f.organisation_id=s.organisation_id AND f.run_id=s.run_id AND f.graph_id=s.graph_id AND f.id=s.file_id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.graph_id=$3 AND s.id=ANY($4::uuid[]) ORDER BY f.repository_id,f.path,s.start_byte,s.id',[...p,[...seen]])).rows;
   const count=(await tx.query<{n:string}>("SELECT count(*)::text AS n FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND resolution_state<>'RESOLVED'",p)).rows[0]!.n;
   const unknown=(await tx.query("SELECT * FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND resolution_state<>'RESOLVED' ORDER BY id LIMIT 256",p)).rows;
+  const semantic=await semanticProjectionDebt(tx,s,String(m.build_id));
   return packet({...provenance(m),nodes,edges:[...edges.values()].filter(e=>seen.has(String(e.source_symbol_id))&&seen.has(String(e.target_symbol_id))),
-   unknown_references:unknown,unresolved_count:count,complete:!truncated&&count==='0',truncated,
+   unknown_references:unknown,unresolved_count:count,unknown_semantic_edges:semantic.rows,unprojected_semantic_edge_count:semantic.count,complete:!truncated&&count==='0'&&semantic.count==='0',truncated:truncated||BigInt(count)>256n||BigInt(semantic.count)>256n,
    limitations:['Unresolved and cross-repository bindings remain explicit unknowns','Depth limits bound observed reachability; they do not prove system coherence']},max);
  },false);
 }

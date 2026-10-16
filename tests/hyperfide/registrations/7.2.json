@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "variant": "task:7.2",
+  "task": "7.2",
+  "scope": "task-component",
+  "cases": [
+    "V-011",
+    "V-022"
+  ],
+  "assertion_ids": [
+    "graph.ingestion.real-copy-describe",
+    "graph.ingestion.persist-build",
+    "graph.ingestion.replay-build",
+    "graph.ingestion.reject-incomplete-seal",
+    "graph.ingestion.actual-copy-row-count",
+    "graph.ingestion.restart-after-staged-chunk",
+    "graph.ingestion.replay-chunk",
+    "graph.ingestion.reject-tampered-copy",
+    "graph.ingestion.reject-cross-run",
+    "graph.ingestion.reject-stale-epoch",
+    "graph.ingestion.complete-chunk-set",
+    "graph.ingestion.seal-resume",
+    "graph.ingestion.reject-late-new-chunk",
+    "graph.ingestion.bounded-restart-resolution",
+    "graph.ingestion.file-projection",
+    "graph.ingestion.symbol-projection",
+    "graph.ingestion.reference-projection",
+    "graph.ingestion.body-reconstruction",
+    "graph.ingestion.no-publication-side-effect"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/7_2.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/graph/extraction.js",
+    "services/hyperfide/dist/identity/enrollment.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-domain07-database",
+      "kind": "postgresql-database",
+      "scope": "domain07-disposable-component"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/7_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "graph/database-absence.json",
+    "graph/database-resource.json",
+    "graph/task-7.2-observations.json"
+  ],
+  "source_files": [
+    "cg",
+    "src/scan.c",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/cases/tasks/7_1.py",
+    "tests/hyperfide/cases/tasks/7_2.py",
+    "tests/hyperfide/registrations/7.2.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "graph.remote.extract",
+    "graph.component.invoke"
+  ]
+}
