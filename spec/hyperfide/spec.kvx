@@ -278,7 +278,7 @@ do_4 = "Implement the task's registered positive/negative assertions and immutab
 
 [task.1.4]
 title = "Record approval policy and bootstrap dependency-enabled build boundaries"
-status = "in_progress"
+status = "done"
 wave = 2
 requires = ["27.1"]
 touches = ["services/hyperfide/src/policy/programme.ts", "tests/hyperfide/manifests/tasks/1.4.json", "spec/workflow.kvx", "Makefile", "services/hyperfide/package.json", "services/hyperfide/package-lock.json", "services/hyperfide/tsconfig.json", "tests/hyperfide/cases/tasks/1_4.py", "tests/hyperfide/registrations/1.4.json", "services/hyperfide/src/control.ts", "services/hyperfide/src/provisioner.ts", "services/hyperfide/src/dispatch.ts", "services/hyperfide/src/components/registry.ts", "services/hyperfide/components/schema.json", "src/hyperfide/components/schema.kvx", "services/hyperfide/src/components/service.ts", "services/hyperfide/components/1.4.json", "spec/hyperfide/tools/render_native.py", "spec/hyperfide/tools/validate_pack.py", "spec/hyperfide/README.md", "spec/hyperfide/requirements.md", "spec/hyperfide/implementation-plan.md", "spec/hyperfide/traceability.md", "spec/hyperfide/privacy.md", "spec/hyperfide/decisions.md", "spec/hyperfide/evidence/traceability.json", "scripts/hyperfide-native-components.py", "src/hyperfide/components.h", "src/hyperfide/component_main.c", "spec/hyperfide/spec.kvx", "spec/hyperfide/evidence/task-catalog.json", ".gitignore", "tests/hyperfide/check-evidence.py", "spec/hyperfide/evidence/implementation-validation.json"]
