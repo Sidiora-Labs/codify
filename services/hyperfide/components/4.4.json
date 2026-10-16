@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "4.4",
+  "task": "4.4",
+  "roles": [
+    "control",
+    "provisioner",
+    "dispatch"
+  ],
+  "module": "storage/durability.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "storage.migrations.inspect",
+    "storage.migrations.apply",
+    "storage.durability.inspect"
+  ],
+  "requires": [
+    "4.2"
+  ]
+}
