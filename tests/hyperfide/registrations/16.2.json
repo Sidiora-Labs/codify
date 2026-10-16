@@ -20,7 +20,11 @@
     "assurance.16.2.https.signed-missing",
     "assurance.16.2.https.cross-scope",
     "assurance.16.2.https.wrong-role",
-    "assurance.16.2.https.no-authority"
+    "assurance.16.2.https.no-authority",
+    "assurance.16.2.preparation.exact-retained-bytes",
+    "assurance.16.2.preparation.missing-newline",
+    "assurance.16.2.preparation.field-relabel",
+    "assurance.16.2.preparation.malformed-utf8"
   ],
   "argv": [
     "python3",
@@ -40,7 +44,8 @@
     "services/hyperfide/dist/assurance/validity.js",
     "services/hyperfide/dist/storage/transactions.js",
     "services/hyperfide/dist/transport/protocol.js",
-    "services/hyperfide/dist/storage/dispositions.js"
+    "services/hyperfide/dist/storage/dispositions.js",
+    "services/hyperfide/dist/assurance/preparation.js"
   ],
   "resources": [
     {
@@ -52,6 +57,21 @@
       "id": "hf-task-16.2-signed-service",
       "kind": "https-service",
       "scope": "task16.2-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.2-signed-role",
+      "kind": "postgresql-role",
+      "scope": "task16.2-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.2-signed-files",
+      "kind": "local-directory",
+      "scope": "task16.2-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.2-preparation",
+      "kind": "local-directory",
+      "scope": "task16.2-pure-derivation-disposable"
     }
   ],
   "cleanup_argv": [
@@ -62,7 +82,8 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "assurance/observations-16.2.json",
-    "assurance/signed-absence-16.2.json"
+    "assurance/signed-absence-16.2.json",
+    "assurance/preparation-absence-16.2.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -85,7 +106,9 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/support/identity_fixture.py"
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/src/assurance/preparation.ts",
+    "tests/hyperfide/cases/tasks/11_1.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -97,6 +120,10 @@
     "postgresql.fixture.create",
     "postgresql.fixture.drop",
     "https.fixture.start",
-    "https.fixture.stop"
+    "https.fixture.stop",
+    "postgresql.role.create",
+    "postgresql.role.drop",
+    "filesystem.fixture.create",
+    "filesystem.fixture.remove"
   ]
 }

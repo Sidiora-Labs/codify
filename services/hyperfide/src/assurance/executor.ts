@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {artifact,canonical,currentCustody,custodyLock,decimal,digest,fail,fields,hash,scope,transaction,uuid,invocation,roles,executionGate,assuranceBarrier,loadPolicy} from './submission.js';
-import type {Data} from './submission.js';
+import type {Data,PrimaryClient} from './submission.js';
 
 const MAX_OUTPUT=32*1024*1024;
 function identity(ctx:ComponentContext):Data{
@@ -45,7 +45,13 @@ async function verifyEnvironment(ctx:ComponentContext,tx:unknown,job:Data,owner:
   validation.input_packet_digest!==expected.input_packet_digest||!/^sha256:[0-9a-f]{64}$/.test(validation.receipt_digest??'')||
   ['dependency','toolchain','configuration','graph','contract'].some(key=>validation.input_manifest?.[key]!==expected.input_manifest?.[key]))
   fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Measured preparation and runtime inputs have not been independently validated against the immutable job packet');
- return result;
+ const registry=dependencies.require('12.1','runner.registry.v1',(value:unknown):boolean=>
+  !!value&&typeof value==='object'&&typeof (value as Data).lookup==='function') as Data;
+ const runner=await registry.lookup(tx,{organisation_id:job.organisation_id,run_id:job.run_id,session_id:result.runner_session_id});
+ if(!runner||runner.slot_id!==result.slot_id||runner.sandbox_id!==result.sandbox_id||runner.boot_id!==result.boot_id||
+  String(runner.boot_generation)!==String(result.boot_generation))
+  fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Actual prepared runner slot binding changed');
+ return {...result,slot_generation:decimal(String(runner.slot_generation))};
 }
 async function lockJob(client:Parameters<Parameters<typeof transaction>[1]>[0],s:[string,string],id:string):Promise<Data>{
  const found=await client.query('SELECT custody_id FROM hyperfide.qualification_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...s,id]);
@@ -215,11 +221,11 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
    });
    // prepare() has returned and its transaction committed before any remote process starts.
    const raw=await remote.execute(prepared.permit,signal) as Data;
-   if(raw.operation_id!==prepared.plan.operation_id||raw.session_id!==prepared.plan.session_id||
+   if(raw.execution_plane!=='REMOTE'||raw.truncated!==false||raw.operation_id!==prepared.plan.operation_id||raw.session_id!==prepared.plan.session_id||
     raw.sandbox_id!==owner.sandbox_id||raw.boot_id!==prepared.observed.boot_id||
-    raw.slot_id!==prepared.observed.slot_id||!raw.native_resource_id||!raw.process_ref||!raw.start_identity||
+    raw.slot_id!==prepared.observed.slot_id||String(raw.slot_generation)!==prepared.observed.slot_generation||!raw.native_resource_id||!raw.process_ref||!raw.start_identity||
     canonical(raw.argv)!==canonical(check.argv)||raw.cwd!==prepared.plan.cwd||
-    raw.source_digest!==snapshot.manifest.source_manifest_digest||raw.source_provenance_digest!==snapshot.inputs.source||
+    raw.source_manifest_digest!==snapshot.manifest.source_manifest_digest||raw.source_object_id!==snapshot.manifest.source_object_id||raw.source_tree_id!==snapshot.manifest.source_tree_id||raw.source_digest!==snapshot.manifest.source_manifest_digest||raw.source_provenance_digest!==snapshot.inputs.source||
     raw.source_state_digest!==prepared.observed.source_state_digest||raw.policy_digest!==prepared.plan.policy_digest||
     raw.executable_digest!==check.executable_digest||raw.environment_digest!==prepared.plan.environment_digest||
     raw.repository_id!==snapshot.manifest.repository_id||raw.organisation_id!==s[0]||raw.run_id!==s[1]||
@@ -254,7 +260,7 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
      preparation_digest:prepared.observed.preparation_digest,readiness_digest:prepared.observed.readiness_digest,
      provider_observation_id:prepared.observed.provider_observation_id,runner_credential_id:prepared.observed.runner_credential_id,workspace_path:prepared.observed.workspace_path,
      session_id:raw.session_id,operation_id:raw.operation_id,provider:raw.provider,
-     native_resource_id:raw.native_resource_id,sandbox_id:raw.sandbox_id,boot_id:raw.boot_id,slot_id:raw.slot_id,
+     native_resource_id:raw.native_resource_id,sandbox_id:raw.sandbox_id,boot_id:raw.boot_id,slot_id:raw.slot_id,slot_generation:String(raw.slot_generation),
      process_ref:raw.process_ref,start_identity:raw.start_identity,spool_digest:raw.spool_digest,cleanup_status:raw.cleanup_status,cleanup:raw.cleanup}});
   }
   return {schema_version:1,job_id:job.id,task_id:job.custody.task_id,source_attempt_id:job.custody.source_attempt_id,source_attempt_generation:String(job.custody.source_generation),lease_generation:String(job.lease_generation),custody_id:job.custody_id,
@@ -350,7 +356,7 @@ export async function verifyReceiptRecordArtifacts(ctx:ComponentContext,s:[strin
   if(manifest.manifest?.content_digest!==record.receipt_digest)fail('QUALIFICATION_ARTIFACT_INCOMPLETE','Immutable execution receipt content digest differs');
  }
 }
-export async function inspectExecutionReceipt(db:Pick<pg.PoolClient,'query'>,
+export async function inspectExecutionReceipt(db:PrimaryClient,
  s:{organisation_id:string;run_id:string},jobId:string,generation:string):Promise<Data>{
  await assuranceBarrier(db,s,'SHARED');
  const result=await db.query("SELECT j.id,j.custody_id,j.custody_generation,j.state,j.outcome,j.rubric_digest,j.lease_generation,c.task_id,c.source_attempt_id,c.source_generation,"
