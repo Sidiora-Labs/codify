@@ -12,8 +12,8 @@ import type {BundleManifest,ExtractionIdentity,JsonObject} from './extraction.js
 export async function publishedGraph(tx:GraphTransaction,s:GraphScope,manifestId:string):Promise<JsonObject>{
  const r=await tx.query('SELECT m.*,b.input_digest,b.parser_digest,b.schema_digest,b.config_digest,b.state FROM hyperfide.graph_manifests m JOIN hyperfide.graph_builds b ON b.organisation_id=m.organisation_id AND b.run_id=m.run_id AND b.id=m.build_id WHERE m.organisation_id=$1 AND m.run_id=$2 AND m.id=$3 AND b.state=$4',[s.organisation_id,s.run_id,manifestId,'PUBLISHED']);
  const m=r.rows[0];if(!m)fail('GRAPH_VERSION_UNAVAILABLE','Requested immutable graph is unavailable or unpublished');
- const sources=await tx.query<{identity:ExtractionIdentity}>('SELECT identity FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 ORDER BY identity->>\'repository_id\'',[s.organisation_id,s.run_id,m.build_id]);
- return {...m,source_set:sources.rows.map(v=>v.identity)};
+ const sources=await tx.query<{bundle_digest:string;identity:ExtractionIdentity;manifest:BundleManifest}>('SELECT bundle_digest,identity,manifest FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 ORDER BY identity->>\'repository_id\'',[s.organisation_id,s.run_id,m.build_id]);
+ return {...m,source_set:sources.rows.map(v=>v.identity),source_coverage:sources.rows.map(v=>({bundle_digest:v.bundle_digest,identity:v.identity,complete:v.manifest.complete,coverage:v.manifest.coverage}))};
 }
 export async function loadGraphSnapshot(tx:GraphTransaction,s:GraphScope,manifestId:string,expected:unknown):Promise<JsonObject>{
  assertPrimaryTransaction(tx);
