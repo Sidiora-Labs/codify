@@ -13,12 +13,18 @@ import type {ProviderAdapter,ProviderOperation,ProviderOutcome,ProviderScope,Res
 
 export interface ProviderPreparationBinding {
  purpose:'PREPARATION'|'EXECUTION';scope:ProviderScope;preparation_digest:string;
- parameters:ProviderOperation<'create'>['parameters'];prepared_base:Record<string,unknown>|null;
+ parameters:ProviderOperation<'create'>['parameters'];adapter_policy_digest:string|null;prepared_base:Record<string,unknown>|null;
 }
+export interface ProviderProcessRecord {native_process_ref?:string|null;process_ref:string;payload_digest:string;resource:ResourceRef;state:'SUBMITTED'|'RUNNING'|'EXITED'|'UNKNOWN';provider_metadata:Record<string,unknown>}
+export interface ProviderResourceBinding {organisation_id:string;run_id:string;sandbox_id:string;boot_id:string;boot_generation:string}
 export interface ProviderPersistenceHooks {
   readonly invocation:InvocationContext;
   assertResourceBinding(operation:ProviderOperation):Promise<void>;
+  resolveResourceBinding(operation:ProviderOperation):Promise<ProviderResourceBinding>;
   resolvePreparation(operation:ProviderOperation<'create'>):Promise<ProviderPreparationBinding>;
+  claimProcess(operation:ProviderOperation<'execute'>,record:ProviderProcessRecord):Promise<{disposition:'NEW'|'EXISTING';record:ProviderProcessRecord}>;
+  resolveProcess(operation:ProviderOperation,processRef:string):Promise<ProviderProcessRecord|null>;
+  persistEarlyProcess(operation:ProviderOperation<'execute'>,nativeProcessRef:string):Promise<void>;
   assignedBootGeneration(operation:ProviderOperation<'create'>):Promise<string>;
   persistEarlyResource(operation:ProviderOperation<'create'>,nativeSandboxId:string):Promise<ResourceRef>;
   recordObservation(operation:ProviderOperation,outcome:ProviderOutcome):Promise<void>;
@@ -37,7 +43,17 @@ export type ProviderOwnershipProbe=(scope:ProviderScope,operationId:string,nativ
 export interface ProviderRunnerBinding extends Record<string,unknown> {organisation_id:string;run_id:string;session_id:string;pool_id:string;sandbox_id:string;external_sandbox_id:string;boot_generation:string;preparation_digest:string}
 export interface ProviderRunnerBindingProof {evidence_digest:string;observed_at:string}
 export type ProviderRunnerBindingVerifier=(tx:PrimaryTransaction,binding:ProviderRunnerBinding)=>Promise<ProviderRunnerBindingProof|null>;
+export interface ProviderIsolationTransport {
+ destroy(operation:ProviderOperation<'destroy'>,signal?:AbortSignal):Promise<ProviderOutcome<'destroy'>>;
+ observe(operation:ProviderOperation<'observe'>,signal?:AbortSignal):Promise<ProviderOutcome<'observe'>>;
+}
+export type ProviderIsolationFactory=(scope:ProviderScope)=>ProviderIsolationTransport|Promise<ProviderIsolationTransport>;
+export interface ProviderDestructionRequest {organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;operation_id:string}
+export interface ProviderDestructionProof {evidence_digest:string;observed_at:string}
+export type ProviderDestructionPreflight=(tx:PrimaryTransaction,input:ProviderDestructionRequest)=>Promise<ProviderDestructionProof|null>;
 export interface ProviderRuntimeRegistry {
+ destructionPreflight?:ProviderDestructionPreflight;
+ isolation:Map<string,ProviderIsolationFactory>;
  runnerBindingVerifier?:ProviderRunnerBindingVerifier;
  adapters:Map<string,ProviderAdapterFactory>;observers:Map<string,ProviderQuotaObserver>;probes:Map<string,ProviderOwnershipProbe>;
 }
@@ -57,8 +73,20 @@ export function bindProviderInvocation(database:ProviderDatabase,config:Deployme
 export function assertInvocationRun(database:ProviderDatabase,run:string):void{
  const invocation=providerInvocation(database);if(invocation.principal.run_id!==run)fail('AUTH_SCOPE_DENIED','Provider operation belongs to another authenticated run');
 }
+export async function resolveSandboxBinding(database:ProviderDatabase,config:DeploymentConfig,run:string,sandbox:string,op:ProviderOperation):Promise<ProviderResourceBinding>{
+ assertInvocationRun(database,run);
+ return transaction(database,async tx=>{
+  const rows=await tx.query('SELECT s.*,b.boot_id FROM hyperfide.sandboxes s JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation WHERE s.organisation_id=$1 AND s.id=$2 FOR SHARE OF s,b',[config.organisation_id,uuid(sandbox)]);
+  const row=rows.rows[0];if(!row)fail('RESOURCE_OWNERSHIP_UNKNOWN','Current logical resource binding unavailable');
+  const {scope}=await currentPool(tx,config,row.pool_id);
+  if(digestDocument(scope)!==digestDocument(op.scope)||op.resource&&(op.resource.native_sandbox_id!==row.native_sandbox_id||op.resource.sandbox_boot_generation!==String(row.boot_generation)))fail('STALE_SANDBOX_GENERATION','Resource scope or current boot changed');
+  if(op.preparation_digest!==null&&op.preparation_digest!==row.preparation_digest)fail('PREPARATION_MISMATCH','Resource preparation binding changed');
+  return{organisation_id:config.organisation_id,run_id:run,sandbox_id:sandbox,boot_id:row.boot_id,boot_generation:String(row.boot_generation)};
+ });
+}
+export function createProviderRuntimeRegistry():ProviderRuntimeRegistry{return{adapters:new Map(),observers:new Map(),probes:new Map(),isolation:new Map()};}
 export function createProviderDatabase(context:ComponentContext):ProviderDatabase {
- const runtime:ProviderRuntimeRegistry={adapters:new Map(),observers:new Map(),probes:new Map()},gateway=context.resources.gateway;
+ const runtime=createProviderRuntimeRegistry(),gateway=context.resources.gateway;
  return{gateway,runtime,query:<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[])=>gateway.withPrimaryTransaction(
  {timeoutMs:10000,maxRetries:2,signal:context.signal},tx=>tx.query<R>(text,values))};
 }
@@ -67,6 +95,7 @@ function register<T>(map:Map<string,T>,provider:string,implementation:T):()=>voi
   throw new FoundationError('PROVIDER_REGISTRATION_CONFLICT','Provider implementation must be registered once by trusted service startup');
  map.set(provider,implementation);return()=>{if(map.get(provider)===implementation)map.delete(provider);};
 }
+export function registerIsolationTransport(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',factory:ProviderIsolationFactory){return register(runtime.isolation,provider,factory);}
 export function registerProviderAdapter(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',factory:ProviderAdapterFactory){return register(runtime.adapters,provider,factory);}
 export function registerProviderQuotaObserver(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',observer:ProviderQuotaObserver){return register(runtime.observers,provider,observer);}
 export function registerProviderOwnershipProbe(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',probe:ProviderOwnershipProbe){return register(runtime.probes,provider,probe);}
@@ -121,7 +150,7 @@ type Limits=Partial<Record<QuotaDimension,string>>;
 export interface PoolConfig {
   id:string;provider:'railway'|'blaxel';account_key:string;environment_key:string;region:string;
   profile_id:string|null;preparation_digest:string;approved_limits:Limits;planning_limits:Limits;
-  create_policy:{seed_reference:string;network:'ISOLATED'|'PRIVATE';stdin_required:boolean};
+  create_policy:{seed_reference:string;network:'ISOLATED'|'PRIVATE';stdin_required:boolean;adapter_policy_digest?:string};
 }
 export interface DeploymentConfig {
   schema_version:1;organisation_id:string;revision:string;
@@ -152,7 +181,7 @@ export function validateDeployment(value:unknown):DeploymentConfig {
     const id=uuid(p.id);if(ids.has(id))fail('POOL_CONFIG_INVALID','Duplicate pool');ids.add(id);
     const key=provider(p.provider)+':'+str(p.account_key,256);if(!accounts.has(key))fail('POOL_CONFIG_INVALID','Pool account is not configured');
     str(p.environment_key,256);str(p.region,256);if(p.profile_id!==null)uuid(p.profile_id);dg(p.preparation_digest);
-    const cp=obj(p.create_policy,['seed_reference','network','stdin_required']);str(cp.seed_reference);if(!['ISOLATED','PRIVATE'].includes(String(cp.network))||typeof cp.stdin_required!=='boolean')fail('POOL_CONFIG_INVALID','Invalid trusted create policy');
+    const cp=obj(p.create_policy);if(Object.keys(cp).some(k=>!['seed_reference','network','stdin_required','adapter_policy_digest'].includes(k))||['seed_reference','network','stdin_required'].some(k=>!Object.hasOwn(cp,k)))fail('POOL_CONFIG_INVALID','Invalid create policy fields');if(cp.adapter_policy_digest!==undefined)dg(cp.adapter_policy_digest);str(cp.seed_reference);if(!['ISOLATED','PRIVATE'].includes(String(cp.network))||typeof cp.stdin_required!=='boolean')fail('POOL_CONFIG_INVALID','Invalid trusted create policy');
     const budget=limits(p.approved_limits);limits(p.planning_limits);
     if(budget.SANDBOX===undefined||budget.PROVISIONING===undefined)fail('POOL_CONFIG_INVALID','Sandbox and provisioning budgets must be separate');
   }
@@ -291,11 +320,13 @@ export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeRe
  const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||row.current_profile!==row.profile_id||
   row.current_preparation!==input.preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
   row.source_manifest_digest!==input.source_digest||row.source_digest!==row.source_manifest_digest||!['READY','ALLOCATED'].includes(row.slot_state)||new Date(row.observed_at).getTime()>Date.now()||new Date(row.expires_at).getTime()<=Date.now())return null;
- const profile=(row.profile_manifest as Record<string,unknown>).profile;
+ const manifest=row.profile_manifest as Record<string,unknown>,manifestBody={...manifest};delete manifestBody.digest;
+ if(manifest.digest!==input.preparation_digest||digestDocument(manifestBody)!==input.preparation_digest)return null;
+ const profile=manifest.profile;
  if(!profile||digestDocument(profile)!==row.profile_digest||digestDocument(row.source_bindings)!==row.source_state_digest||digestDocument(row.readiness_input)!==row.readiness_input_digest)return null;
- const artifacts=await tx.query("SELECT count(*)::int AS count FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE'",
+ const artifacts=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",
   [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest])]]);
- if(artifacts.rows[0]?.count!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest]).size)return null;
+ if(artifacts.rows.length!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest]).size)return null;
  const {current_generation,current_preparation,current_boot_id,current_profile,slot_state,profile_manifest,current_profile_preparation,...proof}=row;
  return{...proof,observed_at:new Date(row.observed_at).toISOString(),expires_at:new Date(row.expires_at).toISOString()} as RuntimeReadinessRecord;
 }
@@ -308,6 +339,7 @@ export function createComponent(context:ComponentContext):Component {
     try{return await fn(input,bindProviderInvocation(database,await config(),invocationOf(requestContext)));}catch(e){throw e instanceof FoundationError?e:databaseError(e);}
   };
   return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness},...(context.role==='provisioner'?{'provider.registry.v1':{
+ registerIsolationTransport:(provider:'railway'|'blaxel',factory:ProviderIsolationFactory)=>registerIsolationTransport(database.runtime,provider,factory),
  registerProviderAdapter:(provider:'railway'|'blaxel',factory:ProviderAdapterFactory)=>registerProviderAdapter(database.runtime,provider,factory),
  registerProviderQuotaObserver:(provider:'railway'|'blaxel',observer:ProviderQuotaObserver)=>registerProviderQuotaObserver(database.runtime,provider,observer),
  registerProviderOwnershipProbe:(provider:'railway'|'blaxel',probe:ProviderOwnershipProbe)=>registerProviderOwnershipProbe(database.runtime,provider,probe)
