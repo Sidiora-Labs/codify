@@ -1,0 +1,129 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/2_1.py"
+  ],
+  "assertion_ids": [
+    "spec.service.linked",
+    "spec.schema.applied",
+    "spec.schema.checksum",
+    "spec.import.actual",
+    "spec.storage.exact-bytes",
+    "spec.storage.restart",
+    "spec.storage.unknown-section",
+    "spec.storage.literal-env",
+    "spec.history.declared-done",
+    "spec.history.no-evidence",
+    "spec.intent.repository",
+    "spec.intent.closure",
+    "spec.replay.same",
+    "spec.replay.conflict",
+    "spec.intent.same-source-new-envelope",
+    "spec.replay.concurrent",
+    "spec.scope.programme",
+    "spec.scope.project",
+    "spec.parse.string",
+    "spec.parse.duplicate-key",
+    "spec.parse.duplicate-section",
+    "spec.parse.precision",
+    "spec.parse.utf8",
+    "spec.refuse.digest",
+    "spec.refuse.size",
+    "spec.refuse.traversal",
+    "spec.refuse.numeric-size",
+    "spec.refuse.leading-zero",
+    "spec.refuse.broaden-action",
+    "spec.git-ref.colon",
+    "spec.git-ref.lock",
+    "spec.git-ref.slash",
+    "spec.git-ref.reflog",
+    "spec.git-ref.dot",
+    "spec.git-ref.empty",
+    "spec.source.symlink",
+    "spec.source.symlink-ancestor",
+    "spec.source.nonregular",
+    "spec.source.changed-during-read",
+    "spec.projection.write",
+    "spec.projection.readonly",
+    "spec.projection.stale-spec_generation",
+    "spec.projection.stale-state_version",
+    "spec.export.pages",
+    "spec.export.bounds",
+    "spec.export.types",
+    "spec.export.drift",
+    "spec.transaction.late-rollback",
+    "spec.history.task-revision",
+    "spec.schema.reject-drift",
+    "spec.history.immutable-revision",
+    "spec.isolation.task_revisions",
+    "spec.isolation.spec_amendments",
+    "spec.isolation.spec_amendment_decisions",
+    "spec.isolation.proof_registries"
+  ],
+  "cases": [
+    "V-001",
+    "V-024"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/2_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/spec/import.js",
+    "services/hyperfide/migrations/0002-spec.sql"
+  ],
+  "required_artifacts": [
+    "spec/observations.json",
+    "storage/database-absence.json"
+  ],
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-2.1-database",
+      "kind": "postgresql-database",
+      "scope": "task2.1-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "services/hyperfide/src/spec/import.ts",
+    "services/hyperfide/src/storage/schema.ts",
+    "services/hyperfide/src/contracts/records.ts",
+    "services/hyperfide/src/components/registry.ts",
+    "services/hyperfide/src/components/service.ts",
+    "services/hyperfide/src/policy/programme.ts",
+    "services/hyperfide/components/2.1.json",
+    "services/hyperfide/migrations/0001-authority.sql",
+    "services/hyperfide/migrations/0002-spec.sql",
+    "tests/hyperfide/cases/tasks/2_1.py",
+    "tests/hyperfide/cases/tasks/4_1.py",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "2.1",
+  "timeout_seconds": 300,
+  "variant": "task:2.1"
+}
