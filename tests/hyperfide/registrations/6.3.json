@@ -7,6 +7,27 @@
     "V-006"
   ],
   "assertion_ids": [
+    "instructions.missing-native-binding-refused",
+    "instructions.bootstrap-interruption-refused",
+    "instructions.bootstrap-interruption-atomic",
+    "instructions.bootstrap-sigkill-before-commit",
+    "instructions.late-native-genesis-preserves-other-streams",
+    "instructions.actual-native-bootstrap",
+    "instructions.native-bootstrap-recovery-reference",
+    "instructions.native-bootstrap-exact-replay",
+    "instructions.native-bootstrap-retarget-refused",
+    "instructions.native-bootstrap-caller-boot-refused",
+    "instructions.native-bootstrap-nonrunner-refused",
+    "instructions.other-manager-refused",
+    "instructions.former-leader-refused",
+    "instructions.refused-actor-no-start-obligation",
+    "instructions.actual-owning-manager-start",
+    "instructions.actual-selected-leader-replay",
+    "instructions.actual-acknowledged-manager-handoff",
+    "instructions.former-manager-replay-refused",
+    "instructions.successor-manager-exact-replay",
+    "instructions.handoff-preserves-attempt-lineage",
+    "instructions.exact-native-recipient-only",
     "instructions.real-service",
     "instructions.stable-start",
     "instructions.start-replay",
@@ -18,10 +39,12 @@
     "instructions.stale-epoch",
     "instructions.stale-boot",
     "instructions.unsupported-kind",
+    "instructions.native-frame-budget-refused",
     "instructions.padded-steer-refused",
     "instructions.pause-defers-start-admission",
     "instructions.pause-no-completed-start-receipt",
     "instructions.start-durably-accepted",
+    "instructions.native-registration-preserves-history",
     "instructions.pause-defers-queued-handoff",
     "instructions.resume-preserves-command",
     "instructions.native-handoff-binding",
@@ -57,7 +80,11 @@
     "instructions.generic-inbox-bypass-refused",
     "instructions.expired-compute-can-report-terminal",
     "instructions.expired-cancel-has-zero-budget",
-    "instructions.stale-native-boot-refused"
+    "instructions.closing-cancel-handoff",
+    "instructions.closing-start-refused",
+    "instructions.closing-terminal-observation",
+    "instructions.stale-native-boot-refused",
+    "instructions.stale-boot-registration-refused"
   ],
   "argv": [
     "python3",
@@ -81,6 +108,11 @@
     {
       "id": "hf-task-6.3-database",
       "kind": "postgresql-database",
+      "scope": "task6.3-disposable"
+    },
+    {
+      "id": "hf-task-6.3-role",
+      "kind": "postgresql-role",
       "scope": "task6.3-disposable"
     },
     {
