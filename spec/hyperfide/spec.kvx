@@ -313,7 +313,7 @@ do_5 = "Implement the task's registered positive/negative assertions and immutab
 
 [task.8.1]
 title = "Define capability-aware provider interface and unsupported outcomes"
-status = "in_progress"
+status = "done"
 wave = 3
 requires = ["1.4"]
 touches = ["services/hyperfide/src/providers/contract.ts", "tests/hyperfide/manifests/tasks/8.1.json", "tests/hyperfide/cases/tasks/8_1.py", "tests/hyperfide/registrations/8.1.json", "services/hyperfide/components/8.1.json"]
