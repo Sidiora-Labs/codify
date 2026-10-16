@@ -46,7 +46,9 @@ def seed(f,task):
     record_database(task,f.database,str(f.path))
     # Apply actual reviewed migrations only; missing prerequisite source is an error.
     for filename in ('0004-durability.sql','0002-spec.sql','0003-hierarchy.sql','0017-review.sql','0018-findings.sql'):
-        sql=(ROOT/'services/hyperfide/migrations'/filename).read_text();f.sql('BEGIN;\n'+sql+'\nCOMMIT;')
+        if callable(getattr(f,'apply_migration',None)):f.apply_migration(filename.removesuffix('.sql'))
+        else:
+            sql=(ROOT/'services/hyperfide/migrations'/filename).read_text();f.sql('BEGIN;\n'+sql+'\nCOMMIT;')
     f.x={key:uid() for key in ('repository','package','collaborator','task','attempt','watcher','manager','successor','peer','artifact','evidence','policy','obligation','receipt')}
     x=f.x;i=f.ids
     insert(f,'repositories',{'organisation_id':i['organisation'],'id':x['repository'],'project_id':i['project'],'name':'synthetic-findings','url':'https://example.invalid/synthetic-findings.git'})
