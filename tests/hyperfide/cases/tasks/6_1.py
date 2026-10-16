@@ -82,6 +82,9 @@ export function createComponent(ctx) {
   'fixture.native-registration-rollback':(input,context)=>authorizedRun(g,context,input,['RUNNER'],async(tx,i)=>{
     await registerRunnerConsumer(tx,input,i);throw new Error('INTENTIONAL_NATIVE_BOOTSTRAP_ROLLBACK');
   }),
+  'fixture.native-registration-crash':(input,context)=>authorizedRun(g,context,input,['RUNNER'],async(tx,i)=>{
+    await registerRunnerConsumer(tx,input,i);process.kill(process.pid,'SIGKILL');await new Promise(()=>{});
+  }),
   'fixture.runtime-role':(input,context)=>auth(context,input,async tx=>{
    const r=await tx.query("SELECT current_user AS role,rolsuper,rolcreatedb,rolcreaterole,has_table_privilege(current_user,'hyperfide.schema_migrations','INSERT,UPDATE,DELETE') AS migrations_mutable FROM pg_roles WHERE rolname=current_user");
    return r.rows[0];
@@ -140,7 +143,7 @@ export function createComponent(ctx) {
    return {sends,passes,first};
   }
  };
- if(ctx.env.HF_TEST_EXECUTION_CONTROLS!=='1'){delete actions['fixture.control'];delete actions['fixture.native-registration-rollback'];}
+ if(ctx.env.HF_TEST_EXECUTION_CONTROLS!=='1'){delete actions['fixture.control'];delete actions['fixture.native-registration-rollback'];delete actions['fixture.native-registration-crash'];}
  return {apiVersion:1,actions};
 }
 """
@@ -175,12 +178,12 @@ class Service(identity.IdentityFixture):
         syntax=subprocess.run(["node","--check",str(module/"fixture.js")],capture_output=True,text=True)
         expect(syntax.returncode==0,"Trusted fixture module syntax failed: "+syntax.stderr[:1000])
         (module/"package.json").write_text('{"type":"module"}')
-        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role","fixture.native-registration-rollback"]
+        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role","fixture.native-registration-rollback","fixture.native-registration-crash"]
         fragment={"schema_version":1,"id":"fixture.events","task":"6.1","roles":["control"],"module":"fixture.js","entry":"createComponent",
             "api_version":1,"actions":actions,"requires":["4.2","6.1","6.2","6.4"]}
         if self.include_instructions:fragment["requires"]+=["5.1","6.3"]
         else:
-            actions.remove("fixture.control");actions.remove("fixture.native-registration-rollback")
+            actions.remove("fixture.control");actions.remove("fixture.native-registration-rollback");actions.remove("fixture.native-registration-crash")
         (self.components/"fixture.json").write_text(json.dumps(fragment))
         self.actions+=actions
         for path in [self.policy,self.identity_config]:
@@ -206,7 +209,7 @@ class Service(identity.IdentityFixture):
     def request_action(self,action,value,runner=None):
         component={"outbox":"6.1","inbox":"6.2","instructions":"6.3","recovery":"6.4","fixture":"fixture.events"}[action.split(".")[0]]
         value={**S,**value} if action.startswith("fixture.") else value
-        use_runner=action in ("instructions.handoff","instructions.ack","instructions.lookup-native","instructions.consumer.register","fixture.native-registration-rollback") if runner is None else runner
+        use_runner=action in ("instructions.handoff","instructions.ack","instructions.lookup-native","instructions.consumer.register","fixture.native-registration-rollback","fixture.native-registration-crash") if runner is None else runner
         kwargs={"key":"runner","credential":self.runner_credential} if use_runner else {}
         status,response=self.invoke(action,value,component=component,**kwargs)
         OBS.append({"action":action,"http_status":status,"ok":response.get("ok"),"error_code":response.get("error",{}).get("code")})
@@ -222,7 +225,7 @@ class Service(identity.IdentityFixture):
     def enroll_runner(self):
         expect(self.bind()[1].get("ok") is True,"Real provisioner binding failed")
         issue=self.invoke("identity.grant.issue",{"grant_id":self.grant,"provisioning_intent_id":self.ids["intent"],"verifier":identity.sha(self.secret),
-            "allowed_actions":["identity.describe","instructions.handoff","instructions.ack","instructions.lookup-native","instructions.consumer.register","fixture.native-registration-rollback"],"ttl_seconds":300})
+            "allowed_actions":["identity.describe","instructions.handoff","instructions.ack","instructions.lookup-native","instructions.consumer.register","fixture.native-registration-rollback","fixture.native-registration-crash"],"ttl_seconds":300})
         expect(issue[1].get("ok") is True,"Real runner grant failed: "+str(issue[1].get("error")))
         enrolled=self.request(self.enrollment(),key="runner",endpoint="/v1/enroll",credential=self.grant)
         expect(enrolled[1].get("ok") is True,"Real runner enrollment failed")
@@ -442,21 +445,32 @@ def control(s,mode,operation,expected=None):
     if expected is not None:value.update(expected_generation=str(expected),resume=mode=="ACTIVE")
     return s.ok("fixture.control",dict(S,control=value))
 def suite63(s):
+    # Older unrelated obligations must not become a native boot's snapshot baseline.
+    for n,label in [(610,"human-private"),(611,"notification-private")]:
+        s.ok("outbox.consumer.register",dict(S,id=uid(n),consumer_key=label,critical=True,state="ACTIVE"))
+    s.ok("fixture.selected",{"event":event(2900),"consumer_ids":[uid(610),uid(611)]})
     seed_native_attempt(s);s.enroll_runner();start=command(3001,"START")
     check("instructions.missing-native-binding-refused",lambda:s.reject("instructions.issue",start,"INSTRUCTION_CONSUMER_REQUIRED"))
     registration=dict(S,consumer_id=CONSUMER)
     check("instructions.bootstrap-interruption-refused",lambda:s.reject("fixture.native-registration-rollback",registration))
     check("instructions.bootstrap-interruption-atomic",lambda:expect(sql("SELECT (SELECT count(*) FROM hyperfide.event_consumers WHERE id="+q(CONSUMER)+")+(SELECT count(*) FROM hyperfide.event_runner_bindings WHERE consumer_id="+q(CONSUMER)+")+(SELECT count(*) FROM hyperfide.command_inbox WHERE operation='instruction.consumer-genesis' AND principal_scope="+q(CONSUMER)+")")=="0","Interrupted native bootstrap left an active consumer, binding or receipt"))
+    def crash_bootstrap():
+        old=s.child;disconnected=False
+        try:s.ok("fixture.native-registration-crash",registration)
+        except Exception:disconnected=True
+        old.wait(timeout=10);expect(disconnected and old.returncode==-signal.SIGKILL,"Bootstrap process did not actually die before COMMIT")
+        s.child=None
+        expect(sql("SELECT (SELECT count(*) FROM hyperfide.event_consumers WHERE id="+q(CONSUMER)+")+(SELECT count(*) FROM hyperfide.event_runner_bindings WHERE consumer_id="+q(CONSUMER)+")+(SELECT count(*) FROM hyperfide.command_inbox WHERE operation='instruction.consumer-genesis' AND principal_scope="+q(CONSUMER)+")")=="0","SIGKILL left a partial native activation")
+        s.start()
+    check("instructions.bootstrap-sigkill-before-commit",crash_bootstrap)
     registered=s.ok("instructions.consumer.register",registration)
+    check("instructions.late-native-genesis-preserves-other-streams",lambda:expect(sql("SELECT count(*) FROM hyperfide.event_deliveries WHERE event_id="+q(uid(2900))+" AND state='PENDING'")=="2","Native genesis consumed unrelated historical delivery obligations"))
     check("instructions.actual-native-bootstrap",lambda:expect(registered["consumer_state"]=="ACTIVE" and registered["boot_id"]==s.ids["boot"] and registered["execution_authority"] is False,"Authenticated native genesis did not bind the actual boot"))
     check("instructions.native-bootstrap-recovery-reference",lambda:expect(s.ok("fixture.snapshot",dict(S,limit=64))["runner_consumers"][0]["bootstrap_receipt_id"]==registered["bootstrap_receipt_id"],"Primary recovery lost the actual immutable native binding receipt"))
     check("instructions.native-bootstrap-exact-replay",lambda:expect(s.ok("instructions.consumer.register",registration)["replayed"],"Existing boot history was replaced"))
     check("instructions.native-bootstrap-retarget-refused",lambda:s.reject("instructions.consumer.register",dict(S,consumer_id=uid(609)),"INSTRUCTION_CONSUMER_CONFLICT"))
     check("instructions.native-bootstrap-caller-boot-refused",lambda:s.reject("instructions.consumer.register",dict(registration,boot_id=uid(999)),"EVENT_INPUT_INVALID"))
     check("instructions.native-bootstrap-nonrunner-refused",lambda:s.reject("instructions.consumer.register",registration,"AUTH_ROLE_DENIED",runner=False))
-    # Other standing inboxes exist before the first command, and must never receive native instructions.
-    for n,label in [(610,"human-private"),(611,"notification-private")]:
-        s.ok("outbox.consumer.register",dict(S,id=uid(n),consumer_key=label,critical=True,state="ACTIVE"))
     actors={name:s.add_principal(name,role) for name,role in [("oldleader","LEADER"),("currentleader","LEADER"),("manager","FEATURE_MANAGER"),("othermanager","FEATURE_MANAGER")]}
     def actor_call(name,action,value,component="6.3",expected=None):
         status,response=s.invoke(action,value,component=component,key=name,credential=s.ids[name])
@@ -499,6 +513,11 @@ def suite63(s):
     control(s,"ACTIVE",861,1)
     def accept(c):return s.ok("instructions.accept",dict(S,event_id=c["id"],consumer_id=CONSUMER))
     check("instructions.start-durably-accepted",lambda:expect(accept(start)["result"]["execution"]=="PENDING_NATIVE_CONNECTOR","Central admission invented a process"))
+    def retained_bootstrap():
+        before=sql("SELECT result::text FROM hyperfide.command_inbox WHERE operation='instruction.spool' AND idempotency_key="+q(start["id"]))
+        replay=s.ok("instructions.consumer.register",registration)
+        expect(replay["replayed"] and replay["bootstrap_receipt_id"]==registered["bootstrap_receipt_id"] and before==sql("SELECT result::text FROM hyperfide.command_inbox WHERE operation='instruction.spool' AND idempotency_key="+q(start["id"])),"Existing boot registration reset its immutable history or actual spool")
+    check("instructions.native-registration-preserves-history",retained_bootstrap)
     control(s,"PAUSE",862,2)
     check("instructions.pause-defers-queued-handoff",lambda:s.reject("instructions.handoff",dict(S,event_id=start["id"],consumer_id=CONSUMER),"EXECUTION_HELD"))
     control(s,"ACTIVE",863,3)
