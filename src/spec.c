@@ -1,3 +1,6 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
+extern int hf_client_authority_guard_args(const char *operation,int argc,char **argv,FILE *output);
 /*
  * cg spec — C port of ion-agent's spec/specgen plus a task engine.
  *
@@ -4379,6 +4382,7 @@ int spec_task_memories_tag(const char *requested, Memory **out) {
 /* ---------------- entry ---------------- */
 
 int cmd_spec(int argc, char **argv, bool json) {
+    { int authority_rc = hf_client_authority_guard_args("spec", argc, argv, stderr); if (authority_rc) return authority_rc; }
     const char *sub = argc > 0 ? argv[0] : "status";
     bool check = false, force = false, repair = false, no_sync = false,
          ahead = false;

@@ -1,3 +1,6 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
+extern int hf_client_authority_guard_args(const char *operation,int argc,char **argv,FILE *output);
 /* Codify CLI — see README.md */
 #include "cg.h"
 #include "sem_flow.h"
@@ -181,6 +184,8 @@ int main(int argc, char **argv) {
         printf("%s\n", CG_VERSION);
         return 0;
     }
+
+    { int authority_rc = hf_client_authority_guard_args("cli", argc, argv, stderr); if (authority_rc) return authority_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0) {

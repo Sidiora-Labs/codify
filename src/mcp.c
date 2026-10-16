@@ -1,3 +1,5 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
 /*
  * MCP (Model Context Protocol) stdio server + auto-install.
  *
@@ -1519,6 +1521,7 @@ static void reply_error(const char *id, int code, const char *msg) {
 }
 
 int cmd_mcp(Cg *cg, const SysInfo *si) {
+    { int authority_rc = hf_client_authority_guard("mcp", stderr); if (authority_rc) return authority_rc; }
     char *line = NULL;
     size_t cap = 0;
     ssize_t n;

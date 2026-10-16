@@ -1,3 +1,5 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
 /*
  * cg integrate — vendor-neutral installation and diagnostics for coding
  * agents. Detection and planning are read-only; apply is recoverable and
@@ -719,6 +721,7 @@ static int integrate_detect(Cg *cg, bool json) {
 }
 
 int cmd_integrate(Cg *cg, const char *action, bool json, bool compatibility) {
+    { int authority_rc = hf_client_authority_guard("integrate", stderr); if (authority_rc) return authority_rc; }
     if (!action || !action[0]) action = "detect";
     if (compatibility && !json)
         printf("Codify compatibility installer -> `cg integrate apply`\n");

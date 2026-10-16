@@ -10,7 +10,7 @@ PREFIX   ?= /usr/local
 BUILD     = build
 
 BIN       = cg
-SRCS      = $(wildcard src/*.c)
+SRCS      = $(wildcard src/*.c) src/hyperfide/client.c
 SRC_HEADERS = $(wildcard src/*.h)
 OBJS      = $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 TS_RUNTIME = $(BUILD)/vendor/tree-sitter-lib.o
@@ -30,6 +30,7 @@ $(BIN): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 $(BUILD)/%.o: src/%.c $(SRC_HEADERS) | $(BUILD)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/vendor/tree-sitter-lib.o: vendor/tree-sitter/lib/src/lib.c | $(BUILD)
