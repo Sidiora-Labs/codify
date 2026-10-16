@@ -14,6 +14,7 @@ async function route(value:FindingTransaction,input:unknown,explicit=false):Prom
  await admin(value);
  const findingId=uuid(p.finding_id),requestId=uuid(p.request_id),expected=decimal(p.expected_state_version),packetDigest=digest(p),{tx,scope}=value;
  const f=await finding(tx,scope,findingId,true);
+ if(f.phase==='DUPLICATE')fail('CANONICAL_TARGET_REQUIRED','A duplicate alias cannot acquire independent routing or repair authority');if(['RESOLVED','ACCEPTED_EXCEPTION','NOT_REPRODUCED'].includes(f.phase))fail('FINDING_CLOSED','A closed finding must first be reopened by current evidence');
  const old=await tx.query('SELECT * FROM hyperfide.finding_routes WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[scope.organisation_id,scope.run_id,requestId]);
  if(old.rows.length){if(old.rows[0]!.request_digest!==packetDigest)fail('IDEMPOTENCY_CONFLICT','Routing request was reused with different intent');return {route:old.rows[0],replayed:true};}
  if(String(f.registry_version)!==expected)fail('STALE_FINDING','Finding changed since routing context was read');
@@ -31,7 +32,7 @@ async function route(value:FindingTransaction,input:unknown,explicit=false):Prom
  const current=result.rows[0]!;
  for(const peer of snapshots)await tx.query('INSERT INTO hyperfide.finding_route_collaborators(organisation_id,run_id,route_id,package_id,manager_session_id,owner_generation) VALUES($1,$2,$3,$4,$5,$6)',[scope.organisation_id,scope.run_id,current.id,peer.package_id,peer.manager_session_id,peer.owner_generation]);
  await tx.query('UPDATE hyperfide.findings SET owner_package_id=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,findingId,packageId]);
- await tx.query('UPDATE hyperfide.finding_registry_records SET phase=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3',[scope.organisation_id,scope.run_id,findingId,active?'ASSIGNED':'TRIAGED']);
+ await tx.query('UPDATE hyperfide.finding_registry_records SET phase=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3',[scope.organisation_id,scope.run_id,findingId,['REPAIRING','READY_FOR_RECHECK'].includes(f.phase)?f.phase:active?'ASSIGNED':'TRIAGED']);
  await emit(tx,scope,findingId,(BigInt(expected)+1n).toString(),'finding.routed',{finding_id:findingId,route_id:current.id,generation,leader_queue:!active});
  return {route:current,collaborators:snapshots,replayed:false};
 }

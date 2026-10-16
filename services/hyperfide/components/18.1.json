@@ -12,7 +12,8 @@
     "finding.report",
     "finding.inspect",
     "finding.list",
-    "finding.duplicate.confirm"
+    "finding.duplicate.confirm",
+    "finding.blockers.inspect"
   ],
   "requires": [
     "4.1",
