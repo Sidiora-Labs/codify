@@ -31,7 +31,7 @@ export async function graphGuard(tx:GraphTransaction,scope:GraphScope,ctx:Compon
  const i=invocationOf(ctx);graphRole(ctx,write);
  if(scope.organisation_id!==i.principal.organisation_id||scope.run_id!==i.principal.run_id||scope.authority_epoch!==i.principal.deployment_epoch)fail('GRAPH_SCOPE_DENIED','Graph scope differs from authenticated principal');
  await i.guard(tx);
- const readiness=await tx.query<{ready:boolean}>("SELECT EXISTS(SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_trgm' AND n.nspname='public') AND (SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='hyperfide' AND c.relname=ANY($1::text[]) AND i.indisvalid AND i.indisready)=5 AS ready",[['graph_bodies_fts','graph_bodies_trigram','graph_facts_trigram','graph_comments_fts','graph_symbols_fts']]);
+ const readiness=await tx.query<{ready:boolean}>("SELECT EXISTS(SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_trgm' AND n.nspname='public') AND (SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='hyperfide' AND c.relname=ANY($1::text[]) AND i.indisvalid AND i.indisready)=5 AND (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='hyperfide' AND c.relname=ANY($2::text[]) AND t.tgname='aaa_supported_isolation' AND t.tgfoid=to_regprocedure('hyperfide.require_authority_isolation()') AND NOT t.tgisinternal AND t.tgenabled IN ('O','A'))=6 AS ready",[['graph_bodies_fts','graph_bodies_trigram','graph_facts_trigram','graph_comments_fts','graph_symbols_fts'],['graph_bundle_inputs','graph_ingestion_chunks','graph_fact_rows','graph_resolution_progress','graph_source_bodies','graph_publication_receipts']]);
  if(readiness.rows[0]?.ready!==true)fail('GRAPH_SCHEMA_UNAVAILABLE','Required graph migration/extension/indexes unavailable');
  const result=await tx.query<{state:string;authority_epoch:string}>('SELECT state,authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
  const row=result.rows[0];if(!row||row.authority_epoch!==scope.authority_epoch)fail('GRAPH_AUTHORITY_STALE','Graph authority epoch changed');
@@ -43,6 +43,12 @@ export async function graphTransaction<T>(ctx:ComponentContext,scope:GraphScope,
 export function sourceId(build:string,bundle:string,family:string,legacy:unknown):string {
  const h=createHash('md5').update(build+':'+bundle+':'+family+':'+String(legacy)).digest('hex');
  return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+}
+// Mirror resolve()'s sourceId(build,bundle,'semantic_edges',legacy-id) identity.
+// Raw edges whose endpoints cannot be projected remain evidence, never proof of absence.
+export async function semanticProjectionDebt(tx:GraphTransaction,s:GraphScope,graphId:string):Promise<{count:string;rows:JsonObject[]}>{
+ const result=await tx.query<{bundle_digest:string;fact_key:string;payload:JsonObject;unresolved_count:string}>("SELECT f.bundle_digest,f.fact_key,f.payload,count(*) OVER()::text AS unresolved_count FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family='semantic_edges' AND NOT EXISTS(SELECT 1 FROM hyperfide.graph_edges e WHERE e.organisation_id=f.organisation_id AND e.run_id=f.run_id AND e.graph_id=f.graph_id AND e.id=md5($3::text||':'||f.bundle_digest||':semantic_edges:'||COALESCE(f.payload->>'id',f.payload->>'symbol_id',f.fact_key))::uuid) ORDER BY f.bundle_digest,f.fact_key LIMIT 256",[s.organisation_id,s.run_id,graphId]);
+ return {count:result.rows[0]?.unresolved_count??'0',rows:result.rows.map(({unresolved_count,...row})=>({...row,resolution_state:'UNPROJECTED_ENDPOINT'}))};
 }
 export async function getBuild(tx:GraphTransaction,s:GraphScope,id:string,lock=false):Promise<JsonObject> {
  const r=await tx.query('SELECT * FROM hyperfide.graph_builds WHERE organisation_id=$1 AND run_id=$2 AND id=$3'+(lock?' FOR UPDATE':''),[s.organisation_id,s.run_id,id]);

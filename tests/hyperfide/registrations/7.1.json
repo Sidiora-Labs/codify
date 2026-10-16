@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "variant": "task:7.1",
+  "task": "7.1",
+  "scope": "task-component",
+  "cases": [
+    "V-018",
+    "V-020"
+  ],
+  "assertion_ids": [
+    "graph.extraction.describe",
+    "graph.extraction.actual-native",
+    "graph.extraction.immutable-inspect",
+    "graph.extraction.chunk-bytes-digests",
+    "graph.extraction.symbol-coverage",
+    "graph.extraction.comment-coverage",
+    "graph.extraction.body-coverage",
+    "graph.extraction.semantic-coverage",
+    "graph.extraction.health-coverage",
+    "graph.extraction.non-authoritative",
+    "graph.extraction.exact-source",
+    "graph.extraction.repeat-deterministic",
+    "graph.extraction.generation-isolation",
+    "graph.extraction.config-isolation",
+    "graph.extraction.named-overlay",
+    "graph.extraction.reject-false-tree",
+    "graph.extraction.reject-unknown-repository",
+    "graph.extraction.reject-numeric-generation",
+    "graph.extraction.reject-request-command",
+    "graph.extraction.reject-main-placement",
+    "graph.extraction.reject-changed-scanner",
+    "graph.extraction.reject-tampered-chunk",
+    "graph.extraction.reject-missing-chunk",
+    "graph.extraction.incremental-body-budget",
+    "graph.extraction.reject-unauthenticated",
+    "graph.extraction.reject-wrong-role",
+    "graph.extraction.authenticated-dispatch-native",
+    "graph.extraction.scratch-disposition"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/7_1.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/graph/extraction.js",
+    "services/hyperfide/dist/identity/enrollment.js",
+    "services/hyperfide/dist/dispatch.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-graph-7.1-database",
+      "kind": "postgresql-database",
+      "scope": "domain07-disposable-component"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/7_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "graph/database-absence.json",
+    "graph/database-resource.json",
+    "graph/extraction-observations.json"
+  ],
+  "source_files": [
+    "cg",
+    "src/scan.c",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/cases/tasks/7_1.py",
+    "tests/hyperfide/registrations/7.1.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "graph.remote.extract",
+    "graph.component.invoke"
+  ]
+}
