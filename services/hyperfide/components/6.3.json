@@ -16,7 +16,8 @@
     "instructions.replay",
     "instructions.ack",
     "instructions.lookup-native",
-    "instructions.consumer.register"
+    "instructions.consumer.register",
+    "instructions.runner.poll"
   ],
   "requires": [
     "4.2",
