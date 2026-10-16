@@ -7,7 +7,7 @@ import type {PreparationManifest,FilePin} from './manifests.js';
 
 export interface CheckpointExpected {
  checkpoint_digest:string;source_metadata_digest:string;source_repository_id:string;
- source_workspace_id:string;source_object_id:string;source_preparation_digest:string;
+ source_workspace_id:string;source_object_id:string;source_preparation_digest:string;parent_preparation_digest:string;
 }
 export interface RestoredCheckpointInput {
  capsule:Uint8Array;expected:CheckpointExpected;native_result:unknown;
@@ -78,7 +78,7 @@ function parseTree(bytes:Buffer,algorithm:string):Entry[]{
 async function git(root:string,args:string[],deadline:number,signal?:AbortSignal,extra:NodeJS.ProcessEnv={},input?:Uint8Array):Promise<Buffer>{
  const remaining=Math.floor(deadline-performance.now());if(remaining<=0||signal?.aborted)fail('CHECKPOINT_VALIDATION_TIMEOUT');
  return new Promise((resolve,reject)=>{
-  const child=spawn('/usr/bin/git',['--no-replace-objects','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.attributesFile=/dev/null','-c','maintenance.auto=false','-c','gc.auto=0','-c','protocol.allow=never',...args],{cwd:root,env:{PATH:'/usr/bin:/bin',LANG:'C',HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',...extra},stdio:['pipe','pipe','pipe']});
+  const child=spawn('/usr/bin/git',['--no-replace-objects','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.attributesFile=/dev/null','-c','maintenance.auto=false','-c','gc.auto=0','-c','protocol.allow=never',...args],{cwd:root,env:{PATH:'/usr/bin:/bin',LANG:'C',HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_NO_LAZY_FETCH:'1',GIT_NO_REPLACE_OBJECTS:'1',...extra},stdio:['pipe','pipe','pipe']});
   let total=0,invalid=false;const chunks:Buffer[]=[];
   const stop=()=>{invalid=true;child.kill('SIGKILL');};const timer=setTimeout(stop,remaining);signal?.addEventListener('abort',stop,{once:true});
   child.stdout.on('data',(chunk:Buffer)=>{total+=chunk.length;if(total>MAX)stop();else chunks.push(chunk);});child.stderr.resume();child.on('error',()=>{invalid=true;});
@@ -147,15 +147,15 @@ function roles(manifest:PreparationManifest,key:string,entries:Entry[]):Row{
 export async function validateRestoredCheckpoint(input:RestoredCheckpointInput):Promise<Row>{
  const limit=input.timeout_ms??30000;if(!Number.isSafeInteger(limit)||limit<100||limit>120000)fail();
  if(!(input.capsule instanceof Uint8Array)||input.capsule.byteLength>MAX)fail('CHECKPOINT_CAPSULE_INVALID');
- const deadline=performance.now()+limit,capsule=Buffer.from(input.capsule),expected=exact(input.expected,['checkpoint_digest','source_metadata_digest','source_repository_id','source_workspace_id','source_object_id','source_preparation_digest']);
- for(const key of ['checkpoint_digest','source_metadata_digest','source_preparation_digest'])if(!DIGEST.test(expected[key]))fail();
+ const deadline=performance.now()+limit,capsule=Buffer.from(input.capsule),expected=exact(input.expected,['checkpoint_digest','source_metadata_digest','source_repository_id','source_workspace_id','source_object_id','source_preparation_digest','parent_preparation_digest']);
+ for(const key of ['checkpoint_digest','source_metadata_digest','source_preparation_digest','parent_preparation_digest'])if(!DIGEST.test(expected[key]))fail();
  if(!UUID.test(expected.source_repository_id)||!UUID.test(expected.source_workspace_id)||!OID.test(expected.source_object_id)||hash(capsule)!==expected.checkpoint_digest)fail('CHECKPOINT_CUSTODY_MISMATCH');
  const parts=unpack(capsule),meta=metadata(parts.metadata);
  if(hash(parts.metadata)!==expected.source_metadata_digest||meta.repository_id!==expected.source_repository_id||meta.workspace_id!==expected.source_workspace_id||meta.head_commit!==expected.source_object_id||meta.preparation_digest!==expected.source_preparation_digest)fail('CHECKPOINT_CUSTODY_MISMATCH');
  const native=exact(input.native_result,['capture_state','native_context','authority','checkpoint_digest','repository_id']);
  if(native.capture_state!=='LOCAL_RESTORED'||native.native_context!=='NOT_RESTORED'||native.authority!=='NONE'||native.checkpoint_digest!==expected.checkpoint_digest||native.repository_id!==expected.source_repository_id)fail('CHECKPOINT_NATIVE_RESULT_INVALID');
  const manifest=input.parent_manifest as PreparationManifest,{digest:manifestDigest,...manifestBody}=object(manifest);
- if(!DIGEST.test(manifestDigest)||identity(manifestBody)!==manifestDigest)fail('CHECKPOINT_PARENT_MANIFEST_INVALID');
+ if(!DIGEST.test(manifestDigest)||identity(manifestBody)!==manifestDigest||manifestDigest!==expected.parent_preparation_digest)fail('CHECKPOINT_PARENT_MANIFEST_INVALID');
  const profile=validateProfile(manifest.profile);if(!profile.repositories.some(repository=>repository.id===input.repository_key))fail('CHECKPOINT_REPOSITORY_BINDING_INVALID');
  const rootFd=rootOpen(input.workspace_path);let scratchFd:number|undefined,temporary:string|undefined;
  try{
@@ -163,6 +163,16 @@ export async function validateRestoredCheckpoint(input:RestoredCheckpointInput):
   if((fs.fstatSync(scratchFd).mode&511)!==448||input.scratch_root===input.workspace_path||input.scratch_root.startsWith(input.workspace_path+'/'))fail('CHECKPOINT_SCRATCH_INVALID');
   if(Number(fs.fstatSync(rootFd,{bigint:true}).mode&511n)!==Number(meta.workspace_mode))fail('CHECKPOINT_MODE_MISMATCH');
   const gitDir=fs.openSync('/proc/self/fd/'+rootFd+'/.git',fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);fs.closeSync(gitDir);
+  // A fresh native clone cannot carry grafts, replacement refs, alternates or
+  // config-driven fsck/lazy-fetch exemptions into this independent byte proof.
+  for(const name of ['commondir','objects/info/alternates','objects/info/http-alternates','info/grafts','refs/replace']){
+   try{fs.lstatSync(path.join(input.workspace_path,'.git',name));fail('CHECKPOINT_GIT_METADATA_UNSUPPORTED');}
+   catch(error){if(!(error instanceof Error)||!('code' in error)||error.code!=='ENOENT')throw error;}
+  }
+  const configFd=fs.openSync(path.join(input.workspace_path,'.git','config'),fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+  try{const st=fs.fstatSync(configFd);if(!st.isFile()||st.nlink!==1||st.size>65536)fail('CHECKPOINT_GIT_CONFIG_UNSUPPORTED');}finally{fs.closeSync(configFd);}
+  const configKeys=(await git(input.workspace_path,['config','--local','--no-includes','--name-only','--null','--list'],deadline,input.signal)).toString('utf8').split('\0').filter(Boolean);
+  for(const raw of configKeys){const key=raw.toLowerCase();if(['include.','includeif.','fsck.','fetch.fsck.','receive.fsck.'].some(prefix=>key.startsWith(prefix))||key==='extensions.partialclone'||key.endsWith('.promisor'))fail('CHECKPOINT_GIT_CONFIG_UNSUPPORTED');}
   const head=(await git(input.workspace_path,['rev-parse','--verify','HEAD'],deadline,input.signal)).toString('utf8').trim();
   if(head!==meta.head_commit)fail('CHECKPOINT_HEAD_MISMATCH');
   const branch=(await git(input.workspace_path,['symbolic-ref','HEAD'],deadline,input.signal)).toString('utf8').trim();if(branch!==meta.branch_ref)fail('CHECKPOINT_BRANCH_MISMATCH');
@@ -190,6 +200,6 @@ export async function validateRestoredCheckpoint(input:RestoredCheckpointInput):
   const again=await inventory(rootFd,algorithm,deadline,input.signal);
   if(canonicalJSON(again)!==canonicalJSON(actual)||(await git(input.workspace_path,['rev-parse','HEAD'],deadline,input.signal)).toString('utf8').trim()!==head||canonicalJSON(indexEntries(await git(input.workspace_path,['ls-files','--stage','-z'],deadline,input.signal)))!==canonicalJSON(actualIndex))fail('CHECKPOINT_SOURCE_UNSTABLE');
   const overlay={head_commit:head,head_tree_id:headTree,index_tree_id:indexTree,index_entries:actualIndex,worktree:actual};
-  return {schema_version:1,status:'RESTORED_SOURCE_ONLY',authority:'NONE',readiness_granted:false,installed_toolchain_verified:false,quiescence_verified:false,native_context_restored:false,checkpoint_digest:expected.checkpoint_digest,source_metadata_digest:expected.source_metadata_digest,metadata:meta,head_commit:head,head_tree_id:headTree,index_tree_id:indexTree,git_bundle_digest:hash(parts.bundle),index_patch_digest:hash(parts.patch),index_entries_digest:identity(actualIndex),worktree_inventory_digest:identity(actual),overlay_digest:identity(overlay),source_state_digest:identity({checkpoint_digest:expected.checkpoint_digest,source_metadata_digest:expected.source_metadata_digest,overlay}),staged_paths:staged,unstaged_paths:unstaged,untracked_paths:untracked,inventory:actual,...roles(manifest,input.repository_key,actual),consistency:'LOCAL_SCAN_REQUIRES_GENUINE_12_QUIESCENCE_AND_SEAL',index_scope:meta.index_scope,ignored_disposition:meta.ignored_disposition};
+  return {schema_version:1,status:'RESTORED_SOURCE_ONLY',authority:'NONE',readiness_granted:false,installed_toolchain_verified:false,quiescence_verified:false,native_context_restored:false,checkpoint_digest:expected.checkpoint_digest,source_metadata_digest:expected.source_metadata_digest,parent_preparation_digest:expected.parent_preparation_digest,metadata:meta,head_commit:head,head_tree_id:headTree,index_tree_id:indexTree,git_bundle_digest:hash(parts.bundle),index_patch_digest:hash(parts.patch),index_entries_digest:identity(actualIndex),worktree_inventory_digest:identity(actual),overlay_digest:identity(overlay),source_state_digest:identity({checkpoint_digest:expected.checkpoint_digest,source_metadata_digest:expected.source_metadata_digest,overlay}),staged_paths:staged,unstaged_paths:unstaged,untracked_paths:untracked,inventory:actual,...roles(manifest,input.repository_key,actual),consistency:'LOCAL_SCAN_REQUIRES_GENUINE_12_QUIESCENCE_AND_SEAL',index_scope:meta.index_scope,ignored_disposition:meta.ignored_disposition};
  }finally{if(temporary)fs.rmSync(temporary,{recursive:true,force:true});if(scratchFd!==undefined)fs.closeSync(scratchFd);fs.closeSync(rootFd);}
 }

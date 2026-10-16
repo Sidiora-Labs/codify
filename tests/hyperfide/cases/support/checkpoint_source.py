@@ -63,7 +63,7 @@ class Fixture:
   (parent.candidate/"other").mkdir();(parent.candidate/"other"/"evidence.json").write_bytes(b"outside")
   scan="import fs from 'node:fs';import {createManifest} from './services/hyperfide/dist/preparation/manifests.js';const v=JSON.parse(fs.readFileSync(0,'utf8'));const m=await createManifest({candidate_path:'candidate',profile:v.profile,scan_policy:{secret_canaries:[],identity_canaries:[],lease_canaries:[]}},{env:{HF_PREPARATION_ALLOWED_ROOT:v.allowed},signal:new AbortController().signal});process.stdout.write(JSON.stringify(m));"
   made=subprocess.run(["node","--input-type=module","-e",scan],cwd=ROOT,input=json.dumps({"profile":self.profile,"allowed":str(parent.allowed)}),text=True,capture_output=True,timeout=30)
-  expect(made.returncode==0,"Actual parent scanner failed: "+made.stderr[-1000:]);self.manifest=json.loads(made.stdout)
+  expect(made.returncode==0,"Actual parent scanner failed: "+made.stderr[-1000:]);self.manifest=json.loads(made.stdout);self.expected["parent_preparation_digest"]=self.manifest["digest"]
   self.scratch=base/"validation-scratch";self.scratch.mkdir(mode=0o700)
  def restore(self):
   self.counter+=1;name="validated-"+str(self.counter)
@@ -140,6 +140,13 @@ def run(native_root,out):
    value=f.call(w,native_result)
    expect(value["ok"] and not marker.exists(),"Git config executed an external monitor during byte validation")
   check("checkpoint-source.no-git-fsmonitor-execution",no_monitor)
+  check("checkpoint-source.reject-unbound-target-parent",lambda:f.direct_negative(expected=dict(f.expected,parent_preparation_digest=digest(b"another-approved-parent"))))
+  check("checkpoint-source.reject-local-fsck-exemption",lambda:f.rejects(lambda w:f.native.git(w,"config","fsck.skipList","/dev/null"),"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
+  def include(w):
+   config=base/"external-config";config.write_text("[fsck]\n skipList = /dev/null\n");f.native.git(w,"config","include.path",str(config))
+  check("checkpoint-source.reject-local-config-include",lambda:f.rejects(include,"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
+  check("checkpoint-source.reject-local-promisor",lambda:f.rejects(lambda w:f.native.git(w,"config","remote.fixture.promisor","true"),"CHECKPOINT_GIT_CONFIG_UNSUPPORTED"))
+  check("checkpoint-source.reject-external-object-alternates",lambda:f.rejects(lambda w:(w/".git"/"objects"/"info"/"alternates").write_text(str(base)+"\n"),"CHECKPOINT_GIT_METADATA_UNSUPPORTED"))
   (out/"observations.json").write_bytes(canonical(dict(scope="LOWER_BYTE_HELPER_ONLY",assertion_count=len(IDS),failures=FAILURES,observations=OBS,source_status="RESTORED_SOURCE_ONLY",authority="NONE",native_source_commit="c46892cb84657f250cc7b165e5724d2275400099",parent_manifest=f.manifest,baseline=state.get("result")))+b"\n")
  base_absent=not base.exists();(out/"cleanup.json").write_bytes(canonical({"owned_root_absent":base_absent})+b"\n")
  expect(base_absent,"Owned fixture root remains")
