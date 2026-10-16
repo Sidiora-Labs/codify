@@ -49,7 +49,7 @@ export function scope(ctx:ComponentContext,input:Data):[string,string]{
   fail('QUALIFICATION_SCOPE_DENIED','Request scope differs from its authenticated principal');
  return [org,run];
 }
-export type PrimaryClient=Pick<pg.PoolClient,'query'>;
+export interface PrimaryClient {query<R extends pg.QueryResultRow=any>(text:string,values?:readonly unknown[]):Promise<pg.QueryResult<R>>}
 export async function assuranceBarrier(db:PrimaryClient,s:{organisation_id:string;run_id:string},mode:'SHARED'|'EXCLUSIVE'):Promise<void>{
  try{const name='../storage/transactions.js',module=await import(name) as Data;module.assertPrimaryTransaction(db);}
  catch{fail('QUALIFICATION_PRIMARY_REQUIRED','A live server-owned primary transaction is required');}
@@ -180,7 +180,29 @@ export function resultInputs(facts:Data,sourceManifestDigest:string,derived:Data
   dependency:derived.dependency_digest,toolchain:derived.toolchain_digest,configuration:derived.configuration_digest,
   graph:derived.graph_digest,contract:derived.contract_digest};
 }
-async function submittedGitFacts(ctx:ComponentContext,v:Data,policy:Data,workspace:Data):Promise<Data>{
+function acceptedSourceScope(definition:unknown):string[]{
+ if(!object(definition))fail('QUALIFICATION_SOURCE_SCOPE','Accepted task has no owned source scope');
+ let value:unknown=definition.touches;
+ if(value===undefined&&object(definition.section)&&object(definition.section.fields))value=definition.section.fields.touches;
+ if(object(value)&&Object.hasOwn(value,'value'))value=value.value;
+ if(typeof value==='string'){try{value=JSON.parse(value);}catch{fail('QUALIFICATION_SOURCE_SCOPE','Accepted source scope is not an explicit path list');}}
+ if(!Array.isArray(value)||!value.length||value.length>4096||value.some(v=>typeof v!=='string'||!v||v.length>4096||
+  v.startsWith('/')||v.includes('\\')||/[\x00-\x1f\x7f]/.test(v)||v.split('/').includes('..')||v.replace(/\/+$/,'').split('/').includes('')||v!=='.'&&v.split('/').includes('.')))
+  fail('QUALIFICATION_SOURCE_SCOPE','Accepted task requires safe explicit owned paths');
+ return value;
+}
+function ownedSourcePath(file:string,scopes:string[]):boolean{
+ if(!file||file.startsWith('/')||file.includes('\\')||/[\x00-\x1f\x7f]/.test(file)||file.split('/').some(p=>!p||p==='.'||p==='..'))return false;
+ return scopes.some(raw=>{
+  const pattern=raw.replace(/\/+$/,'');
+  if(pattern==='.')return true;
+  const wildcard=pattern.search(/[*?\[]/),prefix=(wildcard<0?pattern:pattern.slice(0,pattern.lastIndexOf('/',wildcard)+1)).replace(/\/+$/,'')||'.';
+  if(prefix!=='.'&&file!==prefix&&!file.startsWith(prefix+'/'))return false;
+  return wildcard<0?(file===pattern||file.startsWith(pattern+'/')):path.matchesGlob(file,pattern);
+ });
+}
+/** Glob matching cannot grant paths beyond the scheduler's reserved ownership prefix. */
+export async function submittedGitFacts(ctx:ComponentContext,v:Data,policy:Data,workspace:Data,ownedScope:string[]):Promise<Data>{
  let repositories:Data;
  try{repositories=JSON.parse(ctx.env.HF_QUALIFICATION_REPOSITORIES??'');}catch{fail('QUALIFICATION_SOURCE_UNAVAILABLE','Trusted repository mapping is required');}
  const repository=repositories![v.repository_id];
@@ -196,9 +218,16 @@ async function submittedGitFacts(ctx:ComponentContext,v:Data,policy:Data,workspa
   if(await git(['rev-parse','--verify','--end-of-options',workspace.branch_ref+'^{commit}'])!==v.source_object_id)
    fail('QUALIFICATION_SOURCE_MISMATCH','Submitted result is not the measured head of the current attempt workspace');
   await git(['merge-base','--is-ancestor',policy.source_object_id,v.source_object_id]);
+  const changed=await run('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z','--ignore-submodules=none',policy.source_object_id,v.source_object_id,'--'],
+   {cwd:repository,env:environment,timeout:10000,maxBuffer:16*1024*1024,encoding:'buffer'});
+  const listing=new TextDecoder('utf-8',{fatal:true}).decode(changed.stdout);
+  if(listing&&!listing.endsWith('\0'))fail('QUALIFICATION_SOURCE_SCOPE','Git path inventory is incomplete');
+  const paths=listing?listing.slice(0,-1).split('\0'):[];
+  if(paths.length>100000||paths.some(file=>!ownedSourcePath(file,ownedScope)))
+   fail('QUALIFICATION_SOURCE_SCOPE','Result changes a path outside its accepted owned scope');
   const parents=await git(['show','-s','--format=%P',v.source_object_id]);
   return {repository_id:v.repository_id,source_object_id:v.source_object_id,source_tree_id:tree,baseline_source_object_id:policy.source_object_id,
-   source_parent_ids:parents?parents.split(' '):[]};
+   source_parent_ids:parents?parents.split(' '):[],owned_scope_digest:hash(ownedScope),changed_paths_digest:hash(paths),changed_path_count:paths.length};
  }catch(error){if(error instanceof FoundationError)throw error;fail('QUALIFICATION_SOURCE_MISMATCH','Result commit does not have the accepted Git baseline ancestry');}
 }
 async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
@@ -240,9 +269,9 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
    [...s,sourceManifest.workspace_id,v.repository_id,v.attempt_id,v.attempt_generation,v.sandbox_id,v.slot_id,v.sandbox_boot_generation]);
   if(!workspace.rows[0]||workspace.rows[0].base_commit!==policy.source_object_id)
    fail('QUALIFICATION_SOURCE_MISMATCH','Result workspace is not owned by the current attempt and accepted baseline');
-  return {policy,workspace:workspace.rows[0]};
+  return {policy,workspace:workspace.rows[0],owned_scope:acceptedSourceScope(task.definition)};
  });
- const acceptedPolicy=preflight.policy,gitFacts=await submittedGitFacts(ctx,v,acceptedPolicy,preflight.workspace);
+ const acceptedPolicy=preflight.policy,gitFacts=await submittedGitFacts(ctx,v,acceptedPolicy,preflight.workspace,preflight.owned_scope);
  return await transaction(ctx,async client=>{
   const task=await taskLock(client,s,v.task_id);
   const old=await client.query('SELECT request_digest,custody_id FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,v.request_id]);
@@ -269,6 +298,8 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
    packetIdentity.spec_revision_id!==task.spec_revision_id||String(packetIdentity.spec_generation)!==String(task.spec_generation)||
    packetIdentity.criteria_digest!==task.criteria_digest||packetIdentity.authority_epoch!==task.run_epoch||packet.packet.mandatory.intent.registry_digest!==hash(policy))
    fail('QUALIFICATION_PACKET_INVALID','Execution packet does not bind the submitting attempt');
+  if(hash(packet.packet.mandatory.intent.owned_scope)!==gitFacts.owned_scope_digest||hash(acceptedSourceScope(task.definition))!==gitFacts.owned_scope_digest)
+   fail('QUALIFICATION_SOURCE_SCOPE','Accepted source ownership changed before custody admission');
   const runtimeInputs=resultInputs(gitFacts,source.artifact.digest,packet.derived);
   const current=await client.query("SELECT a.*,a.lease_expires_at>clock_timestamp() AS alive FROM hyperfide.attempts a WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE",[...s,v.attempt_id]);
   const attempt=current.rows[0];
