@@ -16,6 +16,28 @@ def check(identity,callback):
     except Exception as error:actual=f"{type(error).__name__}: {error}";FAILED.append(identity)
     print(json.dumps({"type":"assertion","id":identity,"expected":"observed","actual":actual}),flush=True)
 
+def enable_subreaper():
+    import ctypes
+    expect(ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0,"actual Linux child ownership tracking unavailable")
+def drain_owned_children():
+    children=Path("/proc/self/task/"+str(os.getpid())+"/children")
+    deadline=time.monotonic()+8;signalled=set()
+    while time.monotonic()<deadline:
+        pending=[int(value)for value in children.read_text().split()]
+        if not pending:return True
+        for pid in pending:
+            try:
+                reaped,_=os.waitpid(pid,os.WNOHANG)
+                if reaped:continue
+                stat=Path("/proc/"+str(pid)+"/stat").read_text();rest=stat[stat.rfind(")")+2:].split()
+                if int(rest[1])!=os.getpid():continue
+                start=rest[19];fresh=Path("/proc/"+str(pid)+"/stat").read_text();now=fresh[fresh.rfind(")")+2:].split()
+                if now[19]!=start or int(now[1])!=os.getpid():continue
+                os.kill(pid,signal.SIGKILL if pid in signalled else signal.SIGTERM);signalled.add(pid)
+            except (ChildProcessError,FileNotFoundError,ProcessLookupError):pass
+        time.sleep(.05)
+    return not children.read_text().strip()
+
 class SessionIdentityFixture(IdentityFixture):
     def stop(self):
         if self.child and self.child.poll()is not None:
@@ -24,6 +46,7 @@ class SessionIdentityFixture(IdentityFixture):
 
 class AgentFixture:
     def __init__(self,admission=False,qualified=False):
+        enable_subreaper()
         self.native_folder=tempfile.TemporaryDirectory(prefix="hyperfide-native-transport-")
         native_root=Path(self.native_folder.name);native_env=os.environ.copy();native_env["CODEX_HOME"]=str(native_root/"codex-home");Path(native_env["CODEX_HOME"]).mkdir(mode=0o700)
         executable=subprocess.check_output(["mise","which","codex"],text=True).strip()if shutil.which("mise")else shutil.which("codex")
@@ -122,17 +145,30 @@ COMMIT;"""
         if f:
             f.close()
             absent=f.sql("SELECT datname FROM pg_database WHERE datname=$1",[f.database],admin=True)==[]
-            root=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR",tempfile.gettempdir()));target=root/(resource+"-absence.json");target.write_text(json.dumps({"database":f.database,"observed_absent":absent,"observer":"independent pg_database query after DROP"}))
-            print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":resource,"status":"deleted"if absent else"unknown","observed_absent":absent,"evidence_artifact":target.name}]}),flush=True)
+            expect(drain_owned_children(),"actual native descendants survived fixture cleanup")
+            proof={"database":f.database,"observed_absent":absent,"observer":"independent pg_database query after DROP"}
+            receipt=os.environ.get("HYPERFIDE_RECEIPT_ID");target=cleanup_state(resource)
+            if target:
+                with target.open("x")as state:state.write(json.dumps(proof))
+                target.chmod(0o600)
+            evidence="artifacts/"+receipt+"/stdout.log"if receipt else"raw-stdout"
+            print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":resource,"status":"deleted"if absent else"unknown","observed_absent":absent,"evidence_artifact":evidence,"observation":proof}]}),flush=True)
             expect(absent,"disposable database survived cleanup")
 
+def cleanup_state(resource):
+    receipt=os.environ.get("HYPERFIDE_RECEIPT_ID")
+    if receipt is None:return None
+    expect(str(uuid.UUID(receipt))==receipt,"noncanonical cleanup receipt")
+    return Path(tempfile.gettempdir())/("hyperfide-"+resource+"-"+receipt+".json")
+
 def cleanup_only(resource):
-    root=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR",tempfile.gettempdir()));target=root/(resource+"-absence.json")
+    target=cleanup_state(resource);expect(target is not None,"cleanup receipt identity required")
     value=json.loads(target.read_text());database=value["database"]
     expect(database.startswith("hf_identity_")and len(database)==44,"invalid recorded cleanup database")
     from identity_fixture import SQL_JS
     result=subprocess.run(["node","--input-type=commonjs","-e",SQL_JS],input=json.dumps({"sql":"SELECT datname FROM pg_database WHERE datname=$1","values":[database]}),text=True,cwd=ROOT,env=os.environ.copy(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=15)
     absent=result.returncode==0 and json.loads(result.stdout)==[]
+    if absent:target.unlink()
     return 0 if absent else 1
 
 def main():

@@ -65,3 +65,18 @@ CREATE TABLE hyperfide.agent_admission_reservations (
  FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id)
 );
 CREATE UNIQUE INDEX agent_admission_active_session ON hyperfide.agent_admission_reservations(organisation_id,run_id,session_id) WHERE state IN('RESERVED','RETRY_WAIT','ESCALATED');
+
+-- A committed launch intent is never replayed after the exec boundary.
+CREATE TABLE hyperfide.supervisor_launches (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL,session_id uuid NOT NULL,
+ profile_id text NOT NULL,profile_digest hyperfide.digest NOT NULL,request_digest hyperfide.digest NOT NULL,
+ host_id text NOT NULL,placement jsonb NOT NULL,reservations jsonb NOT NULL,
+ state text NOT NULL CHECK(state IN ('STARTING','SPAWNING','RUNNING','EXITED')),
+ process_identity jsonb,native_session_id text,exit_code integer,observed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id)
+);
+CREATE UNIQUE INDEX supervisor_launch_once ON hyperfide.supervisor_launches(organisation_id,run_id,session_id) WHERE state IN ('STARTING','SPAWNING','RUNNING');
+CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.supervisor_launches FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','session_id','profile_id','profile_digest','request_digest','host_id','placement','reservations');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.supervisor_launches FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

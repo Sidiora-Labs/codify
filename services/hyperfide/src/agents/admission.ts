@@ -89,13 +89,14 @@ export function createComponent(ctx:ComponentContext):Component{
  if(!p||agentDigest(p)!==row.policy_digest)agentError('ADMISSION_POLICY_CHANGED');
  if(name==='context'){
  const native=await getNativeSessionProfile(ctx,p.auth_profile),q=native.qualification as Record<string,unknown>,cap=native.capabilities as Record<string,unknown>;
- const eligible=q.state==='QUALIFIED'&&q.live_qualified===true&&q.receipt_digest===p.qualification_digest&&cap.unattended===true&&typeof native.observed_model_id==='string'&&typeof native.observed_provider_id==='string';
+ const eligible=native.connector===p.connector&&(native.binary as Record<string,unknown>).version===p.connector_version&&native.profile_digest===admitted.rows[0]?.configuration_digest&&native.permission_profile_id===p.permission_profile&&native.configured_provider_id===p.provider&&native.requested_model_id===p.model&&q.state==='QUALIFIED'&&q.live_qualified===true&&q.receipt_digest===p.qualification_digest&&cap.unattended===true&&typeof native.observed_model_id==='string'&&typeof native.observed_provider_id==='string';
  const events=await client.query("SELECT result FROM hyperfide.native_session_events WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND result->>'kind'='ADMISSION_REPORT' AND result->>'reservation_id'=$4 ORDER BY created_at DESC,operation_id DESC LIMIT 1",[s.organisation_id,s.run_id,s.session_id,id]);
  const observation=events.rows[0]?.result as Record<string,unknown>|undefined;
  const wait=row.reason==='RATE_LIMIT'?'PROVIDER_RATE_LIMIT':row.reason==='QUOTA_LIMIT'?'MODEL_QUOTA':row.state==='RETRY_WAIT'?'RETRY_BACKOFF':row.state==='ESCALATED'?'RECONCILIATION_REQUIRED':'NONE';
- const packet={schema_version:1,scope:s,reservation_id:id,attempt_id:admitted.rows[0]?.attempt_id??null,
+ const runPolicy=await client.query('SELECT policy_digest FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id]);
+ const packet={schema_version:1,scope:s,run_policy_digest:runPolicy.rows[0]?.policy_digest??null,admission_policy_digest:row.policy_digest,reservation_id:id,attempt_id:admitted.rows[0]?.attempt_id??null,
  policy_digest:row.policy_digest,capacity_wait:wait,capacity_retained:row.state!=='RELEASED',
- retry:{attempts_used:Number(row.attempt_count),maximum_attempts:p.max_attempts,remaining:Math.max(0,p.max_attempts-Number(row.attempt_count)),retry_after:row.retry_after??null,
+ retry:{attempts_used:Number(row.attempt_count),maximum_attempts:p.max_attempts,remaining:Math.max(0,p.max_attempts-Number(row.attempt_count)),retry_after:row.retry_after===null||row.retry_after===undefined?null:new Date(String(row.retry_after)).toISOString(),
  eligible:row.state==='RETRY_WAIT'&&new Date(String(row.retry_after)).getTime()<=Date.now()&&eligible,requires_condition_change:row.state==='ESCALATED'},
  eligible_frontier_profiles:eligible?[{profile_id:p.auth_profile,connector:p.connector,connector_version:p.connector_version,provider:p.provider,requested_model_id:p.model,observed_model_id:native.observed_model_id,observed_provider_id:native.observed_provider_id,qualification_digest:p.qualification_digest}]:[],
  diagnostic_refs:observation?.diagnostic_refs??[],command_receipt_refs:observation?.command_receipt_refs??[],condition_digest:observation?.condition_digest??null,condition_changed_since_previous:false,condition_change_proof:'UNAVAILABLE',

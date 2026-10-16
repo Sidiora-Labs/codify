@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "13.4.supervision",
+  "task": "13.4",
+  "roles": [
+    "control"
+  ],
+  "module": "agents/supervision.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "supervisor.session.describe",
+    "supervisor.session.launch",
+    "supervisor.session.inspect"
+  ],
+  "requires": [
+    "1.1",
+    "4.2",
+    "5.1",
+    "14.1",
+    "14.3"
+  ]
+}

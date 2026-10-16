@@ -1,0 +1,56 @@
+{
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/13_3.py"
+  ],
+  "assertion_ids": [
+    "recovery.actual-process-reconnect",
+    "recovery.transport-independent-process",
+    "recovery.unknown-process-reconciles",
+    "recovery.pid-start-mismatch",
+    "recovery.boot-mismatch",
+    "recovery.actual-partial-pipe-no-replay",
+    "recovery.auth-expired-explicit",
+    "recovery.auth-revoked-explicit",
+    "recovery.actual-exit-missing-context",
+    "recovery.fresh-handoff-explicit",
+    "recovery.unqualified-resume-blocked",
+    "recovery.native-session-crossover-refused",
+    "recovery.source-crossover-refused",
+    "recovery.reject-unknown-field",
+    "recovery.reject-duplicate-field"
+  ],
+  "cases": [
+    "V-043",
+    "V-044"
+  ],
+  "fixtures": [
+    "build/hyperfide-native"
+  ],
+  "required_env": [],
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "Makefile",
+    "build/hyperfide-native",
+    "scripts/hyperfide-native-components.py",
+    "src/hyperfide/component_main.c",
+    "src/hyperfide/components.h",
+    "src/hyperfide/components/13.1.kvx",
+    "src/hyperfide/components/13.3.kvx",
+    "src/hyperfide/components/schema.kvx",
+    "src/hyperfide/connector_recovery.c",
+    "src/hyperfide/connectors.c",
+    "tests/hyperfide/cases/tasks/13_3.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "src/hyperfide"
+  ],
+  "task": "13.3",
+  "timeout_seconds": 300,
+  "variant": "task:13.3"
+}
