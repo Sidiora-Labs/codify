@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real installed-base verification and native runtime observations for 11.3."""
-import copy,hashlib,importlib.util,json,os,shutil,socket,subprocess,tempfile,threading,time,sys
+import copy,hashlib,importlib.util,json,os,shutil,socket,subprocess,tempfile,threading,time,sys,zlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 spec=importlib.util.spec_from_file_location("preparation_fixture",Path(__file__).with_name("11_1.py"))
@@ -81,8 +81,8 @@ class Fixture:
         expect(r.returncode==0 and row.get("ok"),"workspace inventory creation failed")
         path=self.base/"workspace-manifest.json";path.write_text(json.dumps(row["result"]));path.chmod(0o600)
         self.env["HF_READINESS_WORKSPACE_MANIFEST_FILE"]=str(path);self.env["HF_RUNNER_WORKSPACE_DIGEST"]=row["result"]["digest"]
-    def invoke(self):
-        r=subprocess.run([str(ROOT/"build/hyperfide-native"),"--component","11.3","--action","environment.readiness"],
+    def invoke(self,action="environment.readiness"):
+        r=subprocess.run([str(ROOT/"build/hyperfide-native"),"--component","11.3","--action",action],
           input=json.dumps(self.request),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=self.env,cwd=ROOT,timeout=35)
         rows=[json.loads(line) for line in r.stdout.splitlines() if line.strip()]
         expect(len(rows)==1,"missing native response");return rows[0],r
@@ -129,6 +129,50 @@ def main():
             elif mutation=="hardlink":
                 group=inventory["hardlinks"][0];p=f.workspace/group["paths"][0];data=p.read_bytes();mode=p.stat().st_mode&0o777;p.unlink();p.write_bytes(data);p.chmod(mode);f.refused("WORKSPACE_INVENTORY_INVALID")
             else:f.ready()
+        def source_verified(f):
+            row,r=f.invoke("environment.source.verify")
+            expect(r.returncode==0 and row.get("ok") and row["result"]["state"]=="SOURCE_VERIFIED","source-only verifier refused "+json.dumps(row))
+            expect(row["result"]["authority_granted"] is False,"source proof granted authority")
+            expect(row["result"].get("network_probes",0)==0,"source-only verifier ran network probes")
+        def source_refused(f):
+            row,r=f.invoke("environment.source.verify")
+            expect(not row.get("ok") or row.get("result",{}).get("state")=="SOURCE_INVALID","source-only accepted altered Git chain")
+        def source_without_runtime(f):
+            f.bindingsfile.write_text('{"bindings":[]}')
+            f.credentialfile.write_text('{"schema_version":1,"records":[]}')
+            source_verified(f)
+        def forged_object(f,kind):
+            if kind=="nested-tree":
+                (f.repo/"nested").mkdir();(f.repo/"nested/item.txt").write_text("accepted nested bytes\\n")
+                git(f.repo,"add","nested");git(f.repo,"commit","-qm","nested accepted source")
+                f.prep.profile["repositories"][0]["commit"]=git(f.repo,"rev-parse","HEAD");f.publish()
+            accepted=git(f.repo,"rev-parse","HEAD")
+            expected_tree=git(f.repo,"rev-parse","HEAD:nested" if kind=="nested-tree" else "HEAD^{tree}")
+            target=f.repo/("nested/item.txt" if kind=="nested-tree" else "source.txt")
+            target.write_text("forged materialized source\\n")
+            git(f.repo,"add","-A");git(f.repo,"commit","-qm","attacker objects")
+            replacement=git(f.repo,"rev-parse","HEAD:nested" if kind=="nested-tree" else "HEAD")
+            object_kind="tree" if kind=="nested-tree" else "commit"
+            payload=subprocess.check_output(["git","-C",str(f.repo),"cat-file",object_kind,replacement])
+            original=expected_tree if kind=="nested-tree" else accepted
+            raw=object_kind.encode()+b" "+str(len(payload)).encode()+b"\\0"+payload
+            expect(hashlib.sha1(raw).hexdigest()!=original,"forgery fixture did not change actual object bytes")
+            git(f.repo,"update-ref","HEAD",accepted)
+            filename=f.repo/".git/objects"/original[:2]/original[2:];filename.chmod(0o600);filename.write_bytes(zlib.compress(raw))
+            # Republish the entire real workspace, including the manipulated object.
+            # Inventory integrity must not authenticate the falsely named Git object.
+            f.workspace_inventory();source_refused(f)
+        case("source-only.actual-committed-source",source_verified)
+        case("source-only.no-runtime-probe-authority",source_without_runtime)
+        case("source-only.forged-commit-object",lambda f:forged_object(f,"commit"))
+        case("source-only.forged-nested-tree-object",lambda f:forged_object(f,"nested-tree"))
+        def fsck_override(f):
+            git(f.repo,"config","fsck.missingEmail","ignore");f.workspace_inventory();source_refused(f)
+        case("source-only.repository-fsck-override-denied",fsck_override)
+        if "--source" in sys.argv:
+            print(json.dumps({"type":"cleanup","status":"complete"}),flush=True)
+            return bool(FAILED)
+
         case("packages.actual-npm-native-verification",lambda f:package_readiness(f,"npm"))
         case("packages.actual-pnpm-native-verification",lambda f:package_readiness(f,"pnpm"))
         case("packages.actual-npm-link-drift",lambda f:package_readiness(f,"npm","link"))
@@ -147,6 +191,23 @@ def main():
             r=subprocess.run(["git","-C",str(f.repo),"diff","--quiet","HEAD"],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             expect(r.returncode==0,"fixture did not exercise an actual Git index visibility bypass");f.refused("WORKSPACE_INVENTORY_INVALID")
         case("source.actual-index-flag-bypass",index_bypass)
+        def republished_index_drift(f,flag):
+            git(f.repo,"update-index",flag,"source.txt");(f.repo/"source.txt").write_text("different tracked bytes\n")
+            f.workspace_inventory();f.refused("SOURCE_MISMATCH")
+        case("source.republished-inventory-assume-unchanged",lambda f:republished_index_drift(f,"--assume-unchanged"))
+        case("source.republished-inventory-skip-worktree",lambda f:republished_index_drift(f,"--skip-worktree"))
+        def transformed_source(f):
+            (f.repo/"source.txt").write_bytes(b"pinned\r\n");f.workspace_inventory();f.refused("SOURCE_MISMATCH")
+        case("source.unapproved-eol-transformation",transformed_source)
+        def tracked_symlink(f,mutated=False):
+            (f.repo/"source-link").symlink_to("source.txt");git(f.repo,"add","source-link");git(f.repo,"commit","-qm","source symlink")
+            f.prep.profile["repositories"][0]["commit"]=git(f.repo,"rev-parse","HEAD");f.publish()
+            if mutated:
+                (f.repo/"source-link").unlink();(f.repo/"source-link").symlink_to("./source.txt");f.workspace_inventory();f.refused("SOURCE_MISMATCH")
+            else:f.ready()
+        case("source.tracked-internal-symlink",tracked_symlink)
+        case("source.republished-tracked-symlink-drift",lambda f:tracked_symlink(f,True))
+
         def root_config(f):
             (f.workspace/"package.json").write_text('{"name":"unexpected-ancestor-config"}');f.refused("WORKSPACE_INVENTORY_INVALID")
         case("source.ancestor-config-denied",root_config)
