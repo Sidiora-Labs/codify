@@ -1,12 +1,14 @@
+import { assertNoExecutionHold } from '../scheduler/claim.js';
 import { randomUUID } from 'node:crypto';
 import { assertInvocation } from '../transport/protocol.js';
 import type { InvocationContext, Principal } from '../transport/protocol.js';
 import type { Component, ComponentContext } from '../components/registry.js';
 import type { PrimaryTransaction } from '../storage/transactions.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
-import { fields,scope,uuid,integer,bounded,canonical,digest,eventDigest,event,fail,gateway,run,lockRun,enqueue,authorizedRun } from './outbox.js';
+import { fields,scope,uuid,integer,bounded,canonical,digest,eventDigest,event,fail,gateway,run,lockRun,enqueue,authorizedRun,lookupNativeLaunch } from './outbox.js';
 import type { Scope,OutboxEvent } from './outbox.js';
 import { receive } from './inbox.js';
+export { lookupNativeLaunch } from './outbox.js';
 
 interface Instruction extends Scope { id:string; attempt_id:string; attempt_generation:string;
   authority_epoch:string; sandbox_boot_generation:string; kind:'START'|'STEER'|'CANCEL'; body:Record<string,unknown> }
@@ -43,7 +45,7 @@ async function currentAuthority(tx:PrimaryTransaction,i:Instruction,allowExpired
   if(target.rowCount!==1) fail('INSTRUCTION_STALE_AUTHORITY','Attempt does not exist in this run');
   await tx.query('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
     [i.organisation_id,i.run_id,target.rows[0]!.task_id]);
-  const found=await tx.query(`SELECT a.*,r.authority_epoch AS current_epoch,t.current_attempt_id,t.generation AS current_generation,
+  const found=await tx.query(`SELECT a.*,r.authority_epoch AS current_epoch,t.current_attempt_id,t.generation AS current_generation,t.feature_package_id AS current_package_id,
     s.boot_generation AS current_boot,b.boot_id AS current_boot_id,l.state AS lease_state,l.expires_at AS observed_lease_expires_at
     FROM hyperfide.attempts a JOIN hyperfide.runs r ON(r.organisation_id=a.organisation_id AND r.id=a.run_id)
     JOIN hyperfide.tasks t ON(t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id)
@@ -53,23 +55,25 @@ async function currentAuthority(tx:PrimaryTransaction,i:Instruction,allowExpired
     WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3 FOR UPDATE OF a`,
     [i.organisation_id,i.run_id,i.attempt_id]);
   const a=found.rows[0];
-  const clock=await tx.query('SELECT clock_timestamp() AS checked_at');
-  const leaseUnexpired=a?.observed_lease_expires_at instanceof Date && a.observed_lease_expires_at.getTime()>(clock.rows[0]!.checked_at as Date).getTime();
   if(!a||a.current_attempt_id!==i.attempt_id||a.generation!==i.attempt_generation||a.current_generation!==i.attempt_generation||
       a.authority_epoch!==i.authority_epoch||a.current_epoch!==i.authority_epoch||
       a.sandbox_boot_generation!==i.sandbox_boot_generation||a.current_boot!==i.sandbox_boot_generation)
     fail('INSTRUCTION_STALE_AUTHORITY','Instruction target generation, epoch or sandbox boot is stale');
+  await assertNoExecutionHold(tx,i,{package_id:uuid(a.current_package_id),attempt_id:i.attempt_id,sandbox_id:uuid(a.sandbox_id),
+    operation:allowExpiredCancel?'CLEANUP':i.kind==='START'?'ADMISSION':i.kind==='STEER'?'ADVANCE':'CLEANUP'});
+  if(i.kind==='START'&&i.body.slot_id!==a.slot_id)
+    fail('INSTRUCTION_STALE_AUTHORITY','START slot does not match the current attempt placement');
+  const clock=await tx.query('SELECT clock_timestamp() AS checked_at');
+  const leaseUnexpired=a?.observed_lease_expires_at instanceof Date && a.observed_lease_expires_at.getTime()>(clock.rows[0]!.checked_at as Date).getTime();
   if(!allowExpiredCancel&&(a.compute_authority!=='CURRENT'||a.lease_state!=='ACTIVE'||!leaseUnexpired||
       !['PLANNED','RESERVED','PREPARING','START_REQUESTED','RUNNING'].includes(a.execution_state as string)))
     fail('INSTRUCTION_STALE_AUTHORITY','Current live compute authority is required');
-  if(i.kind==='START'&&i.body.slot_id!==a.slot_id)
-    fail('INSTRUCTION_STALE_AUTHORITY','START slot does not match the current attempt placement');
   const observed=clock.rows[0]!.checked_at as Date;
   const expiry=a.observed_lease_expires_at instanceof Date?a.observed_lease_expires_at:null;
   return {sandbox_id:uuid(a.sandbox_id),boot_id:uuid(a.current_boot_id),observed_at:observed.toISOString(),
     lease_expires_at:expiry?.toISOString()??null,
     remaining_lease_ms:a.compute_authority==='CURRENT'&&a.lease_state==='ACTIVE'&&expiry?
-      Math.min(300000,Math.max(0,Math.floor(expiry.getTime()-observed.getTime()))):0};
+      Math.min(300000,Math.max(0,Math.floor(expiry.getTime()-observed.getTime())-1)):0};
 }
 function bodyOf(i:Instruction,target:{sandbox_id:string;boot_id:string}):Record<string,unknown> {
   return {instruction_id:i.id,attempt_id:i.attempt_id,attempt_generation:i.attempt_generation,
@@ -104,6 +108,11 @@ export async function issue(tx:PrimaryTransaction,input:unknown):Promise<unknown
   if(i.kind==='STEER'&&!start) fail('INSTRUCTION_START_REQUIRED','STEER requires an existing logical START');
   if(i.kind==='START'&&history.rows.some(r=>r.event_type==='instruction.start'))
     fail('INSTRUCTION_START_EXISTS','This attempt already has a stable logical start command');
+  if(i.kind==='START') {
+    const priorLaunch=await tx.query("SELECT id FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND aggregate_type='attempt.instructions' AND event_type='instruction.start' AND payload->'body'->>'launch_id'=$3 LIMIT 1",
+      [i.organisation_id,i.run_id,uuid(i.body.launch_id)]);
+    if(priorLaunch.rows.length)fail('INSTRUCTION_LAUNCH_CONFLICT','One launch UUID cannot be attached to another logical START');
+  }
   const latest=await tx.query("SELECT aggregate_version FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND aggregate_type='attempt.instructions' AND aggregate_id=$3 ORDER BY aggregate_version DESC LIMIT 1",
     [i.organisation_id,i.run_id,i.attempt_id]);
   const version=latest.rows.length?(BigInt(latest.rows[0]!.aggregate_version as string)+1n).toString():'1';
@@ -240,7 +249,7 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
   if(pinned!==null&&v.observed_process!==null&&canonical(pinned)!==canonical(v.observed_process))
     fail('INSTRUCTION_ACK_CONFLICT','Stable command acknowledgement changed the pinned supervised process identity');
   const nextPinned=pinned??v.observed_process;
-  const nextState=newer?{...v,pinned_process:nextPinned}:{...prior,pinned_process:nextPinned};
+  const nextState=newer?{...v,pinned_process:nextPinned,credential_id:invocation.principal.credential_id}:{...prior,pinned_process:nextPinned};
   if(newer&&prior) {
     if(prior.state==='TERMINAL'&&v.state!=='TERMINAL'||prior.state!=='ACCEPTED'&&v.state==='ACCEPTED')
       fail('INSTRUCTION_ACK_REGRESSION','Runner observation cannot regress an established execution state');
@@ -260,15 +269,17 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
   return result;
 }
 
+
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
-  const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement})},actions:{
+  const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch})},actions:{
     'instructions.describe':()=>({schema_version:1,kinds:['START','STEER','CANCEL'],identity:'stable-command-UUID',
       bounds:{body_bytes:65536,outstanding:256},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),
     'instructions.issue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'],tx=>issue(tx,input)),
     'instructions.accept':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acceptInstruction(tx,input)),
     'instructions.handoff':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>handoff(tx,input,invocation.principal)),
     'instructions.replay':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>replayInstructions(tx,input)),
+    'instructions.lookup-native':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER','OPERATOR','COORDINATOR','DISPATCH'],(tx,invocation)=>lookupNativeLaunch(tx,input,invocation)),
     'instructions.ack':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>recordRunnerAcknowledgement(tx,input,invocation))
   }};
   return component;
