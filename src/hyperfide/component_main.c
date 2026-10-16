@@ -170,6 +170,11 @@ int main(int argc, char **argv) {
         free(request);
         return failure("INVALID_JSON", "Expected one JSON object");
     }
+    /* This registered lifetime service emits advisory JSONL while running.
+     * Finite component actions retain their single bounded result envelope. */
+    if (!strcmp(component,"12.1")&&!strcmp(action,"supervisor.serve")) {
+        int result=entry(action,request,stdout);free(request);return result;
+    }
     char *output = NULL;
     size_t output_length = 0;
     FILE *stream = open_memstream(&output, &output_length);

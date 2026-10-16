@@ -47,7 +47,7 @@ typedef struct {
  char cgroup_path[4096],evidence_digest[72];
  unsigned long long cpu_millis,memory_bytes,disk_bytes;
  int cpu_enforced,memory_enforced,disk_enforced,root_fd,scope_fd,child_attached,status;
- HfProcessIdentity attached;char reason[128];
+ HfProcessIdentity attached;uid_t slot_uid;gid_t slot_gid;char reason[128];
  dev_t root_dev,scope_dev;ino_t root_ino,scope_ino;
 } HfBudgetHandle;
 enum {HF_BUDGET_ERROR=-1,HF_BUDGET_UNAVAILABLE=0,HF_BUDGET_READY=1};
