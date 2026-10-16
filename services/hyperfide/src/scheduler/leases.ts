@@ -139,6 +139,23 @@ export async function releaseCompute(tx:PrimaryTransaction,token:ComputeToken,
     [token.organisation_id,token.slot_id]);
 }
 
+export async function lockComputeFenceTargets(tx:PrimaryTransaction,tokens:readonly ComputeToken[]):Promise<void>{
+ assertPrimaryTransaction(tx);
+ if(!Array.isArray(tokens)||tokens.length>10000)fail('INVALID_REQUEST','Compute fencing requires a bounded exact token set');
+ const ordered=tokens.map(parseComputeToken).sort((a,b)=>[a.organisation_id,a.run_id,a.slot_id,a.attempt_id].join(':').localeCompare([b.organisation_id,b.run_id,b.slot_id,b.attempt_id].join(':')));
+ const scopes=new Map(ordered.map(token=>[token.organisation_id+':'+token.run_id,token]));
+ for(const token of scopes.values())await lockRun(tx,token);
+ const pools=new Set<string>();
+ for(const token of ordered){
+  const row=await tx.query<{pool_id:string}>('SELECT pool_id FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[token.organisation_id,token.sandbox_id]);
+  if(row.rows[0])pools.add(token.organisation_id+':'+row.rows[0].pool_id+':resource-admission');
+ }
+ for(const pool of [...pools].sort())await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[pool]);
+ for(const token of ordered)await tx.query(
+  'SELECT a.id FROM hyperfide.slot_allocations a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.attempt_id=$3 AND a.attempt_generation=$4 ORDER BY a.id FOR UPDATE OF a,w',
+  [token.organisation_id,token.run_id,token.attempt_id,token.attempt_generation]);
+}
+
 export interface ComputeFenceOptions {
  actor:SchedulerActor;current_authority_epoch:string;reason:'SPEC_REPLAN'|'STOP'|'EXPIRED'|'LOST';recipients:{consumer_ids:string[]};
 }
@@ -147,9 +164,7 @@ export async function fenceCompute(tx:PrimaryTransaction,token:ComputeToken,opti
  if(!['SPEC_REPLAN','STOP','EXPIRED','LOST'].includes(options.reason))fail('INVALID_REQUEST','Unknown compute fence reason');
  const run=await tx.query<{authority_epoch:string}>('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[token.organisation_id,token.run_id]);
  if(run.rows[0]?.authority_epoch!==options.current_authority_epoch)fail('STALE_AUTHORITY_EPOCH','Fencing requires current run authority');
- await tx.query(
-  'SELECT a.id FROM hyperfide.slot_allocations a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.attempt_id=$3 AND a.attempt_generation=$4 ORDER BY a.id FOR UPDATE OF a,w',
-  [token.organisation_id,token.run_id,token.attempt_id,token.attempt_generation]);
+ await lockComputeFenceTargets(tx,[token]);
  const task=await tx.query<{current_attempt_id:string|null;generation:string;feature_package_id:string}>(
  'SELECT current_attempt_id,generation,feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
  [token.organisation_id,token.run_id,token.task_id]);
@@ -236,7 +251,7 @@ export async function revokeRunForRecovery(tx:PrimaryTransaction,input:Scheduler
 }
 
 export function createComponent(context:ComponentContext):Component{
-  return {apiVersion:1,capabilities:{'scheduler.compute.v1':Object.freeze({assertCurrentCompute,releaseCompute,renewCompute,fenceCompute,revokeRunForRecovery,parseComputeToken})},actions:{
+  return {apiVersion:1,capabilities:{'scheduler.compute.v1':Object.freeze({assertCurrentCompute,releaseCompute,renewCompute,fenceCompute,lockComputeFenceTargets,revokeRunForRecovery,parseComputeToken})},actions:{
     'scheduler.lease.renew':async (value,context)=>{
       const input=fields(value,['token','lease_ms']),token=parseComputeToken(input.token);
       return gatewayFor(context,tx=>assertCurrentCompute(tx,token,{operation:'RENEWAL'})).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
