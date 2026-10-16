@@ -28,6 +28,7 @@ export interface InvocationContext {
   readonly principal: Principal; readonly operation: Operation; readonly payload: InvokePayload;
   readonly signal: AbortSignal;
   readonly guard: (tx: AuthorityTransaction) => Promise<void>;
+  readonly continuationGuard:(tx:AuthorityTransaction,validatePersistedAdmission:(tx:AuthorityTransaction,invocation:InvocationContext)=>Promise<void>)=>Promise<void>;
   readonly identityGuard: (tx: AuthorityTransaction) => Promise<void>;
 }
 export interface EnrollmentPayload {

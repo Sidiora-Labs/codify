@@ -67,6 +67,7 @@ export class ComponentRegistry {
     this.resourceView=Object.freeze({
       gateway:Object.freeze(this.resources.gateway) as typeof this.resources.gateway,
       observe:this.resources.observe.bind(this.resources),
+      withReplicaConnection:this.resources.withReplicaConnection.bind(this.resources),
       withMigrationConnection:this.resources.withMigrationConnection.bind(this.resources),
       withListener:this.resources.withListener.bind(this.resources),
       describe:this.resources.describe.bind(this.resources),
