@@ -8,38 +8,61 @@
     "V-034"
   ],
   "assertion_ids": [
-    "assurance.16.1.auth.submission.submit",
-    "assurance.16.1.auth.submission.revoke",
-    "assurance.16.1.auth.submission.inspect",
+    "assurance.16.1.auth.absent.submission.submit",
+    "assurance.16.1.auth.forged.submission.submit",
+    "assurance.16.1.auth.absent.submission.revoke",
+    "assurance.16.1.auth.forged.submission.revoke",
+    "assurance.16.1.auth.absent.submission.inspect",
+    "assurance.16.1.auth.forged.submission.inspect",
     "assurance.16.1.primary.unbranded-denied",
     "assurance.16.1.schema.applied",
     "assurance.16.1.history.no-authority",
     "assurance.16.1.history.immutable-update",
     "assurance.16.1.history.immutable-delete",
-    "assurance.16.1.history.preserved"
+    "assurance.16.1.history.preserved",
+    "assurance.16.1.https.signed-missing",
+    "assurance.16.1.https.cross-scope",
+    "assurance.16.1.https.wrong-role",
+    "assurance.16.1.https.no-authority",
+    "assurance.16.1.semantic.fresh",
+    "assurance.16.1.semantic.cached",
+    "assurance.16.1.semantic.upgrade-refused"
   ],
   "argv": [
     "python3",
     "tests/hyperfide/cases/tasks/16_1.py"
   ],
-  "timeout_seconds": 180,
+  "timeout_seconds": 300,
   "required_env": [
     "PGHOST",
     "PGPORT",
-    "PGUSER"
+    "PGUSER",
+    "DATABASE_URL"
   ],
   "fixtures": [
     "services/hyperfide/dist/assurance/submission.js",
     "services/hyperfide/dist/assurance/executor.js",
     "services/hyperfide/dist/assurance/coverage.js",
     "services/hyperfide/dist/assurance/validity.js",
-    "services/hyperfide/dist/storage/transactions.js"
+    "services/hyperfide/dist/storage/transactions.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/storage/dispositions.js"
   ],
   "resources": [
     {
       "id": "hf-task-16.1-database",
       "kind": "postgresql-database",
       "scope": "task16.1-disposable"
+    },
+    {
+      "id": "hf-task-16.1-signed-database",
+      "kind": "postgresql-database",
+      "scope": "task16.1-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.1-signed-service",
+      "kind": "https-service",
+      "scope": "task16.1-signed-disposable"
     }
   ],
   "cleanup_argv": [
@@ -50,7 +73,8 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "assurance/observations-16.1.json",
-    "assurance/database-absence-16.1.json"
+    "assurance/database-absence-16.1.json",
+    "assurance/signed-absence-16.1.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -72,7 +96,8 @@
     "tests/hyperfide/cases/tasks/16_4.py",
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
-    "tests/hyperfide/qualify.py"
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -82,6 +107,8 @@
   ],
   "actions": [
     "postgresql.fixture.create",
-    "postgresql.fixture.drop"
+    "postgresql.fixture.drop",
+    "https.fixture.start",
+    "https.fixture.stop"
   ]
 }

@@ -5,6 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
+import {assertInvocation} from '../transport/protocol.js';
 
 export type Data=Record<string,any>;
 export const INPUT_KEYS=['source','dependency','toolchain','configuration','graph','contract'] as const;
@@ -33,8 +34,7 @@ export function digest(value:unknown):string{
 }
 export function invocation(ctx:ComponentContext):Data{
  const value=(ctx as unknown as Data).invocation;
- if(!value?.principal||typeof value.guard!=='function'||typeof value.identityGuard!=='function')
-  fail('AUTH_REQUIRED','Authenticated request invocation is required');
+ assertInvocation(value);
  return value;
 }
 export function roles(ctx:ComponentContext,allowed:string[]):Data{
@@ -53,14 +53,20 @@ export type PrimaryClient=Pick<pg.PoolClient,'query'>;
 export async function assuranceBarrier(db:PrimaryClient,s:{organisation_id:string;run_id:string},mode:'SHARED'|'EXCLUSIVE'):Promise<void>{
  try{const name='../storage/transactions.js',module=await import(name) as Data;module.assertPrimaryTransaction(db);}
  catch{fail('QUALIFICATION_PRIMARY_REQUIRED','A live server-owned primary transaction is required');}
+ let dispositions:Data;
+ try{const source='../storage/dispositions.js';dispositions=await import(source) as Data;}
+ catch{fail('QUALIFICATION_SEMANTIC_FENCE_REQUIRED','The actual shared semantic disposition fence is required');}
+ const fence=mode==='EXCLUSIVE'?dispositions!.writeSemanticDisposition:dispositions!.readSemanticDisposition;
+ if(typeof fence!=='function')fail('QUALIFICATION_SEMANTIC_FENCE_REQUIRED','The actual shared semantic disposition fence is required');
+ await fence(db,s);
  await db.query(mode==='EXCLUSIVE'?'SELECT pg_advisory_xact_lock(hashtextextended($1,0))':'SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);
 }
-export async function transaction<T>(ctx:ComponentContext,operation:(client:PrimaryClient)=>Promise<T>,identityOnly=false):Promise<T>{
+export async function transaction<T>(ctx:ComponentContext,operation:(client:PrimaryClient)=>Promise<T>,identityOnly=false,mode:'READ'|'WRITE'='WRITE'):Promise<T>{
  const inv=invocation(ctx),gateway=(ctx as unknown as Data).resources?.gateway;
  if(!gateway||typeof gateway.withPrimaryTransaction!=='function')
   fail('QUALIFICATION_STORAGE_CAPABILITY_REQUIRED','Primary transaction gateway capability is required');
  try{
-  return await gateway.withPrimaryTransaction({timeoutMs:30000,maxRetries:0,signal:inv.signal,guard:async(tx:PrimaryClient)=>{await assuranceBarrier(tx,{organisation_id:inv.principal.organisation_id,run_id:inv.principal.run_id},'EXCLUSIVE');return identityOnly?inv.identityGuard(tx):inv.guard(tx);}},operation) as T;
+  return await gateway.withPrimaryTransaction({timeoutMs:30000,maxRetries:0,signal:inv.signal,guard:async(tx:PrimaryClient)=>{await assuranceBarrier(tx,{organisation_id:inv.principal.organisation_id,run_id:inv.principal.run_id},mode==='WRITE'?'EXCLUSIVE':'SHARED');return identityOnly?inv.identityGuard(tx):inv.guard(tx);}},operation) as T;
  }catch(error){
   if(error instanceof FoundationError)throw error;
   const code=object(error)?String(error.code):'';
@@ -210,10 +216,10 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
  new Set(v.contract_digests).size!==v.contract_digests.length)fail('QUALIFICATION_INPUT_INVALID','Immutable source and contract identities required');
  const requestDigest=hash(v);
  // Lost-response replay precedes compute and object checks: released compute never erases admitted custody.
- const prior=await transaction(ctx,db=>db.query('SELECT request_digest,custody_id FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,v.request_id]),true);
+ const prior=await transaction(ctx,db=>db.query('SELECT request_digest,custody_id FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,v.request_id]),true,'READ');
  if(prior.rows[0]){
   if(prior.rows[0].request_digest!==requestDigest)fail('QUALIFICATION_IDEMPOTENCY_CONFLICT','Request identity already binds different submission bytes');
-  const c=await transaction(ctx,db=>db.query('SELECT id,custody_generation::text,authority,qualification_outcome FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...s,prior.rows[0].custody_id]),true);
+  const c=await transaction(ctx,db=>db.query('SELECT id,custody_generation::text,authority,qualification_outcome FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...s,prior.rows[0].custody_id]),true,'READ');
   return {submission:c.rows[0],replayed:true,qualification:'PENDING_OR_RECORDED'};
  }
  try{
@@ -300,7 +306,7 @@ async function submit(ctx:ComponentContext,raw:unknown):Promise<Data>{
   // A concurrent identical submit may release compute while this request is reading its artifacts.
   // Reconcile the committed immutable identity before reporting a preflight/lease failure.
   const replay=await transaction(ctx,db=>db.query(
-   'SELECT s.request_digest,c.id,c.custody_generation::text,c.authority,c.qualification_outcome,j.id AS job_id FROM hyperfide.assurance_submissions s JOIN hyperfide.submission_custodies c ON c.organisation_id=s.organisation_id AND c.run_id=s.run_id AND c.id=s.custody_id LEFT JOIN hyperfide.qualification_jobs j ON j.organisation_id=c.organisation_id AND j.run_id=c.run_id AND j.custody_id=c.id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.request_id=$3 ORDER BY j.created_at LIMIT 1',[...s,v.request_id]),true);
+   'SELECT s.request_digest,c.id,c.custody_generation::text,c.authority,c.qualification_outcome,j.id AS job_id FROM hyperfide.assurance_submissions s JOIN hyperfide.submission_custodies c ON c.organisation_id=s.organisation_id AND c.run_id=s.run_id AND c.id=s.custody_id LEFT JOIN hyperfide.qualification_jobs j ON j.organisation_id=c.organisation_id AND j.run_id=c.run_id AND j.custody_id=c.id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.request_id=$3 ORDER BY j.created_at LIMIT 1',[...s,v.request_id]),true,'READ');
   if(!replay.rows[0])throw error;
   const row=replay.rows[0];
   if(row.request_digest!==requestDigest)fail('QUALIFICATION_IDEMPOTENCY_CONFLICT','Request identity already binds different submission bytes');
@@ -387,7 +393,7 @@ export function createComponent(ctx:ComponentContext):Component & {capabilities:
   'submission.inspect':async(raw,requestContext)=>{
    const ctx=requestContext;
    const v=fields(raw,['organisation_id','run_id','submission_id']),s=scope(ctx,v),id=uuid(v.submission_id);
-   const c=await transaction(ctx,db=>db.query('SELECT c.*,a.applicability,a.current_receipt_digest FROM hyperfide.submission_custodies c LEFT JOIN hyperfide.assurance_applicability a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.custody_id=c.id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3',[...s,id]));
+   const c=await transaction(ctx,db=>db.query('SELECT c.*,a.applicability,a.current_receipt_digest FROM hyperfide.submission_custodies c LEFT JOIN hyperfide.assurance_applicability a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.custody_id=c.id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3',[...s,id]),false,'READ');
    if(!c.rows[0])fail('QUALIFICATION_NOT_FOUND','Submission not found');return c.rows[0];
   }
  }};
