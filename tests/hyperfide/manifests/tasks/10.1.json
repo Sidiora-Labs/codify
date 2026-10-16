@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-10.1-blaxel-images-integration-v4",
+  "campaign_id": "hyperfide-task-10.1-blaxel-images-integration-v5",
   "registered_variant": "task:10.1",
   "scope": "task-component",
   "case_ids": [
