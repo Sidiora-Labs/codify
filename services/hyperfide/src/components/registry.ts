@@ -3,6 +3,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FoundationError, object, assertAdmission } from '../policy/programme.js';
 import type { ProgrammePolicy, ServiceRole } from '../policy/programme.js';
+import type {InvocationContext} from '../transport/protocol.js';
+import {assertInvocation} from '../transport/protocol.js';
 import {createResourceContainer} from '../storage/runtime.js';
 import type {ResourceContainer,ServiceResources} from '../storage/runtime.js';
 
@@ -16,6 +18,7 @@ export interface CapabilityResolver {
   require<T>(component:string,capability:string,validate:(value:unknown)=>value is T):T;
 }
 export interface ComponentContext extends StartupContext {
+  readonly invocation?:InvocationContext;
   readonly resources:ServiceResources;
   readonly dependencies:CapabilityResolver;
 }
@@ -163,13 +166,27 @@ export class ComponentRegistry {
     return { role: this.context.role, interface_version: 1, components: this.order
       .filter(id => this.instances.has(id)).map(id => ({ id, actions: [...this.declarations.get(id)!.actions] })) };
   }
-  async invoke(id: string, action: string, input: unknown): Promise<unknown> {
+  hasComponent(id:string):boolean{return this.instances.has(id);}
+  private invocationAuthorizer:((invocation:InvocationContext)=>Promise<void>)|undefined;
+  installInvocationAuthorizer(authorize:(invocation:InvocationContext)=>Promise<void>):void {
+    if(this.invocationAuthorizer)invalid("Invocation authorizer already installed");
+    this.invocationAuthorizer=authorize;
+  }
+  async invoke(id: string, action: string, input: unknown, invocation?:InvocationContext): Promise<unknown> {
     if (this.closed) throw new FoundationError('HANDLER_FAILED', 'Registry is closed');
     const component = this.instances.get(id);
     if (!component) throw new FoundationError('UNKNOWN_COMPONENT', 'Component is unavailable in this service role');
     if (!Object.hasOwn(component.actions, action)) throw new FoundationError('UNKNOWN_ACTION', 'Unknown component action');
     assertAdmission(this.context.policy, this.context.role, action);
-    return component.actions[action]!(input, this.contexts.get(id)!);
+    if(this.instances.has("14.1")) {
+      if(!invocation||!this.invocationAuthorizer)throw new FoundationError("AUTH_REQUIRED","Authenticated invocation required");
+      assertInvocation(invocation);
+      if(invocation.payload.component!==id||invocation.payload.action!==action||invocation.payload.input!==input)
+        throw new FoundationError("AUTH_SCOPE_DENIED","Invocation dispatch binding mismatch");
+      await this.invocationAuthorizer(invocation);
+    }
+    const context=this.contexts.get(id)!;
+    return component.actions[action]!(input, invocation?Object.freeze({...context,invocation}):context);
   }
   async close(): Promise<void> {
     if (this.closed) return;
