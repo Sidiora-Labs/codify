@@ -45,6 +45,17 @@ def main():
         f.stop();f.start()
         check("identity.restart.no-reactivation",lambda:expect(f.request(f.operation("14.1","identity.describe",{}),key="runner",credential=credential)[1].get("ok") is False,"restart reactivated quarantined identity"))
         check("identity.secret.absent-database",lambda:expect(b64(f.secret) not in json.dumps(f.sql("SELECT row_to_json(g) AS value FROM hyperfide.identity_enrollment_grants g")),"reusable grant secret persisted"))
+        watcher=f.add_principal("watcher","COMMIT_WATCHER")
+        check("identity.fixture.registered-watcher",lambda:expect(f.invoke("identity.describe",{},key="watcher")[1].get("result",{}).get("principal",{}).get("actor_id")==watcher["actor_id"],"registered watcher actor binding failed"))
+        check("identity.fixture.reviewer-no-compute-attempt",lambda:expect(f.invoke("identity.describe",{},key="watcher")[1].get("result",{}).get("principal",{}).get("attempt_id") is None,"reviewer inherited coding compute attempt"))
+        def existing_database():
+            try:
+                other=IdentityFixture(database=f.database)
+            except AssertionError:
+                expect(f.invoke("identity.describe",{})[1].get("ok") is True,"failed constructor removed a pre-existing database")
+            else:
+                other.close();raise AssertionError("pre-existing database was accepted")
+        check("identity.fixture.database-ownership",existing_database)
         check("identity.shutdown.orderly",lambda:f.stop())
     finally:fixture.close()
     return int(any(actual!="observed" for _,actual in RESULTS))
