@@ -20,6 +20,9 @@ STAGES = [(1, 2), (10, 20), (25, 50), (50, 100), (100, 200)]
 CONNECTORS = {"codex", "claude_code"}
 PROVIDERS = {"railway", "blaxel"}
 WORKLOADS = {"graph", "build", "test", "review", "integration"}
+# Normative verification.md S3: V036-V041 for EACH provider; V050 is48h.
+PROVIDER_CASES = {"V-036", "V-037", "V-038", "V-039", "V-040", "V-041"}
+PRIOR_48_CASES = {"V-050"}
 
 
 def validate_live(manifest):
@@ -137,7 +140,7 @@ def run(path, evidence):
     common.require({"PROVIDER_READER", "DURABLE_READER", "NATIVE_READER", "MAIN_HOST_AUDITOR"} <= set(trust["roles"]), "live observer must hold every independently approved reader role")
     if profile["duration_hours"] == 72:
         pin = manifest["inputs"]["prior48"][0]
-        common.anchored_full_receipt({"pin": pin, "trusted_anchor_sha256": pin["sha256"]}, manifest, root, "prior48", policy={"campaign_kind": "LIVE_CAMPAIGN", "duration_hours": 48})
+        common.anchored_full_receipt({"pin": pin, "trusted_anchor_sha256": pin["sha256"]}, manifest, root, "prior48", policy={"campaign_kind": "LIVE_CAMPAIGN", "duration_hours": 48}, required_cases=PRIOR_48_CASES)
     directory = Path(evidence) / (manifest["campaign_id"] + "-" + str(uuid.uuid4()))
     directory.mkdir(parents=True, mode=0o700)
     common.sealed_write(directory / "manifest.json", manifest)
@@ -155,7 +158,7 @@ def run(path, evidence):
             canary, _ = adapters["observer"].call(request)
             common.verify_observation(canary, manifest, root, request, {"PROVIDER_READER", "NATIVE_READER"})
             common.require(canary.get("provider") == provider, "observed canary provider mismatch")
-            common.anchored_full_receipt(canary.get("qualification_receipt"), manifest, root, "provider_canaries", directory / "canary-checks", {"provider": provider, "campaign_kind": "PROVIDER_CANARY"})
+            common.anchored_full_receipt(canary.get("qualification_receipt"), manifest, root, "provider_canaries", directory / "canary-checks", {"provider": provider, "campaign_kind": "PROVIDER_CANARY"}, PROVIDER_CASES)
         previous = None
         for sandbox_count, session_count in STAGES:
             adapters["control"].call({"operation": "start_stage", "campaign_id": run_id, "sandboxes": sandbox_count, "sessions": session_count, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"]})

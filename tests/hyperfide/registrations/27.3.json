@@ -49,8 +49,13 @@
     "campaign.live.reader-proof-required",
     "campaign.live.approved-trust-reference-required",
     "campaign.live.same-controller-reader-rejected",
+    "campaign.live.numeric-authority-epoch-rejected",
+    "campaign.live.scope-identities-require-uuid",
     "campaign.live.verification-key-pin-tamper",
     "campaign.live.missing-durable-reader-role",
+    "campaign.live.prior48-must-cover-V050",
+    "campaign.live.provider-canary-cannot-omit-lifecycle",
+    "campaign.live.complete-required-case-coverage",
     "campaign.live.no-implicit-execution"
   ],
   "cases": [

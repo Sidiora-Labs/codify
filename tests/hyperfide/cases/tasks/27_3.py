@@ -86,7 +86,7 @@ def run():
         subprocess.run([str(openssl),'pkey','-in',str(key),'-pubout','-out',str(public)],check=True,capture_output=True)
         def pin(path):
             data=Path(path).read_bytes();return {'path':str(path),'sha256':d.digest(data),'size':len(data)}
-        trust={'schema_version':1,'controller_id':'component-controller','observer_id':'component-reader','key_id':'component-public-key','roles':['DURABLE_READER','MAIN_HOST_AUDITOR','NATIVE_READER','PROVIDER_READER'],'scope':{'organisation_id':'component-org','run_id':'component-run','authority_epoch':1},'public_key':pin(public),'verifier_executable':pin(openssl)}
+        trust={'schema_version':1,'controller_id':'component-controller','observer_id':'component-reader','key_id':'component-public-key','roles':['DURABLE_READER','MAIN_HOST_AUDITOR','NATIVE_READER','PROVIDER_READER'],'scope':{'organisation_id':'33333333-3333-4333-8333-333333333333','run_id':'44444444-4444-4444-8444-444444444444','authority_epoch':'11111111-1111-4111-8111-111111111111'},'public_key':pin(public),'verifier_executable':pin(openssl)}
         trust_path=root/'component-trust.json';trust_path.write_bytes(d.canonical(trust))
         approved=copy.deepcopy(m);approved['inputs']['observer_trust']=[pin(trust_path)]
         request={'operation':'observe','campaign_id':'component-only','nonce':'unique-component-request','source_revision':m['source_revision'],'source_manifest_digest':m['source_manifest_digest']}
@@ -106,7 +106,7 @@ def run():
         bad=copy.deepcopy(observed);bad['provenance']['signature_hex']='0'*128
         check('campaign.live.invalid-actual-signature',lambda:reject(lambda:verify(bad)))
         check('campaign.live.unapproved-signed-reader',lambda:reject(lambda:verify(signed({'reader_id':'component-controller'}))))
-        check('campaign.live.wrong-signed-scope',lambda:reject(lambda:verify(signed({'scope':{**trust['scope'],'authority_epoch':2}}))))
+        check('campaign.live.wrong-signed-scope',lambda:reject(lambda:verify(signed({'scope':{**trust['scope'],'authority_epoch':'22222222-2222-4222-8222-222222222222'}}))))
         check('campaign.live.wrong-signed-source',lambda:reject(lambda:verify(signed({'source_revision':'c'*40}))))
         check('campaign.live.wrong-signed-repositories',lambda:reject(lambda:verify(signed({'source_manifest_digest':'sha256:'+'c'*64}))))
         check('campaign.live.signed-replay-other-request',lambda:reject(lambda:verify(challenge={**request,'nonce':'different-component-request'})))
@@ -116,11 +116,20 @@ def run():
         same=copy.deepcopy(trust);same['observer_id']=same['controller_id'];trust_path.write_bytes(d.canonical(same));same_manifest=copy.deepcopy(approved);same_manifest['inputs']['observer_trust']=[pin(trust_path)]
         check('campaign.live.same-controller-reader-rejected',lambda:reject(lambda:d.observer_trust(same_manifest,root)))
         trust_path.write_bytes(d.canonical(trust))
+        numeric=copy.deepcopy(trust);numeric['scope']['authority_epoch']=1;trust_path.write_bytes(d.canonical(numeric));numeric_manifest=copy.deepcopy(approved);numeric_manifest['inputs']['observer_trust']=[pin(trust_path)]
+        check('campaign.live.numeric-authority-epoch-rejected',lambda:reject(lambda:d.observer_trust(numeric_manifest,root)))
+        trust_path.write_bytes(d.canonical(trust))
+        non_uuid=copy.deepcopy(trust);non_uuid['scope']['organisation_id']='component-org';trust_path.write_bytes(d.canonical(non_uuid));non_uuid_manifest=copy.deepcopy(approved);non_uuid_manifest['inputs']['observer_trust']=[pin(trust_path)]
+        check('campaign.live.scope-identities-require-uuid',lambda:reject(lambda:d.observer_trust(non_uuid_manifest,root)))
+        trust_path.write_bytes(d.canonical(trust))
         changed=public.read_bytes();public.write_bytes(changed+b'\n')
         check('campaign.live.verification-key-pin-tamper',lambda:reject(lambda:verify()))
         public.write_bytes(changed)
         reduced=copy.deepcopy(trust);reduced['roles']=['PROVIDER_READER'];trust_path.write_bytes(d.canonical(reduced));limited=copy.deepcopy(approved);limited['inputs']['observer_trust']=[pin(trust_path)]
         check('campaign.live.missing-durable-reader-role',lambda:reject(lambda:verify(selected=limited)))
+    check('campaign.live.prior48-must-cover-V050',lambda:reject(lambda:d.require_case_coverage({'selected_case_ids':['V-001']},live.PRIOR_48_CASES)))
+    check('campaign.live.provider-canary-cannot-omit-lifecycle',lambda:reject(lambda:d.require_case_coverage({'selected_case_ids':['V-036','V-037','V-038','V-039','V-040']},live.PROVIDER_CASES)))
+    check('campaign.live.complete-required-case-coverage',lambda:d.require_case_coverage({'selected_case_ids':sorted(live.PROVIDER_CASES|live.PRIOR_48_CASES)},live.PROVIDER_CASES|live.PRIOR_48_CASES))
     command=subprocess.run([sys.executable,str(ROOT/'tests/hyperfide/campaigns/live.py'),'--manifest','missing','--evidence','unused'],capture_output=True,text=True)
     check('campaign.live.no-implicit-execution',lambda:command.returncode==2 and 'BLOCKED'in command.stderr)
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}))

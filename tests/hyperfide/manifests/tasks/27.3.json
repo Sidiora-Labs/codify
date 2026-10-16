@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-3-v2",
+  "campaign_id": "hyperfide-driver-component-27-3-v3",
   "case_ids": [
     "V-036",
     "V-037",
@@ -66,8 +66,13 @@
     "campaign.live.reader-proof-required",
     "campaign.live.approved-trust-reference-required",
     "campaign.live.same-controller-reader-rejected",
+    "campaign.live.numeric-authority-epoch-rejected",
+    "campaign.live.scope-identities-require-uuid",
     "campaign.live.verification-key-pin-tamper",
     "campaign.live.missing-durable-reader-role",
+    "campaign.live.prior48-must-cover-V050",
+    "campaign.live.provider-canary-cannot-omit-lifecycle",
+    "campaign.live.complete-required-case-coverage",
     "campaign.live.no-implicit-execution"
   ],
   "inputs": [
@@ -93,18 +98,18 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "f45deed3643f1e74b542e480666049c5d68627679cfe64e8e5ac7e6ff7eefcee",
-      "size": 38730
+      "sha256": "f2606c0f64787c5a5ab8bb13e08b8aafdb4230f083dd45987596eab92ee61577",
+      "size": 44458
     },
     {
       "path": "tests/hyperfide/campaigns/live.py",
-      "sha256": "44f1e3dc4c69ccb6e49d4add1d3f8bc8fb03b94530d5a1257ec5c50b65386ab1",
-      "size": 18222
+      "sha256": "d8de80d861b90a86f45766d0a98cbfbdbb999ca135f56d04f4612fde54495314",
+      "size": 18441
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_3.py",
-      "sha256": "8695d876c992bb71b4d96d759e8d32da3fae4d93f2a04eb7e1a6e20836a6166c",
-      "size": 13487
+      "sha256": "4139a234cbd82c53f35838493134f034bc86b6d02de05edaf5e08622cc7298bb",
+      "size": 14973
     }
   ],
   "policy": {
