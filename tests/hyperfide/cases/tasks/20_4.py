@@ -15,7 +15,7 @@ IDS=["decision.jobs.authenticated-submit","decision.jobs.no-wire-authority","dec
 "decision.jobs.stale-admission","decision.jobs.stale-completion","decision.jobs.cancel-queued",
 "decision.jobs.cancel-running","decision.jobs.restart-queued","decision.jobs.expired-queue",
 "decision.jobs.synthetic-receipt","decision.jobs.no-authority-effects","decision.jobs.completed-audit-freshness",
-"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline"]
+"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline"]
 def expect(v,msg):
  if not v:raise AssertionError(msg)
 def uid():return str(uuid.uuid4())
@@ -53,7 +53,7 @@ def capprofile():
 LOADER="""import {assertInvocation} from './transport/protocol.js';
 export function createComponent(ctx){
  const jobs=ctx.dependencies.require('20.4','decision.jobs.v1',v=>v&&typeof v.registerPurpose==='function'&&typeof v.completedAudit==='function');
- const current=async(tx,s,p,i)=>{assertInvocation(i);await i.guard(tx);const delay=(await tx.query('SELECT seconds FROM public.fixture_decision_delay')).rows[0].seconds;if(delay>0)await tx.query('SELECT pg_sleep($1)',[delay]);const r=(await tx.query('SELECT spec_revision_id,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id])).rows[0];
+ const current=async(tx,s,p,i)=>{assertInvocation(i);await i.guard(tx);const delay=(await tx.query('SELECT seconds,after_response FROM public.fixture_decision_delay')).rows[0];const completed=delay.after_response?(await tx.query('SELECT count(*)::int n FROM hyperfide.decision_attempts WHERE finished_at IS NOT NULL')).rows[0].n:1;if(delay.seconds>0&&completed>0)await tx.query('SELECT pg_sleep($1)',[delay.seconds]);const r=(await tx.query('SELECT spec_revision_id,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id])).rows[0];
  return {spec_revision:r.spec_revision_id,repository_commits:{},graph_revision:null,contract_revisions:{},event_watermark:'fixture-run:'+r.state_version,ownership_generation:String(r.state_version)};};
  jobs.registerPurpose('fixture-review',{current,load:async(tx,i,input)=>{assertInvocation(i);await i.guard(tx);if(!input||Object.keys(input).join(',')!=='packet_id')throw Error('fixture input schema');
  const r=(await tx.query('SELECT packet FROM public.fixture_decision_packets WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[i.principal.organisation_id,i.principal.run_id,input.packet_id])).rows[0];if(!r)throw Error('fixture packet absent');
@@ -69,7 +69,7 @@ class Fixture(identity.IdentityFixture):
   self.provider=provider or Provider();self.second=second;self.owned=provider is None;self.settings=settings or {};self.signer=signer
   def setup(f):
    f.sql((ROOT/"services/hyperfide/migrations/0020-decision-jobs.sql").read_text())
-   f.sql("CREATE TABLE public.fixture_decision_delay(seconds double precision); INSERT INTO public.fixture_decision_delay VALUES(0)")
+   f.sql("CREATE TABLE public.fixture_decision_delay(seconds double precision,after_response boolean NOT NULL DEFAULT false); INSERT INTO public.fixture_decision_delay(seconds) VALUES(0)")
    f.sql("CREATE TABLE public.fixture_decision_packets(organisation_id uuid,run_id uuid,id uuid,packet jsonb,PRIMARY KEY(organisation_id,run_id,id))")
    f.runtime=f.path/"runtime";shutil.copytree(ROOT/"services/hyperfide/dist",f.runtime/"dist");shutil.copytree(ROOT/"services/hyperfide/migrations",f.runtime/"migrations")
    (f.runtime/"package.json").write_text('{"type":"module"}');(f.runtime/"node_modules").symlink_to(ROOT/"services/hyperfide/node_modules",target_is_directory=True)
@@ -257,8 +257,8 @@ def main():
  def stale_admission(f,p,o):
   pack=f.packet();f.advance();f.reject("decision.jobs.submit",f.submission(pack),"DECISION_STALE");expect(not p.received,"stale admission sent")
  def stale_completion(f,p,o):
-  id=f.submit();box=[];t=threading.Thread(target=lambda:box.append(f.process(id)));t.start();expect(p.arrived.wait(5),"no provider request");f.advance();p.release.set();t.join(5)
-  expect(box and box[0]["result"]["payload"]["status"]=="abstained"and box[0]["result"]["payload"]["rejection_reason"]=="stale-at-completion","stale result not refused")
+  id=f.submit(mode="background",deadline_ms=10000);box=[];t=threading.Thread(target=lambda:box.append(f.process(id)));t.start();expect(p.arrived.wait(5),"no provider request");f.advance();p.release.set();t.join(5)
+  expect(box and box[0]["result"]["payload"]["status"]=="abstained"and box[0]["result"]["payload"]["rejection_reason"]=="stale-at-completion","stale result not refused: "+json.dumps(box))
  def cancel_queued(f,p,o):
   id=f.submit();f.call("decision.jobs.cancel",{"decision_id":id});expect(f.status(id)["state"]=="CANCELLED"and not p.received,"queued cancellation sent")
  def cancel_running(f,p,o):
@@ -267,7 +267,7 @@ def main():
  def restart(f,p,o):
   id=f.submit(mode="background",deadline_ms=10000);f.stop();f.start();expect(f.process(id)["state"]=="COMPLETED"and len(p.received)==1,"durable queued work lost/repeated")
  def expired(f,p,o):
-  id=f.submit(deadline_ms=1);time.sleep(.03);v=f.process(id);expect(v["state"]=="EXPIRED"and not p.received,"expired queue sent")
+  id=f.submit(deadline_ms=1000);time.sleep(1.05);v=f.process(id);expect(v["state"]=="EXPIRED"and not p.received,"expired queue sent")
  def slow_freshness(f,p,o):
   id=f.submit();f.sql("UPDATE public.fixture_decision_delay SET seconds=3")
   started=time.monotonic();f.reject("decision.jobs.process",{"decision_id":id},"TX_TIMEOUT")
@@ -285,21 +285,29 @@ def main():
   f.start();time.sleep(2.1);v=f.process(id)
   expect(v["state"]in("EXPIRED","COMPLETED")and len(v["attempts"])==1 and len(p.received)==1,"restart lost or resent uncertain inflight work")
  def completion_deadline(f,p,o):
+  f.sql("UPDATE public.fixture_decision_delay SET seconds=3,after_response=true")
   id=f.submit()
-  p.on_reply=lambda:f.sql("UPDATE public.fixture_decision_delay SET seconds=3")
   started=time.monotonic();v=f.process(id)
-  expect(time.monotonic()-started<3 and v["state"]=="EXPIRED"and v["result"]["payload"]["status"]=="expired","slow completion freshness escaped total job deadline")
-  expect(len(p.received)==1 and v["result"]["payload"]["raw_output"]["answers"]["urgent"]["noul"]==.8,"expired completion lost bounded raw response")
+  expect(time.monotonic()-started<3 and v["state"]=="EXPIRED"and v["result"]["payload"]["status"]=="expired","slow completion freshness escaped total job deadline: "+json.dumps(v))
+  expect(len(p.received)==1 and v["result"]["payload"]["raw_output"].get("answers",{}).get("urgent",{}).get("noul")==.8,"expired completion lost bounded raw response: "+json.dumps(v["result"]))
+ def admission_deadline(f,p,o):
+  inp=f.submission();f.sql("UPDATE public.fixture_decision_delay SET seconds=3")
+  started=time.monotonic();f.reject("decision.jobs.submit",inp,"TX_TIMEOUT")
+  expect(time.monotonic()-started<3 and not p.received,"slow packet admission exceeded total deadline")
+  expect(f.sql("SELECT count(*)::int n FROM hyperfide.decision_jobs")[0]["n"]==0,"timed out admission committed a job")
  def account_quota(f,p,o):
-  f.process(f.submit());v=f.process(f.submit(route_ids=["jev-native"]))
-  expect(len(p.received)==1 and not o.received and v["result"]["payload"]["rejection_reason"]=="DECISION_RATE_LIMIT","routes sharing one account bypassed its global quota")
+  # Both sends must fall inside one real fixed-minute quota window.
+  until_next=60-time.time()%60
+  if until_next<6:time.sleep(until_next+.05)
+  f.process(f.submit(mode="background",deadline_ms=10000));v=f.process(f.submit(route_ids=["jev-native"],mode="background",deadline_ms=10000))
+  expect(len(p.received)==1 and not o.received and v["result"]["payload"]["rejection_reason"]=="DECISION_RATE_LIMIT","routes sharing one account bypassed its global quota: "+json.dumps({"first_sends":len(p.received),"second_sends":len(o.received),"result":v["result"]}))
  cases=[(12,auth,"auth",0,None,None),(13,invalid,"invalid",0,None,None),(14,fallback,"overload",0,None,"valid"),
  (15,deadline,"valid",120,None,None),(16,responsive,"valid",120,None,None),(17,queue,"valid",0,{"max_queued":1},None),
  (18,active,"valid",120,{"max_active":1},None),(19,budget,"valid",0,{"max_job_cost_microusd":0},None),
  (20,rate,"valid",0,{"requests_per_minute":1},None),(21,circuit,"overload",0,{"circuit_failures":1},None),
  (22,stale_admission,"valid",0,None,None),(23,stale_completion,"held",0,None,None),
  (24,cancel_queued,"valid",0,None,None),(25,cancel_running,"valid",120,None,None),
- (26,restart,"valid",0,None,None),(27,expired,"valid",0,None,None),(32,slow_freshness,"valid",0,None,None),(33,restart_inflight,"valid",120,None,None),(37,account_quota,"valid",0,{"requests_per_minute":1},"valid"),(38,completion_deadline,"valid",0,None,None)]
+ (26,restart,"valid",0,None,None),(27,expired,"valid",0,None,None),(32,slow_freshness,"valid",0,None,None),(33,restart_inflight,"valid",120,None,None),(37,account_quota,"valid",0,{"requests_per_minute":1},"valid"),(38,completion_deadline,"valid",0,None,None),(39,admission_deadline,"valid",0,None,None)]
  # basic emitted nonsequential supplemental assertions; caller canonicalises recorded observations below.
  for index,fn,mode,delay,settings,second in cases:
   error=scenario(index,fn,mode,delay,settings,second)

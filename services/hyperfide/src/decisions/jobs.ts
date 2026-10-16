@@ -88,6 +88,7 @@ export class DecisionJobs{
   if(!sameRevision(j.packet.revision,await this.loader(j.purpose).current(tx,s,j.packet,i)))fail('DECISION_STALE','Primary relevant state changed');
  }
  async submit(i:InvocationContext,raw:unknown):Promise<unknown>{
+  const admissionStarted=performance.now();
   const s=scoped(i),v=record(raw,'decision submission');exact(v,['purpose','input','route_ids','deadline_ms','mode'],['purpose','input','route_ids','deadline_ms','mode']);
   const purpose=text(v.purpose,'purpose',128),p=policy(this.env),loader=this.loader(purpose);
   if(!Array.isArray(v.route_ids)||v.route_ids.length<1||v.route_ids.length>2||new Set(v.route_ids).size!==v.route_ids.length)fail('DECISION_SCHEMA','One or two distinct routes required');
@@ -95,6 +96,8 @@ export class DecisionJobs{
   if(!['online','background'].includes(String(v.mode)))fail('DECISION_SCHEMA','Unknown deadline class');
   const duration=integer(v.deadline_ms,'total job deadline',1,v.mode==='online'?2000:30000),id=randomUUID(),eventId=randomUUID();
   const submissionHash=hash({purpose,input:v.input,route_ids:routes,mode:v.mode,deadline_ms:duration});
+  const admissionBudget=Math.floor(duration-(performance.now()-admissionStarted));
+  if(admissionBudget<=0)fail('DECISION_EXPIRED','Request validation consumed the total job deadline');
   return this.tx(i,async tx=>{
    await this.lock(tx,s);
    const old=await tx.query('SELECT id,submission_hash,state FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND idempotency_key=$3',[...scopeValues(s),i.operation.idempotency_key]);
@@ -113,14 +116,16 @@ export class DecisionJobs{
    if(standing.rowCount!==1)fail('DECISION_UNAVAILABLE','Configured decision admission consumer is not standing');
    await this.outbox.enqueue(tx,{...s,id:eventId,aggregate_type:'decision.job',aggregate_id:id,aggregate_version:'1',event_type:'decision.admitted',payload:{decision_id:id,packet_hash:packetHash}},{consumer_ids:[consumer]});
    const applied=await this.inbox.receive(tx,{...s,event_id:eventId,consumer_id:consumer},async()=>{
+    const remaining=Math.floor(duration-(performance.now()-admissionStarted));
+    if(remaining<=0)fail('DECISION_EXPIRED','Admission consumed the total job deadline');
     await tx.query(`INSERT INTO hyperfide.decision_jobs(organisation_id,run_id,id,idempotency_key,submission_hash,request_hash,purpose,packet_hash,packet,request,rubric_version,route_ids,policy_revision,consumer_id,event_id,mode,deadline_at)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14,$15,$16,least(clock_timestamp()+($17::int*interval '1 millisecond'),$18::timestamptz))`,
-     [...scopeValues(s),id,i.operation.idempotency_key,submissionHash,digest,purpose,packetHash,canonical(pack),canonical(request),rubric,canonical(routes),p.revision,consumer,eventId,v.mode,duration,pack.expires_at]);
+     [...scopeValues(s),id,i.operation.idempotency_key,submissionHash,digest,purpose,packetHash,canonical(pack),canonical(request),rubric,canonical(routes),p.revision,consumer,eventId,v.mode,remaining,pack.expires_at]);
     return{decision_id:id};
    });
    if(applied.status!=='APPLIED')fail('DECISION_IDEMPOTENCY_CONFLICT','New admission did not apply once');
    return{decision_id:id,state:'QUEUED',replayed:false,authority:'NONE'};
-  });
+  },admissionBudget);
  }
  async status(i:InvocationContext,raw:unknown):Promise<unknown>{
   const v=record(raw,'status');exact(v,['decision_id'],['decision_id']);const id=uuid(v.decision_id),s=scoped(i);
