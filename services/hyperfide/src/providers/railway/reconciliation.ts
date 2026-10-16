@@ -13,7 +13,7 @@ import {
 } from '../contract.js';
 import { RailwayClient, RailwayRequestError, configuredClient, absolute, digest, hash, instant, integer, object, sameScope, scope, text,
   validatePreparedBase, type PreparedRailwayBase } from './preparation.js';
-import { RailwaySessionSpool, createRailwayArtifactChunkSink, type RailwayChunkSink, type RailwayArchiveBinding, type RailwayArtifactInvoke } from './processes.js';
+import { RailwaySessionSpool, createRailwayArtifactChunkSink, type RailwayChunkSink, type RailwayArchiveBinding, type RailwayArtifactInvoke, type RailwayCaptureProof } from './processes.js';
 import { validateRuntimeProfile, runtimeOptions, runtimeGraphQLInput, type RailwayRuntimeProfile, type CredentialResolver } from './profile.js';
 
 const fields='id status networkIsolation environmentId region idleTimeoutMinutes createdAt domains{prefix port domain}';
@@ -124,7 +124,7 @@ export type RailwayAdapter=ProviderAdapter&{
     custody:{archive_id:string;evidence_digest:string}}>;
   reconcileCapturedOutput(operation:ProviderOperation<'execute'>):Promise<boolean>;
   readCapturedOutput(scope:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number):Promise<{
-    stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;
+    stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;capture:RailwayCaptureProof;
   }>;
 };
 export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAdapterDependencies):RailwayAdapter {
