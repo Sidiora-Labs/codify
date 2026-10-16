@@ -2,7 +2,7 @@ import pg from 'pg';
 import {randomUUID} from 'node:crypto';
 import {storageConfig,createStoragePool,bindStoragePool} from './schema.js';
 import type {StorageConfig} from './schema.js';
-import {TransactionGateway,StorageError,bounded,deadlineFrom} from './transactions.js';
+import {TransactionGateway,StorageError,bounded,deadlineFrom,assertTransactionStatement} from './transactions.js';
 import type {DatabaseLease,QuerySession} from './transactions.js';
 import type {ServiceRole} from '../policy/programme.js';
 
@@ -67,9 +67,19 @@ class BoundedPool {
     return new Proxy(pool,{
       get(target,key){
         if(key==='connect')return (callback?:unknown)=>{
-          const promise=owner.acquire(deadlineFrom()).then(lease=>new Proxy(lease.client,{
-            get(client,property){if(property==='release')return (destroy?:boolean)=>lease.release(destroy);const value=Reflect.get(client,property);return typeof value==='function'?value.bind(client):value;}
-          }));
+          const promise=owner.acquire(deadlineFrom()).then(lease=>{
+            let released=false;
+            return new Proxy(lease.client,{
+              get(client,property){
+                if(property==='release')return (destroy?:boolean)=>{if(released)return;released=true;lease.release(destroy);};
+                if(property==='query')return (...args:unknown[])=>{
+                  if(released||lease.signal.aborted)throw new StorageError('TX_CLOSED','Compatibility client was released');
+                  return Reflect.apply(client.query,client,args);
+                };
+                const value=Reflect.get(client,property);return typeof value==='function'?value.bind(client):value;
+              }
+            });
+          });
           if(typeof callback==='function'){void promise.then(client=>callback(null,client,client.release),error=>callback(error));return;}
           return promise;
         };
@@ -160,11 +170,12 @@ export class ResourceContainer implements ServiceResources {
     if(mode!=='on'&&mode!=='remote_apply')throw new StorageError('DATABASE_CONFIG_INVALID','Commit durability mode must be on or remote_apply');return mode;
   }
   acquirePrimary(deadline:number,signal?:AbortSignal):Promise<DatabaseLease>{return this.pool('primary').acquire(deadline,signal);}
-  private session(lease:DatabaseLease,deadline:number):QuerySession{
+  private session(lease:DatabaseLease,deadline:number,readonly=false):QuerySession{
     let valid=true;
     const session=Object.freeze({
       query:async<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[])=>{
         if(!valid||lease.signal.aborted)throw new StorageError('TX_CLOSED','Connection capability expired');
+        if(readonly)assertTransactionStatement(text);
         return bounded(lease.client.query<R>(text,values?[...values]:undefined),deadline,lease.signal);
       },remainingMs:()=>Math.max(0,Math.floor(deadline-performance.now())),signal:lease.signal
     });
@@ -209,7 +220,7 @@ export class ResourceContainer implements ServiceResources {
     const prefix='HYPERFIDE_'+this.role.toUpperCase();
     const route=options.preferReplica!==false&&this.env[prefix+'_REPLICA_DATABASE_URL']?'replica':'primary';
     const deadline=deadlineFrom(options.timeoutMs),lease=await this.pool(route).acquire(deadline,options.signal);
-    const session=this.session(lease,deadline);let healthy=true;
+    const session=this.session(lease,deadline,true);let healthy=true;
     try{
       await lease.client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const value=await bounded(Promise.resolve().then(()=>operation(session)),deadline,lease.signal);
