@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "variant": "task:4.3",
+  "task": "4.3",
+  "scope": "task-component",
+  "cases": [
+    "V-010",
+    "V-023"
+  ],
+  "assertion_ids": [
+    "replica.fixture.real-signed-packet-and-physical-standby",
+    "replica.causal-exact-packet",
+    "replica.actual-snapshot-watermark",
+    "replica.primary-request-keeps-immutable-packet",
+    "replica.no-barrier-falls-back-explicitly",
+    "replica.reject-absent-packet",
+    "replica.reject-malformed-digest",
+    "replica.reject-tampered-signature",
+    "replica.reject-foreign-run-barrier",
+    "replica.reject-obsolete-cluster-barrier",
+    "replica.reject-expired-barrier",
+    "replica.reject-negative-wait",
+    "replica.reject-unavailable-graph-pin",
+    "replica.explicit-no-required-graph-pin",
+    "replica.native-graph-generation-one-remains-pinned",
+    "replica.native-graph-generation-two-remains-pinned",
+    "replica.native-mixed-graph-generation-refused",
+    "replica.native-graph-post-error-snapshot-clean",
+    "replica.reject-other-manager-scope",
+    "replica.reject-provider-role",
+    "replica.missing-runtime-topology-privilege-explicit",
+    "replica.real-paused-replay-fallback",
+    "replica.wait-before-snapshot-real-resume",
+    "replica.reject-barrier-for-different-packet",
+    "replica.old-packet-stays-old-after-new-packet",
+    "replica.unavailable-route-falls-back-primary",
+    "replica.real-promotion-invalidates-old-timeline-barrier",
+    "replica.promoted-read-endpoint-refused-and-primary-fallback",
+    "replica.runtime-remains-nonoperator",
+    "replica.reads-do-not-mutate-work-authority"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/4_3.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [],
+  "fixtures": [
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/storage/replicas.js",
+    "services/hyperfide/dist/storage/runtime.js",
+    "services/hyperfide/dist/storage/dispositions.js",
+    "services/hyperfide/dist/hierarchy/packets.js",
+    "services/hyperfide/dist/identity/enrollment.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-4.3-postgres",
+      "kind": "postgresql-processes",
+      "scope": "owned-primary-physical-standby-and-signed-packet-fixture"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/4_3.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "replica43/resources.json",
+    "replica43/observations.json",
+    "replica43/cluster-commands.json",
+    "replica43/absence.json"
+  ],
+  "source_files": [
+    "cg",
+    "src/scan.c",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/cases/tasks/3_1.py",
+    "tests/hyperfide/cases/tasks/3_2.py",
+    "tests/hyperfide/cases/support/postgres_cluster.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/cases/tasks/4_3.py",
+    "tests/hyperfide/registrations/4.3.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "postgresql.replication.configure",
+    "postgresql.fixture.promote",
+    "graph.remote.extract",
+    "graph.component.invoke",
+    "storage.packet.invoke"
+  ]
+}
