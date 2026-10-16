@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
+import {invocationOf,gatewayOf} from '../identity/enrollment.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
 
@@ -62,16 +63,16 @@ async function command(executable:string,args:string[],cwd:string,signal:AbortSi
  return new Promise((resolve,reject)=>{
   const child=spawn(executable,args,{cwd,signal,env:{PATH:process.env.PATH??'/usr/bin:/bin',HOME:cwd,GIT_CONFIG_NOSYSTEM:'1',
    GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',LC_ALL:'C.UTF-8',CG_BUSY_TIMEOUT_MS:'1000'},stdio:['ignore','pipe','pipe']});
-  let output=Buffer.alloc(0),errors=0,settled=false;
-  const timer=setTimeout(()=>child.kill('SIGKILL'),120000);
-  child.stdout.on('data',(data:Buffer)=>{if(output.length+data.length>max){child.kill('SIGKILL');return;}output=Buffer.concat([output,data]);});
-  child.stderr.on('data',(data:Buffer)=>{errors+=data.length;if(errors>max)child.kill('SIGKILL');});
+  let output=Buffer.alloc(0),errors=0,settled=false,overflow=false,timedOut=false;
+  const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},120000);
+  child.stdout.on('data',(data:Buffer)=>{if(output.length+data.length>max){overflow=true;child.kill('SIGKILL');return;}output=Buffer.concat([output,data]);});
+  child.stderr.on('data',(data:Buffer)=>{errors+=data.length;if(errors>max){overflow=true;child.kill('SIGKILL');}});
   child.once('error',()=>{settled=true;clearTimeout(timer);reject(new FoundationError('GRAPH_EXECUTION_FAILED','Remote scanner process could not execute'));});
-  child.once('close',(code)=>{clearTimeout(timer);if(settled)return;if(code!==0)reject(new FoundationError('GRAPH_EXECUTION_FAILED','Remote source/scanner process failed'));else resolve(output.toString('utf8').trim());});
+  child.once('close',(code)=>{clearTimeout(timer);if(settled)return;if(overflow){reject(new FoundationError('GRAPH_BUDGET_EXCEEDED','Remote process output exceeded its byte bound'));return;}if(timedOut){reject(new FoundationError('GRAPH_EXECUTION_TIMEOUT','Remote process exceeded its deadline'));return;}if(code!==0)reject(new FoundationError('GRAPH_EXECUTION_FAILED','Remote source/scanner process failed'));else resolve(output.toString('utf8').trim());});
  });
 }
-function snapshotRows(db:DatabaseSync,maxRows:number):{facts:Fact[];counts:Record<string,number>;coverage:JsonObject} {
- const facts:Fact[]=[],counts:Record<string,number>={};
+function snapshotRows(db:DatabaseSync,maxRows:number,maxBytes:number):{facts:Fact[];counts:Record<string,number>;coverage:JsonObject} {
+ const facts:Fact[]=[],counts:Record<string,number>={};let rowBytes=0;
  const tableExists=(t:string)=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
  for(const table of GRAPH_TABLES){
   if(!tableExists(table))fail('GRAPH_SCHEMA_UNSUPPORTED','Scanner omitted required fact table '+table);
@@ -81,9 +82,10 @@ function snapshotRows(db:DatabaseSync,maxRows:number):{facts:Fact[];counts:Recor
    const normalized:JsonObject={};for(const [k,v]of Object.entries(row))normalized[k]=typeof v==='bigint'?v.toString():v instanceof Uint8Array?{base64:Buffer.from(v).toString('base64')}:v;
    // Filesystem times and physical checkout locations are not semantic facts.
    if(table==='files'){delete normalized.mtime;delete normalized.mtime_ns;}
+   rowBytes+=Buffer.byteLength(canonical(normalized))+256;if(rowBytes>maxBytes)fail('GRAPH_BUDGET_EXCEEDED','Raw graph byte budget exceeded');
    rows.push(normalized);if(facts.length+rows.length>maxRows)fail('GRAPH_BUDGET_EXCEEDED','Graph row budget exceeded');
   }
-  rows.sort((a,b)=>canonical(a).localeCompare(canonical(b),'en'));
+  rows.sort((a,b)=>Buffer.compare(Buffer.from(canonical(a)),Buffer.from(canonical(b))));
   counts[table]=rows.length;
   rows.forEach((row,index)=>facts.push({table,key:String(index),row}));
  }
@@ -129,9 +131,19 @@ export function validateManifest(value:unknown):BundleManifest {
  return {...body,bundle_digest:hash};
 }
 
+async function extractionGuard(ctx:ComponentContext,identity?:Pick<ExtractionIdentity,'organisation_id'|'run_id'|'repository_id'|'commit'>,write=false):Promise<void>{
+ const i=invocationOf(ctx),p=i.principal,roles=write?['INDEXER','COORDINATOR','LEADER','OPERATOR']:['INDEXER','COORDINATOR','LEADER','OPERATOR','FEATURE_MANAGER','WORKER','VERIFIER','INTEGRATOR','COMMIT_WATCHER','ISSUE_WATCHER'];
+ if(!roles.includes(p.role)||!p.allowed_actions.includes(i.payload.action))fail('GRAPH_ROLE_DENIED','Authenticated role/action cannot use remote graph extraction');
+ if(identity&&(identity.organisation_id!==p.organisation_id||identity.run_id!==p.run_id))fail('GRAPH_SCOPE_DENIED','Extraction differs from authenticated scope');
+ await gatewayOf(ctx).withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:tx=>i.guard(tx)},async tx=>{
+  if(identity){const pin=await tx.query("SELECT 1 FROM hyperfide.run_repositories rr JOIN hyperfide.source_objects so ON so.organisation_id=rr.organisation_id AND so.repository_id=rr.repository_id AND so.object_id=$4 WHERE rr.organisation_id=$1 AND rr.run_id=$2 AND rr.repository_id=$3 AND so.object_type='commit'",[p.organisation_id,p.run_id,identity.repository_id,identity.commit]);if(pin.rowCount!==1)fail('GRAPH_SOURCE_DENIED','Extraction source is outside authenticated run repository set');}
+ });
+}
 async function create(input:unknown,ctx:ComponentContext,cfg:Config):Promise<BundleManifest> {
  const r=exact(input,['organisation_id','run_id','repository_id','commit','tree','generation','configuration'],['overlay']);
  const org=uuid(r.organisation_id),run=uuid(r.run_id),repo=uuid(r.repository_id),commit=oid(r.commit),tree=oid(r.tree),generation=decimal(r.generation);
+ await extractionGuard(ctx,{organisation_id:org,run_id:run,repository_id:repo,commit},true);
+ const invocation=invocationOf(ctx);ctx={...ctx,signal:AbortSignal.any([ctx.signal,invocation.signal])};
  const source=cfg.repositories[repo];if(!source)fail('GRAPH_REPOSITORY_DENIED','Repository is outside trusted remote map');
  const configuration=exact(r.configuration,['build_flags','resolver_digest','generated_manifest_digest']);
  if(!Array.isArray(configuration.build_flags)||configuration.build_flags.length>128||configuration.build_flags.some(v=>typeof v!=='string'||v.length>1024))fail('GRAPH_INVALID','Invalid build flags');
@@ -174,13 +186,15 @@ async function create(input:unknown,ctx:ComponentContext,cfg:Config):Promise<Bun
   await command(cfg.binary,['index','--full','--json','--workers','1'],root,ctx.signal);
   const db=new DatabaseSync(root+'/.codegraph/graph.db',{readOnly:true});
   let data:ReturnType<typeof snapshotRows>;
-  try{db.exec('BEGIN');data=snapshotRows(db,cfg.maxRows);db.exec('COMMIT');}finally{db.close();}
+  try{db.exec('BEGIN');data=snapshotRows(db,cfg.maxRows,cfg.maxBytes);db.exec('COMMIT');}finally{db.close();}
+  let factBytes=data.facts.reduce((n,f)=>n+Buffer.byteLength(canonical(f)),0);
+  const appendFact=(fact:Fact)=>{const size=Buffer.byteLength(canonical(fact));if(data.facts.length>=cfg.maxRows||factBytes+size>cfg.maxBytes)fail('GRAPH_BUDGET_EXCEEDED','Source body facts exceed configured graph budget');factBytes+=size;data.facts.push(fact);};
   for(const f of data.facts.filter(f=>f.table==='files')){
    const rel=relative(f.row.path),filename=path.join(root,rel),st=await fs.lstat(filename);
    if(!st.isFile()||st.isSymbolicLink())fail('GRAPH_SOURCE_CHANGED','Source file no longer regular');
    const bytes=await fs.readFile(filename);if(digest(bytes)!=='sha256:'+String(f.row.hash))fail('GRAPH_SOURCE_CHANGED','Source bytes changed after parsing');
    // Preserve body FTS coverage; large files remain explicitly body-ineligible.
-   if(bytes.length<=2*1024*1024){const parts=Math.max(1,Math.ceil(bytes.length/32768));for(let part=0;part<parts;part++)data.facts.push({table:'source_bodies',key:digest(rel).slice(7)+':'+part,row:{path:rel,content_digest:digest(bytes),part_index:part,part_count:parts,total_bytes:bytes.length,body_base64:bytes.subarray(part*32768,(part+1)*32768).toString('base64')}});}
+   if(bytes.length<=2*1024*1024){const parts=Math.max(1,Math.ceil(bytes.length/32768));for(let part=0;part<parts;part++)appendFact({table:'source_bodies',key:digest(rel).slice(7)+':'+part,row:{path:rel,content_digest:digest(bytes),part_index:part,part_count:parts,total_bytes:bytes.length,body_base64:bytes.subarray(part*32768,(part+1)*32768).toString('base64')}});}
   }
   data.counts.source_bodies=data.facts.filter(f=>f.table==='source_bodies').length;
   const configStat=await fs.lstat(root+'/codify.kvx').catch(e=>{if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;});
@@ -201,17 +215,17 @@ async function create(input:unknown,ctx:ComponentContext,cfg:Config):Promise<Bun
   const destination=path.join(cfg.scratch,'bundles',manifest.bundle_digest.slice(7));await fs.mkdir(destination,{recursive:true});
   for(const c of chunks)await fs.writeFile(path.join(destination,c.index+'.json'),canonical(c),{flag:'wx',mode:0o600}).catch(async e=>{if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;if(await fs.readFile(path.join(destination,c.index+'.json'),'utf8')!==canonical(c))fail('GRAPH_DIGEST_MISMATCH','Existing chunk differs');});
   await fs.writeFile(path.join(destination,'manifest.json'),canonical(manifest),{flag:'wx',mode:0o600}).catch(async e=>{if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;if(await fs.readFile(path.join(destination,'manifest.json'),'utf8')!==canonical(manifest))fail('GRAPH_DIGEST_MISMATCH','Existing manifest differs');});
-  retain=true;return manifest;
+  await extractionGuard(ctx,identity,true);retain=true;return manifest;
  }finally{await fs.rm(work,{recursive:true,force:true});void retain;}
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component> {
  let active=false;
  const getConfig=()=>config(ctx.env);
- const load=async(value:unknown)=>{const r=exact(value,['bundle_digest']),hash=sha(r.bundle_digest),cfg=await getConfig();const base=path.join(cfg.scratch,'bundles',hash.slice(7));const raw=await fs.readFile(path.join(base,'manifest.json'),'utf8');const m=validateManifest(JSON.parse(raw));const {bundle_digest,...body}=m;if(bundle_digest!==hash||digest(canonical(body))!==hash)fail('GRAPH_DIGEST_MISMATCH','Manifest differs');return {cfg,base,manifest:m};};
+ const load=async(value:unknown)=>{const r=exact(value,['bundle_digest']),hash=sha(r.bundle_digest),cfg=await getConfig();const base=path.join(cfg.scratch,'bundles',hash.slice(7));const raw=await fs.readFile(path.join(base,'manifest.json'),'utf8').catch(()=>fail('GRAPH_BUNDLE_UNAVAILABLE','Named graph bundle is unavailable'));const m=validateManifest(JSON.parse(raw));const {bundle_digest,...body}=m;if(bundle_digest!==hash||digest(canonical(body))!==hash)fail('GRAPH_DIGEST_MISMATCH','Manifest differs');return {cfg,base,manifest:m};};
  return {apiVersion:1,actions:{
   'graph.extract.describe':input=>{exact(input,[]);return {schema_version:1,remote_execution_required:true,fact_families:[...GRAPH_TABLES,'source_bodies'],authority:'NONE',cache:'NON_AUTHORITATIVE',central_publication:false};},
-  'graph.extract.create':async input=>{if(active)fail('GRAPH_OVERLOADED','One extraction per remote dispatcher');active=true;try{return await create(input,ctx,await getConfig());}finally{active=false;}},
-  'graph.extract.inspect':async input=>(await load(input)).manifest,
-  'graph.extract.read-chunk':async input=>{const r=exact(input,['bundle_digest','index']);if(!Number.isSafeInteger(r.index)||Number(r.index)<0)fail('GRAPH_INVALID','Invalid chunk index');const {base,manifest}=await load({bundle_digest:r.bundle_digest});const expected=manifest.chunks[Number(r.index)];if(!expected)fail('GRAPH_CHUNK_UNAVAILABLE','Chunk does not exist');const c=validateChunk(JSON.parse(await fs.readFile(path.join(base,r.index+'.json'),'utf8')));if(c.digest!==expected.digest)fail('GRAPH_DIGEST_MISMATCH','Chunk differs from manifest');return c;}
+  'graph.extract.create':async(input,context)=>{invocationOf(context);if(active)fail('GRAPH_OVERLOADED','One extraction per remote dispatcher');active=true;try{return await create(input,context,await getConfig());}finally{active=false;}},
+  'graph.extract.inspect':async(input,context)=>{await extractionGuard(context);const loaded=await load(input);await extractionGuard(context,loaded.manifest.identity);return loaded.manifest;},
+  'graph.extract.read-chunk':async(input,context)=>{await extractionGuard(context);const r=exact(input,['bundle_digest','index']);if(!Number.isSafeInteger(r.index)||Number(r.index)<0)fail('GRAPH_INVALID','Invalid chunk index');const {base,manifest}=await load({bundle_digest:r.bundle_digest});await extractionGuard(context,manifest.identity);const expected=manifest.chunks[Number(r.index)];if(!expected)fail('GRAPH_CHUNK_UNAVAILABLE','Chunk does not exist');const c=validateChunk(JSON.parse(await fs.readFile(path.join(base,r.index+'.json'),'utf8').catch(()=>fail('GRAPH_CHUNK_UNAVAILABLE','Named graph chunk is unavailable'))));if(c.digest!==expected.digest)fail('GRAPH_DIGEST_MISMATCH','Chunk differs from manifest');return c;}
  }};
 }
