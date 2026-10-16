@@ -58,7 +58,9 @@ IDS = [
  "artifacts.manifest.pending-child", "artifacts.manifest.foreign-child",
  "artifacts.manifest.corrupt-child", "artifacts.manifest.missing-child",
  "artifacts.retention.metadata", "artifacts.retention.children", "artifacts.object.opaque-payload",
+
  "artifacts.manifest.promotion-bypass", "artifacts.http.independent-sigv4", "artifacts.secrets.sanitized",
+ "artifacts.auth.stdio-required", "artifacts.auth.forged-context", "artifacts.auth.revoked-mid-upload",
 ]
 FAILED = []
 OBSERVATIONS = []
@@ -762,6 +764,57 @@ def main():
                        "observations leaked trusted configuration")
                 expect(artifacts(), "no actual database observations")
             check("artifacts.secrets.sanitized", sanitized)
+
+            def raw_stdio_denied():
+                frame = {"id": "artifact-stdio-auth-probe", "component": "15.2",
+                         "action": "artifact.pending.list", "input": dict(SCOPE)}
+                child = subprocess.run(service.argv, input=json.dumps(frame) + "\n", text=True,
+                                       cwd=ROOT, env=service.env, capture_output=True, timeout=15)
+                rows = [json.loads(line) for line in child.stdout.splitlines() if line.startswith("{")]
+                response = next((row for row in rows if row.get("id") == frame["id"]), None)
+                expect(child.returncode == 1 and response is not None and response.get("ok") is False
+                       and response.get("error", {}).get("code") == "AUTH_REQUIRED",
+                       "unauthenticated stdio result differs: " + json.dumps({"exit": child.returncode, "responses": rows, "stderr": child.stderr[:400]}))
+            check("artifacts.auth.stdio-required", raw_stdio_denied)
+
+            def forged_context_denied():
+                script = """import {createArtifactStore} from './services/hyperfide/dist/artifacts/objects.js';
+const context={env:{},signal:new AbortController().signal,invocation:{principal:{organisation_id:'fixture'},guard:async()=>{},signal:new AbortController().signal}};
+try{await createArtifactStore(context).invoke('artifact.pending.list',{});process.exitCode=2;}catch(e){console.log(e.code);if(e.code!=='AUTH_REQUIRED')process.exitCode=3;}"""
+                child = subprocess.run(["node", "--input-type=module", "-e", script],
+                                       cwd=ROOT, env=service.env, text=True,
+                                       capture_output=True, timeout=15)
+                expect(child.returncode == 0 and child.stdout.strip() == "AUTH_REQUIRED",
+                       "structurally forged internal invocation acquired authority")
+            check("artifacts.auth.forged-context", forged_context_denied)
+
+            def revoke_during_upload():
+                blob = b"artifact-auth-revocation-mid-upload"
+                path = fixture.key(blob)
+                fixture.blocked.clear(); fixture.release.clear(); fixture.modes[path] = "crash"
+                responses = []
+                thread = threading.Thread(target=lambda: responses.append(service.request(
+                    "artifact.object.put", upload(blob))))
+                thread.start()
+                try:
+                    expect(fixture.blocked.wait(10), "real PUT did not reach revocation boundary")
+                    row = find(blob)
+                    expect(row["status"] == "PENDING" and fixture.objects[path] == blob,
+                           "upload intent/physical bytes not observed before revocation")
+                    service.auth.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",
+                                     [service.auth.ids["operator"]])
+                finally:
+                    fixture.release.set(); fixture.modes[path] = ""
+                    thread.join(15)
+                expect(not thread.is_alive() and len(responses) == 1, "revoked upload did not settle")
+                status, response = responses[0]
+                expect(response.get("ok") is False and response.get("error", {}).get("code") == "AUTH_REVOKED",
+                       "mid-upload revocation differs: " + str(status) + ":" + str(response.get("error", {}).get("code")))
+                row = find(blob)
+                expect(row["status"] == "PENDING" and row["completed_at"] is None,
+                       "revoked caller completed artifact metadata")
+            check("artifacts.auth.revoked-mid-upload", revoke_during_upload)
+
             expect(CHECKED == IDS, "registered assertion execution inventory differs")
     finally:
         closed = fixture.stop()
@@ -770,7 +823,7 @@ def main():
             "assertion_ids": CHECKED, "failed_ids": FAILED, "service_operations": OBSERVATIONS,
             "http_operations": fixture.events, "independently_rejected_signatures": fixture.bad_signatures,
             "redirect_target_requests": len(fixture.redirect_hits), "http_fixture_observed_absent": closed,
-            "postgresql_version": sql("SHOW server_version;").stdout.strip(),
+            "postgresql_version": sql("SHOW server_version;", database=urlsplit(os.environ["DATABASE_URL"]).path.lstrip("/")).stdout.strip(),
             "package_lock_sha256": hashlib.sha256((ROOT / "services/hyperfide/package-lock.json").read_bytes()).hexdigest()
         }, sort_keys=True) + "\n")
         if service is not None:service.close()

@@ -2,6 +2,8 @@ import {createHash,createHmac} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
+import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
 import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
 
 const MAX_OBJECT=256*1024,MAX_MANIFEST=512*1024,MAX_CHUNKS=4096;
@@ -287,9 +289,11 @@ export class ArtifactStore{
  const rows=await this.transaction(tx=>tx.query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]));
  return {artifacts:rows.rows.slice(0,limit).map(publicArtifact),next_cursor:rows.rows.length>limit?rows.rows[limit-1]!.id:null,destructive_action:false,authority:'NONE',live_qualification:'NOT_EVALUATED'};
  }
- async invoke(action:string,input:unknown,context?:ComponentContext):Promise<unknown>{
- if(context&&context!==this.context)return new ArtifactStore(context as RequestContext).invoke(action,input);
- if(!this.context.invocation)fail('AUTH_REQUIRED','Artifact operation requires verified caller authority');
+ async invoke(action:string,input:unknown,context?:ComponentContext|InvocationContext):Promise<unknown>{
+ const actor=context?('principal' in context?context:context.invocation):this.context.invocation;
+ assertInvocation(actor);
+ if(actor!==this.context.invocation)return new ArtifactStore({...this.context,invocation:actor}).invoke(action,input);
+ assertInvocation(this.context.invocation);
  if(this.context.signal.aborted)fail('ARTIFACT_NOT_COMPLETE','Artifact service is shutting down');
  try{
  const result=await (async()=>{switch(action){
@@ -308,8 +312,10 @@ export class ArtifactStore{
  }
  close():void{/* Shared PostgreSQL pool lifecycle belongs to the storage resource owner. */}
 }
+export interface ArtifactStoreCapability{invoke(action:string,input:unknown,context:ComponentContext|InvocationContext):Promise<unknown>}
+export function isArtifactStoreCapability(value:unknown):value is ArtifactStoreCapability{return !!value&&typeof value==='object'&&'invoke' in value&&typeof value.invoke==='function';}
 export function createArtifactStore(context:ComponentContext):ArtifactStore{return new ArtifactStore(context);}
 export function createComponent(context:ComponentContext):Component{
  const store=createArtifactStore(context),actions=Object.fromEntries(ARTIFACT_ACTIONS.map(action=>[action,(input:unknown,invocationContext:ComponentContext)=>store.invoke(action,input,invocationContext)]));
- return {apiVersion:1,actions,capabilities:{'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
+ return {apiVersion:1,actions,capabilities:{'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext|InvocationContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
 }
