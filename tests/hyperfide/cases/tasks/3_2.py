@@ -92,6 +92,12 @@ def main():
   check("packet.role-denied",lambda:f.reject("hierarchy.packet.create",f.packet_input(idempotency_key="watcher"),"ROLE_DENIED",key="watcher",component="3.2"))
   check("packet.scope-spoof-denied",lambda:f.reject("hierarchy.packet.create",dict(f.packet_input(),organisation_id=uid()),"INVALID_REQUEST",key="manager",component="3.2"))
   check("packet.inspect.exact",lambda:expect(f.ok("hierarchy.packet.inspect",{"leader_generation":"1","package_generation":"2","digest":state["digest"]},key="manager",component="3.2")["packet"]==packet,"Reader changed exact packet"))
+  def validate_inputs():
+   actual=f.ok("hierarchy.packet.validate",{"leader_generation":"1","package_generation":"2","digest":state["digest"]},key="manager",component="3.2")
+   expect(actual["packet"]==packet and actual["execution_authority"] is False and actual["checked_inputs"]==["IMMUTABLE_PACKET","ACCEPTED_ENVIRONMENT_MANIFEST","GRAPH_EXPLICITLY_NOT_REQUIRED"],"Current-input validation changed immutable pins or granted authority")
+  check("packet.inputs.validate.signed",validate_inputs)
+  check("packet.inputs.validate.scope-owner",lambda:f.reject("hierarchy.packet.validate",{"leader_generation":"1","package_generation":"2","digest":state["digest"]},"PACKAGE_OWNER_MISMATCH",key="manager2",component="3.2"))
+
   def immutable():
    try:f.sql("UPDATE hyperfide.hierarchy_execution_packets SET packet='{}'");raise RuntimeError("Immutable packet updated")
    except AssertionError:pass
