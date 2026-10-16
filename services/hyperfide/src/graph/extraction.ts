@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {createReadStream} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
@@ -26,6 +27,17 @@ export function canonical(value:unknown):string {
  return fail('GRAPH_INVALID','Graph values must use bounded JSON types');
 }
 export function digest(value:string|Buffer):string{return 'sha256:'+createHash('sha256').update(value).digest('hex');}
+async function verifiedFile(filename:string,size:number,bodyEligible:boolean,signal:AbortSignal):Promise<{hash:string;body:Buffer|null}>{
+ const hash=createHash('sha256'),parts:Buffer[]=[];let length=0;
+ for await(const part of createReadStream(filename,{highWaterMark:65536,signal})){
+  const bytes=part as Buffer;length+=bytes.length;
+  if(length>size)fail('GRAPH_SOURCE_CHANGED','Source grew during bounded verification');
+  hash.update(bytes);if(bodyEligible)parts.push(bytes);
+ }
+ if(length!==size)fail('GRAPH_SOURCE_CHANGED','Source size changed during verification');
+ return {hash:'sha256:'+hash.digest('hex'),body:bodyEligible?Buffer.concat(parts,length):null};
+}
+
 export function text(value:unknown,kind='text',limit=256):string {
  if(typeof value!=='string'||value.length<1||value.length>limit||/[\x00-\x1f]/.test(value))fail('GRAPH_INVALID','Invalid '+kind);
  return value;
@@ -192,15 +204,16 @@ async function create(input:unknown,ctx:ComponentContext,cfg:Config):Promise<Bun
   for(const f of data.facts.filter(f=>f.table==='files')){
    const rel=relative(f.row.path),filename=path.join(root,rel),st=await fs.lstat(filename);
    if(!st.isFile()||st.isSymbolicLink())fail('GRAPH_SOURCE_CHANGED','Source file no longer regular');
-   const bytes=await fs.readFile(filename);if(digest(bytes)!=='sha256:'+String(f.row.hash))fail('GRAPH_SOURCE_CHANGED','Source bytes changed after parsing');
+   const verified=await verifiedFile(filename,st.size,st.size<=2*1024*1024,ctx.signal);if(verified.hash!=='sha256:'+String(f.row.hash))fail('GRAPH_SOURCE_CHANGED','Source bytes changed after parsing');
+   const bytes=verified.body;
    // Preserve body FTS coverage; large files remain explicitly body-ineligible.
-   if(bytes.length<=2*1024*1024){const parts=Math.max(1,Math.ceil(bytes.length/32768));for(let part=0;part<parts;part++)appendFact({table:'source_bodies',key:digest(rel).slice(7)+':'+part,row:{path:rel,content_digest:digest(bytes),part_index:part,part_count:parts,total_bytes:bytes.length,body_base64:bytes.subarray(part*32768,(part+1)*32768).toString('base64')}});}
+   if(bytes!==null){const parts=Math.max(1,Math.ceil(bytes.length/32768));for(let part=0;part<parts;part++)appendFact({table:'source_bodies',key:digest(rel).slice(7)+':'+part,row:{path:rel,content_digest:digest(bytes),part_index:part,part_count:parts,total_bytes:bytes.length,body_base64:bytes.subarray(part*32768,(part+1)*32768).toString('base64')}});}
   }
   data.counts.source_bodies=data.facts.filter(f=>f.table==='source_bodies').length;
   const configStat=await fs.lstat(root+'/codify.kvx').catch(e=>{if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;});
   if(configStat&&(!configStat.isFile()||configStat.isSymbolicLink()))fail('GRAPH_PATH_DENIED','Native configuration must be a regular file');
-  const nativeConfig=await fs.readFile(root+'/codify.kvx').catch(e=>{if((e as NodeJS.ErrnoException).code==='ENOENT')return Buffer.alloc(0);throw e;});
-  const configDigest=digest(canonical({configuration,native_config_digest:digest(nativeConfig)}));
+  const nativeConfigDigest=configStat?(await verifiedFile(root+'/codify.kvx',configStat.size,false,ctx.signal)).hash:digest(Buffer.alloc(0));
+  const configDigest=digest(canonical({configuration,native_config_digest:nativeConfigDigest}));
   const sourceManifest={organisation_id:org,run_id:run,repository_id:repo,commit,tree,overlay_digest:overlayDigest,overlay_name:overlayName};
   const identity:ExtractionIdentity={...sourceManifest,generation,source_kind:overlayDigest?'OVERLAY':'COMMIT',parser_digest:cfg.binaryDigest,config_digest:configDigest,source_manifest_digest:digest(canonical(sourceManifest))};
   if(await command('git',['rev-parse','HEAD'],root,ctx.signal)!==commit)fail('GRAPH_SOURCE_CHANGED','Source HEAD changed during extraction');
