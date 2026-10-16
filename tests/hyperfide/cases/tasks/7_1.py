@@ -33,6 +33,8 @@ class Service:
         self.base=base;self.repo=base/"repo";self.repo.mkdir()
         self.scratch=base/"scratch";self.scratch.mkdir()
         process(["git","init","-q"],self.repo)
+        process(["git","config","maintenance.auto","false"],self.repo)
+        process(["git","config","gc.auto","0"],self.repo)
         process(["git","config","user.name","Hyperfide component fixture"],self.repo)
         process(["git","config","user.email","fixture@example.invalid"],self.repo)
         (self.repo/"maths.py").write_text("# @contract Preserve the counted result.\ndef helper(value):\n    return value + 1\n\ndef consume(value):\n    return helper(value)\n\nBODY_SENTINEL = 'body words searchable corpus'\n")

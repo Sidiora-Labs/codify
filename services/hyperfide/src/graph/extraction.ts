@@ -74,7 +74,8 @@ async function config(env:Readonly<NodeJS.ProcessEnv>):Promise<Config> {
 async function command(executable:string,args:string[],cwd:string,signal:AbortSignal,max=1048576):Promise<string> {
  return new Promise((resolve,reject)=>{
   const child=spawn(executable,args,{cwd,signal,env:{PATH:process.env.PATH??'/usr/bin:/bin',HOME:cwd,GIT_CONFIG_NOSYSTEM:'1',
-   GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0',LC_ALL:'C.UTF-8',CG_BUSY_TIMEOUT_MS:'1000'},stdio:['ignore','pipe','pipe']});
+   GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_COUNT:'3',GIT_CONFIG_KEY_0:'maintenance.auto',GIT_CONFIG_VALUE_0:'false',
+   GIT_CONFIG_KEY_1:'gc.auto',GIT_CONFIG_VALUE_1:'0',GIT_CONFIG_KEY_2:'gc.autoDetach',GIT_CONFIG_VALUE_2:'false',GIT_TERMINAL_PROMPT:'0',LC_ALL:'C.UTF-8',CG_BUSY_TIMEOUT_MS:'1000'},stdio:['ignore','pipe','pipe']});
   let output=Buffer.alloc(0),errors=0,settled=false,overflow=false,timedOut=false;
   const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},120000);
   child.stdout.on('data',(data:Buffer)=>{if(output.length+data.length>max){overflow=true;child.kill('SIGKILL');return;}output=Buffer.concat([output,data]);});

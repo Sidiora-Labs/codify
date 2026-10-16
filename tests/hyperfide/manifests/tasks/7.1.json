@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-7.1-authenticated-graph-v1",
+  "campaign_id": "hyperfide-task-7.1-authenticated-graph-v2",
   "registered_variant": "task:7.1",
   "scope": "task-component",
   "case_ids": [
@@ -203,13 +203,13 @@
     },
     {
       "path": "services/hyperfide/dist/graph/extraction.js",
-      "sha256": "dbbb14e410e19a325973666c5fac45e7c548a4bd8c2aee42ab994a45eb08d9ed",
-      "size": 30709
+      "sha256": "9d4fe92600066dcd8139561d2e1208b2a69c276cac9bcd6d02befa2206724770",
+      "size": 30933
     },
     {
       "path": "services/hyperfide/dist/graph/extraction.js.map",
-      "sha256": "854f1e7cc5510f3c7bcf0feb34cbf43de75edd4c5a6765e244a1b96c0a060681",
-      "size": 33908
+      "sha256": "b76ff13c20d1c293d3a5f5741b02cf293b1ad7124e38d9aad97b414576576073",
+      "size": 34066
     },
     {
       "path": "services/hyperfide/dist/graph/ingestion.d.ts",
@@ -503,8 +503,8 @@
     },
     {
       "path": "services/hyperfide/src/graph/extraction.ts",
-      "sha256": "f496aede4810cf6431a25d48e0e8bb6e75b6e9d37ec947a4baa5079c01469977",
-      "size": 27439
+      "sha256": "808054c0926b0da9e89d776fff412d5091ae080476f6213bf8f64bd3d62cf251",
+      "size": 27637
     },
     {
       "path": "services/hyperfide/src/graph/ingestion.ts",
@@ -598,8 +598,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/7_1.py",
-      "sha256": "4b85627e700b77a4b510f5fc10fa724fece875432ee7d8a4043997031028a787",
-      "size": 18185
+      "sha256": "014a6fcfaa09c8e074cfcf07b8cac894b390f14c453a0c47ce5e1452e13a91c1",
+      "size": 18314
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
