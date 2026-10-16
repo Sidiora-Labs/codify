@@ -216,3 +216,24 @@ BEGIN
  EXECUTE format('CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation()',t);
  END LOOP;
 END $$;
+
+ALTER TABLE hyperfide.integration_candidate_review_inputs ADD COLUMN input_bindings jsonb NOT NULL CHECK(jsonb_typeof(input_bindings)='object');
+ALTER TABLE hyperfide.integration_candidate_review_inputs ADD COLUMN bindings_digest hyperfide.digest NOT NULL;
+CREATE TRIGGER immutable_candidate_context_bindings BEFORE UPDATE ON hyperfide.integration_candidate_review_inputs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('input_bindings','bindings_digest');
+
+ALTER TABLE hyperfide.integration_jobs ADD COLUMN source_manifest_digest hyperfide.digest,ADD COLUMN source_object_id hyperfide.git_oid,ADD COLUMN source_tree_id hyperfide.git_oid;
+CREATE TRIGGER immutable_candidate_job_source BEFORE UPDATE ON hyperfide.integration_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('source_manifest_digest','source_object_id','source_tree_id');
+
+ALTER TABLE hyperfide.integration_candidate_review_inputs DROP CONSTRAINT integration_candidate_review_inputs_pkey;
+ALTER TABLE hyperfide.integration_candidate_review_inputs ADD COLUMN phase text NOT NULL DEFAULT 'ADMISSION' CHECK(phase IN('ADMISSION','CURRENT_PUBLISHED')),ADD COLUMN generation bigint GENERATED ALWAYS AS IDENTITY;
+ALTER TABLE hyperfide.integration_candidate_review_inputs ADD PRIMARY KEY(organisation_id,run_id,candidate_id,source_object_id,input_manifest_digest,phase);
+CREATE TRIGGER immutable_candidate_review_generation BEFORE UPDATE ON hyperfide.integration_candidate_review_inputs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('phase','generation');
+ALTER TABLE hyperfide.integration_jobs ADD COLUMN review_bindings_digest hyperfide.digest,ADD COLUMN verification_input_digest hyperfide.digest;
+CREATE TRIGGER immutable_candidate_job_context BEFORE UPDATE ON hyperfide.integration_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('review_bindings_digest','verification_input_digest');
+
+CREATE TABLE hyperfide.publication_acceptance_receipts(organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL,operation_id uuid NOT NULL,outcome text NOT NULL CHECK(outcome IN('ACCEPTED','HELD')),reasons text[] NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(organisation_id,run_id,id),FOREIGN KEY(organisation_id,run_id,operation_id) REFERENCES hyperfide.publication_operations(organisation_id,run_id,id));
+CREATE TRIGGER immutable_publication_acceptance BEFORE UPDATE OR DELETE ON hyperfide.publication_acceptance_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','operation_id','outcome','reasons');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.publication_acceptance_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+ALTER TABLE hyperfide.publication_acceptance_receipts ADD COLUMN manifest jsonb NOT NULL DEFAULT '{}' CHECK(jsonb_typeof(manifest)='object');
+CREATE TRIGGER immutable_publication_acceptance_proof BEFORE UPDATE ON hyperfide.publication_acceptance_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('manifest');
