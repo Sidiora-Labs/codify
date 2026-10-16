@@ -57,4 +57,24 @@ int hf_budget_observe(const HfBudgetHandle *,FILE *);
 int hf_budget_release(HfBudgetHandle *);
 int hf_supervisor_daemon(const char *request,FILE *out);
 
+typedef struct {
+ uid_t uid;gid_t gid;
+ const char *operation_id;const HfProcessIdentity *watchdog;
+ int executable_fd,cwd_fd,stdout_fd,stderr_fd;
+ const char *const *argv;const char *const *environment;
+ const char *home;const char *tmp;
+ long long deadline_ns;size_t output_limit_bytes;
+ int (*native_entry)(const char *,const char *,FILE *);
+ const char *native_action;const char *native_request;
+} HfPreparationProcessSpec;
+typedef struct {
+ HfProcessIdentity process;
+ int exit_code,signal,timed_out,interrupted,output_complete,uid_absent;
+ unsigned long long stdout_bytes,stderr_bytes;
+ char stdout_digest[72],stderr_digest[72],started_at[40],ended_at[40];
+ long long duration_ms;
+} HfPreparationProcessResult;
+int hf_preparation_process(const HfPreparationProcessSpec *,HfPreparationProcessResult *);
+
+
 #endif
