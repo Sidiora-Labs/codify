@@ -36,6 +36,7 @@ CREATE TABLE hyperfide.hierarchy_handoffs (
  context jsonb NOT NULL CHECK(jsonb_typeof(context)='object' AND octet_length(context::text)<=65536),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,id),
+ UNIQUE(organisation_id,run_id,id,successor_id),
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,run_id,predecessor_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,run_id,successor_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
@@ -45,7 +46,7 @@ CREATE TABLE hyperfide.hierarchy_handoff_acknowledgements (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,handoff_id uuid NOT NULL,
  successor_id uuid NOT NULL,acknowledged_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,handoff_id),
- FOREIGN KEY(organisation_id,run_id,handoff_id) REFERENCES hyperfide.hierarchy_handoffs(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,handoff_id,successor_id) REFERENCES hyperfide.hierarchy_handoffs(organisation_id,run_id,id,successor_id),
  FOREIGN KEY(organisation_id,run_id,successor_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id)
 );
 CREATE TABLE hyperfide.hierarchy_session_packages (
