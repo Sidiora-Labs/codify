@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "7.4",
+  "task": "7.4",
+  "roles": [
+    "control"
+  ],
+  "module": "graph/query.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "graph.query.describe",
+    "graph.query.status",
+    "graph.query.search",
+    "graph.query.context",
+    "graph.query.traverse"
+  ],
+  "requires": [
+    "4.2",
+    "7.3"
+  ]
+}
