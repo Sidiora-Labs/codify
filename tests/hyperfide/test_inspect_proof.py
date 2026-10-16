@@ -13,6 +13,7 @@ import uuid
 from selftest_harness import Fixture, HERE
 
 INSPECTOR = HERE / "inspect-proof.py"
+GIT = ["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "gc.autoDetach=false"]
 
 def sha(raw):
     return "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -28,7 +29,7 @@ class ProofInspectionTests(unittest.TestCase):
         self.fixture.manifest["policy"] = {"cutover_parity": policy()}
         self.fixture.save()
         for argv in (["init", "-q"], ["add", "--all"], ["-c", "user.name=Proof fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "real disposable proof source"]):
-            subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"] + argv, cwd=self.fixture.root, check=True, capture_output=True, timeout=15)
+            subprocess.run(GIT + [ "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"] + argv, cwd=self.fixture.root, check=True, capture_output=True, timeout=15)
         self.campaign, summary = self.fixture.successful()
         self.receipt_path = self.campaign / "receipts" / (summary["receipt_id"] + ".json")
         self.receipt = json.loads(self.receipt_path.read_bytes())
@@ -106,7 +107,7 @@ class ProofInspectionTests(unittest.TestCase):
     def portable(self):
         self.staging = tempfile.TemporaryDirectory(prefix="hyperfide-proof-staging-")
         root = Path(self.staging.name)
-        subprocess.run(["git", "clone", "--no-hardlinks", "--quiet", str(self.fixture.root), str(root / "source")], check=True, capture_output=True, timeout=20)
+        subprocess.run(GIT + [ "clone", "--no-hardlinks", "--quiet", str(self.fixture.root), str(root / "source")], check=True, capture_output=True, timeout=20)
         shutil.copytree(self.campaign, root / "campaign")
         (root / "tools").mkdir()
         mapping = {"schema_version": 1, "workspace": {"original": str(self.fixture.root), "staged": "source"}, "campaign_original": str(self.campaign), "files": [], "executables": [], "checker_original": str(HERE / "check-evidence.py"), "runner_original": str(HERE / "qualify.py")}
@@ -153,7 +154,7 @@ class ProofInspectionTests(unittest.TestCase):
 
     def test_portable_rejects_wrong_commit_and_escape(self):
         root, mapping = self.portable()
-        subprocess.run(["git", "-c", "user.name=Proof fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-qm", "different source revision"], cwd=root / "source", check=True, capture_output=True, timeout=15)
+        subprocess.run(GIT + [ "-c", "user.name=Proof fixture", "-c", "user.email=fixture@example.invalid", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-qm", "different source revision"], cwd=root / "source", check=True, capture_output=True, timeout=15)
         self.reject(self.run_inspector(root=root))
         mapping["files"][0]["staged"] = "../escape"
         (root / "trusted-relocation.json").write_text(json.dumps(mapping))

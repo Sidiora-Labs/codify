@@ -121,10 +121,13 @@ def canonical_check(campaign, receipt_id, relocation=None):
         try:
             code = child.wait(timeout=120)
         finally:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            # A live, unreaped child retains its PID/group identity. Never signal
+            # a group after wait has reaped the leader and released that PID.
+            if child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             child.wait()
         output.seek(0)
         raw = output.read(MAX_BYTES + 1)

@@ -106,8 +106,8 @@
     },
     {
       "path": "tests/hyperfide/inspect-proof.py",
-      "sha256": "a5de137c5e5284295a8df33536621d815724f91dfdec7401d3c738ba5ce9a9b4",
-      "size": 10612
+      "sha256": "7f2a1adb23fb44bc08ae0cfbac075bd37afdbc28bea25b7391bccacfac32cd08",
+      "size": 10825
     },
     {
       "path": "tests/hyperfide/proof_relocation.py",
@@ -116,8 +116,8 @@
     },
     {
       "path": "tests/hyperfide/test_inspect_proof.py",
-      "sha256": "3f0e04df005b48c064b4a7564ff4259e54993ee9b5b6c5e6d34ec340ce653f73",
-      "size": 9727
+      "sha256": "cbbc30400dd973921a9f0129539d7ee21c9014d44d7772de7eef8ac745776d10",
+      "size": 9821
     }
   ],
   "policy": {
