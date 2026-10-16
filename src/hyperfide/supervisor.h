@@ -28,3 +28,6 @@ int hf_runner_job_claim(const char *,const char *,HfHttpResponse *);
 int hf_runner_job_placement(const char *,const char *);
 int hf_runner_job_execute(const char *,FILE *);
 #endif
+
+/* Dedicated slot UID cleanup survives a blocked or dead supervising broker. */
+pid_t hf_slot_watchdog(uid_t uid, long long deadline_ns, int *writer);
