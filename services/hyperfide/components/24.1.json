@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "24.1",
+  "task": "24.1",
+  "roles": [
+    "control"
+  ],
+  "module": "recovery/control.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "recovery.control.describe",
+    "recovery.control.reconstruct",
+    "recovery.offline.evaluate",
+    "recovery.control.resume",
+    "recovery.control.adopt"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "5.1"
+  ]
+}
