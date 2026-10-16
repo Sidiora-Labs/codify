@@ -52,7 +52,11 @@
     "harness.source.output-equals-workspace",
     "harness.source.output-contains-probe",
     "harness.child.detached-pipe-timeout",
-    "harness.source.git-bytecode-parity"
+    "harness.source.git-bytecode-parity",
+    "harness.artifact.required-per-receipt",
+    "harness.artifact.old-snapshot-tamper",
+    "harness.artifact.logical-alias-forgery",
+    "harness.cleanup.immutable-absence-reference"
   ],
   "cases": [
     "V-056"
@@ -67,7 +71,8 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/selftest_harness.py",
     "tests/hyperfide/cases/tasks/27_1.py",
-    "tests/hyperfide/manifest.schema.json"
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/test_required_artifact_receipts.py"
   ],
   "source_roots": [
     "tests/hyperfide"
