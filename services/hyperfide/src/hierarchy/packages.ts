@@ -133,7 +133,11 @@ export async function requireAuthority(tx:PrimaryTransaction,input:AuthorityRequ
   if(session.role==='FEATURE_MANAGER'&&p.manager_session_id!==actor)return refuse('PACKAGE_OWNER_MISMATCH','Manager does not own the package');
   if(!['LEADER','FEATURE_MANAGER'].includes(session.role)) {
    const binding=await tx.query('SELECT 1 FROM hyperfide.hierarchy_session_packages WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND package_id=$4',[org,run,actor,id]);
-   if(!binding.rowCount)return refuse('PACKAGE_OWNER_MISMATCH','Session has no package role binding');
+   if(!binding.rowCount){
+    const registry=await tx.query("SELECT to_regclass('hyperfide.hierarchy_worker_registrations') IS NOT NULL AS available");
+    const worker=registry.rows[0]?.available&&session.role==='WORKER'?await tx.query('SELECT 1 FROM hyperfide.hierarchy_worker_registrations WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND package_id=$4',[org,run,actor,id]):null;
+    if(!worker?.rowCount)return refuse('PACKAGE_OWNER_MISMATCH','Session has no immutable package role binding');
+   }
   }
   result.package_id=id;result.package_generation=p.owner_generation;
  } else if(session.role==='FEATURE_MANAGER')return refuse('PACKAGE_REQUIRED','Manager authority requires an explicit package');

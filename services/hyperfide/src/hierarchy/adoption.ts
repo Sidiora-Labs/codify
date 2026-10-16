@@ -1,3 +1,8 @@
+import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
+import type {ComputeToken} from '../scheduler/claim.js';
+import {isNativeAuthAuthority} from '../identity/native_auth.js';
+import type {NativeAuthAuthority} from '../identity/native_auth.js';
 import {readSemanticDisposition} from '../storage/dispositions.js';
 import {randomUUID,createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
@@ -5,7 +10,7 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {object} from '../policy/programme.js';
-import {gateway,trustedActor,operation,ready,record,uuid,decimal,text,refuse,requireAuthority,hierarchyReadGuard,leadership,hash} from './packages.js';
+import {gateway,trustedActor,operation,ready,record,uuid,decimal,text,refuse,requireAuthority,hierarchyReadGuard,leadership,hash,digest,canonical} from './packages.js';
 import {validateExecutionInputs} from './packets.js';
 import {parseComputeToken,assertCurrentCompute} from '../scheduler/leases.js';
 import {dimensions,validateResourceVector,reserveCapacity,lockSandboxBudget,reserveSandboxResources,inspectSandboxCharge} from '../scheduler/claim.js';
@@ -172,5 +177,79 @@ export function createComponent(context:ComponentContext):Component{
    return {package_id:packageId,package_generation:auth.package_generation,current_manager_session_id:await currentManager(tx,a,packageId),sessions:sessions.rows.slice(0,256),omitted_at_least:Math.max(0,sessions.rows.length-256),authority:'NONE',restart_required:false,ancestry:'IMMUTABLE; accountability follows current package ownership'};
   });
  }
+ }};
+}
+
+export interface WorkerRegistrationInput {
+ organisation_id:string;run_id:string;command_id:string;token:ComputeToken;packet_digest:string;payload_digest:string;
+}
+export interface WorkerRegistrationReceipt {
+ session_id:string;registration_receipt_digest:string;native_session_id:string|null;state:string;execution_authority:false;
+}
+export interface WorkerRegistrationAuthority {
+ registerWorker:(tx:PrimaryTransaction,input:WorkerRegistrationInput,invocation:InvocationContext)=>Promise<WorkerRegistrationReceipt>;
+}
+export function isWorkerRegistrationAuthority(value:unknown):value is WorkerRegistrationAuthority {
+ return object(value)&&typeof value.registerWorker==='function';
+}
+async function workerSchema(tx:PrimaryTransaction){
+ await schema(tx);
+ const table=await tx.query("SELECT to_regclass('hyperfide.hierarchy_worker_registrations') IS NOT NULL AS ready");
+ if(!table.rows[0]?.ready)return refuse('WORKER_REGISTRATION_SCHEMA_REQUIRED','Apply trusted normal-worker registration migration first');
+}
+/** An observed native identity is attached later by the actual runner/native binder. */
+async function workerSeat(tx:PrimaryTransaction,token:ComputeToken,packetDigest:string,native:NativeAuthAuthority,i:InvocationContext):Promise<WorkerRegistrationReceipt>{
+ assertPrimaryTransaction(tx);assertInvocation(i);await readSemanticDisposition(tx,token);await i.guard(tx);await workerSchema(tx);
+ if(token.organisation_id!==i.principal.organisation_id||token.run_id!==i.principal.run_id||token.authority_epoch!==i.principal.deployment_epoch)return refuse('ACTOR_SCOPE_MISMATCH','Worker registration targets another authenticated scope');
+ const compute=await assertCurrentCompute(tx,token,{operation:'ADMISSION'});
+ if(compute.input_packet_digest!==packetDigest)return refuse('WORKER_PACKET_MISMATCH','Registration requires the actual claimed immutable packet');
+ const loaded=await validateExecutionInputs(tx,{organisation_id:token.organisation_id,run_id:token.run_id,digest:packetDigest},i),m=loaded.packet.mandatory;
+ if(!object(m)||!object(m.identity)||!object(m.runtime)||!object(m.runtime.execution_profile))return refuse('WORKER_PACKET_MISMATCH','Claimed packet lacks accepted native execution intent');
+ const identity=m.identity,execution=m.runtime.execution_profile;
+ for(const key of ['task_id','attempt_id','attempt_generation','authority_epoch'])if(identity[key]!==token[key as keyof ComputeToken])return refuse('WORKER_PACKET_MISMATCH','Accepted worker identity differs from current claim');
+ if(m.runtime.sandbox_id!==token.sandbox_id||m.runtime.slot_id!==token.slot_id||m.runtime.sandbox_boot_generation!==token.sandbox_boot_generation)return refuse('WORKER_PACKET_MISMATCH','Worker executor differs from accepted packet');
+ const profileId=name(execution.model_profile_ref),resolved=await native.privateRuntimeInTransaction(tx,i,profileId),snapshot=resolved.snapshot;
+ const connector=execution.connector==='claude-code'?'claude':execution.connector;
+ if(connector!==snapshot.connector||execution.credential_profile_ref!==snapshot.credential_reference)return refuse('WORKER_NATIVE_PROFILE_MISMATCH','Protected native profile connector or credential differs from accepted intent');
+ const account=name(resolved.configured_account_key),parentId=uuid(identity.parent_session_id),packageId=uuid(identity.package_id);
+ await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[token.organisation_id+':'+token.run_id+':worker-seat:'+token.attempt_id]);
+ const old=await tx.query('SELECT w.*,w.attempt_generation::text,w.sandbox_boot_generation::text,s.native_session_id,s.state FROM hyperfide.hierarchy_worker_registrations w JOIN hyperfide.agent_sessions s ON s.organisation_id=w.organisation_id AND s.run_id=w.run_id AND s.id=w.session_id WHERE w.organisation_id=$1 AND w.run_id=$2 AND w.attempt_id=$3 FOR SHARE OF s',[token.organisation_id,token.run_id,token.attempt_id]);
+ if(old.rows[0]){
+  const row=old.rows[0];
+  if(row.attempt_generation!==token.attempt_generation||row.packet_digest!==packetDigest||row.slot_id!==token.slot_id||row.sandbox_id!==token.sandbox_id||row.sandbox_boot_generation!==token.sandbox_boot_generation||row.native_profile_id!==profileId||row.native_profile_digest!==snapshot.profile_digest||row.account_key!==account||row.connector!==connector)return refuse('WORKER_REGISTRATION_CONFLICT','An attempt already has a different immutable worker seat');
+  return {session_id:uuid(row.session_id),registration_receipt_digest:digest(row.registration_receipt_digest),native_session_id:row.native_session_id,state:String(row.state),execution_authority:false};
+ }
+ const id=randomUUID(),receipt=hash({schema_version:1,organisation_id:token.organisation_id,run_id:token.run_id,session_id:id,token,packet_digest:packetDigest,parent_session_id:parentId,package_id:packageId,native_profile_id:profileId,native_profile_digest:snapshot.profile_digest,connector,configured_account_key:account});
+ await tx.query("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id,state) VALUES($1,$2,$3,'WORKER',$4,$5,$6,NULL,$7,$8,$9,$10,'REGISTERED')",[token.organisation_id,token.run_id,id,parentId,connector,account,token.slot_id,token.sandbox_id,token.sandbox_boot_generation,token.attempt_id]);
+ await tx.query('INSERT INTO hyperfide.hierarchy_worker_registrations(organisation_id,run_id,session_id,task_id,attempt_id,attempt_generation,authority_epoch,sandbox_id,slot_id,sandbox_boot_generation,packet_digest,parent_session_id,package_id,native_profile_id,native_profile_digest,connector,account_key,registration_receipt_digest,registered_by_credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)',[token.organisation_id,token.run_id,id,token.task_id,token.attempt_id,token.attempt_generation,token.authority_epoch,token.sandbox_id,token.slot_id,token.sandbox_boot_generation,packetDigest,parentId,packageId,profileId,snapshot.profile_digest,connector,account,receipt,i.principal.credential_id]);
+ return {session_id:id,registration_receipt_digest:receipt,native_session_id:null,state:'REGISTERED',execution_authority:false};
+}
+export function createWorkerComponent(context:ComponentContext):Component{
+ const g=gateway(context),native=context.dependencies.require('14.3','identity.native-auth',isNativeAuthAuthority);
+ const registerWorker:WorkerRegistrationAuthority['registerWorker']=async(tx,input,i)=>{
+  assertPrimaryTransaction(tx);assertInvocation(i);await readSemanticDisposition(tx,input);await i.guard(tx);
+  const v=record(input,['organisation_id','run_id','command_id','token','packet_digest','payload_digest']),token=parseComputeToken(v.token);
+  if(!['OPERATOR','COORDINATOR','DISPATCH'].includes(i.principal.role)||uuid(v.organisation_id)!==i.principal.organisation_id||uuid(v.run_id)!==i.principal.run_id)return refuse('ROLE_DENIED','Actual dispatch controller and same-scope command required');
+  const command=uuid(v.command_id),packet=digest(v.packet_digest),payload=digest(v.payload_digest),expected={command_id:command,token,packet_digest:packet};
+  if(hash(expected)!==payload)return refuse('WORKER_DISPATCH_MISMATCH','Committed dispatch payload digest preimage differs');
+  const rows=await tx.query("SELECT d.*,d.attempt_generation::text,d.sandbox_boot_generation::text,e.aggregate_type,e.aggregate_id,e.aggregate_version::text,e.event_type,e.payload FROM hyperfide.scheduler_dispatches d JOIN hyperfide.outbox_events e ON e.organisation_id=d.organisation_id AND e.run_id=d.run_id AND e.id=d.event_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.id=$3 FOR SHARE OF d,e",[i.principal.organisation_id,i.principal.run_id,command]);
+  const row=rows.rows[0];
+  if(!row||!['INTENT','UNKNOWN'].includes(String(row.state))||row.aggregate_type!=='scheduler-spawn'||row.aggregate_id!==command||row.aggregate_version!=='1'||row.event_type!=='runner.spawn.requested'||row.payload_digest!==payload||canonical(row.payload)!==canonical({...expected,payload_digest:payload}))return refuse('WORKER_DISPATCH_MISMATCH','The exact committed scheduler spawn event is required');
+  for(const key of ['task_id','attempt_id','attempt_generation','authority_epoch','sandbox_id','slot_id','sandbox_boot_generation'])if(String(row[key])!==String(token[key as keyof ComputeToken]))return refuse('WORKER_DISPATCH_MISMATCH','Dispatch journal differs from current worker tuple');
+  return workerSeat(tx,token,packet,native,i);
+ };
+ return {apiVersion:1,capabilities:{'hierarchy.worker-registration.v1':Object.freeze({registerWorker})},actions:{
+  'hierarchy.worker.register':async(input,current)=>{
+   const v=record(input,['idempotency_key','leader_generation','package_generation','token']),a=trustedActor(current),token=parseComputeToken(v.token);
+   const guarded={...a,guard:async(tx:PrimaryTransaction)=>{
+    await a.guard(tx);
+    const task=await tx.query('SELECT feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[a.organisation_id,a.run_id,token.task_id]);
+    await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:uuid(task.rows[0]?.feature_package_id),package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
+   }};
+   return operation(g,guarded,'hierarchy.worker.register',v,async tx=>{
+    const compute=await assertCurrentCompute(tx,token,{operation:'ADMISSION'});
+    return workerSeat(tx,token,compute.input_packet_digest,native,a.invocation);
+   });
+  }
  }};
 }

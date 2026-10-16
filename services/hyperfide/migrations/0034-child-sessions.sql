@@ -79,3 +79,29 @@ BEGIN
 END $$;
 CREATE TRIGGER charged_sandbox BEFORE INSERT ON hyperfide.hierarchy_child_registrations
  FOR EACH ROW EXECUTE FUNCTION hyperfide.require_child_sandbox_charge();
+
+CREATE TABLE hyperfide.hierarchy_worker_registrations (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,session_id uuid NOT NULL,
+ task_id uuid NOT NULL,attempt_id uuid NOT NULL,attempt_generation bigint NOT NULL CHECK(attempt_generation>0),
+ authority_epoch uuid NOT NULL,sandbox_id uuid NOT NULL,slot_id uuid NOT NULL,sandbox_boot_generation bigint NOT NULL CHECK(sandbox_boot_generation>0),
+ packet_digest hyperfide.digest NOT NULL,parent_session_id uuid NOT NULL,package_id uuid NOT NULL,
+ native_profile_id text NOT NULL CHECK(octet_length(native_profile_id) BETWEEN 1 AND 128),
+ native_profile_digest hyperfide.digest NOT NULL,connector text NOT NULL CHECK(connector IN ('codex','claude')),
+ account_key text NOT NULL CHECK(octet_length(account_key) BETWEEN 1 AND 128),
+ registration_receipt_digest hyperfide.digest NOT NULL,registered_by_credential_id uuid NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,session_id),UNIQUE(organisation_id,run_id,attempt_id),
+ FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,parent_session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,task_id) REFERENCES hyperfide.tasks(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,package_id) REFERENCES hyperfide.feature_packages(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,attempt_id,attempt_generation,authority_epoch,sandbox_boot_generation)
+ REFERENCES hyperfide.attempts(organisation_id,run_id,id,generation,authority_epoch,sandbox_boot_generation),
+ FOREIGN KEY(organisation_id,sandbox_id,slot_id,sandbox_boot_generation) REFERENCES hyperfide.worker_slots(organisation_id,sandbox_id,id,boot_generation),
+ FOREIGN KEY(organisation_id,run_id,packet_digest) REFERENCES hyperfide.hierarchy_execution_packets(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,run_id,registered_by_credential_id) REFERENCES hyperfide.identity_principals(organisation_id,run_id,credential_id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_worker_registrations
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','session_id','task_id','attempt_id','attempt_generation','authority_epoch','sandbox_id','slot_id','sandbox_boot_generation','packet_digest','parent_session_id','package_id','native_profile_id','native_profile_digest','connector','account_key','registration_receipt_digest','registered_by_credential_id','created_at');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_worker_registrations
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

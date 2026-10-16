@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "hierarchy-worker-registration",
+  "task": "3.4",
+  "roles": [
+    "control"
+  ],
+  "module": "hierarchy/adoption.js",
+  "entry": "createWorkerComponent",
+  "api_version": 1,
+  "actions": [
+    "hierarchy.worker.register"
+  ],
+  "requires": [
+    "3.4",
+    "3.1",
+    "3.2",
+    "4.2",
+    "5.1",
+    "5.2",
+    "14.1",
+    "14.3"
+  ]
+}
