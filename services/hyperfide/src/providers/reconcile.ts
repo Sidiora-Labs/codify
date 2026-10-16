@@ -414,7 +414,7 @@ export async function executeBound(pool:ProviderDatabase,config:DeploymentConfig
  const op=await transaction(pool,async c=>{
   const {scope}=await currentPool(c,config,poolId);
   if(!pool.runtime.runnerBindingVerifier)fail('RUNNER_REGISTRY_UNAVAILABLE','Actual trusted runner registration must be verified');
-  const proof=await pool.runtime.runnerBindingVerifier(c,b as ProviderRunnerBinding);if(!proof)fail('RUNNER_BINDING_STALE','Runner registration is unavailable or stale');
+  const proof=await pool.runtime.runnerBindingVerifier(c,b as ProviderRunnerBinding,value);if(!proof)fail('RUNNER_BINDING_STALE','Runner registration is unavailable or stale');
   const bindingDigest=dg(proof.evidence_digest);utc(proof.observed_at);
   if(Date.parse(proof.observed_at)>Date.now()||Date.now()-Date.parse(proof.observed_at)>60000)fail('RUNNER_BINDING_STALE','Runner binding verification must be fresh');
   const rows=await c.query('SELECT native_sandbox_id,boot_generation,preparation_digest,desired_state FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 FOR UPDATE',[config.organisation_id,sandbox,poolId]);
@@ -443,7 +443,7 @@ export async function executeBound(pool:ProviderDatabase,config:DeploymentConfig
  };
  const adapter=providerAdapter(op.scope,{...remoteProcessHooks(pool,config.organisation_id,run,id),invocation:providerInvocation(pool),resolveResourceBinding:observed=>resolveSandboxBinding(pool,config,run,sandbox,observed),resolvePreparation:unavailable,assertResourceBinding:async observed=>{
   if(digestDocument(observed)!==digestDocument(op))fail('PROVIDER_SCOPE_MISMATCH','Remote operation changed');
-  await transaction(pool,async c=>{const proof=await pool.runtime.runnerBindingVerifier!(c,b as ProviderRunnerBinding);if(!proof)fail('RUNNER_BINDING_STALE','Runner binding expired');const current=(await c.query('SELECT native_sandbox_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[config.organisation_id,sandbox])).rows[0];if(!current||current.native_sandbox_id!==b.external_sandbox_id||String(current.boot_generation)!==b.boot_generation)fail('STALE_SANDBOX_GENERATION','Remote resource boot changed');});
+  await transaction(pool,async c=>{const proof=await pool.runtime.runnerBindingVerifier!(c,b as ProviderRunnerBinding,value);if(!proof)fail('RUNNER_BINDING_STALE','Runner binding expired');const current=(await c.query('SELECT native_sandbox_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[config.organisation_id,sandbox])).rows[0];if(!current||current.native_sandbox_id!==b.external_sandbox_id||String(current.boot_generation)!==b.boot_generation)fail('STALE_SANDBOX_GENERATION','Remote resource boot changed');});
  },assignedBootGeneration:unavailable,persistEarlyResource:unavailable,recordObservation:record},pool.runtime) as ReturnType<typeof providerAdapter>&{
   readCapturedOutput?:(scope:ProviderOperation['scope'],resource:ResourceRef,processRef:string,maxBytes:number)=>Promise<CapturedProviderOutput>;
  };
