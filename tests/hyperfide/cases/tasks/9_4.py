@@ -14,7 +14,8 @@ IDS=[
  "railway.adapter.destroy-awaits-terminal","railway.adapter.destroy-confirmed","railway.adapter.expired-before-dispatch","railway.adapter.malformed-observation-keeps-id",
  "railway.isolation.accepted-delete-is-not-absence","railway.isolation.exact-deletion-confirmed",
  "railway.isolation.exact-absence-observation","railway.isolation.http-failure-unknown",
- "railway.isolation.wrong-native-id-unknown","railway.isolation.pure-live-construction"
+ "railway.isolation.wrong-native-id-unknown","railway.isolation.pure-live-construction",
+ "railway.adapter.restore-source-id-is-unknown"
 ]
 def main():
  if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:19]+IDS[24:25]+IDS[19:24]+IDS[25:]));return 0
@@ -164,6 +165,15 @@ process.stdout.write(JSON.stringify({constructed:typeof transport.destroy==='fun
       cwd=c.ROOT,capture_output=True,text=True,timeout=20)
    c.check(IDS[30],lambda:c.expect(pure.returncode==0 and json.loads(pure.stdout)=={"constructed":True,"denied":True} and
       len(fixture.requests)==before,"pure live construction usedPG/provider effects or accepted another scope: "+pure.stderr))
+   original_observed=c.observed
+   try:
+    c.observed=lambda:original_observed()|{"id":params["base"]["source_native_sandbox_id"]}
+    same_source=adapter()
+   finally:c.observed=original_observed
+   c.check(IDS[31],lambda:c.expect(same_source["outcome"]["status"]=="UNKNOWN" and
+      same_source["outcome"]["resource"]["native_sandbox_id"]==params["base"]["source_native_sandbox_id"] and
+      same_source["events"]==["assigned-generation","early-id:"+params["base"]["source_native_sandbox_id"],"observation:UNKNOWN"],
+      "source resource identity was adopted as a fresh restore"))
    service.close();fixture.close();complete=True
   finally:
    if service.process.poll() is None:service.process.kill();service.process.wait()

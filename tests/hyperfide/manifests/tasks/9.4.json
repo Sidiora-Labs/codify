@@ -40,7 +40,8 @@
     "railway.isolation.exact-absence-observation",
     "railway.isolation.http-failure-unknown",
     "railway.isolation.wrong-native-id-unknown",
-    "railway.isolation.pure-live-construction"
+    "railway.isolation.pure-live-construction",
+    "railway.adapter.restore-source-id-is-unknown"
   ],
   "inputs": [
     {
@@ -410,13 +411,13 @@
     },
     {
       "path": "services/hyperfide/dist/providers/railway/reconciliation.js",
-      "sha256": "5fe22c8267de33b5676a52b30f5adb696fc5c9739f00c069014b994843f8e4f8",
-      "size": 44257
+      "sha256": "bcbd90c47cf3ae5322a025834776d0fbcc7cb3c7c3af1efde836e5e824d80513",
+      "size": 44564
     },
     {
       "path": "services/hyperfide/dist/providers/railway/reconciliation.js.map",
-      "sha256": "d5901f567c35442e93b6b75e1821799dfacba45d3fe55962c312bf3d17ee7810",
-      "size": 38053
+      "sha256": "1eb74274a93eccc8b6bab631b792dfdccec498126f435c21eb7b81b7d4e5eacf",
+      "size": 38214
     },
     {
       "path": "services/hyperfide/dist/providers/reconcile.d.ts",
@@ -640,8 +641,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/railway/reconciliation.ts",
-      "sha256": "33a4aee925872170bdbfa7e42c18c49afda1e73be0ee92dd017e78ff205850e7",
-      "size": 41927
+      "sha256": "f8c2b1b2503552f5747caf72e8af1346462e692308a85a2fc422972e31f1168c",
+      "size": 42162
     },
     {
       "path": "services/hyperfide/src/providers/reconcile.ts",
@@ -695,8 +696,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/9_4.py",
-      "sha256": "e4f7550d4e272e4c9a4f2aa636b36a87aeb6af40aeea47dfe4095305b27f4713",
-      "size": 13145
+      "sha256": "088166366a5f79dd50f1214da3fcaf7387634e706e97b30fcf2c04be132b9e86",
+      "size": 13782
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -715,8 +716,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/9.4.json",
-      "sha256": "cb056769f0d34a6ed2379498fec1b74fd40fc2aff7adac1b81e6b3a72664d192",
-      "size": 9295
+      "sha256": "e99eeb13b384deef7087d515855aa7d4a2d5d3af6b804f72fb2a4334607a2200",
+      "size": 9347
     },
     {
       "path": "tests/hyperfide/registry.json",

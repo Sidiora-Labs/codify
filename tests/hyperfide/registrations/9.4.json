@@ -39,7 +39,8 @@
     "railway.isolation.exact-absence-observation",
     "railway.isolation.http-failure-unknown",
     "railway.isolation.wrong-native-id-unknown",
-    "railway.isolation.pure-live-construction"
+    "railway.isolation.pure-live-construction",
+    "railway.adapter.restore-source-id-is-unknown"
   ],
   "argv": [
     "python3",

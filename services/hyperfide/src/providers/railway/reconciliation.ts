@@ -154,6 +154,7 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
           outcome=success(operation,null,result);break;
         }
         case 'create':{
+          let sourceNativeId:string|null=null;
           const profile=validateRuntimeProfile(await dependencies.runtimeProfile(operation));
           if(!sameScope(profile.scope,operation.scope)||profile.preparation_digest!==operation.preparation_digest||
             hash(profile.resources)!==hash(operation.parameters.resources)||profile.network!==operation.parameters.network)
@@ -168,6 +169,7 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
           }else{
             const base=validatePreparedBase(await dependencies.preparedBase(operation.parameters.preparation_reference,operation.scope),
               operation.scope,digest(operation.preparation_digest));
+            sourceNativeId=base.source_native_sandbox_id;
             if(profile.source.kind==='CHECKPOINT'){
               if(profile.source.reference!==base.checkpoint.key)throw new Error('Railway approved checkpoint mismatch');
             }else if(!dependencies.verifyForkSource||!await dependencies.verifyForkSource(operation,profile,base)){
@@ -188,6 +190,7 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
           resource={native_sandbox_id:nativeId,sandbox_boot_generation:generation};
           const persisted=await dependencies.persistence.persistEarlyResource(operation,nativeId);
           if(persisted.native_sandbox_id!==nativeId||persisted.sandbox_boot_generation!==generation)throw new Error('Railway persisted resource mismatch');
+          if(sourceNativeId!==null&&nativeId===sourceNativeId)throw new Error('Railway restore reused source resource identity');
           const row=info(raw,client);
           if(row.status!=='CREATING'&&row.status!=='RUNNING'){outcome=unknown(operation,resource);break;}
           outcome=success(operation,resource,{provider_state:row.status});break;
