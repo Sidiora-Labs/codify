@@ -435,6 +435,12 @@ static int command(int dir, const char *const *args, Buf *out, int outputfd) {
         av[n++] = "core.worktree=.";
         av[n++] = "-c";
         av[n++] = "core.bare=false";
+        /* Maintenance may detach grandchildren; checkpoint processes own every
+         * child and never start repository housekeeping in the background. */
+        av[n++] = "-c";
+        av[n++] = "maintenance.auto=false";
+        av[n++] = "-c";
+        av[n++] = "gc.auto=0";
         for (int i = 0; args[i] && n < 55; i++)
             av[n++] = args[i];
         av[n] = NULL;

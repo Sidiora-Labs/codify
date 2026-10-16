@@ -39,7 +39,7 @@ def check(identity,callback):
         actual=type(error).__name__+": "+str(error)
     print(json.dumps({"type":"assertion","id":identity,"expected":"observed","actual":actual}),flush=True)
 def git(repo,*args):
-    p=subprocess.run(["git","-C",str(repo),*args],capture_output=True,check=True)
+    p=subprocess.run(["git","-c","maintenance.auto=false","-c","gc.auto=0","-C",str(repo),*args],capture_output=True,check=True)
     return p.stdout
 def invoke(action,request,env=None,raw=None):
     p=subprocess.run([str(ROOT/"build/hyperfide-native"),"--component","15.1","--action",action],
@@ -287,7 +287,7 @@ def sql(statement,database="postgres"):
                           input=statement,text=True,capture_output=True,env=env,timeout=30)
     expect(result.returncode==0,"owned checkpoint database operation failed")
     return result.stdout.strip()
-def cleanup():
+def cleanup(emit=True):
     try:
         sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND pid<>pg_backend_pid();")
         sql('DROP DATABASE IF EXISTS "'+DATABASE+'";')
@@ -295,13 +295,15 @@ def cleanup():
         (evidence_dir()/"database-absence.json").write_text(json.dumps({
             "database":DATABASE,"observed_absent":absent,
             "observer":"primary pg_database after explicit owned database cleanup"})+"\n")
-        print(json.dumps({"type":"cleanup","complete":absent,"resources":[
-            {"id":RESOURCE,"status":"deleted" if absent else "unknown","observed_absent":absent,
-             "evidence_artifact":"checkpoint/database-absence.json"}]}),flush=True)
+        if emit:
+            print(json.dumps({"type":"cleanup","complete":absent,"resources":[
+                {"id":RESOURCE,"status":"deleted" if absent else "unknown","observed_absent":absent,
+                 "evidence_artifact":"checkpoint/database-absence.json"}]}),flush=True)
         return 0 if absent else 1
     except Exception:
-        print(json.dumps({"type":"cleanup","complete":False,"resources":[
-            {"id":RESOURCE,"status":"unknown"}]}),flush=True)
+        if emit:
+            print(json.dumps({"type":"cleanup","complete":False,"resources":[
+                {"id":RESOURCE,"status":"unknown"}]}),flush=True)
         return 1
 def durable_suite(f):
     """Real authenticated HTTPS service; native receives filesystem inputs only."""
@@ -312,19 +314,27 @@ def durable_suite(f):
     factory=getattr(objects,"createAuthenticatedFixture",None)
     expect(callable(factory),"actual14 authenticated artifact fixture is not available")
     base=f.base/"durable";base.mkdir()
-    capsule=Fixture(base,{"organisation_id":objects.ORG,"run_id":objects.RUN})
     supervisor_base=f.base/"supervisor";supervisor_base.mkdir()
-    setup=factory(supervisor_base,DATABASE,RESOURCE)
+    setup=None
     observations={"scope":"task-component","source":"actual native and authenticated14 HTTPS processes",
                   "native_authority":"NONE","publication_authority":"supervisor verified artifact service",
-                  "objects":[],"checkpoint_digest":capsule.digest,"restored":False,
-                  "live_provider_qualification":"NOT_EVALUATED"}
+                  "objects":[],"restored":False,"live_provider_qualification":"NOT_EVALUATED"}
     try:
+        setup=factory(supervisor_base,DATABASE,RESOURCE)
+        expect(setup.database==DATABASE,"authenticated fixture did not create the declared owned database")
         service=setup.service
+        # Bind source provenance to the authenticated service's real identity.
+        identity=service.ok("identity.describe",{},component="14.1")["principal"]
+        scope={"organisation_id":identity["organisation_id"],"run_id":identity["run_id"]}
+        expect(setup.scope==scope,"artifact fixture scope differs from actual authenticated principal")
+        capsule=Fixture(base,scope)
+        observations["checkpoint_digest"]=capsule.digest
+        observations["authenticated_scope"]=scope
+        observations["authenticated_role"]=identity["role"]
         chunks=capsule.chunks()
         rows=[];offset=0
         for sequence,data in enumerate(chunks):
-            response=service.put(data)
+            response=service.put(data,**scope)
             expect(response["outcome"]=="SUCCEEDED" and response["availability"]=="VERIFIED",
                    "actual object service did not verify chunk durability")
             artifact=response["artifact"]
@@ -336,7 +346,7 @@ def durable_suite(f):
             observations["objects"].append({"artifact_id":artifact["artifact_id"],"digest":artifact["digest"],
                                             "receipt_id":response["receipt"]["receipt_id"]})
             offset+=len(data)
-        request={"organisation_id":objects.ORG,"run_id":objects.RUN,"expected_chunks":len(rows),
+        request={**scope,"expected_chunks":len(rows),
                  "total_size_bytes":str(offset),"content_digest":capsule.digest,"chunks":rows,
                  "complete":True,"truncated":False,"missing_ranges":[],
                  "retention_class":"RUN","retention_until":None,"retention_hold":False}
@@ -351,10 +361,10 @@ def durable_suite(f):
         # actual service. Native itself never accepts a publication receipt.
         shutil.rmtree(capsule.spool)
         capsule.spool.mkdir(mode=0o700)
-        read=service.ok("artifact.manifest.read",service.by_id(result))
+        read=service.ok("artifact.manifest.read",{**scope,"artifact_id":result["artifact"]["artifact_id"]})
         reconstructed=[]
         for row in read["manifest"]["chunks"]:
-            part=service.ok("artifact.object.read",{"organisation_id":objects.ORG,"run_id":objects.RUN,
+            part=service.ok("artifact.object.read",{**scope,
                                                    "artifact_id":row["artifact_id"]})
             expect(part["availability"]=="VERIFIED","child object not physically verified")
             data=base64.b64decode(part["data_base64"],validate=True)
@@ -375,9 +385,11 @@ def durable_suite(f):
         observations["restored"]=True
         observations["native_context"]=restored["native_context"]
     finally:
-        setup.close()
-        (evidence_dir()/"roundtrip-observations.json").write_text(json.dumps(observations,sort_keys=True)+"\n")
-        expect(cleanup()==0,"owned checkpoint database cleanup failed")
+        try:
+            if setup is not None:setup.close()
+        finally:
+            (evidence_dir()/"roundtrip-observations.json").write_text(json.dumps(observations,sort_keys=True)+"\n")
+            expect(cleanup(emit=False)==0,"owned checkpoint database cleanup failed")
 def pin_manifest():
     """Pin only real integrated inputs; missing authentication/source fails."""
     for relative in ("tests/hyperfide/support/identity_fixture.py","tests/hyperfide/cases/tasks/15_2.py",
