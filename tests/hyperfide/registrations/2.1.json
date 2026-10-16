@@ -62,7 +62,12 @@
     "spec.isolation.task_revisions",
     "spec.isolation.spec_amendments",
     "spec.isolation.spec_amendment_decisions",
-    "spec.isolation.proof_registries"
+    "spec.isolation.proof_registries",
+    "spec.auth.semantic-read",
+    "spec.auth.semantic-write",
+    "spec.auth.no-startup-fallback",
+    "spec.auth.role-refused",
+    "spec.auth.revoked-refused"
   ],
   "cases": [
     "V-001",
@@ -81,7 +86,7 @@
   ],
   "required_artifacts": [
     "spec/observations.json",
-    "storage/database-absence.json"
+    "spec/database-absence.json"
   ],
   "required_env": [
     "DATABASE_URL",
@@ -115,7 +120,14 @@
     "tests/hyperfide/cases/tasks/4_1.py",
     "tests/hyperfide/qualify.py",
     "tests/hyperfide/check-evidence.py",
-    "tests/hyperfide/manifest.schema.json"
+    "tests/hyperfide/manifest.schema.json",
+    "services/hyperfide/src/spec/bootstrap.ts",
+    "services/hyperfide/src/storage/dispositions.ts",
+    "services/hyperfide/src/storage/durability.ts",
+    "services/hyperfide/migrations/0004-durability.sql",
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/components/4.2.json",
+    "services/hyperfide/components/14.1.json"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -124,6 +136,6 @@
     "services/hyperfide/migrations"
   ],
   "task": "2.1",
-  "timeout_seconds": 300,
+  "timeout_seconds": 600,
   "variant": "task:2.1"
 }

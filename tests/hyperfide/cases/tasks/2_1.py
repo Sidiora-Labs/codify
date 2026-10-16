@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64,copy,hashlib,importlib.util,json,os,re,shutil,stat,subprocess,sys,tempfile,uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[4]/"tests/hyperfide/support"))
 ROOT=Path(__file__).resolve().parents[4]
 spec=importlib.util.spec_from_file_location("storage_fixture",Path(__file__).with_name("4_1.py"))
 storage=importlib.util.module_from_spec(spec);spec.loader.exec_module(storage)
@@ -19,7 +20,7 @@ SOURCE=('# preserve\r\n[meta]\r\nslug = "synthetic"\r\n[feature.1]\r\nname = "on
  'requires = []\r\nreqs = ["1.1"]\r\ntouches = ["src/example.c"]\r\n').encode()
 def expect(value,message):
  if not value:raise AssertionError(message)
-def sql(command,db=DB,allow_error=False):return storage.sql(command,database=db,allow_error=allow_error).stdout.strip()
+def sql(command,db=None,allow_error=False):return storage.sql(command,database=db or DB,allow_error=allow_error).stdout.strip()
 def check(identity,callback):
  IDS.append(identity)
  try:callback();actual="observed"
@@ -27,37 +28,78 @@ def check(identity,callback):
  print(json.dumps({"type":"assertion","id":identity,"expected":"observed","actual":actual}),flush=True)
 def outdir():
  p=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/task-2.1-standalone"))/"spec";p.mkdir(parents=True,exist_ok=True);return p
+BOOTSTRAP_NODE="import{createResourceContainer}from'./services/hyperfide/dist/storage/runtime.js';import{bootstrapAcceptedIntentWithGateway}from'./services/hyperfide/dist/spec/bootstrap.js';let text='';for await(const c of process.stdin)text+=c;const v=JSON.parse(text),r=createResourceContainer({role:'control',env:process.env,signal:new AbortController().signal});try{const result=await bootstrapAcceptedIntentWithGateway(r.gateway,v.scope,v.metadata,v.input,v.deployment_id);process.stdout.write(JSON.stringify({ok:true,result}));}catch(error){process.stdout.write(JSON.stringify({ok:false,error:{code:typeof error.code==='string'?error.code:'BOOTSTRAP_FAILED'}}));}finally{await r.close();}"
 class Service:
  def __init__(self,base):
-  self.base=base;self.root=base/"sources";self.root.mkdir();self.components=base/"components";self.components.mkdir();self.counter=0
-  for name in ["1.4.json","4.1.json","2.1.json"]:shutil.copyfile(ROOT/"services/hyperfide/components"/name,self.components/name)
- def args(self,run):
-  self.counter+=1;p=self.base/("policy-"+uuid.uuid4().hex+".json")
-  policy={"schema_version":1,"programme_id":run,"repository":REPO,"spec_revision":"spec-import-fixture","policy_revision":1,"status":"ACTIVE",
-   "approval":{"decision":"APPROVED","record_id":"authorised-synthetic-fixture","spec_revision":"spec-import-fixture","policy_revision":1},
-   "allowed_roles":["control"],"allowed_actions":ACTIONS}
-  p.write_text(json.dumps(policy))
-  return ["node",str(ROOT/"services/hyperfide/dist/control.js"),"--policy",str(p),"--spec-revision","spec-import-fixture",
-   "--components",str(self.components),"--module-root",str(ROOT/"services/hyperfide/dist")]
+  from identity_fixture import IdentityFixture,sha
+  import threading
+  self.base=base;self.root=base/"sources";self.root.mkdir();self.lock=threading.RLock();self.credentials={};self.counter=0
+  def setup(f):
+   global DB,ORG,PROJECT,REPO,EPOCH,OID,ACTIONS
+   self.f=f;DB=f.database;storage.DATABASE=DB
+   for version,name in [(2,"0002-spec"),(4,"0004-durability")]:
+    raw=(ROOT/("services/hyperfide/migrations/"+name+".sql")).read_bytes()
+    f.sql("BEGIN;"+raw.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
+   self.deployment_id=str(uuid.uuid4())
+   ORG=str(uuid.uuid4());PROJECT=str(uuid.uuid4());REPO=str(uuid.uuid4());EPOCH=str(uuid.uuid4())
+   OID=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()
+   fmt=subprocess.check_output(["git","rev-parse","--show-object-format"],cwd=ROOT,text=True).strip()
+   f.actions=list(dict.fromkeys(f.actions+["system.describe","work.synthetic"]));ACTIONS=f.actions
+   self.metadata={"organisation":{"id":ORG,"name":"actual-intake-fixture"},"project":{"id":PROJECT,"name":"actual-intake-fixture"},"repositories":[{"id":REPO,"name":"actual-checkout","url":"https://github.com/Sidiora-Labs/codify.git","object_format":fmt,"checkout_root":str(ROOT),"source_objects":[{"object_id":OID,"object_type":"commit"}]}]}
+   f.sql("INSERT INTO hyperfide.authority_epochs(deployment_id,epoch,activation_kind,state,fence_id,proof_digest) VALUES($1,$2,'BOOTSTRAP','ACTIVE','fixture-known-approved-epoch',$3)",[self.deployment_id,EPOCH,sha(b"fixture-approved-bootstrap-epoch")])
+   self.initial_run=str(uuid.uuid4());initial=self.envelope(self.initial_run);self.initial_input=initial
+   result=self._bootstrap(initial,self.initial_run)
+   expect(result.get("ok") is True,"Actual offline intake did not accept initial synthetic source: "+str(result.get("error",{}).get("code")))
+   self.initial_result=result["result"];f.ids.update(organisation=ORG,project=PROJECT,run=self.initial_run,epoch=EPOCH,spec=result["result"]["spec_revision_id"])
+   config=json.loads(f.identity_config.read_text())
+   for record in config["principals"]:record.update(organisation_id=ORG,run_id=self.initial_run,deployment_epoch=EPOCH,allowed_actions=f.actions)
+   f.identity_config.write_text(json.dumps(config));f.identity_config.chmod(0o600)
+   policy=json.loads(f.policy.read_text());policy.update(programme_id=self.initial_run,allowed_actions=f.actions);f.policy.write_text(json.dumps(policy))
+   self.credentials[self.initial_run]=f.ids["operator"]
+   f.env.update(HF_SPEC_ALLOWED_ROOT=str(self.root),UNTRUSTED_VALUE="must-not-interpolate")
+  self.f=IdentityFixture(extra_components=("2.1",),extra_setup=setup)
+  (outdir()/"database-names.json").write_text(json.dumps({"databases":[self.f.database]}))
+ def _bootstrap(self,value,run,overrides=None):
+  env=self.f.env.copy();env.update(overrides or {})
+  data={"scope":{"organisation_id":ORG,"project_id":PROJECT,"run_id":run,"authority_epoch":EPOCH,"root":str(self.root),"allowed_actions":ACTIONS},"metadata":self.metadata,"input":value,"deployment_id":self.deployment_id}
+  result=subprocess.run(["node","--input-type=module","-e",BOOTSTRAP_NODE],input=json.dumps(data),text=True,capture_output=True,cwd=ROOT,env=env,timeout=60)
+  expect(result.returncode==0,"Actual offline intake process failed")
+  try:return json.loads(result.stdout)
+  except ValueError:raise AssertionError("Actual offline intake returned malformed bounded result")
+ def _enrol(self,run):
+  with self.lock:
+   if run in self.credentials:return
+   config=json.loads(self.f.identity_config.read_text());record=copy.deepcopy(config["principals"][0]);credential=str(uuid.uuid4())
+   record.update(credential_id=credential,actor_id=credential,run_id=run)
+   config["principals"].append(record);self.f.identity_config.write_text(json.dumps(config))
+   self.f.stop();self.f.start();self.credentials[run]=credential
  def request(self,action,input,run,component="spec-import",overrides=None):
-  env=storage.database_env(DB);env.update(HF_SPEC_ORGANISATION_ID=ORG,HF_SPEC_PROJECT_ID=PROJECT,HF_AUTHORITY_EPOCH=EPOCH,HF_SPEC_ALLOWED_ROOT=str(self.root),
-   UNTRUSTED_VALUE="must-not-interpolate");env.update(overrides or {})
-  result=subprocess.run(self.args(run),input=json.dumps({"id":1,"component":component,"action":action,"input":input})+"\n",
-   text=True,capture_output=True,cwd=ROOT,env=env,timeout=45)
-  rows=[json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-  expect(len(rows)==1 and rows[0].get("id")==1,"Missing correlated service response")
-  OBS.append({"action":action,"ok":rows[0].get("ok"),"error":rows[0].get("error",{}).get("code")});return rows[0]
+  if action=="spec.import" and run not in self.credentials:
+   result=self._bootstrap(input,run,overrides)
+   if result.get("ok"):self._enrol(run)
+   OBS.append({"action":action,"transport":"TRUSTED_OFFLINE_INTAKE","ok":result.get("ok"),"error":result.get("error",{}).get("code")})
+   return result
+  if component=="system":run=self.initial_run
+  with self.lock:
+   before=self.f.env.copy()
+   try:
+    if overrides:self.f.env.update(overrides);self.f.stop();self.f.start()
+    operation=self.f.operation(component,action,input,run=run)
+    status,result=self.f.request(operation,key="operator",credential=self.credentials[run])
+    expect(status==200,"Actual signed importer HTTPS dispatch failed")
+    OBS.append({"action":action,"transport":"AUTHENTICATED_HTTPS","ok":result.get("ok"),"error":result.get("error",{}).get("code")})
+    return result
+   finally:
+    if overrides:self.f.env=before;self.f.stop();self.f.start()
  def ok(self,*args,**kwargs):
   r=self.request(*args,**kwargs);expect(r.get("ok") is True,"Service rejected operation: "+str(r.get("error",{}).get("code")));return r["result"]
  def reject(self,action,input,run,codes,**kwargs):
-  r=self.request(action,input,run,**kwargs);expect(r.get("ok") is False and r.get("error",{}).get("code") in codes,
-   "Expected "+"/".join(codes)+"; observed "+str(r.get("error",{}).get("code")))
+  r=self.request(action,input,run,**kwargs);expect(r.get("ok") is False and r.get("error",{}).get("code") in codes,"Expected "+"/".join(codes)+"; observed "+str(r.get("error",{}).get("code")))
  def source(self,content=SOURCE):
-  name=uuid.uuid4().hex+".kvx";(self.root/name).write_bytes(content)
+  name=uuid.uuid4().hex+".kvx";p=self.root/name;p.write_bytes(content);p.chmod(0o600)
   return {"relative_path":name,"sha256":hashlib.sha256(content).hexdigest(),"size_bytes":str(len(content))}
  def envelope(self,run,source=None):
-  return {"run_id":run,"source":source or self.source(),"repositories":[{"repository_id":REPO,"source_object_id":OID,"integration_ref":"refs/heads/main"}],
-   "allowed_actions":["work.synthetic"],"closure_policy":{"required_evidence":["synthetic.assertion"],"required_review_roles":["reviewer"],"publication":"AFTER_QUALIFICATION"},"provenance":None}
+  return {"run_id":run,"source":source or self.source(),"repositories":[{"repository_id":REPO,"source_object_id":OID,"integration_ref":"refs/heads/main"}],"allowed_actions":ACTIONS,"closure_policy":{"required_evidence":["synthetic.assertion"],"required_review_roles":["VERIFIER"],"publication":"AFTER_QUALIFICATION"},"provenance":None}
 def probe(s):
  run=str(uuid.uuid4());value=s.envelope(run);saved={}
  check("spec.service.linked",lambda:expect(any(x["id"]=="spec-import" for x in s.ok("system.describe",{},run,component="system")["components"]),"Disconnected module"))
@@ -87,7 +129,7 @@ def probe(s):
   expect(sql("SELECT count(*) FROM hyperfide.runs WHERE id='"+rid+"';")=="1","Concurrent retry duplicated authority")
  check("spec.replay.concurrent",concurrent_replay)
  check("spec.scope.programme",lambda:s.reject("spec.inspect",{"run_id":second},run,["SCOPE_MISMATCH"]))
- check("spec.scope.project",lambda:s.reject("spec.inspect",{"run_id":run},run,["SCOPE_MISMATCH"],overrides={"HF_SPEC_PROJECT_ID":str(uuid.uuid4())}))
+ check("spec.scope.project",lambda:expect(s.ok("spec.inspect",{"run_id":run},run,overrides={"HF_SPEC_PROJECT_ID":str(uuid.uuid4())})["revision_digest"]==saved["revision_digest"],"Startup environment redirected authenticated project"))
  def badsource(content,code):
   rid=str(uuid.uuid4());v=s.envelope(rid,s.source(content));s.reject("spec.import",v,rid,[code])
   expect(sql("SELECT count(*) FROM hyperfide.runs WHERE id='"+rid+"';")=="0","Rejected input left partial run")
@@ -142,7 +184,7 @@ def probe(s):
  def rollback():
   sql("CREATE FUNCTION hyperfide.inject_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.task_key='99.2' THEN RAISE EXCEPTION 'synthetic late failure'; END IF; RETURN NEW; END $$;CREATE TRIGGER inject_failure BEFORE INSERT ON hyperfide.tasks FOR EACH ROW EXECUTE FUNCTION hyperfide.inject_failure();")
   try:
-   rid=str(uuid.uuid4());v=s.envelope(rid,s.source(b'[task.99.1]\nwave = 1\n[task.99.2]\nwave = 1\n'));s.reject("spec.import",v,rid,["STORAGE_UNAVAILABLE"])
+   rid=str(uuid.uuid4());v=s.envelope(rid,s.source(b'[task.99.1]\nwave = 1\n[task.99.2]\nwave = 1\n'));s.reject("spec.import",v,rid,["DB_UNAVAILABLE"])
    expect(sql("SELECT count(*) FROM hyperfide.runs WHERE id='"+rid+"';")=="0","Late failure retained run")
    expect(sql("SELECT count(*) FROM hyperfide.spec_revisions WHERE source_digest='sha256:"+v["source"]["sha256"]+"';")=="0","Late failure retained source")
   finally:sql("DROP TRIGGER inject_failure ON hyperfide.tasks;DROP FUNCTION hyperfide.inject_failure();")
@@ -161,6 +203,38 @@ def probe(s):
    result=storage.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; INSERT INTO hyperfide."+table+" DEFAULT VALUES; COMMIT;",database=DB,allow_error=True)
    expect(result.returncode!=0 and "25001" in result.stderr,"New authority table accepted unsupported repeatable-read write")
   check("spec.isolation."+table,isolation)
+
+ # Authentication and disposition checks run after the original byte/history
+ # assertions; revocation is last so ordinary cleanup still observes the database.
+ def inspect_fence():
+  before=sql("SELECT semantic_generation FROM hyperfide.runs WHERE id='"+run+"';")
+  s.ok("spec.inspect",{"run_id":run},run)
+  expect(sql("SELECT semantic_generation FROM hyperfide.runs WHERE id='"+run+"';")==before,"Read projection advanced semantic generation")
+ check("spec.auth.semantic-read",inspect_fence)
+ def replay_fence():
+  before=sql("SELECT state_version::text||'|'||semantic_generation::text FROM hyperfide.runs WHERE id='"+run+"';").split('|')
+  s.ok("spec.import",value,run)
+  after=sql("SELECT state_version::text||'|'||semantic_generation::text FROM hyperfide.runs WHERE id='"+run+"';").split('|')
+  expect(after[0]==before[0] and int(after[1])==int(before[1])+1,"Replay disposition changed business CAS or omitted write fence")
+ check("spec.auth.semantic-write",replay_fence)
+ def raw_refused():
+  argv=["node",str(ROOT/"services/hyperfide/dist/control.js"),"--policy",str(s.f.policy),"--spec-revision","fixture-identity-v1","--components",str(s.f.components),"--module-root",str(ROOT/"services/hyperfide/dist")]
+  result=subprocess.run(argv,input=json.dumps({"id":1,"component":"spec-import","action":"spec.inspect","input":{"run_id":run}})+"\n",text=True,capture_output=True,cwd=ROOT,env=s.f.env,timeout=30)
+  rows=[json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+  expect(len(rows)==1 and rows[0].get("ok") is False and rows[0].get("error",{}).get("code")=="AUTH_REQUIRED","Unbranded JSONL acquired specification authority")
+ check("spec.auth.no-startup-fallback",raw_refused)
+ def role_refused():
+  operation=s.f.operation("spec-import","spec.import",s.initial_input,run=s.initial_run)
+  status,result=s.f.request(operation,key="provisioner",credential=s.f.ids["provisioner"])
+  expect(status==200 and result.get("ok") is False and result.get("error",{}).get("code")=="ACTION_DENIED","Provisioner imported accepted intent")
+ check("spec.auth.role-refused",role_refused)
+ def revoked():
+  before=sql("SELECT state_version::text||'|'||semantic_generation::text FROM hyperfide.runs WHERE id='"+run+"';")
+  s.f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED' WHERE credential_id=$1",[s.credentials[run]])
+  status,result=s.f.request(s.f.operation("spec-import","spec.inspect",{"run_id":run},run=run),credential=s.credentials[run])
+  expect(status in [401,403] or result.get("ok") is False,"Revoked credential read authority")
+  expect(sql("SELECT state_version::text||'|'||semantic_generation::text FROM hyperfide.runs WHERE id='"+run+"';")==before,"Revoked call mutated accepted state")
+ check("spec.auth.revoked-refused",revoked)
 PRIVATE_IDS=["spec.private.first.import","spec.private.first.history","spec.private.first.export","spec.private.second.import","spec.private.second.history","spec.private.second.export","spec.private.joint-identities","spec.private.no-runtime-proof"]
 def private_profile():
  base=ROOT/"spec/hyperfide/private/runtime/task-2.1-fixtures"
@@ -254,18 +328,28 @@ def qualify_private():
  print("Private corpus qualification "+("passed." if result.returncode==0 else "failed; inspect private receipts."),flush=True)
  return result.returncode
 
+def cleanup():
+ from identity_fixture import SQL_JS
+ p=outdir()/"database-names.json"
+ expect(p.is_file(),"Owned fixture database descriptor missing")
+ names=json.loads(p.read_text())["databases"]
+ expect(names and all(re.fullmatch("hf_identity_[0-9a-f]{32}",name) for name in names),"Owned database identities invalid")
+ for name in names:
+  subprocess.run(["node","--input-type=commonjs","-e",SQL_JS],input=json.dumps({"sql":'DROP DATABASE IF EXISTS "'+name+'" WITH(FORCE)',"values":[]}),text=True,cwd=ROOT,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+ result=subprocess.run(["node","--input-type=commonjs","-e",SQL_JS],input=json.dumps({"sql":"SELECT count(*)::int n FROM pg_database WHERE datname=ANY($1::text[])","values":[names]}),text=True,cwd=ROOT,capture_output=True,timeout=15)
+ absent=result.returncode==0 and json.loads(result.stdout)==[{"n":0}]
+ (outdir()/"database-absence.json").write_text(json.dumps({"databases":names,"observed_absent":absent})+"\n")
+ print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":"hf-task-2.1-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"spec/database-absence.json"}]}),flush=True)
+ return 0 if absent else 1
 def main():
- sql("CREATE DATABASE "+DB+";","postgres")
  with tempfile.TemporaryDirectory(prefix="hyperfide-2-1-") as temp:
-  s=Service(Path(temp));s.ok("authority.schema.bootstrap",{},str(uuid.uuid4()),component="4.1")
-  migration=(ROOT/"services/hyperfide/migrations/0002-spec.sql").read_bytes()
-  sql("BEGIN;"+migration.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(2,'0002-spec','sha256:"+hashlib.sha256(migration).hexdigest()+"');COMMIT;")
-  sql("INSERT INTO hyperfide.organisations(id,name) VALUES('"+ORG+"','synthetic');INSERT INTO hyperfide.projects(organisation_id,id,name) VALUES('"+ORG+"','"+PROJECT+"','synthetic');INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES('"+ORG+"','"+PROJECT+"','"+REPO+"','synthetic','https://invalid.example/synthetic');INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES('"+ORG+"','"+REPO+"','"+OID+"');")
-  private_probe(s) if "--private-corpus" in sys.argv else probe(s)
+  s=Service(Path(temp))
+  try:private_probe(s) if "--private-corpus" in sys.argv else probe(s)
+  finally:s.f.close()
  (outdir()/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"operations":OBS})+"\n")
  return 1 if FAILED else 0
 if __name__=="__main__":
- if "--cleanup" in sys.argv:sys.exit(storage.cleanup())
+ if "--cleanup" in sys.argv:sys.exit(cleanup())
  if "--qualify-private-corpus" in sys.argv:
   try:sys.exit(qualify_private())
   except (OSError,ValueError,AssertionError,subprocess.SubprocessError):
