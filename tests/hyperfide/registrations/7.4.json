@@ -22,13 +22,21 @@
     "graph.query.stable-pagination",
     "graph.query.reject-cross-query-cursor",
     "graph.query.grouped-context",
+    "graph.query.reject-missing-context-symbol",
+    "graph.query.reject-partial-context-symbol-set",
+    "graph.query.reject-missing-context-file",
+    "graph.query.reject-wrong-repository-context-file",
     "graph.query.traversal-unknowns",
+    "graph.query.explicit-unprojected-semantic-edge-debt",
     "graph.query.reject-wrong-symbol-version",
     "graph.query.reject-unbounded-depth",
     "graph.query.primary-provenance",
     "graph.query.literal-special-characters",
     "graph.query.reject-sql-field",
-    "graph.query.source-delete-rename-version-isolation"
+    "graph.query.reject-missing-authority-isolation-guard",
+    "graph.query.source-delete-rename-version-isolation",
+    "graph.query.reject-cross-version-context-symbol",
+    "graph.query.reject-cross-version-cursor"
   ],
   "argv": [
     "python3",
