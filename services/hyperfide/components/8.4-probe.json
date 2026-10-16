@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "8.4-probe",
+  "task": "8.4",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/placement.js",
+  "entry": "createProbeComponent",
+  "api_version": 1,
+  "actions": [
+    "provider.placement.probe"
+  ],
+  "requires": [
+    "8.2",
+    "8.3",
+    "14.1",
+    "12.4-executor"
+  ]
+}

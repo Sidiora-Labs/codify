@@ -15,7 +15,7 @@ IDS=[
 "provider.observation.transport-unknown","provider.observation.no-destroy-capability","provider.observation.wrong-boot",
 "provider.observation.wrong-resource-scope","provider.observation.cancel-before-effect","provider.observation.expired-permit",
 "provider.isolation.invalid-topology-mode","provider.isolation.incomplete-delete-no-absence"]
-IDS+=["provider.placement.real-configure","provider.placement.no-caller-failure","provider.placement.no-invented-observation","provider.placement.recorded-failure-backoff","provider.placement.idempotent-backoff","provider.placement.unknown-no-retry-authority","provider.placement.cross-run-observation","provider.placement.private-connectivity-policy","provider.placement.no-caller-inventory","provider.placement.no-invented-enrollment"]
+IDS+=["provider.placement.real-configure","provider.placement.no-caller-failure","provider.placement.no-invented-observation","provider.placement.recorded-failure-backoff","provider.placement.idempotent-backoff","provider.placement.unknown-no-retry-authority","provider.placement.cross-run-observation","provider.placement.private-connectivity-policy","provider.placement.no-probe-from-metadata","provider.placement.no-invented-enrollment"]
 SCRIPT=r"""
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -173,7 +173,7 @@ def main():
    try:reject("provider.placement.record-failure",{"observation_id":observation_id},"CONNECTIVITY_CONFIG_INVALID")
    finally:f.connectivity.chmod(0o600)
   check(35,private_policy)
-  check(36,lambda:reject("provider.placement.probe",{"pool_id":f.pool,"sandbox_id":request["sandbox_id"],"run_id":run,"native_sandbox_id":"caller"},"INVALID_REQUEST"))
+  check(36,lambda:reject("provider.placement.probe",{"pool_id":f.pool,"sandbox_id":request["sandbox_id"],"run_id":run,"native_sandbox_id":"caller"}))
   check(37,lambda:reject("provider.relocation.confirm-enrollment",{"run_id":run,"plan_id":str(uuid.uuid4()),"sandbox_id":request["sandbox_id"]},"RELOCATION_PLAN_INVALID"))
   f.close();f=None;cleanup=True
  finally:

@@ -13,24 +13,28 @@ import type {ProviderOperation,ProviderScope,ProviderOutcome} from './contract.j
 import {providerDatabase,resolveSandboxBinding,assertInvocationRun,providerInvocation,bindProviderInvocation,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
 import type {ProviderDatabase,DeploymentConfig,ProviderIsolationFactory} from './pools.js';
 
-export interface FreshEnrollmentRequest {
-  organisation_id:string;run_id:string;pool_id:string;sandbox_id:string;sandbox_boot_generation:string;nonce:string;
-}
+
 export interface FreshEnrollmentProof {
-  enrolled:boolean;nonce:string;boot_id:string;credential_lineage:string;verified_at:string;evidence_digest:string;
+ enrolled:true;boot_id:string;session_id:string;credential_id:string;credential_lineage:string;verified_at:string;evidence_digest:string;
 }
-export type EnrollmentVerifier=(request:FreshEnrollmentRequest,signal:AbortSignal)=>Promise<FreshEnrollmentProof>;
+interface PlacementDependencies {
+ authority:{verifyFreshRunner(invocation:InvocationContext,tx:PrimaryTransaction,input:Record<string,unknown>):Promise<Record<string,unknown>>};
+ execution:import('./reconcile.js').ProviderExecutionCapability;
+ native:{authenticatePlacementProbe(invocation:InvocationContext,input:{probe_id:string},signal:AbortSignal):Promise<{request:import('./reconcile.js').BoundProviderRequest;invocation:InvocationContext}>};
+}
+function identityPlacementDependencies(context:ComponentContext):Pick<PlacementDependencies,"authority">{
+ return{authority:context.dependencies.require("14.1","identity.authority",(v):v is PlacementDependencies["authority"]=>!!v&&typeof v==="object"&&typeof (v as PlacementDependencies["authority"]).verifyFreshRunner==="function")};
+}
+function placementDependencies(context:ComponentContext):PlacementDependencies {
+ return{
+  authority:context.dependencies.require('14.1','identity.authority',(v):v is PlacementDependencies['authority']=>!!v&&typeof v==='object'&&typeof (v as PlacementDependencies['authority']).verifyFreshRunner==='function'),
+  execution:context.dependencies.require('8.3','provider.execution.v1',(v):v is PlacementDependencies['execution']=>!!v&&typeof v==='object'&&typeof (v as PlacementDependencies['execution']).executeBound==='function'),
+  native:context.dependencies.require('12.4-executor','runner.native.v1',(v):v is PlacementDependencies['native']=>!!v&&typeof v==='object'&&typeof (v as PlacementDependencies['native']).authenticatePlacementProbe==='function'),
+ };
+}
 export interface EnvironmentCompatibilityProof {compatible:boolean;evidence_digest:string}
 export type EnvironmentCompatibilityVerifier=(source:unknown,target:unknown)=>Promise<EnvironmentCompatibilityProof>;
-let enrollmentVerifier:EnrollmentVerifier|undefined,environmentVerifier:EnvironmentCompatibilityVerifier|undefined;
-export function registerProviderEnrollmentVerifier(verifier:EnrollmentVerifier):()=>void{
-  if(enrollmentVerifier||typeof verifier!=='function')fail('PROVIDER_REGISTRATION_CONFLICT','Enrollment verifier must be installed once by trusted startup');
-  enrollmentVerifier=verifier;return()=>{if(enrollmentVerifier===verifier)enrollmentVerifier=undefined;};
-}
-export function registerEnvironmentCompatibilityVerifier(verifier:EnvironmentCompatibilityVerifier):()=>void{
-  if(environmentVerifier||typeof verifier!=='function')fail('PROVIDER_REGISTRATION_CONFLICT','Environment verifier must be installed once by trusted startup');
-  environmentVerifier=verifier;return()=>{if(environmentVerifier===verifier)environmentVerifier=undefined;};
-}
+
 interface Target {name:'coordinator'|'git'|'artifact'|'model';url:string;header_name:string;header_prefix:string;credential_ref:string;expected_status:number;denied_statuses:number[];expected_body_sha256:string|null}
 interface ConnectivityConfig {schema_version:1;evidence_scope:'LIVE_POOL'|'COMPONENT_FIXTURE';targets:Target[];timeout_ms:number;maximum_attempts:number;base_backoff_ms:number;max_backoff_ms:number;proof_max_age_ms:number}
 async function connectivity(env:Readonly<NodeJS.ProcessEnv>):Promise<ConnectivityConfig>{
@@ -86,90 +90,79 @@ async function boundedEffect<T>(effect:Promise<T>,signal:AbortSignal,deadline:nu
   timer=setTimeout(stop,Math.max(1,deadline-Date.now()));abort=stop;signal.addEventListener('abort',stop,{once:true});if(signal.aborted||Date.now()>=deadline)stop();
  })]);}finally{if(timer)clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
 }
-async function verifyEnrollment(config:DeploymentConfig,poolId:string,sandbox:Record<string,any>,runId:string,signal:AbortSignal,maxAge:number):Promise<FreshEnrollmentProof>{
-  if(!enrollmentVerifier)fail('ENROLLMENT_VERIFIER_UNAVAILABLE','Fresh authenticated enrollment verification is required');
-  const nonce=randomUUID(),request={organisation_id:config.organisation_id,run_id:runId,pool_id:poolId,sandbox_id:sandbox.id,sandbox_boot_generation:String(sandbox.boot_generation),nonce};
-  const proof=await enrollmentVerifier(request,signal);
-  if(!proof.enrolled||proof.nonce!==nonce||!proof.boot_id||!proof.credential_lineage)fail('ENROLLMENT_UNVERIFIED','Enrollment proof does not bind this fresh challenge');
-  uuid(proof.boot_id);str(proof.credential_lineage);dg(proof.evidence_digest);utc(proof.verified_at);
-  if(Date.parse(proof.verified_at)>Date.now()||Date.now()-Date.parse(proof.verified_at)>maxAge)fail('ENROLLMENT_STALE','Enrollment proof is stale');
-  return proof;
+
+async function verifyEnrollmentInTx(tx:PrimaryTransaction,pool:ProviderDatabase,config:DeploymentConfig,poolId:string,sandbox:Record<string,any>,runId:string,maxAge:number,dependencies:Pick<PlacementDependencies,"authority">):Promise<FreshEnrollmentProof>{
+ assertPrimaryTransaction(tx);assertInvocationRun(pool,runId);
+ const runners=(await tx.query("SELECT r.session_id,r.credential_id,b.boot_id FROM hyperfide.runner_registry r JOIN hyperfide.sandbox_boots b ON b.organisation_id=r.organisation_id AND b.sandbox_id=r.sandbox_id AND b.boot_generation=r.boot_generation AND b.boot_id=r.boot_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.sandbox_id=$3 AND r.boot_generation=$4 AND r.state='CURRENT' FOR SHARE OF r,b",[config.organisation_id,runId,sandbox.id,sandbox.boot_generation])).rows;
+ const creates=(await tx.query("SELECT id,created_at FROM hyperfide.provisioning_intents WHERE organisation_id=$1 AND run_id=$2 AND pool_id=$3 AND sandbox_id=$4 AND boot_generation=$5 AND native_sandbox_id=$6 AND kind='CREATE' AND state IN ('ID_KNOWN','ACKNOWLEDGED') FOR SHARE",[config.organisation_id,runId,poolId,sandbox.id,sandbox.boot_generation,sandbox.native_sandbox_id])).rows;
+ if(runners.length!==1||creates.length!==1)fail('ENROLLMENT_UNVERIFIED','Unique actual current runner and durable creation lineage required');
+ const runner=runners[0]!,create=creates[0]!;
+ const observed=await dependencies.authority.verifyFreshRunner(providerInvocation(pool),tx,{sandbox_id:sandbox.id,boot_id:runner.boot_id,boot_generation:String(sandbox.boot_generation),provisioning_intent_id:create.id,credential_id:runner.credential_id,observed_after:new Date(create.created_at).toISOString()});
+ if(observed.credential_id!==runner.credential_id||observed.boot_id!==runner.boot_id||observed.sandbox_id!==sandbox.id||String(observed.boot_generation)!==String(sandbox.boot_generation)||observed.provisioning_intent_id!==create.id)fail('ENROLLMENT_UNVERIFIED','Actual signed enrollment lineage changed');
+ const at=utc(observed.heartbeat_at);
+ if(Date.parse(at)>Date.now()||Date.now()-Date.parse(at)>maxAge)fail('ENROLLMENT_STALE','Actual authenticated runner heartbeat is stale');
+ return{enrolled:true,session_id:String(runner.session_id),credential_id:String(runner.credential_id),boot_id:String(runner.boot_id),credential_lineage:String(runner.credential_id),verified_at:at,evidence_digest:digestDocument({session_id:runner.session_id,verified:observed})};
 }
-export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,signal:AbortSignal):Promise<unknown>{
-  const input=obj(value,['pool_id','sandbox_id','run_id']),poolId=uuid(input.pool_id),sandboxId=uuid(input.sandbox_id),runId=uuid(input.run_id);
-  assertInvocationRun(pool,runId);
-  const {scope}=await currentPool(pool,config,poolId);
-  const rows=await pool.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND observed_state='RUNNING'",[config.organisation_id,sandboxId,poolId]);
-  const sandbox=rows.rows[0];if(!sandbox?.native_sandbox_id)fail('POOL_PROBE_UNAVAILABLE','An identified running sandbox is required');
-  const proof=await verifyEnrollment(config,poolId,sandbox,runId,signal,policy.proof_max_age_ms),id=randomUUID(),nonce=randomUUID();
-  const env:Record<string,string>={},targets=policy.targets.map((target,index)=>{
-    const name='HYPERFIDE_PROBE_CREDENTIAL_'+index;env[name]=target.credential_ref;
-    return {...target,env:name,credential_ref:undefined};
-  });
-  const duration=Math.min(config.maximum_operation_ms,policy.timeout_ms*8+1000);
-  const base={schema_version:1 as const,kind:'execute' as const,scope,deadline_at:new Date(Date.now()+duration).toISOString(),
-    resource:{native_sandbox_id:sandbox.native_sandbox_id,sandbox_boot_generation:String(sandbox.boot_generation)},preparation_digest:sandbox.preparation_digest,
-    parameters:{argv:['node','--input-type=commonjs','-e',probeProgram,JSON.stringify({nonce,targets,timeout_ms:policy.timeout_ms})],
-      cwd:'/',env_refs:env,stdin:false,durable:false,process_timeout_ms:duration,wait_timeout_ms:duration},
-    identity:{operation_id:id,idempotency_key:id,payload_digest:'',correlation_id:id,causation_id:id}};
-  base.identity.payload_digest=operationPayloadDigest(base);
-  // Persist possible delivery before any SDK call. Only the final verified
-  // receipt can promote this row to PASS; journal callbacks never grant it.
-  const initialDigest=digestDocument({operation:base,enrollment:proof});
-  await transaction(pool,async c=>{
-   await currentPool(c,config,poolId);
-   await c.query('INSERT INTO hyperfide.provider_connectivity_probes(organisation_id,id,pool_id,sandbox_id,boot_generation,configuration_digest,endpoints_digest,credential_lineage,enrollment_evidence_digest,evidence_digest,evidence_scope,status,observation,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,\'UNKNOWN\',$12,$13)',
-    [config.organisation_id,id,poolId,sandboxId,sandbox.boot_generation,scope.configuration_digest,digestDocument(policy.targets),proof.credential_lineage,proof.evidence_digest,initialDigest,policy.evidence_scope,{operation:base,outcome:null},new Date(Date.now()+policy.proof_max_age_ms).toISOString()]);
-  });
-  const unavailable=async()=>fail('PROVIDER_HOOK_UNAVAILABLE','Connectivity execution cannot create provisioning resources');
-  const journal=async(op:ProviderOperation,outcome:ProviderOutcome)=>{
-   validateProviderOutcome({operation:op,outcome});
-   if(digestDocument(op)!==digestDocument(base))fail('OBSERVATION_SCOPE_MISMATCH','Connectivity observation differs from persisted command');
-   await pool.query("UPDATE hyperfide.provider_connectivity_probes SET observation=$3,evidence_digest=$4 WHERE organisation_id=$1 AND id=$2 AND status='UNKNOWN'",
-    [config.organisation_id,id,{operation:base,outcome},digestDocument({operation:base,outcome,enrollment:proof})]);
-  };
-  const adapter=providerAdapter(scope,{invocation:providerInvocation(pool),resolveResourceBinding:observed=>resolveSandboxBinding(pool,config,runId,sandboxId,observed),resolvePreparation:unavailable,persistOutputArchive:unavailable,persistEarlyProcess:unavailable,claimProcess:unavailable,resolveProcess:unavailable,assertResourceBinding:async observed=>{
-   if(digestDocument(observed)!==digestDocument(base))fail('PROVIDER_SCOPE_MISMATCH','Connectivity operation changed');
-   const current=(await pool.query('SELECT native_sandbox_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[config.organisation_id,sandboxId])).rows[0];
-   if(!current||current.native_sandbox_id!==sandbox.native_sandbox_id||String(current.boot_generation)!==String(sandbox.boot_generation))fail('STALE_SANDBOX_GENERATION','Connectivity boot binding changed');
-  },assignedBootGeneration:unavailable,persistEarlyResource:unavailable,recordObservation:journal},pool.runtime) as ReturnType<typeof providerAdapter>&{
-   readCapturedOutput?:(scope:ProviderScope,resource:NonNullable<ProviderOperation['resource']>,processRef:string,maxBytes:number)=>Promise<{stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string}>;
-  };
-  if(typeof adapter.readCapturedOutput!=='function')fail('REMOTE_CAPTURE_UNAVAILABLE','Actual bounded probe receipt bytes are required');
-  const combined=AbortSignal.any([signal,AbortSignal.timeout(duration)]),limit=Date.parse(base.deadline_at);
-  const outcome=await boundedEffect(adapter.execute(base,combined),combined,limit);await journal(base,outcome);
-  validateProviderOutcome({operation:base,outcome});
-  const result=outcome.status==='SUCCEEDED'?outcome.result:null;
-  let pass=outcome.status==='SUCCEEDED'&&result?.phase==='EXITED'&&result.exit_code===0&&!result.timed_out&&result.output.complete&&!result.output.truncated&&result.output.sha256!==null;
-  let receipt:unknown=null;
-  if(pass&&result){
-   const captured=await boundedEffect(adapter.readCapturedOutput(scope,base.resource,result.process_ref,65536),combined,limit);
-   if(captured.complete!==true||captured.exit_code!==0||captured.stdout.byteLength>65536||captured.stderr.byteLength!==0)pass=false;
-   else{
-    try{
-     receipt=JSON.parse(Buffer.from(captured.stdout).toString('utf8'));const r=obj(receipt,['nonce','results']);
-     if(r.nonce!==nonce||!Array.isArray(r.results)||r.results.length!==policy.targets.length)pass=false;
-     else for(let n=0;n<policy.targets.length;n++){
-      const observed=obj(r.results[n],['name','denied_status','status','body_sha256']),target=policy.targets[n]!;
-      if(observed.name!==target.name||observed.status!==target.expected_status||!target.denied_statuses.includes(observed.denied_status as number)||
-       (target.expected_body_sha256&&observed.body_sha256!==target.expected_body_sha256))pass=false;
-      dg(observed.body_sha256);
-     }
-    }catch{pass=false;}
+async function verifyEnrollment(pool:ProviderDatabase,config:DeploymentConfig,poolId:string,sandbox:Record<string,any>,runId:string,maxAge:number,dependencies:Pick<PlacementDependencies,"authority">):Promise<FreshEnrollmentProof>{
+ return transaction(pool,tx=>verifyEnrollmentInTx(tx,pool,config,poolId,sandbox,runId,maxAge,dependencies));
+}
+export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,signal:AbortSignal,resolveDependencies?:()=>PlacementDependencies):Promise<unknown>{
+ const input=obj(value,['pool_id','sandbox_id','run_id']),poolId=uuid(input.pool_id),sandboxId=uuid(input.sandbox_id),runId=uuid(input.run_id);
+ assertInvocationRun(pool,runId);
+ const incoming=providerInvocation(pool);
+ if(incoming.principal.role!=='PROVISIONER')fail('AUTH_SCOPE_DENIED','Actual provisioner executes configured pool probes');
+ if(!resolveDependencies)fail('PROVIDER_HOOK_UNAVAILABLE','Actual identity/native/provider execution composition required');
+ const dependencies=resolveDependencies(),{scope}=await currentPool(pool,config,poolId);
+ const rows=await pool.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND desired_state='RUNNING' AND observed_state='RUNNING'",[config.organisation_id,sandboxId,poolId]);
+ const sandbox=rows.rows[0];if(!sandbox?.native_sandbox_id)fail('POOL_PROBE_UNAVAILABLE','An identified current running sandbox is required');
+ const proof=await verifyEnrollment(pool,config,poolId,sandbox,runId,policy.proof_max_age_ms,dependencies),id=incoming.operation.operation_id,nonce=randomUUID();
+ const env:Record<string,string>={},targets=policy.targets.map((target,index)=>{const name='HYPERFIDE_PROBE_CREDENTIAL_'+index;env[name]=target.credential_ref;return{...target,env:name,credential_ref:undefined};});
+ const duration=Math.min(config.maximum_operation_ms,policy.timeout_ms*8+1000);
+ const request:import('./reconcile.js').BoundProviderRequest={binding:{organisation_id:config.organisation_id,run_id:runId,session_id:proof.session_id,pool_id:poolId,sandbox_id:sandboxId,external_sandbox_id:sandbox.native_sandbox_id,boot_generation:String(sandbox.boot_generation),preparation_digest:sandbox.preparation_digest},operation_id:id,
+  argv:['node','--input-type=commonjs','-e',probeProgram,JSON.stringify({nonce,targets,timeout_ms:policy.timeout_ms})],cwd:'/',env_refs:env,timeout_ms:duration};
+ const sourceInvocation={component:incoming.payload.component,action:incoming.payload.action,payload_digest:incoming.operation.payload_digest,operation_id:incoming.operation.operation_id,credential_id:incoming.principal.credential_id,run_id:incoming.principal.run_id};
+ const endpointsDigest=digestDocument(policy.targets);
+ const previous=await transaction(pool,async tx=>{
+  await currentPool(tx,config,poolId);
+  const old=(await tx.query('SELECT * FROM hyperfide.provider_connectivity_probes WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[config.organisation_id,id])).rows[0];
+  if(old){
+   if(old.pool_id!==poolId||old.sandbox_id!==sandboxId||String(old.boot_generation)!==String(sandbox.boot_generation)||old.configuration_digest!==scope.configuration_digest||old.endpoints_digest!==endpointsDigest||digestDocument(old.observation.source_invocation)!==digestDocument(sourceInvocation))fail('IDEMPOTENCY_CONFLICT','Probe identity or protected policy changed');
+   return old;
+  }
+  await tx.query("INSERT INTO hyperfide.provider_connectivity_probes(organisation_id,id,pool_id,sandbox_id,boot_generation,configuration_digest,endpoints_digest,credential_lineage,enrollment_evidence_digest,evidence_digest,evidence_scope,status,observation,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'UNKNOWN',$12,$13)",
+   [config.organisation_id,id,poolId,sandboxId,sandbox.boot_generation,scope.configuration_digest,endpointsDigest,proof.credential_lineage,proof.evidence_digest,digestDocument({request,enrollment:proof}),policy.evidence_scope,{nonce,bound_request:request,source_invocation:sourceInvocation},new Date(Date.now()+policy.proof_max_age_ms).toISOString()]);
+  return null;
+ });
+ if(previous)return{id,status:previous.status==='PASS'&&new Date(previous.expires_at).getTime()>Date.now()?'PASS':'UNKNOWN',evidence_digest:previous.evidence_digest,evidence_scope:previous.evidence_scope,live_pool_qualified:previous.status==='PASS'&&new Date(previous.expires_at).getTime()>Date.now()&&previous.evidence_scope==='LIVE_POOL',replayed:true,reconciliation_required:previous.status==='UNKNOWN',admission_granted:false};
+ const combined=AbortSignal.any([signal,incoming.signal,AbortSignal.timeout(duration)]),deadline=Date.now()+duration;
+ let executed:Record<string,any>|null=null,receipt:unknown=null,pass=false,errorCode:string|null=null;
+ try{
+  const authenticated=await boundedEffect(dependencies.native.authenticatePlacementProbe(incoming,{probe_id:id},combined),combined,deadline);
+  assertInvocation(authenticated.invocation);
+  if(digestDocument(authenticated.request)!==digestDocument(request))fail('PROBE_EXECUTION_MISMATCH','Actual signer returned a different persisted probe');
+  executed=await boundedEffect(dependencies.execution.executeBound(authenticated.request,combined,authenticated.invocation) as Promise<Record<string,any>>,combined,deadline);
+  const captured=executed.captured;
+  if(captured?.complete===true&&captured.exit_code===0&&captured.stdout instanceof Uint8Array&&captured.stderr instanceof Uint8Array&&captured.stdout.byteLength<=65536&&captured.stderr.byteLength===0){
+   receipt=JSON.parse(Buffer.from(captured.stdout).toString('utf8'));const r=obj(receipt,['nonce','results']);pass=r.nonce===nonce&&Array.isArray(r.results)&&r.results.length===policy.targets.length;
+   if(pass)for(let n=0;n<policy.targets.length;n++){const observed=obj((r.results as unknown[])[n],['name','denied_status','status','body_sha256']),target=policy.targets[n]!;
+    if(observed.name!==target.name||observed.status!==target.expected_status||!target.denied_statuses.includes(observed.denied_status as number)||target.expected_body_sha256&&observed.body_sha256!==target.expected_body_sha256)pass=false;
+    dg(observed.body_sha256);
    }
   }
-  const digest=digestDocument({operation:base,outcome,enrollment:proof,receipt}),status=pass?'PASS':outcome.status==='UNKNOWN'?'UNKNOWN':'FAIL';
-  await transaction(pool,async c=>{
-    await currentPool(c,config,poolId);
-    const current=await c.query('SELECT boot_generation,native_sandbox_id FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[config.organisation_id,sandboxId]);
-    if(String(current.rows[0]?.boot_generation)!==String(sandbox.boot_generation)||current.rows[0]?.native_sandbox_id!==sandbox.native_sandbox_id)
-      fail('STALE_SANDBOX_GENERATION','Sandbox identity changed during connectivity probing');
-    await c.query('UPDATE hyperfide.provider_connectivity_probes SET evidence_digest=$3,status=$4,observation=$5 WHERE organisation_id=$1 AND id=$2',
-     [config.organisation_id,id,digest,status,{operation:base,outcome,receipt}]);
-    if(pass)await c.query("INSERT INTO hyperfide.provider_pool_health(organisation_id,pool_id) VALUES($1,$2) ON CONFLICT(organisation_id,pool_id) DO UPDATE SET failure_count=0,state='CLOSED',retry_after=NULL,state_version=hyperfide.provider_pool_health.state_version+1",[config.organisation_id,poolId]);
-  });
-  return{id,status,evidence_digest:digest,evidence_scope:policy.evidence_scope,live_pool_qualified:pass&&policy.evidence_scope==='LIVE_POOL',admission_granted:false};
+ }catch(error){errorCode=error&&typeof error==='object'&&'code'in error?String(error.code):'PROBE_OUTCOME_UNKNOWN';}
+ const status=pass?'PASS':executed?'FAIL':'UNKNOWN',evidence=digestDocument({request,execution_evidence_digest:executed?.evidence_digest??null,enrollment:proof,receipt,error_code:errorCode});
+ await transaction(pool,async tx=>{
+  await currentPool(tx,config,poolId);
+  const current=(await tx.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND desired_state='RUNNING' AND observed_state='RUNNING' FOR SHARE",[config.organisation_id,sandboxId])).rows[0];
+  if(!current||String(current.boot_generation)!==String(sandbox.boot_generation)||current.native_sandbox_id!==sandbox.native_sandbox_id)fail('STALE_SANDBOX_GENERATION','Resource identity changed during pool probing');
+  await verifyEnrollmentInTx(tx,pool,config,poolId,current,runId,policy.proof_max_age_ms,dependencies);
+  await tx.query('UPDATE hyperfide.provider_connectivity_probes SET evidence_digest=$3,status=$4,observation=$5 WHERE organisation_id=$1 AND id=$2',
+   [config.organisation_id,id,evidence,status,{nonce,bound_request:request,source_invocation:sourceInvocation,execution_evidence_digest:executed?.evidence_digest??null,receipt,error_code:errorCode}]);
+  if(pass)await tx.query("INSERT INTO hyperfide.provider_pool_health(organisation_id,pool_id) VALUES($1,$2) ON CONFLICT(organisation_id,pool_id) DO UPDATE SET failure_count=0,state='CLOSED',retry_after=NULL,state_version=hyperfide.provider_pool_health.state_version+1",[config.organisation_id,poolId]);
+ });
+ return{id,status,evidence_digest:evidence,evidence_scope:policy.evidence_scope,live_pool_qualified:pass&&policy.evidence_scope==='LIVE_POOL',reconciliation_required:status==='UNKNOWN',admission_granted:false};
 }
+
 export async function recordPoolFailure(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
   const input=obj(value,['observation_id']),observationId=uuid(input.observation_id);
   return transaction(pool,async c=>{
@@ -189,7 +182,7 @@ export async function recordPoolFailure(pool:ProviderDatabase,config:DeploymentC
     return{recorded:true,pool_id:row.pool_id,retry_after:retry,maximum_attempts:policy.maximum_attempts,automatic_retry_allowed:count<policy.maximum_attempts,reconciliation_required:row.observation.outcome.status==='UNKNOWN'};
   });
 }
-export async function planRelocation(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
+export async function planRelocation(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,environmentVerifier?:EnvironmentCompatibilityVerifier):Promise<unknown>{
   const input=obj(value,['run_id','old_attempt_id','expected_generation','expected_authority_epoch','target_pool_id','checkpoint_id','reason_observation_id']);
   const run=uuid(input.run_id),attemptId=uuid(input.old_attempt_id),generation=dec(input.expected_generation),epoch=uuid(input.expected_authority_epoch),targetId=uuid(input.target_pool_id);
   assertInvocationRun(pool,run);
@@ -463,20 +456,38 @@ export function createComponent(context:ComponentContext):Component{
     const config=await readDeployment(context.env);return fn(input,config,await connectivity(context.env),bindProviderInvocation(database,config,invocationOf(requestContext),['PROVISIONER','COORDINATOR','OPERATOR']));
   };
   return{apiVersion:1,capabilities:{'provider.observation.v1':{observeConfiguredResource:createProviderIsolationObserver({env:context.env,signal:context.signal,registry:database.runtime.isolation})},'provider.isolation.v1':{isolateConfiguredResource:createProviderIsolation({env:context.env,signal:context.signal,registry:database.runtime.isolation,gateway:database.gateway})}},actions:{
-    'provider.placement.probe':guarded((i,c,p,database)=>probePool(database,c,p,i,context.signal)),
     'provider.placement.record-failure':guarded((i,c,p,database)=>recordPoolFailure(database,c,p,i)),
     'provider.relocation.plan':guarded((i,c,p,database)=>planRelocation(database,c,p,i)),
     'provider.relocation.confirm-enrollment':guarded(async(input,c,p,database)=>{
       const i=obj(input,['run_id','plan_id','sandbox_id']),run=uuid(i.run_id),planId=uuid(i.plan_id),sandboxId=uuid(i.sandbox_id);assertInvocationRun(database,run);
-      const plan=(await database.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[c.organisation_id,run,planId])).rows[0];
-      if(!plan||!['PENDING_ADMISSION','ENROLLED'].includes(plan.state))fail('RELOCATION_PLAN_INVALID','An unadmitted relocation plan is required');
-      const {scope}=await currentPool(database,c,plan.target_pool_id);
-      if(scope.configuration_digest!==plan.target_configuration_digest)fail('RELOCATION_CONFIG_CHANGED','Target configuration changed since planning');
-      const sandbox=(await database.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND observed_state='RUNNING' AND preparation_digest=$4",[c.organisation_id,sandboxId,plan.target_pool_id,plan.preparation_digest])).rows[0];
-      if(!sandbox)fail('RELOCATION_RESOURCE_INVALID','Exact target environment and sandbox identity are required');
-      const proof=await verifyEnrollment(c,plan.target_pool_id,sandbox,run,context.signal,p.proof_max_age_ms);
-      await database.query("UPDATE hyperfide.provider_relocation_plans SET state='ENROLLED',enrolled_sandbox_id=$4,enrolled_boot_generation=$5,enrollment_evidence_digest=$6 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING_ADMISSION','ENROLLED')",[c.organisation_id,run,planId,sandboxId,sandbox.boot_generation,proof.evidence_digest]);
-      return{id:planId,state:'ENROLLED',fresh_enrollment_required:true,admission_granted:false};
+      return transaction(database,async tx=>{
+       const plan=(await tx.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[c.organisation_id,run,planId])).rows[0];
+       if(!plan||!['PENDING_ADMISSION','ENROLLED'].includes(plan.state))fail('RELOCATION_PLAN_INVALID','An unadmitted relocation plan is required');
+       if(plan.old_authority_epoch!==providerInvocation(database).principal.deployment_epoch)fail('RELOCATION_PLAN_STALE','Relocation belongs to a different admitted authority epoch');
+       const {scope}=await currentPool(tx,c,plan.target_pool_id);
+       if(scope.configuration_digest!==plan.target_configuration_digest)fail('RELOCATION_CONFIG_CHANGED','Target configuration changed since planning');
+       const sandbox=(await tx.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND desired_state='RUNNING' AND observed_state='RUNNING' AND preparation_digest=$4 FOR SHARE",[c.organisation_id,sandboxId,plan.target_pool_id,plan.preparation_digest])).rows[0];
+       if(!sandbox)fail('RELOCATION_RESOURCE_INVALID','Exact target environment and current sandbox identity are required');
+       if(plan.state==='ENROLLED'&&(plan.enrolled_sandbox_id!==sandboxId||String(plan.enrolled_boot_generation)!==String(sandbox.boot_generation)))fail('RELOCATION_ENROLLMENT_CONFLICT','Existing enrollment cannot change resource or boot');
+       const proof=await verifyEnrollmentInTx(tx,database,c,plan.target_pool_id,sandbox,run,p.proof_max_age_ms,identityPlacementDependencies(context));
+       await tx.query("UPDATE hyperfide.provider_relocation_plans SET state='ENROLLED',enrolled_sandbox_id=$4,enrolled_boot_generation=$5,enrollment_evidence_digest=$6 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING_ADMISSION','ENROLLED')",[c.organisation_id,run,planId,sandboxId,sandbox.boot_generation,proof.evidence_digest]);
+       return{id:planId,state:'ENROLLED',fresh_enrollment_required:true,admission_granted:false};
+      });
     }),
   }};
+}
+
+/** This deployment entry requires actual native-worker signing/artifact
+ * prerequisites. Metadata-only deployments never advertise physical probes. */
+export function createProbeComponent(context:ComponentContext):Component{
+ const database=providerDatabase(context),dependencies=placementDependencies(context);
+ const availability=Object.freeze({component:'8.4-probe' as const,state:'CONFIGURED' as const});
+ if(database.runtime.connectivityProbe)fail('PROVIDER_REGISTRATION_CONFLICT','Connectivity probe component already configured');
+ database.runtime.connectivityProbe=availability;
+ return{apiVersion:1,close:()=>{if(database.runtime.connectivityProbe===availability)delete database.runtime.connectivityProbe;},actions:{
+  'provider.placement.probe':async(input,requestContext)=>{
+   const config=await readDeployment(context.env),policy=await connectivity(context.env);
+   return probePool(bindProviderInvocation(database,config,invocationOf(requestContext),['PROVISIONER']),config,policy,input,context.signal,()=>dependencies);
+  }
+ }};
 }
