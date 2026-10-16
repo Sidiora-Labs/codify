@@ -1,0 +1,123 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-13.3-native-component-v1",
+  "case_ids": [
+    "V-043",
+    "V-044"
+  ],
+  "expected_assertion_ids": [
+    "recovery.actual-process-reconnect",
+    "recovery.transport-independent-process",
+    "recovery.unknown-process-reconciles",
+    "recovery.pid-start-mismatch",
+    "recovery.boot-mismatch",
+    "recovery.actual-partial-pipe-no-replay",
+    "recovery.auth-expired-explicit",
+    "recovery.auth-revoked-explicit",
+    "recovery.actual-exit-missing-context",
+    "recovery.fresh-handoff-explicit",
+    "recovery.unqualified-resume-blocked",
+    "recovery.native-session-crossover-refused",
+    "recovery.source-crossover-refused",
+    "recovery.reject-unknown-field",
+    "recovery.reject-duplicate-field"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "fd30922bad855fdfbdc31f0d50ba659aa101a73eb0577468cd7377c4abde8a67",
+      "size": 3448
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "74d9af33b02c49a373d4be3d34b9b332eda732369ad14d97f3e8a656a49ca9ed",
+      "size": 51496
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "f59eaab698c71a47e3680d06bfd1581e4a9bdfe537e79578de576e1c6fa62d88",
+      "size": 7490
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "4926c40a471fa077344b3fc6919920d93ae90f044064418c2b4487c8e1777cf4",
+      "size": 5873
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/13.1.kvx",
+      "sha256": "a594a81503ba4f6f6bbdbb35bcf7101fa57b6e38c1881b8882e6de42931e6559",
+      "size": 225
+    },
+    {
+      "path": "src/hyperfide/components/13.3.kvx",
+      "sha256": "a3d35c4357b0ca16ef6ed48ffd8a9b1bda34d8fc22719ed39229de5e7b4ab5af",
+      "size": 169
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "713bd4f6473cf0067e44b2a5b6338ab557944934a02ddccaf93df3081981aea9",
+      "size": 285
+    },
+    {
+      "path": "src/hyperfide/connector_recovery.c",
+      "sha256": "3ba404d5c642b3fc0ded9879c7e9f9a3574f54b59b374e7fe09ff0aeb67abb91",
+      "size": 8219
+    },
+    {
+      "path": "src/hyperfide/connectors.c",
+      "sha256": "73fb6fc8972e168d5dbcff2edbb9ab8d5d5b29872d4912b894437b808ca556e3",
+      "size": 19403
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/13_3.py",
+      "sha256": "8ec5d4414b6100c7180ec4b2673c75183f06075929f4c0d2f7613f65b3f082eb",
+      "size": 5932
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "7f97dbde67eb6e0824543e8a382c745c4ef352411d7ce54d0a962c6814b75d93",
+      "size": 27891
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
+      "size": 36837
+    },
+    {
+      "path": "tests/hyperfide/registrations/13.3.json",
+      "sha256": "05456f813851524ab5ef36b1b35db010e52686eeabfc5c2989fa3ddd24e68bbe",
+      "size": 1563
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "qualification_limitations": [
+      "No live frontier inference, preserved native context, unattended permissions, credential refresh or MAIN restriction qualification.",
+      "MAIN supervisor module is source-only: these variants do not activate it or qualify actual MAIN launch, restricted tool escape resistance or cleanup release.",
+      "Actual installed native transport, signed HTTPS and PostgreSQL probes are bounded component evidence only.",
+      "Historical admission fixture rows exercise accounting, never genuine live profile admission.",
+      "Final merged-source manifests require refreshed complete inventory pins."
+    ]
+  },
+  "registered_variant": "task:13.3",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}

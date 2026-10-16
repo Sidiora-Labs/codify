@@ -50,6 +50,12 @@ def main():
             p=call("agent.admission.recovery-context",base)
             expect(p["capacity_wait"]=="PROVIDER_RATE_LIMIT" and p["diagnostic_refs"]==report["diagnostic_refs"] and p["condition_digest"]==report["condition_digest"] and not p["retry"]["eligible"],"actual diagnostic/backoff packet wrong")
         check("admission.persisted-diagnostics-and-wait",refs)
+        def portable():
+            packet=call("agent.admission.recovery-context",base);deadline=packet["retry"]["retry_after"]
+            expect(isinstance(deadline,str)and deadline.endswith("Z"),"retry deadline is not portable ISO text")
+            digest=packet.pop("packet_digest")
+            expect(digest==sha(json.dumps(packet,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()),"packet digest does not bind actual portable retry deadline")
+        check("admission.context-date-is-portable",portable)
         time.sleep(.2)
         def bounded():
             p=call("agent.admission.report",dict(base,operation_id=uid(),reason="RATE_LIMIT"))
