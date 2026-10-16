@@ -8,10 +8,23 @@
     "V-048"
   ],
   "assertion_ids": [
+    "observability.resources.boot-budget-missing-unqualified",
+    "observability.resources.boot-free-vector-exact",
+    "observability.resources.pending-release-remains-charged",
+    "observability.resources.pool-free-not-boot-headroom",
+    "observability.resources.boot-no-kernel-proof",
+    "observability.resources.boot-primary-source",
+    "observability.resources.boot-source-age-unknown",
+    "observability.resources.boot-other-run-hidden",
+    "observability.resources.boot-unqualified-not-zero-free",
+    "observability.resources.boot-pagination",
+    "observability.resources.boot-replica-preference-primary-fallback",
+    "observability.resources.boot-input-closed",
+    "observability.resources.boot-cursor-typed",
+    "observability.resources.boot-preference-typed",
+    "observability.resources.boot-cross-run-denied",
+    "observability.resources.old-boot-debt-retained",
     "observability.resources.dimensions",
-    "observability.resources.profile-density-2",
-    "observability.resources.profile-density-4",
-    "observability.resources.profile-density-8",
     "observability.resources.profile-replay",
     "observability.resources.profile-conflict",
     "observability.resources.unknown-dimension",
@@ -34,7 +47,10 @@
     "observability.resources.profile-density-not-session-count",
     "observability.resources.observation-not-admission",
     "observability.resources.cross-run-denied",
-    "observability.resources.untyped-capacity-not-inferred"
+    "observability.resources.untyped-capacity-not-inferred",
+    "observability.resources.profile-density-2",
+    "observability.resources.profile-density-4",
+    "observability.resources.profile-density-8"
   ],
   "argv": [
     "python3",
@@ -82,7 +98,8 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/registrations/23.2.json"
+    "tests/hyperfide/registrations/23.2.json",
+    "tests/hyperfide/support/identity_fixture.py"
   ],
   "source_roots": [
     "services/hyperfide/src",

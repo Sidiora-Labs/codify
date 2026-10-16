@@ -13,6 +13,13 @@
     "observability.notifications.nonowner-binding-denied",
     "observability.notifications.actual-recipient-binding",
     "observability.notifications.binding-replay",
+    "observability.notifications.shared-binding-foundation",
+    "observability.notifications.human-intent-channel-denied",
+    "observability.notifications.human-intent-not-recipient",
+    "observability.notifications.otheractor-private-inspection-denied",
+    "observability.notifications.self-private-inspection",
+    "observability.notifications.wrong-producer-role-denied",
+    "observability.notifications.wrong-dispatch-role-denied",
     "observability.notifications.credential-summary-rejected",
     "observability.notifications.actual-enqueue",
     "observability.notifications.dedup-replay",
@@ -36,6 +43,7 @@
     "observability.notifications.stable-evidence-reference",
     "observability.notifications.actual-evidence-retrieval",
     "observability.notifications.no-secrets-durable-or-public",
+    "observability.notifications.leader-other-session-inspection-denied",
     "observability.notifications.buffering-not-live",
     "observability.notifications.bootstrap-namespaces-not-caller-controlled",
     "observability.notifications.bootstrap-nonrecipient-denied",
@@ -99,7 +107,8 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
-    "tests/hyperfide/registrations/23.4.json"
+    "tests/hyperfide/registrations/23.4.json",
+    "tests/hyperfide/support/identity_fixture.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
