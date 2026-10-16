@@ -16,7 +16,8 @@ IDS=["review.inputs.exact-obligation-generation","review.inputs.replay-stable","
 "review.receipt.expired-lease-refused","review.lease.reclaim-fences-old-generation","review.receipt.old-lease-refused",
 "review.receipt.actual-admitted-support","review.receipt.immutable-history","review.receipt.exact-replay",
 "review.coverage.limitations-prevent-completion","review.inputs.changed-policy-stales","review.inputs.reconcile-preserves-history",
-"review.observation.origin-attempt-refused","review.observation.exact-source-attribution","review.observation.history-immutable"]
+"review.observation.origin-attempt-refused","review.observation.exact-source-attribution","review.observation.history-immutable","review.inputs.partial-task-revision-stales","review.inputs.rebind-fences-old-generation"]
+IDS+=["review.execution.package-stop-denies-claim","review.execution.sandbox-stop-denies-output"]
 def seed_inputs(f):
  d=f.identity;profile=m.xid(0x701);build=m.xid(0x702);graph=m.xid(0x703);artifact=m.xid(0x704);attempt=m.xid(0x705);evidence=m.xid(0x706)
  body=b"Bounded support fixture: API units are cents; no semantic proof claimed.\n"
@@ -33,7 +34,13 @@ def main():
  with tempfile.TemporaryDirectory(prefix="hf-review-receipts-") as folder:
   f=m.Fixture("17.3",Path(folder),["17.3"])
   try:
-   f.configure();f.discover();seed=seed_inputs(f)
+   f.configure();f.discover()
+   accepted=m.xid(0x900)
+   f.identity.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version) VALUES($1,$2,$3,$4,'fixture-amended','{}',1)",[m.ORG,f.identity.ids["project"],accepted,"sha256:"+__import__("hashlib").sha256(b"fixture-amended").hexdigest()])
+   f.identity.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[m.ORG,m.RUN,accepted])
+   f.identity.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state=\'PENDING_VALIDATION\',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN,accepted])
+   f.identity.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN])
+   seed=seed_inputs(f)
    binding=dict(m.SCOPE,repository_id=m.REPOSITORY,source_object_id=f.first,policy_digest=f.policy_digest,candidate_digest=m.DIGEST,snapshot=seed["snapshot"])
    bound=f.ok("review.inputs.bind",binding,component="17.3");obligation=f.identity.sql("SELECT id AS obligation_id,generation::text AS generation FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4 AND watcher_id=\'watcher-0\'",[m.ORG,m.RUN,m.REPOSITORY,f.first])[0]
    m.check(IDS[0],lambda:m.expect(len(bound["obligations"])==10 and all(row["generation"]=="1" for row in bound["obligations"]),"input generation denominator wrong"))
@@ -71,11 +78,19 @@ def main():
    coverage=f.coverage(f.first,candidate_digest=m.DIGEST,input_manifest_digest=bound["input_manifest_digest"])
    m.check(IDS[15],lambda:m.expect(coverage["status"]=="INCOMPLETE" and coverage["complete"]==0,"limited review became complete frontier proof"))
    other=f.identity.sql("SELECT id AS obligation_id,generation::text AS generation FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4 AND watcher_id='watcher-1'",[m.ORG,m.RUN,m.REPOSITORY,f.first])[0]
+   package_hold=m.xid(0xc01)
+   f.identity.sql("INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,package_id,mode) VALUES($1,$2,$3,'PACKAGE',$4,$4,'STOP')",[m.ORG,m.RUN,package_hold,m.xid(0x300)])
+   m.check(IDS[23],lambda:f.reject("review.obligation.claim",dict(m.SCOPE,obligation_id=other["obligation_id"],generation=other["generation"],lease_seconds=120),"EXECUTION_HELD",component="17.3",key="watcher1"))
+   f.identity.sql("UPDATE hyperfide.execution_controls SET mode='ACTIVE',generation=generation+1,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,package_hold])
    other_lease=f.ok("review.obligation.claim",dict(m.SCOPE,obligation_id=other["obligation_id"],generation=other["generation"],lease_seconds=120),component="17.3",key="watcher1")
    observation={"evidence_id":seed["evidence_id"],"origin_task_id":m.xid(0x301),"origin_attempt_id":m.xid(0xdead),"contract_id":None,"failure_fingerprint":m.DIGEST,"summary":"Fixture-observed unit mismatch, with explicit unknown graph limitation.","severity":"ERROR"}
    finding_request=dict(request,request_id=m.xid(0x801),obligation_id=other["obligation_id"],generation=other["generation"],lease_generation=other_lease["lease_generation"],outcome="FINDINGS",observations=[observation])
    m.check(IDS[18],lambda:f.reject("review.receipt.submit",finding_request,"REVIEW_OBSERVATION_INVALID",component="17.3",key="watcher1"))
    observation["origin_attempt_id"]=seed["attempt_id"]
+   sandbox_hold=m.xid(0xc02)
+   f.identity.sql("INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,sandbox_id,mode) VALUES($1,$2,$3,'SANDBOX',$4,$4,'STOP')",[m.ORG,m.RUN,sandbox_hold,f.identity.ids["sandbox"]])
+   m.check(IDS[24],lambda:f.reject("review.receipt.submit",finding_request,"EXECUTION_HELD",component="17.3",key="watcher1"))
+   f.identity.sql("UPDATE hyperfide.execution_controls SET mode='ACTIVE',generation=generation+1,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,sandbox_hold])
    finding=f.ok("review.receipt.submit",finding_request,component="17.3",key="watcher1")
    def exact_observation():
     row=f.identity.sql("SELECT observer_session_id,origin_task_id,origin_attempt_id,repository_id,source_object_id FROM hyperfide.review_observations WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,finding["observation_ids"][0]])[0]
@@ -85,6 +100,13 @@ def main():
     result=m.sql("17.3","UPDATE hyperfide.review_observations SET summary='rewritten';",allow_error=True)
     m.expect(result.returncode!=0 and "23514" in result.stderr,"immutable observation was overwritten")
    m.check(IDS[20],immutable_observation)
+   f.identity.sql("UPDATE hyperfide.runs SET state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN])
+   f.identity.sql("UPDATE hyperfide.tasks SET spec_revision_id=$3,spec_generation=2,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$4",[m.ORG,m.RUN,accepted,m.xid(0x301)])
+   f.identity.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN])
+   m.check(IDS[21],lambda:m.expect(f.coverage(f.first,candidate_digest=m.DIGEST,input_manifest_digest=bound["input_manifest_digest"])["status"]=="STALE","partial task amendment retained review under unchanged global revision"))
+   refreshed=f.ok("review.inputs.bind",binding,component="17.3")
+   m.check(IDS[22],lambda:m.expect(all(row["generation"]=="2" for row in refreshed["obligations"]) and refreshed["input_manifest_digest"]!=bound["input_manifest_digest"],"changed task context did not fence old generation"))
+   bound=refreshed
    f.identity.sql("UPDATE hyperfide.runs SET policy_digest=$3,state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN,"sha256:"+"b"*64])
    m.check(IDS[16],lambda:m.expect(f.coverage(f.first,candidate_digest=m.DIGEST,input_manifest_digest=bound["input_manifest_digest"])["status"]=="STALE","changed policy retained current review"))
    reconciled=f.ok("review.inputs.reconcile",m.SCOPE,component="17.3")

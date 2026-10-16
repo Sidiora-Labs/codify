@@ -1,6 +1,8 @@
 import type {Component,ComponentContext} from '../components/registry.js';
-import {authorizeReview,canonical,decimal,dependencyDigest,digest,fail,hash,obj,oid,relevantContracts,reviewError,reviewInputCurrent,scope,strings,text,transaction,uuid} from './coverage.js';
-import type {ReviewDb,ReviewScope} from './coverage.js';
+import {authorizeReview,canonical,decimal,dependencyDigest,digest,fail,hash,obj,oid,relevantContracts,reviewError,reviewInputCurrent,reviewTaskVersions,reviewAttributionComplete,scope,strings,text,transaction,uuid} from './coverage.js';
+import {assertReviewExecutionAllowed,reviewControlMatches,primary,lockReviewDisposition} from './coverage.js';
+import type {ReviewControl,ReviewDb,ReviewScope} from './coverage.js';
+import {CONTRACT_FACETS} from './contracts.js';
 
 interface Source {repository_id:string;source_object_id:string}
 function sources(value:unknown):Source[]{
@@ -42,16 +44,17 @@ async function snapshot(db:ReviewDb,binding:ReviewScope,candidateDigest:string,v
  }
  const admitted=provenance?.source_coverage;
  const sourceIdentity=provenance?.source_set;
- const graphVerified=provenance?.expected_sources_validated===true&&Array.isArray(sourceIdentity)&&sourceIdentity.length===sourceSet.length&&sourceIdentity.every(source=>source&&typeof source==='object'&&(source as Record<string,unknown>).source_kind==='COMMIT'&&(source as Record<string,unknown>).overlay_digest===null)&&Array.isArray(admitted)&&admitted.length===sourceSet.length&&admitted.every(bundle=>bundle&&typeof bundle==='object'&&(bundle as Record<string,unknown>).complete===true);
- const result={schema_version:1,candidate_digest:candidateDigest,source_set:sourceSet,
+ const projectionDebt=provenance?.unprojected_semantic_edge_count;
+ const graphVerified=projectionDebt==='0'&&provenance?.expected_sources_validated===true&&Array.isArray(sourceIdentity)&&sourceIdentity.length===sourceSet.length&&sourceIdentity.every(source=>source&&typeof source==='object'&&(source as Record<string,unknown>).source_kind==='COMMIT'&&(source as Record<string,unknown>).overlay_digest===null)&&Array.isArray(admitted)&&admitted.length===sourceSet.length&&admitted.every(bundle=>bundle&&typeof bundle==='object'&&(bundle as Record<string,unknown>).complete===true&&(()=>{const coverage=(bundle as Record<string,unknown>).coverage as Record<string,unknown>|undefined;return !!coverage&&coverage.complete===true&&coverage.failed_files===0&&coverage.skipped_files===0&&Array.isArray(coverage.limitations)&&coverage.limitations.length===0;})());
+ const result={schema_version:2,task_versions:await reviewTaskVersions(db,binding,sourceSet),task_attribution_complete:await reviewAttributionComplete(db,binding,sourceSet),candidate_digest:candidateDigest,source_set:sourceSet,
   spec_revision_id:current.spec_revision_id,spec_digest:current.source_digest,configuration_digest:current.policy_digest,
   dependency_manifest_digest:await dependencyDigest(db,binding),contract_versions:versions,
-  graph_manifest_id:graphId,graph_manifest_digest:graph.rows[0]!.manifest_digest,graph_complete:graph.rows[0]!.unresolved==='0'&&graphVerified,graph_source_set:sourceIdentity??graphSources.rows,graph_provenance_verified:graphVerified,
+  graph_manifest_id:graphId,graph_manifest_digest:graph.rows[0]!.manifest_digest,graph_complete:graph.rows[0]!.unresolved==='0'&&graphVerified,graph_source_set:sourceIdentity??graphSources.rows,graph_provenance_verified:graphVerified,graph_unprojected_semantic_edge_count:typeof projectionDebt==='string'?projectionDebt:null,
   environment_profile_id:profileId,environment_digest:profile.rows[0]!.content_digest,
   toolchain_digest:hash(profile.rows[0]!.manifest),toolchain_projection:'ENTIRE_PINNED_ENVIRONMENT_MANIFEST',
   contracts_complete:contracts.every(row=>{
    const facets=row.definition.facets;
-   return !!facets&&typeof facets==='object'&&Object.values(facets).every(facet=>!!facet&&typeof facet==='object'&&(facet as Record<string,unknown>).status==='DEFINED');
+   return !!facets&&typeof facets==='object'&&Object.keys(facets).length===CONTRACT_FACETS.length&&CONTRACT_FACETS.every(name=>{const facet=(facets as Record<string,unknown>)[name];return !!facet&&typeof facet==='object'&&(facet as Record<string,unknown>).status==='DEFINED';});
   })};
  if(!await reviewInputCurrent(db,binding,result))fail('REVIEW_SNAPSHOT_INVALID','Source or dependency snapshot is unavailable');
  return result;
@@ -135,6 +138,7 @@ export async function submitReviewReceipt(context:ComponentContext,value:unknown
   if(prior.rows[0])return {receipt_id:prior.rows[0].id,replayed:true,current:prior.rows[0].id===obligation.current_receipt_id};
   if(obligation.lease_generation!==leaseGeneration||obligation.lease_session_id!==actor||!obligation.lease_current||obligation.lease_sandbox_id!==trusted.invocation.principal.sandbox_id||obligation.lease_boot_generation!==trusted.invocation.principal.boot_generation)fail('REVIEW_LEASE_STALE','Receipt owner, reservation or boot no longer owns this exact review job lease');
   await watcherReservation(db,binding,actor,obligation.lease_sandbox_id!,obligation.lease_boot_generation!);
+  await assertReviewExecutionAllowed(context,db,binding,obligation.snapshot.source_set as Source[],obligation.lease_sandbox_id,'CHECKPOINT');
   const evidence=await db.query<{id:string;attempt_id:string}>(`SELECT evidence.id,evidence.attempt_id FROM hyperfide.evidence evidence JOIN hyperfide.artifacts artifact
    ON artifact.organisation_id=evidence.organisation_id AND artifact.run_id=evidence.run_id AND artifact.id=evidence.artifact_id
    WHERE evidence.organisation_id=$1 AND evidence.run_id=$2 AND evidence.id=ANY($3::uuid[]) AND evidence.repository_id=$4
@@ -183,6 +187,7 @@ export async function claimReviewObligation(context:ComponentContext,value:unkno
   const row=found.rows[0];
   if(!row||!row.active||row.generation!==generation||row.reviewer_session_id!==actor||!row.input_manifest_digest||!row.snapshot)fail('REVIEW_JOB_DENIED','Principal is not assigned this exact current input generation');
   if(!await reviewInputCurrent(db,binding,row.snapshot))fail('REVIEW_INPUTS_STALE','Review input changed before claim');
+  await assertReviewExecutionAllowed(context,db,binding,row.snapshot.source_set as Source[],sandboxId,'ADMISSION');
   if(row.lease_current)fail('REVIEW_LEASE_CONFLICT','Review job already has a live reservation');
   const result=await db.query(`UPDATE hyperfide.review_obligations SET lease_generation=lease_generation+1,lease_session_id=$4,lease_sandbox_id=$5,lease_boot_generation=$6,lease_expires_at=clock_timestamp()+$7*interval '1 second',state='RUNNING' WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,generation,lease_generation,lease_expires_at,input_manifest_digest,candidate_digest`,[binding.organisation_id,binding.run_id,obligationId,actor,sandboxId,boot,seconds]);
   return {...result.rows[0],snapshot:row.snapshot};
@@ -225,4 +230,18 @@ export function createComponent(_context:ComponentContext):Component{
    return transaction(ctx,binding,db=>reconcileReviewInputs(db,binding,v.after_id?uuid(v.after_id):null,limit));
   })
  }};
+}
+
+export async function fenceReviewObligations(db:ReviewDb,binding:ReviewScope,control:ReviewControl):Promise<unknown>{
+ await primary(db);await lockReviewDisposition(db,binding,true);
+ const rows=await db.query<Record<string,any>>(`SELECT o.*,i.snapshot FROM hyperfide.review_obligations o LEFT JOIN hyperfide.review_obligation_inputs i ON i.organisation_id=o.organisation_id AND i.run_id=o.run_id AND i.obligation_id=o.id AND i.generation=o.generation WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.state='RUNNING' FOR UPDATE OF o`,[binding.organisation_id,binding.run_id]);
+ const fenced:Record<string,unknown>[]=[],physical:Record<string,unknown>[]=[];
+ for(const row of rows.rows){
+  const tasks=row.snapshot?.task_attribution_complete===true&&Array.isArray(row.snapshot?.task_versions)?row.snapshot.task_versions.map((v:Record<string,unknown>)=>uuid(v.task_id)):[];
+  if(!await reviewControlMatches(db,binding,control,tasks,row.lease_sandbox_id))continue;
+  if(row.lease_session_id)physical.push({kind:'REVIEW',obligation_id:row.id,session_id:row.lease_session_id,sandbox_id:row.lease_sandbox_id,sandbox_boot_generation:row.lease_boot_generation,lease_generation:row.lease_generation,reservation_id:null,operation_id:null});
+  const changed=await db.query(`UPDATE hyperfide.review_obligations SET state='PENDING',lease_generation=lease_generation+1,lease_session_id=NULL,lease_sandbox_id=NULL,lease_boot_generation=NULL,lease_expires_at=NULL WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation`,[binding.organisation_id,binding.run_id,row.id]);
+  fenced.push(changed.rows[0]);
+ }
+ return {fenced,physical,cleanup_status:'UNKNOWN',reassignment_authorized:false,control_operation_id:control.operation_id,control_generation:control.control_generation};
 }
