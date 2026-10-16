@@ -34,6 +34,7 @@
     "graph.extraction.incremental-body-budget",
     "graph.extraction.reject-unauthenticated",
     "graph.extraction.reject-wrong-role",
+    "graph.extraction.authenticated-dispatch-native",
     "graph.extraction.scratch-disposition"
   ],
   "argv": [
@@ -51,7 +52,8 @@
     "cg",
     "services/hyperfide/dist/control.js",
     "services/hyperfide/dist/graph/extraction.js",
-    "services/hyperfide/dist/identity/enrollment.js"
+    "services/hyperfide/dist/identity/enrollment.js",
+    "services/hyperfide/dist/dispatch.js"
   ],
   "resources": [
     {
