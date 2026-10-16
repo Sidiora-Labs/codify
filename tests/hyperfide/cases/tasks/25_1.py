@@ -274,6 +274,47 @@ INSERT INTO symbol_fts VALUES('name_test');
    check("migration.source-v18.after."+table,lambda table=table,columns=columns:expect(set(columns)<=table_columns(new,table),"source-derived v18 additive columns omitted"))
   check("migration.source-v18.after.journal",lambda:expect(any(t["name"]=="journal_applied" for t in new["inventory"]["tables"]),"actual optional journal DDL omitted"))
   check("migration.source-v18.virtual-shadow-ddl",lambda:expect(any(t["type"]=="virtual" for t in new["inventory"]["tables"]) and any(t["type"]=="shadow" for t in new["inventory"]["tables"]) and all(o.get("sql") for o in new["inventory"]["objects"] if o["type"]=="table" and not o["name"].startswith("sqlite_")),"actual C schema virtual/shadow/source DDL not preserved"))
+  # Independent direct-primary oracles prove namespaces, rather than checking
+  # the importer's own calculated identifiers.
+  variant.executescript("CREATE TABLE equivalent_key(key TEXT PRIMARY KEY,value TEXT); INSERT INTO equivalent_key VALUES('schema_version','18'); CREATE TABLE exact_cells(id INTEGER PRIMARY KEY,empty_text TEXT,empty_blob BLOB,min_integer INTEGER,max_integer INTEGER); CREATE TABLE unicode_keys(key TEXT PRIMARY KEY);")
+  variant.execute("INSERT INTO exact_cells VALUES(?,?,?,?,?)",(1,"",b"",-(2**63),2**63-1))
+  variant.executemany("INSERT INTO unicode_keys VALUES(?)",[("é",),("é",)]);variant.commit()
+  namespace=ok("snapshot",{"source":"source-ddl"})
+  for snapshot in [old,namespace]:
+   ok("import",{"source":"source-ddl","import_id":snapshot["import_id"],"table":"meta","offset":"0","limit":10})
+  def mapped(import_id,table):
+   values=FIXTURE.sql("SELECT mapped_id::text FROM hyperfide_history.rows WHERE import_id=$1 AND table_name=$2 ORDER BY mapped_id",[import_id,table])
+   expect(len(values)==1,"namespace fixture expected exactly one original typed key")
+   return values[0]["mapped_id"]
+  baseline=mapped(namespace["import_id"],"meta")
+  check("migration.namespace.stable-across-snapshot-revisions",lambda:expect(mapped(old["import_id"],"meta")==baseline,"same source/key identity changed with snapshot revision"))
+  original=profiles[-1]
+  profiles.append(dict(original,id="other-lineage",source_id="10000000-0000-0000-0000-000000000003"))
+  second_repository=uid()
+  FIXTURE.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'second-legacy','fixture:second-legacy')",[FIXTURE.ids["organisation"],second_repository,FIXTURE.ids["project"]])
+  FIXTURE.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[FIXTURE.ids["organisation"],second_repository,"2"*40])
+  FIXTURE.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[FIXTURE.ids["organisation"],FIXTURE.ids["run"],second_repository,"2"*40])
+  profiles.append(dict(original,id="other-repository",repository_id=second_repository));pf.write_text(json.dumps(profiles))
+  def different_namespace(source_name):
+   snapshot=ok("snapshot",{"source":source_name})
+   ok("import",{"source":source_name,"import_id":snapshot["import_id"],"table":"meta","offset":"0","limit":10})
+   expect(mapped(snapshot["import_id"],"meta")!=baseline,"distinct source/repository namespace collapsed")
+  check("migration.namespace.source-lineage-separated",lambda:different_namespace("other-lineage"))
+  check("migration.namespace.repository-separated",lambda:different_namespace("other-repository"))
+  def different_table():
+   ok("import",{"source":"source-ddl","import_id":namespace["import_id"],"table":"equivalent_key","offset":"0","limit":10})
+   expect(mapped(namespace["import_id"],"equivalent_key")!=baseline,"equal typed keys in different tables collapsed")
+  check("migration.namespace.table-separated",different_table)
+  ok("import",{"source":"source-ddl","import_id":namespace["import_id"],"table":"exact_cells","offset":"0","limit":10})
+  payload=FIXTURE.sql("SELECT payload FROM hyperfide_history.rows WHERE import_id=$1 AND table_name='exact_cells'",[namespace["import_id"]])[0]["payload"]
+  values={x["column"]:x["value"] for x in payload}
+  check("migration.types.empty-text-distinct-empty-blob",lambda:expect(values["empty_text"]["type"]=="text" and values["empty_blob"]["type"]=="blob" and "" in values["empty_text"].values() and "" in values["empty_blob"].values(),"empty text/blob storage classes or exact bytes changed"))
+  check("migration.types.signed-integer-extremes",lambda:expect(str(-(2**63)) in values["min_integer"].values() and str(2**63-1) in values["max_integer"].values(),"signed64-bit integer extrema rounded"))
+  def unicode_distinct():
+   ok("import",{"source":"source-ddl","import_id":namespace["import_id"],"table":"unicode_keys","offset":"0","limit":10})
+   count=FIXTURE.sql("SELECT count(*)::text AS n,count(DISTINCT mapped_id)::text AS distinct_ids FROM hyperfide_history.rows WHERE import_id=$1 AND table_name='unicode_keys'",[namespace["import_id"]])[0]
+   expect(count=={"n":"2","distinct_ids":"2"},"composed/decomposed Unicode byte identities normalised together")
+  check("migration.types.unicode-key-bytes-preserved",unicode_distinct)
   (artifacts()/"source-variants.json").write_text(json.dumps(variant_provenance,sort_keys=True))
   variant.close()
   c.execute("UPDATE meta SET value='19' WHERE key='schema_version'");c.commit()
