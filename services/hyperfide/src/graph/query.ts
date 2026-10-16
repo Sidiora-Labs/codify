@@ -3,11 +3,20 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import {invocationOf} from '../identity/enrollment.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import {FoundationError} from '../policy/programme.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import type {QuerySession} from '../storage/transactions.js';
 import {canonical,digest,exact,fail,text,uuid} from './extraction.js';
 import {graphTransaction,scopeInput,semanticProjectionDebt} from './ingestion.js';
 import type {GraphScope,GraphTransaction} from './ingestion.js';
 import {publishedGraph} from './publication.js';
 import type {JsonObject} from './extraction.js';
+
+export interface GraphQueryDescriptor {kind:string;input:JsonObject;max_bytes:number;read_options?:unknown}
+export type GraphQueryExecutor=<T extends JsonObject>(ctx:ComponentContext,scope:GraphScope,manifestId:string,query:GraphQueryDescriptor,operation:(session:QuerySession,manifest:JsonObject)=>Promise<T>)=>Promise<T>;
+export const primaryGraphQueryExecutor:GraphQueryExecutor=async(ctx,scope,manifestId,_query,operation)=>graphTransaction(ctx,scope,async tx=>{
+ assertPrimaryTransaction(tx);return operation(tx,await publishedGraph(tx,scope,manifestId));
+},false);
+function semanticInput(input:JsonObject):JsonObject{const {read_options,...semantic}=input;void read_options;return semantic;}
 
 function bounded(value:unknown,base:number,min:number,max:number):number{if(value===undefined)return base;if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)fail('GRAPH_INVALID','Invalid query budget');return Number(value);}
 function ids(value:unknown,max=128):string[]{if(!Array.isArray(value)||value.length>max)fail('GRAPH_INVALID','Bounded ID array required');const all=value.map(uuid);if(new Set(all).size!==all.length)fail('GRAPH_INVALID','Duplicate query IDs');return all;}
@@ -27,8 +36,8 @@ async function status(input:unknown,ctx:ComponentContext):Promise<unknown>{
   return {...provenance(manifest),published_at:manifest.published_at,build_id:manifest.build_id,channel,availability:'AVAILABLE',complete:true};
  },false);
 }
-async function search(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','mode','q'],['limit','cursor','max_bytes']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
+export async function search(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise<unknown>{
+ const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','mode','q'],['limit','cursor','max_bytes','read_options']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
  q=text(r.q,'search query',256),limit=bounded(r.limit,50,1,200),max=budget(r.max_bytes),mode=r.mode;
  if(!['symbol','body','comment','trigram','body-trigram'].includes(String(mode)))fail('GRAPH_INVALID','Unsupported search mode');
  const queryDigest=digest(canonical({manifest_id:manifestId,mode,q,limit,max_bytes:max}));let offset=0;
@@ -37,8 +46,8 @@ async function search(input:unknown,ctx:ComponentContext):Promise<unknown>{
   try{const bytes=Buffer.from(raw,'base64url');if(bytes.toString('base64url')!==raw)throw new Error();c=exact(JSON.parse(bytes.toString('utf8')),['query_digest','offset']);}catch{fail('GRAPH_CURSOR_INVALID','Invalid pinned search cursor');}
   if(c.query_digest!==queryDigest||!Number.isSafeInteger(c.offset)||Number(c.offset)<0||Number(c.offset)>1000000)fail('GRAPH_CURSOR_INVALID','Cursor belongs to different immutable query');offset=Number(c.offset);
  }
- return graphTransaction(ctx,s,async tx=>{
-  const manifest=await publishedGraph(tx,s,manifestId),p=[s.organisation_id,s.run_id,manifest.build_id,q,limit+1,offset];
+ return executor(ctx,s,manifestId,{kind:'search',input:semanticInput(r),max_bytes:max,read_options:r.read_options},async(tx,manifest)=>{
+  const p=[s.organisation_id,s.run_id,manifest.build_id,q,limit+1,offset];
   let sql:string;
   if(mode==='body')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND b.search_vector@@plainto_tsquery('simple',$4) ORDER BY ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4)) DESC,b.bundle_digest,b.path LIMIT $5 OFFSET $6";
   else if(mode==='body-trigram')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,'1'::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND position(lower($4) IN lower(b.body))>0 AND b.body ILIKE $7 ORDER BY b.bundle_digest,b.path LIMIT $5 OFFSET $6";
@@ -53,14 +62,14 @@ async function search(input:unknown,ctx:ComponentContext):Promise<unknown>{
    rows,complete:!truncated,truncated,next_cursor:truncated?Buffer.from(canonical({query_digest:queryDigest,offset:offset+rows.length})).toString('base64url'):null,
    limitations:['Task component ranking is explicit; full legacy FTS/ranking parity requires its independently approved corpus']};
   return packet(result,max);
- },false);
+ });
 }
-async function context(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','files'],['max_bytes']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),symbols=ids(r.symbol_ids),max=budget(r.max_bytes);
+export async function context(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise<unknown>{
+ const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','files'],['max_bytes','read_options']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),symbols=ids(r.symbol_ids),max=budget(r.max_bytes);
  if(!Array.isArray(r.files)||r.files.length>128)fail('GRAPH_INVALID','Bounded repository/file set required');
  const files=r.files.map(value=>{const v=exact(value,['repository_id','path']);return {repository_id:uuid(v.repository_id),path:text(v.path,'file path',4096)};});
- return graphTransaction(ctx,s,async tx=>{
-  const m=await publishedGraph(tx,s,manifestId),p=[s.organisation_id,s.run_id,m.build_id,symbols,canonical(files)];
+ return executor(ctx,s,manifestId,{kind:'context',input:semanticInput(r),max_bytes:max,read_options:r.read_options},async(tx,m)=>{
+  const p=[s.organisation_id,s.run_id,m.build_id,symbols,canonical(files)];
   const requested=(await tx.query('SELECT id FROM hyperfide.graph_symbols WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND id=ANY($4::uuid[])',p.slice(0,4))).rows;
   if(requested.length!==symbols.length)fail('GRAPH_SYMBOL_UNAVAILABLE','Requested context symbol is absent from exact graph');
   const selected=(await tx.query("SELECT DISTINCT f.* FROM hyperfide.graph_files f LEFT JOIN hyperfide.graph_symbols sy ON sy.organisation_id=f.organisation_id AND sy.run_id=f.run_id AND sy.graph_id=f.graph_id AND sy.file_id=f.id WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND (sy.id=ANY($4::uuid[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($5::jsonb) x(repository_id uuid,path text) WHERE x.repository_id=f.repository_id AND x.path=f.path)) ORDER BY f.repository_id,f.path LIMIT 257",p)).rows;
@@ -74,14 +83,14 @@ async function context(input:unknown,ctx:ComponentContext):Promise<unknown>{
   const truncated=nodes.length>1000||references.length>1000||raw.length>1000||BigInt(semantic.count)>256n,unknown=references.filter(v=>v.resolution_state!=='RESOLVED');
   return packet({...provenance(m),files:selected,nodes:nodes.slice(0,1000),references:references.slice(0,1000),source_facts:raw.slice(0,1000),unknown_references:unknown.slice(0,256),
    unknown_semantic_edges:semantic.rows,unprojected_semantic_edge_count:semantic.count,complete:!truncated&&unknown.length===0&&semantic.count==='0',truncated,unknown_edges:unknown.length>0||semantic.count!=='0',query_amplification:'BOUNDED_GROUPED_QUERIES'},max);
- },false);
+ });
 }
-async function traverse(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','direction','depth','max_nodes'],['max_bytes']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
+export async function traverse(input:unknown,ctx:ComponentContext,executor:GraphQueryExecutor=primaryGraphQueryExecutor):Promise<unknown>{
+ const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','direction','depth','max_nodes'],['max_bytes','read_options']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
  seeds=ids(r.symbol_ids),depth=bounded(r.depth,1,0,4),maxNodes=bounded(r.max_nodes,100,1,500),max=budget(r.max_bytes),direction=r.direction;
  if(!['callers','callees','both'].includes(String(direction))||seeds.length>maxNodes)fail('GRAPH_INVALID','Invalid traversal');
- return graphTransaction(ctx,s,async tx=>{
-  const m=await publishedGraph(tx,s,manifestId),p=[s.organisation_id,s.run_id,m.build_id];
+ return executor(ctx,s,manifestId,{kind:'traverse',input:semanticInput(r),max_bytes:max,read_options:r.read_options},async(tx,m)=>{
+  const p=[s.organisation_id,s.run_id,m.build_id];
   const selected=(await tx.query('SELECT s.*,f.repository_id,f.path FROM hyperfide.graph_symbols s JOIN hyperfide.graph_files f ON f.organisation_id=s.organisation_id AND f.run_id=s.run_id AND f.graph_id=s.graph_id AND f.id=s.file_id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.graph_id=$3 AND s.id=ANY($4::uuid[])',[...p,seeds])).rows;
   if(selected.length!==seeds.length)fail('GRAPH_SYMBOL_UNAVAILABLE','Traversal seed is absent from exact graph');
   const seen=new Set(seeds),edges=new Map<string,JsonObject>();let frontier=seeds,truncated=false;
@@ -99,7 +108,7 @@ async function traverse(input:unknown,ctx:ComponentContext):Promise<unknown>{
   return packet({...provenance(m),nodes,edges:[...edges.values()].filter(e=>seen.has(String(e.source_symbol_id))&&seen.has(String(e.target_symbol_id))),
    unknown_references:unknown,unresolved_count:count,unknown_semantic_edges:semantic.rows,unprojected_semantic_edge_count:semantic.count,complete:!truncated&&count==='0'&&semantic.count==='0',truncated:truncated||BigInt(count)>256n||BigInt(semantic.count)>256n,
    limitations:['Unresolved and cross-repository bindings remain explicit unknowns','Depth limits bound observed reachability; they do not prove system coherence']},max);
- },false);
+ });
 }
 export function createComponent(ctx:ComponentContext):Component {
  const wrap=(fn:(input:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown,context:ComponentContext)=>{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_QUERY_FAILED','Exact graph query could not complete within its storage budget');}};

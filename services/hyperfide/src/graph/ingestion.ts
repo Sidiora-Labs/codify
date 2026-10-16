@@ -46,7 +46,7 @@ export function sourceId(build:string,bundle:string,family:string,legacy:unknown
 }
 // Mirror resolve()'s sourceId(build,bundle,'semantic_edges',legacy-id) identity.
 // Raw edges whose endpoints cannot be projected remain evidence, never proof of absence.
-export async function semanticProjectionDebt(tx:GraphTransaction,s:GraphScope,graphId:string):Promise<{count:string;rows:JsonObject[]}>{
+export async function semanticProjectionDebt(tx:Pick<GraphTransaction,'query'>,s:GraphScope,graphId:string):Promise<{count:string;rows:JsonObject[]}>{
  const result=await tx.query<{bundle_digest:string;fact_key:string;payload:JsonObject;unresolved_count:string}>("SELECT f.bundle_digest,f.fact_key,f.payload,count(*) OVER()::text AS unresolved_count FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family='semantic_edges' AND NOT EXISTS(SELECT 1 FROM hyperfide.graph_edges e WHERE e.organisation_id=f.organisation_id AND e.run_id=f.run_id AND e.graph_id=f.graph_id AND e.id=md5($3::text||':'||f.bundle_digest||':semantic_edges:'||COALESCE(f.payload->>'id',f.payload->>'symbol_id',f.fact_key))::uuid) ORDER BY f.bundle_digest,f.fact_key LIMIT 256",[s.organisation_id,s.run_id,graphId]);
  return {count:result.rows[0]?.unresolved_count??'0',rows:result.rows.map(({unresolved_count,...row})=>({...row,resolution_state:'UNPROJECTED_ENDPOINT'}))};
 }
