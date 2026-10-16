@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observe authority routing through the actual public binary; no live authority."""
+"""Observe native CLI/MCP against actual signed HTTPS/PostgreSQL authority. Synthetic data only."""
 import json,os,subprocess,tempfile,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4];FAILED=[];IDS=[]
@@ -45,6 +45,7 @@ def main():
   marker.unlink();marker.symlink_to(base/"private-marker");(base/"private-marker").write_text(json.dumps(descriptor));(base/"private-marker").chmod(0o600)
   check("client.symlink-descriptor-denied",lambda:blocked(["init"],"AUTHORITY_MODE_INVALID"))
  network_checks()
+ mapping_checks()
  return 1 if FAILED else 0
 
 def network_checks():
@@ -152,4 +153,37 @@ def network_checks():
    expect(p.returncode!=0 and r and r["ok"] is False,"revoked credential accepted")
   check("client.https.revoked-principal",revoked)
  finally:fixture.close()
+
+
+
+def mapping_checks():
+ sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
+ from identity_fixture import IdentityFixture,uid,sha
+ def setup(f):
+  data=(ROOT/"services/hyperfide/migrations/0023-observability.sql").read_bytes()
+  f.sql("BEGIN;"+data.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(23,'0023-observability','"+sha(data)+"');COMMIT;")
+ fixture=IdentityFixture(extra_components=["23.1"],extra_setup=setup)
+ try:
+  config=fixture.path/"native-status-transport.json";config.write_text(json.dumps({"origin":fixture.origin,"ca_file":str(fixture.ca),"key_path":str(fixture.keys["operator"]["path"]),"credential_id":fixture.ids["operator"],"timeout_ms":5000}));config.chmod(0o600)
+  marker=fixture.path/"status-authority.json";marker.write_text(json.dumps({"schema_version":1,"mode":"distributed","authority_epoch":fixture.ids["epoch"]}));marker.chmod(0o600)
+  environment=os.environ.copy();environment.update(HYPERFIDE_MODE="distributed",HYPERFIDE_AUTHORITY_DESCRIPTOR=str(marker),HYPERFIDE_TRANSPORT_CONFIG=str(config));environment.pop("HYPERFIDE_AUTHORITY_URL",None)
+  expected=fixture.sql("SELECT id,state,state_version::text FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[fixture.ids["organisation"],fixture.ids["run"]])[0]
+  def verify(result):
+   value=result["result"]
+   expect(result["ok"] and value["run"]["id"]==expected["id"] and value["run"]["state"]==expected["state"] and str(value["run"]["state_version"])==expected["state_version"],"finite route result differs from actual primary run")
+   expect(value["freshness"]["route"]=="PRIMARY","finite route lost primary provenance")
+   expect(not (fixture.path/".codegraph").exists(),"finite distributed route opened SQLite")
+  def cli():
+   filename=fixture.path/"status-input.json";filename.write_text("{}")
+   args=[str(ROOT/"cg"),"fleet","status","--input-file",str(filename),"--run-id",fixture.ids["run"],"--operation-id",uid(),"--idempotency-key",uid(),"--correlation-id",uid()]
+   p=subprocess.run(args,cwd=fixture.path,env=environment,capture_output=True,text=True,timeout=20)
+   expect(p.returncode==0,"finite CLI fleet status rejected: "+p.stderr[:200]);verify(json.loads(p.stdout))
+  check("client.mapping.fleet-status-real-primary",cli)
+  def mcp():
+   request={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fleet_status","arguments":{"run_id":fixture.ids["run"],"input":{},"operation_id":uid(),"idempotency_key":uid(),"correlation_id":uid()}}}
+   p=subprocess.run([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=environment,input=json.dumps(request)+"\n",capture_output=True,text=True,timeout=20)
+   r=json.loads(p.stdout);expect(p.returncode==0 and not r["result"]["isError"],"finite MCP fleet status rejected");verify(json.loads(r["result"]["content"][0]["text"]))
+  check("client.mapping.mcp-fleet-status-real-primary",mcp)
+ finally:fixture.close()
+
 if __name__=="__main__":sys.exit(main())
