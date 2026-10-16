@@ -30,7 +30,7 @@ def main():
   check("client.local.help",lambda:expect(run(["help"]).returncode==0,"local help requires remote credentials"))
   check("client.offline.local-version",lambda:expect(run(["version"],mode="offline").returncode==0,"offline local version unavailable"))
   check("client.offline.local-spec",lambda:expect(run(["spec","status"],mode="offline").returncode!=78,"explicit offline local scope blocked"))
-  for command in [["init"],["spec","claim","1"],["spec","done","1","--force"],["spec","run"],["mcp"],["hook","post-edit"],["work","update"],["docs","close"],["projection"],["serve"],["fleet","up"]]:
+  for command in [["init"],["spec","claim","1"],["spec","done","1","--force"],["spec","run"],["mcp"],["hook","post-edit"],["work","update"],["docs","legacy-close"],["projection"],["serve"],["fleet","up"]]:
    check("client.distributed."+command[0]+("-"+command[1] if len(command)>1 else ""),lambda command=command:blocked(command,"TRANSPORT_CONFIG_REQUIRED" if command[0]=="mcp" else "DISTRIBUTED_COMMAND_UNSUPPORTED"))
   check("client.offline.remote-denied",lambda:blocked(["spec","claim","1"],"OFFLINE_AUTHORITY_UNAVAILABLE",mode="offline"))
   check("client.downgrade-denied",lambda:blocked(["spec","claim","1"],"AUTHORITY_MODE_INVALID",mode="local"))
@@ -46,6 +46,7 @@ def main():
   check("client.symlink-descriptor-denied",lambda:blocked(["init"],"AUTHORITY_MODE_INVALID"))
  network_checks()
  mapping_checks()
+ business_unknown_checks()
  return 1 if FAILED else 0
 
 def network_checks():
@@ -237,5 +238,51 @@ def mapping_checks():
    policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}))
   check("client.mcp.wrong-supervisor-credential-refused",wrong_subject)
  finally:fixture.close()
+
+def business_unknown_checks():
+ sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
+ from identity_fixture import IdentityFixture,uid,sha
+ import importlib.util,base64
+ spec=importlib.util.spec_from_file_location("client_actual_artifact_fixture",ROOT/"tests/hyperfide/cases/tasks/15_2.py")
+ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+ backend=module.ObjectFixture()
+ fixture=None
+ try:
+  def setup(f):
+   f.env.update(HF_ARTIFACT_S3_ENDPOINT=backend.endpoint,HF_ARTIFACT_ALLOW_LOOPBACK_HTTP="1",HF_ARTIFACT_S3_REGION=module.REGION,HF_ARTIFACT_S3_BUCKET=module.BUCKET,HF_ARTIFACT_S3_ACCESS_KEY_ID=module.KEY,HF_ARTIFACT_S3_SECRET_ACCESS_KEY=module.SECRET,HF_ARTIFACT_S3_SESSION_TOKEN=module.TOKEN,HF_ARTIFACT_ORGANISATION_ID=f.ids["organisation"],HF_ARTIFACT_ALLOWED_RUN_IDS=json.dumps([f.ids["run"]]))
+  fixture=IdentityFixture(extra_components=["15.2"],extra_setup=setup)
+  module.ORG=fixture.ids["organisation"];module.RUN=fixture.ids["run"]
+  module.SCOPE={"organisation_id":module.ORG,"run_id":module.RUN}
+  config=fixture.path/"artifact-native.json";config.write_text(json.dumps({"origin":fixture.origin,"ca_file":str(fixture.ca),"key_path":str(fixture.keys["operator"]["path"]),"credential_id":fixture.ids["operator"],"timeout_ms":5000}));config.chmod(0o600)
+  marker=fixture.path/"artifact-authority.json";marker.write_text(json.dumps({"schema_version":1,"mode":"distributed","authority_epoch":fixture.ids["epoch"]}));marker.chmod(0o600)
+  environment=os.environ.copy();environment.update(HYPERFIDE_MODE="distributed",HYPERFIDE_AUTHORITY_DESCRIPTOR=str(marker),HYPERFIDE_TRANSPORT_CONFIG=str(config));environment.pop("HYPERFIDE_AUTHORITY_URL",None);environment.pop("HYPERFIDE_MCP_TOOL_POLICY_FILE",None)
+  def payload(data):
+   return {"run_id":fixture.ids["run"],"component":"15.2","action":"artifact.object.put","input":{"organisation_id":fixture.ids["organisation"],"run_id":fixture.ids["run"],"digest":sha(data),"size_bytes":str(len(data)),"data_base64":base64.b64encode(data).decode(),"retention_class":"RUN","retention_until":None,"retention_hold":False},"expected_version":None,"authority":None}
+  def observed(result,data):
+   expect(result["ok"] is True and result["result"]["outcome"]=="UNKNOWN" and result["result"]["artifact"]["status"]=="PENDING" and result["result"]["receipt"] is None,"real15.2 backend refusal did not preserve explicit UNKNOWN")
+   rows=fixture.sql("SELECT status,completed_at FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3",[fixture.ids["organisation"],fixture.ids["run"],sha(data)])
+   expect(len(rows)==1 and rows[0]["status"]=="PENDING" and rows[0]["completed_at"] is None,"native UNKNOWN differs from direct primary pending intent")
+   events=[e for e in backend.events if e["path"]==backend.key(data) and e["method"]=="PUT"]
+   expect(len(events)==1 and events[0]["signature_verified"],"native caller blindly replayed unknown artifact upload")
+  def cli_unknown():
+   data=b"real native business UNKNOWN";backend.set_mode(data,"reject")
+   filename=fixture.path/"artifact-payload.json";filename.write_text(json.dumps(payload(data)))
+   operation=uid();key=uid()
+   p=subprocess.run([str(ROOT/"cg"),"authority","invoke","--payload-file",str(filename),"--operation-id",operation,"--idempotency-key",key,"--correlation-id",uid()],cwd=fixture.path,env=environment,capture_output=True,text=True,timeout=20)
+   expect(p.returncode==75,"HTTP200 business UNKNOWN exit mismatch: "+str((p.returncode,p.stdout,p.stderr)))
+   observed(json.loads(p.stdout),data)
+   error=json.loads(p.stderr);expect(error["automatic_replay"] is False and error["operation_id"]==operation and error["idempotency_key"]==key,"business UNKNOWN reconciliation identity lost")
+  check("client.https.business-unknown-exit75-real-pending",cli_unknown)
+  def mcp_unknown():
+   data=b"real MCP business UNKNOWN";backend.set_mode(data,"reject")
+   request={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"authority_invoke","arguments":{"payload":payload(data),"operation_id":uid(),"idempotency_key":uid(),"correlation_id":uid()}}}
+   p=subprocess.run([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=environment,input=json.dumps(request)+"\n",capture_output=True,text=True,timeout=20)
+   response=json.loads(p.stdout);expect(p.returncode==0 and response["result"]["isError"] is True,"HTTP200 business UNKNOWN MCP mismatch: "+str((p.returncode,p.stdout,p.stderr)))
+   observed(json.loads(response["result"]["content"][0]["text"]),data)
+  check("client.mcp.business-unknown-error-real-pending",mcp_unknown)
+ finally:
+  if fixture:fixture.close()
+  absent=backend.stop()
+  expect(absent,"owned artifact fault fixture retained a listener")
 
 if __name__=="__main__":sys.exit(main())

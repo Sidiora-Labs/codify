@@ -96,7 +96,9 @@ static int hf_json25(const char *data,size_t length,int response,const char *ope
  char actual[64],id[64];
  if(!hf_json_get(json,"operation_id",actual,sizeof actual)||strcmp(actual,operation)||!hf_json_get(json,"id",id,sizeof id)||strcmp(id,operation)){free(json);return 0;}
  }
- free(json);return ok?2:1;
+ int result=hf_json_field(json,0,"result");char outcome[32];
+ int unknown=ok&&result>=0&&hf_json_string(json,hf_json_field(json,result,"outcome"),outcome,sizeof outcome)&&!strcmp(outcome,"UNKNOWN");
+ free(json);return unknown?3:ok?2:1;
 }
 static int hf_client_error25(FILE *err,const char *code,const char *message){
  fprintf(err,"{\"ok\":false,\"error\":{\"code\":\"%s\",\"message\":\"%s\"},\"local_fallback\":false}\n",code,message);return 78;
@@ -128,9 +130,11 @@ static int hf_invoke_config25(const HfTransportConfig *supplied,const char *payl
  return hf_client_error25(err,"AUTHORITY_TRANSPORT_FAILED","Verified authority exchange failed before a confirmed response");
  }
  int parsed=hf_json25(response.body,response.length,1,response.status>=200&&response.status<300?operation:NULL);
- if(!parsed||(parsed==2&&(response.status<200||response.status>=300))){hf_http_response_free(&response);return hf_client_error25(err,"AUTHORITY_PROTOCOL_INVALID","Authority returned an invalid protocol1 response");}
+ if(!parsed||(parsed>=2&&(response.status<200||response.status>=300))){hf_http_response_free(&response);return hf_client_error25(err,"AUTHORITY_PROTOCOL_INVALID","Authority returned an invalid protocol1 response");}
  fwrite(response.body,1,response.length,out);fputc('\n',out);
- int success=response.status>=200&&response.status<300&&parsed==2;hf_http_response_free(&response);return success?0:1;
+ int success=response.status>=200&&response.status<300&&parsed==2;hf_http_response_free(&response);
+ if(parsed==3){fprintf(err,"{\"ok\":false,\"error\":{\"code\":\"AUTHORITY_OUTCOME_UNKNOWN\",\"message\":\"Authority explicitly reported UNKNOWN; reconcile the same operation before retry\"},\"operation_id\":\"%s\",\"idempotency_key\":\"%s\",\"automatic_replay\":false,\"local_fallback\":false}\n",operation,idempotency);return 75;}
+ return success?0:1;
 }
 static int hf_invoke25(const char *payload,const char *operation,const char *idempotency,const char *correlation,const char *causation,FILE *out,FILE *err){
  return hf_invoke_config25(NULL,payload,operation,idempotency,correlation,causation,out,err);
@@ -140,6 +144,11 @@ static const HfRoute25 hf_routes25[]={
  {"spec","status","spec-import","spec.inspect"},
  {"spec","frontier","spec-dependencies","spec.next"},
  {"spec","resolve","spec-dependencies","spec.task.resolve"},
+ {"task","claim","5.1","scheduler.claim"},
+ {"task","dispatch","5.3","scheduler.dispatch.ensure"},
+ {"task","renew","5.2","scheduler.lease.renew"},
+ {"task","cancel","5.2","scheduler.compute.cancel"},
+ {"task","eligible","5.4","scheduler.resources.eligible"},
  {"submission","submit","16.1","submission.submit"},
  {"submission","inspect","16.1","submission.inspect"},
  {"submission","revoke","16.1","submission.revoke"},
@@ -152,11 +161,20 @@ static const HfRoute25 hf_routes25[]={
  {"fleet","status","23.1","fleet.views.snapshot"},
  {"fleet","entities","23.1","fleet.views.entities"},
  {"fleet","resources","23.2","fleet.resources.snapshot"},
+ {"docs","packet","28.2","docs.packet"},
+ {"docs","inspect","28.2","docs.inspect"},
+ {"docs","check","28.2","docs.check"},
+ {"docs","close","28.2","docs.close"},
+ {"supervisor","describe","13.4.supervision","supervisor.session.describe"},
+ {"supervisor","launch","13.4.supervision","supervisor.session.launch"},
+ {"supervisor","inspect","13.4.supervision","supervisor.session.inspect"},
+ {"hierarchy","describe","3.1","hierarchy.describe"},
  {"hierarchy","inspect","3.1","hierarchy.inspect"},
  {"hierarchy","view","3.3","hierarchy.view"},
  {"hierarchy","acquire","3.1","hierarchy.leader.acquire"},
  {"hierarchy","configure","3.1","hierarchy.package.configure"},
  {"hierarchy","assign","3.1","hierarchy.package.assign"},
+ {"human","describe","1.2","human.describe"},
  {"human","submit" ,"1.2","human.submit"},
  {"human","escalate","1.2","human.escalate"},
  {"human","autonomous","1.2","human.autonomous"},
