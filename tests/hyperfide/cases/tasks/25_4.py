@@ -37,7 +37,7 @@ def main():
   for item in payload.rglob("*"):
    if item.is_file():item.chmod(0o755 if item.relative_to(payload).as_posix().startswith(("bin/","runtime/node","runtime/python/bin/")) else 0o644)
   files=[{"path":p.relative_to(payload).as_posix(),"digest":"sha256:"+hashlib.sha256(p.read_bytes()).hexdigest(),"size_bytes":str(p.stat().st_size),"mode":format(p.stat().st_mode&0o777,"04o")} for p in sorted(payload.rglob("*")) if p.is_file()]
-  manifest={"schema_version":1,"release_version":"2.0.0-dev","source_commit":"a"*40,"source_date_epoch":"1","protocol_version":1,"schema_min":1,"schema_max":1,"runtime":{"node":"24.22.0","npm":"11.19.1","python":"3.14.8","platform":"linux","architecture":"x64"},"files":files}
+  manifest={"schema_version":1,"release_version":"2.0.0-dev","source_commit":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),"source_date_epoch":"1","protocol_version":1,"schema_min":1,"schema_max":1,"runtime":{"node":"24.22.0","npm":"11.19.1","python":"3.14.8","platform":"linux","architecture":"x64"},"files":files}
   mf=payload/"manifest.json";mf.write_text(json.dumps(manifest))
   sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
   from identity_fixture import IdentityFixture
@@ -114,6 +114,40 @@ def main():
    fixture.sql('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE)',admin=True)
    absent=not fixture.sql("SELECT datname FROM pg_database WHERE datname=$1",[database],admin=True)
    check("release.migrations.actual-database-cleanup",lambda:expect(absent,"owned migration database retained"))
+  public=base/"trusted-release-public.pem";signature=base/"manifest.sig"
+  subprocess.run(["openssl","pkey","-in",str(fixture.keys["operator"]["path"]),"-pubout","-out",str(public)],check=True,capture_output=True)
+  public.chmod(0o644)
+  signed=subprocess.check_output(["openssl","pkeyutl","-sign","-rawin","-inkey",str(fixture.keys["operator"]["path"]),"-in",str(mf)])
+  signature.write_bytes(signed);signature.chmod(0o644)
+  fixture.stop();fixture.env.update(HYPERFIDE_TRUSTED_RELEASE_KEY_FILE=str(public),HYPERFIDE_RELEASE_SIGNATURE_FILE=str(signature));fixture.start()
+  def authenticated():
+   value=ok("inspect",{"manifest":"manifest.json"})
+   der=subprocess.check_output(["openssl","pkey","-pubin","-in",str(public),"-outform","DER"])
+   expect(value["signature_status"]=="VERIFIED" and value["authentication"]["mode"]=="ED25519" and value["authentication"]["key_fingerprint"]=="sha256:"+hashlib.sha256(der).hexdigest(),"real Ed25519 source authentication did not match trusted public SPKI")
+   expect(value["deployment_authorized"] is False,"signature alone activated deployment")
+  check("release.signature.actual-ed25519-manifest",authenticated)
+  def changed_signature():
+   signature.write_bytes(bytes([signed[0]^1])+signed[1:])
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:signature.write_bytes(signed)
+  check("release.signature.changed-raw-signature-refused",changed_signature)
+  def changed_key():
+   original=public.read_bytes()
+   replacement=subprocess.check_output(["openssl","pkey","-in",str(fixture.keys["other"]["path"]),"-pubout"])
+   public.write_bytes(replacement)
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:public.write_bytes(original)
+  check("release.signature.wrong-trust-key-refused",changed_key)
+  def writable_key():
+   public.chmod(0o666)
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:public.chmod(0o644)
+  check("release.signature.writable-anchor-refused",writable_key)
+  def missing_signature():
+   signature.unlink()
+   try:rejected("inspect",{"manifest":"manifest.json"})
+   finally:signature.write_bytes(signed);signature.chmod(0o644)
+  check("release.signature.missing-detached-refused",missing_signature)
   import socket
   database=fixture.database;runtime_role=fixture.runtime_role;port=fixture.port;private_root=fixture.path
   fixture.close()
