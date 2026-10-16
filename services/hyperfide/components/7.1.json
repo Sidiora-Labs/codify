@@ -3,6 +3,7 @@
   "id": "7.1",
   "task": "7.1",
   "roles": [
+    "control",
     "dispatch"
   ],
   "module": "graph/extraction.js",
@@ -14,5 +15,8 @@
     "graph.extract.inspect",
     "graph.extract.read-chunk"
   ],
-  "requires": []
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
 }
