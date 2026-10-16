@@ -12,7 +12,7 @@ export const RAILWAY_PIN = Object.freeze({ sdk_name:'railway',sdk_version:'3.16.
   api_revision:'97fdb4f61d351319d5633c2c92a86ca2ff0062d8',node_version:'24.22.0' });
 export type JsonObject = Record<string,unknown>;
 export function object(value:unknown,keys?:readonly string[]):JsonObject {
-  if(value===null||typeof value!=='object'||Array.isArray(value)||Object.getPrototypeOf(value)!==Object.prototype)
+  if(value===null||typeof value!=='object'||Array.isArray(value)||(Object.getPrototypeOf(value)!==Object.prototype&&Object.getPrototypeOf(value)!==null))
     throw new Error('Railway object schema');
   const v=value as JsonObject;
   if(keys && (Object.keys(v).length!==keys.length||keys.some(k=>!Object.hasOwn(v,k)))) throw new Error('Railway fields');
@@ -160,7 +160,7 @@ export class RailwayClient {
     return {mode:this.config.mode,sdk:RAILWAY_PIN,live_qualification:'NOT_EVALUATED'};
   }
 }
-export function configuredClient(context:ComponentContext):RailwayClient {
+export function configuredClient(context:Pick<ComponentContext,'env'>):RailwayClient {
   const name=context.env.HF_RAILWAY_CONFIG;
   if(!name||!path.isAbsolute(name)) throw new Error('Railway trusted configuration missing');
   const fd=fs.openSync(name,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
@@ -197,6 +197,7 @@ export async function capturePreparedBase(client:RailwayClient,input:{
 },context:ComponentContext,hooks:PreparationCaptureHooks):Promise<PreparedRailwayBase> {
   client.assertScope(input.scope);
   await verifyManifest({candidate_path:input.candidate_path,manifest:input.manifest,scan_policy:input.scan_policy},context);
+  if(Date.parse(input.manifest.profile.policy.expires_at)<=Date.now())throw new Error('Railway preparation expired');
   // The coordinator lease must fence this immutable key before runner quiescence.
   return hooks.withPreparationLock(input.manifest.digest,async()=>{
   const before=await hooks.quiesceAndVerify(text(input.sandbox_id),input.manifest,context.signal);

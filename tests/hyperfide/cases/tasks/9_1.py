@@ -105,6 +105,8 @@ class Fixture:
     raw=json.loads(self.rfile.read(int(self.headers["content-length"])))
     owner.requests.append(raw)
     query=raw["query"];variables=raw.get("variables",{});mode=owner.state["mode"]
+    if mode=="http-failure":
+     self.send_response(503);self.end_headers();return
     if "generateShellToken" in query:data={"generateShellToken":"fixture-jwt"}
     elif "sandboxTemplateBuild" in query:data={"sandboxTemplateBuild":{"id":"fixture-build-ID","status":"READY"}}
     elif "sandboxCheckpointCreate" in query:
@@ -163,38 +165,28 @@ class Fixture:
  def close(self):self.server.shutdown();self.server.server_close();self.thread.join(timeout=5)
 
 class Service:
+ """Actual provisioner HTTPS/Ed25519/PG path; cloud endpoints remain explicit simulated fixtures."""
  def __init__(self,directory,fixture):
-  self.directory=Path(directory);self.fixture=fixture;self.sequence=0;self.had_error=False
-  policy={"schema_version":1,"programme_id":"railway-component-fixture","repository":"fixture/repository",
-   "spec_revision":"fixture-revision","policy_revision":1,"status":"ACTIVE",
-   "approval":{"decision":"APPROVED","record_id":"fixture-approval","spec_revision":"fixture-revision","policy_revision":1},
-   "allowed_roles":["provisioner"],"allowed_actions":["programme.provision"]+ACTIONS}
-  filename=self.directory/("policy-"+str(time.monotonic_ns())+".json");filename.write_text(json.dumps(policy))
-  self.stderr=(self.directory/("stderr-"+str(time.monotonic_ns()))).open("w+")
-  environment=os.environ.copy()
-  environment.update(HF_RAILWAY_CONFIG=str(fixture.config_path),HF_RAILWAY_FIXTURE_TOKEN="not-a-real-credential",
-                     HF_RAILWAY_PROCESS_ROOT=str(self.directory/"spool"))
-  self.process=subprocess.Popen(["node","services/hyperfide/dist/provisioner.js","--policy",str(filename),
-    "--spec-revision","fixture-revision"],cwd=ROOT,env=environment,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-    stderr=self.stderr,text=True,start_new_session=True)
+  import importlib.util
+  helper=ROOT/"tests/hyperfide/support/identity_fixture.py"
+  spec=importlib.util.spec_from_file_location("railway_actual_identity",helper)
+  identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
+  names=set()
+  def include(name):
+   if name in names:return
+   names.add(name)
+   fragment=json.loads((ROOT/("services/hyperfide/components/"+name+".json")).read_text())
+   for dependency in fragment["requires"]:include(dependency)
+  for name in ("9.1","9.2","9.3","9.4","14.1"):include(name)
+  environment={"HF_RAILWAY_CONFIG":str(fixture.config_path),"HF_RAILWAY_FIXTURE_TOKEN":"not-a-real-credential",
+               "HF_RAILWAY_PROCESS_ROOT":str(Path(directory)/"spool")}
+  self.actual=identity.IdentityFixture(components=tuple(sorted(names)),extra_env=environment,service_role="provisioner")
+  self.process=self.actual.child
  def call(self,component,action,payload):
-  self.sequence+=1;identity="request-"+str(self.sequence)
-  self.process.stdin.write(json.dumps({"id":identity,"component":component,"action":action,"input":payload})+"\n")
-  self.process.stdin.flush()
-  ready,_,_=select.select([self.process.stdout],[],[],40)
-  expect(bool(ready),"provisioner response deadline")
-  line=self.process.stdout.readline()
-  expect(bool(line),"service ended before response")
-  row=json.loads(line);expect(row.get("id")==identity,row)
-  if row.get("ok") is False:self.had_error=True
+  status,row=self.actual.invoke(action,payload,component=component,key="provisioner")
+  expect(status==200,row)
   return row
- def close(self):
-  if self.process.poll() is None:
-   self.process.stdin.close();self.process.wait(timeout=15)
-  expect(self.process.returncode==(1 if self.had_error else 0),f"service exit{self.process.returncode}")
-  expect(self.process.stdout.read()=="","extra protocol output")
-  self.process.stdout.close();self.stderr.seek(0);errors=self.stderr.read();self.stderr.close()
-  expect(errors=="",errors)
+ def close(self):self.actual.close()
 
 WS_SOURCE=r"""
 import http from 'node:http';
@@ -284,8 +276,8 @@ def main():
       "railway.preparation.checkpoint-id-not-key","railway.preparation.ambiguous-key","railway.preparation.cross-environment-key",
       "railway.preparation.no-mutation","railway.preparation.bounded-response-stream",
       "railway.preparation.lock-before-quiescence","railway.preparation.quiescence-through-capture",
-      "railway.preparation.release-on-refusal","railway.preparation.pinned-sdk-template","railway.preparation.recipe-mismatch","railway.preparation.same-native-id-refused"]
- if sys.argv[1:]==["--inventory"]:print(json.dumps(ids[:11]+ids[22:]+ids[11:22]));return 0
+      "railway.preparation.release-on-refusal","railway.preparation.pinned-sdk-template","railway.preparation.recipe-mismatch","railway.preparation.same-native-id-refused","railway.preparation.expired-capture-no-effect"]
+ if sys.argv[1:]==["--inventory"]:print(json.dumps(ids[:11]+ids[22:23]+ids[11:22]+ids[23:]));return 0
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway91-") as folder:
   fixture=Fixture(folder);service=Service(folder,fixture)
@@ -324,8 +316,10 @@ def main():
    (prep.candidate/"recipe.sh").write_text(json.dumps(pinned_recipe))
    prep.profile["recipe"]=prep.pin("recipe.sh")
    manifest=prep.create()
+   original_expiry=prep.profile["policy"]["expires_at"];prep.profile["policy"]["expires_at"]=utc(2)
+   expired_manifest=prep.create();prep.profile["policy"]["expires_at"]=original_expiry
    input_path=Path(folder)/"capture-input.json"
-   input_path.write_text(json.dumps({"config":fixture.config,"manifest":manifest,"scope":SCOPE,
+   input_path.write_text(json.dumps({"config":fixture.config,"manifest":manifest,"expired_manifest":expired_manifest,"scope":SCOPE,
       "allowed_root":str(prep.allowed),"policy":json.loads(prep.policy_file.read_text()),"scan_policy":preparation.SCAN,
       "recipe":pinned_recipe}))
    script=r"""
@@ -357,13 +351,20 @@ await buildRailwayTemplate(client,{candidate_path:'candidate',manifest:data.mani
 let recipeRejected=false;
 try{await buildRailwayTemplate(client,{candidate_path:'candidate',manifest:data.manifest,scan_policy:data.scan_policy,
  scope:data.scope,commands:['unapproved command'],build_env:data.recipe.build_env},ctx);}catch{recipeRejected=true;}
+const failureEvents=[...events];
+const expired=data.expired_manifest;
+await new Promise(resolve=>setTimeout(resolve,Math.max(0,Date.parse(expired.profile.policy.expires_at)-Date.now()+10)));
+const beforeExpiry=events.length;let expiredRejected=false;
+try{await capturePreparedBase(client,{sandbox_id:'source-sandbox',scope:data.scope,manifest:expired,
+ candidate_path:'candidate',scan_policy:data.scan_policy},ctx,hooks);}catch{expiredRejected=true;}
+const expiredNoEffects=events.length===beforeExpiry;
 let pulled=0,cancelled=false;
 const tooLarge=new RailwayClient(data.config,{HF_RAILWAY_FIXTURE_TOKEN:'fixture'},async()=>new Response(new ReadableStream({
  pull(controller){pulled++;if(pulled>400)controller.close();else controller.enqueue(new Uint8Array(65536));},
  cancel(){cancelled=true;}
 },{highWaterMark:0})));
 let largeRejected=false;try{await tooLarge.request('query Fixture',{});}catch{largeRejected=true;}
-process.stdout.write(JSON.stringify({good,rejected,failureEvents:events,recipeRejected,largeRejected,pulled,cancelled}));
+process.stdout.write(JSON.stringify({good,rejected,failureEvents,recipeRejected,largeRejected,pulled,cancelled,expiredRejected,expiredNoEffects}));
 """
    command=subprocess.run(["node","--input-type=module","-e",script,str(input_path)],cwd=ROOT,capture_output=True,text=True,timeout=40)
    expect(command.returncode==0,command.stderr)
@@ -377,6 +378,8 @@ process.stdout.write(JSON.stringify({good,rejected,failureEvents:events,recipeRe
       "failed fence was not released"))
    check(ids[20],lambda:expect(any("sandboxTemplateBuild" in row["query"] for row in fixture.requests),"pinned SDK build absent"))
    check(ids[21],lambda:expect(observed["recipeRejected"],"unapproved recipe execution"))
+   check(ids[23],lambda:expect(observed["expiredRejected"] and observed["expiredNoEffects"],
+      "expired valid preparation reached quiescence/provider allocation"))
    service.close();fixture.close();complete=True
   finally:
    if service.process.poll() is None:service.process.kill();service.process.wait()
