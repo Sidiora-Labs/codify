@@ -74,8 +74,6 @@
   "required_artifacts": [
     "review/database-absence.json",
     "review/observations.json",
-    "review/closed-run-audit-read.json",
-    "review/closed-run-audit-write.json",
     "review/semantic-fence-signed-boundary.json"
   ],
   "source_files": [

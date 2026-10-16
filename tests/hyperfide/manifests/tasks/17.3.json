@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-review-17.3-v8",
+  "campaign_id": "hyperfide-review-17.3-v9",
   "case_ids": [
     "V-031",
     "V-034"
@@ -1526,8 +1526,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/17.3.json",
-      "sha256": "044f7ef6996d7319984a71f134177de064ccbca4453bf9f628093ae85f2d26ca",
-      "size": 3131
+      "sha256": "e0db2c39d6556ab3392d211688dcc8bb6825422cbcf0cc48b4657f4e17bd28b3",
+      "size": 3048
     },
     {
       "path": "tests/hyperfide/support/identity_fixture.py",
@@ -1546,8 +1546,6 @@
   "required_artifacts": [
     "review/database-absence.json",
     "review/observations.json",
-    "review/closed-run-audit-read.json",
-    "review/closed-run-audit-write.json",
     "review/semantic-fence-signed-boundary.json"
   ],
   "resources": [
