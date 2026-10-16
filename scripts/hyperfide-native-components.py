@@ -53,7 +53,7 @@ def inventory(root):
     expected = {
         'version': 1,
         'required_fields': ['schema_version', 'id', 'source', 'entry', 'actions'],
-        'optional_fields': ['requires'],
+        'optional_fields': ['requires', 'support_sources', 'headers', 'libraries'],
         'callback': 'int entry(const char *action, const char *request_json, FILE *output)',
     }
     if type(schema.get('schema', {}).get('version')) is not int or schema != {'schema': expected}:
@@ -68,7 +68,7 @@ def inventory(root):
             raise ValueError('fragment must contain exactly [component]')
         item = parsed['component']
         required = set(expected['required_fields'])
-        if not required <= set(item) or set(item) - required - {'requires'}:
+        if not required <= set(item) or set(item) - required - {'requires', 'support_sources', 'headers', 'libraries'}:
             raise ValueError('missing or unknown component fields')
         if type(item['schema_version']) is not int or item['schema_version'] != 1:
             raise ValueError('unsupported component schema version')
@@ -94,6 +94,19 @@ def inventory(root):
         requires = item.setdefault('requires', [])
         if not isinstance(requires, list) or any(not isinstance(x, str) or not re.fullmatch(r'[0-9]+\.[0-9]+', x) for x in requires) or len(requires) != len(set(requires)):
             raise ValueError('invalid component dependencies')
+        for field, suffix in [('support_sources', '.c'), ('headers', '.h')]:
+            paths = item.setdefault(field, [])
+            if not isinstance(paths, list) or any(not isinstance(value, str) for value in paths) or len(paths) != len(set(paths)):
+                raise ValueError('invalid or duplicate native support paths')
+            for value in paths:
+                if not re.fullmatch(r'src/hyperfide/[A-Za-z0-9_./-]+[.]' + suffix[1:], value) or Path(value).name == 'component_main.c':
+                    raise ValueError('native support path must be a repository native source/header without standalone main')
+                contained(root, Path(value))
+            if field == 'support_sources' and item['source'] in paths:
+                raise ValueError('component source duplicated as support source')
+        libraries = item.setdefault('libraries', [])
+        if not isinstance(libraries, list) or len(libraries) != len(set(libraries)) or any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}', value) for value in libraries):
+            raise ValueError('invalid native link library declaration')
         components.append(item)
     by_id = {item['id']: item for item in components}
     incoming = {key: len(item['requires']) for key, item in by_id.items()}
@@ -132,6 +145,8 @@ def main():
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--generate', type=Path)
     parser.add_argument('--sources', action='store_true')
+    parser.add_argument('--headers', action='store_true')
+    parser.add_argument('--libraries', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     try:
@@ -150,7 +165,11 @@ def main():
                     if os.path.exists(temporary):
                         os.unlink(temporary)
         if args.sources:
-            print(' '.join(sorted({item['source'] for item in items})))
+            print(' '.join(sorted({path for item in items for path in [item['source'], *item['support_sources']]})))
+        elif args.headers:
+            print(' '.join(sorted({path for item in items for path in item['headers']})))
+        elif args.libraries:
+            print(' '.join('-l' + library for library in sorted({library for item in items for library in item['libraries']})))
         else:
             print(json.dumps({'schema_version': 1, 'components': len(items), 'status': 'PASS'}))
         return 0

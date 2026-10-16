@@ -98,9 +98,9 @@ export async function loadProofObligations(db:PrimaryClient,scope:ProofPins):Pro
  const result=await db.query(
  'SELECT pg_is_in_recovery() AS replica,p.registry_digest,p.criteria_digest,p.policy,t.criteria_digest AS current_criteria FROM hyperfide.proof_registries p '+
  'JOIN hyperfide.tasks t ON t.organisation_id=p.organisation_id AND t.run_id=p.run_id AND t.id=p.task_id '+
- 'JOIN hyperfide.runs r ON r.organisation_id=t.organisation_id AND r.id=t.run_id '+
+ 'JOIN hyperfide.run_spec_revisions h ON h.organisation_id=t.organisation_id AND h.run_id=t.run_id AND h.spec_generation=t.spec_generation AND h.spec_revision_id=t.spec_revision_id '+
  'WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.task_id=$3 AND p.spec_generation=$4 AND p.spec_revision_id=$5 '+
- 'AND t.spec_generation=p.spec_generation AND t.spec_revision_id=p.spec_revision_id AND r.spec_generation=p.spec_generation AND r.spec_revision_id=p.spec_revision_id',
+ 'AND t.spec_generation=p.spec_generation AND t.spec_revision_id=p.spec_revision_id AND h.accepted',
  [scope.organisation_id,scope.run_id,scope.task_id,scope.spec_generation,scope.spec_revision_id]);
  if(result.rows.length!==1)fail('PROOF_REGISTRY_MISSING','An exact current accepted proof registry is required');
  const row=result.rows[0]!;
@@ -139,7 +139,7 @@ function clauseCoverage(policy:ProofPolicy,definition:unknown,intent:StoredInten
   fail('PROOF_MAPPING_INVALID','Proof mapping must preserve the complete accepted task scenario set');
  for(const clause of policy.clauses){
   const associated=explicit.get(clause.id)!;
-  if(clause.acceptance_ids.some(id=>!required.has(id))||associated.size>0&&
+  if(associated.size===0||clause.acceptance_ids.some(id=>!required.has(id)||(!sections.has('acceptance.'+id)&&!sections.has('case.'+id)))||
    (associated.size!==clause.acceptance_ids.length||clause.acceptance_ids.some(id=>!associated.has(id))))
    fail('PROOF_MAPPING_INVALID','Proof cannot substitute unrelated accepted scenarios for a clause');
  }
@@ -166,15 +166,14 @@ export async function registerProofPolicy(client:PrimaryClient,scope:{organisati
   'JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id AND s.project_id=r.project_id '+
   'WHERE r.organisation_id=$1 AND r.id=$2 FOR SHARE OF r',[scope.organisation_id,scope.run_id]);
  const current=run.rows[0];
- if(!current||current.replica||current.state_version!==request.state_version||current.spec_generation!==pin.spec_generation||
-  current.spec_revision_id!==pin.spec_revision_id||!['PENDING_VALIDATION','READY','RUNNING','PAUSED'].includes(current.state))
+ if(!current||current.replica||current.state_version!==request.state_version||!['PENDING_VALIDATION','READY','RUNNING','PAUSED'].includes(current.state))
   fail('PROOF_REGISTRY_MISMATCH','Accepted run or state version changed before proof registration');
  const task=await client.query(
-  'SELECT criteria_digest,definition,state FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND spec_generation=$4 AND spec_revision_id=$5 FOR UPDATE',
+  'SELECT t.criteria_digest,t.definition,t.state,s.document AS accepted_document FROM hyperfide.tasks t JOIN hyperfide.spec_revisions s ON s.organisation_id=t.organisation_id AND s.id=t.spec_revision_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 AND t.spec_generation=$4 AND t.spec_revision_id=$5 FOR UPDATE OF t',
   [pin.organisation_id,pin.run_id,pin.task_id,pin.spec_generation,pin.spec_revision_id]);
  const row=task.rows[0];
  if(!row||row.criteria_digest!==policy.criteria_digest)fail('PROOF_REGISTRY_MISMATCH','Proof criteria do not match current task');
- clauseCoverage(policy,row.definition,current.document as StoredIntent);
+ clauseCoverage(policy,row.definition,row.accepted_document as StoredIntent);
  const source=await client.query('SELECT 1 FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4',
   [pin.organisation_id,pin.run_id,policy.repository_id,policy.source_object_id]);
  if(source.rows.length!==1)fail('PROOF_REGISTRY_MISMATCH','Proof baseline is outside the accepted input repository revision set');

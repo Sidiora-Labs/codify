@@ -1,0 +1,10 @@
+[component]
+schema_version = 1
+id = "12.1"
+source = "src/hyperfide/supervisor.c"
+entry = "hf_component_12_1"
+actions = ["supervisor.describe", "supervisor.keygen", "supervisor.slot.allocate", "supervisor.enroll", "supervisor.invoke", "supervisor.register", "supervisor.heartbeat", "supervisor.reconnect"]
+requires = []
+support_sources = ["src/hyperfide/transport.c"]
+headers = ["src/hyperfide/transport.h", "src/hyperfide/supervisor.h"]
+libraries = ["curl", "crypto"]
