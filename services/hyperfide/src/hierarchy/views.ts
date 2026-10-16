@@ -1,5 +1,5 @@
 import type {Component,ComponentContext} from '../components/registry.js';
-import {gateway,trustedActor,requireAuthority,record,uuid,decimal,text,canonical,refuse,ready} from './packages.js';
+import {gateway,trustedActor,requireAuthority,record,uuid,decimal,text,canonical,refuse,ready,hierarchyReadGuard} from './packages.js';
 
 /** Each response observes one primary snapshot; continuation pages observe fresh snapshots. */
 export function createComponent(context:ComponentContext):Component {
@@ -16,7 +16,7 @@ export function createComponent(context:ComponentContext):Component {
    if(after!==null&&(v.expected_spec_generation===undefined||v.expected_run_version===undefined))
     return refuse('VIEW_CURSOR_UNPINNED','Continuation requires exact spec and run versions');
    const packageId=v.package_id===undefined?undefined:uuid(v.package_id);
-   return g.withPrimaryTransaction({timeoutMs:10000,guard:actor.guard,signal:actor.signal},async tx=>{
+   return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyReadGuard(actor),signal:actor.signal},async tx=>{
     await ready(tx);
     const authority=await requireAuthority(tx,{...actor,leader_generation:decimal(v.leader_generation),
      ...(packageId?{package_id:packageId,package_generation:decimal(v.package_generation)}:{}),roles:['LEADER','FEATURE_MANAGER']});
