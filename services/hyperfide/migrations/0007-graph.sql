@@ -72,6 +72,9 @@ CREATE FUNCTION hyperfide.protect_graph_extension() RETURNS trigger LANGUAGE plp
 SET search_path=pg_catalog,hyperfide AS $$
 DECLARE g uuid; org uuid; run uuid;
 BEGIN
+ IF TG_OP='UPDATE' AND ROW(NEW.organisation_id,NEW.run_id,NEW.graph_id) IS DISTINCT FROM ROW(OLD.organisation_id,OLD.run_id,OLD.graph_id) THEN
+  RAISE EXCEPTION 'graph extension scope immutable' USING ERRCODE='23514';
+ END IF;
  g=COALESCE(NEW.graph_id,OLD.graph_id);org=COALESCE(NEW.organisation_id,OLD.organisation_id);run=COALESCE(NEW.run_id,OLD.run_id);
  PERFORM 1 FROM hyperfide.graph_builds WHERE organisation_id=org AND run_id=run AND id=g FOR SHARE;
  IF EXISTS(SELECT 1 FROM hyperfide.graph_manifests WHERE organisation_id=org AND run_id=run AND build_id=g) THEN
@@ -85,3 +88,10 @@ CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperf
 CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_resolution_progress FOR EACH ROW EXECUTE FUNCTION hyperfide.protect_graph_extension();
 CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_source_bodies FOR EACH ROW EXECUTE FUNCTION hyperfide.protect_graph_extension();
 CREATE TRIGGER graph_receipt_immutable BEFORE UPDATE OR DELETE ON hyperfide.graph_publication_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','operation_id','graph_id','channel','expected_generation','manifest_id','manifest_digest','publication_generation','receipt');
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_bundle_inputs FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_ingestion_chunks FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_fact_rows FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_resolution_progress FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_source_bodies FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_publication_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

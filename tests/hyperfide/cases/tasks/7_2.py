@@ -144,6 +144,16 @@ def publication(f):
     check("graph.publication.atomic-commit",publish)
     if "receipt" not in state:return
     receipt=state["receipt"]
+    def isolation(table):
+        expect(int(sql("SELECT count(*) FROM hyperfide."+table+" WHERE graph_id='"+b+"'").stdout.strip())>0,"authority isolation fixture table has no actual rows")
+        result=sql("BEGIN ISOLATION LEVEL REPEATABLE READ; UPDATE hyperfide."+table+" SET organisation_id=organisation_id WHERE graph_id='"+b+"'; ROLLBACK;",allow_error=True)
+        expect(result.returncode!=0 and "authority writes require READ COMMITTED or SERIALIZABLE" in result.stderr,"unsupported isolation was accepted or refused for another reason")
+    check("graph.publication.reject-repeatable-read-graph_bundle_inputs",lambda:isolation("graph_bundle_inputs"))
+    check("graph.publication.reject-repeatable-read-graph_ingestion_chunks",lambda:isolation("graph_ingestion_chunks"))
+    check("graph.publication.reject-repeatable-read-graph_fact_rows",lambda:isolation("graph_fact_rows"))
+    check("graph.publication.reject-repeatable-read-graph_resolution_progress",lambda:isolation("graph_resolution_progress"))
+    check("graph.publication.reject-repeatable-read-graph_source_bodies",lambda:isolation("graph_source_bodies"))
+    check("graph.publication.reject-repeatable-read-graph_publication_receipts",lambda:isolation("graph_publication_receipts"))
     check("graph.publication.durable-channel",lambda:expect(sql("SELECT manifest_id::text FROM hyperfide.graph_channels WHERE name='main'").stdout.strip()==receipt["manifest_id"],"channel differs from receipt"))
     def crash_after_publication():
         f.fixture.child.kill();f.fixture.child.communicate(timeout=8);f.fixture.child=None;f.fixture.start()
@@ -161,14 +171,28 @@ def publication(f):
         new=f.extract("2");new_build=f.ready(new);state["new"]=f.publish(new_build,expected="1")
         expect(state["new"]["publication_generation"]=="2","new extraction did not publish next generation")
     check("graph.publication.replace-new-generation",next_generation)
+    def generation_collision():
+        request=copy.deepcopy(f.native.input);request["generation"]="2";request["configuration"]["build_flags"]=["--distinct-index-configuration"]
+        changed=f.native.ok("graph.extract.create",request);build=f.ready(changed)
+        f.reject("7.3","graph.publish.commit",f.scoped(build_id=build,channel="main",expected_generation="2",operation_id=str(uuid.uuid4())),"GRAPH_GENERATION_CONFLICT")
+    check("graph.publication.reject-same-generation-different-configuration",generation_collision)
     check("graph.publication.reject-delayed-extraction",lambda:f.reject("7.3","graph.publish.commit",dict(request,expected_generation="2",operation_id=str(uuid.uuid4())),"GRAPH_GENERATION_STALE"))
     check("graph.publication.preserve-old-version",lambda:expect(f.ok("7.3","graph.publish.inspect",f.scoped(manifest_id=receipt["manifest_id"]))["manifest_digest"]==receipt["manifest_digest"],"older immutable graph disappeared"))
+    def extension_move_denied():
+        # Operator-only fault setup: a disposable unpublished target has the same
+        # parent bundle, so a missing old-graph guard cannot hide behind an FK.
+        target=f.create(f.extract("3"))["build_id"]
+        sql("INSERT INTO hyperfide.graph_bundle_inputs(organisation_id,run_id,graph_id,bundle_digest,identity,manifest,manifest_text,artifact_id) SELECT organisation_id,run_id,'"+target+"',bundle_digest,identity,manifest,manifest_text,artifact_id FROM hyperfide.graph_bundle_inputs WHERE graph_id='"+b+"'")
+        result=sql("BEGIN; UPDATE hyperfide.graph_fact_rows SET graph_id='"+target+"' WHERE graph_id='"+b+"' AND family='comments'; ROLLBACK;",allow_error=True)
+        expect(result.returncode!=0 and "graph extension scope immutable" in result.stderr,"published facts could move to an unpublished graph or refusal was unrelated")
+    check("graph.publication.reject-published-extension-scope-move",extension_move_denied)
     pins=[{"repository_id":native.UUIDS["repository_id"],"source_object_id":f.native.commit}]
     def snapshot():
         snap=f.ok("7.3","graph.publish.snapshot",f.scoped(manifest_id=receipt["manifest_id"],expected_sources=pins))
         expect(snap["expected_sources_validated"] is True and snap["source_set"][0]["commit"]==f.native.commit,"exact source snapshot not validated")
         expect(snap["source_coverage"][0]["complete"] is True and snap["source_coverage"][0]["identity"]["source_kind"]=="COMMIT","immutable parse/overlay provenance lost")
         expect(snap["file_coverage"][0]["source_object_id"]==f.native.commit,"file coverage not pinned")
+        expect(int(snap["unprojected_semantic_edge_count"])>0 and snap["semantic_projection_complete"] is False and snap["unknown_semantic_edges"],"snapshot hid actual native unprojected semantic edges")
     check("graph.publication.exact-source-snapshot",snapshot)
     check("graph.publication.reject-wrong-source-snapshot",lambda:f.reject("7.3","graph.publish.snapshot",f.scoped(manifest_id=receipt["manifest_id"],expected_sources=[dict(pins[0],source_object_id="f"*40)]),"GRAPH_SOURCE_SET_MISMATCH"))
     check("graph.publication.reject-overlay-relabel",lambda:f.reject("7.3","graph.publish.snapshot",f.scoped(manifest_id=receipt["manifest_id"],expected_sources=[dict(pins[0],overlay_digest=sha("unrelated overlay"))]),"GRAPH_SOURCE_SET_MISMATCH"))
@@ -236,16 +260,35 @@ def querying(f):
         expect(actual["nodes"] and actual["files"] and actual["manifest_id"]==manifest,"grouped context omitted selected source")
         expect(any(row["family"]=="comments" for row in actual["source_facts"]),"source comments lost in context")
     check("graph.query.grouped-context",context)
+    check("graph.query.reject-missing-context-symbol",lambda:f.reject("7.4","graph.query.context",f.scoped(manifest_id=manifest,symbol_ids=[str(uuid.uuid4())],files=[]),"GRAPH_SYMBOL_UNAVAILABLE"))
+    check("graph.query.reject-partial-context-symbol-set",lambda:f.reject("7.4","graph.query.context",f.scoped(manifest_id=manifest,symbol_ids=rows+[str(uuid.uuid4())],files=[]),"GRAPH_SYMBOL_UNAVAILABLE"))
+    check("graph.query.reject-missing-context-file",lambda:f.reject("7.4","graph.query.context",f.scoped(manifest_id=manifest,symbol_ids=[],files=[{"repository_id":native.UUIDS["repository_id"],"path":"missing.py"}]),"GRAPH_FILE_UNAVAILABLE"))
+    check("graph.query.reject-wrong-repository-context-file",lambda:f.reject("7.4","graph.query.context",f.scoped(manifest_id=manifest,symbol_ids=[],files=[{"repository_id":str(uuid.uuid4()),"path":"maths.py"}]),"GRAPH_FILE_UNAVAILABLE"))
     def traversal():
         actual=request("graph.query.traverse",symbol_ids=rows,direction="both",depth=2,max_nodes=100)
         expect(actual["nodes"] and actual["manifest_id"]==manifest,"version-pinned traversal lost seed")
         expect(actual["complete"] is False or actual["unresolved_count"]=="0","unknown graph was reported complete")
     check("graph.query.traversal-unknowns",traversal)
+    def semantic_debt():
+        actual=request("graph.query.traverse",symbol_ids=rows,direction="both",depth=1,max_nodes=100)
+        raw_count=int(sql("SELECT count(*) FROM hyperfide.graph_fact_rows WHERE family='semantic_edges' AND graph_id='"+state["build"]+"'").stdout.strip())
+        projected=int(sql("SELECT count(*) FROM hyperfide.graph_edges WHERE graph_id='"+state["build"]+"'").stdout.strip())
+        expected=raw_count-projected
+        OBS.append({"observation":"semantic_projection_debt","raw_edges":raw_count,"projected_edges":projected,"unprojected_edges":expected,"unknown_rows_returned":len(actual["unknown_semantic_edges"])})
+        expect(int(actual["unprojected_semantic_edge_count"])==expected,"raw semantic projection debt lost")
+        expect(expected>0,"actual native top-level call fixture omitted expected unresolved source endpoint")
+        expect(actual["unknown_semantic_edges"] and actual["complete"] is False,"unprojected semantic edges were called complete")
+    check("graph.query.explicit-unprojected-semantic-edge-debt",semantic_debt)
     check("graph.query.reject-wrong-symbol-version",lambda:f.reject("7.4","graph.query.traverse",f.scoped(manifest_id=manifest,symbol_ids=[str(uuid.uuid4())],direction="both",depth=1,max_nodes=10),"GRAPH_SYMBOL_UNAVAILABLE"))
     check("graph.query.reject-unbounded-depth",lambda:f.reject("7.4","graph.query.traverse",f.scoped(manifest_id=manifest,symbol_ids=rows,direction="both",depth=100,max_nodes=100),"GRAPH_INVALID"))
     check("graph.query.primary-provenance",lambda:expect(request("graph.query.status")["provenance"]["route"]=="PRIMARY","unqualified replica freshness was claimed"))
     check("graph.query.literal-special-characters",lambda:expect(request("graph.query.search",mode="trigram",q="' OR true --")["rows"]==[],"literal query changed SQL structure"))
     check("graph.query.reject-sql-field",lambda:f.reject("7.4","graph.query.status",f.scoped(manifest_id=manifest,sql="SELECT 1"),"GRAPH_INVALID"))
+    def readiness():
+        sql("ALTER TABLE hyperfide.graph_fact_rows DISABLE TRIGGER aaa_supported_isolation")
+        try:f.reject("7.4","graph.query.status",f.scoped(manifest_id=manifest),"GRAPH_SCHEMA_UNAVAILABLE")
+        finally:sql("ALTER TABLE hyperfide.graph_fact_rows ENABLE TRIGGER aaa_supported_isolation")
+    check("graph.query.reject-missing-authority-isolation-guard",readiness)
     baseline.close()
     def changed_source():
         source=f.native.repo
@@ -257,12 +300,15 @@ def querying(f):
         sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES('"+SCOPE["organisation_id"]+"','"+native.UUIDS["repository_id"]+"','"+commit+"')")
         f.native.input.update(commit=commit,tree=tree)
         new=f.extract("2");build=f.ready(new);receipt=f.publish(build,expected="1")
+        state["next_manifest"]=receipt["manifest_id"]
         paths=sql("SELECT path FROM hyperfide.graph_files WHERE graph_id='"+build+"' ORDER BY path").stdout.splitlines()
         expect("maths.py" not in paths and "route.js" not in paths and "renamed-route.js" in paths and "fresh.py" in paths,"new graph retained removed/renamed files")
         old=request("graph.query.search",mode="symbol",q="helper")
         current=f.ok("7.4","graph.query.search",f.scoped(manifest_id=receipt["manifest_id"],mode="symbol",q="helper"))
         expect(old["rows"] and not current["rows"],"old/new version reads silently mixed source revisions")
     check("graph.query.source-delete-rename-version-isolation",changed_source)
+    check("graph.query.reject-cross-version-context-symbol",lambda:f.reject("7.4","graph.query.context",f.scoped(manifest_id=state["next_manifest"],symbol_ids=rows,files=[]),"GRAPH_SYMBOL_UNAVAILABLE"))
+    check("graph.query.reject-cross-version-cursor",lambda:f.reject("7.4","graph.query.search",f.scoped(manifest_id=state["next_manifest"],mode="body",q="body",limit=1,cursor=state["cursor"]),"GRAPH_CURSOR_INVALID"))
 def main(mode="7.2"):
     fixture=None
     try:
