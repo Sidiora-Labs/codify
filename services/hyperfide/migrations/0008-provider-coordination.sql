@@ -269,6 +269,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  slot_id uuid NOT NULL,
  profile_id uuid NOT NULL,
  profile_digest hyperfide.digest NOT NULL,
+ boot_preparation_digest hyperfide.digest NOT NULL,
  preparation_digest hyperfide.digest NOT NULL,
  readiness_digest hyperfide.digest NOT NULL,
  source_digest hyperfide.digest NOT NULL,
@@ -396,3 +397,10 @@ CREATE TABLE hyperfide.provider_profile_lineage (
 CREATE TRIGGER provider_profile_lineage_immutable BEFORE UPDATE ON hyperfide.provider_profile_lineage FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_prepared_immutable();
 
 CREATE TRIGGER provider_intent_identity_immutable BEFORE UPDATE ON hyperfide.provisioning_intents FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','pool_id','sandbox_id','configuration_digest','kind','preparation_purpose','profile_id','request_key','request_digest','payload_digest','operation','boot_generation');
+
+-- All provider authority writes retain the same supported transaction boundary.
+DO $$ DECLARE table_name text; BEGIN
+ FOREACH table_name IN ARRAY ARRAY['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations','provider_process_candidates','provider_profile_lineage'] LOOP
+  EXECUTE format('CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation()',table_name);
+ END LOOP;
+END $$;
