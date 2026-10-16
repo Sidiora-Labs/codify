@@ -55,7 +55,7 @@ async function acknowledge(value:FindingTransaction,input:unknown,collaborator=f
  }else{
   if(routed.leader_queue||routed.manager_session_id!==value.principal.actor_id||String(routed.owner_generation)!==ownerGeneration)fail('STALE_ROUTE','Route is not assigned to this current owner');
   await tx.query('INSERT INTO hyperfide.finding_route_acknowledgements(organisation_id,run_id,route_id,actor_id,generation,owner_generation) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[scope.organisation_id,scope.run_id,routeId,value.principal.actor_id,generation,ownerGeneration]);
-  await tx.query('UPDATE hyperfide.findings SET state=CASE WHEN state=\'OPEN\' THEN \'ACKNOWLEDGED\' ELSE state END WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,routed.finding_id]);
+  await tx.query('UPDATE hyperfide.findings SET state=\'ACKNOWLEDGED\',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state=\'OPEN\'',[scope.organisation_id,scope.run_id,routed.finding_id]);
  }
  return {acknowledged:true,route_id:routeId,generation,owner_generation:ownerGeneration,package_id:packageId};
 }
