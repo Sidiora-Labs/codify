@@ -58,14 +58,19 @@ INSERT INTO symbol_fts VALUES('name_test');
   c.execute("INSERT INTO memories VALUES(?,?,?,?,?)",(2,"uncommitted",b"",0,"done"))
   profiles=[{"id":"fixture","source_id":"10000000-0000-0000-0000-000000000001","repository_id":"20000000-0000-0000-0000-000000000001","organisation_id":"30000000-0000-0000-0000-000000000001","root":str(source),"database":"graph.db","external":[{"label":"missing-docs","path":"missing.json","kind":"documentation"},{"label":"session","path":"credentials","kind":"native_session","sensitive":True}]}]
   pf=base/"sources.json";pf.write_text(json.dumps(profiles))
+  import importlib.util
+  spec=importlib.util.spec_from_file_location("artifact_fixture",ROOT/"tests/hyperfide/cases/tasks/15_2.py")
+  artifact_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(artifact_module)
+  backend=artifact_module.ObjectFixture()
   def setup(fixture):
    data=(ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes()
    fixture.sql("BEGIN;"+data.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(25,'0025-sqlite-history','"+sha(data)+"');COMMIT;")
    i=fixture.ids;repository=profiles[0]['repository_id'];profiles[0]['organisation_id']=i['organisation'];pf.write_text(json.dumps(profiles))
+   fixture.env.update(HF_ARTIFACT_S3_ENDPOINT=backend.endpoint,HF_ARTIFACT_ALLOW_LOOPBACK_HTTP='1',HF_ARTIFACT_S3_REGION=artifact_module.REGION,HF_ARTIFACT_S3_BUCKET=artifact_module.BUCKET,HF_ARTIFACT_S3_ACCESS_KEY_ID=artifact_module.KEY,HF_ARTIFACT_S3_SECRET_ACCESS_KEY=artifact_module.SECRET,HF_ARTIFACT_S3_SESSION_TOKEN=artifact_module.TOKEN,HF_ARTIFACT_ORGANISATION_ID=i['organisation'],HF_ARTIFACT_ALLOWED_RUN_IDS=json.dumps([i['run']]))
    fixture.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'legacy','fixture:legacy')",[i['organisation'],repository,i['project']])
    fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i['organisation'],repository,'1'*40])
    fixture.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i['organisation'],i['run'],repository,'1'*40])
-  FIXTURE=IdentityFixture(extra_components=['25.1'],extra_env={'HF_MIGRATION_SOURCES_FILE':str(pf),'HF_MIGRATION_ARCHIVE_ROOT':str(archive)},extra_setup=setup)
+  FIXTURE=IdentityFixture(extra_components=['15.2','25.1'],extra_env={'HF_MIGRATION_SOURCES_FILE':str(pf),'HF_MIGRATION_ARCHIVE_ROOT':str(archive)},extra_setup=setup)
   import atexit
   atexit.register(FIXTURE.close)
   def request(action,value):
@@ -96,6 +101,39 @@ INSERT INTO symbol_fts VALUES('name_test');
   check("migration.snapshot.wal",lambda:expect(frozen.execute("SELECT count(*) FROM memories").fetchone()[0]==1,"WAL commit missing or open transaction included"))
   check("migration.snapshot.integrity",lambda:expect(frozen.execute("PRAGMA integrity_check").fetchone()[0]=="ok","invalid SQLite archive"))
   check("migration.snapshot.digest",lambda:expect(hashlib.sha256((archive/(dg[7:]+".db")).read_bytes()).hexdigest()==dg[7:],"archive digest differs"))
+  def unapproved_archive():
+   before=len(backend.events)
+   reject('archive',{'source':'fixture','import_id':iid},'SECRET_REVIEW_REQUIRED')
+   expect(len(backend.events)==before,'unapproved raw snapshot reached object backend')
+  check("migration.archive.secret-review-required",unapproved_archive)
+  profiles[0]['archive_approved_digests']=[dg];pf.write_text(json.dumps(profiles))
+  preserved={}
+  def preserve():
+   r=ok('archive',{'source':'fixture','import_id':iid});preserved.update(r)
+   expect(r['outcome']=='SUCCEEDED' and r['archive_durability']=='ARTIFACT_RECEIPT' and r['qualification']=='UNQUALIFIED','archive receipt claimed false qualification')
+   row=FIXTURE.sql('SELECT status,digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[FIXTURE.ids['organisation'],FIXTURE.ids['run'],r['archive']['manifest_artifact_id']])
+   expect(row and row[0]['status']=='COMPLETE' and row[0]['digest']==r['archive']['manifest_digest'],'archive manifest not actually complete in primary')
+  check("migration.archive.real-artifact-custody",preserve)
+  def independent_bytes():
+   prefix='/'+artifact_module.BUCKET+'/hyperfide/v1/'+FIXTURE.ids['organisation']+'/'+FIXTURE.ids['run']
+   manifest_raw=backend.objects[prefix+'/manifests/sha256/'+preserved['archive']['manifest_digest'][7:]]
+   manifest=json.loads(manifest_raw);offset=0;content=[]
+   for n,chunk in enumerate(manifest['chunks']):
+    raw=backend.objects[prefix+'/sha256/'+chunk['digest'][7:]]
+    expect(chunk['sequence']==n and int(chunk['offset_bytes'])==offset and len(raw)==int(chunk['size_bytes']) and 'sha256:'+hashlib.sha256(raw).hexdigest()==chunk['digest'],'actual backend chunks differ')
+    content.append(raw);offset+=len(raw)
+   raw=b''.join(content)
+   expect('sha256:'+hashlib.sha256(raw).hexdigest()==dg and raw==(archive/(dg[7:]+'.db')).read_bytes(),'independent backend bytes do not equal immutable SQLite snapshot')
+   expect(not backend.bad_signatures,'archive HTTP did not carry independently verified SigV4')
+  check("migration.archive.independent-backend-bytes",independent_bytes)
+  def restarted_archive():
+   count=sql('SELECT count(*) FROM hyperfide.artifacts;');events=len(backend.events);FIXTURE.stop();FIXTURE.start()
+   r=ok('archive',{'source':'fixture','import_id':iid})
+   expect(r['archive']['manifest_artifact_id']==preserved['archive']['manifest_artifact_id'] and sql('SELECT count(*) FROM hyperfide.artifacts;')==count,'restart duplicated immutable artifacts')
+   expect(any(e['method']=='GET' for e in backend.events[events:]),'restart trusted cached bytes without backend read')
+   independent_bytes()
+  check("migration.archive.restart-real-readback",restarted_archive)
+
   check("migration.snapshot.source-unchanged",lambda:expect(c.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()==before_schema and c.in_transaction,"snapshot changed source schema or transaction"))
   check("migration.inventory.shape",lambda:expect("base" not in [x["name"] for t in snap["inventory"]["tables"] if t["name"]=="files" for x in t["columns"]],"inventory invented additive column"))
   check("migration.inventory.virtual",lambda:expect(any(t["name"]=="symbol_fts" and t["disposition"]=="ARCHIVE_ONLY" for t in snap["inventory"]["tables"]),"FTS semantics silently promoted"))
@@ -127,9 +165,9 @@ INSERT INTO symbol_fts VALUES('name_test');
    try:reject('describe',{},'MIGRATION_SCHEMA_REQUIRED')
    finally:FIXTURE.sql("UPDATE hyperfide.schema_migrations SET checksum=$1 WHERE version=25",[sha((ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes())])
   check("migration.schema.checksum-refused",wrong_schema)
-  c.close();frozen.close();database=FIXTURE.database;FIXTURE.close()
+  c.close();frozen.close();database=FIXTURE.database;FIXTURE.close();backend_absent=backend.stop()
   absent=not FIXTURE.sql('SELECT datname FROM pg_database WHERE datname=$1',[database],admin=True)
-  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL pg_database after fixture close"}))
+  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL pg_database after fixture close","object_backend_observed_absent":backend_absent}))
   check("migration.cleanup.actual-absence",lambda:expect(absent,"synthetic database still exists"))
  (artifacts()/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"private_records_used":False,"full_cases_qualified":False},sort_keys=True))
  return 1 if FAILED else 0

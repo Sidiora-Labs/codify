@@ -12,11 +12,13 @@
     "migration.sqlite.describe",
     "migration.sqlite.snapshot",
     "migration.sqlite.inventory",
+    "migration.sqlite.archive",
     "migration.sqlite.import",
     "migration.sqlite.status"
   ],
   "requires": [
     "4.2",
-    "14.1"
+    "14.1",
+    "15.2"
   ]
 }

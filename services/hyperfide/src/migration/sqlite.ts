@@ -9,7 +9,7 @@ import {identityTransaction,invocationOf} from '../identity/enrollment.js';
 import type {IdentityTransaction} from '../identity/enrollment.js';
 
 type Json=Record<string,unknown>;
-interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[]}
+interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];archive_approved_digests?:string[]}
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const digestPattern=/^sha256:[0-9a-f]{64}$/;
 const known=new Set(['meta','branches','files','symbols','refs','routes','memories','memory_superseded','git_commits','git_churn','leases','attempts','agents','runtime_events','events','fleet_runs','fleet_nodes','fleet_approvals','runtime_files','work_packets','work_files','work_evidence','imports','comments','projections','projection_findings','extraction_health','journal_applied']);
@@ -52,6 +52,7 @@ async function profiles(env:Readonly<NodeJS.ProcessEnv>):Promise<Profile[]>{
  if(!object(item)||typeof item.id!=='string'||!/^[a-zA-Z0-9._-]{1,64}$/.test(item.id)||typeof item.root!=='string'||typeof item.database!=='string')fail('MIGRATION_CONFIG','Invalid source profile');
  id(item.source_id);id(item.repository_id);id(item.organisation_id);
  if(item.external!==undefined&&(!Array.isArray(item.external)||item.external.length>512))fail('MIGRATION_CONFIG','Invalid external inventory');
+ if(item.archive_approved_digests!==undefined&&(!Array.isArray(item.archive_approved_digests)||item.archive_approved_digests.length>1024||item.archive_approved_digests.some(d=>typeof d!=='string'||!digestPattern.test(d))))fail('MIGRATION_CONFIG','Invalid trusted digest-specific archive approval');
  result.push(item as unknown as Profile);
  }
  if(new Set(result.map(p=>p.id)).size!==result.length)fail('MIGRATION_CONFIG','Duplicate source profile');
@@ -211,7 +212,50 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  throw error;
  }
 }
-export const MIGRATION_ACTIONS=['migration.sqlite.describe','migration.sqlite.snapshot','migration.sqlite.inventory','migration.sqlite.import','migration.sqlite.status'] as const;
+interface ArchiveStore {invoke(action:string,input:unknown,ctx:ComponentContext):Promise<unknown>}
+function verifiedArtifact(raw:unknown,expectedDigest?:string,expectedSize?:string):Record<string,unknown>|null {
+ if(!object(raw)||raw.outcome!=='SUCCEEDED'||raw.availability!=='VERIFIED'||!object(raw.artifact)||!object(raw.receipt)||typeof raw.receipt.receipt_id!=='string'||!digestPattern.test(raw.receipt.receipt_id))return null;
+ const a=raw.artifact;
+ if(typeof a.artifact_id!=='string'||!uuid.test(a.artifact_id)||a.status!=='COMPLETE'||expectedDigest!==undefined&&a.digest!==expectedDigest||expectedSize!==undefined&&a.size_bytes!==expectedSize)return null;
+ return a;
+}
+async function preserve(p:Profile,importId:string,ctx:ComponentContext):Promise<unknown>{
+ const stored=await load(p,importId,ctx),snapshotDigest=hex(stored.snapshot_digest),i=invocationOf(ctx);
+ // Approval comes from trusted server configuration and binds the exact bytes.
+ // No caller assertion can classify an arbitrary historical database as safe.
+ if(!p.archive_approved_digests?.includes(snapshotDigest))fail('SECRET_REVIEW_REQUIRED','Exact snapshot digest requires trusted sanitisation approval before external archival');
+ const store=ctx.dependencies.require('15.2','artifact.store.v1',(v:unknown):v is ArchiveStore=>object(v)&&typeof v.invoke==='function');
+ const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},retention={retention_class:'RUN',retention_until:null,retention_hold:false};
+ const filename=String(stored.archive_path),size=(await fs.stat(filename)).size;
+ if(size>2048*256*1024)fail('MIGRATION_ARCHIVE_SIZE_BOUND','Archive exceeds bounded complete-manifest capacity; local snapshot remains preserved and unqualified');
+ const handle=await fs.open(filename,'r'),chunks:Record<string,unknown>[]=[];let offset=0;
+ try{
+ while(offset<size){
+ const bytes=Buffer.alloc(Math.min(256*1024,size-offset)),observed=await handle.read(bytes,0,bytes.length,offset);
+ if(observed.bytesRead!==bytes.length)fail('MIGRATION_CORRUPT','Immutable archive changed during preservation');
+ const digest=hash(bytes),raw=await store.invoke('artifact.object.put',{...scope,...retention,digest,size_bytes:String(bytes.length),data_base64:bytes.toString('base64')},ctx);
+ const artifact=verifiedArtifact(raw,digest,String(bytes.length));
+ if(!artifact)return identityTransaction(ctx,async()=>({outcome:'UNKNOWN',import_id:importId,snapshot_digest:snapshotDigest,archive_durability:'UNQUALIFIED',automatic_replay:false,reconcile:'REPEAT_IDENTICAL_ARCHIVE',authority:'NONE',qualification:'UNQUALIFIED'}));
+ chunks.push({sequence:chunks.length,artifact_id:artifact.artifact_id,digest,size_bytes:String(bytes.length),offset_bytes:String(offset)});offset+=bytes.length;
+ }
+ }finally{await handle.close();}
+ if(await fileHash(filename)!==snapshotDigest)fail('MIGRATION_CORRUPT','Snapshot changed during external preservation');
+ const manifest={...scope,...retention,expected_chunks:chunks.length,total_size_bytes:String(size),content_digest:snapshotDigest,complete:true,truncated:false,missing_ranges:[],chunks};
+ const raw=await store.invoke('artifact.manifest.commit',manifest,ctx),artifact=verifiedArtifact(raw);
+ if(!artifact)return identityTransaction(ctx,async()=>({outcome:'UNKNOWN',import_id:importId,snapshot_digest:snapshotDigest,archive_durability:'UNQUALIFIED',automatic_replay:false,reconcile:'REPEAT_IDENTICAL_ARCHIVE',authority:'NONE',qualification:'UNQUALIFIED'}));
+ const observed=await store.invoke('artifact.manifest.read',{...scope,artifact_id:artifact.artifact_id},ctx);
+ if(!verifiedArtifact(observed)||!object(observed)||observed.content_digest!==snapshotDigest)fail('MIGRATION_ARCHIVE_UNAVAILABLE','Committed archive closure could not be verified');
+ const evidence={classification:'TRUSTED_DIGEST_APPROVED',approved_snapshot_digest:snapshotDigest,manifest_artifact_id:artifact.artifact_id,manifest_digest:artifact.digest,receipt:object(raw)?raw.receipt:null,content_digest:snapshotDigest,size_bytes:String(size),availability:'VERIFIED'};
+ try{return await identityTransaction(ctx,async tx=>{
+ await scoped(tx,p,ctx);
+ await tx.query("UPDATE hyperfide_history.imports SET inventory=inventory||jsonb_build_object('archives',COALESCE(inventory->'archives','{}'::jsonb)||jsonb_build_object($2::text,$3::jsonb)) WHERE id=$1",[importId,scope.run_id,JSON.stringify(evidence)]);
+ return {outcome:'SUCCEEDED',import_id:importId,snapshot_digest:snapshotDigest,archive_durability:'ARTIFACT_RECEIPT',archive:evidence,authority:'NONE',qualification:'UNQUALIFIED'};
+ });}catch(error){
+ if(object(error)&&error.code==='COMMIT_AMBIGUOUS')return {outcome:'UNKNOWN',import_id:importId,manifest_artifact_id:artifact.artifact_id,automatic_replay:false,reconcile:'REPEAT_IDENTICAL_ARCHIVE',authority:'NONE',qualification:'UNQUALIFIED'};
+ throw error;
+ }
+}
+export const MIGRATION_ACTIONS=['migration.sqlite.describe','migration.sqlite.snapshot','migration.sqlite.inventory','migration.sqlite.archive','migration.sqlite.import','migration.sqlite.status'] as const;
 async function scoped(tx:IdentityTransaction,p:Profile,ctx:ComponentContext):Promise<void>{
  const i=invocationOf(ctx),principal=i.principal;
  if(p.organisation_id!==principal.organisation_id)fail('MIGRATION_SCOPE','Source profile is outside authenticated organisation');
@@ -230,6 +274,7 @@ export function createComponent(_startup:ComponentContext):Component{return {api
  if(action.endsWith('.snapshot'))return snapshot(p,ctx);
  const stored=await load(p,id(v.import_id),ctx);
  if(action.endsWith('.inventory'))return identityTransaction(ctx,async tx=>{await scoped(tx,p,ctx);return {import_id:stored.id,inventory:stored.inventory,external_inventory:stored.external_inventory,authority:'NONE',qualification:'UNQUALIFIED'};});
+ if(action.endsWith('.archive'))return preserve(p,id(v.import_id),ctx);
  if(action.endsWith('.import'))return importBatch(p,v,ctx);
  return identityTransaction(ctx,async tx=>{await scoped(tx,p,ctx);
  const counts=await tx.query('SELECT table_name,count(*)::text AS rows FROM hyperfide_history.rows WHERE import_id=$1 GROUP BY table_name ORDER BY table_name',[stored.id]);
