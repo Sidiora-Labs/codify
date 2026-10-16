@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-review-17.2-v2",
+  "campaign_id": "hyperfide-review-17.2-v8",
   "case_ids": [
     "V-029",
     "V-034"
@@ -1155,8 +1155,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0008-provider-coordination.sql",
-      "sha256": "8cae39aeefb0022c3a1bfcb7a6bde99f659019287517008068a0f3280086ba09",
-      "size": 17729
+      "sha256": "501cb79c39510114a58dc50658769088beba0affbb14ac9ff3b8de1e0d773b72",
+      "size": 31388
     },
     {
       "path": "services/hyperfide/migrations/0012-runner-registry.sql",
@@ -1510,8 +1510,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/17.2.json",
-      "sha256": "39a196e388107e38ea8eada39d4b0a7c8e1f50c68c7306dd189d6f2cb9ed9709",
-      "size": 2228
+      "sha256": "dd38ff2d603cf43ab3152e7b5cdafd09033667f2199faa32a5352a0f006d51ef",
+      "size": 2311
     },
     {
       "path": "tests/hyperfide/support/identity_fixture.py",
@@ -1529,7 +1529,9 @@
   "registered_variant": "task:17.2",
   "required_artifacts": [
     "review/database-absence.json",
-    "review/observations.json"
+    "review/observations.json",
+    "review/closed-run-audit-read.json",
+    "review/closed-run-audit-write.json"
   ],
   "resources": [
     {

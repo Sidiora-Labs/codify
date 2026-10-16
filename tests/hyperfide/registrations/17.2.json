@@ -57,7 +57,9 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "review/database-absence.json",
-    "review/observations.json"
+    "review/observations.json",
+    "review/closed-run-audit-read.json",
+    "review/closed-run-audit-write.json"
   ],
   "source_files": [
     "tests/hyperfide/cases/tasks/17_2.py",
