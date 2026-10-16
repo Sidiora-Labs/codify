@@ -25,7 +25,9 @@ SQL_JS="""const fs=require('fs'),{createRequire}=require('module'),pg=createRequ
 (async()=>{const q=JSON.parse(fs.readFileSync(0,'utf8')),c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();try{const r=await c.query(q.sql,q.values);process.stdout.write(JSON.stringify(r.rows??[]));}finally{await c.end();}})().catch(e=>{process.stderr.write(JSON.stringify({code:e.code??'SQL_ERROR',message:e.message}));process.exitCode=1;});"""
 SIGN_JS="""const fs=require('fs'),crypto=require('crypto');process.stdout.write(crypto.sign(null,fs.readFileSync(0),fs.readFileSync(process.argv[1])).toString('base64url'));"""
 class IdentityFixture:
-    def __init__(self,extra_components=(),extra_env=None,extra_setup=None,components=None,database=None):
+    def __init__(self,extra_components=(),extra_env=None,extra_setup=None,components=None,database=None,service_role="control"):
+        if service_role not in ("control","provisioner","dispatch"):raise ValueError("Known service role required")
+        self.service_role=service_role
         self.folder=tempfile.TemporaryDirectory(prefix="hyperfide-identity-")
         self.path=Path(self.folder.name);self.child=None;self.database=database or "hf_identity_"+uuid.uuid4().hex;self.database_created=False
         if not re.fullmatch(r"hf_[a-z0-9_]{1,59}",self.database):self.folder.cleanup();raise ValueError("Owned bounded hf_ database name required")
@@ -63,7 +65,8 @@ class IdentityFixture:
             with socket.socket() as sock:sock.bind(("127.0.0.1",0));self.port=sock.getsockname()[1]
             self.origin="https://localhost:"+str(self.port)
             self.components=self.path/"components";self.components.mkdir()
-            names=list(components or ("1.4","4.1","4.2","14.1"))+list(extra_components)
+            defaults=("1.4","4.1","4.2","14.1") if service_role=="control" else ("1.4","4.2","14.1")
+            names=list(components or defaults)+list(extra_components)
             actions=["programme.activate","programme.provision","programme.dispatch"]
             for name in dict.fromkeys(names):
                 fragment=ROOT/("services/hyperfide/components/"+name+".json")
@@ -90,7 +93,7 @@ class IdentityFixture:
         expect(result.returncode==0,"PostgreSQL fixture query failed: "+result.stderr[:1000])
         return json.loads(result.stdout)
     def start(self):
-        argv=["node",str(ROOT/"services/hyperfide/dist/control.js"),"--policy",str(self.policy),"--spec-revision","fixture-identity-v1","--components",str(self.components),"--module-root",str(ROOT/"services/hyperfide/dist"),"--mode","https","--host","127.0.0.1","--port",str(self.port),"--tls-cert",str(self.ca),"--tls-key",str(self.tlskey)]
+        argv=["node",str(ROOT/("services/hyperfide/dist/"+self.service_role+".js")),"--policy",str(self.policy),"--spec-revision","fixture-identity-v1","--components",str(self.components),"--module-root",str(ROOT/"services/hyperfide/dist"),"--mode","https","--host","127.0.0.1","--port",str(self.port),"--tls-cert",str(self.ca),"--tls-key",str(self.tlskey)]
         self.child=subprocess.Popen(argv,cwd=ROOT,env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         deadline=time.monotonic()+15;lines=[]
         while time.monotonic()<deadline:
