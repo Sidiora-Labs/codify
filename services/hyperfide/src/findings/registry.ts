@@ -2,12 +2,14 @@ import {createHash} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {getPool,databaseError} from '../storage/schema.js';
+import {databaseError} from '../storage/schema.js';
+import type {AuthorityTransaction} from '../transport/protocol.js';
 
 export interface FindingScope {organisation_id:string;run_id:string;repository_id?:string;source_object_id?:string}
 export interface FindingPrincipal {credential_id:string;actor_id:string;organisation_id:string;run_id:string;deployment_epoch:string;role:string;allowed_actions:readonly string[]}
-export interface FindingInvocation {principal:FindingPrincipal;operation:string;guard(tx:pg.PoolClient):Promise<void>}
-export interface FindingTransaction {tx:pg.PoolClient;scope:FindingScope;principal:FindingPrincipal;context:ComponentContext}
+export interface FindingInvocation {principal:FindingPrincipal;operation:unknown;payload:{action:string;run_id:string};guard(tx:AuthorityTransaction):Promise<void>}
+export type FindingDatabase=AuthorityTransaction;
+export interface FindingTransaction {tx:FindingDatabase;scope:FindingScope;principal:FindingPrincipal;context:ComponentContext}
 export function fail(code:string,message:string):never {throw new FoundationError(code,message);}
 export function record(value:unknown):Record<string,unknown>{if(!object(value))fail('INVALID_REQUEST','A bounded object is required');return value;}
 export function fields(value:Record<string,unknown>,required:string[],optional:string[]=[]):void{
@@ -34,29 +36,25 @@ export async function invocation(context:ComponentContext,action:string):Promise
  if(typeof authenticate!=='function')fail('DEPENDENCY_NOT_READY','The actual identity authority brand is required');authenticate(value);
  const principal=value.principal;
  uuid(principal.credential_id);uuid(principal.actor_id);uuid(principal.organisation_id);uuid(principal.run_id);uuid(principal.deployment_epoch);
- if(value.operation!==action||principal.run_id!==context.policy.programme_id||!Array.isArray(principal.allowed_actions)||!principal.allowed_actions.includes(action))fail('AUTH_DENIED','Invocation is not authorised for this run and operation');
+ if(value.payload?.action!==action||value.payload?.run_id!==principal.run_id||principal.run_id!==context.policy.programme_id||!Array.isArray(principal.allowed_actions)||!principal.allowed_actions.includes(action))fail('AUTH_DENIED','Invocation is not authorised for this run and operation');
  return value;
 }
-export async function readiness(tx:pg.PoolClient):Promise<void>{
+export async function readiness(tx:FindingDatabase):Promise<void>{
  const result=await tx.query("SELECT to_regclass('hyperfide.finding_registry_records')::text AS installed,pg_is_in_recovery() AS replica");
  if(result.rows[0]?.replica)fail('PRIMARY_REQUIRED','Finding authority requires the PostgreSQL primary');
  if(!result.rows[0]?.installed)fail('MIGRATION_REQUIRED','The domain18 additive migration must be applied by the migration runner');
 }
 export async function withFindingTransaction<T>(context:ComponentContext,action:string,fn:(value:FindingTransaction)=>Promise<T>):Promise<T>{
  const call=await invocation(context,action),principal=call.principal;
- const tx=await getPool(context.env).connect();
- try{
-  await tx.query('BEGIN ISOLATION LEVEL READ COMMITTED');await readiness(tx);await call.guard(tx);
-  const scope={organisation_id:principal.organisation_id,run_id:principal.run_id};
+ let gatewayOf:unknown;try{gatewayOf=(await import(new URL('../identity/enrollment.js',import.meta.url).href)).gatewayOf;}catch{fail('DEPENDENCY_NOT_READY','Actual identity and primary transaction gateway are required');}if(typeof gatewayOf!=='function')fail('DEPENDENCY_NOT_READY','Actual primary transaction gateway is absent');
+ const gateway=gatewayOf(context);
+ try{return await gateway.withPrimaryTransaction({timeoutMs:10000,signal:context.signal,guard:call.guard},async(tx:AuthorityTransaction)=>{
+  await readiness(tx);const scope={organisation_id:principal.organisation_id,run_id:principal.run_id};
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':finding-disposition']);
   const run=await tx.query('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
   if(run.rows.length!==1||run.rows[0]!.authority_epoch!==principal.deployment_epoch)fail('STALE_AUTHORITY','Run authority epoch does not match the authenticated deployment');
-  const result=await fn({tx,scope,principal,context});await call.guard(tx);await tx.query('COMMIT');return result;
- }catch(error){try{await tx.query('ROLLBACK');}catch{/* An unknown transaction outcome is not success. */}
-  if(error instanceof FoundationError)throw error;
-  if(object(error)&&error.code==='42P01')fail('DEPENDENCY_NOT_READY','A required authority module migration is missing');
-  throw databaseError(error);
- }finally{tx.release();}
+  return fn({tx,scope,principal,context});
+ });}catch(error){if(error instanceof FoundationError)throw error;if(object(error)&&error.code==='42P01')fail('DEPENDENCY_NOT_READY','A required authority migration is missing');throw databaseError(error);}
 }
 export async function admin(value:FindingTransaction):Promise<void>{
  if(['OPERATOR','COORDINATOR'].includes(value.principal.role))return;
@@ -68,14 +66,14 @@ export async function manager(value:FindingTransaction,packageId:string):Promise
  const result=await value.tx.query('SELECT manager_session_id FROM hyperfide.feature_packages WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[value.scope.organisation_id,value.scope.run_id,packageId]);
  if(result.rows[0]?.manager_session_id!==value.principal.actor_id)fail('AUTH_DENIED','Only the current accountable manager may mutate this finding');
 }
-export async function emit(tx:pg.PoolClient,scope:FindingScope,findingId:string,version:string,event:string,payload:Record<string,unknown>):Promise<void>{
+export async function emit(tx:FindingDatabase,scope:FindingScope,findingId:string,version:string,event:string,payload:Record<string,unknown>):Promise<void>{
  await tx.query('INSERT INTO hyperfide.outbox_events(organisation_id,run_id,aggregate_type,aggregate_id,aggregate_version,event_type,payload) VALUES($1,$2,\'finding\',$3,$4,$5,$6::jsonb) ON CONFLICT DO NOTHING',[scope.organisation_id,scope.run_id,findingId,version,event,JSON.stringify(payload)]);
 }
-export async function finding(tx:pg.PoolClient,scope:FindingScope,id:string,lock=false):Promise<Record<string,any>>{
+export async function finding(tx:FindingDatabase,scope:FindingScope,id:string,lock=false):Promise<Record<string,any>>{
  const result=await tx.query('SELECT f.*,r.phase,r.origin_task_id,r.origin_attempt_id,r.resolution_condition,r.resolution_digest,r.collaborator_package_ids,r.state_version AS registry_version,r.first_observed_at,r.last_observed_at FROM hyperfide.findings f JOIN hyperfide.finding_registry_records r ON r.organisation_id=f.organisation_id AND r.run_id=f.run_id AND r.finding_id=f.id WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.id=$3'+(lock?' FOR UPDATE OF f,r':''),[scope.organisation_id,scope.run_id,id]);
  if(result.rows.length!==1)fail('FINDING_NOT_FOUND','Finding does not exist in the authenticated run');return result.rows[0]!;
 }
-export async function admittedEvidence(tx:pg.PoolClient,scope:FindingScope,evidenceIds:string[],repositoryId?:string,sourceObjectId?:string):Promise<void>{
+export async function admittedEvidence(tx:FindingDatabase,scope:FindingScope,evidenceIds:string[],repositoryId?:string,sourceObjectId?:string):Promise<void>{
  if(!evidenceIds.length)fail('EVIDENCE_REQUIRED','Admitted evidence is required');
  const result=await tx.query('SELECT id,repository_id,source_object_id,admission_state FROM hyperfide.evidence WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) FOR SHARE',[scope.organisation_id,scope.run_id,evidenceIds]);
  if(result.rows.length!==evidenceIds.length||result.rows.some(row=>row.admission_state!=='ADMITTED'||repositoryId&&row.repository_id!==repositoryId||sourceObjectId&&row.source_object_id!==sourceObjectId))fail('EVIDENCE_INVALID','Evidence is missing, stale or bound to different inputs');
@@ -125,7 +123,7 @@ export async function reportFinding(value:FindingTransaction,input:unknown):Prom
  await emit(tx,scope,findingId,String(current.registry_version),reopened?'finding.reopened':'finding.observed',{finding_id:findingId,observation_id:observationId});
  return {finding_id:findingId,observation_id:observationId,replayed:false,deduplicated:existing.rows.length>0,reopened,phase:current.phase,state_version:String(current.registry_version)};
 }
-export async function inspectBlockingFindings(tx:pg.PoolClient,scope:FindingScope):Promise<{clear:boolean;blockers:Record<string,unknown>[]} >{
+export async function inspectBlockingFindings(tx:FindingDatabase,scope:FindingScope):Promise<{clear:boolean;blockers:Record<string,unknown>[]} >{
  await readiness(tx);uuid(scope.organisation_id);uuid(scope.run_id);if(scope.repository_id)uuid(scope.repository_id);if(scope.source_object_id)oid(scope.source_object_id);
  await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':finding-disposition']);
  // Earlier unresolved revisions remain blocking; a candidate commit alone never disposes of them.
