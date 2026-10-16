@@ -12,7 +12,7 @@ def check(name,fn):
  print(json.dumps({"type":"assertion","id":"entrypoint."+name,"expected":"observed","actual":actual}),flush=True)
 def run(*args,**kw):
  timeout=kw.pop("timeout",180);data=kw.pop("input",None)
- child=subprocess.Popen(args,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,**kw)
+ child=subprocess.Popen(args,text=True,stdin=subprocess.PIPE if data is not None else None,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,**kw)
  try:out,err=child.communicate(data,timeout=timeout)
  except subprocess.TimeoutExpired:
   try:os.killpg(child.pid,signal.SIGKILL)
@@ -71,7 +71,8 @@ def main():
   helper=run(str(current/"bin/hyperfide-native"),"--component","26.1","--action","branding.identity.describe",input="{}",env=e)
   check("bundled-native-helper-actually-executes",lambda:expect(helper.returncode==0 and json.loads(helper.stdout)["result"]["product"]=="Hyperfide"))
   linked=run("ldd",str(current/"bin/hyperfide"),env=e)
-  check("native-actually-loads-bundled-curl-and-crypto",lambda:expect(linked.returncode==0 and all(any(name in line and str(current/"lib/hyperfide") in line for line in linked.stdout.splitlines()) for name in ["libcurl","libcrypto"])))
+  loaded={line.split("=>",1)[0].strip():Path(line.split("=>",1)[1].strip().split()[0]).resolve() for line in linked.stdout.splitlines() if "=> /" in line}
+  check("native-actually-loads-bundled-curl-and-crypto",lambda:expect(linked.returncode==0 and loaded.get("libcurl.so.4")==current/"lib/hyperfide/libcurl.so.4" and loaded.get("libcrypto.so.3")==current/"lib/hyperfide/libcrypto.so.3"))
   unknown=base/"unknown/bin";unknown.mkdir(parents=True);(unknown/"hyperfide").write_bytes(b"USER-OWNED-COMMAND")
   check("refuses-unowned-executable",lambda:expect(install({"HYPERFIDE_INSTALL_DIR":str(unknown)}).returncode!=0 and(unknown/"hyperfide").read_bytes()==b"USER-OWNED-COMMAND"))
   legacy=base/"legacy/bin";legacy.mkdir(parents=True);shutil.copy2(ROOT/"cg",legacy/"cg");legacy_hash=hashlib.sha256((legacy/"cg").read_bytes()).hexdigest()
