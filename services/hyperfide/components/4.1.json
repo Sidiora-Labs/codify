@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "4.1",
+  "task": "4.1",
+  "roles": [
+    "control"
+  ],
+  "module": "storage/schema.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "authority.schema.describe",
+    "authority.schema.bootstrap",
+    "authority.database.inspect",
+    "authority.record.validate",
+    "authority.record.create"
+  ],
+  "requires": []
+}
