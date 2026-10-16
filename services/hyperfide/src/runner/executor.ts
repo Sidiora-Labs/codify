@@ -231,7 +231,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  assertInvocation(i);
  if(signal.aborted)fail('RUNNER_EXECUTOR_CLOSED','Provisioner executor is closed');
  const probeSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);
- if(i.principal.role!=='PROVISIONER'||i.payload.component!=='8.4'||i.payload.action!=='provider.placement.probe'||!object(input)||!uuid(input.probe_id)||Object.keys(input).some(k=>k!=='probe_id')||!object(i.payload.input))fail('RUNNER_PROBE_AUTHORITY_DENIED','Genuine bounded placement probe invocation required');
+ if(i.principal.role!=='PROVISIONER'||i.payload.component!=='8.4-probe'||i.payload.action!=='provider.placement.probe'||!object(input)||!uuid(input.probe_id)||Object.keys(input).some(k=>k!=='probe_id')||!object(i.payload.input))fail('RUNNER_PROBE_AUTHORITY_DENIED','Genuine bounded placement probe invocation required');
  const original=i.payload.input;
  if(!uuid(original.pool_id)||!uuid(original.sandbox_id)||original.run_id!==i.principal.run_id||Object.keys(original).some(k=>!['pool_id','sandbox_id','run_id'].includes(k)))fail('RUNNER_PROBE_AUTHORITY_DENIED','Exact authenticated placement target required');
  const signer=config.signers.find(s=>s.credential_id===i.principal.credential_id);
