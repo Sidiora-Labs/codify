@@ -43,6 +43,7 @@ CREATE TABLE hyperfide.provisioning_intents (
  sandbox_id uuid NOT NULL,
  configuration_digest hyperfide.digest NOT NULL,
  kind text NOT NULL CHECK(kind IN ('CREATE','DESTROY')),
+ preparation_purpose text CHECK(preparation_purpose IN ('PREPARATION','EXECUTION')),
  request_key text NOT NULL CHECK(length(request_key) BETWEEN 1 AND 256),
  request_digest hyperfide.digest NOT NULL,
  payload_digest hyperfide.digest NOT NULL,
@@ -62,7 +63,8 @@ CREATE TABLE hyperfide.provisioning_intents (
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,sandbox_id) REFERENCES hyperfide.sandboxes(organisation_id,id),
  FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
- CHECK((kind='CREATE') OR native_sandbox_id IS NOT NULL)
+ CHECK((kind='CREATE') OR native_sandbox_id IS NOT NULL),
+ CHECK((kind='CREATE')=(preparation_purpose IS NOT NULL))
 );
 CREATE UNIQUE INDEX provider_one_active_destroy ON hyperfide.provisioning_intents(organisation_id,sandbox_id) WHERE kind='DESTROY' AND state NOT IN ('TERMINAL','REJECTED');
 CREATE INDEX provider_intent_reconcile ON hyperfide.provisioning_intents(organisation_id,pool_id,state,updated_at);
@@ -256,6 +258,10 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  preparation_digest hyperfide.digest NOT NULL,
  readiness_digest hyperfide.digest NOT NULL,
  source_digest hyperfide.digest NOT NULL,
+ source_manifest_digest hyperfide.digest NOT NULL,
+ source_state_digest hyperfide.digest NOT NULL,
+ readiness_input jsonb NOT NULL CHECK(jsonb_typeof(readiness_input)='object' AND octet_length(readiness_input::text)<=1048576),
+ readiness_input_digest hyperfide.digest NOT NULL,
  source_repository_id uuid NOT NULL,
  source_object_id hyperfide.git_oid NOT NULL,
  source_tree_id hyperfide.git_oid NOT NULL,
@@ -275,6 +281,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  CHECK(expires_at>observed_at),
  CHECK(state<>'READY' OR failure_code IS NULL),
+ CHECK(source_digest=source_manifest_digest),
  PRIMARY KEY(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,sandbox_id,boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
