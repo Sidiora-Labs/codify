@@ -43,7 +43,7 @@ export function createComponent(ctx:ComponentContext):Component{
  return {apiVersion:1,actions:{
  'decision.spec.describe':()=>({schema_version:1,authority:'NONE',accepted_intent_mutable:false,proposal_acceptance:'ordinary_spec_amendment_only'}),
  'decision.spec.packet':async (value,ctx)=>{const q=input(value,['clauses']);return withAuthority(ctx,q.scope,'decision.spec.packet',async client=>{
-  const source=await currentRevision(client,q.scope);
+  const source=await currentRevision(client,q.scope,true);
   return storePacket(client,q.scope,'spec_critique',clauseState(source.document,q.data.clauses,source.source_digest));});},
  'decision.spec.flags':async(value,ctx)=>{const q=input(value,['audit_id']);return withAuthority(ctx,q.scope,'decision.spec.flags',async client=>{
  const {audit,packet}=await auditFor(client,q.scope,q.data.audit_id,'spec_critique');
