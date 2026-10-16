@@ -3,7 +3,9 @@
   "id": "14.1",
   "task": "14.1",
   "roles": [
-    "control"
+    "control",
+    "provisioner",
+    "dispatch"
   ],
   "module": "identity/enrollment.js",
   "entry": "createComponent",
@@ -14,9 +16,13 @@
     "identity.grant.issue",
     "identity.principal.revoke",
     "identity.runner.register",
-    "identity.runner.heartbeat"
+    "identity.runner.heartbeat",
+    "identity.principal.delegate",
+    "identity.principal.renew",
+    "identity.service.issue"
   ],
   "requires": [
-    "4.2"
+    "4.2",
+    "4.4"
   ]
 }

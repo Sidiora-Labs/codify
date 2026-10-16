@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys,json,os,subprocess,time
+from concurrent.futures import ThreadPoolExecutor
+ROOT=Path(__file__).resolve().parents[4]
+sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
+from identity_fixture import IdentityFixture,RESULTS,check,expect,uid,sha,SQL_JS
+
+def main():
+    canary="HF_TEST_PRIVATE_"+uid()
+    other=uid(); expiry=time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+1800))
+    def setup(f):
+        f.path.chmod(0o711)
+        secrets=f.path/"secrets";secrets.mkdir(mode=0o700)
+        attachments=f.path/"attachments";attachments.mkdir(mode=0o711)
+        (secrets/"token").write_text(canary);(secrets/"token").chmod(0o600)
+        config={"schema_version":1,"secret_root":str(secrets),"attachment_root":str(attachments),"sources":[{"name":"token","relative_path":"token","expires_at":expiry,"purposes":["WORKER_RUNTIME","WORKER_PROCESS"]}],"targets":[{"actor_id":f.ids["operator"],"uid":41001,"layers":["runtime","process"]},{"actor_id":other,"uid":41002,"layers":["runtime","process"]}]}
+        file=f.path/"credentials.json";file.write_text(json.dumps(config));file.chmod(0o600);f.env["HF_CREDENTIAL_CONFIG_FILE"]=str(file)
+    f=IdentityFixture(extra_components=["14.2"],extra_setup=setup)
+    try:
+        def private_resolve(request):
+            from identity_fixture import canonical,b64
+            body=f.operation("14.2","credentials.inspect",{"reference_id":"inference/account"});raw=canonical(body);seconds=str(int(time.time()));nonce=uid()
+            signature=f.sign("operator",("\n".join(("HYPERFIDE-REQUEST-V1","POST","/v1/invoke",f.origin,f.ids["operator"],seconds,nonce,sha(raw),""))).encode())
+            args={"components":str(f.components),"policy":str(f.policy),"body":b64(raw),"headers":["HF-Credential-Id",f.ids["operator"],"HF-Request-Time",seconds,"HF-Request-Nonce",nonce,"HF-Request-Signature",signature],"request":request,"expected":sha(canary.encode())}
+            script="""import fs from 'node:fs';import {ComponentRegistry} from './services/hyperfide/dist/components/registry.js';import {validatePolicy} from './services/hyperfide/dist/policy/programme.js';import {hash} from './services/hyperfide/dist/transport/protocol.js';const a=JSON.parse(fs.readFileSync(0,'utf8')),c=new AbortController(),policy=validatePolicy(JSON.parse(fs.readFileSync(a.policy,'utf8')),'fixture-identity-v1','control'),r=new ComponentRegistry({role:'control',env:process.env,signal:c.signal,policy});try{await r.load(a.components,process.cwd()+'/services/hyperfide/dist');const auth=r.resolveCapability('14.1','identity.authority',v=>typeof v.authenticate==='function'),i=await auth.authenticate(Buffer.from(a.body,'base64url'),a.headers,c.signal),credentials=r.resolveCapability('14.2','identity.credentials',v=>typeof v.resolveCredentialReferences==='function');const values=await credentials.resolveCredentialReferences(i,a.request,c.signal);process.stdout.write(JSON.stringify({ok:true,matched:hash(values.TOKEN)===a.expected,count:Object.keys(values).length}));}catch(e){process.stdout.write(JSON.stringify({ok:false,code:e.code??'ERROR'}));}finally{await r.close();}"""
+            result=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps(args),cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=20)
+            expect(result.returncode==0,"private actual capability process failed: "+result.stderr[:200]);return json.loads(result.stdout)
+        base={"reference_id":"inference/account","source_name":"token","expected_version":"0","expires_at":expiry,"allowed_layers":["runtime","process"],"allowed_roles":["OPERATOR"],"refresh_owner":f.ids["operator"],"purposes":["WORKER_RUNTIME","WORKER_PROCESS"]}
+        check("credentials.reference.missing",lambda:expect(f.invoke("credentials.inspect",{"reference_id":"inference/account"},component="14.2")[1].get("result",{}).get("status")=="MISSING","missing reference misreported"))
+        rotated=f.invoke("credentials.reference.rotate",base,component="14.2")[1]
+        check("credentials.rotate.actual-private-source",lambda:expect(rotated.get("result",{}).get("credential_version")=="1","rotation failed: "+json.dumps(rotated)))
+        check("credentials.inspect.scoped-current",lambda:expect(f.invoke("credentials.inspect",{"reference_id":"inference/account"},component="14.2")[1].get("result",{}).get("assignment_scope",{}).get("actor_id")==f.ids["operator"],"trusted actor scope absent"))
+        attached=f.invoke("credentials.attach",{"reference_id":"inference/account","layer":"process"},component="14.2")[1]
+        check("credentials.attach.metadata-only",lambda:expect(attached.get("result",{}).get("status")=="AVAILABLE" and canary not in json.dumps(attached),"attachment failed or secret entered response: "+json.dumps(attached)))
+        attachment=attached.get("result",{}).get("attachment_id")
+        if not attachment:raise AssertionError(json.dumps(attached))
+        file=f.path/"attachments"/str(attachment)/"value"
+        def as_uid(number,path):
+            return subprocess.run(["/usr/bin/python3","-c","from pathlib import Path;import sys;sys.stdout.write(Path(sys.argv[1]).read_text())",str(path)],preexec_fn=lambda:(os.setgid(number),os.setuid(number)),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        check("credentials.uid.owner-can-read",lambda:expect(as_uid(41001,file).stdout==canary,"assigned private UID cannot read attachment"))
+        check("credentials.uid.other-denied",lambda:expect(as_uid(41002,file).returncode!=0,"another actor UID read secret"))
+        check("credentials.uid.source-store-denied",lambda:expect(as_uid(41001,f.path/"secrets"/"token").returncode!=0,"actor traversed source store"))
+        check("credentials.uid.permissions",lambda:expect(file.stat().st_uid==41001 and file.stat().st_mode&0o777==0o600 and file.parent.stat().st_mode&0o777==0o700,"attachment owner/mode invalid"))
+        check("credentials.image.no-secret-attachment",lambda:expect(f.invoke("credentials.attach",{"reference_id":"inference/account","layer":"image"},component="14.2")[1].get("ok") is False,"image accepted secret attachment"))
+        check("credentials.build.runtime-secret-denied",lambda:expect(f.invoke("credentials.attach",{"reference_id":"inference/account","layer":"build"},component="14.2")[1].get("ok") is False,"build received runtime credential"))
+        f.add_principal("otheractor","OPERATOR",actor_id=other)
+        other_attachment=f.invoke("credentials.attach",{"reference_id":"inference/account","layer":"runtime"},component="14.2",key="otheractor")[1]
+        check("credentials.uid.distinct-actor-attachment",lambda:expect(other_attachment.get("result",{}).get("assignment_scope",{}).get("actor_id")==other and other_attachment.get("result",{}).get("attachment_id")!=attachment,"separate actor reused attachment"))
+        def race():
+            req={**base,"expected_version":"1"}
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                responses=list(pool.map(lambda _:f.invoke("credentials.reference.rotate",req,component="14.2")[1],range(2)))
+            expect(sum(x.get("ok") is True for x in responses)==1,"refresh CAS did not select exactly one writer")
+            expect(sum(x.get("error",{}).get("code")=="VERSION_CONFLICT" for x in responses)==1,"losing refresh lacked version conflict")
+        check("credentials.refresh.concurrent-cas",race)
+        state=f.sql("SELECT state FROM hyperfide.identity_credential_attachments WHERE id=$1",[attachment])[0]["state"]
+        check("credentials.refresh.invalidates-prior-attachment",lambda:expect(state=="REVOKED","old attachment metadata remained current"))
+        check("credentials.refresh.owner-fence",lambda:expect(f.invoke("credentials.reference.rotate",{**base,"expected_version":"2","refresh_owner":uid()},component="14.2")[1].get("error",{}).get("code")=="VERSION_CONFLICT","unrelated refresh owner replaced reference"))
+        plan=f.invoke("credentials.environment.plan",{"layers":{"image":{"BASE":"image"},"build":{"BASE":"build"},"runtime":{"BASE":"runtime"},"process":{"BASE":"process"}},"secret_bindings":[{"name":"MODEL_AUTH","reference_id":"inference/account","layer":"process"}]},component="14.2")[1]
+        check("credentials.environment.metadata-only",lambda:expect(plan.get("ok") is True and "process" not in plan.get("result",{}).get("environment_keys",[]) and canary not in json.dumps(plan),"environment plan leaked values"))
+        check("credentials.environment.loader-injection-denied",lambda:expect(f.invoke("credentials.environment.plan",{"layers":{"image":{},"build":{},"runtime":{},"process":{"NODE_OPTIONS":"--require malicious"}},"secret_bindings":[]},component="14.2")[1].get("ok") is False,"loader injection accepted"))
+        check("credentials.environment.image-binding-denied",lambda:expect(f.invoke("credentials.environment.plan",{"layers":{"image":{},"build":{},"runtime":{},"process":{}},"secret_bindings":[{"name":"TOKEN","reference_id":"inference/account","layer":"image"}]},component="14.2")[1].get("ok") is False,"image secret binding accepted"))
+        expect(f.bind()[1].get("ok") is True,"trusted provider binding failed")
+        resolution={"references":[{"name":"TOKEN","reference_id":"inference/account"}],"purpose":"WORKER_PROCESS","sandbox_id":f.ids["sandbox"],"boot_id":f.ids["boot"],"boot_generation":"1"}
+        check("credentials.resolver.actual-private-purpose",lambda:expect(private_resolve(resolution)=={"ok":True,"matched":True,"count":1},"actual resolver failed"))
+        check("credentials.resolver.wrong-boot-denied",lambda:expect(private_resolve({**resolution,"boot_id":uid()}).get("code")=="AUTH_STALE_BOOT","wrong target boot resolved secret"))
+        check("credentials.resolver.wrong-purpose-denied",lambda:expect(private_resolve({**resolution,"purpose":"WORKER_BUILD"}).get("ok") is False,"build purpose received process secret"))
+        check("credentials.resolver.provider-only-denied",lambda:expect(private_resolve({**resolution,"purpose":"PROVIDER_API"}).get("ok") is False,"operator resolver received provider administration key"))
+        check("credentials.resolver.loader-injection-denied",lambda:expect(private_resolve({**resolution,"references":[{"name":"NODE_OPTIONS","reference_id":"inference/account"}]}).get("ok") is False,"private resolver permitted loader injection"))
+        f.sql("UPDATE hyperfide.identity_credential_references SET expires_at=clock_timestamp()-interval '1 second' WHERE reference_id='inference/account'")
+        check("credentials.resolver.expired-reference-denied",lambda:expect(private_resolve(resolution).get("code")=="AUTH_EXPIRED","expired private credential resolved"))
+        f.sql("UPDATE hyperfide.identity_credential_references SET expires_at=$1 WHERE reference_id='inference/account'",[expiry])
+        revoked=f.invoke("credentials.reference.revoke",{"reference_id":"inference/account","expected_version":"2"},component="14.2")[1]
+        check("credentials.revoke.versioned",lambda:expect(revoked.get("result",{}).get("credential_version")=="3","revocation did not advance version"))
+        check("credentials.revoke.availability",lambda:expect(f.invoke("credentials.inspect",{"reference_id":"inference/account"},component="14.2")[1].get("result",{}).get("status")=="REVOKED","revoked reference available"))
+        check("credentials.revoke.new-attachment-denied",lambda:expect(f.invoke("credentials.attach",{"reference_id":"inference/account","layer":"process"},component="14.2")[1].get("ok") is False,"revoked reference attached"))
+        db=json.dumps(f.sql("SELECT row_to_json(r) FROM hyperfide.identity_credential_references r"))+json.dumps(f.sql("SELECT row_to_json(a) FROM hyperfide.identity_credential_attachments a"))
+        check("credentials.secret.absent-durable-metadata",lambda:expect(canary not in db,"secret persisted to PostgreSQL"))
+        redactor="""import {StreamingRedactor,composeEnvironment} from './services/hyperfide/dist/identity/credentials.js';const r=new StreamingRedactor(['secretVALUE','overlapVALUE']);let output=r.push('before sec')+r.push('retVAL')+r.push('UE after overlap')+r.push('VALUE tail',true);if(output!=='before [REDACTED] after [REDACTED] tail')throw Error('split redaction mismatch');const x=composeEnvironment({image:{A:'image'},build:{A:'build'},runtime:{A:'runtime'},process:{A:'process'}});if(x.A!=='process')throw Error('precedence mismatch');process.stdout.write('observed');"""
+        result=subprocess.run(["node","--input-type=module","-e",redactor],cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        check("credentials.streaming-redaction.and-precedence",lambda:expect(result.returncode==0 and result.stdout=="observed","split redaction/precedence failed: "+result.stderr))
+        permit_script="""import fs from 'node:fs';import {issueIsolationPermit,loadIsolationPermitVerifier,assertIsolationPermit,isVerifiedIsolationPermit} from './services/hyperfide/dist/identity/credentials.js';import {hash} from './services/hyperfide/dist/transport/protocol.js';import {randomUUID,sign} from 'node:crypto';const a=JSON.parse(fs.readFileSync(0,'utf8')),now=Date.now(),claims={schema_version:1,purpose:'EXTERNAL_WRITER_ISOLATION_ONLY',deployment_id:randomUUID(),operation_id:randomUUID(),organisation_id:a.organisation,run_id:a.run,source_epoch:a.epoch,topology_digest:hash('topology'),resources:[{reference_key:'sandbox/one',topology_digest:hash('resource-one')}],issued_at:new Date(now-1000).toISOString(),expires_at:new Date(now+60000).toISOString(),nonce:randomUUID()},expected={deployment_id:claims.deployment_id,operation_id:claims.operation_id,organisation_id:claims.organisation_id,run_id:claims.run_id,source_epoch:claims.source_epoch,topology_digest:claims.topology_digest},rows=[];const add=(name,good)=>rows.push([name,Boolean(good)]),denied=(fn)=>{try{fn();return false}catch{return true}},deniedAsync=async(fn)=>{try{await fn();return false}catch{return true}};fs.writeFileSync(a.config,JSON.stringify({schema_version:1,issuers:[{key_id:'fixture-operator',public_key_b64:a.public_key_b64}]}),{mode:0o600});const verifier=await loadIsolationPermitVerifier(a.config),serialized=await issueIsolationPermit(claims,{key_id:'fixture-operator',private_key_file:a.key}),permit=verifier.verify(serialized,expected);add('valid-signed-bound-proof',isVerifiedIsolationPermit(permit)&&permit.permit_digest===hash(serialized));assertIsolationPermit(permit,{...expected,resource_reference:'sandbox/one',resource_topology_digest:hash('resource-one')});add('allowed-resource-exact',true);add('cross-operation-denied',denied(()=>verifier.verify(serialized,{...expected,operation_id:randomUUID()})));add('cross-epoch-denied',denied(()=>verifier.verify(serialized,{...expected,source_epoch:randomUUID()})));add('cross-topology-denied',denied(()=>verifier.verify(serialized,{...expected,topology_digest:hash('different')})));add('extra-resource-denied',denied(()=>assertIsolationPermit(permit,{...expected,resource_reference:'sandbox/two',resource_topology_digest:hash('resource-one')})));add('forged-structural-proof-denied',denied(()=>assertIsolationPermit({...permit},expected)));const envelope=JSON.parse(serialized);envelope.signature_b64=Buffer.alloc(64).toString('base64url');add('invalid-signature-denied',denied(()=>verifier.verify(JSON.stringify(envelope),expected)));const bad=JSON.parse(serialized);bad.payload_b64=Buffer.from(JSON.stringify({...claims,operation_id:randomUUID()})).toString('base64url');add('changed-claims-denied',denied(()=>verifier.verify(JSON.stringify(bad),expected)));add('expired-issuance-denied',await deniedAsync(()=>issueIsolationPermit({...claims,issued_at:new Date(now-60000).toISOString(),expires_at:new Date(now-1).toISOString()},{key_id:'fixture-operator',private_key_file:a.key})));add('activation-purpose-denied',await deniedAsync(()=>issueIsolationPermit({...claims,purpose:'ACTIVATE_AUTHORITY'},{key_id:'fixture-operator',private_key_file:a.key})));add('replay-has-same-consumption-key',verifier.verify(serialized,expected).permit_digest===permit.permit_digest);add('proof-immutable',Object.isFrozen(permit)&&Object.isFrozen(permit.resources)&&Object.isFrozen(permit.resources[0]));process.stdout.write(JSON.stringify(rows));"""
+        permit_args={"organisation":f.ids["organisation"],"run":f.ids["run"],"epoch":f.ids["epoch"],"key":str(f.keys["operator"]["path"]),"public_key_b64":f.keys["operator"]["public_key_b64"],"config":str(f.path/"isolation-public.json")}
+        permits=subprocess.run(["node","--input-type=module","-e",permit_script],input=json.dumps(permit_args),cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=20)
+        expect(permits.returncode==0,"actual isolation permit primitive failed: "+permits.stderr[:800])
+        for name,observed in json.loads(permits.stdout):check("credentials.isolation-permit."+name,lambda value=observed:expect(value,"permit boundary failed"))
+    finally:f.close()
+    return int(any(actual!="observed" for _,actual in RESULTS))
+if __name__=="__main__":raise SystemExit(main())
