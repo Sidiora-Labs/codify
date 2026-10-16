@@ -37,7 +37,7 @@ def main():
         if not attachment:raise AssertionError(json.dumps(attached))
         file=f.path/"attachments"/str(attachment)/"value"
         def as_uid(number,path):
-            return subprocess.run(["/usr/bin/python3","-c","from pathlib import Path;import sys;sys.stdout.write(Path(sys.argv[1]).read_text())",str(path)],preexec_fn=lambda:(os.setgid(number),os.setuid(number)),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            return subprocess.run(["/usr/bin/python3","-c","from pathlib import Path;import sys;sys.stdout.write(Path(sys.argv[1]).read_text())",str(path)],env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'},preexec_fn=lambda:(os.setgid(number),os.setuid(number)),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         check("credentials.uid.owner-can-read",lambda:expect(as_uid(41001,file).stdout==canary,"assigned private UID cannot read attachment"))
         check("credentials.uid.other-denied",lambda:expect(as_uid(41002,file).returncode!=0,"another actor UID read secret"))
         check("credentials.uid.source-store-denied",lambda:expect(as_uid(41001,f.path/"secrets"/"token").returncode!=0,"actor traversed source store"))
