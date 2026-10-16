@@ -6,6 +6,7 @@ import {assertInvocation} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 
 const MAX_OBJECT=256*1024,MAX_MANIFEST=512*1024,MAX_CHUNKS=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -185,17 +186,17 @@ export class ArtifactStore{
  return scope;
  }
  private backend():S3{return new S3(this.config(),AbortSignal.any([this.context.signal,this.context.invocation?.signal??this.context.signal]));}
- private async transaction<T>(operation:(client:PrimaryTransaction)=>Promise<T>):Promise<T>{
+ private async transaction<T>(operation:(client:PrimaryTransaction)=>Promise<T>,mode:'READ'|'WRITE'='WRITE'):Promise<T>{
  const invocation=this.context.invocation;
  if(!invocation)fail('AUTH_REQUIRED','Artifact operation requires verified caller authority');
- return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:tx=>invocation.guard(tx)},async tx=>{
+ return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=>{await (mode==='WRITE'?writeSemanticDisposition:readSemanticDisposition)(tx,invocation.principal);await invocation.guard(tx);}},async tx=>{
  const result=await operation(tx);
  await invocation.guard(tx);
  return result;
  });
  }
  private async load(scope:Scope,id:string,client?:QuerySession):Promise<Artifact>{
- if(!client)return this.transaction(tx=>this.load(scope,id,tx));
+ if(!client)return this.transaction(tx=>this.load(scope,id,tx),'READ');
  const result=await client.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,id]);
  const row=result.rows[0];if(!row)fail('ARTIFACT_NOT_FOUND','Artifact is not registered in this scope');
  if(row.storage_backend!==BACKEND||(row.storage_key!==keyOf(scope,row.digest)&&row.storage_key!==keyOf(scope,row.digest,true)))fail('ARTIFACT_BINDING_CONFLICT','Artifact backend binding differs');
@@ -248,7 +249,7 @@ export class ArtifactStore{
  if(observation.availability!=='VERIFIED')return envelope(row,observation.availability);
  // Manifest promotion requires validated child references; generic reconciliation cannot bypass them.
  let current=row;
- const edgeCount=await this.transaction(tx=>tx.query<{count:string}>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[scope.organisation_id,scope.run_id,row.id]));
+ const edgeCount=await this.transaction(tx=>tx.query<{count:string}>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[scope.organisation_id,scope.run_id,row.id]),'READ');
  if(operation==='reconcile'&&row.status==='PENDING'){
  if(row.storage_key===keyOf(scope,row.digest,true)||edgeCount.rows[0]!.count!=='0')fail('ARTIFACT_NOT_COMPLETE','Resume manifest commit to validate chunk closure');
  current=await this.complete(row);
@@ -299,7 +300,7 @@ export class ArtifactStore{
  if('sha256:'+hasher.digest('hex')!==manifest.content_digest)fail('ARTIFACT_INTEGRITY','Concatenated content checksum differs');
  }
  private async edges(scope:Scope,parent:string,client?:QuerySession):Promise<Chunk[]>{
- if(!client)return this.transaction(tx=>this.edges(scope,parent,tx));
+ if(!client)return this.transaction(tx=>this.edges(scope,parent,tx),'READ');
  const result=await client.query<{sequence:number;child_artifact_id:string;offset_bytes:string;size_bytes:string;digest:string}>('SELECT d.sequence,d.child_artifact_id,d.offset_bytes::text,d.size_bytes::text,a.digest FROM hyperfide.artifact_dependencies d JOIN hyperfide.artifacts a ON a.organisation_id=d.organisation_id AND a.run_id=d.run_id AND a.id=d.child_artifact_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.parent_artifact_id=$3 ORDER BY d.sequence',[scope.organisation_id,scope.run_id,parent]);
  return result.rows.map(row=>({sequence:row.sequence,artifact_id:row.child_artifact_id,digest:row.digest,size_bytes:row.size_bytes,offset_bytes:row.offset_bytes}));
  }
@@ -330,7 +331,7 @@ export class ArtifactStore{
  }
  private async locate(input:unknown):Promise<unknown>{
  const value=fields(input,[...scopeKeys,'digest','expected_size_bytes']),scope=this.scope(value),identity=digest(value.digest),size=decimal(value.expected_size_bytes,BigInt(MAX_MANIFEST));
- const row=await this.transaction(async tx=>(await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[scope.organisation_id,scope.run_id,identity])).rows[0]);
+ const row=await this.transaction(async tx=>(await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[scope.organisation_id,scope.run_id,identity])).rows[0],'READ');
  if(!row)return {outcome:'NOT_FOUND',metadata_state:'ABSENT',availability:'NOT_EVALUATED',artifact:null,receipt:null,retry_authority:'NONE',authority:'NONE',live_qualification:'NOT_EVALUATED'};
  if(row.size_bytes!==size)fail('ARTIFACT_BINDING_CONFLICT','Located object size differs from expected immutable identity');
  if(row.status!=='COMPLETE')return envelope(row,'UNKNOWN',{metadata_state:'PRESENT',requires_reconciliation:row.status==='PENDING',retry_authority:'NONE'});
@@ -341,7 +342,7 @@ export class ArtifactStore{
  const value=fields(input,scopeKeys,['limit','after_artifact_id']),scope=this.scope(value),limit=value.limit??100;
  if(typeof limit!=='number'||!Number.isInteger(limit)||limit<1||limit>1000)fail('ARTIFACT_INPUT_INVALID','Invalid inventory limit');
  const after=value.after_artifact_id===undefined?null:uuid(value.after_artifact_id);
- const rows=await this.transaction(tx=>tx.query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]));
+ const rows=await this.transaction(tx=>tx.query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]),'READ');
  return {artifacts:rows.rows.slice(0,limit).map(publicArtifact),next_cursor:rows.rows.length>limit?rows.rows[limit-1]!.id:null,destructive_action:false,authority:'NONE',live_qualification:'NOT_EVALUATED'};
  }
  async invoke(action:string,input:unknown,context?:ComponentContext|InvocationContext):Promise<unknown>{
@@ -362,7 +363,7 @@ export class ArtifactStore{
  case 'artifact.object.locate':return await this.locate(input);
  default:fail('ARTIFACT_INPUT_INVALID','Unknown artifact operation');
  }})();
- if(this.context.invocation)await this.transaction(async()=>undefined);
+ if(this.context.invocation)await this.transaction(async()=>undefined,'READ');
  return result;
  }catch(error){if(error instanceof FoundationError)throw error;fail('ARTIFACT_DATABASE_UNAVAILABLE','Artifact metadata operation failed; reconcile before retry');}
  }
@@ -378,7 +379,7 @@ export class ArtifactStore{
  return artifact;
  });
  const observed=await this.backend().destroy(row.storage_key,row.digest,row.size_bytes);
- await this.transaction(async()=>undefined);
+ await this.transaction(async()=>undefined,'READ');
  return {outcome:observed,current_object_absent:observed==='ABSENT',physical_version_erasure:'NOT_QUALIFIED',grants_authority:false};
  }
 

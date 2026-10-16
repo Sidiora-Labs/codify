@@ -63,10 +63,8 @@ def main():
    nonlocal policy_path,policy_digest,scope
    scope={'organisation_id':f.ids['organisation'],'run_id':f.ids['run']}
    objects.ORG=scope['organisation_id'];objects.RUN=scope['run_id'];objects.SCOPE=scope
-   for name in ['0015-artifact-adoption.sql','0029-artifact-retention.sql']:
-    raw=(ROOT/'services/hyperfide/migrations'/name).read_bytes()
-    f.sql(raw.decode())
-    f.sql('INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES($1,$2,$3)',[int(name[:4]),name[:-4],sha(raw)])
+   for name in ['0008-provider-coordination.sql','0015-artifact-adoption.sql','0029-artifact-retention.sql']:
+    f.apply_migration(name[:-4])
    f.sql("CREATE TABLE hyperfide.fixture_release_links(organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL DEFAULT gen_random_uuid(),artifact_id uuid NOT NULL,PRIMARY KEY(organisation_id,run_id,id),FOREIGN KEY(organisation_id,run_id,artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id));CREATE TABLE hyperfide.fixture_prepared_links(organisation_id uuid NOT NULL,source_run_id uuid NOT NULL,manifest_digest hyperfide.digest NOT NULL,PRIMARY KEY(organisation_id,source_run_id,manifest_digest),FOREIGN KEY(organisation_id,source_run_id,manifest_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest));")
    policy['organisation_id']=scope['organisation_id'];policy_path=f.path/'retention-policy.json'
    raw=json.dumps(policy,separators=(',',':')).encode();policy_path.write_bytes(raw);policy_digest=sha(raw)
@@ -76,7 +74,7 @@ def main():
    'HF_ARTIFACT_S3_ACCESS_KEY_ID':objects.KEY,'HF_ARTIFACT_S3_SECRET_ACCESS_KEY':objects.SECRET,
    'HF_ARTIFACT_S3_SESSION_TOKEN':objects.TOKEN,'HF_ARTIFACT_ORGANISATION_ID':scope['organisation_id'],
    'HF_ARTIFACT_ALLOWED_RUN_IDS':json.dumps([scope['run_id']])})
-  service=identity.IdentityFixture(extra_components=('15.2','15.4'),extra_setup=setup,database='hf_task_15_4_qualification')
+  service=identity.IdentityFixture(extra_components=('8.2','8.3','15.2','15.4'),extra_setup=setup,database='hf_task_15_4_qualification')
   def invoke(action,value,*,body=None):
    return service.request(body or service.operation('15.4',action,value))
   def ok(action,value,component='15.4',body=None):
@@ -210,7 +208,7 @@ def main():
   check('retention.scope.authenticated',lambda:rejected('artifact.retention.inspect',dict(ref(run),run_id=identity.uid()),['RETENTION_SCOPE_DENIED']))
   def auth_required():
    import subprocess
-   script="import {createComponent} from './services/hyperfide/dist/artifacts/retention.js';try{await createComponent({}).actions['artifact.retention.inspect']({},{});process.exitCode=2;}catch(e){console.log(e.code);if(e.code!=='AUTH_REQUIRED')process.exitCode=3;}"
+   script="import {ArtifactRetention} from './services/hyperfide/dist/artifacts/retention.js';try{await new ArtifactRetention({}).invoke('artifact.retention.inspect',{});process.exitCode=2;}catch(e){console.log(e.code);if(e.code!=='AUTH_REQUIRED')process.exitCode=3;}"
    result=subprocess.run(['node','--input-type=module','-e',script],cwd=ROOT,text=True,capture_output=True,timeout=10)
    expect(result.returncode==0 and result.stdout.strip()=='AUTH_REQUIRED','unverified retention invocation accepted')
   check('retention.auth.required',auth_required)

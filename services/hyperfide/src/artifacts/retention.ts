@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
+import {registerArtifactDestructionPreflight} from './destruction.js';
 import {createHash} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import {FoundationError} from '../policy/programme.js';
 import {assertInvocation} from '../transport/protocol.js';
 
@@ -43,7 +45,7 @@ export class ArtifactRetention{
  return {digest:identity,minimum_age_ms:limits};
  }catch(error){if(error instanceof FoundationError)throw error;fail('RETENTION_POLICY_INVALID','Trusted retention policy is invalid');}
  }
- private async transaction<T>(body:(tx:PrimaryTransaction)=>Promise<T>):Promise<T>{const actor=this.actor();return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:actor.signal,guard:tx=>actor.guard(tx)},async tx=>{const result=await body(tx);await actor.guard(tx);return result;});}
+ private async transaction<T>(body:(tx:PrimaryTransaction)=>Promise<T>,mode:'READ'|'WRITE'='WRITE'):Promise<T>{const actor=this.actor();return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:actor.signal,guard:async tx=>{await (mode==='WRITE'?writeSemanticDisposition:readSemanticDisposition)(tx,actor.principal);await actor.guard(tx);}},async tx=>{const result=await body(tx);await actor.guard(tx);return result;});}
  private async artifact(tx:PrimaryTransaction,scope:Scope,id:string):Promise<Row>{const result=await tx.query('SELECT *,size_bytes::text,state_version::text,clock_timestamp() AS db_now FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[scope.organisation_id,scope.run_id,id]);const row=result.rows[0];if(!row)fail('RETENTION_NOT_FOUND','Artifact is not registered');return row;}
  private async blockers(tx:PrimaryTransaction,scope:Scope,row:Row,policy:Policy):Promise<string[]>{
  const reasons:string[]=[],now=new Date(row.db_now).getTime(),minimum=policy.minimum_age_ms[String(row.retention_class)];
@@ -56,6 +58,7 @@ export class ArtifactRetention{
  UNRESOLVED_FINDING:"SELECT 1 FROM hyperfide.findings f JOIN hyperfide.finding_observations o ON o.organisation_id=f.organisation_id AND o.run_id=f.run_id AND o.finding_id=f.id JOIN hyperfide.evidence e ON e.organisation_id=o.organisation_id AND e.run_id=o.run_id AND e.id=o.evidence_id WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.state IN ('OPEN','ACKNOWLEDGED') AND (e.artifact_id=$3 OR EXISTS(SELECT 1 FROM hyperfide.evidence_artifacts a WHERE a.organisation_id=e.organisation_id AND a.run_id=e.run_id AND a.evidence_id=e.id AND a.artifact_id=$3)) LIMIT 1",
  PENDING_PUBLICATION_EVIDENCE:"SELECT 1 FROM hyperfide.publication_intents p JOIN hyperfide.candidate_evidence c ON c.organisation_id=p.organisation_id AND c.run_id=p.run_id AND c.candidate_id=p.candidate_id JOIN hyperfide.evidence e ON e.organisation_id=c.organisation_id AND e.run_id=c.run_id AND e.id=c.evidence_id WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.state IN ('PENDING','EXECUTING') AND (e.artifact_id=$3 OR EXISTS(SELECT 1 FROM hyperfide.evidence_artifacts a WHERE a.organisation_id=e.organisation_id AND a.run_id=e.run_id AND a.evidence_id=e.id AND a.artifact_id=$3)) LIMIT 1",
  PENDING_PUBLICATION_MANIFEST:"SELECT 1 FROM hyperfide.publication_intents p JOIN hyperfide.integration_candidates c ON c.organisation_id=p.organisation_id AND c.run_id=p.run_id AND c.id=p.candidate_id JOIN hyperfide.submission_custodies s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.id=c.custody_id JOIN hyperfide.artifacts a ON a.organisation_id=s.organisation_id AND a.run_id=s.run_id AND a.digest IN (s.source_manifest_digest,s.evidence_manifest_digest,c.input_manifest_digest) WHERE p.organisation_id=$1 AND p.run_id=$2 AND a.id=$3 AND p.state IN ('PENDING','EXECUTING') LIMIT 1",
+ CHECKPOINT_CONTEXT: "SELECT 1 FROM hyperfide.checkpoint_context_artifacts x JOIN hyperfide.checkpoints c ON c.organisation_id=x.organisation_id AND c.run_id=x.run_id AND c.id=x.checkpoint_id JOIN hyperfide.artifacts a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.id=c.artifact_id WHERE x.organisation_id=$1 AND x.run_id=$2 AND x.artifact_id=$3 AND a.status='COMPLETE' LIMIT 1",
  ACTIVE_HOLD:"SELECT 1 FROM hyperfide.artifact_holds WHERE organisation_id=$1 AND run_id=$2 AND artifact_id=$3 AND status='ACTIVE' LIMIT 1",
  COMPLETE_PARENT:"SELECT 1 FROM hyperfide.artifact_dependencies d JOIN hyperfide.artifacts p ON p.organisation_id=d.organisation_id AND p.run_id=d.run_id AND p.id=d.parent_artifact_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.child_artifact_id=$3 AND p.status='COMPLETE' LIMIT 1",
  REQUIRED_EVIDENCE:"SELECT 1 FROM hyperfide.evidence e WHERE e.organisation_id=$1 AND e.run_id=$2 AND e.artifact_id=$3 AND e.admission_state IN ('PENDING','ADMITTED') UNION ALL SELECT 1 FROM hyperfide.evidence_artifacts a JOIN hyperfide.evidence e ON e.organisation_id=a.organisation_id AND e.run_id=a.run_id AND e.id=a.evidence_id WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.artifact_id=$3 AND e.admission_state IN ('PENDING','ADMITTED') LIMIT 1",
@@ -72,7 +75,7 @@ export class ArtifactRetention{
  const catalog=await tx.query<{schema_name:string;table_name:string;columns:{local:string;remote:string}[]}>(
  "SELECT ns.nspname AS schema_name,rel.relname AS table_name,jsonb_agg(jsonb_build_object('local',local_att.attname,'remote',remote_att.attname) ORDER BY link.position) AS columns FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid JOIN pg_namespace ns ON ns.oid=rel.relnamespace CROSS JOIN LATERAL unnest(con.conkey,con.confkey) WITH ORDINALITY AS link(local_number,remote_number,position) JOIN pg_attribute local_att ON local_att.attrelid=con.conrelid AND local_att.attnum=link.local_number JOIN pg_attribute remote_att ON remote_att.attrelid=con.confrelid AND remote_att.attnum=link.remote_number WHERE con.contype='f' AND con.confrelid='hyperfide.artifacts'::regclass GROUP BY con.oid,ns.nspname,rel.relname ORDER BY ns.nspname,rel.relname,con.oid");
  if(catalog.rows.length>256)fail('RETENTION_REFERENCE_CATALOG_LIMIT','Artifact reference catalog exceeds the reviewed bound');
- const known=new Set(['artifact_dependencies','checkpoints','evidence','evidence_artifacts','parse_blobs','artifact_adoptions','artifact_holds','artifact_gc_operations','artifact_retention_events']);
+ const known=new Set(['artifact_dependencies','checkpoints','evidence','evidence_artifacts','parse_blobs','artifact_adoptions','artifact_holds','artifact_gc_operations','artifact_retention_events','checkpoint_context_artifacts']);
  const quote=(name:string)=>'"'+name.replaceAll('"','""')+'"',reasons:string[]=[];
  for(const reference of catalog.rows){
  if(reference.schema_name==='hyperfide'&&known.has(reference.table_name))continue;
@@ -85,7 +88,7 @@ export class ArtifactRetention{
  }
 
  private result(row:Row):unknown{return {operation:row,current_object_absent:row.state==='ABSENT',cleanup_debt:['INTENT','REQUESTED','UNKNOWN','FAILED'].includes(row.state),physical_version_erasure:'NOT_QUALIFIED',grants_authority:false};}
- private async inspect(input:unknown):Promise<unknown>{const value=fields(input,['organisation_id','run_id','artifact_id','policy_digest']),scope=this.scope(value),policy=await this.policy(value.policy_digest);return this.transaction(async tx=>{const row=await this.artifact(tx,scope,uuid(value.artifact_id)),blockers=await this.blockers(tx,scope,row,policy);return {artifact_id:row.id,status:row.status,eligible:['PENDING','COMPLETE'].includes(row.status)&&blockers.length===0,blockers,policy_digest:policy.digest,grants_authority:false};});}
+ private async inspect(input:unknown):Promise<unknown>{const value=fields(input,['organisation_id','run_id','artifact_id','policy_digest']),scope=this.scope(value),policy=await this.policy(value.policy_digest);return this.transaction(async tx=>{const row=await this.artifact(tx,scope,uuid(value.artifact_id)),blockers=await this.blockers(tx,scope,row,policy);return {artifact_id:row.id,status:row.status,eligible:['PENDING','COMPLETE'].includes(row.status)&&blockers.length===0,blockers,policy_digest:policy.digest,grants_authority:false};},'READ');}
  private async reference(tx:PrimaryTransaction,scope:Scope,kind:string,id:string):Promise<void>{
  const tables:Record<string,string>={EVIDENCE:'evidence',FINDING:'findings',PUBLICATION:'publication_intents',RECOVERY:'checkpoints',ADOPTION:'artifact_adoptions'};
  const table=tables[kind];if(!table)fail('RETENTION_INPUT_INVALID','Unknown hold reference kind');
@@ -180,4 +183,4 @@ export class ArtifactRetention{
  catch(error){if(error instanceof FoundationError)throw error;fail('RETENTION_DATABASE_UNAVAILABLE','Retention operation failed; reconcile durable intent before retry');}
  }
 }
-export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(ACTIONS.map(action=>[action,(input:unknown,context:ComponentContext)=>new ArtifactRetention(context as Context).invoke(action,input)]))};}
+export function createComponent(_context:ComponentContext):Component{registerArtifactDestructionPreflight(_context);return {apiVersion:1,actions:Object.fromEntries(ACTIONS.map(action=>[action,(input:unknown,context:ComponentContext)=>new ArtifactRetention(context as Context).invoke(action,input)]))};}
