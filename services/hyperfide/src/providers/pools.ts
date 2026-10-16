@@ -6,6 +6,7 @@ import type {PrimaryTransaction,TransactionGateway} from '../storage/transaction
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
 import {databaseError} from '../storage/schema.js';
+import {validateProfile} from '../preparation/manifests.js';
 import {assertInvocation} from '../transport/protocol.js';
 import {invocationOf} from '../identity/enrollment.js';
 import type {InvocationContext} from '../transport/protocol.js';
@@ -13,12 +14,18 @@ import type {ProviderAdapter,ProviderOperation,ProviderOutcome,ProviderScope,Res
 
 export interface ProviderPreparationBinding {
  purpose:'PREPARATION'|'EXECUTION';scope:ProviderScope;preparation_digest:string;
- parameters:ProviderOperation<'create'>['parameters'];prepared_base:Record<string,unknown>|null;
+ parameters:ProviderOperation<'create'>['parameters'];adapter_policy_digest:string|null;prepared_base:Record<string,unknown>|null;
 }
+export interface ProviderProcessRecord {native_process_ref?:string|null;process_ref:string;payload_digest:string;resource:ResourceRef;state:'SUBMITTED'|'RUNNING'|'EXITED'|'UNKNOWN';provider_metadata:Record<string,unknown>}
+export interface ProviderResourceBinding {organisation_id:string;run_id:string;sandbox_id:string;boot_id:string;boot_generation:string}
 export interface ProviderPersistenceHooks {
   readonly invocation:InvocationContext;
   assertResourceBinding(operation:ProviderOperation):Promise<void>;
+  resolveResourceBinding(operation:ProviderOperation):Promise<ProviderResourceBinding>;
   resolvePreparation(operation:ProviderOperation<'create'>):Promise<ProviderPreparationBinding>;
+  claimProcess(operation:ProviderOperation<'execute'>,record:ProviderProcessRecord):Promise<{disposition:'NEW'|'EXISTING';record:ProviderProcessRecord}>;
+  resolveProcess(operation:ProviderOperation,processRef:string):Promise<ProviderProcessRecord|null>;
+  persistEarlyProcess(operation:ProviderOperation<'execute'>,nativeProcessRef:string):Promise<void>;
   assignedBootGeneration(operation:ProviderOperation<'create'>):Promise<string>;
   persistEarlyResource(operation:ProviderOperation<'create'>,nativeSandboxId:string):Promise<ResourceRef>;
   recordObservation(operation:ProviderOperation,outcome:ProviderOutcome):Promise<void>;
@@ -36,8 +43,18 @@ export interface OwnershipObservation {matches:boolean;operation_id:string;nativ
 export type ProviderOwnershipProbe=(scope:ProviderScope,operationId:string,nativeId:string,signal:AbortSignal)=>Promise<OwnershipObservation>;
 export interface ProviderRunnerBinding extends Record<string,unknown> {organisation_id:string;run_id:string;session_id:string;pool_id:string;sandbox_id:string;external_sandbox_id:string;boot_generation:string;preparation_digest:string}
 export interface ProviderRunnerBindingProof {evidence_digest:string;observed_at:string}
-export type ProviderRunnerBindingVerifier=(tx:PrimaryTransaction,binding:ProviderRunnerBinding)=>Promise<ProviderRunnerBindingProof|null>;
+export type ProviderRunnerBindingVerifier=(tx:PrimaryTransaction,binding:ProviderRunnerBinding,request:unknown)=>Promise<ProviderRunnerBindingProof|null>;
+export interface ProviderIsolationTransport {
+ destroy(operation:ProviderOperation<'destroy'>,signal?:AbortSignal):Promise<ProviderOutcome<'destroy'>>;
+ observe(operation:ProviderOperation<'observe'>,signal?:AbortSignal):Promise<ProviderOutcome<'observe'>>;
+}
+export type ProviderIsolationFactory=(scope:ProviderScope)=>ProviderIsolationTransport|Promise<ProviderIsolationTransport>;
+export interface ProviderDestructionRequest {organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;operation_id:string}
+export interface ProviderDestructionProof {evidence_digest:string;observed_at:string}
+export type ProviderDestructionPreflight=(tx:PrimaryTransaction,input:ProviderDestructionRequest)=>Promise<ProviderDestructionProof|null>;
 export interface ProviderRuntimeRegistry {
+ destructionPreflight?:ProviderDestructionPreflight;
+ isolation:Map<string,ProviderIsolationFactory>;
  runnerBindingVerifier?:ProviderRunnerBindingVerifier;
  adapters:Map<string,ProviderAdapterFactory>;observers:Map<string,ProviderQuotaObserver>;probes:Map<string,ProviderOwnershipProbe>;
 }
@@ -57,8 +74,20 @@ export function bindProviderInvocation(database:ProviderDatabase,config:Deployme
 export function assertInvocationRun(database:ProviderDatabase,run:string):void{
  const invocation=providerInvocation(database);if(invocation.principal.run_id!==run)fail('AUTH_SCOPE_DENIED','Provider operation belongs to another authenticated run');
 }
+export async function resolveSandboxBinding(database:ProviderDatabase,config:DeploymentConfig,run:string,sandbox:string,op:ProviderOperation):Promise<ProviderResourceBinding>{
+ assertInvocationRun(database,run);
+ return transaction(database,async tx=>{
+  const rows=await tx.query('SELECT s.*,b.boot_id FROM hyperfide.sandboxes s JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation WHERE s.organisation_id=$1 AND s.id=$2 FOR SHARE OF s,b',[config.organisation_id,uuid(sandbox)]);
+  const row=rows.rows[0];if(!row)fail('RESOURCE_OWNERSHIP_UNKNOWN','Current logical resource binding unavailable');
+  const {scope}=await currentPool(tx,config,row.pool_id);
+  if(digestDocument(scope)!==digestDocument(op.scope)||op.resource&&(op.resource.native_sandbox_id!==row.native_sandbox_id||op.resource.sandbox_boot_generation!==String(row.boot_generation)))fail('STALE_SANDBOX_GENERATION','Resource scope or current boot changed');
+  if(op.preparation_digest!==null&&op.preparation_digest!==row.preparation_digest)fail('PREPARATION_MISMATCH','Resource preparation binding changed');
+  return{organisation_id:config.organisation_id,run_id:run,sandbox_id:sandbox,boot_id:row.boot_id,boot_generation:String(row.boot_generation)};
+ });
+}
+export function createProviderRuntimeRegistry():ProviderRuntimeRegistry{return{adapters:new Map(),observers:new Map(),probes:new Map(),isolation:new Map()};}
 export function createProviderDatabase(context:ComponentContext):ProviderDatabase {
- const runtime:ProviderRuntimeRegistry={adapters:new Map(),observers:new Map(),probes:new Map()},gateway=context.resources.gateway;
+ const runtime=createProviderRuntimeRegistry(),gateway=context.resources.gateway;
  return{gateway,runtime,query:<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[])=>gateway.withPrimaryTransaction(
  {timeoutMs:10000,maxRetries:2,signal:context.signal},tx=>tx.query<R>(text,values))};
 }
@@ -67,6 +96,7 @@ function register<T>(map:Map<string,T>,provider:string,implementation:T):()=>voi
   throw new FoundationError('PROVIDER_REGISTRATION_CONFLICT','Provider implementation must be registered once by trusted service startup');
  map.set(provider,implementation);return()=>{if(map.get(provider)===implementation)map.delete(provider);};
 }
+export function registerIsolationTransport(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',factory:ProviderIsolationFactory){return register(runtime.isolation,provider,factory);}
 export function registerProviderAdapter(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',factory:ProviderAdapterFactory){return register(runtime.adapters,provider,factory);}
 export function registerProviderQuotaObserver(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',observer:ProviderQuotaObserver){return register(runtime.observers,provider,observer);}
 export function registerProviderOwnershipProbe(runtime:ProviderRuntimeRegistry,provider:'railway'|'blaxel',probe:ProviderOwnershipProbe){return register(runtime.probes,provider,probe);}
@@ -121,7 +151,7 @@ type Limits=Partial<Record<QuotaDimension,string>>;
 export interface PoolConfig {
   id:string;provider:'railway'|'blaxel';account_key:string;environment_key:string;region:string;
   profile_id:string|null;preparation_digest:string;approved_limits:Limits;planning_limits:Limits;
-  create_policy:{seed_reference:string;network:'ISOLATED'|'PRIVATE';stdin_required:boolean};
+  create_policy:{seed_reference:string;network:'ISOLATED'|'PRIVATE';stdin_required:boolean;adapter_policy_digest?:string};
 }
 export interface DeploymentConfig {
   schema_version:1;organisation_id:string;revision:string;
@@ -152,7 +182,7 @@ export function validateDeployment(value:unknown):DeploymentConfig {
     const id=uuid(p.id);if(ids.has(id))fail('POOL_CONFIG_INVALID','Duplicate pool');ids.add(id);
     const key=provider(p.provider)+':'+str(p.account_key,256);if(!accounts.has(key))fail('POOL_CONFIG_INVALID','Pool account is not configured');
     str(p.environment_key,256);str(p.region,256);if(p.profile_id!==null)uuid(p.profile_id);dg(p.preparation_digest);
-    const cp=obj(p.create_policy,['seed_reference','network','stdin_required']);str(cp.seed_reference);if(!['ISOLATED','PRIVATE'].includes(String(cp.network))||typeof cp.stdin_required!=='boolean')fail('POOL_CONFIG_INVALID','Invalid trusted create policy');
+    const cp=obj(p.create_policy);if(Object.keys(cp).some(k=>!['seed_reference','network','stdin_required','adapter_policy_digest'].includes(k))||['seed_reference','network','stdin_required'].some(k=>!Object.hasOwn(cp,k)))fail('POOL_CONFIG_INVALID','Invalid create policy fields');if(cp.adapter_policy_digest!==undefined)dg(cp.adapter_policy_digest);str(cp.seed_reference);if(!['ISOLATED','PRIVATE'].includes(String(cp.network))||typeof cp.stdin_required!=='boolean')fail('POOL_CONFIG_INVALID','Invalid trusted create policy');
     const budget=limits(p.approved_limits);limits(p.planning_limits);
     if(budget.SANDBOX===undefined||budget.PROVISIONING===undefined)fail('POOL_CONFIG_INVALID','Sandbox and provisioning budgets must be separate');
   }
@@ -171,7 +201,7 @@ export async function inspectProviderSchema(pool:ProviderDatabase):Promise<unkno
   const migration=await pool.query('SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=8');
   if(migration.rows[0]?.name!=='0008-provider-coordination'||migration.rows[0]?.checksum!==checksum)
     fail('PROVIDER_SCHEMA_NOT_READY','The dedicated migration runner must apply the pinned provider migration');
-  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations'];
+  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations','provider_profile_lineage','provider_process_candidates'];
   const result=await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='hyperfide' AND tablename=ANY($1::text[])",[tables]);
   if(result.rows.length!==tables.length)fail('PROVIDER_SCHEMA_NOT_READY','Provider migration tables are incomplete');
   return{ready:true,version:8,name:'0008-provider-coordination',checksum};
@@ -276,26 +306,79 @@ export async function assertPoolCapacity(client:PrimaryTransaction,config:Deploy
   }
 }
 
+export function approvedProfilePolicyDigest(value:unknown):string{
+ validateProfile(value);const profile=JSON.parse(JSON.stringify(value)) as Record<string,unknown>;
+ delete profile.profile_id;delete profile.profile_version;
+ const pins=(raw:unknown)=>{if(!Array.isArray(raw))fail('PREPARATION_MISMATCH','Profile pin collection unavailable');return raw.map(v=>({path:obj(v).path}));};
+ profile.repositories=(profile.repositories as Array<Record<string,unknown>>).map(r=>({...r,commit:null,submodules:(r.submodules as Array<Record<string,unknown>>).map(m=>({...m,commit:null}))}));
+ profile.package_managers=(profile.package_managers as Array<Record<string,unknown>>).map(m=>({...m,locks:pins(m.locks)}));
+ profile.recipe={path:obj(profile.recipe).path};
+ for(const key of ['generated_inputs','build_config','preparation_evidence'])profile[key]=pins(profile[key]);
+ profile.caches=(profile.caches as Array<Record<string,unknown>>).map(c=>({...c,input_digest:null}));
+ return digestDocument(profile);
+}
+export interface SelectedEnvironmentInput {
+ organisation_id:string;pool_id:string;configuration_digest:string;parent_profile_id:string;parent_preparation_digest:string;
+ profile_id:string;preparation_digest:string;source_manifest_digest?:string;
+}
+export async function readSelectedEnvironmentProfile(tx:PrimaryTransaction,input:SelectedEnvironmentInput):Promise<{manifest:Record<string,unknown>;lineage:Record<string,unknown>|null}|null>{
+ assertPrimaryTransaction(tx);
+ const read=async(id:string,expected:string)=>{
+  const rows=await tx.query('SELECT manifest,content_digest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2 FOR SHARE',[input.organisation_id,id]);
+  const row=rows.rows[0];if(!row||row.content_digest!==expected)return null;
+  const raw=obj(row.manifest);if(raw.schema_version!==1&&raw.schema_version!==2)return null;
+  const manifest=obj(raw,raw.schema_version===1?['schema_version','profile','files','directories','scan','digest']:['schema_version','profile','files','directories','symlinks','scan','digest']),body={...manifest};delete body.digest;
+  if(manifest.digest!==expected||digestDocument(body)!==expected)return null;
+  validateProfile(manifest.profile);return manifest;
+ };
+ const manifest=await read(input.profile_id,input.preparation_digest);if(!manifest)return null;
+ if(input.profile_id===input.parent_profile_id&&input.preparation_digest===input.parent_preparation_digest)return{manifest,lineage:null};
+ const parent=await read(input.parent_profile_id,input.parent_preparation_digest);if(!parent)return null;
+ const rows=await tx.query("SELECT * FROM hyperfide.provider_profile_lineage WHERE organisation_id=$1 AND pool_id=$2 AND configuration_digest=$3 AND parent_profile_id=$4 AND parent_preparation_digest=$5 AND derived_profile_id=$6 AND derived_preparation_digest=$7 AND state='QUALIFIED' AND observed_at<=clock_timestamp() AND expires_at>clock_timestamp() FOR SHARE",
+ [input.organisation_id,input.pool_id,input.configuration_digest,input.parent_profile_id,input.parent_preparation_digest,input.profile_id,input.preparation_digest]);
+ if(rows.rows.length!==1)return null;const lineage=rows.rows[0]!;
+ if(input.source_manifest_digest&&lineage.source_manifest_digest!==input.source_manifest_digest)return null;
+ if(approvedProfilePolicyDigest(parent.profile)!==lineage.accepted_policy_digest||approvedProfilePolicyDigest(manifest.profile)!==lineage.accepted_policy_digest)return null;
+ const required=[...new Set([lineage.source_manifest_artifact_digest,lineage.execution_receipt_artifact_digest,lineage.verification_receipt_artifact_digest])];
+ const retained=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",[input.organisation_id,lineage.source_run_id,required]);
+ if(retained.rows.length!==required.length)return null;
+ const {state,observed_at,expires_at,created_at,lineage_digest,...identity}=lineage;
+ if(digestDocument(identity)!==lineage_digest)return null;
+ return{manifest,lineage};
+}
+
 export interface RuntimeReadinessInput {
- organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;slot_id:string;preparation_digest:string;source_digest:string;
+ organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;slot_id:string;boot_preparation_digest:string;preparation_digest:string;source_digest:string;
 }
 export interface RuntimeReadinessRecord extends Record<string,unknown> {
- readiness_digest:string;profile_digest:string;preparation_digest:string;source_digest:string;source_manifest_digest:string;source_state_digest:string;
- source_object_id:string;source_tree_id:string;source_repository_id:string;source_bindings:Array<{id:string;commit:string;tree:string}>;
+ readiness_digest:string;profile_digest:string;boot_preparation_digest:string;preparation_digest:string;source_digest:string;source_manifest_digest:string;source_state_digest:string;
+ source_object_id:string;source_tree_id:string;source_repository_id:string;source_repository_key:string;execution_receipt_artifact_digest:string;verification_receipt_artifact_digest:string;source_bindings:Array<{id:string;commit:string;tree:string}>;
  execution_receipt_digest:string;verification_receipt_digest:string;observed_at:string;expires_at:string;readiness_input:Record<string,unknown>;readiness_input_digest:string;
 }
 export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeReadinessInput):Promise<RuntimeReadinessRecord|null>{
- assertPrimaryTransaction(tx);uuid(input.organisation_id);uuid(input.run_id);uuid(input.sandbox_id);dec(input.boot_generation);uuid(input.slot_id);dg(input.preparation_digest);dg(input.source_digest);
- const rows=await tx.query("SELECT o.*,s.boot_generation::text AS current_generation,s.preparation_digest AS current_preparation,b.boot_id AS current_boot_id,p.profile_id AS current_profile,w.state AS slot_state,ep.manifest AS profile_manifest,ep.content_digest AS current_profile_preparation FROM hyperfide.runtime_environment_observations o JOIN hyperfide.sandboxes s ON s.organisation_id=o.organisation_id AND s.id=o.sandbox_id JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.worker_slots w ON w.organisation_id=o.organisation_id AND w.id=o.slot_id AND w.sandbox_id=o.sandbox_id AND w.boot_generation=o.boot_generation JOIN hyperfide.environment_profiles ep ON ep.organisation_id=o.organisation_id AND ep.id=o.profile_id WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.sandbox_id=$3 AND o.boot_generation=$4 AND o.slot_id=$5 ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC LIMIT 1 FOR SHARE OF o,s,b,p,w,ep",
+ assertPrimaryTransaction(tx);uuid(input.organisation_id);uuid(input.run_id);uuid(input.sandbox_id);dec(input.boot_generation);uuid(input.slot_id);dg(input.boot_preparation_digest);dg(input.preparation_digest);dg(input.source_digest);
+ const rows=await tx.query("SELECT o.*,s.boot_generation::text AS current_generation,s.preparation_digest AS current_preparation,b.boot_id AS current_boot_id,p.profile_id AS current_profile,p.id AS current_pool,pc.configuration_digest AS current_configuration,pc.document->'pool'->>'preparation_digest' AS parent_preparation,w.state AS slot_state,ep.manifest AS profile_manifest,ep.content_digest AS current_profile_preparation FROM hyperfide.runtime_environment_observations o JOIN hyperfide.sandboxes s ON s.organisation_id=o.organisation_id AND s.id=o.sandbox_id JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.provider_pool_configurations pc ON pc.organisation_id=p.organisation_id AND pc.pool_id=p.id AND pc.active JOIN hyperfide.worker_slots w ON w.organisation_id=o.organisation_id AND w.id=o.slot_id AND w.sandbox_id=o.sandbox_id AND w.boot_generation=o.boot_generation JOIN hyperfide.environment_profiles ep ON ep.organisation_id=o.organisation_id AND ep.id=o.profile_id WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.sandbox_id=$3 AND o.boot_generation=$4 AND o.slot_id=$5 ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC LIMIT 1 FOR SHARE OF o,s,b,p,pc,w,ep",
   [input.organisation_id,input.run_id,input.sandbox_id,input.boot_generation,input.slot_id]);
- const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||row.current_profile!==row.profile_id||
-  row.current_preparation!==input.preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
+ const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||
+  row.current_preparation!==input.boot_preparation_digest||row.boot_preparation_digest!==input.boot_preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
   row.source_manifest_digest!==input.source_digest||row.source_digest!==row.source_manifest_digest||!['READY','ALLOCATED'].includes(row.slot_state)||new Date(row.observed_at).getTime()>Date.now()||new Date(row.expires_at).getTime()<=Date.now())return null;
- const profile=(row.profile_manifest as Record<string,unknown>).profile;
+ const selected=await readSelectedEnvironmentProfile(tx,{organisation_id:input.organisation_id,pool_id:row.current_pool,configuration_digest:row.current_configuration,parent_profile_id:row.current_profile,parent_preparation_digest:row.parent_preparation,profile_id:row.profile_id,preparation_digest:input.preparation_digest,source_manifest_digest:row.source_manifest_digest});if(!selected)return null;
+ const manifest=row.profile_manifest as Record<string,unknown>,manifestBody={...manifest};delete manifestBody.digest;
+ if(manifest.digest!==input.preparation_digest||digestDocument(manifestBody)!==input.preparation_digest)return null;
+ const profile=manifest.profile;
  if(!profile||digestDocument(profile)!==row.profile_digest||digestDocument(row.source_bindings)!==row.source_state_digest||digestDocument(row.readiness_input)!==row.readiness_input_digest)return null;
- const artifacts=await tx.query("SELECT count(*)::int AS count FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE'",
-  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest])]]);
- if(artifacts.rows[0]?.count!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest]).size)return null;
+ if(!Array.isArray(row.source_bindings)||!Array.isArray((profile as Record<string,unknown>).repositories))return null;
+ const measured=row.source_bindings.filter((v:unknown)=>!!v&&typeof v==='object'&&(v as Record<string,unknown>).id===row.source_repository_key);
+ if(measured.length!==1||measured[0].commit!==row.source_object_id||measured[0].tree!==row.source_tree_id)return null;
+ const declared=((profile as Record<string,unknown>).repositories as Array<Record<string,unknown>>).filter(v=>v.id===row.source_repository_key);
+ if(declared.length!==1||typeof declared[0]!.url!=='string')return null;
+ // Repository keys belong to the profile; UUIDs belong to the accepted run.
+ // Resolve them through the exact approved URL, never by copying caller labels.
+ const mapped=await tx.query("SELECT r.repository_id,p.url FROM hyperfide.run_repositories r JOIN hyperfide.runs run ON run.organisation_id=r.organisation_id AND run.id=r.run_id JOIN hyperfide.repositories p ON p.organisation_id=r.organisation_id AND p.id=r.repository_id AND p.project_id=run.project_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND p.url=$3 FOR SHARE OF r,run,p",[input.organisation_id,input.run_id,declared[0]!.url]);
+ if(mapped.rows.length!==1||mapped.rows[0]!.repository_id!==row.source_repository_id)return null;
+ const artifacts=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",
+  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest])]]);
+ if(artifacts.rows.length!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest]).size)return null;
  const {current_generation,current_preparation,current_boot_id,current_profile,slot_state,profile_manifest,current_profile_preparation,...proof}=row;
  return{...proof,observed_at:new Date(row.observed_at).toISOString(),expires_at:new Date(row.expires_at).toISOString()} as RuntimeReadinessRecord;
 }
@@ -308,6 +391,7 @@ export function createComponent(context:ComponentContext):Component {
     try{return await fn(input,bindProviderInvocation(database,await config(),invocationOf(requestContext)));}catch(e){throw e instanceof FoundationError?e:databaseError(e);}
   };
   return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness},...(context.role==='provisioner'?{'provider.registry.v1':{
+ registerIsolationTransport:(provider:'railway'|'blaxel',factory:ProviderIsolationFactory)=>registerIsolationTransport(database.runtime,provider,factory),
  registerProviderAdapter:(provider:'railway'|'blaxel',factory:ProviderAdapterFactory)=>registerProviderAdapter(database.runtime,provider,factory),
  registerProviderQuotaObserver:(provider:'railway'|'blaxel',observer:ProviderQuotaObserver)=>registerProviderQuotaObserver(database.runtime,provider,observer),
  registerProviderOwnershipProbe:(provider:'railway'|'blaxel',probe:ProviderOwnershipProbe)=>registerProviderOwnershipProbe(database.runtime,provider,probe)
