@@ -8,25 +8,50 @@
     "V-034"
   ],
   "assertion_ids": [
-    "assurance.16.4.auth.assurance.validity.inspect",
-    "assurance.16.4.auth.assurance.invalidate",
-    "assurance.16.4.auth.assurance.requalification.accept",
-    "assurance.16.4.primary.unbranded-denied"
+    "assurance.16.4.auth.absent.assurance.validity.inspect",
+    "assurance.16.4.auth.forged.assurance.validity.inspect",
+    "assurance.16.4.auth.absent.assurance.invalidate",
+    "assurance.16.4.auth.forged.assurance.invalidate",
+    "assurance.16.4.auth.absent.assurance.requalification.accept",
+    "assurance.16.4.auth.forged.assurance.requalification.accept",
+    "assurance.16.4.primary.unbranded-denied",
+    "assurance.16.4.https.signed-missing",
+    "assurance.16.4.https.cross-scope",
+    "assurance.16.4.https.wrong-role",
+    "assurance.16.4.https.no-authority"
   ],
   "argv": [
     "python3",
     "tests/hyperfide/cases/tasks/16_4.py"
   ],
-  "timeout_seconds": 180,
-  "required_env": [],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
   "fixtures": [
     "services/hyperfide/dist/assurance/submission.js",
     "services/hyperfide/dist/assurance/executor.js",
     "services/hyperfide/dist/assurance/coverage.js",
     "services/hyperfide/dist/assurance/validity.js",
-    "services/hyperfide/dist/storage/transactions.js"
+    "services/hyperfide/dist/storage/transactions.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/storage/dispositions.js"
   ],
-  "resources": [],
+  "resources": [
+    {
+      "id": "hf-task-16.4-signed-database",
+      "kind": "postgresql-database",
+      "scope": "task16.4-signed-disposable"
+    },
+    {
+      "id": "hf-task-16.4-signed-service",
+      "kind": "https-service",
+      "scope": "task16.4-signed-disposable"
+    }
+  ],
   "cleanup_argv": [
     "python3",
     "tests/hyperfide/cases/tasks/16_4.py",
@@ -34,7 +59,8 @@
   ],
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
-    "assurance/observations-16.4.json"
+    "assurance/observations-16.4.json",
+    "assurance/signed-absence-16.4.json"
   ],
   "source_files": [
     "services/hyperfide/src/assurance/submission.ts",
@@ -56,7 +82,8 @@
     "tests/hyperfide/cases/tasks/16_4.py",
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
-    "tests/hyperfide/qualify.py"
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py"
   ],
   "source_roots": [
     "services/hyperfide/src",
@@ -64,5 +91,10 @@
     "services/hyperfide/components",
     "services/hyperfide/migrations"
   ],
-  "actions": []
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.start",
+    "https.fixture.stop"
+  ]
 }

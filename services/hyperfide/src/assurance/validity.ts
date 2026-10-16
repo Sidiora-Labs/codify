@@ -48,7 +48,7 @@ export async function inspectValidity(db:PrimaryClient,s:CoverageScope,id:string
 }
 async function inspect(ctx:ComponentContext,raw:unknown):Promise<Data>{
  const v=fields(raw,['organisation_id','run_id','submission_id']),s=scope(ctx,v),id=uuid(v.submission_id);
- return transaction(ctx,db=>inspectValidity(db,{organisation_id:s[0],run_id:s[1]},id));
+ return transaction(ctx,db=>inspectValidity(db,{organisation_id:s[0],run_id:s[1]},id),false,'READ');
 }
 async function freshContext(ctx:ComponentContext,db:PrimaryClient,s:[string,string],c:Data,saved:Data,v:Data):Promise<Data>{
  if(v.input_packet_digest===undefined)fail('QUALIFICATION_PACKET_REQUIRED','Fresh requalification requires an actual immutable execution packet');
@@ -97,7 +97,7 @@ async function invalidate(ctx:ComponentContext,raw:unknown):Promise<Data>{
  if(v.publication_operation_id!==undefined)uuid(v.publication_operation_id);
  if(v.input_packet_digest!==undefined)digest(v.input_packet_digest);
  const requestDigest=hash(v);
- return transaction(ctx,async db=>{
+ const durable=await transaction(ctx,async db=>{
   const c=await custodyLock(db,s,id);
   const replay=await db.query('SELECT request_digest,affected_checks,requalification_id FROM hyperfide.assurance_invalidations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,requestId]);
   if(replay.rows[0]){
@@ -112,48 +112,62 @@ async function invalidate(ctx:ComponentContext,raw:unknown):Promise<Data>{
   const changed=Object.keys(v.changes).filter(key=>INPUT_KEYS.includes(key as any)&&v.changes[key]!==applicable.input_manifest[key]);
   const after={...applicable.input_manifest};for(const key of changed)after[key]=v.changes[key];
   let affected=saved.policy.checks.filter((check:Data)=>check.input_keys.some((key:string)=>changed.includes(key))).map((check:Data)=>check.id);
-  let operation:string|null=null,blocked:string|null=null,context:Data|undefined;
+  const operation:null=null,blocked:null=null;
   const needsRequalification=changed.length>0||applicable.applicability==='STALE'&&v.input_packet_digest!==undefined;
   if(needsRequalification){
    // Invalidation commits even when a fresh registry/packet/environment is not yet available.
    await db.query("UPDATE hyperfide.assurance_applicability SET applicability='STALE',input_manifest=$4,reasons=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3",
     [...s,id,after,JSON.stringify(changed.map(key=>({input:key,before:applicable.input_manifest[key],after:after[key]})))]);
    if(c.authority==='ACTIVE')await db.query("UPDATE hyperfide.tasks SET state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.task_id]);
-   await db.query('SAVEPOINT assurance_fresh_context');
-   try{
-    await executionGate(ctx,db,s,'ADMISSION');
-    context=await freshContext(ctx,db,s,c,saved,v);
-    if(canonical(context.inputs)!==canonical(after))blocked='QUALIFICATION_INPUT_MISMATCH';
-    await db.query('RELEASE SAVEPOINT assurance_fresh_context');
-   }catch(error){
-    await db.query('ROLLBACK TO SAVEPOINT assurance_fresh_context');
-    await db.query('RELEASE SAVEPOINT assurance_fresh_context');context=undefined;
-    if(error instanceof FoundationError)blocked=error.code;
-    else if(error&&typeof error==='object'&&'code' in error)blocked='QUALIFICATION_CONTEXT_DATABASE_UNAVAILABLE';
-    else throw error;
-   }
-   if(context&&!blocked){
-    if(hash(context.policy)!==hash(saved.policy))affected=context.policy.checks.map((check:Data)=>check.id);
-    const pending=await db.query("SELECT q.id,q.qualification_job_id,i.policy,q.input_manifest_digest FROM hyperfide.requalification_operations q JOIN hyperfide.assurance_requalification_inputs i ON i.organisation_id=q.organisation_id AND i.run_id=q.run_id AND i.operation_id=q.id WHERE q.organisation_id=$1 AND q.run_id=$2 AND q.custody_id=$3 AND q.state IN ('PENDING','RUNNING') FOR UPDATE OF q",[...s,id]);
-    const same=pending.rows.find((q:Data)=>q.input_manifest_digest===hash(after)&&hash(q.policy)===hash(context!.policy));
-    if(same)operation=same.id;
-    else{
-     for(const old of pending.rows){
-      await db.query("UPDATE hyperfide.qualification_jobs SET state='CANCELLED',lease_generation=lease_generation+1,lease_owner=NULL,lease_expires_at=NULL,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING','RUNNING')",[...s,old.qualification_job_id]);
-      await db.query("UPDATE hyperfide.requalification_operations SET state='CANCELLED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,old.id]);
-     }
-     operation=randomUUID();const job=randomUUID();
-     await db.query('INSERT INTO hyperfide.qualification_jobs(organisation_id,run_id,id,custody_id,custody_generation,rubric_digest) VALUES($1,$2,$3,$4,$5,$6)',[...s,job,id,String(c.custody_generation),context.policy.rubric_digest]);
-     await db.query('INSERT INTO hyperfide.requalification_operations(organisation_id,run_id,id,custody_id,custody_generation,qualification_job_id,request_id,input_manifest_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[...s,operation,id,String(c.custody_generation),job,requestId,hash(after)]);
-     await db.query('INSERT INTO hyperfide.assurance_requalification_inputs(organisation_id,run_id,operation_id,publication_operation_id,manifest,policy,registry_digest,input_manifest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[...s,operation,context.manifest.publication_operation_id??null,context.manifest,context.policy,hash(context.policy),after]);
-    }
-   }
+   await db.query("UPDATE hyperfide.qualification_jobs SET state='CANCELLED',lease_generation=lease_generation+1,lease_owner=NULL,lease_expires_at=NULL,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 AND state IN ('PENDING','RUNNING')",[...s,id]);
+   await db.query("UPDATE hyperfide.requalification_operations SET state='CANCELLED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 AND state IN ('PENDING','RUNNING')",[...s,id]);
+
   }
   await db.query('INSERT INTO hyperfide.assurance_invalidations(organisation_id,run_id,request_id,custody_id,request_digest,before_inputs,after_inputs,affected_checks,requalification_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[...s,requestId,id,requestDigest,applicable.input_manifest,after,JSON.stringify(affected),operation]);
   return {replayed:false,applicability:needsRequalification?'STALE':applicable.applicability,affected_checks:affected,
    requalification_id:operation,requalification_blocked_reason:blocked,historical_receipts_preserved:true,
    custody_authority:c.authority,compute_authority_restored:false,state_version:(BigInt(version)+(needsRequalification?1n:0n)).toString()};
  });
+ // The gateway owns transaction control: a failed optional scheduling lookup must never undo invalidation.
+ try{
+  const scheduled=await transaction(ctx,async db=>{
+   const c=await custodyLock(db,s,id);
+   const recorded=(await db.query('SELECT request_digest,before_inputs,after_inputs,affected_checks FROM hyperfide.assurance_invalidations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,requestId])).rows[0];
+   if(!recorded||recorded.request_digest!==requestDigest)fail('QUALIFICATION_IDEMPOTENCY_CONFLICT','Durable invalidation identity differs');
+   const existing=(await db.query('SELECT id,state FROM hyperfide.requalification_operations WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[...s,requestId])).rows[0];
+   if(existing)return {requalification_id:existing.id,scheduling_outcome:'RECORDED',requalification_state:existing.state};
+   const app=(await db.query('SELECT * FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 FOR UPDATE',[...s,id])).rows[0];
+   if(canonical(recorded.before_inputs)===canonical(recorded.after_inputs)&&v.input_packet_digest===undefined)
+    return {requalification_id:null,scheduling_outcome:'NOT_REQUIRED'};
+   if(!app||app.applicability!=='STALE'||String(app.state_version)!==(BigInt(version)+1n).toString()||
+    canonical(app.input_manifest)!==canonical(recorded.after_inputs))
+    return {requalification_id:null,scheduling_outcome:'BLOCKED',requalification_blocked_reason:'QUALIFICATION_INVALIDATION_SUPERSEDED'};
+   if(!['ACTIVE','RELEASED'].includes(c.authority))fail('QUALIFICATION_STALE_CUSTODY','Disposed custody cannot schedule requalification');
+   const saved=(await db.query('SELECT manifest,policy FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,id])).rows[0];
+   await executionGate(ctx,db,s,'ADMISSION');
+   const context=await freshContext(ctx,db,s,c,saved,v),after=recorded.after_inputs;
+   if(canonical(context.inputs)!==canonical(after))fail('QUALIFICATION_INPUT_MISMATCH','Fresh authoritative inputs differ from durable invalidation');
+   let operation:string|null=null;
+   const pending=await db.query("SELECT q.id,q.qualification_job_id,i.policy,q.input_manifest_digest FROM hyperfide.requalification_operations q JOIN hyperfide.assurance_requalification_inputs i ON i.organisation_id=q.organisation_id AND i.run_id=q.run_id AND i.operation_id=q.id WHERE q.organisation_id=$1 AND q.run_id=$2 AND q.custody_id=$3 AND q.state IN ('PENDING','RUNNING') FOR UPDATE OF q",[...s,id]);
+   const same=pending.rows.find((q:Data)=>q.input_manifest_digest===hash(after)&&hash(q.policy)===hash(context.policy));
+   if(same)operation=same.id;
+   else{
+    for(const prior of pending.rows){
+     await db.query("UPDATE hyperfide.qualification_jobs SET state='CANCELLED',lease_generation=lease_generation+1,lease_owner=NULL,lease_expires_at=NULL,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING','RUNNING')",[...s,prior.qualification_job_id]);
+     await db.query("UPDATE hyperfide.requalification_operations SET state='CANCELLED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,prior.id]);
+    }
+    operation=randomUUID();const job=randomUUID();
+    await db.query('INSERT INTO hyperfide.qualification_jobs(organisation_id,run_id,id,custody_id,custody_generation,rubric_digest) VALUES($1,$2,$3,$4,$5,$6)',[...s,job,id,String(c.custody_generation),context.policy.rubric_digest]);
+    await db.query('INSERT INTO hyperfide.requalification_operations(organisation_id,run_id,id,custody_id,custody_generation,qualification_job_id,request_id,input_manifest_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[...s,operation,id,String(c.custody_generation),job,requestId,hash(after)]);
+    await db.query('INSERT INTO hyperfide.assurance_requalification_inputs(organisation_id,run_id,operation_id,publication_operation_id,manifest,policy,registry_digest,input_manifest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[...s,operation,context.manifest.publication_operation_id??null,context.manifest,context.policy,hash(context.policy),after]);
+   }
+   return {requalification_id:operation,scheduling_outcome:'SCHEDULED',affected_checks:context.policy.checks.map((check:Data)=>check.id)};
+  });
+  return {...durable,...scheduled,invalidation_durable:true};
+ }catch(error){
+  return {...durable,invalidation_durable:true,requalification_id:null,scheduling_outcome:'BLOCKED',
+   requalification_blocked_reason:error instanceof FoundationError?error.code:'QUALIFICATION_SCHEDULING_UNAVAILABLE'};
+ }
 }
 async function acceptRequalification(ctx:ComponentContext,raw:unknown):Promise<Data>{
  roles(ctx,['COORDINATOR','OPERATOR']);
