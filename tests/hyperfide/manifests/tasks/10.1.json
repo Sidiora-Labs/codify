@@ -20,7 +20,7 @@
     "qualification_limitations": [
       "Real local filesystem/compiler/package resolution and checksum-verified official sandbox-api protocol; no live Blaxel image publication or mounted-provider acceptance.",
       "Controlled publisher fixture never calls a provider and only returns failed/UNKNOWN observations.",
-      "Linux child-subreaper supervision requires /usr/bin/python3, libc prctl and procfs.",
+      "Linux child-subreaper supervision requires trusted HYPERFIDE_SUPERVISOR_PYTHON (default /usr/bin/python3), libc prctl and procfs; an explicit missing or invalid path never falls back.",
       "Native Hyperfide version probe exercises installed cg compatibility binary 1.6.0; no completed Hyperfide2.0 runtime or full frontier connector acceptance is claimed."
     ]
   },
@@ -66,6 +66,11 @@
     "blaxel.images.template.uv-style-hardlink-denied",
     "blaxel.images.template.volume-budget-and-paths",
     "blaxel.images.process.detached-descendant-reaped",
+    "blaxel.images.process.supervisor-spawn-error-structured",
+    "blaxel.images.process.trusted-packaged-supervisor-used",
+    "blaxel.images.process.missing-supervisor-never-falls-back",
+    "blaxel.images.process.relative-supervisor-denied",
+    "blaxel.images.process.supervisor-ignores-pythonpath-startup-hook",
     "blaxel.images.sdk.repository-dotenv-denied",
     "blaxel.images.sdk.endpoint-override-denied"
   ],
@@ -213,18 +218,18 @@
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.d.ts",
-      "sha256": "09b4901618c015334c2341160ecebe19e5f48a9ab4e2dec296d8e0828e68b4fb",
-      "size": 3623
+      "sha256": "d651b08a47dc995cc93aab9251de4bfc2eff82d0b7519e9256b9d54e06d28972",
+      "size": 3678
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js",
-      "sha256": "dbe38641b3aaedd93a42142136580bfd7b285077cd0a3cfc9136a10c2d2c8fee",
-      "size": 37457
+      "sha256": "bfde63817f4a875e228c5e8b8b196443c14ea1498e7c868bfcf00efc8fff8cfa",
+      "size": 37891
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js.map",
-      "sha256": "d0d7f8d66c25ac138ca1b449fe3f11008ab8ee7cc455c5a88a5b4ecd6b06ab30",
-      "size": 34251
+      "sha256": "255d3f0845bde63f8f09b067310c590f95a62b353af77a07297fbed8eaa8e941",
+      "size": 34501
     },
     {
       "path": "services/hyperfide/dist/providers/contract.d.ts",
@@ -318,8 +323,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/blaxel/images.ts",
-      "sha256": "0f9f239e920af7c24838cc93cc2a926d07a0244209d59c3abb06505104a35ff8",
-      "size": 35875
+      "sha256": "f13ca8e1a406836066716b0ea8a90c7ba4d33d0ca3dc2b02f1f887de0c733f44",
+      "size": 36287
     },
     {
       "path": "services/hyperfide/src/providers/contract.ts",
@@ -343,8 +348,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/10_1.py",
-      "sha256": "b940b6906f2f83e03df9eb84f548475e9c010bb2581940f9a4cbe19e323c1e4a",
-      "size": 18628
+      "sha256": "94db72bff3f37d32f7d77b860e626e1538389d940d22bb16e5924374c48e1879",
+      "size": 21734
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_1.py",
@@ -368,8 +373,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/10.1.json",
-      "sha256": "5a5b73e84be8745b56e4497118b2e8a1e0abe48e5803c767f32934b4de2bbc97",
-      "size": 5486
+      "sha256": "1fa712a5bd97e3fb42c07513b139e531ec45065537ccf4b38329d800108a8fdb",
+      "size": 5804
     }
   ]
 }

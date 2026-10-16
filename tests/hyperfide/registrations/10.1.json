@@ -49,6 +49,11 @@
     "blaxel.images.template.uv-style-hardlink-denied",
     "blaxel.images.template.volume-budget-and-paths",
     "blaxel.images.process.detached-descendant-reaped",
+    "blaxel.images.process.supervisor-spawn-error-structured",
+    "blaxel.images.process.trusted-packaged-supervisor-used",
+    "blaxel.images.process.missing-supervisor-never-falls-back",
+    "blaxel.images.process.relative-supervisor-denied",
+    "blaxel.images.process.supervisor-ignores-pythonpath-startup-hook",
     "blaxel.images.sdk.repository-dotenv-denied",
     "blaxel.images.sdk.endpoint-override-denied"
   ],
