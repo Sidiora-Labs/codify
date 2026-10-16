@@ -211,9 +211,9 @@ function summary(run:PinnedRun):unknown{
  spec_generation:run.spec_generation,state_version:run.state_version,state:run.state,validation_status:run.state==='PENDING_VALIDATION'?'PENDING':'NOT_ASSERTED',
  counts:run.document.parsed.counts};
 }
-export async function importRun(pool:pg.Pool,scope:SpecScope,raw:unknown):Promise<unknown>{
+export async function importRunTransaction(client:pg.PoolClient,scope:SpecScope,raw:unknown):Promise<unknown>{
  const expected=digest(await fs.readFile(new URL('../../migrations/0002-spec.sql',import.meta.url)));
- const readiness=await pool.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
+ const readiness=await client.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
  if(readiness.rows.length!==1||readiness.rows[0]!.name!=='0002-spec'||readiness.rows[0]!.checksum!==expected)
   fail('SPEC_SCHEMA_NOT_INITIALISED','Apply the exact versioned specification migration before importing');
  const input=validateImport(raw,scope),source=await readPinnedSource(scope.root,input.source),parsed=parseKvx(source.text);
@@ -223,15 +223,13 @@ export async function importRun(pool:pg.Pool,scope:SpecScope,raw:unknown):Promis
  const revision_digest=digest(canonical(accepted)),tasks=taskDefinitions(parsed);
  const document:StoredIntent={...accepted,schema_version:1,revision_digest,parsed,runtime_wave_offset:tasks.some(task=>task.declared_wave===0)?1:0};
  const specId=derivedId(scope.organisation_id+':'+scope.project_id+':'+revision_digest);
- const client=await pool.connect();
- try{
-  await client.query('BEGIN');await primary(client);
+  await primary(client);
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id]);
   const existing=await client.query('SELECT id FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id]);
   if(existing.rows.length){
    const prior=await loadPinnedRun(client,scope);
    if(prior.document.revision_digest!==revision_digest)fail('REVISION_CONFLICT','Existing run pins different accepted intent');
-   await client.query('COMMIT');return {...summary(prior) as object,replayed:true};
+   return {...summary(prior) as object,replayed:true};
   }
   for(const repo of input.repositories){
    const record=await client.query(
@@ -267,10 +265,21 @@ export async function importRun(pool:pg.Pool,scope:SpecScope,raw:unknown):Promis
     [scope.organisation_id,scope.run_id,derivedId(scope.run_id+':task:'+task.key),task.key,packages.get(task.package_key),priorSpec.rows[0]?.id??specId,
      digest(canonical({source_digest:accepted.source_digest,reqs:value(task.section,'reqs')??null})),JSON.stringify(definition),task.wave]);
   }
-  const run=await loadPinnedRun(client,scope);await client.query('COMMIT');return {...summary(run) as object,replayed:false};
- }catch(error){try{await client.query('ROLLBACK');}catch{/* Preserve the original observed failure. */}return storageFailure(error);}
- finally{client.release();}
+  const run=await loadPinnedRun(client,scope);return {...summary(run) as object,replayed:false};
 }
+export async function importRun(pool:pg.Pool,scope:SpecScope,raw:unknown):Promise<unknown>{
+ const client=await pool.connect();let committing=false;let discard:Error|undefined;
+ try{
+  await client.query('BEGIN');
+  const result=await importRunTransaction(client,scope,raw);
+  committing=true;await client.query('COMMIT');return result;
+ }catch(error){
+  if(committing){discard=new Error('Uncertain specification commit');fail('COMMIT_AMBIGUOUS','Reconcile exact accepted-intent identity before retry');}
+  try{await client.query('ROLLBACK');}catch{/* Preserve the observed failure. */}
+  return storageFailure(error);
+ }finally{client.release(discard);}
+}
+
 function scoped(input:unknown,scope:SpecScope,names:string[]):Record<string,unknown>{
  const row=fields(input,names);if(row.run_id!==scope.run_id)fail('SCOPE_MISMATCH','Run is outside the trusted service scope');return row;
 }
