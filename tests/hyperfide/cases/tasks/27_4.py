@@ -15,6 +15,10 @@ sys.path.insert(0,str(ROOT/'tests/hyperfide'))
 import deterministic as d
 import faults
 from selftest_harness import Fixture
+EPOCH1="11111111-1111-4111-8111-111111111111"
+EPOCH2="22222222-2222-4222-8222-222222222222"
+DEPLOYMENT="33333333-3333-4333-8333-333333333333"
+ACTIVATION="44444444-4444-4444-8444-444444444444"
 FAILED=[]
 
 def check(identity,action):
@@ -42,9 +46,9 @@ def run():
         receipt_pin=pin(campaign/'receipts'/(summary['receipt_id']+'.json'))
         kinds=sorted(faults.FAULTS)
         pairs=[kinds[index:index+2]for index in range(0,len(kinds),2)]
-        manifest={'kind':'faults','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'profile':{'sandboxes':100,'slots':200,'required_composite_pairs':pairs},'inputs':{'accepted_receipts':[receipt_pin]},'adapters':{'control':{'component':'control'},'observer':{'component':'observer'},'cleanup':{'component':'cleanup'}},'faults':[{'id':'fault-'+kind,'kind':kind,'at_ms':0,'duration_ms':100}for kind in kinds],'slo':{'rpo_ms':1,'rto_ms':100,'schedule_tolerance_ms':0}}
-        events=[{'sequence':1,'virtual_ms':1,'kind':'effect','epoch':1,'operation_id':'effect1','effect_key':'once','accepted':True},{'sequence':2,'virtual_ms':2,'kind':'effect','epoch':1,'operation_id':'effect2','effect_key':'once','accepted':False}]
-        golden={'epoch':1,'owners':{},'slots':{},'custody':{},'resources':[],'publications':{},'effect_count':1,'accepted_count':1,'peak_slots':0,'session_lifetimes':0,'pending_creates':[],'faults':[],'virtual_elapsed_ms':2}
+        manifest={'kind':'faults','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'profile':{'sandboxes':100,'slots':200,'initial_authority_epoch':EPOCH1,'deployment_id':DEPLOYMENT,'required_composite_pairs':pairs},'inputs':{'accepted_receipts':[receipt_pin]},'adapters':{'control':{'component':'control'},'observer':{'component':'observer'},'cleanup':{'component':'cleanup'}},'faults':[{'id':'fault-'+kind,'kind':kind,'at_ms':0,'duration_ms':100}for kind in kinds],'slo':{'rpo_ms':1,'rto_ms':100,'schedule_tolerance_ms':0}}
+        events=[{'sequence':1,'virtual_ms':1,'kind':'effect','epoch':EPOCH1,'operation_id':'effect1','effect_key':'once','accepted':True},{'sequence':2,'virtual_ms':2,'kind':'effect','epoch':EPOCH1,'operation_id':'effect2','effect_key':'once','accepted':False}]
+        golden={'epoch':EPOCH1,'owners':{},'slots':{},'custody':{},'resources':[],'publications':{},'effect_count':1,'accepted_count':1,'peak_slots':0,'session_lifetimes':0,'pending_creates':[],'faults':[],'virtual_elapsed_ms':2}
         observation={'basis':'INDEPENDENT_DURABLE_RECONSTRUCTION','source_revision':'a'*40,'source_manifest_digest':'sha256:'+'b'*64,'events':events,'final_state':golden,'protected_refs':{},'resource_inventory_complete':True,'resource_ids':[],'unknown_operations':[],'unacknowledged_effects':[],'hidden_backlog':[],'resource_debts':[],'receipts':[{'pin':receipt_pin,'trusted_anchor_sha256':receipt_pin['sha256']}],'campaign_start_monotonic_ns':0,'fault_reports':[{'fault_id':row['id'],'kind':row['kind'],'injection_observed':True,'recovery_observed':True,'basis':'INDEPENDENT_OBSERVATION','injected_monotonic_ns':0,'cleared_monotonic_ns':100000000,'recovered_monotonic_ns':100000000,'rpo_ms':0,'rto_ms':100}for row in manifest['faults']],'conflicting_accepted_owners':0,'unqualified_publications':0}
         check('campaign.faults.complete-composite-schedule',lambda:len(faults.validate_faults(manifest))==10)
         check('campaign.faults.actual-overlap-reference',lambda:faults.inspect_fault_reports(observation,manifest))

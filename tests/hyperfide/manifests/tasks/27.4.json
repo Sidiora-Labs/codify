@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-4-v2",
+  "campaign_id": "hyperfide-driver-component-27-4-v3",
   "case_ids": [
     "V-002",
     "V-003",
@@ -85,18 +85,18 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "f45deed3643f1e74b542e480666049c5d68627679cfe64e8e5ac7e6ff7eefcee",
-      "size": 38730
+      "sha256": "f2606c0f64787c5a5ab8bb13e08b8aafdb4230f083dd45987596eab92ee61577",
+      "size": 44458
     },
     {
       "path": "tests/hyperfide/campaigns/live.py",
-      "sha256": "44f1e3dc4c69ccb6e49d4add1d3f8bc8fb03b94530d5a1257ec5c50b65386ab1",
-      "size": 18222
+      "sha256": "d8de80d861b90a86f45766d0a98cbfbdbb999ca135f56d04f4612fde54495314",
+      "size": 18441
     },
     {
       "path": "tests/hyperfide/campaigns/faults.py",
-      "sha256": "2833722676a76baa14eda1e8f975e65e0c14a0543ba200212ef83942aac86bcb",
-      "size": 13797
+      "sha256": "06a7548a2b2b7b5aed7039d3886f0d363bdb0c141a04e1086089d87b694f3c10",
+      "size": 14356
     },
     {
       "path": "tests/hyperfide/selftest_harness.py",
@@ -110,8 +110,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_4.py",
-      "sha256": "355a5f49b6c607845c6bf1f56e271df9902132e10b4839d7067f3a7ef84138cb",
-      "size": 10082
+      "sha256": "559a4a641e983657248ae1fc21931db8e384c1cb009f02128e1b703f8405a352",
+      "size": 10349
     }
   ],
   "policy": {

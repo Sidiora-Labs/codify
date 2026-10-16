@@ -144,6 +144,8 @@ def run(path, evidence):
     common.sealed_write(directory / 'manifest.json', manifest)
     adapters = {name: common.CommandAdapter(spec, root, directory / name) for name, spec in manifest['adapters'].items()}
     run_id = str(uuid.uuid4())
+    current_epoch = common.authority_uuid(manifest['profile'].get('initial_authority_epoch'))
+    common.require(trust['scope']['authority_epoch'] == current_epoch, 'approved observer scope must match initial durable authority')
     state, failure, resource_ids = None, None, set()
     started = time.monotonic_ns()
     try:
@@ -151,7 +153,11 @@ def run(path, evidence):
         request = {'operation': 'reconstruct', 'campaign_id': run_id, 'source_revision': manifest['source_revision'], 'source_manifest_digest': manifest['source_manifest_digest']}
         observed, _ = adapters['observer'].call(request)
         observation = observed.get('observation')
-        common.verify_observation(observation, manifest, root, request, {'DURABLE_READER', 'PROVIDER_READER'})
+        # First validate the declared immutable history without granting any
+        # authority; then authenticate that exact reconstruction and fresh scope.
+        observed_epoch = common.reconstruct(observation.get('events'), manifest['profile'])['epoch']
+        common.verify_observation(observation, manifest, root, request, {'DURABLE_READER', 'PROVIDER_READER'}, observed_epoch)
+        current_epoch = observed_epoch
         if isinstance(observation, dict) and isinstance(observation.get('events'), list):
             resource_ids = {event['resource_id'] for event in observation['events'] if event.get('kind') == 'provider_observe' and isinstance(event.get('resource_id'), str)}
         state = inspect_reconstruction(observation, manifest, root, directory / 'receipt-checks')
@@ -164,7 +170,7 @@ def run(path, evidence):
             adapters['cleanup'].call({'operation': 'cleanup', 'campaign_id': run_id})
             request = {'operation': 'observe_cleanup', 'campaign_id': run_id, 'source_revision': manifest['source_revision'], 'source_manifest_digest': manifest['source_manifest_digest']}
             cleanup, _ = adapters['observer'].call(request)
-            common.verify_observation(cleanup, manifest, root, request, {'DURABLE_READER', 'PROVIDER_READER'})
+            common.verify_observation(cleanup, manifest, root, request, {'DURABLE_READER', 'PROVIDER_READER'}, current_epoch)
             cleanup_result(cleanup, manifest.get('retained_resources', {}), resource_ids)
         except BaseException as exc:
             failure = common.CampaignError('cleanup debt: ' + str(exc) + ('; original: ' + str(failure) if failure else ''))
