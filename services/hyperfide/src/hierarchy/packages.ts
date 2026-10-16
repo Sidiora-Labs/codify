@@ -2,6 +2,8 @@ import {readFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
+import {invocationOf} from '../identity/enrollment.js';
+import type {InvocationContext} from '../transport/protocol.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction,TransactionGateway} from '../storage/transactions.js';
 
@@ -16,7 +18,43 @@ export interface AuthorityView extends Leadership {session_id:string;role:Sessio
 export interface HierarchyAuthority {
  leadership(tx:PrimaryTransaction,scope:Scope):Promise<Leadership>;
  requireAuthority(tx:PrimaryTransaction,input:AuthorityRequest):Promise<AuthorityView>;
+ requireLeaderReplacement(tx:PrimaryTransaction,input:LeaderReplacementRequest):Promise<Record<string,unknown>>;
 }
+
+export interface LeaderReplacementRequest extends Scope {
+ actor_session_id:string;current_leader_generation:string;predecessor_session_id:string;
+ predecessor_generation:string;predecessor_authority_epoch:string;
+}
+/** Immutable replacement proof for adopting an already-persisted leader-targeted intent. */
+export async function requireLeaderReplacement(tx:PrimaryTransaction,input:LeaderReplacementRequest):Promise<Record<string,unknown>>{
+ assertPrimaryTransaction(tx);await ready(tx);
+ const org=uuid(input.organisation_id),run=uuid(input.run_id),actorId=uuid(input.actor_session_id);
+ const currentGeneration=decimal(input.current_leader_generation),priorGeneration=decimal(input.predecessor_generation),priorId=uuid(input.predecessor_session_id),priorEpoch=uuid(input.predecessor_authority_epoch);
+ const current=await leadership(tx,{organisation_id:org,run_id:run});
+ await requireAuthority(tx,{organisation_id:org,run_id:run,authority_epoch:current.authority_epoch,session_id:actorId,leader_generation:currentGeneration,roles:['LEADER']});
+ if(BigInt(priorGeneration)>=BigInt(currentGeneration)||BigInt(currentGeneration)-BigInt(priorGeneration)>1024n)return refuse('LEADER_REPLACEMENT_UNPROVEN','A bounded actual replacement chain is required');
+ const found=await tx.query("SELECT id,actor_session_id,leader_generation::text,payload FROM hyperfide.hierarchy_ownership_events WHERE organisation_id=$1 AND run_id=$2 AND kind='LEADER_ACQUIRED' AND leader_generation >= $3 AND leader_generation <= $4 ORDER BY leader_generation,id",[org,run,priorGeneration,currentGeneration]);
+ const expected=Number(BigInt(currentGeneration)-BigInt(priorGeneration)+1n);
+ if(found.rowCount!==expected)return refuse('LEADER_REPLACEMENT_UNPROVEN','Immutable leadership replacement history is incomplete or ambiguous');
+ let session=priorId,epoch=priorEpoch,generation=priorGeneration;
+ const eventIds:string[]=[];
+ for(let index=0;index<found.rows.length;index++){
+  const row=found.rows[index]!,p=row.payload;
+  if(!object(p)||row.leader_generation!==(BigInt(priorGeneration)+BigInt(index)).toString()||typeof p.authority_epoch!=='string')return refuse('LEADER_REPLACEMENT_UNPROVEN','History lacks exact platform epoch pins');
+  uuid(p.authority_epoch);
+  if(index===0){
+   if(row.actor_session_id!==priorId||p.authority_epoch!==priorEpoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Original event target is not proven by immutable history');
+  }else{
+   if(p.predecessor_id!==session||p.predecessor_generation!==generation||p.predecessor_authority_epoch!==epoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Replacement history is not a contiguous actor/generation/epoch chain');
+  }
+  session=uuid(row.actor_session_id);epoch=p.authority_epoch;generation=row.leader_generation;eventIds.push(uuid(row.id));
+ }
+ if(session!==actorId||session!==current.leader_session_id||generation!==currentGeneration||epoch!==current.authority_epoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Replacement chain does not terminate at the current primary leader');
+ const proof={organisation_id:org,run_id:run,predecessor_session_id:priorId,predecessor_generation:priorGeneration,predecessor_authority_epoch:priorEpoch,
+  current_leader_session_id:session,current_leader_generation:generation,current_authority_epoch:epoch,event_ids:eventIds};
+ return Object.freeze({authority:'LEADER_REPLACEMENT_PROOF',...proof,event_ids:Object.freeze(eventIds),proof_digest:hash(proof)});
+}
+
 type Data=Record<string,unknown>;
 const MIGRATION_CHECKSUM='sha256:'+createHash('sha256').update(readFileSync(new URL('../../migrations/0003-hierarchy.sql',import.meta.url))).digest('hex');
 export function refuse(code:string,message:string):never {throw new FoundationError(code,message);}
@@ -97,17 +135,12 @@ export async function requireAuthority(tx:PrimaryTransaction,input:AuthorityRequ
  } else if(session.role==='FEATURE_MANAGER')return refuse('PACKAGE_REQUIRED','Manager authority requires an explicit package');
  return result;
 }
-export interface TrustedActor extends Scope {session_id:string;authority_epoch:string;guard:(tx:PrimaryTransaction)=>Promise<void>}
+export interface TrustedActor extends Scope {session_id:string;authority_epoch:string;guard:(tx:PrimaryTransaction)=>Promise<void>;signal:AbortSignal;invocation:InvocationContext}
 export function trustedActor(context:ComponentContext):TrustedActor {
- // Authentication binds this context outside repository-controlled request data.
- // The transport guard rechecks revocation inside each SERIALIZABLE retry.
- const invocation=(context as unknown as {invocation?:{principal?:Record<string,unknown>;guard?:(tx:PrimaryTransaction)=>Promise<void>}}).invocation;
- if(!invocation?.principal||typeof invocation.guard!=='function')
-  return refuse('AUTHENTICATED_ACTOR_REQUIRED','Hierarchy mutations require an authenticated invocation context');
- const p=invocation.principal;
- const run=uuid(p.run_id);if(run!==context.policy.programme_id)return refuse('ACTOR_SCOPE_MISMATCH','Authenticated run differs from the approved programme');
- return {organisation_id:uuid(p.organisation_id),run_id:run,session_id:uuid(p.actor_id),
-  authority_epoch:uuid(p.deployment_epoch),guard:invocation.guard};
+ const invocation=invocationOf(context),principal=invocation.principal;
+ const run=uuid(principal.run_id);if(run!==context.policy.programme_id)return refuse('ACTOR_SCOPE_MISMATCH','Authenticated run differs from the approved programme');
+ return {organisation_id:uuid(principal.organisation_id),run_id:run,session_id:uuid(principal.actor_id),
+  authority_epoch:uuid(principal.deployment_epoch),guard:tx=>invocation.guard(tx),signal:invocation.signal,invocation};
 }
 export async function ready(tx:PrimaryTransaction):Promise<void> {
  assertPrimaryTransaction(tx);
@@ -124,22 +157,31 @@ export async function event(tx:PrimaryTransaction,actor:TrustedActor,generation:
 }
 export async function operation<T>(g:TransactionGateway,actor:TrustedActor,name:string,input:Data,fn:(tx:PrimaryTransaction)=>Promise<T>):Promise<T> {
  const key=text(input.idempotency_key),identity=hash({name,actor:actor.session_id,input});
- return g.withPrimaryTransaction({timeoutMs:10000,guard:actor.guard},async tx=>{
+ const envelope=actor.invocation.operation;
+ return g.withPrimaryTransaction({timeoutMs:10000,guard:actor.guard,signal:actor.signal},async tx=>{
   await ready(tx);
-  await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,principal_scope,operation,idempotency_key,request_digest) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
-   [actor.organisation_id,actor.run_id,actor.session_id,name,key,identity]);
-  const seen=await tx.query('SELECT id,request_digest,state,result FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation=$4 AND idempotency_key=$5 FOR UPDATE',
-   [actor.organisation_id,actor.run_id,actor.session_id,name,key]);
-  const old=seen.rows[0];if(!old||old.request_digest!==identity)return refuse('IDEMPOTENCY_CONFLICT','Request key already has another payload');
-  if(old.state==='COMPLETED')return old.result as T;
-  if(old.state!=='PENDING')return refuse('OPERATION_FAILED','Operation has an immutable failed outcome');
+  const lookup=async(operationName:string,operationKey:string,requestDigest:string)=>{
+   await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,principal_scope,operation,idempotency_key,request_digest) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
+    [actor.organisation_id,actor.run_id,actor.session_id,operationName,operationKey,requestDigest]);
+   const result=await tx.query('SELECT id,request_digest,state,result FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation=$4 AND idempotency_key=$5 FOR UPDATE',
+    [actor.organisation_id,actor.run_id,actor.session_id,operationName,operationKey]);
+   const row=result.rows[0];if(!row||row.request_digest!==requestDigest)return refuse('IDEMPOTENCY_CONFLICT','Request key already has another payload');
+   if(!['PENDING','COMPLETED'].includes(row.state))return refuse('OPERATION_FAILED','Operation has an immutable failed outcome');return row;
+  };
+  const finish=async(id:string,result:unknown)=>{
+   await tx.query("UPDATE hyperfide.command_inbox SET state='COMPLETED',result=$1,state_version=state_version+1 WHERE organisation_id=$2 AND run_id=$3 AND id=$4",
+    [JSON.stringify(result),actor.organisation_id,actor.run_id,id]);
+  };
+  // Bind both protocol and application keys. A fresh inner key cannot evade
+  // conflicting reuse of an authenticated envelope's idempotency identity.
+  const outer=await lookup('envelope.'+name,envelope.idempotency_key,envelope.payload_digest);
+  if(outer.state==='COMPLETED')return outer.result as T;
+  const old=await lookup(name,key,identity);
+  if(old.state==='COMPLETED'){await finish(outer.id,old.result);return old.result as T;}
   const state=await tx.query('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[actor.organisation_id,actor.run_id]);
   if(!state.rowCount||['SUCCEEDED','FAILED','CANCELLED','COMPLETED'].includes(state.rows[0]!.state))
    return refuse('RUN_TERMINAL','The run does not permit a new hierarchy mutation');
-  const result=await fn(tx);
-  await tx.query("UPDATE hyperfide.command_inbox SET state='COMPLETED',result=$1,state_version=state_version+1 WHERE organisation_id=$2 AND run_id=$3 AND id=$4",
-   [JSON.stringify(result),actor.organisation_id,actor.run_id,old.id]);
-  return result;
+  const result=await fn(tx);await finish(old.id,result);await finish(outer.id,result);return result;
  });
 }
 async function manager(tx:PrimaryTransaction,actor:TrustedActor,id:string):Promise<void> {
@@ -162,11 +204,11 @@ export function createComponent(context:ComponentContext):Component {
    if(runs.rows[0]?.authority_epoch!==a.authority_epoch)return refuse('AUTHORITY_EPOCH_STALE','Run platform epoch mismatch');
    const session=await tx.query("SELECT 1 FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND role='LEADER' AND state IN ('REGISTERED','RUNNING','DISCONNECTED') FOR SHARE",[a.organisation_id,a.run_id,a.session_id]);
    if(!session.rowCount)return refuse('ROLE_DENIED','Only a registered leader session may acquire leadership');
-   const old=await tx.query('SELECT generation::text,leader_session_id FROM hyperfide.hierarchy_leaders WHERE organisation_id=$1 AND run_id=$2 FOR UPDATE',[a.organisation_id,a.run_id]);
+   const old=await tx.query('SELECT generation::text,leader_session_id,authority_epoch FROM hyperfide.hierarchy_leaders WHERE organisation_id=$1 AND run_id=$2 FOR UPDATE',[a.organisation_id,a.run_id]);
    if((old.rows[0]?.generation??'0')!==expected)return refuse('LEADER_GENERATION_STALE','Leadership compare-and-set failed');
    const next=(BigInt(expected)+1n).toString();decimal(next);
    await tx.query('INSERT INTO hyperfide.hierarchy_leaders(organisation_id,run_id,authority_epoch,leader_session_id,generation) VALUES($1,$2,$3,$4,$5) ON CONFLICT(organisation_id,run_id) DO UPDATE SET authority_epoch=EXCLUDED.authority_epoch,leader_session_id=EXCLUDED.leader_session_id,generation=EXCLUDED.generation,state_version=hyperfide.hierarchy_leaders.state_version+1',[a.organisation_id,a.run_id,a.authority_epoch,a.session_id,next]);
-   await event(tx,a,next,'LEADER_ACQUIRED',{predecessor_id:old.rows[0]?.leader_session_id??null,reason:v.reason});
+   await event(tx,a,next,'LEADER_ACQUIRED',{predecessor_id:old.rows[0]?.leader_session_id??null,predecessor_generation:old.rows[0]?.generation??null,predecessor_authority_epoch:old.rows[0]?.authority_epoch??null,authority_epoch:a.authority_epoch,reason:v.reason});
    return {organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch,leader_session_id:a.session_id,leader_generation:next};
   });
  },
@@ -275,11 +317,11 @@ export function createComponent(context:ComponentContext):Component {
  },
  'hierarchy.inspect':async (input,invocation)=>{
   const v=record(input,['leader_generation']);const a=trustedActor(invocation);
-  return g.withPrimaryTransaction({timeoutMs:5000,guard:a.guard},async tx=>{
+  return g.withPrimaryTransaction({timeoutMs:5000,guard:a.guard,signal:a.signal},async tx=>{
    await ready(tx);const authority=await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),roles:['LEADER']});
    const packages=await tx.query('SELECT h.*,h.owner_generation::text AS owner_generation,h.state_version::text AS state_version,p.manager_session_id,p.wave FROM hyperfide.hierarchy_packages h JOIN hyperfide.feature_packages p ON p.organisation_id=h.organisation_id AND p.run_id=h.run_id AND p.id=h.package_id WHERE h.organisation_id=$1 AND h.run_id=$2 ORDER BY p.wave,h.package_id LIMIT 257',[a.organisation_id,a.run_id]);
    return {authority,packages:packages.rows.slice(0,256),has_more:packages.rows.length>256,dispatch_authority:false};
   });
  }};
- return {apiVersion:1,actions,capabilities:{'hierarchy.authority.v1':Object.freeze({leadership,requireAuthority})}};
+ return {apiVersion:1,actions,capabilities:{'hierarchy.authority.v1':Object.freeze({leadership,requireAuthority,requireLeaderReplacement}),'hierarchy.handoff.v1':Object.freeze({propose:actions['hierarchy.package.handoff.propose'],acknowledge:actions['hierarchy.package.handoff.acknowledge']})}};
 }
