@@ -4,7 +4,7 @@
 This component test does not qualify domain17 review execution or any live GitHub account.
 """
 from __future__ import annotations
-import hashlib, importlib.util, json, os, shutil, subprocess, sys, uuid
+import hashlib, importlib.util, json, os, re, shutil, subprocess, sys, uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
@@ -21,12 +21,13 @@ def check(name,callback):
 def campaign():return Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/domain18-standalone'))
 def record_database(task,database,directory):
     target=campaign()/'findings';target.mkdir(parents=True,exist_ok=True)
-    (target/('task-'+task+'-resource.json')).write_text(json.dumps({'database':database,'directory':directory})+'\n')
+    (target/('task-'+task+'-resource.json')).write_text(json.dumps({'database':database,'directory':directory,'task':task,'receipt_id':os.environ.get('HYPERFIDE_RECEIPT_ID','standalone')})+'\n')
 def cleanup(task):
     target=campaign()/'findings';target.mkdir(parents=True,exist_ok=True);complete=False
     try:
         profile=json.loads((target/('task-'+task+'-resource.json')).read_text());database=profile['database']
-        expect(database=='hf_task_'+task.replace('.','_')+'_qualification','Unexpected disposable database identity')
+        expect(profile.get('task')==task and profile.get('receipt_id')==os.environ.get('HYPERFIDE_RECEIPT_ID','standalone'),'Owned resource receipt scope mismatch')
+        expect(database=='hf_task_'+task.replace('.','_')+'_qualification' or task=='18.4' and re.fullmatch(r'hf_identity_[0-9a-f]{32}',database) is not None,'Unexpected disposable database identity')
         for query in ('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE)',"SELECT datname FROM pg_database WHERE datname='"+database+"'"):
             result=subprocess.run(['node','--input-type=commonjs','-e',SQL_JS],input=json.dumps({'sql':query,'values':[]}),text=True,cwd=ROOT,env=os.environ.copy(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
             expect(result.returncode==0,'Database absence observer failed')
@@ -87,7 +88,7 @@ def fixture(task,extra=(),env=None,after_seed=None):
     def setup(f):
         seed(f,task)
         if after_seed:after_seed(f)
-    return IdentityFixture(database='hf_task_'+task.replace('.','_')+'_qualification',extra_components=('18.1',)+tuple(extra),extra_env=env,extra_setup=setup)
+    return IdentityFixture(database='hf_task_'+task.replace('.','_')+'_qualification',extra_components=('3.1','18.1')+tuple(extra),extra_env=env,extra_setup=setup)
 def main():
     if '--cleanup' in sys.argv:return cleanup('18.1')
     f=fixture('18.1')
@@ -128,6 +129,7 @@ def main():
         check('findings.registry.alias-observation-reopens-canonical',lambda:expect(reopened['finding_id']==fid and reopened['reopened'] is True and reopened['phase']=='REOPENED'))
         read_generation=f.sql('SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE id=$1',[f.ids['run']])[0]['generation']
         context=call(f,'finding.context.read',{'limit':100});check('findings.registry.context-preserves-provenance',lambda:expect(context['qualifies_findings'] is False and any(row['observation_id']==a and row['evidence_id']==f.x['evidence'] and row['source_object_id']==OID for row in context['observations']) and context['context_digest'].startswith('sha256:')))
+        check('findings.registry.context-missing-hierarchy-explicit',lambda:missing_context_hierarchy(f))
         check('findings.registry.context-explicit-pagination',lambda:expect(call(f,'finding.context.read',{'limit':1})['next_observation_id'] is not None))
         check('findings.registry.common-read-fence-preserves-generation',lambda:expect(f.sql('SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE id=$1',[f.ids['run']])[0]['generation']==read_generation))
         check('findings.registry.no-implicit-repair',lambda:expect(f.sql('SELECT count(*)::text AS n FROM hyperfide.finding_repairs')[0]['n']=='0'))
@@ -136,6 +138,10 @@ def main():
         check('findings.registry.signed-cross-run-refused',lambda:expect(f.request(f.operation('finding-registry','finding.list',{},run=uid()))[1].get('ok') is False))
     finally:f.close()
     return int(any(actual!='observed' for _,actual in RESULTS))
+def missing_context_hierarchy(f):
+    f.sql('BEGIN; ALTER TABLE hyperfide.hierarchy_packages RENAME TO hierarchy_packages_context_fixture; COMMIT;')
+    try:reject(f,'finding.context.read',{},'MIGRATION_REQUIRED')
+    finally:f.sql('BEGIN; ALTER TABLE hyperfide.hierarchy_packages_context_fixture RENAME TO hierarchy_packages; COMMIT;')
 def assert_sql_refused(f,query):
     try:f.sql(query)
     except AssertionError:return
