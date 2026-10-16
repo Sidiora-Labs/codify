@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "7.3",
+  "task": "7.3",
+  "roles": [
+    "control"
+  ],
+  "module": "graph/publication.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "graph.publish.describe",
+    "graph.publish.commit",
+    "graph.publish.inspect"
+  ],
+  "requires": [
+    "4.2",
+    "7.2",
+    "14.1"
+  ]
+}
