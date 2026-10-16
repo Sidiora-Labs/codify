@@ -525,6 +525,9 @@ def suite64(s):
     check("recovery.unknown-outcome-retains-identity",lambda:expect(sql("SELECT attempt_count FROM hyperfide.event_deliveries WHERE event_id="+q(uid(4010))+";")=="2","Unknown result replaced the command identity"))
     snapshot=s.ok("fixture.snapshot",dict(S,limit=1))
     check("recovery.snapshot-bounded",lambda:expect(snapshot["source"]=="primary-transaction" and len(snapshot["cursor_and_instruction_records"])==1 and snapshot["truncated"]["cursor_and_instruction_records"],"Recovery snapshot was unbounded or concealed truncation"))
+    check("recovery.snapshot-no-raw-receiver-payload",lambda:expect(all("result" not in row and row["result_payload_included"] is False and row["result_reference"]["inbox_id"]==row["id"] and
+        len(json.dumps(row["metadata"]))<512 for row in snapshot["cursor_and_instruction_records"]) and snapshot["record_projection"]=="bounded-metadata-with-retained-inbox-reference",
+        "Recovery copied raw instruction/receiver payloads instead of bounded metadata references"))
     s.ok("outbox.enqueue",event(4020))
     hung=s.ok("fixture.hung",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=100,poll_ms=10,retry_ms=0)})
     check("recovery.unresponsive-adapter-bounded",lambda:expect(hung["result"]["pending"]==1 and hung["elapsed_ms"]<3000,"Unresponsive adapter prevented bounded shutdown"))

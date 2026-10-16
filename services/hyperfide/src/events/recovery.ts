@@ -25,7 +25,18 @@ export async function recoverySnapshot(tx:PrimaryTransaction,input:unknown):Prom
       ON(e.organisation_id=d.organisation_id AND e.run_id=d.run_id AND e.id=d.event_id)
     WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.state<>'ACKNOWLEDGED'
     ORDER BY d.next_attempt_at,d.event_id,d.consumer_id LIMIT $3`,[s.organisation_id,s.run_id,limit+1]);
-  const cursors=await tx.query(`SELECT id,principal_scope,operation,idempotency_key,state,result,state_version
+  const cursors=await tx.query(`SELECT id,principal_scope,operation,idempotency_key,state,request_digest,state_version,
+      CASE WHEN operation='event.aggregate' THEN jsonb_build_object(
+        'version',left(result->>'version',19),
+        'terminal',CASE WHEN jsonb_typeof(result->'terminal')='boolean' THEN result->'terminal' ELSE NULL END,
+        'last_event_id',left(result->>'last_event_id',36))
+      WHEN operation='instruction.spool' THEN jsonb_build_object(
+        'command_id',left(result->>'command_id',36),'kind',left(result->>'kind',6),
+        'accepted',CASE WHEN jsonb_typeof(result->'accepted')='boolean' THEN result->'accepted' ELSE NULL END,
+        'disposition',left(result->>'disposition',32),'target_generation',left(result->>'target_generation',19))
+      ELSE jsonb_build_object('ledger_receipt_id',left(result->>'ledger_receipt_id',36),
+        'ledger_version',left(result->>'ledger_version',19),'state',left(result->>'state',9),
+        'credential_id',left(result->>'credential_id',36)) END AS metadata
     FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2
       AND operation IN('event.aggregate','instruction.spool','instruction.runner-state')
     ORDER BY operation,principal_scope,idempotency_key LIMIT $3`,[s.organisation_id,s.run_id,limit+1]);
@@ -35,7 +46,10 @@ export async function recoverySnapshot(tx:PrimaryTransaction,input:unknown):Prom
       AND operation IN('event.aggregate','instruction.spool','instruction.runner-state')) AS cursor_and_instruction_records`,[s.organisation_id,s.run_id]);
   return {source:'primary-transaction',scope:s,counts:counts.rows[0],
     pending_deliveries:deliveries.rows.slice(0,limit).map(row=>({...row,next_attempt_at:row.next_attempt_at instanceof Date?row.next_attempt_at.toISOString():null})),
-    cursor_and_instruction_records:cursors.rows.slice(0,limit),
+    cursor_and_instruction_records:cursors.rows.slice(0,limit).map(row=>({...row,
+      result_reference:{inbox_id:row.id,request_digest:row.request_digest,state_version:row.state_version},
+      result_payload_included:false})),
+    record_projection:'bounded-metadata-with-retained-inbox-reference',
     truncated:{pending_deliveries:deliveries.rows.length>limit,cursor_and_instruction_records:cursors.rows.length>limit},
     task_completion_authority:false};
 }
