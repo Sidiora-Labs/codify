@@ -18,6 +18,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/hyperfide
+Environment=HYPERFIDE_SUPERVISOR_PYTHON=/opt/hyperfide/current/runtime/python/bin/python3
 Environment=LD_LIBRARY_PATH=/opt/hyperfide/current/lib/hyperfide
 UMask=0077
 [Install]

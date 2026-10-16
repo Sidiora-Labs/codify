@@ -40,7 +40,7 @@ async function execute(ctx:ComponentContext,action:typeof actions[number],raw:un
  const manifest=exact(JSON.parse(await fs.readFile(filename,'utf8')),['schema_version','release_version','source_commit','source_date_epoch','protocol_version','schema_min','schema_max','runtime','files']);
  if(manifest.schema_version!==1||typeof manifest.release_version!=='string'||!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(manifest.release_version)||typeof manifest.source_commit!=='string'||!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(manifest.source_commit)||typeof manifest.source_date_epoch!=='string'||!/^(0|[1-9][0-9]*)$/.test(manifest.source_date_epoch))fail('Invalid immutable release provenance');
  version(manifest.protocol_version);const min=version(manifest.schema_min),max=version(manifest.schema_max);if(min>max)fail('Inverted schema range');
- const runtime=exact(manifest.runtime,['node','npm','platform','architecture']);if(runtime.node!=='24.22.0'||runtime.npm!=='11.19.1'||runtime.platform!=='linux'||runtime.architecture!=='x64')fail('Unqualified release runtime');
+ const runtime=exact(manifest.runtime,['node','npm','python','platform','architecture']);if(runtime.node!=='24.22.0'||runtime.npm!=='11.19.1'||runtime.python!=='3.14.8'||runtime.platform!=='linux'||runtime.architecture!=='x64')fail('Unqualified release runtime');
  if(!Array.isArray(manifest.files)||!manifest.files.length||manifest.files.length>100000)fail('Invalid release file inventory');
  const names=new Set<string>();
  for(const item of manifest.files){
@@ -49,7 +49,7 @@ async function execute(ctx:ComponentContext,action:typeof actions[number],raw:un
  names.add(f.path);const p=await file(root,f.path),st=await fs.stat(p);
  if(BigInt(st.size)!==BigInt(f.size_bytes)||await checksum(p)!==f.digest||(st.mode&0o777)!==parseInt(String(f.mode),8))fail('Prebuilt release file does not match its immutable pin');
  }
- for(const required of ['bin/hyperfide','bin/cg','runtime/node','services/package.json','services/dist/control.js','services/dist/provisioner.js','services/dist/dispatch.js','services/package-lock.json'])if(!names.has(required))fail('Release lacks a required executable or dependency lock');
+ for(const required of ['bin/hyperfide','bin/cg','runtime/node','runtime/python/bin/python3','runtime/python/bin/python3.bin','runtime/python/lib/python3.14/ctypes/__init__.py','services/package.json','services/dist/control.js','services/dist/provisioner.js','services/dist/dispatch.js','services/package-lock.json'])if(!names.has(required))fail('Release lacks a required executable or dependency lock');
  const entries=manifest.files as Record<string,unknown>[];
  if(entries.find(f=>f.path==='bin/hyperfide')!.digest!==entries.find(f=>f.path==='bin/cg')!.digest)fail('Compatibility CLI differs from the canonical executable');
  if(!entries.some(f=>String(f.path).startsWith('lib/hyperfide/'))||!entries.some(f=>String(f.path).startsWith('services/node_modules/')))fail('Prebuilt runtime libraries and production dependencies are required');

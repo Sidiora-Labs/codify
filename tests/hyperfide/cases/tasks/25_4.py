@@ -13,7 +13,7 @@ def check(name,fn):
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-release-") as tmp:
   base=Path(tmp);payload=base/"payload";payload.mkdir()
-  copies={"bin/hyperfide":ROOT/"cg","bin/cg":ROOT/"cg","runtime/node":Path(shutil.which("node")).resolve(),
+  copies={"bin/hyperfide":ROOT/"cg","bin/cg":ROOT/"cg","runtime/node":Path(shutil.which("node")).resolve(),"runtime/python/bin/python3":Path(sys.executable).resolve(),"runtime/python/bin/python3.bin":Path(sys.executable).resolve(),"runtime/python/lib/python3.14/ctypes/__init__.py":Path(__import__("ctypes").__file__).resolve(),
    "services/package.json":ROOT/"services/hyperfide/package.json","services/package-lock.json":ROOT/"services/hyperfide/package-lock.json",
    "services/node_modules/pg/package.json":ROOT/"services/hyperfide/node_modules/pg/package.json"}
   for role in ["control","provisioner","dispatch"]:copies["services/dist/"+role+".js"]=ROOT/("services/hyperfide/dist/"+role+".js")
@@ -21,9 +21,9 @@ def main():
   library=next(Path(line.split("=>",1)[1].strip().split()[0]).resolve() for line in libraries.splitlines() if "libsqlite3" in line)
   copies["lib/hyperfide/"+library.name]=library
   for dest,source in copies.items():
-   p=payload/dest;p.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,p);p.chmod(0o755 if dest.startswith(("bin/","runtime/")) else 0o644)
+   p=payload/dest;p.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,p);p.chmod(0o755 if dest.startswith(("bin/","runtime/node","runtime/python/bin/")) else 0o644)
   files=[{"path":p.relative_to(payload).as_posix(),"digest":"sha256:"+hashlib.sha256(p.read_bytes()).hexdigest(),"size_bytes":str(p.stat().st_size),"mode":format(p.stat().st_mode&0o777,"04o")} for p in sorted(payload.rglob("*")) if p.is_file()]
-  manifest={"schema_version":1,"release_version":"2.0.0-dev","source_commit":"a"*40,"source_date_epoch":"1","protocol_version":1,"schema_min":1,"schema_max":1,"runtime":{"node":"24.22.0","npm":"11.19.1","platform":"linux","architecture":"x64"},"files":files}
+  manifest={"schema_version":1,"release_version":"2.0.0-dev","source_commit":"a"*40,"source_date_epoch":"1","protocol_version":1,"schema_min":1,"schema_max":1,"runtime":{"node":"24.22.0","npm":"11.19.1","python":"3.14.8","platform":"linux","architecture":"x64"},"files":files}
   mf=payload/"manifest.json";mf.write_text(json.dumps(manifest))
   sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
   from identity_fixture import IdentityFixture
@@ -55,6 +55,12 @@ def main():
   check("release.runtime.unqualified",lambda:rejected("inspect",{"manifest":"manifest.json"}));mf.write_text(json.dumps(manifest))
   outside=base/"outside";outside.write_text("outside");(payload/"extra-link").symlink_to(outside)
   check("release.path.symlink",lambda:rejected("inspect",{"manifest":"manifest.json"}))
+  for required_python in ["runtime/python/bin/python3.bin","runtime/python/lib/python3.14/ctypes/__init__.py"]:
+   (payload/"extra-link").unlink(missing_ok=True)
+   actual=payload/required_python;original=actual.read_bytes();actual.unlink()
+   changed=dict(manifest,files=[f for f in manifest["files"] if f["path"]!=required_python]);mf.write_text(json.dumps(changed))
+   check("release.python.required."+("interpreter" if required_python.endswith(".bin") else "ctypes"),lambda:rejected("inspect",{"manifest":"manifest.json"}))
+   actual.write_bytes(original);actual.chmod(0o755 if required_python.endswith(".bin") else 0o644);mf.write_text(json.dumps(manifest))
   fixture.close()
  out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-release-tests"))/"release";out.mkdir(parents=True,exist_ok=True)
  (out/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"fixture":"real binaries/compiled modules with bounded dependency subset; not a deployable release","deployment_authorized":False}))
