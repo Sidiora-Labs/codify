@@ -148,7 +148,7 @@ export async function inspectProviderSchema(pool:ProviderDatabase):Promise<unkno
   const migration=await pool.query('SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=8');
   if(migration.rows[0]?.name!=='0008-provider-coordination'||migration.rows[0]?.checksum!==checksum)
     fail('PROVIDER_SCHEMA_NOT_READY','The dedicated migration runner must apply the pinned provider migration');
-  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations'];
+  const tables=['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations'];
   const result=await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='hyperfide' AND tablename=ANY($1::text[])",[tables]);
   if(result.rows.length!==tables.length)fail('PROVIDER_SCHEMA_NOT_READY','Provider migration tables are incomplete');
   return{ready:true,version:8,name:'0008-provider-coordination',checksum};
@@ -253,6 +253,24 @@ export async function assertPoolCapacity(client:PrimaryTransaction,config:Deploy
   }
 }
 
+export interface RuntimeReadinessInput {
+ organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;slot_id:string;preparation_digest:string;source_digest:string;
+}
+export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeReadinessInput):Promise<Record<string,unknown>|null>{
+ assertPrimaryTransaction(tx);uuid(input.organisation_id);uuid(input.run_id);uuid(input.sandbox_id);dec(input.boot_generation);uuid(input.slot_id);dg(input.preparation_digest);dg(input.source_digest);
+ const rows=await tx.query("SELECT o.*,s.boot_generation::text AS current_generation,s.preparation_digest AS current_preparation,b.boot_id AS current_boot_id,p.profile_id AS current_profile,w.state AS slot_state,ep.manifest AS profile_manifest,ep.content_digest AS current_profile_preparation FROM hyperfide.runtime_environment_observations o JOIN hyperfide.sandboxes s ON s.organisation_id=o.organisation_id AND s.id=o.sandbox_id JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.worker_slots w ON w.organisation_id=o.organisation_id AND w.id=o.slot_id AND w.sandbox_id=o.sandbox_id AND w.boot_generation=o.boot_generation JOIN hyperfide.environment_profiles ep ON ep.organisation_id=o.organisation_id AND ep.id=o.profile_id WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.sandbox_id=$3 AND o.boot_generation=$4 AND o.slot_id=$5 ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC LIMIT 1 FOR SHARE OF o,s,b,p,w,ep",
+  [input.organisation_id,input.run_id,input.sandbox_id,input.boot_generation,input.slot_id]);
+ const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||row.current_profile!==row.profile_id||
+  row.current_preparation!==input.preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
+  row.source_digest!==input.source_digest||!['READY','ALLOCATED'].includes(row.slot_state)||new Date(row.observed_at).getTime()>Date.now()||new Date(row.expires_at).getTime()<=Date.now())return null;
+ const profile=(row.profile_manifest as Record<string,unknown>).profile;
+ if(!profile||digestDocument(profile)!==row.profile_digest||digestDocument(row.source_bindings)!==row.source_digest)return null;
+ const artifacts=await tx.query("SELECT count(*)::int AS count FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE'",
+  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest])]]);
+ if(artifacts.rows[0]?.count!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest]).size)return null;
+ const {current_generation,current_preparation,current_boot_id,current_profile,slot_state,profile_manifest,current_profile_preparation,...proof}=row;
+ return{...proof,observed_at:new Date(row.observed_at).toISOString(),expires_at:new Date(row.expires_at).toISOString()};
+}
 export function createComponent(context:ComponentContext):Component {
   const database=createProviderDatabase(context);
   const provisioner=()=>{if(context.role!=='provisioner')fail('ROLE_FORBIDDEN','Provider administration requires the provisioner role');};
@@ -261,7 +279,7 @@ export function createComponent(context:ComponentContext):Component {
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider service is shutting down');
     try{return await fn(input);}catch(e){throw e instanceof FoundationError?e:databaseError(e);}
   };
-  return {apiVersion:1,capabilities:{'provider.pools.v1':database,...(context.role==='provisioner'?{'provider.registry.v1':{
+  return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness},...(context.role==='provisioner'?{'provider.registry.v1':{
  registerProviderAdapter:(provider:'railway'|'blaxel',factory:ProviderAdapterFactory)=>registerProviderAdapter(database.runtime,provider,factory),
  registerProviderQuotaObserver:(provider:'railway'|'blaxel',observer:ProviderQuotaObserver)=>registerProviderQuotaObserver(database.runtime,provider,observer),
  registerProviderOwnershipProbe:(provider:'railway'|'blaxel',probe:ProviderOwnershipProbe)=>registerProviderOwnershipProbe(database.runtime,provider,probe)
