@@ -5,6 +5,7 @@ import {assertInvocation,UUID} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction,TransactionGateway} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import type {enqueue,claimPending,acknowledge} from '../events/outbox.js';
 import type {receive} from '../events/inbox.js';
 import {canonical,configuredTransport,DecisionError,exact,fail,hash,integer,record,route,strictJson,text} from './adapters.js';
@@ -71,16 +72,16 @@ export class DecisionJobs{
  private loader(purpose:string):PurposeLoader{
   const found=this.purposes.get(purpose);if(!found)fail('DECISION_UNSUPPORTED','No trusted purpose loader is registered');return found!;
  }
- private async guard(i:InvocationContext,tx:PrimaryTransaction):Promise<void>{
+ private async guard(i:InvocationContext,tx:PrimaryTransaction,mode:'READ'|'WRITE'):Promise<void>{
   const s=scoped(i);
-  // Match the actual assurance writer barrier before principal/run row locks.
-  await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);
+  // The shared generation fence must precede principal/run SHARE guards.
+  await(mode==='WRITE'?writeSemanticDisposition(tx,s):readSemanticDisposition(tx,s));
   await i.guard(tx);
  }
- private async tx<T>(i:InvocationContext,fn:(tx:PrimaryTransaction)=>Promise<T>,timeoutMs=5000):Promise<T>{
+ private async tx<T>(i:InvocationContext,fn:(tx:PrimaryTransaction)=>Promise<T>,timeoutMs=5000,mode:'READ'|'WRITE'='WRITE'):Promise<T>{
   scoped(i);if(!allowedRoles.includes(i.principal.role))fail('AUTH_SCOPE_DENIED','Role cannot operate decision jobs');
   if(this.closed)fail('DECISION_UNAVAILABLE','Decision jobs are closed');
-  return this.g.withPrimaryTransaction({timeoutMs,signal:i.signal,guard:tx=>this.guard(i,tx)},fn);
+  return this.g.withPrimaryTransaction({timeoutMs,signal:i.signal,guard:tx=>this.guard(i,tx,mode)},fn);
  }
  private async lock(tx:PrimaryTransaction,s:Scope):Promise<void>{
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[s.organisation_id+':decision-admission']);
@@ -139,7 +140,7 @@ export class DecisionJobs{
    const j=await this.row(tx,s,id),result=await tx.query('SELECT status,payload FROM hyperfide.decision_results WHERE organisation_id=$1 AND run_id=$2 AND decision_id=$3',[...scopeValues(s),id]);
    const attempts=await tx.query('SELECT attempt_no,route,requested_model,started_at,finished_at,outcome,metadata FROM hyperfide.decision_attempts WHERE organisation_id=$1 AND run_id=$2 AND decision_id=$3 ORDER BY attempt_no',[...scopeValues(s),id]);
    return{decision_id:id,state:j.state,packet_hash:j.packet_hash,deadline_at:j.deadline_at,result:result.rows[0]??null,attempts:attempts.rows,authority:'NONE'};
-  });
+  },5000,'READ');
  }
  async cancel(i:InvocationContext,raw:unknown):Promise<unknown>{
   const v=record(raw,'cancel');exact(v,['decision_id'],['decision_id']);const id=uuid(v.decision_id),s=scoped(i);
@@ -185,7 +186,7 @@ export class DecisionJobs{
    const retained=rawOutput!==undefined&&object(row.metadata)&&row.metadata.response_hash===hash(rawOutput);
    return{schema_version:1,decision_id:id,packet_hash:job.packet_hash,attempt_no:number,request:{body:row.request_body,headers:row.request_headers,hash:hash(row.request_body)},
     configuration:row.configuration,outcome:row.outcome,response:retained?{available:true,body:rawOutput,hash:hash(rawOutput)}:{available:false,reason:'provider-response-not-retained'},authority:'NONE'};
-  });
+  },5000,'READ');
  }
  private async finish(tx:PrimaryTransaction,s:Scope,j:JobRow,status:string,reason:string|null,decision:ValidatedDecision|null):Promise<void>{
   const attempts=await this.attempts(tx,s,j.id),last=attempts.at(-1);
@@ -205,7 +206,7 @@ export class DecisionJobs{
   const v=record(raw,'process');exact(v,['decision_id'],['decision_id']);const id=uuid(v.decision_id),s=scoped(i),p=policy(this.env);
   if(!['OPERATOR','COORDINATOR'].includes(i.principal.role))fail('AUTH_SCOPE_DENIED','Only coordinator may dispatch decision work');
   const sampledAt=performance.now();
-  const initialRemaining=await this.tx(i,async tx=>Number((await this.row(tx,s,id)).remaining_ms));
+  const initialRemaining=await this.tx(i,async tx=>Number((await this.row(tx,s,id)).remaining_ms),5000,'READ');
   const processDeadline=sampledAt+Math.max(0,initialRemaining);
   const databaseTimeout=()=>Math.max(1,Math.min(5000,Math.floor(processDeadline-performance.now())));
   const lease=randomUUID();
@@ -329,7 +330,7 @@ export class DecisionJobs{
  async completedAudit(tx:PrimaryTransaction,s:Scope,input:{decision_id:string;packet_hash:string},i:InvocationContext):Promise<unknown>{
   assertPrimaryTransaction(tx);assertInvocation(i);uuid(s.organisation_id);uuid(s.run_id);uuid(input.decision_id);
   if(i.principal.organisation_id!==s.organisation_id||i.principal.run_id!==s.run_id)fail('AUTH_SCOPE_DENIED','Audit scope differs from verified principal');
-  await this.guard(i,tx);
+  await this.guard(i,tx,'READ');
   const known=await tx.query('SELECT 1 FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...scopeValues(s),input.decision_id]);
   if(!known.rowCount)return{available:false,reason:'missing'};
   const job=await this.row(tx,s,input.decision_id);await this.fresh(tx,s,job,i);

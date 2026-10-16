@@ -52,3 +52,13 @@ CREATE TABLE hyperfide.decision_quota_windows(
  minute bigint NOT NULL,sends integer NOT NULL DEFAULT 0 CHECK(sends>=0),
  rate_limit integer NOT NULL CHECK(rate_limit>0)
 );
+
+CREATE TRIGGER decision_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER decision_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_attempts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER decision_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_results FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER decision_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_route_windows FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER decision_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_quota_windows FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

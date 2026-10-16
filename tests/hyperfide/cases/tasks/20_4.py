@@ -15,7 +15,7 @@ IDS=["decision.jobs.authenticated-submit","decision.jobs.no-wire-authority","dec
 "decision.jobs.stale-admission","decision.jobs.stale-completion","decision.jobs.cancel-queued",
 "decision.jobs.cancel-running","decision.jobs.restart-queued","decision.jobs.expired-queue",
 "decision.jobs.synthetic-receipt","decision.jobs.no-authority-effects","decision.jobs.completed-audit-freshness",
-"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline","decision.jobs.semantic-lock-order"]
+"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline","decision.jobs.semantic-lock-order","decision.jobs.business-version-preserved","decision.jobs.insert-freshness","decision.jobs.isolation-guard"]
 def expect(v,msg):
  if not v:raise AssertionError(msg)
 def uid():return str(uuid.uuid4())
@@ -51,35 +51,46 @@ def capprofile():
  "context_request_tokens":64000,"context_question_tokens":32000,"tokenizer_ref":"synthetic-byte-upper-bound",
  "billing":"repeated-state","price_input_per_million":.042,"price_output_per_million":0}
 LOADER="""import {assertInvocation} from './transport/protocol.js';
+import {readSemanticDisposition} from './storage/dispositions.js';
+import * as fs from 'node:fs/promises';
 export function createComponent(ctx){
  const jobs=ctx.dependencies.require('20.4','decision.jobs.v1',v=>v&&typeof v.registerPurpose==='function'&&typeof v.completedAudit==='function');
- const current=async(tx,s,p,i)=>{assertInvocation(i);await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);await i.guard(tx);const delay=(await tx.query('SELECT seconds,after_response FROM public.fixture_decision_delay')).rows[0];const completed=delay.after_response?(await tx.query('SELECT count(*)::int n FROM hyperfide.decision_attempts WHERE finished_at IS NOT NULL')).rows[0].n:1;if(delay.seconds>0&&completed>0)await tx.query('SELECT pg_sleep($1)',[delay.seconds]);const r=(await tx.query('SELECT spec_revision_id,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id])).rows[0];
- return {spec_revision:r.spec_revision_id,repository_commits:{},graph_revision:null,contract_revisions:{},event_watermark:'fixture-run:'+r.state_version,ownership_generation:String(r.state_version)};};
- jobs.registerPurpose('fixture-review',{current,load:async(tx,i,input)=>{assertInvocation(i);await i.guard(tx);if(!input||Object.keys(input).join(',')!=='packet_id')throw Error('fixture input schema');
+ const current=async(tx,s,p,i)=>{assertInvocation(i);await readSemanticDisposition(tx,s);await i.guard(tx);const delay=(await tx.query('SELECT seconds,after_response FROM public.fixture_decision_delay')).rows[0];const completed=delay.after_response?(await tx.query('SELECT count(*)::int n FROM hyperfide.decision_attempts WHERE finished_at IS NOT NULL')).rows[0].n:1;if(delay.seconds>0&&completed>0)await tx.query('SELECT pg_sleep($1)',[delay.seconds]);const r=(await tx.query('SELECT spec_revision_id,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id])).rows[0];
+ const source=(await tx.query('SELECT max(data_version)::text version FROM public.fixture_decision_source')).rows[0];return {spec_revision:r.spec_revision_id,repository_commits:{},graph_revision:null,contract_revisions:{},event_watermark:'fixture-run:'+r.state_version+':source:'+source.version,ownership_generation:String(r.state_version)};};
+ jobs.registerPurpose('fixture-review',{current,load:async(tx,i,input)=>{assertInvocation(i);await readSemanticDisposition(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id});await i.guard(tx);if(!input||Object.keys(input).join(',')!=='packet_id')throw Error('fixture input schema');
  const r=(await tx.query('SELECT packet FROM public.fixture_decision_packets WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[i.principal.organisation_id,i.principal.run_id,input.packet_id])).rows[0];if(!r)throw Error('fixture packet absent');
  const {questions,...state}=r.packet.state;return{packet:r.packet,request:{state,questions},rubric_version:'fixture-rubric-v1'};}});
  return {apiVersion:1,actions:{'decision.fixture.audit':async(input,context)=>{const i=context.invocation;assertInvocation(i);
- return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:tx=>i.guard(tx)},async tx=>{
+ return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:async tx=>{await readSemanticDisposition(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id});await i.guard(tx);}},async tx=>{
  const s={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},r=(await tx.query('SELECT packet_hash FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[s.organisation_id,s.run_id,input.decision_id])).rows[0];
- return jobs.completedAudit(tx,s,{decision_id:input.decision_id,packet_hash:r.packet_hash},i);});}}};
+ return jobs.completedAudit(tx,s,{decision_id:input.decision_id,packet_hash:r.packet_hash},i);});},
+ 'decision.fixture.submit':async(input,context)=>{const i=context.invocation;assertInvocation(i);
+ const dir=ctx.env.HYPERFIDE_DECISION_FIXTURE_BARRIER;await fs.writeFile(dir+'/ready','authenticated');
+ const until=performance.now()+8000;while(true){try{await fs.stat(dir+'/continue');break;}catch{}if(i.signal.aborted||performance.now()>until)throw Error('owned fixture gate deadline');await new Promise(r=>setTimeout(r,20));}
+ return jobs.submit(i,input);}}};
+
 }
 """
 class Fixture(identity.IdentityFixture):
  def __init__(self,provider=None,second=None,settings=None,signer=False):
   self.provider=provider or Provider();self.second=second;self.owned=provider is None;self.settings=settings or {};self.signer=signer
   def setup(f):
-   f.sql((ROOT/"services/hyperfide/migrations/0020-decision-jobs.sql").read_text())
+   f.apply_migration("0020-decision-jobs")
    f.sql("CREATE TABLE public.fixture_decision_delay(seconds double precision,after_response boolean NOT NULL DEFAULT false); INSERT INTO public.fixture_decision_delay(seconds) VALUES(0)")
+   f.sql("CREATE TABLE public.fixture_decision_source(data_version bigint NOT NULL); INSERT INTO public.fixture_decision_source VALUES(1)")
    f.sql("CREATE TABLE public.fixture_decision_packets(organisation_id uuid,run_id uuid,id uuid,packet jsonb,PRIMARY KEY(organisation_id,run_id,id))")
    f.runtime=f.path/"runtime";shutil.copytree(ROOT/"services/hyperfide/dist",f.runtime/"dist");shutil.copytree(ROOT/"services/hyperfide/migrations",f.runtime/"migrations")
    (f.runtime/"package.json").write_text('{"type":"module"}');(f.runtime/"node_modules").symlink_to(ROOT/"services/hyperfide/node_modules",target_is_directory=True)
    (f.runtime/"dist/fixture-purpose.js").write_text(LOADER)
-   fragment={"schema_version":1,"id":"99.20","task":"99.20","roles":["control"],"module":"fixture-purpose.js","entry":"createComponent","api_version":1,"actions":["decision.fixture.audit"],"requires":["4.2","20.4"]}
+   fragment={"schema_version":1,"id":"99.20","task":"99.20","roles":["control"],"module":"fixture-purpose.js","entry":"createComponent","api_version":1,"actions":["decision.fixture.audit","decision.fixture.submit"],"requires":["4.2","20.4"]}
    (f.components/"99.20.json").write_text(json.dumps(fragment))
-   f.actions+=["decision.fixture.audit"]
-   pol=json.loads(f.policy.read_text());pol["allowed_actions"]+=["decision.fixture.audit"];f.policy.write_text(json.dumps(pol))
+   f.actions+=["decision.fixture.audit","decision.fixture.submit"]
+   pol=json.loads(f.policy.read_text());pol["allowed_actions"]+=["decision.fixture.audit","decision.fixture.submit"];f.policy.write_text(json.dumps(pol))
    auth=json.loads(f.identity_config.read_text())
-   for principal in auth["principals"]:principal["allowed_actions"]+=["decision.fixture.audit"]
+   for principal in auth["principals"]:
+    principal["allowed_actions"]+=["decision.fixture.audit","decision.fixture.submit"]
+    # Explicit isolated fixture issuance; production startup only verifies these rows.
+    f.sql("UPDATE hyperfide.identity_principals SET allowed_actions=$1 WHERE credential_id=$2 AND organisation_id=$3 AND run_id=$4",[principal["allowed_actions"],principal["credential_id"],f.ids["organisation"],f.ids["run"]])
    f.identity_config.write_text(json.dumps(auth))
    f.consumer=uid()
    policy={"schema_version":1,"revision":"fixture-job-policy-v1","allowed_purposes":{"fixture-review":["span-native","jev-native"]},"consumers":{f.ids["run"]:f.consumer},"quota_groups":{"span-native":"synthetic-decision-account","jev-native":"synthetic-decision-account"},
@@ -87,6 +98,8 @@ class Fixture(identity.IdentityFixture):
    policy.update(f.settings)
    routes={"span-native":f.provider.config("span-02")}
    if f.second:routes["jev-native"]=f.second.config("jev-1.14.0")
+   f.gate=f.path/"submit-gate";f.gate.mkdir()
+   f.env["HYPERFIDE_DECISION_FIXTURE_BARRIER"]=str(f.gate)
    f.env.update({"HYPERFIDE_DECISION_FIXTURE_KEY":"synthetic-job-credential","HYPERFIDE_DECISION_ROUTES":json.dumps(routes),
     "HYPERFIDE_DECISION_CAPABILITY_PROFILES":json.dumps({"span-native":capprofile(),"jev-native":capprofile()}),
     "HYPERFIDE_DECISION_JOB_POLICY":json.dumps(policy)})
@@ -98,6 +111,8 @@ class Fixture(identity.IdentityFixture):
   super().__init__(extra_components=("6.1","6.2","20.1","20.2","20.3","20.4"),extra_setup=setup)
   self.call("outbox.consumer.register",{"organisation_id":self.ids["organisation"],"run_id":self.ids["run"],"id":self.consumer,"consumer_key":"decision-fixture","critical":False,"state":"ACTIVE"},component="6.1")
  def start(self):
+  if self.runtime_role_created:self.sql('GRANT USAGE ON SCHEMA public TO "'+self.runtime_role+'"; GRANT SELECT ON public.fixture_decision_delay,public.fixture_decision_packets,public.fixture_decision_source TO "'+self.runtime_role+'"')
+  if self.runtime_role_created:self.sql('GRANT INSERT ON public.fixture_decision_source TO "'+self.runtime_role+'"')
   argv=["node",str(self.runtime/"dist/control.js"),"--policy",str(self.policy),"--spec-revision","fixture-identity-v1","--components",str(self.components),"--module-root",str(self.runtime/"dist"),"--mode","https","--host","127.0.0.1","--port",str(self.port),"--tls-cert",str(self.ca),"--tls-key",str(self.tlskey)]
   self.child=subprocess.Popen(argv,cwd=ROOT,env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
   deadline=time.monotonic()+15;lines=[]
@@ -127,9 +142,9 @@ class Fixture(identity.IdentityFixture):
   expect(r.get("ok")is False and(not code or r.get("error",{}).get("code")==code),f"unsafe success: HTTP{status} {r}")
   return r
  def packet(self):
-  row=self.sql("SELECT spec_revision_id,state_version::text FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[self.ids["organisation"],self.ids["run"]])[0]
-  revision={"spec_revision":row["spec_revision_id"],"repository_commits":{},"graph_revision":None,"contract_revisions":{},"event_watermark":"fixture-run:"+row["state_version"],"ownership_generation":row["state_version"]}
-  p={"schema_version":1,"id":uid(),"purpose":"fixture-review","revision":revision,"state":{"source":"Synthetic source only","questions":{"urgent":{"type":"noul","instructions":"Does this need review?"}}},
+  row=self.sql("SELECT spec_revision_id,state_version::text,(SELECT max(data_version)::text FROM public.fixture_decision_source) source_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2",[self.ids["organisation"],self.ids["run"]])[0]
+  revision={"spec_revision":row["spec_revision_id"],"repository_commits":{},"graph_revision":None,"contract_revisions":{},"event_watermark":"fixture-run:"+row["state_version"]+":source:"+row["source_version"],"ownership_generation":row["state_version"]}
+  p={"schema_version":1,"id":uid(),"purpose":"fixture-review","revision":revision,"state":{"source":"Synthetic source only","source_version":row["source_version"],"questions":{"urgent":{"type":"noul","instructions":"Does this need review?"}}},
    "created_at":time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()-1)),"expires_at":time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+120)),"authority":"NONE"}
   self.sql("INSERT INTO public.fixture_decision_packets VALUES($1,$2,$3,$4::jsonb)",[self.ids["organisation"],self.ids["run"],p["id"],json.dumps(p)])
   return p
@@ -161,10 +176,16 @@ def main():
     rows=f.sql("SELECT count(*)::int n FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND operation='event.receive' AND state='COMPLETED'",[f.ids["organisation"],f.ids["run"]])
     expect(rows[0]["n"]==1,"admission lacked actual durable6.2 receipt")
    check(IDS[5],admission)
+   def isolation_guard():
+    script="const {createRequire}=require('node:module'),pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg');const c=new pg.Client({connectionString:process.env.DATABASE_URL});(async()=>{await c.connect();try{await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ');try{await c.query('UPDATE hyperfide.decision_jobs SET state_version=state_version+1 WHERE id=$1',[process.argv[1]]);throw Error('unsupported isolation accepted')}catch(e){if(e.code!=='25001')throw e;}finally{await c.query('ROLLBACK')}}finally{await c.end()}})().catch(e=>{console.error(e.code??e.message);process.exitCode=1})"
+    cp=subprocess.run(["node","--input-type=commonjs","-e",script,id],cwd=ROOT,env=f.env,capture_output=True,text=True,timeout=10)
+    expect(cp.returncode==0,"actual repeatable-read mutation guard failed: "+cp.stderr)
+   check(IDS[43],isolation_guard)
    def replay():
     _,v=f.request(operation);expect(v.get("ok")is True and v["result"]["decision_id"]==id and v["result"]["replayed"]is True,"duplicate admission created new job")
    check(IDS[6],replay)
    # Earlier admission/read tests consume time deliberately; refresh work on a background deadline.
+   business_before=f.sql("SELECT state_version::text,semantic_generation::text FROM hyperfide.runs WHERE id=$1",[f.ids["run"]])[0]
    work=f.submit(mode="background",deadline_ms=10000);result=f.process(work)
    def validated():
     p=result["result"]["payload"];expect(result["state"]=="COMPLETED"and p["status"]=="abstained"and p["raw_output"]["answers"]["urgent"]["noul"]==.8 and len(result["attempts"])==1,"validated raw result missing")
@@ -196,6 +217,10 @@ def main():
     expect("Authorization"not in replay["request"]["headers"]and"synthetic-job-credential"not in json.dumps(replay),"resolved credential persisted")
    check(IDS[36],replay_request)
    check(IDS[29],lambda:expect(f.sql("SELECT state FROM hyperfide.runs WHERE id=$1",[f.ids["run"]])[0]["state"]=="RUNNING","model altered run authority"))
+   def business_version():
+    after=f.sql("SELECT state_version::text,semantic_generation::text FROM hyperfide.runs WHERE id=$1",[f.ids["run"]])[0]
+    expect(after["state_version"]==business_before["state_version"]and int(after["semantic_generation"])>int(business_before["semantic_generation"]),"advisory bookkeeping changed business version or skipped actual fence")
+   check(IDS[41],business_version)
    f.advance()
    def changed_submission():
     changed=f.operation("20.4","decision.jobs.submit",f.submission())
@@ -213,7 +238,7 @@ def main():
    except Exception:cleanup_complete=False;raise
  try:basic()
  except Exception as e:
-  for i in [*IDS[:12],IDS[28],IDS[29],IDS[30],IDS[31],IDS[34],IDS[35],IDS[36]]:
+  for i in [*IDS[:12],IDS[28],IDS[29],IDS[30],IDS[31],IDS[34],IDS[35],IDS[36],IDS[41],IDS[43]]:
    if i not in observations:
     observations[i]="fixture setup failed: "+str(e);failed.append(i)
  # Remaining cases are collected before output so assertion order remains exact.
@@ -296,28 +321,39 @@ def main():
   expect(time.monotonic()-started<3 and not p.received,"slow packet admission exceeded total deadline")
   expect(f.sql("SELECT count(*)::int n FROM hyperfide.decision_jobs")[0]["n"]==0,"timed out admission committed a job")
  def semantic_lock_order(f,p,o):
-  inp=f.submission(mode="background",deadline_ms=10000);box=[];t=None
-  script="""import {createRequire} from 'node:module';
-const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg'),c=new pg.Client({connectionString:process.env.DATABASE_URL}),s=JSON.parse(process.argv[1]);
-try{await c.connect();await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[s.organisation+':'+s.run+':finding-disposition']);
-console.log('locked');await new Promise(resolve=>process.stdin.once('data',resolve));
-await c.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[s.organisation,s.run]);await c.query('COMMIT');console.log('committed');}
-finally{await c.end();}"""
-  writer=subprocess.Popen(["node","--input-type=module","-e",script,json.dumps(f.ids)],cwd=ROOT,env=f.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+  inp=f.submission(mode="background",deadline_ms=10000);box=[];t=None;writer=None
+  def request():box.append(f.invoke("decision.fixture.submit",inp,component="99.20"))
+  t=threading.Thread(target=request);t.start()
+  until=time.monotonic()+5
+  while time.monotonic()<until and not(f.gate/"ready").exists():time.sleep(.02)
+  expect((f.gate/"ready").exists(),"real HTTPS authentication did not reach trusted fixture gate")
+  script="""import {createResourceContainer} from './services/hyperfide/dist/storage/runtime.js';
+import {writeSemanticDisposition} from './services/hyperfide/dist/storage/dispositions.js';
+const s=JSON.parse(process.argv[1]),r=createResourceContainer({role:'control',env:process.env,signal:new AbortController().signal});
+try{await r.gateway.withPrimaryTransaction({timeoutMs:10000},async tx=>{
+await writeSemanticDisposition(tx,{organisation_id:s.organisation,run_id:s.run});console.log('locked');
+await new Promise(resolve=>process.stdin.once('data',resolve));
+await tx.query('INSERT INTO public.fixture_decision_source VALUES(2)');});console.log('committed');}
+finally{await r.close();}"""
   try:
-   ready,_,_=select.select([writer.stdout],[],[],5);expect(ready and writer.stdout.readline().strip()=="locked","actual assurance writer did not hold barrier")
-   t=threading.Thread(target=lambda:box.append(f.invoke("decision.jobs.submit",inp,component="20.4")));t.start()
+   writer=subprocess.Popen(["node","--input-type=module","-e",script,json.dumps(f.ids)],cwd=ROOT,env=f.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+   ready,_,_=select.select([writer.stdout],[],[],5);expect(ready and writer.stdout.readline().strip()=="locked","actual shared generation writer did not hold run fence")
+   (f.gate/"continue").touch()
    deadline=time.monotonic()+4;waiting=[]
    while time.monotonic()<deadline:
-    waiting=f.sql("SELECT a.pid,(SELECT count(*)::int FROM pg_locks l WHERE l.pid=a.pid AND l.relation='hyperfide.runs'::regclass AND l.mode='RowShareLock' AND l.granted) AS run_locks FROM pg_stat_activity a WHERE a.datname=current_database() AND a.wait_event='advisory'")
+    waiting=f.sql("SELECT a.pid,(SELECT count(*)::int FROM pg_locks l WHERE l.pid=a.pid AND l.relation='hyperfide.runs'::regclass AND l.mode='RowShareLock' AND l.granted) AS run_locks FROM pg_stat_activity a WHERE a.datname=current_database() AND a.wait_event IN('transactionid','tuple') AND a.query LIKE 'UPDATE hyperfide.runs SET semantic_generation=%'")
     if waiting:break
     time.sleep(.03)
-   expect(waiting and all(row["run_locks"]==0 for row in waiting),"decision waited for semantic barrier while retaining principal/run locks: "+json.dumps(waiting))
-   out,err=writer.communicate("continue\n",timeout=4);expect(writer.returncode==0 and "committed"in out,"writer failed under concurrent decision guard: "+err)
-   t.join(6);expect(not t.is_alive() and box and box[0][1].get("error",{}).get("code")=="DECISION_STALE","concurrent semantic writer was not observed as stale: "+json.dumps(box))
-   expect(not p.received,"stale semantic packet invoked provider")
+   expect(waiting and all(row["run_locks"]==0 for row in waiting),"decision acquired run SHARE before actual WRITE fence: "+json.dumps(waiting))
+   out,err=writer.communicate("continue\n",timeout=4);expect(writer.returncode==0 and "committed"in out,"actual generation writer failed: "+err)
+   t.join(6);expect(not t.is_alive(),"actual authenticated decision request leaked")
+   def insert_freshness():
+    expect(box and box[0][1].get("error",{}).get("code")=="DECISION_STALE","new semantic row after blocked snapshot was not observed: "+json.dumps(box))
+    expect(f.sql("SELECT max(data_version)::int version FROM public.fixture_decision_source")[0]["version"]==2 and not p.received,"real semantic insert absent or stale packet sent")
+   check(IDS[42],insert_freshness)
   finally:
-   if writer.poll()is None:
+   (f.gate/"continue").touch()
+   if writer and writer.poll()is None:
     writer.kill();writer.communicate(timeout=5)
    if t:t.join(6)
  def account_quota(f,p,o):
