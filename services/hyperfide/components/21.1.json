@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "21.1",
+  "task": "21.1",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/spec_critique.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.spec.describe",
+    "decision.spec.packet",
+    "decision.spec.propose",
+    "decision.spec.flags"
+  ],
+  "requires": [
+    "4.2",
+    "21.4",
+    "20.4"
+  ]
+}
