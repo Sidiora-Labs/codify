@@ -5,8 +5,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {getPool} from '../storage/schema.js';
-import {bindScope,obj,keys,scope,uuid,values,hash,canonical,fail,config,repository,git,tx,currentRun,custody,prepareRemoteGate,executeRemote,type Scope,type DB,type IntegrationConfig,type GateConfig} from './candidates.js';
+import {bindScope,primaryClient,obj,keys,scope,uuid,values,hash,canonical,fail,config,repository,git,tx,currentRun,custody,reviewCoverage,prepareRemoteGate,executeRemote,type Scope,type DB,type IntegrationConfig,type GateConfig} from './candidates.js';
 const exec=promisify(execFile);
 type Level='TASK'|'WAVE'|'PROGRAMME';
 interface ScopeGate extends GateConfig {covers:string[];proof:{manifest_path:string;manifest_digest:string;registry_path:string;registry_digest:string;expected_assertion_ids:string[];case_ids:string[]}}
@@ -15,7 +14,7 @@ export function closurePolicy(c:IntegrationConfig):ClosurePolicy{
  const p=obj(c.closure);keys(p,['wave_gates','programme_gates','required_acceptance_ids','required_docs']);
  if(!Array.isArray(p.wave_gates)||!p.wave_gates.length||!Array.isArray(p.programme_gates)||!p.programme_gates.length||!Array.isArray(p.required_acceptance_ids)||!p.required_acceptance_ids.length||p.required_acceptance_ids.some(x=>typeof x!=='string'||!/^V-[0-9]{3}$/.test(x))||new Set(p.required_acceptance_ids).size!==p.required_acceptance_ids.length||typeof p.required_docs!=='boolean')fail('CLOSURE_POLICY_INVALID','Explicit aggregate, acceptance and documentation policy required');
  for(const gates of [p.wave_gates,p.programme_gates]){
- const ids=new Set<string>();for(const raw of gates){const g=obj(raw);keys(g,['id','kind','argv','timeout_ms','covers','proof']);if(typeof g.id!=='string'||!/^[A-Za-z0-9._-]{1,128}$/.test(g.id)||ids.has(g.id)||!['build','test'].includes(String(g.kind))||!Array.isArray(g.argv)||!g.argv.length||g.argv.some(x=>typeof x!=='string'||!x||x.includes('\0'))||!Number.isSafeInteger(g.timeout_ms)||Number(g.timeout_ms)<100||Number(g.timeout_ms)>900000||!Array.isArray(g.covers)||g.covers.some(x=>typeof x!=='string')||new Set(g.covers).size!==g.covers.length)fail('CLOSURE_POLICY_INVALID','Invalid registered scope gate');ids.add(g.id);{const proof=obj(g.proof);keys(proof,['manifest_path','manifest_digest','registry_path','registry_digest','expected_assertion_ids','case_ids']);if(typeof proof.manifest_path!=='string'||typeof proof.registry_path!=='string'||!Array.isArray(proof.expected_assertion_ids)||!proof.expected_assertion_ids.length||proof.expected_assertion_ids.some(x=>typeof x!=='string'||!x)||new Set(proof.expected_assertion_ids).size!==proof.expected_assertion_ids.length)fail('CLOSURE_POLICY_INVALID','Exact registered scope proof required');for(const key of ['manifest_digest','registry_digest'])if(typeof proof[key]!=='string'||!/^sha256:[a-f0-9]{64}$/.test(String(proof[key])))fail('CLOSURE_POLICY_INVALID','Pinned scope inputs required');}}
+ const ids=new Set<string>();for(const raw of gates){const g=obj(raw);keys(g,['id','kind','argv','timeout_ms','covers','proof']);if(typeof g.id!=='string'||!/^[A-Za-z0-9._-]{1,128}$/.test(g.id)||ids.has(g.id)||!['build','test'].includes(String(g.kind))||!Array.isArray(g.argv)||!g.argv.length||g.argv.some(x=>typeof x!=='string'||!x||x.includes('\0'))||!Number.isSafeInteger(g.timeout_ms)||Number(g.timeout_ms)<100||Number(g.timeout_ms)>900000||!Array.isArray(g.covers)||g.covers.some(x=>typeof x!=='string')||new Set(g.covers).size!==g.covers.length)fail('CLOSURE_POLICY_INVALID','Invalid registered scope gate');ids.add(g.id);{const proof=obj(g.proof);keys(proof,['manifest_path','manifest_digest','registry_path','registry_digest','expected_assertion_ids','case_ids']);if(typeof proof.manifest_path!=='string'||typeof proof.registry_path!=='string'||!Array.isArray(proof.expected_assertion_ids)||!proof.expected_assertion_ids.length||proof.expected_assertion_ids.some(x=>typeof x!=='string'||!x)||new Set(proof.expected_assertion_ids).size!==proof.expected_assertion_ids.length)fail('CLOSURE_POLICY_INVALID','Exact registered scope proof required');if(!Array.isArray(proof.case_ids)||!proof.case_ids.length||proof.case_ids.some(x=>typeof x!=='string'||!/^V-[0-9]{3}$/.test(x))||new Set(proof.case_ids).size!==proof.case_ids.length||g.kind==='test'&&canonical([...(proof.case_ids as string[])].sort())!==canonical([...(g.covers as string[])].sort()))fail('CLOSURE_POLICY_INVALID','Declared acceptance coverage must equal the exact registered full-case inventory');for(const key of ['manifest_digest','registry_digest'])if(typeof proof[key]!=='string'||!/^sha256:[a-f0-9]{64}$/.test(String(proof[key])))fail('CLOSURE_POLICY_INVALID','Pinned scope inputs required');}}
  }
  return p as unknown as ClosurePolicy;
 }
@@ -31,7 +30,7 @@ export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,tas
  const run=await currentRun(db,s,true,undefined,true);
  const closurePolicyRow=(await db.query('SELECT * FROM hyperfide.integration_closure_policies WHERE organisation_id=$1 AND run_id=$2 AND run_policy_digest=$3',[...values(s),run.policy_digest])).rows[0];if(!closurePolicyRow||hash(canonical(closurePolicyRow.policy))!==closurePolicyRow.closure_policy_digest)fail('CLOSURE_POLICY_UNAVAILABLE','Persisted current closure policy required');
  const tasks=(await db.query('SELECT id,task_key,state,state_version::text,generation::text,current_custody_id,criteria_digest,spec_generation::text,spec_revision_id,wave FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2'+(level==='TASK'?' AND id=$3':level==='WAVE'?' AND wave=$3':'')+' ORDER BY task_key',[...values(s),...(level==='TASK'?[taskId]:level==='WAVE'?[wave]:[])])).rows;
- if(!tasks.length)fail('CLOSURE_SCOPE_EMPTY','No tasks in declared closure scope');
+ if(tasks.length>10000)fail('CLOSURE_SCOPE_UNBOUNDED','Scope task count exceeds bounded10k inspection');if(!tasks.length)fail('CLOSURE_SCOPE_EMPTY','No tasks in declared closure scope');
  const publications=(await db.query("SELECT p.id,p.repository_id,p.candidate_id,p.candidate_head,p.observed_head,p.state,p.state_version::text,c.input_manifest_digest,m.manifest FROM hyperfide.publication_operations p JOIN hyperfide.integration_candidates c ON c.organisation_id=p.organisation_id AND c.run_id=p.run_id AND c.id=p.candidate_id JOIN hyperfide.integration_candidate_manifests m ON m.organisation_id=c.organisation_id AND m.run_id=c.run_id AND m.candidate_id=c.id WHERE p.organisation_id=$1 AND p.run_id=$2 ORDER BY p.repository_id,p.created_at,p.id",values(s))).rows;
  const repositories=(await db.query('SELECT repository_id,integration_ref FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 ORDER BY repository_id',values(s))).rows;
  const findings:unknown[]=[]; // Canonical finding disposition is carried by findingObservations below.
@@ -46,20 +45,24 @@ export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,tas
  const reviewObservations:Record<string,unknown>[]=[];
  const findingObservations:Record<string,unknown>[]=[];
  const assuranceModule='../assurance/coverage.js',reviewModule='../review/coverage.js',findingModule='../findings/registry.js';
- for(const publication of publications.filter(p=>p.state==='PUBLISHED'&&p.manifest.contributors.some((contributor:Record<string,any>)=>tasks.some(t=>t.id===contributor.task_id&&t.current_custody_id===contributor.custody_id&&t.criteria_digest===contributor.criteria_digest)))){
+ for(const publication of publications.filter(p=>p.state==='PUBLISHED'&&p.manifest.contributors.some((contributor:Record<string,any>)=>tasks.some(t=>t.id===contributor.task_id&&t.current_custody_id===contributor.custody_id)))){
   const manifest=publication.manifest;
   for(const contributor of manifest.contributors){
    try{const validityModule='../assurance/validity.js';const inspect=(await import(validityModule)).inspectValidity;
     const evidence=await inspect(db,s,contributor.custody_id);
     assuranceObservations.push({task_id:contributor.task_id,custody_id:contributor.custody_id,applicability:evidence.applicability,
-     current:evidence.current_integrated_assurance===true&&evidence.proof_complete===true&&evidence.applicability==='CURRENT'&&evidence.criteria_digest===contributor.criteria_digest,receipt_digest:evidence.receipt_digest??null,clauses:evidence.clauses??[],proof_complete:evidence.proof_complete===true});
+     current:evidence.current_integrated_assurance===true&&evidence.proof_complete===true&&evidence.applicability==='CURRENT'&&evidence.proof_criteria_digest===tasks.find((t:Record<string,any>)=>t.id===contributor.task_id)?.criteria_digest,receipt_digest:evidence.receipt_digest??null,clauses:evidence.clauses??[],proof_complete:evidence.proof_complete===true});
    }catch{assuranceObservations.push({task_id:contributor.task_id,custody_id:contributor.custody_id,current:false,reason:'ASSURANCE_UNAVAILABLE'});}
   }
-  try{const inspect=(await import(reviewModule)).inspectReviewCoverage;const bindings=(await db.query('SELECT * FROM hyperfide.integration_candidate_review_inputs WHERE organisation_id=$1 AND run_id=$2 AND candidate_id=$3 ORDER BY repository_id,source_object_id',[...values(s),publication.candidate_id])).rows;const sources=manifest.review_sources;if(!Array.isArray(sources)||!sources.length||bindings.length!==sources.length)fail('INTEGRATION_REVIEW_INCOMPLETE','Exact per-source review bindings unavailable');for(const source of sources){const binding=bindings.find(b=>b.repository_id===publication.repository_id&&b.source_object_id===source);if(!binding)fail('INTEGRATION_REVIEW_INCOMPLETE','Missing source review binding');const coverage=await inspect(db,s,{repository_id:publication.repository_id,source_object_id:source,candidate_digest:publication.input_manifest_digest,input_manifest_digest:binding.input_manifest_digest,policy_digest:binding.policy_digest});const complete=coverage.status==='COMPLETE'&&coverage.required>0&&coverage.complete===coverage.required&&Array.isArray(coverage.missing)&&!coverage.missing.length&&Array.isArray(coverage.untriaged_observation_ids)&&!coverage.untriaged_observation_ids.length&&Array.isArray(coverage.blocking_observation_ids)&&!coverage.blocking_observation_ids.length;reviewObservations.push({candidate_id:publication.candidate_id,...coverage,status:complete?'COMPLETE':'INCOMPLETE'});}}
-  catch{reviewObservations.push({candidate_id:publication.candidate_id,status:'INCOMPLETE',reason:'REVIEW_UNAVAILABLE'});}
+
+ }
+ for(const repository of repositories){
+  const publication=[...publications].reverse().find(p=>p.repository_id===repository.repository_id&&p.state==='PUBLISHED'&&p.observed_head===p.candidate_head);if(!publication){reviewObservations.push({repository_id:repository.repository_id,status:'INCOMPLETE',reason:'LATEST_PUBLICATION_MISSING'});continue;}
+  try{const current=await reviewCoverage(db,s,publication.manifest,publication.input_manifest_digest,publication.candidate_id,'CURRENT_PUBLISHED');reviewObservations.push(...current.observations.map(o=>({...o,review_bindings_digest:current.digest})));}
+  catch{reviewObservations.push({candidate_id:publication.candidate_id,repository_id:repository.repository_id,status:'INCOMPLETE',reason:'CURRENT_PUBLISHED_REVIEW_UNAVAILABLE'});}
  }
  for(const task of tasks.filter(t=>!assuranceObservations.some(a=>a.task_id===t.id))){
-  try{const inspect=(await import(assuranceModule)).inspectCoverage;const evidence=await inspect(db,s,task.current_custody_id);assuranceObservations.push({task_id:task.id,custody_id:task.current_custody_id,applicability:evidence.applicability,current:evidence.proof_complete===true&&evidence.applicability==='CURRENT'&&evidence.criteria_digest===task.criteria_digest,receipt_digest:evidence.receipt_digest??null,clauses:evidence.clauses??[],proof_complete:evidence.proof_complete===true});}
+  try{const inspect=(await import(assuranceModule)).inspectCoverage;const evidence=await inspect(db,s,task.current_custody_id);assuranceObservations.push({task_id:task.id,custody_id:task.current_custody_id,applicability:evidence.applicability,current:evidence.proof_complete===true&&evidence.applicability==='CURRENT'&&evidence.proof_criteria_digest===task.criteria_digest,receipt_digest:evidence.receipt_digest??null,clauses:evidence.clauses??[],proof_complete:evidence.proof_complete===true});}
   catch{assuranceObservations.push({task_id:task.id,custody_id:task.current_custody_id,current:false,reason:'ASSURANCE_UNAVAILABLE'});}
  }
  for(const repository of repositories){
@@ -76,19 +79,19 @@ function parse(input:unknown):{s:Scope;level:Level;wave?:number;taskId?:string}{
  if(level==='WAVE'){if(!Number.isSafeInteger(v.wave)||Number(v.wave)<1)fail('CLOSURE_INVALID','Positive wave required');return {s:scope(v),level,wave:Number(v.wave)};}
  if(v.wave!==undefined)fail('CLOSURE_INVALID','Programme covers every wave');return {s:scope(v),level};
 }
-export async function evaluateClosure(pool:pg.Pool,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
+export async function evaluateClosure(pool:import('./candidates.js').DB,cfg:IntegrationConfig,input:unknown):Promise<unknown>{
  const p=parse(input);if(p.s.organisation_id!==cfg.organisation_id)fail('CLOSURE_SCOPE_DENIED','Wrong organisation');const policy=closurePolicy(cfg);
  return tx(pool,async db=>{
  await registerClosurePolicy(db,p.s,cfg);const m=await closureSnapshot(db,p.s,p.level,p.wave,p.taskId),inputDigest=hash(canonical(m)),reasons:string[]=[];let documentation:unknown=null;
  for(const task of m.tasks){
   if(p.level==='TASK'){
    try{if(task.state==='INTEGRATED'){
-    const receipt=m.publications.find((pub:Record<string,any>)=>pub.state==='PUBLISHED'&&pub.observed_head===pub.candidate_head&&pub.manifest.contributors.some((c:Record<string,any>)=>c.task_id===task.id&&c.custody_id===task.current_custody_id&&c.criteria_digest===task.criteria_digest));if(!receipt)reasons.push('TASK_INTEGRATION_RECEIPT_MISSING:'+task.task_key);
+    const receipt=m.publications.find((pub:Record<string,any>)=>pub.state==='PUBLISHED'&&pub.observed_head===pub.candidate_head&&pub.manifest.contributors.some((c:Record<string,any>)=>c.task_id===task.id&&c.custody_id===task.current_custody_id));if(!receipt)reasons.push('TASK_INTEGRATION_RECEIPT_MISSING:'+task.task_key);
    }else if(task.current_custody_id){await custody(db,p.s,task.current_custody_id);}else reasons.push('TASK_CUSTODY_MISSING:'+task.task_key);
    }catch{reasons.push('TASK_QUALIFICATION_STALE:'+task.task_key);}
   }else{
    if(task.state!=='INTEGRATED')reasons.push('TASK_NOT_INTEGRATED:'+task.task_key);
-   const receipt=m.publications.find((pub:Record<string,any>)=>pub.state==='PUBLISHED'&&pub.observed_head===pub.candidate_head&&pub.manifest.contributors.some((c:Record<string,any>)=>c.task_id===task.id&&c.custody_id===task.current_custody_id&&c.criteria_digest===task.criteria_digest));
+   const receipt=m.publications.find((pub:Record<string,any>)=>pub.state==='PUBLISHED'&&pub.observed_head===pub.candidate_head&&pub.manifest.contributors.some((c:Record<string,any>)=>c.task_id===task.id&&c.custody_id===task.current_custody_id));
    if(!receipt)reasons.push('TASK_INTEGRATION_RECEIPT_MISSING:'+task.task_key);
   }
  }
@@ -173,7 +176,7 @@ export async function registeredScopeGate(gate:ScopeGate,cwd:string,work:string,
  await collect(output);
  return {stdout:result.stdout+'\n'+checked.stdout,stderr:result.stderr+'\n'+checked.stderr,exitCode:0,assertions:receipt.assertions.length,proof:{scope_digest:inputDigest,template_digest:p.manifest_digest,registry_digest:p.registry_digest,receipt_id:summary.receipt_id,checker_digest:env.HYPERFIDE_CHECKER_DIGEST,bundle_digest:hash(canonical(bundle)),files:bundle}};
 }
-async function verifyScope(pool:pg.Pool,cfg:IntegrationConfig,_env:Readonly<NodeJS.ProcessEnv>,input:unknown):Promise<unknown>{
+async function verifyScope(pool:import('./candidates.js').DB,cfg:IntegrationConfig,_env:Readonly<NodeJS.ProcessEnv>,input:unknown):Promise<unknown>{
  const parsed=obj(input),p=parse(input);if(p.level==='TASK')fail('CLOSURE_INVALID','Task proof belongs to custody qualification');
  const session=uuid(parsed.session_id),reservation=uuid(parsed.reservation_id),policy=closurePolicy(cfg),gates=p.level==='WAVE'?policy.wave_gates:policy.programme_gates;
  const prepared=await tx(pool,async db=>{
@@ -199,9 +202,9 @@ async function verifyScope(pool:pg.Pool,cfg:IntegrationConfig,_env:Readonly<Node
 export function createComponent(ctx:ComponentContext):Component{
  let cfg:Promise<IntegrationConfig>|undefined;const settings=()=>cfg??=config(ctx.env);
  return bindScope(ctx,{apiVersion:1,actions:{
- 'integration.closure.evaluate':async input=>evaluateClosure(getPool(ctx.env),await settings(),input),
- 'integration.closure.verify':async input=>verifyScope(getPool(ctx.env),await settings(),ctx.env,input),
- 'integration.closure.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','evaluation_id']);const rows=await getPool(ctx.env).query('SELECT * FROM hyperfide.integration_closure_evaluations WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...values(scope(v)),uuid(v.evaluation_id)]);return rows.rows[0]??fail('CLOSURE_UNKNOWN','Unknown closure evaluation');}
+ 'integration.closure.evaluate':async input=>evaluateClosure(primaryClient(),await settings(),input),
+ 'integration.closure.verify':async input=>verifyScope(primaryClient(),await settings(),ctx.env,input),
+ 'integration.closure.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','evaluation_id']);const rows=await primaryClient().query('SELECT * FROM hyperfide.integration_closure_evaluations WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...values(scope(v)),uuid(v.evaluation_id)]);return rows.rows[0]??fail('CLOSURE_UNKNOWN','Unknown closure evaluation');}
  }});
 }
 
@@ -220,13 +223,13 @@ export async function qualifiedIntegratedOutcomes(db:DB,s:Scope):Promise<Record<
   if(!contributor)continue;
   const publication=await inspectPublication(db,s,{task_id:task.id,custody_id:task.current_custody_id,custody_generation:contributor.custody_generation});
   const validity=await inspectValidity(db,s,task.current_custody_id);
-  const review=snapshot.reviewObservations.filter((r:Record<string,any>)=>r.candidate_id===publication.candidate_id);
+  const review=snapshot.reviewObservations.filter((r:Record<string,any>)=>r.repository_id===publication.repository_id&&r.source_object_id===publication.current_source?.source_object_id);
   if(publication.status==='PUBLISHED'&&validity.current_integrated_assurance===true&&review.length&&review.every((r:Record<string,any>)=>r.status==='COMPLETE')&&snapshot.findingObservations.every((r:Record<string,any>)=>r.clear===true))
    accepted.push({task_id:task.id,custody_id:task.current_custody_id,publication,assurance_receipt_digest:validity.receipt_digest,review_receipt_ids:review.flatMap((r:Record<string,any>)=>r.receipt_ids??[])});
  }
  const input=hash(canonical(snapshot)),programme=(await db.query("SELECT 1 FROM hyperfide.integration_closure_evaluations WHERE organisation_id=$1 AND run_id=$2 AND level='PROGRAMME' AND input_manifest_digest=$3 AND outcome='PASS'",[...values(s),input])).rowCount!>0;
- return {status:'CURRENT',count:String(accepted.length),proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:hash(canonical({input_manifest_digest:input,accepted})),as_of,programme_outcome:programme?'PASS':'HELD',reasons};
- }catch{return {status:'HELD',count:null,proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:null,as_of,programme_outcome:'HELD',reasons:['CURRENT_INTEGRATED_PROOF_UNAVAILABLE']};}
+ return {status:'CURRENT',count:String(accepted.length),current_task_ids:accepted.map(a=>String(a.task_id)).sort(),proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:hash(canonical({input_manifest_digest:input,accepted})),as_of,programme_outcome:programme?'PASS':'HELD',reasons};
+ }catch{return {status:'HELD',count:null,current_task_ids:[],proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:null,as_of,programme_outcome:'HELD',reasons:['CURRENT_INTEGRATED_PROOF_UNAVAILABLE']};}
 }
 /** Uses the exact current primary snapshot and previously executed immutable full-case receipts. */
 export async function inspectProgrammeClosure(db:DB,invocation:unknown):Promise<Record<string,unknown>>{

@@ -14,7 +14,9 @@
     "closure.policy-requires-gates",
     "closure.policy-requires-acceptance",
     "closure.evaluation-immutable",
-    "closure.unregistered-assertions-refused"
+    "closure.unregistered-assertions-refused",
+    "closure.declared-coverage-bound",
+    "closure.policy-valid-shape"
   ],
   "argv": [
     "python3",
