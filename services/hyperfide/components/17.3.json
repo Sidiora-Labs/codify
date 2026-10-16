@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "17.3",
+  "task": "17.3",
+  "roles": [
+    "control"
+  ],
+  "module": "review/receipts.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "review.inputs.bind",
+    "review.receipt.submit",
+    "review.receipt.inspect",
+    "review.inputs.reconcile",
+    "review.obligation.claim"
+  ],
+  "requires": [
+    "17.1",
+    "17.2",
+    "7.3"
+  ]
+}
