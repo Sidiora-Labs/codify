@@ -1,0 +1,177 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-13.1-native-component-v1",
+  "case_ids": [
+    "V-042"
+  ],
+  "expected_assertion_ids": [
+    "connectors.registered-describe",
+    "connectors.unknown-field",
+    "connectors.duplicate-field",
+    "connectors.missing-trusted-profile",
+    "connectors.actual-version.codex",
+    "connectors.actual-option-refusal.codex",
+    "connectors.launch-boundary.codex",
+    "connectors.actual-version.claude",
+    "connectors.actual-option-refusal.claude",
+    "connectors.launch-boundary.claude",
+    "connectors.actual-version-mismatch",
+    "connectors.encode-unique-request",
+    "connectors.encode-unicode",
+    "connectors.steer-requires-turn",
+    "connectors.cancel-exact-turn",
+    "connectors.resume-unqualified-refusal",
+    "connectors.initialize-sequencing",
+    "connectors.actual-codex-initialize",
+    "connectors.claude-user-frame",
+    "connectors.claude-steer-unsupported"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "f62744542df73f766f84e997d9516de1c91c4b7de27b2d0844ce71f3886a626f",
+      "size": 3524
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "a92996162db5ab8e8197b35b6a577529fd39e75507d36e2d05784cee6e9711f2",
+      "size": 200408
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
+      "size": 9165
+    },
+    {
+      "path": "src/hyperfide/bootstrap.c",
+      "sha256": "3b111c682f414fa28adccb2668cc80591ab80838e79fa91716b28caa39dc2a11",
+      "size": 40122
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "84e1defc09cd63946d6be8401ff6d6d36ef6f609111b4d154ba16c6fe72d7224",
+      "size": 7262
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/11.2.kvx",
+      "sha256": "4ceaea25f04e64302c2e3ac34f10bfbf25a824f9f851e8f8eea8018137c220c1",
+      "size": 232
+    },
+    {
+      "path": "src/hyperfide/components/11.3.kvx",
+      "sha256": "264328b121a41ef71194c09a8b410185c6c63848fbfcdee25d5d0444fea1fa3b",
+      "size": 238
+    },
+    {
+      "path": "src/hyperfide/components/12.1.kvx",
+      "sha256": "cf606751aa1f5f893af179128f9fe16dfc2817350e914248652082214bd5d40b",
+      "size": 468
+    },
+    {
+      "path": "src/hyperfide/components/13.1.kvx",
+      "sha256": "a594a81503ba4f6f6bbdbb35bcf7101fa57b6e38c1881b8882e6de42931e6559",
+      "size": 225
+    },
+    {
+      "path": "src/hyperfide/components/13.3.kvx",
+      "sha256": "a3d35c4357b0ca16ef6ed48ffd8a9b1bda34d8fc22719ed39229de5e7b4ab5af",
+      "size": 169
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "d93d9aa1d266794445bf1f236674319947f9f74437b5ce1528e83bbebfbf3fa1",
+      "size": 328
+    },
+    {
+      "path": "src/hyperfide/connector_recovery.c",
+      "sha256": "3ba404d5c642b3fc0ded9879c7e9f9a3574f54b59b374e7fe09ff0aeb67abb91",
+      "size": 8219
+    },
+    {
+      "path": "src/hyperfide/connectors.c",
+      "sha256": "5f78fce9b7838cc20e348284a6f5f3328041b1be2fccbad7786ba8fb297c22cd",
+      "size": 19515
+    },
+    {
+      "path": "src/hyperfide/preparation_support.h",
+      "sha256": "a059ce2157d26830a647de8afe72c5697c7e82fbb2e66b90def39f3e48745a12",
+      "size": 16480
+    },
+    {
+      "path": "src/hyperfide/readiness.c",
+      "sha256": "41d385943d89e7edbb6d91393f8db016102376fb3a0ef51e4a810f87e7cc47e7",
+      "size": 40812
+    },
+    {
+      "path": "src/hyperfide/supervisor.c",
+      "sha256": "195e849aa0e06dad8b995b5809742682f35efb2613d3bbadfb1ad988ecc4f2dc",
+      "size": 20456
+    },
+    {
+      "path": "src/hyperfide/supervisor.h",
+      "sha256": "bfe6fc78a100ec15498357cacf7425383932636365b9613e11b71c02bd9aa7cd",
+      "size": 1475
+    },
+    {
+      "path": "src/hyperfide/transport.c",
+      "sha256": "a826656d2d12906f90d1338edbbb7141c141cd51d27119d3e375cb82708e392f",
+      "size": 26435
+    },
+    {
+      "path": "src/hyperfide/transport.h",
+      "sha256": "e8dddaef334001da21b1e278bac5c7ca8801ae999af1782a6f60f0411153895e",
+      "size": 2433
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/13_1.py",
+      "sha256": "523045328c020868ea058d86b699093cc420a89cd3b581c93b2fabe332aed92e",
+      "size": 14437
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "7f97dbde67eb6e0824543e8a382c745c4ef352411d7ce54d0a962c6814b75d93",
+      "size": 27891
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
+      "size": 36837
+    },
+    {
+      "path": "tests/hyperfide/registrations/13.1.json",
+      "sha256": "7eea0e80d6a0da1235ee937f0f8229e912cda367867c96e92d8ed2d1dc52ed4b",
+      "size": 2101
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "qualification_limitations": [
+      "No live frontier inference, preserved native context, unattended permissions, credential refresh or MAIN restriction qualification.",
+      "MAIN supervisor module is source-only: these variants do not activate it or qualify actual MAIN launch, restricted tool escape resistance or cleanup release.",
+      "Actual installed native transport, signed HTTPS and PostgreSQL probes are bounded component evidence only.",
+      "Historical admission fixture rows exercise accounting, never genuine live profile admission.",
+      "Final merged-source manifests require refreshed complete inventory pins."
+    ]
+  },
+  "registered_variant": "task:13.1",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
