@@ -11,7 +11,8 @@ CREATE TABLE hyperfide.runner_registry (
  credential_id uuid NOT NULL,sandbox_id uuid NOT NULL,boot_generation bigint NOT NULL CHECK(boot_generation>0),boot_id uuid NOT NULL,
  slot_id uuid NOT NULL,repository_id uuid,launch_id uuid,
  state_dir text NOT NULL CHECK(state_dir ~ '^/[^[:cntrl:]]+$'),runner_binary text NOT NULL CHECK(runner_binary ~ '^/[^[:cntrl:]]+$'),
- workspace_path text NOT NULL CHECK(workspace_path ~ '^/[^[:cntrl:]]+$'),runner_binary_digest hyperfide.digest NOT NULL,
+ workspace_path text NOT NULL CHECK(workspace_path ~ '^/[^[:cntrl:]]+$'),
+ home_path text NOT NULL CHECK(home_path ~ '^/[^[:cntrl:]]+$'),tmp_path text NOT NULL CHECK(tmp_path ~ '^/[^[:cntrl:]]+$'),runner_binary_digest hyperfide.digest NOT NULL,
  boot_preparation_digest hyperfide.digest NOT NULL,preparation_digest hyperfide.digest NOT NULL,readiness_digest hyperfide.digest,
  source_digest hyperfide.digest,source_object_id text,source_tree_id text,
  preparation_policy_digest hyperfide.digest,
@@ -110,6 +111,11 @@ CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.runner_remote_jobs
 CREATE FUNCTION hyperfide.guard_runner_remote_result() RETURNS trigger
  LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
 BEGIN
+ IF TG_OP='INSERT' THEN
+  IF NEW.state<>'ADMITTED' OR NEW.claim_id IS NOT NULL OR NEW.executor_credential_id IS NOT NULL OR NEW.result IS NOT NULL OR NEW.result_digest IS NOT NULL OR NEW.result_signature IS NOT NULL
+  THEN RAISE EXCEPTION 'runner intents begin admitted without a fabricated result' USING ERRCODE='23514'; END IF;
+  RETURN NEW;
+ END IF;
  IF OLD.claim_id IS NOT NULL AND ROW(NEW.claim_id,NEW.executor_credential_id,NEW.claimed_at) IS DISTINCT FROM ROW(OLD.claim_id,OLD.executor_credential_id,OLD.claimed_at)
  THEN RAISE EXCEPTION 'runner execution claim is immutable' USING ERRCODE='23514'; END IF;
  IF OLD.state='ADMITTED' AND NEW.state NOT IN('ADMITTED','CLAIMED','UNKNOWN')
@@ -130,5 +136,8 @@ BEGIN
  THEN RAISE EXCEPTION 'runner result must be scoped metadata and immutable artifact references only' USING ERRCODE='23514'; END IF;
  RETURN NEW;
 END $$;
-CREATE TRIGGER guarded_result BEFORE UPDATE ON hyperfide.runner_remote_jobs
+CREATE TRIGGER guarded_result BEFORE INSERT OR UPDATE ON hyperfide.runner_remote_jobs
  FOR EACH ROW EXECUTE FUNCTION hyperfide.guard_runner_remote_result();
+
+CREATE TRIGGER retain_durable_intent BEFORE DELETE ON hyperfide.runner_remote_jobs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','operation_id');
