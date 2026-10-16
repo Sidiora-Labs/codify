@@ -56,7 +56,14 @@ int main(void){
  check(!queue_ack(db,&config,&i,1,"UNCERTAIN",NULL),"runner.ack.conflicting-replay-denied");
  check(sqlite3_exec(db,"PRAGMA query_only=ON",NULL,NULL,NULL)==SQLITE_OK,"runner.ack.write-fault-injected");
  check(!queue_ack(db,&config,&i,2,"EXECUTING",NULL),"runner.ack.write-failure-observed");
- sqlite3_close(db);return checks==28?0:3;
+ check(sqlite3_exec(db,"PRAGMA query_only=OFF;CREATE TABLE frames(id TEXT PRIMARY KEY,launch TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL);",NULL,NULL,NULL)==SQLITE_OK,"runner.frame.real-ledger");
+ check(frame_reserve(db,"frame-a","launch-a","sha256:a")==1,"runner.frame.first-intent");
+ check(frame_reserve(db,"frame-a","launch-a","sha256:a")==0,"runner.frame.exact-never-replays");
+ check(frame_reserve(db,"frame-a","launch-b","sha256:a")==-1,"runner.frame.cross-launch-conflict");
+ check(frame_reserve(db,"frame-a","launch-a","sha256:b")==-1,"runner.frame.changed-bytes-conflict");
+ check(sqlite3_exec(db,"PRAGMA query_only=ON",NULL,NULL,NULL)==SQLITE_OK,"runner.frame.write-fault");
+ check(frame_reserve(db,"frame-b","launch-a","sha256:a")==-2,"runner.frame.ledger-fault-refused");
+ sqlite3_close(db);return checks==35?0:3;
 }
 '''
 def main():

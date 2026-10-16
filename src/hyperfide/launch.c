@@ -112,6 +112,16 @@ static sqlite3 *ledger(const RunnerConfig *c) {
  if(rc!=SQLITE_OK){sqlite3_close(db);return NULL;}sqlite3_busy_timeout(db,5000);
  if(sqlite3_exec(db,"PRAGMA journal_mode=WAL;PRAGMA synchronous=FULL;CREATE TABLE IF NOT EXISTS launches(id TEXT PRIMARY KEY,command TEXT UNIQUE NOT NULL,digest TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,uid INTEGER NOT NULL,gid INTEGER NOT NULL,slot TEXT NOT NULL,identity TEXT NOT NULL,broker_pid INTEGER,broker_start TEXT,agent_pid INTEGER,agent_start TEXT,os_boot TEXT,exit_code INTEGER,updated INTEGER NOT NULL);CREATE UNIQUE INDEX IF NOT EXISTS active_slot_uid ON launches(uid) WHERE state NOT IN ('STOPPED','EXITED');CREATE TABLE IF NOT EXISTS native_ack_outbox(command TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(command,version));CREATE TABLE IF NOT EXISTS frames(id TEXT PRIMARY KEY,launch TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL);",NULL,NULL,NULL)!=SQLITE_OK){sqlite3_close(db);return NULL;}return db;
 }
+/* A frame UUID is one immutable launch/byte identity. Exact retries never
+ * write stdin again; conflicting retries must not masquerade as duplicates. */
+static int frame_reserve(sqlite3 *db,const char *id,const char *launch,const char *digest){
+ sqlite3_stmt *q=NULL;int ok=sqlite3_prepare_v2(db,"INSERT INTO frames(id,launch,digest,state) VALUES(?,?,?,'SENDING') ON CONFLICT(id) DO NOTHING",-1,&q,NULL)==SQLITE_OK;
+ if(ok){sqlite3_bind_text(q,1,id,-1,SQLITE_STATIC);sqlite3_bind_text(q,2,launch,-1,SQLITE_STATIC);sqlite3_bind_text(q,3,digest,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_DONE;}
+ int inserted=ok&&sqlite3_changes(db)==1;sqlite3_finalize(q);if(!ok)return -2;if(inserted)return 1;
+ q=NULL;ok=sqlite3_prepare_v2(db,"SELECT launch,digest FROM frames WHERE id=?",-1,&q,NULL)==SQLITE_OK;
+ if(ok){sqlite3_bind_text(q,1,id,-1,SQLITE_STATIC);ok=sqlite3_step(q)==SQLITE_ROW&&!strcmp((const char*)sqlite3_column_text(q,0),launch)&&!strcmp((const char*)sqlite3_column_text(q,1),digest);}
+ sqlite3_finalize(q);return ok?0:-1;
+}
 static int queue_ack(sqlite3 *db,const RunnerConfig *c,const Instruction *i,int version,const char *state,const HfProcessIdentity *process) {
  char *payload=NULL;size_t length=0;FILE *out=open_memstream(&payload,&length);if(!out)return 0;
  fprintf(out,"{\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"command_id\":\"%s\",\"operation_id\":\"%s\",\"attempt_id\":\"%s\",\"attempt_generation\":\"%s\",\"authority_epoch\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"sandbox_boot_generation\":\"%s\",\"sequence\":\"%s\",\"payload_digest\":\"%s\",\"ledger_receipt_id\":\"%s\",\"ledger_version\":\"%d\",\"state\":\"%s\",\"observed_process\":",c->organisation,c->run,i->command,i->command,i->attempt,i->attempt_generation,i->epoch,c->sandbox,c->boot,c->generation,i->sequence,i->digest,i->command,version,state);
@@ -301,8 +311,10 @@ static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char 
   }else if(!strcmp(action,"launch.send")){
    char request_id[37],digest[72],encoded[8192];int accepted=atstring(j,payload,"request_id",request_id,sizeof request_id)&&hf_uuid_valid(request_id)&&atstring(j,payload,"frame_b64",encoded,sizeof encoded)&&stdin_open&&!strcmp(state,"RUNNING")&&input_permitted(db,i->launch);size_t length=0;unsigned char *frame=accepted?hf_base64url_decode(encoded,&length):NULL;char hash[65];accepted=accepted&&frame&&length>0&&length<=4096&&hf_sha256_bytes(frame,length,hash);snprintf(digest,sizeof digest,"sha256:%s",accepted?hash:"");
    sqlite3_stmt *s=NULL;const char *delivery="REJECTED";
-   if(accepted&&sqlite3_prepare_v2(db,"INSERT INTO frames(id,launch,digest,state) VALUES(?,?,?,'SENDING') ON CONFLICT(id) DO NOTHING",-1,&s,NULL)==SQLITE_OK){sqlite3_bind_text(s,1,request_id,-1,SQLITE_STATIC);sqlite3_bind_text(s,2,i->launch,-1,SQLITE_STATIC);sqlite3_bind_text(s,3,digest,-1,SQLITE_STATIC);accepted=sqlite3_step(s)==SQLITE_DONE&&sqlite3_changes(db)==1;sqlite3_finalize(s);s=NULL;
-    if(accepted){ssize_t sent=write(input[1],frame,length);delivery=sent==(ssize_t)length?"WRITTEN_UNACKNOWLEDGED":"UNCERTAIN";if(sqlite3_prepare_v2(db,"UPDATE frames SET state=? WHERE id=?",-1,&s,NULL)==SQLITE_OK){sqlite3_bind_text(s,1,delivery,-1,SQLITE_STATIC);sqlite3_bind_text(s,2,request_id,-1,SQLITE_STATIC);sqlite3_step(s);}sqlite3_finalize(s);}else delivery="DUPLICATE_NOT_REPLAYED";
+   if(accepted){
+    int reservation=frame_reserve(db,request_id,i->launch,digest);
+    if(reservation==1){ssize_t sent=write(input[1],frame,length);delivery=sent==(ssize_t)length?"WRITTEN_UNACKNOWLEDGED":"UNCERTAIN";int saved=sqlite3_prepare_v2(db,"UPDATE frames SET state=? WHERE id=?",-1,&s,NULL)==SQLITE_OK;if(saved){sqlite3_bind_text(s,1,delivery,-1,SQLITE_STATIC);sqlite3_bind_text(s,2,request_id,-1,SQLITE_STATIC);saved=sqlite3_step(s)==SQLITE_DONE&&sqlite3_changes(db)==1;}sqlite3_finalize(s);s=NULL;if(!saved)delivery="UNCERTAIN";}
+    else delivery=reservation==0?"DUPLICATE_NOT_REPLAYED":reservation==-1?"FRAME_IDENTITY_CONFLICT":"LEDGER_UNAVAILABLE";
    }
    free(frame);fprintf(out,"{\"delivery\":\"%s\",\"replay_safe\":false,\"native_acknowledged\":false}",delivery);
   }else hf_native_error(out,"UNKNOWN_BROKER_ACTION");
