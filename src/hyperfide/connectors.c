@@ -47,7 +47,7 @@ static int absdir(const char *s){struct stat st;return *s=='/'&&!strstr(s,"/../"
 static long millis(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1000+t.tv_nsec/1000000;}
 static int version(const char *exe,char *buf,size_t cap){int pipefd[2];if(*exe!='/'||pipe2(pipefd,O_CLOEXEC|O_NONBLOCK))return 0;pid_t pid=fork();if(pid<0){close(pipefd[0]);close(pipefd[1]);return 0;}if(pid==0){setpgid(0,0);dup2(pipefd[1],STDOUT_FILENO);int null=open("/dev/null",O_RDWR);dup2(null,STDERR_FILENO);dup2(null,STDIN_FILENO);close(pipefd[0]);close(pipefd[1]);execl(exe,exe,"--version",(char*)NULL);_exit(127);}close(pipefd[1]);setpgid(pid,pid);size_t n=0;int status=0,exited=0;long deadline=millis()+10000;while(millis()<deadline){ssize_t got=read(pipefd[0],buf+n,cap-1-n);if(got>0){n+=(size_t)got;if(n==cap-1)break;}if(waitpid(pid,&status,WNOHANG)==pid){exited=1;while((got=read(pipefd[0],buf+n,cap-1-n))>0){n+=(size_t)got;if(n==cap-1)break;}break;}struct pollfd fd={pipefd[0],POLLIN,0};poll(&fd,1,20);}close(pipefd[0]);kill(-pid,SIGKILL);if(!exited)waitpid(pid,&status,0);buf[n]=0;return exited&&WIFEXITED(status)&&WEXITSTATUS(status)==0&&n>0&&n<cap-1;}
 typedef struct {
- char connector[16],path[4096],version[64],digest[80],profile_digest[80],profile_id[129],alias[129],model[255],provider[255],observed_model[255],observed_provider[255],permission[129];
+ char connector[16],path[4096],version[64],digest[80],profile_digest[80],profile_id[129],alias[129],model[255],provider[255],observed_model[255],observed_provider[255],permission[129],receipt_digest[80];
  int unattended,explicit_resume,live_qualified;
 } AuthProfile;
 static int raw(Field *f,const char *value){return f&&f->len==strlen(value)&&!memcmp(f->start,value,f->len);}
@@ -80,10 +80,17 @@ static int snapshot(AuthProfile *a){
  if(!raw(field(f,n,"observed_model_id"),"null")&&!string(field(f,n,"observed_model_id"),a->observed_model,sizeof a->observed_model))goto done;
  if(!raw(field(f,n,"observed_provider_id"),"null")&&!string(field(f,n,"observed_provider_id"),a->observed_provider,sizeof a->observed_provider))goto done;
  a->live_qualified=a->live_qualified&&a->observed_model[0]&&a->observed_provider[0];
+ if(a->live_qualified)snprintf(a->receipt_digest,sizeof a->receipt_digest,"%s",receipt);
  good=1;
  done:free(bs);free(cs);free(qs);free(json);return good;
 }
 static int provider(Field *fs,int n,char *name,FILE *out){if(!string(field(fs,n,"connector"),name,16)||(!strcmp(name,"codex")?0:strcmp(name,"claude")))return error(out,"CONNECTOR_INVALID");return 0;}
+int hf_connector_resume_qualified(const char *connector,char *receipt,size_t size){
+ AuthProfile p={0};if(!snapshot(&p)||strcmp(p.connector,connector)||!p.explicit_resume||!p.live_qualified)return 0;
+ if(size<strlen(p.receipt_digest)+1)return 0;
+ strcpy(receipt,p.receipt_digest);
+ return 1;
+}
 int hf_component_13_1(const char *action,const char *json,FILE *out){
 Field fs[16];int n=fields(json,fs,16,"|connector||expected_version||alias||auth_profile||workspace||home||temp||permission_mode||native_session_id||operation||turn_id||text||request_id|");
 if(n<0)return error(out,"CONNECTOR_INVALID");

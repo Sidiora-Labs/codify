@@ -28,9 +28,10 @@ static int safe_id(const char *s){if(!*s||strlen(s)>128)return 0;for(;*s;s++)if(
 
 static int digest(const char *s){if(strlen(s)!=71||strncmp(s,"sha256:",7))return 0;for(s+=7;*s;s++)if(!strchr("0123456789abcdef",*s))return 0;return 1;}
 static int get(Field *fs,int n,const char *key,char *out,size_t size){return string(field(fs,n,key),out,size);}
+extern int hf_connector_resume_qualified(const char *,char *,size_t);
 int hf_component_13_3(const char *action,const char *json,FILE *out){
  if(strcmp(action,"connector.recover"))return error(out,"CONNECTOR_UNSUPPORTED");
- Field fs[24];int n=fields(json,fs,24,"|connector||native_session_id||source_manifest_digest||configuration_digest||auth_state||transport_state||process_state||process_boot_id||observed_boot_id||process_start_time||observed_process_start_time||saved_native_session_id||checkpoint_source_manifest_digest||checkpoint_configuration_digest||checkpoint_reference||new_session_id||handoff_digest||protocol_delivery|");
+ Field fs[24];int n=fields(json,fs,24,"|connector||native_session_id||source_manifest_digest||configuration_digest||auth_state||transport_state||process_state||process_boot_id||observed_boot_id||process_start_time||observed_process_start_time||saved_native_session_id||checkpoint_source_manifest_digest||checkpoint_configuration_digest||checkpoint_reference||new_agent_session_id||handoff_digest||protocol_delivery|");
  char connector[16],native[256],source[80],configuration[80],auth[32],transport[32],process[32],boot[129],observed_boot[129],start[32],observed_start[32],delivery[32];
  if(n<12||!get(fs,n,"connector",connector,sizeof connector)||(strcmp(connector,"codex")&&strcmp(connector,"claude"))||
  !get(fs,n,"native_session_id",native,sizeof native)||!safe_id(native)||
@@ -42,7 +43,7 @@ int hf_component_13_3(const char *action,const char *json,FILE *out){
  !get(fs,n,"process_boot_id",boot,sizeof boot)||!safe_id(boot)||!get(fs,n,"observed_boot_id",observed_boot,sizeof observed_boot)||!safe_id(observed_boot)||
  !get(fs,n,"process_start_time",start,sizeof start)||!safe_id(start)||!get(fs,n,"observed_process_start_time",observed_start,sizeof observed_start)||!safe_id(observed_start)||
  !get(fs,n,"protocol_delivery",delivery,sizeof delivery)||(strcmp(delivery,"ACKNOWLEDGED")&&strcmp(delivery,"PARTIAL")&&strcmp(delivery,"UNKNOWN")))return error(out,"RECOVERY_INVALID");
- const char *decision="RECONCILE",*reason="PROCESS_OUTCOME_UNKNOWN";int lost=0;
+ const char *decision="RECONCILE",*reason="PROCESS_OUTCOME_UNKNOWN";int lost=0;char new_agent[256]="",handoff_ref[80]="",qualification[80]="";
  if(strcmp(auth,"VALID")){decision="BLOCKED_AUTH";reason=auth;}
  else if(!strcmp(process,"ALIVE_VERIFIED")){
   if(strcmp(boot,observed_boot)||strcmp(start,observed_start)){decision="RECONCILE";reason="PROCESS_IDENTITY_MISMATCH";}
@@ -50,18 +51,21 @@ int hf_component_13_3(const char *action,const char *json,FILE *out){
   else{decision=!strcmp(transport,"LOST")?"RECONNECT_EXISTING":"CONTINUE_EXISTING";reason="EXACT_PROCESS_OBSERVED";}
  }else if(!strcmp(process,"EXITED_VERIFIED")){
   char saved[256]="",cs[80]="",cc[80]="",checkpoint[80]="",fresh[256]="",handoff[80]="";
-  const char *q=getenv("HF_NATIVE_RESUME_QUALIFIED_CONNECTOR"),*receipt=getenv("HF_NATIVE_RESUME_RECEIPT_DIGEST");
+  int qualified=hf_connector_resume_qualified(connector,qualification,sizeof qualification);
   int saved_present=get(fs,n,"saved_native_session_id",saved,sizeof saved)&&safe_id(saved);
   int cp_present=get(fs,n,"checkpoint_reference",checkpoint,sizeof checkpoint)&&digest(checkpoint)&&
    get(fs,n,"checkpoint_source_manifest_digest",cs,sizeof cs)&&digest(cs)&&
    get(fs,n,"checkpoint_configuration_digest",cc,sizeof cc)&&digest(cc);
   int compatible=saved_present&&cp_present&&!strcmp(saved,native)&&!strcmp(cs,source)&&!strcmp(cc,configuration);
-  if(compatible&&q&&!strcmp(q,connector)&&receipt&&digest(receipt)){decision="RESUME_EXACT_SAVED";reason="QUALIFIED_CONTEXT_CANDIDATE";}
-  else if(get(fs,n,"new_session_id",fresh,sizeof fresh)&&safe_id(fresh)&&strcmp(fresh,native)&&
+  if(compatible&&qualified){decision="RESUME_EXACT_SAVED";reason="QUALIFIED_CONTEXT_CANDIDATE";}
+  else if(get(fs,n,"new_agent_session_id",fresh,sizeof fresh)&&safe_id(fresh)&&strcmp(fresh,native)&&
           get(fs,n,"handoff_digest",handoff,sizeof handoff)&&digest(handoff)){
-   decision="FRESH_HANDOFF";reason=compatible?"NATIVE_RESUME_UNQUALIFIED":saved_present||cp_present?"CHECKPOINT_MISMATCH":"SAVED_CONTEXT_UNAVAILABLE";lost=1;strcpy(native,fresh);
+   decision="FRESH_HANDOFF";reason=compatible?"NATIVE_RESUME_UNQUALIFIED":saved_present||cp_present?"CHECKPOINT_MISMATCH":"SAVED_CONTEXT_UNAVAILABLE";lost=1;strcpy(new_agent,fresh);strcpy(handoff_ref,handoff);
   }else{decision="BLOCKED_CONTEXT";reason=compatible?"NATIVE_RESUME_UNQUALIFIED":"SAVED_CONTEXT_UNAVAILABLE";lost=1;}
  }
- fputs("{\"decision\":",out);quoted(out,decision);fputs(",\"reason\":",out);quoted(out,reason);fputs(",\"native_session_id\":",out);quoted(out,native);
+ fputs("{\"decision\":",out);quoted(out,decision);fputs(",\"reason\":",out);quoted(out,reason);fputs(",\"native_session_id\":",out);if(new_agent[0])fputs("null",out);else quoted(out,native);
+ fputs(",\"new_agent_session_id\":",out);if(new_agent[0])quoted(out,new_agent);else fputs("null",out);
+ fputs(",\"handoff_digest\":",out);if(handoff_ref[0])quoted(out,handoff_ref);else fputs("null",out);
+ fputs(",\"native_qualification_digest\":",out);if(qualification[0])quoted(out,qualification);else fputs("null",out);
  fprintf(out,",\"context_lost\":%s,\"context_restored\":false,\"replay_pending_input\":false,\"grants_authority\":false}",lost?"true":"false");return 0;
 }

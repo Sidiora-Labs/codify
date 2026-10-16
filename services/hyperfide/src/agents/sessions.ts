@@ -68,7 +68,7 @@ async function binding(client:pg.PoolClient,s:AgentScope):Promise<RecordValue>{
  const row=await client.query('SELECT * FROM hyperfide.native_session_bindings WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 FOR UPDATE',key(s));
  if(row.rows.length!==1)agentError('AGENT_BINDING_NOT_FOUND');return row.rows[0] as RecordValue;
 }
-async function operation(client:pg.PoolClient,s:AgentScope,id:string,payload:unknown,run:()=>Promise<RecordValue>):Promise<RecordValue>{
+export async function agentOperation(client:pg.PoolClient,s:AgentScope,id:string,payload:unknown,run:()=>Promise<RecordValue>):Promise<RecordValue>{
  // Locking the session serialises same-scope operation IDs and protects source/session binding.
  await session(client,s);
  const digest=agentDigest(payload);
@@ -78,12 +78,19 @@ async function operation(client:pg.PoolClient,s:AgentScope,id:string,payload:unk
  await client.query('INSERT INTO hyperfide.native_session_events(organisation_id,run_id,session_id,operation_id,payload_digest,result) VALUES($1,$2,$3,$4,$5,$6)',[...key(s),id,digest,result]);
  return result;
 }
+export interface AgentSessionsCapability {
+ readonly schema_version:1;
+ resumeCheck(input:unknown,context:ComponentContext):Promise<unknown>;
+}
+export function isAgentSessionsCapability(value:unknown):value is AgentSessionsCapability{
+ return object(value)&&value.schema_version===1&&typeof value.resumeCheck==='function';
+}
 export function createComponent(ctx:ComponentContext):Component{
  const guard=(fn:(value:RecordValue)=>Promise<unknown>)=>async(input:unknown)=>{
  if(ctx.signal.aborted)agentError('AGENT_CLOSED');if(!object(input))agentError('AGENT_INPUT_INVALID');return fn(input);
  };
  const transact=<T>(fn:(client:pg.PoolClient)=>Promise<T>)=>agentTransaction(getPool(ctx.env),fn);
- return {apiVersion:1,actions:{
+ const component:Component={apiVersion:1,actions:{
  'agent.session.bind':guard(async input=>{
  const v=exactAgentObject(input,['scope','binding']),s=agentScope(v.scope);
  const b=exactAgentObject(v.binding,['connector_version','auth_profile','configuration_digest','source_manifest_digest','process_id','process_start_time','boot_id','native_session_id','connector']);
@@ -112,7 +119,7 @@ export function createComponent(ctx:ComponentContext):Component{
  const p=exactAgentObject(v.process,['boot_id','process_id','process_start_time','exit_observed']);
  agentString(p.boot_id,'uuid');agentString(p.process_start_time,'decimal');
  if(typeof p.exit_observed!=='boolean'||!Number.isSafeInteger(p.process_id))agentError('AGENT_INPUT_INVALID');
- return transact(client=>operation(client,s,id,v,async()=>{
+ return transact(client=>agentOperation(client,s,id,v,async()=>{
  const admitted=await session(client,s),b=await binding(client,s);
  if(String(admitted.state_version)!==expected)agentError('AGENT_STATE_STALE');
  if(p.boot_id!==b.boot_id||p.process_id!==b.process_id||p.process_start_time!==b.process_start_time)agentError('AGENT_PROCESS_MISMATCH');
@@ -129,7 +136,7 @@ export function createComponent(ctx:ComponentContext):Component{
  const v=exactAgentObject(input,['scope','operation_id','checkpoint']),s=agentScope(v.scope),id=agentString(v.operation_id,'uuid');
  const c=exactAgentObject(v.checkpoint,['checkpoint_id','checkpoint_digest','manifest_digest','source_manifest_digest','configuration_digest','native_session_id']);
  agentString(c.checkpoint_id,'uuid');agentString(c.native_session_id);for(const k of ['checkpoint_digest','manifest_digest','source_manifest_digest','configuration_digest'])agentString(c[k],'digest');
- return transact(client=>operation(client,s,id,v,async()=>{
+ return transact(client=>agentOperation(client,s,id,v,async()=>{
  const admitted=await session(client,s),b=await binding(client,s);
  if(c.native_session_id!==admitted.native_session_id||c.source_manifest_digest!==b.source_manifest_digest||c.configuration_digest!==b.configuration_digest)agentError('AGENT_CHECKPOINT_MISMATCH');
  const observed=await client.query('SELECT c.agent_session_id,c.support_level,a.digest,a.status FROM hyperfide.checkpoints c JOIN hyperfide.artifacts a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.id=c.artifact_id WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3',[s.organisation_id,s.run_id,c.checkpoint_id]);
@@ -158,4 +165,11 @@ export function createComponent(ctx:ComponentContext):Component{
  });
  })
  }};
+ const capability:AgentSessionsCapability=Object.freeze({
+ schema_version:1 as const,
+ resumeCheck:async(input:unknown,requestContext:ComponentContext)=>{
+ if(requestContext.signal.aborted)agentError('AGENT_CLOSED');
+ return await component.actions['agent.session.resume-check']!(input,requestContext);
+ }});
+ return Object.assign(component,{capabilities:Object.freeze({'agent.sessions.v1':capability})});
 }
