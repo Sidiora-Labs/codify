@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "variant": "task:16.2",
+  "task": "16.2",
+  "scope": "task-component",
+  "cases": [
+    "V-013",
+    "V-056"
+  ],
+  "assertion_ids": [
+    "assurance.16.2.auth.qualification.job.assign",
+    "assurance.16.2.auth.qualification.job.claim",
+    "assurance.16.2.auth.qualification.execute",
+    "assurance.16.2.auth.qualification.history.import",
+    "assurance.16.2.primary.unbranded-denied"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/16_2.py"
+  ],
+  "timeout_seconds": 180,
+  "required_env": [],
+  "fixtures": [
+    "services/hyperfide/dist/assurance/submission.js",
+    "services/hyperfide/dist/assurance/executor.js",
+    "services/hyperfide/dist/assurance/coverage.js",
+    "services/hyperfide/dist/assurance/validity.js",
+    "services/hyperfide/dist/storage/transactions.js"
+  ],
+  "resources": [],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/16_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "assurance/observations-16.2.json"
+  ],
+  "source_files": [
+    "services/hyperfide/src/assurance/submission.ts",
+    "services/hyperfide/src/assurance/executor.ts",
+    "services/hyperfide/src/assurance/coverage.ts",
+    "services/hyperfide/src/assurance/validity.ts",
+    "services/hyperfide/components/16.1.json",
+    "services/hyperfide/components/16.2.json",
+    "services/hyperfide/components/16.3.json",
+    "services/hyperfide/components/16.4.json",
+    "services/hyperfide/migrations/0001-authority.sql",
+    "services/hyperfide/migrations/0016-qualification.sql",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/16_1.py",
+    "tests/hyperfide/cases/tasks/16_2.py",
+    "tests/hyperfide/cases/tasks/16_3.py",
+    "tests/hyperfide/cases/tasks/16_4.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": []
+}

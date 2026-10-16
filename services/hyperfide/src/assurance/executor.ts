@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {artifact,canonical,currentCustody,custodyLock,decimal,digest,fail,fields,hash,scope,transaction,uuid,invocation,roles,executionGate,assuranceBarrier} from './submission.js';
+import {artifact,canonical,currentCustody,custodyLock,decimal,digest,fail,fields,hash,scope,transaction,uuid,invocation,roles,executionGate,assuranceBarrier,loadPolicy} from './submission.js';
 import type {Data} from './submission.js';
 
 const MAX_OUTPUT=32*1024*1024;
@@ -9,6 +9,11 @@ function identity(ctx:ComponentContext):Data{
  const principal=roles(ctx,['VERIFIER']).principal;
  const verifier=uuid(principal.actor_id),sandbox=uuid(principal.sandbox_id);
  return {verifier_id:verifier,sandbox_id:sandbox};
+}
+function jobResources(ctx:ComponentContext):Data{
+ try{return (ctx as unknown as Data).dependencies.require('5.1','scheduler.allocations.v1',(value:unknown):boolean=>
+  !!value&&typeof value==='object'&&typeof (value as Data).assertJobReservation==='function'&&typeof (value as Data).readJobAllocation==='function'&&typeof (value as Data).renewJobAllocation==='function'&&typeof (value as Data).releaseJobAllocation==='function') as Data;}
+ catch{fail('QUALIFICATION_CAPACITY_UNAVAILABLE','Actual scheduler allocation authority is required');}
 }
 async function verifyEnvironment(ctx:ComponentContext,tx:unknown,job:Data,owner:Data):Promise<Data>{
  const assignment=await (tx as Data).query('SELECT * FROM hyperfide.assurance_job_assignments WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3 ORDER BY assignment_generation DESC LIMIT 1',[job.organisation_id,job.run_id,job.id]);
@@ -19,6 +24,12 @@ async function verifyEnvironment(ctx:ComponentContext,tx:unknown,job:Data,owner:
   owner.reservation_id&&owner.reservation_id!==bound.reservation_id)
   fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Current job assignment differs from the authenticated verifier boot');
  owner.environment_digest=digest(bound.environment_digest);owner.reservation_id=uuid(bound.reservation_id);
+ const allocation=await jobResources(ctx).readJobAllocation(tx,{organisation_id:job.organisation_id,run_id:job.run_id,reservation_id:owner.reservation_id});
+ if(!allocation||allocation.allocation_id!==bound.allocation_id||String(allocation.generation)!==String(bound.allocation_generation)||
+  allocation.slot_id!==bound.slot_id||allocation.sandbox_id!==bound.sandbox_id||
+  String(allocation.sandbox_boot_generation)!==String(bound.sandbox_boot_generation)||allocation.assignee_session_id!==owner.verifier_id)
+  fail('QUALIFICATION_STALE_JOB','Current independent capacity assignment generation changed');
+ owner.allocation_id=bound.allocation_id;owner.allocation_generation=String(bound.allocation_generation);
  const dependencies=(ctx as unknown as Data).dependencies;
  let reader:Data;
  try{
@@ -28,6 +39,12 @@ async function verifyEnvironment(ctx:ComponentContext,tx:unknown,job:Data,owner:
  const result=await reader!.verify(tx,invocation(ctx),{job_id:job.id,reservation_id:owner.reservation_id,environment_digest:owner.environment_digest});
  if(!result||result.sandbox_id!==owner.sandbox_id||result.slot_id!==bound.slot_id||String(result.boot_generation)!==String(bound.sandbox_boot_generation)||result.boot_id!==principal.boot_id||!result.preparation_digest||!result.readiness_digest||!result.provider_observation_id||!result.runner_credential_id||!result.boot_id||!result.slot_id)
  fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Current independent environment observation is incomplete or mismatched');
+ const expected=(await (tx as Data).query("SELECT COALESCE(i.manifest,s.manifest) AS manifest FROM hyperfide.qualification_jobs j JOIN hyperfide.assurance_submissions s ON s.organisation_id=j.organisation_id AND s.run_id=j.run_id AND s.custody_id=j.custody_id LEFT JOIN hyperfide.requalification_operations q ON q.organisation_id=j.organisation_id AND q.run_id=j.run_id AND q.qualification_job_id=j.id LEFT JOIN hyperfide.assurance_requalification_inputs i ON i.organisation_id=q.organisation_id AND i.run_id=q.run_id AND i.operation_id=q.id WHERE j.organisation_id=$1 AND j.run_id=$2 AND j.id=$3",[job.organisation_id,job.run_id,job.id])).rows[0]?.manifest;
+ const validation=result.input_validation;
+ if(!expected||!validation||validation.status!=='VERIFIED'||validation.job_id!==job.id||
+  validation.input_packet_digest!==expected.input_packet_digest||!/^sha256:[0-9a-f]{64}$/.test(validation.receipt_digest??'')||
+  ['dependency','toolchain','configuration','graph','contract'].some(key=>validation.input_manifest?.[key]!==expected.input_manifest?.[key]))
+  fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Measured preparation and runtime inputs have not been independently validated against the immutable job packet');
  return result;
 }
 async function lockJob(client:Parameters<Parameters<typeof transaction>[1]>[0],s:[string,string],id:string):Promise<Data>{
@@ -62,16 +79,19 @@ async function assignJob(ctx:ComponentContext,raw:unknown):Promise<Data>{
   const session=await db.query("SELECT a.id FROM hyperfide.agent_sessions a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation JOIN hyperfide.sandboxes b ON b.organisation_id=w.organisation_id AND b.id=w.sandbox_id AND b.boot_generation=w.boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3 AND a.role='VERIFIER' AND a.state IN ('REGISTERED','RUNNING') AND a.sandbox_id=$4 AND a.slot_id=$5 AND a.sandbox_boot_generation=$6 AND w.capacity_kind='TEST' AND w.state IN ('READY','ALLOCATED') AND b.observed_state='RUNNING' FOR SHARE OF a,w,b",
    [...s,v.verifier_id,v.sandbox_id,v.slot_id,v.sandbox_boot_generation]);
   if(!session.rows.length)fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Current scoped verifier session and TEST slot are required');
-  let capacity:Data;
-  try{capacity=(ctx as unknown as Data).dependencies.require('5.1','scheduler.allocations.v1',(value:unknown):boolean=>
-   !!value&&typeof value==='object'&&typeof (value as Data).assertJobReservation==='function') as Data;}
-  catch{fail('QUALIFICATION_CAPACITY_UNAVAILABLE','Actual scheduler resource authority is required');}
+  const capacity=jobResources(ctx);
   await capacity!.assertJobReservation(db,{organisation_id:s[0],run_id:s[1],task_id:job.custody.task_id,job_kind:'TEST',reservation_id:v.reservation_id});
+  const allocation=await capacity.readJobAllocation(db,{organisation_id:s[0],run_id:s[1],reservation_id:v.reservation_id});
+  if(!allocation||allocation.task_id!==job.custody.task_id||allocation.job_kind!=='TEST'||
+   allocation.assignee_session_id!==v.verifier_id||allocation.slot_id!==v.slot_id||allocation.sandbox_id!==v.sandbox_id||
+   String(allocation.sandbox_boot_generation)!==v.sandbox_boot_generation)
+   fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Exact current independent slot allocation required');
+  uuid(allocation.allocation_id);decimal(String(allocation.generation));
   const reservation=await db.query("SELECT r.id FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts c ON c.organisation_id=r.organisation_id AND c.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND r.state='ALLOCATED' AND r.expires_at>clock_timestamp() AND r.quantity>0 AND c.dimension='TEST' AND c.qualification_state='QUALIFIED' FOR SHARE OF r,c",[...s,v.reservation_id]);
   if(!reservation.rows.length)fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Independent verification needs an actual qualified allocated TEST reservation');
   const generation=await db.query('SELECT (coalesce(max(assignment_generation),0)+1)::text AS generation FROM hyperfide.assurance_job_assignments WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3',[...s,id]);
-  await db.query('INSERT INTO hyperfide.assurance_job_assignments(organisation_id,run_id,job_id,assignment_generation,verifier_id,sandbox_id,slot_id,sandbox_boot_generation,reservation_id,environment_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
-   [...s,id,generation.rows[0].generation,v.verifier_id,v.sandbox_id,v.slot_id,v.sandbox_boot_generation,v.reservation_id,v.environment_digest]);
+  await db.query('INSERT INTO hyperfide.assurance_job_assignments(organisation_id,run_id,job_id,assignment_generation,verifier_id,sandbox_id,slot_id,sandbox_boot_generation,reservation_id,environment_digest,allocation_id,allocation_generation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+   [...s,id,generation.rows[0].generation,v.verifier_id,v.sandbox_id,v.slot_id,v.sandbox_boot_generation,v.reservation_id,v.environment_digest,allocation.allocation_id,String(allocation.generation)]);
   await db.query('UPDATE hyperfide.qualification_jobs SET state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...s,id]);
   return {job_id:id,assignment_generation:generation.rows[0].generation,state_version:(BigInt(version)+1n).toString(),
    readiness:'NOT_EVALUATED',qualification:'PENDING'};
@@ -98,8 +118,9 @@ export async function claimJob(ctx:ComponentContext,raw:unknown):Promise<Data>{
   if(source.rows[0]?.sandbox_id===owner.sandbox_id)fail('QUALIFICATION_NOT_INDEPENDENT','Coding sandbox cannot qualify its own submission');
   if(!['PENDING','RUNNING'].includes(job.state)||(job.state==='RUNNING'&&job.lease_alive))
    fail('QUALIFICATION_CONFLICT','Verification job is not available for claim');
-  const lease=await client.query("UPDATE hyperfide.qualification_jobs SET state='RUNNING',lease_generation=lease_generation+1,lease_owner=$4,lease_expires_at=clock_timestamp()+interval '10 minutes',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation::text,lease_owner,lease_expires_at,state_version::text",
-   [...s,id,owner.verifier_id]);
+  const renewed=await renewAllocation(ctx,client,s,owner);
+  const lease=await client.query("UPDATE hyperfide.qualification_jobs SET state='RUNNING',lease_generation=lease_generation+1,lease_owner=$4,lease_expires_at=$5::timestamptz,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation::text,lease_owner,lease_expires_at,state_version::text",
+   [...s,id,owner.verifier_id,renewed.expires_at]);
   await client.query("UPDATE hyperfide.requalification_operations SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND qualification_job_id=$3 AND state='PENDING'",[...s,id]);
   return {...lease.rows[0],...owner,authority:'VERIFICATION_JOB_ONLY'};
  });
@@ -114,10 +135,10 @@ async function uploadBytes(ctx:ComponentContext,s:[string,string],bytes:Buffer):
    size_bytes:String(part.length),offset_bytes:String(offset)});
   if(bytes.length===0)break;
  }
- if(chunks.length===1)return {artifact_id:chunks[0]!.artifact_id,digest:chunks[0]!.digest,size_bytes:String(bytes.length)};
+ if(chunks.length===1)return {artifact_id:chunks[0]!.artifact_id,digest:chunks[0]!.digest,size_bytes:String(bytes.length),storage_kind:'OBJECT'};
  const result=await artifact(ctx,'artifact.manifest.commit',{...common,expected_chunks:chunks.length,total_size_bytes:String(bytes.length),
  content_digest:bytesHash(bytes),complete:true,truncated:false,missing_ranges:[],chunks});
- return {artifact_id:result.artifact.artifact_id,digest:result.artifact.digest,content_digest:bytesHash(bytes),size_bytes:String(bytes.length)};
+ return {artifact_id:result.artifact.artifact_id,digest:result.artifact.digest,content_digest:bytesHash(bytes),size_bytes:String(bytes.length),manifest_size_bytes:result.artifact.size_bytes,storage_kind:'CHUNK_MANIFEST'};
 }
 function bytesHash(bytes:Buffer):string{return 'sha256:'+requireHash(bytes);}
 import {createHash} from 'node:crypto';
@@ -138,16 +159,26 @@ function remoteBytes(value:Data):Buffer{
   fail('QUALIFICATION_REMOTE_OUTPUT_INTEGRITY','Remote output byte identity differs from independently observed spool');
  return bytes;
 }
+async function renewAllocation(ctx:ComponentContext,db:unknown,s:[string,string],owner:Data):Promise<Data>{
+ const renewed=await jobResources(ctx).renewJobAllocation(db,{organisation_id:s[0],run_id:s[1],
+  reservation_id:owner.reservation_id,allocation_id:owner.allocation_id,allocation_generation:owner.allocation_generation,
+  assignee_session_id:owner.verifier_id,lease_ms:600000});
+ if(renewed.allocation_id!==owner.allocation_id||String(renewed.generation)!==owner.allocation_generation||!renewed.expires_at)
+  fail('QUALIFICATION_STALE_JOB','Resource lease renewal did not retain its exact allocation generation');
+ return renewed;
+}
 async function renewJob(ctx:ComponentContext,s:[string,string],id:string,generation:string,owner:Data):Promise<void>{
  await transaction(ctx,async client=>{
   const job=await lockJob(client,s,id);activeJob(job,owner,generation);await executionGate(ctx,client,s,'ADVANCE');
   await verifyEnvironment(ctx,client,job,owner);
-  await client.query("UPDATE hyperfide.qualification_jobs SET lease_expires_at=clock_timestamp()+interval '10 minutes',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,id]);
+  const renewed=await renewAllocation(ctx,client,s,owner);
+  await client.query("UPDATE hyperfide.qualification_jobs SET lease_expires_at=$4::timestamptz,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,id,renewed.expires_at]);
  });
 }
 /** Orchestrates actual remote sessions. No command or Git checkout runs on control. */
 export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot:Data):Promise<Data>{
  const s:[string,string]=[job.organisation_id,job.run_id],owner=identity(ctx),remote=remoteExecutor(ctx);
+ if(!Array.isArray(snapshot.policy?.checks)||snapshot.policy.checks.length===0)fail('QUALIFICATION_PROOF_INCOMPLETE','Empty registered command selection cannot qualify');
  const maxCheckMs=Number(ctx.env.HF_QUALIFICATION_MAX_CHECK_MS??'3600000');
  if(!Number.isSafeInteger(maxCheckMs)||maxCheckMs<100||maxCheckMs>259200000)
   fail('QUALIFICATION_POLICY_INVALID','Approved verification deadline is invalid');
@@ -166,15 +197,15 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
     const current=await lockJob(client,s,job.id);activeJob(current,owner,String(job.lease_generation));await executionGate(ctx,client,s,'ADVANCE');
     const observed=await verifyEnvironment(ctx,client,current,owner);
     if(observed.source_object_id!==snapshot.manifest.source_object_id||observed.source_tree_id!==snapshot.manifest.source_tree_id||
-      observed.source_digest!==snapshot.inputs.source||!observed.workspace_path||!observed.runner_session_id)
+      observed.source_manifest_digest!==snapshot.manifest.source_manifest_digest||!/^sha256:[0-9a-f]{64}$/.test(observed.source_state_digest??'')||!observed.workspace_path||!observed.runner_session_id)
      fail('QUALIFICATION_SOURCE_MISMATCH','Actual verification workspace does not contain the submitted immutable result');
     const existing=await client.query('SELECT operation_id,session_id,plan_digest FROM hyperfide.assurance_check_intents WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3 AND lease_generation=$4 AND check_id=$5',
      [...s,job.id,String(job.lease_generation),check.id]);
     const operationId=existing.rows[0]?.operation_id??randomUUID();
-    const plan={session_id:observed.runner_session_id,operation_id:operationId,argv:check.argv,cwd:observed.workspace_path,
+    const plan={session_id:observed.runner_session_id,operation_id:operationId,argv:check.argv,cwd:'.',
      environment:{LANG:'C.UTF-8',LC_ALL:'C.UTF-8'},timeout_ms:check.timeout_ms,
-     artifact_paths:check.required_artifacts,repository_id:snapshot.manifest.repository_id,reservation_id:owner.reservation_id,executable_digest:check.executable_digest,environment_digest:owner.environment_digest,
-     source_digest:snapshot.inputs.source,policy_digest:hash(snapshot.policy)};
+     artifact_paths:check.required_artifacts,repository_id:snapshot.manifest.repository_id,reservation_id:owner.reservation_id,executable_digest:check.executable_digest,environment_digest:hash({LANG:'C.UTF-8',LC_ALL:'C.UTF-8'}),
+     source_digest:snapshot.manifest.source_manifest_digest,source_provenance_digest:snapshot.inputs.source,policy_digest:hash(snapshot.policy)};
     if(existing.rows[0]&&(existing.rows[0].plan_digest!==hash(plan)||existing.rows[0].session_id!==plan.session_id))
      fail('QUALIFICATION_IDEMPOTENCY_CONFLICT','Recorded remote check intent differs');
     const permit=await remote.prepare(client,invocation(ctx),plan);
@@ -188,8 +219,13 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
     raw.sandbox_id!==owner.sandbox_id||raw.boot_id!==prepared.observed.boot_id||
     raw.slot_id!==prepared.observed.slot_id||!raw.native_resource_id||!raw.process_ref||!raw.start_identity||
     canonical(raw.argv)!==canonical(check.argv)||raw.cwd!==prepared.plan.cwd||
-    raw.source_digest!==snapshot.inputs.source||raw.policy_digest!==prepared.plan.policy_digest||
-    raw.executable_digest!==check.executable_digest||raw.environment_digest!==owner.environment_digest)
+    raw.source_digest!==snapshot.manifest.source_manifest_digest||raw.source_provenance_digest!==snapshot.inputs.source||
+    raw.source_state_digest!==prepared.observed.source_state_digest||raw.policy_digest!==prepared.plan.policy_digest||
+    raw.executable_digest!==check.executable_digest||raw.environment_digest!==prepared.plan.environment_digest||
+    raw.repository_id!==snapshot.manifest.repository_id||raw.organisation_id!==s[0]||raw.run_id!==s[1]||
+    String(raw.boot_generation)!==String(prepared.observed.boot_generation)||typeof raw.started_at!=='string'||typeof raw.ended_at!=='string'||
+    !Number.isFinite(raw.duration_ms)||raw.duration_ms<0||!Number.isFinite(Date.parse(raw.started_at))||!Number.isFinite(Date.parse(raw.ended_at))||
+    Date.parse(raw.ended_at)<Date.parse(raw.started_at)||typeof raw.spool_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(raw.spool_digest))
      fail('QUALIFICATION_REMOTE_BINDING_INVALID','Provider-observed execution identity differs from admitted check');
    const stdout=remoteBytes(raw.stdout),stderr=remoteBytes(raw.stderr),files:Data[]=[];
    let complete=true;
@@ -199,26 +235,33 @@ export async function runRegisteredChecks(ctx:ComponentContext,job:Data,snapshot
     if(!file){complete=false;files.push({path:name,status:'MISSING'});continue;}
     try{
      const bytes=remoteBytes(file);
-     if(bytes.length===0||bytes.length>MAX_OUTPUT)throw new Error();
+     if(bytes.length>MAX_OUTPUT)throw new Error();
      files.push({path:name,...await uploadBytes(ctx,s,bytes)});
     }catch{complete=false;files.push({path:name,status:'MISSING_OR_INVALID'});}
    }
    const output={stdout:await uploadBytes(ctx,s,stdout),stderr:await uploadBytes(ctx,s,stderr)};
-   const command={argv:check.argv,exit_code:raw.exit_code,signal:raw.signal??null,timed_out:raw.timed_out,
+   const command={argv:check.argv,cwd:prepared.plan.cwd,workspace_path:prepared.observed.workspace_path,
+    environment:prepared.plan.environment,environment_digest:prepared.plan.environment_digest,exit_code:raw.exit_code,signal:raw.signal??null,timed_out:raw.timed_out,
     interrupted:raw.interrupted,output_truncated:false,started_at:raw.started_at,ended_at:raw.ended_at,duration_ms:raw.duration_ms};
    const passed=raw.outcome==='SUCCEEDED'&&raw.exit_code===0&&raw.signal===null&&raw.timed_out===false&&raw.interrupted===false&&
-    raw.cleanup_status==='CONFIRMED'&&stdout.length+stderr.length>0&&complete;
+    raw.status==='COMPLETED'&&raw.output_complete===true&&raw.cleanup_status==='CONFIRMED'&&
+    raw.cleanup?.complete===true&&raw.cleanup?.observed_process_absent===true&&complete;
    results.push({check_id:check.id,source_object_id:snapshot.manifest.source_object_id,environment_digest:owner.environment_digest,
     executable_digest:check.executable_digest,command,output,artifacts:files,outcome:passed?'PASS':'FAIL',
     input_keys:check.input_keys,input_manifest:snapshot.inputs,
-    execution:{session_id:raw.session_id,operation_id:raw.operation_id,provider:raw.provider,
+    execution:{source_manifest_digest:snapshot.manifest.source_manifest_digest,source_state_digest:raw.source_state_digest,source_provenance_digest:snapshot.inputs.source,
+     environment_digest:prepared.plan.environment_digest,assignment_environment_digest:owner.environment_digest,input_validation:prepared.observed.input_validation,
+     preparation_digest:prepared.observed.preparation_digest,readiness_digest:prepared.observed.readiness_digest,
+     provider_observation_id:prepared.observed.provider_observation_id,runner_credential_id:prepared.observed.runner_credential_id,workspace_path:prepared.observed.workspace_path,
+     session_id:raw.session_id,operation_id:raw.operation_id,provider:raw.provider,
      native_resource_id:raw.native_resource_id,sandbox_id:raw.sandbox_id,boot_id:raw.boot_id,slot_id:raw.slot_id,
-     process_ref:raw.process_ref,start_identity:raw.start_identity,spool_digest:raw.spool_digest,cleanup_status:raw.cleanup_status}});
+     process_ref:raw.process_ref,start_identity:raw.start_identity,spool_digest:raw.spool_digest,cleanup_status:raw.cleanup_status,cleanup:raw.cleanup}});
   }
-  return {schema_version:1,job_id:job.id,lease_generation:String(job.lease_generation),custody_id:job.custody_id,
-   custody_generation:String(job.custody_generation),rubric_digest:job.rubric_digest,criteria_digest:snapshot.manifest.criteria_digest,
-   source_object_id:snapshot.manifest.source_object_id,verifier_id:owner.verifier_id,verifier_sandbox_id:owner.sandbox_id,
-   environment_digest:owner.environment_digest,reservation_id:owner.reservation_id,
+  return {schema_version:1,job_id:job.id,task_id:job.custody.task_id,source_attempt_id:job.custody.source_attempt_id,source_attempt_generation:String(job.custody.source_generation),lease_generation:String(job.lease_generation),custody_id:job.custody_id,
+   custody_generation:String(job.custody_generation),rubric_digest:job.rubric_digest,registry_digest:hash(snapshot.policy),criteria_digest:snapshot.manifest.criteria_digest,
+   source_manifest_digest:snapshot.manifest.source_manifest_digest,source_origin:snapshot.manifest.source_origin??'SUBMITTED_RESULT',input_manifest:snapshot.inputs,
+   source_object_id:snapshot.manifest.source_object_id,verifier_id:owner.verifier_id,verifier_sandbox_id:owner.sandbox_id,verifier_boot_id:invocation(ctx).principal.boot_id,verifier_boot_generation:invocation(ctx).principal.boot_generation,
+   environment_digest:owner.environment_digest,environment_digest_kind:'ASSIGNMENT_DESCRIPTOR',reservation_id:owner.reservation_id,allocation_id:owner.allocation_id,allocation_generation:owner.allocation_generation,
    required_check_ids:snapshot.policy.checks.map((c:Data)=>c.id),checks:results,
    outcome:results.length===snapshot.policy.checks.length&&results.every(c=>c.outcome==='PASS')?'PASS':'FAIL'};
  }finally{clearInterval(heartbeat);}
@@ -229,7 +272,13 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
  const admission=await transaction(ctx,async client=>{
   const job=await lockJob(client,s,id);
   const existing=await client.query('SELECT receipt,receipt_digest,evidence_id,receipt_artifact_id FROM hyperfide.assurance_job_receipts WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3 AND lease_generation=$4',[...s,id,generation]);
-  if(existing.rows[0])return {replayed:existing.rows[0]};
+  if(existing.rows[0]){
+   const recorded=existing.rows[0].receipt;
+   if(String(job.lease_generation)!==generation||recorded.verifier_id!==owner.verifier_id||recorded.verifier_sandbox_id!==owner.sandbox_id||
+    recorded.verifier_boot_id!==invocation(ctx).principal.boot_id||hash(recorded)!==existing.rows[0].receipt_digest)
+    fail('QUALIFICATION_STALE_JOB','Recorded result replay belongs to a different verifier/job generation');
+   return {replayed:existing.rows[0]};
+  }
   activeJob(job,owner,generation);await executionGate(ctx,client,s,'ADVANCE');
   await verifyEnvironment(ctx,client,job,owner);
   const operations=await client.query("SELECT * FROM hyperfide.requalification_operations WHERE organisation_id=$1 AND run_id=$2 AND qualification_job_id=$3 AND state='RUNNING'",[...s,id]);
@@ -238,11 +287,14 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
   const submitted=await client.query('SELECT manifest,policy FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,job.custody_id]);
   const applicability=await client.query('SELECT input_manifest FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,job.custody_id]);
   if(!submitted.rows[0])fail('QUALIFICATION_MANIFEST_INVALID','Job has no immutable admitted submission');
+  const currentPolicy=await loadPolicy(ctx,job.custody.task,client);
   if(operations.rows[0]){
    const requalified=await client.query('SELECT manifest,policy,input_manifest FROM hyperfide.assurance_requalification_inputs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[...s,operations.rows[0].id]);
    if(!requalified.rows[0])fail('QUALIFICATION_MANIFEST_INVALID','Requalification immutable inputs missing');
+   if(hash(currentPolicy)!==hash(requalified.rows[0].policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed before execution');
    return {job,snapshot:{manifest:requalified.rows[0].manifest,policy:requalified.rows[0].policy,inputs:requalified.rows[0].input_manifest},requalification:operations.rows[0].id};
   }
+  if(hash(currentPolicy)!==hash(submitted.rows[0].policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed before execution');
   return {job,snapshot:{...submitted.rows[0],inputs:applicability.rows[0]?.input_manifest},requalification:operations.rows[0]?.id};
  });
  if(admission.replayed)return {...admission.replayed,replayed:true,task_qualified:false};
@@ -254,6 +306,7 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
   if(!admission.requalification)currentCustody(job.custody,String(job.custody_generation));
   else if(!['ACTIVE','RELEASED'].includes(job.custody.authority))fail('QUALIFICATION_STALE_CUSTODY','Requalification disposition revoked');
   const current=await client.query('SELECT input_manifest FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3 FOR UPDATE',[...s,job.custody_id]);
+  if(hash(await loadPolicy(ctx,job.custody.task,client))!==hash(admission.snapshot!.policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed during execution');
   if(canonical(current.rows[0]?.input_manifest)!==canonical(admission.snapshot!.inputs))
    fail('QUALIFICATION_INPUT_STALE','Inputs changed while independent verification ran');
   const evidenceId=randomUUID();
@@ -266,10 +319,13 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
   }
   await client.query("INSERT INTO hyperfide.assurance_job_receipts(organisation_id,run_id,job_id,lease_generation,verifier_id,environment_digest,receipt_digest,evidence_id,receipt_artifact_id,receipt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
    [...s,id,generation,owner.verifier_id,owner.environment_digest,receiptDigest,evidenceId,receiptArtifact.artifact_id,receipt]);
+  const released=await jobResources(ctx).releaseJobAllocation(client,{organisation_id:s[0],run_id:s[1],reservation_id:owner.reservation_id,
+   allocation_id:owner.allocation_id,allocation_generation:owner.allocation_generation,assignee_session_id:owner.verifier_id});
+  if(!['RELEASE_PENDING','RELEASED'].includes(released.state))fail('QUALIFICATION_CAPACITY_UNAVAILABLE','Independent allocation logical release was not recorded');
   await client.query("UPDATE hyperfide.qualification_jobs SET state=$4,outcome=$5,lease_owner=NULL,lease_expires_at=NULL,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,id,receipt.outcome==='PASS'?'SUCCEEDED':'FAILED',receipt.outcome]);
   if(admission.requalification)await client.query("UPDATE hyperfide.requalification_operations SET state=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,admission.requalification,receipt.outcome==='PASS'?'SUCCEEDED':'FAILED']);
   // Gate PASS is evidence only; clause coverage and custody acceptance are a distinct fenced transition.
-  return {receipt,receipt_digest:receiptDigest,evidence_id:evidenceId,replayed:false,task_qualified:false};
+  return {receipt,receipt_digest:receiptDigest,evidence_id:evidenceId,allocation_state:released.state,resources_still_counted:released.resources_still_counted,replayed:false,task_qualified:false};
  });
 }
 export async function verifyStoredReceiptArtifacts(ctx:ComponentContext,s:[string,string],receipt:Data):Promise<void>{
@@ -278,7 +334,12 @@ export async function verifyStoredReceiptArtifacts(ctx:ComponentContext,s:[strin
   if(!ref?.artifact_id||seen.has(ref.artifact_id))continue;
   seen.add(ref.artifact_id);
   const checked=await artifact(ctx,'artifact.object.inspect',{organisation_id:s[0],run_id:s[1],artifact_id:ref.artifact_id});
-  if(checked.artifact.digest!==ref.digest)fail('QUALIFICATION_ARTIFACT_INCOMPLETE','Accepted execution artifact identity changed');
+  if(checked.artifact.digest!==ref.digest||String(checked.artifact.size_bytes)!==String(ref.manifest_size_bytes??ref.size_bytes))fail('QUALIFICATION_ARTIFACT_INCOMPLETE','Accepted execution artifact identity changed');
+  if(ref.storage_kind==='CHUNK_MANIFEST'){
+   const manifest=await artifact(ctx,'artifact.manifest.read',{organisation_id:s[0],run_id:s[1],artifact_id:ref.artifact_id});
+   if(manifest.manifest?.content_digest!==ref.content_digest||String(manifest.manifest?.total_size_bytes)!==ref.size_bytes)
+    fail('QUALIFICATION_ARTIFACT_INCOMPLETE','Captured stream manifest content identity differs');
+  }
  }
 }
 export async function verifyReceiptRecordArtifacts(ctx:ComponentContext,s:[string,string],record:Data):Promise<void>{
@@ -292,21 +353,23 @@ export async function verifyReceiptRecordArtifacts(ctx:ComponentContext,s:[strin
 export async function inspectExecutionReceipt(db:Pick<pg.PoolClient,'query'>,
  s:{organisation_id:string;run_id:string},jobId:string,generation:string):Promise<Data>{
  await assuranceBarrier(db,s,'SHARED');
- const result=await db.query("SELECT j.id,j.custody_id,j.custody_generation,j.state,j.outcome,j.rubric_digest,j.lease_generation,"
+ const result=await db.query("SELECT j.id,j.custody_id,j.custody_generation,j.state,j.outcome,j.rubric_digest,j.lease_generation,c.task_id,c.source_attempt_id,c.source_generation,"
  +"p.receipt,p.receipt_digest,p.evidence_id,p.receipt_artifact_id,p.verifier_id,p.environment_digest FROM hyperfide.qualification_jobs j "
+ +"JOIN hyperfide.submission_custodies c ON c.organisation_id=j.organisation_id AND c.run_id=j.run_id AND c.id=j.custody_id "
  +"JOIN hyperfide.assurance_job_receipts p ON p.organisation_id=j.organisation_id AND p.run_id=j.run_id AND p.job_id=j.id "
  +"WHERE j.organisation_id=$1 AND j.run_id=$2 AND j.id=$3 AND p.lease_generation=$4",
  [s.organisation_id,s.run_id,uuid(jobId),decimal(generation)]);
  const row=result.rows[0];
  if(!row||hash(row.receipt)!==row.receipt_digest||row.receipt.job_id!==jobId||
  row.receipt.lease_generation!==generation||row.receipt.custody_id!==row.custody_id||
+ row.receipt.task_id!==row.task_id||row.receipt.source_attempt_id!==row.source_attempt_id||String(row.receipt.source_attempt_generation)!==String(row.source_generation)||
  String(row.receipt.custody_generation)!==String(row.custody_generation)||
  row.receipt.rubric_digest!==row.rubric_digest||row.receipt.verifier_id!==row.verifier_id||
  row.receipt.environment_digest!==row.environment_digest)
   fail('QUALIFICATION_RECEIPT_INVALID','Actual server-generated execution receipt is missing or does not bind its job');
- return {job_id:row.id,custody_id:row.custody_id,custody_generation:String(row.custody_generation),
+ return {job_id:row.id,task_id:row.task_id,source_attempt_id:row.source_attempt_id,source_attempt_generation:String(row.source_generation),custody_id:row.custody_id,custody_generation:String(row.custody_generation),
   lease_generation:generation,current_job_generation:String(row.lease_generation)===generation,
-  state:row.state,outcome:row.outcome,receipt_digest:row.receipt_digest,evidence_id:row.evidence_id,receipt_artifact_id:row.receipt_artifact_id,receipt:row.receipt,
+  state:row.state,outcome:row.outcome,source_origin:row.receipt.source_origin,receipt_digest:row.receipt_digest,evidence_id:row.evidence_id,receipt_artifact_id:row.receipt_artifact_id,receipt:row.receipt,
   qualification:'NOT_GRANTED',preparation_readiness:'NOT_EVALUATED'};
 }
 export function createComponent(ctx:ComponentContext):Component & {capabilities:Record<string,unknown>}{
