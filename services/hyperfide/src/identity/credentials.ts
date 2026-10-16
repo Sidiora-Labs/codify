@@ -176,3 +176,52 @@ export async function loadIsolationPermitVerifier(configFile:string):Promise<Iso
   const result=frozen({...claims,permit_digest:hash(envelopeBytes),issuer_key_id:envelope.key_id}) as VerifiedIsolationPermit;verifiedIsolationPermits.add(result);return result;
  };return Object.freeze({verifySigned,verify:(serialized:Buffer|string,expected:IsolationPermitExpectation)=>{const result=verifySigned(serialized);assertIsolationPermit(result,expected);return result;}});
 }
+
+
+export type WriterObservationPermitClaims=Omit<IsolationPermitClaims,'purpose'>&{readonly purpose:'EXTERNAL_WRITER_OBSERVATION_ONLY'};
+export interface VerifiedWriterObservationPermit extends WriterObservationPermitClaims {readonly permit_digest:string;readonly issuer_key_id:string}
+export interface WriterObservationPermitVerifier {
+ verifySigned(serialized:Buffer|string):VerifiedWriterObservationPermit;
+ verify(serialized:Buffer|string,expected:IsolationPermitExpectation):VerifiedWriterObservationPermit;
+}
+const verifiedWriterObservationPermits=new WeakSet<object>();
+function validateWriterObservationClaims(value:unknown,nowMs:number):asserts value is WriterObservationPermitClaims {
+ if(!object(value)||value.purpose!=='EXTERNAL_WRITER_OBSERVATION_ONLY')fail('OBSERVATION_PERMIT_INVALID','A distinct observation-only permit is required');
+ // Share only inert binding validation. This never registers an isolation brand or authorises an effect.
+ validateIsolationClaims({...value,purpose:'EXTERNAL_WRITER_ISOLATION_ONLY'},nowMs);
+}
+export function isVerifiedWriterObservationPermit(value:unknown):value is VerifiedWriterObservationPermit{return object(value)&&verifiedWriterObservationPermits.has(value);}
+export function assertVerifiedWriterObservationPermit(value:unknown):asserts value is VerifiedWriterObservationPermit {
+ if(!isVerifiedWriterObservationPermit(value))fail('OBSERVATION_PERMIT_REQUIRED','A genuinely verified observation-only permit is required');
+ const {permit_digest:_digest,issuer_key_id:_issuer,...claims}=value;validateWriterObservationClaims(claims,Date.now());
+}
+export function assertWriterObservationPermit(value:unknown,expected:IsolationPermitExpectation):asserts value is VerifiedWriterObservationPermit {
+ assertVerifiedWriterObservationPermit(value);
+ exact(expected,['deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest',...(Object.hasOwn(expected,'resource_reference')?['resource_reference']:[]),...(Object.hasOwn(expected,'resource_topology_digest')?['resource_topology_digest']:[])]);
+ for(const key of ['deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest'] as const)if(value[key]!==expected[key])fail('OBSERVATION_PERMIT_SCOPE','Observation permit differs from the existing durable operation');
+ if((expected.resource_reference===undefined)!==(expected.resource_topology_digest===undefined))fail('OBSERVATION_PERMIT_SCOPE','Complete resource identity is required');
+ if(expected.resource_reference!==undefined&&!value.resources.some(r=>r.reference_key===expected.resource_reference&&r.topology_digest===expected.resource_topology_digest))fail('OBSERVATION_PERMIT_SCOPE','Resource is outside the observation allowlist');
+}
+function writerObservationSigningBytes(keyId:string,payload:Buffer):Buffer{return Buffer.from('HYPERFIDE-WRITER-OBSERVATION-PERMIT-V1\n'+keyId+'\n'+hash(payload)+'\n','utf8');}
+export async function issueWriterObservationPermit(claims:WriterObservationPermitClaims,issuer:{key_id:string;private_key_file:string}):Promise<string>{
+ validateWriterObservationClaims(claims,Date.now());exact(issuer,['key_id','private_key_file']);if(typeof issuer.key_id!=='string'||!NAME.test(issuer.key_id)||typeof issuer.private_key_file!=='string'||!path.isAbsolute(issuer.private_key_file))fail('OBSERVATION_PERMIT_CONFIG','Explicit trusted operator signing key required');
+ const file=await fs.open(issuer.private_key_file,constants.O_RDONLY|constants.O_NOFOLLOW);let bytes:Buffer;
+ try{const stat=await file.stat();if(!stat.isFile()||stat.uid!==process.getuid?.()||stat.size<1||stat.size>4096||(stat.mode&0o077)!==0)fail('OBSERVATION_PERMIT_CONFIG','Bounded private operator signing key required');bytes=await file.readFile();}finally{await file.close();}
+ let key;try{key=createPrivateKey(bytes!);}finally{bytes!.fill(0);}if(key.asymmetricKeyType!=='ed25519')fail('OBSERVATION_PERMIT_CONFIG','Observation signer must use Ed25519');
+ const payload=Buffer.from(canonicalPermitJSON(claims)),signature=sign(null,writerObservationSigningBytes(issuer.key_id,payload),key);
+ return canonicalPermitJSON({schema_version:1,key_id:issuer.key_id,payload_b64:payload.toString('base64url'),signature_b64:signature.toString('base64url')});
+}
+export async function loadWriterObservationPermitVerifier(configFile:string):Promise<WriterObservationPermitVerifier>{
+ if(!path.isAbsolute(configFile))fail('OBSERVATION_PERMIT_CONFIG','Trusted verifier configuration must be absolute');
+ const file=await fs.open(configFile,constants.O_RDONLY|constants.O_NOFOLLOW);let bytes:Buffer;
+ try{const stat=await file.stat();if(!stat.isFile()||stat.uid!==process.getuid?.()||stat.size<1||stat.size>65536||(stat.mode&0o022)!==0)fail('OBSERVATION_PERMIT_CONFIG','Bounded operator-owned verifier configuration required');bytes=await file.readFile();}finally{await file.close();}
+ const config=strictJSON(bytes!);exact(config,['schema_version','issuers']);if(config.schema_version!==1||!Array.isArray(config.issuers)||!config.issuers.length||config.issuers.length>16)fail('OBSERVATION_PERMIT_CONFIG','Explicit bounded trusted operator public keys required');
+ const keys=new Map<string,ReturnType<typeof createPublicKey>>();for(const issuer of config.issuers){exact(issuer,['key_id','public_key_b64']);if(typeof issuer.key_id!=='string'||!NAME.test(issuer.key_id)||keys.has(issuer.key_id))fail('OBSERVATION_PERMIT_CONFIG','Unique trusted observation issuer required');const publicBytes=base64(issuer.public_key_b64,32);keys.set(issuer.key_id,createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),publicBytes]),format:'der',type:'spki'}));}
+ const verifySigned=(serialized:Buffer|string):VerifiedWriterObservationPermit=>{
+  const envelopeBytes=Buffer.isBuffer(serialized)?Buffer.from(serialized):Buffer.from(serialized,'utf8');if(envelopeBytes.length>131072)fail('OBSERVATION_PERMIT_INVALID','Bounded observation permit envelope required');
+  const envelope=strictJSON(envelopeBytes);exact(envelope,['schema_version','key_id','payload_b64','signature_b64']);if(envelope.schema_version!==1||typeof envelope.key_id!=='string'||typeof envelope.payload_b64!=='string'||!keys.has(envelope.key_id))fail('OBSERVATION_PERMIT_INVALID','Unknown observation permit issuer');
+  const payload=base64(envelope.payload_b64),signature=base64(envelope.signature_b64,64),claims=strictJSON(payload);validateWriterObservationClaims(claims,Date.now());
+  if(canonicalPermitJSON(claims)!==payload.toString('utf8')||canonicalPermitJSON(envelope)!==envelopeBytes.toString('utf8')||!verify(null,writerObservationSigningBytes(envelope.key_id,payload),keys.get(envelope.key_id)!,signature))fail('OBSERVATION_PERMIT_INVALID','Observation permit bytes or signature are invalid');
+  const result=frozen({...claims,permit_digest:hash(envelopeBytes),issuer_key_id:envelope.key_id}) as VerifiedWriterObservationPermit;verifiedWriterObservationPermits.add(result);return result;
+ };return Object.freeze({verifySigned,verify:(serialized:Buffer|string,expected:IsolationPermitExpectation)=>{const result=verifySigned(serialized);assertWriterObservationPermit(result,expected);return result;}});
+}
