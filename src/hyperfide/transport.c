@@ -293,6 +293,57 @@ int hf_private_read(const char *path,size_t maximum,char **data,size_t *length) 
     if (!valid||memchr(*data,0,*length)) {free(*data);*data=NULL;return 0;}
     return 1;
 }
+static int protected_directory(int fd,int root_only) {
+    struct stat st;
+    if (fstat(fd,&st)||!S_ISDIR(st.st_mode)) return 0;
+    if (st.st_uid!=0&&(root_only||st.st_uid!=geteuid())) return 0;
+    return !(st.st_mode&022)||(st.st_uid==0&&(st.st_mode&S_ISVTX));
+}
+int hf_protected_read(const char *path,size_t maximum,char **data,size_t *length) {
+    if (!data||!length) return 0;
+    *data=NULL;*length=0;
+    if (!path||path[0]!='/'||strlen(path)>4095||!path[1]||path[strlen(path)-1]=='/') return 0;
+    char *copy=strdup(path+1);if (!copy) return 0;
+    int directory=open("/",O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC),fd=-1,valid=0,all_root=1;
+    if (directory<0||!protected_directory(directory,0)) goto done;
+    char *part=copy;
+    for (;;) {
+        char *slash=strchr(part,'/');
+        if (slash) *slash=0;
+        if (!*part||!strcmp(part,".")||!strcmp(part,"..")) goto done;
+        if (!slash) {fd=openat(directory,part,O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC);break;}
+        int next=openat(directory,part,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+        if (next<0) goto done;
+        struct stat st;
+        if (!protected_directory(next,0)||fstat(next,&st)) {close(next);goto done;}
+        if (st.st_uid!=0) all_root=0;
+        close(directory);directory=next;part=slash+1;
+    }
+    struct stat before,after;
+    if (fd<0||fstat(fd,&before)||!S_ISREG(before.st_mode)||before.st_nlink!=1||before.st_size<0||(uint64_t)before.st_size>maximum) goto done;
+    mode_t mode=before.st_mode&07777;
+    int own=before.st_uid==geteuid()&&(mode==0600||mode==0400);
+    int root_group=all_root&&before.st_uid==0&&before.st_gid==getegid()&&(mode==0640||mode==0440);
+    if (!own&&!root_group) goto done;
+    *length=(size_t)before.st_size;*data=malloc(*length+1);
+    if (!*data) goto done;
+    size_t used=0;
+    while (used<*length) {
+        ssize_t n=read(fd,*data+used,*length-used);
+        if (n<0&&errno==EINTR) continue;
+        if (n<=0) goto done;
+        used+=(size_t)n;
+    }
+    char extra;
+    if (read(fd,&extra,1)!=0||fstat(fd,&after)||before.st_dev!=after.st_dev||before.st_ino!=after.st_ino||before.st_size!=after.st_size||before.st_mode!=after.st_mode||before.st_uid!=after.st_uid||before.st_gid!=after.st_gid||after.st_nlink!=1||before.st_mtim.tv_sec!=after.st_mtim.tv_sec||before.st_mtim.tv_nsec!=after.st_mtim.tv_nsec||before.st_ctim.tv_sec!=after.st_ctim.tv_sec||before.st_ctim.tv_nsec!=after.st_ctim.tv_nsec||memchr(*data,0,*length)) goto done;
+    (*data)[*length]=0;valid=1;
+done:
+    if (fd>=0) close(fd);
+    if (directory>=0) close(directory);
+    free(copy);
+    if (!valid) {if (*data) {OPENSSL_cleanse(*data,*length);free(*data);}*data=NULL;*length=0;}
+    return valid;
+}
 int hf_private_write(const char *path,const void *data,size_t length,int replace) {
     if (!path||path[0]!='/'||strlen(path)>4000) return 0;
     char *parent=strdup(path);if (!parent) return 0;
@@ -339,7 +390,7 @@ static int origin_valid(const char *origin) {
 }
 int hf_transport_config(const char *path,HfTransportConfig *config) {
     char *text=NULL;size_t length=0;
-    if (!hf_private_read(path,32768,&text,&length)) return 0;
+    if (!hf_protected_read(path,32768,&text,&length)) return 0;
     HfJson *json=malloc(sizeof *json);if (!json) {free(text);return 0;}
     const char *keys[]={"origin","ca_file","key_path","credential_id","grant_path","timeout_ms"};
     memset(config,0,sizeof *config);config->timeout_ms=10000;
@@ -352,7 +403,7 @@ int hf_transport_config(const char *path,HfTransportConfig *config) {
 }
 static int no_password(char *buf,int size,int rwflag,void *userdata) {(void)buf;(void)size;(void)rwflag;(void)userdata;return 0;}
 static EVP_PKEY *private_key(const char *path) {
-    char *pem=NULL;size_t size=0;if (!hf_private_read(path,4096,&pem,&size)) return NULL;
+    char *pem=NULL;size_t size=0;if (!hf_protected_read(path,4096,&pem,&size)) return NULL;
     BIO *bio=BIO_new_mem_buf(pem,(int)size);EVP_PKEY *key=bio?PEM_read_bio_PrivateKey(bio,NULL,no_password,NULL):NULL;
     BIO_free(bio);OPENSSL_cleanse(pem,size);free(pem);
     if (key&&!EVP_PKEY_is_a(key,"ED25519")) {EVP_PKEY_free(key);return NULL;}

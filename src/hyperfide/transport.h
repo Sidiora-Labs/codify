@@ -23,6 +23,9 @@ int hf_sha256_bytes(const void *data,size_t length,char output[65]);
 char *hf_base64url(const unsigned char *data,size_t length);
 unsigned char *hf_base64url_decode(const char *text,size_t *length);
 int hf_private_read(const char *path,size_t maximum,char **data,size_t *length);
+/* Protected operator files may be root-owned and readable by the target primary GID.
+ * Unlike private process state, these files must remain immutable to that child. */
+int hf_protected_read(const char *path,size_t maximum,char **data,size_t *length);
 int hf_private_write(const char *path,const void *data,size_t length,int replace);
 int hf_native_error(FILE *output,const char *code);
 typedef struct {
