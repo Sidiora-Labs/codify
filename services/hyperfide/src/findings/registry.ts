@@ -27,9 +27,11 @@ export function canonical(value:unknown):string{
  return fail('INVALID_REQUEST','Only JSON values are supported');
 }
 export function digest(value:unknown):string{return 'sha256:'+createHash('sha256').update(canonical(value)).digest('hex');}
-export function invocation(context:ComponentContext,action:string):FindingInvocation{
+export async function invocation(context:ComponentContext,action:string):Promise<FindingInvocation>{
  const value=(context as unknown as {invocation?:FindingInvocation}).invocation;
  if(!value||!value.principal||typeof value.guard!=='function')fail('AUTH_REQUIRED','Authenticated invocation context is required');
+ let authenticate:unknown;try{authenticate=(await import(new URL('../transport/protocol.js',import.meta.url).href)).assertInvocation;}catch{fail('DEPENDENCY_NOT_READY','The actual identity authority module is required');}
+ if(typeof authenticate!=='function')fail('DEPENDENCY_NOT_READY','The actual identity authority brand is required');authenticate(value);
  const principal=value.principal;
  uuid(principal.credential_id);uuid(principal.actor_id);uuid(principal.organisation_id);uuid(principal.run_id);uuid(principal.deployment_epoch);
  if(value.operation!==action||principal.run_id!==context.policy.programme_id||!Array.isArray(principal.allowed_actions)||!principal.allowed_actions.includes(action))fail('AUTH_DENIED','Invocation is not authorised for this run and operation');
@@ -41,7 +43,7 @@ export async function readiness(tx:pg.PoolClient):Promise<void>{
  if(!result.rows[0]?.installed)fail('MIGRATION_REQUIRED','The domain18 additive migration must be applied by the migration runner');
 }
 export async function withFindingTransaction<T>(context:ComponentContext,action:string,fn:(value:FindingTransaction)=>Promise<T>):Promise<T>{
- const call=invocation(context,action),principal=call.principal;
+ const call=await invocation(context,action),principal=call.principal;
  const tx=await getPool(context.env).connect();
  try{
   await tx.query('BEGIN ISOLATION LEVEL READ COMMITTED');await readiness(tx);await call.guard(tx);
