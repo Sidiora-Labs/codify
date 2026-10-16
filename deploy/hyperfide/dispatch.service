@@ -2,14 +2,19 @@
 Description=Hyperfide agent dispatch
 After=network-online.target hyperfide-control.service
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 [Service]
 Type=simple
 User=hyperfide-dispatch
 Group=hyperfide
 WorkingDirectory=/opt/hyperfide/current
 EnvironmentFile=/etc/hyperfide/dispatch.env
-ExecStart=/opt/hyperfide/current/runtime/node /opt/hyperfide/current/services/dist/dispatch.js --mode daemon --policy /etc/hyperfide/dispatch-policy.json --spec-revision ${HYPERFIDE_SPEC_REVISION}
+Environment=HF_EVENT_DISPATCH_CONFIG=/etc/hyperfide/dispatch-worker.json
+Environment=HF_IDENTITY_CONFIG_FILE=/etc/hyperfide/dispatch-identity.json
+ExecStart=/opt/hyperfide/current/runtime/node /opt/hyperfide/current/services/dist/dispatch.js --mode https --host ${HYPERFIDE_DISPATCH_LISTEN_HOST} --port ${HYPERFIDE_DISPATCH_LISTEN_PORT} --tls-cert /etc/hyperfide/dispatch.crt --tls-key /etc/hyperfide/dispatch.key --policy /etc/hyperfide/dispatch-policy.json --spec-revision ${HYPERFIDE_SPEC_REVISION}
 Restart=on-failure
+RestartSec=10
 KillMode=control-group
 TimeoutStopSec=30
 NoNewPrivileges=true
