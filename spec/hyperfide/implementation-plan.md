@@ -2,7 +2,7 @@
 
 **Approved implementation baseline on 2026-10-16. Per-task states below are historical planning states; native `spec.kvx` owns live bootstrap progress.**
 
-This approved dependency graph contains 112 bounded implementation and qualification packages across 32 waves. It covers all 112 native acceptance clauses. The native KVX task sections are generated from [the versioned planning catalog](evidence/task-catalog.json); the IDs remain stable even when explicitly approved scope or dependency amendments revise the plan. Live native statuses and runtime metadata are never imported from historical catalog states. Each task initially owns one acceptance clause, and its concrete steps integrate the relevant cross-cutting contracts. A task can be implemented before full programme qualification, but its component receipts cannot claim a full acceptance case passed.
+This approved dependency graph contains 112 bounded implementation and qualification packages across 33 waves. It covers all 112 native acceptance clauses. The native KVX task sections are generated from [the versioned planning catalog](evidence/task-catalog.json); the IDs remain stable even when explicitly approved scope or dependency amendments revise the plan. Live native statuses and runtime metadata are never imported from historical catalog states. Each task initially owns one acceptance clause, and its concrete steps integrate the relevant cross-cutting contracts. A task can be implemented before full programme qualification, but its component receipts cannot claim a full acceptance case passed.
 
 The implementation team must re-read the pinned current source and approved architecture at task start. Proposed paths describe intended ownership, including files that do not yet exist; they are not claims about shipped modules. Current source paths named by an integration task are edited only after approval. All builds, prerequisites, indexing, implementation, tests, reproductions, integration and qualification run remotely. The main server receives verified prebuilt outputs and performs supervision.
 
@@ -83,15 +83,21 @@ These are approved implementation assignments for existing requirements, not cla
 | 4.2 | Implement bounded primary transaction gateway | storage | 4.1, 1.4 | V-002, V-011 |
 | 10.1 | Build Blaxel coding images with qualified writable storage and mounts | blaxel | 8.1, 11.1, 1.4 | V-038, V-039 |
 
-### Wave 5 — 3 packages
+### Wave 5 — 2 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
-| 14.1 | Enroll role-scoped identities bound to intent and boot generation | identity | 4.1, 8.1, 4.2, 1.4, 11.1 | V-015, V-040 |
 | 3.1 | Register leader, manager, wave-package and execution role ownership | hierarchy | 2.1, 4.2 | V-001, V-008 |
 | 4.4 | Establish database migration, durability and old-primary fencing | storage | 4.2 | V-009, V-053 |
 
-### Wave 6 — 6 packages
+### Wave 6 — 2 packages
+
+| Task | Deliverable | Owner | Requires | Cases |
+|---|---|---|---|---|
+| 14.1 | Enroll role-scoped identities bound to intent and boot generation | identity | 4.1, 8.1, 4.2, 1.4, 11.1, 4.4 | V-015, V-040 |
+| 1.1 | Enforce supervision-only main-host placement across all job classes | policy | 8.1, 3.1 | V-007, V-052 |
+
+### Wave 7 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -100,9 +106,8 @@ These are approved implementation assignments for existing requirements, not cla
 | 6.1 | Implement transactional pending outbox and committed delivery obligations | delivery | 4.2, 14.1 | V-005 |
 | 7.1 | Extract repository and workspace graph bundles remotely | graph | 4.1, 2.1, 14.1, 4.2 | V-018, V-020 |
 | 14.2 | Inject layered variables and rotate scoped credential references | identity | 14.1 | V-040 |
-| 1.1 | Enforce supervision-only main-host placement across all job classes | policy | 8.1, 3.1 | V-007, V-052 |
 
-### Wave 7 — 10 packages
+### Wave 8 — 10 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -117,7 +122,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 14.3 | Qualify account-session and API authentication modes separately | identity | 14.2 | V-040, V-042 |
 | 20.1 | Implement typed Span, Jev1.14 and d1-ultra route adapters | decisions | 14.2, 1.4 | V-045 |
 
-### Wave 8 — 5 packages
+### Wave 9 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -127,7 +132,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 20.2 | Preserve output probability and confidence semantics with abstention | decisions | 20.1 | V-045 |
 | 20.3 | Represent route-specific images, reasoning and actual billing | decisions | 20.1 | V-045 |
 
-### Wave 9 — 4 packages
+### Wave 10 — 4 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -136,7 +141,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 3.2 | Build immutable scoped execution packets | hierarchy | 3.1, 2.4, 11.1, 7.3 | V-001, V-014 |
 | 20.4 | Run decision jobs asynchronously with deadlines and safe fallback | decisions | 20.2, 20.3, 6.2 | V-045, V-011 |
 
-### Wave 10 — 3 packages
+### Wave 11 — 3 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -144,7 +149,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 4.3 | Assemble consistent packets with topology-aware replica barriers | storage | 4.2, 3.2, 4.4, 14.1 | V-010, V-023 |
 | 21.4 | Persist complete decision audit records and eventual outcomes | decisions | 20.4, 15.2 | V-045, V-014 |
 
-### Wave 11 — 5 packages
+### Wave 12 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -154,7 +159,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 21.1 | Add advisory clause critique with validated change proposals | decisions | 20.4, 2.3, 21.4 | V-045, V-024 |
 | 22.1 | Build temporally valid labelled evaluation datasets | evaluation | 21.4 | V-046 |
 
-### Wave 12 — 5 packages
+### Wave 13 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -164,7 +169,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 8.2 | Implement pool inventory and separately qualified account quotas | providers | 8.1, 5.4 | V-007, V-036 |
 | 22.2 | Measure calibrated quality, latency and billed cost against baseline | evaluation | 22.1, 20.3 | V-046 |
 
-### Wave 13 — 5 packages
+### Wave 14 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -174,7 +179,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 10.2 | Apply explicit Blaxel process and sandbox lifetime controls | blaxel | 10.1, 8.2 | V-036, V-041 |
 | 12.2 | Persist local start ledger and own agent IPC across reconnects | runner | 12.1, 6.3 | V-006, V-041, V-043 |
 
-### Wave 14 — 4 packages
+### Wave 15 — 4 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -183,7 +188,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 12.3 | Observe process trees, useful progress and resource usage separately | runner | 12.2, 3.4 | V-007, V-044 |
 | 13.1 | Implement pinned Claude Code and Codex connector capability profiles | connectors | 12.2, 14.3 | V-042 |
 
-### Wave 15 — 6 packages
+### Wave 16 — 6 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -194,7 +199,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 12.4 | Implement runner pause, drain, cancel and verified stop | runner | 12.3, 15.2, 11.3, 5.1, 8.2 | V-006, V-017 |
 | 13.2 | Persist native session lineage and source-linked checkpoints | connectors | 13.1, 15.1 | V-042, V-043 |
 
-### Wave 16 — 5 packages
+### Wave 17 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -204,7 +209,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 16.2 | Reject false qualification from missing checks and legacy force paths | assurance | 16.1, 27.1, 12.4, 5.1 | V-013, V-056 |
 | 17.1 | Discover every commit and enforce the full watcher obligation matrix | review | 16.1, 13.1, 14.1, 4.2 | V-031 |
 
-### Wave 17 — 6 packages
+### Wave 18 — 6 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -215,7 +220,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 16.3 | Record clause evidence and policy-limited independent review judgements | assurance | 16.2, 2.4 | V-013, V-034 |
 | 21.2 | Rank policy-permitted recovery actions from preserved failure packets | decisions | 20.4, 13.4, 16.2, 21.4 | V-045, V-044 |
 
-### Wave 18 — 3 packages
+### Wave 19 — 3 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -223,7 +228,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 17.2 | Build producer-consumer contracts and behavioural impact analysis | review | 7.4, 16.3, 17.1 | V-029, V-034 |
 | 24.1 | Recover supervisory desired state and bounded offline continuation | recovery | 6.4, 3.4, 13.3, 12.4, 4.4, 5.1 | V-008, V-043 |
 
-### Wave 19 — 5 packages
+### Wave 20 — 5 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -233,7 +238,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 24.2 | Recover lost sandboxes and processes with fenced compatible replacement | recovery | 24.1, 8.4, 15.3 | V-004, V-041, V-049 |
 | 25.3 | Route CLI, MCP, editor, hooks and offline workflows through authority modes | migration | 4.3, 6.3, 16.4, 2.1, 12.2, 14.1, 12.1, 1.4 | V-019, V-027, V-028 |
 
-### Wave 20 — 6 packages
+### Wave 21 — 6 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -241,10 +246,10 @@ These are approved implementation assignments for existing requirements, not cla
 | 18.1 | Implement canonical findings and provenance-preserving deduplication | findings | 16.3, 3.1, 17.3 | V-032 |
 | 23.3 | Instrument lifecycle, graph freshness, recovery and qualified outcome cost | observability | 6.4, 7.3, 16.4, 21.4, 23.1 | V-011, V-048 |
 | 23.4 | Deliver bounded actionable notifications and durable evidence links | observability | 23.1, 6.2 | V-016, V-048 |
-| 24.3 | Implement scoped pause, drain, cancel and fleet stop controllers | recovery | 12.4, 24.2, 15.4, 5.1 | V-017, V-054 |
+| 24.3 | Implement scoped pause, drain, cancel and fleet stop controllers | recovery | 12.4, 24.2, 15.4, 5.1, 25.1 | V-017, V-054 |
 | 25.4 | Build reproducible releases and deploy prebuilt services in compatibility order | deployment | 25.3, 4.4, 12.4, 13.4, 1.1 | V-028, V-052, V-055 |
 
-### Wave 21 — 4 packages
+### Wave 22 — 4 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -253,7 +258,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 21.3 | Rank eligible frontier profiles, optional context and review/finding advice | decisions | 20.4, 5.4, 18.1, 17.2, 21.4 | V-045 |
 | 26.1 | Apply Hyperfide identity to owned product and distribution surfaces | branding | 25.4 | V-026, V-028 |
 
-### Wave 22 — 3 packages
+### Wave 23 — 3 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -261,7 +266,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 22.3 | Run shadow evaluation then bounded controlled decision trials | evaluation | 22.2, 21.1, 21.2, 21.3 | V-046 |
 | 26.2 | Ship canonical hyperfide entrypoint with explicit cg compatibility policy | branding | 26.1, 25.3 | V-026, V-028 |
 
-### Wave 23 — 3 packages
+### Wave 24 — 3 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -269,59 +274,59 @@ These are approved implementation assignments for existing requirements, not cla
 | 22.4 | Gate decision promotion, drift rollback and optional Span self-hosting | evaluation | 22.3 | V-045, V-046 |
 | 26.3 | Migrate config, directories and variable aliases with backups and conflict checks | branding | 26.2, 25.1 | V-026, V-055 |
 
-### Wave 24 — 2 packages
+### Wave 25 — 2 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 19.2 | Enforce sole protected-target publication gateway and CAS reconciliation | integration | 19.1, 14.4, 5.2 | V-033 |
 | 26.4 | Regenerate owned guidance and verify old/new integration parity | branding | 26.3, 25.3, 12.4, 14.1, 18.4, 2.1 | V-026, V-027 |
 
-### Wave 25 — 2 packages
+### Wave 26 — 2 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 19.3 | Evaluate task, wave and programme closure against required milestones | integration | 19.2, 16.3, 18.4 | V-034 |
 | 25.2 | Rehearse single-authority cutover and separate rollback boundaries | migration | 25.1, 7.4, 4.4, 24.3, 26.4, 25.4 | V-019, V-028, V-055 |
 
-### Wave 26 — 1 package
+### Wave 27 — 1 package
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 19.4 | Publish explicit partial outcomes behind multi-repository release barrier | integration | 19.2, 19.3 | V-030, V-033 |
 
-### Wave 27 — 2 packages
+### Wave 28 — 2 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 24.4 | Exercise operational recovery runbooks and declared RPO/RTO | recovery | 24.3, 4.4, 19.4 | V-009, V-049, V-053 |
 | 27.2 | Replay deterministic large-spec, mixed-graph and 1500-session schedules | qualification | 5.4, 7.4, 23.4, 24.3, 19.4 | V-024, V-047, V-048, V-049 |
 
-### Wave 28 — 1 package
+### Wave 29 — 1 package
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 27.3 | Qualify both live providers and native agents through staged48/72-hour fleet campaigns | qualification | 27.2, 9.4, 10.4, 13.4, 11.4, 19.4, 23.3, 24.4, 22.4, 26.4, 1.2, 1.3, 14.4, 17.3, 18.2, 25.2 | V-036, V-037, V-038, V-039, V-040, V-041, V-042, V-043, V-044, V-045, V-046, V-050, V-051, V-052 |
 
-### Wave 29 — 2 packages
+### Wave 30 — 2 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 27.4 | Run composite fault qualification and independent invariant reconstruction | qualification | 27.3, 24.4, 19.4 | V-002, V-003, V-004, V-005, V-009, V-010, V-012, V-015, V-016, V-017, V-033, V-037, V-040, V-049, V-053, V-054 |
 | 28.1 | Publish operational documentation from qualified implementation interfaces | documentation | 26.4, 27.3 | V-028, V-035, V-052, V-055 |
 
-### Wave 30 — 1 package
+### Wave 31 — 1 package
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 28.2 | Persist deterministic documentation closure snapshots and receipts | documentation | 28.1, 19.3, 15.2, 12.4, 4.2, 5.1 | V-035 |
 
-### Wave 31 — 1 package
+### Wave 32 — 1 package
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 28.4 | Retain requirements, decisions, source evidence and implementation traceability | release | 27.4, 28.2, 25.2, 19.4, 15.4 | V-024, V-034, V-056 |
 
-### Wave 32 — 1 package
+### Wave 33 — 1 package
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
@@ -532,9 +537,9 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 14.1 — Enroll role-scoped identities bound to intent and boot generation
 
-Pending · wave 5 · owner `identity` · clause `14.1`
+Pending · wave 6 · owner `identity` · clause `14.1`
 
-Requires: 4.1, 8.1, 4.2, 1.4, 11.1.
+Requires: 4.1, 8.1, 4.2, 1.4, 11.1, 4.4.
 
 1. Keep provider administration credentials only in provisioner scope; exchange one-use/controlled bootstrap grants bound to provisioning intent/boot for runner identity.
 2. Replay enrollment from another sandbox/generation and forge role events; server-side authority rejects access independently of model text.
@@ -562,7 +567,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 15.2 — Store complete immutable artifacts with receipts and checksums
 
-Planning baseline pending · wave 6 · owner `artifacts` · clause `15.2`
+Planning baseline pending · wave 7 · owner `artifacts` · clause `15.2`
 
 Requires: 4.1, 4.2, 14.1.
 
@@ -585,7 +590,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 15.1 — Publish attributable attempt source and recoverable workspace checkpoints
 
-Pending · wave 7 · owner `artifacts` · clause `15.1`
+Pending · wave 8 · owner `artifacts` · clause `15.1`
 
 Requires: 4.1, 11.1, 15.2.
 
@@ -609,7 +614,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 2.2 — Validate cross-programme dependency graphs and explicit milestones
 
-Planning baseline pending · wave 6 · owner `specification` · clause `2.2`
+Planning baseline pending · wave 7 · owner `specification` · clause `2.2`
 
 Requires: 2.1, 14.1, 4.2.
 
@@ -684,7 +689,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 6.1 — Implement transactional pending outbox and committed delivery obligations
 
-Planning baseline pending · wave 6 · owner `delivery` · clause `6.1`
+Planning baseline pending · wave 7 · owner `delivery` · clause `6.1`
 
 Requires: 4.2, 14.1.
 
@@ -693,7 +698,7 @@ Requires: 4.2, 14.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/events/outbox.ts`, `tests/hyperfide/manifests/tasks/6.1.json`, `tests/hyperfide/cases/tasks/6_1.py`, `tests/hyperfide/registrations/6.1.json`, `services/hyperfide/components/6.1.json`.
+Owns: `services/hyperfide/src/events/outbox.ts`, `tests/hyperfide/manifests/tasks/6.1.json`, `tests/hyperfide/cases/tasks/6_1.py`, `tests/hyperfide/registrations/6.1.json`, `services/hyperfide/components/6.1.json`, `services/hyperfide/migrations/0006-event-session-bindings.sql`.
 
 Verification interface:
 
@@ -707,7 +712,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 7.1 — Extract repository and workspace graph bundles remotely
 
-Planning baseline pending · wave 6 · owner `graph` · clause `7.1`
+Planning baseline pending · wave 7 · owner `graph` · clause `7.1`
 
 Requires: 4.1, 2.1, 14.1, 4.2.
 
@@ -730,7 +735,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 12.1 — Register supervisor boots and isolate writable worker slots
 
-Pending · wave 8 · owner `runner` · clause `12.1`
+Pending · wave 9 · owner `runner` · clause `12.1`
 
 Requires: 14.1, 11.1, 1.4, 15.1, 4.2.
 
@@ -759,7 +764,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 14.2 — Inject layered variables and rotate scoped credential references
 
-Planning baseline pending · wave 6 · owner `identity` · clause `14.2`
+Planning baseline pending · wave 7 · owner `identity` · clause `14.2`
 
 Requires: 14.1.
 
@@ -768,7 +773,7 @@ Requires: 14.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/identity/credentials.ts`, `tests/hyperfide/manifests/tasks/14.2.json`, `tests/hyperfide/cases/tasks/14_2.py`, `tests/hyperfide/registrations/14.2.json`, `services/hyperfide/components/14.2.json`.
+Owns: `services/hyperfide/src/identity/credentials.ts`, `tests/hyperfide/manifests/tasks/14.2.json`, `tests/hyperfide/cases/tasks/14_2.py`, `tests/hyperfide/registrations/14.2.json`, `services/hyperfide/components/14.2.json`, `services/hyperfide/src/transport/isolation.ts`, `tests/hyperfide/cases/tasks/14_isolation_transport.py`.
 
 Verification interface:
 
@@ -782,7 +787,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 14.4 — Enforce scoped API, artifact, Git and model-egress authority
 
-Planning baseline pending · wave 7 · owner `identity` · clause `14.4`
+Planning baseline pending · wave 8 · owner `identity` · clause `14.4`
 
 Requires: 14.1, 15.2.
 
@@ -805,7 +810,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 25.1 — Inventory actual SQLite shapes and import historical state with provenance
 
-Pending · wave 7 · owner `migration` · clause `25.1`
+Pending · wave 8 · owner `migration` · clause `25.1`
 
 Requires: 4.1, 2.1, 15.2.
 
@@ -817,7 +822,7 @@ Requires: 4.1, 2.1, 15.2.
 6. Use the approved Node runtime built-in SQLite API for source snapshots; this amendment requires no package manifest or lockfile dependency change.
 7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/migration/sqlite.ts`, `tests/hyperfide/manifests/tasks/25.1.json`, `tests/hyperfide/cases/tasks/25_1.py`, `tests/hyperfide/registrations/25.1.json`, `services/hyperfide/components/25.1.json`, `services/hyperfide/migrations/0025-sqlite-history.sql`.
+Owns: `services/hyperfide/src/migration/sqlite.ts`, `tests/hyperfide/manifests/tasks/25.1.json`, `tests/hyperfide/cases/tasks/25_1.py`, `tests/hyperfide/registrations/25.1.json`, `services/hyperfide/components/25.1.json`, `services/hyperfide/migrations/0025-sqlite-history.sql`, `services/hyperfide/components/legacy-writer-isolation.json`.
 
 Planned verification:
 
@@ -831,7 +836,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 9.1 — Implement Railway preparation, disk checkpoints and fresh restore enrollment
 
-Pending · wave 9 · owner `railway` · clause `9.1`
+Pending · wave 10 · owner `railway` · clause `9.1`
 
 Requires: 8.1, 11.1, 14.1, 12.1, 10.1.
 
@@ -856,7 +861,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 11.2 — Materialise exact source and keyed dependency caches
 
-Planning baseline pending · wave 8 · owner `preparation` · clause `11.2`
+Planning baseline pending · wave 9 · owner `preparation` · clause `11.2`
 
 Requires: 11.1, 15.1.
 
@@ -902,7 +907,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 2.3 — Version task decomposition and active-run replanning
 
-Planning baseline pending · wave 7 · owner `specification` · clause `2.3`
+Planning baseline pending · wave 8 · owner `specification` · clause `2.3`
 
 Requires: 2.2.
 
@@ -925,7 +930,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 2.4 — Register criterion-level proof obligations and permitted review rubrics
 
-Planning baseline pending · wave 7 · owner `assurance` · clause `2.4`
+Planning baseline pending · wave 8 · owner `assurance` · clause `2.4`
 
 Requires: 2.2, 14.1, 4.2.
 
@@ -948,7 +953,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 3.3 — Provide bounded leader and manager context views
 
-Planning baseline pending · wave 7 · owner `hierarchy` · clause `3.3`
+Planning baseline pending · wave 8 · owner `hierarchy` · clause `3.3`
 
 Requires: 3.1, 2.2.
 
@@ -971,7 +976,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 5.1 — Atomically admit task claims and capacity reservations
 
-Planning baseline pending · wave 10 · owner `scheduler` · clause `5.1`
+Planning baseline pending · wave 11 · owner `scheduler` · clause `5.1`
 
 Requires: 4.2, 2.2, 3.1, 6.1, 14.1, 3.2.
 
@@ -995,7 +1000,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 6.2 — Implement inbox deduplication, revisions and replay-gap recovery
 
-Planning baseline pending · wave 7 · owner `delivery` · clause `6.2`
+Planning baseline pending · wave 8 · owner `delivery` · clause `6.2`
 
 Requires: 6.1.
 
@@ -1018,7 +1023,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 7.2 — Bulk-stage graph facts and resolve references in bounded batches
 
-Planning baseline pending · wave 7 · owner `graph` · clause `7.2`
+Planning baseline pending · wave 8 · owner `graph` · clause `7.2`
 
 Requires: 7.1, 4.2, 14.1.
 
@@ -1041,7 +1046,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 14.3 — Qualify account-session and API authentication modes separately
 
-Planning baseline pending · wave 7 · owner `identity` · clause `14.3`
+Planning baseline pending · wave 8 · owner `identity` · clause `14.3`
 
 Requires: 14.2.
 
@@ -1065,7 +1070,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 20.1 — Implement typed Span, Jev1.14 and d1-ultra route adapters
 
-Planning baseline pending · wave 7 · owner `decisions` · clause `20.1`
+Planning baseline pending · wave 8 · owner `decisions` · clause `20.1`
 
 Requires: 14.2, 1.4.
 
@@ -1089,7 +1094,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 11.3 — Probe actual environment readiness before assignment
 
-Planning baseline pending · wave 9 · owner `preparation` · clause `11.3`
+Planning baseline pending · wave 10 · owner `preparation` · clause `11.3`
 
 Requires: 11.2, 14.2.
 
@@ -1112,7 +1117,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 3.2 — Build immutable scoped execution packets
 
-Planning baseline pending · wave 9 · owner `hierarchy` · clause `3.2`
+Planning baseline pending · wave 10 · owner `hierarchy` · clause `3.2`
 
 Requires: 3.1, 2.4, 11.1, 7.3.
 
@@ -1135,7 +1140,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 5.2 — Enforce monotonic generations and primary-clock leases
 
-Planning baseline pending · wave 11 · owner `scheduler` · clause `5.2`
+Planning baseline pending · wave 12 · owner `scheduler` · clause `5.2`
 
 Requires: 5.1.
 
@@ -1159,7 +1164,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 5.4 — Replace fixed local slot/start limits with resource admission and fairness
 
-Planning baseline pending · wave 11 · owner `scheduler` · clause `5.4`
+Planning baseline pending · wave 12 · owner `scheduler` · clause `5.4`
 
 Requires: 5.1.
 
@@ -1182,7 +1187,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 6.4 — Recover durable dispatch after controller restart
 
-Planning baseline pending · wave 13 · owner `delivery` · clause `6.4`
+Planning baseline pending · wave 14 · owner `delivery` · clause `6.4`
 
 Requires: 6.2, 14.1, 6.3.
 
@@ -1207,7 +1212,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 7.3 — Publish complete graph generations atomically
 
-Planning baseline pending · wave 8 · owner `graph` · clause `7.3`
+Planning baseline pending · wave 9 · owner `graph` · clause `7.3`
 
 Requires: 7.2.
 
@@ -1230,7 +1235,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 20.2 — Preserve output probability and confidence semantics with abstention
 
-Planning baseline pending · wave 8 · owner `decisions` · clause `20.2`
+Planning baseline pending · wave 9 · owner `decisions` · clause `20.2`
 
 Requires: 20.1.
 
@@ -1253,7 +1258,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 20.3 — Represent route-specific images, reasoning and actual billing
 
-Planning baseline pending · wave 8 · owner `decisions` · clause `20.3`
+Planning baseline pending · wave 9 · owner `decisions` · clause `20.3`
 
 Requires: 20.1.
 
@@ -1276,7 +1281,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 3.4 — Register native descendants and adopt valid work after manager replacement
 
-Planning baseline pending · wave 12 · owner `hierarchy` · clause `3.4`
+Planning baseline pending · wave 13 · owner `hierarchy` · clause `3.4`
 
 Requires: 3.1, 5.2.
 
@@ -1299,7 +1304,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 4.3 — Assemble consistent packets with topology-aware replica barriers
 
-Planning baseline pending · wave 10 · owner `storage` · clause `4.3`
+Planning baseline pending · wave 11 · owner `storage` · clause `4.3`
 
 Requires: 4.2, 3.2, 4.4, 14.1.
 
@@ -1322,7 +1327,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 5.3 — Reconcile idempotent dispatch and uncertain external outcomes
 
-Planning baseline pending · wave 12 · owner `scheduler` · clause `5.3`
+Planning baseline pending · wave 13 · owner `scheduler` · clause `5.3`
 
 Requires: 5.2, 6.1, 1.1, 5.4.
 
@@ -1345,7 +1350,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 6.3 — Deliver generation-bound start, steering and cancellation instructions
 
-Planning baseline pending · wave 12 · owner `delivery` · clause `6.3`
+Planning baseline pending · wave 13 · owner `delivery` · clause `6.3`
 
 Requires: 6.2, 5.2, 14.1.
 
@@ -1370,7 +1375,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 8.2 — Implement pool inventory and separately qualified account quotas
 
-Planning baseline pending · wave 12 · owner `providers` · clause `8.2`
+Planning baseline pending · wave 13 · owner `providers` · clause `8.2`
 
 Requires: 8.1, 5.4.
 
@@ -1393,7 +1398,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 15.3 — Adopt stale-attempt artifacts without restoring stale authority
 
-Planning baseline pending · wave 16 · owner `artifacts` · clause `15.3`
+Planning baseline pending · wave 17 · owner `artifacts` · clause `15.3`
 
 Requires: 15.1, 15.2, 5.2, 13.2, 3.2.
 
@@ -1416,7 +1421,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 20.4 — Run decision jobs asynchronously with deadlines and safe fallback
 
-Planning baseline pending · wave 9 · owner `decisions` · clause `20.4`
+Planning baseline pending · wave 10 · owner `decisions` · clause `20.4`
 
 Requires: 20.2, 20.3, 6.2.
 
@@ -1439,7 +1444,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 1.2 — Expose one human programme interface through primary leader
 
-Planning baseline pending · wave 13 · owner `policy` · clause `1.2`
+Planning baseline pending · wave 14 · owner `policy` · clause `1.2`
 
 Requires: 3.1, 6.3.
 
@@ -1462,7 +1467,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 7.4 — Port graph query and search semantics with differential parity
 
-Planning baseline pending · wave 11 · owner `graph` · clause `7.4`
+Planning baseline pending · wave 12 · owner `graph` · clause `7.4`
 
 Requires: 7.3, 4.3.
 
@@ -1485,7 +1490,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 8.3 — Persist provisioning intents and quarantine ambiguous or orphan resources
 
-Planning baseline pending · wave 14 · owner `providers` · clause `8.3`
+Planning baseline pending · wave 15 · owner `providers` · clause `8.3`
 
 Requires: 8.2, 5.3, 6.4, 14.1.
 
@@ -1511,7 +1516,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 8.4 — Implement authenticated cross-pool connectivity and compatible relocation
 
-Planning baseline pending · wave 16 · owner `providers` · clause `8.4`
+Planning baseline pending · wave 17 · owner `providers` · clause `8.4`
 
 Requires: 8.2, 14.1, 11.4, 12.4.
 
@@ -1534,7 +1539,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 9.2 — Apply complete Railway runtime profiles for every launch
 
-Planning baseline pending · wave 13 · owner `railway` · clause `9.2`
+Planning baseline pending · wave 14 · owner `railway` · clause `9.2`
 
 Requires: 9.1, 8.2.
 
@@ -1557,7 +1562,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 10.2 — Apply explicit Blaxel process and sandbox lifetime controls
 
-Planning baseline pending · wave 13 · owner `blaxel` · clause `10.2`
+Planning baseline pending · wave 14 · owner `blaxel` · clause `10.2`
 
 Requires: 10.1, 8.2.
 
@@ -1580,7 +1585,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 12.2 — Persist local start ledger and own agent IPC across reconnects
 
-Planning baseline pending · wave 13 · owner `runner` · clause `12.2`
+Planning baseline pending · wave 14 · owner `runner` · clause `12.2`
 
 Requires: 12.1, 6.3.
 
@@ -1605,7 +1610,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 21.1 — Add advisory clause critique with validated change proposals
 
-Planning baseline pending · wave 11 · owner `decisions` · clause `21.1`
+Planning baseline pending · wave 12 · owner `decisions` · clause `21.1`
 
 Requires: 20.4, 2.3, 21.4.
 
@@ -1628,7 +1633,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 21.4 — Persist complete decision audit records and eventual outcomes
 
-Planning baseline pending · wave 10 · owner `decisions` · clause `21.4`
+Planning baseline pending · wave 11 · owner `decisions` · clause `21.4`
 
 Requires: 20.4, 15.2.
 
@@ -1651,7 +1656,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 9.3 — Track Railway durable sessions, logs and process termination
 
-Planning baseline pending · wave 14 · owner `railway` · clause `9.3`
+Planning baseline pending · wave 15 · owner `railway` · clause `9.3`
 
 Requires: 9.2, 12.2, 15.2.
 
@@ -1674,7 +1679,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 10.3 — Reconcile Blaxel create-or-get and recover process streams
 
-Planning baseline pending · wave 15 · owner `blaxel` · clause `10.3`
+Planning baseline pending · wave 16 · owner `blaxel` · clause `10.3`
 
 Requires: 10.2, 12.2, 8.3, 14.1, 14.2.
 
@@ -1697,7 +1702,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 11.4 — Schedule remote preparation and eligible-work-driven prewarming
 
-Planning baseline pending · wave 15 · owner `preparation` · clause `11.4`
+Planning baseline pending · wave 16 · owner `preparation` · clause `11.4`
 
 Requires: 11.1, 5.4, 8.3, 1.1.
 
@@ -1720,7 +1725,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 12.3 — Observe process trees, useful progress and resource usage separately
 
-Planning baseline pending · wave 14 · owner `runner` · clause `12.3`
+Planning baseline pending · wave 15 · owner `runner` · clause `12.3`
 
 Requires: 12.2, 3.4.
 
@@ -1743,7 +1748,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 13.1 — Implement pinned Claude Code and Codex connector capability profiles
 
-Planning baseline pending · wave 14 · owner `connectors` · clause `13.1`
+Planning baseline pending · wave 15 · owner `connectors` · clause `13.1`
 
 Requires: 12.2, 14.3.
 
@@ -1766,7 +1771,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 15.4 — Implement reference-safe retention, garbage collection and destruction gates
 
-Planning baseline pending · wave 17 · owner `artifacts` · clause `15.4`
+Planning baseline pending · wave 18 · owner `artifacts` · clause `15.4`
 
 Requires: 15.2, 8.3, 15.3.
 
@@ -1789,7 +1794,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 16.1 — Submit immutable worker results and dispatch independent qualification
 
-Planning baseline pending · wave 15 · owner `assurance` · clause `16.1`
+Planning baseline pending · wave 16 · owner `assurance` · clause `16.1`
 
 Requires: 2.4, 5.2, 15.2, 12.2, 6.4, 8.3, 14.4, 11.3, 13.1, 3.2, 5.1.
 
@@ -1816,7 +1821,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 22.1 — Build temporally valid labelled evaluation datasets
 
-Planning baseline pending · wave 11 · owner `evaluation` · clause `22.1`
+Planning baseline pending · wave 12 · owner `evaluation` · clause `22.1`
 
 Requires: 21.4.
 
@@ -1839,7 +1844,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 1.3 — Apply qualified frontier assignment policy and user model aliases
 
-Planning baseline pending · wave 15 · owner `policy` · clause `1.3`
+Planning baseline pending · wave 16 · owner `policy` · clause `1.3`
 
 Requires: 13.1, 5.4.
 
@@ -1862,7 +1867,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 9.4 — Reconcile Railway API edge cases and qualify actual account lifecycle
 
-Planning baseline pending · wave 17 · owner `railway` · clause `9.4`
+Planning baseline pending · wave 18 · owner `railway` · clause `9.4`
 
 Requires: 9.3, 8.3, 8.4.
 
@@ -1885,7 +1890,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 10.4 — Gate Blaxel preview capabilities and qualify fresh-identity recovery
 
-Planning baseline pending · wave 17 · owner `blaxel` · clause `10.4`
+Planning baseline pending · wave 18 · owner `blaxel` · clause `10.4`
 
 Requires: 10.3, 14.1, 15.3.
 
@@ -1908,7 +1913,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 12.4 — Implement runner pause, drain, cancel and verified stop
 
-Planning baseline pending · wave 15 · owner `runner` · clause `12.4`
+Planning baseline pending · wave 16 · owner `runner` · clause `12.4`
 
 Requires: 12.3, 15.2, 11.3, 5.1, 8.2.
 
@@ -1931,7 +1936,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 13.2 — Persist native session lineage and source-linked checkpoints
 
-Planning baseline pending · wave 15 · owner `connectors` · clause `13.2`
+Planning baseline pending · wave 16 · owner `connectors` · clause `13.2`
 
 Requires: 13.1, 15.1.
 
@@ -1954,7 +1959,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 13.4 — Integrate native quotas, permission profiles and autonomous escalation
 
-Planning baseline pending · wave 16 · owner `connectors` · clause `13.4`
+Planning baseline pending · wave 17 · owner `connectors` · clause `13.4`
 
 Requires: 13.1, 5.4, 13.2, 5.1, 1.1.
 
@@ -1963,7 +1968,7 @@ Requires: 13.1, 5.4, 13.2, 5.1, 1.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/agents/admission.ts`, `tests/hyperfide/manifests/tasks/13.4.json`, `tests/hyperfide/cases/tasks/13_4.py`, `tests/hyperfide/registrations/13.4.json`, `services/hyperfide/components/13.4.json`, `services/hyperfide/src/agents/supervision.ts`.
+Owns: `services/hyperfide/src/agents/admission.ts`, `tests/hyperfide/manifests/tasks/13.4.json`, `tests/hyperfide/cases/tasks/13_4.py`, `tests/hyperfide/registrations/13.4.json`, `services/hyperfide/components/13.4.json`, `services/hyperfide/src/agents/supervision.ts`, `services/hyperfide/components/13.4-supervision.json`.
 
 Verification interface:
 
@@ -1977,7 +1982,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 16.2 — Reject false qualification from missing checks and legacy force paths
 
-Planning baseline pending · wave 16 · owner `assurance` · clause `16.2`
+Planning baseline pending · wave 17 · owner `assurance` · clause `16.2`
 
 Requires: 16.1, 27.1, 12.4, 5.1.
 
@@ -2000,7 +2005,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 17.1 — Discover every commit and enforce the full watcher obligation matrix
 
-Planning baseline pending · wave 16 · owner `review` · clause `17.1`
+Planning baseline pending · wave 17 · owner `review` · clause `17.1`
 
 Requires: 16.1, 13.1, 14.1, 4.2.
 
@@ -2023,7 +2028,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 22.2 — Measure calibrated quality, latency and billed cost against baseline
 
-Planning baseline pending · wave 12 · owner `evaluation` · clause `22.2`
+Planning baseline pending · wave 13 · owner `evaluation` · clause `22.2`
 
 Requires: 22.1, 20.3.
 
@@ -2046,7 +2051,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 23.2 — Account for distinct infrastructure and model resource dimensions
 
-Planning baseline pending · wave 20 · owner `observability` · clause `23.2`
+Planning baseline pending · wave 21 · owner `observability` · clause `23.2`
 
 Requires: 5.4, 8.2, 12.3, 23.1.
 
@@ -2069,7 +2074,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 13.3 — Recover transport and process loss with explicit context outcomes
 
-Planning baseline pending · wave 17 · owner `connectors` · clause `13.3`
+Planning baseline pending · wave 18 · owner `connectors` · clause `13.3`
 
 Requires: 13.2, 15.3.
 
@@ -2092,7 +2097,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 16.3 — Record clause evidence and policy-limited independent review judgements
 
-Planning baseline pending · wave 17 · owner `assurance` · clause `16.3`
+Planning baseline pending · wave 18 · owner `assurance` · clause `16.3`
 
 Requires: 16.2, 2.4.
 
@@ -2116,7 +2121,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 21.2 — Rank policy-permitted recovery actions from preserved failure packets
 
-Planning baseline pending · wave 17 · owner `decisions` · clause `21.2`
+Planning baseline pending · wave 18 · owner `decisions` · clause `21.2`
 
 Requires: 20.4, 13.4, 16.2, 21.4.
 
@@ -2139,7 +2144,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 16.4 — Invalidate affected assurance while retaining task history
 
-Planning baseline pending · wave 18 · owner `assurance` · clause `16.4`
+Planning baseline pending · wave 19 · owner `assurance` · clause `16.4`
 
 Requires: 16.3, 7.3.
 
@@ -2163,7 +2168,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 17.2 — Build producer-consumer contracts and behavioural impact analysis
 
-Planning baseline pending · wave 18 · owner `review` · clause `17.2`
+Planning baseline pending · wave 19 · owner `review` · clause `17.2`
 
 Requires: 7.4, 16.3, 17.1.
 
@@ -2186,7 +2191,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 18.1 — Implement canonical findings and provenance-preserving deduplication
 
-Planning baseline pending · wave 20 · owner `findings` · clause `18.1`
+Planning baseline pending · wave 21 · owner `findings` · clause `18.1`
 
 Requires: 16.3, 3.1, 17.3.
 
@@ -2209,7 +2214,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 24.1 — Recover supervisory desired state and bounded offline continuation
 
-Planning baseline pending · wave 18 · owner `recovery` · clause `24.1`
+Planning baseline pending · wave 19 · owner `recovery` · clause `24.1`
 
 Requires: 6.4, 3.4, 13.3, 12.4, 4.4, 5.1.
 
@@ -2232,7 +2237,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 17.3 — Persist revision-specific review receipts and invalidate stale conclusions
 
-Planning baseline pending · wave 19 · owner `review` · clause `17.3`
+Planning baseline pending · wave 20 · owner `review` · clause `17.3`
 
 Requires: 17.1, 17.2, 16.4.
 
@@ -2255,7 +2260,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 17.4 — Dispatch remote reproductions and contract/system qualification jobs
 
-Planning baseline pending · wave 19 · owner `review` · clause `17.4`
+Planning baseline pending · wave 20 · owner `review` · clause `17.4`
 
 Requires: 17.2, 16.2, 11.3, 12.4, 15.2, 2.4.
 
@@ -2278,7 +2283,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 18.2 — Project findings to GitHub with ten-minute reconciliation
 
-Planning baseline pending · wave 21 · owner `findings` · clause `18.2`
+Planning baseline pending · wave 22 · owner `findings` · clause `18.2`
 
 Requires: 18.1, 6.2, 14.2.
 
@@ -2301,7 +2306,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 18.3 — Route findings through revision, attempt and current accountable manager
 
-Planning baseline pending · wave 21 · owner `findings` · clause `18.3`
+Planning baseline pending · wave 22 · owner `findings` · clause `18.3`
 
 Requires: 18.1, 3.4.
 
@@ -2324,7 +2329,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 21.3 — Rank eligible frontier profiles, optional context and review/finding advice
 
-Planning baseline pending · wave 21 · owner `decisions` · clause `21.3`
+Planning baseline pending · wave 22 · owner `decisions` · clause `21.3`
 
 Requires: 20.4, 5.4, 18.1, 17.2, 21.4.
 
@@ -2347,7 +2352,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 23.1 — Expose desired/observed fleet state, evidence and critical paths
 
-Planning baseline pending · wave 19 · owner `observability` · clause `23.1`
+Planning baseline pending · wave 20 · owner `observability` · clause `23.1`
 
 Requires: 3.3, 5.4, 16.4, 4.2, 14.1.
 
@@ -2370,7 +2375,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 23.3 — Instrument lifecycle, graph freshness, recovery and qualified outcome cost
 
-Planning baseline pending · wave 20 · owner `observability` · clause `23.3`
+Planning baseline pending · wave 21 · owner `observability` · clause `23.3`
 
 Requires: 6.4, 7.3, 16.4, 21.4, 23.1.
 
@@ -2393,7 +2398,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 24.2 — Recover lost sandboxes and processes with fenced compatible replacement
 
-Planning baseline pending · wave 19 · owner `recovery` · clause `24.2`
+Planning baseline pending · wave 20 · owner `recovery` · clause `24.2`
 
 Requires: 24.1, 8.4, 15.3.
 
@@ -2417,7 +2422,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 25.3 — Route CLI, MCP, editor, hooks and offline workflows through authority modes
 
-Planning baseline pending · wave 19 · owner `migration` · clause `25.3`
+Planning baseline pending · wave 20 · owner `migration` · clause `25.3`
 
 Requires: 4.3, 6.3, 16.4, 2.1, 12.2, 14.1, 12.1, 1.4.
 
@@ -2443,7 +2448,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 18.4 — Close findings only after fenced repair and recorded resolution proof
 
-Planning baseline pending · wave 22 · owner `findings` · clause `18.4`
+Planning baseline pending · wave 23 · owner `findings` · clause `18.4`
 
 Requires: 18.3, 16.4, 17.4.
 
@@ -2466,7 +2471,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 22.3 — Run shadow evaluation then bounded controlled decision trials
 
-Planning baseline pending · wave 22 · owner `evaluation` · clause `22.3`
+Planning baseline pending · wave 23 · owner `evaluation` · clause `22.3`
 
 Requires: 22.2, 21.1, 21.2, 21.3.
 
@@ -2489,7 +2494,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 23.4 — Deliver bounded actionable notifications and durable evidence links
 
-Planning baseline pending · wave 20 · owner `observability` · clause `23.4`
+Planning baseline pending · wave 21 · owner `observability` · clause `23.4`
 
 Requires: 23.1, 6.2.
 
@@ -2512,16 +2517,16 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 24.3 — Implement scoped pause, drain, cancel and fleet stop controllers
 
-Planning baseline pending · wave 20 · owner `recovery` · clause `24.3`
+Planning baseline pending · wave 21 · owner `recovery` · clause `24.3`
 
-Requires: 12.4, 24.2, 15.4, 5.1.
+Requires: 12.4, 24.2, 15.4, 5.1, 25.1.
 
 1. Enforce enclosing run controls over package/attempt/sandbox scopes; revoke authority, deliver termination and preserve required artifacts with idempotent cleanup.
 2. Stop during prepare/build/review/publication and restart controller; report confirmed inventory and explicit unreachable-resource debt before declaring stop complete.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/recovery/stop.ts`, `tests/hyperfide/manifests/tasks/24.3.json`, `tests/hyperfide/cases/tasks/24_3.py`, `tests/hyperfide/registrations/24.3.json`, `services/hyperfide/components/24.3.json`, `services/hyperfide/src/recovery/fencing.ts`.
+Owns: `services/hyperfide/src/recovery/stop.ts`, `tests/hyperfide/manifests/tasks/24.3.json`, `tests/hyperfide/cases/tasks/24_3.py`, `tests/hyperfide/registrations/24.3.json`, `services/hyperfide/components/24.3.json`, `services/hyperfide/src/recovery/fencing.ts`, `services/hyperfide/components/external-fencing.json`, `services/hyperfide/src/recovery/fencing_service.ts`.
 
 Verification interface:
 
@@ -2535,7 +2540,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 25.4 — Build reproducible releases and deploy prebuilt services in compatibility order
 
-Planning baseline pending · wave 20 · owner `deployment` · clause `25.4`
+Planning baseline pending · wave 21 · owner `deployment` · clause `25.4`
 
 Requires: 25.3, 4.4, 12.4, 13.4, 1.1.
 
@@ -2558,7 +2563,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 19.1 — Build immutable multi-repository integration candidates remotely
 
-Planning baseline pending · wave 23 · owner `integration` · clause `19.1`
+Planning baseline pending · wave 24 · owner `integration` · clause `19.1`
 
 Requires: 16.4, 17.4, 18.4.
 
@@ -2582,7 +2587,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 22.4 — Gate decision promotion, drift rollback and optional Span self-hosting
 
-Planning baseline pending · wave 23 · owner `evaluation` · clause `22.4`
+Planning baseline pending · wave 24 · owner `evaluation` · clause `22.4`
 
 Requires: 22.3.
 
@@ -2605,7 +2610,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 26.1 — Apply Hyperfide identity to owned product and distribution surfaces
 
-Planning baseline pending · wave 21 · owner `branding` · clause `26.1`
+Planning baseline pending · wave 22 · owner `branding` · clause `26.1`
 
 Requires: 25.4.
 
@@ -2628,7 +2633,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 19.2 — Enforce sole protected-target publication gateway and CAS reconciliation
 
-Planning baseline pending · wave 24 · owner `integration` · clause `19.2`
+Planning baseline pending · wave 25 · owner `integration` · clause `19.2`
 
 Requires: 19.1, 14.4, 5.2.
 
@@ -2652,7 +2657,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 26.2 — Ship canonical hyperfide entrypoint with explicit cg compatibility policy
 
-Planning baseline pending · wave 22 · owner `branding` · clause `26.2`
+Planning baseline pending · wave 23 · owner `branding` · clause `26.2`
 
 Requires: 26.1, 25.3.
 
@@ -2677,7 +2682,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 19.3 — Evaluate task, wave and programme closure against required milestones
 
-Planning baseline pending · wave 25 · owner `integration` · clause `19.3`
+Planning baseline pending · wave 26 · owner `integration` · clause `19.3`
 
 Requires: 19.2, 16.3, 18.4.
 
@@ -2701,7 +2706,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 26.3 — Migrate config, directories and variable aliases with backups and conflict checks
 
-Planning baseline pending · wave 23 · owner `branding` · clause `26.3`
+Planning baseline pending · wave 24 · owner `branding` · clause `26.3`
 
 Requires: 26.2, 25.1.
 
@@ -2724,7 +2729,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 19.4 — Publish explicit partial outcomes behind multi-repository release barrier
 
-Planning baseline pending · wave 26 · owner `integration` · clause `19.4`
+Planning baseline pending · wave 27 · owner `integration` · clause `19.4`
 
 Requires: 19.2, 19.3.
 
@@ -2747,7 +2752,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 26.4 — Regenerate owned guidance and verify old/new integration parity
 
-Planning baseline pending · wave 24 · owner `branding` · clause `26.4`
+Planning baseline pending · wave 25 · owner `branding` · clause `26.4`
 
 Requires: 26.3, 25.3, 12.4, 14.1, 18.4, 2.1.
 
@@ -2757,7 +2762,7 @@ Requires: 26.3, 25.3, 12.4, 14.1, 18.4, 2.1.
 4. Transfer ownership of src/spec.c from completed task25.3 before changing the existing C spec renderer; update the actual src/agent.c agent-context generator and plain-JavaScript editor sources rather than introducing replacement paths inferred from stale generated guidance.
 5. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/migration/generated.ts`, `tests/hyperfide/manifests/tasks/26.4.json`, `AGENTS.md`, `CLAUDE.md`, `CODEMAP.md`, `src/spec.c`, `src/agent.c`, `src/codemap.c`, `tests/hyperfide/cases/tasks/26_4.py`, `tests/hyperfide/registrations/26.4.json`, `services/hyperfide/components/26.4.json`, `src/mcp.c`, `src/integrate.c`, `editors/vscode/extension.js`, `editors/vscode/package.json`, `services/hyperfide/src/bootstrap.ts`, `services/hyperfide/src/issue-watcher.ts`, `spec/workflow.kvx`, `src/hyperfide/components/26.4.kvx`, `src/hyperfide/entrypoint.c`, `src/main.c`, `tests/hyperfide/cases/tasks/26_4_bootstrap.py`, `tests/hyperfide/cases/tasks/26_4_watcher.py`.
+Owns: `services/hyperfide/src/migration/generated.ts`, `tests/hyperfide/manifests/tasks/26.4.json`, `AGENTS.md`, `CLAUDE.md`, `CODEMAP.md`, `src/spec.c`, `src/agent.c`, `src/codemap.c`, `tests/hyperfide/cases/tasks/26_4.py`, `tests/hyperfide/registrations/26.4.json`, `services/hyperfide/components/26.4.json`, `src/mcp.c`, `src/integrate.c`, `editors/vscode/extension.js`, `editors/vscode/package.json`, `services/hyperfide/src/bootstrap.ts`, `services/hyperfide/src/issue-watcher.ts`, `spec/workflow.kvx`, `src/hyperfide/components/26.4.kvx`, `src/hyperfide/entrypoint.c`, `src/main.c`, `tests/hyperfide/cases/tasks/26_4_bootstrap.py`, `tests/hyperfide/cases/tasks/26_4_watcher.py`, `services/hyperfide/src/bootstrap_identity.ts`, `services/hyperfide/migrations/0026-bootstrap.sql`.
 
 Verification interface:
 
@@ -2771,7 +2776,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 25.2 — Rehearse single-authority cutover and separate rollback boundaries
 
-Planning baseline pending · wave 25 · owner `migration` · clause `25.2`
+Planning baseline pending · wave 26 · owner `migration` · clause `25.2`
 
 Requires: 25.1, 7.4, 4.4, 24.3, 26.4, 25.4.
 
@@ -2794,7 +2799,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 24.4 — Exercise operational recovery runbooks and declared RPO/RTO
 
-Planning baseline pending · wave 27 · owner `recovery` · clause `24.4`
+Planning baseline pending · wave 28 · owner `recovery` · clause `24.4`
 
 Requires: 24.3, 4.4, 19.4.
 
@@ -2817,7 +2822,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 27.2 — Replay deterministic large-spec, mixed-graph and 1500-session schedules
 
-Planning baseline pending · wave 27 · owner `qualification` · clause `27.2`
+Planning baseline pending · wave 28 · owner `qualification` · clause `27.2`
 
 Requires: 5.4, 7.4, 23.4, 24.3, 19.4.
 
@@ -2839,7 +2844,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 27.3 — Qualify both live providers and native agents through staged48/72-hour fleet campaigns
 
-Planning baseline pending · wave 28 · owner `qualification` · clause `27.3`
+Planning baseline pending · wave 29 · owner `qualification` · clause `27.3`
 
 Requires: 27.2, 9.4, 10.4, 13.4, 11.4, 19.4, 23.3, 24.4, 22.4, 26.4, 1.2, 1.3, 14.4, 17.3, 18.2, 25.2.
 
@@ -2861,7 +2866,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 27.4 — Run composite fault qualification and independent invariant reconstruction
 
-Planning baseline pending · wave 29 · owner `qualification` · clause `27.4`
+Planning baseline pending · wave 30 · owner `qualification` · clause `27.4`
 
 Requires: 27.3, 24.4, 19.4.
 
@@ -2883,7 +2888,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 28.1 — Publish operational documentation from qualified implementation interfaces
 
-Planning baseline pending · wave 29 · owner `documentation` · clause `28.1`
+Planning baseline pending · wave 30 · owner `documentation` · clause `28.1`
 
 Requires: 26.4, 27.3.
 
@@ -2905,7 +2910,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 28.2 — Persist deterministic documentation closure snapshots and receipts
 
-Planning baseline pending · wave 30 · owner `documentation` · clause `28.2`
+Planning baseline pending · wave 31 · owner `documentation` · clause `28.2`
 
 Requires: 28.1, 19.3, 15.2, 12.4, 4.2, 5.1.
 
@@ -2928,7 +2933,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 28.4 — Retain requirements, decisions, source evidence and implementation traceability
 
-Planning baseline pending · wave 31 · owner `release` · clause `28.4`
+Planning baseline pending · wave 32 · owner `release` · clause `28.4`
 
 Requires: 27.4, 28.2, 25.2, 19.4, 15.4.
 
@@ -2952,7 +2957,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 28.3 — Assemble independent release readiness and complete closure evidence
 
-Planning baseline pending · wave 32 · owner `release` · clause `28.3`
+Planning baseline pending · wave 33 · owner `release` · clause `28.3`
 
 Requires: 27.4, 28.2, 25.2, 19.4, 15.4, 28.4.
 
