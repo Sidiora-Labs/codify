@@ -39,7 +39,7 @@ RESOURCE='hf-task-2.2-database'
 def artifact_root():
     path=Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/task-2.2-auth-standalone'));path.mkdir(parents=True,exist_ok=True);return path
 def setup(f):
-    for version,name in [(2,'0002-spec'),(202,'0202-spec-dependencies')]:
+    for version,name in [(2,'0002-spec'),(4,'0004-durability'),(202,'0202-spec-dependencies')]:
         raw=(ROOT/('services/hyperfide/migrations/'+name+'.sql')).read_bytes()
         f.sql("BEGIN;\n"+raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
     f.ids.update({key:f.ids.get(key,str(uuid.uuid4())) for key in ['repository','accepted_spec','package','package2','task1','task2','task3','task4','task5']})

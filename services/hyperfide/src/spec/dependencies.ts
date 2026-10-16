@@ -1,10 +1,11 @@
 import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import type {AuthorityTransaction} from '../transport/protocol.js';
-import {identityTransaction} from '../identity/enrollment.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {validIntegrationRef} from './import.js';
+import {validIntegrationRef,specTransaction} from './import.js';
 import {loadProofObligations} from './obligations.js';
 
 type Tx=AuthorityTransaction;
@@ -53,6 +54,8 @@ async function readySchema(tx:Tx):Promise<void>{
   fail('SPEC_SCHEMA_NOT_READY','Exact dependency migration must be applied by the trusted operator');
 }
 async function snapshot(tx:Tx,scope:DependencyScope,run_id:string,lock=false):Promise<Snapshot>{
+ assertPrimaryTransaction(tx);
+ try{await readSemanticDisposition(tx,{organisation_id:scope.organisation_id,run_id});}catch(error){if(error instanceof FoundationError&&error.code==='SEMANTIC_RUN_MISSING')fail('SPEC_RUN_NOT_FOUND','Accepted run does not exist in this organisation');throw error;}
  const result=await tx.query('SELECT r.*,r.spec_generation::text,r.state_version::text,pg_is_in_recovery() AS replica FROM hyperfide.runs r WHERE r.organisation_id=$1 AND r.id=$2'+(lock?' FOR UPDATE':' FOR SHARE'),[scope.organisation_id,run_id]);
  const run=result.rows[0];if(!run)fail('SPEC_RUN_NOT_FOUND','Accepted run does not exist in this organisation');
  if(run.replica)fail('PRIMARY_REQUIRED','Accepted plan authority requires primary state');
@@ -201,6 +204,7 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
  return validateGraph(tx,scope,input);
 }
 export async function admitDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<Omit<DependencyReport,'edges'>&{admitted:boolean}>{
+ assertPrimaryTransaction(tx);await writeSemanticDisposition(tx,scope);
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);
  const current=await snapshot(tx,scope,scope.run_id,true);assertPins(current.run,request);
  if(current.run.state!=='PENDING_VALIDATION')fail('SPEC_ADMISSION_STATE','Only a pending-validation generation can be admitted');
@@ -240,11 +244,11 @@ export async function structuralFrontier(tx:Tx,scope:DependencyScope,input:unkno
 }
 export function createComponent(_startup:ComponentContext):Component{
  const read=(handler:(tx:Tx,scope:DependencyScope,input:unknown)=>Promise<unknown>)=>async(input:unknown,ctx:ComponentContext)=>
-  identityTransaction(ctx,async(tx,i)=>handler(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},input));
+  specTransaction(ctx,'READ',async(tx,i)=>handler(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},input));
  return {apiVersion:1,actions:{
   'spec.task.resolve':read(resolveTask),'spec.next':read(structuralFrontier),
   'spec.dependencies.check':read(async(tx,scope,input)=>{const report=await validateDependencies(tx,scope,input as PlanPins);const {edges,...result}=report;return result;}),
-  'spec.dependencies.admit':async(input,ctx)=>identityTransaction(ctx,async(tx,i)=>{
+  'spec.dependencies.admit':async(input,ctx)=>specTransaction(ctx,'WRITE',async(tx,i)=>{
    if(!['OPERATOR','LEADER','COORDINATOR'].includes(i.principal.role))fail('ACTION_DENIED','Role cannot admit an accepted plan');
    return admitDependencies(tx,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},input as PlanPins);
   })
