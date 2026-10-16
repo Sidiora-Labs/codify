@@ -161,8 +161,7 @@ def mapping_checks():
  sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
  from identity_fixture import IdentityFixture,uid,sha
  def setup(f):
-  data=(ROOT/"services/hyperfide/migrations/0023-observability.sql").read_bytes()
-  f.sql("BEGIN;"+data.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(23,'0023-observability','"+sha(data)+"');COMMIT;")
+  f.apply_migration('0023-observability')
  fixture=IdentityFixture(extra_components=["23.1"],extra_setup=setup)
  try:
   config=fixture.path/"native-status-transport.json";config.write_text(json.dumps({"origin":fixture.origin,"ca_file":str(fixture.ca),"key_path":str(fixture.keys["operator"]["path"]),"credential_id":fixture.ids["operator"],"timeout_ms":5000}));config.chmod(0o600)
