@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Component, ComponentContext } from '../components/registry.js';
 import { FoundationError, object } from '../policy/programme.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
+import { assertInvocation } from '../transport/protocol.js';
+import type { InvocationContext } from '../transport/protocol.js';
 import type { PrimaryTransaction, TransactionGateway } from '../storage/transactions.js';
 
 export interface Scope { organisation_id: string; run_id: string }
@@ -87,6 +89,24 @@ export function gateway(context: ComponentContext): TransactionGateway {
 export async function run<T>(g: TransactionGateway, operation:(tx:PrimaryTransaction)=>Promise<T>): Promise<T> {
   return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3},operation);
 }
+export function requireInvocation(context:ComponentContext,input:unknown,roles:readonly string[]):InvocationContext {
+  const invocation=context.invocation;
+  if(!invocation) fail('AUTH_REQUIRED','Authenticated invocation is required for event authority');
+  assertInvocation(invocation);
+  if(!object(input)) fail('EVENT_INPUT_INVALID','Event operation input must be an object');
+  const requested=scope(input),principal=invocation.principal;
+  if(requested.organisation_id!==principal.organisation_id||requested.run_id!==principal.run_id)
+    fail('AUTH_SCOPE_DENIED','Event scope differs from the authenticated principal');
+  if(!roles.includes(principal.role)) fail('AUTH_ROLE_DENIED','Principal role cannot perform this event operation');
+  return invocation;
+}
+export function authorizedRun<T>(g:TransactionGateway,context:ComponentContext,input:unknown,roles:readonly string[],
+    operation:(tx:PrimaryTransaction,invocation:InvocationContext)=>Promise<T>):Promise<T> {
+  const invocation=requireInvocation(context,input,roles);
+  return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=>invocation.guard(tx)},
+    tx=>operation(tx,invocation));
+}
+
 // Registration and creation use the same short run lock, preventing a subscriber gap.
 export async function lockRun(tx: PrimaryTransaction, s: Scope, mode: 'shared'|'exclusive' = 'shared'): Promise<void> {
   assertPrimaryTransaction(tx);
@@ -229,11 +249,11 @@ export function createComponent(context:ComponentContext):Component {
   const component={apiVersion:1 as const,capabilities:{'events.outbox.v1':Object.freeze({enqueue,lockRun,registerConsumer,claimPending,acknowledge,retry})},actions:{
     'outbox.describe':()=>({schema_version:1,delivery:'at-least-once',ordering:'per-aggregate-version',global_cursor:false,
       acknowledgement:'durable-matching-inbox',full_case_status:'INCOMPLETE'}),
-    'outbox.consumer.register':(input:unknown)=>run(g,tx=>registerConsumer(tx,input)),
-    'outbox.enqueue':(input:unknown)=>run(g,tx=>enqueue(tx,input)),
-    'outbox.claim':(input:unknown)=>run(g,tx=>claimPending(tx,input)),
-    'outbox.acknowledge':(input:unknown)=>run(g,tx=>acknowledge(tx,input)),
-    'outbox.retry':(input:unknown)=>run(g,tx=>retry(tx,input))
+    'outbox.consumer.register':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>registerConsumer(tx,input)),
+    'outbox.enqueue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>enqueue(tx,input)),
+    'outbox.claim':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>claimPending(tx,input)),
+    'outbox.acknowledge':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acknowledge(tx,input)),
+    'outbox.retry':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>retry(tx,input))
   }};
   return component;
 }
