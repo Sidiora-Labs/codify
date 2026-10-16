@@ -16,7 +16,8 @@
     "provider.intents.execute",
     "provider.intents.reconcile",
     "provider.orphans.list",
-    "provider.inventory.observe-known"
+    "provider.inventory.observe-known",
+    "provider.remote.execute-bound"
   ],
   "requires": [
     "8.2"
