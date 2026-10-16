@@ -172,7 +172,7 @@ def main():
     path=pathlib.Path(p["spool_path"]);receipt=json.loads((path/"receipt.json").read_text());out=(path/"stdout").read_bytes();err=(path/"stderr").read_bytes()
     expect(out==bytes([0,255,65])and err==b"stderr")
     q={"receipt":receipt,"stdout_base64":base64.b64encode(out).decode(),"stderr_base64":base64.b64encode(err).decode(),"scope":o["scope"],"resource":o["resource"],"process_ref":p["process_ref"],"expected":{"operation_id":o["identity"]["operation_id"],"payload_digest":o["identity"]["payload_digest"],"launch_digest":p["launch_digest"],"spool_path":p["spool_path"],"scope_digest":dg(o["scope"])},"max_bytes":16*1024*1024}
-    r=f.good("capture-validate",q);expect(r["complete"]and r["exit_code"]==0 and r["byte_count"]==9 and r["authority"]=="NONE");actual_capture.update(q)
+    r=f.good("capture-validate",q);expect(r["complete"]and r["exit_code"]==0 and r["byte_count"]==9 and r["authority"]=="NONE");expect(r["capture"]=={"schema_version":1,"scheme":"STREAM_DIGESTS_CANONICAL_JSON"});expect("capture"not in receipt and r["spool_digest"]==dg({k:v for k,v in receipt.items()if k!="spool_digest"}));actual_capture.update(q)
    check("capture.actual-binary-stdout-stderr-and-receipt",capture)
    def overflow():
     marker=b/"overflow-completed";o=operation();o["parameters"]["argv"]=["node","-e","process.stdout.write(Buffer.alloc(17*1024*1024,65));require('node:fs').writeFileSync("+json.dumps(str(marker))+",'completed')"];rehash(o);plan=f.good("plan",{"operation":o});names.append(plan["process_ref"]);spools.append(pathlib.Path(plan["spool_path"]))

@@ -37,7 +37,7 @@ function requireOperation<T extends ProviderMethod>(raw:unknown,kind:T,scope:Pro
  const o=validateProviderOperation(raw);if(o.kind!==kind||o.scope.provider!=='blaxel'||!equal(o.scope,scope))fail('BLAXEL_PROCESS_INVALID','Operation scope or method differs from trusted adapter');
  return o as ProviderOperation<T>;
 }
-export interface CapturedBlaxelOutput{stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string}
+export interface CapturedBlaxelOutput{stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;capture:{schema_version:1;scheme:'STREAM_DIGESTS_CANONICAL_JSON'}}
 export interface BlaxelProcessRecord{native_process_ref?:string|null;process_ref:string;payload_digest:string;resource:ResourceRef;state:'SUBMITTED'|'RUNNING'|'EXITED'|'UNKNOWN';provider_metadata:Record<string,unknown>}
 export interface BlaxelPersistenceHooks{
  persistEarlyProcess(operation:ProviderOperation<'execute'>,nativeProcessRef:string):Promise<void>;
@@ -208,7 +208,7 @@ export function verifyBlaxelCapturedOutput(input:{receipt:unknown;stdout:Uint8Ar
  r.stdout_digest!==bytesDigest(input.stdout)||r.stderr_digest!==bytesDigest(input.stderr))
  fail('BLAXEL_CAPTURE_UNAVAILABLE','Complete captured output is unavailable or belongs to another boot/process');
  const {spool_digest,...body}=r;if(spool_digest!==digest(body))fail('BLAXEL_CAPTURE_UNAVAILABLE','Capture receipt digest differs');
- return{stdout:input.stdout,stderr:input.stderr,exit_code:r.exit_code as number,complete:true,spool_digest:spool_digest as string};
+ return{stdout:input.stdout,stderr:input.stderr,exit_code:r.exit_code as number,complete:true,spool_digest:spool_digest as string,capture:{schema_version:1,scheme:'STREAM_DIGESTS_CANONICAL_JSON'}};
 }
 function noOutput(ref:string,raw:Obj):ProcessResult{
  if(raw.status==='running')return{process_ref:ref,phase:'STARTED',exit_code:null,timed_out:false,termination_confirmed:false,output:{complete:false,truncated:false,byte_count:'0',sha256:null}};
@@ -562,7 +562,7 @@ export function createComponent(ctx:ComponentContext):Component{
    const o=shape(input,['receipt','stdout_base64','stderr_base64','scope','resource','process_ref','expected','max_bytes']);
    const decode=(v:unknown)=>{if(typeof v!=='string'||v.length>22369624)fail('BLAXEL_PROCESS_INVALID','Bounded base64 required');const b=Buffer.from(v,'base64');if(b.toString('base64')!==v)fail('BLAXEL_PROCESS_INVALID','Noncanonical output encoding');return b;};
    const r=verifyBlaxelCapturedOutput({receipt:o.receipt,stdout:decode(o.stdout_base64),stderr:decode(o.stderr_base64),scope:o.scope as ProviderScope,resource:o.resource as ResourceRef,process_ref:text(o.process_ref,128),expected:o.expected as Parameters<typeof verifyBlaxelCapturedOutput>[0]['expected'],maxBytes:o.max_bytes as number});
-   return{complete:true,exit_code:r.exit_code,spool_digest:r.spool_digest,byte_count:r.stdout.length+r.stderr.length,authority:'NONE',input_observation_is_not_provider_evidence:true};
+   return{complete:true,exit_code:r.exit_code,spool_digest:r.spool_digest,capture:r.capture,byte_count:r.stdout.length+r.stderr.length,authority:'NONE',input_observation_is_not_provider_evidence:true};
   },
   'blaxel.process.plan':input=>{
    const o=shape(input,['operation']);const op=validateProviderOperation(o.operation);

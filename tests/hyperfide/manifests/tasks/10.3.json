@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-10.3-blaxel-guarded-v4",
+  "campaign_id": "hyperfide-task-10.3-blaxel-capture-scheme-v5",
   "registered_variant": "task:10.3",
   "scope": "task-component",
   "case_ids": [
@@ -22,7 +22,8 @@
       "Early-ID negative uses real fsynced persistence callback before rejecting wrong actual candidate metadata; actual08 primary-ledger and cloud control-plane acceptance remain separate qualification requirements.",
       "Actual cloud create-or-get, quota/account limits, secret-bearing remote injection, persistent-volume allocation and native frontier runner interactions remain unqualified without approved real-provider campaigns.",
       "TCP lost acknowledgements prove actual ambiguity; production exactly-once instruction authority remains in authenticated08/12 ledgers, not caller advisory input.",
-      "One shared capture deadline and combined request/context/invocation cancellation are tested with real timers; no local fixture can mark a provider sandbox READY."
+      "One shared capture deadline and combined request/context/invocation cancellation are tested with real timers; no local fixture can mark a provider sandbox READY.",
+      "Versioned STREAM_DIGESTS_CANONICAL_JSON capture metadata declares existing provider hash framing; historical private receipt preimages remain unchanged. Central08 independently verifies the declared scheme; this task-component does not grant provider readiness."
     ]
   },
   "expected_assertion_ids": [
@@ -344,18 +345,18 @@
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/processes.d.ts",
-      "sha256": "34168bfe8f789f2f0aa50f1caea3480d49cb003ac63f7cc21cbcdbd24c9ec973",
-      "size": 7285
+      "sha256": "59d07df6ace9f3d76ea3ef5dd7c95c8785e54cf74d667571ce080938d7ce0732",
+      "size": 7383
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/processes.js",
-      "sha256": "99e8939b3af17eba5a7a53c5d325410a8beefea8b0167e2c0a8fda8116cdd710",
-      "size": 56420
+      "sha256": "7baaef9f4897b2e842c67b3a5849982c59f21c6cb83ac506ca8a8a424ed78161",
+      "size": 56513
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/processes.js.map",
-      "sha256": "456690feab1b0ac98c371e0721c5c85fee2d0fc64bdd6ea66effa780109540fe",
-      "size": 49891
+      "sha256": "26e79a398d0b86c1ce13ca2a8108ef5cfbd9f93f1841209e32c146d58f52589e",
+      "size": 49983
     },
     {
       "path": "services/hyperfide/dist/providers/contract.d.ts",
@@ -619,8 +620,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/blaxel/processes.ts",
-      "sha256": "bfb30f909b9e611a2c8e19f7ad37cfabf0641376afcf64f2759bc26b12a4aba8",
-      "size": 56036
+      "sha256": "c052a6fe4be7c3e536a689240bd83e596dc71d89157746a475d8993bfd56fab6",
+      "size": 56186
     },
     {
       "path": "services/hyperfide/src/providers/contract.ts",
@@ -689,8 +690,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/10_3.py",
-      "sha256": "702186270a7f23e0b51cb2620e04ca001531ed6f13fe546865abab9fbcc1b58c",
-      "size": 27286
+      "sha256": "ac9547312470228a74296b75d9aff9d59d60afeee9a582d360ce79758c834e18",
+      "size": 27482
     },
     {
       "path": "tests/hyperfide/cases/tasks/11_1.py",
