@@ -508,7 +508,7 @@ do_7 = "Implement the task's registered positive/negative assertions and immutab
 
 [task.4.4]
 title = "Establish database migration, durability and old-primary fencing"
-status = "done"
+status = "in_progress"
 wave = 5
 requires = ["4.2"]
 touches = ["services/hyperfide/src/storage/durability.ts", "tests/hyperfide/manifests/tasks/4.4.json", "tests/hyperfide/cases/tasks/4_4.py", "tests/hyperfide/registrations/4.4.json", "services/hyperfide/components/4.4.json", "services/hyperfide/migrations/0004-durability.sql", "services/hyperfide/src/storage/schema.ts", "tests/hyperfide/cases/support/postgres_cluster.py", "services/hyperfide/src/storage/runtime.ts", "services/hyperfide/src/storage/transactions.ts", "services/hyperfide/src/storage/authority_journal.ts", "services/hyperfide/src/storage/dispositions.ts"]

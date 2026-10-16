@@ -15,6 +15,9 @@
     "V-053"
   ],
   "expected_assertion_ids": [
+    "durability.artifact_reference_ack",
+    "durability.artifact_reference_promotion",
+    "durability.artifact_reference_restore",
     "durability.semantic_business_version",
     "durability.semantic_business_guard",
     "durability.semantic_monotonic",
@@ -261,8 +264,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_4.py",
-      "sha256": "d1d9acf8d84eb7e9268f108dd288f8841bf0246d9530846571e539cba21ffe80",
-      "size": 42585
+      "sha256": "ebdc5513f6509381dd5349c755207b4394dea59e88469ae7acca6babdfd96292",
+      "size": 46812
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -281,8 +284,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/4.4.json",
-      "sha256": "a7ed5abefe917922dac9ce1da99a9a58c258365ea09f502e5cf23c85ae2deab7",
-      "size": 6067
+      "sha256": "f83401880fd57eb3a85c0a3b027f44c4bb7f363a5f62cb7dfa094a2dacda9c89",
+      "size": 6241
     }
   ],
   "policy": {

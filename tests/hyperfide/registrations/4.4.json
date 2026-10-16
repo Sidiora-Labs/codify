@@ -11,6 +11,9 @@
     "tests/hyperfide/cases/tasks/4_4.py"
   ],
   "assertion_ids": [
+    "durability.artifact_reference_ack",
+    "durability.artifact_reference_promotion",
+    "durability.artifact_reference_restore",
     "durability.semantic_business_version",
     "durability.semantic_business_guard",
     "durability.semantic_monotonic",
@@ -126,7 +129,8 @@
     "storage44/observations.json",
     "storage44/cluster-commands.json",
     "storage44/absence.json",
-    "storage44/semantic-race.json"
+    "storage44/semantic-race.json",
+    "storage44/artifact-reference.json"
   ],
   "required_env": [],
   "resources": [
