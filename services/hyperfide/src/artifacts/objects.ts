@@ -129,19 +129,29 @@ function receipt(row:Artifact):unknown{
  * Pins a durable metadata binding in the caller's guarded primary transaction.
  * Physical byte verification remains a separate artifact-store operation.
  */
-export async function assertCompleteArtifactReference(tx:PrimaryTransaction,scope:ArtifactScope,reference:ArtifactReference):Promise<Readonly<ArtifactReceipt>>{
+export async function assertCompleteArtifactReferences(tx:PrimaryTransaction,scope:ArtifactScope,references:readonly ArtifactReference[]):Promise<readonly Readonly<ArtifactReceipt>[]>{
  assertPrimaryTransaction(tx);
- const organisation=uuid(scope.organisation_id),run=uuid(scope.run_id),id=uuid(reference.artifact_id);
- const expectedDigest=digest(reference.digest),expectedReceipt=digest(reference.receipt_id);
- const expectedSize=decimal(reference.size_bytes,9223372036854775807n);
- const result=await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[organisation,run,id]);
- const row=result.rows[0];
+ const organisation=uuid(scope.organisation_id),run=uuid(scope.run_id);
+ if(!Array.isArray(references)||references.length>4096)fail('ARTIFACT_INPUT_INVALID','Artifact reference batch exceeds the reviewed bound');
+ const expected=references.map(reference=>({artifact_id:uuid(reference.artifact_id),digest:digest(reference.digest),receipt_id:digest(reference.receipt_id),size_bytes:decimal(reference.size_bytes,9223372036854775807n)}));
+ if(!expected.length)return Object.freeze([]);
+ const ids=[...new Set(expected.map(reference=>reference.artifact_id))].sort();
+ const result=await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) ORDER BY id FOR SHARE',[organisation,run,ids]);
+ const rows=new Map(result.rows.map(row=>[row.id,row]));
+ const receipts=expected.map(reference=>{
+ const row=rows.get(reference.artifact_id);
  if(!row||row.status!=='COMPLETE'||!row.completed_at)fail('ARTIFACT_NOT_COMPLETE','Artifact reference is unavailable');
- if(row.digest!==expectedDigest||row.size_bytes!==expectedSize)fail('ARTIFACT_BINDING_CONFLICT','Artifact reference differs from immutable metadata');
+ if(row.digest!==reference.digest||row.size_bytes!==reference.size_bytes)fail('ARTIFACT_BINDING_CONFLICT','Artifact reference differs from immutable metadata');
  const binding=receipt(row) as ArtifactReceipt|null;
- if(!binding||binding.receipt_id!==expectedReceipt)fail('ARTIFACT_BINDING_CONFLICT','Artifact receipt differs from immutable metadata');
+ if(!binding||binding.receipt_id!==reference.receipt_id)fail('ARTIFACT_BINDING_CONFLICT','Artifact receipt differs from immutable metadata');
  return Object.freeze(binding);
+ });
+ return Object.freeze(receipts);
 }
+export async function assertCompleteArtifactReference(tx:PrimaryTransaction,scope:ArtifactScope,reference:ArtifactReference):Promise<Readonly<ArtifactReceipt>>{
+ return (await assertCompleteArtifactReferences(tx,scope,[reference]))[0]!;
+}
+
 function envelope(row:Artifact,availability:'VERIFIED'|'ABSENT'|'UNKNOWN',extra:Record<string,unknown>={}):Record<string,unknown>{
  return {outcome:availability==='VERIFIED'&&row.status==='COMPLETE'?'SUCCEEDED':'UNKNOWN',availability,artifact:publicArtifact(row),receipt:availability==='VERIFIED'?receipt(row):null,authority:'NONE',live_qualification:'NOT_EVALUATED',...extra};
 }
