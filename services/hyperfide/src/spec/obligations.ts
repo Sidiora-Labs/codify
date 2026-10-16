@@ -139,7 +139,7 @@ function clauseCoverage(policy:ProofPolicy,definition:unknown,intent:StoredInten
   fail('PROOF_MAPPING_INVALID','Proof mapping must preserve the complete accepted task scenario set');
  for(const clause of policy.clauses){
   const associated=explicit.get(clause.id)!;
-  if(clause.acceptance_ids.some(id=>!required.has(id))||associated.size>0&&
+  if(associated.size===0||clause.acceptance_ids.some(id=>!required.has(id)||(!sections.has('acceptance.'+id)&&!sections.has('case.'+id)))||
    (associated.size!==clause.acceptance_ids.length||clause.acceptance_ids.some(id=>!associated.has(id))))
    fail('PROOF_MAPPING_INVALID','Proof cannot substitute unrelated accepted scenarios for a clause');
  }
