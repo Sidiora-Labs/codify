@@ -9,6 +9,7 @@
   "assertion_ids": [
     "outbox.real-service",
     "outbox.module-copy-integrity",
+    "outbox.least-privilege-runtime",
     "outbox.enqueue-committed",
     "outbox.idempotent-replay",
     "outbox.conflicting-payload",
@@ -67,6 +68,11 @@
     {
       "id": "hf-task-6.1-database",
       "kind": "postgresql-database",
+      "scope": "task6.1-disposable"
+    },
+    {
+      "id": "hf-task-6.1-role",
+      "kind": "postgresql-role",
       "scope": "task6.1-disposable"
     },
     {
