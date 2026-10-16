@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-domain20-task20.4-final-v1",
+  "campaign_id": "hyperfide-domain20-task20.4-final-v2",
   "registered_variant": "task:20.4",
   "scope": "task-component",
   "case_ids": [
@@ -46,7 +46,8 @@
     "decision.jobs.replay-after-revision-change",
     "decision.jobs.retained-request-replay",
     "decision.jobs.shared-account-quota",
-    "decision.jobs.completion-deadline"
+    "decision.jobs.completion-deadline",
+    "decision.jobs.admission-deadline"
   ],
   "inputs": [
     {
@@ -236,13 +237,13 @@
     },
     {
       "path": "services/hyperfide/dist/decisions/jobs.js",
-      "sha256": "c5eb8f3a246c6e17e071228e9bdbe07c4d8d5857f49c5ad4d1e86761e0d40189",
-      "size": 39648
+      "sha256": "02e513142a9af332fb79518224fcfae4a67b5aeed979cccfe4e6aa5a1a1f2d20",
+      "size": 40163
     },
     {
       "path": "services/hyperfide/dist/decisions/jobs.js.map",
-      "sha256": "76586e40a18f40838c86dcca9bf7a662ec2db3d95f64359b859f8ca53026e278",
-      "size": 38028
+      "sha256": "e1efdc33ffd7776dca64ab6fab57abeb5af2507864ed712960c43f8d3244b8b8",
+      "size": 38436
     },
     {
       "path": "services/hyperfide/dist/decisions/results.d.ts",
@@ -1276,8 +1277,8 @@
     },
     {
       "path": "services/hyperfide/src/decisions/jobs.ts",
-      "sha256": "6f9d782c40653485c239343012280bfce0f85c66deffdc7231c8a9d00b3ec220",
-      "size": 35947
+      "sha256": "0447f33363da25a76e4cc8b40968eb1fae918537e082d8ed6d2a80253e43970a",
+      "size": 36363
     },
     {
       "path": "services/hyperfide/src/decisions/results.ts",
@@ -1396,8 +1397,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/20_4.py",
-      "sha256": "3eaa5a67f4767c304dc10b530ac246ce0a49ddaec213666ad4ca25a4bdacd3e6",
-      "size": 26414
+      "sha256": "49af987b53239746f184c7637ab5f9b0bca3d07a91add62a60aa0fcd444b5056",
+      "size": 27585
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -1416,8 +1417,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/20.4.json",
-      "sha256": "9dbe75ac9858c5010b3ffa7c5e9e7bfcb7eb3919ff5bfab336fc0b0f0fed47b7",
-      "size": 18296
+      "sha256": "6a97bb7d5fbc2400495f258d2c085cbc8f725ca4fd2228993e0dc9364993d640",
+      "size": 18336
     },
     {
       "path": "tests/hyperfide/registry.json",

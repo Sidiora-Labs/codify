@@ -46,7 +46,8 @@
     "decision.jobs.replay-after-revision-change",
     "decision.jobs.retained-request-replay",
     "decision.jobs.shared-account-quota",
-    "decision.jobs.completion-deadline"
+    "decision.jobs.completion-deadline",
+    "decision.jobs.admission-deadline"
   ],
   "argv": [
     "python3",
