@@ -87,6 +87,8 @@ def main():
                 value={"connector":name,"expected_version":p["binary"]["version"],"alias":p["configured_model_alias"],"auth_profile":p["profile_id"],"workspace":str(dirs[0]),"home":str(dirs[1]),"temp":str(dirs[2]),"permission_mode":"workspace-write"}
                 result=success("connector.launch",value,env)
                 expect(result["argv"][0]==p["binary"]["path"] and result["requires_supervisor"] and not result["delegation_enabled"],"launch lost process/delegation boundary")
+                if name=="codex":
+                    args=result["argv"];expect(all(["--disable",feature]==args[index:index+2]for feature in ["multi_agent","multi_agent_v2","multi_agent_v2_dynamic_tools"]for index in [args.index(feature)-1])and "agents.enabled=false"in args,"configured delegation variant escaped explicit disabling")
                 expect(not result["dispatch_eligible"] and result["observed_model_id"] is None and result["requested_model_id"]=="fixture-model","fixture config became observed model/qualified dispatch")
                 if name=="claude":
                     mcp=base/"finite-supervisor-mcp.json";mcp.write_text('{"mcpServers":{}}');env["HF_SUPERVISOR_MCP_CONFIG_FILE"]=str(mcp)

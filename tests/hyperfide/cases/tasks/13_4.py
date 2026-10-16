@@ -11,9 +11,41 @@ def check(identity,fn):
     try:fn();actual="observed"
     except Exception as error:actual=type(error).__name__+": "+str(error);FAILED.append(identity)
     print(json.dumps({"type":"assertion","id":identity,"expected":"observed","actual":actual}),flush=True)
+def startup_budget():
+    script=r"""
+import fs from 'node:fs';import os from 'node:os';
+import {validateSupervisorStartupBudget as validate} from './services/hyperfide/dist/agents/supervision.js';
+const max=9223372036854775807n;
+let cpu=BigInt(os.availableParallelism())*1000n;
+let memory=BigInt(/^MemAvailable:\s+(\d+)/m.exec(fs.readFileSync('/proc/meminfo','utf8'))[1])*1024n;
+const membership=fs.readFileSync('/proc/self/cgroup','utf8').trim().split('\n').find(v=>v.startsWith('0::'));
+if(!membership)throw Error('Current cgroup membership unavailable');
+const parts=membership.slice(3).split('/').filter(Boolean);
+for(let count=parts.length;count>=0;count--){
+ const root='/sys/fs/cgroup'+(count?'/'+parts.slice(0,count).join('/'):'');
+ if(fs.existsSync(root+'/cpu.max')){const q=fs.readFileSync(root+'/cpu.max','utf8').trim().split(' ');if(q[0]!=='max'){const limit=BigInt(q[0])*1000n/BigInt(q[1]);cpu=cpu<limit?cpu:limit;}}
+ if(fs.existsSync(root+'/memory.max')){const q=fs.readFileSync(root+'/memory.max','utf8').trim();if(q!=='max'){const free=BigInt(q)-BigInt(fs.readFileSync(root+'/memory.current','utf8').trim());memory=memory<free?memory:free;}}
+}
+if(cpu<1n||memory<1n)throw Error('No measured fixture headroom');
+const b={schema_version:1,host_id:'10000000-0000-0000-0000-000000000001',pool_id:'10000000-0000-0000-0000-000000000002',allowance:{cpu_millis:'1',memory_bytes:'1',agent_slots:'1'},headroom:{cpu_millis:'0',memory_bytes:'0'}};
+const o={cpu_available_millis:cpu.toString(),memory_available_bytes:memory.toString(),observed_at:new Date().toISOString(),source:'LINUX_PROCFS_CGROUP'};
+const ok=validate(b,o);if(ok.capacity_admitted!==false||ok.execution_started!==false)throw Error('Sizing became authority');
+const reject=(budget,observation,code)=>{try{validate(budget,observation);}catch(e){if(e.code===code)return;throw e;}throw Error('Invalid budget admitted');};
+reject({...b,allowance:{...b.allowance,memory_bytes:(memory+1n).toString()}},o,'SUPERVISOR_MAIN_HEADROOM_UNSATISFIED');
+reject({...b,headroom:{...b.headroom,cpu_millis:cpu.toString()}},o,'SUPERVISOR_MAIN_HEADROOM_UNSATISFIED');
+reject(b,{...o,observed_at:'2000-01-01T00:00:00.000Z'},'SUPERVISOR_MAIN_OBSERVATION_STALE');
+reject({...b,allowance:{...b.allowance,cpu_millis:'01'}},o,'SUPERVISOR_MAIN_BUDGET_INVALID');
+reject({...b,allowance:{...b.allowance,memory_bytes:(max+1n).toString()}},o,'SUPERVISOR_MAIN_BUDGET_INVALID');
+console.log(JSON.stringify({sizing_only:true,measured_source:o.source,negative_cases:5}));
+"""
+    result=module.subprocess.run(["node","--input-type=module","-e",script],cwd=module.ROOT,text=True,stdout=module.subprocess.PIPE,stderr=module.subprocess.PIPE,timeout=15)
+    expect(result.returncode==0,"actual sizing helper refused bounded fixture: "+result.stderr[-1000:])
+    expect(json.loads(result.stdout)["negative_cases"]==5,"sizing negatives not exercised")
+
 def main():
     f=None
     try:
+        check('admission.main-startup-sizing-only',startup_budget)
         f=AgentFixture(admission=True);f.bind()
         reserve={"scope":f.scope,"reservation_id":uid(),"quota_key":"fixture-quota"}
         def blocked():

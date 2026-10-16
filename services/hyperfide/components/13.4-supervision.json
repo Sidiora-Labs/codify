@@ -11,13 +11,16 @@
   "actions": [
     "supervisor.session.describe",
     "supervisor.session.launch",
-    "supervisor.session.inspect"
+    "supervisor.session.inspect",
+    "supervisor.session.input",
+    "supervisor.session.stop"
   ],
   "requires": [
     "1.1",
     "4.2",
     "5.1",
     "14.1",
+    "14.2",
     "14.3"
   ]
 }
