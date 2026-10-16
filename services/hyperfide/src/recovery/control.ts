@@ -4,7 +4,8 @@ import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
 import {getPool,databaseError} from '../storage/schema.js';
-import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {assertPrimaryTransaction,type PrimaryTransaction} from '../storage/transactions.js';
+import {lockRun as lockEventRun} from '../events/outbox.js';
 import {invocationOf} from '../identity/enrollment.js';
 
 export interface RecoveryScope {organisation_id:string;run_id:string;authority_epoch:string}
@@ -89,8 +90,8 @@ export async function recoveryReady(tx:Pick<RecoveryTransaction,'query'>):Promis
  if(result.rows.length!==1||result.rows[0]!.name!=='0024-recovery'||result.rows[0]!.checksum!==checksum)
   fail('RECOVERY_SCHEMA_NOT_READY','Reviewed recovery migration is not installed');
 }
-export async function lockRun(tx:RecoveryTransaction,scope:RecoveryScope):Promise<pg.QueryResultRow>{
- const result=await tx.query('SELECT id,authority_epoch,state,spec_generation,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[scope.organisation_id,scope.run_id]);
+export async function lockRun(tx:RecoveryTransaction,scope:RecoveryScope,write=true):Promise<pg.QueryResultRow>{
+ const result=await tx.query('SELECT id,authority_epoch,state,spec_generation,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 '+(write?'FOR UPDATE':'FOR SHARE'),[scope.organisation_id,scope.run_id]);
  if(result.rows.length!==1)fail('RECOVERY_RUN_NOT_FOUND','Run is unavailable in this organisation');
  const run=result.rows[0]!;
  if(run.authority_epoch!==scope.authority_epoch)fail('RECOVERY_STALE_EPOCH','Run authority epoch changed; reconcile before retry');
@@ -103,8 +104,8 @@ export async function recoveryTransaction<T>(context:ComponentContext,scope:Reco
  if(!observation&&!['OPERATOR','COORDINATOR','LEADER'].includes(invocation.principal.role))fail('ROLE_DENIED','Run recovery mutation requires leader or coordinator authority');
  const gateway=capability(context,'4.2','storage.transactions.v1',isGateway);
  const authority=requiresExternalAuthority?capability(context,'4.4','storage.authority.v1',isAuthority):undefined;
- try{return await gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:0,signal:context.signal,
-  guard:async tx=>{await invocation.guard(tx);await recoveryReady(tx);await lockRun(tx,scope);if(authority)await authority.assertCurrent(tx,scope);}
+ try{return await gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal,
+  guard:async tx=>{await lockEventRun(tx as PrimaryTransaction,scope,observation?'shared':'exclusive');await invocation.guard(tx);await recoveryReady(tx);await lockRun(tx,scope,!observation);if(authority)await authority.assertCurrent(tx,scope);}
  },body);}catch(error){if(error instanceof FoundationError)throw error;throw databaseError(error);}
 }
 export async function operationReplay(tx:RecoveryTransaction,scope:RecoveryScope,operationId:string,kind:string,input:unknown):Promise<Record<string,unknown>|null>{
