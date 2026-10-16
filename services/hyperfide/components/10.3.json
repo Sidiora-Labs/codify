@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "10.3",
+  "task": "10.3",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/blaxel/processes.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "blaxel.process.describe",
+    "blaxel.process.plan",
+    "blaxel.process.create-plan",
+    "blaxel.process.verify-create",
+    "blaxel.process.capture-validate"
+  ],
+  "requires": [
+    "8.1",
+    "8.2",
+    "10.2",
+    "14.1",
+    "14.2"
+  ]
+}
