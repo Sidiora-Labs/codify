@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { FoundationError, object, assertAdmission } from '../policy/programme.js';
 import type { ProgrammePolicy, ServiceRole } from '../policy/programme.js';
 import type {InvocationContext} from '../transport/protocol.js';
+import {assertInvocation} from '../transport/protocol.js';
 import {createResourceContainer} from '../storage/runtime.js';
 import type {ResourceContainer,ServiceResources} from '../storage/runtime.js';
 
@@ -179,6 +180,7 @@ export class ComponentRegistry {
     assertAdmission(this.context.policy, this.context.role, action);
     if(this.instances.has("14.1")) {
       if(!invocation||!this.invocationAuthorizer)throw new FoundationError("AUTH_REQUIRED","Authenticated invocation required");
+      assertInvocation(invocation);
       if(invocation.payload.component!==id||invocation.payload.action!==action||invocation.payload.input!==input)
         throw new FoundationError("AUTH_SCOPE_DENIED","Invocation dispatch binding mismatch");
       await this.invocationAuthorizer(invocation);
