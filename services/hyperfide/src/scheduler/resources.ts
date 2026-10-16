@@ -179,6 +179,8 @@ export class ResourceScheduler {
       if(reservation.state!=='RELEASE_PENDING')fail('RELEASE_NOT_PENDING','Revoke execution and request cleanup before releasing capacity');
       let proof:QuiescenceReceipt|null=null,source='';
       for(const [name,reader] of this.readers){
+        const account=await tx.query<{capacity_class:string}>('SELECT capacity_class FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND id=$2',[input.organisation_id,reservation.capacity_account_id]);
+        if(account.rows[0]?.capacity_class==='PHYSICAL'&&name!=='provider.absence')continue;
         proof=await reader(tx,{organisation_id:input.organisation_id,run_id:input.run_id,reservation_id:reservation.id});
         if(proof){source=name;break;}
       }

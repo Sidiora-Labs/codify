@@ -5,7 +5,9 @@ import type {PrimaryTransaction,TransactionGateway} from '../storage/transaction
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {requireAuthority} from '../hierarchy/packages.js';
 import {enqueue,lockRun} from '../events/outbox.js';
-import {loadExecutionPacket} from '../hierarchy/packets.js';
+import {loadExecutionPacket,loadPreparationIntent} from '../hierarchy/packets.js';
+import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
 
 
 export type ExecutionMode='ACTIVE'|'PAUSE'|'DRAIN'|'STOP';
@@ -100,8 +102,7 @@ export async function approvedDimensions(tx:PrimaryTransaction,scope:SchedulerSc
  const required:Record<string,string>={CPU_MILLIS:String(requirements.cpu_millis),MEMORY_BYTES:requirements.memory_bytes,DISK_BYTES:requirements.disk_bytes};
  if(job_class==='AGENT'){
   required.AGENT='1';
-  if(requirements.build_slots)required.BUILD=String(requirements.build_slots);
-  if(requirements.test_slots)required.TEST=String(requirements.test_slots);
+  // BUILD and TEST are admitted separately when a job actually needs them.
  }else{
   if(!['BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION','EXCLUSIVE_SERVICE'].includes(job_class))fail('RESOURCE_POLICY_MISSING','Job has no accepted resource policy');
   if(job_class==='BUILD'&&!requirements.build_slots||job_class==='TEST'&&!requirements.test_slots)
@@ -188,20 +189,25 @@ export function canonical(value:unknown):string{
 export function requestDigest(value:unknown):string{
   return 'sha256:'+createHash('sha256').update(canonical(value)).digest('hex');
 }
-export function gatewayFor(context:ComponentContext):TransactionGateway{
+export function gatewayFor(context:ComponentContext):Pick<TransactionGateway,'withPrimaryTransaction'>{
   const resources=(context as ComponentContext & {resources?:{gateway?:TransactionGateway}}).resources;
   if(!resources?.gateway)fail('DEPENDENCY_UNAVAILABLE','The registered primary transaction gateway is required');
-  return resources.gateway;
+  const gateway=resources.gateway,invocation=invocationFor(context);
+  return {withPrimaryTransaction:async <T>(options:Parameters<TransactionGateway['withPrimaryTransaction']>[0],operation:(tx:PrimaryTransaction)=>Promise<T>|T):Promise<T>=>{
+   return gateway.withPrimaryTransaction(options,async tx=>{
+    const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
+    const key=invocation.operation.idempotency_key,name='envelope.'+invocation.payload.action;
+    const payload={payload_digest:invocation.operation.payload_digest};
+    const replay=await operationReplay(tx,scope,invocation.principal.actor_id,name,key,payload);
+    if(replay!==undefined)return replay as T;
+    const result=await operation(tx);
+    await recordOutcome(tx,scope,invocation.principal.actor_id,name,key,payload,result);
+    return result;
+   });
+  }};
 }
-export interface SchedulerInvocation {
-  principal:{actor_id:string;organisation_id:string;run_id:string;deployment_epoch:string};
-  guard:(tx:PrimaryTransaction)=>Promise<void>;
-}
-export function invocationFor(context:ComponentContext):SchedulerInvocation {
-  const invocation=(context as ComponentContext & {invocation?:SchedulerInvocation}).invocation;
-  if(!invocation||typeof invocation.guard!=='function'||!invocation.principal)
-    fail('AUTHENTICATED_ACTOR_REQUIRED','A server-authenticated invocation is required');
-  return invocation;
+export function invocationFor(context:ComponentContext):InvocationContext {
+ const invocation=context.invocation;assertInvocation(invocation);return invocation;
 }
 export function actorFor(context:ComponentContext,scope:SchedulerScope,request:Record<string,unknown>):SchedulerActor{
   const principal=invocationFor(context).principal;
@@ -428,12 +434,9 @@ export async function jobPolicy(tx:PrimaryTransaction,scope:SchedulerScope,task_
  const run=await tx.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
  if(!(operation==='ADVANCE'?['READY','RUNNING','DRAINING']:['READY','RUNNING']).includes(run.rows[0]?.state??''))fail('RUN_NOT_ADMITTING','Run state does not allow this resource job');
  await requireProofRegistry(tx,scope,task);
- const rows=await tx.query<{digest:string}>(
- 'SELECT digest FROM hyperfide.hierarchy_execution_packets WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND spec_revision_id=$4 AND spec_generation=$5 ORDER BY created_at DESC,id DESC LIMIT 1',
- [scope.organisation_id,scope.run_id,task_id,task.spec_revision_id,task.spec_generation]);
- if(!rows.rows[0])fail('EXECUTION_PACKET_MISSING','Job requires accepted immutable resource policy');
- const loaded=await loadExecutionPacket(tx,{...scope,digest:rows.rows[0].digest});
- return packetPolicyResources(loaded.packet);
+ const accepted=await loadPreparationIntent(tx,{...scope,task_id});
+ const definition=await tx.query<{definition:unknown}>('SELECT definition FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,task_id]);
+ return packetPolicyResources({mandatory:{resource_requirements:accepted.resource_requirements,intent:{definition:definition.rows[0]!.definition}}});
 }
 export async function allocateReservations(tx:PrimaryTransaction,input:SchedulerScope&{reservation_ids:string[]}):Promise<void>{
  assertPrimaryTransaction(tx);await lockRun(tx,input);
