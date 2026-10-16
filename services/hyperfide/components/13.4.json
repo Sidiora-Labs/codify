@@ -3,8 +3,7 @@
   "id": "13.4",
   "task": "13.4",
   "roles": [
-    "control",
-    "dispatch"
+    "control"
   ],
   "module": "agents/admission.js",
   "entry": "createComponent",
@@ -12,9 +11,11 @@
   "actions": [
     "agent.admission.reserve",
     "agent.admission.inspect",
-    "agent.admission.report"
+    "agent.admission.report",
+    "agent.admission.recovery-context"
   ],
   "requires": [
-    "13.2"
+    "13.2",
+    "14.3"
   ]
 }

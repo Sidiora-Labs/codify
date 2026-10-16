@@ -86,10 +86,8 @@ static int snapshot(AuthProfile *a){
 }
 static int provider(Field *fs,int n,char *name,FILE *out){if(!string(field(fs,n,"connector"),name,16)||(!strcmp(name,"codex")?0:strcmp(name,"claude")))return error(out,"CONNECTOR_INVALID");return 0;}
 int hf_connector_resume_qualified(const char *connector,char *receipt,size_t size){
- AuthProfile p={0};if(!snapshot(&p)||strcmp(p.connector,connector)||!p.explicit_resume||!p.live_qualified)return 0;
- if(size<strlen(p.receipt_digest)+1)return 0;
- strcpy(receipt,p.receipt_digest);
- return 1;
+ /* Offline recipe files carry no authenticated server qualification authority. */
+ (void)connector;(void)receipt;(void)size;return 0;
 }
 int hf_component_13_1(const char *action,const char *json,FILE *out){
 Field fs[16];int n=fields(json,fs,16,"|connector||expected_version||alias||auth_profile||workspace||home||temp||permission_mode||native_session_id||operation||turn_id||text||request_id|");
@@ -130,10 +128,10 @@ if(!string(field(fs,n,"expected_version"),ev,sizeof ev)||strcmp(ev,pin)||!string
 const char *resolved=profile.model,*configured_alias=profile.alias,*provider_name=profile.provider,*auth_ref=profile.profile_id;
 if(!profile.unattended||(session[0]&&!profile.explicit_resume))return error(out,"CONNECTOR_UNSUPPORTED");
 if(!resolved||!safe_id(resolved)||!configured_alias||strcmp(alias,configured_alias)||!provider_name||!safe_id(provider_name)||!auth_ref||strcmp(auth,auth_ref))return error(out,"CONNECTOR_PROFILE_UNRESOLVED");
-fputs("{\"connector\":",out);quoted(out,name);fputs(",\"version\":",out);quoted(out,pin);fputs(",\"requested_model_id\":",out);quoted(out,resolved);fputs(",\"configured_provider_id\":",out);quoted(out,provider_name);fputs(",\"observed_model_id\":",out);if(profile.observed_model[0])quoted(out,profile.observed_model);else fputs("null",out);fputs(",\"observed_provider_id\":",out);if(profile.observed_provider[0])quoted(out,profile.observed_provider);else fputs("null",out);fputs(",\"auth_profile\":",out);quoted(out,auth);fputs(",\"argv\":[",out);quoted(out,exe);
+fputs("{\"connector\":",out);quoted(out,name);fputs(",\"version\":",out);quoted(out,pin);fputs(",\"requested_model_id\":",out);quoted(out,resolved);fputs(",\"configured_provider_id\":",out);quoted(out,provider_name);fputs(",\"observed_model_id\":",out);fputs("null",out);fputs(",\"observed_provider_id\":",out);fputs("null",out);fputs(",\"auth_profile\":",out);quoted(out,auth);fputs(",\"argv\":[",out);quoted(out,exe);
 if(!strcmp(name,"codex"))fputs(",\"app-server\",\"--listen\",\"stdio://\",\"--disable\",\"multi_agent\"",out);
 else {fputs(",\"--print\",\"--input-format\",\"stream-json\",\"--output-format\",\"stream-json\",\"--verbose\",\"--permission-mode\",\"dontAsk\",\"--permission-prompts\",\"none\",\"--strict-mcp-config\",\"--setting-sources\",\"\",\"--disallowedTools\",\"Agent,Task\",\"--model\",",out);quoted(out,resolved);if(session[0]){fputs(",\"--resume\",",out);quoted(out,session);}}
-fputs("],\"binary_digest\":",out);quoted(out,profile.digest);fputs(",\"profile_digest\":",out);quoted(out,profile.profile_digest);fputs(",\"permission_profile_id\":",out);quoted(out,profile.permission);fprintf(out,",\"dispatch_eligible\":%s",profile.live_qualified?"true":"false");fputs(",\"cwd\":",out);quoted(out,workspace);fputs(",\"home\":",out);quoted(out,home);fputs(",\"temp\":",out);quoted(out,temp);fputs(",\"native_session_id\":",out);if(session[0])quoted(out,session);else fputs("null",out);fputs(",\"delegation_enabled\":false,\"requires_supervisor\":true,\"live_qualified\":false}",out);return 0;}
+fputs("],\"binary_digest\":",out);quoted(out,profile.digest);fputs(",\"profile_digest\":",out);quoted(out,profile.profile_digest);fputs(",\"permission_profile_id\":",out);quoted(out,profile.permission);fputs(",\"dispatch_eligible\":false",out);fputs(",\"cwd\":",out);quoted(out,workspace);fputs(",\"home\":",out);quoted(out,home);fputs(",\"temp\":",out);quoted(out,temp);fputs(",\"native_session_id\":",out);if(session[0])quoted(out,session);else fputs("null",out);fputs(",\"delegation_enabled\":false,\"requires_supervisor\":true,\"live_qualified\":false}",out);return 0;}
 if(!strcmp(action,"connector.encode")){
 if(!keys(fs,n,"|connector||operation||native_session_id||turn_id||text||request_id|"))return error(out,"CONNECTOR_INVALID");
 char op[32],session[129],turn[129]="",text[65536]="",request_id[129];

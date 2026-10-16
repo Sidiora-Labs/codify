@@ -3,8 +3,7 @@
   "id": "13.2",
   "task": "13.2",
   "roles": [
-    "control",
-    "dispatch"
+    "control"
   ],
   "module": "agents/sessions.js",
   "entry": "createComponent",
@@ -18,6 +17,8 @@
   ],
   "requires": [
     "1.4",
-    "4.1"
+    "4.2",
+    "14.1",
+    "14.3"
   ]
 }
