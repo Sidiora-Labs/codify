@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "6.4",
+  "task": "6.4",
+  "roles": [
+    "control",
+    "dispatch"
+  ],
+  "module": "events/recovery.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "recovery.describe",
+    "recovery.inspect",
+    "recovery.claim"
+  ],
+  "requires": [
+    "4.2",
+    "6.1",
+    "6.2"
+  ]
+}
