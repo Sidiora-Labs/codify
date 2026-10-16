@@ -30,7 +30,9 @@
     "review.reproduction.no-physical-execution-inferred",
     "review.reproduction.exact-registry-inspector",
     "review.reproduction.current-source-unrun-causal-refused",
-    "review.reproduction.current-source-caller-head-refused"
+    "review.reproduction.current-source-caller-head-refused",
+    "review.reproduction.registered-seventy-two-hour-timeout",
+    "review.reproduction.inspector-exact-custody-lineage"
   ],
   "argv": [
     "python3",

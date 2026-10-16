@@ -11,6 +11,7 @@ from pathlib import Path
 spec=importlib.util.spec_from_file_location("review17_fixture",Path(__file__).with_name("17_1.py"))
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 ROOT=m.ROOT
+CHECK_TIMEOUT=72*60*60*1000
 IDS=[
 "review.remote.component-producer-pass","review.remote.component-consumer-pass",
 "review.remote.integrated-behaviour-fails","review.remote.repaired-behaviour-passes",
@@ -21,7 +22,7 @@ IDS=[
 "review.reproduction.immutable-job-inputs","review.reproduction.unrun-never-proof",
 "review.reproduction.non-verifier-assignment-refused","review.reproduction.capacity-required",
 "review.reproduction.unassigned-execution-refused","review.reproduction.cross-run-refused",
-"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused",
+"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused","review.reproduction.registered-seventy-two-hour-timeout","review.reproduction.inspector-exact-custody-lineage",
 ]
 SOURCE='''[meta]
 slug = "fixture"
@@ -57,7 +58,7 @@ def setup(f,d):
  (f.repo/"scenario.py").write_text(SCENARIO.replace("CONVERSION","value/100").replace("LOCAL_INPUT","100"))
  f.git("add","scenario.py");f.git("commit","-m","[spec:fixture/1.1] align monetary units");f.second=f.git("rev-parse","HEAD").strip()
  executable=str(Path(sys.executable).resolve())
- fields={"argv":[executable,"scenario.py","integration"],"executable_digest":sha(Path(executable).read_bytes()),"timeout_ms":30000,"required_artifacts":["result.json"],"input_keys":["source","dependency","toolchain","configuration","graph","contract"]}
+ fields={"argv":[executable,"scenario.py","integration"],"executable_digest":sha(Path(executable).read_bytes()),"timeout_ms":CHECK_TIMEOUT,"required_artifacts":["result.json"],"input_keys":["source","dependency","toolchain","configuration","graph","contract"]}
  source=SOURCE.replace("[task.1.1]",'checks = ["units-system"]\n[task.1.1]')+'\n[proof]\nrubric_digest = '+json.dumps(m.DIGEST)+'\n[proof.check.units-system]\n'+"".join(key+" = "+json.dumps(value)+"\n" for key,value in fields.items())
  parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e","import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
  accepted=m.xid(0xa00)
@@ -70,7 +71,7 @@ def setup(f,d):
  f.criteria=sha(canonical({"reqs":["1.1"],"accepted_text":"Preserve producer and consumer monetary units"}))
  d.sql("UPDATE hyperfide.tasks SET spec_revision_id=$3,spec_generation=2,criteria_digest=$4,definition=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$6",[m.ORG,m.RUN,accepted,f.criteria,definition,m.xid(0x301)])
  d.ids["accepted_spec"]=accepted
- d.env.update({"HF_SPEC_ALLOWED_ROOT":str(d.path),"HF_SPEC_ORGANISATION_ID":m.ORG,"HF_SPEC_PROJECT_ID":d.ids["project"],"HF_AUTHORITY_EPOCH":d.ids["epoch"],"HF_PROOF_MAX_CHECK_MS":"1800000"})
+ d.env.update({"HF_SPEC_ALLOWED_ROOT":str(d.path),"HF_SPEC_ORGANISATION_ID":m.ORG,"HF_SPEC_PROJECT_ID":d.ids["project"],"HF_AUTHORITY_EPOCH":d.ids["epoch"],"HF_PROOF_MAX_CHECK_MS":str(CHECK_TIMEOUT)})
 def seed(f):
  d=f.identity;profile=m.xid(0xa01);graph=m.xid(0xa02);build=m.xid(0xa03)
  d.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,content_digest,provider,runtime_platform,manifest) VALUES($1,$2,$3,'fixture','linux',$4)",[m.ORG,profile,m.DIGEST,{"schema_version":1,"tools":{"python":sys.version}}])
@@ -87,7 +88,7 @@ def main():
   try:
    f.configure();f.discover();snapshot=seed(f)
    executable=str(Path(sys.executable).resolve())
-   check={"id":"units-system","argv":[executable,"scenario.py","integration"],"executable_digest":sha(Path(executable).read_bytes()),"timeout_ms":30000,"required_artifacts":["result.json"],"input_keys":["source","dependency","toolchain","configuration","graph","contract"]}
+   check={"id":"units-system","argv":[executable,"scenario.py","integration"],"executable_digest":sha(Path(executable).read_bytes()),"timeout_ms":CHECK_TIMEOUT,"required_artifacts":["result.json"],"input_keys":["source","dependency","toolchain","configuration","graph","contract"]}
    policy={"schema_version":1,"criteria_digest":f.criteria,"spec_revision_id":f.identity.ids["accepted_spec"],"spec_generation":"2","repository_id":m.REPOSITORY,"source_object_id":f.pinned,"rubric_digest":m.DIGEST,"checks":[check],"clauses":[{"id":"1.1","mode":"EXECUTABLE","acceptance_ids":["1"],"checks":["units-system"]}],"inputs":{key:sha(key.encode()) for key in ["source","dependency","toolchain","configuration","graph","contract"]},"contract_digests":[]}
    registry=f.ok("spec.proof.register",{"run_id":m.RUN,"task_id":m.xid(0x301),"spec_revision_id":f.identity.ids["accepted_spec"],"spec_generation":"2","state_version":"2","policy":policy},component="spec-obligations")
    bound=f.ok("review.inputs.bind",dict(m.SCOPE,repository_id=m.REPOSITORY,source_object_id=f.second,policy_digest=f.policy_digest,candidate_digest=m.DIGEST,snapshot=snapshot),component="17.3")
@@ -108,6 +109,7 @@ def main():
    planned={}
    m.check(IDS[4],lambda:planned.update(f.ok("review.reproduction.plan",request,component="17.4")))
    rows=f.identity.sql("SELECT id,snapshot,qualification_scope FROM hyperfide.review_reproduction_jobs ORDER BY snapshot->>'variant'")
+   m.check(IDS[22],lambda:m.expect(len(rows)==2 and all(r["snapshot"]["check"]["timeout_ms"]==CHECK_TIMEOUT for r in rows),"actual accepted72hcheck was shortened or refused during plan admission"))
    m.check(IDS[5],lambda:m.expect(len(rows)==2 and all(r["snapshot"]["source_object_id"]!=f.pinned and r["snapshot"]["check"]==check for r in rows),"result revision was confused with accepted baseline"))
    m.check(IDS[6],lambda:m.expect(f.ok("review.reproduction.plan",request,component="17.4")["plan_id"]==planned["plan_id"],"retry created another physical job"))
    m.check(IDS[7],lambda:f.reject("review.reproduction.plan",dict(request,qualification_scope="CONTRACT"),"REPRODUCTION_REQUEST_CONFLICT",component="17.4"))
@@ -135,6 +137,7 @@ def main():
    m.check(IDS[17],lambda:f.reject("review.reproduction.inspect",dict(m.SCOPE,run_id=m.xid(0xdead),plan_id=planned["plan_id"]),"REVIEW_SCOPE_DENIED",component="17.4"))
    m.check(IDS[18],lambda:m.expect(f.identity.sql("SELECT count(*)::text AS n FROM hyperfide.runner_remote_jobs")[0]["n"]=="0" and f.identity.sql("SELECT count(*)::text AS n FROM hyperfide.review_reproduction_receipts")[0]["n"]=="0","unassigned validation fabricated physical execution"))
    m.check(IDS[19],lambda:m.expect(inspection["original"]["task_id"]==m.xid(0x301) and inspection["original"]["check_definition_digest"]==sha(canonical(check)) and inspection["original"]["registry_digest"]==inspection["repaired"]["registry_digest"] and inspection["original"]["qualification_scope"]=="SYSTEM","inspector lost exact accepted executable/source identity"))
+   m.check(IDS[23],lambda:m.expect(inspection["original"]["custody_id"]==m.xid(0xa21) and inspection["original"]["custody_generation"]=="1" and inspection["repaired"]["custody_id"]==m.xid(0xa22) and inspection["repaired"]["custody_generation"]=="2","inspector lost immutable original and repair custody generations"))
    current_request=dict(m.SCOPE,request_id=m.xid(0xf01),causal_plan_id=planned["plan_id"],repair_custody_id=m.xid(0xa22),publication_operation_id=m.xid(0xf02),candidate_digest=m.DIGEST,candidate_input_manifest_digest=bound["input_manifest_digest"],template_id="units-system",qualification_scope="SYSTEM",snapshot=snapshot)
    m.check(IDS[20],lambda:f.reject("review.reproduction.current.plan",current_request,"REPRODUCTION_CAUSAL_PROOF_INCOMPLETE",component="17.4"))
    m.check(IDS[21],lambda:f.reject("review.reproduction.current.plan",dict(current_request,source_object_id=f.second),"REVIEW_INPUT_INVALID",component="17.4"))

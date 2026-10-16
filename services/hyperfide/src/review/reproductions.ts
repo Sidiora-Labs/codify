@@ -45,7 +45,7 @@ function selectedCheck(registry:Data,id:string):Data{
  const check=checks[0];
  if(!Array.isArray(registry.policy.clauses)||!registry.policy.clauses.some((clause:Data)=>clause.mode==='EXECUTABLE'&&Array.isArray(clause.checks)&&clause.checks.includes(id)))fail('REPRODUCTION_CHECK_NOT_REQUIRED','Selected check is not an accepted executable proof obligation');
  if(!Array.isArray(check.argv)||!check.argv.length||check.argv.some((arg:unknown)=>typeof arg!=='string'||arg.includes('\0'))||
- !Number.isSafeInteger(check.timeout_ms)||check.timeout_ms<1||check.timeout_ms>3600000)
+ !Number.isSafeInteger(check.timeout_ms)||check.timeout_ms<1||check.timeout_ms>259200000)
  fail('REPRODUCTION_REGISTRY_INVALID','Accepted check execution definition is invalid');
  digest(check.executable_digest);
  return check;
@@ -81,7 +81,7 @@ export async function planReproduction(ctx:ComponentContext,value:unknown):Promi
    if(!discovered.rows[0])fail('REPRODUCTION_DISCOVERY_REQUIRED','Actual Git commit/tree discovery must precede a reproduction plan');
    if(!(current.source_set as Data[]).some(item=>item.repository_id===source.repository_id&&item.source_object_id===source.source_object_id))fail('REPRODUCTION_SOURCE_MISMATCH','Execution snapshot omits its exact custody commit');
    const snapshot:Data={...current,plan_id:planId,variant:index===0?'ORIGINAL':'REPAIRED',candidate_input_manifest_digest:candidateInput,
-    task_id:after.task_id,source_task_id:source.task_id,origin_task_id:before.task_id,origin_registry_digest:originRegistry.registry_digest,source_criteria_digest:source.criteria_digest,custody_id:source.id,attempt_id:source.source_attempt_id,attempt_generation:String(source.source_generation),
+    task_id:after.task_id,source_task_id:source.task_id,origin_task_id:before.task_id,origin_registry_digest:originRegistry.registry_digest,source_criteria_digest:source.criteria_digest,custody_id:source.id,custody_generation:String(source.custody_generation),attempt_id:source.source_attempt_id,attempt_generation:String(source.source_generation),
     repository_id:source.repository_id,source_object_id:source.source_object_id,criteria_digest:registry.task.criteria_digest,
     registry_digest:registry.registry_digest,source_manifest_digest:source.source_manifest_digest,source_tree_id:discovered.rows[0].tree_object_id,check,contract_ids:(current.contract_versions as Data[]).map(row=>row.id)};
    snapshot.execution_inputs={source:{source_manifest_digest:source.source_manifest_digest,source_set:current.source_set},dependency:{manifest_digest:current.dependency_manifest_digest},toolchain:{environment_profile_id:current.environment_profile_id,digest:current.toolchain_digest},configuration:{digest:current.configuration_digest},graph:{manifest_id:current.graph_manifest_id,digest:current.graph_manifest_digest,source_set:current.graph_source_set},contract:{versions:current.contract_versions}};
@@ -100,11 +100,18 @@ async function lockJob(db:ReviewDb,binding:ReviewScope,id:string):Promise<Data>{
  if(!found.rows[0])fail('REPRODUCTION_JOB_MISSING','Reproduction job is not in this run');
  const now=await db.query<Data>('SELECT clock_timestamp() AS now');found.rows[0].lease_current=!!found.rows[0].lease_expires_at&&new Date(found.rows[0].lease_expires_at).getTime()>new Date(now.rows[0]!.now).getTime();return found.rows[0];
 }
+async function assertCausalRepairCustody(db:ReviewDb,binding:ReviewScope,causalId:string,record:Data):Promise<void>{
+ const found=await db.query<Data>('SELECT snapshot FROM hyperfide.review_reproduction_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[binding.organisation_id,binding.run_id,pairedId(causalId)]);
+ const snapshot=found.rows[0]?.snapshot;
+ if(!snapshot||snapshot.variant!=='REPAIRED'||snapshot.plan_id!==causalId||snapshot.plan_kind==='CURRENT_SOURCE'||snapshot.custody_id!==record.id||snapshot.custody_generation!==String(record.custody_generation)||snapshot.task_id!==record.task_id||snapshot.attempt_id!==record.source_attempt_id||snapshot.attempt_generation!==String(record.source_generation)||snapshot.source_object_id!==record.source_object_id||snapshot.source_manifest_digest!==record.source_manifest_digest||snapshot.source_criteria_digest!==record.criteria_digest)
+  fail('REPRODUCTION_CAUSAL_CUSTODY_MISMATCH','Fresh current-source execution must preserve the exact historical repair custody, task and attempt; no accepted supersession authority exists');
+}
 async function currentJob(db:ReviewDb,binding:ReviewScope,job:Data):Promise<void>{
  if(hash(job.snapshot)!==job.input_manifest_digest||!await reviewInputCurrent(db,binding,job.snapshot))fail('REPRODUCTION_INPUTS_STALE','Immutable reproduction source and current spec/dependency/environment differ');
  const registry=await loadRegistry(db,binding,job.snapshot.task_id);
  if(job.snapshot.plan_kind==='CURRENT_SOURCE'){
   const record=await custody(db,binding,job.snapshot.custody_id),source=await integratedSource(db,binding,record,registry,job.snapshot.publication_operation_id,job.candidate_digest);
+  await assertCausalRepairCustody(db,binding,job.snapshot.causal_plan_id,record);
   const causal=await inspectReproduction(db,binding,job.snapshot.causal_plan_id) as Data;
   if(causal.original?.job_id!==job.snapshot.historical_original_job_id||causal.original?.receipt_id!==job.snapshot.historical_original_receipt_id||causal.original?.outcome!=='FAIL'||causal.original?.check_definition_digest!==hash(job.snapshot.check))fail('REPRODUCTION_CAUSAL_PROOF_STALE','Exact original failing proof is no longer available');
   for(const key of ['source_object_id','source_manifest_digest','qualification_receipt_digest','git_provenance_manifest_digest','integration_input_manifest_digest'])if(source[key]!==job.snapshot[key])fail('REPRODUCTION_PUBLICATION_STALE','Current integrated proof source changed');
@@ -189,6 +196,18 @@ export async function renewReproduction(ctx:ComponentContext,value:unknown):Prom
   return result.rows[0];
  });
 }
+async function measuredReproductionInputs(ctx:ComponentContext,db:ReviewDb,binding:ReviewScope,job:Data):Promise<Data>{
+ // The current qualification-only supplier refuses this namespace. A genuine
+ // reproduction reader must derive these bindings from its job and measured
+ // runtime facts before this path may dispatch; echoed request labels are not proof.
+ const reader=capability<Data>(ctx,'12.1','qualification.environment.v1',['verify']);
+ const observed=await reader.verify(db,(ctx as Data).invocation,{job_namespace:'REPRODUCTION',job_id:job.id,lease_generation:String(job.lease_generation),reservation_id:job.reservation_id,input_manifest_digest:job.input_manifest_digest,environment_digest:job.snapshot.environment_digest});
+ const validation=observed?.input_validation,roles:Data={};
+ for(const key of ['dependency','toolchain','configuration','graph','contract'])roles[key]=job.snapshot.execution_inputs?.[key];
+ if(!validation||validation.status!=='VERIFIED'||validation.namespace!=='REPRODUCTION'||validation.job_id!==job.id||validation.lease_generation!==String(job.lease_generation)||validation.input_manifest_digest!==job.input_manifest_digest||validation.input_packet_digest!==hash(job.snapshot.execution_inputs)||canonical(validation.input_manifest)!==canonical(roles)||typeof validation.receipt_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(validation.receipt_digest)||observed.runner_session_id!==job.runner_session_id||observed.sandbox_id!==job.sandbox_id||String(observed.boot_generation)!==String(job.sandbox_boot_generation)||observed.slot_id!==job.slot_id||observed.source_object_id!==job.snapshot.source_object_id||observed.source_tree_id!==job.snapshot.source_tree_id||observed.source_manifest_digest!==job.snapshot.source_manifest_digest)
+  fail('REPRODUCTION_INPUT_MEASUREMENTS_UNAVAILABLE','Independent reproduction namespace and measured dependency/toolchain/configuration/graph/contract input bindings are required before dispatch and admission');
+ return validation;
+}
 export async function executeReproduction(ctx:ComponentContext,value:unknown):Promise<unknown>{
  const v=obj(value,['organisation_id','run_id','job_id','lease_generation']),binding=scope(v),id=uuid(v.job_id),generation=decimal(v.lease_generation);
  const trusted=authorizeReview(ctx,binding,['VERIFIER']);assertInvocation((ctx as Data).invocation);
@@ -213,11 +232,13 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   const registry=capability<Data>(ctx,'12.1','runner.registry.v1',['lookup']),registered=await registry.lookup(db,{...binding,session_id:actual.rows[0]!.session_id});
   if(registered.sandbox_id!==job.sandbox_id||registered.slot_id!==job.slot_id||String(registered.boot_generation)!==String(job.sandbox_boot_generation)||registered.repository_id!==job.snapshot.repository_id||registered.source_object_id!==job.snapshot.source_object_id||registered.source_tree_id!==job.snapshot.source_tree_id||registered.source_digest!==job.snapshot.source_manifest_digest)fail('REPRODUCTION_SOURCE_MISMATCH','Actual prepared runner source differs from the immutable reproduction source');
   if(job.runner_session_id&&job.runner_session_id!==registered.session_id)fail('REPRODUCTION_RECONCILE_REQUIRED','Recorded runner was replaced; reconcile the existing operation without relaunching');
-  const permit=await runner.prepare(db,(ctx as Data).invocation,{session_id:registered.session_id,operation_id:id,repository_id:job.snapshot.repository_id,reservation_id:job.reservation_id,task_id:job.snapshot.task_id,job_id:id,job_kind:'TEST',argv:check.argv,cwd:'.',environment:{},environment_digest:hash({}),artifact_paths:artifactPaths,
+  const measuredJob={...job,runner_session_id:registered.session_id};
+  const inputValidation=await measuredReproductionInputs(ctx,db,binding,measuredJob);
+  const permit=await runner.prepare(db,(ctx as Data).invocation,{job_namespace:'REPRODUCTION',input_validation:inputValidation,session_id:registered.session_id,operation_id:id,repository_id:job.snapshot.repository_id,reservation_id:job.reservation_id,task_id:job.snapshot.task_id,job_id:id,job_kind:'TEST',argv:check.argv,cwd:'.',environment:{},environment_digest:hash({}),artifact_paths:artifactPaths,
    timeout_ms:check.timeout_ms,source_digest:job.snapshot.source_manifest_digest,source_provenance_digest:hash(job.snapshot.execution_inputs),policy_digest:job.snapshot.registry_digest,
    executable_digest:check.executable_digest});
   await db.query("UPDATE hyperfide.review_reproduction_jobs SET state='RUNNING',runner_session_id=$4,runner_boot_id=$5,workspace_path=$6 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[binding.organisation_id,binding.run_id,id,registered.session_id,registered.boot_id,registered.workspace_path]);
-  return {permit,job:{...job,runner_session_id:registered.session_id,runner_boot_id:registered.boot_id,workspace_path:registered.workspace_path} as Data};
+  return {permit,inputValidation,job:{...job,runner_session_id:registered.session_id,runner_boot_id:registered.boot_id,workspace_path:registered.workspace_path} as Data};
  });
  // The runner executes only after the guarded dispatch intent commits. No transaction spans remote work or artifact I/O.
  const leaseAbort=new AbortController(),signal=AbortSignal.any([trusted.invocation.signal,leaseAbort.signal]);
@@ -234,7 +255,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
  if(!physical||physical.execution_plane!=='REMOTE'||physical.organisation_id!==binding.organisation_id||physical.run_id!==binding.run_id||
  physical.operation_id!==id||physical.repository_id!==prepared.job.snapshot.repository_id||physical.session_id!==prepared.job.runner_session_id||physical.boot_id!==prepared.job.runner_boot_id||physical.sandbox_id!==prepared.job.sandbox_id||String(physical.boot_generation)!==String(prepared.job.sandbox_boot_generation)||
  physical.source_digest!==sourceDigest||physical.source_object_id!==prepared.job.snapshot.source_object_id||physical.source_tree_id!==prepared.job.snapshot.source_tree_id||physical.source_provenance_digest!==hash(prepared.job.snapshot.execution_inputs)||physical.policy_digest!==prepared.job.snapshot.registry_digest||physical.executable_digest!==check.executable_digest||
- physical.slot_id!==prepared.job.slot_id||String(physical.slot_generation)!==String(prepared.job.allocation_generation)||![ '.',prepared.job.workspace_path].includes(physical.cwd)||typeof physical.process_ref!=='string'||!physical.process_ref||!physical.start_identity||typeof physical.start_identity!=='object'||!Number.isSafeInteger(physical.start_identity.pid)||physical.start_identity.pid<1||!Number.isSafeInteger(physical.start_identity.pgid)||physical.start_identity.pgid<1||!Number.isSafeInteger(physical.start_identity.uid)||physical.start_identity.uid<1||typeof physical.start_identity.start_time!=='string'||!(/^(0|[1-9][0-9]*)$/).test(physical.start_identity.start_time)||typeof physical.start_identity.os_boot_id!=='string'||!(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/).test(physical.start_identity.os_boot_id)||physical.environment_digest!==hash({})||canonical(physical.argv)!==canonical(check.argv)||physical.output_complete!==true||physical.truncated!==false||physical.status!=='COMPLETED'||
+ physical.slot_id!==prepared.job.slot_id||String(physical.slot_generation)!==String(prepared.job.allocation_generation)||![ '.',prepared.job.workspace_path].includes(physical.cwd)||typeof physical.process_ref!=='string'||!physical.process_ref||!physical.start_identity||typeof physical.start_identity!=='object'||!Number.isSafeInteger(physical.start_identity.pid)||physical.start_identity.pid<1||!Number.isSafeInteger(physical.start_identity.pgid)||physical.start_identity.pgid<1||!Number.isSafeInteger(physical.start_identity.uid)||physical.start_identity.uid<1||typeof physical.start_identity.start_time!=='string'||!(/^(0|[1-9][0-9]*)$/).test(physical.start_identity.start_time)||typeof physical.start_identity.os_boot_id!=='string'||!(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/).test(physical.start_identity.os_boot_id)||physical.environment_digest!==hash({})||canonical(physical.input_validation)!==canonical(prepared.inputValidation)||canonical(physical.argv)!==canonical(check.argv)||physical.output_complete!==true||physical.truncated!==false||physical.status!=='COMPLETED'||
  !Number.isSafeInteger(physical.exit_code)||physical.timed_out!==false||physical.interrupted!==false||physical.cleanup_status!=='CONFIRMED'||physical.cleanup?.complete!==true||physical.cleanup?.observed_process_absent!==true)
  fail('REPRODUCTION_RECEIPT_INCOMPLETE','Actual remote executable/source/process/output provenance is incomplete; job cannot qualify');
  const stdout=captured(physical.stdout),stderr=captured(physical.stderr),out=await upload(ctx,binding,stdout),err=await upload(ctx,binding,stderr);
@@ -244,7 +265,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   if(found.length!==1)fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Required registered artifact is missing or ambiguous');
   additional.push({path,...await upload(ctx,binding,captured(found[0]))});
  }
- const physicalMetadata={...physical,requested_cwd:'.',verified_workspace_path:prepared.job.workspace_path,stdout:{digest:out.content_digest,size_bytes:String(stdout.length),complete:true},stderr:{digest:err.content_digest,size_bytes:String(stderr.length),complete:true},artifacts:additional};
+ const physicalMetadata={...physical,input_validation:prepared.inputValidation,requested_cwd:'.',verified_workspace_path:prepared.job.workspace_path,stdout:{digest:out.content_digest,size_bytes:String(stdout.length),complete:true},stderr:{digest:err.content_digest,size_bytes:String(stderr.length),complete:true},artifacts:additional};
  const outcome=physical.exit_code===0?'PASS':'FAIL',checks=[{id:check.id,status:outcome,exit_code:physical.exit_code}];
  const limitations:string[]=[];
  if((prepared.job.snapshot.source_set as Data[]).some(source=>source.repository_id!==prepared.job.snapshot.repository_id))limitations.push('PHYSICAL_SOURCE_SET_PARTIAL');
@@ -262,6 +283,8 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   await resources.assertJobReservation(db,{...binding,task_id:job.snapshot.task_id,job_kind:'TEST',reservation_id:job.reservation_id});
   const allocation=await resources.readJobAllocation(db,{...binding,reservation_id:job.reservation_id});
   if(!allocation||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||allocation.sandbox_id!==job.sandbox_id||String(allocation.sandbox_boot_generation)!==String(job.sandbox_boot_generation)||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Remote reservation was revoked or reassigned before output admission');
+  const finalInputs=await measuredReproductionInputs(ctx,db,binding,job);
+  if(canonical(finalInputs)!==canonical(prepared.inputValidation))fail('REPRODUCTION_INPUTS_STALE','Measured execution context changed before evidence admission');
   const snapshot=job.snapshot;
   const evidence=await db.query<Data>(`INSERT INTO hyperfide.evidence(organisation_id,run_id,attempt_id,attempt_generation,repository_id,source_object_id,criteria_digest,manifest_digest,artifact_id,admission_state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'ADMITTED') RETURNING id`,
    [binding.organisation_id,binding.run_id,snapshot.attempt_id,snapshot.attempt_generation,snapshot.repository_id,snapshot.source_object_id,snapshot.source_criteria_digest,hash(receiptBody),receiptArtifact.artifact_id]);
@@ -325,7 +348,7 @@ export async function inspectReproduction(db:ReviewDb,binding:ReviewScope,planId
   if(!historical&&result&&Array.isArray(result.limitations)&&result.limitations.length&&status==='COMPLETE')status='INCOMPLETE';
   const checks=result?.checks,terminal=['PASSED','FAILED'].includes(row.state),valid=terminal&&row.receipt_id&&String(row.receipt_generation)===String(row.lease_generation)&&admitted&&Array.isArray(checks)&&checks.length===1&&checks[0]?.id===row.template_id&&checks[0]?.status===(row.state==='PASSED'?'PASS':'FAIL')&&result?.outcome===checks[0]?.status&&result?.job_id===row.id&&result?.candidate_digest===row.candidate_digest&&result?.input_manifest_digest===row.input_manifest_digest&&String(result?.lease_generation)===String(row.lease_generation)&&canonical(result?.source_set)===canonical(row.snapshot.source_set);
   if(!valid&&status==='COMPLETE')status='INCOMPLETE';
-  results[variant.toLowerCase()]={historical,currentness:historical?'HISTORICAL_CAUSAL_PROOF':'CURRENT_EXECUTION_PROOF',causal_plan_id:historical?currentPlan!.snapshot.causal_plan_id:row.snapshot.plan_id,causal_job_id:historical?row.id:null,registry_current:registryCurrent,origin_registry_current:originRegistryCurrent,source_origin:row.snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:row.snapshot.publication_operation_id??null,qualification_receipt_digest:row.snapshot.qualification_receipt_digest??null,git_provenance_manifest_digest:row.snapshot.git_provenance_manifest_digest??null,integration_input_manifest_digest:row.snapshot.integration_input_manifest_digest??null,limitations:result?.limitations??[],job_id:row.id,task_id:row.snapshot.task_id,source_task_id:row.snapshot.source_task_id,origin_task_id:row.snapshot.origin_task_id,criteria_digest:row.snapshot.criteria_digest,source_criteria_digest:row.snapshot.source_criteria_digest,registry_digest:row.snapshot.registry_digest,origin_registry_digest:row.snapshot.origin_registry_digest,template_id:row.template_id,check_definition_digest:hash(row.snapshot.check),qualification_scope:row.qualification_scope,source_set:row.snapshot.source_set,input_manifest_digest:row.input_manifest_digest,outcome:valid?(row.state==='PASSED'?'PASS':'FAIL'):'UNKNOWN',receipt_id:row.receipt_id??null,evidence_ids:admitted?result!.evidence_ids:[],checks:valid?checks:[],job_state:row.state,last_error_code:row.last_error_code??null};
+  results[variant.toLowerCase()]={historical,currentness:historical?'HISTORICAL_CAUSAL_PROOF':'CURRENT_EXECUTION_PROOF',causal_plan_id:historical?currentPlan!.snapshot.causal_plan_id:row.snapshot.plan_id,causal_job_id:historical?row.id:null,registry_current:registryCurrent,origin_registry_current:originRegistryCurrent,source_origin:row.snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:row.snapshot.publication_operation_id??null,qualification_receipt_digest:row.snapshot.qualification_receipt_digest??null,git_provenance_manifest_digest:row.snapshot.git_provenance_manifest_digest??null,integration_input_manifest_digest:row.snapshot.integration_input_manifest_digest??null,limitations:result?.limitations??[],job_id:row.id,custody_id:row.snapshot.custody_id,custody_generation:row.snapshot.custody_generation??null,task_id:row.snapshot.task_id,source_task_id:row.snapshot.source_task_id,origin_task_id:row.snapshot.origin_task_id,criteria_digest:row.snapshot.criteria_digest,source_criteria_digest:row.snapshot.source_criteria_digest,registry_digest:row.snapshot.registry_digest,origin_registry_digest:row.snapshot.origin_registry_digest,template_id:row.template_id,check_definition_digest:hash(row.snapshot.check),qualification_scope:row.qualification_scope,source_set:row.snapshot.source_set,input_manifest_digest:row.input_manifest_digest,outcome:valid?(row.state==='PASSED'?'PASS':'FAIL'):'UNKNOWN',receipt_id:row.receipt_id??null,evidence_ids:admitted?result!.evidence_ids:[],checks:valid?checks:[],job_state:row.state,last_error_code:row.last_error_code??null};
  }
  const first=rows.rows[0];
  return {status,plan_id:planId,plan_kind:currentPlan?'CURRENT_SOURCE':'PAIRED',causal_plan_id:currentPlan?.snapshot?.causal_plan_id??planId,candidate_digest:(currentPlan??first)?.candidate_digest??null,candidate_input_manifest_digest:(currentPlan??first)?.snapshot?.candidate_input_manifest_digest??null,...results};
@@ -370,6 +393,7 @@ export async function planCurrentSourceReproduction(ctx:ComponentContext,value:u
   const causal=await inspectReproduction(db,binding,causalId) as Data,original=causal.original;
   if(causal.plan_kind!=='PAIRED'||!original||original.outcome!=='FAIL'||!Array.isArray(original.evidence_ids)||!original.evidence_ids.length||original.template_id!==template||!original.receipt_id)fail('REPRODUCTION_CAUSAL_PROOF_INCOMPLETE','An actual immutable original failing execution is required; an unrun pair cannot authorize current-source reproduction');
   const record=await custody(db,binding,custodyId);
+  await assertCausalRepairCustody(db,binding,causalId,record);
   if(!['ACTIVE','RELEASED'].includes(record.authority))fail('REPRODUCTION_CUSTODY_STALE','Current-source proof cannot revive disposed custody');
   const registry=await loadRegistry(db,binding,record.task_id),check=selectedCheck(registry,template);
   if(hash(check)!==original.check_definition_digest)fail('REPRODUCTION_CHECK_MISMATCH','Current accepted check differs from the recorded original failure definition');
@@ -383,7 +407,7 @@ export async function planCurrentSourceReproduction(ctx:ComponentContext,value:u
   const planId=randomUUID(),jobId=pairedId(planId);
   const snapshot:Data={...current,plan_id:planId,plan_kind:'CURRENT_SOURCE',variant:'REPAIRED',causal_plan_id:causalId,historical_original_job_id:original.job_id,historical_original_receipt_id:original.receipt_id,candidate_input_manifest_digest:candidateInput,
    task_id:record.task_id,source_task_id:record.task_id,origin_task_id:original.origin_task_id,origin_registry_digest:original.origin_registry_digest,registry_digest:registry.registry_digest,
-   custody_id:record.id,custody_source_object_id:record.source_object_id,custody_criteria_digest:record.criteria_digest,custody_source_manifest_digest:record.source_manifest_digest,attempt_id:record.source_attempt_id,attempt_generation:String(record.source_generation),
+   custody_id:record.id,custody_generation:String(record.custody_generation),custody_source_object_id:record.source_object_id,custody_criteria_digest:record.criteria_digest,custody_source_manifest_digest:record.source_manifest_digest,attempt_id:record.source_attempt_id,attempt_generation:String(record.source_generation),
    source_origin:'INTEGRATED_PUBLICATION',publication_operation_id:operationId,qualification_receipt_digest:source.qualification_receipt_digest,
    git_provenance_manifest_digest:source.git_provenance_manifest_digest,integration_input_manifest_digest:source.integration_input_manifest_digest,
    repository_id:record.repository_id,source_object_id:source.source_object_id,source_tree_id:source.tree,source_manifest_digest:source.source_manifest_digest,
