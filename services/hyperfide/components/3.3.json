@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "3.3",
+  "task": "3.3",
+  "roles": [
+    "control"
+  ],
+  "module": "hierarchy/views.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "hierarchy.views.describe",
+    "hierarchy.view"
+  ],
+  "requires": [
+    "3.1",
+    "4.2"
+  ]
+}

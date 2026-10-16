@@ -248,7 +248,7 @@ export interface ProviderIsolationReceipt {
 }
 export interface ProviderIsolationBinding {
  schema_version:1;reference_key:string;operation_id:string;topology_digest:string;resource_identity_digest:string;
- destroy_operation:ProviderOperation<'destroy'>;authority_digest:string;custody_evidence_digest:string;
+ destroy_operation:ProviderOperation<'destroy'>;authority_digest:string;custody_evidence_digest:string;custody_expires_at:string;
 }
 export interface ProviderIsolationState {binding:ProviderIsolationBinding;receipt:ProviderIsolationReceipt|null}
 export interface ProviderIsolationJournal {
@@ -261,7 +261,7 @@ export interface IsolationTarget {
  preparation_digest:string;resource_topology_digest:string;
 }
 interface IsolationConfiguration {
- schema_version:1;deployment_id:string;organisation_id:string;run_id:string;source_epoch:string;topology_digest:string;
+ schema_version:1;deployment_id:string;organisation_id:string;run_id:string;source_epoch:string|null;topology_digest:string;
  evidence_scope:'LIVE_PROVIDER'|'COMPONENT_FIXTURE';maximum_operation_ms:number;proof_max_age_ms:number;resources:IsolationTarget[];
 }
 async function isolationConfiguration(env:Readonly<NodeJS.ProcessEnv>):Promise<IsolationConfiguration>{
@@ -269,7 +269,7 @@ async function isolationConfiguration(env:Readonly<NodeJS.ProcessEnv>):Promise<I
  const stat=await fs.lstat(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1048576||(stat.mode&0o077)||(process.getuid&&stat.uid!==process.getuid()))fail('ISOLATION_CONFIG_INVALID','Writer topology must be bounded and owner-only');
  const c=obj(JSON.parse(await fs.readFile(file,'utf8')),['schema_version','deployment_id','organisation_id','run_id','source_epoch','topology_digest','evidence_scope','maximum_operation_ms','proof_max_age_ms','resources']);
  if(c.schema_version!==1||!['LIVE_PROVIDER','COMPONENT_FIXTURE'].includes(String(c.evidence_scope)))fail('ISOLATION_CONFIG_INVALID','Invalid isolation schema/evidence scope');
- uuid(c.deployment_id);uuid(c.organisation_id);uuid(c.run_id);str(c.source_epoch,128);dg(c.topology_digest);
+ uuid(c.deployment_id);uuid(c.organisation_id);uuid(c.run_id);if(c.source_epoch!==null)uuid(c.source_epoch);dg(c.topology_digest);
  for(const k of ['maximum_operation_ms','proof_max_age_ms'])if(!Number.isSafeInteger(c[k])||(c[k] as number)<100||(c[k] as number)>30000)fail('ISOLATION_CONFIG_INVALID','Isolation deadline/evidence lifetime must be bounded to30seconds');
  if(!Array.isArray(c.resources)||!c.resources.length||c.resources.length>10000)fail('ISOLATION_CONFIG_INVALID','Explicit writer resources required');
  const names=new Set<string>();
@@ -305,12 +305,13 @@ export function createProviderIsolation(runtime:ProviderIsolationRuntime){
   const config=await isolationConfiguration(runtime.env),target=config.resources.find(r=>r.reference_key===referenceKey);
   if(!target)fail('ISOLATION_SCOPE_DENIED','Writer resource is not in protected deployment topology');
   const resourceDigest=digestDocument({scope:target.scope,resource:target.resource,boot_id:target.boot_id,preparation_digest:target.preparation_digest});
-  let authorityDigest:string,authorityExpiry:string;
+  let authorityDigest:string,authorityExpiry:string,revalidateAuthority:()=>Promise<void>;
   const permitModule=identityCredentials as unknown as Record<string,unknown>;
   if(typeof permitModule.isVerifiedIsolationPermit==='function'&&(permitModule.isVerifiedIsolationPermit as (v:unknown)=>boolean)(authority)){
    if(typeof permitModule.assertIsolationPermit!=='function')fail('ISOLATION_AUTHORITY_UNAVAILABLE','Actual isolation permit verifier unavailable');
    const expected={operation_id:operationId,organisation_id:config.organisation_id,run_id:config.run_id,deployment_id:config.deployment_id,source_epoch:config.source_epoch,topology_digest:config.topology_digest,resource_reference:referenceKey,resource_topology_digest:target.resource_topology_digest};
    (permitModule.assertIsolationPermit as (v:unknown,e:unknown)=>void)(authority,expected);
+   revalidateAuthority=async()=>{(permitModule.assertIsolationPermit as (v:unknown,e:unknown)=>void)(authority,expected);};
    const verified=authority as {permit_digest:string;expires_at:string};authorityDigest=dg(verified.permit_digest);authorityExpiry=utc(verified.expires_at);
   }else{
    assertInvocation(authority);const invocation=authority as InvocationContext;
@@ -319,7 +320,8 @@ export function createProviderIsolation(runtime:ProviderIsolationRuntime){
    // Ordinary requests retain current-primary authority. The separate actual14
    // permit path is the only outage mechanism and never grants a new epoch.
    if(!runtime.gateway)fail('ISOLATION_AUTHORITY_UNAVAILABLE','Normal authority requires actual primary gateway');
-   await runtime.gateway.withPrimaryTransaction({timeoutMs:5000,signal,guard:tx=>invocation.guard(tx)},async()=>{});
+   revalidateAuthority=async()=>{await runtime.gateway!.withPrimaryTransaction({timeoutMs:5000,signal,guard:tx=>invocation.guard(tx)},async()=>{});};
+   await revalidateAuthority();
    authorityDigest=dg(invocation.operation.payload_digest);authorityExpiry=utc(invocation.principal.expires_at);
   }
   if(Date.parse(authorityExpiry)<=Date.now())fail('AUTH_EXPIRED','Isolation authority expired');
@@ -333,16 +335,16 @@ export function createProviderIsolation(runtime:ProviderIsolationRuntime){
    // topology metadata and an isolation permit alone never authorise data loss.
    if(!runtime.destructionPreflight)fail('DESTRUCTION_PREFLIGHT_UNAVAILABLE','Actual retained-custody proof required before destructive isolation');
    const proof=await boundedEffect(runtime.destructionPreflight(target,operationId,authority,signal),signal,deadline);
-   if(!proof||proof.operation_id!==operationId||proof.resource_identity_digest!==resourceDigest||Date.parse(utc(proof.observed_at))>Date.now()||Date.parse(utc(proof.expires_at))<=Date.now())fail('DESTRUCTION_CUSTODY_UNPROVEN','Fresh retained-custody proof must bind this exact resource and isolation operation');
+   if(!proof||proof.operation_id!==operationId||proof.resource_identity_digest!==resourceDigest||Date.parse(utc(proof.observed_at))>Date.now()||Date.now()-Date.parse(proof.observed_at)>config.proof_max_age_ms||Date.parse(utc(proof.expires_at))<=Date.now())fail('DESTRUCTION_CUSTODY_UNPROVEN','Fresh retained-custody proof must bind this exact resource and isolation operation');
    const custodyDigest=dg(proof.evidence_digest);
    const binding:ProviderIsolationBinding={schema_version:1,reference_key:referenceKey,operation_id:operationId,topology_digest:config.topology_digest,resource_identity_digest:resourceDigest,
-    destroy_operation:isolationOperation('destroy',target,operationId,new Date(deadline).toISOString(),operationId),authority_digest:authorityDigest,custody_evidence_digest:custodyDigest};
+    destroy_operation:isolationOperation('destroy',target,operationId,new Date(deadline).toISOString(),operationId),authority_digest:authorityDigest,custody_evidence_digest:custodyDigest,custody_expires_at:proof.expires_at};
    const claimed=await journal.prepare(binding);state=claimed.state;first=claimed.created;
   }
   const binding=state.binding;
   if(binding.schema_version!==1||binding.reference_key!==referenceKey||binding.operation_id!==operationId||binding.topology_digest!==config.topology_digest||binding.resource_identity_digest!==resourceDigest||binding.authority_digest!==authorityDigest)
    fail('ISOLATION_JOURNAL_CONFLICT','Durable operation/source authority differs from protected topology');
-  dg(binding.custody_evidence_digest);
+  dg(binding.custody_evidence_digest);utc(binding.custody_expires_at);
   const destroy=validateProviderOperation(binding.destroy_operation);
   if(destroy.kind!=='destroy'||destroy.identity.operation_id!==operationId||digestDocument(destroy.scope)!==digestDocument(target.scope)||digestDocument(destroy.resource)!==digestDocument(target.resource)||destroy.preparation_digest!==target.preparation_digest)
    fail('ISOLATION_JOURNAL_CONFLICT','Journal resource operation binding changed');
@@ -363,19 +365,20 @@ export function createProviderIsolation(runtime:ProviderIsolationRuntime){
   if(!factory){const result=receipt(null);await journal.record({binding,receipt:result,observations});return result;}
   const combined=AbortSignal.any([signal,runtime.signal,AbortSignal.timeout(Math.max(1,deadline-Date.now()))]);
   let transport:Awaited<ReturnType<typeof factory>>;
-  try{transport=await boundedEffect(Promise.resolve(factory(target.scope)),combined,deadline);}
+  const withinDeadline=()=>{if(combined.aborted||Date.now()>=deadline)fail('PROVIDER_TIMEOUT','Isolation budget expired before provider call');};
+  try{withinDeadline();transport=await boundedEffect(Promise.resolve(factory(target.scope)),combined,deadline);}
   catch{const result=receipt(null);await journal.record({binding,receipt:result,observations});return result;}
   if(typeof transport.destroy!=='function'||typeof transport.observe!=='function')fail('ISOLATION_TRANSPORT_INVALID','Actual typed admin transport required');
   if(first){
    let outcome:ProviderOutcome;
-   try{outcome=await boundedEffect(transport.destroy(destroy as ProviderOperation<'destroy'>,combined),combined,deadline);}
+   try{withinDeadline();await revalidateAuthority();withinDeadline();if(Date.parse(binding.custody_expires_at)<=Date.now())fail('DESTRUCTION_CUSTODY_STALE','Custody proof expired before destructive effect');outcome=await boundedEffect(transport.destroy(destroy as ProviderOperation<'destroy'>,combined),combined,deadline);}
    catch{outcome=unknownIsolationOutcome(destroy);}
    add(destroy,outcome);await journal.record({binding,receipt:receipt(null),observations:[...observations]});
   }
   // Never infer absence from accepted deletion, list omission or a cached proof.
   const observe=isolationOperation('observe',target,randomUUID(),new Date(deadline).toISOString(),operationId);
   let observed:ProviderOutcome;
-  try{observed=await boundedEffect(transport.observe(observe,combined),combined,deadline);}
+  try{withinDeadline();observed=await boundedEffect(transport.observe(observe,combined),combined,deadline);await revalidateAuthority();}
   catch{observed=unknownIsolationOutcome(observe);}
   add(observe,observed);const result=receipt(observed);await journal.record({binding,receipt:result,observations});return result;
  };

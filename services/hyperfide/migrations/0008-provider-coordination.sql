@@ -44,6 +44,7 @@ CREATE TABLE hyperfide.provisioning_intents (
  configuration_digest hyperfide.digest NOT NULL,
  kind text NOT NULL CHECK(kind IN ('CREATE','DESTROY')),
  preparation_purpose text CHECK(preparation_purpose IN ('PREPARATION','EXECUTION')),
+ profile_id uuid,
  request_key text NOT NULL CHECK(length(request_key) BETWEEN 1 AND 256),
  request_digest hyperfide.digest NOT NULL,
  payload_digest hyperfide.digest NOT NULL,
@@ -61,10 +62,12 @@ CREATE TABLE hyperfide.provisioning_intents (
  UNIQUE(organisation_id,run_id,request_key),
  UNIQUE(organisation_id,id),
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
  FOREIGN KEY(organisation_id,sandbox_id) REFERENCES hyperfide.sandboxes(organisation_id,id),
  FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
  CHECK((kind='CREATE') OR native_sandbox_id IS NOT NULL),
- CHECK((kind='CREATE')=(preparation_purpose IS NOT NULL))
+ CHECK((kind='CREATE')=(preparation_purpose IS NOT NULL)),
+ CHECK((kind='CREATE')=(profile_id IS NOT NULL))
 );
 CREATE UNIQUE INDEX provider_one_active_destroy ON hyperfide.provisioning_intents(organisation_id,sandbox_id) WHERE kind='DESTROY' AND state NOT IN ('TERMINAL','REJECTED');
 CREATE INDEX provider_intent_reconcile ON hyperfide.provisioning_intents(organisation_id,pool_id,state,updated_at);
@@ -201,6 +204,8 @@ CREATE TABLE hyperfide.provider_prepared_bases (
  manifest_artifact_digest hyperfide.digest NOT NULL,
  execution_receipt_digest hyperfide.digest NOT NULL,
  verification_receipt_digest hyperfide.digest NOT NULL,
+ execution_receipt_artifact_digest hyperfide.digest NOT NULL,
+ verification_receipt_artifact_digest hyperfide.digest NOT NULL,
  verification_scope text NOT NULL CHECK(verification_scope='POOL'),
  state text NOT NULL CHECK(state IN ('QUALIFIED','STALE','REVOKED')),
  expires_at timestamptz NOT NULL,
@@ -212,6 +217,8 @@ CREATE TABLE hyperfide.provider_prepared_bases (
  FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
  FOREIGN KEY(organisation_id,source_run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,source_run_id,manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,source_run_id,execution_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,source_run_id,verification_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,source_sandbox_id,source_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation)
 );
 CREATE INDEX provider_prepared_current ON hyperfide.provider_prepared_bases(organisation_id,pool_id,profile_id,preparation_digest,state,expires_at);
@@ -262,6 +269,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  slot_id uuid NOT NULL,
  profile_id uuid NOT NULL,
  profile_digest hyperfide.digest NOT NULL,
+ boot_preparation_digest hyperfide.digest NOT NULL,
  preparation_digest hyperfide.digest NOT NULL,
  readiness_digest hyperfide.digest NOT NULL,
  source_digest hyperfide.digest NOT NULL,
@@ -270,6 +278,7 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  readiness_input jsonb NOT NULL CHECK(jsonb_typeof(readiness_input)='object' AND octet_length(readiness_input::text)<=1048576),
  readiness_input_digest hyperfide.digest NOT NULL,
  source_repository_id uuid NOT NULL,
+ source_repository_key text NOT NULL CHECK(length(source_repository_key) BETWEEN 1 AND 256 AND source_repository_key !~ '[[:cntrl:]]'),
  source_object_id hyperfide.git_oid NOT NULL,
  source_tree_id hyperfide.git_oid NOT NULL,
  source_bindings jsonb NOT NULL CHECK(jsonb_typeof(source_bindings)='array' AND jsonb_array_length(source_bindings)>0 AND octet_length(source_bindings::text)<=1048576),
@@ -280,6 +289,8 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  stdout_artifact_digest hyperfide.digest NOT NULL,
  execution_receipt_digest hyperfide.digest NOT NULL,
  verification_receipt_digest hyperfide.digest NOT NULL,
+ execution_receipt_artifact_digest hyperfide.digest NOT NULL,
+ verification_receipt_artifact_digest hyperfide.digest NOT NULL,
  manifest_artifact_digest hyperfide.digest NOT NULL,
  state text NOT NULL CHECK(state IN ('READY','NOT_READY','STALE','REVOKED')),
  failure_code text,
@@ -296,6 +307,9 @@ CREATE TABLE hyperfide.runtime_environment_observations (
  FOREIGN KEY(organisation_id,sandbox_id,slot_id,boot_generation) REFERENCES hyperfide.worker_slots(organisation_id,sandbox_id,id,boot_generation),
  FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
  FOREIGN KEY(organisation_id,source_repository_id,source_object_id) REFERENCES hyperfide.source_objects(organisation_id,repository_id,object_id),
+ FOREIGN KEY(organisation_id,source_repository_id,source_tree_id) REFERENCES hyperfide.source_objects(organisation_id,repository_id,object_id),
+ FOREIGN KEY(organisation_id,run_id,execution_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,run_id,verification_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,run_id,stdout_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,run_id,manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest)
 );
@@ -344,3 +358,49 @@ BEGIN
  RETURN NEW;
 END $$;
 CREATE TRIGGER provider_work_admission_immutable BEFORE UPDATE ON hyperfide.sandboxes FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_work_admission_immutable();
+
+-- Effective result environments are immutable children of an accepted pool policy.
+-- Only the trusted measured preparation producer may publish these rows.
+CREATE TABLE hyperfide.provider_profile_lineage (
+ organisation_id uuid NOT NULL,
+ id uuid NOT NULL,
+ pool_id uuid NOT NULL,
+ configuration_digest hyperfide.digest NOT NULL,
+ parent_profile_id uuid NOT NULL,
+ parent_preparation_digest hyperfide.digest NOT NULL,
+ derived_profile_id uuid NOT NULL,
+ derived_preparation_digest hyperfide.digest NOT NULL,
+ source_run_id uuid NOT NULL,
+ source_manifest_digest hyperfide.digest NOT NULL,
+ source_manifest_artifact_digest hyperfide.digest NOT NULL,
+ execution_receipt_artifact_digest hyperfide.digest NOT NULL,
+ verification_receipt_artifact_digest hyperfide.digest NOT NULL,
+ accepted_policy_digest hyperfide.digest NOT NULL,
+ lineage_digest hyperfide.digest NOT NULL,
+ allowed_delta jsonb NOT NULL CHECK(allowed_delta='["source","dependency_pins","build_config_pins"]'::jsonb),
+ state text NOT NULL CHECK(state IN ('QUALIFIED','STALE','REVOKED')),
+ observed_at timestamptz NOT NULL,
+ expires_at timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,id),
+ UNIQUE(organisation_id,pool_id,configuration_digest,derived_profile_id,derived_preparation_digest),
+ CHECK(parent_profile_id<>derived_profile_id AND parent_preparation_digest<>derived_preparation_digest),
+ CHECK(expires_at>observed_at),
+ FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
+ FOREIGN KEY(organisation_id,parent_profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
+ FOREIGN KEY(organisation_id,derived_profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
+ FOREIGN KEY(organisation_id,source_run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,source_run_id,source_manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,source_run_id,execution_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
+ FOREIGN KEY(organisation_id,source_run_id,verification_receipt_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest)
+);
+CREATE TRIGGER provider_profile_lineage_immutable BEFORE UPDATE ON hyperfide.provider_profile_lineage FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_prepared_immutable();
+
+CREATE TRIGGER provider_intent_identity_immutable BEFORE UPDATE ON hyperfide.provisioning_intents FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','pool_id','sandbox_id','configuration_digest','kind','preparation_purpose','profile_id','request_key','request_digest','payload_digest','operation','boot_generation');
+
+-- All provider authority writes retain the same supported transaction boundary.
+DO $$ DECLARE table_name text; BEGIN
+ FOREACH table_name IN ARRAY ARRAY['provider_pool_configurations','provider_quota_observations','provisioning_intents','provisioning_intent_reservations','provider_observations','provider_orphans','provider_pool_health','provider_relocation_plans','provider_connectivity_probes','provider_prepared_bases','provider_remote_operations','runtime_environment_observations','provider_process_candidates','provider_profile_lineage'] LOOP
+  EXECUTE format('CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation()',table_name);
+ END LOOP;
+END $$;
