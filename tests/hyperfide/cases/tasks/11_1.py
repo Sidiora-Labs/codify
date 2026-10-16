@@ -163,7 +163,7 @@ def main():
 
         def inventory(f):
             manifest=f.create()
-            expect(set(manifest)=={"schema_version","profile","files","directories","scan","digest"},
+            expect(set(manifest)=={"schema_version","profile","files","directories","symlinks","hardlinks","scan","digest"} and manifest["schema_version"]==2,
                    "manifest shape differs from contract")
             actual={p.relative_to(f.candidate).as_posix():p for p in f.candidate.rglob("*") if p.is_file()}
             rows=manifest["files"]
@@ -281,7 +281,7 @@ def main():
             f.reject({"candidate_path":"alias/empty","profile":f.profile,"scan_policy":SCAN})
         case("filesystem.ancestor-symlink",ancestor_symlink)
         def hardlink(f):
-            os.link(f.candidate/".hidden",f.candidate/"hardlinked")
+            os.link(f.candidate/".hidden",f.base/"external-hardlinked")
             f.reject()
         case("filesystem.hardlink",hardlink)
         def fifo(f):
@@ -575,9 +575,157 @@ def main():
             shutil.rmtree(f.candidate);f.candidate.mkdir()
             f.reject()
         case("filesystem.empty-candidate",empty_candidate)
+        link_cases(case)
 
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
     return 1 if FAILED else 0
 
+
+def install_local_package(candidate,manager):
+    package=candidate/"local-pkg";package.mkdir()
+    (package/"package.json").write_text(json.dumps({"name":"hf-link-fixture","version":"1.0.0","bin":{"hf-link-fixture":"bin.js"}}))
+    (package/"bin.js").write_text("#!/usr/bin/env node\nprocess.stdout.write('actual-local-package\\n');\n");(package/"bin.js").chmod(0o755)
+    (candidate/"package.json").write_text(json.dumps({"name":"hf-install-fixture","version":"1.0.0","private":True,"dependencies":{"hf-link-fixture":"file:./local-pkg"}}))
+    configroot=Path(tempfile.mkdtemp(prefix="package-config-",dir=candidate.parent))
+    userconfig=configroot/"user.conf";globalconfig=configroot/"global.conf";userconfig.write_text("");globalconfig.write_text("")
+    env=os.environ.copy();env.update(NPM_CONFIG_USERCONFIG=str(userconfig),NPM_CONFIG_GLOBALCONFIG=str(globalconfig),COREPACK_ENABLE_NETWORK="0",COREPACK_ENABLE_DOWNLOAD_PROMPT="0")
+    if manager=="npm":
+        argv=["npm","install","--ignore-scripts","--offline","--no-audit","--no-fund"]
+        lock="package-lock.json"
+    else:
+        argv=["pnpm","install","--ignore-scripts","--offline","--no-frozen-lockfile","--store-dir",str(candidate/".pnpm-store"),"--package-import-method=hardlink"]
+        lock="pnpm-lock.yaml"
+    result=subprocess.run(argv,cwd=candidate,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=60)
+    expect(result.returncode==0,"actual "+manager+" local install failed: "+result.stderr[-1500:])
+    version=subprocess.check_output([manager,"--version"],env=env,text=True).strip()
+    executed=subprocess.run([str(candidate/"node_modules/.bin/hf-link-fixture")],cwd=candidate,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=10)
+    expect(executed.returncode==0 and executed.stdout=="actual-local-package\n","actual installed bin did not execute")
+    return {"manager":manager,"version":version,"lock":lock}
+
+def link_cases(case):
+    def internal(f):
+        (f.candidate/"link").symlink_to(".hidden")
+        manifest=f.create()
+        expect(manifest["symlinks"]==[{"path":"link","target":".hidden","digest":digest(b".hidden")}],"exact link bytes not represented")
+        row,_=f.verify(manifest);expect(row.get("ok"),"valid internal link failed roundtrip")
+    case("links.internal-file-roundtrip",internal)
+    def directory_graph(f):
+        (f.candidate/"a").mkdir();(f.candidate/"b").mkdir()
+        (f.candidate/"a/to-b").symlink_to("../b",target_is_directory=True)
+        (f.candidate/"b/to-a").symlink_to("../a",target_is_directory=True)
+        manifest=f.create();expect(len(manifest["symlinks"])==2,"ordinary cyclic package directory graph rejected")
+    case("links.package-directory-cycle-allowed",directory_graph)
+    def target_drift(f):
+        (f.candidate/"link").symlink_to(".hidden");manifest=f.create()
+        (f.candidate/"link").unlink();(f.candidate/"link").symlink_to("./.hidden")
+        row,_=f.verify(manifest);expect(row.get("ok") is False,"equivalent target spelling drift was invisible")
+    case("links.exact-target-drift",target_drift)
+    def absolute(f):
+        (f.candidate/"link").symlink_to(f.candidate/".hidden");f.reject()
+    case("links.absolute-target-denied",absolute)
+    def escape(f):
+        (f.base/"outside").write_bytes(b"not-candidate")
+        (f.candidate/"link").symlink_to("../../outside");f.reject()
+    case("links.relative-escape-denied",escape)
+    def intermediate(f):
+        (f.candidate/"link").symlink_to("../candidate/.hidden");f.reject()
+    case("links.intermediate-escape-denied",intermediate)
+    def dangling(f):
+        (f.candidate/"link").symlink_to("missing");f.reject()
+    case("links.dangling-denied",dangling)
+    def loop(f):
+        (f.candidate/"a").symlink_to("b");(f.candidate/"b").symlink_to("a");f.reject()
+    case("links.resolution-loop-denied",loop)
+    def non_directory(f):
+        (f.candidate/"link").symlink_to(".hidden/../binary.dat");f.reject()
+    case("links.non-directory-component-denied",non_directory)
+    def invalid_utf8(f):
+        os.symlink(b"\xff",os.fsencode(f.candidate/"link"));f.reject()
+    case("links.non-utf8-target-denied",invalid_utf8)
+    def repeated(f):
+        (f.candidate/"a").symlink_to(".",target_is_directory=True)
+        (f.candidate/"b").symlink_to("/".join(["a"]*41))
+        try:(f.candidate/"b").stat()
+        except OSError as error:expect(error.errno==40,"actual filesystem did not return ELOOP")
+        else:raise AssertionError("actual filesystem accepted >40 symlink traversals")
+        f.reject()
+    case("links.total-traversal-budget",repeated)
+    def finite_repetition(f):
+        (f.candidate/"a").symlink_to(".",target_is_directory=True)
+        (f.candidate/"b").symlink_to("a/a/a/binary.dat")
+        f.create()
+    case("links.finite-repeated-alias-allowed",finite_repetition)
+    def canary(f):
+        target="empty/../binary.dat";(f.candidate/"link").symlink_to(target)
+        policy=copy.deepcopy(SCAN);policy["secret_canaries"].append(target)
+        row,proc=f.invoke(payload={"candidate_path":"candidate","profile":f.profile,"scan_policy":policy})
+        expect(row.get("ok") is False and target not in proc.stdout+proc.stderr,"raw target canary leaked/accepted")
+    case("links.target-canary-denied",canary)
+    def hardlinks(f):
+        os.link(f.candidate/".hidden",f.candidate/"alias")
+        manifest=f.create()
+        expect(manifest["hardlinks"]==[{"paths":[".hidden","alias"]}],"internal aliases omitted from identity")
+        row,_=f.verify(manifest);expect(row.get("ok"),"internal hardlink roundtrip refused")
+    case("links.internal-hardlink-group",hardlinks)
+    def alias_drift(f):
+        os.link(f.candidate/".hidden",f.candidate/"alias");manifest=f.create()
+        (f.candidate/"alias").unlink();(f.candidate/"alias").write_bytes((f.candidate/".hidden").read_bytes())
+        row,_=f.verify(manifest);expect(row.get("ok") is False,"lost alias relationship with equal bytes was invisible")
+    case("links.hardlink-alias-drift",alias_drift)
+    def external_alias(f):
+        os.link(f.candidate/".hidden",f.base/"outside-alias");f.reject()
+    case("links.external-hardlink-denied",external_alias)
+    def legacy(f):
+        manifest=f.create();manifest["schema_version"]=1;manifest.pop("symlinks");manifest.pop("hardlinks")
+        manifest["digest"]=digest(canonical({key:value for key,value in manifest.items() if key!="digest"}))
+        row,_=f.verify(manifest);expect(row.get("ok"),"actual legacyv1 roundtrip refused")
+        (f.candidate/"link").symlink_to(".hidden")
+        row,_=f.verify(manifest);expect(row.get("ok") is False,"legacyv1 silently accepted unrepresented link")
+    case("links.legacy-v1-strict",legacy)
+    def installed(f,manager):
+        package=install_local_package(f.candidate,manager)
+        f.profile["package_managers"]=[{"name":manager,"version":package["version"],"locks":[f.pin(package["lock"])]}]
+        manifest=f.create()
+        expect(manifest["symlinks"],"actual package install created no inventoried links")
+        if manager=="pnpm":expect(manifest["hardlinks"],"actual pnpm hardlink installation was not measured")
+        row,_=f.verify(manifest);expect(row.get("ok"),"actual "+manager+" inventory failed roundtrip")
+    case("links.actual-npm-install",lambda f:installed(f,"npm"))
+    case("links.actual-pnpm-install",lambda f:installed(f,"pnpm"))
+    def mutation(f,kind):
+        if kind=="symlink":(f.candidate/"a-link").symlink_to(".hidden")
+        if kind=="hardlink":os.link(f.candidate/".hidden",f.candidate/"a-alias")
+        target=f.candidate/"z-runtime"
+        executable=subprocess.check_output(["node","-p","process.execPath"],text=True).strip();shutil.copyfile(executable,target)
+        libc=ctypes.CDLL(None,use_errno=True);fd=libc.inotify_init1(os.O_NONBLOCK|os.O_CLOEXEC)
+        expect(fd>=0,"inotify unavailable");stop=threading.Event();seen=[];errors=[]
+        try:
+            expect(libc.inotify_add_watch(fd,os.fsencode(target),0x20)>=0,"actual later-file watch failed")
+            def mutate():
+                try:
+                    while not stop.is_set():
+                        if select.select([fd],[],[],.1)[0]:
+                            os.read(fd,65536)
+                            if kind=="symlink":
+                                (f.candidate/"a-link").unlink();(f.candidate/"a-link").symlink_to("../../outside")
+                            elif kind=="hardlink":
+                                os.link(f.candidate/".hidden",f.base/"late-outside-alias")
+                            else:(f.candidate/"late-added").write_bytes(b"new-file")
+                            seen.append(True);return
+                except Exception as error:errors.append(str(error))
+            thread=threading.Thread(target=mutate,daemon=True);thread.start()
+            try:row,_=f.invoke()
+            finally:stop.set();thread.join(timeout=3)
+            expect(seen and not errors and not thread.is_alive(),"actual concurrent mutation did not complete")
+            expect(row.get("ok") is False,"concurrent "+kind+" mutation escaped inventory closure")
+        finally:stop.set();os.close(fd)
+    for kind in ["symlink","hardlink","directory"]:
+        case("links.concurrent-"+kind+"-mutation",lambda f,kind=kind:mutation(f,kind))
+
 if __name__=="__main__":
+    if "--links" in sys.argv:
+        with tempfile.TemporaryDirectory(prefix="hyperfide-links-") as folder:
+            def case(identity,callback):check("preparation."+identity,lambda:using(Path(folder),callback))
+            link_cases(case)
+        print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
+        sys.exit(1 if FAILED else 0)
     sys.exit(main())
