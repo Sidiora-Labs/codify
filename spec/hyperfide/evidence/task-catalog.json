@@ -40,7 +40,9 @@
         "tests/hyperfide/cases/tasks/27_1.py",
         "tests/hyperfide/registrations/27.1.json",
         "tests/hyperfide/bootstrap-contract.md",
-        "tests/hyperfide/test_required_artifact_receipts.py"
+        "tests/hyperfide/test_required_artifact_receipts.py",
+        "tests/hyperfide/inspect-proof.py",
+        "tests/hyperfide/test_inspect_proof.py"
       ],
       "do_steps": [
         "Bootstrap the first disposable remote workspace through an existing approved provider SDK/CLI or remote-access tool, before Hyperfide adapters exist. Record resource IDs/credentials references/owner/expiry in a durable bootstrap ledger; edit/build/execute the harness remotely, verify cleanup, and import surviving resources into Hyperfide inventory when available. No bootstrap build or implementation runs on the supervision host.",
@@ -601,7 +603,8 @@
         "tests/hyperfide/cases/support/postgres_cluster.py",
         "services/hyperfide/src/storage/runtime.ts",
         "services/hyperfide/src/storage/transactions.ts",
-        "services/hyperfide/src/storage/authority_journal.ts"
+        "services/hyperfide/src/storage/authority_journal.ts",
+        "services/hyperfide/src/storage/dispositions.ts"
       ],
       "do_steps": [
         "Implement checksummed schema migration coordination, authority epoch bootstrap and configurable acknowledged-write durability outside the main failure domain.",
@@ -775,7 +778,8 @@
         "tests/hyperfide/registrations/14.2.json",
         "services/hyperfide/components/14.2.json",
         "services/hyperfide/src/transport/isolation.ts",
-        "tests/hyperfide/cases/tasks/14_isolation_transport.py"
+        "tests/hyperfide/cases/tasks/14_isolation_transport.py",
+        "services/hyperfide/src/transport/writer_observation.ts"
       ],
       "do_steps": [
         "Implement distinct image/build/runtime/process layers, secret-reference resolution, designated-canary redaction and revoke/rotate protocols.",
@@ -1012,7 +1016,9 @@
         "tests/hyperfide/manifests/tasks/2.3.json",
         "tests/hyperfide/cases/tasks/2_3.py",
         "tests/hyperfide/registrations/2.3.json",
-        "services/hyperfide/components/2.3.json"
+        "services/hyperfide/components/2.3.json",
+        "services/hyperfide/src/spec/import.ts",
+        "services/hyperfide/src/spec/dependencies.ts"
       ],
       "do_steps": [
         "Implement manager proposals, impact computation and atomic revision admission for task/dependency changes with active attempts.",
@@ -1684,7 +1690,8 @@
         "5.2",
         "6.1",
         "1.1",
-        "5.4"
+        "5.4",
+        "6.2"
       ],
       "reqs": [
         "5.3"
@@ -1881,7 +1888,8 @@
       "wave": 14,
       "requires": [
         "3.1",
-        "6.3"
+        "6.3",
+        "6.2"
       ],
       "reqs": [
         "1.2"
@@ -2113,7 +2121,9 @@
       "wave": 14,
       "requires": [
         "12.1",
-        "6.3"
+        "6.3",
+        "6.2",
+        "5.1"
       ],
       "reqs": [
         "12.2"
@@ -2123,7 +2133,8 @@
         "tests/hyperfide/manifests/tasks/12.2.json",
         "tests/hyperfide/cases/tasks/12_2.py",
         "tests/hyperfide/registrations/12.2.json",
-        "src/hyperfide/components/12.2.kvx"
+        "src/hyperfide/components/12.2.kvx",
+        "services/hyperfide/src/runner/dispatch.ts"
       ],
       "do_steps": [
         "Durably accept generation-bound starts before spawn, record process/session associations and retain supervisor-owned IPC independently of controller transport.",
@@ -2280,7 +2291,8 @@
         "tests/hyperfide/manifests/tasks/10.3.json",
         "tests/hyperfide/cases/tasks/10_3.py",
         "tests/hyperfide/registrations/10.3.json",
-        "services/hyperfide/components/10.3.json"
+        "services/hyperfide/components/10.3.json",
+        "services/hyperfide/src/providers/blaxel/images.ts"
       ],
       "do_steps": [
         "Verify actual configuration on named create-or-get; treat mutable/nonunique externalID as metadata; persist process IDs/exits/logs.",
@@ -2321,7 +2333,9 @@
         "tests/hyperfide/registrations/11.4.json",
         "services/hyperfide/components/11.4.json",
         "services/hyperfide/migrations/0011-prewarm.sql",
-        "services/hyperfide/components/11.4-provisioner.json"
+        "services/hyperfide/components/11.4-provisioner.json",
+        "services/hyperfide/src/preparation/effective.ts",
+        "services/hyperfide/src/preparation/recipe.ts"
       ],
       "do_steps": [
         "Dispatch prerequisite installation and indexing preparation remotely with bounded retry/diagnostics and capacity reservations driven by eligible work.",
@@ -2395,7 +2409,9 @@
         "tests/hyperfide/manifests/tasks/13.1.json",
         "tests/hyperfide/cases/tasks/13_1.py",
         "tests/hyperfide/registrations/13.1.json",
-        "src/hyperfide/components/13.1.kvx"
+        "src/hyperfide/components/13.1.kvx",
+        "runtime/supervisory_host.py",
+        "tests/hyperfide/cases/tasks/13_1_host.py"
       ],
       "do_steps": [
         "Qualify actual launch/input/output/steer/cancel/child/resume capabilities for each pinned CLI/auth mode and resolve user frontier aliases from real configuration.",
@@ -2680,7 +2696,10 @@
         "services/hyperfide/components/12.4.json",
         "services/hyperfide/src/runner/bridge.ts",
         "src/hyperfide/job.c",
-        "services/hyperfide/src/runner/executor.ts"
+        "services/hyperfide/src/runner/executor.ts",
+        "tests/hyperfide/cases/tasks/12_4_executor.py",
+        "src/hyperfide/preparation_stage.c",
+        "tests/hyperfide/support/preparation_stage_fixture.py"
       ],
       "do_steps": [
         "Implement distinct control semantics with fenced authority and artifact-safe cleanup; report confirmed and unresolved termination explicitly.",
@@ -2760,7 +2779,9 @@
         "tests/hyperfide/registrations/13.4.json",
         "services/hyperfide/components/13.4.json",
         "services/hyperfide/src/agents/supervision.ts",
-        "services/hyperfide/components/13.4-supervision.json"
+        "services/hyperfide/components/13.4-supervision.json",
+        "services/hyperfide/src/agents/dispatch.ts",
+        "services/hyperfide/components/13.4-dispatch.json"
       ],
       "do_steps": [
         "Bind provider/model quotas and qualified approval/permission behaviour to the approved run policy; enforce bounded retry and escalation.",
@@ -2790,7 +2811,8 @@
         "16.1",
         "27.1",
         "12.4",
-        "5.1"
+        "5.1",
+        "11.4"
       ],
       "reqs": [
         "16.2"
@@ -2800,7 +2822,9 @@
         "tests/hyperfide/manifests/tasks/16.2.json",
         "tests/hyperfide/cases/tasks/16_2.py",
         "tests/hyperfide/registrations/16.2.json",
-        "services/hyperfide/components/16.2.json"
+        "services/hyperfide/components/16.2.json",
+        "services/hyperfide/src/assurance/preparation.ts",
+        "services/hyperfide/migrations/0016-qualification.sql"
       ],
       "do_steps": [
         "Execute registered gates with complete command/environment/exit/artifact receipts; reject skipped/empty/unknown/interrupted/stale required checks.",
@@ -3212,7 +3236,8 @@
       "requires": [
         "17.1",
         "17.2",
-        "16.4"
+        "16.4",
+        "5.1"
       ],
       "reqs": [
         "17.3"
@@ -3246,14 +3271,16 @@
       "id": "17.4",
       "title": "Dispatch remote reproductions and contract/system qualification jobs",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "17.2",
         "16.2",
         "11.3",
         "12.4",
         "15.2",
-        "2.4"
+        "2.4",
+        "17.3",
+        "16.3"
       ],
       "reqs": [
         "17.4"
@@ -4165,7 +4192,8 @@
         "4.4",
         "24.3",
         "26.4",
-        "25.4"
+        "25.4",
+        "27.1"
       ],
       "reqs": [
         "25.2"
