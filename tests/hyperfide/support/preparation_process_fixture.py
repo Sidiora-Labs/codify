@@ -121,7 +121,15 @@ int main(int argc,char **argv){
   if(child==0){setsid();signal(SIGTERM,SIG_IGN);for(;;)pause();}
   printf("%ld\n",(long)child);fflush(stdout);return 0;
  }
- if(!strcmp(mode,"deadline")||!strcmp(mode,"parent-death")){
+ if(!strcmp(mode,"parent-death")){
+  int ready[2];if(pipe(ready))return 97;pid_t detached=fork();if(detached<0)return 98;
+  if(detached==0){close(ready[0]);if(setsid()<0||prctl(PR_SET_PDEATHSIG,0))_exit(99);signal(SIGTERM,SIG_IGN);
+   if(write(ready[1],"R",1)!=1)_exit(100);
+   close(ready[1]);for(;;)pause();}
+  close(ready[1]);char noticed;if(read(ready[0],&noticed,1)!=1)return 101;close(ready[0]);
+  printf("%ld %ld\n",(long)getpid(),(long)detached);fflush(stdout);for(;;)pause();
+ }
+ if(!strcmp(mode,"deadline")){
   printf("%ld\n",(long)getpid());fflush(stdout);
   for(;;)pause();
  }
@@ -288,7 +296,9 @@ def main():
         ready_until = time.monotonic() + 5
         while time.monotonic() < ready_until and not (folder / "stdout").stat().st_size:
             time.sleep(.01)
-        check("parent-death-real-child-started", (folder / "stdout").stat().st_size > 0)
+        observed_before_death = [int(value) for value in (folder / "stdout").read_text().split()]
+        check("parent-death-real-child-started", len(observed_before_death) == 2
+              and all(pid in uid_processes() for pid in observed_before_death))
         os.kill(controller.pid, signal.SIGKILL)
         controller.wait(timeout=5)
         cleanup_until = time.monotonic() + 5
