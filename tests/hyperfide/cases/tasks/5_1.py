@@ -197,7 +197,7 @@ def main():
    expect(f.request(altered,key="manager")[1].get("error",{}).get("code")=="IDEMPOTENCY_CONFLICT","Fresh inner request bypassed protocol identity")
   check("claim.protocol.identity",envelope_conflict)
   check("claim.no-false-qualification",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.tasks WHERE state IN ('QUALIFIED','INTEGRATED','DONE')")[0]["n"]==0,"Claim manufactured qualification"))
-  f.sql("UPDATE hyperfide.sandboxes SET desired_state='DESTROYED' WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["sandbox"]])
+  f.sql("UPDATE hyperfide.sandboxes SET desired_state='DESTROYED',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["sandbox"]])
   check("claim.destroy-intent.blocks-continuation",lambda:expect(f.primary("return leases.assertCurrentCompute(tx,data.token,{operation:'ADVANCE'});",{"token":f.claims["a"]["result"]["token"]}).get("error",{}).get("code")=="SANDBOX_NOT_ADMITTING","Destroy intent allowed continued execution"))
  finally:
   db=f.database;path=f.path;port=f.port;f.close()

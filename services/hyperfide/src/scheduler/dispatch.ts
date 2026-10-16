@@ -67,7 +67,7 @@ export class DispatchReconciler {
    try{await assertCurrentCompute(tx,token);authoritative=true;}
    catch(error){
     const code=typeof error==='object'&&error!==null&&'code' in error?String(error.code):'';
-    if(!['STALE_AUTHORITY_EPOCH','STALE_SANDBOX_BOOT','STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','ACTIVE_SUBMISSION_CUSTODY','EXECUTION_HELD','RUN_NOT_EXECUTING','STALE_TASK_SPEC','STALE_PREPARATION','COMPUTE_ALLOCATION_INVALID'].includes(code))throw error;
+    if(!['STALE_AUTHORITY_EPOCH','STALE_SANDBOX_BOOT','STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','ACTIVE_SUBMISSION_CUSTODY','EXECUTION_HELD','RUN_NOT_EXECUTING','STALE_TASK_SPEC','STALE_PREPARATION','COMPUTE_ALLOCATION_INVALID','COMPUTE_SANDBOX_BUDGET_INVALID','SANDBOX_NOT_ADMITTING'].includes(code))throw error;
    }
   }else{
    if(!observation.terminal_kind)fail('NATIVE_RECEIPT_INCOMPLETE','A terminal observation must identify the observed terminal condition');
@@ -158,7 +158,11 @@ export function createComponent(_startup:ComponentContext):Component{
    const input=fields(value,['token','request_id','leader_generation'],['package_generation']);
    const token=parseComputeToken(input.token),scope={organisation_id:token.organisation_id,run_id:token.run_id};
    const actor=actorFor(context,scope,{...input,authority_epoch:token.authority_epoch}),request=uuid(input.request_id,'request_id');
-   return gatewayFor(context,tx=>assertCurrentCompute(tx,token,{operation:'ADVANCE'})).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
+   return gatewayFor(context,async tx=>{
+    const previous=await tx.query<DispatchRow>('SELECT * FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[scope.organisation_id,scope.run_id,request]);
+    if(previous.rows[0]&&!sameToken(rowToken(scope,previous.rows[0]),token))fail('IDEMPOTENCY_CONFLICT','Dispatch request is already bound to a different immutable compute tuple');
+    await assertCurrentCompute(tx,token,{operation:'ADVANCE'});
+   }).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
     await lockRun(tx,scope);
     const task=await tx.query<{feature_package_id:string}>('SELECT feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
      [scope.organisation_id,scope.run_id,token.task_id]);

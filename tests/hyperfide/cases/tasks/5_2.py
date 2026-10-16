@@ -57,7 +57,10 @@ def main():
   data={"organisation_id":recovery.ids["organisation"],"run_id":recovery.ids["run"],"expected_run_epoch":recovery.ids["epoch"],"target_epoch":uid(),"recovery_operation_id":uid()}
   wrong=dict(data,expected_run_epoch=uid())
   check("lease.recovery.exact-source-epoch",lambda:expect(recovery.primary("return leases.revokeRunForRecovery(tx,data.input);",{"input":wrong}).get("error",{}).get("code")=="STALE_AUTHORITY_EPOCH","Foreign source epoch revoked compute"))
-  check("lease.recovery.transaction-rollback",lambda:expect(recovery.primary("await leases.revokeRunForRecovery(tx,data.input);throw Error('bounded rollback injection');",{"input":data}).get("error",{}).get("code")=="ERROR" and recovery.sql("SELECT count(*)::int n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]["n"]==1 and recovery.counts()==before,"Rollback lost authority or resource counters"))
+  def recovery_rollback():
+   outcome=recovery.primary("await leases.lockComputeFenceTargets(tx,[data.token]);await leases.revokeRunForRecovery(tx,data.input);throw Error('bounded rollback injection');",{"input":data,"token":token})
+   expect("error" in outcome and "result" not in outcome and recovery.sql("SELECT count(*)::int n FROM hyperfide.attempts WHERE compute_authority='CURRENT'")[0]["n"]==1 and recovery.counts()==before,"Rollback lost authority/counters: "+json.dumps(outcome))
+  check("lease.recovery.transaction-rollback",recovery_rollback)
   revoked=recovery.primary("return leases.revokeRunForRecovery(tx,data.input);",{"input":data})["result"]
   check("lease.recovery.revokes-current",lambda:expect(revoked["revoked_attempts"]=="1" and revoked["revoked_allocations"]=="1" and recovery.sql("SELECT count(*)::int n FROM hyperfide.compute_leases WHERE state='ACTIVE'")[0]["n"]==0,"Offline revocation left active compute"))
   check("lease.recovery.retains-physical-debt",lambda:expect(recovery.counts()==before and any(x.startswith("sandbox-charge:") for x in revoked["retained_debt_references"]) and recovery.sql("SELECT state FROM hyperfide.sandbox_execution_charges")[0]["state"]=="RELEASE_PENDING","Offline recovery freed unknown physical capacity"))
