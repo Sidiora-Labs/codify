@@ -55,7 +55,7 @@ export function createComponent(ctx:ComponentContext):Component{
   const {audit,packet}=await auditFor(client,q.scope,q.data.audit_id,'spec_critique');
   if(audit.status!=='accepted_advice')return {state:'ABSTAINED',reason:audit.status,authority:'NONE',applied:false};
   const findings=validateCritique({findings:q.data.findings},packet.state);
-  return persistProposal(client,q.scope,q.data.audit_id,{findings,source_packet_id:packet.id,packet_hash:packet.packet_hash,revision:packet.revision,structural_validation:'UNRUN',impact_validation:'UNRUN'});
+  return persistProposal(client,q.scope,q.data.audit_id,{findings,source_packet_id:packet.id,packet_hash:packet.packet_hash,revision:packet.revision,primary_revision:packet.state.primary_revision,structural_validation:'UNRUN',impact_validation:'UNRUN'});
  });}
  }};
 }
