@@ -96,12 +96,25 @@ def run():
     effects = [small("effect", effect_key="same"), small("effect", False, 2, effect_key="same")]
     check("campaign.deterministic.duplicate-effects", lambda: len(model(effects).effects) == 1)
     revision = "a" * 40
-    publication = [claim, small("submit", True, 2, task_id="task", attempt_id="attempt", generation=1, revision=revision), small("qualify", True, 3, task_id="task", revision=revision, evidence_valid=True), small("publish", True, 4, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True), small("publish", False, 5, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True)]
+    publication = [claim, small("submit", True, 2, task_id="task", attempt_id="attempt", generation=1, custody_generation=1, revision=revision), small("qualify", True, 3, task_id="task", attempt_id="attempt", generation=1, custody_generation=1, revision=revision, evidence_valid=True), small("publish", True, 4, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True), small("publish", False, 5, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True)]
     check("campaign.deterministic.git-cas-lost-ack", lambda: model(publication).publications == {"refs/heads/main": revision})
     unsigned = copy.deepcopy(publication[:4]);unsigned[-1]["gateway_authorised"] = False
     check("campaign.deterministic.worker-push-rejected", lambda: reject(lambda: model(unsigned)))
     restored = publication[:3] + [small("epoch", True, 4, new_epoch=2), small("publish", False, 5, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True)]
     check("campaign.deterministic.restore-fences-old-proof", lambda: not model(restored).publications)
+    custody_claim = small("claim", False, 3, task_id="task", attempt_id="new", slot_id="new", generation=2)
+    check("campaign.deterministic.submission-retains-custody", lambda: bool(model(publication[:2]+[custody_claim]).state()["custody"]))
+    bad_custody=copy.deepcopy(publication[:3]);bad_custody[-1]["custody_generation"]=2
+    check("campaign.deterministic.qualification-custody-fenced", lambda: reject(lambda:model(bad_custody)))
+    release=small("custody_expire",True,3,task_id="task",attempt_id="attempt",generation=1,custody_generation=1)
+    reclaim=small("claim",True,4,task_id="task",attempt_id="new",slot_id="new",generation=2)
+    check("campaign.deterministic.custody-expiry-releases-task",lambda:model(publication[:2]+[release,reclaim]).owners["task"][0]=="new")
+    old_effect=small("effect",False,2,effect_key="stale")
+    check("campaign.deterministic.restore-rejects-old-effects",lambda:not model([small("epoch",True,new_epoch=2),old_effect]).effects)
+    fresh_claim=small("claim",True,3,task_id="task",attempt_id="fresh",slot_id="fresh",generation=1);fresh_claim["epoch"]=2
+    check("campaign.deterministic.restore-resets-epoch-generations",lambda:model([claim,small("epoch",True,2,new_epoch=2),fresh_claim]).owners["task"][0]=="fresh")
+    prior_effect=small("effect",True,effect_key="external");replay=small("effect",False,3,effect_key="external");replay["epoch"]=2
+    check("campaign.deterministic.restore-preserves-effect-idempotency",lambda:model([prior_effect,small("epoch",True,2,new_epoch=2),replay]).effects=={"external"})
     reversed_events = copy.deepcopy(trace()[:2]);reversed_events[1]["sequence"] = 1
     check("campaign.deterministic.reordered-observations", lambda: reject(lambda: model(reversed_events)))
     check("campaign.deterministic.unknown-event", lambda: reject(lambda: model([small("invented", False)])))
@@ -111,10 +124,19 @@ def run():
     commands = d.schedule(profile, 17)
     check("campaign.deterministic.seeded-schedule", lambda: commands == d.schedule(profile, 17) and commands != d.schedule(profile, 19))
     check("campaign.deterministic.schedule-workload-count", lambda: len([row for row in commands if row["operation"] == "session"]) == 1500)
-    metric = {"workload_digest":"w","environment_digest":"e","units":"ms","measurement_kind":"REPLAY", **{key:1 for key in ("p50","p95","p99","throughput","error_count","connection_peak","lock_wait_count")}}
+    metric = {"workload_digest":"a"*64,"environment_digest":"b"*64,"provenance_digest":"c"*64,"sample_count":3,"quantile_basis":"HISTOGRAM_UPPER_BOUND","units":{"p50":"ms","p95":"ms","p99":"ms","throughput":"1/s","error_count":"count","connection_peak":"count","lock_wait_count":"count"},"measurement_kind":"REPLAY", **{key:"1" for key in ("p50","p95","p99","throughput","error_count","connection_peak","lock_wait_count")}}
     check("campaign.deterministic.baseline-descriptive", lambda: d.compare_metrics(metric, metric)["performance_claim"] == "DESCRIPTIVE_ONLY")
     other = {**metric,"environment_digest":"different"}
     check("campaign.deterministic.incomparable-baseline", lambda: reject(lambda: d.compare_metrics(metric, other)))
+    check("campaign.deterministic.histogram-bound-semantics", lambda:d.compare_metrics(metric,metric)["quantile_basis"]=="HISTOGRAM_UPPER_BOUND" and d.compare_metrics(metric,metric)["p95"]["current"]=="1")
+    exact={**metric,"quantile_basis":"EXACT_SAMPLES"}
+    check("campaign.deterministic.quantile-semantics-not-interchangeable",lambda:reject(lambda:d.compare_metrics(metric,exact)))
+    dimensions=copy.deepcopy(metric);dimensions["units"]["throughput"]="ms"
+    check("campaign.deterministic.metric-dimensions-preserved",lambda:reject(lambda:d.compare_metrics(dimensions,dimensions)))
+    nonfinite={**metric,"p99":"Infinity"}
+    check("campaign.deterministic.nonfinite-measurement-rejected",lambda:reject(lambda:d.compare_metrics(nonfinite,nonfinite)))
+    unordered={**metric,"p50":"3"}
+    check("campaign.deterministic.quantile-order-preserved",lambda:reject(lambda:d.compare_metrics(unordered,unordered)))
     with tempfile.TemporaryDirectory(prefix="hyperfide-campaign-component-") as temp:
         root = Path(temp)
         corpus = root / "synthetic-component-input.kvx"
@@ -124,7 +146,7 @@ def run():
         corpus.write_text("changed component fixture")
         check("campaign.deterministic.corpus-tamper", lambda: reject(lambda: d.pinned_file(record, root)))
         fixture = root / "component-command.py"
-        fixture.write_text('import hashlib,json,sys,time\ndata=sys.stdin.buffer.read();q=json.loads(data)\nif q.get("mode")=="timeout":time.sleep(5)\nif q.get("mode")=="exit":raise SystemExit(7)\nprint(json.dumps({"schema_version":1,"request_sha256":hashlib.sha256(data).hexdigest() if q.get("mode")!="wrong" else "0"*64,"value":42}))\n')
+        fixture.write_text("import hashlib,json,sys,time,subprocess,os\nfrom pathlib import Path\ndata=sys.stdin.buffer.read();q=json.loads(data)\nif q.get('mode') in ('escape-success','escape-timeout'):\n child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)',q['marker']],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)\n identity=Path('/proc/'+str(child.pid)+'/stat').read_text().rsplit(')',1)[1].split()[19]\n Path(q['pid_file']).write_text(json.dumps({'pid':child.pid,'start_ticks':identity,'marker':q['marker']}))\n if q['mode']=='escape-timeout':time.sleep(5)\nif q.get('mode')=='timeout':time.sleep(5)\nif q.get('mode')=='exit':raise SystemExit(7)\nprint(json.dumps({'schema_version':1,'request_sha256':hashlib.sha256(data).hexdigest()if q.get('mode')!='wrong'else'0'*64,'value':42}))\n")
         spec = {"argv":[str(Path(sys.executable).resolve()),str(fixture)],"cwd":str(root),"pins":[pin(sys.executable),pin(fixture)],"timeout_seconds":1,"required_env":[]}
         def adapter(name, specification=None):
             return d.CommandAdapter(specification or spec, root, root / name)
@@ -137,6 +159,58 @@ def run():
         timeout = {**spec,"timeout_seconds":0.05}
         check("campaign.deterministic.timeout-is-unknown", lambda: reject(lambda: adapter("timeout", timeout).call({"mode":"timeout"}), d.Blocked))
         check("campaign.deterministic.unknown-intent-retained", lambda: len(list((root/"timeout").glob("*/unknown.json"))) == 1 and len(list((root/"timeout").glob("*/intent.json"))) == 1)
+        def escaped(mode):
+            import signal, uuid
+            pid_file=root/(mode+'.pid.json')
+            marker='hyperfide-owned-escape-'+uuid.uuid4().hex
+            selected={**spec,'timeout_seconds':0.5 if mode=='escape-timeout' else 2}
+            rejected=reject(lambda:adapter(mode,selected).call({'mode':mode,'pid_file':str(pid_file),'marker':marker}),d.Blocked if mode=='escape-timeout'else d.CampaignError)
+            if not pid_file.is_file():raise AssertionError('real detached-child fixture did not start')
+            observed=json.loads(pid_file.read_text());pid=observed['pid'];identity=d.process_identity(pid)
+            executing=identity is not None and identity[0]==observed['start_ticks'] and identity[1]!='Z'
+            if executing:
+                fd=os.pidfd_open(pid,0)
+                try:
+                    if d.process_identity(pid)==identity:signal.pidfd_send_signal(fd,signal.SIGKILL,None,0)
+                finally:os.close(fd)
+                try:os.waitpid(pid,0)
+                except ChildProcessError:pass
+            cleanup_files=list((root/mode).glob('*/process-cleanup.json'))
+            if len(cleanup_files)!=1:raise AssertionError('missing durable process cleanup receipt')
+            cleanup=json.loads(cleanup_files[0].read_text())
+            return rejected and not executing and cleanup['complete'] and not cleanup['remaining_owned_pids'] and any(row['pid']==pid and row['start_ticks']==observed['start_ticks']for row in cleanup['owned_processes_observed'])
+        check('campaign.deterministic.normal-exit-detached-child',lambda:escaped('escape-success'))
+        check('campaign.deterministic.timeout-detached-child',lambda:escaped('escape-timeout'))
+        def interrupted():
+            from unittest.mock import patch
+            import signal,uuid
+            marker="hyperfide-interrupted-"+uuid.uuid4().hex
+            pid_file=root/"interrupted.pid.json"
+            original=d.subprocess.Popen.communicate
+            first=[True]
+            def interrupt(process,*args,**kwargs):
+                if first[0]:
+                    first[0]=False
+                    try:
+                        kwargs["timeout"]=0.2
+                        original(process,*args,**kwargs)
+                    except d.subprocess.TimeoutExpired:pass
+                    raise KeyboardInterrupt("actual component interrupt after Popen")
+                return original(process,*args,**kwargs)
+            with patch.object(d.subprocess.Popen,"communicate",interrupt):
+                rejected=reject(lambda:adapter("interrupted").call({"mode":"escape-timeout","pid_file":str(pid_file),"marker":marker}),d.Blocked)
+            observed=json.loads(pid_file.read_text());identity=d.process_identity(observed["pid"])
+            executing=identity is not None and identity[0]==observed["start_ticks"] and identity[1]!="Z"
+            if executing:
+                fd=os.pidfd_open(observed["pid"],0)
+                try:
+                    if d.process_identity(observed["pid"])==identity:signal.pidfd_send_signal(fd,signal.SIGKILL,None,0)
+                finally:os.close(fd)
+                try:os.waitpid(observed["pid"],0)
+                except ChildProcessError:pass
+            unknown=list((root/"interrupted").glob("*/unknown.json"))
+            return rejected and not executing and len(unknown)==1 and json.loads(unknown[0].read_text())["cause"]=="KeyboardInterrupt" and json.loads(unknown[0].read_text())["owned_process_cleanup"]["complete"]
+        check("campaign.deterministic.interrupted-detached-child",interrupted)
         unpinned = {**spec,"pins":[pin(fixture)]}
         check("campaign.deterministic.unpinned-executable", lambda: reject(lambda: adapter("unpinned", unpinned)))
     with tempfile.TemporaryDirectory(prefix="hyperfide-manifest-component-") as temporary:

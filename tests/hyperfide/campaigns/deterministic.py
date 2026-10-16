@@ -140,6 +140,126 @@ def load_manifest(path, kind):
     require(isinstance(manifest["adapters"], dict), "adapter map required")
     return manifest, path.parent
 
+
+def observer_trust(manifest, root):
+    pins=manifest['inputs'].get('observer_trust')
+    require(isinstance(pins,list) and len(pins)==1,'one approved pinned observer trust document required')
+    _,data=pinned_file(pins[0],root)
+    trust=decode(data)
+    required={'schema_version','controller_id','observer_id','key_id','roles','scope','public_key','verifier_executable'}
+    require(isinstance(trust,dict) and set(trust)==required and trust['schema_version']==1,'exact observer trust configuration required')
+    for key in ('controller_id','observer_id','key_id'):
+        require(isinstance(trust[key],str) and bool(trust[key]),'observer trust identity missing')
+    require(trust['observer_id']!=trust['controller_id'],'controller cannot be its own independent observer')
+    scope=trust['scope']
+    require(isinstance(scope,dict) and set(scope)=={'organisation_id','run_id','authority_epoch'},'exact trusted observer scope required')
+    require(all(isinstance(scope[key],str) and scope[key] for key in ('organisation_id','run_id')),'trusted organisation/run identities required')
+    integer(scope['authority_epoch'],'trusted observer authority epoch')
+    allowed={'DURABLE_READER','PROVIDER_READER','NATIVE_READER','MAIN_HOST_AUDITOR'}
+    require(isinstance(trust['roles'],list) and trust['roles']==sorted(set(trust['roles'])) and set(trust['roles'])<=allowed,'approved independent reader roles required')
+    _,key=pinned_file(trust['public_key'],root)
+    require(key.startswith(b'-----BEGIN PUBLIC KEY-----'),'pinned public verification key required')
+    executable,_=pinned_file(trust['verifier_executable'],root)
+    require(executable.is_absolute() and os.access(executable,os.X_OK),'pinned crypto verifier executable required')
+    return trust
+
+def verify_observation(observation, manifest, root, request, roles):
+    """Signature grants no authority: approved identities/roles/scope are the anchor."""
+    import tempfile
+    trust=observer_trust(manifest,root)
+    require(set(roles)<=set(trust['roles']),'observer lacks approved independent reader roles')
+    require(isinstance(observation,dict),'signed independent observation required')
+    proof=observation.get('provenance')
+    fields={'reader_id','key_id','scope','roles','source_revision','source_manifest_digest','request_sha256','observation_sha256','signature_hex'}
+    require(isinstance(proof,dict) and set(proof)==fields,'immutable signed read provenance required')
+    require(proof['reader_id']==trust['observer_id'] and proof['key_id']==trust['key_id'],'unapproved independent observer identity/key')
+    require(proof['scope']==trust['scope'] and proof['roles']==trust['roles'],'independent observer scope/roles mismatch')
+    require(proof['source_revision']==manifest['source_revision'] and proof['source_manifest_digest']==manifest['source_manifest_digest'],'signed observer source mismatch')
+    require(proof['request_sha256']==digest(canonical(request)+b'\n'),'signed observation is not bound to this exact campaign request')
+    unsigned={key:value for key,value in observation.items()if key!='provenance'}
+    require(proof['observation_sha256']==digest(canonical(unsigned)),'signed observation content changed')
+    signature=proof['signature_hex']
+    require(isinstance(signature,str) and re.fullmatch('[0-9a-f]{128}',signature),'Ed25519 signature required')
+    signed={key:value for key,value in proof.items()if key!='signature_hex'}
+    key,_=pinned_file(trust['public_key'],root)
+    executable,_=pinned_file(trust['verifier_executable'],root)
+    with tempfile.TemporaryDirectory(prefix='hyperfide-read-proof-') as directory:
+        directory=Path(directory);message=directory/'message.json';sig=directory/'signature.bin'
+        message.write_bytes(canonical(signed));sig.write_bytes(bytes.fromhex(signature))
+        result=subprocess.run([str(executable),'pkeyutl','-verify','-pubin','-inkey',str(key),'-rawin','-in',str(message),'-sigfile',str(sig)],capture_output=True,timeout=10)
+        require(result.returncode==0,'independent observation Ed25519 signature invalid')
+    return True
+
+def verify_full_receipt(pin, manifest, root, evidence=None, policy=None):
+    path,content=pinned_file(pin,root);receipt=decode(content)
+    require(isinstance(receipt,dict) and receipt.get('scope') in ('full-case','campaign') and receipt.get('full_case_status')=='PASS' and receipt.get('outcome')=='PASS','task-component or incomplete receipt cannot qualify a full obligation')
+    require(isinstance(receipt.get('source'),dict) and receipt['source'].get('commit')==manifest['source_revision'],'full receipt source revision mismatch')
+    cases=receipt.get('case_ids')
+    require(isinstance(cases,list) and cases and len(set(cases))==len(cases) and receipt.get('selected_case_ids')==cases,'full receipt must exercise every declared case')
+    require(path.parent.name=='receipts','canonical full campaign receipt path required')
+    campaign=path.parent.parent;full_path=campaign/'manifest.json'
+    require(full_path.is_file() and not full_path.is_symlink(),'canonical full manifest absent/unsafe')
+    data=full_path.read_bytes();require(digest(data)==receipt.get('manifest_sha256'),'full manifest differs from pinned receipt')
+    full=decode(data);actual_policy=full.get('policy',{})
+    require(actual_policy.get('source_manifest_digest')==manifest['source_manifest_digest'],'full receipt repository source set mismatch')
+    require(all(actual_policy.get(key)==value for key,value in (policy or {}).items()),'full receipt does not bind required campaign policy')
+    checker=Path(__file__).resolve().parents[1]/'check-evidence.py'
+    argv=[sys.executable,str(checker),'--campaign',str(campaign),'--receipt',path.stem]
+    started=time.monotonic_ns();result=subprocess.run(argv,capture_output=True,timeout=60)
+    if evidence is not None:
+        sealed_write(Path(evidence)/(pin['sha256']+'.json'),{'argv':argv,'checker_sha256':digest(checker.read_bytes()),'duration_ns':time.monotonic_ns()-started,'exit_code':result.returncode,'stdout_hex':result.stdout.hex(),'stderr_hex':result.stderr.hex()})
+    require(result.returncode==0,'canonical independent checker rejected full receipt')
+    return receipt
+
+def anchored_full_receipt(record, manifest, root, input_name, evidence=None, policy=None):
+    anchors=manifest['inputs'].get(input_name)
+    require(isinstance(anchors,list) and anchors,'externally approved full receipt anchors absent: '+input_name)
+    require(isinstance(record,dict) and set(record)=={'pin','trusted_anchor_sha256'},'exact externally anchored full receipt required')
+    require(record['pin'] in anchors and record['trusted_anchor_sha256']==record['pin']['sha256'],'receipt is not an approved full receipt anchor')
+    return verify_full_receipt(record['pin'],manifest,root,evidence,policy)
+
+def child_pids():
+    return {int(value) for value in Path('/proc/self/task/' + str(os.getpid()) + '/children').read_text().split()}
+
+def process_identity(pid):
+    try:
+        fields = Path('/proc/' + str(pid) + '/stat').read_text().rsplit(')', 1)[1].split()
+        return fields[19], fields[0]
+    except (OSError, IndexError):
+        return None
+
+def reap_owned_children(original, deadline_seconds=5):
+    found, reaped = {}, []
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        current = child_pids() - original
+        if not current:
+            break
+        for pid in current:
+            identity = process_identity(pid)
+            if identity is None:
+                continue
+            found[pid] = identity[0]
+            try:
+                descriptor = os.pidfd_open(pid, 0)
+                try:
+                    if process_identity(pid) == identity and identity[1] != 'Z':
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL, None, 0)
+                finally:
+                    os.close(descriptor)
+                try:
+                    exited, status = os.waitpid(pid, os.WNOHANG)
+                    if exited:
+                        reaped.append({'pid': exited, 'exit_code': os.waitstatus_to_exitcode(status)})
+                except ChildProcessError:
+                    pass
+            except ProcessLookupError:
+                pass
+        time.sleep(0.01)
+    remaining = child_pids() - original
+    return {'owned_processes_observed': [{'pid': pid, 'start_ticks': ticks} for pid, ticks in sorted(found.items())],
+            'remaining_owned_pids': sorted(remaining), 'reaped_exit_codes': reaped, 'complete': not remaining}
+
 class CommandAdapter:
     """Durable command boundary for actual component/API-owner bridges.
 
@@ -171,40 +291,74 @@ class CommandAdapter:
         self.evidence.mkdir(parents=True, exist_ok=True)
 
     def call(self, request):
-        # Detect changed executables/scripts between campaign calls.
-        for pin in self.spec["pins"]:
+        for pin in self.spec['pins']:
             pinned_file(pin, self.root)
+        if not sys.platform.startswith('linux') or not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
+            raise Blocked('Linux subreaper/pidfd process ownership is required')
+        import ctypes
+        if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+            raise Blocked('Cannot establish owned descendant cleanup before execution')
+        original = child_pids()
         operation = str(uuid.uuid4())
         directory = self.evidence / operation
         directory.mkdir(mode=0o700)
-        body = canonical(request) + b"\n"
-        sealed_write(directory / "intent.json", {"operation_id": operation, "at": utc(), "argv": self.spec["argv"], "cwd": self.spec["cwd"], "request_sha256": digest(body), "request": request})
+        body = canonical(request) + b'\n'
+        sealed_write(directory / 'intent.json', {'operation_id': operation, 'at': utc(), 'argv': self.spec['argv'], 'cwd': self.spec['cwd'], 'request_sha256': digest(body), 'request': request})
+        if request.get('source_revision'):
+            actual = subprocess.run(['git', '-C', self.spec['cwd'], 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=10)
+            require(actual.returncode == 0 and actual.stdout.strip() == request['source_revision'], 'actual adapter source revision differs from campaign pin')
         started = time.monotonic_ns()
-        if request.get("source_revision"):
-            actual = subprocess.run(["git", "-C", self.spec["cwd"], "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-            require(actual.returncode == 0 and actual.stdout.strip() == request["source_revision"], "actual adapter source revision differs from campaign pin")
-        child = subprocess.Popen(self.spec["argv"], cwd=self.spec["cwd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        timed_out, stdout, stderr, child, unknown_reason = False, b'', b'', None, None
+        caught = None
         try:
-            stdout, stderr = child.communicate(body, timeout=self.spec["timeout_seconds"])
+            child = subprocess.Popen(self.spec['argv'], cwd=self.spec['cwd'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+            stdout, stderr = child.communicate(body, timeout=self.spec['timeout_seconds'])
         except subprocess.TimeoutExpired as exc:
-            os.killpg(child.pid, signal.SIGKILL)
+            timed_out, unknown_reason = True, 'TIMEOUT'
+            stdout, stderr = exc.output or b'', exc.stderr or b''
+            caught = exc
+        except BaseException as exc:
+            caught = exc
+            unknown_reason = type(exc).__name__ if child is not None else None
+            if child is None:
+                sealed_write(directory / 'outcome.json', {'operation_id': operation, 'status': 'FAILED_BEFORE_EXEC', 'error_type': type(exc).__name__, 'at': utc()})
+        finally:
+            if child is not None and unknown_reason:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            cleanup = reap_owned_children(original)
+            sealed_write(directory / 'process-cleanup.json', cleanup)
+        if child is None:
+            raise CampaignError('Adapter could not execute; operation ' + operation) from caught
+        for observed in cleanup['reaped_exit_codes']:
+            if observed['pid'] == child.pid:
+                child.returncode = observed['exit_code']
+        if unknown_reason:
             try:
-                child.communicate(timeout=5)
+                stdout, stderr = child.communicate(timeout=2)
             except subprocess.TimeoutExpired:
-                pass
-            sealed_write(directory / "unknown.json", {"operation_id": operation, "status": "UNKNOWN", "reason": "adapter timeout; remote mutation may have occurred", "at": utc()})
-            raise Blocked("adapter outcome UNKNOWN; reconcile operation " + operation + " before retry") from exc
-        for name, data in (("stdout", stdout), ("stderr", stderr)):
-            with (directory / (name + ".bin")).open("xb") as stream:
+                cleanup['complete'] = False
+        for name, data in (('stdout', stdout), ('stderr', stderr)):
+            with (directory / (name + '.bin')).open('xb') as stream:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
-        receipt = {"operation_id": operation, "exit_code": child.returncode, "duration_ns": time.monotonic_ns() - started, "stdout_sha256": digest(stdout), "stderr_sha256": digest(stderr), "at": utc()}
-        sealed_write(directory / "outcome.json", receipt)
-        require(child.returncode == 0, "actual adapter command failed; inspect private operation receipt " + operation)
+        receipt = {'operation_id': operation, 'exit_code': child.returncode, 'timed_out': timed_out, 'unknown_outcome': unknown_reason is not None,
+                   'duration_ns': time.monotonic_ns() - started, 'stdout_sha256': digest(stdout),
+                   'stderr_sha256': digest(stderr), 'owned_process_cleanup': cleanup, 'at': utc()}
+        sealed_write(directory / 'outcome.json', receipt)
+        if unknown_reason:
+            sealed_write(directory / 'unknown.json', {'operation_id': operation, 'status': 'UNKNOWN', 'cause': unknown_reason,
+                         'reason': 'Remote mutation may have occurred; reconcile before retry', 'owned_process_cleanup': cleanup, 'at': utc()})
+            raise Blocked('adapter outcome UNKNOWN; reconcile operation ' + operation + ' before retry') from caught
+        require(cleanup['complete'], 'adapter owned-process cleanup incomplete; operation ' + operation)
+        require(not cleanup['owned_processes_observed'], 'adapter left descendant processes; cleaned and rejected; operation ' + operation)
+        require(child.returncode == 0, 'actual adapter command failed; inspect private operation receipt ' + operation)
         result = decode(stdout)
-        require(isinstance(result, dict) and result.get("schema_version") == 1, "invalid adapter result")
-        require(result.get("request_sha256") == digest(body), "adapter observation does not bind exact request")
+        require(isinstance(result, dict) and result.get('schema_version') == 1, 'invalid adapter result')
+        require(result.get('request_sha256') == digest(body), 'adapter observation does not bind exact request')
         return result, receipt
 
 class Reference:
@@ -214,7 +368,7 @@ class Reference:
         self.epoch, self.owners, self.slots, self.generations = 1, {}, {}, {}
         self.resources, self.intents, self.publications, self.effects = set(), set(), {}, set()
         self.pending_creates, self.observed_creates, self.attempts, self.faults = set(), {}, set(), set()
-        self.submitted, self.qualified = {}, set()
+        self.submitted, self.qualified, self.custody_generations = {}, set(), {}
         self.last_sequence, self.last_time = 0, -1
         self.peak, self.accepted = 0, 0
 
@@ -232,7 +386,7 @@ class Reference:
             task, attempt, slot = event.get("task_id"), event.get("attempt_id"), event.get("slot_id")
             require(all(isinstance(value, str) and value for value in (task, attempt, slot)), "claim identities required")
             generation = integer(event.get("generation"), "ownership generation")
-            accepted = event.get("epoch") == self.epoch and task not in self.owners and slot not in self.slots and len(self.slots) < self.limit and generation > self.generations.get(task, 0)
+            accepted = event.get("epoch") == self.epoch and task not in self.owners and task not in self.submitted and slot not in self.slots and len(self.slots) < self.limit and generation > self.generations.get(task, 0)
             if accepted:
                 self.owners[task] = (attempt, generation, slot)
                 self.slots[slot] = task
@@ -246,13 +400,23 @@ class Reference:
             if accepted:
                 if kind == "submit":
                     require(isinstance(event.get("revision"), str) and re.fullmatch(r"[0-9a-f]{40}", event["revision"]), "exact submitted revision required")
-                    self.submitted[task] = (event["revision"], owner[0], owner[1])
+                    custody = integer(event.get("custody_generation"), "submitted custody generation")
+                    require(custody > self.custody_generations.get(task, 0), "non-increasing custody generation")
+                    self.custody_generations[task] = custody
+                    self.submitted[task] = (event["revision"], owner[0], owner[1], custody)
                 self.owners.pop(task)
                 self.slots.pop(owner[2])
+        elif kind in ("custody_revoke", "custody_expire"):
+            task = event.get("task_id")
+            submitted = self.submitted.get(task)
+            accepted = event.get("epoch") == self.epoch and submitted is not None and submitted[1:] == (event.get("attempt_id"), event.get("generation"), event.get("custody_generation"))
+            if accepted:
+                self.submitted.pop(task)
+                self.qualified.discard((task, submitted[0]))
         elif kind == "qualify":
             task = event.get("task_id")
             submitted = self.submitted.get(task)
-            accepted = event.get("epoch") == self.epoch and submitted is not None and submitted[0] == event.get("revision") and event.get("evidence_valid") is True
+            accepted = event.get("epoch") == self.epoch and submitted is not None and submitted == (event.get("revision"), event.get("attempt_id"), event.get("generation"), event.get("custody_generation")) and event.get("evidence_valid") is True
             if accepted:
                 self.qualified.add((task, event["revision"]))
         elif kind == "publish":
@@ -261,6 +425,8 @@ class Reference:
             accepted = event.get("epoch") == self.epoch and (task, revision) in self.qualified and event.get("gateway_authorised") is True and self.publications.get(ref) == event.get("expected_head")
             if accepted:
                 self.publications[ref] = revision
+                self.submitted.pop(task)
+                self.qualified.discard((task, revision))
         elif kind == "epoch":
             epoch = integer(event.get("new_epoch"), "restore epoch")
             accepted = epoch > self.epoch
@@ -271,8 +437,10 @@ class Reference:
                 # A restore requires fresh evidence/custody, not rewound qualification.
                 self.qualified.clear()
                 self.submitted.clear()
+                self.generations.clear()
+                self.custody_generations.clear()
         elif kind == "create_intent":
-            accepted = op not in self.intents and len(self.resources) + len(self.pending_creates) < self.sandbox_limit
+            accepted = event.get("epoch") == self.epoch and op not in self.intents and len(self.resources) + len(self.pending_creates) < self.sandbox_limit
             if accepted:
                 self.intents.add(op)
                 self.pending_creates.add(op)
@@ -295,7 +463,7 @@ class Reference:
         elif kind == "effect":
             key = event.get("effect_key")
             require(isinstance(key, str) and key, "durable effect key required")
-            accepted = key not in self.effects
+            accepted = event.get("epoch") == self.epoch and key not in self.effects
             if accepted:
                 self.effects.add(key)
         elif kind == "fault_observed":
@@ -313,7 +481,7 @@ class Reference:
         return accepted
 
     def state(self):
-        return {"epoch": self.epoch, "owners": {key: list(value) for key, value in sorted(self.owners.items())}, "slots": dict(sorted(self.slots.items())), "resources": sorted(self.resources), "publications": dict(sorted(self.publications.items())), "effect_count": len(self.effects), "accepted_count": self.accepted, "peak_slots": self.peak, "session_lifetimes": len(self.attempts), "pending_creates": sorted(self.pending_creates), "faults": sorted(self.faults), "virtual_elapsed_ms": self.last_time}
+        return {"epoch": self.epoch, "owners": {key: list(value) for key, value in sorted(self.owners.items())}, "slots": dict(sorted(self.slots.items())), "custody": {key: list(value) for key, value in sorted(self.submitted.items())}, "resources": sorted(self.resources), "publications": dict(sorted(self.publications.items())), "effect_count": len(self.effects), "accepted_count": self.accepted, "peak_slots": self.peak, "session_lifetimes": len(self.attempts), "pending_creates": sorted(self.pending_creates), "faults": sorted(self.faults), "virtual_elapsed_ms": self.last_time}
 
 def reconstruct(events, profile):
     require(isinstance(events, list) and events, "nonempty independently observed event stream required")
@@ -336,15 +504,35 @@ def schedule(profile, seed):
     return sorted(commands, key=lambda row: (row["virtual_ms"], row["operation_id"]))
 
 def compare_metrics(current, baseline):
+    """Preserve decimal measurements and histogram bounds; never infer causality."""
+    from decimal import Decimal, localcontext
     require(isinstance(current, dict) and isinstance(baseline, dict), "comparable metric records required")
-    for key in ("workload_digest", "environment_digest", "units", "measurement_kind"):
+    units={"p50":"ms","p95":"ms","p99":"ms","throughput":"1/s","error_count":"count","connection_peak":"count","lock_wait_count":"count"}
+    for key in ("workload_digest", "environment_digest", "provenance_digest", "units", "measurement_kind", "quantile_basis"):
         require(key in current and current[key] == baseline.get(key), "baseline parity mismatch: " + key)
-    result = {"performance_claim": "DESCRIPTIVE_ONLY", "units": current["units"]}
-    for key in ("p50", "p95", "p99", "throughput", "error_count", "connection_peak", "lock_wait_count"):
-        a, b = current.get(key), baseline.get(key)
-        require(type(a) in (int, float) and type(b) in (int, float) and a >= 0 and b >= 0, "complete nonnegative measured metric required: " + key)
-        require(a < float("inf") and b < float("inf"), "nonfinite metric")
-        result[key] = {"current": a, "baseline": b, "ratio": a / b if b else None}
+    require(current['units']==units,'metric dimensions must remain explicit and comparable')
+    require(current['measurement_kind'] in {'MEASUREMENT_REPORT','REPLAY'},'actual measurement origin required')
+    require(current['quantile_basis'] in {'HISTOGRAM_UPPER_BOUND','EXACT_SAMPLES'},'quantile measurement semantics required')
+    for record in (current,baseline):
+        integer(record.get('sample_count'),'observed metric sample count')
+        require(all(isinstance(record.get(key),str) and re.fullmatch('[0-9a-f]{64}',record[key])for key in ('workload_digest','environment_digest','provenance_digest')),'exact comparable metric provenance required')
+    def number(value):
+        if type(value) is int:
+            require(value>=0,'nonnegative measured metric required');value=str(value)
+        require(isinstance(value,str) and re.fullmatch(r'(0|[1-9][0-9]*)(\.[0-9]*[1-9])?',value),'canonical nonnegative decimal metric required')
+        return Decimal(value)
+    result={"performance_claim":"DESCRIPTIVE_ONLY","units":units,"quantile_basis":current['quantile_basis'],"measurement_kind":current['measurement_kind']}
+    values={}
+    for key in units:
+        a,b=number(current.get(key)),number(baseline.get(key))
+        if key in ('error_count','connection_peak','lock_wait_count'):
+            require(a==a.to_integral_value() and b==b.to_integral_value(),'count metrics must be integral')
+        with localcontext() as context:
+            context.prec=34
+            ratio=format(a/b,'f') if b else None
+        result[key]={"current":format(a,'f'),"baseline":format(b,'f'),"ratio":ratio}
+        values[key]=(a,b)
+    require(all(values['p50'][index]<=values['p95'][index]<=values['p99'][index] for index in (0,1)),'quantile values/bounds must be monotonic')
     return result
 
 def run(path, evidence):
@@ -368,7 +556,7 @@ def run(path, evidence):
         require(state == current.get("final_state"), "reported final state differs from independently reconstructed state")
         baseline_state = reconstruct(baseline.get("events"), manifest["profile"])
         require(state == baseline_state, "implementation/baseline final state parity failed")
-        require(not state["owners"] and not state["slots"] and not state["resources"] and not state["pending_creates"], "incomplete final cleanup/inventory or unresolved creates")
+        require(not state["owners"] and not state["slots"] and not state["custody"] and not state["resources"] and not state["pending_creates"], "incomplete final cleanup/inventory or unresolved creates")
         require(state["peak_slots"] >= 200, "200 simultaneously occupied simulated slots not observed")
         require(state["session_lifetimes"] == manifest["profile"]["session_lifetimes"] and state["virtual_elapsed_ms"] == manifest["profile"]["virtual_hours"] * 3600000, "declared schedule was not fully exercised")
         require(set(state["faults"]) >= {"stale_generation", "reversed_commits", "unknown_create", "replica_lag", "saturation", "main_loss", "credential_expiry"}, "actual fault observation coverage incomplete")

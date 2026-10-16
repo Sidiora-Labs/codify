@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-2-v1",
+  "campaign_id": "hyperfide-driver-component-27-2-v2",
   "case_ids": [
     "V-024",
     "V-047",
@@ -27,6 +27,12 @@
     "campaign.deterministic.git-cas-lost-ack",
     "campaign.deterministic.worker-push-rejected",
     "campaign.deterministic.restore-fences-old-proof",
+    "campaign.deterministic.submission-retains-custody",
+    "campaign.deterministic.qualification-custody-fenced",
+    "campaign.deterministic.custody-expiry-releases-task",
+    "campaign.deterministic.restore-rejects-old-effects",
+    "campaign.deterministic.restore-resets-epoch-generations",
+    "campaign.deterministic.restore-preserves-effect-idempotency",
     "campaign.deterministic.reordered-observations",
     "campaign.deterministic.unknown-event",
     "campaign.deterministic.duplicate-json-rejected",
@@ -35,6 +41,11 @@
     "campaign.deterministic.schedule-workload-count",
     "campaign.deterministic.baseline-descriptive",
     "campaign.deterministic.incomparable-baseline",
+    "campaign.deterministic.histogram-bound-semantics",
+    "campaign.deterministic.quantile-semantics-not-interchangeable",
+    "campaign.deterministic.metric-dimensions-preserved",
+    "campaign.deterministic.nonfinite-measurement-rejected",
+    "campaign.deterministic.quantile-order-preserved",
     "campaign.deterministic.corpus-pin",
     "campaign.deterministic.corpus-tamper",
     "campaign.deterministic.actual-command-boundary",
@@ -43,6 +54,9 @@
     "campaign.deterministic.missing-auth-blocks",
     "campaign.deterministic.timeout-is-unknown",
     "campaign.deterministic.unknown-intent-retained",
+    "campaign.deterministic.normal-exit-detached-child",
+    "campaign.deterministic.timeout-detached-child",
+    "campaign.deterministic.interrupted-detached-child",
     "campaign.deterministic.unpinned-executable",
     "campaign.deterministic.pinned-source-manifest",
     "campaign.deterministic.unapproved-manifest",
@@ -74,13 +88,13 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "dc07481704f5e1020a9fd15f72ddf77525d83154913522b5a444ec946a2d6913",
-      "size": 25259
+      "sha256": "f45deed3643f1e74b542e480666049c5d68627679cfe64e8e5ac7e6ff7eefcee",
+      "size": 38730
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_2.py",
-      "sha256": "acdd0725d436049516979f9b8f9fe6faf0419001938fd8a6ac1bd70ceab8e5e0",
-      "size": 13033
+      "sha256": "90b8d9aa6b7dbdec095222925373aa2407abec13e1c915ad9c6150f3c2f29282",
+      "size": 19930
     }
   ],
   "policy": {
