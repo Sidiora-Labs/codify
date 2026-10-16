@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-domain20-task20.1-final-v2",
+  "campaign_id": "hyperfide-domain20-task20.1-final-v3",
   "registered_variant": "task:20.1",
   "scope": "task-component",
   "case_ids": [
@@ -222,18 +222,18 @@
     },
     {
       "path": "services/hyperfide/dist/decisions/jobs.d.ts",
-      "sha256": "0243f791e20aab0fd84258a026648f6f201ecb5839e127c4832a1752023376fa",
-      "size": 2457
+      "sha256": "24971ac8a5cae06e02a3a18fe5f40856b6ccc6cb87d74dd8f8b002990f9fe798",
+      "size": 2476
     },
     {
       "path": "services/hyperfide/dist/decisions/jobs.js",
-      "sha256": "02e513142a9af332fb79518224fcfae4a67b5aeed979cccfe4e6aa5a1a1f2d20",
-      "size": 40163
+      "sha256": "d08d02c1d95b5957bf764cf00833fc7574957a99c2ddce25f01e84cf187d4a79",
+      "size": 40451
     },
     {
       "path": "services/hyperfide/dist/decisions/jobs.js.map",
-      "sha256": "e1efdc33ffd7776dca64ab6fab57abeb5af2507864ed712960c43f8d3244b8b8",
-      "size": 38436
+      "sha256": "12ca7aa171432a38f2abbdd07803178a2033f65710368e13c36f9105467751d6",
+      "size": 38669
     },
     {
       "path": "services/hyperfide/dist/decisions/results.d.ts",
@@ -1267,8 +1267,8 @@
     },
     {
       "path": "services/hyperfide/src/decisions/jobs.ts",
-      "sha256": "0447f33363da25a76e4cc8b40968eb1fae918537e082d8ed6d2a80253e43970a",
-      "size": 36363
+      "sha256": "615f76d62954e2ae3d04602918a0244afb538b8cee4ef848171651ff565912d0",
+      "size": 36673
     },
     {
       "path": "services/hyperfide/src/decisions/results.ts",
@@ -1387,8 +1387,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/20_4.py",
-      "sha256": "49af987b53239746f184c7637ab5f9b0bca3d07a91add62a60aa0fcd444b5056",
-      "size": 27585
+      "sha256": "9809a04e9d0598d643fa7e820832c77523f85c9b57bc7938c53d09f1be9521f3",
+      "size": 30166
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
