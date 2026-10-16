@@ -2,14 +2,14 @@ import {randomUUID,createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
-import type {PrimaryTransaction} from '../storage/transactions.js';
+import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
 import {object} from '../policy/programme.js';
 import {validateProfile} from '../preparation/manifests.js';
 
 import {gateway,trustedActor,requireAuthority,record,uuid,decimal,digest,text,strings,canonical,hash,refuse,operation,ready} from './packages.js';
 
 const MIGRATION_CHECKSUM='sha256:'+createHash('sha256').update(readFileSync(new URL('../../migrations/0032-execution-packets.sql',import.meta.url))).digest('hex');
-async function packetSchema(tx:PrimaryTransaction):Promise<void>{
+async function packetSchema(tx:QuerySession):Promise<void>{
  const table=await tx.query("SELECT to_regclass('hyperfide.hierarchy_execution_packets') IS NOT NULL AS ready");
  if(!table.rows[0]?.ready)return refuse('PACKET_SCHEMA_REQUIRED','Apply the trusted execution-packet migration first');
  const metadata=await tx.query("SELECT 1 FROM hyperfide.schema_migrations WHERE version=32 AND name='0032-execution-packets' AND checksum=$1",[MIGRATION_CHECKSUM]);
@@ -37,7 +37,11 @@ function freeze<T>(value:T):T {
 }
 /** Return immutable historical inputs. Current admission/custody authority is a separate gate. */
 export async function loadExecutionPacket(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string}):Promise<ExecutionPacketRecord>{
- assertPrimaryTransaction(tx);await ready(tx);await packetSchema(tx);
+ assertPrimaryTransaction(tx);await ready(tx);return readExecutionPacket(tx,input);
+}
+/** Exact immutable observation only; caller owns authenticated causal snapshot admission. */
+export async function readExecutionPacket(tx:QuerySession,input:{organisation_id:string;run_id:string;digest:string}):Promise<ExecutionPacketRecord>{
+ await packetSchema(tx);
  const org=uuid(input.organisation_id),run=uuid(input.run_id),identity=digest(input.digest);
  const rows=await tx.query('SELECT *,attempt_generation::text,spec_generation::text,package_generation::text,leader_generation::text FROM hyperfide.hierarchy_execution_packets WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[org,run,identity]);
  const row=rows.rows[0];if(!row||!object(row.packet))return refuse('PACKET_UNAVAILABLE','No immutable execution packet matches the authenticated scope/digest');
@@ -77,7 +81,7 @@ export function deriveQualificationInputs(packet:unknown):{
 
 export function createComponent(context:ComponentContext):Component {
  const g=gateway(context);
- return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,deriveQualificationInputs})},actions:{
+ return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,deriveQualificationInputs})},actions:{
  'hierarchy.packet.describe':async input=>{record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
  'hierarchy.packet.create':async (input,invocation)=>{
   const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
