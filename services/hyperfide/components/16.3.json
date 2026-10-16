@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "16.3",
+  "task": "16.3",
+  "roles": [
+    "control"
+  ],
+  "module": "assurance/coverage.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "qualification.coverage.inspect",
+    "qualification.review.record",
+    "qualification.accept"
+  ],
+  "requires": [
+    "16.2",
+    "5.1",
+    "15.2"
+  ]
+}
