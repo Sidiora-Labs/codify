@@ -173,6 +173,22 @@ class Fixture:
             expect(row["state"]==state,"Uncertain operation was replayed or promoted")
             if state=="CLAIMED":expect({k:row[k] for k in self.claimed_before}==self.claimed_before,"Once-claim custody changed")
         expect(f.sql("SELECT count(*)::int AS n FROM hyperfide.provider_remote_operations")[0]["n"]==0,"A rejected/uncertain fixture crossed the actual provider journal")
+    def sql_refused(self,sql,values):
+        try:self.f.sql(sql,values)
+        except AssertionError:return
+        raise AssertionError("Invalid scoped immutable metadata write was accepted")
+    def reference_link_tests(self,artifact):
+        insert="INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
+        values=[self.scope["organisation_id"],self.scope["run_id"],self.ids["UNKNOWN"],"stdout",artifact["artifact_id"],artifact["digest"],artifact["digest"],artifact["size_bytes"]]
+        check("executor.actual15-scoped-retention-link",lambda:self.f.sql(insert,values))
+        bad=list(values);bad[3]="bad-digest";bad[5]=digest(b"not-the-stored-object")
+        check("executor.retention-wrong-digest-refused",lambda:self.sql_refused(insert,bad))
+        other=list(values);other[0]=uid();other[3]="cross-scope"
+        check("executor.retention-cross-scope-refused",lambda:self.sql_refused(insert,other))
+        check("executor.retention-binding-immutable",lambda:self.sql_refused("UPDATE hyperfide.runner_result_artifacts SET content_digest=$1 WHERE organisation_id=$2 AND run_id=$3 AND operation_id=$4 AND role='stdout'",[digest(b"changed"),*values[:3]]))
+        check("executor.retention-link-delete-refused",lambda:self.sql_refused("DELETE FROM hyperfide.runner_result_artifacts WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND role='stdout'",values[:3]))
+        row=self.f.sql("SELECT artifact_id::text,artifact_digest,content_digest FROM hyperfide.runner_result_artifacts WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND role='stdout'",values[:3])
+        check("executor.retention-original-reference-preserved",lambda:expect(len(row)==1 and row[0]["artifact_id"]==artifact["artifact_id"] and row[0]["artifact_digest"]==artifact["digest"] and row[0]["content_digest"]==artifact["digest"],"Rejected writes changed durable reference custody"))
     def close(self):
         try:
             if self.actor:self.actor.close();self.actor=None
@@ -220,7 +236,7 @@ def main():
             check("executor.forged-artifact-brand-refused",lambda:f.refused(f.actor.request({"op":"forged-artifact","forged":{"principal":f.principal},"action":"artifact.object.put","input":put}),"AUTH_REQUIRED"))
             check("executor.artifact-cross-scope-refused",lambda:expect(f.command("artifact",action="artifact.object.put",input=dict(put,organisation_id=uid())).get("ok") is False,"Cross-organisation artifact scope admitted"))
             if saved.get("ok"):
-                a=saved["result"]["artifact"];ref={"storage_kind":"object","artifact_id":a["artifact_id"],"digest":a["digest"],"size_bytes":a["size_bytes"],"complete":False}
+                a=saved["result"]["artifact"];f.reference_link_tests(a);ref={"storage_kind":"object","artifact_id":a["artifact_id"],"digest":a["digest"],"size_bytes":a["size_bytes"],"complete":False}
                 s=f.command("signature",reference=ref,operation_id=uid(),other_operation_id=uid(),plan_digest=digest(b"plan"),other_plan_digest=digest(b"other-plan"))
                 check("executor.actual-provisioner-metadata-signature",lambda:expect(s.get("ok") and s["result"]["valid"] is True,"Actual registered Ed25519 signature did not verify"))
                 check("executor.signature-result-tamper-refused",lambda:expect(s["result"]["changed_result"] is False,"Result mutation preserved signature"))
