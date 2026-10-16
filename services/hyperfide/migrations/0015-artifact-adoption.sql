@@ -59,3 +59,51 @@ CREATE TRIGGER immutable_adoption BEFORE UPDATE OR DELETE ON hyperfide.artifact_
  'source_object_id','input_packet_digest','preparation_digest','mode','compatibility','provenance','created_at');
 
 CREATE TRIGGER authority_isolation_artifact_adoptions BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.artifact_adoptions FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- These identities are recoverable context bytes, not optional model prose.
+ALTER TABLE hyperfide.checkpoints ADD COLUMN artifact_content_size_bytes bigint
+ CHECK(artifact_content_size_bytes BETWEEN 40 AND 134217728);
+ALTER TABLE hyperfide.checkpoints ADD CONSTRAINT checkpoint_content_size_bound
+ CHECK((registration_operation_id IS NULL)=(artifact_content_size_bytes IS NULL));
+CREATE TRIGGER immutable_checkpoint_content_size BEFORE UPDATE OR DELETE ON hyperfide.checkpoints
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('artifact_content_size_bytes');
+CREATE TABLE hyperfide.checkpoint_context_artifacts (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,checkpoint_id uuid NOT NULL,
+ role text NOT NULL CHECK(role IN ('dependency','summary','findings')),
+ artifact_id uuid NOT NULL,artifact_digest hyperfide.digest NOT NULL,
+ artifact_size_bytes bigint NOT NULL CHECK(artifact_size_bytes>=0),
+ receipt_id hyperfide.digest NOT NULL,
+ storage_kind text NOT NULL CHECK(storage_kind IN ('object','manifest')),
+ content_digest hyperfide.digest NOT NULL,content_size_bytes bigint NOT NULL CHECK(content_size_bytes>=0 AND content_size_bytes<=1073741824),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,checkpoint_id,role),
+ FOREIGN KEY(organisation_id,run_id,checkpoint_id) REFERENCES hyperfide.checkpoints(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id),
+ CHECK(storage_kind<>'object' OR (content_digest=artifact_digest AND content_size_bytes=artifact_size_bytes))
+);
+CREATE TRIGGER immutable_checkpoint_context BEFORE UPDATE OR DELETE ON hyperfide.checkpoint_context_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','checkpoint_id','role','artifact_id','artifact_digest','artifact_size_bytes','receipt_id','storage_kind','content_digest','content_size_bytes','created_at');
+CREATE TRIGGER authority_isolation_checkpoint_context BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.checkpoint_context_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE FUNCTION hyperfide.checkpoint_context_available() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE item record;
+BEGIN
+ SELECT * INTO item FROM hyperfide.artifacts
+ WHERE organisation_id=NEW.organisation_id AND run_id=NEW.run_id AND id=NEW.artifact_id FOR SHARE;
+ IF NOT FOUND OR item.status<>'COMPLETE' OR item.digest<>NEW.artifact_digest OR item.size_bytes<>NEW.artifact_size_bytes THEN
+ RAISE EXCEPTION 'checkpoint context artifact differs or is unavailable' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER checkpoint_context_available BEFORE INSERT ON hyperfide.checkpoint_context_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.checkpoint_context_available();
+CREATE FUNCTION hyperfide.checkpoint_context_complete() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.registration_operation_id IS NOT NULL AND
+ (SELECT count(*) FROM hyperfide.checkpoint_context_artifacts WHERE organisation_id=NEW.organisation_id AND run_id=NEW.run_id AND checkpoint_id=NEW.id)<>3 THEN
+ RAISE EXCEPTION 'registered checkpoint requires all immutable context artifacts' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE CONSTRAINT TRIGGER checkpoint_context_complete AFTER INSERT ON hyperfide.checkpoints
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION hyperfide.checkpoint_context_complete();

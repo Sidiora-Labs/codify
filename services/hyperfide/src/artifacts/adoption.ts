@@ -1,12 +1,15 @@
 import {createHash} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import {assertInvocation,strictJSON} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
-import {loadExecutionPacket} from '../hierarchy/packets.js';
+import {loadExecutionPacket,deriveQualificationInputs} from '../hierarchy/packets.js';
+import {leadership,requireAuthority} from '../hierarchy/packages.js';
+import {assertCompleteArtifactReferences} from './objects.js';
+import {readCheckpointContinuation} from './continuation.js';
 import {FoundationError} from '../policy/programme.js';
-import {validateAuthorityRecord} from '../contracts/records.js';
-import {assertCurrentCompute} from '../scheduler/leases.js';
+import {assertCurrentCompute,parseComputeToken} from '../scheduler/leases.js';
 import type {ComputeToken} from '../scheduler/leases.js';
 
 type Invocation=InvocationContext;
@@ -20,6 +23,7 @@ function record(value:unknown):Record<string,unknown>{if(!value||typeof value!==
 function exact(value:unknown,required:string[],optional:string[]=[]):Record<string,unknown>{const row=record(value);if(required.some(key=>!Object.hasOwn(row,key))||Object.keys(row).some(key=>![...required,...optional].includes(key)))fail('ADOPTION_INPUT_INVALID','Adoption fields differ');return row;}
 function uuid(value:unknown):string{if(typeof value!=='string'||!UUID.test(value))fail('ADOPTION_INPUT_INVALID','Expected UUID');return value;}
 function digest(value:unknown):string{if(typeof value!=='string'||!DIGEST.test(value))fail('ADOPTION_INPUT_INVALID','Expected SHA-256 digest');return value;}
+function byteCount(value:unknown):string{if(typeof value!=='string'||!/^(0|[1-9][0-9]{0,18})$/.test(value)||BigInt(value)>1073741824n)fail('CHECKPOINT_CONTEXT_MISMATCH','Bounded context byte count required');return value;}
 function canonical(value:unknown):string{
  if(value===null||typeof value!=='object')return JSON.stringify(value);
  if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
@@ -31,7 +35,7 @@ type Request={token:ComputeToken;source_checkpoint_id:string;source_expected_art
 function parse(input:unknown):Request{
  const row=exact(input,['token','source_checkpoint_id','source_expected_artifact_digest','target_expected_input_packet_digest','target_expected_preparation_digest','mode','native_resume']);
  if(row.mode!=='SOURCE_ONLY'&&row.mode!=='NATIVE_RESUME')fail('ADOPTION_INPUT_INVALID','Unsupported adoption mode');
- const token=validateAuthorityRecord('compute_token',structuredClone(row.token)) as unknown as ComputeToken;
+ const token=parseComputeToken(structuredClone(row.token));
  let native:Record<string,unknown>|null=null;
  if(row.mode==='NATIVE_RESUME'){
  native=exact(structuredClone(row.native_resume),['session_id','native_session_id','configuration_digest','source_manifest_digest']);
@@ -44,6 +48,24 @@ type Checkpoint={registration_operation_id:string|null;preparation_digest:string
 const checkpointSQL="SELECT c.id,c.artifact_id,c.attempt_id,c.attempt_generation::text,c.repository_id,c.source_object_id,c.input_packet_digest,c.support_level,c.agent_session_id,c.registration_operation_id,c.preparation_digest,c.artifact_content_digest,c.source_metadata_digest,a.digest,a.status,s.compute_authority AS source_compute_authority,s.input_packet_digest AS source_packet_digest,s.task_id AS source_task_id,(s.lease_expires_at IS NULL OR s.lease_expires_at<=clock_timestamp()) AS source_expired FROM hyperfide.checkpoints c JOIN hyperfide.artifacts a ON a.organisation_id=c.organisation_id AND a.run_id=c.run_id AND a.id=c.artifact_id JOIN hyperfide.attempts s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.id=c.attempt_id AND s.generation=c.attempt_generation WHERE c.organisation_id=$1 AND c.run_id=$2 AND c.id=$3";
 export class ArtifactAdoption{
  constructor(private readonly context:Context){}
+ private async targetActor(tx:PrimaryTransaction,token:ComputeToken,actor:Invocation):Promise<void>{
+ const t=token as unknown as Record<string,unknown>,p=actor.principal;
+ if(['OPERATOR','COORDINATOR','PROVISIONER'].includes(p.role))return;
+ if(p.role==='WORKER'){
+ if(p.attempt_id!==t.attempt_id||p.attempt_generation!==t.attempt_generation||p.sandbox_id!==t.sandbox_id||p.boot_generation!==t.sandbox_boot_generation)fail('ADOPTION_ACTOR_SCOPE_DENIED','Worker checkpoint authority belongs to its exact current attempt');
+ return;
+ }
+ if(p.role==='RUNNER'){
+ if(p.sandbox_id!==t.sandbox_id||p.boot_generation!==t.sandbox_boot_generation)fail('ADOPTION_ACTOR_SCOPE_DENIED','Runner checkpoint authority belongs to its exact boot');
+ return;
+ }
+ if(p.role!=='LEADER'&&p.role!=='FEATURE_MANAGER')fail('ADOPTION_ROLE_DENIED','Checkpoint mutation requires execution or management authority');
+ const scope={organisation_id:p.organisation_id,run_id:p.run_id},leader=await leadership(tx,scope);
+ const task=(await tx.query('SELECT t.feature_package_id,h.owner_generation::text FROM hyperfide.tasks t JOIN hyperfide.hierarchy_packages h ON h.organisation_id=t.organisation_id AND h.run_id=t.run_id AND h.package_id=t.feature_package_id WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.id=$3 FOR SHARE OF t,h',[p.organisation_id,p.run_id,t.task_id])).rows[0];
+ if(!task)fail('ADOPTION_ACTOR_SCOPE_DENIED','Current target package is unavailable');
+ await requireAuthority(tx,{...scope,authority_epoch:String(t.authority_epoch),session_id:p.actor_id,leader_generation:leader.leader_generation,package_id:task.feature_package_id,package_generation:task.owner_generation,roles:['LEADER','FEATURE_MANAGER']});
+ }
+
  private authority(request:Request):Invocation{
  const actor=this.context.invocation;
  assertInvocation(actor);
@@ -53,7 +75,7 @@ export class ArtifactAdoption{
  }
  private async transaction<T>(actor:Invocation,body:(tx:PrimaryTransaction)=>Promise<T>,identityOnly=false):Promise<T>{
  const guard=identityOnly?actor.identityGuard:actor.guard;
- return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:actor.signal,guard:tx=>guard(tx)},async tx=>{const value=await body(tx);await guard(tx);return value;});
+ return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:actor.signal,guard:async tx=>{await (identityOnly?readSemanticDisposition:writeSemanticDisposition)(tx,actor.principal);await guard(tx);}},async tx=>{const value=await body(tx);await guard(tx);return value;});
  }
  private async checkpoint(tx:PrimaryTransaction,request:Request):Promise<Checkpoint>{
  const token=request.token as unknown as Record<string,unknown>;
@@ -78,6 +100,7 @@ export class ArtifactAdoption{
  if(replay)return {adoption:replay,replayed:true,compute_authority_changed:false,context_restored:false,grants_authority:false};
  const initial=await this.transaction(actor,async tx=>{
  const prior=await this.prior(tx,actor,payload);if(prior)return {prior,checkpoint:null};
+ await this.targetActor(tx,request.token,actor);
  await assertCurrentCompute(tx,request.token,{operation:'CHECKPOINT'});
  return {prior:undefined,checkpoint:await this.checkpoint(tx,request)};
  });
@@ -95,8 +118,13 @@ export class ArtifactAdoption{
  }
  return this.transaction(actor,async tx=>{
  const existing=await this.prior(tx,actor,payload);if(existing)return {adoption:existing,replayed:true,compute_authority_changed:false,context_restored:false,grants_authority:false};
+ await this.targetActor(tx,request.token,actor);
  const target=record(await assertCurrentCompute(tx,request.token,{operation:'CHECKPOINT'}));
  if(target.input_packet_digest!==request.target_expected_input_packet_digest||target.preparation_digest!==request.target_expected_preparation_digest)fail('ADOPTION_TARGET_CHANGED','Target execution packet or preparation differs');
+ const packet=await loadExecutionPacket(tx,{organisation_id:String(token.organisation_id),run_id:String(token.run_id),digest:String(target.input_packet_digest)});
+ const continuation=record(record(record(packet.packet).mandatory).intent).continuation;
+ const expectedContinuation=await readCheckpointContinuation(tx,{organisation_id:String(token.organisation_id),run_id:String(token.run_id),checkpoint_id:source.id},actor);
+ if(!continuation||canonical(continuation)!==canonical(expectedContinuation))fail('ADOPTION_CONTINUATION_REQUIRED','Target packet must pin the exact immutable checkpoint and context before claim');
  const current=await this.checkpoint(tx,request);
  if(current.artifact_id!==source.artifact_id||current.digest!==source.digest||current.source_object_id!==source.source_object_id)fail('ADOPTION_CHECKPOINT_INVALID','Source checkpoint changed');
  if((await tx.query('SELECT id FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND status=\'COMPLETE\' FOR SHARE',[token.organisation_id,token.run_id,current.artifact_id])).rowCount!==1)fail('ADOPTION_ARTIFACT_UNAVAILABLE','Checkpoint artifact ceased to be complete');
@@ -108,8 +136,10 @@ export class ArtifactAdoption{
  });
  }
  async registerCheckpoint(input:unknown,stale:boolean):Promise<unknown>{
- const value=exact(input,['token','workspace_id','artifact_id','expected_capsule_digest','expected_source_metadata_digest']);
- const token=validateAuthorityRecord('compute_token',structuredClone(value.token)) as unknown as ComputeToken;
+ const value=exact(input,['token','workspace_id','artifact_id','expected_capsule_digest','expected_source_metadata_digest','context_artifacts']);
+ const contextInput=exact(structuredClone(value.context_artifacts),['dependency_artifact_id','summary_artifact_id','findings_artifact_id']);
+ const contextIds={dependency:uuid(contextInput.dependency_artifact_id),summary:uuid(contextInput.summary_artifact_id),findings:uuid(contextInput.findings_artifact_id)};
+ const token=parseComputeToken(structuredClone(value.token));
  const actor=this.context.invocation;assertInvocation(actor);
  const t=token as unknown as Record<string,unknown>,scope={organisation_id:uuid(t.organisation_id),run_id:uuid(t.run_id)};
  if(scope.organisation_id!==actor.principal.organisation_id||scope.run_id!==actor.principal.run_id)fail('ADOPTION_SCOPE_DENIED','Checkpoint differs from verified caller scope');
@@ -122,7 +152,7 @@ export class ArtifactAdoption{
  };
  const replay=await this.transaction(actor,prior,true);
  if(replay)return {checkpoint:replay,replayed:true,durability:'VERIFIED',grants_authority:false,context_restored:false};
- await this.transaction(actor,async tx=>{await assertCurrentCompute(tx,token,{operation:'CHECKPOINT'});});
+ await this.transaction(actor,async tx=>{await this.targetActor(tx,token,actor);await assertCurrentCompute(tx,token,{operation:'CHECKPOINT'});});
  const artifacts=this.context.dependencies.require('15.2','artifact.store.v1',capability);
  const verified=record(await artifacts.invoke('artifact.manifest.read',{...scope,artifact_id:artifactId},this.context));
  if(verified.outcome!=='SUCCEEDED'||verified.availability!=='VERIFIED'||verified.receipt===null)fail('CHECKPOINT_ARTIFACT_UNAVAILABLE','Checkpoint manifest bytes are not verified');
@@ -158,8 +188,19 @@ export class ArtifactAdoption{
  if(!/^refs\/heads\/[^\x00-\x20~^:?*\\[]+$/.test(String(metadata.branch_ref))||String(metadata.branch_ref).includes('..')||String(metadata.branch_ref).endsWith('/')||!/^(0|[1-9][0-9]{0,18})$/.test(String(metadata.instruction_cursor))||!/^[0-9]{1,4}$/.test(String(metadata.workspace_mode)))fail('CHECKPOINT_METADATA_INVALID','Native branch or cursor differs');
  if(!['RECORDED','UNSUPPORTED'].includes(String(metadata.native_support))||(metadata.native_session_ref!==''&&!UUID.test(String(metadata.native_session_ref))))fail('CHECKPOINT_METADATA_INVALID','Native session metadata differs');
  if(metadata.organisation_id!==scope.organisation_id||metadata.run_id!==scope.run_id||metadata.task_id!==t.task_id||metadata.workspace_id!==workspaceId)fail('CHECKPOINT_SCOPE_DENIED','Native checkpoint scope differs');
+ const contextFacts=await Promise.all((['dependency','summary','findings'] as const).map(async role=>{
+ const id=contextIds[role],observation=record(await artifacts.invoke('artifact.object.inspect',{...scope,artifact_id:id},this.context));
+ const object=record(observation.artifact??{}),receipt=record(observation.receipt??{});
+ if(observation.outcome!=='SUCCEEDED'||observation.availability!=='VERIFIED'||object.status!=='COMPLETE'||object.artifact_id!==id||object.organisation_id!==scope.organisation_id||object.run_id!==scope.run_id)fail('CHECKPOINT_CONTEXT_UNAVAILABLE','Context artifact bytes are unavailable');
+ const manifest=observation.manifest===undefined?null:record(observation.manifest);
+ const contentDigest=digest(manifest?manifest.content_digest:object.digest),contentSize=byteCount(manifest?manifest.total_size_bytes:object.size_bytes);
+ if(contentDigest!==metadata[role+'_digest'])fail('CHECKPOINT_CONTEXT_MISMATCH','Context bytes differ from native checkpoint metadata');
+ return {role,artifact_id:id,artifact_digest:digest(object.digest),artifact_size_bytes:byteCount(object.size_bytes),receipt_id:digest(receipt.receipt_id),storage_kind:manifest?'manifest':'object',content_digest:contentDigest,content_size_bytes:contentSize};
+ }));
+
  return this.transaction(actor,async tx=>{
  const previous=await prior(tx);if(previous)return {checkpoint:previous,replayed:true,durability:'VERIFIED',grants_authority:false,context_restored:false};
+ await this.targetActor(tx,token,actor);
  const current=record(await assertCurrentCompute(tx,token,{operation:'CHECKPOINT'}));
  const workspace=(await tx.query('SELECT * FROM hyperfide.workspaces WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[scope.organisation_id,scope.run_id,workspaceId])).rows[0];
  if(!workspace||workspace.repository_id!==metadata.repository_id||workspace.attempt_id!==metadata.attempt_id||workspace.base_commit!==metadata.base_commit||workspace.branch_ref!==metadata.branch_ref)fail('CHECKPOINT_WORKSPACE_INVALID','Actual source workspace differs');
@@ -171,6 +212,8 @@ export class ArtifactAdoption{
  if(source.id===t.attempt_id||source.compute_authority==='CURRENT'&&source.lease_expires_at&&new Date(source.lease_expires_at)>new Date(source.primary_now))fail('CHECKPOINT_SOURCE_ACTIVE','Stale import requires a distinct inactive producer');
  }
  const execution=await loadExecutionPacket(tx,{organisation_id:scope.organisation_id,run_id:scope.run_id,digest:String(source.input_packet_digest)});
+ if(deriveQualificationInputs(execution.packet).dependency_digest!==metadata.dependency_digest)fail('CHECKPOINT_PROVENANCE_INVALID','Native dependency identity differs from the immutable execution packet');
+ await assertCompleteArtifactReferences(tx,scope,contextFacts.map(fact=>({artifact_id:fact.artifact_id,receipt_id:fact.receipt_id,digest:fact.artifact_digest,size_bytes:fact.artifact_size_bytes})));
  if(record(record(record(execution.packet).mandatory).runtime).preparation_digest!==metadata.preparation_digest)fail('CHECKPOINT_PROVENANCE_INVALID','Historical source preparation differs from immutable input packet');
  const object=(await tx.query('SELECT object_id FROM hyperfide.source_objects WHERE organisation_id=$1 AND repository_id=$2 AND object_id=$3 AND object_type=\'commit\' FOR SHARE',[scope.organisation_id,metadata.repository_id,metadata.head_commit])).rows[0];
  if(!object)fail('CHECKPOINT_SOURCE_UNREGISTERED','Checkpoint Git object is not registered for this repository');
@@ -182,7 +225,9 @@ export class ArtifactAdoption{
  }
  const complete=(await tx.query("SELECT id FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND digest=$4 AND status='COMPLETE' FOR SHARE",[scope.organisation_id,scope.run_id,artifactId,artifact.digest])).rows[0];
  if(!complete)fail('CHECKPOINT_ARTIFACT_UNAVAILABLE','Verified manifest ceased to be complete');
- const row=(await tx.query("INSERT INTO hyperfide.checkpoints(organisation_id,run_id,attempt_id,attempt_generation,agent_session_id,artifact_id,repository_id,source_object_id,input_packet_digest,support_level,artifact_content_digest,source_metadata_digest,preparation_digest,dependency_digest,source_manifest,registration_operation_id,registration_payload_digest,registration_actor_id,registration_kind,source_workspace_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *",[scope.organisation_id,scope.run_id,source.id,source.generation,sessionId,artifactId,metadata.repository_id,metadata.head_commit,source.input_packet_digest,sessionId&&metadata.native_support==='RECORDED'?'NATIVE_RESUME':'SOURCE_ONLY',capsuleDigest,metadataDigest,metadata.preparation_digest,metadata.dependency_digest,JSON.stringify(metadata),actor.operation.operation_id,payload,actor.principal.actor_id,stale?'STALE_IMPORT':'LIVE',workspaceId])).rows[0];
+ const row=(await tx.query("INSERT INTO hyperfide.checkpoints(organisation_id,run_id,attempt_id,attempt_generation,agent_session_id,artifact_id,repository_id,source_object_id,input_packet_digest,support_level,artifact_content_digest,source_metadata_digest,preparation_digest,dependency_digest,source_manifest,registration_operation_id,registration_payload_digest,registration_actor_id,registration_kind,source_workspace_id,artifact_content_size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING *",[scope.organisation_id,scope.run_id,source.id,source.generation,sessionId,artifactId,metadata.repository_id,metadata.head_commit,source.input_packet_digest,sessionId&&metadata.native_support==='RECORDED'?'NATIVE_RESUME':'SOURCE_ONLY',capsuleDigest,metadataDigest,metadata.preparation_digest,metadata.dependency_digest,JSON.stringify(metadata),actor.operation.operation_id,payload,actor.principal.actor_id,stale?'STALE_IMPORT':'LIVE',workspaceId,total])).rows[0];
+ if(!row)fail('CHECKPOINT_REGISTRATION_FAILED','Checkpoint registration did not persist');
+ for(const fact of contextFacts)await tx.query('INSERT INTO hyperfide.checkpoint_context_artifacts(organisation_id,run_id,checkpoint_id,role,artifact_id,artifact_digest,artifact_size_bytes,receipt_id,storage_kind,content_digest,content_size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',[scope.organisation_id,scope.run_id,row.id,fact.role,fact.artifact_id,fact.artifact_digest,fact.artifact_size_bytes,fact.receipt_id,fact.storage_kind,fact.content_digest,fact.content_size_bytes]);
  return {checkpoint:row,replayed:false,durability:'VERIFIED',source_git_semantics:'NOT_QUALIFIED',compute_authority_changed:false,context_restored:false,grants_authority:false};
  });
  }
