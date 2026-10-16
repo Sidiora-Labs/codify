@@ -104,6 +104,7 @@ def main():
         check('findings.registry.origin-and-conditions',lambda:expect(snapshot['finding']['origin_attempt_id']==f.x['attempt'] and all(snapshot['finding']['resolution_condition'].get(key)==value for key,value in CONDITION.items()) and snapshot['finding']['collaborator_package_ids']==[f.x['collaborator']]))
         distinct=finding(f,observation(f,'different-reproducer'));check('findings.registry.distinct-reproducer',lambda:expect(distinct['finding_id']!=fid))
         check('findings.registry.accepted-executable-definition-pins',lambda:expect(snapshot['finding']['resolution_condition']['origin_task_id']==f.x['task'] and len(snapshot['finding']['resolution_condition']['required_check_definitions'])==2 and all(item['definition_digest'].startswith('sha256:') for item in snapshot['finding']['resolution_condition']['required_check_definitions'])))
+        check('findings.registry.named-counterfactual-not-broadened',lambda:expect(snapshot['finding']['resolution_condition']['counterfactual_check_ids']==['finding.repaired']))
 
         untriaged=observation(f,'untriaged-upstream');check('findings.registry.untriaged-observation-blocks',lambda:expect(any(row.get('observation_id')==untriaged and row.get('reason')=='UNTRIAGED_BLOCKING_OBSERVATION' for row in call(f,'finding.blockers.inspect',{})['blockers'])))
         check('findings.registry.unknown-observation',lambda:reject(f,'finding.report',{'observation_id':uid(),'resolution_condition':CONDITION},'OBSERVATION_INVALID'))
