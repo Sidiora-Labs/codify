@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "15.2",
+  "task": "15.2",
+  "roles": [
+    "control"
+  ],
+  "module": "artifacts/objects.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "artifact.object.put",
+    "artifact.object.read",
+    "artifact.object.inspect",
+    "artifact.object.reconcile",
+    "artifact.manifest.commit",
+    "artifact.manifest.read",
+    "artifact.pending.list"
+  ],
+  "requires": [
+    "4.1"
+  ]
+}
