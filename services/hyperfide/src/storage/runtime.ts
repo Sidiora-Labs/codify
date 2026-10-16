@@ -137,6 +137,13 @@ export class ResourceContainer implements ServiceResources {
     if(signal.aborted)this.controller.abort();
     this.unbind=bindStoragePool(caller=>this.compatibilityPool(caller));
   }
+  async validateCommit(client:pg.PoolClient):Promise<void>{
+    const required=this.env.HYPERFIDE_REQUIRE_SYNC_REPLICA;
+    if(required!==undefined&&!['0','1'].includes(required))throw new StorageError('DATABASE_CONFIG_INVALID','Synchronous replica policy must be 0 or 1');
+    if(required!=='1')return;
+    const row=(await client.query<{valid:boolean}>("SELECT (NOT pg_is_in_recovery() AND current_setting('fsync')='on' AND current_setting('full_page_writes')='on' AND length(btrim(current_setting('synchronous_standby_names')))>0) AS valid")).rows[0];
+    if(row?.valid!==true)throw new StorageError('DURABILITY_UNAVAILABLE','Required synchronous durability configuration is unavailable');
+  }
   private config(kind:'primary'|'replica'|'migration'|'listener'):StorageConfig{
     const prefix='HYPERFIDE_'+this.role.toUpperCase();
     const url=kind==='migration'?this.env.HYPERFIDE_MIGRATION_DATABASE_URL:
