@@ -6,7 +6,7 @@ Fixtures create their own database, CA/key material and trusted service principa
 ordinary requests always pass the real production TLS/authentication path.
 """
 from __future__ import annotations
-import base64, hashlib, http.client, importlib.util, json, os, select, shutil, signal, socket, ssl, subprocess, sys, tempfile, time, uuid
+import base64, hashlib, http.client, importlib.util, json, os, re, select, shutil, signal, socket, ssl, subprocess, sys, tempfile, time, uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]
 RESULTS=[]
@@ -25,9 +25,10 @@ SQL_JS="""const fs=require('fs'),{createRequire}=require('module'),pg=createRequ
 (async()=>{const q=JSON.parse(fs.readFileSync(0,'utf8')),c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();try{const r=await c.query(q.sql,q.values);process.stdout.write(JSON.stringify(r.rows??[]));}finally{await c.end();}})().catch(e=>{process.stderr.write(JSON.stringify({code:e.code??'SQL_ERROR',message:e.message}));process.exitCode=1;});"""
 SIGN_JS="""const fs=require('fs'),crypto=require('crypto');process.stdout.write(crypto.sign(null,fs.readFileSync(0),fs.readFileSync(process.argv[1])).toString('base64url'));"""
 class IdentityFixture:
-    def __init__(self,extra_components=(),extra_env=None,extra_setup=None,components=None):
+    def __init__(self,extra_components=(),extra_env=None,extra_setup=None,components=None,database=None):
         self.folder=tempfile.TemporaryDirectory(prefix="hyperfide-identity-")
-        self.path=Path(self.folder.name);self.child=None;self.database="hf_identity_"+uuid.uuid4().hex
+        self.path=Path(self.folder.name);self.child=None;self.database=database or "hf_identity_"+uuid.uuid4().hex;self.database_created=False
+        if not re.fullmatch(r"hf_[a-z0-9_]{1,59}",self.database):self.folder.cleanup();raise ValueError("Owned bounded hf_ database name required")
         self.base_url=os.environ.get("DATABASE_URL")
         if not self.base_url:raise RuntimeError("DATABASE_URL required for actual PostgreSQL fixture")
         from urllib.parse import urlsplit,urlunsplit
@@ -37,6 +38,7 @@ class IdentityFixture:
         self.secret=os.urandom(32);self.grant=uid();self.preparation=sha(b"prepared-fixture-v1")
         try:
             self.sql('CREATE DATABASE "'+self.database+'"',admin=True)
+            self.database_created=True
             core=(ROOT/"services/hyperfide/migrations/0001-authority.sql").read_bytes()
             identity=(ROOT/"services/hyperfide/migrations/0014-enrollment.sql").read_bytes()
             self.sql("BEGIN;\n"+core.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(1,'0001-authority','"+sha(core)+"');\n"+identity.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(14,'0014-enrollment','"+sha(identity)+"');\nCOMMIT;")
@@ -109,8 +111,24 @@ class IdentityFixture:
         try:self.stop()
         finally:
             try:
-                if getattr(self,"base_url",None):self.sql('DROP DATABASE IF EXISTS "'+self.database+'" WITH (FORCE)',admin=True)
-            finally:self.folder.cleanup()
+                if self.database_created:self.sql('DROP DATABASE IF EXISTS "'+self.database+'" WITH (FORCE)',admin=True)
+            finally:self.database_created=False;self.folder.cleanup()
+    def add_principal(self,name,role,actor_id=None):
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}",name) or name in self.keys:raise ValueError("Fresh fixture principal name required")
+        agents=("LEADER","FEATURE_MANAGER","COMMIT_WATCHER","ISSUE_WATCHER","VERIFIER","INTEGRATOR","INDEXER")
+        if role=="WORKER":raise ValueError("WORKER requires actual runner delegation/current implementation attempt")
+        self.stop()
+        key=self.path/(name+".pem")
+        subprocess.run(["openssl","genpkey","-algorithm","Ed25519","-out",str(key)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);key.chmod(0o600)
+        public=subprocess.check_output(["openssl","pkey","-in",str(key),"-pubout","-outform","DER"],stderr=subprocess.DEVNULL)
+        self.keys[name]={"path":key,"public_key_b64":b64(public[-32:])};self.ids[name]=uid()
+        actor=actor_id or uid()
+        if role in agents and actor_id is None:
+            self.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id) VALUES($1,$2,$3,$4,'fixture','fixture',$5)",[self.ids["organisation"],self.ids["run"],actor,role,uid()])
+        config=json.loads(self.identity_config.read_text())
+        config["principals"].append({"credential_id":self.ids[name],"organisation_id":self.ids["organisation"],"run_id":self.ids["run"],"actor_id":actor,"role":role,"public_key_b64":self.keys[name]["public_key_b64"],"deployment_epoch":self.ids["epoch"],"allowed_actions":self.actions,"expires_at":time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+3600))})
+        self.identity_config.write_text(json.dumps(config));self.start()
+        return {"credential_id":self.ids[name],"actor_id":actor,"role":role}
     def operation(self,component,action,input,run=None,authority=None,expected_version=None,operation=None):
         payload=canonical({"run_id":run or self.ids["run"],"component":component,"action":action,"input":input,"expected_version":expected_version,"authority":authority})
         return operation or {"protocol_version":1,"operation_id":uid(),"idempotency_key":uid(),"payload_digest":sha(payload),"correlation_id":uid(),"causation_id":None,"payload_b64":b64(payload)}
