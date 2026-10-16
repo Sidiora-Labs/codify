@@ -128,7 +128,7 @@ export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,po
    await pool.query("UPDATE hyperfide.provider_connectivity_probes SET observation=$3,evidence_digest=$4 WHERE organisation_id=$1 AND id=$2 AND status='UNKNOWN'",
     [config.organisation_id,id,{operation:base,outcome},digestDocument({operation:base,outcome,enrollment:proof})]);
   };
-  const adapter=providerAdapter(scope,{invocation:providerInvocation(pool),resolveResourceBinding:observed=>resolveSandboxBinding(pool,config,runId,sandboxId,observed),resolvePreparation:unavailable,persistEarlyProcess:unavailable,claimProcess:unavailable,resolveProcess:unavailable,assertResourceBinding:async observed=>{
+  const adapter=providerAdapter(scope,{invocation:providerInvocation(pool),resolveResourceBinding:observed=>resolveSandboxBinding(pool,config,runId,sandboxId,observed),resolvePreparation:unavailable,persistOutputArchive:unavailable,persistEarlyProcess:unavailable,claimProcess:unavailable,resolveProcess:unavailable,assertResourceBinding:async observed=>{
    if(digestDocument(observed)!==digestDocument(base))fail('PROVIDER_SCOPE_MISMATCH','Connectivity operation changed');
    const current=(await pool.query('SELECT native_sandbox_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[config.organisation_id,sandboxId])).rows[0];
    if(!current||current.native_sandbox_id!==sandbox.native_sandbox_id||String(current.boot_generation)!==String(sandbox.boot_generation))fail('STALE_SANDBOX_GENERATION','Connectivity boot binding changed');
@@ -383,13 +383,85 @@ export function createProviderIsolation(runtime:ProviderIsolationRuntime){
   add(observe,observed);const result=receipt(observed);await journal.record({binding,receipt:result,observations});return result;
  };
 }
+export interface ProviderWriterObservation {
+ reference_key:string;operation_id:string;status:'OBSERVED'|'UNKNOWN';observed_state:'ABSENT'|'PRESENT'|'UNKNOWN';
+ topology_digest:string;resource_identity_digest:string;observed_at:string;expires_at:string;evidence_digest:string;
+ evidence_scope:'LIVE_PROVIDER'|'COMPONENT_FIXTURE';authority:'OBSERVATION_ONLY';
+}
+export interface ProviderIsolationObservationJournal {
+ read():Promise<ProviderIsolationState|null>;
+ recordObservation(value:{binding:ProviderIsolationBinding;observation:ProviderWriterObservation;
+  provider_observation:{operation:ProviderOperation<'observe'>;outcome:ProviderOutcome<'observe'>};
+  authorization_digest:string;authorization_expires_at:string}):Promise<void>;
+}
+export interface ProviderIsolationObserverRuntime {
+ env:Readonly<NodeJS.ProcessEnv>;signal:AbortSignal;
+ registry:Map<string,(scope:ProviderScope)=>Pick<Awaited<ReturnType<ProviderIsolationFactory>>,'observe'>|Promise<Pick<Awaited<ReturnType<ProviderIsolationFactory>>,'observe'>>>;
+}
+/** A distinct, non-mutating observation route. It cannot prepare an operation,
+ * obtain destroy(), renew destructive authority, or return an activation receipt. */
+export function createProviderIsolationObserver(runtime:ProviderIsolationObserverRuntime){
+ return async(referenceKey:string,operationId:string,authority:unknown,signal:AbortSignal,journal:ProviderIsolationObservationJournal):Promise<ProviderWriterObservation>=>{
+  str(referenceKey,128);uuid(operationId);
+  const config=await isolationConfiguration(runtime.env),target=config.resources.find(r=>r.reference_key===referenceKey);
+  if(!target)fail('ISOLATION_SCOPE_DENIED','Observed resource is not in protected deployment topology');
+  const expected={operation_id:operationId,organisation_id:config.organisation_id,run_id:config.run_id,deployment_id:config.deployment_id,
+   source_epoch:config.source_epoch,topology_digest:config.topology_digest,resource_reference:referenceKey,resource_topology_digest:target.resource_topology_digest};
+  const module=identityCredentials as unknown as Record<string,unknown>,assert=module.assertWriterObservationPermit;
+  if(typeof assert!=='function')fail('OBSERVATION_AUTHORITY_UNAVAILABLE','Actual observation-only permit primitive unavailable');
+  const authorise=()=>{(assert as (v:unknown,e:unknown)=>void)(authority,expected);};
+  authorise();
+  const proof=authority as {permit_digest:string;expires_at:string},authorizationDigest=dg(proof.permit_digest),authorizationExpiry=utc(proof.expires_at);
+  if(!journal||typeof journal.read!=='function'||typeof journal.recordObservation!=='function')fail('ISOLATION_JOURNAL_REQUIRED','Existing durable operation and observation journal required');
+  const state=await journal.read();
+  if(!state)fail('ISOLATION_OPERATION_UNKNOWN','Observation cannot prepare a new isolation operation');
+  const binding=state.binding,resourceDigest=digestDocument({scope:target.scope,resource:target.resource,boot_id:target.boot_id,preparation_digest:target.preparation_digest});
+  if(binding.schema_version!==1||binding.reference_key!==referenceKey||binding.operation_id!==operationId||binding.topology_digest!==config.topology_digest||binding.resource_identity_digest!==resourceDigest)
+   fail('ISOLATION_JOURNAL_CONFLICT','Observation must retain the original immutable resource operation');
+  dg(binding.authority_digest);dg(binding.custody_evidence_digest);utc(binding.custody_expires_at);
+  const original=validateProviderOperation(binding.destroy_operation);
+  if(original.kind!=='destroy'||original.identity.operation_id!==operationId||digestDocument(original.scope)!==digestDocument(target.scope)||digestDocument(original.resource)!==digestDocument(target.resource)||original.preparation_digest!==target.preparation_digest)
+   fail('ISOLATION_JOURNAL_CONFLICT','Original resource identity changed');
+  const deadline=Math.min(Date.now()+config.maximum_operation_ms,Date.parse(authorizationExpiry));
+  if(deadline<=Date.now()||signal.aborted||runtime.signal.aborted)fail('AUTH_EXPIRED','Observation authority or request expired');
+  const combined=AbortSignal.any([signal,runtime.signal,AbortSignal.timeout(Math.max(1,deadline-Date.now()))]);
+  const operation=isolationOperation('observe',target,randomUUID(),new Date(deadline).toISOString(),operationId);
+  let outcome=unknownIsolationOutcome(operation) as ProviderOutcome<'observe'>;
+  const factory=runtime.registry.get(target.scope.provider);
+  if(factory){
+   try{
+    authorise();if(combined.aborted||Date.now()>=deadline)fail('PROVIDER_TIMEOUT','Observation deadline expired before provider call');
+    const backend=await boundedEffect(Promise.resolve(factory(target.scope)),combined,deadline);
+    // Capture only this read capability. Destruction and journal preparation
+    // are absent from the observer's interface and implementation.
+    const observe=backend.observe.bind(backend);
+    authorise();if(combined.aborted||Date.now()>=deadline)fail('PROVIDER_TIMEOUT','Observation deadline expired before provider call');
+    const measured=await boundedEffect(observe(operation,combined),combined,deadline);
+    validateProviderOutcome({operation,outcome:measured});authorise();outcome=measured;
+   }catch{outcome=unknownIsolationOutcome(operation) as ProviderOutcome<'observe'>;}
+  }
+  const now=Date.now(),at=Date.parse(outcome.observed_at);
+  const fresh=outcome.status==='SUCCEEDED'&&outcome.acceptance==='CONFIRMED_ACCEPTED'&&at<=now&&now-at<config.proof_max_age_ms&&Date.parse(authorizationExpiry)>now;
+  const absence=fresh&&outcome.status==='SUCCEEDED'&&outcome.result.provider_state==='DESTROYED'&&outcome.result.health==='ABSENT';
+  const present=fresh&&outcome.status==='SUCCEEDED'&&outcome.result.provider_state!=='DESTROYED'&&outcome.result.provider_state!=='UNKNOWN'&&outcome.result.health!=='ABSENT';
+  const observed={reference_key:referenceKey,operation_id:operationId,status:absence||present?'OBSERVED' as const:'UNKNOWN' as const,
+   observed_state:absence?'ABSENT' as const:present?'PRESENT' as const:'UNKNOWN' as const,topology_digest:config.topology_digest,
+   resource_identity_digest:resourceDigest,observed_at:new Date(fresh?at:now).toISOString(),
+   expires_at:new Date(Math.min((fresh?at:now)+config.proof_max_age_ms,Date.parse(authorizationExpiry))).toISOString(),
+   evidence_scope:config.evidence_scope,authority:'OBSERVATION_ONLY' as const};
+  const observation={...observed,evidence_digest:digestDocument({binding,authorization_digest:authorizationDigest,operation,outcome,observation:observed})};
+  await journal.recordObservation({binding,observation,provider_observation:{operation,outcome},authorization_digest:authorizationDigest,authorization_expires_at:authorizationExpiry});
+  return observation;
+ };
+}
+
 export function createComponent(context:ComponentContext):Component{
   const database=providerDatabase(context);
   const guarded=(fn:(i:unknown,c:DeploymentConfig,p:ConnectivityConfig,database:ProviderDatabase)=>Promise<unknown>)=>async(input:unknown,requestContext:ComponentContext)=>{
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider placement is shutting down');
     const config=await readDeployment(context.env);return fn(input,config,await connectivity(context.env),bindProviderInvocation(database,config,invocationOf(requestContext),['PROVISIONER','COORDINATOR','OPERATOR']));
   };
-  return{apiVersion:1,capabilities:{'provider.isolation.v1':{isolateConfiguredResource:createProviderIsolation({env:context.env,signal:context.signal,registry:database.runtime.isolation,gateway:database.gateway})}},actions:{
+  return{apiVersion:1,capabilities:{'provider.observation.v1':{observeConfiguredResource:createProviderIsolationObserver({env:context.env,signal:context.signal,registry:database.runtime.isolation})},'provider.isolation.v1':{isolateConfiguredResource:createProviderIsolation({env:context.env,signal:context.signal,registry:database.runtime.isolation,gateway:database.gateway})}},actions:{
     'provider.placement.probe':guarded((i,c,p,database)=>probePool(database,c,p,i,context.signal)),
     'provider.placement.record-failure':guarded((i,c,p,database)=>recordPoolFailure(database,c,p,i)),
     'provider.relocation.plan':guarded((i,c,p,database)=>planRelocation(database,c,p,i)),
