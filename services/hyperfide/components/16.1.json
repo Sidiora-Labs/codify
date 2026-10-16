@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "16.1",
+  "task": "16.1",
+  "roles": [
+    "control"
+  ],
+  "module": "assurance/submission.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "submission.submit",
+    "submission.revoke",
+    "submission.inspect"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "5.2",
+    "15.2",
+    "spec-obligations",
+    "3.2",
+    "5.1"
+  ]
+}
