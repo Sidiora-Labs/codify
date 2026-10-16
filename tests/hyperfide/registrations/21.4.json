@@ -29,6 +29,8 @@
     "audit.capture-trusted-job",
     "audit.freshness-skips-document",
     "audit.outcome-cursor-bounded",
+    "audit.required-isolation-guards",
+    "audit.repeatable-read-refused",
     "audit.outcome-index-present",
     "audit.outcome-cross-audit-replay",
     "audit.secret-in-free-text",

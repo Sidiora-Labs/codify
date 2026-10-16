@@ -29,6 +29,8 @@
     "audit.capture-trusted-job",
     "audit.freshness-skips-document",
     "audit.outcome-cursor-bounded",
+    "audit.required-isolation-guards",
+    "audit.repeatable-read-refused",
     "audit.outcome-index-present",
     "audit.outcome-cross-audit-replay",
     "audit.secret-in-free-text",
@@ -66,8 +68,8 @@
     },
     {
       "path": "services/hyperfide/components/21.3.json",
-      "sha256": "f3efb35a60d817446e48ab8aef6e2f0f862ade43e71435304674d2c6d904237d",
-      "size": 373
+      "sha256": "c05ba745ed520490f465956438b829b29eb68d974cead8e5ee37bf09b6d5cc70",
+      "size": 385
     },
     {
       "path": "services/hyperfide/components/21.4.json",
@@ -171,18 +173,18 @@
     },
     {
       "path": "services/hyperfide/dist/decisions/ranking.d.ts",
-      "sha256": "542d7b37493d4c3bb0ba6357630c8d34dcb342f1ec75449dd30e10e9d43cda1b",
-      "size": 902
+      "sha256": "281b3fc5c791bcc9d01acc2aa7469674f299f4be7af5b6337b5ec087547308fa",
+      "size": 1026
     },
     {
       "path": "services/hyperfide/dist/decisions/ranking.js",
-      "sha256": "a963baffdac928148fa21b34e175605b30b43fa0c6f040c6929c9ef6cdc9b99c",
-      "size": 13615
+      "sha256": "9f175daae9448c17bf212ae515a8c131cc1d28750ab0abfad0930fadafb44dfd",
+      "size": 13821
     },
     {
       "path": "services/hyperfide/dist/decisions/ranking.js.map",
-      "sha256": "d323748c90729ca3e2796f409f7bd2e01814a5b024232d105012c0b079c6ff87",
-      "size": 14912
+      "sha256": "49ef56651b8886df34629004a84405a59fa199fff85659cc516667bfe3a4581a",
+      "size": 15091
     },
     {
       "path": "services/hyperfide/dist/decisions/recovery.d.ts",
@@ -341,8 +343,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0021-decisions.sql",
-      "sha256": "fe5999538bfd5f831146b543be0bf7a3d413316231ef5d6098e5b76cf42e4206",
-      "size": 3710
+      "sha256": "16f38a69500a7c84f0d305b37496ea6fad7ec23db9905f20305bd174b9e7e16d",
+      "size": 4412
     },
     {
       "path": "services/hyperfide/package-lock.json",
@@ -381,8 +383,8 @@
     },
     {
       "path": "services/hyperfide/src/decisions/ranking.ts",
-      "sha256": "6f7448953ea72042e1b4cfeedd439cdf48dd3c88941b88638727271efc07e1aa",
-      "size": 12306
+      "sha256": "f840d0fbf2e07d1270c9dd5c2bfbdcc1e625b0a7a3f136496eca70fd23a0a87f",
+      "size": 12538
     },
     {
       "path": "services/hyperfide/src/decisions/recovery.ts",
@@ -441,8 +443,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/21_4.py",
-      "sha256": "f34c0eeabd696f94ea8a582fd6a13a9c50763975472296b384836884f8fae0f5",
-      "size": 43994
+      "sha256": "444460c88b87f65f1b3a4f7f5b21e1d60ac2461a7b5689d3582cf1ccedadf895",
+      "size": 49908
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_1.py",
@@ -466,8 +468,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/21.4.json",
-      "sha256": "d21a194606371d2779cfc7ec5b3fe48a27d5a3dac3da86efe71daf8330475a94",
-      "size": 2277
+      "sha256": "f923d3d4d310f9899f57ba6dab887efd3bfeed8c38864607379984806d0c72b0",
+      "size": 2353
     }
   ],
   "resources": [

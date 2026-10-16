@@ -48,3 +48,15 @@ REVOKE ALL ON hyperfide.decision_packets,hyperfide.decision_audits,hyperfide.dec
 
 -- Audit traversal stays bounded without scanning unrelated run outcomes.
 CREATE INDEX decision_outcomes_audit_cursor ON hyperfide.decision_outcomes(organisation_id,run_id,audit_id,created_at,id);
+
+CREATE TRIGGER aaa_decision_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_packets
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_decision_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_audits
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_decision_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_proposals
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_decision_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.decision_outcomes
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
