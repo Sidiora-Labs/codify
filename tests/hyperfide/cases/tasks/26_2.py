@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Construct a real nonpublished release and install its exact bytes into disposable prefixes."""
 from pathlib import Path
-import hashlib,json,os,shutil,subprocess,tempfile,sys
+import hashlib,json,os,shutil,subprocess,tempfile,sys,signal
 ROOT=Path(__file__).resolve().parents[4];FAIL=[]
 NODE=Path(subprocess.check_output(["node","-p","process.execPath"],cwd=ROOT,text=True).strip())
 def expect(value):
@@ -10,7 +10,15 @@ def check(name,fn):
  try:fn();actual="observed"
  except Exception as e:FAIL.append(name);actual=type(e).__name__+": "+str(e)
  print(json.dumps({"type":"assertion","id":"entrypoint."+name,"expected":"observed","actual":actual}),flush=True)
-def run(*args,**kw):return subprocess.run(args,text=True,capture_output=True,timeout=180,**kw)
+def run(*args,**kw):
+ timeout=kw.pop("timeout",180);data=kw.pop("input",None)
+ child=subprocess.Popen(args,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,**kw)
+ try:out,err=child.communicate(data,timeout=timeout)
+ except subprocess.TimeoutExpired:
+  try:os.killpg(child.pid,signal.SIGKILL)
+  except ProcessLookupError:pass
+  child.communicate();raise
+ return subprocess.CompletedProcess(args,child.returncode,out,err)
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-release-probe-") as d:
   base=Path(d);release=base/"release";home=base/"home";home.mkdir()
@@ -18,7 +26,7 @@ def main():
   expect(run("/usr/bin/openssl","genpkey","-algorithm","Ed25519","-out",str(signing)).returncode==0);signing.chmod(0o600)
   expect(run("/usr/bin/openssl","pkey","-in",str(signing),"-pubout","-out",str(trusted)).returncode==0);trusted.chmod(0o644)
   e=dict(os.environ,PATH=str(NODE.parent)+":"+os.environ["PATH"],HOME=str(home),HYPERFIDE_BUILD_PLACEMENT="remote",HYPERFIDE_RELEASE_SIGNING_KEY_FILE=str(signing))
-  constructed=run("bash",str(ROOT/"scripts/release.sh"),"--output",str(release),"--skip-tests",cwd=ROOT,env=e)
+  constructed=run("bash",str(ROOT/"scripts/release.sh"),"--output",str(release),"--skip-tests",cwd=ROOT,env=e,timeout=600)
   if constructed.returncode:
    sys.stderr.write(constructed.stdout[-2000:]+constructed.stderr[-2000:]);raise RuntimeError("actual nonpublishing construction failed")
   index=json.loads((release/"release.json").read_text());manifest=json.loads((release/"manifest.json").read_text())

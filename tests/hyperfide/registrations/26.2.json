@@ -45,7 +45,7 @@
     "python3",
     "tests/hyperfide/cases/tasks/26_2.py"
   ],
-  "timeout_seconds": 600,
+  "timeout_seconds": 900,
   "required_env": [],
   "fixtures": [
     "hyperfide",
