@@ -16,7 +16,7 @@ export function createComponent(context:ComponentContext):Component {
    if(after!==null&&(v.expected_spec_generation===undefined||v.expected_run_version===undefined))
     return refuse('VIEW_CURSOR_UNPINNED','Continuation requires exact spec and run versions');
    const packageId=v.package_id===undefined?undefined:uuid(v.package_id);
-   return g.withPrimaryTransaction({timeoutMs:10000,guard:actor.guard},async tx=>{
+   return g.withPrimaryTransaction({timeoutMs:10000,guard:actor.guard,signal:actor.signal},async tx=>{
     await ready(tx);
     const authority=await requireAuthority(tx,{...actor,leader_generation:decimal(v.leader_generation),
      ...(packageId?{package_id:packageId,package_generation:decimal(v.package_generation)}:{}),roles:['LEADER','FEATURE_MANAGER']});
@@ -47,9 +47,9 @@ export function createComponent(context:ComponentContext):Component {
     // Drop optional detail first. Mandatory scope, provenance, blocker totals and
     // explicit omission counts remain present even with a very small budget.
     while(Buffer.byteLength(canonical(result()))>Number(v.max_bytes)){
-     if(tasks.length){tasks=tasks.slice(0,-1);continue;}
      if(dependencies.length){dependencies=dependencies.slice(0,-1);continue;}
      if(exceptions.length){exceptions=exceptions.slice(0,-1);continue;}
+     if(tasks.length>1){tasks=tasks.slice(0,-1);continue;}
      return refuse('VIEW_BUDGET_TOO_SMALL','Required provenance and exception totals exceed the requested budget');
     }
     if(rows.rows.length&&tasks.length===0)return refuse('VIEW_BUDGET_TOO_SMALL','Budget cannot encode one complete task and its required provenance');
