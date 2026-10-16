@@ -1,0 +1,10 @@
+[component]
+schema_version = 1
+id = "11.2"
+source = "src/hyperfide/bootstrap.c"
+entry = "hf_component_11_2"
+actions = ["bootstrap.materialize"]
+requires = []
+
+headers = ["src/hyperfide/preparation_support.h"]
+libraries = ["crypto"]

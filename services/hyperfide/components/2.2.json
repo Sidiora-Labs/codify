@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "spec-dependencies",
+  "task": "2.2",
+  "roles": [
+    "control"
+  ],
+  "module": "spec/dependencies.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "spec.task.resolve",
+    "spec.next",
+    "spec.dependencies.check",
+    "spec.dependencies.admit"
+  ],
+  "requires": [
+    "spec-import",
+    "spec-obligations",
+    "4.2",
+    "14.1"
+  ]
+}
