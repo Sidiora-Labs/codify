@@ -1,0 +1,117 @@
+{
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/28_3.py"
+  ],
+  "assertion_ids": [
+    "readiness.controlled-complete-inventory",
+    "readiness.reject-missing-case",
+    "readiness.reject-missing-clause",
+    "readiness.reject-duplicate-case",
+    "readiness.reject-missing-gate",
+    "readiness.reject-component-is-not-full-case",
+    "readiness.reject-missing-assertion",
+    "readiness.reject-stale-commit",
+    "readiness.reject-stale-source-manifest",
+    "readiness.reject-tampered-contract",
+    "readiness.reject-unknown-proof",
+    "readiness.reject-wrong-gate-proof",
+    "readiness.reject-omitted-resource",
+    "readiness.reject-unexplained-retention",
+    "readiness.reject-expired-retention",
+    "readiness.reject-wrong-clause-owner",
+    "readiness.reject-missing-native-registration",
+    "readiness.reject-force-override",
+    "readiness.reject-recursive-seal-input",
+    "readiness.explicit-current-retention",
+    "readiness.observed-later-cleanup",
+    "readiness.exact-manifest-byte-binding",
+    "readiness.reject-manifest-changed-after-checker",
+    "readiness.actual-service-refuses-unadmitted-proof",
+    "readiness.actual-service-rejects-empty-inventory",
+    "readiness.actual-seal-refuses-unadmitted-proof",
+    "readiness.actual-seal-table-guarded"
+  ],
+  "cases": [
+    "V-034",
+    "V-053",
+    "V-054",
+    "V-055",
+    "V-056"
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/28_3.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 90,
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/docs/closure.js",
+    "services/hyperfide/dist/release/traceability.js",
+    "services/hyperfide/dist/release/readiness.js"
+  ],
+  "required_artifacts": [
+    "docs/task-28.3-cleanup.json",
+    "docs/task-28.3-databases.json"
+  ],
+  "required_env": [
+    "DATABASE_URL"
+  ],
+  "resources": [
+    {
+      "id": "task28.3-fixture-resources",
+      "kind": "fixture-resource-set",
+      "scope": "task28.3-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "source_files": [
+    "docs/hyperfide/operations.md",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/tsconfig.json",
+    "spec/hyperfide/assurance.md",
+    "spec/hyperfide/decision-models.md",
+    "spec/hyperfide/decisions.md",
+    "spec/hyperfide/design.body.md",
+    "spec/hyperfide/evidence/task-catalog.json",
+    "spec/hyperfide/evidence/traceability.json",
+    "spec/hyperfide/execution-contract.md",
+    "spec/hyperfide/identity-security.md",
+    "spec/hyperfide/implementation-plan.md",
+    "spec/hyperfide/migration.md",
+    "spec/hyperfide/providers/blaxel.md",
+    "spec/hyperfide/providers/railway.md",
+    "spec/hyperfide/repository-baseline.md",
+    "spec/hyperfide/requirements.md",
+    "spec/hyperfide/reviews/README.md",
+    "spec/hyperfide/schematics.md",
+    "spec/hyperfide/spec.kvx",
+    "spec/hyperfide/storage.md",
+    "spec/hyperfide/traceability.md",
+    "spec/hyperfide/verification.md",
+    "tests/hyperfide/cases/tasks/28_2.py",
+    "tests/hyperfide/cases/tasks/28_3.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "task": "28.3",
+  "timeout_seconds": 300,
+  "variant": "task:28.3"
+}
