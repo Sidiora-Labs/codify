@@ -5,13 +5,14 @@ import type {InvocationContext} from '../transport/protocol.js';
 import {invocationOf} from '../identity/enrollment.js';
 import {FoundationError} from '../policy/programme.js';
 import {canonical,digest,exact,fail,text,uuid,decimal,sha} from './extraction.js';
-import {getBuild,graphCoverage,graphTransaction,graphGuard,scopeInput,semanticProjectionDebt} from './ingestion.js';
+import {getBuild,graphCoverage,graphTransaction,graphGuard,scopeInput,semanticProjectionDebt,assertGraphArtifacts} from './ingestion.js';
 import type {GraphScope,GraphTransaction} from './ingestion.js';
 import type {BundleManifest,ExtractionIdentity,JsonObject} from './extraction.js';
 
 export async function publishedGraph(tx:GraphTransaction,s:GraphScope,manifestId:string):Promise<JsonObject>{
  const r=await tx.query('SELECT m.*,b.input_digest,b.parser_digest,b.schema_digest,b.config_digest,b.state FROM hyperfide.graph_manifests m JOIN hyperfide.graph_builds b ON b.organisation_id=m.organisation_id AND b.run_id=m.run_id AND b.id=m.build_id WHERE m.organisation_id=$1 AND m.run_id=$2 AND m.id=$3 AND b.state=$4',[s.organisation_id,s.run_id,manifestId,'PUBLISHED']);
  const m=r.rows[0];if(!m)fail('GRAPH_VERSION_UNAVAILABLE','Requested immutable graph is unavailable or unpublished');
+ await assertGraphArtifacts(tx,s,String(m.build_id));
  const sources=await tx.query<{bundle_digest:string;identity:ExtractionIdentity;manifest:BundleManifest}>('SELECT bundle_digest,identity,manifest FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 ORDER BY identity->>\'repository_id\'',[s.organisation_id,s.run_id,m.build_id]);
  return {...m,source_set:sources.rows.map(v=>v.identity),source_coverage:sources.rows.map(v=>({bundle_digest:v.bundle_digest,identity:v.identity,complete:v.manifest.complete,coverage:v.manifest.coverage}))};
 }
@@ -35,13 +36,14 @@ async function publish(input:unknown,ctx:ComponentContext):Promise<unknown>{
  return graphTransaction(ctx,s,async tx=>{
   const p=[s.organisation_id,s.run_id,id];
   const prior=(await tx.query<{receipt:JsonObject}>('SELECT receipt FROM hyperfide.graph_publication_receipts WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[s.organisation_id,s.run_id,operation])).rows[0];
-  if(prior){if(prior.receipt.request_digest!==requestDigest)fail('GRAPH_OPERATION_CONFLICT','Publication operation reused with different input');return {...prior.receipt,replayed:true};}
+  if(prior){if(prior.receipt.request_digest!==requestDigest)fail('GRAPH_OPERATION_CONFLICT','Publication operation reused with different input');await assertGraphArtifacts(tx,s,String(prior.receipt.build_id));return {...prior.receipt,replayed:true};}
   const build=await getBuild(tx,s,id,true);
   const current=(await tx.query('SELECT * FROM hyperfide.graph_channels WHERE organisation_id=$1 AND run_id=$2 AND name=$3 FOR UPDATE',[s.organisation_id,s.run_id,channel])).rows[0];
   if(String(current?.publication_generation??'0')!==expected)fail('GRAPH_GENERATION_CONFLICT','Graph channel changed; recompute publication intent');
   if(build.state!=='READY'&&build.state!=='PUBLISHED')fail('GRAPH_INCOMPLETE','Graph build is not ready');
   const progress=(await tx.query('SELECT phase FROM hyperfide.graph_resolution_progress WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3',p)).rows[0];
   if(progress?.phase!=='COMPLETE')fail('GRAPH_INCOMPLETE','Resolution has not completed');
+  await assertGraphArtifacts(tx,s,id);
   const sourceRows=await tx.query<{bundle_digest:string;manifest:BundleManifest;identity:ExtractionIdentity}>('SELECT bundle_digest,manifest,identity FROM hyperfide.graph_bundle_inputs WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 ORDER BY identity->>\'repository_id\'',p);
   const coverage=await graphCoverage(tx,s,id);if(!sourceRows.rows.length||coverage.failed_files!==0||sourceRows.rows.some(v=>!v.manifest.complete))fail('GRAPH_INCOMPLETE','Source/parse coverage incomplete');
   // A delayed extraction cannot displace a newer generation on this channel.
