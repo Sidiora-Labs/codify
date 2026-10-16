@@ -17,7 +17,7 @@ IDS=["review.inputs.exact-obligation-generation","review.inputs.replay-stable","
 "review.receipt.actual-admitted-support","review.receipt.immutable-history","review.receipt.exact-replay",
 "review.coverage.limitations-prevent-completion","review.inputs.changed-policy-stales","review.inputs.reconcile-preserves-history",
 "review.observation.origin-attempt-refused","review.observation.exact-source-attribution","review.observation.history-immutable","review.inputs.partial-task-revision-stales","review.inputs.rebind-fences-old-generation"]
-IDS+=["review.execution.package-stop-denies-claim","review.execution.sandbox-stop-denies-output"]
+IDS+=["review.execution.package-stop-denies-claim","review.execution.sandbox-stop-denies-output","review.execution.old-sandbox-stop-preserves-current-review","review.lease.owner-renewal","review.lease.wrong-owner-renewal-refused","review.lock-order.disposition-before-auth-run","review.graph-custody.quarantine-and-scope-fenced"]
 def seed_inputs(f):
  d=f.identity;profile=m.xid(0x701);build=m.xid(0x702);graph=m.xid(0x703);artifact=m.xid(0x704);attempt=m.xid(0x705);evidence=m.xid(0x706)
  body=b"Bounded support fixture: API units are cents; no semantic proof claimed.\n"
@@ -30,6 +30,63 @@ def seed_inputs(f):
  d.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest) VALUES($1,$2,$3,$4,1,$5,$6)",[m.ORG,m.RUN,attempt,m.xid(0x301),d.ids["epoch"],m.DIGEST])
  d.sql("INSERT INTO hyperfide.evidence(organisation_id,run_id,id,attempt_id,attempt_generation,repository_id,source_object_id,criteria_digest,manifest_digest,artifact_id,admission_state) VALUES($1,$2,$3,$4,1,$5,$6,$7,$7,$8,'ADMITTED')",[m.ORG,m.RUN,evidence,attempt,m.REPOSITORY,f.first,m.DIGEST,artifact])
  return {"snapshot":{"source_set":[{"repository_id":m.REPOSITORY,"source_object_id":f.first}],"graph_manifest_id":graph,"contract_ids":[],"environment_profile_id":profile},"evidence_id":evidence,"attempt_id":attempt}
+
+def lock_order_probe(f):
+ """Two real connections: authenticated review must wait before taking run SHARE."""
+ import subprocess,threading,time
+ js=r"""const {createRequire}=require('module'),pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg');
+ const readline=require('readline');
+ (async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL,statement_timeout:1500,lock_timeout:1000});await c.connect();
+ try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[process.argv[1]+':'+process.argv[2]+':finding-disposition']);process.stdout.write('LOCKED\n');
+ const lines=readline.createInterface({input:process.stdin});await new Promise(resolve=>lines.once('line',resolve));
+ await c.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[process.argv[1],process.argv[2]]);
+ await c.query('COMMIT');process.stdout.write('UPDATED\n');lines.close();}finally{await c.end();}})().catch(e=>{process.stderr.write(JSON.stringify({code:e.code??'ERROR'}));process.exitCode=1;});"""
+ child=subprocess.Popen(["node","-e",js,m.ORG,m.RUN],cwd=ROOT,env=f.identity.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+ result={};errors=[]
+ def invoke():
+  try:result.update(f.coverage(f.first))
+  except Exception as error:errors.append(error)
+ thread=None
+ try:
+  m.expect(child.stdout.readline().strip()=="LOCKED","primary control transaction did not acquire disposition lock")
+  thread=threading.Thread(target=invoke);thread.start()
+  waiting=False
+  for _ in range(50):
+   rows=f.identity.sql("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE 'SELECT pg_advisory_xact_lock%'")
+   if rows:waiting=True;break
+   time.sleep(.05)
+  m.expect(waiting,"actual authenticated request never reached disposition barrier")
+  child.stdin.write("CONTINUE\n");child.stdin.flush()
+  output=child.communicate(timeout=5)
+  m.expect(child.returncode==0 and "UPDATED" in output[0],"review acquired run SHARE before disposition lock: "+output[1])
+  thread.join(timeout=8)
+  m.expect(not thread.is_alive() and not errors and result.get("status")=="INCOMPLETE","actual authenticated review did not resume after primary commit")
+ finally:
+  if child.poll() is None:child.kill();child.communicate()
+  if thread:thread.join(timeout=10)
+
+
+def graph_custody_probe(f,seed):
+ import hashlib,subprocess
+ d=f.identity;artifact=m.xid(0xe01);raw="{}";digest="sha256:"+hashlib.sha256(raw.encode()).hexdigest()
+ graph=m.xid(0xe02);build=m.xid(0xe03);graph_digest="sha256:"+hashlib.sha256(b"graph-custody-fixture").hexdigest()
+ d.sql("INSERT INTO hyperfide.graph_builds(organisation_id,run_id,id,input_digest,source_manifest_digest,parser_digest,schema_digest,config_digest,state) VALUES($1,$2,$3,$4,$4,$4,$4,$4,'STAGING')",[m.ORG,m.RUN,build,graph_digest])
+ d.sql("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,retention_class) VALUES($1,$2,$3,$4,2,'fixture','graph-custody','COMPLETE','RUN')",[m.ORG,m.RUN,artifact,digest])
+ d.sql("INSERT INTO hyperfide.graph_bundle_inputs(organisation_id,run_id,graph_id,bundle_digest,identity,manifest,manifest_text,artifact_id) VALUES($1,$2,$3,$4,'{}','{}',$5,$6)",[m.ORG,m.RUN,build,digest,raw,artifact])
+ d.sql("UPDATE hyperfide.graph_builds SET state='PUBLISHED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,build])
+ d.sql("INSERT INTO hyperfide.graph_manifests(organisation_id,run_id,id,build_id,manifest_digest,source_manifest_digest,file_count,symbol_count,reference_count,edge_count) VALUES($1,$2,$3,$4,$5,$5,0,0,0,0)",[m.ORG,m.RUN,graph,build,graph_digest])
+ # This is a storage freshness unit using actual PG metadata, not a graph
+ # publication or authentication proof. Signed component assertions are separate.
+ js="""import{createRequire}from'node:module';import{reviewGraphCustodyCurrent}from'./services/hyperfide/dist/review/coverage.js';
+ const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg'),c=new pg.Client({connectionString:process.env.DATABASE_URL});
+ await c.connect();try{await c.query('BEGIN');const value=await reviewGraphCustodyCurrent(c,{organisation_id:process.argv[1],run_id:process.argv[2]},process.argv[3]);await c.query('COMMIT');process.stdout.write(JSON.stringify(value));}finally{await c.end();}"""
+ def inspect(run):
+  return json.loads(subprocess.check_output(["node","--input-type=module","-e",js,m.ORG,run,graph],cwd=ROOT,env=d.env))
+ m.expect(inspect(m.RUN) is True,"actual complete graph artifact custody was not current")
+ d.sql("UPDATE hyperfide.artifacts SET status='QUARANTINED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,artifact])
+ m.expect(inspect(m.RUN) is False,"quarantined graph artifact remained current")
+ m.expect(inspect(m.xid(0xdead)) is False,"another run borrowed graph artifact custody")
+
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-review-receipts-") as folder:
   f=m.Fixture("17.3",Path(folder),["17.3"])
@@ -40,7 +97,9 @@ def main():
    f.identity.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[m.ORG,m.RUN,accepted])
    f.identity.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state=\'PENDING_VALIDATION\',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN,accepted])
    f.identity.sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN])
+   m.check(IDS[28],lambda:lock_order_probe(f))
    seed=seed_inputs(f)
+   m.check(IDS[29],lambda:graph_custody_probe(f,seed))
    binding=dict(m.SCOPE,repository_id=m.REPOSITORY,source_object_id=f.first,policy_digest=f.policy_digest,candidate_digest=m.DIGEST,snapshot=seed["snapshot"])
    bound=f.ok("review.inputs.bind",binding,component="17.3");obligation=f.identity.sql("SELECT id AS obligation_id,generation::text AS generation FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4 AND watcher_id=\'watcher-0\'",[m.ORG,m.RUN,m.REPOSITORY,f.first])[0]
    m.check(IDS[0],lambda:m.expect(len(bound["obligations"])==10 and all(row["generation"]=="1" for row in bound["obligations"]),"input generation denominator wrong"))
@@ -58,8 +117,19 @@ def main():
    f.identity.delegate_principal("watcher0",m.xid(0x200))
    f.identity.delegate_principal("watcher1",m.xid(0x201))
    claim=dict(m.SCOPE,obligation_id=obligation["obligation_id"],generation=obligation["generation"],lease_seconds=120)
+   oldbox=m.xid(0xd00);oldslot=m.xid(0xd01);oldattempt=m.xid(0xd02);oldhold=m.xid(0xd03)
+   f.identity.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state) VALUES($1,$2,$3,'fixture-old-review-host','RUNNING')",[m.ORG,oldbox,f.identity.ids["pool"]])
+   f.identity.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES($1,$2,$3,'historical-agent',1,'AGENT')",[m.ORG,oldslot,oldbox])
+   f.identity.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,sandbox_id,slot_id,sandbox_boot_generation) VALUES($1,$2,$3,$4,2,$5,$6,$7,$8,1)",[m.ORG,m.RUN,oldattempt,m.xid(0x301),f.identity.ids["epoch"],m.DIGEST,oldbox,oldslot])
+   f.identity.sql("INSERT INTO hyperfide.execution_controls(organisation_id,run_id,id,scope_kind,scope_id,sandbox_id,mode) VALUES($1,$2,$3,'SANDBOX',$4,$4,'STOP')",[m.ORG,m.RUN,oldhold,oldbox])
    claimed={}
    m.check(IDS[6],lambda:claimed.update(f.ok("review.obligation.claim",claim,component="17.3",key="watcher0")))
+   m.check(IDS[25],lambda:m.expect(bool(claimed.get("lease_generation")) and f.identity.sql("SELECT lease_sandbox_id FROM hyperfide.review_obligations WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[m.ORG,m.RUN,obligation["obligation_id"]])[0]["lease_sandbox_id"]==f.identity.ids["sandbox"],"historical sandbox hold cancelled current independent review"))
+   renewal=dict(claim,lease_generation=claimed["lease_generation"])
+   renewed={}
+   m.check(IDS[26],lambda:renewed.update(f.ok("review.obligation.renew",renewal,component="17.3",key="watcher0")))
+   m.check(IDS[27],lambda:f.reject("review.obligation.renew",renewal,"REVIEW_LEASE_STALE",component="17.3",key="watcher1"))
+   m.expect(renewed.get("lease_generation")==claimed["lease_generation"],"renewal replaced the current ownership generation")
    m.check(IDS[7],lambda:f.reject("review.obligation.claim",claim,"REVIEW_JOB_DENIED",component="17.3",key="watcher1"))
    m.check(IDS[8],lambda:f.reject("review.obligation.claim",claim,"REVIEW_LEASE_CONFLICT",component="17.3",key="watcher0"))
    request["lease_generation"]=claimed["lease_generation"]

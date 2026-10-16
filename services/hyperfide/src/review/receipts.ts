@@ -212,6 +212,7 @@ export function createComponent(_context:ComponentContext):Component{
  return {apiVersion:1,actions:{
   'review.inputs.bind':guarded(bindReviewInputs),
   'review.obligation.claim':guarded(claimReviewObligation),
+  'review.obligation.renew':guarded(renewReviewObligation),
   'review.receipt.submit':guarded(submitReviewReceipt),
   'review.receipt.inspect':guarded(async(ctx,input)=>{
    const v=obj(input,['organisation_id','run_id','receipt_id']),binding=scope(v);
@@ -244,4 +245,22 @@ export async function fenceReviewObligations(db:ReviewDb,binding:ReviewScope,con
   fenced.push(changed.rows[0]);
  }
  return {fenced,physical,cleanup_status:'UNKNOWN',reassignment_authorized:false,control_operation_id:control.operation_id,control_generation:control.control_generation};
+}
+
+export async function renewReviewObligation(context:ComponentContext,value:unknown):Promise<unknown>{
+ const v=obj(value,['organisation_id','run_id','obligation_id','generation','lease_generation','lease_seconds']);
+ const binding=scope(v),trusted=authorizeReview(context,binding,['COMMIT_WATCHER']),actor=uuid(trusted.invocation.principal.actor_id);
+ const id=uuid(v.obligation_id),generation=decimal(v.generation),lease=decimal(v.lease_generation),seconds=v.lease_seconds;
+ if(typeof seconds!=='number'||!Number.isSafeInteger(seconds)||seconds<30||seconds>3600)fail('REVIEW_INPUT_INVALID','Review lease must be 30..3600 seconds');
+ return transaction(context,binding,async db=>{
+  const rows=await db.query<Record<string,any>>(`SELECT o.*,i.snapshot,p.active FROM hyperfide.review_obligations o JOIN hyperfide.review_obligation_inputs i ON i.organisation_id=o.organisation_id AND i.run_id=o.run_id AND i.obligation_id=o.id AND i.generation=o.generation JOIN hyperfide.review_policies p ON p.organisation_id=o.organisation_id AND p.run_id=o.run_id AND p.digest=o.policy_digest WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.id=$3 FOR UPDATE OF o`,[binding.organisation_id,binding.run_id,id]);
+  const row=rows.rows[0],principal=trusted.invocation.principal;
+  if(!row||!row.active||row.state!=='RUNNING'||String(row.generation)!==generation||String(row.lease_generation)!==lease||row.lease_session_id!==actor||row.lease_sandbox_id!==principal.sandbox_id||String(row.lease_boot_generation)!==principal.boot_generation)fail('REVIEW_LEASE_STALE','Only the exact current review job owner may renew');
+  if(!await reviewInputCurrent(db,binding,row.snapshot))fail('REVIEW_INPUTS_STALE','Accepted review inputs changed before renewal');
+  await watcherReservation(db,binding,actor,row.lease_sandbox_id,row.lease_boot_generation);
+  await assertReviewExecutionAllowed(context,db,binding,row.snapshot.source_set,row.lease_sandbox_id,'RENEWAL');
+  const updated=await db.query(`UPDATE hyperfide.review_obligations SET lease_expires_at=clock_timestamp()+$6*interval '1 second' WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND generation=$4 AND lease_generation=$5 AND lease_expires_at>clock_timestamp() RETURNING id,generation,lease_generation,lease_expires_at`,[binding.organisation_id,binding.run_id,id,generation,lease,seconds]);
+  if(!updated.rows[0])fail('REVIEW_LEASE_STALE','An expired review lease cannot be revived');
+  return updated.rows[0];
+ });
 }

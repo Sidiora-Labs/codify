@@ -13,7 +13,8 @@
     "review.receipt.submit",
     "review.receipt.inspect",
     "review.inputs.reconcile",
-    "review.obligation.claim"
+    "review.obligation.claim",
+    "review.obligation.renew"
   ],
   "requires": [
     "17.1",

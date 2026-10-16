@@ -32,7 +32,12 @@
     "review.inputs.partial-task-revision-stales",
     "review.inputs.rebind-fences-old-generation",
     "review.execution.package-stop-denies-claim",
-    "review.execution.sandbox-stop-denies-output"
+    "review.execution.sandbox-stop-denies-output",
+    "review.execution.old-sandbox-stop-preserves-current-review",
+    "review.lease.owner-renewal",
+    "review.lease.wrong-owner-renewal-refused",
+    "review.lock-order.disposition-before-auth-run",
+    "review.graph-custody.quarantine-and-scope-fenced"
   ],
   "argv": [
     "python3",
