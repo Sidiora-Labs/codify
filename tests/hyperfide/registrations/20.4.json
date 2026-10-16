@@ -47,7 +47,8 @@
     "decision.jobs.retained-request-replay",
     "decision.jobs.shared-account-quota",
     "decision.jobs.completion-deadline",
-    "decision.jobs.admission-deadline"
+    "decision.jobs.admission-deadline",
+    "decision.jobs.semantic-lock-order"
   ],
   "argv": [
     "python3",
