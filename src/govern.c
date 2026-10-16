@@ -1,3 +1,5 @@
+#include <stdio.h>
+extern int hf_client_authority_guard(const char *operation, FILE *output);
 /*
  * Governance: the commands that make Codify present at every step rather than
  * only at the bookends.
@@ -1165,6 +1167,7 @@ static int hook_guard_call(void *u) {
  * background sync inside the freshness window. Always exits 0: a hook that
  * fails wedges the agent's tool loop, and nothing here is worth that. */
 int cmd_hook_post_edit(Cg *cg, const SysInfo *si, bool json) {
+    { int authority_rc = hf_client_authority_guard("hook.post-edit", stderr); if (authority_rc) return authority_rc; }
     char *payload = hook_read_stdin();
     char *path = hook_edited_path(payload);
 
