@@ -12,6 +12,8 @@ import threading
 import importlib.util
 import json
 import os
+import re
+from urllib.parse import urlsplit,urlunsplit
 from pathlib import Path
 import shutil
 import stat
@@ -48,7 +50,7 @@ def invoke(action,request,env=None,raw=None):
     expect(result["ok"] is True,"native dispatcher did not invoke component")
     return result["result"]
 class Fixture:
-    def __init__(self,base):
+    def __init__(self,base,scope=None):
         self.base=base
         self.allowed=base/"allowed";self.allowed.mkdir()
         self.spool=base/"spool";self.spool.mkdir(mode=0o700)
@@ -82,15 +84,18 @@ class Fixture:
         (self.repo/"ignored"/"credential").write_text("IGNORED-SECRET-CANARY")
         (self.repo/".env").write_text("ENV-SECRET-CANARY")
         self.request={k:str(uuid.uuid4()) for k in ("organisation_id","run_id","repository_id","task_id","attempt_id","workspace_id")}
+        if scope:self.request.update(scope)
         self.request.update(candidate_path="repo",base_commit=self.head,branch_ref="refs/heads/attempt",
             preparation_digest="sha256:"+"1"*64,dependency_digest="sha256:"+"2"*64,
             summary_digest="sha256:"+"3"*64,findings_digest="sha256:"+"4"*64,
             instruction_cursor="27",native_support="RECORDED",native_session_ref=str(uuid.uuid4()))
-        self.env=dict(os.environ,HF_CHECKPOINT_ALLOWED_ROOT=str(self.allowed),HF_CHECKPOINT_SPOOL_ROOT=str(self.spool))
-        # Native must work with no service credentials or authority role.
-        for key in list(self.env):
-            if "DATABASE" in key or key.startswith(("PG","HF_ARTIFACT","HYPERFIDE_PG")):
-                self.env.pop(key,None)
+        # A supervisor supplies filesystem references only. No ambient account,
+        # database, provider or authenticated service configuration enters native.
+        self.env={"PATH":"/usr/bin:/bin","LANG":"C",
+                  "HF_CHECKPOINT_ALLOWED_ROOT":str(self.allowed),
+                  "HF_CHECKPOINT_SPOOL_ROOT":str(self.spool)}
+        for key in ("ASAN_OPTIONS","UBSAN_OPTIONS"):
+            if key in os.environ:self.env[key]=os.environ[key]
         self.capture=invoke("checkpoint.capture",self.request,self.env)
         expect(self.capture.get("capture_state")=="LOCAL_COMPLETE","fixture capture refused: "+str(self.capture))
         self.digest=self.capture["checkpoint_digest"]
@@ -268,62 +273,144 @@ def native_suite(f):
             expect(not thread.is_alive(),"owned source writer leaked")
     check("checkpoint.source.live-writer-instability",live_writer)
 
+DATABASE="hf_task_15_1_checkpoint"
+RESOURCE="hf-task-15.1-database"
+def evidence_dir():
+    target=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/task-15.1-standalone"))/"checkpoint"
+    target.mkdir(parents=True,exist_ok=True)
+    return target
+def sql(statement,database="postgres"):
+    parsed=urlsplit(os.environ["DATABASE_URL"])
+    url=urlunsplit((parsed.scheme,parsed.netloc,"/"+database,parsed.query,""))
+    env=dict(os.environ,PGDATABASE=database)
+    result=subprocess.run(["psql","-X","-q","-A","-t","-v","ON_ERROR_STOP=1","-d",url],
+                          input=statement,text=True,capture_output=True,env=env,timeout=30)
+    expect(result.returncode==0,"owned checkpoint database operation failed")
+    return result.stdout.strip()
+def cleanup():
+    try:
+        sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='"+DATABASE+"' AND pid<>pg_backend_pid();")
+        sql('DROP DATABASE IF EXISTS "'+DATABASE+'";')
+        absent=sql("SELECT datname FROM pg_database WHERE datname='"+DATABASE+"';")==""
+        (evidence_dir()/"database-absence.json").write_text(json.dumps({
+            "database":DATABASE,"observed_absent":absent,
+            "observer":"primary pg_database after explicit owned database cleanup"})+"\n")
+        print(json.dumps({"type":"cleanup","complete":absent,"resources":[
+            {"id":RESOURCE,"status":"deleted" if absent else "unknown","observed_absent":absent,
+             "evidence_artifact":"checkpoint/database-absence.json"}]}),flush=True)
+        return 0 if absent else 1
+    except Exception:
+        print(json.dumps({"type":"cleanup","complete":False,"resources":[
+            {"id":RESOURCE,"status":"unknown"}]}),flush=True)
+        return 1
 def durable_suite(f):
-    """Trusted supervisor fixture owns service/DB; native environment remains scrubbed."""
+    """Real authenticated HTTPS service; native receives filesystem inputs only."""
     module_path=ROOT/"tests/hyperfide/cases/tasks/15_2.py"
-    expect(module_path.is_file(),"qualified task15.2 fixture missing; prerequisite must be integrated")
+    expect(module_path.is_file(),"actual task15.2 fixture missing; adopt its published source")
     spec=importlib.util.spec_from_file_location("hyperfide_objects_15_1",module_path)
     objects=importlib.util.module_from_spec(spec);spec.loader.exec_module(objects)
-    objects.DATABASE="hf_task_15_1_checkpoint"
-    objects.RESOURCE="task15-1-checkpoint"
-    original_environment=objects.environment
-    original_sql=objects.sql
-    objects.environment=lambda database=objects.DATABASE:original_environment(database)
-    objects.sql=lambda statement,*,database=objects.DATABASE,allow_error=False:original_sql(statement,database=database,allow_error=allow_error)
-    expect(objects.cleanup()==0,"dedicated checkpoint fixture cleanup failed")
-    objects.sql('CREATE DATABASE "'+objects.DATABASE+'";',database="postgres")
-    fixture=objects.ObjectFixture()
+    factory=getattr(objects,"createAuthenticatedFixture",None)
+    expect(callable(factory),"actual14 authenticated artifact fixture is not available")
+    base=f.base/"durable";base.mkdir()
+    capsule=Fixture(base,{"organisation_id":objects.ORG,"run_id":objects.RUN})
+    supervisor_base=f.base/"supervisor";supervisor_base.mkdir()
+    setup=factory(supervisor_base,DATABASE,RESOURCE)
+    observations={"scope":"task-component","source":"actual native and authenticated14 HTTPS processes",
+                  "native_authority":"NONE","publication_authority":"supervisor verified artifact service",
+                  "objects":[],"checkpoint_digest":capsule.digest,"restored":False,
+                  "live_provider_qualification":"NOT_EVALUATED"}
     try:
-        with tempfile.TemporaryDirectory(prefix="checkpoint-supervisor-",dir="/tmp/hyperfide") as temp:
-            service=objects.Service(Path(temp),fixture)
-            try:
-                service.ok("authority.schema.bootstrap",{},component="4.1")
-                objects.seed()
-                chunks=f.chunks()
-                rows=[]
-                offset=0
-                for sequence,data in enumerate(chunks):
-                    response=service.put(data)
-                    expect(response["outcome"]=="SUCCEEDED" and response["availability"]=="VERIFIED")
-                    artifact=response["artifact"]
-                    rows.append({"sequence":sequence,"artifact_id":artifact["artifact_id"],"digest":DIGEST(data),
-                                 "size_bytes":str(len(data)),"offset_bytes":str(offset)})
-                    offset+=len(data)
-                request={"organisation_id":objects.ORG,"run_id":objects.RUN,"expected_chunks":len(rows),
-                         "total_size_bytes":str(offset),"content_digest":f.digest,"chunks":rows,
-                         "complete":True,"truncated":False,"missing_ranges":[],
-                         "retention_class":"RUN","retention_until":None,"retention_hold":False}
-                result=service.ok("artifact.manifest.commit",request)
-                expect(result["outcome"]=="SUCCEEDED" and result["availability"]=="VERIFIED" and result["receipt"] is not None)
-                expect(result["content_digest"]==f.digest and result["chunk_count"]==len(rows))
-                f.object.unlink()
-                read=service.ok("artifact.manifest.read",service.by_id(result))
-                reconstructed=[]
-                for row in read["manifest"]["chunks"]:
-                    part=service.ok("artifact.object.read",{"organisation_id":objects.ORG,"run_id":objects.RUN,"artifact_id":row["artifact_id"]})
-                    data=base64.b64decode(part["data_base64"],validate=True)
-                    expect(DIGEST(data)==row["digest"])
-                    reconstructed.append(data)
-                data=b"".join(reconstructed)
-                expect(DIGEST(data)==f.digest and data==f.bytes)
-                f.object.write_bytes(data)
-                restored=f.restore(dict(f.restore_request,candidate_path="durable-restored"))
-                expect(restored["native_context"]=="NOT_RESTORED" and restored["authority"]=="NONE")
-                expect((f.allowed/"durable-restored/tracked.bin").read_bytes()==(f.repo/"tracked.bin").read_bytes())
-            finally:pass  # Service requests each own and wait for their actual child process.
+        service=setup.service
+        chunks=capsule.chunks()
+        rows=[];offset=0
+        for sequence,data in enumerate(chunks):
+            response=service.put(data)
+            expect(response["outcome"]=="SUCCEEDED" and response["availability"]=="VERIFIED",
+                   "actual object service did not verify chunk durability")
+            artifact=response["artifact"]
+            expect(artifact["organisation_id"]==capsule.request["organisation_id"] and
+                   artifact["run_id"]==capsule.request["run_id"],"artifact scope differs from source envelope")
+            expect(response.get("receipt") is not None,"verified chunk lacks actual receipt")
+            rows.append({"sequence":sequence,"artifact_id":artifact["artifact_id"],"digest":DIGEST(data),
+                         "size_bytes":str(len(data)),"offset_bytes":str(offset)})
+            observations["objects"].append({"artifact_id":artifact["artifact_id"],"digest":artifact["digest"],
+                                            "receipt_id":response["receipt"]["receipt_id"]})
+            offset+=len(data)
+        request={"organisation_id":objects.ORG,"run_id":objects.RUN,"expected_chunks":len(rows),
+                 "total_size_bytes":str(offset),"content_digest":capsule.digest,"chunks":rows,
+                 "complete":True,"truncated":False,"missing_ranges":[],
+                 "retention_class":"RUN","retention_until":None,"retention_hold":False}
+        result=service.ok("artifact.manifest.commit",request)
+        expect(result["outcome"]=="SUCCEEDED" and result["availability"]=="VERIFIED" and
+               result["receipt"] is not None,"actual manifest publication is not verified")
+        expect(result["content_digest"]==capsule.digest and result["chunk_count"]==len(rows),
+               "durable manifest is not bound to the exact capsule")
+        observations["manifest_receipt"]=result["receipt"]["receipt_id"]
+        observations["manifest_digest"]=result["manifest_digest"]
+        # Simulate loss of all local capsule storage before recovering from the
+        # actual service. Native itself never accepts a publication receipt.
+        shutil.rmtree(capsule.spool)
+        capsule.spool.mkdir(mode=0o700)
+        read=service.ok("artifact.manifest.read",service.by_id(result))
+        reconstructed=[]
+        for row in read["manifest"]["chunks"]:
+            part=service.ok("artifact.object.read",{"organisation_id":objects.ORG,"run_id":objects.RUN,
+                                                   "artifact_id":row["artifact_id"]})
+            expect(part["availability"]=="VERIFIED","child object not physically verified")
+            data=base64.b64decode(part["data_base64"],validate=True)
+            expect(DIGEST(data)==row["digest"],"retrieved chunk hash differs")
+            reconstructed.append(data)
+        data=b"".join(reconstructed)
+        expect(DIGEST(data)==capsule.digest and data==capsule.bytes,"retrieved capsule differs")
+        capsule.object.write_bytes(data)
+        restored=capsule.restore(dict(capsule.restore_request,candidate_path="durable-restored"))
+        expect(restored["native_context"]=="NOT_RESTORED" and restored["authority"]=="NONE",
+               "restoration invented native context or authority")
+        target=capsule.allowed/"durable-restored"
+        expect((target/"tracked.bin").read_bytes()==(capsule.repo/"tracked.bin").read_bytes(),
+               "durably restored worktree differs")
+        expect(git(target,"show",":tracked.bin")==capsule.staged,"durably restored staging differs")
+        expect(git(target,"status","--porcelain","-z")==git(capsule.repo,"status","--porcelain","-z"),
+               "durably restored Git status differs")
+        observations["restored"]=True
+        observations["native_context"]=restored["native_context"]
     finally:
-        fixture.stop();expect(objects.cleanup()==0,"checkpoint database cleanup failed")
+        setup.close()
+        (evidence_dir()/"roundtrip-observations.json").write_text(json.dumps(observations,sort_keys=True)+"\n")
+        expect(cleanup()==0,"owned checkpoint database cleanup failed")
+def pin_manifest():
+    """Pin only real integrated inputs; missing authentication/source fails."""
+    for relative in ("tests/hyperfide/support/identity_fixture.py","tests/hyperfide/cases/tasks/15_2.py",
+                     "services/hyperfide/src/identity/enrollment.ts",
+                     "services/hyperfide/src/artifacts/objects.ts",
+                     "services/hyperfide/dist/control.js","build/hyperfide-native"):
+        expect((ROOT/relative).is_file(),"cannot pin missing integrated prerequisite: "+relative)
+    registration=json.loads((ROOT/"tests/hyperfide/registrations/15.1.json").read_text())
+    paths={ROOT/path for path in registration["source_files"]}
+    for name in registration["source_roots"]:
+        paths.update(p for p in (ROOT/name).rglob("*") if p.is_file())
+    paths.add(ROOT/"tests/hyperfide/registrations/15.1.json")
+    paths.add(ROOT/"tests/hyperfide/registry.json")
+    inputs=[]
+    for path in sorted(paths,key=lambda p:str(p.relative_to(ROOT))):
+        expect(path.is_file() and not path.is_symlink(),"missing or unsafe pinned input")
+        data=path.read_bytes()
+        inputs.append({"path":str(path.relative_to(ROOT)),"sha256":hashlib.sha256(data).hexdigest(),"size":len(data)})
+    manifest={"schema_version":1,"campaign_id":"hyperfide-task-15.1-native-checkpoint-v1",
+              "registered_variant":"task:15.1","scope":"task-component","case_ids":registration["cases"],
+              "expected_assertion_ids":registration["assertion_ids"],
+              "approval":{"approved":True,"allowed_actions":registration["actions"]},
+              "inputs":inputs,"resources":registration["resources"],"seed":1,
+              "policy":{"component_only":True,"execution":"remote-only","cloud_provisioning":False,
+                        "frontier_calls":False,"full_case_status":"INCOMPLETE",
+                        "durable_transport":"actual14-signed-HTTPS-to-artifact-service",
+                        "native_authority":"NONE","native_context_restore":"NOT_RESTORED"}}
+    (ROOT/"tests/hyperfide/manifests/tasks/15.1.json").write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n")
+    print(json.dumps({"manifest_inputs":len(inputs),"assertions":len(registration["assertion_ids"])}))
 def main():
+    if "--cleanup" in sys.argv:return cleanup()
+    if "--pin-manifest" in sys.argv:
+        pin_manifest();return 0
     with tempfile.TemporaryDirectory(prefix="hyperfide-task15-1-",dir="/tmp/hyperfide") as tmp:
         f=Fixture(Path(tmp))
         native_suite(f)
