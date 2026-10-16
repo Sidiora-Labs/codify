@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "variant": "task:21.4",
+  "task": "21.4",
+  "scope": "task-component",
+  "cases": [
+    "V-045",
+    "V-014"
+  ],
+  "assertion_ids": [
+    "audit.service-linked",
+    "audit.packet-primary",
+    "audit.append-real-database",
+    "audit.replay-idempotent",
+    "audit.replay-conflict",
+    "audit.inspect-complete",
+    "audit.wire-result-untrusted",
+    "audit.cross-scope-refused",
+    "audit.missing-invocation",
+    "audit.guard-inside-primary",
+    "audit.secret-rejected",
+    "audit.authority-rejected",
+    "audit.strict-json-null-prototypes",
+    "audit.null-unknown-preserved",
+    "audit.outcome-persist",
+    "audit.capture-trusted-job",
+    "audit.sql-history-immutable",
+    "audit.stale-packet-refused",
+    "audit.accepted-intent-unchanged"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/21_4.py"
+  ],
+  "timeout_seconds": 240,
+  "required_env": [],
+  "fixtures": [
+    "services/hyperfide/dist/decisions/audit.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-21.4-database",
+      "kind": "postgresql-database",
+      "scope": "task21.4-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/21_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "storage/database-absence.json"
+  ],
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/cases/tasks/4_1.py",
+    "tests/hyperfide/cases/tasks/21_4.py",
+    "tests/hyperfide/registrations/21.4.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop"
+  ]
+}
