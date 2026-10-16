@@ -68,7 +68,7 @@ export function validateProofPolicy(value:unknown):ProofPolicy{
    check.argv.some(arg=>typeof arg!=='string'||arg.length>8192||arg.includes('\0'))||
    typeof check.argv[0]!=='string'||!path.isAbsolute(check.argv[0])||typeof check.executable_digest!=='string'||!SHA.test(check.executable_digest)||
    !Number.isInteger(check.timeout_ms)||(check.timeout_ms as number)<100||(check.timeout_ms as number)>259200000||
-   !strings(check.required_artifacts,/^.+$/)||check.required_artifacts.some(item=>!safeArtifact(item))||
+   !strings(check.required_artifacts,/^.+$/,true)||check.required_artifacts.some(item=>!safeArtifact(item))||
    !strings(check.input_keys,/^(source|dependency|toolchain|configuration|graph|contract)$/))
    fail('PROOF_MAPPING_INVALID','Executable checks require exact identities, bounded execution and safe required artifacts');
   checks.add(check.id);
@@ -171,7 +171,7 @@ async function acceptedProofAuthority(policy:ProofPolicy,definition:unknown,inte
   }
  }else if(policy.checks.length){
   const command=taskValue('verify_cmd'),artifacts=taskValue('artifacts');
-  if(typeof command!=='string'||!command.length||command.length>8192||!strings(artifacts,/^.+$/)||artifacts.some(item=>!safeArtifact(item))||
+  if(typeof command!=='string'||!command.length||command.length>8192||!strings(artifacts,/^.+$/,true)||artifacts.some(item=>!safeArtifact(item))||
    policy.checks.length!==1||policy.rubric_digest!==policy.criteria_digest)
    fail('PROOF_MAPPING_INVALID','Accepted executable definitions or exact task command and artifacts are required');
   let executable:string,executable_digest:string;

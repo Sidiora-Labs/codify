@@ -55,6 +55,12 @@ reqs = ["1.1"]
 acceptance_ids = ["1"]
 verify_cmd = "printf accepted-task-command"
 artifacts = ["proof.json"]
+[task.8]
+wave = 2
+reqs = ["1.1"]
+acceptance_ids = ["1"]
+verify_cmd = "printf captured-evidence"
+artifacts = []
 '''
 OBS=[]
 FAILED=[]
@@ -246,6 +252,13 @@ def probe(f):
         candidate['policy']['checks'][0]['argv'][2]='true'
         refused(f,'spec.proof.register',candidate,'PROOF_MAPPING_INVALID')
     check('proof.accepted-task-command.exact-adapter',accepted_task_command)
+
+    def accepted_empty_artifacts():
+        candidate=proof_input(f,'task8');p=candidate['policy'];shell=str(Path('/bin/bash').resolve())
+        p['rubric_digest']=f.criteria;p['checks']=[{'id':'captured-command','argv':[shell,'-c','printf captured-evidence'],'executable_digest':sha(Path(shell).read_bytes()),'timeout_ms':600000,'required_artifacts':[],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}]
+        p['clauses'][0]['checks']=['captured-command']
+        expect(success(f,'spec.proof.register',candidate)['policy']['checks'][0]['required_artifacts']==[],'Explicit accepted empty artifact inventory was not preserved')
+    check('proof.accepted-task-command.explicit-empty-artifacts',accepted_empty_artifacts)
 
     def legacy_unbound():
         candidate=proof_input(f,'task6');candidate['policy']['checks'][0]['argv']=['/usr/bin/true']
