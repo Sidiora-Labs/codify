@@ -1,0 +1,25 @@
+{
+  "name": "@hyperfide/control-services",
+  "version": "2.0.0-dev",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.22.0"
+  },
+  "packageManager": "npm@11.19.1",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "control": "node dist/control.js",
+    "provisioner": "node dist/provisioner.js",
+    "dispatch": "node dist/dispatch.js"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "typescript": "7.0.2"
+  }
+}

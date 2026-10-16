@@ -70,6 +70,23 @@ def parse_kvx(text: str) -> dict:
     return sections
 
 
+
+def workflow_errors(root: Path, mode: str) -> list[str]:
+    workflow = root.parent / 'workflow.kvx'
+    if not workflow.is_file():
+        return ['implementation mode requires the owning workflow.kvx'] if mode == 'implementation' else []
+    try:
+        sections = parse_kvx(workflow.read_text())
+    except (OSError, InvalidKVX) as error:
+        return [f'workflow.kvx: invalid owning workflow: {error}']
+    active = sections.get('meta', {}).get('active_feature')
+    if mode == 'implementation' and active != 'hyperfide':
+        return ['implementation mode requires owning workflow active_feature=hyperfide']
+    if mode == 'draft' and active == 'hyperfide':
+        return ['Hyperfide draft has been activated before implementation approval']
+    return []
+
+
 def dependency_errors(tasks: dict) -> list[str]:
     errors = []
     indegree = {task_id: 0 for task_id in tasks}
@@ -104,15 +121,17 @@ def dependency_errors(tasks: dict) -> list[str]:
     return errors
 
 
-def task_errors(tasks: dict, clauses: set, cases: set) -> list[str]:
+def task_errors(tasks: dict, clauses: set, cases: set, mode: str = 'draft') -> list[str]:
     errors = dependency_errors(tasks)
     covered = set()
     selected_cases = set()
     for task_id, task in tasks.items():
         if not re.fullmatch(r'\d+\.\d+', task_id):
             errors.append(f'invalid task ID {task_id}')
-        if task.get('status') != 'pending':
+        if mode == 'draft' and task.get('status') != 'pending':
             errors.append(f'task {task_id}: draft status must remain pending')
+        elif mode == 'implementation' and task.get('status') not in {'pending', 'in_progress', 'implemented', 'done'}:
+            errors.append(f'task {task_id}: invalid native implementation status')
         for field in ['title', 'owner']:
             if not isinstance(task.get(field), str) or not task[field].strip():
                 errors.append(f'task {task_id}: missing nonempty {field}')
@@ -242,12 +261,15 @@ def negative_self_tests() -> list[dict]:
 
 
 class Validator:
-    def __init__(self, root: Path, output: Path, publication_policy: Path | None = None):
+    def __init__(self, root: Path, output: Path, publication_policy: Path | None = None, mode: str = 'draft'):
         self.root, self.output = root.resolve(), output.resolve()
         self.errors, self.warnings, self.incomplete = [], [], []
         self.metrics, self.notes = {}, []
         self.json_documents = {}
         self.publication_policy = publication_policy
+        if mode not in {'draft', 'implementation'}:
+            raise ValueError('unknown validation mode')
+        self.mode = mode
 
     def public_files(self, pattern: str):
         paths = []
@@ -359,13 +381,13 @@ class Validator:
         self.validate_whitespace()
         self.validate_privacy()
         self.metrics['public_review_summaries'] = int((self.root / 'reviews/README.md').is_file())
-        workflow = self.root.parents[0] / 'workflow.kvx'
-        if workflow.exists():
-            active = re.search(r'^active_feature\s*=\s*"([^\"]+)"', workflow.read_text(), re.M)
-            if active:
-                self.metrics['active_feature_observed'] = active.group(1)
-                if active.group(1) == 'hyperfide':
-                    self.errors.append('Hyperfide draft has been activated before implementation approval')
+        self.errors.extend(workflow_errors(self.root, self.mode))
+        workflow = self.root.parent / 'workflow.kvx'
+        if workflow.is_file():
+            try:
+                self.metrics['active_feature_observed'] = parse_kvx(workflow.read_text()).get('meta', {}).get('active_feature')
+            except (OSError, InvalidKVX):
+                pass
         fixtures = negative_self_tests()
         if not all(item['expected_rejection_observed'] for item in fixtures):
             self.errors.append('validator negative fixture or valid-control self-test failed')
@@ -373,10 +395,13 @@ class Validator:
         for path in self.public_files('*'):
             if path.is_file() and path.resolve() != self.output and '__pycache__' not in path.parts:
                 files[str(path.relative_to(self.root))] = hashlib.sha256(path.read_bytes()).hexdigest()
-        return {'schema_version': 1, 'scope': 'AUTHORING STRUCTURE ONLY',
+        qualification_states = Counter(value.get('qualification', 'UNRUN') for name, value in sections.items() if name.startswith('acceptance.'))
+        return {'schema_version': 1, 'scope': 'AUTHORING STRUCTURE ONLY', 'validation_mode': self.mode,
                 'generated_at': datetime.now(timezone.utc).isoformat(),
                 'status': 'FAIL' if self.errors else ('INCOMPLETE' if self.incomplete else 'PASS'),
-                'runtime_acceptance_status': 'UNRUN', 'product_commands_executed': False,
+                'runtime_acceptance_status': 'UNRUN' if set(qualification_states) <= {'UNRUN'} else 'DECLARED_STATES_ONLY',
+                'declared_acceptance_states': dict(qualification_states), 'product_commands_executed': False,
+                'live_state_authority': 'native spec.kvx during bootstrap; PostgreSQL after qualified cutover',
                 'private_audit': 'NOT_VALIDATED_BY_PUBLIC_CHECK',
                 'metrics': self.metrics, 'errors': self.errors, 'incomplete': self.incomplete,
                 'warnings': self.warnings, 'notes': self.notes, 'validator_self_tests': fixtures,
@@ -393,8 +418,20 @@ class Validator:
 
     def validate_spec(self, sections: dict) -> set:
         meta = sections.get('meta', {})
-        if meta.get('feature') != 'hyperfide' or meta.get('status') != 'draft' or meta.get('implementation_authorized') is not False:
-            self.errors.append('spec.kvx: Hyperfide must remain draft and explicitly unapproved')
+        if meta.get('feature') != 'hyperfide':
+            self.errors.append('spec.kvx: incorrect feature identity')
+        if self.mode == 'draft':
+            if (meta.get('status') != 'draft' or meta.get('implementation_authorized') is not False
+                    or sections.get('execution', {}).get('state') != 'not_started'
+                    or sections.get('execution', {}).get('approval_record')):
+                self.errors.append('spec.kvx: draft mode requires draft and explicitly unapproved metadata')
+        else:
+            execution = sections.get('execution', {})
+            if (meta.get('implementation_authorized') is not True or meta.get('status') not in {'in_progress', 'done'}
+                    or execution.get('state') not in {'in_progress', 'completed'}
+                    or not isinstance(execution.get('approval_record'), str) or not execution['approval_record'].strip()):
+                self.errors.append('spec.kvx: implementation mode requires explicit approved native metadata and execution record')
+            self.notes.append('Task catalog, traceability baseline and dated authoring reports are historical plans. Native KVX owns bootstrap live task state. Structural validation never certifies task or runtime qualification.')
         clauses = {f'{name[4:]}.{key[3:]}' for name, values in sections.items() if name.startswith('req.')
                    for key in values if re.fullmatch(r'ac_\d+', key)}
         expected_clauses = {f'{req}.{ac}' for req in range(1, 29) for ac in range(1, 5)}
@@ -412,7 +449,7 @@ class Validator:
         if not tasks:
             self.incomplete.append('native task sections not yet assembled')
         else:
-            self.errors.extend(task_errors(tasks, clauses, cases))
+            self.errors.extend(task_errors(tasks, clauses, cases, self.mode))
             if len(tasks) != 112:
                 self.errors.append(f'expected 112 native implementation tasks, found {len(tasks)}')
         if not acceptance:
@@ -421,8 +458,9 @@ class Validator:
             if set(acceptance) != cases:
                 self.errors.append(f'native acceptance IDs differ from verification table: missing={sorted(cases-set(acceptance))}, extra={sorted(set(acceptance)-cases)}')
             for case, value in acceptance.items():
-                if value.get('qualification') != 'UNRUN':
-                    self.errors.append(f'acceptance {case}: runtime status must remain UNRUN')
+                allowed = {'UNRUN'} if self.mode == 'draft' else {'UNRUN', 'PASS', 'FAIL', 'BLOCKED'}
+                if value.get('qualification') not in allowed:
+                    self.errors.append(f'acceptance {case}: invalid qualification status for {self.mode} mode')
                 if value.get('feature') != 'hyperfide':
                     self.errors.append(f'acceptance {case}: incorrect or missing feature')
                 for field in ['scenario', 'expected', 'contract', 'test']:
@@ -447,7 +485,12 @@ class Validator:
                 self.errors.append('task catalog/native task IDs differ')
             for task_id in set(catalog_tasks) & set(tasks):
                 item, native = catalog_tasks[task_id], tasks[task_id]
-                for field in ['title', 'status', 'wave', 'requires', 'reqs', 'touches', 'verify_cmd', 'acceptance_ids', 'owner', 'artifacts']:
+                fields = ['title', 'wave', 'requires', 'reqs', 'touches', 'verify_cmd', 'acceptance_ids', 'owner', 'artifacts', 'verification_scope']
+                if self.mode == 'draft':
+                    fields.append('status')
+                if item.get('status') != 'pending':
+                    self.errors.append(f'task {task_id}: planning baseline must remain pending')
+                for field in fields:
                     if item.get(field) != native.get(field):
                         self.errors.append(f'task {task_id}: catalog/native {field} mismatch')
                 native_steps = [native[key] for key in sorted((key for key in native if re.fullmatch(r'do_\d+', key)), key=lambda key: int(key[3:]))]
@@ -485,7 +528,7 @@ class Validator:
                             task_catalog_entries=len(catalog_tasks), same_wave_exact_path_collisions=len(collisions))
         runner = self.root.parents[1] / 'tests/hyperfide/qualify.py'
         self.notes.append({'planned_product_runner': 'tests/hyperfide/qualify.py', 'exists': runner.exists(),
-                           'executed': False, 'interpretation': 'A missing future runner is expected during specification authoring; runtime qualification remains UNRUN.'})
+                           'executed': False, 'interpretation': 'Runner existence is reported only; no product verification or runtime qualification is executed by this structural check.'})
         return cases
 
     def validate_traceability(self, sections: dict, cases: set) -> None:
@@ -623,12 +666,15 @@ def private_audit(root: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument('--output', type=Path, help='Defaults to <root>/evidence/pack-validation.json')
+    parser.add_argument('--output', type=Path, help='Defaults to a mode-specific structural report; historical authoring report is retained')
+    parser.add_argument('--mode', choices=['draft', 'implementation'], default='draft')
     parser.add_argument('--publication-policy', type=Path, help='Optional local regex policy JSON; expressions are never copied into the public report')
     parser.add_argument('--private-audit', action='store_true', help='Also audit optional preserved provenance; detailed output stays inside private/evidence/')
     args = parser.parse_args()
-    output = args.output or args.root / 'evidence/pack-validation.json'
-    report = Validator(args.root, output, args.publication_policy).run()
+    output = args.output or args.root / ('evidence/pack-validation.json' if args.mode == 'draft' else 'evidence/implementation-validation.json')
+    if args.mode == 'implementation' and output.resolve() in {(args.root / 'evidence/pack-validation.json').resolve(), (args.root / 'evidence/native-lint.json').resolve()}:
+        parser.error('implementation checks must not overwrite historical authoring evidence')
+    report = Validator(args.root, output, args.publication_policy, args.mode).run()
     private_status = private_audit(args.root) if args.private_audit else None
     if args.private_audit:
         report['private_audit'] = 'RECORDED_SEPARATELY'

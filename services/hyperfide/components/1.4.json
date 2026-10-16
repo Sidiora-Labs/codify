@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "1.4",
+  "task": "1.4",
+  "roles": [
+    "control",
+    "provisioner",
+    "dispatch"
+  ],
+  "module": "policy/programme.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "programme.authorize"
+  ],
+  "requires": []
+}

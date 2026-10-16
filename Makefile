@@ -75,3 +75,24 @@ clean:
 # static release binary published to the web root (see scripts/release.sh)
 release:
 	scripts/release.sh
+
+# Hyperfide approved split runtime: explicit dependency setup and service builds.
+# Build-time Python validates native fragments; native execution remains a C binary.
+.PHONY: hyperfide-deps hyperfide-services hyperfide-check hyperfide-native
+hyperfide-deps:
+	npm --prefix services/hyperfide ci --ignore-scripts
+
+hyperfide-services:
+	npm --prefix services/hyperfide run build
+
+hyperfide-check:
+	npm --prefix services/hyperfide run check
+
+# Always rediscover fragments, including removals. A failed validation/build
+# removes the old executable so a normal build cannot expose stale dispatch.
+hyperfide-native:
+	@mkdir -p $(BUILD)
+	@rm -f $(BUILD)/hyperfide-native $(BUILD)/hyperfide-native.tmp
+	python3 scripts/hyperfide-native-components.py --generate $(BUILD)/hyperfide-native-registry.inc
+	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS)
+	mv $(BUILD)/hyperfide-native.tmp $(BUILD)/hyperfide-native

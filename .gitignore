@@ -37,3 +37,6 @@ tmp/
 
 # Generated Python caches from Hyperfide qualification
 /tests/hyperfide/**/__pycache__/
+/services/hyperfide/dist/
+**/__pycache__/
+*.pyc

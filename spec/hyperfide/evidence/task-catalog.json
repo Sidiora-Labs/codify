@@ -18,8 +18,8 @@
     "component_registration": "Task-owned typed service/native registration fragments connect modules to real internal entrypoints; public facade integration has explicit later owner."
   },
   "task_count": 112,
-  "wave_count": 25,
-  "shared_path_policy": "Each task owns its declared exact paths while active; same-wave overlap is forbidden. Shared src/spec.c transfers from task25.3 to task26.4 through an explicit dependency. Other shared-source edits require an explicit serialized owner/dependency change before work starts.",
+  "wave_count": 26,
+  "shared_path_policy": "Each task owns its declared exact paths while active; same-wave overlap is forbidden. Serialized shared paths: services/hyperfide/src/components/registry.ts owned by 1.4 -> 4.2 -> 14.1; services/hyperfide/src/components/service.ts owned by 1.4 -> 14.1; Makefile owned by 1.4 -> 12.1 -> 25.3 -> 26.2; src/hyperfide/components/schema.kvx owned by 1.4 -> 12.1; scripts/hyperfide-native-components.py owned by 1.4 -> 12.1; src/hyperfide/component_main.c owned by 1.4 -> 25.3; src/hyperfide/components.h owned by 1.4 -> 25.3; scripts/install.sh owned by 26.1 -> 26.2; scripts/release.sh owned by 26.1 -> 26.2; src/spec.c owned by 25.3 -> 26.4. Other shared-source edits require explicit serialized ownership and dependencies before work starts.",
   "tasks": [
     {
       "id": "27.1",
@@ -84,7 +84,26 @@
         "services/hyperfide/src/dispatch.ts",
         "services/hyperfide/src/components/registry.ts",
         "services/hyperfide/components/schema.json",
-        "src/hyperfide/components/schema.kvx"
+        "src/hyperfide/components/schema.kvx",
+        "services/hyperfide/src/components/service.ts",
+        "services/hyperfide/components/1.4.json",
+        "spec/hyperfide/tools/render_native.py",
+        "spec/hyperfide/tools/validate_pack.py",
+        "spec/hyperfide/README.md",
+        "spec/hyperfide/requirements.md",
+        "spec/hyperfide/implementation-plan.md",
+        "spec/hyperfide/traceability.md",
+        "spec/hyperfide/privacy.md",
+        "spec/hyperfide/decisions.md",
+        "spec/hyperfide/evidence/traceability.json",
+        "scripts/hyperfide-native-components.py",
+        "src/hyperfide/components.h",
+        "src/hyperfide/component_main.c",
+        "spec/hyperfide/spec.kvx",
+        "spec/hyperfide/evidence/task-catalog.json",
+        ".gitignore",
+        "tests/hyperfide/check-evidence.py",
+        "spec/hyperfide/evidence/implementation-validation.json"
       ],
       "do_steps": [
         "Implement approved run-policy revision and inactive/unapproved refusal; supersede the local single-binary/dependency restrictions through their owning workflow source only after user approval.",
@@ -257,7 +276,8 @@
       "status": "pending",
       "wave": 4,
       "requires": [
-        "4.1"
+        "4.1",
+        "1.4"
       ],
       "reqs": [
         "4.2"
@@ -267,12 +287,17 @@
         "tests/hyperfide/manifests/tasks/4.2.json",
         "tests/hyperfide/cases/tasks/4_2.py",
         "tests/hyperfide/registrations/4.2.json",
-        "services/hyperfide/components/4.2.json"
+        "services/hyperfide/components/4.2.json",
+        "services/hyperfide/src/storage/runtime.ts",
+        "services/hyperfide/src/components/registry.ts"
       ],
       "do_steps": [
         "Build pooled short-transaction APIs for authoritative operations with explicit deadlines, deadlock retry and current-state validation.",
         "Separate replica candidate discovery from primary decisions; hold no database lock across agent or provider execution and expose overload reasons.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Own the long-lived per-process shared resource container: bounded primary/replica PostgreSQL pools with service-specific credentials, transaction capability handles, listener connections where needed, cancellation and deterministic shutdown. Components must reuse this container rather than create hidden independent global pools.",
+        "Extend the established component registry through an explicit task1.4-to4.2 ownership transfer. Resolve declared same-role dependency capabilities against initialized component instances, reject missing or role-incompatible dependencies before readiness, and dispose dependants before shared resources. Preserve control/provisioner/dispatch process separation; cross-role work remains durable queue/API communication.",
+        "Exercise at least two registered components through the actual service dispatcher using the same process-owned PostgreSQL resources; verify bounded connection use, shared committed state and shutdown. Direct helper tests alone do not establish runtime composition.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -329,10 +354,12 @@
       "id": "14.1",
       "title": "Enroll role-scoped identities bound to intent and boot generation",
       "status": "pending",
-      "wave": 4,
+      "wave": 5,
       "requires": [
         "4.1",
-        "8.1"
+        "8.1",
+        "4.2",
+        "1.4"
       ],
       "reqs": [
         "14.1"
@@ -342,12 +369,20 @@
         "tests/hyperfide/manifests/tasks/14.1.json",
         "tests/hyperfide/cases/tasks/14_1.py",
         "tests/hyperfide/registrations/14.1.json",
-        "services/hyperfide/components/14.1.json"
+        "services/hyperfide/components/14.1.json",
+        "services/hyperfide/src/transport/http.ts",
+        "services/hyperfide/src/transport/protocol.ts",
+        "services/hyperfide/src/components/service.ts",
+        "services/hyperfide/src/components/registry.ts"
       ],
       "do_steps": [
         "Keep provider administration credentials only in provisioner scope; exchange one-use/controlled bootstrap grants bound to provisioning intent/boot for runner identity.",
         "Replay enrollment from another sandbox/generation and forge role events; server-side authority rejects access independently of model text.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Own the authenticated coordinator HTTPS listener and persistent daemon lifecycle. Transfer components/service.ts from task1.4 and components/registry.ts from task4.2 before editing them; reuse handleRequest and the initialized registry/shared resources rather than create another dispatcher. Bind readiness to successful policy, resource, component and listener initialization; shut down listeners and background workers before shared resources.",
+        "Validate TLS server identity, bounded request/response sizes, deadlines, concurrent request admission and the versioned external protocol envelope. Explicitly map operation identity, idempotency key, payload digest, correlation/causation and expected-version fields to internal dispatch; a JSONL correlation id is not durable idempotency.",
+        "Bind an immutable trusted actor/run/role/attempt context to each invocation after authentication. Wire payloads cannot select or replace identity, startup policy or shared resource capabilities. Limit unauthenticated enrollment to valid scoped bootstrap grants; deny non-granted remote operations by default and provide the later task14.4 authorization module an explicit middleware/capability hook. Local stdio access must not bypass remote identity requirements.",
+        "Run the listener in an explicit service mode whose lifetime does not depend on stdin remaining open. Qualify real separate-process HTTPS enrollment and authenticated requests, malformed/wrong-peer/wrong-scope requests, startup failure and orderly termination using designated test credentials only.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -620,10 +655,11 @@
       "id": "12.1",
       "title": "Register supervisor boots and isolate writable worker slots",
       "status": "pending",
-      "wave": 5,
+      "wave": 6,
       "requires": [
         "14.1",
-        "11.1"
+        "11.1",
+        "1.4"
       ],
       "reqs": [
         "12.1"
@@ -633,12 +669,21 @@
         "tests/hyperfide/manifests/tasks/12.1.json",
         "tests/hyperfide/cases/tasks/12_1.py",
         "tests/hyperfide/registrations/12.1.json",
-        "src/hyperfide/components/12.1.kvx"
+        "src/hyperfide/components/12.1.kvx",
+        "src/hyperfide/transport.c",
+        "src/hyperfide/transport.h",
+        "Makefile",
+        "src/hyperfide/components/schema.kvx",
+        "scripts/hyperfide-native-components.py"
       ],
       "do_steps": [
         "Register boot/capability/preparation/slot inventory and allocate separate worktree/build/home/temp/ports with explicit security isolation profiles.",
         "Run colliding builds and credential-sensitive jobs; separate worktrees are not accepted as an OS boundary and unsafe co-location is refused.",
         "Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.",
+        "Own a reusable native HTTPS transport linked against libcurl with a qualified TLS backend. Transfer Makefile and the native component link/build contract from task1.4 after its foundation work is complete before extending them; declare libcurl headers, libraries, TLS backend and runtime dependency versions in the remote build/preparation manifests. Do not implement TLS through shell-command interpolation or relax certificate/hostname verification.",
+        "Extend the actual scripts/hyperfide-native-components.py build helper alongside Makefile and the native fragment schema. Its validated component source/header/library declarations must support the shared libcurl transport and export a source/link contract usable by the later public CLI build, while excluding duplicate standalone-main definitions.",
+        "Implement outbound bootstrap enrollment, supervisor registration, heartbeat and reconnect against task14.1 coordinator HTTPS operations. Enforce explicit endpoint identity, request deadlines, bounded response handling, credential rotation and conservative reconnect/backoff. Sandboxes receive no general PostgreSQL credentials.",
+        "Connect the real supervisor process lifecycle to authenticated network registration and slot inventory, using server-returned identity and current boot generation. Prove correct-server success and wrong-certificate/wrong-host/revoked-token failure over actual sockets in a remote disposable fixture.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -657,7 +702,7 @@
       "id": "14.2",
       "title": "Inject layered variables and rotate scoped credential references",
       "status": "pending",
-      "wave": 5,
+      "wave": 6,
       "requires": [
         "14.1"
       ],
@@ -692,7 +737,7 @@
       "id": "14.4",
       "title": "Enforce scoped API, artifact, Git and model-egress authority",
       "status": "pending",
-      "wave": 5,
+      "wave": 6,
       "requires": [
         "14.1",
         "15.2"
@@ -769,7 +814,7 @@
       "id": "9.1",
       "title": "Implement Railway preparation, disk checkpoints and fresh restore enrollment",
       "status": "pending",
-      "wave": 6,
+      "wave": 7,
       "requires": [
         "8.1",
         "11.1",
@@ -1105,7 +1150,7 @@
       "id": "14.3",
       "title": "Qualify account-session and API authentication modes separately",
       "status": "pending",
-      "wave": 6,
+      "wave": 7,
       "requires": [
         "14.2"
       ],
@@ -1142,7 +1187,7 @@
       "id": "20.1",
       "title": "Implement typed Span, Jev1.14 and d1-ultra route adapters",
       "status": "pending",
-      "wave": 6,
+      "wave": 7,
       "requires": [
         "14.2",
         "1.4"
@@ -1327,9 +1372,11 @@
       "id": "6.4",
       "title": "Recover durable dispatch after controller restart",
       "status": "pending",
-      "wave": 7,
+      "wave": 9,
       "requires": [
-        "6.2"
+        "6.2",
+        "14.1",
+        "6.3"
       ],
       "reqs": [
         "6.4"
@@ -1339,12 +1386,15 @@
         "tests/hyperfide/manifests/tasks/6.4.json",
         "tests/hyperfide/cases/tasks/6_4.py",
         "tests/hyperfide/registrations/6.4.json",
-        "services/hyperfide/components/6.4.json"
+        "services/hyperfide/components/6.4.json",
+        "services/hyperfide/src/events/dispatcher.ts"
       ],
       "do_steps": [
         "Use notifications/streams only as wakeups over durable queues and periodic reconciliation; restore unacknowledged obligations after restart.",
         "Lose stream notifications and crash dispatch before/after external send; prove committed work remains discoverable without an always-live subscription.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Own the continuously running dispatch-role delivery worker: claim committed pending delivery rows, invoke registered delivery handlers, persist acknowledgement/retry outcomes, and periodically reconcile independently of notifications. Use the established daemon lifecycle and process-owned PostgreSQL resources; no stdin EOF or transient stream disconnect may terminate durable delivery silently.",
+        "Keep command publication and acknowledgement coordinated with task6.3 API bindings. Start separate control and dispatch processes against the same PostgreSQL fixture, commit work in one, observe delivery in the other, restart the dispatcher and prove the same logical effect after lost acknowledgement.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -1399,7 +1449,7 @@
       "id": "20.2",
       "title": "Preserve output probability and confidence semantics with abstention",
       "status": "pending",
-      "wave": 7,
+      "wave": 8,
       "requires": [
         "20.1"
       ],
@@ -1434,7 +1484,7 @@
       "id": "20.3",
       "title": "Represent route-specific images, reasoning and actual billing",
       "status": "pending",
-      "wave": 7,
+      "wave": 8,
       "requires": [
         "20.1"
       ],
@@ -1584,7 +1634,8 @@
       "wave": 8,
       "requires": [
         "6.2",
-        "5.2"
+        "5.2",
+        "14.1"
       ],
       "reqs": [
         "6.3"
@@ -1594,12 +1645,15 @@
         "tests/hyperfide/manifests/tasks/6.3.json",
         "tests/hyperfide/cases/tasks/6_3.py",
         "tests/hyperfide/registrations/6.3.json",
-        "services/hyperfide/components/6.3.json"
+        "services/hyperfide/components/6.3.json",
+        "services/hyperfide/src/events/api.ts"
       ],
       "do_steps": [
         "Persist stable command IDs, target generation, ordering, delivery state and acknowledgements with bounded spool/central retention.",
         "Race cancellation with launch and lose acknowledgements; redelivery cannot append the same instruction or start another logical agent.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Bind command poll/delivery, ordered steering/cancel, acknowledgement and structured event-ingress operations into the authenticated coordinator API with exact runner/boot/attempt scope. Make durable command state discoverable on reconnect; a failed response never implies command absence.",
+        "Exercise the actual HTTPS API and durable inbox/outbox state across lost delivery/acknowledgement and duplicate instruction delivery. An isolated instructions handler cannot substitute for the network binding.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -1693,7 +1747,7 @@
       "id": "20.4",
       "title": "Run decision jobs asynchronously with deadlines and safe fallback",
       "status": "pending",
-      "wave": 8,
+      "wave": 9,
       "requires": [
         "20.2",
         "20.3",
@@ -1807,10 +1861,12 @@
       "id": "8.3",
       "title": "Persist provisioning intents and quarantine ambiguous or orphan resources",
       "status": "pending",
-      "wave": 9,
+      "wave": 10,
       "requires": [
         "8.2",
-        "5.3"
+        "5.3",
+        "6.4",
+        "14.1"
       ],
       "reqs": [
         "8.3"
@@ -1820,12 +1876,16 @@
         "tests/hyperfide/manifests/tasks/8.3.json",
         "tests/hyperfide/cases/tasks/8_3.py",
         "tests/hyperfide/registrations/8.3.json",
-        "services/hyperfide/components/8.3.json"
+        "services/hyperfide/components/8.3.json",
+        "services/hyperfide/src/providers/worker.ts"
       ],
       "do_steps": [
         "Record intent before external create, persist returned IDs early and completely paginate inventory for reconciliation.",
         "Interrupt create/readiness/delete responses; retain uncertain quota consumption, quarantine ambiguous resources and clean only resources with established ownership.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Own the persistent provisioner-role worker that claims durable provisioning intents and invokes the configured provider adapter create/observe/destroy methods with bounded concurrency. Persist returned identifiers and uncertain outcomes through the actual shared authority; method wrappers without an executing worker are insufficient.",
+        "Keep provider administration credentials only in the provisioner process. Control and dispatch communicate with it through durable PostgreSQL obligations or authenticated internal operations, not through cross-role in-process capability injection. A configured pool with a missing or incompatible adapter cannot report operational readiness.",
+        "Prove the provisioner consumes a committed intent from a separately running control process, records adapter-observed state, resumes reconciliation after worker restart and leaves ambiguous external outcomes visible. Controlled adapter fixtures qualify this composition only; real provider behavior still requires its dedicated live variants.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -1974,6 +2034,8 @@
         "Durably accept generation-bound starts before spawn, record process/session associations and retain supervisor-owned IPC independently of controller transport.",
         "Crash immediately before/after spawn and ledger writes; inspect/adopt existing process or record uncertainty rather than blindly launching another session.",
         "Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.",
+        "Use task12.1 shared native transport for command polling, start/steer/cancel delivery, acknowledgements, lease renewal and structured event upload. Connect durable local instruction/start records to actual agent process spawning and reconnect; do not leave launch execution accessible only through isolated component-dispatch tests.",
+        "Run a separate coordinator/dispatch process and a native supervisor process over HTTPS, interrupt their transport around spawn/ack windows, and verify restored command identity, existing-process adoption and bounded spool replay without duplicate logical starts.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -1993,7 +2055,7 @@
       "id": "21.1",
       "title": "Add advisory clause critique with validated change proposals",
       "status": "pending",
-      "wave": 9,
+      "wave": 10,
       "requires": [
         "20.4",
         "2.3"
@@ -2030,7 +2092,7 @@
       "id": "21.4",
       "title": "Persist complete decision audit records and eventual outcomes",
       "status": "pending",
-      "wave": 9,
+      "wave": 10,
       "requires": [
         "20.4",
         "15.2"
@@ -2105,7 +2167,7 @@
       "id": "10.3",
       "title": "Reconcile Blaxel create-or-get and recover process streams",
       "status": "pending",
-      "wave": 10,
+      "wave": 11,
       "requires": [
         "10.2",
         "12.2",
@@ -2143,7 +2205,7 @@
       "id": "11.4",
       "title": "Schedule remote preparation and eligible-work-driven prewarming",
       "status": "pending",
-      "wave": 10,
+      "wave": 11,
       "requires": [
         "11.1",
         "5.4",
@@ -2255,7 +2317,7 @@
       "id": "15.4",
       "title": "Implement reference-safe retention, garbage collection and destruction gates",
       "status": "pending",
-      "wave": 10,
+      "wave": 11,
       "requires": [
         "15.2",
         "8.3"
@@ -2292,12 +2354,18 @@
       "id": "16.1",
       "title": "Submit immutable worker results and dispatch independent qualification",
       "status": "pending",
-      "wave": 10,
+      "wave": 11,
       "requires": [
         "2.4",
         "5.2",
         "15.2",
-        "12.2"
+        "12.2",
+        "6.4",
+        "8.3",
+        "14.4",
+        "11.3",
+        "13.1",
+        "3.2"
       ],
       "reqs": [
         "16.1"
@@ -2307,13 +2375,17 @@
         "tests/hyperfide/manifests/tasks/16.1.json",
         "tests/hyperfide/cases/tasks/16_1.py",
         "tests/hyperfide/registrations/16.1.json",
-        "services/hyperfide/components/16.1.json"
+        "services/hyperfide/components/16.1.json",
+        "tests/hyperfide/integration/connected-stack.py"
       ],
       "do_steps": [
         "Admit generation-bound immutable source/evidence/criteria/contract submission manifests with idempotent conflicting-payload rejection.",
         "Run required checks in separate clean remote qualification environments; worker completion text or process exit cannot qualify its own task.",
         "Atomically validate current compute authority and complete immutable artifacts, create active coordinator submission custody, release original compute authority and schedule independent verification jobs under their own leases. Race the expiry sweeper, lost-response replay and coding-sandbox cleanup; admitted custody remains valid through qualification and integration.",
         "Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.",
+        "Own a mandatory connected-stack integration variant using separately running control, dispatch and provisioner services, a real disposable PostgreSQL database, the coordinator HTTPS listener and a real native supervisor process. Exercise imported run/packet creation, eligibility/claim, durable dispatch, preparation/readiness, actual process spawn, immutable artifact submission, compute-to-custody transfer and independent qualification after coding-slot cleanup.",
+        "Restart dispatch and interrupt the network between commit/send/ack; observe actual process identity, PostgreSQL records and immutable artifacts independently. The connected variant cannot be satisfied by in-process registry invocation, direct handler calls, fabricated occupancy or unrelated component PASS receipts.",
+        "Controlled provider and agent process doubles may be explicitly selected for the first connected-stack probe, while network transport, database and service/process boundaries remain real. Such evidence never qualifies a real provider/native frontier variant; those require their own approved live probes and campaign receipts. Required full-case inventories must include this connected-stack assertion family.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -2332,7 +2404,7 @@
       "id": "22.1",
       "title": "Build temporally valid labelled evaluation datasets",
       "status": "pending",
-      "wave": 10,
+      "wave": 11,
       "requires": [
         "21.4"
       ],
@@ -2443,7 +2515,7 @@
       "id": "10.4",
       "title": "Gate Blaxel preview capabilities and qualify fresh-identity recovery",
       "status": "pending",
-      "wave": 11,
+      "wave": 12,
       "requires": [
         "10.3",
         "14.1",
@@ -2593,7 +2665,7 @@
       "id": "16.2",
       "title": "Reject false qualification from missing checks and legacy force paths",
       "status": "pending",
-      "wave": 11,
+      "wave": 12,
       "requires": [
         "16.1",
         "27.1"
@@ -2630,7 +2702,7 @@
       "id": "17.1",
       "title": "Discover every commit and enforce the full watcher obligation matrix",
       "status": "pending",
-      "wave": 11,
+      "wave": 12,
       "requires": [
         "16.1",
         "13.1"
@@ -2666,7 +2738,7 @@
       "id": "22.2",
       "title": "Measure calibrated quality, latency and billed cost against baseline",
       "status": "pending",
-      "wave": 11,
+      "wave": 12,
       "requires": [
         "22.1",
         "20.3"
@@ -2777,7 +2849,7 @@
       "id": "16.3",
       "title": "Record clause evidence and policy-limited independent review judgements",
       "status": "pending",
-      "wave": 12,
+      "wave": 13,
       "requires": [
         "16.2",
         "2.4"
@@ -2815,7 +2887,7 @@
       "id": "21.2",
       "title": "Rank policy-permitted recovery actions from preserved failure packets",
       "status": "pending",
-      "wave": 12,
+      "wave": 13,
       "requires": [
         "20.4",
         "13.4",
@@ -2853,7 +2925,7 @@
       "id": "16.4",
       "title": "Invalidate affected assurance while retaining task history",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "16.3",
         "7.3"
@@ -2891,7 +2963,7 @@
       "id": "17.2",
       "title": "Build producer-consumer contracts and behavioural impact analysis",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "7.4",
         "16.3"
@@ -2928,7 +3000,7 @@
       "id": "18.1",
       "title": "Implement canonical findings and provenance-preserving deduplication",
       "status": "pending",
-      "wave": 13,
+      "wave": 14,
       "requires": [
         "16.3",
         "3.1"
@@ -3002,7 +3074,7 @@
       "id": "17.3",
       "title": "Persist revision-specific review receipts and invalidate stale conclusions",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "17.1",
         "17.2",
@@ -3040,7 +3112,7 @@
       "id": "17.4",
       "title": "Dispatch remote reproductions and contract/system qualification jobs",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "17.2",
         "16.2",
@@ -3079,7 +3151,7 @@
       "id": "18.2",
       "title": "Project findings to GitHub with ten-minute reconciliation",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "18.1",
         "6.2",
@@ -3116,7 +3188,7 @@
       "id": "18.3",
       "title": "Route findings through revision, attempt and current accountable manager",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "18.1",
         "3.4"
@@ -3153,7 +3225,7 @@
       "id": "21.3",
       "title": "Rank eligible frontier profiles, optional context and review/finding advice",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "20.4",
         "5.4",
@@ -3191,7 +3263,7 @@
       "id": "23.1",
       "title": "Expose desired/observed fleet state, evidence and critical paths",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "3.3",
         "5.4",
@@ -3229,7 +3301,7 @@
       "id": "23.3",
       "title": "Instrument lifecycle, graph freshness, recovery and qualified outcome cost",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "6.4",
         "7.3",
@@ -3308,12 +3380,16 @@
       "id": "25.3",
       "title": "Route CLI, MCP, editor, hooks and offline workflows through authority modes",
       "status": "pending",
-      "wave": 14,
+      "wave": 15,
       "requires": [
         "4.3",
         "6.3",
         "16.4",
-        "2.1"
+        "2.1",
+        "12.2",
+        "14.1",
+        "12.1",
+        "1.4"
       ],
       "reqs": [
         "25.3"
@@ -3330,12 +3406,18 @@
         "editors/vscode/extension.js",
         "tests/hyperfide/cases/tasks/25_3.py",
         "tests/hyperfide/registrations/25.3.json",
-        "src/hyperfide/components/25.3.kvx"
+        "src/hyperfide/components/25.3.kvx",
+        "Makefile",
+        "src/hyperfide/component_main.c",
+        "src/hyperfide/components.h"
       ],
       "do_steps": [
         "Integrate distributed API transport and explicit local/offline modes with work_open/update/handoff/projection/docs, CLI/MCP/editor/hooks contracts.",
         "With network/PG/model credentials absent retain promised local core functions, show cache freshness and forbid offline remote ownership or stale projection overwrite.",
         "Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.",
+        "Take Makefile ownership from task12.1 and native component_main.c/components.h dispatch/ABI ownership from task1.4. Link the registered nested src/hyperfide component and transport sources into the real public CLI/MCP binary; the existing src/*.c wildcard cannot discover them. Preserve the standalone runner build without linking two main functions, and exercise the public CLI against the running coordinator.",
+        "Reuse the established task12.1 native HTTPS transport and task14.1 protocol for the existing CLI/MCP/editor/hooks authority facade. Do not introduce an independent late RPC implementation, duplicate shared pools, or a path that bypasses trusted identity and expected-version checks.",
+        "Exercise real existing CLI and MCP entrypoints against the running coordinator, including nonzero structured errors and offline refusal of distributed authority; direct client helper calls alone cannot establish public entrypoint integration.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -3355,7 +3437,7 @@
       "id": "18.4",
       "title": "Close findings only after fenced repair and recorded resolution proof",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "18.3",
         "16.4"
@@ -3392,7 +3474,7 @@
       "id": "22.3",
       "title": "Run shadow evaluation then bounded controlled decision trials",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "22.2",
         "21.1",
@@ -3430,7 +3512,7 @@
       "id": "23.4",
       "title": "Deliver bounded actionable notifications and durable evidence links",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "23.1",
         "6.2"
@@ -3505,7 +3587,7 @@
       "id": "25.4",
       "title": "Build reproducible releases and deploy prebuilt services in compatibility order",
       "status": "pending",
-      "wave": 15,
+      "wave": 16,
       "requires": [
         "25.3",
         "4.4",
@@ -3550,7 +3632,7 @@
       "id": "19.1",
       "title": "Build immutable multi-repository integration candidates remotely",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "16.4",
         "17.4",
@@ -3589,7 +3671,7 @@
       "id": "22.4",
       "title": "Gate decision promotion, drift rollback and optional Span self-hosting",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "22.3"
       ],
@@ -3625,7 +3707,7 @@
       "id": "26.1",
       "title": "Apply Hyperfide identity to owned product and distribution surfaces",
       "status": "pending",
-      "wave": 16,
+      "wave": 17,
       "requires": [
         "25.4"
       ],
@@ -3665,7 +3747,7 @@
       "id": "19.2",
       "title": "Enforce sole protected-target publication gateway and CAS reconciliation",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
         "19.1",
         "14.4",
@@ -3703,9 +3785,10 @@
       "id": "26.2",
       "title": "Ship canonical hyperfide entrypoint with explicit cg compatibility policy",
       "status": "pending",
-      "wave": 17,
+      "wave": 18,
       "requires": [
-        "26.1"
+        "26.1",
+        "25.3"
       ],
       "reqs": [
         "26.2"
@@ -3714,11 +3797,18 @@
         "scripts/hyperfide-entrypoint.sh",
         "tests/hyperfide/manifests/tasks/26.2.json",
         "tests/hyperfide/cases/tasks/26_2.py",
-        "tests/hyperfide/registrations/26.2.json"
+        "tests/hyperfide/registrations/26.2.json",
+        "Makefile",
+        "scripts/install.sh",
+        "scripts/release.sh",
+        "scripts/uninstall.sh"
       ],
       "do_steps": [
         "Implement proposed hyperfide command and cg alias with argument/JSON/exit parity and nonrecursive executable resolution.",
         "Resolve approved release version/support window and public namespace ownership separately; never reserve or assume short alias/domain/package availability.",
+        "Take Makefile ownership after task25.3 and installer/release-script ownership after task26.1. Build and install an actual canonical hyperfide executable and the approved cg compatibility entrypoint from the same qualified linked implementation; a wrapper over an unbuilt or unrelated PATH executable is insufficient. Preserve all native component, libcurl and TLS link dependencies without duplicate standalone-main objects.",
+        "Update the actual installer, release and uninstaller paths to consume the approved canonical artifact manifest and install/remove both declared command names safely. Existing scripts/release.sh hardcodes strip/publish cg and overrides LDLIBS with legacy static flags; preserve the qualified link contract and explicitly package any required runtime libraries rather than silently dropping the new transport. Namespace and publication destinations remain configuration, never invented ownership.",
+        "Qualify clean remote builds, installation to a disposable prefix, both command names, argument/JSON/exit parity and uninstall against the real produced artifacts. Run documented release construction in a nonpublishing fixture; this task does not independently authorize production publication.",
         "Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes."
       ],
       "acceptance_ids": [
@@ -3737,7 +3827,7 @@
       "id": "19.3",
       "title": "Evaluate task, wave and programme closure against required milestones",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "19.2",
         "16.3",
@@ -3775,7 +3865,7 @@
       "id": "26.3",
       "title": "Migrate config, directories and variable aliases with backups and conflict checks",
       "status": "pending",
-      "wave": 18,
+      "wave": 19,
       "requires": [
         "26.2",
         "25.1"
@@ -3812,7 +3902,7 @@
       "id": "19.4",
       "title": "Publish explicit partial outcomes behind multi-repository release barrier",
       "status": "pending",
-      "wave": 19,
+      "wave": 20,
       "requires": [
         "19.2",
         "19.3"
@@ -3849,7 +3939,7 @@
       "id": "26.4",
       "title": "Regenerate owned guidance and verify old/new integration parity",
       "status": "pending",
-      "wave": 19,
+      "wave": 20,
       "requires": [
         "26.3",
         "25.3"
@@ -3893,7 +3983,7 @@
       "id": "25.2",
       "title": "Rehearse single-authority cutover and separate rollback boundaries",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "25.1",
         "7.4",
@@ -3935,7 +4025,7 @@
       "id": "24.4",
       "title": "Exercise operational recovery runbooks and declared RPO/RTO",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "24.3",
         "4.4",
@@ -3974,7 +4064,7 @@
       "id": "27.2",
       "title": "Replay deterministic large-spec, mixed-graph and 1500-session schedules",
       "status": "pending",
-      "wave": 20,
+      "wave": 21,
       "requires": [
         "5.4",
         "7.4",
@@ -4014,7 +4104,7 @@
       "id": "27.3",
       "title": "Qualify both live providers and native agents through staged48/72-hour fleet campaigns",
       "status": "pending",
-      "wave": 21,
+      "wave": 22,
       "requires": [
         "27.2",
         "9.4",
@@ -4075,7 +4165,7 @@
       "id": "27.4",
       "title": "Run composite fault qualification and independent invariant reconstruction",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "27.3",
         "24.4",
@@ -4125,7 +4215,7 @@
       "id": "28.1",
       "title": "Publish operational documentation from qualified implementation interfaces",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "26.4",
         "27.3"
@@ -4162,7 +4252,7 @@
       "id": "28.2",
       "title": "Persist deterministic documentation closure snapshots and receipts",
       "status": "pending",
-      "wave": 23,
+      "wave": 24,
       "requires": [
         "28.1",
         "19.3",
@@ -4199,7 +4289,7 @@
       "id": "28.4",
       "title": "Retain requirements, decisions, source evidence and implementation traceability",
       "status": "pending",
-      "wave": 24,
+      "wave": 25,
       "requires": [
         "27.4",
         "28.2",
@@ -4241,7 +4331,7 @@
       "id": "28.3",
       "title": "Assemble independent release readiness and complete closure evidence",
       "status": "pending",
-      "wave": 25,
+      "wave": 26,
       "requires": [
         "27.4",
         "28.2",

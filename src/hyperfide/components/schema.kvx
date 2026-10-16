@@ -1,0 +1,6 @@
+# Native component build contract. Task-owned fragments contain [component].
+[schema]
+version = 1
+required_fields = ["schema_version", "id", "source", "entry", "actions"]
+optional_fields = ["requires"]
+callback = "int entry(const char *action, const char *request_json, FILE *output)"

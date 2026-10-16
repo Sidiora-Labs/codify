@@ -1,0 +1,499 @@
+{
+  "schema_version": 1,
+  "campaign_id": "hyperfide-task-1.4-foundation-v3",
+  "scope": "task-component",
+  "registered_variant": "task:1.4",
+  "case_ids": [
+    "V-001",
+    "V-028"
+  ],
+  "expected_assertion_ids": [
+    "foundation.service.control",
+    "foundation.service.provisioner",
+    "foundation.service.dispatch",
+    "foundation.policy.inactive",
+    "foundation.policy.unapproved",
+    "foundation.policy.stale-spec",
+    "foundation.policy.stale-policy",
+    "foundation.policy.missing",
+    "foundation.policy.role-denied",
+    "foundation.policy.boot-action-denied",
+    "foundation.policy.request-cannot-approve",
+    "foundation.policy.request-action-denied",
+    "foundation.policy.authorize",
+    "foundation.registry.duplicate-id",
+    "foundation.registry.duplicate-action",
+    "foundation.registry.unknown-schema",
+    "foundation.registry.unknown-api",
+    "foundation.registry.missing-module",
+    "foundation.registry.escaping-module",
+    "foundation.registry.symlink-module",
+    "foundation.registry.missing-export",
+    "foundation.registry.missing-dependency",
+    "foundation.registry.cycle",
+    "foundation.registry.role-dependency",
+    "foundation.registry.returned-action-mismatch",
+    "foundation.registry.factory-failure",
+    "foundation.registry.import-failure",
+    "foundation.registry.validate-before-import",
+    "foundation.registry.reverse-close",
+    "foundation.registry.sigterm-pending-factory",
+    "foundation.registry.sigterm-pending-import",
+    "foundation.request.unknown-component",
+    "foundation.request.unknown-action",
+    "foundation.request.malformed",
+    "foundation.request.failed-handler",
+    "foundation.request.stable-result-snapshot",
+    "foundation.native.linked-dispatch",
+    "foundation.native.unknown-component",
+    "foundation.native.unknown-action",
+    "foundation.native.invalid-input",
+    "foundation.native.duplicate-id",
+    "foundation.native.schema",
+    "foundation.native.missing-source",
+    "foundation.native.escaping-source",
+    "foundation.native.missing-symbol",
+    "foundation.native.boolean-schema",
+    "foundation.native.make-injection",
+    "foundation.build.pinned",
+    "foundation.authoring.approved-validation",
+    "foundation.authoring.preserve-state",
+    "foundation.authoring.check-no-write",
+    "foundation.authoring.structure-mismatch",
+    "foundation.authoring.unknown-task",
+    "foundation.authoring.draft-refusal",
+    "foundation.authoring.workflow-missing",
+    "foundation.authoring.workflow-duplicate",
+    "foundation.authoring.workflow-stale",
+    "foundation.authoring.preamble-duplicate",
+    "foundation.authoring.verification-scope",
+    "foundation.authoring.draft-control",
+    "foundation.authoring.historical-receipts",
+    "foundation.harness.canonical-source-order"
+  ],
+  "inputs": [
+    {
+      "path": "Makefile",
+      "sha256": "fd30922bad855fdfbdc31f0d50ba659aa101a73eb0577468cd7377c4abde8a67",
+      "size": 3448
+    },
+    {
+      "path": "build/hyperfide-native",
+      "sha256": "21a619a7ed7635a43257765ad1882f16d085e736795b964988c1551958676864",
+      "size": 16016
+    },
+    {
+      "path": "scripts/hyperfide-native-components.py",
+      "sha256": "f59eaab698c71a47e3680d06bfd1581e4a9bdfe537e79578de576e1c6fa62d88",
+      "size": 7490
+    },
+    {
+      "path": "services/hyperfide/components/1.4.json",
+      "sha256": "bad91dd5fb9ed7e60aaad3dfd43510a848ee86a5f95c5bb682082f029c8f1f26",
+      "size": 274
+    },
+    {
+      "path": "services/hyperfide/components/schema.json",
+      "sha256": "8895f135cc1ce6aad30858d5e15d0810157e49a8fa266cbd2c1ae385f76f8961",
+      "size": 1439
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.d.ts",
+      "sha256": "96d1c4eb11b3357c0f6227457c015c683e8a2025b7547d11a77a1d2c27d21d1c",
+      "size": 934
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js",
+      "sha256": "e18f7c5acaaf4db08b5ed7c796c6628f238f63b24efca730d3a500d4a9f1f6fe",
+      "size": 9048
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js.map",
+      "sha256": "a9dbdb2872c2c36f44fbc1ccb7819a7301362de71b1f835d54c5b272762b175f",
+      "size": 9123
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.d.ts",
+      "sha256": "7e1dff61f1fb8f18add6560e90f445f256bd6af7f37a4b5c0d0e2110bf1bec18",
+      "size": 526
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js",
+      "sha256": "30cbe0a3185d930cf82c832930f62c037ee844114d7e703e3994e61a05f5814c",
+      "size": 7069
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js.map",
+      "sha256": "41a476e22e6d70032200b17d3b184274233fb030b469ced882fee11d4b47c055",
+      "size": 7484
+    },
+    {
+      "path": "services/hyperfide/dist/control.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/control.js.map",
+      "sha256": "48349cca9de2de36e81e287513d65b9d7112d94f02e116fe52cde8a33ceac76f",
+      "size": 183
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js",
+      "sha256": "993b2fcdb5f4599e9475a27d29d15f861794bea9b611e85968b4d9a37cfc8216",
+      "size": 120
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js.map",
+      "sha256": "657b88f6e4c3cf5371864771b82cd7e29e42aad56b78c5c3e13ea06f508491cd",
+      "size": 185
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.d.ts",
+      "sha256": "8386faed4722998f9e3fb9b3413c6b0e7e56879a0bb497a4a19d654d11c44e86",
+      "size": 1076
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js",
+      "sha256": "2f9b0745664f79b55492989112528b423decdf553fb303778425c4f9685fa6a5",
+      "size": 4611
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js.map",
+      "sha256": "1d0832f8dbf790abd212afdfde928b6093ca4689a292315f60f1e3ab13813f38",
+      "size": 4311
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js",
+      "sha256": "0747f45b91ff8319ea22f6ced47d0af9c812f502d8240b543d06c7f1ba0d030a",
+      "size": 126
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js.map",
+      "sha256": "ce33225f34728722e868c0c125f9c8ccac69df9b08573c2388fa580707d4bc0e",
+      "size": 191
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "99a2fc1bea6f51c7963c5d9b692d2f4753b34161dee50da37ddef06c8af5f489",
+      "size": 19220
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "6c760a3bc5749bf5944e9618d4a1b8133c28e7bade8027a7ab09d152c53e3720",
+      "size": 570
+    },
+    {
+      "path": "services/hyperfide/src/components/registry.ts",
+      "sha256": "992079df4d9cf0e3c8c0b257987da423096bf3982f20b84894d93d6516a40736",
+      "size": 8993
+    },
+    {
+      "path": "services/hyperfide/src/components/service.ts",
+      "sha256": "a72575f0c081e56356b145746b284ba31e691c87cf9f415537f5f410d153045a",
+      "size": 6910
+    },
+    {
+      "path": "services/hyperfide/src/control.ts",
+      "sha256": "576b9b5b40fc508edf560682bc4de73f850ec590a996ad94d951f44a1c4d5cbf",
+      "size": 83
+    },
+    {
+      "path": "services/hyperfide/src/dispatch.ts",
+      "sha256": "924dc43a3711361ebb60168ae0556d1a212d10f5507bf372e4ace17c398448a6",
+      "size": 84
+    },
+    {
+      "path": "services/hyperfide/src/policy/programme.ts",
+      "sha256": "64addcffe3ccc4b106982123688e07abf19b7656ffbceaebcd7e2d581343692e",
+      "size": 5089
+    },
+    {
+      "path": "services/hyperfide/src/provisioner.ts",
+      "sha256": "56d68c3c582bac9ed6ab73c70fa566072a48126b49111033ee70b1e6567aadb7",
+      "size": 87
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "spec/hyperfide/README.md",
+      "sha256": "946c2fef2c7f5733927cd6e4de8c9c8f8b4a0187da40d47b9083532a0fa4207f",
+      "size": 5310
+    },
+    {
+      "path": "spec/hyperfide/assurance.md",
+      "sha256": "108c95b1b242fe66ca59cfad33993e46fe09c41a8d6a805b07e9517a47f10d72",
+      "size": 43593
+    },
+    {
+      "path": "spec/hyperfide/decision-models.md",
+      "sha256": "e763240abe2b7bdf92b634fd41e684767ed98b4b54ef20854f548940e1e0cd7d",
+      "size": 37651
+    },
+    {
+      "path": "spec/hyperfide/decisions.md",
+      "sha256": "2526488220ec555e9b6cb67c707a31deda09dab838d8990fb2b709460337a188",
+      "size": 18632
+    },
+    {
+      "path": "spec/hyperfide/design.body.md",
+      "sha256": "e810305d7d1eb49ab765fef8f97a7cc189dd29d73002a116df47710c4fd9fff5",
+      "size": 15676
+    },
+    {
+      "path": "spec/hyperfide/diagrams/01-physical-topology.mmd",
+      "sha256": "662f3dcd2ab9769194b0ec8a3e5396f50375a7a4b3e543d754f66dc9f5f5dc1a",
+      "size": 2259
+    },
+    {
+      "path": "spec/hyperfide/diagrams/02-role-authority.mmd",
+      "sha256": "14af3f72e6af6f79c3dc56d66efb04120115f171b80497691593423218db4547",
+      "size": 1348
+    },
+    {
+      "path": "spec/hyperfide/diagrams/03-task-execution.mmd",
+      "sha256": "8b08eab804871f6d87c0a84fed69d463e07cd93fe511020b13f183e69056d466",
+      "size": 3406
+    },
+    {
+      "path": "spec/hyperfide/diagrams/04-state-machines.mmd",
+      "sha256": "9fccbf0211eb4aff8e545677bde3369f68cc743ef96ca651e37fab2be8d6096c",
+      "size": 1004
+    },
+    {
+      "path": "spec/hyperfide/diagrams/04a-attempt-state.mmd",
+      "sha256": "5a271c8d1a6b5d27c2c2757768dbd6f3f971dbc16193629f08bbfd8f92999291",
+      "size": 1044
+    },
+    {
+      "path": "spec/hyperfide/diagrams/04b-sandbox-and-slot-state.mmd",
+      "sha256": "6fe45bf18e0070c61daa6c7473e23021de20315a0ee1d4b3e3d1cef20eb63705",
+      "size": 1539
+    },
+    {
+      "path": "spec/hyperfide/diagrams/04c-submission-custody.mmd",
+      "sha256": "66fe9f7d5474af43ca011f269cc153ee3ac6bda38af511d0a04c88a6873f99e5",
+      "size": 1168
+    },
+    {
+      "path": "spec/hyperfide/diagrams/05-failure-recovery.mmd",
+      "sha256": "6cd0249a90abd778d6f1cf6ec352fa311c1b84706a06778a9c7da46dc4d329f9",
+      "size": 1688
+    },
+    {
+      "path": "spec/hyperfide/diagrams/06-data-and-graph.mmd",
+      "sha256": "126ae060e8eb4284d4db8300b80f49a9f5d2b17532169e52bb7368b2eeefdf2d",
+      "size": 1357
+    },
+    {
+      "path": "spec/hyperfide/diagrams/07-review-and-contract-closure.mmd",
+      "sha256": "94996bbcd15dc46ec67c185e179c3daf39bd96b5e4c0f02213ffb3f34f829433",
+      "size": 1287
+    },
+    {
+      "path": "spec/hyperfide/diagrams/08-illustrative-fleet.mmd",
+      "sha256": "43afb4719862b57180960d8f1be80676cb9e37d068159de5b8fd059c3ff1c7b8",
+      "size": 985
+    },
+    {
+      "path": "spec/hyperfide/diagrams/09-migration-gates.mmd",
+      "sha256": "90e61aea839bd412ebc18eaf2c930a668f14f029d2fb9136aeca84061d9692f2",
+      "size": 739
+    },
+    {
+      "path": "spec/hyperfide/diagrams/10-multi-repository-publication.mmd",
+      "sha256": "c24498de18fc1a35af64157abcd5ccdcf0e43f62e50ccbb2f215301d38ff2e8c",
+      "size": 911
+    },
+    {
+      "path": "spec/hyperfide/evidence/implementation-validation.json",
+      "sha256": "166459cd408ba51292055b7b8a183b30005a9bf6132d50012b9cf8e003f051ac",
+      "size": 8958
+    },
+    {
+      "path": "spec/hyperfide/evidence/native-lint.json",
+      "sha256": "1bfe760489bb0aea89e604a290125e1a68b4c6b8d1acba93c5b7837f4c435008",
+      "size": 50291
+    },
+    {
+      "path": "spec/hyperfide/evidence/pack-validation.json",
+      "sha256": "7f9fb1ed5e81743409c0a958f4aced37b23b5b24ab45bc93a9f7adb19be3a69a",
+      "size": 8351
+    },
+    {
+      "path": "spec/hyperfide/evidence/publication-check.json",
+      "sha256": "ad83b873fbae785b3cadbd240a607a539db44e3444c59fb0e651ef57d56af5a4",
+      "size": 706
+    },
+    {
+      "path": "spec/hyperfide/evidence/task-catalog.json",
+      "sha256": "d03891ffa5dec90e97e6554059d2910321c4ba26b3a8cf4769bbb49fe6b0816b",
+      "size": 252996
+    },
+    {
+      "path": "spec/hyperfide/evidence/traceability.json",
+      "sha256": "e6f773a8230647f16ef11c753a589bb3e5b669496e160be981f54af356788742",
+      "size": 25953
+    },
+    {
+      "path": "spec/hyperfide/execution-contract.md",
+      "sha256": "9af8b0b67c0cbb56efddc70becdc7e0968c5eb0ed92c9a96e13c8d6d65e68770",
+      "size": 48455
+    },
+    {
+      "path": "spec/hyperfide/identity-security.md",
+      "sha256": "8de6bba0b37982cba4a6c0ca189e98d94d7ce2bbb3eafbd46edc28dbb0b16a30",
+      "size": 27504
+    },
+    {
+      "path": "spec/hyperfide/implementation-plan.md",
+      "sha256": "969c205c4e1fe84582e6c7457f410b4fcfc54a0e7765d0669dfb66d9d80d4e09",
+      "size": 238790
+    },
+    {
+      "path": "spec/hyperfide/migration.md",
+      "sha256": "6419db5e9b59fe10d5cd9447cf900d0d9e261e35eaebbc93514ae38e2e66e515",
+      "size": 35555
+    },
+    {
+      "path": "spec/hyperfide/privacy.md",
+      "sha256": "edc007ad9951085526610fb608e99932f158e2f06eb9d86c9ed29e97c35233ea",
+      "size": 2276
+    },
+    {
+      "path": "spec/hyperfide/providers/blaxel.md",
+      "sha256": "0708886822f3510eab6b74da6152712f44331a72d75ccc875b9993ce11cf44df",
+      "size": 19935
+    },
+    {
+      "path": "spec/hyperfide/providers/railway.md",
+      "sha256": "fae68edde65cda6fd6a19cd8337f827bf618f6c57783296bec14d49e5418b17a",
+      "size": 29890
+    },
+    {
+      "path": "spec/hyperfide/repository-baseline.md",
+      "sha256": "c10c10ebbd8bdf7a0b199a0aaf82426b14e29444030b2fd20a88e312805fe56f",
+      "size": 13700
+    },
+    {
+      "path": "spec/hyperfide/requirements.md",
+      "sha256": "4273c6f63fdb702f42b1c94a6ab7c0d9e125d4e767164644f171c716872158d6",
+      "size": 5216
+    },
+    {
+      "path": "spec/hyperfide/reviews/README.md",
+      "sha256": "5784260042c54786522d86f72272fe0cf47a718843e24c6dbcc2e324046f00b0",
+      "size": 4761
+    },
+    {
+      "path": "spec/hyperfide/schematics.md",
+      "sha256": "f0f89d750c52d35e484b166280369c4fd34bb3898db24354fcebfa21db51e275",
+      "size": 42448
+    },
+    {
+      "path": "spec/hyperfide/spec.kvx",
+      "sha256": "363410afe5caabfd9fc509f362bd6d50399fd977be6fd8de7f26688b6e467d63",
+      "size": 297605
+    },
+    {
+      "path": "spec/hyperfide/spec.kvx.lock",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "spec/hyperfide/storage.md",
+      "sha256": "b5a54f6aafde50135d386a3b4d4a0dba3855e585bca5df995dd89e2e7584342f",
+      "size": 50052
+    },
+    {
+      "path": "spec/hyperfide/tools/render_native.py",
+      "sha256": "7bbc0165f36f52c65b0e707ed169313970c1d387e19d3d5e1044c04f71bbe963",
+      "size": 8836
+    },
+    {
+      "path": "spec/hyperfide/tools/validate_pack.py",
+      "sha256": "9e578b5b66ea45073d43a6f385ec098a8d0522b8393e389a2bce4dc4c7a71ee0",
+      "size": 43170
+    },
+    {
+      "path": "spec/hyperfide/traceability.md",
+      "sha256": "da8720a4146157145c1c55fef67af930979bcbbe33369462262b52bdac0d0253",
+      "size": 12320
+    },
+    {
+      "path": "spec/hyperfide/verification.md",
+      "sha256": "486802a7b8a10d78a04c8ca705da5a34263c17358a0eafe1aa8310ac79e0f152",
+      "size": 45126
+    },
+    {
+      "path": "spec/workflow.kvx",
+      "sha256": "f720de1ffb67496d268d295a74492419a21e29b9ad4d1e32fbd21d9554974485",
+      "size": 4820
+    },
+    {
+      "path": "src/hyperfide/component_main.c",
+      "sha256": "4926c40a471fa077344b3fc6919920d93ae90f044064418c2b4487c8e1777cf4",
+      "size": 5873
+    },
+    {
+      "path": "src/hyperfide/components.h",
+      "sha256": "0c89648b865492dca5a15f7b17c5cd6609ce37efffcab780cad870e77dd3eac3",
+      "size": 538
+    },
+    {
+      "path": "src/hyperfide/components/schema.kvx",
+      "sha256": "713bd4f6473cf0067e44b2a5b6338ab557944934a02ddccaf93df3081981aea9",
+      "size": 285
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/1_4.py",
+      "sha256": "e6fc9076e57a9a3587f58038e75a2cbfc96e72c9c7b95b1302d43a21cc6ae591",
+      "size": 40026
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "7f97dbde67eb6e0824543e8a382c745c4ef352411d7ce54d0a962c6814b75d93",
+      "size": 27891
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
+      "size": 36837
+    }
+  ],
+  "resources": [],
+  "approval": {
+    "approved": true,
+    "allowed_actions": []
+  },
+  "seed": 1,
+  "policy": {
+    "component_only": true,
+    "execution": "remote-only",
+    "cloud_provisioning": false,
+    "frontier_calls": false,
+    "historical_draft_fixture_commit": "c1047fe2bcdef0a44053d49f36e8e732c0206fea"
+  }
+}

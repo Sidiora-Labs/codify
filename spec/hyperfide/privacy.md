@@ -14,4 +14,4 @@ Actual deployment settings are supplied by private manifests and secret referenc
 
 Run the public authoring validator and native spec lint without requiring private transcripts or local session files. Inspect the resulting public file list for sensitive content. The [publication check](evidence/publication-check.json) records the latest targeted scan and ignore/tracking probes, including their limits. Preserve private audit evidence separately when required for internal review; never copy raw private evidence into a public validation report.
 
-The pack remains a draft. Neither sanitisation nor structural validation grants implementation approval, cloud permission or production qualification.
+Implementation approval is recorded in the native specification. Neither sanitisation nor structural validation grants provider/model permissions or production qualification. Raw execution artifacts remain private; public summaries contain reviewed source and outcome identities only.

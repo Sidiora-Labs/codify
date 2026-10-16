@@ -1,6 +1,6 @@
 # Implementation traceability
 
-Status: draft; implementation is not authorised. All product cases remain **UNRUN**. This public crosswalk maps the 112 normative clauses in the [native specification](spec.kvx) to 112 pending implementation tasks, 56 canonical verification cases and their design contracts. It contains implementation coverage, not execution evidence.
+Status: approved for implementation on 2026-10-16. This crosswalk is the historical planning baseline; native KVX tracks live task progress, and product cases require independent full-case evidence. This public crosswalk maps the 112 normative clauses in the [native specification](spec.kvx) to 112 implementation task identities, 56 canonical verification cases and their design contracts. It contains implementation coverage, not execution evidence.
 
 A clause identifier `N.M` means `[req.N] ac_M`. Task identifiers resolve in the [implementation plan](implementation-plan.md) and [task catalogue](evidence/task-catalog.json). Verification identifiers resolve in [verification.md](verification.md). The machine-readable source for this table is [traceability.json](evidence/traceability.json).
 

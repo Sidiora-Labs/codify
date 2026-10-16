@@ -1,6 +1,6 @@
 # Hyperfide — implementation review pack
 
-**Draft for review. Implementation is not authorised.** Hyperfide is the name requested for the Codify 2.0 successor. This directory does not activate the feature or rename the current installation. The proposed public version is `2.0.0`; release numbering and the proposed `hyperfide` command are recorded decisions for review.
+**Implementation authorised on 2026-10-16; product qualification remains evidence driven.** Hyperfide is the name requested for the Codify 2.0 successor. The approved workflow selects this feature; released product naming changes remain their own implementation tasks. The proposed public version is `2.0.0`; release numbering and the proposed `hyperfide` command are recorded decisions for review.
 
 The proposed system puts the primary Claude Code or Codex leader and feature managers on a configured supervisory main server. PostgreSQL holds fleet authority and versioned shared graph state. Railway and Blaxel sandboxes run the engineering work. Humans work through the primary leader; managers request execution through Hyperfide, and independent evidence determines qualification and integration.
 
@@ -13,8 +13,8 @@ The specification preserves frontier implementation agents, three decision-model
 | [Design overview](design.body.md) | The complete operating model, boundaries, one-task walkthrough, authority and deployment choices. |
 | [Schematics](schematics.md) | Ten architecture views, with thirteen standalone Mermaid sources: topology, roles, execution, state, custody, recovery, graph, reviews, fleet, migration and multiple repositories. |
 | [Decisions and qualifications](decisions.md) | Direct user requirements, recommended choices and facts that still require implementation-time evidence. |
-| [Implementation plan](implementation-plan.md) | Dependency waves, bounded packages, file ownership and future verification commands. |
-| [Native specification](spec.kvx) | 28 requirements / 112 acceptance clauses, pending implementation tasks and 56 UNRUN canonical product cases. |
+| [Implementation plan](implementation-plan.md) | 112 packages across 26 dependency waves, explicit ownership handoffs and verification interfaces. |
+| [Native specification](spec.kvx) | 28 requirements / 112 acceptance clauses, live implementation tasks and 56 separately tracked canonical product cases. |
 | [Verification](verification.md) | Strict evidence rules, fault tests, provider/native-agent qualification and actual 48/72-hour fleet campaigns. |
 | [Traceability](traceability.md) | All 112 acceptance clauses linked to implementation tasks, canonical cases and contracts. |
 | [Review report](reviews/README.md) | Review scope, findings, corrections, actual authoring checks and remaining limits. |
@@ -33,8 +33,8 @@ The specification preserves frontier implementation agents, three decision-model
 
 ## Evidence boundary
 
-Source/documentation research and authoring checks establish a reviewable design. They do not prove that Hyperfide runs, that a deployment account has a required entitlement, or that a native authentication mode supports hundreds of sessions. All product scenarios remain **UNRUN** and every implementation task remains **pending**. The active repository feature remains `codify-v16`.
+Source/documentation research and authoring checks establish a reviewable design. They do not prove that Hyperfide runs, that a deployment account has a required entitlement, or that a native authentication mode supports hundreds of sessions. The [native specification](spec.kvx) is the sole bootstrap task-progress authority. Canonical full-case status remains independent of component completion; the historical planning catalog retains its original pending states. The active repository feature is `hyperfide`.
 
-[Pack validation](evidence/pack-validation.json) records structural checks and their limits. The [native lint report](evidence/native-lint.json) records checkout-local `cg spec lint` against this inactive draft. Future implementation paths are intentionally absent; neither report executes the proposed product verification commands.
+[Pack validation](evidence/pack-validation.json) and [native lint](evidence/native-lint.json) preserve dated authoring checks against the original draft. Current structural checks use `python3 spec/hyperfide/tools/validate_pack.py --mode implementation` and write a separate report. Neither structural check executes product verification. The renderer requires the same explicit mode and preserves native task statuses and runtime evidence.
 
 Reviewing or approving this pack is separate from provider/model campaign authorisation and release qualification. Routine execution after approval should be autonomous within a declared run policy; the unresolved account/authentication facts are explicit qualification tasks, not hidden assumptions or prompts for per-task human supervision.

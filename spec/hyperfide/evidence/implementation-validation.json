@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "scope": "AUTHORING STRUCTURE ONLY",
+  "validation_mode": "implementation",
+  "generated_at": "2026-10-16T10:54:08.787401+00:00",
+  "status": "PASS",
+  "runtime_acceptance_status": "UNRUN",
+  "declared_acceptance_states": {
+    "UNRUN": 56
+  },
+  "product_commands_executed": false,
+  "live_state_authority": "native spec.kvx during bootstrap; PostgreSQL after qualified cutover",
+  "private_audit": "NOT_VALIDATED_BY_PUBLIC_CHECK",
+  "metrics": {
+    "requirement_clauses": 112,
+    "native_tasks": 112,
+    "acceptance_cases": 56,
+    "native_acceptance_cases": 56,
+    "task_catalog_entries": 112,
+    "same_wave_exact_path_collisions": 0,
+    "recorded_native_lint_errors": 0,
+    "recorded_native_lint_warnings": 573,
+    "public_traceability_clauses": 112,
+    "local_markdown_links": 343,
+    "unresolved_local_links": 0,
+    "mermaid_sources": 13,
+    "mermaid_embeds": 13,
+    "optional_publication_policy_applied": false,
+    "public_privacy_files_checked": 40,
+    "public_review_summaries": 1,
+    "active_feature_observed": "hyperfide"
+  },
+  "errors": [],
+  "incomplete": [],
+  "warnings": [],
+  "notes": [
+    "Task catalog, traceability baseline and dated authoring reports are historical plans. Native KVX owns bootstrap live task state. Structural validation never certifies task or runtime qualification.",
+    {
+      "planned_product_runner": "tests/hyperfide/qualify.py",
+      "exists": true,
+      "executed": false,
+      "interpretation": "Runner existence is reported only; no product verification or runtime qualification is executed by this structural check."
+    },
+    "Native lint is a separately recorded authoring check. Its absent planned-path warnings are preserved; this validator does not execute cg."
+  ],
+  "validator_self_tests": [
+    {
+      "fixture": "duplicate-section",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "duplicate-key",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "invalid-value",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "duplicate-nested-json-key",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "invalid-json-numeric-constant",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "valid-control",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "done-flag",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "missing-dependency",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "missing-requirement",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "unknown-case",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "empty-selection",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "echoed-runner",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "wrong-task-manifest",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "success-masking",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "boolean-wave",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "empty-steps",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "missing-owner",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "absolute-file-scope",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "duplicate-case-selection",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "cycle",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "valid-300-task-chain",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "later-wave-prerequisite",
+      "expected_rejection_observed": true
+    },
+    {
+      "fixture": "unassigned-acceptance-case",
+      "expected_rejection_observed": true
+    }
+  ],
+  "limitations": [
+    "No product command, provider API, model API, infrastructure or load qualification is executed.",
+    "KVX validation covers the documented single-line JSON-value subset; native cg lint is a separate check.",
+    "Reference and coverage checks establish linkage, not semantic adequacy of prose, tests or architecture.",
+    "Private companion files are excluded from public requirements, scans, links and hashes; the original transcript audit is not claimed by this public check.",
+    "Same-wave collision detection checks exact file paths, not wildcard overlaps or undeclared/generated edits.",
+    "Mermaid source/embed equality is checked; diagram parsing, layout and rendering are not claimed.",
+    "HTTP links and local heading anchors are not verified; current vendor facts require the cited research.",
+    "Pack hashes identify inspected files; authoring the JSON report does not freeze later edits."
+  ],
+  "inspected_sha256": {
+    "README.md": "946c2fef2c7f5733927cd6e4de8c9c8f8b4a0187da40d47b9083532a0fa4207f",
+    "assurance.md": "108c95b1b242fe66ca59cfad33993e46fe09c41a8d6a805b07e9517a47f10d72",
+    "decision-models.md": "e763240abe2b7bdf92b634fd41e684767ed98b4b54ef20854f548940e1e0cd7d",
+    "decisions.md": "2526488220ec555e9b6cb67c707a31deda09dab838d8990fb2b709460337a188",
+    "design.body.md": "e810305d7d1eb49ab765fef8f97a7cc189dd29d73002a116df47710c4fd9fff5",
+    "diagrams/01-physical-topology.mmd": "662f3dcd2ab9769194b0ec8a3e5396f50375a7a4b3e543d754f66dc9f5f5dc1a",
+    "diagrams/02-role-authority.mmd": "14af3f72e6af6f79c3dc56d66efb04120115f171b80497691593423218db4547",
+    "diagrams/03-task-execution.mmd": "8b08eab804871f6d87c0a84fed69d463e07cd93fe511020b13f183e69056d466",
+    "diagrams/04-state-machines.mmd": "9fccbf0211eb4aff8e545677bde3369f68cc743ef96ca651e37fab2be8d6096c",
+    "diagrams/04a-attempt-state.mmd": "5a271c8d1a6b5d27c2c2757768dbd6f3f971dbc16193629f08bbfd8f92999291",
+    "diagrams/04b-sandbox-and-slot-state.mmd": "6fe45bf18e0070c61daa6c7473e23021de20315a0ee1d4b3e3d1cef20eb63705",
+    "diagrams/04c-submission-custody.mmd": "66fe9f7d5474af43ca011f269cc153ee3ac6bda38af511d0a04c88a6873f99e5",
+    "diagrams/05-failure-recovery.mmd": "6cd0249a90abd778d6f1cf6ec352fa311c1b84706a06778a9c7da46dc4d329f9",
+    "diagrams/06-data-and-graph.mmd": "126ae060e8eb4284d4db8300b80f49a9f5d2b17532169e52bb7368b2eeefdf2d",
+    "diagrams/07-review-and-contract-closure.mmd": "94996bbcd15dc46ec67c185e179c3daf39bd96b5e4c0f02213ffb3f34f829433",
+    "diagrams/08-illustrative-fleet.mmd": "43afb4719862b57180960d8f1be80676cb9e37d068159de5b8fd059c3ff1c7b8",
+    "diagrams/09-migration-gates.mmd": "90e61aea839bd412ebc18eaf2c930a668f14f029d2fb9136aeca84061d9692f2",
+    "diagrams/10-multi-repository-publication.mmd": "c24498de18fc1a35af64157abcd5ccdcf0e43f62e50ccbb2f215301d38ff2e8c",
+    "evidence/native-lint.json": "1bfe760489bb0aea89e604a290125e1a68b4c6b8d1acba93c5b7837f4c435008",
+    "evidence/pack-validation.json": "7f9fb1ed5e81743409c0a958f4aced37b23b5b24ab45bc93a9f7adb19be3a69a",
+    "evidence/publication-check.json": "ad83b873fbae785b3cadbd240a607a539db44e3444c59fb0e651ef57d56af5a4",
+    "evidence/task-catalog.json": "d03891ffa5dec90e97e6554059d2910321c4ba26b3a8cf4769bbb49fe6b0816b",
+    "evidence/traceability.json": "e6f773a8230647f16ef11c753a589bb3e5b669496e160be981f54af356788742",
+    "execution-contract.md": "9af8b0b67c0cbb56efddc70becdc7e0968c5eb0ed92c9a96e13c8d6d65e68770",
+    "identity-security.md": "8de6bba0b37982cba4a6c0ca189e98d94d7ce2bbb3eafbd46edc28dbb0b16a30",
+    "implementation-plan.md": "969c205c4e1fe84582e6c7457f410b4fcfc54a0e7765d0669dfb66d9d80d4e09",
+    "migration.md": "6419db5e9b59fe10d5cd9447cf900d0d9e261e35eaebbc93514ae38e2e66e515",
+    "privacy.md": "edc007ad9951085526610fb608e99932f158e2f06eb9d86c9ed29e97c35233ea",
+    "providers/blaxel.md": "0708886822f3510eab6b74da6152712f44331a72d75ccc875b9993ce11cf44df",
+    "providers/railway.md": "fae68edde65cda6fd6a19cd8337f827bf618f6c57783296bec14d49e5418b17a",
+    "repository-baseline.md": "c10c10ebbd8bdf7a0b199a0aaf82426b14e29444030b2fd20a88e312805fe56f",
+    "requirements.md": "4273c6f63fdb702f42b1c94a6ab7c0d9e125d4e767164644f171c716872158d6",
+    "reviews/README.md": "5784260042c54786522d86f72272fe0cf47a718843e24c6dbcc2e324046f00b0",
+    "schematics.md": "f0f89d750c52d35e484b166280369c4fd34bb3898db24354fcebfa21db51e275",
+    "spec.kvx": "363410afe5caabfd9fc509f362bd6d50399fd977be6fd8de7f26688b6e467d63",
+    "spec.kvx.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "storage.md": "b5a54f6aafde50135d386a3b4d4a0dba3855e585bca5df995dd89e2e7584342f",
+    "tools/render_native.py": "7bbc0165f36f52c65b0e707ed169313970c1d387e19d3d5e1044c04f71bbe963",
+    "tools/validate_pack.py": "9e578b5b66ea45073d43a6f385ec098a8d0522b8393e389a2bce4dc4c7a71ee0",
+    "traceability.md": "da8720a4146157145c1c55fef67af930979bcbbe33369462262b52bdac0d0253",
+    "verification.md": "486802a7b8a10d78a04c8ca705da5a34263c17358a0eafe1aa8310ac79e0f152"
+  }
+}

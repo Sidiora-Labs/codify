@@ -1,6 +1,6 @@
 # Requirements index
 
-Status: draft for review. Implementation is not authorised. The [native specification](spec.kvx) defines 28 requirement domains, each containing four normative acceptance clauses. All 112 clauses retain an explicit implementation and verification mapping in the [public crosswalk](traceability.md).
+Status: approved for implementation on 2026-10-16. Runtime qualification remains independent. The [native specification](spec.kvx) defines 28 requirement domains, each containing four normative acceptance clauses. All 112 clauses retain an explicit implementation and verification mapping in the [public crosswalk](traceability.md).
 
 This index summarises engineering obligations. Deployment-specific resources, provider quotas, credentials, model aliases, permissions and workload inputs are supplied through an approved run policy and qualification manifests. Source research and structural authoring checks do not establish runtime behaviour or measured performance.
 
@@ -37,6 +37,6 @@ This index summarises engineering obligations. Deployment-specific resources, pr
 
 ## Acceptance boundary
 
-The implementation plan keeps every task pending. Product verification keeps every case UNRUN. After approval, registered tests must validate exact source, environment, policy and evidence identities; unavailable fixtures, credentials or required variants block qualification. Worker declarations, nonempty proof strings, model recommendations and linked requirement identifiers cannot substitute for independent results.
+The historical implementation catalog records initial pending states; native KVX owns live bootstrap progress. Canonical product cases remain UNRUN until their complete obligations qualify. Registered tests must validate exact source, environment, policy and evidence identities; unavailable fixtures, credentials or required variants block qualification. Worker declarations, nonempty proof strings, model recommendations and linked requirement identifiers cannot substitute for independent results.
 
 Changes to programme intent, authority, dependency policy or closure criteria require a versioned review. Routine scheduling, recovery and repairs operate autonomously within the approved policy. Public repository artifacts contain reusable contracts and deliberately exclude deployment-specific operating records.

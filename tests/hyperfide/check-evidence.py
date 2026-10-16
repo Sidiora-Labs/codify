@@ -232,7 +232,7 @@ def source_inventory(workspace, registration, campaign):
             require(not path.is_symlink(), "symbolic source inventory entry")
             if path.is_file():
                 candidates.add(path.resolve())
-    return [{"original_path": str(path), "sha256": digest_file(path)[0], "size": digest_file(path)[1]} for path in sorted(candidates)]
+    return [{"original_path": str(path), "sha256": digest_file(path)[0], "size": digest_file(path)[1]} for path in sorted(candidates, key=str)]
 
 
 def worktree_inventory(workspace, campaign, commit, inventory):

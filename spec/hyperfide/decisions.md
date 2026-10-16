@@ -1,13 +1,13 @@
 # Hyperfide decisions and qualification register
 
-Status: **DRAFT FOR USER REVIEW — no implementation approval recorded.** This register distinguishes user direction, engineering recommendations and unverified enablement facts. Normative SHALL statements in the native spec describe the proposed contract; they do not imply that every design choice was separately requested or already implemented.
+Status: **Approved for implementation on 2026-10-16; qualification remains evidence driven.** This register distinguishes user direction, engineering recommendations and unverified enablement facts. Normative SHALL statements in the native spec describe the proposed contract; they do not imply that every design choice was separately requested or already implemented.
 
 ## 1. Functional baseline
 
 | ID | Requirement | Contract consequence |
 |---|---|---|
 | U-01 | Hyperfide is the successor product name. | Deliberate branding and compatibility migration; no blind historical identifier replacement. |
-| U-02 | Specification review precedes implementation. | Every task remains pending, every product case UNRUN and the feature inactive until approval. |
+| U-02 | Specification review precedes implementation. | Approval was recorded on 2026-10-16. Native KVX now tracks bootstrap progress; the catalog remains its historical pending baseline and canonical full-case qualification stays independent. |
 | U-03 | Main server hosts the primary leader, feature managers and supervision. | Implementation and builds are remote; capacity is supplied by private deployment configuration. |
 | U-04 | Humans interact through the primary leader; ordinary execution is agent owned. | No routine worker-console intervention or per-task approval within an authorised run policy. |
 | U-05 | Managers receive wave work and request sandbox workers through Hyperfide. | Durable packages, ownership, handoffs and scoped context. |
@@ -79,3 +79,27 @@ These gates do not request new permissions during specification authoring. Provi
 - **Always-on availability:** one supervisory main server is an acknowledged supervision failure domain. Durable recovery and bounded worker continuation are mandatory; continuous leadership failover is not falsely promised.
 - **Full memory cloning:** optional, not production foundation. Disk/image preparation and fresh identity are the common provider baseline.
 - **Approval and proof:** spec review does not activate a run; a task labelled done does not prove correctness; a source/doc review does not qualify an account, model or deployment.
+
+## Approved bootstrap authoring policy
+
+The programme owner authorised implementation on 2026-10-16. The native specification records that approval and owns live bootstrap task progress until the qualified PostgreSQL authority takes over. The planning catalog and dated authoring reports retain their historical meaning. Explicit scope amendments are coordinated in both native and catalog structure without copying historical pending states over live work.
+
+The workflow temporarily disables Markdown mirrors because the reviewed public requirements index is manually maintained. Generated agent pointers still come from the owning workflow source. Permanent generated-document ownership and naming remain task26.4; public CLI and MCP integration remain task25.3.
+
+The internal native component dispatcher is a trusted local build/invocation seam. It does not grant programme approval, leases, provider credentials or protected-branch authority. Authority-changing operations must be admitted through the corresponding qualified control boundary.
+
+## Approved runtime integration amendments
+
+The amended planning catalog retains 112 tasks and 56 canonical cases and now orders implementation across 26 waves. Task 27.1 and task 1.4 retain waves 1 and 2; their live statuses and every canonical case record are preserved. The additional wave follows explicit runtime composition, network admission, native transport and distribution dependencies. These amendments assign implementation ownership within the existing approved requirements and do not certify future behavior.
+
+| Owner | Integration obligation | Required predecessor and handoff |
+|---|---|---|
+| 4.2 | Per-process bounded PostgreSQL resources, component dependency capabilities and deterministic shutdown; multiple components share the initialized resource container. | Registry ownership follows 1.4; separate service roles continue to communicate through durable channels rather than share cross-process globals. |
+| 14.1 | Authenticated persistent HTTPS coordinator, external versioned envelope, trusted invocation identity and readiness/shutdown lifecycle. | Follows 4.2 resources and 1.4 service runtime; takes registry from 4.2 and service lifecycle from 1.4. Remote payloads cannot replace policy or trusted actor context. |
+| 12.1 | Native HTTPS transport using libcurl and a qualified TLS backend, enrollment/heartbeat/reconnect and actual slot registration. | Follows 14.1; takes Makefile, native fragment schema and build helper from 1.4 before adding transport source/header/link declarations. Certificate and hostname verification remain enforced. |
+| 25.3 | Link nested registered native modules into actual public CLI/MCP, reuse native HTTPS transport and exercise real public entrypoints. | Follows 12.1 transport and 14.1 protocol; takes Makefile from 12.1 and standalone dispatch/ABI sources from 1.4, preserving separate main functions. |
+| 26.2 | Produce and install the canonical executable and compatibility entrypoint, update release/uninstall paths, preserve transport/runtime link dependencies. | Takes Makefile from 25.3 and installer/release scripts from 26.1. Tests clean builds and disposable-prefix installation/uninstallation; production publication remains separately authorised. |
+
+The versioned catalog records every exact shared-path ownership chain and the DAG enforces the handoffs. Current foundation JSONL dispatch and the internal native component seam remain bounded foundation work; neither substitutes for the later coordinator listener, authenticated native registration or public client integration. Ignored generated AGENTS/CLAUDE pointers are regenerated from their owning source and are excluded from task 1.4 tracked commit paths.
+
+The task1.4 qualification attempt exposed an ordering-only checker defect for a file beside a directory with the same prefix. Task1.4 takes the checker path after task27.1, uses the runner's canonical string ordering, and verifies both matching inventories and changed-content refusal. Rejected receipts remain immutable.
