@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "8.2",
+  "task": "8.2",
+  "roles": [
+    "control",
+    "provisioner"
+  ],
+  "module": "providers/pools.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "provider.pools.describe",
+    "provider.pools.readiness",
+    "provider.pools.configure",
+    "provider.pools.list",
+    "provider.pools.capacity",
+    "provider.pools.observe"
+  ],
+  "requires": [
+    "4.2"
+  ]
+}
