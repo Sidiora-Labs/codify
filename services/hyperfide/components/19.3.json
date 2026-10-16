@@ -11,11 +11,12 @@
   "actions": [
     "integration.closure.evaluate",
     "integration.closure.verify",
-    "integration.closure.inspect"
+    "integration.closure.inspect",
+    "integration.closure.reconcile"
   ],
   "requires": [
     "19.2",
     "16.3",
-    "18.4"
+    "finding-remediation"
   ]
 }

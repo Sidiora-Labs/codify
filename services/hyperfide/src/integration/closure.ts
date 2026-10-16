@@ -4,9 +4,13 @@ import {randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import type pg from 'pg';
+import {FoundationError} from '../policy/programme.js';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {bindScope,primaryClient,obj,keys,scope,uuid,values,hash,canonical,fail,config,repository,git,tx,currentRun,custody,reviewCoverage,prepareRemoteGate,executeRemote,type Scope,type DB,type IntegrationConfig,type GateConfig} from './candidates.js';
+import {bindScope,primaryClient,obj,keys,scope,uuid,values,hash,canonical,fail,config,repository,git,tx,currentRun,custody,reviewCoverage,prepareRemoteGate,executeRemote,snapshotRemote,restoreRemote,semanticDisposition,type Scope,type DB,type IntegrationConfig,type GateConfig,type AdmittedIntegrationWork} from './candidates.js';
 const exec=promisify(execFile);
+function semanticHold(error:unknown):void{
+ if(error instanceof FoundationError)return;const code=(error as {code?:unknown})?.code;if(code==='ERR_MODULE_NOT_FOUND'||code==='MODULE_NOT_FOUND')return;throw error;
+}
 type Level='TASK'|'WAVE'|'PROGRAMME';
 interface ScopeGate extends GateConfig {covers:string[];proof:{manifest_path:string;manifest_digest:string;registry_path:string;registry_digest:string;expected_assertion_ids:string[];case_ids:string[]}}
 interface ClosurePolicy {wave_gates:ScopeGate[];programme_gates:ScopeGate[];required_acceptance_ids:string[];required_docs:boolean}
@@ -26,8 +30,8 @@ async function registerClosurePolicy(db:DB,s:Scope,cfg:IntegrationConfig):Promis
  if(!accepted||accepted.closure_policy_digest!==policyDigest||canonical(accepted.policy)!==canonical(policy))fail('CLOSURE_POLICY_CHANGED','Accepted immutable closure policy differs from trusted configuration');
 }
 
-export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,taskId?:string):Promise<Record<string,any>>{
- const run=await currentRun(db,s,true,undefined,true);
+export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,taskId?:string,admittedWork?:AdmittedIntegrationWork):Promise<Record<string,any>>{
+ await semanticDisposition(db,s,'READ');const run=await currentRun(db,s,false,undefined,true,admittedWork);
  const closurePolicyRow=(await db.query('SELECT * FROM hyperfide.integration_closure_policies WHERE organisation_id=$1 AND run_id=$2 AND run_policy_digest=$3',[...values(s),run.policy_digest])).rows[0];if(!closurePolicyRow||hash(canonical(closurePolicyRow.policy))!==closurePolicyRow.closure_policy_digest)fail('CLOSURE_POLICY_UNAVAILABLE','Persisted current closure policy required');
  const tasks=(await db.query('SELECT id,task_key,state,state_version::text,generation::text,current_custody_id,criteria_digest,spec_generation::text,spec_revision_id,wave FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2'+(level==='TASK'?' AND id=$3':level==='WAVE'?' AND wave=$3':'')+' ORDER BY task_key',[...values(s),...(level==='TASK'?[taskId]:level==='WAVE'?[wave]:[])])).rows;
  if(tasks.length>10000)fail('CLOSURE_SCOPE_UNBOUNDED','Scope task count exceeds bounded10k inspection');if(!tasks.length)fail('CLOSURE_SCOPE_EMPTY','No tasks in declared closure scope');
@@ -39,7 +43,7 @@ export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,tas
  const registryModule='../spec/obligations.js';
  for(const task of tasks){
   try{const loader=(await import(registryModule)).loadProofObligations;const proof=await loader(db,{...s,task_id:task.id,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});proofInventory.push({task_id:task.id,registry_digest:proof.registry_digest,criteria_digest:proof.criteria_digest,obligations:proof.obligations});}
-  catch{proofInventory.push({task_id:task.id,unavailable:true});}
+  catch(error){semanticHold(error);proofInventory.push({task_id:task.id,unavailable:true});}
  }
  const assuranceObservations:Record<string,unknown>[]=[];
  const reviewObservations:Record<string,unknown>[]=[];
@@ -47,27 +51,27 @@ export async function closureSnapshot(db:DB,s:Scope,level:Level,wave?:number,tas
  const assuranceModule='../assurance/coverage.js',reviewModule='../review/coverage.js',findingModule='../findings/registry.js';
  for(const publication of publications.filter(p=>p.state==='PUBLISHED'&&p.manifest.contributors.some((contributor:Record<string,any>)=>tasks.some(t=>t.id===contributor.task_id&&t.current_custody_id===contributor.custody_id)))){
   const manifest=publication.manifest;
-  for(const contributor of manifest.contributors){
+  for(const contributor of manifest.contributors.filter((c:Record<string,any>)=>tasks.some(t=>t.id===c.task_id&&t.current_custody_id===c.custody_id))){
    try{const validityModule='../assurance/validity.js';const inspect=(await import(validityModule)).inspectValidity;
     const evidence=await inspect(db,s,contributor.custody_id);
     assuranceObservations.push({task_id:contributor.task_id,custody_id:contributor.custody_id,applicability:evidence.applicability,
      current:evidence.current_integrated_assurance===true&&evidence.proof_complete===true&&evidence.applicability==='CURRENT'&&evidence.proof_criteria_digest===tasks.find((t:Record<string,any>)=>t.id===contributor.task_id)?.criteria_digest,receipt_digest:evidence.receipt_digest??null,clauses:evidence.clauses??[],proof_complete:evidence.proof_complete===true});
-   }catch{assuranceObservations.push({task_id:contributor.task_id,custody_id:contributor.custody_id,current:false,reason:'ASSURANCE_UNAVAILABLE'});}
+   }catch(error){semanticHold(error);assuranceObservations.push({task_id:contributor.task_id,custody_id:contributor.custody_id,current:false,reason:'ASSURANCE_UNAVAILABLE'});}
   }
 
  }
  for(const repository of repositories){
   const publication=[...publications].reverse().find(p=>p.repository_id===repository.repository_id&&p.state==='PUBLISHED'&&p.observed_head===p.candidate_head);if(!publication){reviewObservations.push({repository_id:repository.repository_id,status:'INCOMPLETE',reason:'LATEST_PUBLICATION_MISSING'});continue;}
   try{const current=await reviewCoverage(db,s,publication.manifest,publication.input_manifest_digest,publication.candidate_id,'CURRENT_PUBLISHED');reviewObservations.push(...current.observations.map(o=>({...o,review_bindings_digest:current.digest})));}
-  catch{reviewObservations.push({candidate_id:publication.candidate_id,repository_id:repository.repository_id,status:'INCOMPLETE',reason:'CURRENT_PUBLISHED_REVIEW_UNAVAILABLE'});}
+  catch(error){semanticHold(error);reviewObservations.push({candidate_id:publication.candidate_id,repository_id:repository.repository_id,status:'INCOMPLETE',reason:'CURRENT_PUBLISHED_REVIEW_UNAVAILABLE'});}
  }
  for(const task of tasks.filter(t=>!assuranceObservations.some(a=>a.task_id===t.id))){
   try{const inspect=(await import(assuranceModule)).inspectCoverage;const evidence=await inspect(db,s,task.current_custody_id);assuranceObservations.push({task_id:task.id,custody_id:task.current_custody_id,applicability:evidence.applicability,current:evidence.proof_complete===true&&evidence.applicability==='CURRENT'&&evidence.proof_criteria_digest===task.criteria_digest,receipt_digest:evidence.receipt_digest??null,clauses:evidence.clauses??[],proof_complete:evidence.proof_complete===true});}
-  catch{assuranceObservations.push({task_id:task.id,custody_id:task.current_custody_id,current:false,reason:'ASSURANCE_UNAVAILABLE'});}
+  catch(error){semanticHold(error);assuranceObservations.push({task_id:task.id,custody_id:task.current_custody_id,current:false,reason:'ASSURANCE_UNAVAILABLE'});}
  }
  for(const repository of repositories){
   try{const inspect=(await import(findingModule)).inspectBlockingFindings;findingObservations.push({repository_id:repository.repository_id,...await inspect(db,{...s,repository_id:repository.repository_id})});}
-  catch{findingObservations.push({repository_id:repository.repository_id,clear:false,reason:'FINDINGS_UNAVAILABLE'});}
+  catch(error){semanticHold(error);findingObservations.push({repository_id:repository.repository_id,clear:false,reason:'FINDINGS_UNAVAILABLE'});}
  }
  return {version:1,organisation_id:s.organisation_id,run_id:s.run_id,level,closure_policy_digest:closurePolicyRow.closure_policy_digest,closure_policy:closurePolicyRow.policy,wave:wave??null,task_id:taskId??null,spec_revision_id:run.spec_revision_id,spec_generation:String(run.spec_generation),policy_digest:run.policy_digest,authority_epoch:run.authority_epoch,tasks,publications,repositories,findings,barriers,proofInventory,assuranceObservations,reviewObservations,findingObservations};
 }
@@ -88,7 +92,7 @@ export async function evaluateClosure(pool:import('./candidates.js').DB,cfg:Inte
    try{if(task.state==='INTEGRATED'){
     const receipt=m.publications.find((pub:Record<string,any>)=>pub.state==='PUBLISHED'&&pub.observed_head===pub.candidate_head&&pub.manifest.contributors.some((c:Record<string,any>)=>c.task_id===task.id&&c.custody_id===task.current_custody_id));if(!receipt)reasons.push('TASK_INTEGRATION_RECEIPT_MISSING:'+task.task_key);
    }else if(task.current_custody_id){await custody(db,p.s,task.current_custody_id);}else reasons.push('TASK_CUSTODY_MISSING:'+task.task_key);
-   }catch{reasons.push('TASK_QUALIFICATION_STALE:'+task.task_key);}
+   }catch(error){semanticHold(error);reasons.push('TASK_QUALIFICATION_STALE:'+task.task_key);}
   }else{
    if(task.state!=='INTEGRATED')reasons.push('TASK_NOT_INTEGRATED:'+task.task_key);
    const receipt=m.publications.find((pub:Record<string,any>)=>pub.state==='PUBLISHED'&&pub.observed_head===pub.candidate_head&&pub.manifest.contributors.some((c:Record<string,any>)=>c.task_id===task.id&&c.custody_id===task.current_custody_id));
@@ -115,7 +119,7 @@ export async function evaluateClosure(pool:import('./candidates.js').DB,cfg:Inte
    for(const id of required)if(!covers.has(id))reasons.push('ACCEPTANCE_UNMAPPED:'+id);
    if(canonical([...required].sort())!==canonical([...policy.required_acceptance_ids].sort()))reasons.push('ACCEPTED_ACCEPTANCE_INVENTORY_MISMATCH');
    try{const integratedDigest=integratedManifestDigest(m);const docsModule='../docs/closure.js';const inspect=(await import(docsModule)).inspectDocumentationClosure;const docs=await inspect(db,p.s,{spec_revision_id:m.spec_revision_id,spec_generation:m.spec_generation,programme_manifest_digest:integratedDigest,source_manifest_digest:integratedDigest});documentation=docs;if(docs.status!=='CURRENT'||docs.closed!==true||docs.source_manifest_digest!==integratedDigest)reasons.push('DOCUMENTATION_CLOSURE_NOT_CURRENT');}
-   catch{reasons.push('DOCUMENTATION_CLOSURE_UNAVAILABLE');}
+   catch(error){semanticHold(error);reasons.push('DOCUMENTATION_CLOSURE_UNAVAILABLE');}
    for(const repository of m.repositories){if(!m.publications.some((r:Record<string,any>)=>r.repository_id===repository.repository_id&&r.state==='PUBLISHED'))reasons.push('REPOSITORY_NOT_PUBLISHED:'+repository.repository_id);}
    if(!m.barriers.some((b:Record<string,any>)=>b.state==='RELEASED'))reasons.push('RELEASE_BARRIER_HELD');
   }
@@ -183,26 +187,45 @@ async function verifyScope(pool:import('./candidates.js').DB,cfg:IntegrationConf
   await registerClosurePolicy(db,p.s,cfg);const snapshot=await closureSnapshot(db,p.s,p.level,p.wave),inputDigest=hash(canonical(snapshot));
   if(snapshot.tasks.some((t:Record<string,any>)=>t.state!=='INTEGRATED')||snapshot.publications.some((r:Record<string,any>)=>['PENDING','RUNNING','OUTCOME_UNKNOWN'].includes(r.state)))fail('CLOSURE_INPUT_INCOMPLETE','Scope is not fully integrated');
   const primary=snapshot.repositories[0]?.repository_id;if(!primary)fail('CLOSURE_SCOPE_EMPTY','No scope repository');
+  const active=(await db.query("SELECT id,state FROM hyperfide.integration_scope_jobs WHERE organisation_id=$1 AND run_id=$2 AND level=$3 AND wave IS NOT DISTINCT FROM $4 AND state IN ('RUNNING','OUTCOME_UNKNOWN') FOR UPDATE",[...values(p.s),p.level,p.wave??null])).rows[0];if(active)return {existing_job_id:String(active.id),state:String(active.state)};
   const held=await db.query("SELECT 1 FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='ALLOCATED' AND attempt_id IS NULL AND quantity>0 AND expires_at>clock_timestamp() FOR UPDATE",[...values(p.s),reservation]);if(!held.rowCount)fail('CLOSURE_RESERVATION_REQUIRED','Separate integration resource reservation required');
   const id=randomUUID(),plans=[];
   for(const gate of gates)plans.push({gate,remote:await prepareRemoteGate(db,p.s,{session_id:session,reservation_id:reservation,repository_id:primary,input_digest:inputDigest,policy_digest:snapshot.policy_digest,gate,mode:p.level as 'WAVE'|'PROGRAMME',snapshot})});
-  await db.query("INSERT INTO hyperfide.integration_scope_jobs(organisation_id,run_id,id,executor_id,reservation_id,level,wave,input_manifest_digest,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'RUNNING')",[...values(p.s),id,session,reservation,p.level,p.wave??null,inputDigest]);
+  await db.query("INSERT INTO hyperfide.integration_scope_jobs(organisation_id,run_id,id,executor_id,reservation_id,level,wave,input_manifest_digest,state,execution_manifest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'RUNNING',$9)",[...values(p.s),id,session,reservation,p.level,p.wave??null,inputDigest,{snapshot,plans:plans.map(p=>({gate:p.gate,remote:snapshotRemote(p.remote)}))}]);
   return {id,snapshot,inputDigest,plans};
  });
+ if('existing_job_id' in prepared)return {job_id:prepared.existing_job_id,state:prepared.state,recovery_required:true,redispatched:false};
+ return executeScopeJob(pool,p,prepared);
+}
+async function executeScopeJob(pool:DB,p:ReturnType<typeof parse>,prepared:{id:string;snapshot:Record<string,any>;inputDigest:string;plans:{gate:ScopeGate;remote:Awaited<ReturnType<typeof prepareRemoteGate>>}[]}):Promise<unknown>{
  const results:Record<string,unknown>[]=[];
  for(const plan of prepared.plans){
+  const existing=(await pool.query('SELECT outcome,id FROM hyperfide.integration_scope_receipts WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3 AND gate_id=$4',[...values(p.s),prepared.id,plan.gate.id])).rows[0];if(existing){results.push({receipt_id:existing.id,gate_id:plan.gate.id,outcome:existing.outcome,replayed:true});continue;}
   const capture=await executeRemote(plan.remote),observed=obj(JSON.parse(capture.stdout)),stdout=String(observed.stdout??''),stderr=String(observed.stderr??''),assertions=Number(observed.assertions),proof=obj(observed.proof);
   let outcome=observed.exitCode===0&&Number.isSafeInteger(assertions)&&assertions>0&&proof.scope_digest===prepared.inputDigest?'PASS':'FAIL';
-  const id=randomUUID();await tx(pool,async db=>{const current=await closureSnapshot(db,p.s,p.level,p.wave);if(hash(canonical(current))!==prepared.inputDigest)outcome='STALE';await db.query('INSERT INTO hyperfide.integration_scope_receipts(organisation_id,run_id,id,level,wave,input_manifest_digest,manifest,gate_id,covered_ids,outcome,exit_code,assertion_count,stdout,stderr,job_id,proof) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)',[...values(p.s),id,p.level,p.wave??null,prepared.inputDigest,prepared.snapshot,plan.gate.id,plan.gate.covers,outcome,observed.exitCode,assertions,stdout,stderr,prepared.id,{...proof,remote_spool_digest:capture.spool_digest,remote_cleanup_receipt_digest:capture.cleanup.receipt_digest}]);});
+  const id=randomUUID();await tx(pool,async db=>{const current=await closureSnapshot(db,p.s,p.level,p.wave,undefined,{kind:'SCOPE',id:prepared.id});if(hash(canonical(current))!==prepared.inputDigest)outcome='STALE';await db.query('INSERT INTO hyperfide.integration_scope_receipts(organisation_id,run_id,id,level,wave,input_manifest_digest,manifest,gate_id,covered_ids,outcome,exit_code,assertion_count,stdout,stderr,job_id,proof) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(organisation_id,run_id,job_id,gate_id) DO NOTHING',[...values(p.s),id,p.level,p.wave??null,prepared.inputDigest,prepared.snapshot,plan.gate.id,plan.gate.covers,outcome,observed.exitCode,assertions,stdout,stderr,prepared.id,{...proof,remote_spool_digest:capture.spool_digest,remote_cleanup_receipt_digest:capture.cleanup.receipt_digest}]);});
   results.push({receipt_id:id,gate_id:plan.gate.id,outcome,spool_digest:capture.spool_digest});
  }
- await tx(pool,async db=>{const current=await closureSnapshot(db,p.s,p.level,p.wave);await db.query('UPDATE hyperfide.integration_scope_jobs SET state=$4 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...values(p.s),prepared.id,hash(canonical(current))===prepared.inputDigest&&results.every(r=>r.outcome==='PASS')?'SUCCEEDED':'FAILED']);});
+ await tx(pool,async db=>{const current=await closureSnapshot(db,p.s,p.level,p.wave,undefined,{kind:'SCOPE',id:prepared.id});await db.query('UPDATE hyperfide.integration_scope_jobs SET state=$4 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...values(p.s),prepared.id,hash(canonical(current))===prepared.inputDigest&&results.every(r=>r.outcome==='PASS')?'SUCCEEDED':'FAILED']);});
  return {scope:p.level,input_manifest_digest:prepared.inputDigest,results,programme_qualified:false,external_activation_authorized:false};
+}
+async function recoverScopeJob(pool:DB,input:unknown):Promise<unknown>{
+ const v=obj(input);keys(v,['organisation_id','run_id','job_id']);const s=scope(v),id=uuid(v.job_id);
+ const saved=await tx(pool,async db=>{
+  await currentRun(db,s,true,undefined,false,{kind:'SCOPE',id});const row=(await db.query('SELECT * FROM hyperfide.integration_scope_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[...values(s),id])).rows[0];if(!row)fail('CLOSURE_JOB_UNKNOWN','Existing scoped verification job required');
+  if(!['RUNNING','OUTCOME_UNKNOWN'].includes(row.state))return {terminal:true,state:row.state};
+  const manifest=obj(row.execution_manifest);if(!Array.isArray(manifest.plans)||!manifest.plans.length||hash(canonical(manifest.snapshot))!==row.input_manifest_digest)fail('INTEGRATION_REMOTE_RECOVERY_UNAVAILABLE','Original scoped input and exact remote plans unavailable');
+  const plans=[];for(const raw of manifest.plans){const entry=obj(raw);plans.push({gate:entry.gate as ScopeGate,remote:await restoreRemote(db,entry.remote)});}
+  const p:ReturnType<typeof parse>={s,level:row.level,...(row.wave===null?{}:{wave:row.wave})};return {terminal:false,state:row.state,p,prepared:{id,snapshot:obj(manifest.snapshot),inputDigest:row.input_manifest_digest,plans}};
+ });
+ if(saved.terminal)return {job_id:id,state:saved.state,replayed:true};
+ return executeScopeJob(pool,saved.p!,saved.prepared!);
 }
 export function createComponent(ctx:ComponentContext):Component{
  let cfg:Promise<IntegrationConfig>|undefined;const settings=()=>cfg??=config(ctx.env);
  return bindScope(ctx,{apiVersion:1,actions:{
  'integration.closure.evaluate':async input=>evaluateClosure(primaryClient(),await settings(),input),
+ 'integration.closure.reconcile':async input=>recoverScopeJob(primaryClient(),input),
  'integration.closure.verify':async input=>verifyScope(primaryClient(),await settings(),ctx.env,input),
  'integration.closure.inspect':async input=>{const v=obj(input);keys(v,['organisation_id','run_id','evaluation_id']);const rows=await primaryClient().query('SELECT * FROM hyperfide.integration_closure_evaluations WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...values(scope(v)),uuid(v.evaluation_id)]);return rows.rows[0]??fail('CLOSURE_UNKNOWN','Unknown closure evaluation');}
  }});
@@ -229,13 +252,13 @@ export async function qualifiedIntegratedOutcomes(db:DB,s:Scope):Promise<Record<
  }
  const input=hash(canonical(snapshot)),programme=(await db.query("SELECT 1 FROM hyperfide.integration_closure_evaluations WHERE organisation_id=$1 AND run_id=$2 AND level='PROGRAMME' AND input_manifest_digest=$3 AND outcome='PASS'",[...values(s),input])).rowCount!>0;
  return {status:'CURRENT',count:String(accepted.length),current_task_ids:accepted.map(a=>String(a.task_id)).sort(),proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:hash(canonical({input_manifest_digest:input,accepted})),as_of,programme_outcome:programme?'PASS':'HELD',reasons};
- }catch{return {status:'HELD',count:null,current_task_ids:[],proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:null,as_of,programme_outcome:'HELD',reasons:['CURRENT_INTEGRATED_PROOF_UNAVAILABLE']};}
+ }catch(error){semanticHold(error);return {status:'HELD',count:null,current_task_ids:[],proof_level:'TASK_CURRENT_INTEGRATED',proof_digest:null,as_of,programme_outcome:'HELD',reasons:['CURRENT_INTEGRATED_PROOF_UNAVAILABLE']};}
 }
 /** Uses the exact current primary snapshot and previously executed immutable full-case receipts. */
 export async function inspectProgrammeClosure(db:DB,invocation:unknown):Promise<Record<string,unknown>>{
  const protocol='../transport/protocol.js';const identity=await import(protocol);identity.assertInvocation(invocation);
- const i=invocation as {principal:Record<string,unknown>;payload:Record<string,unknown>;guard:(tx:DB)=>Promise<void>};await i.guard(db);
- const input=obj(i.payload.input),s={organisation_id:uuid(i.principal.organisation_id),run_id:uuid(i.payload.run_id)};
+ const i=invocation as {principal:Record<string,unknown>;payload:Record<string,unknown>;guard:(tx:DB)=>Promise<void>};
+ const input=obj(i.payload.input),s={organisation_id:uuid(i.principal.organisation_id),run_id:uuid(i.principal.run_id)};if(i.payload.run_id!==s.run_id)fail('INTEGRATION_SCOPE_DENIED','Programme inspector run differs from genuine invocation');await semanticDisposition(db,s,'READ');await i.guard(db);
  const snapshot=await closureSnapshot(db,s,'PROGRAMME'),inputDigest=hash(canonical(snapshot)),reasons:string[]=[];
  const evaluation=(await db.query("SELECT * FROM hyperfide.integration_closure_evaluations WHERE organisation_id=$1 AND run_id=$2 AND level='PROGRAMME' AND input_manifest_digest=$3 AND outcome='PASS' ORDER BY created_at DESC LIMIT 1",[...values(s),inputDigest])).rows[0];
  if(!evaluation)reasons.push('CURRENT_PROGRAMME_EVALUATION_UNAVAILABLE');
@@ -243,8 +266,8 @@ export async function inspectProgrammeClosure(db:DB,invocation:unknown):Promise<
  for(const gate of snapshot.closure_policy.programme_gates){const receipt=currentReceipts.find(r=>r.gate_id===gate.id);if(!receipt||receipt.outcome!=='PASS'||receipt.proof?.scope_digest!==inputDigest||receipt.proof?.template_digest!==gate.proof.manifest_digest||receipt.proof?.registry_digest!==gate.proof.registry_digest||hash(canonical(receipt.proof?.files))!==receipt.proof?.bundle_digest)reasons.push('CURRENT_FULL_CASE_RECEIPT_UNAVAILABLE:'+gate.id);}
 
  if(snapshot.tasks.some((t:Record<string,any>)=>t.state!=='INTEGRATED')||snapshot.assuranceObservations.some((a:Record<string,any>)=>a.current!==true)||snapshot.reviewObservations.some((r:Record<string,any>)=>r.status!=='COMPLETE')||snapshot.findingObservations.some((r:Record<string,any>)=>r.clear!==true))reasons.push('CURRENT_SCOPE_EVIDENCE_HELD');
- let sourceDigest:string|null=null;try{sourceDigest=integratedManifestDigest(snapshot);}catch{reasons.push('CURRENT_SOURCE_SET_UNAVAILABLE');}
+ let sourceDigest:string|null=null;try{sourceDigest=integratedManifestDigest(snapshot);}catch(error){semanticHold(error);reasons.push('CURRENT_SOURCE_SET_UNAVAILABLE');}
  if(!snapshot.barriers.some((b:Record<string,any>)=>b.state==='RELEASED'))reasons.push('RELEASE_BARRIER_HELD');
- if(sourceDigest){try{const moduleName='../docs/closure.js';const docs=await(await import(moduleName)).inspectDocumentationClosure(db,s,{spec_revision_id:snapshot.spec_revision_id,spec_generation:snapshot.spec_generation,programme_manifest_digest:sourceDigest,source_manifest_digest:sourceDigest});if(docs.status!=='CURRENT'||docs.closed!==true)reasons.push('DOCUMENTATION_CLOSURE_HELD');}catch{reasons.push('DOCUMENTATION_CLOSURE_UNAVAILABLE');}}
+ if(sourceDigest){try{const moduleName='../docs/closure.js';const docs=await(await import(moduleName)).inspectDocumentationClosure(db,s,{spec_revision_id:snapshot.spec_revision_id,spec_generation:snapshot.spec_generation,programme_manifest_digest:sourceDigest,source_manifest_digest:sourceDigest});if(docs.status!=='CURRENT'||docs.closed!==true)reasons.push('DOCUMENTATION_CLOSURE_HELD');}catch(error){semanticHold(error);reasons.push('DOCUMENTATION_CLOSURE_UNAVAILABLE');}}
  return {ready:!reasons.length,outcome:reasons.length?'HELD':'PASS',input_manifest_digest:inputDigest,source_manifest_digest:sourceDigest,spec_revision_id:snapshot.spec_revision_id,spec_generation:snapshot.spec_generation,reasons};
 }
