@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "13.4",
+  "task": "13.4",
+  "roles": [
+    "control",
+    "dispatch"
+  ],
+  "module": "agents/admission.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "agent.admission.reserve",
+    "agent.admission.inspect",
+    "agent.admission.report"
+  ],
+  "requires": [
+    "13.2"
+  ]
+}

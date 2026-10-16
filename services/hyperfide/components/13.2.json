@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "13.2",
+  "task": "13.2",
+  "roles": [
+    "control",
+    "dispatch"
+  ],
+  "module": "agents/sessions.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "agent.session.bind",
+    "agent.session.inspect",
+    "agent.session.transition",
+    "agent.session.checkpoint",
+    "agent.session.resume-check"
+  ],
+  "requires": [
+    "1.4",
+    "4.1"
+  ]
+}

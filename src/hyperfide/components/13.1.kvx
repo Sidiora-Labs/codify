@@ -1,0 +1,6 @@
+[component]
+schema_version = 1
+id = "13.1"
+source = "src/hyperfide/connectors.c"
+entry = "hf_component_13_1"
+actions = ["connector.describe", "connector.probe", "connector.launch", "connector.initialize", "connector.encode"]
