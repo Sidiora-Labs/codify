@@ -16,6 +16,7 @@
     "finding.repair.fail"
   ],
   "requires": [
+    "5.2",
     "finding-registry",
     "finding-routing"
   ]
