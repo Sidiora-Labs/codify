@@ -3,10 +3,10 @@ import {admin,decimal,digest,emit,fail,fields,finding,manager,record,text,uuid,w
 import type {FindingTransaction} from './registry.js';
 
 async function owner(value:FindingTransaction,packageId:string):Promise<Record<string,any>>{
- const rows=await value.tx.query('SELECT p.id,p.manager_session_id,h.owner_generation::text,s.state AS manager_state,s.role AS manager_role FROM hyperfide.feature_packages p LEFT JOIN hyperfide.hierarchy_packages h ON h.organisation_id=p.organisation_id AND h.run_id=p.run_id AND h.package_id=p.id LEFT JOIN hyperfide.agent_sessions s ON s.organisation_id=p.organisation_id AND s.run_id=p.run_id AND s.id=p.manager_session_id WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.id=$3 FOR SHARE OF p',[value.scope.organisation_id,value.scope.run_id,packageId]);
- if(rows.rows.length!==1)fail('OWNER_NOT_FOUND','Accountable package does not exist in this run');
- if(rows.rows[0]!.owner_generation!==null)await value.tx.query('SELECT package_id FROM hyperfide.hierarchy_packages WHERE organisation_id=$1 AND run_id=$2 AND package_id=$3 FOR SHARE',[value.scope.organisation_id,value.scope.run_id,packageId]);
- return rows.rows[0]!;
+ const pins=[value.scope.organisation_id,value.scope.run_id,packageId];const packages=await value.tx.query('SELECT id,manager_session_id FROM hyperfide.feature_packages WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',pins);if(packages.rows.length!==1)fail('OWNER_NOT_FOUND','Accountable package does not exist in this run');const p=packages.rows[0]!;
+ const hierarchy=await value.tx.query('SELECT owner_generation::text FROM hyperfide.hierarchy_packages WHERE organisation_id=$1 AND run_id=$2 AND package_id=$3 FOR SHARE',pins);
+ const sessions=p.manager_session_id?await value.tx.query('SELECT state,role FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[value.scope.organisation_id,value.scope.run_id,p.manager_session_id]):{rows:[]};
+ return {...p,owner_generation:hierarchy.rows[0]?.owner_generation??null,manager_state:sessions.rows[0]?.state??null,manager_role:sessions.rows[0]?.role??null};
 }
 async function route(value:FindingTransaction,input:unknown,explicit=false):Promise<Record<string,unknown>>{
  const p=record(input);fields(p,['finding_id','request_id','expected_state_version'],explicit?['package_id','reason']:[]);
