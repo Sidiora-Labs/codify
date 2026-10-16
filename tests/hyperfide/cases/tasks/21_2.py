@@ -25,7 +25,7 @@ def native_admission_probe():
   for name in ["dist","migrations","components"]:shutil.copytree(root/"services/hyperfide"/name,service/name)
   shutil.copyfile(root/"services/hyperfide/package.json",service/"package.json")
   (service/"node_modules").symlink_to(root/"services/hyperfide/node_modules",target_is_directory=True)
-  jobs="""const loaders=new Map();export function createComponent(){return {apiVersion:1,capabilities:{'decision.jobs.v1':{registerPurpose(p,l){loaders.set(p,l)},completedAudit(){return {available:false,reason:'missing'}}}},actions:{'fixture.jobs.current':async(input,ctx)=>ctx.resources.gateway.withPrimaryTransaction({guard:tx=>ctx.invocation.guard(tx)},async tx=>{const p=await loaders.get('recovery').load(tx,ctx.invocation,{packet_id:input.packet_id});await loaders.get('recovery').current(tx,{organisation_id:ctx.invocation.principal.organisation_id,run_id:ctx.invocation.principal.run_id},p.packet,ctx.invocation);return {authority:'NONE',fresh:true,packet_id:p.packet.id}})}}}"""
+  jobs="""import {readSemanticDisposition} from './storage/dispositions.js';const loaders=new Map();export function createComponent(){return {apiVersion:1,capabilities:{'decision.jobs.v1':{registerPurpose(p,l){loaders.set(p,l)},completedAudit(){return {available:false,reason:'missing'}}}},actions:{'fixture.jobs.current':async(input,ctx)=>ctx.resources.gateway.withPrimaryTransaction({guard:async tx=>{await readSemanticDisposition(tx,ctx.invocation.principal);await ctx.invocation.guard(tx)}},async tx=>{const p=await loaders.get('recovery').load(tx,ctx.invocation,{packet_id:input.packet_id});await loaders.get('recovery').current(tx,{organisation_id:ctx.invocation.principal.organisation_id,run_id:ctx.invocation.principal.run_id},p.packet,ctx.invocation);return {authority:'NONE',fresh:true,packet_id:p.packet.id}})}}}"""
   (service/"dist/fixture-recovery-jobs.js").write_text(jobs)
   (service/"dist/fixture-no-assurance.js").write_text("export function createComponent(){return {apiVersion:1,capabilities:{'assurance.execution.v1':{inspectExecutionReceipt(){throw Error('No assurance producer qualification in native metadata fixture')}}},actions:{'fixture.assurance.describe':()=>({authority:'NONE'})}}}")
   for ident,module,action in [("20.4","fixture-recovery-jobs.js","fixture.jobs.current"),("16.2","fixture-no-assurance.js","fixture.assurance.describe")]:
@@ -36,7 +36,7 @@ def native_admission_probe():
    def __init__(self,*args,**kwargs):
     before=kwargs["extra_setup"]
     def setup(f):
-     before(f);f.sql((service/"migrations/0021-decisions.sql").read_text())
+     before(f);helper.ensure_semantic_fence_schema(f,service);f.sql((service/"migrations/0021-decisions.sql").read_text())
     kwargs["extra_setup"]=setup
     kwargs["extra_components"]+=["20.4","16.2","21.4","21.2"]
     super().__init__(*args,**kwargs)
