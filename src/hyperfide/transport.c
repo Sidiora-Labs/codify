@@ -396,11 +396,12 @@ int hf_transport_config(const char *path,HfTransportConfig *config) {
     char *text=NULL;size_t length=0;
     if (!hf_protected_read(path,32768,&text,&length)) return 0;
     HfJson *json=malloc(sizeof *json);if (!json) {free(text);return 0;}
-    const char *keys[]={"origin","ca_file","key_path","credential_id","grant_path","timeout_ms"};
+    const char *keys[]={"origin","ca_file","key_path","credential_id","grant_path","timeout_ms","run_id"};
     memset(config,0,sizeof *config);config->timeout_ms=10000;
     int valid=hf_json_parse(json,text)&&hf_json_only(json,0,keys,sizeof keys/sizeof keys[0])&&hf_json_get(json,"origin",config->origin,sizeof config->origin)&&origin_valid(config->origin)&&hf_json_get(json,"key_path",config->key_path,sizeof config->key_path)&&config->key_path[0]=='/';
     if (valid&&hf_json_field(json,0,"ca_file")>=0) valid=hf_json_get(json,"ca_file",config->ca_file,sizeof config->ca_file)&&config->ca_file[0]=='/';
     if (valid&&hf_json_field(json,0,"credential_id")>=0) valid=hf_json_get(json,"credential_id",config->credential_id,sizeof config->credential_id)&&hf_uuid_valid(config->credential_id);
+    if (valid&&hf_json_field(json,0,"run_id")>=0) valid=hf_json_get(json,"run_id",config->run_id,sizeof config->run_id)&&hf_uuid_valid(config->run_id);
     if (valid&&hf_json_field(json,0,"grant_path")>=0) valid=hf_json_get(json,"grant_path",config->grant_path,sizeof config->grant_path)&&config->grant_path[0]=='/';
     if (valid&&hf_json_field(json,0,"timeout_ms")>=0) {int64_t timeout=0;valid=hf_json_i64(json,hf_json_field(json,0,"timeout_ms"),&timeout)&&timeout>=100&&timeout<=60000;if (valid) config->timeout_ms=(long)timeout;}
     free(json);OPENSSL_cleanse(text,length);free(text);return valid;
