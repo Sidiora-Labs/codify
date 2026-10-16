@@ -135,8 +135,39 @@ def cleanup():
  resources=[] if RESOURCE is None else [{"id":RESOURCE,"status":"deleted" if complete else "unknown","observed_absent":complete,"evidence_artifact":"recovery/database-absence.json"}]
  print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
  return complete
+
+ACCEPTED_REBIND_PROBE=r'''
+import {createResourceContainer} from './services/hyperfide/dist/storage/runtime.js';
+import {FileExternalAuthorityJournal} from './services/hyperfide/dist/storage/authority_journal.js';
+import {lookupAuthorityActivation} from './services/hyperfide/dist/storage/durability.js';
+import {FileExternalFenceJournal} from './services/hyperfide/dist/recovery/fencing.js';
+import {createAcceptedRunRecoveryVerifier} from './services/hyperfide/dist/recovery/control.js';
+import fs from 'node:fs/promises';import {randomUUID} from 'node:crypto';
+const signal=new AbortController().signal,r=createResourceContainer({role:'control',env:process.env,signal});
+const D='sha256:'+'a'.repeat(64),org=process.env.HF_RECOVERY_ORG,run=process.env.HF_RECOVERY_RUN,deployment=process.env.HYPERFIDE_DEPLOYMENT_ID;
+const dir=await fs.mkdtemp('/tmp/hyperfide/rebind-negative-');await fs.chmod(dir,0o700);let revocations=0;
+try{
+ const current=(await r.observe({preferReplica:false},async tx=>(await tx.query("SELECT a.operation_id::text,a.epoch::text,e.proof_digest FROM hyperfide.authority_activations a JOIN hyperfide.authority_epochs e ON e.deployment_id=a.deployment_id AND e.epoch=a.epoch WHERE a.deployment_id=$1 AND e.state='ACTIVE'",[deployment])).rows[0])).value;
+ const journal=new FileExternalAuthorityJournal(process.env.HYPERFIDE_AUTHORITY_JOURNAL_DIR,input=>lookupAuthorityActivation(r,input));
+ const head=await journal.current({deployment_id:deployment});
+ const topology={schema_version:1,deployment_id:deployment,organisation_id:org,run_id:run,source_epoch:null,evidence_scope:'LIVE_PROVIDER',legacy_topology_digest:D,legacy_pid_namespace:await fs.readlink('/proc/self/ns/pid'),legacy_mount_namespace:await fs.readlink('/proc/self/ns/mnt'),required_writer_ids:['writer'],resources:[{reference_key:'writer-node',topology_digest:D,writer_ids:['writer'],backend:'OWNED_HOST'}]};
+ const factory=createAcceptedRunRecoveryVerifier({resources:r,journal,fenceJournal:new FileExternalFenceJournal(dir),topology,revokeCompute:async()=>{revocations++;throw Error('Missing actual recovery scheduler must never run in this negative probe')}});
+ const input={schema_version:1,organisation_id:org,run_id:run,recovery_operation_id:randomUUID(),activation_operation_id:current.operation_id,deployment_id:deployment,expected_run_epoch:randomUUID(),target_epoch:current.epoch,expected_spec_generation:'1',expected_spec_revision_id:process.env.HF_RECOVERY_SPEC,expected_revision_digest:D,external_previous_epoch:null,database_predecessor_epoch:null,fence_proof_digest:current.proof_digest,external_journal_sequence:head.sequence};
+ const outcome={};
+ try{await factory.prepare({...input,target_epoch:input.expected_run_epoch})}catch(e){outcome['rebind-equal-epoch-refused']=e.code==='RECOVERY_REBIND_SCOPE_DENIED'}
+ try{await factory.prepare({...input,organisation_id:randomUUID()})}catch(e){outcome['rebind-outside-trusted-topology-refused']=e.code==='RECOVERY_REBIND_SCOPE_DENIED'}
+ try{await factory.prepare(input)}catch(e){outcome['committed-global-epoch-without-physical-completion-refused']=['ENOENT','EXTERNAL_FENCE_COMPLETION_UNVERIFIED'].includes(e.code)&&revocations===0}
+ console.log(JSON.stringify(outcome));if(Object.keys(outcome).length!==3||Object.values(outcome).some(v=>v!==true))throw Error('Actual recovery proof negative regression');
+}finally{await r.close();await fs.rm(dir,{recursive:true,force:true})}
+'''
+
 def tests(f):
  check("recovery.control.real-registered-process",lambda:expect(f.ok("recovery.control.describe",{})["supervision_failure_domains"]==1))
+ probe_env=f.identity.env.copy();probe_env["HF_RECOVERY_ORG"]=ORG;probe_env["HF_RECOVERY_RUN"]=RUN;probe_env["HF_RECOVERY_SPEC"]=uid(4)
+ actual=subprocess.run(["node","--input-type=module","-e",ACCEPTED_REBIND_PROBE],cwd=ROOT,env=probe_env,capture_output=True,text=True,timeout=40)
+ expect(actual.returncode==0,"Accepted recovery proof probe failed: "+actual.stderr[:1000])
+ for name,value in json.loads(actual.stdout).items():check("recovery.control."+name,lambda value=value:expect(value))
+
  snapshot=f.ok("recovery.control.reconstruct",SCOPE)
  check("recovery.control.consistent-snapshot",lambda:expect(snapshot["snapshot_consistency"]=="SERIALIZABLE" and len(snapshot["packages"])==1))
  check("recovery.control.no-duplicate-dispatch",lambda:expect(snapshot["new_work_authorized"] is False and snapshot["adoption_candidates"][0]["authority"]=="NONE"))
