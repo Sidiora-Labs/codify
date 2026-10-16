@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "finding-registry",
+  "task": "18.1",
+  "roles": [
+    "control"
+  ],
+  "module": "findings/registry.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "finding.report",
+    "finding.inspect",
+    "finding.list",
+    "finding.duplicate.confirm"
+  ],
+  "requires": [
+    "4.1"
+  ]
+}
