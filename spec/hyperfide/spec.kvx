@@ -330,7 +330,7 @@ do_4 = "Implement the task's registered positive/negative assertions and immutab
 
 [task.11.1]
 title = "Publish content-derived environment profiles without live identity"
-status = "in_progress"
+status = "done"
 wave = 3
 requires = ["1.4"]
 touches = ["services/hyperfide/src/preparation/manifests.ts", "tests/hyperfide/manifests/tasks/11.1.json", "tests/hyperfide/cases/tasks/11_1.py", "tests/hyperfide/registrations/11.1.json", "services/hyperfide/components/11.1.json", "services/hyperfide/src/components/service.ts"]
