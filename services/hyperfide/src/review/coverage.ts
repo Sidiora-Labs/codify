@@ -6,7 +6,8 @@ import {promisify} from 'node:util';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
-import {getPool,databaseError} from '../storage/schema.js';
+import {databaseError} from '../storage/schema.js';
+import {assertInvocation} from '../transport/protocol.js';
 
 const execute=promisify(execFile);
 export type ReviewDb=Pick<pg.PoolClient,'query'>;
@@ -60,22 +61,55 @@ export async function primary(db:ReviewDb):Promise<void>{
  const result=await db.query<{recovery:boolean}>('SELECT pg_is_in_recovery() AS recovery');
  if(result.rows[0]?.recovery)fail('REVIEW_PRIMARY_REQUIRED','Review authority requires PostgreSQL primary');
 }
-export async function transaction<T>(env:Readonly<NodeJS.ProcessEnv>,binding:ReviewScope,
- operation:(db:pg.PoolClient)=>Promise<T>):Promise<T>{
- const client=await getPool(env).connect();
+interface ReviewInvocation {
+ principal:{organisation_id:string;run_id:string;actor_id:string;role:string;allowed_actions:readonly string[];sandbox_id:string|null;boot_generation:string|null};
+ payload:{action:string};signal:AbortSignal;guard:(db:ReviewDb)=>Promise<void>;
+}
+interface ReviewGateway {
+ withPrimaryTransaction<T>(options:{timeoutMs:number;signal:AbortSignal;guard:(db:ReviewDb)=>Promise<void>},
+  operation:(db:ReviewDb)=>Promise<T>):Promise<T>;
+}
+export function authorizeReview(context:ComponentContext,binding:ReviewScope,roles?:readonly string[]):
+ {invocation:ReviewInvocation;gateway:ReviewGateway;scope:ReviewScope}{
+ const request=context as unknown as {invocation?:ReviewInvocation;resources?:{gateway?:ReviewGateway}};
+ const invocation=request.invocation;
+ assertInvocation(invocation);
+ if(!invocation||typeof invocation.guard!=='function'||!invocation.principal)
+  fail('AUTH_REQUIRED','Authenticated invocation is required for review authority');
+ const actual={organisation_id:uuid(invocation.principal.organisation_id),run_id:uuid(invocation.principal.run_id)};
+ if(actual.organisation_id!==binding.organisation_id||actual.run_id!==binding.run_id)
+  fail('REVIEW_SCOPE_DENIED','Request scope differs from its authenticated principal');
+ if(roles&&!roles.includes(invocation.principal.role))fail('REVIEW_ROLE_DENIED','Authenticated role cannot perform this review operation');
+ if(!invocation.principal.allowed_actions.includes(invocation.payload.action))fail('REVIEW_ACTION_DENIED','Credential does not allow this review operation');
+ const gateway=request.resources?.gateway;
+ if(!gateway||typeof gateway.withPrimaryTransaction!=='function')
+  fail('REVIEW_STORAGE_UNAVAILABLE','Review authority requires the shared primary transaction gateway');
+ return {invocation,gateway,scope:actual};
+}
+export async function lockReviewDisposition(db:ReviewDb,binding:ReviewScope,exclusive=false):Promise<void>{
+ await db.query('SELECT '+(exclusive?'pg_advisory_xact_lock':'pg_advisory_xact_lock_shared')+'(hashtextextended($1,0))',[binding.organisation_id+':'+binding.run_id+':finding-disposition']);
+}
+export async function transaction<T>(context:ComponentContext,binding:ReviewScope,
+ operation:(db:ReviewDb)=>Promise<T>,exclusive=true):Promise<T>{
+ const trusted=authorizeReview(context,binding);
  try{
-  await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');await primary(client);
-  const run=await client.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR UPDATE',[binding.organisation_id,binding.run_id]);
-  if(!run.rows.length)fail('REVIEW_SCOPE_INVALID','Run does not exist in this organisation');
-  if(['STOPPING','STOPPED','SUCCEEDED','FAILED','CANCELLED'].includes(run.rows[0]!.state))
-   fail('REVIEW_RUN_CLOSED','Closed run cannot grant new review authority');
-  const result=await operation(client);await client.query('COMMIT');return result;
- }catch(error){try{await client.query('ROLLBACK');}catch{/* Unknown outcome must be reconciled by stable request identity. */}throw reviewError(error);}
- finally{client.release();}
+  return await trusted.gateway.withPrimaryTransaction({timeoutMs:5000,signal:trusted.invocation.signal,
+   guard:db=>trusted.invocation.guard(db)},async db=>{
+   await primary(db);
+   await lockReviewDisposition(db,binding,exclusive);
+   const run=await db.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',
+    [trusted.scope.organisation_id,trusted.scope.run_id]);
+   if(!run.rows.length)fail('REVIEW_SCOPE_INVALID','Run does not exist in this organisation');
+   if(['STOPPING','STOPPED','SUCCEEDED','FAILED','CANCELLED'].includes(run.rows[0]!.state))
+    fail('REVIEW_RUN_CLOSED','Closed run cannot grant new review authority');
+   return operation(db);
+  });
+ }catch(error){throw reviewError(error);}
 }
 export function reviewError(error:unknown):FoundationError{
  if(error instanceof FoundationError)return error;
  const code=error&&typeof error==='object'&&'code'in error?String(error.code):'';
+ if(code==='COMMIT_AMBIGUOUS')return new FoundationError('REVIEW_OUTCOME_UNKNOWN','Review commit outcome is unknown; reconcile its stable identity before retrying');
  if(code==='42P01')return new FoundationError('REVIEW_SCHEMA_MISSING','Review migration has not been applied');
  return databaseError(error);
 }
@@ -106,13 +140,14 @@ function policy(value:unknown):WatcherPolicy{
 }
 export async function configureReviewPolicy(context:ComponentContext,value:unknown):Promise<unknown>{
  const v=obj(value,['organisation_id','run_id','policy']);const binding=scope(v),definition=policy(v.policy);
+ authorizeReview(context,binding,['OPERATOR','LEADER','COORDINATOR']);
  const policyDigest=hash({schema_version:1,...binding,policy:definition});
  if(definition.mode==='SPECIALIST'){
   let approved:unknown;try{approved=JSON.parse(context.env.HYPERFIDE_REVIEW_APPROVED_POLICY_DIGESTS??'[]');}catch{fail('REVIEW_CONFIG_INVALID','Invalid trusted review approvals');}
   if(!Array.isArray(approved)||!approved.includes(policyDigest))
    fail('REVIEW_SHARDING_APPROVAL_REQUIRED','Specialist sharding requires this exact trusted approved policy digest');
  }
- return transaction(context.env,binding,async db=>{
+ return transaction(context,binding,async db=>{
   const current=await db.query<{digest:string;revision:string}>('SELECT digest,revision FROM hyperfide.review_policies WHERE organisation_id=$1 AND run_id=$2 AND active',[binding.organisation_id,binding.run_id]);
   if(current.rows[0]?.digest===policyDigest)return {policy_digest:policyDigest,replayed:true,watchers:definition.watchers.length,mode:definition.mode};
   if(current.rows[0]&&BigInt(definition.revision)<=BigInt(current.rows[0].revision))
@@ -172,18 +207,19 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
  const v=obj(value,['organisation_id','run_id','repository_id','batch_size'],['batch_size']);
  const binding=scope(v),repositoryId=uuid(v.repository_id),batch=v.batch_size??64;
  if(typeof batch!=='number'||!Number.isSafeInteger(batch)||batch<1||batch>256)fail('REVIEW_INPUT_INVALID','Discovery batch must be one to 256 commits');
+ authorizeReview(context,binding,['OPERATOR','LEADER','COORDINATOR','FEATURE_MANAGER','COMMIT_WATCHER','INTEGRATOR']);
  const config=await repositoryConfig(context.env,repositoryId);
  const snapshot=await heads(config);
- const initial=await getPool(context.env).query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[binding.organisation_id,binding.run_id,repositoryId]);
+ const initial=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[binding.organisation_id,binding.run_id,repositoryId]));
  if(initial.rows.length!==1)fail('REVIEW_SCOPE_INVALID','Repository is not part of this run');
  const base=oid(initial.rows[0]!.source_object_id);
  await git(config.path,['cat-file','-e',base+'^{commit}']);
  const reachable=(await git(config.path,['rev-list','--reverse','--topo-order','--max-count=100001',...Object.values(snapshot),'--not',base])).trim().split('\n').filter(Boolean).map(oid);
  if(reachable.length>100000)fail('REVIEW_DISCOVERY_LIMIT','History exceeds the explicit discovery bound; narrow the approved branch/base range');
- const existing=await getPool(context.env).query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=ANY($4::text[])',[binding.organisation_id,binding.run_id,repositoryId,reachable]);
+ const existing=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=ANY($4::text[])',[binding.organisation_id,binding.run_id,repositoryId,reachable]));
  const known=new Set(existing.rows.map(row=>row.source_object_id));
  const selected=reachable.filter(commit=>!known.has(commit)).slice(0,Number(batch));
- const tasks=await getPool(context.env).query<{task_key:string}>('SELECT task_key FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2',[binding.organisation_id,binding.run_id]);
+ const tasks=await transaction(context,binding,db=>db.query<{task_key:string}>('SELECT task_key FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2',[binding.organisation_id,binding.run_id]));
  const taskKeys=new Set(tasks.rows.map(task=>task.task_key));
  const commits:Commit[]=[];
  for(const commit of selected){
@@ -196,7 +232,7 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
   commits.push({source_object_id:commit,tree_object_id:tree,parent_objects:parents,changed_paths:paths,
     attribution:{state:!tags.length?'UNATTRIBUTED':unknown.length?'UNKNOWN_TASK':'ATTRIBUTED',spec_tags:tags}});
  }
- const latest=await getPool(context.env).query<{refs:Record<string,string>}>('SELECT refs FROM hyperfide.review_head_observations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 ORDER BY observed_at DESC LIMIT 1',[binding.organisation_id,binding.run_id,repositoryId]);
+ const latest=await transaction(context,binding,db=>db.query<{refs:Record<string,string>}>('SELECT refs FROM hyperfide.review_head_observations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 ORDER BY observed_at DESC LIMIT 1',[binding.organisation_id,binding.run_id,repositoryId]));
  const rewrites:Array<{ref:string;previous:string;current:string}>=[];
  for(const [ref,prior]of Object.entries(latest.rows[0]?.refs??{})){
   if(snapshot[ref]&&snapshot[ref]!==prior){
@@ -212,7 +248,7 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
  }
  const changed=canonical(await heads(config))!==canonical(snapshot);
  const observationDigest=hash({repository_id:repositoryId,base,refs:snapshot});
- return transaction(context.env,binding,async db=>{
+ return transaction(context,binding,async db=>{
   const active=await db.query<{digest:string;definition:WatcherPolicy}>('SELECT digest,definition FROM hyperfide.review_policies WHERE organisation_id=$1 AND run_id=$2 AND active',[binding.organisation_id,binding.run_id]);
   if(active.rows.length!==1)fail('REVIEW_POLICY_MISSING','Configure an approved watcher policy before discovery');
   const watcherPolicy=active.rows[0]!;
@@ -242,19 +278,66 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
     coverage_status:'INCOMPLETE',qualification:'UNRUN'};
  });
 }
+
+export async function dependencyDigest(db:ReviewDb,binding:ReviewScope):Promise<string>{
+ const result=await db.query('SELECT task_id,predecessor_run_id,predecessor_task_id,milestone,revision::text AS revision FROM hyperfide.task_dependencies WHERE organisation_id=$1 AND run_id=$2 ORDER BY task_id,predecessor_run_id,predecessor_task_id,milestone,revision',
+  [binding.organisation_id,binding.run_id]);
+ return hash(result.rows);
+}
+export async function relevantContracts(db:ReviewDb,binding:ReviewScope,repositories:string[]):Promise<Array<{id:string;revision:string;criteria_digest:string;definition:Record<string,unknown>}>>{
+ const result=await db.query<{id:string;revision:string;criteria_digest:string;definition:Record<string,unknown>}>(`
+ SELECT latest.id,latest.revision::text,latest.criteria_digest,latest.definition FROM
+ (SELECT DISTINCT ON(contract_key) id,revision,criteria_digest,definition,contract_key FROM hyperfide.contracts
+  WHERE organisation_id=$1 AND run_id=$2 ORDER BY contract_key,revision DESC) latest
+ WHERE latest.definition->'producer'->>'repository_id'=ANY($3::text[])
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(latest.definition->'consumers')='array' THEN latest.definition->'consumers' ELSE '[]'::jsonb END)consumer
+  WHERE consumer->>'repository_id'=ANY($3::text[]))
+ OR latest.definition->'producer'->>'repository_id' IS NULL
+ ORDER BY latest.contract_key`,[binding.organisation_id,binding.run_id,repositories]);
+ return result.rows;
+}
+export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapshot:Record<string,unknown>):Promise<boolean>{
+ const run=await db.query<{spec_revision_id:string;policy_digest:string;source_digest:string}>(`SELECT run.spec_revision_id,run.policy_digest,spec.source_digest
+ FROM hyperfide.runs run JOIN hyperfide.spec_revisions spec ON spec.organisation_id=run.organisation_id AND spec.id=run.spec_revision_id
+ WHERE run.organisation_id=$1 AND run.id=$2`,[binding.organisation_id,binding.run_id]);
+ const current=run.rows[0];
+ if(!current||snapshot.spec_revision_id!==current.spec_revision_id||snapshot.spec_digest!==current.source_digest||
+    snapshot.configuration_digest!==current.policy_digest||snapshot.dependency_manifest_digest!==await dependencyDigest(db,binding))return false;
+ if(!Array.isArray(snapshot.source_set)||!snapshot.source_set.length||!Array.isArray(snapshot.contract_versions)||typeof snapshot.environment_profile_id!=='string'||typeof snapshot.graph_manifest_id!=='string')return false;
+ const sources=snapshot.source_set as Array<Record<string,unknown>>;
+ if(sources.some(source=>!source||typeof source!=='object'||typeof source.repository_id!=='string'||!(/^[0-9a-f-]{36}$/).test(source.repository_id)||typeof source.source_object_id!=='string'||!(/^([0-9a-f]{40}|[0-9a-f]{64})$/).test(source.source_object_id)))return false;
+ const repositories=[...new Set(sources.map(source=>String(source.repository_id)))];
+ for(const source of sources){
+  const exists=await db.query(`SELECT 1 FROM hyperfide.run_repositories membership JOIN hyperfide.source_objects object
+   ON object.organisation_id=membership.organisation_id AND object.repository_id=membership.repository_id
+   WHERE membership.organisation_id=$1 AND membership.run_id=$2 AND membership.repository_id=$3 AND object.object_id=$4 AND object.object_type='commit'`,
+   [binding.organisation_id,binding.run_id,source.repository_id,source.source_object_id]);
+  if(exists.rows.length!==1)return false;
+ }
+ const contracts=await relevantContracts(db,binding,repositories);
+ const versions=contracts.map(row=>({id:row.id,revision:row.revision,criteria_digest:row.criteria_digest}));
+ if(canonical(snapshot.contract_versions)!==canonical(versions))return false;
+ const profile=await db.query<{content_digest:string;manifest:Record<string,unknown>}>('SELECT content_digest,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2',
+  [binding.organisation_id,snapshot.environment_profile_id]);
+ if(profile.rows.length!==1||snapshot.environment_digest!==profile.rows[0]!.content_digest||snapshot.toolchain_digest!==hash(profile.rows[0]!.manifest))return false;
+ const graph=await db.query<{manifest_digest:string}>('SELECT manifest_digest FROM hyperfide.graph_manifests WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
+  [binding.organisation_id,binding.run_id,snapshot.graph_manifest_id]);
+ return graph.rows.length===1&&snapshot.graph_manifest_digest===graph.rows[0]!.manifest_digest;
+}
+
 export interface ReviewCoverageSummary {
  status:'COMPLETE'|'INCOMPLETE'|'STALE';policy_digest:string;repository_id:string;source_object_id:string;
  required:number;complete:number;missing:Array<Record<string,unknown>>;receipt_ids:string[];limitations:string[];
  authority:'POSTGRESQL_REVIEW_OBLIGATIONS';
 }
 export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,query:ReviewCoverageQuery):Promise<ReviewCoverageSummary>{
- await primary(db);
+ await primary(db);await lockReviewDisposition(db,binding);
  const policyResult=await db.query<{digest:string;active:boolean}>('SELECT digest,active FROM hyperfide.review_policies WHERE organisation_id=$1 AND run_id=$2 AND '+(query.policy_digest?'digest=$3':'active'),query.policy_digest?[binding.organisation_id,binding.run_id,query.policy_digest]:[binding.organisation_id,binding.run_id]);
  if(policyResult.rows.length!==1)fail('REVIEW_POLICY_MISSING','Review policy is unavailable');
  const policyDigest=policyResult.rows[0]!.digest;
- const rows=await db.query<{id:string|null;watcher_id:string;reviewer_session_id:string;rubric_digest:string;generation:string|null;state:string|null;input_manifest_digest:string|null;candidate_digest:string|null;receipt_id:string|null;outcome:string|null;limitations:string[]|null;evidence_current:boolean;discovered:boolean;spec_current:boolean}>(`
+ const rows=await db.query<{id:string|null;watcher_id:string;reviewer_session_id:string;rubric_digest:string;generation:string|null;state:string|null;input_manifest_digest:string|null;candidate_digest:string|null;receipt_id:string|null;outcome:string|null;limitations:string[]|null;evidence_current:boolean;discovered:boolean;spec_current:boolean;snapshot:Record<string,unknown>|null}>(`
  SELECT o.id,w.watcher_id,w.reviewer_session_id,w.rubric_digest,o.generation,o.state,o.input_manifest_digest,o.candidate_digest,
- receipt.id AS receipt_id,receipt.outcome,receipt.limitations,(commit.source_object_id IS NOT NULL) AS discovered,
+ receipt.id AS receipt_id,receipt.outcome,receipt.limitations,inputs.snapshot,(commit.source_object_id IS NOT NULL) AS discovered,
  (inputs.snapshot->>'spec_revision_id'=current_run.spec_revision_id::text) AS spec_current,
  (EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id)
  AND NOT EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x JOIN hyperfide.evidence e ON e.organisation_id=x.organisation_id AND e.run_id=x.run_id AND e.id=x.evidence_id
@@ -271,13 +354,15 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  ORDER BY w.watcher_id`,
  [binding.organisation_id,binding.run_id,query.repository_id,query.source_object_id,policyDigest]);
  const missing=[],receipts:string[]=[],limitations:string[]=[];let stale=!policyResult.rows[0]!.active;
+ const freshness=new Map<string,boolean>();
+ for(const row of rows.rows)if(row.input_manifest_digest&&row.snapshot&&!freshness.has(row.input_manifest_digest))freshness.set(row.input_manifest_digest,await reviewInputCurrent(db,binding,row.snapshot));
  for(const row of rows.rows){
   let reason='';
   if(!row.discovered)reason='COMMIT_NOT_DISCOVERED';
   else if(!row.id)reason='OBLIGATION_MISSING';
   else if(!query.candidate_digest||!query.input_manifest_digest)reason='EXACT_CANDIDATE_INPUTS_REQUIRED';
   else if(!row.input_manifest_digest)reason='REVIEW_INPUTS_UNBOUND';
-  else if(!row.spec_current||row.candidate_digest!==query.candidate_digest||row.input_manifest_digest!==query.input_manifest_digest){reason='INPUTS_STALE';stale=true;}
+  else if(!row.spec_current||!row.snapshot||hash(row.snapshot)!==row.input_manifest_digest||!freshness.get(row.input_manifest_digest)||row.candidate_digest!==query.candidate_digest||row.input_manifest_digest!==query.input_manifest_digest){reason='INPUTS_STALE';stale=true;}
   else if(row.state!=='COMPLETE'||!row.receipt_id)reason='RECEIPT_MISSING';
   else if(row.outcome==='INCONCLUSIVE'||!row.evidence_current)reason='EVIDENCE_INCOMPLETE';
   else if(row.limitations?.length)reason='REVIEW_LIMITED';
@@ -290,17 +375,18 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
   repository_id:query.repository_id,source_object_id:query.source_object_id,required:rows.rows.length,complete:receipts.length,
   missing,receipt_ids:receipts,limitations:[...new Set(limitations)],authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
 }
-export function createComponent(context:ComponentContext):Component{
- const guarded=(fn:(input:unknown)=>Promise<unknown>)=>async(input:unknown)=>{try{return await fn(input);}catch(error){throw reviewError(error);}};
+export function createComponent(_context:ComponentContext):Component{
+ const guarded=(fn:(context:ComponentContext,input:unknown)=>Promise<unknown>)=>
+  async(input:unknown,context:ComponentContext)=>{try{return await fn(context,input);}catch(error){throw reviewError(error);}};
  return {apiVersion:1,actions:{
-  'review.policy.configure':guarded(input=>configureReviewPolicy(context,input)),
-  'review.commits.discover':guarded(input=>discoverReviewCommits(context,input)),
-  'review.coverage.inspect':guarded(async input=>{
+  'review.policy.configure':guarded((context,input)=>configureReviewPolicy(context,input)),
+  'review.commits.discover':guarded((context,input)=>discoverReviewCommits(context,input)),
+  'review.coverage.inspect':guarded(async(context,input)=>{
    const v=obj(input,['organisation_id','run_id','repository_id','source_object_id','candidate_digest','input_manifest_digest','policy_digest'],['candidate_digest','input_manifest_digest','policy_digest']);
-   return inspectReviewCoverage(getPool(context.env),scope(v),{repository_id:uuid(v.repository_id),source_object_id:oid(v.source_object_id),
+   return transaction(context,scope(v),db=>inspectReviewCoverage(db,scope(v),{repository_id:uuid(v.repository_id),source_object_id:oid(v.source_object_id),
     ...(v.candidate_digest?{candidate_digest:digest(v.candidate_digest)}:{}),
     ...(v.input_manifest_digest?{input_manifest_digest:digest(v.input_manifest_digest)}:{}),
-    ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})});
+    ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})}));
   })
  }};
 }

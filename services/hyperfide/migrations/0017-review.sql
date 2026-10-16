@@ -44,11 +44,15 @@ CREATE TABLE hyperfide.review_obligations (
  policy_digest hyperfide.digest NOT NULL, watcher_id text NOT NULL, generation bigint NOT NULL DEFAULT 1 CHECK(generation>0),
  input_manifest_digest hyperfide.digest, candidate_digest hyperfide.digest,
  state text NOT NULL DEFAULT 'PENDING' CHECK(state IN ('PENDING','RUNNING','COMPLETE','STALE')),
+ lease_session_id uuid, lease_sandbox_id uuid, lease_boot_generation bigint, lease_generation bigint NOT NULL DEFAULT 0 CHECK(lease_generation>=0), lease_expires_at timestamptz,
  current_receipt_id uuid, created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,id),
  UNIQUE(organisation_id,run_id,repository_id,source_object_id,policy_digest,watcher_id),
  FOREIGN KEY(organisation_id,run_id,repository_id,source_object_id) REFERENCES hyperfide.review_commits(organisation_id,run_id,repository_id,source_object_id),
  FOREIGN KEY(organisation_id,run_id,policy_digest,watcher_id) REFERENCES hyperfide.review_watchers(organisation_id,run_id,policy_digest,watcher_id),
+ FOREIGN KEY(organisation_id,run_id,lease_session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,lease_sandbox_id,lease_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
+ CHECK(state<>'RUNNING' OR (lease_session_id IS NOT NULL AND lease_sandbox_id IS NOT NULL AND lease_boot_generation>0 AND lease_generation>0 AND lease_expires_at IS NOT NULL)),
  CHECK(state<>'COMPLETE' OR (input_manifest_digest IS NOT NULL AND current_receipt_id IS NOT NULL))
 );
 CREATE TABLE hyperfide.review_obligation_inputs (
@@ -63,7 +67,7 @@ CREATE TABLE hyperfide.review_obligation_inputs (
 CREATE TABLE hyperfide.review_receipts (
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, id uuid NOT NULL DEFAULT gen_random_uuid(),
  request_id uuid NOT NULL, request_digest hyperfide.digest NOT NULL, obligation_id uuid NOT NULL,
- generation bigint NOT NULL CHECK(generation>0), reviewer_session_id uuid NOT NULL, rubric_digest hyperfide.digest NOT NULL,
+ lease_generation bigint NOT NULL CHECK(lease_generation>0), generation bigint NOT NULL CHECK(generation>0), reviewer_session_id uuid NOT NULL, rubric_digest hyperfide.digest NOT NULL,
  input_manifest_digest hyperfide.digest NOT NULL, candidate_digest hyperfide.digest NOT NULL,
  outcome text NOT NULL CHECK(outcome IN ('NO_FINDINGS','FINDINGS','INCONCLUSIVE')),
  limitations jsonb NOT NULL CHECK(jsonb_typeof(limitations)='array'), created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -153,3 +157,7 @@ CREATE TRIGGER policy_identity BEFORE UPDATE OR DELETE ON hyperfide.review_polic
  EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','digest','revision','definition');
 CREATE TRIGGER commit_references BEFORE INSERT ON hyperfide.review_commits FOR EACH ROW
  EXECUTE FUNCTION hyperfide.check_commit_references('source_object_id');
+
+CREATE TRIGGER reproduction_identity BEFORE UPDATE OR DELETE ON hyperfide.review_reproduction_jobs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','request_id','request_digest','candidate_digest','input_manifest_digest','snapshot','template_id','qualification_scope','execution_plane');
+
+CREATE UNIQUE INDEX review_one_active_job_per_watcher ON hyperfide.review_obligations(organisation_id,run_id,lease_session_id) WHERE state='RUNNING';
