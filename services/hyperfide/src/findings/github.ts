@@ -17,7 +17,7 @@ function marker(env:Readonly<NodeJS.ProcessEnv>,scope:FindingScope,findingId:str
 }
 export class GitHubClient {
  readonly base:URL;readonly token:string;
- constructor(readonly env:Readonly<NodeJS.ProcessEnv>){
+ constructor(readonly env:Readonly<NodeJS.ProcessEnv>,readonly signal?:AbortSignal,public deadline=Date.now()+30000){
   if(env.HF_GITHUB_REQUESTS_APPROVED!=='true')fail('EXTERNAL_ACTION_NOT_APPROVED','GitHub network actions require explicit deployment approval');
   try{this.base=new URL(env.HF_GITHUB_API_URL??'https://api.github.com/');}catch{fail('GITHUB_CONFIG_INVALID','GitHub endpoint is invalid');}
   const loopback=['127.0.0.1','[::1]','localhost'].includes(this.base.hostname)&&env.HF_GITHUB_ALLOW_LOOPBACK==='true';
@@ -27,8 +27,9 @@ export class GitHubClient {
  }
  async request(method:string,relative:string,payload?:unknown):Promise<{data:unknown;link:string|null}>{
   const url=new URL(relative,this.base);if(url.origin!==this.base.origin||!url.pathname.startsWith(this.base.pathname))throw new GitHubFailure('GITHUB_UNSAFE_PAGINATION');
+  const remaining=Math.floor(this.deadline-Date.now());if(remaining<=0||this.signal?.aborted)throw new GitHubFailure('GITHUB_DEADLINE_EXCEEDED',method!=='GET');
   let response:Response;
-  try{response=await fetch(url,{method,redirect:'error',headers:{accept:'application/vnd.github+json',authorization:'Bearer '+this.token,'x-github-api-version':'2022-11-28',...(payload===undefined?{}:{'content-type':'application/json'})},...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:AbortSignal.timeout(10000)});}catch{throw new GitHubFailure('GITHUB_UNAVAILABLE',method!=='GET');}
+  try{response=await fetch(url,{method,redirect:'error',headers:{accept:'application/vnd.github+json',authorization:'Bearer '+this.token,'x-github-api-version':'2022-11-28',...(payload===undefined?{}:{'content-type':'application/json'})},...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:AbortSignal.any([AbortSignal.timeout(Math.min(10000,remaining)),...(this.signal?[this.signal]:[])])});}catch{throw new GitHubFailure('GITHUB_UNAVAILABLE',method!=='GET');}
   if(response.status===429||response.status===403&&response.headers.get('x-ratelimit-remaining')==='0'){await response.body?.cancel();throw new GitHubFailure('GITHUB_RATE_LIMITED',method!=='GET');}
   if(!response.ok){await response.body?.cancel();throw new GitHubFailure('GITHUB_HTTP_'+response.status,method!=='GET'&&response.status>=500);}
   const reader=response.body?.getReader(),chunks:Uint8Array[]=[];let bytes=0;
@@ -82,29 +83,32 @@ async function saveIssue(value:FindingTransaction,repositoryId:string,owner:stri
  return {intake:true,issue_number:external.number};
 }
 async function dispatch(context:ComponentContext,input:unknown):Promise<Record<string,unknown>>{
- const p=record(input);fields(p,['operation_id']);const id=uuid(p.operation_id),client=new GitHubClient(context.env);
+ const p=record(input);fields(p,['operation_id']);const id=uuid(p.operation_id),client=new GitHubClient(context.env,context.signal);
  const claimed=await withFindingTransaction<Record<string,any>>(context,'finding.github.dispatch',async value=>{
   await admin(value);const rows=await value.tx.query('SELECT *,lease_expires_at>clock_timestamp() AS live,next_attempt_at<=clock_timestamp() AS ready FROM hyperfide.finding_github_operations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[value.scope.organisation_id,value.scope.run_id,id]);
   if(rows.rows.length!==1)fail('OPERATION_NOT_FOUND','GitHub operation does not exist in this run');const op=rows.rows[0]!;
   if(op.state==='ACKNOWLEDGED')return {...op,done:true};if(op.state==='FAILED')fail('OPERATION_FAILED','Failed operation requires explicit review');if(['PENDING','UNKNOWN'].includes(op.state)&&!op.ready)fail('OPERATION_NOT_DUE','Durable retry backoff has not elapsed');if(op.state==='IN_FLIGHT'&&op.live)fail('OPERATION_BUSY','GitHub operation is held by another live dispatch');
   const earlier=await value.tx.query('SELECT 1 FROM hyperfide.finding_github_operations WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3 AND operation_sequence<$4 AND state<>\'ACKNOWLEDGED\' LIMIT 1',[value.scope.organisation_id,value.scope.run_id,op.finding_id,String(op.operation_sequence)]);if(earlier.rows.length)fail('OPERATION_ORDER_BLOCKED','Earlier public intent must be independently acknowledged before another dispatch');
   const unknown=op.state==='UNKNOWN'||op.state==='IN_FLIGHT';
-  const updated=await value.tx.query('UPDATE hyperfide.finding_github_operations SET state=\'IN_FLIGHT\',generation=generation+1,lease_owner=$4,lease_expires_at=clock_timestamp()+interval \'60 seconds\',attempt_count=attempt_count+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING generation::text',[value.scope.organisation_id,value.scope.run_id,id,value.principal.actor_id]);
-  return {...op,scope:value.scope,unknown,generation:updated.rows[0]!.generation};
+  const updated=await value.tx.query('UPDATE hyperfide.finding_github_operations SET state=\'IN_FLIGHT\',generation=generation+1,lease_owner=$4,lease_expires_at=clock_timestamp()+interval \'60 seconds\',attempt_count=attempt_count+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING generation::text,lease_expires_at::text',[value.scope.organisation_id,value.scope.run_id,id,value.principal.actor_id]);
+  return {...op,scope:value.scope,unknown,generation:updated.rows[0]!.generation,lease_expires_at:updated.rows[0]!.lease_expires_at,authority_expires_at:value.principal.expires_at};
  });
  if(claimed.done)return {operation_id:id,state:'ACKNOWLEDGED',replayed:true};
+ client.deadline=Math.min(client.deadline,Date.parse(claimed.lease_expires_at),Date.parse(claimed.authority_expires_at));if(!Number.isFinite(client.deadline))fail('STALE_OPERATION','Dispatch authority deadline is invalid');
+ const authorizeMutation=()=>withFindingTransaction(context,'finding.github.dispatch',async value=>{await admin(value);const current=await value.tx.query('SELECT generation::text,lease_owner,state,lease_expires_at>clock_timestamp() AS live FROM hyperfide.finding_github_operations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[value.scope.organisation_id,value.scope.run_id,id]);const row=current.rows[0];if(!row||row.generation!==claimed.generation||row.lease_owner!==value.principal.actor_id||row.state!=='IN_FLIGHT'||!row.live||client.signal?.aborted||Date.now()>=client.deadline)fail('STALE_OPERATION','External write requires current authenticated dispatch authority');});
+
  let found:Issue|undefined,failure:string|undefined,uncertain=claimed.unknown;
  try{
   const list=await client.issues(claimed.owner_name,claimed.repository_name,new Date(Date.parse(claimed.created_at)-300000).toISOString());
   const expected=marker(context.env,claimed.scope,claimed.finding_id,claimed.repository_id),matching=list.filter(row=>row.body.includes(expected));
   if(matching.length>1)throw new GitHubFailure('GITHUB_AMBIGUOUS_MAPPING',true);found=matching[0];
   if(claimed.kind==='CREATE'){
-   if(!found&&!claimed.unknown){uncertain=true;found=issue((await client.request('POST','repos/'+claimed.owner_name+'/'+claimed.repository_name+'/issues',claimed.payload)).data);}
+   if(!found&&!claimed.unknown){await authorizeMutation();uncertain=true;found=issue((await client.request('POST','repos/'+claimed.owner_name+'/'+claimed.repository_name+'/issues',claimed.payload)).data);}
    if(!found){failure='GITHUB_CREATE_OUTCOME_UNKNOWN';uncertain=true;}
   }else{
    if(!found)throw new GitHubFailure('GITHUB_MAPPING_NOT_FOUND',true);
    if(claimed.unknown){if(found.title!==claimed.payload.title||found.body!==claimed.payload.body){failure='GITHUB_UPDATE_OUTCOME_UNKNOWN';uncertain=true;}}
-   else {uncertain=true;found=issue((await client.request('PATCH','repos/'+claimed.owner_name+'/'+claimed.repository_name+'/issues/'+found.number,claimed.payload)).data);}
+   else {await authorizeMutation();uncertain=true;found=issue((await client.request('PATCH','repos/'+claimed.owner_name+'/'+claimed.repository_name+'/issues/'+found.number,claimed.payload)).data);}
   }
   if(found&&(found.title!==claimed.payload.title||found.body!==claimed.payload.body)){failure='GITHUB_PUBLIC_INTENT_DIFFERENT';uncertain=true;}
  }catch(error){failure=error instanceof GitHubFailure?error.code:'GITHUB_UNAVAILABLE';uncertain=uncertain||error instanceof GitHubFailure&&error.uncertain;}
@@ -153,7 +157,7 @@ async function reconcile(context:ComponentContext,input:unknown):Promise<Record<
   const rows=await value.tx.query('SELECT *,next_poll_at>clock_timestamp() AS deferred FROM hyperfide.finding_github_checkpoints WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 FOR UPDATE',[value.scope.organisation_id,value.scope.run_id,repoId]);const row=rows.rows[0]!;if(row.owner_name!==owner||row.repository_name!==name)fail('SCOPE_MISMATCH','Repository projection identity is already pinned');return row;
  });
  if(snapshot.deferred)return {reconciled:false,reason:'NOT_DUE',next_poll_at:snapshot.next_poll_at};
- let external:Issue[];try{external=await new GitHubClient(context.env).issues(owner,name,new Date(Date.parse(snapshot.updated_since)-300000).toISOString());}catch(error){
+ let external:Issue[];try{external=await new GitHubClient(context.env,context.signal).issues(owner,name,new Date(Date.parse(snapshot.updated_since)-300000).toISOString());}catch(error){
   const code=error instanceof GitHubFailure?error.code:'GITHUB_UNAVAILABLE';await withFindingTransaction(context,'finding.github.reconcile',async value=>{await admin(value);await value.tx.query('UPDATE hyperfide.finding_github_checkpoints SET last_error_code=$4,next_poll_at=clock_timestamp()+interval \'10 minutes\' WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[value.scope.organisation_id,value.scope.run_id,repoId,code]);return null;});return {reconciled:false,error_code:code};
  }
  return withFindingTransaction(context,'finding.github.reconcile',async value=>{

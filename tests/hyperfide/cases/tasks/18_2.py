@@ -8,13 +8,15 @@ from types import SimpleNamespace
 check=common.check;expect=common.expect;uid=common.uid
 class GitHubFixture:
     def __init__(self):
-        state=self;self.issues=[];self.posts=0;self.gets=0;self.fail=False;self.lose_next=True
+        state=self;self.issues=[];self.posts=0;self.gets=0;self.fail=False;self.lose_next=True;self.before_get=None
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def reply(self,code,value):
                 raw=json.dumps(value).encode();self.send_response(code);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
             def do_GET(self):
                 state.gets+=1
+                callback=state.before_get;state.before_get=None
+                if callback:callback()
                 if state.fail:return self.reply(503,{'message':'controlled fixture outage'})
                 return self.reply(200,state.issues)
             def do_POST(self):
@@ -36,6 +38,7 @@ def main():
         fid=common.finding(f)['finding_id'];packet={'finding_id':fid,'request_id':uid(),'owner':'fixture','repository':'repository','title':'Synthetic actionable finding','body':'Reviewed synthetic public projection','kind':'CREATE'};op=call('finding.github.enqueue',packet)
         check('findings.github.durable-enqueue',lambda:expect(op['state']=='PENDING' and github.posts==0))
         check('findings.github.enqueue-idempotent',lambda:expect(call('finding.github.enqueue',packet)['operation_id']==op['operation_id']))
+        check('findings.github.public-intent-and-order-immutable',lambda:common.assert_sql_refused(f,'UPDATE hyperfide.finding_github_operations SET operation_sequence=999'))
         check('findings.github.conflicting-intent-refused',lambda:reject('finding.github.enqueue',dict(packet,title='Changed public intent'),'IDEMPOTENCY_CONFLICT'))
         check('findings.github.reserved-marker-refused',lambda:reject('finding.github.enqueue',dict(packet,request_id=uid(),body='hyperfide-finding:forged'),'INVALID_REQUEST'))
         check('findings.github.due-inventory',lambda:expect(call('finding.github.due',{})['operations']==[{'operation_id':op['operation_id']}]))
@@ -78,6 +81,14 @@ def main():
         check('findings.github.outage-preserves-checkpoint',lambda:expect(outage['reconciled'] is False and f.sql('SELECT updated_since FROM hyperfide.finding_github_checkpoints')[0]['updated_since']==checkpoint))
         check('findings.github.outage-backlog-visible',lambda:expect(call('finding.github.status',{})['reconciliation'][0]['last_error_code']=='GITHUB_HTTP_503'))
         check('findings.github.loopback-only-observation',lambda:expect(github.server.server_address[0]=='127.0.0.1' and github.posts==1))
+        github.fail=False
+        slow_fid=common.finding(f,common.observation(f,'expired-dispatch-authority'))['finding_id'];slow=call('finding.github.enqueue',dict(packet,finding_id=slow_fid,request_id=uid()))
+        github.before_get=lambda:f.sql("UPDATE hyperfide.finding_github_operations SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[slow['operation_id']]);before=github.posts;_,response=f.invoke('finding.github.dispatch',{'operation_id':slow['operation_id']},component='finding-github')
+        check('findings.github.expired-lease-before-write-refused',lambda:expect(response.get('ok') is False and github.posts==before))
+        revoked_fid=common.finding(f,common.observation(f,'revoked-dispatch-authority'))['finding_id'];revoked=call('finding.github.enqueue',dict(packet,finding_id=revoked_fid,request_id=uid()))
+        github.before_get=lambda:f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[f.ids['operator']]);before=github.posts;_,response=f.invoke('finding.github.dispatch',{'operation_id':revoked['operation_id']},component='finding-github')
+        check('findings.github.revoked-principal-before-write-refused',lambda:expect(response.get('ok') is False and github.posts==before))
+
     finally:
         try:f.close()
         finally:github.close()

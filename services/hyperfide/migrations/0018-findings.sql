@@ -155,3 +155,5 @@ DO $$ DECLARE tab text; BEGIN
 END $$;
 CREATE TRIGGER finding_resolution_identity BEFORE UPDATE OR DELETE ON hyperfide.finding_registry_records FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','finding_id','origin_task_id','origin_attempt_id','resolution_condition','resolution_digest','first_observed_at');
 CREATE TRIGGER finding_repair_identity BEFORE UPDATE OR DELETE ON hyperfide.finding_repairs FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','finding_id','request_id','request_digest','repair_task_id','resolution_digest','baseline_source_object_id','max_attempts');
+
+CREATE TRIGGER finding_github_intent_identity BEFORE UPDATE OR DELETE ON hyperfide.finding_github_operations FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','finding_id','request_id','payload_digest','operation_sequence','repository_id','owner_name','repository_name','kind','payload','created_at');
