@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyperfide.invalid/schemas/qualification-manifest-v1.json",
+  "title": "Hyperfide immutable qualification campaign manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "registered_variant",
+    "scope",
+    "case_ids",
+    "expected_assertion_ids",
+    "approval",
+    "inputs",
+    "resources",
+    "seed",
+    "policy"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "campaign_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    },
+    "registered_variant": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    },
+    "scope": {
+      "enum": [
+        "task-component",
+        "full-case",
+        "campaign"
+      ]
+    },
+    "case_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^V-[0-9]{3}$",
+        "minLength": 1
+      }
+    },
+    "expected_assertion_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": ".*\\S.*"
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": [
+        "approved",
+        "allowed_actions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "approved": {
+          "const": true
+        },
+        "allowed_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": ".*\\S.*"
+          }
+        },
+        "allow_retained_resources": {
+          "type": "boolean",
+          "default": false,
+          "description": "Explicit authorization to retain inventory resources with recorded owner and expiry."
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256",
+          "size"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": ".*\\S.*"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": ".*\\S.*"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "policy": {
+      "type": "object"
+    }
+  },
+  "$comment": "Runtime additionally checks registered variant/case/assertion equality, current content pins, action and resource approval, and scope-specific full inventories. Schema validation alone never proves qualification."
+}

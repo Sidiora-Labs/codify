@@ -31,3 +31,6 @@ tmp/
 !.env.example
 !.env.sample
 !.env.template
+
+# Private Hyperfide execution logs, deployment manifests and raw receipts
+/artifacts/hyperfide/

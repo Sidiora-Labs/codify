@@ -1,0 +1,99 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-27.1-bootstrap-v1",
+  "case_ids": [
+    "V-056"
+  ],
+  "expected_assertion_ids": [
+    "harness.selector.missing",
+    "harness.selector.unknown",
+    "harness.selector.empty",
+    "harness.selector.duplicate",
+    "harness.selector.empty-suite",
+    "harness.runner.missing",
+    "harness.child.missing",
+    "harness.checker.missing",
+    "harness.fixture.missing",
+    "harness.fixture.digest",
+    "harness.credential.missing",
+    "harness.child.failure",
+    "harness.child.timeout-descendants",
+    "harness.assertion.zero",
+    "harness.assertion.duplicate",
+    "harness.assertion.unexecuted",
+    "harness.assertion.failure",
+    "harness.assertion.malformed",
+    "harness.cleanup.missing",
+    "harness.cleanup.failure",
+    "harness.artifact.missing",
+    "harness.artifact.tampered",
+    "harness.receipt.tampered",
+    "harness.receipt.scope-forgery",
+    "harness.receipt.inventory-forgery",
+    "harness.campaign.snapshot-tampered",
+    "harness.campaign.append-only",
+    "harness.campaign.changed-input",
+    "harness.selector.task",
+    "harness.selector.suite",
+    "harness.campaign.failed-then-pass",
+    "harness.checker.canonical",
+    "harness.child.normal-exit-descendants",
+    "harness.source.declared-import",
+    "harness.source.undeclared-import-in-root",
+    "harness.cleanup.retention-approved",
+    "harness.cleanup.retention-unapproved",
+    "harness.cleanup.retention-owner-missing",
+    "harness.cleanup.retention-expiry-missing",
+    "harness.schema.registry-version-bool",
+    "harness.schema.registration-version-bool",
+    "harness.schema.manifest-version-bool",
+    "harness.schema.input-size-bool",
+    "harness.schema.manifest-unknown-field",
+    "harness.schema.approval-unknown-field",
+    "harness.source.output-equals-workspace",
+    "harness.source.output-contains-probe",
+    "harness.child.detached-pipe-timeout",
+    "harness.source.git-bytecode-parity"
+  ],
+  "inputs": [
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
+      "size": 36837
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "718d767d273e56b2ca904114d9db7263a006d338443d271dd4bf74633b0d8481",
+      "size": 27882
+    },
+    {
+      "path": "tests/hyperfide/selftest_harness.py",
+      "sha256": "7a0a9777260cc064a91d88e0f8a30cb13fab0e0321efbe1198582f1125993824",
+      "size": 30354
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/27_1.py",
+      "sha256": "f162320202f0362dcb88ec322b6315b744fd60bc6ef713a24007e67d1df59e2b",
+      "size": 391
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false
+  },
+  "registered_variant": "task:27.1",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}

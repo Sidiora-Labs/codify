@@ -1,0 +1,394 @@
+{
+  "schema_version": 1,
+  "cases": {
+    "V-001": {
+      "title": "Hyperfide acceptance case V-001",
+      "full_assertion_ids": []
+    },
+    "V-002": {
+      "title": "Hyperfide acceptance case V-002",
+      "full_assertion_ids": []
+    },
+    "V-003": {
+      "title": "Hyperfide acceptance case V-003",
+      "full_assertion_ids": []
+    },
+    "V-004": {
+      "title": "Hyperfide acceptance case V-004",
+      "full_assertion_ids": []
+    },
+    "V-005": {
+      "title": "Hyperfide acceptance case V-005",
+      "full_assertion_ids": []
+    },
+    "V-006": {
+      "title": "Hyperfide acceptance case V-006",
+      "full_assertion_ids": []
+    },
+    "V-007": {
+      "title": "Hyperfide acceptance case V-007",
+      "full_assertion_ids": []
+    },
+    "V-008": {
+      "title": "Hyperfide acceptance case V-008",
+      "full_assertion_ids": []
+    },
+    "V-009": {
+      "title": "Hyperfide acceptance case V-009",
+      "full_assertion_ids": []
+    },
+    "V-010": {
+      "title": "Hyperfide acceptance case V-010",
+      "full_assertion_ids": []
+    },
+    "V-011": {
+      "title": "Hyperfide acceptance case V-011",
+      "full_assertion_ids": []
+    },
+    "V-012": {
+      "title": "Hyperfide acceptance case V-012",
+      "full_assertion_ids": []
+    },
+    "V-013": {
+      "title": "Hyperfide acceptance case V-013",
+      "full_assertion_ids": []
+    },
+    "V-014": {
+      "title": "Hyperfide acceptance case V-014",
+      "full_assertion_ids": []
+    },
+    "V-015": {
+      "title": "Hyperfide acceptance case V-015",
+      "full_assertion_ids": []
+    },
+    "V-016": {
+      "title": "Hyperfide acceptance case V-016",
+      "full_assertion_ids": []
+    },
+    "V-017": {
+      "title": "Hyperfide acceptance case V-017",
+      "full_assertion_ids": []
+    },
+    "V-018": {
+      "title": "Hyperfide acceptance case V-018",
+      "full_assertion_ids": []
+    },
+    "V-019": {
+      "title": "Hyperfide acceptance case V-019",
+      "full_assertion_ids": []
+    },
+    "V-020": {
+      "title": "Hyperfide acceptance case V-020",
+      "full_assertion_ids": []
+    },
+    "V-021": {
+      "title": "Hyperfide acceptance case V-021",
+      "full_assertion_ids": []
+    },
+    "V-022": {
+      "title": "Hyperfide acceptance case V-022",
+      "full_assertion_ids": []
+    },
+    "V-023": {
+      "title": "Hyperfide acceptance case V-023",
+      "full_assertion_ids": []
+    },
+    "V-024": {
+      "title": "Hyperfide acceptance case V-024",
+      "full_assertion_ids": []
+    },
+    "V-025": {
+      "title": "Hyperfide acceptance case V-025",
+      "full_assertion_ids": []
+    },
+    "V-026": {
+      "title": "Hyperfide acceptance case V-026",
+      "full_assertion_ids": []
+    },
+    "V-027": {
+      "title": "Hyperfide acceptance case V-027",
+      "full_assertion_ids": []
+    },
+    "V-028": {
+      "title": "Hyperfide acceptance case V-028",
+      "full_assertion_ids": []
+    },
+    "V-029": {
+      "title": "Hyperfide acceptance case V-029",
+      "full_assertion_ids": []
+    },
+    "V-030": {
+      "title": "Hyperfide acceptance case V-030",
+      "full_assertion_ids": []
+    },
+    "V-031": {
+      "title": "Hyperfide acceptance case V-031",
+      "full_assertion_ids": []
+    },
+    "V-032": {
+      "title": "Hyperfide acceptance case V-032",
+      "full_assertion_ids": []
+    },
+    "V-033": {
+      "title": "Hyperfide acceptance case V-033",
+      "full_assertion_ids": []
+    },
+    "V-034": {
+      "title": "Hyperfide acceptance case V-034",
+      "full_assertion_ids": []
+    },
+    "V-035": {
+      "title": "Hyperfide acceptance case V-035",
+      "full_assertion_ids": []
+    },
+    "V-036": {
+      "title": "Hyperfide acceptance case V-036",
+      "full_assertion_ids": []
+    },
+    "V-037": {
+      "title": "Hyperfide acceptance case V-037",
+      "full_assertion_ids": []
+    },
+    "V-038": {
+      "title": "Hyperfide acceptance case V-038",
+      "full_assertion_ids": []
+    },
+    "V-039": {
+      "title": "Hyperfide acceptance case V-039",
+      "full_assertion_ids": []
+    },
+    "V-040": {
+      "title": "Hyperfide acceptance case V-040",
+      "full_assertion_ids": []
+    },
+    "V-041": {
+      "title": "Hyperfide acceptance case V-041",
+      "full_assertion_ids": []
+    },
+    "V-042": {
+      "title": "Hyperfide acceptance case V-042",
+      "full_assertion_ids": []
+    },
+    "V-043": {
+      "title": "Hyperfide acceptance case V-043",
+      "full_assertion_ids": []
+    },
+    "V-044": {
+      "title": "Hyperfide acceptance case V-044",
+      "full_assertion_ids": []
+    },
+    "V-045": {
+      "title": "Hyperfide acceptance case V-045",
+      "full_assertion_ids": []
+    },
+    "V-046": {
+      "title": "Hyperfide acceptance case V-046",
+      "full_assertion_ids": []
+    },
+    "V-047": {
+      "title": "Hyperfide acceptance case V-047",
+      "full_assertion_ids": []
+    },
+    "V-048": {
+      "title": "Hyperfide acceptance case V-048",
+      "full_assertion_ids": []
+    },
+    "V-049": {
+      "title": "Hyperfide acceptance case V-049",
+      "full_assertion_ids": []
+    },
+    "V-050": {
+      "title": "Hyperfide acceptance case V-050",
+      "full_assertion_ids": []
+    },
+    "V-051": {
+      "title": "Hyperfide acceptance case V-051",
+      "full_assertion_ids": []
+    },
+    "V-052": {
+      "title": "Hyperfide acceptance case V-052",
+      "full_assertion_ids": []
+    },
+    "V-053": {
+      "title": "Hyperfide acceptance case V-053",
+      "full_assertion_ids": []
+    },
+    "V-054": {
+      "title": "Hyperfide acceptance case V-054",
+      "full_assertion_ids": []
+    },
+    "V-055": {
+      "title": "Hyperfide acceptance case V-055",
+      "full_assertion_ids": []
+    },
+    "V-056": {
+      "title": "Hyperfide acceptance case V-056",
+      "full_assertion_ids": []
+    }
+  },
+  "suites": {
+    "contract": [
+      "V-001",
+      "V-002",
+      "V-003",
+      "V-004",
+      "V-005",
+      "V-006",
+      "V-007",
+      "V-008",
+      "V-009",
+      "V-010",
+      "V-011",
+      "V-012",
+      "V-013",
+      "V-014",
+      "V-015",
+      "V-016",
+      "V-017"
+    ],
+    "storage-graph": [
+      "V-009",
+      "V-010",
+      "V-011",
+      "V-012",
+      "V-013",
+      "V-014",
+      "V-015",
+      "V-016",
+      "V-017",
+      "V-018",
+      "V-019",
+      "V-020",
+      "V-021",
+      "V-022",
+      "V-023",
+      "V-024",
+      "V-025"
+    ],
+    "provider-railway": [
+      "V-036",
+      "V-037",
+      "V-038",
+      "V-039",
+      "V-040",
+      "V-041"
+    ],
+    "provider-blaxel": [
+      "V-036",
+      "V-037",
+      "V-038",
+      "V-039",
+      "V-040",
+      "V-041"
+    ],
+    "native-agents": [
+      "V-042",
+      "V-043",
+      "V-044"
+    ],
+    "assurance": [
+      "V-029",
+      "V-030",
+      "V-031",
+      "V-032",
+      "V-033",
+      "V-034",
+      "V-035"
+    ],
+    "compatibility": [
+      "V-018",
+      "V-019",
+      "V-020",
+      "V-021",
+      "V-022",
+      "V-023",
+      "V-024",
+      "V-025",
+      "V-026",
+      "V-027",
+      "V-028"
+    ],
+    "deterministic-load": [
+      "V-047",
+      "V-048",
+      "V-049"
+    ],
+    "live-canary": [
+      "V-036",
+      "V-037",
+      "V-038",
+      "V-039",
+      "V-040",
+      "V-041",
+      "V-042",
+      "V-043",
+      "V-044",
+      "V-045",
+      "V-046"
+    ],
+    "live-soak": [
+      "V-050",
+      "V-051",
+      "V-052"
+    ],
+    "release": [
+      "V-001",
+      "V-002",
+      "V-003",
+      "V-004",
+      "V-005",
+      "V-006",
+      "V-007",
+      "V-008",
+      "V-009",
+      "V-010",
+      "V-011",
+      "V-012",
+      "V-013",
+      "V-014",
+      "V-015",
+      "V-016",
+      "V-017",
+      "V-018",
+      "V-019",
+      "V-020",
+      "V-021",
+      "V-022",
+      "V-023",
+      "V-024",
+      "V-025",
+      "V-026",
+      "V-027",
+      "V-028",
+      "V-029",
+      "V-030",
+      "V-031",
+      "V-032",
+      "V-033",
+      "V-034",
+      "V-035",
+      "V-036",
+      "V-037",
+      "V-038",
+      "V-039",
+      "V-040",
+      "V-041",
+      "V-042",
+      "V-043",
+      "V-044",
+      "V-045",
+      "V-046",
+      "V-047",
+      "V-048",
+      "V-049",
+      "V-050",
+      "V-051",
+      "V-052",
+      "V-053",
+      "V-054",
+      "V-055",
+      "V-056"
+    ]
+  },
+  "registration_glob": "registrations/*.json"
+}
