@@ -81,3 +81,13 @@ CREATE TABLE hyperfide.supervisor_launches (
 CREATE UNIQUE INDEX supervisor_launch_once ON hyperfide.supervisor_launches(organisation_id,run_id,session_id) WHERE state IN ('STARTING','SPAWNING','RUNNING');
 CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.supervisor_launches FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','session_id','profile_id','profile_digest','request_digest','host_id','placement','reservations');
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.supervisor_launches FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.native_session_bindings FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.native_session_checkpoints FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.native_session_events FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.agent_admission_accounts FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.agent_admission_reservations FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

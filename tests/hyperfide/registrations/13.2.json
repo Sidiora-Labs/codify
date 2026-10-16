@@ -10,6 +10,7 @@
   "assertion_ids": [
     "sessions.handshake-cleanup-preserves-peer",
     "sessions.signed-registration",
+    "sessions.migration-authority-isolation",
     "sessions.observed-null-first-binding",
     "sessions.schema-reject-native-rebind",
     "sessions.schema-reject-native-clear",

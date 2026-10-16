@@ -731,8 +731,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0013-agents.sql",
-      "sha256": "b451955d939793cbf5972faf63a41aec8451f452c551685e511c15c6ba0edd6e",
-      "size": 6211
+      "sha256": "a125f5d0a633ad306843b0186760e1d953d768a0c7c6e2c583430f316db7096e",
+      "size": 7128
     },
     {
       "path": "services/hyperfide/migrations/0014-enrollment.sql",
@@ -936,8 +936,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/13_2.py",
-      "sha256": "70cf1c4f50a232d16dc238985fe418fdd19663a59842b36a0460dd2ec197760d",
-      "size": 29124
+      "sha256": "a3d1dca5b381dcd808b4aa48d1b9b77aded75493a01630f0273363353c5c7806",
+      "size": 30338
     },
     {
       "path": "tests/hyperfide/cases/tasks/13_4.py",

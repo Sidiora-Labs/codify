@@ -250,6 +250,17 @@ def main():
         check('sessions.handshake-cleanup-preserves-peer',handshake_isolation)
         fixture=AgentFixture();f=fixture
         check("sessions.signed-registration",lambda:expect(f.bind()["bound"]is True,"binding missing"))
+        def isolation_guards():
+            tables=["native_session_bindings","native_session_checkpoints","native_session_events","agent_admission_accounts","agent_admission_reservations"]
+            names=",".join("'"+name+"'"for name in tables)
+            rows=f.inner.sql("SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid WHERE n.nspname='hyperfide' AND c.relname IN("+names+") AND NOT t.tgisinternal AND t.tgenabled='O' AND p.proname='require_authority_isolation' ORDER BY c.relname")
+            expect(sorted(row["relname"]for row in rows)==sorted(tables),"migration authority-isolation guards missing")
+            try:f.inner.sql("BEGIN ISOLATION LEVEL REPEATABLE READ; UPDATE hyperfide.native_session_bindings SET process_exited=process_exited; ROLLBACK;")
+            except Exception as error:
+                expect("authority writes require READ COMMITTED or SERIALIZABLE"in str(error),"wrong isolation refusal")
+                return
+            raise AssertionError("REPEATABLE READ native authority mutation was admitted")
+        check("sessions.migration-authority-isolation",isolation_guards)
         f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"]);f.foreign_runner()
         registered_version=str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]);running_version=str(int(registered_version)+1)
         def first_binding():
