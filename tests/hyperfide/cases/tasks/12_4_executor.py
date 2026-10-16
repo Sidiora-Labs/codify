@@ -48,11 +48,13 @@ try{
  for await(const line of readline.createInterface({input:process.stdin})){
   let q;try{q=JSON.parse(line);let result;
    if(q.op==='forged-native')result=await native.invokeNativeRunner(q.forged,q.input,controller.signal);
+   else if(q.op==='forged-probe')result=await native.authenticatePlacementProbe(q.forged,q.input,controller.signal);
    else if(q.op==='forged-artifact')result=await store.invoke(q.action,q.input,q.forged);
    else{
     const i=await authority.authenticate(Buffer.from(q.body,'base64'),q.headers,controller.signal);await authority.authorize(i);
     if(q.op==='public')result=await registry.invoke(i.payload.component,i.payload.action,i.payload.input,i);
     else if(q.op==='native')result=await native.invokeNativeRunner(i,q.input,controller.signal);
+    else if(q.op==='placement')result=await native.authenticatePlacementProbe(i,q.input,controller.signal);
     else if(q.op==='artifact')result=await store.invoke(q.action,q.input,i);
     else if(q.op==='resolve'){
      if(typeof resolveRunnerCapturedReference!=='function')throw new Error('Actual runner captured-reference resolver prerequisite is missing');
@@ -272,6 +274,13 @@ def main():
             check("executor.native-stop-command-required",lambda:f.refused(f.command("native",input=dict(native,action="runner.stop")),"RUNNER_CONTROL_DENIED"))
             check("executor.native-action-allowlist",lambda:f.refused(f.command("native",input=dict(native,action="runner.execute-arbitrary")),"RUNNER_CONTROL_DENIED"))
             check("executor.native-unregistered-target-refused",lambda:f.refused(f.command("native",input=native),"RUNNER_NOT_CURRENT"))
+            probe={"probe_id":uid()}
+            placement_input={"pool_id":f.f.ids["pool"],"sandbox_id":f.f.ids["sandbox"],"run_id":f.scope["run_id"]}
+            check("executor.placement-forged-brand-refused",lambda:f.refused(f.actor.request({"op":"forged-probe","forged":{"principal":f.principal},"input":probe}),"AUTH_REQUIRED"))
+            check("executor.placement-wrong-source-label-refused",lambda:f.refused(f.command("placement",input=probe),"RUNNER_PROBE_AUTHORITY_DENIED"))
+            check("executor.placement-operator-denied",lambda:f.refused(f.actor.request({"op":"placement",**f.proof(key="operator",component="8.4-probe",action="provider.placement.probe",value=placement_input),"input":probe}),"RUNNER_PROBE_AUTHORITY_DENIED"))
+            check("executor.placement-operation-mismatch-refused",lambda:f.refused(f.actor.request({"op":"placement",**f.proof(component="8.4-probe",action="provider.placement.probe",value=placement_input),"input":probe}),"RUNNER_PROBE_AUTHORITY_DENIED"))
+            check("executor.placement-invalid-identity-refused",lambda:f.refused(f.actor.request({"op":"placement",**f.proof(component="8.4-probe",action="provider.placement.probe",value=placement_input),"input":{"probe_id":"../invalid"}}),"RUNNER_PROBE_AUTHORITY_DENIED"))
             # Hostile metadata fixtures exercise the exact runtime validator;
             # they are not observations of a physical runner or stop event.
             target={"launch_id":uid(),"attempt_id":uid(),"attempt_generation":"1","sandbox_id":uid(),"boot_id":uid(),"boot_generation":"1","uid":65534}
