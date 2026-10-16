@@ -1,6 +1,6 @@
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
-import {record,scopeOf,uuid,positive,recoveryTransaction,operationReplay,finishOperation,readControlSnapshot} from './control.js';
+import {record,scopeOf,uuid,positive,recoveryTransaction,operationReplay,finishOperation,readControlSnapshot,capability,isExecutionControls} from './control.js';
 
 export function createComponent(_context:ComponentContext):Component{
  return {apiVersion:1,actions:{
@@ -17,6 +17,11 @@ export function createComponent(_context:ComponentContext):Component{
     if(row.current_attempt_id!==attempt||row.task_generation!==generation)
      throw new FoundationError('RECOVERY_SUPERSEDED_ATTEMPT','Attempt was superseded; retain outputs as provenance only');
     const custody=await tx.query("SELECT id,custody_generation,qualification_outcome FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND source_attempt_id=$3 AND source_generation=$4 AND authority='ACTIVE'",[scope.organisation_id,scope.run_id,attempt,generation]);
+    let replacementGate:unknown=null;
+    if(custody.rows.length===0){
+     const gate=capability(context,'5.1','scheduler.controls.v1',isExecutionControls);
+     replacementGate=await gate.applyExecutionControl(tx,scope,{scope_kind:'ATTEMPT',scope_id:attempt,mode:'STOP',operation_id:id,reason:'Lost source requires verified inventory and checkpoint compatibility before replacement'});
+    }
     await tx.query("UPDATE hyperfide.compute_leases SET state='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='ACTIVE'",[scope.organisation_id,scope.run_id,attempt]);
     await tx.query("UPDATE hyperfide.attempts SET compute_authority='REVOKED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND compute_authority IN ('CURRENT','EXPIRED')",[scope.organisation_id,scope.run_id,attempt]);
     await tx.query("UPDATE hyperfide.slot_allocations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='ACTIVE'",[scope.organisation_id,scope.run_id,attempt]);
@@ -29,7 +34,7 @@ export function createComponent(_context:ComponentContext):Component{
      await tx.query("UPDATE hyperfide.tasks SET state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND current_attempt_id=$4 AND generation=$5 AND state NOT IN ('INTEGRATED','CANCELLED')",[scope.organisation_id,scope.run_id,row.task_id,attempt,generation]);
     }
     const result={scope,attempt_id:attempt,compute_authority:['CURRENT','EXPIRED'].includes(String(row.compute_authority))?'REVOKED':row.compute_authority,preserved_submission_custody:custody.rows,qualification_jobs_requeued:expiredJobs.rows,
-     normal_scheduler_recovery_pending:custody.rows.length===0,recovery_operation_id:id,task_id:row.task_id,replacement_authorized:false,requires: custody.rows.length?'RECOVER_QUALIFICATION_UNDER_ITS_OWN_LEASE':'EXTERNAL_INVENTORY_AND_COMPATIBLE_CHECKPOINT',
+     replacement_gate:replacementGate,normal_scheduler_recovery_pending:custody.rows.length===0,recovery_operation_id:id,task_id:row.task_id,replacement_authorized:false,requires: custody.rows.length?'RECOVER_QUALIFICATION_UNDER_ITS_OWN_LEASE':'EXTERNAL_INVENTORY_AND_COMPATIBLE_CHECKPOINT',
      stale_outputs:'ARCHIVE_PROVENANCE_ONLY',publication_authorized:false};
     await finishOperation(tx,scope,id,result);return result;
    });
