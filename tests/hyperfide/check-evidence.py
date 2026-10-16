@@ -271,7 +271,8 @@ def worktree_inventory(workspace, campaign, commit, inventory):
     diff_sha256 = None
     if commit is not None:
         def git(arguments):
-            result = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", str(workspace)] + arguments, capture_output=True, timeout=30)
+            from proof_relocation import safe_git
+            result = safe_git(workspace, arguments, require, portable=RELOCATION is not None)
             require(result.returncode == 0, "cannot independently inspect Git worktree")
             return result.stdout
         changed = set(filter(None, git(["diff", "--name-only", "-z", "HEAD", "--"]).decode("utf-8").split("\0")))
@@ -346,8 +347,9 @@ def verify_selected(root, receipt, manifest, registry, registration, events, art
     else:
         require(isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit), "source commit identity invalid")
         require(source.get("unversioned") is False, "source version identity inconsistent")
-        result = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-C", str(physical_directory(workspace)), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=15)
-        require(result.returncode == 0 and result.stdout.strip() == commit, "current source revision differs from candidate")
+        from proof_relocation import safe_git
+        result = safe_git(physical_directory(workspace), ["rev-parse", "HEAD"], require, portable=RELOCATION is not None)
+        require(result.returncode == 0 and result.stdout.decode("utf-8").strip() == commit, "current source revision differs from candidate")
     originals = set()
     for record in source["files"]:
         original = record.get("original_path")

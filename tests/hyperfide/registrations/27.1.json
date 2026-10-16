@@ -67,7 +67,8 @@
     "harness.proof.portable-real-source-and-executable-checks",
     "harness.proof.portable-rejects-missing-map-and-changed-tool",
     "harness.proof.portable-rejects-wrong-commit-and-escape",
-    "harness.proof.postcheck-bytes-are-rechecked"
+    "harness.proof.postcheck-bytes-are-rechecked",
+    "harness.proof.git-filter-no-execution"
   ],
   "cases": [
     "V-056"

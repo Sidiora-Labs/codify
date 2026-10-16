@@ -83,3 +83,63 @@ class Relocation:
         original = Path(original)
         self.require(self.executables.get(original) == command["argv"][0], "executable argv identity differs from trusted mapping")
         return self.file(original)
+
+
+def safe_git(workspace, arguments, require, portable=False):
+    """Read Git state without evaluating repository/global executable helpers.
+
+    Filtered/LFS or other non-neutral configurations are unsupported and reject.
+    This does not replace source, worktree or commit comparisons.
+    """
+    import configparser
+    import re
+    import subprocess
+    marker = Path(workspace) / ".git"
+    require(not marker.is_symlink(), "symbolic Git metadata forbidden")
+    if marker.is_dir():
+        gitdir = marker
+    else:
+        require(not portable and marker.is_file(), "portable source requires standalone Git metadata")
+        raw = marker.read_text()
+        require(raw.startswith("gitdir: ") and len(raw.splitlines()) == 1, "unsupported Git metadata marker")
+        gitdir = (marker.parent / raw[8:].strip()).resolve()
+    common = gitdir / "commondir"
+    if common.exists():
+        require(not portable and not common.is_symlink(), "portable shared Git metadata forbidden")
+        gitdir = (gitdir / common.read_text().strip()).resolve()
+    require(not (gitdir / "config.worktree").exists(), "worktree-specific Git config unsupported")
+    require(not (gitdir / "objects/info/alternates").exists(), "external Git object stores unsupported")
+    config = gitdir / "config"
+    require(config.is_file() and not config.is_symlink() and config.stat().st_size <= 65536, "neutral local Git config required")
+    parsed = configparser.ConfigParser(interpolation=None, strict=True)
+    try:
+        parsed.read_string(config.read_text())
+    except (configparser.Error, ValueError):
+        require(False, "unsupported local Git configuration syntax")
+    require(not parsed.defaults(), "default Git configuration unsupported")
+    for section in parsed.sections():
+        if section == "core":
+            allowed = {"repositoryformatversion", "filemode", "bare", "logallrefupdates", "symlinks", "ignorecase", "precomposeunicode"}
+        elif section == "extensions":
+            allowed = {"objectformat"}
+        elif re.fullmatch(r'remote "[^"\n]+"', section):
+            allowed = {"url", "fetch"}
+        elif re.fullmatch(r'branch "[^"\n]+"', section):
+            allowed = {"remote", "merge"}
+        elif section == "user":
+            allowed = {"name", "email"}
+        elif section == "gc":
+            allowed = {"auto", "autodetach"}
+        elif section == "maintenance":
+            allowed = {"auto"}
+        else:
+            require(False, "non-neutral Git configuration is unsupported")
+        require(set(parsed[section]).issubset(allowed), "non-neutral Git configuration is unsupported")
+    # Git's environment config can inject helpers even when .git/config is clean.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM=os.devnull,
+               GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM="1", GIT_OPTIONAL_LOCKS="0")
+    return subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+                           "-c", "core.attributesFile=/dev/null", "-c", "maintenance.auto=false",
+                           "-c", "gc.auto=0", "-c", "gc.autoDetach=false", "-C", str(workspace)] + arguments,
+                          env=env, capture_output=True, timeout=30)

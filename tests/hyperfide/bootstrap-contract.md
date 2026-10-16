@@ -15,7 +15,7 @@ Default campaign directories are fingerprinted by the actual Git HEAD, dirty and
 
 ## Registered checks
 
-The 64 assertion IDs in registrations/27.1.json correspond, in order, to these actual subprocess experiments:
+The 65 assertion IDs in registrations/27.1.json correspond, in order, to these actual subprocess experiments:
 
 1. Reject absent selector.
 2. Reject unknown case.
@@ -154,8 +154,10 @@ source, cases, assertions and policy with `grants_authority: false`; mismatch
 returns nonzero `REJECTED`. The trusted service must bind that bounded result to
 its durable admission transaction and the original actual15 custody receipt.
 
-Checks54–64 exercise real versioned component receipts, closed request/policy
+Checks54–65 exercise real versioned component receipts, closed request/policy
 validation, anchors, case/source pin mismatches, symbolic/path escapes, artifact
 changes, byte reread, and portable verification after deleting the original
 checkout. Changed tools, missing mappings and wrong staged revisions reject.
 They are delegated by the standard selftest entrypoint and cannot skip.
+
+Git inspection rejects non-neutral local configuration (including filters, includes and process helpers) and strips inherited Git configuration; LFS/normalising filters remain unsupported and fail closed. Check65 uses an actual configured clean filter plus environment injection and proves its marker is never written. The external receipt anchor must originate from an authenticated qualified campaign producer and actual trusted custody, never an arbitrary caller digest; server-owned staging alone does not authenticate copied bytes.

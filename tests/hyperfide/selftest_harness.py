@@ -55,6 +55,7 @@ ASSERTIONS = [
     'harness.proof.portable-rejects-missing-map-and-changed-tool',
     'harness.proof.portable-rejects-wrong-commit-and-escape',
     'harness.proof.postcheck-bytes-are-rechecked',
+    "harness.proof.git-filter-no-execution",
 ]
 
 PROBE = r"""import json
@@ -700,6 +701,8 @@ class HarnessTests(unittest.TestCase):
     def test_64_proof_postcheck_bytes_are_rechecked(self):
         self.proof_regression('test_postcheck_bytes_are_rechecked')
 
+    def test_65_proof_git_filter_no_execution(self):
+        self.proof_regression("test_git_filter_configuration_never_executes")
 
 class InventoryResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):

@@ -71,7 +71,8 @@
     "harness.proof.portable-real-source-and-executable-checks",
     "harness.proof.portable-rejects-missing-map-and-changed-tool",
     "harness.proof.portable-rejects-wrong-commit-and-escape",
-    "harness.proof.postcheck-bytes-are-rechecked"
+    "harness.proof.postcheck-bytes-are-rechecked",
+    "harness.proof.git-filter-no-execution"
   ],
   "inputs": [
     {
@@ -81,13 +82,13 @@
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
-      "sha256": "7feda1b2c54a806b3a7a814654d25abbb0bb12487f82a2a7f327001f1d0b720d",
-      "size": 30481
+      "sha256": "1f5bd2c472657c4de4e0882ab2021711b4188419e27fafcf1071ba7df6b65092",
+      "size": 30421
     },
     {
       "path": "tests/hyperfide/selftest_harness.py",
-      "sha256": "88873c9ebfa457db62294b81fe411ee94ab273964b4ced731ccf6d8012041923",
-      "size": 34112
+      "sha256": "4b813abe66a5a74f76392088182f22a7a8249de730a3ff7cc2f55a0bc013c1a4",
+      "size": 34288
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_1.py",
@@ -111,13 +112,13 @@
     },
     {
       "path": "tests/hyperfide/proof_relocation.py",
-      "sha256": "b5d87d5574fe90723c21674bceaf0b6d548a062751e99688fd2f543d9f2db72a",
-      "size": 5175
+      "sha256": "1f504a5acdafa03d6f07e0fa356b4622f5ac9cfaedf9eeeadcadcdaf6456dcfc",
+      "size": 8509
     },
     {
       "path": "tests/hyperfide/test_inspect_proof.py",
-      "sha256": "cbbc30400dd973921a9f0129539d7ee21c9014d44d7772de7eef8ac745776d10",
-      "size": 9821
+      "sha256": "1853e331356e58f3b24db9a38249143ef68f89b0b3062f541299074f0a1dd998",
+      "size": 10986
     }
   ],
   "policy": {

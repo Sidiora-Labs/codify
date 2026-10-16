@@ -41,8 +41,8 @@ class ProofInspectionTests(unittest.TestCase):
         if self.staging:
             self.staging.cleanup()
 
-    def run_inspector(self, request=None, full=False, root=None, raw=None):
-        return subprocess.run([sys.executable, str(INSPECTOR), "--evidence-root", str(root or self.fixture.root)] + (["--require-full"] if full else []), input=raw if raw is not None else json.dumps(request or self.request), text=True, capture_output=True, timeout=25)
+    def run_inspector(self, request=None, full=False, root=None, raw=None, environment=None):
+        return subprocess.run([sys.executable, str(INSPECTOR), "--evidence-root", str(root or self.fixture.root)] + (["--require-full"] if full else []), input=raw if raw is not None else json.dumps(request or self.request), text=True, capture_output=True, timeout=25, env=environment)
 
     def reject(self, result):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -169,6 +169,25 @@ class ProofInspectionTests(unittest.TestCase):
         self.receipt_path.write_bytes(pins[0][1] + b" ")
         with self.assertRaises(module.Rejected):
             module.recheck(pins)
+
+    def test_git_filter_configuration_never_executes(self):
+        import os
+        root, mapping = self.portable()
+        marker = root / "filter-executed"
+        source = root / "source"
+        config = source / ".git/config"
+        original = config.read_text()
+        (source / ".git/info/attributes").write_text("probe.py filter=untrusted\n")
+        script = "sh -c 'touch " + str(marker) + "; cat'"
+        config.write_text(original + '\n[filter "untrusted"]\n\tclean = ' + script + '\n')
+        os.utime(source / "probe.py", None)
+        self.reject(self.run_inspector(root=root))
+        self.assertFalse(marker.exists(), "repository clean filter executed during read-only inspection")
+        config.write_text(original)
+        environment = dict(os.environ, GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="filter.untrusted.clean", GIT_CONFIG_VALUE_0=script)
+        result = self.run_inspector(root=root, environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(marker.exists(), "environment clean filter executed during read-only inspection")
 
 if __name__ == "__main__":
     unittest.main()
