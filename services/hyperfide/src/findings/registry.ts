@@ -6,7 +6,7 @@ import {databaseError} from '../storage/schema.js';
 import type {AuthorityTransaction} from '../transport/protocol.js';
 
 export interface FindingScope {organisation_id:string;run_id:string;repository_id?:string;source_object_id?:string}
-export interface FindingPrincipal {credential_id:string;actor_id:string;organisation_id:string;run_id:string;deployment_epoch:string;role:string;allowed_actions:readonly string[]}
+export interface FindingPrincipal {credential_id:string;actor_id:string;organisation_id:string;run_id:string;deployment_epoch:string;role:string;allowed_actions:readonly string[];expires_at:string}
 export interface FindingInvocation {principal:FindingPrincipal;operation:unknown;payload:{action:string;run_id:string};guard(tx:AuthorityTransaction):Promise<void>}
 export type FindingDatabase=AuthorityTransaction;
 export interface FindingTransaction {tx:FindingDatabase;scope:FindingScope;principal:FindingPrincipal;context:ComponentContext}
@@ -47,11 +47,10 @@ export async function readiness(tx:FindingDatabase):Promise<void>{
 export async function withFindingTransaction<T>(context:ComponentContext,action:string,fn:(value:FindingTransaction)=>Promise<T>):Promise<T>{
  const call=await invocation(context,action),principal=call.principal;
  let gatewayOf:unknown;try{gatewayOf=(await import(new URL('../identity/enrollment.js',import.meta.url).href)).gatewayOf;}catch{fail('DEPENDENCY_NOT_READY','Actual identity and primary transaction gateway are required');}if(typeof gatewayOf!=='function')fail('DEPENDENCY_NOT_READY','Actual primary transaction gateway is absent');
- const gateway=gatewayOf(context);
- try{return await gateway.withPrimaryTransaction({timeoutMs:10000,signal:context.signal,guard:call.guard},async(tx:AuthorityTransaction)=>{
-  await readiness(tx);const scope={organisation_id:principal.organisation_id,run_id:principal.run_id};
-  const readOnly=['finding.inspect','finding.list','finding.context.read','finding.blockers.inspect','finding.github.status','finding.github.due'].includes(action);
-  await tx.query(readOnly?'SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))':'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':finding-disposition']);
+ const gateway=gatewayOf(context),scope={organisation_id:principal.organisation_id,run_id:principal.run_id};const readOnly=['finding.inspect','finding.list','finding.context.read','finding.blockers.inspect','finding.github.status','finding.github.due'].includes(action);
+ const guarded=async(tx:AuthorityTransaction)=>{await tx.query(readOnly?'SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))':'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':finding-disposition']);await call.guard(tx);};
+ try{return await gateway.withPrimaryTransaction({timeoutMs:10000,signal:context.signal,guard:guarded},async(tx:AuthorityTransaction)=>{
+  await readiness(tx);
   const run=await tx.query('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
   if(run.rows.length!==1||run.rows[0]!.authority_epoch!==principal.deployment_epoch)fail('STALE_AUTHORITY','Run authority epoch does not match the authenticated deployment');
   return fn({tx,scope,principal,context});
