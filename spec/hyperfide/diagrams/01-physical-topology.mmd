@@ -1,0 +1,50 @@
+flowchart TB
+    HUMAN["Humans: spec, constraints, programme changes"]
+    subgraph MAIN["Main server: supervision and coordination"]
+        LEADER["Primary Claude Code or Codex leader"]
+        FM["Feature managers: supervision and engineering decisions"]
+        API["Hyperfide coordination API and pooled DB access"]
+        CONTROL["Scheduler / provisioner / reconciler / event dispatcher"]
+        subgraph ADMIN["Provisioner administration boundary"]
+            ADAPTER["Provider SDK adapters: scoped provider administration credentials"]
+        end
+        LEADER <--> FM
+        LEADER <--> API
+        FM <--> API
+        API <--> CONTROL
+        CONTROL <-->|Desired and observed state| ADAPTER
+    end
+    HUMAN <--> LEADER
+    subgraph DURABLE["Durable services outside main-server failure domain"]
+        PRIMARY[("PostgreSQL primary: fleet authority and versioned graphs")]
+        REPLICA[("PostgreSQL replica: lag-aware observation and graph reads")]
+        GIT["Git: attempt refs and integration refs"]
+        OBJECTS["Artifact storage: logs, checkpoints, evidence, build outputs"]
+        PRIMARY -->|Replication| REPLICA
+    end
+    API <--> PRIMARY
+    API -->|Eligible read classes| REPLICA
+    subgraph REMOTE["Railway and Blaxel execution pools"]
+        PROVIDER["Provider execution interfaces and sandbox resources"]
+        RUNNER["Sandbox supervisors and isolated worker slots"]
+        PREP["Remote preparation and graph indexing"]
+        IMPL["Remote frontier implementation and repair"]
+        REVIEW["Remote review and reproductions"]
+        VERIFY["Remote builds, tests and integration"]
+        PUBLISH["Sole publication gateway: protected target-ref credentials"]
+        PROVIDER --> RUNNER
+        RUNNER --> PREP
+        RUNNER --> IMPL
+        RUNNER --> REVIEW
+        RUNNER --> VERIFY
+        VERIFY --> PUBLISH
+    end
+    ADAPTER <-->|Create, inspect, configure and delete| PROVIDER
+    RUNNER <-->|Authenticated assignments, events and steering| API
+    RUNNER <--> GIT
+    CONTROL -->|Authorised release intent| PUBLISH
+    PUBLISH -->|Expected-head compare-and-swap| GIT
+    RUNNER <--> OBJECTS
+    DECISION["Span / Jev / D1 decision APIs: advisory only"]
+    CONTROL -.-> DECISION
+    DECISION -.-> API

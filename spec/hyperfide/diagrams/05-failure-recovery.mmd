@@ -1,0 +1,29 @@
+flowchart TB
+    LOST["Missing connection, heartbeat or process observation"]
+    OBSERVE["Mark observation uncertain; retain identities and history"]
+    RECON["Reconcile provider identity, boot identity, process and ownership"]
+    EXIST["Existing execution healthy and current"]
+    RESTORE["Reattach session and replay acknowledged event cursor"]
+    CUSTODY["Admitted durable submission has ACTIVE custody"]
+    KEEP["Preserve custody; recover qualification jobs under their own leases"]
+    REPLACE["Unfinished compute lost, or explicit replacement authorised"]
+    FENCE["Primary validates no ACTIVE custody or explicitly disposes it; supersedes attempt and advances generation"]
+    NEW["New attempt and independently registered supervisor"]
+    MANIFEST["Select durable Git, workspace and native-session checkpoint manifest"]
+    VERIFY["Validate hashes, provenance and connector compatibility"]
+    RESUME["Resume supported session or start fresh from checkpoint packet"]
+    OLD["Old worker returns or uploads late result"]
+    REJECT["Reject stale authoritative update"]
+    QUAR["Retain candidate artifacts with original provenance"]
+    ADOPT["Current owner explicitly adopts validated artifacts"]
+    QUAL["Re-evaluate current evidence and integration eligibility"]
+    CTRL["Main server restarts"]
+    LOAD["Recover control state from PostgreSQL; reacquire control ownership"]
+    LOST --> OBSERVE --> RECON
+    RECON --> EXIST --> RESTORE
+    RECON --> CUSTODY --> KEEP --> QUAL
+    RECON --> REPLACE --> FENCE --> NEW --> MANIFEST --> VERIFY --> RESUME
+    OLD --> REJECT --> QUAR --> ADOPT --> QUAL
+    FENCE -.-> REJECT
+    RESUME --> QUAL
+    CTRL --> LOAD --> RECON

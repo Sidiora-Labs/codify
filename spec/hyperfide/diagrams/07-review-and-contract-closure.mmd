@@ -1,0 +1,25 @@
+flowchart TB
+    CHANGE["Immutable commit or candidate change"]
+    COVER["Review coverage ledger: required watchers and rubrics"]
+    COMMIT["Baseline: each of 10-15 commit watchers examines every commit"]
+    CONTRACT["Contract impact: producers, consumers and behaviour"]
+    LEVELS["Task / contract / candidate / programme checks"]
+    FIND["Finding: evidence, revision, affected criteria and contracts"]
+    DEDUP["Dispatcher: stable identity, deduplication and accountable owner"]
+    FM["Owner FM with affected peer managers"]
+    FIX["Remote repair and reproduction"]
+    RECHECK["Resolution evidence against current affected inputs"]
+    CLOSE["Finding resolved; review coverage and assurance updated"]
+    GATE["Required closure rules evaluated for task or candidate"]
+    GH["GitHub issue mirror and externally created issues"]
+    RECON["10-minute reconciliation plus internal event delivery"]
+    CHANGE --> COVER --> COMMIT
+    CHANGE --> CONTRACT --> LEVELS
+    COMMIT --> FIND
+    LEVELS --> FIND
+    FIND --> DEDUP --> FM --> FIX --> RECHECK --> CLOSE --> GATE
+    DEDUP <--> GH
+    GH --> RECON --> DEDUP
+    CONTRACT -.->|Relevant change invalidates affected evidence| RECHECK
+    ADVICE["Decision assistance: routing and duplicate suggestions"]
+    ADVICE -.-> DEDUP

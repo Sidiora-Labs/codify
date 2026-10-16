@@ -1,0 +1,12 @@
+flowchart LR
+    DRAFT["Draft pack and explicit decisions"]
+    APPROVAL["Human reviews pack and authorises implementation"]
+    BASE["Inventory compatibility and capture baseline evidence"]
+    STATE["Implement versioned state and execution contracts"]
+    PROVIDERS["Qualify provider adapters and native connectors"]
+    GRAPH["Migrate graph and evidence with parity checks"]
+    PILOT["Controlled pilot including recovery and semantic gates"]
+    SCALE["Mixed-load scale and 48-72 hour qualification"]
+    CUT["Controlled authority cutover and rollback rehearsal"]
+    BRAND["Hyperfide release and documented compatibility window"]
+    DRAFT --> APPROVAL --> BASE --> STATE --> PROVIDERS --> GRAPH --> PILOT --> SCALE --> CUT --> BRAND

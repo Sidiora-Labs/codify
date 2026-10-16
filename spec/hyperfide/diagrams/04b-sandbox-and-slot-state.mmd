@@ -1,0 +1,38 @@
+stateDiagram-v2
+    state "Sandbox lifecycle" as Sandbox {
+        [*] --> REQUESTED
+        REQUESTED --> PROVISIONING
+        PROVISIONING --> BOOTSTRAPPING: provider identity confirmed
+        BOOTSTRAPPING --> READY: sandbox readiness attested
+        READY --> DRAINING
+        DRAINING --> DELETING: required artifacts durable and ownership released
+        DELETING --> DELETED: provider absence confirmed
+        BOOTSTRAPPING --> QUARANTINED: unsafe preparation
+        READY --> QUARANTINED: contamination or unsafe residual state
+        QUARANTINED --> DRAINING: disposition authorised
+    }
+    state "Slot lifecycle" as Slot {
+        [*] --> SlotFree
+        state "FREE" as SlotFree
+        state "RESERVED" as SlotReserved
+        state "MATERIALISING" as SlotMaterialising
+        state "READY" as SlotReady
+        state "STARTING" as SlotStarting
+        state "BUSY" as SlotBusy
+        state "CLEANING" as SlotCleaning
+        state "QUARANTINED" as SlotQuarantined
+        SlotFree --> SlotReserved
+        SlotReserved --> SlotMaterialising
+        SlotMaterialising --> SlotReady
+        SlotReady --> SlotStarting
+        SlotStarting --> SlotBusy
+        SlotBusy --> SlotCleaning
+        SlotCleaning --> SlotFree: teardown and readiness verified
+        SlotCleaning --> SlotQuarantined: unsafe residue
+    }
+    note right of Sandbox
+        Observed health is separate:
+        HEALTHY / SUSPECT / UNKNOWN / ABSENT.
+        Unreachable means uncertain observation.
+        BUSY is a slot state.
+    end note

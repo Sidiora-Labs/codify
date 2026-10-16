@@ -1,0 +1,24 @@
+flowchart TB
+    WORKER["Worker compute authority CURRENT with unexpired lease"]
+    SUBMIT["Initial SubmitResult validates attempt, source and artifacts"]
+    TX["Primary transaction creates submission ID and custody generation"]
+    COMPUTE["Worker compute authority RELEASED"]
+    ACTIVE["Submission custody ACTIVE"]
+    JOB["Independent qualification job with its own compute lease"]
+    VALIDATE["Validate current submission, ownership generation and ACTIVE custody generation"]
+    PASS["Qualification outcome PASS; task QUALIFIED; custody remains ACTIVE"]
+    FAIL["Qualification outcome FAIL; repair required; custody remains ACTIVE until disposition"]
+    TERMINAL["Integration or terminal disposition recorded"]
+    RELEASE["Custody RELEASED"]
+    REVOKE["Explicit revocation or reassignment transaction"]
+    END["Custody REVOKED or SUPERSEDED"]
+    WORKER --> SUBMIT --> TX
+    TX --> COMPUTE
+    TX --> ACTIVE --> JOB --> VALIDATE
+    VALIDATE --> PASS
+    VALIDATE --> FAIL
+    PASS --> TERMINAL
+    FAIL --> TERMINAL
+    TERMINAL --> RELEASE
+    ACTIVE --> REVOKE --> END
+    COMPUTE -.->|Later worker lease expiry cannot reclaim ACTIVE custody| ACTIVE

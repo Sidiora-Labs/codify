@@ -1,0 +1,57 @@
+sequenceDiagram
+    autonumber
+    participant FM as Feature manager
+    participant API as Hyperfide coordinator
+    participant DB as PostgreSQL primary
+    participant P as Main provisioner adapter
+    participant S as Sandbox supervisor
+    participant W as Frontier worker
+    participant A as Git and artifact storage
+    participant V as Review and verification
+    participant I as Remote integrator
+    participant G as Publication gateway
+    FM->>API: Request eligible task with idempotency key
+    API->>DB: Short transaction: validate dependencies, claim attempt, reserve slot, outbox
+    DB-->>API: Attempt ID, ownership generation and assignment
+    API->>P: Ensure sandbox for recorded provisioning request
+    P-->>API: Provider identity or uncertain creation result
+    Note over API,P: Uncertain creation is reconciled before another create
+    API->>S: Bootstrap packet and scoped runtime credential references
+    S->>A: Fetch pinned source and prepared dependency artifacts
+    S->>API: Register boot identity, workspace, capabilities and readiness
+    API->>DB: Validate attempt and boot identity
+    API->>S: Start connector with session identity and execution packet
+    S->>W: Launch native agent with isolated runtime and workspace
+    loop During execution
+        S->>API: Heartbeats, process observations and progress events
+        W->>A: Source checkpoints, logs and session checkpoints
+        FM->>API: Durable steering message
+        API->>S: Deliver instruction with message ID
+        S->>W: Local connector delivery
+        S->>API: Delivery and processing acknowledgements
+    end
+    W->>A: Publish immutable source revision and evidence artifacts
+    S->>API: Submit result manifest, revision and ownership generation
+    API->>DB: Validate compute lease; create ACTIVE submission custody; release compute authority
+    Note over S,DB: Clean worker slot after quiescence and durable outputs; custody survives compute expiry
+    API->>V: Independent review and qualification packet
+    Note over API,V: Qualification jobs hold their own compute leases
+    V->>A: Preserve command results, findings and reproductions
+    V->>API: Revision-bound qualification and review results
+    API->>DB: Validate current submission and ACTIVE custody generation; record outcome and retain custody
+    alt Required evidence fails
+        API->>FM: Route finding and failure packet
+        FM->>API: Request repair attempt under same task
+    else Required evidence passes
+        API->>I: Build candidate from qualified revisions and expected target head
+        I->>A: Construct candidate, run integration gates and store evidence
+        I->>API: Candidate revision, expected head and result manifest
+        API->>DB: Validate integration ownership, candidate inputs and evidence
+        API->>G: Authorise publication with candidate, expected head and integration generation
+        Note over I,G: Integrators lack target-ref credentials; gateway is the sole publication path
+        G->>A: Compare-and-swap target ref against expected head
+        G->>API: Report actual publication result or uncertain outcome
+        Note over API,G: Reconcile uncertain Git outcome before replacement publication
+        API->>DB: Reconcile publication; record integration, release terminal custody and evaluate wave closure
+        API-->>FM: Wave status and newly eligible work
+    end

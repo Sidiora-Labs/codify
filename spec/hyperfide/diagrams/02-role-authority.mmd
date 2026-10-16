@@ -1,0 +1,31 @@
+flowchart TB
+    HUMAN["Human: intent and acceptance criteria"]
+    LEADER["Primary leader: programme decisions and accountability"]
+    FM["Feature manager: accountable work-package owner"]
+    PACKAGE["Wave package: tasks, contracts, dependencies and findings"]
+    CONTROL["Hyperfide services: deterministic admission and state transitions"]
+    SUP["Sandbox supervisor: local process and workspace ownership"]
+    IMPL["Frontier implementation / repair worker"]
+    CHILD["Registered native child agent: parent and slot attribution"]
+    REVIEW["Independent commit and semantic reviewers"]
+    VERIFY["Verification and integration executors"]
+    DISPATCH["Finding dispatcher: deduplicate and attribute"]
+    EVIDENCE["Revision-bound evidence and current assurance"]
+    HUMAN --> LEADER
+    LEADER <-->|Delegation and escalations| FM
+    FM --> PACKAGE
+    PACKAGE -->|Execution request| CONTROL
+    CONTROL -->|Assignment and fence| SUP
+    SUP --> IMPL
+    IMPL -->|Register before execution| CHILD
+    CONTROL --> REVIEW
+    CONTROL --> VERIFY
+    IMPL --> EVIDENCE
+    REVIEW --> EVIDENCE
+    VERIFY --> EVIDENCE
+    EVIDENCE --> CONTROL
+    REVIEW --> DISPATCH
+    VERIFY --> DISPATCH
+    DISPATCH -->|One remediation owner plus affected managers| FM
+    ADVICE["Decision models: rank, flag, classify or abstain"]
+    ADVICE -.-> CONTROL

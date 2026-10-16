@@ -1,0 +1,17 @@
+{
+  "scope": "Public Hyperfide specification candidates and local ignore/tracking policy; not a repository-history secret audit",
+  "status": "PASS",
+  "public_files_scanned": 39,
+  "private_probe_count": 6,
+  "private_probes_ignored": 6,
+  "private_companion_tracked": false,
+  "generated_context_tracked": false,
+  "generated_context_local_copy_exists": true,
+  "dotenv_templates_remain_eligible": true,
+  "findings": [],
+  "limitations": [
+    "Pattern matching is not proof that arbitrary sensitive prose or all secret formats are absent.",
+    "No commit history was rewritten or published.",
+    "Detailed private audit records are deliberately excluded from public validation and file lists."
+  ]
+}

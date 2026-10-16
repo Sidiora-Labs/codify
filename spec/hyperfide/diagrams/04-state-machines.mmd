@@ -1,0 +1,21 @@
+stateDiagram-v2
+    [*] --> BLOCKED
+    BLOCKED --> ELIGIBLE: required dependency milestones satisfied
+    ELIGIBLE --> ACTIVE: current attempt reserved
+    ACTIVE --> SUBMITTED: authoritative revision submitted
+    SUBMITTED --> QUALIFYING: coordinator takes qualification custody
+    QUALIFYING --> QUALIFIED: required evidence current
+    QUALIFIED --> INTEGRATING: candidate work admitted
+    INTEGRATING --> INTEGRATED: publication reconciled
+    QUALIFYING --> REPAIR_REQUIRED: required evidence fails
+    INTEGRATING --> REPAIR_REQUIRED: candidate requires repair
+    ACTIVE --> REPAIR_REQUIRED: failed attempt requires repair plan
+    REPAIR_REQUIRED --> ELIGIBLE: defined repair and scheduling plan
+    BLOCKED --> CANCELLED: programme authority
+    ELIGIBLE --> CANCELLED: programme authority
+    ACTIVE --> CANCELLED: fence and cancel execution
+    note right of QUALIFIED
+        Assurance is separate:
+        CURRENT / STALE / MISSING.
+        Historical progress is retained.
+    end note

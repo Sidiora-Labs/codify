@@ -1,0 +1,14 @@
+flowchart TB
+    SET["Candidate manifest: spec, repository commits and required contracts"]
+    TEST["Remote cross-repository qualification against entire candidate set"]
+    INTENT["Record release intent and expected heads for all target refs"]
+    GATE["Sole publication gateway: protected target credentials"]
+    REFS["Per-repository compare-and-swap updates"]
+    RECON["Reconcile every repository outcome and record actual refs"]
+    PARTIAL["Partial or uncertain publication: freeze dependent release"]
+    POLICY["Apply recorded recovery policy: complete or restore refs where authorised"]
+    COMPLETE["All required repository outcomes verified"]
+    BARRIER["Commit programme release barrier; expose integrated milestone"]
+    SET --> TEST --> INTENT --> GATE --> REFS --> RECON
+    RECON -->|Incomplete or uncertain| PARTIAL --> POLICY --> RECON
+    RECON -->|Complete manifest| COMPLETE --> BARRIER

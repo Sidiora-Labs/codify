@@ -47,7 +47,6 @@
         "**/.DS_Store": true,
         "**/.pytest_cache": true,
         "**/.cache": true,
-        "**/.codegraph": true,
         "**/build": true,
         "**/.logs": true,
         "**/.kiro": true,

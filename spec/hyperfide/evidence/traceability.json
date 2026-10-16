@@ -1,0 +1,1580 @@
+{
+  "schema_version": 2,
+  "scope": "PUBLIC_IMPLEMENTATION_TRACEABILITY",
+  "generated_on": "2026-10-16",
+  "status": "draft",
+  "runtime_status": "UNRUN",
+  "implementation_authorized": false,
+  "mapping_contract": {
+    "native_clauses": "N.M means [req.N] ac_M in spec.kvx",
+    "task_ids": "[task.ID], matching evidence/task-catalog.json",
+    "acceptance_ids": "Canonical V-NNN case registry; all runtime cases remain UNRUN",
+    "component_receipts": "A task-component receipt cannot close required full-case or provider, connector and campaign variants",
+    "chapters": "Public design and implementation contracts; links establish coverage, not successful qualification"
+  },
+  "clause_mappings": [
+    {
+      "id": "1.1",
+      "task_ids": [
+        "1.1"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-052"
+      ],
+      "chapters": [
+        "design.body.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "1.2",
+      "task_ids": [
+        "1.2"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-008"
+      ],
+      "chapters": [
+        "design.body.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "1.3",
+      "task_ids": [
+        "1.3"
+      ],
+      "acceptance_ids": [
+        "V-042",
+        "V-044"
+      ],
+      "chapters": [
+        "design.body.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "1.4",
+      "task_ids": [
+        "1.4"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-028"
+      ],
+      "chapters": [
+        "design.body.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "2.1",
+      "task_ids": [
+        "2.1"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-024"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "2.2",
+      "task_ids": [
+        "2.2"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-024"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "2.3",
+      "task_ids": [
+        "2.3"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-014"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "2.4",
+      "task_ids": [
+        "2.4"
+      ],
+      "acceptance_ids": [
+        "V-013",
+        "V-034"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "3.1",
+      "task_ids": [
+        "3.1"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-008"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "schematics.md"
+      ]
+    },
+    {
+      "id": "3.2",
+      "task_ids": [
+        "3.2"
+      ],
+      "acceptance_ids": [
+        "V-001",
+        "V-014"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "schematics.md"
+      ]
+    },
+    {
+      "id": "3.3",
+      "task_ids": [
+        "3.3"
+      ],
+      "acceptance_ids": [
+        "V-010",
+        "V-016"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "schematics.md"
+      ]
+    },
+    {
+      "id": "3.4",
+      "task_ids": [
+        "3.4"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-008"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "schematics.md"
+      ]
+    },
+    {
+      "id": "4.1",
+      "task_ids": [
+        "4.1"
+      ],
+      "acceptance_ids": [
+        "V-002",
+        "V-015"
+      ],
+      "chapters": [
+        "storage.md"
+      ]
+    },
+    {
+      "id": "4.2",
+      "task_ids": [
+        "4.2"
+      ],
+      "acceptance_ids": [
+        "V-002",
+        "V-011"
+      ],
+      "chapters": [
+        "storage.md"
+      ]
+    },
+    {
+      "id": "4.3",
+      "task_ids": [
+        "4.3"
+      ],
+      "acceptance_ids": [
+        "V-010",
+        "V-023"
+      ],
+      "chapters": [
+        "storage.md"
+      ]
+    },
+    {
+      "id": "4.4",
+      "task_ids": [
+        "4.4"
+      ],
+      "acceptance_ids": [
+        "V-009",
+        "V-053"
+      ],
+      "chapters": [
+        "storage.md"
+      ]
+    },
+    {
+      "id": "5.1",
+      "task_ids": [
+        "5.1"
+      ],
+      "acceptance_ids": [
+        "V-002",
+        "V-007"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "5.2",
+      "task_ids": [
+        "5.2"
+      ],
+      "acceptance_ids": [
+        "V-003",
+        "V-004"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "5.3",
+      "task_ids": [
+        "5.3"
+      ],
+      "acceptance_ids": [
+        "V-004",
+        "V-037"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "5.4",
+      "task_ids": [
+        "5.4"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-047"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "6.1",
+      "task_ids": [
+        "6.1"
+      ],
+      "acceptance_ids": [
+        "V-005"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "6.2",
+      "task_ids": [
+        "6.2"
+      ],
+      "acceptance_ids": [
+        "V-005",
+        "V-016"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "6.3",
+      "task_ids": [
+        "6.3"
+      ],
+      "acceptance_ids": [
+        "V-006"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "6.4",
+      "task_ids": [
+        "6.4"
+      ],
+      "acceptance_ids": [
+        "V-005",
+        "V-008"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "7.1",
+      "task_ids": [
+        "7.1"
+      ],
+      "acceptance_ids": [
+        "V-018",
+        "V-020"
+      ],
+      "chapters": [
+        "storage.md",
+        "migration.md"
+      ]
+    },
+    {
+      "id": "7.2",
+      "task_ids": [
+        "7.2"
+      ],
+      "acceptance_ids": [
+        "V-011",
+        "V-022"
+      ],
+      "chapters": [
+        "storage.md",
+        "migration.md"
+      ]
+    },
+    {
+      "id": "7.3",
+      "task_ids": [
+        "7.3"
+      ],
+      "acceptance_ids": [
+        "V-021",
+        "V-022"
+      ],
+      "chapters": [
+        "storage.md",
+        "migration.md"
+      ]
+    },
+    {
+      "id": "7.4",
+      "task_ids": [
+        "7.4"
+      ],
+      "acceptance_ids": [
+        "V-020",
+        "V-021",
+        "V-025",
+        "V-048"
+      ],
+      "chapters": [
+        "storage.md",
+        "migration.md"
+      ]
+    },
+    {
+      "id": "8.1",
+      "task_ids": [
+        "8.1"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-041"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "8.2",
+      "task_ids": [
+        "8.2"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-036"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "8.3",
+      "task_ids": [
+        "8.3"
+      ],
+      "acceptance_ids": [
+        "V-037",
+        "V-054"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "8.4",
+      "task_ids": [
+        "8.4"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-049"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "9.1",
+      "task_ids": [
+        "9.1"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-038",
+        "V-041"
+      ],
+      "chapters": [
+        "providers/railway.md"
+      ]
+    },
+    {
+      "id": "9.2",
+      "task_ids": [
+        "9.2"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-038"
+      ],
+      "chapters": [
+        "providers/railway.md"
+      ]
+    },
+    {
+      "id": "9.3",
+      "task_ids": [
+        "9.3"
+      ],
+      "acceptance_ids": [
+        "V-039",
+        "V-041"
+      ],
+      "chapters": [
+        "providers/railway.md"
+      ]
+    },
+    {
+      "id": "9.4",
+      "task_ids": [
+        "9.4"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-037",
+        "V-041"
+      ],
+      "chapters": [
+        "providers/railway.md"
+      ]
+    },
+    {
+      "id": "10.1",
+      "task_ids": [
+        "10.1"
+      ],
+      "acceptance_ids": [
+        "V-038",
+        "V-039"
+      ],
+      "chapters": [
+        "providers/blaxel.md"
+      ]
+    },
+    {
+      "id": "10.2",
+      "task_ids": [
+        "10.2"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-041"
+      ],
+      "chapters": [
+        "providers/blaxel.md"
+      ]
+    },
+    {
+      "id": "10.3",
+      "task_ids": [
+        "10.3"
+      ],
+      "acceptance_ids": [
+        "V-037",
+        "V-041"
+      ],
+      "chapters": [
+        "providers/blaxel.md"
+      ]
+    },
+    {
+      "id": "10.4",
+      "task_ids": [
+        "10.4"
+      ],
+      "acceptance_ids": [
+        "V-040",
+        "V-041"
+      ],
+      "chapters": [
+        "providers/blaxel.md"
+      ]
+    },
+    {
+      "id": "11.1",
+      "task_ids": [
+        "11.1"
+      ],
+      "acceptance_ids": [
+        "V-038",
+        "V-040"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "11.2",
+      "task_ids": [
+        "11.2"
+      ],
+      "acceptance_ids": [
+        "V-038",
+        "V-039"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "11.3",
+      "task_ids": [
+        "11.3"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-038",
+        "V-039"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "11.4",
+      "task_ids": [
+        "11.4"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-038"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "12.1",
+      "task_ids": [
+        "12.1"
+      ],
+      "acceptance_ids": [
+        "V-015",
+        "V-039"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "12.2",
+      "task_ids": [
+        "12.2"
+      ],
+      "acceptance_ids": [
+        "V-006",
+        "V-041",
+        "V-043"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "12.3",
+      "task_ids": [
+        "12.3"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-044"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "12.4",
+      "task_ids": [
+        "12.4"
+      ],
+      "acceptance_ids": [
+        "V-006",
+        "V-017"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "13.1",
+      "task_ids": [
+        "13.1"
+      ],
+      "acceptance_ids": [
+        "V-042"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "13.2",
+      "task_ids": [
+        "13.2"
+      ],
+      "acceptance_ids": [
+        "V-042",
+        "V-043"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "13.3",
+      "task_ids": [
+        "13.3"
+      ],
+      "acceptance_ids": [
+        "V-043",
+        "V-044"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "13.4",
+      "task_ids": [
+        "13.4"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-042",
+        "V-044"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "14.1",
+      "task_ids": [
+        "14.1"
+      ],
+      "acceptance_ids": [
+        "V-015",
+        "V-040"
+      ],
+      "chapters": [
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "14.2",
+      "task_ids": [
+        "14.2"
+      ],
+      "acceptance_ids": [
+        "V-040"
+      ],
+      "chapters": [
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "14.3",
+      "task_ids": [
+        "14.3"
+      ],
+      "acceptance_ids": [
+        "V-040",
+        "V-042"
+      ],
+      "chapters": [
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "14.4",
+      "task_ids": [
+        "14.4"
+      ],
+      "acceptance_ids": [
+        "V-015",
+        "V-016",
+        "V-040"
+      ],
+      "chapters": [
+        "identity-security.md"
+      ]
+    },
+    {
+      "id": "15.1",
+      "task_ids": [
+        "15.1"
+      ],
+      "acceptance_ids": [
+        "V-012",
+        "V-043"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "15.2",
+      "task_ids": [
+        "15.2"
+      ],
+      "acceptance_ids": [
+        "V-012"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "15.3",
+      "task_ids": [
+        "15.3"
+      ],
+      "acceptance_ids": [
+        "V-003",
+        "V-014",
+        "V-043"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "15.4",
+      "task_ids": [
+        "15.4"
+      ],
+      "acceptance_ids": [
+        "V-012",
+        "V-054"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "16.1",
+      "task_ids": [
+        "16.1"
+      ],
+      "acceptance_ids": [
+        "V-013",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "16.2",
+      "task_ids": [
+        "16.2"
+      ],
+      "acceptance_ids": [
+        "V-013",
+        "V-056"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "16.3",
+      "task_ids": [
+        "16.3"
+      ],
+      "acceptance_ids": [
+        "V-013",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "16.4",
+      "task_ids": [
+        "16.4"
+      ],
+      "acceptance_ids": [
+        "V-014",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "17.1",
+      "task_ids": [
+        "17.1"
+      ],
+      "acceptance_ids": [
+        "V-031"
+      ],
+      "chapters": [
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "17.2",
+      "task_ids": [
+        "17.2"
+      ],
+      "acceptance_ids": [
+        "V-029",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "17.3",
+      "task_ids": [
+        "17.3"
+      ],
+      "acceptance_ids": [
+        "V-031",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "17.4",
+      "task_ids": [
+        "17.4"
+      ],
+      "acceptance_ids": [
+        "V-029",
+        "V-030",
+        "V-052"
+      ],
+      "chapters": [
+        "assurance.md"
+      ]
+    },
+    {
+      "id": "18.1",
+      "task_ids": [
+        "18.1"
+      ],
+      "acceptance_ids": [
+        "V-032"
+      ],
+      "chapters": [
+        "assurance.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "18.2",
+      "task_ids": [
+        "18.2"
+      ],
+      "acceptance_ids": [
+        "V-032"
+      ],
+      "chapters": [
+        "assurance.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "18.3",
+      "task_ids": [
+        "18.3"
+      ],
+      "acceptance_ids": [
+        "V-008",
+        "V-032"
+      ],
+      "chapters": [
+        "assurance.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "18.4",
+      "task_ids": [
+        "18.4"
+      ],
+      "acceptance_ids": [
+        "V-032",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md",
+        "execution-contract.md"
+      ]
+    },
+    {
+      "id": "19.1",
+      "task_ids": [
+        "19.1"
+      ],
+      "acceptance_ids": [
+        "V-030",
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "19.2",
+      "task_ids": [
+        "19.2"
+      ],
+      "acceptance_ids": [
+        "V-033"
+      ],
+      "chapters": [
+        "assurance.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "19.3",
+      "task_ids": [
+        "19.3"
+      ],
+      "acceptance_ids": [
+        "V-034"
+      ],
+      "chapters": [
+        "assurance.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "19.4",
+      "task_ids": [
+        "19.4"
+      ],
+      "acceptance_ids": [
+        "V-030",
+        "V-033"
+      ],
+      "chapters": [
+        "assurance.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "20.1",
+      "task_ids": [
+        "20.1"
+      ],
+      "acceptance_ids": [
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "20.2",
+      "task_ids": [
+        "20.2"
+      ],
+      "acceptance_ids": [
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "20.3",
+      "task_ids": [
+        "20.3"
+      ],
+      "acceptance_ids": [
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "20.4",
+      "task_ids": [
+        "20.4"
+      ],
+      "acceptance_ids": [
+        "V-011",
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "21.1",
+      "task_ids": [
+        "21.1"
+      ],
+      "acceptance_ids": [
+        "V-024",
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "21.2",
+      "task_ids": [
+        "21.2"
+      ],
+      "acceptance_ids": [
+        "V-044",
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "21.3",
+      "task_ids": [
+        "21.3"
+      ],
+      "acceptance_ids": [
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "21.4",
+      "task_ids": [
+        "21.4"
+      ],
+      "acceptance_ids": [
+        "V-014",
+        "V-045"
+      ],
+      "chapters": [
+        "decision-models.md"
+      ]
+    },
+    {
+      "id": "22.1",
+      "task_ids": [
+        "22.1"
+      ],
+      "acceptance_ids": [
+        "V-046"
+      ],
+      "chapters": [
+        "decision-models.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "22.2",
+      "task_ids": [
+        "22.2"
+      ],
+      "acceptance_ids": [
+        "V-046"
+      ],
+      "chapters": [
+        "decision-models.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "22.3",
+      "task_ids": [
+        "22.3"
+      ],
+      "acceptance_ids": [
+        "V-046"
+      ],
+      "chapters": [
+        "decision-models.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "22.4",
+      "task_ids": [
+        "22.4"
+      ],
+      "acceptance_ids": [
+        "V-045",
+        "V-046"
+      ],
+      "chapters": [
+        "decision-models.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "23.1",
+      "task_ids": [
+        "23.1"
+      ],
+      "acceptance_ids": [
+        "V-010",
+        "V-034"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "23.2",
+      "task_ids": [
+        "23.2"
+      ],
+      "acceptance_ids": [
+        "V-007",
+        "V-048"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "23.3",
+      "task_ids": [
+        "23.3"
+      ],
+      "acceptance_ids": [
+        "V-011",
+        "V-048"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "23.4",
+      "task_ids": [
+        "23.4"
+      ],
+      "acceptance_ids": [
+        "V-016",
+        "V-048"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "24.1",
+      "task_ids": [
+        "24.1"
+      ],
+      "acceptance_ids": [
+        "V-008",
+        "V-043"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "24.2",
+      "task_ids": [
+        "24.2"
+      ],
+      "acceptance_ids": [
+        "V-004",
+        "V-041",
+        "V-049"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "24.3",
+      "task_ids": [
+        "24.3"
+      ],
+      "acceptance_ids": [
+        "V-017",
+        "V-054"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "24.4",
+      "task_ids": [
+        "24.4"
+      ],
+      "acceptance_ids": [
+        "V-009",
+        "V-049",
+        "V-053"
+      ],
+      "chapters": [
+        "execution-contract.md",
+        "storage.md"
+      ]
+    },
+    {
+      "id": "25.1",
+      "task_ids": [
+        "25.1"
+      ],
+      "acceptance_ids": [
+        "V-018",
+        "V-019",
+        "V-025"
+      ],
+      "chapters": [
+        "migration.md",
+        "repository-baseline.md"
+      ]
+    },
+    {
+      "id": "25.2",
+      "task_ids": [
+        "25.2"
+      ],
+      "acceptance_ids": [
+        "V-019",
+        "V-028",
+        "V-055"
+      ],
+      "chapters": [
+        "migration.md",
+        "repository-baseline.md"
+      ]
+    },
+    {
+      "id": "25.3",
+      "task_ids": [
+        "25.3"
+      ],
+      "acceptance_ids": [
+        "V-019",
+        "V-027",
+        "V-028"
+      ],
+      "chapters": [
+        "migration.md",
+        "repository-baseline.md"
+      ]
+    },
+    {
+      "id": "25.4",
+      "task_ids": [
+        "25.4"
+      ],
+      "acceptance_ids": [
+        "V-028",
+        "V-052",
+        "V-055"
+      ],
+      "chapters": [
+        "migration.md",
+        "repository-baseline.md"
+      ]
+    },
+    {
+      "id": "26.1",
+      "task_ids": [
+        "26.1"
+      ],
+      "acceptance_ids": [
+        "V-026",
+        "V-028"
+      ],
+      "chapters": [
+        "migration.md"
+      ]
+    },
+    {
+      "id": "26.2",
+      "task_ids": [
+        "26.2"
+      ],
+      "acceptance_ids": [
+        "V-026",
+        "V-028"
+      ],
+      "chapters": [
+        "migration.md"
+      ]
+    },
+    {
+      "id": "26.3",
+      "task_ids": [
+        "26.3"
+      ],
+      "acceptance_ids": [
+        "V-026",
+        "V-055"
+      ],
+      "chapters": [
+        "migration.md"
+      ]
+    },
+    {
+      "id": "26.4",
+      "task_ids": [
+        "26.4"
+      ],
+      "acceptance_ids": [
+        "V-026",
+        "V-027"
+      ],
+      "chapters": [
+        "migration.md"
+      ]
+    },
+    {
+      "id": "27.1",
+      "task_ids": [
+        "27.1"
+      ],
+      "acceptance_ids": [
+        "V-056"
+      ],
+      "chapters": [
+        "verification.md"
+      ]
+    },
+    {
+      "id": "27.2",
+      "task_ids": [
+        "27.2"
+      ],
+      "acceptance_ids": [
+        "V-024",
+        "V-047",
+        "V-048",
+        "V-049"
+      ],
+      "chapters": [
+        "verification.md"
+      ]
+    },
+    {
+      "id": "27.3",
+      "task_ids": [
+        "27.3"
+      ],
+      "acceptance_ids": [
+        "V-036",
+        "V-037",
+        "V-038",
+        "V-039",
+        "V-040",
+        "V-041",
+        "V-042",
+        "V-043",
+        "V-044",
+        "V-045",
+        "V-046",
+        "V-050",
+        "V-051",
+        "V-052"
+      ],
+      "chapters": [
+        "verification.md"
+      ]
+    },
+    {
+      "id": "27.4",
+      "task_ids": [
+        "27.4"
+      ],
+      "acceptance_ids": [
+        "V-002",
+        "V-003",
+        "V-004",
+        "V-005",
+        "V-009",
+        "V-010",
+        "V-012",
+        "V-015",
+        "V-016",
+        "V-017",
+        "V-033",
+        "V-037",
+        "V-040",
+        "V-049",
+        "V-053",
+        "V-054"
+      ],
+      "chapters": [
+        "verification.md"
+      ]
+    },
+    {
+      "id": "28.1",
+      "task_ids": [
+        "28.1"
+      ],
+      "acceptance_ids": [
+        "V-028",
+        "V-035",
+        "V-052",
+        "V-055"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "28.2",
+      "task_ids": [
+        "28.2"
+      ],
+      "acceptance_ids": [
+        "V-035"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "28.3",
+      "task_ids": [
+        "28.3"
+      ],
+      "acceptance_ids": [
+        "V-034",
+        "V-053",
+        "V-054",
+        "V-055",
+        "V-056"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    },
+    {
+      "id": "28.4",
+      "task_ids": [
+        "28.4"
+      ],
+      "acceptance_ids": [
+        "V-024",
+        "V-034",
+        "V-056"
+      ],
+      "chapters": [
+        "assurance.md",
+        "verification.md"
+      ]
+    }
+  ]
+}

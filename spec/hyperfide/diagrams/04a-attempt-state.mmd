@@ -1,0 +1,25 @@
+stateDiagram-v2
+    [*] --> RESERVED
+    RESERVED --> PREPARING
+    PREPARING --> START_REQUESTED
+    START_REQUESTED --> RUNNING
+    RUNNING --> CHECKPOINTING
+    CHECKPOINTING --> RUNNING: checkpoint durable and execution continues
+    CHECKPOINTING --> SUBMITTED: final immutable result
+    SUBMITTED --> SUCCEEDED: required qualification accepted
+    START_REQUESTED --> RECONCILING: launch outcome unknown
+    RUNNING --> RECONCILING: execution observation uncertain
+    RECONCILING --> RUNNING: same execution and authority confirmed
+    RECONCILING --> FAILED: loss confirmed
+    RECONCILING --> SUPERSEDED: replacement authorised
+    RUNNING --> FAILED
+    RUNNING --> CANCELLED
+    RUNNING --> SUPERSEDED
+    SUBMITTED --> FAILED: qualification failure disposition
+    SUBMITTED --> SUPERSEDED: generation replaced
+    note right of RECONCILING
+        Uncertainty grants no new owner.
+        Compute authority is separate:
+        CURRENT / RELEASED / REVOKED / EXPIRED.
+        Accepted submission has durable custody.
+    end note

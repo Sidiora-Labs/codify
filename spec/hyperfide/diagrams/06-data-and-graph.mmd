@@ -1,0 +1,28 @@
+flowchart LR
+    CLIENT["Leaders, managers and remote workers"]
+    API["Hyperfide API: authenticate and classify operation"]
+    PRIMARY[("PostgreSQL primary")]
+    REPLICA[("Read replica")]
+    ROUTE{"Required state and graph version visible?"}
+    ANSWER["Version-labelled response and freshness watermark"]
+    JOB["Remote graph job: pinned revisions and parser configuration"]
+    PARSE["Parallel parse and batched facts"]
+    STAGE["Version-isolated staging and batch ingest"]
+    RESOLVE["Remote executor drives batched resolution queries"]
+    CHECK["Completeness, provenance and graph checks"]
+    PUBLISH["Primary transaction publishes complete graph version"]
+    GIT["Git source identities"]
+    OBJECTS["Artifacts: hashes and manifests referenced by primary"]
+    CLIENT --> API
+    API -->|Claims, leases, acceptance, integration and read-your-writes fallback| PRIMARY
+    API -->|Observation or requested published graph| ROUTE
+    ROUTE -->|Visible within required freshness| REPLICA
+    ROUTE -->|Lag or unavailable version: wait boundedly or use primary| PRIMARY
+    REPLICA --> ANSWER
+    PRIMARY --> ANSWER
+    PRIMARY -->|Asynchronous replication; lag measured| REPLICA
+    GIT --> JOB --> PARSE --> STAGE --> RESOLVE --> CHECK --> PUBLISH
+    STAGE --> PRIMARY
+    RESOLVE <--> PRIMARY
+    PUBLISH --> PRIMARY
+    OBJECTS <--> PRIMARY

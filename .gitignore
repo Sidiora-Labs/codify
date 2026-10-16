@@ -14,3 +14,20 @@ docs/superpowers/
 /kvx/.git-local/
 .env
 scripts/index.html
+tmp/
+
+# Private local planning, credentials and runtime state
+/spec/hyperfide/private/
+/spec/hyperfide/evidence/transcript*
+/spec/hyperfide/evidence/*private*
+/tmp/
+/.codify/
+/.codex/sessions/
+/.codex/auth.json
+/.claude/credentials.json
+/.claude/.credentials.json
+/.aws/credentials
+.env.*
+!.env.example
+!.env.sample
+!.env.template

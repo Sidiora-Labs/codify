@@ -1,0 +1,28 @@
+flowchart TB
+    MAIN["Main server: 1 leader + 13 feature managers = 14 model agents"]
+    POOLS["Illustrative large-run profile: 100 remote sandboxes"]
+    IMPL["Implementation / repair: 75 sandboxes x 2 = 150 agents"]
+    REV["Review / investigation: 10 sandboxes x 3 = 30 agents"]
+    QUAL["Qualification / integration: 10 sandboxes x 2 = 20 agents"]
+    RESERVE["Prepared reserve: 5 sandboxes x 0 = 0 agents"]
+    RAIL["Railway: 45 + 6 + 6 + 3 = 60 sandboxes"]
+    BLAX["Blaxel: 30 + 4 + 4 + 2 = 40 sandboxes"]
+    TOTAL["200 remote model agents + 14 main = 214 model agents"]
+    SERVICES["Supervisors, build jobs and other services counted separately"]
+    MAIN --> POOLS
+    POOLS --> IMPL
+    POOLS --> REV
+    POOLS --> QUAL
+    POOLS --> RESERVE
+    IMPL --> RAIL
+    REV --> RAIL
+    QUAL --> RAIL
+    RESERVE --> RAIL
+    IMPL --> BLAX
+    REV --> BLAX
+    QUAL --> BLAX
+    RESERVE --> BLAX
+    RAIL --> TOTAL
+    BLAX --> TOTAL
+    MAIN --> TOTAL
+    TOTAL -.-> SERVICES
