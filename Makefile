@@ -94,5 +94,5 @@ hyperfide-native:
 	@mkdir -p $(BUILD)
 	@rm -f $(BUILD)/hyperfide-native $(BUILD)/hyperfide-native.tmp
 	python3 scripts/hyperfide-native-components.py --generate $(BUILD)/hyperfide-native-registry.inc
-	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS)
+	$(CC) $(CFLAGS) -Isrc/hyperfide -I$(BUILD) -o $(BUILD)/hyperfide-native.tmp src/hyperfide/component_main.c src/sha256.c $$(python3 scripts/hyperfide-native-components.py --sources) $(LDLIBS)
 	mv $(BUILD)/hyperfide-native.tmp $(BUILD)/hyperfide-native
