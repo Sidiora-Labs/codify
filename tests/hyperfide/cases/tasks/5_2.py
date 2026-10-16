@@ -39,6 +39,7 @@ def main():
   check("lease.cancel.replay",lambda:expect(f.ok("scheduler.compute.cancel",request,key="manager2",component="5.2")==cancelled,"Cancellation replay revived authority"))
   check("lease.cancel.stale-result-denied",lambda:f.reject("scheduler.dispatch.ensure",dict(request,request_id=uid()),"COMPUTE_ALLOCATION_INVALID",key="manager2",component="5.3"))
   check("lease.cancel.immutable-history",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.attempts")[0]["n"]==2 and f.sql("SELECT count(*)::int n FROM hyperfide.compute_leases")[0]["n"]==2,"Cleanup deleted historical authority records"))
+  check("lease.cleanup.retains-sandbox-charges",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.sandbox_execution_charges WHERE state='RELEASE_PENDING'")[0]["n"]==2 and f.sql("SELECT held_cpu_millis::text cpu FROM hyperfide.sandbox_execution_budgets WHERE sandbox_id=$1",[i["sandbox"]])[0]["cpu"]=="2000","TTL/cancel freed unknown physical execution capacity"))
   check("lease.expiry.no-custody-created",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.submission_custodies")[0]["n"]==0,"Compute expiry manufactured submission custody"))
  finally:
   db=f.database;path=f.path;f.close();check("lease.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))

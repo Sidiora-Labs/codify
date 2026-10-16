@@ -435,6 +435,8 @@ export async function jobPolicy(tx:PrimaryTransaction,scope:SchedulerScope,task_
  'SELECT id,feature_package_id,spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
  [scope.organisation_id,scope.run_id,task_id]);
  const task=tasks.rows[0];if(!task)fail('TASK_MISSING','Job must bind an accepted task');
+ const retired=await tx.query("SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND definition ? 'retirement'",[scope.organisation_id,scope.run_id,task_id]);
+ if(retired.rows.length)fail('TASK_RETIRED','Retired accepted intent cannot admit a new resource job');
  await assertNoExecutionHold(tx,scope,{package_id:task.feature_package_id,operation});
  const run=await tx.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
  if(!(operation==='ADVANCE'?['READY','RUNNING','DRAINING']:['READY','RUNNING']).includes(run.rows[0]?.state??''))fail('RUN_NOT_ADMITTING','Run state does not allow this resource job');
@@ -804,7 +806,7 @@ export async function releaseSandboxCharges(tx:PrimaryTransaction,scope:Schedule
 
 export async function inspectSandboxCharge(tx:PrimaryTransaction,input:SchedulerScope&{request_id:string}):Promise<Record<string,unknown>|null>{
  assertPrimaryTransaction(tx);
- const result=await tx.query('SELECT * FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[input.organisation_id,input.run_id,uuid(input.request_id,'request_id')]);
+ const result=await tx.query('SELECT * FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR SHARE',[input.organisation_id,input.run_id,uuid(input.request_id,'request_id')]);
  const r=result.rows[0];return r?{charge_id:r.id,generation:r.generation,request_id:r.request_id,organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,sandbox_boot_generation:r.sandbox_boot_generation,slot_id:r.slot_id,attempt_id:r.attempt_id,job_kind:r.job_kind,state:r.state,resources:{cpu_millis:r.cpu_millis,memory_bytes:r.memory_bytes,disk_bytes:r.disk_bytes},execution_authority:false}:null;
 }
 export function createComponent(context:ComponentContext):Component{

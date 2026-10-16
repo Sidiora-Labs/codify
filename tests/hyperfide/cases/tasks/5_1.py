@@ -18,7 +18,7 @@ def check(name,callback):
  except Exception as error:FAILED.append(name);actual=type(error).__name__+": "+str(error)
  print(json.dumps({"type":"assertion","id":name,"expected":"observed","actual":actual}),flush=True)
 class SchedulerFixture(PacketFixture):
- def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True):
+ def __init__(self,extra_components=(),extra_setup=None,agent_limit=2,bootstrap=True,sandbox_cpu_limit=8000,sandbox_cpu_headroom=1000,source_object_id=None):
   def setup(f):
    packet.apply_migration(f,"0005-scheduling")
    i=f.ids;f.accounts={};f.claims={}
@@ -44,9 +44,9 @@ class SchedulerFixture(PacketFixture):
      policy=copy.deepcopy(f.packet_proof);policy["criteria_digest"]=criteria
      f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,1,$4,$5,$6,$7)",[i["organisation"],i["run"],task_id,i["spec"],criteria,identity(policy),json.dumps(policy)])
    if extra_setup:extra_setup(f)
-  super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False)
+  super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False,**({"source_object_id":source_object_id} if source_object_id is not None else {}))
   # Explicit trusted fixed test envelope; not provider/kernel measurement evidence.
-  qualified=self.primary("return claims.qualifySandboxBudget(tx,data.qualification);",{"qualification":{"organisation_id":self.ids["organisation"],"sandbox_id":self.ids["sandbox"],"sandbox_boot_generation":"1","qualification_id":uid(),"evidence_digest":sha(b"explicit-fixed-test-envelope"),"source":"OPERATOR_FIXED","hard_limits":{"cpu_millis":"8000","memory_bytes":"17179869184","disk_bytes":"34359738368"},"headroom":{"cpu_millis":"1000","memory_bytes":"1073741824","disk_bytes":"0"}}})
+  qualified=self.primary("return claims.qualifySandboxBudget(tx,data.qualification);",{"qualification":{"organisation_id":self.ids["organisation"],"sandbox_id":self.ids["sandbox"],"sandbox_boot_generation":"1","qualification_id":uid(),"evidence_digest":sha(b"explicit-fixed-test-envelope"),"source":"OPERATOR_FIXED","hard_limits":{"cpu_millis":str(sandbox_cpu_limit),"memory_bytes":"17179869184","disk_bytes":"34359738368"},"headroom":{"cpu_millis":str(sandbox_cpu_headroom),"memory_bytes":"1073741824","disk_bytes":"0"}}})
   expect("result" in qualified,"Trusted fixture budget failed: "+json.dumps(qualified))
  def capacity(self,job="AGENT"):
   requirements=self.packet_definition["resource_requirements"]
@@ -140,6 +140,22 @@ def main():
   check('claim.quota-rollback.full-vector',lambda:expect(q.sql("SELECT count(*)::int n FROM hyperfide.reservations")[0]['n']==4,'Failed quota claim leaked partial vector'))
  finally:
   db=q.database;path=q.path;q.close();check('claim.quota-cleanup.observed',lambda:expect(not path.exists() and q.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]['n']==0,'Quota fixture remains'))
+ local=SchedulerFixture(agent_limit=2,sandbox_cpu_limit=1500,sandbox_cpu_headroom=0)
+ try:
+  la=local.prepare_claim('a');lb=local.prepare_claim('b')
+  def sandbox_race():
+   with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+    futures=[pool.submit(local.invoke,'scheduler.claim',r,key=k,component='5.1') for r,k in [(la,'manager'),(lb,'manager2')]]
+    responses=[f.result()[1] for f in futures]
+   expect(sum(r.get('ok') is True for r in responses)==1,'A single sandbox admitted excess aggregate CPU')
+   expect(sum(r.get('error',{}).get('code')=='SANDBOX_CAPACITY_EXHAUSTED' for r in responses)==1,'Budget loser did not identify actual sandbox constraint')
+   budget=local.sql("SELECT held_cpu_millis::text cpu,held_memory_bytes::text memory FROM hyperfide.sandbox_execution_budgets WHERE sandbox_id=$1",[local.ids['sandbox']])[0]
+   expect(budget=={'cpu':'1000','memory':'2147483648'},'Failed local charge leaked multidimensional counters')
+  check('claim.concurrent.sandbox-budget',sandbox_race)
+  check('claim.sandbox.pool-budget-independent',lambda:expect(local.sql("SELECT allocated::text amount,configured_limit::text budget FROM hyperfide.capacity_accounts WHERE id=$1",[local.accounts['AGENT']])[0]=={'amount':'1','budget':'2'},'Local limit was replaced with global pool quota'))
+  check('claim.sandbox.exact-charge',lambda:expect(local.sql("SELECT count(*)::int n FROM hyperfide.sandbox_execution_charges WHERE state='HELD'")[0]['n']==1,'Failed admission left multiple per-box authorities'))
+ finally:
+  db=local.database;path=local.path;local.close();check('claim.sandbox-cleanup.observed',lambda:expect(not path.exists() and local.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]['n']==0,'Local budget fixture remains'))
  return 1 if FAILED else 0
 if __name__=="__main__":
  if "--cleanup" in sys.argv:raise SystemExit("Independent crash cleanup requires the persisted owned-resource receipt; not falsely reporting success.")
