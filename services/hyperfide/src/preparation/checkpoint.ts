@@ -78,7 +78,7 @@ function parseTree(bytes:Buffer,algorithm:string):Entry[]{
 async function git(root:string,args:string[],deadline:number,signal?:AbortSignal,extra:NodeJS.ProcessEnv={},input?:Uint8Array):Promise<Buffer>{
  const remaining=Math.floor(deadline-performance.now());if(remaining<=0||signal?.aborted)fail('CHECKPOINT_VALIDATION_TIMEOUT');
  return new Promise((resolve,reject)=>{
-  const child=spawn('/usr/bin/git',['--no-replace-objects','-c','core.hooksPath=/dev/null','-c','core.attributesFile=/dev/null','-c','maintenance.auto=false','-c','gc.auto=0','-c','protocol.allow=never',...args],{cwd:root,env:{PATH:'/usr/bin:/bin',LANG:'C',HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',...extra},stdio:['pipe','pipe','pipe']});
+  const child=spawn('/usr/bin/git',['--no-replace-objects','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.attributesFile=/dev/null','-c','maintenance.auto=false','-c','gc.auto=0','-c','protocol.allow=never',...args],{cwd:root,env:{PATH:'/usr/bin:/bin',LANG:'C',HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0',...extra},stdio:['pipe','pipe','pipe']});
   let total=0,invalid=false;const chunks:Buffer[]=[];
   const stop=()=>{invalid=true;child.kill('SIGKILL');};const timer=setTimeout(stop,remaining);signal?.addEventListener('abort',stop,{once:true});
   child.stdout.on('data',(chunk:Buffer)=>{total+=chunk.length;if(total>MAX)stop();else chunks.push(chunk);});child.stderr.resume();child.on('error',()=>{invalid=true;});
