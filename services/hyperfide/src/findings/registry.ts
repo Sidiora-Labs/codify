@@ -50,7 +50,8 @@ export async function withFindingTransaction<T>(context:ComponentContext,action:
  const gateway=gatewayOf(context);
  try{return await gateway.withPrimaryTransaction({timeoutMs:10000,signal:context.signal,guard:call.guard},async(tx:AuthorityTransaction)=>{
   await readiness(tx);const scope={organisation_id:principal.organisation_id,run_id:principal.run_id};
-  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':finding-disposition']);
+  const readOnly=['finding.inspect','finding.list','finding.blockers.inspect','finding.github.status','finding.github.due'].includes(action);
+  await tx.query(readOnly?'SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))':'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':finding-disposition']);
   const run=await tx.query('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id]);
   if(run.rows.length!==1||run.rows[0]!.authority_epoch!==principal.deployment_epoch)fail('STALE_AUTHORITY','Run authority epoch does not match the authenticated deployment');
   return fn({tx,scope,principal,context});
@@ -83,7 +84,7 @@ function resolution(value:unknown):Record<string,unknown>{
  text(out.condition_id,'condition identity',128);digestValue(out.criteria_digest);digestValue(out.rubric_digest);ids(out.required_contract_ids);
  if(typeof out.requires_original_failure!=='boolean'||Buffer.byteLength(canonical(out))>65536)fail('INVALID_REQUEST','Invalid bounded resolution condition');return out;
 }
-export async function acceptedResolution(tx:pg.PoolClient,scope:FindingScope,taskId:string,repositoryId:string,input:unknown):Promise<Record<string,unknown>>{
+export async function acceptedResolution(tx:FindingDatabase,scope:FindingScope,taskId:string,repositoryId:string,input:unknown):Promise<Record<string,unknown>>{
  const condition=resolution(input);const task=await tx.query('SELECT criteria_digest,spec_generation::text,spec_revision_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[scope.organisation_id,scope.run_id,taskId]);if(task.rows.length!==1)fail('ORIGIN_INVALID','Resolution origin task is absent');
  let load:unknown;try{load=(await import(new URL('../spec/obligations.js',import.meta.url).href)).loadProofObligations;}catch{fail('DEPENDENCY_NOT_READY','Accepted proof registry authority is required');}if(typeof load!=='function')fail('DEPENDENCY_NOT_READY','Accepted proof registry inspector is absent');
  const accepted=record(await load(tx,{organisation_id:scope.organisation_id,run_id:scope.run_id,task_id:taskId,spec_generation:task.rows[0]!.spec_generation,spec_revision_id:task.rows[0]!.spec_revision_id})),policy=record(accepted.policy);
@@ -95,7 +96,7 @@ export async function acceptedResolution(tx:pg.PoolClient,scope:FindingScope,tas
  const contractDigests=Array.isArray(policy.contract_digests)?policy.contract_digests.map(digestValue):[];const contracts=await tx.query('SELECT id,criteria_digest FROM (SELECT DISTINCT ON(contract_key) id,criteria_digest FROM hyperfide.contracts WHERE organisation_id=$1 AND run_id=$2 ORDER BY contract_key,revision DESC) current_contracts WHERE criteria_digest=ANY($3::text[]) ORDER BY id',[scope.organisation_id,scope.run_id,contractDigests]);if(contracts.rows.length!==contractDigests.length||new Set(contracts.rows.map(row=>row.criteria_digest)).size!==contractDigests.length)fail('CONDITION_MISMATCH','Accepted affected contract identities are missing or ambiguous');const requiredContracts=contracts.rows.map(row=>String(row.id)).sort();if(canonical(requiredContracts)!==canonical((condition.required_contract_ids as string[]).slice().sort()))fail('CONDITION_MISMATCH','All accepted affected contract obligations must be preserved');
  return {...condition,required_contract_ids:requiredContracts,proof_registry_digest:accepted.registry_digest,required_check_ids:checks};
 }
-export async function revalidateResolution(tx:pg.PoolClient,scope:FindingScope,f:Record<string,any>):Promise<void>{const stored=record(f.resolution_condition);const input=Object.fromEntries(['condition_id','criteria_digest','rubric_digest','requires_original_failure','required_contract_ids'].map(key=>[key,stored[key]]));const current=await acceptedResolution(tx,scope,String(f.origin_task_id),String(f.repository_id),input);if(canonical(current)!==canonical(stored))fail('RESOLUTION_CONDITION_CHANGED','Accepted resolution obligations are no longer current');}
+export async function revalidateResolution(tx:FindingDatabase,scope:FindingScope,f:Record<string,any>):Promise<void>{const stored=record(f.resolution_condition);const input=Object.fromEntries(['condition_id','criteria_digest','rubric_digest','requires_original_failure','required_contract_ids'].map(key=>[key,stored[key]]));const current=await acceptedResolution(tx,scope,String(f.origin_task_id),String(f.repository_id),input);if(canonical(current)!==canonical(stored))fail('RESOLUTION_CONDITION_CHANGED','Accepted resolution obligations are no longer current');}
 export async function reportFinding(value:FindingTransaction,input:unknown):Promise<Record<string,unknown>>{
  const payload=record(input);fields(payload,['observation_id','resolution_condition'],['collaborator_package_ids']);
  const observationId=uuid(payload.observation_id),requestedCondition=resolution(payload.resolution_condition),collaborators=ids(payload.collaborator_package_ids??[]).sort();
