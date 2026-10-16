@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "4.2",
+  "task": "4.2",
+  "roles": [
+    "control",
+    "provisioner",
+    "dispatch"
+  ],
+  "module": "storage/runtime.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "storage.runtime.describe"
+  ],
+  "requires": []
+}

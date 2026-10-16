@@ -83,8 +83,17 @@ return pool;
 }
 let currentPool:pg.Pool|undefined;
 let currentConfig:string|undefined;
+let managedProvider:((env:Readonly<NodeJS.ProcessEnv>)=>pg.Pool)|undefined;
+/** Registry owns the process pool lifecycle while legacy callers retain the stable facade. */
+export function bindStoragePool(provider:(env:Readonly<NodeJS.ProcessEnv>)=>pg.Pool):()=>void{
+if(managedProvider||currentPool)throw new FoundationError('DATABASE_CONFIG_CONFLICT','A process storage owner is already active');
+managedProvider=provider;
+return ()=>{if(managedProvider===provider)managedProvider=undefined;};
+}
+
 /** Stable process resource seam; task4.2 owns the later shared lifecycle. */
 export function getPool(env:Readonly<NodeJS.ProcessEnv>):pg.Pool {
+if(managedProvider)return managedProvider(env);
 const config=storageConfig(env),signature=JSON.stringify(config);
 if(currentPool&&signature!==currentConfig)
 throw new FoundationError('DATABASE_CONFIG_CONFLICT','This process owns a different PostgreSQL configuration');
@@ -92,6 +101,7 @@ if(!currentPool){currentPool=createStoragePool(config);currentConfig=signature;}
 return currentPool;
 }
 export async function closePool():Promise<void>{
+if(managedProvider)return;
 const pool=currentPool;currentPool=undefined;currentConfig=undefined;if(pool)await pool.end();
 }
 async function migration():Promise<{sql:string;checksum:string}>{
