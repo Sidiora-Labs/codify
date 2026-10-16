@@ -73,60 +73,47 @@ def seed():
  sql("BEGIN;\n"+common+"\nCOMMIT;")
 class Fixture:
  def __init__(self,task,components,extra_env=None):
-  set_task(task);self.components_ids=components;self.extra_env=extra_env or {};self.process=None;self.temp=None;self.calls=[]
+  set_task(task);self.components_ids=components;self.extra_env=extra_env or {};self.process=None;self.temp=None;self.calls=[];self.identity=None
  def __enter__(self):
   try:return self._enter()
   except BaseException:
    self.__exit__(None,None,None)
    raise
  def _enter(self):
+  global EPOCH
   for field in ("DATABASE_URL","PGHOST","PGPORT","PGUSER"): expect(os.environ.get(field),"Required PostgreSQL fixture is absent: "+field)
-  self.temp=tempfile.TemporaryDirectory(prefix="hf-observability-"+TASK+"-");self.base=Path(self.temp.name)
-  subprocess.run(["createdb",database()],env=db_env("postgres"),check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
-  paths=["0001-authority.sql","0006-event-session-bindings.sql","0014-enrollment.sql","0023-observability.sql"]
-  for name in paths:
-   p=ROOT/"services/hyperfide/migrations"/name;expect(p.is_file(),"Actual dependency migration is absent: "+name)
-   r=subprocess.run(["psql","-X","-q","-v","ON_ERROR_STOP=1","--single-transaction","-d",database(),"-f",str(p)],env=db_env(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
-   expect(r.returncode==0,"Pinned actual migration failed: "+name+" "+r.stderr.decode()[-1000:])
-   version=int(name.split("-")[0]);checksum="sha256:"+hashlib.sha256(p.read_bytes()).hexdigest()
-   sql(f"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES({version},'{p.stem}','{checksum}');")
-  seed()
-  self.component_dir=self.base/"components";self.component_dir.mkdir();self.fragments={}
+  self.fragments={}
   def add(identity):
    if identity in self.fragments:return
    p=ROOT/"services/hyperfide/components"/(identity+".json");expect(p.is_file(),"Actual component dependency absent: "+identity)
    declaration=json.loads(p.read_text());self.fragments[identity]=declaration
-   for d in declaration["requires"]:add(d)
-   (self.component_dir/p.name).write_bytes(p.read_bytes())
-  for identity in self.components_ids:add(identity)
-  self.actions=sorted({a for fragment in self.fragments.values() for a in fragment["actions"]})
-  self.policy={"schema_version":1,"programme_id":"observability-component-fixture","repository":"fixture/repo","spec_revision":"task-"+TASK+"-reviewed","policy_revision":1,"status":"ACTIVE","approval":{"decision":"APPROVED","record_id":"programme-owner-authorized-implementation","spec_revision":"task-"+TASK+"-reviewed","policy_revision":1},"allowed_roles":["control"],"allowed_actions":["programme.activate"]+self.actions}
-  (self.base/"policy.json").write_text(json.dumps(self.policy))
-  with socket.socket() as sock:sock.bind(("127.0.0.1",0));self.port=sock.getsockname()[1]
-  self.origin="https://127.0.0.1:"+str(self.port);self.keys={}
-  principals=[]
-  for role,actor,credential in [("OPERATOR",OPERATOR,CREDENTIAL),("VERIFIER",VERIFIER,VERIFIER_CREDENTIAL),("LEADER",LEADER,uid(20))]:
-   private=self.base/(role+".pem")
-   script="const c=require('node:crypto'),f=require('node:fs');const k=c.generateKeyPairSync('ed25519');f.writeFileSync(process.argv[1],k.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});process.stdout.write(k.publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('base64url'));"
-   pub=subprocess.run(["node","-e",script,str(private)],check=True,stdout=subprocess.PIPE,text=True,timeout=10).stdout
-   self.keys[role]=(private,credential)
-   principals.append({"credential_id":credential,"organisation_id":ORG,"run_id":RUN,"actor_id":actor,"role":role,"public_key_b64":pub,"deployment_epoch":EPOCH,"allowed_actions":self.actions,"expires_at":time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+3600))})
-  cfg={"schema_version":1,"origin":self.origin,"clock_skew_seconds":30,"grant_ttl_seconds":60,"credential_ttl_seconds":3600,"principals":principals}
-  (self.base/"identity.json").write_text(json.dumps(cfg));os.chmod(self.base/"identity.json",0o600)
-  cert,key=self.base/"tls-cert.pem",self.base/"tls-key.pem"
-  subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-nodes","-keyout",str(key),"-out",str(cert),"-days","1","-subj","/CN=127.0.0.1","-addext","subjectAltName=IP:127.0.0.1"],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30);os.chmod(key,0o600)
-  self.tls=ssl.create_default_context(cafile=str(cert))
-  env=db_env();env.update(self.extra_env);env["HF_IDENTITY_CONFIG_FILE"]=str(self.base/"identity.json");env["HYPERFIDE_OBSERVABILITY_ALLOW_REPLAY"]="1"
-  self.process=subprocess.Popen(["node",str(ROOT/"services/hyperfide/dist/control.js"),"--policy",str(self.base/"policy.json"),"--spec-revision",self.policy["spec_revision"],"--components",str(self.component_dir),"--module-root",str(ROOT/"services/hyperfide/dist"),"--mode","https","--host","127.0.0.1","--port",str(self.port),"--tls-cert",str(cert),"--tls-key",str(key)],cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-  deadline=time.monotonic()+30;ready=False;diagnostic=[]
-  while time.monotonic()<deadline:
-   if self.process.poll() is not None:break
-   if select.select([self.process.stderr],[],[],0.1)[0]:
-    line=self.process.stderr.readline();diagnostic.append(line)
-    try:ready=json.loads(line).get("event")=="ready"
-    except Exception:pass
-    if ready:break
-  expect(ready,"Actual HTTPS service did not become ready: "+"".join(diagnostic)[-1200:])
+   for dependency in declaration["requires"]:add(dependency)
+  for identity in list(self.components_ids)+["1.4","4.1","4.2","4.4","14.1"]:add(identity)
+  module_spec=importlib.util.spec_from_file_location("observability_actual_identity",ROOT/"tests/hyperfide/support/identity_fixture.py")
+  shared=importlib.util.module_from_spec(module_spec);module_spec.loader.exec_module(shared)
+  def setup(parent):
+   global EPOCH
+   self.identity=parent
+   # The real shared fixture creates a fresh owned DB and establishes its
+   # external authority journal. These records are explicit workload inputs,
+   # never constructor-time production identity enrollment.
+   EPOCH=parent.ids["epoch"]
+   seed()
+   self.base=parent.path;self.component_dir=parent.components;self.origin=parent.origin;self.port=parent.port
+   self.actions=parent.actions;self.keys={}
+   config=json.loads(parent.identity_config.read_text())
+   for role,actor,credential in [("OPERATOR",OPERATOR,CREDENTIAL),("VERIFIER",VERIFIER,VERIFIER_CREDENTIAL),("LEADER",LEADER,uid(20))]:
+    private=self.base/(role+".pem")
+    script="const c=require('node:crypto'),f=require('node:fs');const k=c.generateKeyPairSync('ed25519');f.writeFileSync(process.argv[1],k.privateKey.export({type:'pkcs8',format:'pem'}),{mode:0o600});process.stdout.write(k.publicKey.export({type:'spki',format:'der'}).subarray(-32).toString('base64url'));"
+    public=subprocess.run(["node","-e",script,str(private)],check=True,stdout=subprocess.PIPE,text=True,timeout=10).stdout
+    self.keys[role]=(private,credential)
+    record={"credential_id":credential,"organisation_id":ORG,"run_id":RUN,"actor_id":actor,"role":role,"public_key_b64":public,"deployment_epoch":EPOCH,"allowed_actions":self.actions,"expires_at":time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+3600))}
+    parent.seed_fixture_principal(record);config["principals"].append(record)
+   parent.identity_config.write_text(json.dumps(config))
+   policy=json.loads(parent.policy.read_text());policy["programme_id"]=RUN;parent.policy.write_text(json.dumps(policy));self.policy=policy
+  extra=dict(self.extra_env);extra["HYPERFIDE_OBSERVABILITY_ALLOW_REPLAY"]="1"
+  self.identity=shared.IdentityFixture(components=tuple(self.fragments),extra_env=extra,extra_setup=setup,database=database())
+  self.process=self.identity.child;self.tls=ssl.create_default_context(cafile=str(self.identity.ca))
   return self
  def request(self,component,action,value=None,role="OPERATOR",run=RUN,unsigned=False):
   import uuid as uuidlib
@@ -138,7 +125,7 @@ class Fixture:
    script="import fs from 'node:fs';import crypto from 'node:crypto';import {pathToFileURL} from 'node:url';const [file,origin,id,time,nonce]=process.argv.slice(1);const {signingBytes}=await import(pathToFileURL("+json.dumps(str(ROOT/"services/hyperfide/dist/transport/protocol.js"))+").href);const chunks=[];for await(const c of process.stdin)chunks.push(c);const body=Buffer.concat(chunks);process.stdout.write(crypto.sign(null,signingBytes(origin,'/v1/invoke',{id,time,nonce},body),fs.readFileSync(file)).toString('base64url'));"
    signature=subprocess.run(["node","--input-type=module","-e",script,str(private),self.origin,credential,stamp,nonce],input=body,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True,timeout=10).stdout.decode()
    headers.update({"hf-credential-id":credential,"hf-request-time":stamp,"hf-request-nonce":nonce,"hf-request-signature":signature})
-  client=http.client.HTTPSConnection("127.0.0.1",self.port,context=self.tls,timeout=15)
+  client=http.client.HTTPSConnection(urlsplit(self.origin).hostname,self.port,context=self.tls,timeout=15)
   start=time.monotonic()
   try:client.request("POST","/v1/invoke",body=body,headers=headers);response=client.getresponse();raw=response.read();result=json.loads(raw)
   finally:client.close()
@@ -153,14 +140,15 @@ class Fixture:
   return r
  def __exit__(self,typ,value,tb):
   closed=True
-  if self.process:
-   self.process.send_signal(signal.SIGTERM)
-   try:self.process.communicate(timeout=12)
-   except subprocess.TimeoutExpired:self.process.kill();self.process.communicate();closed=False
-   with socket.socket() as sock:closed=closed and sock.connect_ex(("127.0.0.1",self.port))!=0
-  (output()/"observations.json").write_text(json.dumps({"scope":"task-component","simulation":"Synthetic workload, real PostgreSQL/HTTPS/signature/registered service","requests":self.calls,"server_observed_closed":closed},sort_keys=True)+"\n")
-  if self.temp:self.temp.cleanup()
-  expect(closed,"Real service listener did not stop")
+  if self.identity:
+   try:self.identity.close()
+   except Exception:closed=False
+   self.process=None
+   if hasattr(self,"port"):
+    with socket.socket() as sock:closed=closed and sock.connect_ex(("127.0.0.1",self.port))!=0
+  (output()/"observations.json").write_text(json.dumps({"scope":"task-component","simulation":"Synthetic workload; actual shared14 fixture, external authority journal, least-privilege runtime role, PostgreSQL/HTTPS/Ed25519","requests":self.calls,"server_observed_closed":closed},sort_keys=True)+"\n")
+  expect(closed,"Real service listener or owned authority fixture did not close")
+
 def finish():
  (output()/"assertion-inventory.json").write_text(json.dumps({"task":TASK,"ids":IDS,"failed":FAILED,"scope":"task-component","full_cases":"INCOMPLETE"})+"\n")
  return 1 if FAILED else 0
