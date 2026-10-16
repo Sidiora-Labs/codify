@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Component, ComponentContext } from '../components/registry.js';
 import type { PrimaryTransaction } from '../storage/transactions.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
-import { event, eventDigest, fields, scope, uuid, name, integer, bounded, canonical, digest, fail, gateway, run, lockRun } from './outbox.js';
+import { event, eventDigest, fields, scope, uuid, name, integer, bounded, canonical, digest, fail, gateway, run, lockRun, authorizedRun } from './outbox.js';
 import type { OutboxEvent, Scope } from './outbox.js';
 
 export interface InboxResult { status:'APPLIED'|'DUPLICATE'|'GAP'|'RESNAPSHOT_REQUIRED'; event_id:string;
@@ -26,6 +26,9 @@ export async function receive(tx:PrimaryTransaction,input:unknown,
   await lockRun(tx,s);
   const e=await fetchEvent(tx,s,id,consumer),requestDigest=eventDigest(e);
   if(e.aggregate_type==='attempt.instructions'&&!apply) fail('INBOX_TRUSTED_HANDLER_REQUIRED','Instructions require the generation-bound linked receiver');
+  const key=aggregateKey(e.aggregate_type,e.aggregate_id);
+  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':'+consumer+':'+key]);
+  const counterDigest=digest({consumer_id:consumer,aggregate_key:key});
   const existing=await tx.query("SELECT * FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='event.receive' AND idempotency_key=$4 FOR UPDATE",
     [s.organisation_id,s.run_id,consumer,id]);
   if(existing.rows.length) {
@@ -34,9 +37,6 @@ export async function receive(tx:PrimaryTransaction,input:unknown,
     if(row.state!=='COMPLETED') fail('INBOX_RECEIPT_INCOMPLETE','Prior receiver effect is not durably complete');
     return {status:'DUPLICATE',event_id:id,inbox_id:row.id as string,result:row.result};
   }
-  const key=aggregateKey(e.aggregate_type,e.aggregate_id);
-  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':'+consumer+':'+key]);
-  const counterDigest=digest({consumer_id:consumer,aggregate_key:key});
   let counter=await tx.query("SELECT * FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='event.aggregate' AND idempotency_key=$4 FOR UPDATE",
     [s.organisation_id,s.run_id,consumer,key]);
   if(!counter.rows.length) {
@@ -91,8 +91,8 @@ export function createComponent(context:ComponentContext):Component {
   const component={apiVersion:1 as const,capabilities:{'events.inbox.v1':Object.freeze({receive,replay})},actions:{
     'inbox.describe':()=>({schema_version:1,effect:'transactional-linked-callback',duplicate_effects:false,
       gap:'defer-and-replay-or-resnapshot-required',full_case_status:'INCOMPLETE'}),
-    'inbox.receive':(input:unknown)=>run(g,tx=>receive(tx,input)),
-    'inbox.replay':(input:unknown)=>run(g,tx=>replay(tx,input))
+    'inbox.receive':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>receive(tx,input)),
+    'inbox.replay':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>replay(tx,input))
   }};
   return component;
 }
