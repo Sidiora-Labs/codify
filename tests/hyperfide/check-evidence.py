@@ -181,6 +181,18 @@ def verify_receipt_integrity(root, receipt, manifest_hash, registry_hash, regist
         require(record["path"] not in artifact_map, "duplicate artifact path")
         artifact_map[record["path"]] = path
         kind = record.get("kind")
+        if "logical_path" in record:
+            logical = record["logical_path"]
+            require(kind == "required" and isinstance(logical, str) and logical,
+                    "logical artifact name is invalid")
+            relative = Path(logical)
+            require(not relative.is_absolute() and ".." not in relative.parts,
+                    "logical artifact name escapes campaign")
+            expected = (Path("artifacts") / receipt["receipt_id"] / "required" / relative).as_posix()
+            require(record["path"] == expected,
+                    "required artifact is not bound to its receipt snapshot")
+            require(logical not in artifact_map, "duplicate logical artifact name")
+            artifact_map[logical] = path
         require(isinstance(kind, str) and kind, "artifact kind is missing")
         if kind in ("stdout", "stderr", "events"):
             require(kind not in kinds, "duplicate required artifact kind")
