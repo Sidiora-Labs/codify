@@ -275,7 +275,9 @@ int  cg_schema_upgrade(Cg *cg);
  * cg->root for the tree being worked on, cg->shared where a caller reads the
  * main tree's spec. Loaded once per tree per process; a missing file or key
  * is the built-in default. Paths are root-relative and normalized. */
-#define CG_CONFIG_FILE "codify.kvx"
+#define CG_CONFIG_FILE "hyperfide.kvx"
+#define CG_LEGACY_CONFIG_FILE "codify.kvx"
+int hyperfide_environment_aliases(void);
 enum { CFG_SYNC_AUTO, CFG_PATH_SPEC, CFG_PATH_CONTEXT, CFG_PATH_SKILLS,
        CFG_PATH_CODEMAP, CFG_INDEX_WORKERS,
        /* codify-v15 3.1 */

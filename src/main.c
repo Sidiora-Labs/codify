@@ -1,7 +1,6 @@
 #include <stdio.h>
 extern int hf_client_authority_guard(const char *operation, FILE *output);
 extern int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err);
-extern int hf_client_authority_guard_args(const char *operation,int argc,char **argv,FILE *output);
 /* Codify CLI — see README.md */
 #include "cg.h"
 #include "sem_flow.h"
@@ -169,6 +168,7 @@ static void index_fresh(Cg *cg, const SysInfo *si) {
 }
 
 int main(int argc, char **argv) {
+    if (hyperfide_environment_aliases() != 0) return 78;
     if (argc < 2) { usage(); return 1; }
     int hrc = help_route(argc, argv);
     if (hrc >= 0) return hrc;
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    { int remote_rc = hf_client_dispatch(argc, argv, stdout, stderr); if (remote_rc >= 0) return remote_rc; }
+    { int remote_rc = hf_client_dispatch(argc,argv,stdout,stderr); if (remote_rc >= 0) return remote_rc; }
 
     /* spec works without .codegraph — dispatch before opening the graph */
     if (strcmp(cmd, "spec") == 0) {
