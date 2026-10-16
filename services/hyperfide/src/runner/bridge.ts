@@ -27,7 +27,8 @@ export interface RunnerStagingReference {
 export interface RunnerPreparationInput {
  recipe_id:'environment.prepare.v1'|'checkpoint.restore.v1';
  input_manifest_artifact_id:string;input_manifest_digest:string;
- source:{repository_key:string;source_object_id:string;source_tree_id:string;source_manifest_digest:string};
+ source:{repository_key:string;source_object_id:string;source_tree_id:string|null;source_manifest_digest:string};
+ job_binding:RunnerPreparationJobBinding;
  staging:RunnerStagingReference[];
 }
 export interface RunnerPreparationPlan extends RunnerPreparationInput {
@@ -156,7 +157,14 @@ async function observe(tx:PrimaryTransaction,v:Record<string,unknown>,i:Invocati
  return {registered:true,runner_session_id:v.session_id,registration_version:String(r.registration_version),observed_at:new Date(r.observed_at).toISOString(),authority:'OBSERVATION_ONLY',task_qualified:false};
 }
 
-export type RunnerJobNamespace='QUALIFICATION'|'REPRODUCTION'|'CANDIDATE';
+export type RunnerJobNamespace='QUALIFICATION'|'REPRODUCTION'|'CANDIDATE'|'CHECKPOINT'|'PREWARM';
+export interface RunnerPreparationJobBinding {
+ namespace:RunnerJobNamespace;job_id:string;lease_generation:string;reservation_id:string;input_packet_digest:string;input_manifest_digest:string;
+}
+export interface RunnerPreparationAdmission {
+ authority:'EXPECTED_JOB_AUTHORITY';job_binding:RunnerPreparationJobBinding;source:RunnerPreparationInput['source'];repository_id:string;job_kind:'PREPARATION'|'CHECKPOINT';
+}
+export type RunnerPreparationAdmissionReader=(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=>Promise<RunnerPreparationAdmission|null>;
 export interface RunnerEnvironmentRequest {
  job_namespace?:RunnerJobNamespace;job_id:string;lease_generation?:string;reservation_id:string;
  input_manifest_digest?:string;environment_digest:string;
@@ -174,13 +182,13 @@ export interface RunnerExpectedInputs {
 export type RunnerInputReader=(tx:PrimaryTransaction,i:InvocationContext,request:RunnerEnvironmentRequest)=>Promise<RunnerExpectedInputs|null>;
 async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest,
  readers:ReadonlyMap<RunnerJobNamespace,RunnerInputReader>):Promise<unknown>{
- assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);
+ assertPrimaryTransaction(tx);assertInvocation(i);
  const namespace=v.job_namespace??'QUALIFICATION';
- if(!['QUALIFICATION','REPRODUCTION','CANDIDATE'].includes(namespace)||!uuid(v.job_id)||!uuid(v.reservation_id)||!digest(v.environment_digest)||
+ if(!['QUALIFICATION','REPRODUCTION','CANDIDATE','CHECKPOINT','PREWARM'].includes(namespace)||!uuid(v.job_id)||!uuid(v.reservation_id)||!digest(v.environment_digest)||
     v.lease_generation!==undefined&&!decimal(v.lease_generation,true)||v.input_manifest_digest!==undefined&&!digest(v.input_manifest_digest))
   fail('QUALIFICATION_ENVIRONMENT_DENIED','Exact namespace-bound immutable job inputs required');
  const reader=readers.get(namespace);if(!reader)fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Trusted job input reader is not registered for this namespace');
- const expected=await reader(tx,i,v);const p=i.principal;
+ const expected=await reader(tx,i,v);await i.guard(tx);const p=i.principal;
  if(!expected||expected.authority!=='EXPECTED_AUTHORITY'||expected.namespace!==namespace||expected.organisation_id!==p.organisation_id||
  expected.run_id!==p.run_id||expected.job_id!==v.job_id||expected.reservation_id!==v.reservation_id||
  v.lease_generation!==undefined&&expected.lease_generation!==v.lease_generation||
@@ -215,9 +223,21 @@ async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:Run
 export async function createComponent(ctx:ComponentContext):Promise<Component> {
  await schema(ctx);
  const readers=new Map<RunnerJobNamespace,RunnerInputReader>();
- const environment=Object.freeze({verify:(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest)=>verifyEnvironment(tx,i,v,readers),
+ const admissionReaders=new Map<RunnerJobNamespace,RunnerPreparationAdmissionReader>();
+ const environment=Object.freeze({
+ registerPreparationAdmissionReader:(namespace:RunnerJobNamespace,reader:RunnerPreparationAdmissionReader)=>{
+  if(!['QUALIFICATION','REPRODUCTION','CANDIDATE','CHECKPOINT','PREWARM'].includes(namespace)||typeof reader!=='function'||admissionReaders.has(namespace))fail('RUNNER_INPUT_READER_CONFLICT','One trusted semantic preparation admission reader owns each namespace');
+  admissionReaders.set(namespace,reader);return()=>{if(admissionReaders.get(namespace)===reader)admissionReaders.delete(namespace);};
+ },
+ admitPreparation:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=>{
+  assertPrimaryTransaction(tx);assertInvocation(i);const reader=admissionReaders.get(request.job_binding.namespace);
+  if(!reader)fail('PREPARATION_JOB_AUTHORITY_UNAVAILABLE','Trusted semantic preparation job reader is not registered');
+  const admitted=await reader(tx,i,request);await i.guard(tx);
+  if(!admitted||admitted.authority!=='EXPECTED_JOB_AUTHORITY'||runnerCanonical(admitted.job_binding)!==runnerCanonical(request.job_binding)||runnerCanonical(admitted.source)!==runnerCanonical(request.source)||admitted.repository_id!==request.repository_id||admitted.job_kind!==(request.recipe_id==='checkpoint.restore.v1'?'CHECKPOINT':'PREPARATION'))fail('PREPARATION_JOB_AUTHORITY_DENIED','Actual semantic job admission differs from the immutable preparation plan');
+  return admitted;
+ },verify:(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest)=>verifyEnvironment(tx,i,v,readers),
  registerInputReader:(namespace:RunnerJobNamespace,reader:RunnerInputReader)=>{
-  if(!['QUALIFICATION','REPRODUCTION','CANDIDATE'].includes(namespace)||typeof reader!=='function'||readers.has(namespace))fail('RUNNER_INPUT_READER_CONFLICT','One trusted input reader owns each job namespace');
+  if(!['QUALIFICATION','REPRODUCTION','CANDIDATE','CHECKPOINT','PREWARM'].includes(namespace)||typeof reader!=='function'||readers.has(namespace))fail('RUNNER_INPUT_READER_CONFLICT','One trusted input reader owns each job namespace');
   readers.set(namespace,reader);return()=>{if(readers.get(namespace)===reader)readers.delete(namespace);};
  }});
  const registry=Object.freeze({lookup:readRunnerBinding,lookupSlot:async(tx:PrimaryTransaction,v:{organisation_id:string;run_id:string;sandbox_id:string;slot_id:string;boot_generation:string;preparation_digest:string})=>{
@@ -391,23 +411,28 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
   prepare:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=>{
    assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);
    if(!object(request))fail('INVALID_PREPARATION_PLAN','Bound preparation object required');
-   exact(request,['operation_id','session_id','reservation_id','repository_id','timeout_ms','recipe_id','input_manifest_artifact_id','input_manifest_digest','source','staging']);
+   exact(request,['operation_id','session_id','reservation_id','repository_id','timeout_ms','recipe_id','input_manifest_artifact_id','input_manifest_digest','source','staging','job_binding']);
    if(![request.operation_id,request.session_id,request.reservation_id,request.repository_id,request.input_manifest_artifact_id].every(uuid)||!digest(request.input_manifest_digest)||!['environment.prepare.v1','checkpoint.restore.v1'].includes(request.recipe_id)||!Number.isSafeInteger(request.timeout_ms)||request.timeout_ms<1||request.timeout_ms>259200000||!object(request.source)||!Array.isArray(request.staging)||request.staging.length>64)fail('INVALID_PREPARATION_PLAN','Exact bounded preparation identities required');
+   if(!object(request.job_binding))fail('INVALID_PREPARATION_PLAN','Logical job binding required');
+   exact(request.job_binding,['namespace','job_id','lease_generation','reservation_id','input_packet_digest','input_manifest_digest']);
+   if(!['QUALIFICATION','REPRODUCTION','CANDIDATE','CHECKPOINT','PREWARM'].includes(request.job_binding.namespace)||!uuid(request.job_binding.job_id)||!decimal(request.job_binding.lease_generation,true)||request.job_binding.reservation_id!==request.reservation_id||![request.job_binding.input_packet_digest,request.job_binding.input_manifest_digest].every(digest))fail('INVALID_PREPARATION_PLAN','Exact semantic job/lease/input binding required');
    exact(request.source,['repository_key','source_object_id','source_tree_id','source_manifest_digest']);
-   if(typeof request.source.repository_key!=='string'||!request.source.repository_key.trim()||request.source.repository_key.length>128||![request.source.source_object_id,request.source.source_tree_id].every(x=>typeof x==='string'&&/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(x))||!digest(request.source.source_manifest_digest))fail('INVALID_PREPARATION_PLAN','Accepted source envelope and exact Git facts required');
+   if(typeof request.source.repository_key!=='string'||!request.source.repository_key.trim()||request.source.repository_key.length>128||!([request.source.source_object_id].every(x=>typeof x==='string'&&/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(x))&&(request.source.source_tree_id===null?request.recipe_id==='checkpoint.restore.v1':typeof request.source.source_tree_id==='string'&&/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(request.source.source_tree_id)))||!digest(request.source.source_manifest_digest))fail('INVALID_PREPARATION_PLAN','Accepted source envelope and exact Git facts required');
    const roles=new Set<string>();for(const ref of request.staging){if(!object(ref)||typeof ref.role!=='string'||!ref.role||ref.role.length>128||roles.has(ref.role)||!uuid(ref.artifact_id)||!['object','manifest'].includes(ref.storage_kind)||!digest(ref.digest)||!decimal(ref.size_bytes)||BigInt(ref.size_bytes)>536870912n||ref.storage_kind==='manifest'&&!digest(ref.manifest_digest))fail('INVALID_PREPARATION_PLAN','Exact bounded immutable staging refs required');roles.add(ref.role);}
    const p=i.principal;
    const previous=(await tx.query('SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE',[p.organisation_id,p.run_id,request.operation_id])).rows[0];
    if(previous){if(previous.job_class!=='PREPARATION'||runnerCanonical(previous.plan.preparation_request)!==runnerCanonical(request)||previous.principal.actor_id!==p.actor_id||previous.authority_epoch!==p.deployment_epoch)fail('REMOTE_OPERATION_CONFLICT','Recorded preparation operation differs');const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan:previous.plan.request as RunnerRemotePlan,binding:previous.plan.binding as Binding,principal:p,invocation:i,digest:previous.plan_digest});return permit;}
+   const jobAuthority=ctx.dependencies.require('12.1','qualification.environment.v1',(value):value is {admitPreparation:(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=>Promise<RunnerPreparationAdmission>}=>object(value)&&typeof value.admitPreparation==='function');
+   await jobAuthority.admitPreparation(tx,i,request);
    const r=await readRunnerPreparationBinding(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:request.session_id});
    if(r.repository_id!==request.repository_id)fail('REMOTE_SOURCE_MISMATCH','Preparation repository differs from trusted slot');
    const approved=await approvedRecipePolicy(ctx,tx,i,r);if(approved.digest!==r.preparation_policy_digest||runnerCanonical(approved.recipes)!==runnerCanonical(r.preparation_recipes))fail('RUNNER_RECIPE_POLICY_INVALID','Current independently approved policy differs from registered inventory');
    const recipe=r.preparation_recipes[request.recipe_id];if(!object(recipe)||!digest(r.preparation_policy_digest)||recipe.native_path!==r.runner_binary||recipe.native_digest!==r.runner_binary_digest)fail('RUNNER_RECIPE_POLICY_REQUIRED','Independently approved native recipe binding required');
    if(!decimal(recipe.max_stage_bytes,true)||request.staging.reduce((n,v)=>n+BigInt(v.size_bytes),0n)>BigInt(recipe.max_stage_bytes))fail('PREPARATION_STAGE_BUDGET_EXCEEDED','Declared stage exceeds independently approved recipe budget');
    const allocation=await resources.readJobAllocation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,reservation_id:request.reservation_id});
-   if(!allocation||allocation.slot_id!==r.slot_id||allocation.sandbox_id!==r.sandbox_id||String(allocation.sandbox_boot_generation)!==r.boot_generation||(!['OPERATOR','COORDINATOR'].includes(p.role)&&allocation.assignee_session_id!==p.actor_id)||allocation.job_kind!=='PREPARATION')fail('REMOTE_JOB_ASSIGNMENT_MISMATCH','Actual dedicated preparation reservation/slot/assignee required');
-   await resources.assertJobReservation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,task_id:allocation.task_id,job_kind:'PREPARATION',reservation_id:request.reservation_id});
-   const environment={LANG:'C.UTF-8',LC_ALL:'C.UTF-8'},plan:RunnerRemotePlan={operation_id:request.operation_id,session_id:request.session_id,repository_id:request.repository_id,reservation_id:request.reservation_id,argv:[String(recipe.node_path),String(recipe.recipe_path),'--job-context','/run/hyperfide-stage/'+request.operation_id+'/context.json'],cwd:'.',environment,timeout_ms:request.timeout_ms,source_digest:request.source.source_manifest_digest,policy_digest:request.input_manifest_digest,executable_digest:String(recipe.node_digest),environment_digest:hash(runnerCanonical(environment)),artifact_paths:[],preparation:{recipe_id:request.recipe_id,input_manifest_artifact_id:request.input_manifest_artifact_id,input_manifest_digest:request.input_manifest_digest,source:structuredClone(request.source),staging:structuredClone(request.staging)}};
+   if(!allocation||allocation.slot_id!==r.slot_id||allocation.sandbox_id!==r.sandbox_id||String(allocation.sandbox_boot_generation)!==r.boot_generation||(!['OPERATOR','COORDINATOR'].includes(p.role)&&allocation.assignee_session_id!==p.actor_id)||allocation.job_kind!==(request.recipe_id==='checkpoint.restore.v1'?'CHECKPOINT':'PREPARATION'))fail('REMOTE_JOB_ASSIGNMENT_MISMATCH','Actual dedicated preparation reservation/slot/assignee required');
+   await resources.assertJobReservation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,task_id:allocation.task_id,job_kind:request.recipe_id==='checkpoint.restore.v1'?'CHECKPOINT':'PREPARATION',reservation_id:request.reservation_id});
+   const environment={LANG:'C.UTF-8',LC_ALL:'C.UTF-8'},plan:RunnerRemotePlan={operation_id:request.operation_id,session_id:request.session_id,repository_id:request.repository_id,reservation_id:request.reservation_id,argv:[String(recipe.node_path),String(recipe.recipe_path),'--job-context','/run/hyperfide-stage/'+request.operation_id+'/context.json'],cwd:'.',environment,timeout_ms:request.timeout_ms,source_digest:request.source.source_manifest_digest,policy_digest:request.input_manifest_digest,executable_digest:String(recipe.node_digest),environment_digest:hash(runnerCanonical(environment)),artifact_paths:[],preparation:{job_binding:structuredClone(request.job_binding),recipe_id:request.recipe_id,input_manifest_artifact_id:request.input_manifest_artifact_id,input_manifest_digest:request.input_manifest_digest,source:structuredClone(request.source),staging:structuredClone(request.staging)}};
    validatePlan(plan);
    const prior=(await tx.query('SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE',[p.organisation_id,p.run_id,plan.operation_id])).rows[0];
    if(prior){if(prior.job_class!=='PREPARATION'||runnerCanonical(prior.plan.request)!==runnerCanonical(plan)||prior.principal.actor_id!==p.actor_id||prior.authority_epoch!==p.deployment_epoch)fail('REMOTE_OPERATION_CONFLICT','Preparation identity or exact inputs changed');const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:prior.plan.binding as Binding,principal:p,invocation:i,digest:prior.plan_digest});return permit;}
