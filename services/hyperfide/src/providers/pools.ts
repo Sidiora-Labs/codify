@@ -57,6 +57,7 @@ export interface ProviderDestructionRequest {organisation_id:string;run_id:strin
 export interface ProviderDestructionProof {evidence_digest:string;observed_at:string}
 export type ProviderDestructionPreflight=(tx:PrimaryTransaction,input:ProviderDestructionRequest)=>Promise<ProviderDestructionProof|null>;
 export interface ProviderRuntimeRegistry {
+ publicationVerifier?:RuntimeReadinessPublicationVerifier;
  artifactReferenceReader?:ProviderArtifactReferenceReader;
  destructionPreflight?:ProviderDestructionPreflight;
  isolation:Map<string,ProviderIsolationFactory>;
@@ -327,7 +328,8 @@ export function approvedProfilePolicyDigest(value:unknown):string{
  const pins=(raw:unknown)=>{if(!Array.isArray(raw))fail('PREPARATION_MISMATCH','Profile pin collection unavailable');return raw.map(v=>({path:obj(v).path}));};
  profile.repositories=(profile.repositories as Array<Record<string,unknown>>).map(r=>({...r,commit:null,submodules:(r.submodules as Array<Record<string,unknown>>).map(m=>({...m,commit:null}))}));
  profile.package_managers=(profile.package_managers as Array<Record<string,unknown>>).map(m=>({...m,locks:pins(m.locks)}));
- profile.recipe={path:obj(profile.recipe).path};
+ // The versioned preparation-policy file is approval authority, not a source pin.
+ profile.recipe=JSON.parse(JSON.stringify(profile.recipe));
  for(const key of ['generated_inputs','build_config','preparation_evidence'])profile[key]=pins(profile[key]);
  profile.caches=(profile.caches as Array<Record<string,unknown>>).map(c=>({...c,input_digest:null}));
  return digestDocument(profile);
@@ -412,6 +414,7 @@ export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeRe
  const selected=await readSelectedEnvironmentProfile(tx,{organisation_id:input.organisation_id,pool_id:row.current_pool,configuration_digest:row.current_configuration,parent_profile_id:row.current_profile,parent_preparation_digest:row.parent_preparation,profile_id:row.profile_id,preparation_digest:input.preparation_digest,source_manifest_digest:row.source_manifest_digest});if(!selected)return null;
  const manifest=row.profile_manifest as Record<string,unknown>,manifestBody={...manifest};delete manifestBody.digest;
  if(manifest.digest!==input.preparation_digest||digestDocument(manifestBody)!==input.preparation_digest)return null;
+ if(runtimeReadinessDigest(row)!==row.readiness_digest)return null;
  const profile=manifest.profile;
  if(!profile||digestDocument(profile)!==row.profile_digest||digestDocument(row.source_bindings)!==row.source_state_digest||digestDocument(row.readiness_input)!==row.readiness_input_digest)return null;
  if(!Array.isArray(row.source_bindings)||!Array.isArray((profile as Record<string,unknown>).repositories))return null;
@@ -423,12 +426,143 @@ export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeRe
  // Resolve them through the exact approved URL, never by copying caller labels.
  const mapped=await tx.query("SELECT r.repository_id,p.url FROM hyperfide.run_repositories r JOIN hyperfide.runs run ON run.organisation_id=r.organisation_id AND run.id=r.run_id JOIN hyperfide.repositories p ON p.organisation_id=r.organisation_id AND p.id=r.repository_id AND p.project_id=run.project_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND p.url=$3 FOR SHARE OF r,run,p",[input.organisation_id,input.run_id,declared[0]!.url]);
  if(mapped.rows.length!==1||mapped.rows[0]!.repository_id!==row.source_repository_id)return null;
- const artifacts=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",
-  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest])]]);
- if(artifacts.rows.length!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest]).size)return null;
+ const artifacts=await tx.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' AND completed_at IS NOT NULL FOR SHARE",
+  [input.organisation_id,input.run_id,[...new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.source_manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest])]]);
+ if(artifacts.rows.length!==new Set([row.stdout_artifact_digest,row.manifest_artifact_digest,row.source_manifest_artifact_digest,row.execution_receipt_artifact_digest,row.verification_receipt_artifact_digest]).size)return null;
  const {current_generation,current_preparation,current_boot_id,current_profile,slot_state,profile_manifest,current_profile_preparation,...proof}=row;
  return{...proof,observed_at:new Date(row.observed_at).toISOString(),expires_at:new Date(row.expires_at).toISOString()} as RuntimeReadinessRecord;
 }
+
+export interface VerifiedRuntimeReadinessPublication {
+ observation:{
+  id:string;sandbox_id:string;boot_generation:string;boot_id:string;slot_id:string;profile_id:string;
+  boot_preparation_digest:string;preparation_digest:string;source_manifest_digest:string;
+  source_repository_id:string;source_repository_key:string;source_object_id:string;source_tree_id:string;
+  source_bindings:Array<{id:string;commit:string;tree:string}>;workspace_digest:string|null;
+  native_operation_id:string;input_digest:string;command_digest:string;readiness_input:Record<string,unknown>;
+  execution_receipt_digest:string;verification_receipt_digest:string;
+  state:'READY'|'NOT_READY';failure_code:string|null;observed_at:string;expires_at:string;
+ };
+ manifest:Record<string,unknown>;lineage_id:string|null;
+ artifacts:{stdout:ProviderArtifactReference;manifest:ProviderArtifactReference;source_manifest:ProviderArtifactReference;
+  execution_receipt:ProviderArtifactReference;verification_receipt:ProviderArtifactReference};
+}
+const readinessIdentityFields=[
+ 'organisation_id','run_id','id','sandbox_id','boot_generation','boot_id','slot_id','profile_id','profile_digest',
+ 'boot_preparation_digest','preparation_digest','source_digest','source_manifest_digest','source_manifest_artifact_digest','source_state_digest',
+ 'readiness_input','readiness_input_digest','source_repository_id','source_repository_key','source_object_id','source_tree_id',
+ 'source_bindings','workspace_digest','native_operation_id','input_digest','command_digest','stdout_artifact_digest',
+ 'execution_receipt_digest','verification_receipt_digest','execution_receipt_artifact_digest','verification_receipt_artifact_digest',
+ 'manifest_artifact_digest','failure_code','observed_at','expires_at',
+] as const;
+/** This digest identifies the retained publication envelope, not the native
+ * checker, a Git tree, or the full preparation manifest. Those remain explicit. */
+export function runtimeReadinessDigest(value:Record<string,unknown>):string {
+ const identity:Record<string,unknown>={};
+ for(const key of readinessIdentityFields){
+  if(!Object.hasOwn(value,key))fail('RUNTIME_OBSERVATION_INVALID','Complete immutable readiness envelope required');
+  identity[key]=['observed_at','expires_at'].includes(key)?new Date(String(value[key])).toISOString():key==='boot_generation'?String(value[key]):value[key];
+ }
+ return digestDocument({schema_version:1,kind:'RUNTIME_READINESS_PUBLICATION',identity});
+}
+export type RuntimeReadinessPublicationVerifier=(tx:PrimaryTransaction,invocation:InvocationContext,input:VerifiedRuntimeReadinessPublication,producerProof:unknown)=>Promise<void>;
+export function registerPublicationVerifier(runtime:ProviderRuntimeRegistry,verifier:RuntimeReadinessPublicationVerifier):()=>void{
+ if(typeof verifier!=="function"||runtime.publicationVerifier&&runtime.publicationVerifier!==verifier)fail("PROVIDER_REGISTRATION_CONFLICT","Actual private publication proof verifier must be installed once");
+ if(runtime.publicationVerifier===verifier)return()=>{};runtime.publicationVerifier=verifier;return()=>{if(runtime.publicationVerifier===verifier)delete runtime.publicationVerifier;};
+}
+export interface ProviderReadinessCapability {
+ registerPublicationVerifier(verifier:RuntimeReadinessPublicationVerifier):()=>void;
+ registerArtifactReferenceReader(reader:ProviderArtifactReferenceReader):()=>void;
+ readRuntimeReadiness:typeof readRuntimeReadiness;
+ publishVerifiedRuntimeReadiness(tx:PrimaryTransaction,invocation:InvocationContext,input:VerifiedRuntimeReadinessPublication,producerProof:unknown):Promise<{created:boolean;id:string;readiness_digest:string;state:string;authority:'OBSERVATION_ONLY'}>;
+}
+export function isProviderReadinessCapability(value:unknown):value is ProviderReadinessCapability {
+ return !!value&&typeof value==='object'&&['registerPublicationVerifier','registerArtifactReferenceReader','readRuntimeReadiness','publishVerifiedRuntimeReadiness'].every(k=>typeof (value as Record<string,unknown>)[k]==='function');
+}
+/** Private transaction-bound producer API. The actual12 retained-receipt
+ * publisher must first verify the signed/root-sealed result, stored artifact
+ * bytes and independently measured source. No JSON action exposes this method.
+ * Lower08 revalidates its own authority, immutable profile/source identities,
+ * retained metadata and current physical binding in the caller's transaction. */
+export async function publishVerifiedRuntimeReadiness(tx:PrimaryTransaction,invocation:InvocationContext,
+ raw:VerifiedRuntimeReadinessPublication,producerProof:unknown,reader:ProviderArtifactReferenceReader,verifier:RuntimeReadinessPublicationVerifier):Promise<{created:boolean;id:string;readiness_digest:string;state:string;authority:'OBSERVATION_ONLY'}>{
+ assertPrimaryTransaction(tx);assertInvocation(invocation);
+ if(!['PROVISIONER','VERIFIER'].includes(invocation.principal.role))fail('AUTH_SCOPE_DENIED','Actual retained-receipt provisioner/verifier producer required');
+ if(typeof verifier!=='function')fail('RUNTIME_PRODUCER_UNAVAILABLE','Actual private retained-byte producer proof verifier required');
+ if(typeof reader!=='function')fail('ARTIFACT_REFERENCE_READER_UNAVAILABLE','Actual retained artifact metadata reader required');
+ // Clone before any await: later caller mutation cannot change committed facts.
+ const input=obj(JSON.parse(JSON.stringify(raw)),['observation','manifest','lineage_id','artifacts']);
+ if(JSON.stringify(input).length>16777216)fail('RUNTIME_OBSERVATION_INVALID','Bounded readiness publication required');
+ const o=obj(input.observation,['id','sandbox_id','boot_generation','boot_id','slot_id','profile_id','boot_preparation_digest','preparation_digest','source_manifest_digest',
+ 'source_repository_id','source_repository_key','source_object_id','source_tree_id','source_bindings','workspace_digest','native_operation_id','input_digest','command_digest',
+ 'readiness_input','execution_receipt_digest','verification_receipt_digest','state','failure_code','observed_at','expires_at']);
+ for(const k of ['id','sandbox_id','boot_id','slot_id','profile_id','source_repository_id','native_operation_id'])uuid(o[k]);dec(o.boot_generation);
+ if(o.boot_generation==='0'||!['READY','NOT_READY'].includes(String(o.state))||o.state==='READY'&&o.failure_code!==null)fail('RUNTIME_OBSERVATION_INVALID','Valid observed state/current boot required');
+ if(o.failure_code!==null)str(o.failure_code,128);
+ for(const k of ['boot_preparation_digest','preparation_digest','source_manifest_digest','input_digest','command_digest','execution_receipt_digest','verification_receipt_digest'])dg(o[k]);
+ if(o.workspace_digest!==null)dg(o.workspace_digest);str(o.source_repository_key,256);
+ const oid=(v:unknown)=>{if(typeof v!=='string'||!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(v))fail('RUNTIME_OBSERVATION_INVALID','Exact measured Git object identity required');};
+ oid(o.source_object_id);oid(o.source_tree_id);
+ if(!Array.isArray(o.source_bindings)||!o.source_bindings.length||o.source_bindings.length>1024)fail('RUNTIME_OBSERVATION_INVALID','Bounded measured repository bindings required');
+ const keys=new Set<string>();
+ for(const rawBinding of o.source_bindings){const b=obj(rawBinding,['id','commit','tree']);const key=str(b.id,256);if(keys.has(key))fail('RUNTIME_OBSERVATION_INVALID','Duplicate measured repository key');keys.add(key);oid(b.commit);oid(b.tree);}
+ const measured=o.source_bindings.filter(b=>b.id===o.source_repository_key);
+ if(measured.length!==1||measured[0]!.commit!==o.source_object_id||measured[0]!.tree!==o.source_tree_id)fail('RUNTIME_SOURCE_MISMATCH','Observed source key/commit/tree must match the exact measured binding');
+ const at=utc(o.observed_at),until=utc(o.expires_at),now=Date.now();
+ if(Date.parse(at)>now||now-Date.parse(at)>30000||Date.parse(until)<=now||Date.parse(until)-Date.parse(at)>300000)fail('RUNTIME_OBSERVATION_STALE','Fresh bounded physical readiness publication required');
+ const readinessInput=obj(o.readiness_input);if(JSON.stringify(readinessInput).length>1048576)fail('RUNTIME_OBSERVATION_INVALID','Bounded secret-free native readiness input required');
+ if(readinessInput.boot_id!==o.boot_id||readinessInput.preparation_digest!==o.preparation_digest)fail('RUNTIME_OBSERVATION_INVALID','Native readiness input must retain exact boot/effective preparation');
+ const manifest=obj(input.manifest),manifestBody={...manifest};delete manifestBody.digest;
+ obj(manifest,manifest.schema_version===1?['schema_version','profile','files','directories','scan','digest']:['schema_version','profile','files','directories','symlinks','hardlinks','scan','digest']);
+ if(![1,2].includes(Number(manifest.schema_version))||manifest.digest!==o.preparation_digest||digestDocument(manifestBody)!==o.preparation_digest)fail('PREPARATION_MISMATCH','Actual complete preparation manifest bytes required');
+ validateProfile(manifest.profile);
+ const profile=obj(manifest.profile),profileDigest=digestDocument(profile);
+ if(readinessInput.profile_digest!==profileDigest)fail('RUNTIME_OBSERVATION_INVALID','Native readiness input must bind the actual effective profile');
+ const declared=(profile.repositories as Array<Record<string,unknown>>).filter(r=>r.id===o.source_repository_key);
+ if(declared.length!==1)fail('RUNTIME_SOURCE_MISMATCH','Exactly one declared logical repository key required');
+ const artifacts=obj(input.artifacts,['stdout','manifest','source_manifest','execution_receipt','verification_receipt']);
+ const refs=Object.values(artifacts).map(rawRef=>{const r=obj(rawRef,['artifact_id','receipt_id','digest','size_bytes']);uuid(r.artifact_id);str(r.receipt_id,128);dg(r.digest);dec(r.size_bytes);return r as unknown as ProviderArtifactReference;});
+ await invocation.guard(tx);
+ await verifier(tx,invocation,input as unknown as VerifiedRuntimeReadinessPublication,producerProof);
+ const organisation=invocation.principal.organisation_id,run=invocation.principal.run_id;
+ const current=(await tx.query("SELECT s.*,b.boot_id,p.profile_id AS parent_profile_id,pc.configuration_digest,pc.document->'pool'->>'preparation_digest' AS parent_preparation_digest,ep.provider AS parent_provider,ep.runtime_platform AS parent_runtime_platform,ep.manifest AS parent_manifest,w.state AS slot_state FROM hyperfide.sandboxes s JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.worker_slots w ON w.organisation_id=s.organisation_id AND w.sandbox_id=s.id AND w.boot_generation=s.boot_generation AND w.id=$3 JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.provider_pool_configurations pc ON pc.organisation_id=p.organisation_id AND pc.pool_id=p.id AND pc.active JOIN hyperfide.environment_profiles ep ON ep.organisation_id=p.organisation_id AND ep.id=p.profile_id WHERE s.organisation_id=$1 AND s.id=$2 FOR SHARE OF s,b,w,p,pc,ep",[organisation,o.sandbox_id,o.slot_id])).rows;
+ if(current.length!==1)fail('RUNTIME_BINDING_UNAVAILABLE','Unique current configured sandbox/slot/parent profile required');
+ const physical=current[0]!;
+ if(String(physical.boot_generation)!==o.boot_generation||physical.boot_id!==o.boot_id||physical.preparation_digest!==o.boot_preparation_digest||physical.observed_state!=='RUNNING'||physical.desired_state!=='RUNNING'||!['READY','ALLOCATED'].includes(physical.slot_state))fail('STALE_SANDBOX_GENERATION','Readiness must bind the current running physical boot and usable slot');
+ const mapping=(await tx.query("SELECT r.repository_id FROM hyperfide.run_repositories r JOIN hyperfide.runs run ON run.organisation_id=r.organisation_id AND run.id=r.run_id JOIN hyperfide.repositories p ON p.organisation_id=r.organisation_id AND p.id=r.repository_id AND p.project_id=run.project_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND p.url=$3 FOR SHARE OF r,run,p",[organisation,run,declared[0]!.url])).rows;
+ if(mapping.length!==1||mapping[0]!.repository_id!==o.source_repository_id)fail('RUNTIME_SOURCE_MISMATCH','Logical profile repository must resolve uniquely to the accepted run repository');
+ const objects=(await tx.query("SELECT object_id,object_type FROM hyperfide.source_objects WHERE organisation_id=$1 AND repository_id=$2 AND object_id=ANY($3::text[]) FOR SHARE",[organisation,o.source_repository_id,[o.source_object_id,o.source_tree_id]])).rows;
+ if(!objects.some(r=>r.object_id===o.source_object_id&&r.object_type==='commit')||!objects.some(r=>r.object_id===o.source_tree_id&&r.object_type==='tree'))fail('RUNTIME_SOURCE_MISMATCH','Accepted durable commit/tree identities required');
+ const metadata=await reader(tx,{organisation_id:organisation,run_id:run},refs);
+ if(!Array.isArray(metadata)||metadata.length!==refs.length)fail('ARTIFACT_REFERENCE_READER_INVALID','Complete actual artifact references required');
+ const ref=(key:string)=>artifacts[key] as unknown as ProviderArtifactReference;
+ const parentManifest=obj(physical.parent_manifest),parentBody={...parentManifest};delete parentBody.digest;
+ if(parentManifest.digest!==physical.parent_preparation_digest||digestDocument(parentBody)!==physical.parent_preparation_digest)fail('PREPARATION_MISMATCH','Accepted parent manifest identity changed');
+ const existingProfile=(await tx.query('SELECT content_digest,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2 FOR SHARE',[organisation,o.profile_id])).rows[0];
+ if(existingProfile){if(existingProfile.content_digest!==o.preparation_digest||digestDocument(existingProfile.manifest)!==digestDocument(manifest))fail('PREPARATION_MISMATCH','Effective profile identity is immutable');}
+ else await tx.query('INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,$3,$4,$5,$6)',[organisation,o.profile_id,physical.parent_provider,physical.parent_runtime_platform,o.preparation_digest,manifest]);
+ const derived=o.profile_id!==physical.parent_profile_id||o.preparation_digest!==physical.parent_preparation_digest;
+ if(derived){
+  uuid(input.lineage_id);
+  const policy=approvedProfilePolicyDigest(parentManifest.profile);
+  if(approvedProfilePolicyDigest(profile)!==policy)fail('PREPARATION_POLICY_REAPPROVAL_REQUIRED','Derived result may not alter approved resources, tools, capabilities or preparation policy');
+  const identity={organisation_id:organisation,id:input.lineage_id,pool_id:physical.pool_id,configuration_digest:physical.configuration_digest,parent_profile_id:physical.parent_profile_id,parent_preparation_digest:physical.parent_preparation_digest,derived_profile_id:o.profile_id,derived_preparation_digest:o.preparation_digest,source_run_id:run,source_manifest_digest:o.source_manifest_digest,source_manifest_artifact_digest:ref('source_manifest').digest,execution_receipt_artifact_digest:ref('execution_receipt').digest,verification_receipt_artifact_digest:ref('verification_receipt').digest,accepted_policy_digest:policy,allowed_delta:['source','dependency_pins','build_config_pins']};
+  const lineageDigest=digestDocument(identity),prior=(await tx.query('SELECT * FROM hyperfide.provider_profile_lineage WHERE organisation_id=$1 AND pool_id=$2 AND configuration_digest=$3 AND derived_profile_id=$4 AND derived_preparation_digest=$5 FOR SHARE',[organisation,physical.pool_id,physical.configuration_digest,o.profile_id,o.preparation_digest])).rows[0];
+  if(prior){if(prior.lineage_digest!==lineageDigest||prior.state!=='QUALIFIED'||new Date(prior.expires_at).getTime()<=now)fail('PREPARATION_LINEAGE_CONFLICT','Existing lineage cannot change, renew or regain qualification');}
+  else{
+   const row:Record<string,unknown>={...identity,lineage_digest:lineageDigest,state:'QUALIFIED',observed_at:at,expires_at:until},columns=Object.keys(row);
+   await tx.query('INSERT INTO hyperfide.provider_profile_lineage('+columns.join(',')+') VALUES('+columns.map((_,n)=>'$'+(n+1)).join(',')+')',columns.map(k=>k==='allowed_delta'?JSON.stringify(row[k]):row[k]));
+  }
+ }else if(input.lineage_id!==null)fail('PREPARATION_LINEAGE_CONFLICT','Base profile requires no derived lineage');
+ const row:Record<string,unknown>={organisation_id:organisation,run_id:run,...o,profile_digest:profileDigest,source_digest:o.source_manifest_digest,source_manifest_artifact_digest:ref('source_manifest').digest,source_state_digest:digestDocument(o.source_bindings),readiness_input_digest:digestDocument(readinessInput),stdout_artifact_digest:ref('stdout').digest,manifest_artifact_digest:ref('manifest').digest,execution_receipt_artifact_digest:ref('execution_receipt').digest,verification_receipt_artifact_digest:ref('verification_receipt').digest};
+ row.readiness_digest=runtimeReadinessDigest(row);
+ const prior=(await tx.query('SELECT * FROM hyperfide.runtime_environment_observations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',[organisation,run,o.id])).rows[0];
+ if(prior){if(prior.readiness_digest!==row.readiness_digest)fail('RUNTIME_OBSERVATION_CONFLICT','Physical publication identity changed');return{created:false,id:String(o.id),readiness_digest:String(prior.readiness_digest),state:String(prior.state),authority:'OBSERVATION_ONLY'};}
+ const columns=Object.keys(row);
+ await tx.query('INSERT INTO hyperfide.runtime_environment_observations('+columns.join(',')+') VALUES('+columns.map((_,n)=>'$'+(n+1)).join(',')+')',columns.map(k=>['source_bindings'].includes(k)?JSON.stringify(row[k]):row[k]));
+ return{created:true,id:String(o.id),readiness_digest:String(row.readiness_digest),state:String(o.state),authority:'OBSERVATION_ONLY'};
+}
+
 export function createComponent(context:ComponentContext):Component {
   const database=createProviderDatabase(context);
   const provisioner=()=>{if(context.role!=='provisioner')fail('ROLE_FORBIDDEN','Provider administration requires the provisioner role');};
@@ -437,7 +571,7 @@ export function createComponent(context:ComponentContext):Component {
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider service is shutting down');
     try{return await fn(input,bindProviderInvocation(database,await config(),invocationOf(requestContext)));}catch(e){throw e instanceof FoundationError?e:databaseError(e);}
   };
-  return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness},...(context.role==='provisioner'?{'provider.registry.v1':{
+  return {apiVersion:1,capabilities:{'provider.pools.v1':database,'provider.readiness.v1':{readRuntimeReadiness,registerPublicationVerifier:(verifier:RuntimeReadinessPublicationVerifier)=>registerPublicationVerifier(database.runtime,verifier),registerArtifactReferenceReader:(reader:ProviderArtifactReferenceReader)=>registerArtifactReferenceReader(database.runtime,reader),publishVerifiedRuntimeReadiness:(tx:PrimaryTransaction,i:InvocationContext,input:VerifiedRuntimeReadinessPublication,proof:unknown)=>{const reader=database.runtime.artifactReferenceReader;const verifier=database.runtime.publicationVerifier;if(!verifier)fail("RUNTIME_PRODUCER_UNAVAILABLE","Actual private retained-byte producer proof verifier required");if(!reader)fail('ARTIFACT_REFERENCE_READER_UNAVAILABLE','Actual retained artifact metadata reader required');return publishVerifiedRuntimeReadiness(tx,i,input,proof,reader,verifier);}},...(context.role==='provisioner'?{'provider.registry.v1':{
  registerArtifactReferenceReader:(reader:ProviderArtifactReferenceReader)=>registerArtifactReferenceReader(database.runtime,reader),
  registerIsolationTransport:(provider:'railway'|'blaxel',factory:ProviderIsolationFactory)=>registerIsolationTransport(database.runtime,provider,factory),
  registerProviderAdapter:(provider:'railway'|'blaxel',factory:ProviderAdapterFactory)=>registerProviderAdapter(database.runtime,provider,factory),
