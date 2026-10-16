@@ -15,7 +15,7 @@ IDS=["decision.jobs.authenticated-submit","decision.jobs.no-wire-authority","dec
 "decision.jobs.stale-admission","decision.jobs.stale-completion","decision.jobs.cancel-queued",
 "decision.jobs.cancel-running","decision.jobs.restart-queued","decision.jobs.expired-queue",
 "decision.jobs.synthetic-receipt","decision.jobs.no-authority-effects","decision.jobs.completed-audit-freshness",
-"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline"]
+"decision.jobs.revision-unknown-rejected","decision.jobs.slow-freshness-zero-send","decision.jobs.restart-inflight","decision.jobs.idempotency-conflict","decision.jobs.replay-after-revision-change","decision.jobs.retained-request-replay","decision.jobs.shared-account-quota","decision.jobs.completion-deadline","decision.jobs.admission-deadline","decision.jobs.semantic-lock-order"]
 def expect(v,msg):
  if not v:raise AssertionError(msg)
 def uid():return str(uuid.uuid4())
@@ -53,7 +53,7 @@ def capprofile():
 LOADER="""import {assertInvocation} from './transport/protocol.js';
 export function createComponent(ctx){
  const jobs=ctx.dependencies.require('20.4','decision.jobs.v1',v=>v&&typeof v.registerPurpose==='function'&&typeof v.completedAudit==='function');
- const current=async(tx,s,p,i)=>{assertInvocation(i);await i.guard(tx);const delay=(await tx.query('SELECT seconds,after_response FROM public.fixture_decision_delay')).rows[0];const completed=delay.after_response?(await tx.query('SELECT count(*)::int n FROM hyperfide.decision_attempts WHERE finished_at IS NOT NULL')).rows[0].n:1;if(delay.seconds>0&&completed>0)await tx.query('SELECT pg_sleep($1)',[delay.seconds]);const r=(await tx.query('SELECT spec_revision_id,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id])).rows[0];
+ const current=async(tx,s,p,i)=>{assertInvocation(i);await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);await i.guard(tx);const delay=(await tx.query('SELECT seconds,after_response FROM public.fixture_decision_delay')).rows[0];const completed=delay.after_response?(await tx.query('SELECT count(*)::int n FROM hyperfide.decision_attempts WHERE finished_at IS NOT NULL')).rows[0].n:1;if(delay.seconds>0&&completed>0)await tx.query('SELECT pg_sleep($1)',[delay.seconds]);const r=(await tx.query('SELECT spec_revision_id,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[s.organisation_id,s.run_id])).rows[0];
  return {spec_revision:r.spec_revision_id,repository_commits:{},graph_revision:null,contract_revisions:{},event_watermark:'fixture-run:'+r.state_version,ownership_generation:String(r.state_version)};};
  jobs.registerPurpose('fixture-review',{current,load:async(tx,i,input)=>{assertInvocation(i);await i.guard(tx);if(!input||Object.keys(input).join(',')!=='packet_id')throw Error('fixture input schema');
  const r=(await tx.query('SELECT packet FROM public.fixture_decision_packets WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[i.principal.organisation_id,i.principal.run_id,input.packet_id])).rows[0];if(!r)throw Error('fixture packet absent');
@@ -287,14 +287,39 @@ def main():
  def completion_deadline(f,p,o):
   f.sql("UPDATE public.fixture_decision_delay SET seconds=3,after_response=true")
   id=f.submit()
-  started=time.monotonic();v=f.process(id)
-  expect(time.monotonic()-started<3 and v["state"]=="EXPIRED"and v["result"]["payload"]["status"]=="expired","slow completion freshness escaped total job deadline: "+json.dumps(v))
+  started=time.monotonic();v=f.process(id);elapsed=time.monotonic()-started
+  expect(elapsed<3 and v["state"]=="EXPIRED"and v["result"]["payload"]["status"]=="expired","slow completion freshness escaped total job deadline: "+json.dumps({"elapsed":elapsed,"result":v}))
   expect(len(p.received)==1 and v["result"]["payload"]["raw_output"].get("answers",{}).get("urgent",{}).get("noul")==.8,"expired completion lost bounded raw response: "+json.dumps(v["result"]))
  def admission_deadline(f,p,o):
   inp=f.submission();f.sql("UPDATE public.fixture_decision_delay SET seconds=3")
   started=time.monotonic();f.reject("decision.jobs.submit",inp,"TX_TIMEOUT")
   expect(time.monotonic()-started<3 and not p.received,"slow packet admission exceeded total deadline")
   expect(f.sql("SELECT count(*)::int n FROM hyperfide.decision_jobs")[0]["n"]==0,"timed out admission committed a job")
+ def semantic_lock_order(f,p,o):
+  inp=f.submission(mode="background",deadline_ms=10000);box=[];t=None
+  script="""import {createRequire} from 'node:module';
+const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg'),c=new pg.Client({connectionString:process.env.DATABASE_URL}),s=JSON.parse(process.argv[1]);
+try{await c.connect();await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[s.organisation+':'+s.run+':finding-disposition']);
+console.log('locked');await new Promise(resolve=>process.stdin.once('data',resolve));
+await c.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[s.organisation,s.run]);await c.query('COMMIT');console.log('committed');}
+finally{await c.end();}"""
+  writer=subprocess.Popen(["node","--input-type=module","-e",script,json.dumps(f.ids)],cwd=ROOT,env=f.env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+  try:
+   ready,_,_=select.select([writer.stdout],[],[],5);expect(ready and writer.stdout.readline().strip()=="locked","actual assurance writer did not hold barrier")
+   t=threading.Thread(target=lambda:box.append(f.invoke("decision.jobs.submit",inp,component="20.4")));t.start()
+   deadline=time.monotonic()+4;waiting=[]
+   while time.monotonic()<deadline:
+    waiting=f.sql("SELECT a.pid,(SELECT count(*)::int FROM pg_locks l WHERE l.pid=a.pid AND l.relation='hyperfide.runs'::regclass AND l.mode='RowShareLock' AND l.granted) AS run_locks FROM pg_stat_activity a WHERE a.datname=current_database() AND a.wait_event='advisory'")
+    if waiting:break
+    time.sleep(.03)
+   expect(waiting and all(row["run_locks"]==0 for row in waiting),"decision waited for semantic barrier while retaining principal/run locks: "+json.dumps(waiting))
+   out,err=writer.communicate("continue\n",timeout=4);expect(writer.returncode==0 and "committed"in out,"writer failed under concurrent decision guard: "+err)
+   t.join(6);expect(not t.is_alive() and box and box[0][1].get("error",{}).get("code")=="DECISION_STALE","concurrent semantic writer was not observed as stale: "+json.dumps(box))
+   expect(not p.received,"stale semantic packet invoked provider")
+  finally:
+   if writer.poll()is None:
+    writer.kill();writer.communicate(timeout=5)
+   if t:t.join(6)
  def account_quota(f,p,o):
   # Both sends must fall inside one real fixed-minute quota window.
   until_next=60-time.time()%60
@@ -307,7 +332,7 @@ def main():
  (20,rate,"valid",0,{"requests_per_minute":1},None),(21,circuit,"overload",0,{"circuit_failures":1},None),
  (22,stale_admission,"valid",0,None,None),(23,stale_completion,"held",0,None,None),
  (24,cancel_queued,"valid",0,None,None),(25,cancel_running,"valid",120,None,None),
- (26,restart,"valid",0,None,None),(27,expired,"valid",0,None,None),(32,slow_freshness,"valid",0,None,None),(33,restart_inflight,"valid",120,None,None),(37,account_quota,"valid",0,{"requests_per_minute":1},"valid"),(38,completion_deadline,"valid",0,None,None),(39,admission_deadline,"valid",0,None,None)]
+ (26,restart,"valid",0,None,None),(27,expired,"valid",0,None,None),(32,slow_freshness,"valid",0,None,None),(33,restart_inflight,"valid",120,None,None),(37,account_quota,"valid",0,{"requests_per_minute":1},"valid"),(38,completion_deadline,"valid",0,None,None),(39,admission_deadline,"valid",0,None,None),(40,semantic_lock_order,"valid",0,None,None)]
  # basic emitted nonsequential supplemental assertions; caller canonicalises recorded observations below.
  for index,fn,mode,delay,settings,second in cases:
   error=scenario(index,fn,mode,delay,settings,second)

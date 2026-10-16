@@ -71,10 +71,16 @@ export class DecisionJobs{
  private loader(purpose:string):PurposeLoader{
   const found=this.purposes.get(purpose);if(!found)fail('DECISION_UNSUPPORTED','No trusted purpose loader is registered');return found!;
  }
+ private async guard(i:InvocationContext,tx:PrimaryTransaction):Promise<void>{
+  const s=scoped(i);
+  // Match the actual assurance writer barrier before principal/run row locks.
+  await tx.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);
+  await i.guard(tx);
+ }
  private async tx<T>(i:InvocationContext,fn:(tx:PrimaryTransaction)=>Promise<T>,timeoutMs=5000):Promise<T>{
   scoped(i);if(!allowedRoles.includes(i.principal.role))fail('AUTH_SCOPE_DENIED','Role cannot operate decision jobs');
   if(this.closed)fail('DECISION_UNAVAILABLE','Decision jobs are closed');
-  return this.g.withPrimaryTransaction({timeoutMs,signal:i.signal,guard:tx=>i.guard(tx)},fn);
+  return this.g.withPrimaryTransaction({timeoutMs,signal:i.signal,guard:tx=>this.guard(i,tx)},fn);
  }
  private async lock(tx:PrimaryTransaction,s:Scope):Promise<void>{
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[s.organisation_id+':decision-admission']);
@@ -311,7 +317,7 @@ export class DecisionJobs{
    else if(!checkFresh)fail('DECISION_UNAVAILABLE','Completion freshness deadline interrupted before job expiry');
    await this.finish(tx,s,j,status,lastReason||null,decision);
   },timeoutMs);
-  try{await complete(true,performance.now()>=processDeadline?5000:databaseTimeout());}
+  try{await complete(true,databaseTimeout());}
   catch(error){
    if(!(error instanceof Error)||!('code'in error)||error.code!=='TX_TIMEOUT')throw error;
    // A cancelled freshness query rolls back. Retain the bounded provider response only
@@ -323,7 +329,7 @@ export class DecisionJobs{
  async completedAudit(tx:PrimaryTransaction,s:Scope,input:{decision_id:string;packet_hash:string},i:InvocationContext):Promise<unknown>{
   assertPrimaryTransaction(tx);assertInvocation(i);uuid(s.organisation_id);uuid(s.run_id);uuid(input.decision_id);
   if(i.principal.organisation_id!==s.organisation_id||i.principal.run_id!==s.run_id)fail('AUTH_SCOPE_DENIED','Audit scope differs from verified principal');
-  await i.guard(tx);
+  await this.guard(i,tx);
   const known=await tx.query('SELECT 1 FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...scopeValues(s),input.decision_id]);
   if(!known.rowCount)return{available:false,reason:'missing'};
   const job=await this.row(tx,s,input.decision_id);await this.fresh(tx,s,job,i);
