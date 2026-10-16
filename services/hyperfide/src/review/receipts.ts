@@ -242,7 +242,7 @@ export async function fenceReviewObligations(db:ReviewDb,binding:ReviewScope,con
   if(!await reviewControlMatches(db,binding,control,tasks,row.lease_sandbox_id))continue;
   if(row.lease_session_id)physical.push({kind:'REVIEW',obligation_id:row.id,session_id:row.lease_session_id,sandbox_id:row.lease_sandbox_id,sandbox_boot_generation:row.lease_boot_generation,lease_generation:row.lease_generation,reservation_id:null,operation_id:null});
   const changed=await db.query(`UPDATE hyperfide.review_obligations SET state='PENDING',lease_generation=lease_generation+1,lease_session_id=NULL,lease_sandbox_id=NULL,lease_boot_generation=NULL,lease_expires_at=NULL WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation`,[binding.organisation_id,binding.run_id,row.id]);
-  fenced.push(changed.rows[0]);
+  const fencedRow=changed.rows[0];if(!fencedRow)fail('REVIEW_FENCE_CONFLICT','Locked review authority could not be fenced');fenced.push(fencedRow);
  }
  return {fenced,physical,cleanup_status:'UNKNOWN',reassignment_authorized:false,control_operation_id:control.operation_id,control_generation:control.control_generation};
 }
