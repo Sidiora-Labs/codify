@@ -131,12 +131,45 @@ def ingestion(f):
     check("graph.ingestion.reference-projection",lambda:expect(sql("SELECT count(*) FROM hyperfide.graph_references").stdout.strip()==str(f.manifest["counts"]["refs"]),"reference projection differs"))
     check("graph.ingestion.body-reconstruction",lambda:expect(sql("SELECT count(*) FROM hyperfide.graph_source_bodies WHERE body LIKE '%body words searchable corpus%'").stdout.strip()=="1","actual body parts were not reconstructed"))
     check("graph.ingestion.no-publication-side-effect",lambda:expect(sql("SELECT count(*) FROM hyperfide.graph_manifests").stdout.strip()=="0","staging published graph authority"))
+    def concurrent_build():
+        m=f.extract("4");value=f.scoped(bundles=[m])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda _:f.request("7.2","graph.ingest.create",value),range(2)))
+        expect(all(response.get("ok") is True for _,response in results),"concurrent exact create returned an uncertain database failure")
+        build_ids={response["result"]["build_id"] for _,response in results}
+        expect(len(build_ids)==1,"concurrent create duplicated immutable graph build")
+        expect(sql("SELECT count(*) FROM hyperfide.graph_builds WHERE input_digest='"+sha(encoded([m]))+"'").stdout.strip()=="1","independent SQL found duplicate/missing build")
+    check("graph.ingestion.concurrent-exact-build-replay",concurrent_build)
+    def pending_artifact():
+        m=f.extract("5");body=encoded(m);value=sha(body)
+        f.fixture.sql("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,retention_class) VALUES($1,$2,$3,$4,$5,'FIXTURE_PENDING',$6,'PENDING','RUN')",[SCOPE["organisation_id"],SCOPE["run_id"],str(uuid.uuid4()),value,str(len(body.encode())),"pending-manifest-"+str(uuid.uuid4())])
+        f.reject("7.2","graph.ingest.create",f.scoped(bundles=[m]),"GRAPH_ARTIFACT_CONFLICT")
+        expect(sql("SELECT status FROM hyperfide.artifacts WHERE digest='"+value+"'").stdout.strip()=="PENDING","ingestion falsely completed another artifact")
+        expect(sql("SELECT count(*) FROM hyperfide.graph_builds WHERE input_digest='"+sha(encoded([m]))+"'").stdout.strip()=="0","conflicting artifact left a partially admitted build")
+    check("graph.ingestion.reject-incomplete-manifest-artifact-reuse",pending_artifact)
+    def unavailable_replay():
+        artifact_status(b,"QUARANTINED")
+        try:f.reject("7.2","graph.ingest.create",f.scoped(bundles=[f.manifest]),"GRAPH_ARTIFACT_UNAVAILABLE")
+        finally:artifact_status(b,"COMPLETE")
+    check("graph.ingestion.reject-quarantined-build-replay",unavailable_replay)
+
+
+def artifact_status(build,status):
+    expect(status in ("COMPLETE","QUARANTINED"),"invalid fixture artifact state")
+    sql("UPDATE hyperfide.artifacts a SET status='"+status+"',state_version=state_version+1 FROM hyperfide.graph_bundle_inputs b WHERE a.organisation_id=b.organisation_id AND a.run_id=b.run_id AND a.id=b.artifact_id AND b.graph_id='"+build+"'")
 
 def publication(f):
     b=f.create()["build_id"];operation=str(uuid.uuid4());request=f.scoped(build_id=b,channel="main",expected_generation="0",operation_id=operation);state={}
     check("graph.publication.reject-partial",lambda:f.reject("7.3","graph.publish.commit",request,"GRAPH_INCOMPLETE"))
     def ready():state["build"]=f.ready();expect(state["build"]==b,"ready replay changed build")
     check("graph.publication.complete-build",ready)
+    def quarantined_publish():
+        artifact_status(b,"QUARANTINED")
+        try:
+            f.reject("7.3","graph.publish.commit",request,"GRAPH_ARTIFACT_UNAVAILABLE")
+            expect(sql("SELECT count(*) FROM hyperfide.graph_manifests").stdout.strip()=="0","unavailable artifact published a manifest")
+        finally:artifact_status(b,"COMPLETE")
+    check("graph.publication.reject-quarantined-artifact",quarantined_publish)
+
     def publish():
         state["receipt"]=f.ok("7.3","graph.publish.commit",request)
         expect(state["receipt"]["publication_generation"]=="1","publication generation differs")
@@ -202,6 +235,14 @@ def publication(f):
         expect(sum(response.get("ok") is True for _,response in results)==1,"concurrent publication admitted more or fewer than one winner")
         expect(sql("SELECT count(*) FROM hyperfide.graph_channels WHERE name='race'").stdout.strip()=="1","publication race left duplicate/missing channel")
     check("graph.publication.concurrent-cas",race)
+    def quarantined_history():
+        artifact_status(b,"QUARANTINED")
+        try:
+            f.reject("7.3","graph.publish.snapshot",f.scoped(manifest_id=receipt["manifest_id"],expected_sources=pins),"GRAPH_ARTIFACT_UNAVAILABLE")
+            f.reject("7.3","graph.publish.commit",request,"GRAPH_ARTIFACT_UNAVAILABLE")
+        finally:artifact_status(b,"COMPLETE")
+    check("graph.publication.reject-unavailable-history-and-replay",quarantined_history)
+
 def querying(f):
     state={}
     def ready():
@@ -211,6 +252,14 @@ def querying(f):
     manifest=state["manifest"]
     def request(action,**kw):return f.ok("7.4",action,f.scoped(manifest_id=manifest,**kw))
     check("graph.query.exact-manifest-status",lambda:expect(request("graph.query.status")["manifest_digest"]==state["receipt"]["manifest_digest"],"query substituted a graph"))
+    def quarantined_query():
+        artifact_status(state["build"],"QUARANTINED")
+        try:
+            f.reject("7.4","graph.query.status",f.scoped(manifest_id=manifest),"GRAPH_ARTIFACT_UNAVAILABLE")
+            f.reject("7.4","graph.query.search",f.scoped(manifest_id=manifest,mode="body",q="searchable"),"GRAPH_ARTIFACT_UNAVAILABLE")
+        finally:artifact_status(state["build"],"COMPLETE")
+    check("graph.query.reject-quarantined-manifest-custody",quarantined_query)
+
     check("graph.query.reject-missing-version",lambda:f.reject("7.4","graph.query.status",f.scoped(manifest_id=str(uuid.uuid4())),"GRAPH_VERSION_UNAVAILABLE"))
     check("graph.query.channel-status",lambda:expect(f.ok("7.4","graph.query.status",f.scoped(channel="main"))["manifest_id"]==manifest,"channel status lost exact manifest"))
     # Independent real legacy SQLite baseline built from the identical Git source.
@@ -309,6 +358,39 @@ def querying(f):
     check("graph.query.source-delete-rename-version-isolation",changed_source)
     check("graph.query.reject-cross-version-context-symbol",lambda:f.reject("7.4","graph.query.context",f.scoped(manifest_id=state["next_manifest"],symbol_ids=rows,files=[]),"GRAPH_SYMBOL_UNAVAILABLE"))
     check("graph.query.reject-cross-version-cursor",lambda:f.reject("7.4","graph.query.search",f.scoped(manifest_id=state["next_manifest"],mode="body",q="body",limit=1,cursor=state["cursor"]),"GRAPH_CURSOR_INVALID"))
+    def multiple_repositories():
+        second_id=str(uuid.uuid4());second=f.native.base/"second-repository"
+        native.process(["git","-c","maintenance.auto=false","clone","--quiet","--no-hardlinks",str(f.native.repo),str(second)],f.native.base)
+        commit=native.process(["git","rev-parse","HEAD"],second);tree=native.process(["git","rev-parse","HEAD^{tree}"],second)
+        org=SCOPE["organisation_id"];run=SCOPE["run_id"]
+        f.fixture.sql("INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES($1,$2,$3,'second-graph-fixture','https://example.invalid/second')",[org,f.fixture.ids["project"],second_id])
+        f.fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[org,second_id,commit])
+        f.fixture.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[org,run,second_id,commit])
+        f.native.configuration["repositories"][second_id]=str(second);f.native.config.write_text(encoded(f.native.configuration))
+        try:
+            second_manifest=f.native.ok("graph.extract.create",dict(f.native.input,repository_id=second_id,commit=commit,tree=tree,generation="1"))
+            manifests=[f.manifest,second_manifest]
+            build=f.ok("7.2","graph.ingest.create",f.scoped(bundles=manifests))["build_id"]
+            for item in manifests:f.stage(build,item,f.native.chunks(item))
+            f.ok("7.2","graph.ingest.seal",f.scoped(build_id=build))
+            for _ in range(100):
+                resolved=f.ok("7.2","graph.ingest.resolve",f.scoped(build_id=build,limit=8))
+                if resolved["state"]=="READY":break
+            else:raise AssertionError("two-repository graph failed bounded resolution")
+            receipt=f.publish(build,channel="multi")
+            result=f.ok("7.4","graph.query.search",f.scoped(manifest_id=receipt["manifest_id"],mode="body",q="Unicode"))
+            bindings={row["bundle_digest"]:row["identity"] for row in result["source_coverage"]}
+            matched=[bindings[row["bundle_digest"]] for row in result["rows"]]
+            expected={native.UUIDS["repository_id"]:f.manifest["identity"]["commit"],second_id:commit}
+            expect({row["repository_id"]:row["commit"] for row in matched}==expected,"same-path body search lost repository/source bindings")
+            context=f.ok("7.4","graph.query.context",f.scoped(manifest_id=receipt["manifest_id"],symbol_ids=[],files=[{"repository_id":second_id,"path":"README.md"}]))
+            expect(len(context["files"])==1 and context["files"][0]["repository_id"]==second_id,"file context crossed repository namespace")
+            crossing=sql("SELECT count(*) FROM hyperfide.graph_edges e JOIN hyperfide.graph_symbols s ON s.id=e.source_symbol_id AND s.graph_id=e.graph_id JOIN hyperfide.graph_symbols t ON t.id=e.target_symbol_id AND t.graph_id=e.graph_id JOIN hyperfide.graph_files sf ON sf.id=s.file_id AND sf.graph_id=s.graph_id JOIN hyperfide.graph_files tf ON tf.id=t.file_id AND tf.graph_id=t.graph_id WHERE e.graph_id='"+build+"' AND sf.repository_id<>tf.repository_id").stdout.strip()
+            expect(crossing=="0","matching native local symbol IDs created false cross-repository edges")
+            OBS.append({"observation":"two-real-repository-namespace","manifest_id":receipt["manifest_id"],"source_pins":expected,"body_hits":len(result["rows"]),"false_cross_repository_edges":0})
+        finally:
+            f.native.configuration["repositories"].pop(second_id,None);f.native.config.write_text(encoded(f.native.configuration))
+    check("graph.query.multiple-repository-namespace-and-provenance",multiple_repositories)
 def main(mode="7.2"):
     fixture=None
     try:
