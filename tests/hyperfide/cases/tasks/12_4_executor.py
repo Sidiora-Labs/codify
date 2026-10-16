@@ -133,7 +133,7 @@ class Fixture:
         f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,configured_limit,provenance_digest) VALUES($1,$2,$3,'TEST',1,$4)",[org,self.account,i["pool"],digest(b"fixture-not-qualified")])
         f.sql("INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at) VALUES($1,$2,$3,$4,$5,0,clock_timestamp()+interval '1 hour')",[org,run,self.reservation,uid(),self.account])
         pin=digest(b"HOSTILE_INPUT_NOT_ACTUAL_SOURCE")
-        f.sql("INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,state_dir,runner_binary,workspace_path,runner_binary_digest,preparation_digest,readiness_digest,source_digest,source_object_id,source_tree_id,slot_generation,uid,gid,observation_digest) VALUES($1,$2,$3,$4,$5,1,$6,$7,$8,'/invalid/never-run','/invalid/no-native-binary','/invalid/no-workspace',$9,$9,$9,$9,$10,$10,1,65534,65534,$9)",[org,run,self.session,i["provisioner"],i["sandbox"],i["boot"],self.slot,self.repository,pin,"1"*40])
+        f.sql("INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,state_dir,runner_binary,workspace_path,runner_binary_digest,boot_preparation_digest,preparation_digest,readiness_digest,source_digest,source_object_id,source_tree_id,slot_generation,uid,gid,observation_digest) VALUES($1,$2,$3,$4,$5,1,$6,$7,$8,'/invalid/never-run','/invalid/no-native-binary','/invalid/no-workspace',$9,$9,$9,$9,$9,$10,$10,1,65534,65534,$9)",[org,run,self.session,i["provisioner"],i["sandbox"],i["boot"],self.slot,self.repository,pin,"1"*40])
         self.ids={}
         request={"session_id":self.session,"operation_id":uid(),"repository_id":self.repository,"reservation_id":self.reservation,"argv":["/invalid/never-run"],"cwd":".","environment":{},"timeout_ms":1000,"source_digest":pin,"policy_digest":pin,"executable_digest":pin,"environment_digest":digest(b"{}"),"artifact_paths":[]}
         binding={"organisation_id":org,"run_id":run,"session_id":self.session,"credential_id":i["provisioner"],"sandbox_id":i["sandbox"],"boot_id":i["boot"],"boot_generation":"1","slot_id":self.slot,"slot_generation":"1","repository_id":self.repository,"state_dir":"/invalid/never-run","runner_binary":"/invalid/no-native-binary","workspace_path":"/invalid/no-workspace","preparation_digest":pin,"source_digest":pin,"source_object_id":"1"*40,"source_tree_id":"1"*40,"uid":65534,"gid":65534,"provider":"fixture","pool_id":i["pool"],"external_sandbox_id":"fixture-resource"}
@@ -177,6 +177,22 @@ class Fixture:
         try:self.f.sql(sql,values)
         except AssertionError:return
         raise AssertionError("Invalid scoped immutable metadata write was accepted")
+    def metadata_guard_tests(self):
+        scope=[self.scope["organisation_id"],self.scope["run_id"],self.ids["UNKNOWN"]]
+        base=" WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3"
+        for label,assignment in (
+            ("plan", "plan=plan||'{\"changed\":true}'::jsonb"),
+            ("principal", "principal=principal||'{\"actor_id\":\"changed\"}'::jsonb"),
+            ("epoch", "authority_epoch=authority_epoch||'-changed'"),
+            ("job-class", "job_class='PREPARATION'")):
+            check("executor.job-"+label+"-immutable",lambda assignment=assignment:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET "+assignment+base,scope))
+        claimed=[*scope[:2],self.ids["CLAIMED"]]
+        check("executor.claim-custody-immutable",lambda:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET claim_id=gen_random_uuid()"+base,claimed))
+        check("executor.unknown-never-readmitted",lambda:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET state='ADMITTED',claim_id=NULL,executor_credential_id=NULL"+base,scope))
+        metadata={**self.scope,"operation_id":self.ids["UNKNOWN"],"session_id":self.session,"stdout":{"nested":[{"base64":"Ynl0ZXM="}]}}
+        check("executor.inline-result-bytes-refused",lambda:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET result=$4::jsonb,result_digest=$5"+base,[*scope,json.dumps(metadata),digest(b"hostile-result")]))
+        metadata.pop("stdout");metadata["run_id"]=uid()
+        check("executor.result-cross-scope-refused",lambda:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET result=$4::jsonb,result_digest=$5"+base,[*scope,json.dumps(metadata),digest(b"hostile-scope")]))
     def reference_link_tests(self,artifact):
         insert="INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
         values=[self.scope["organisation_id"],self.scope["run_id"],self.ids["UNKNOWN"],"stdout",artifact["artifact_id"],artifact["digest"],artifact["digest"],artifact["size_bytes"]]
@@ -229,6 +245,7 @@ def main():
             check("executor.config-wrong-key-refused",lambda:f.config_refused("wrong-key",dict(f.configuration,principals=[wrong])))
             operator={"credential_id":f.f.ids["operator"],"key_path":str(f.f.keys["operator"]["path"])}
             check("executor.config-wrong-role-refused",lambda:f.config_refused("wrong-role",dict(f.configuration,principals=[operator])))
+            f.metadata_guard_tests()
             payload=b"actual executor metadata-ref probe; no physical job assertion"
             put={**f.scope,"digest":digest(payload),"size_bytes":str(len(payload)),"data_base64":base64.b64encode(payload).decode(),"retention_class":"RUN","retention_until":None,"retention_hold":False}
             saved=f.command("artifact",action="artifact.object.put",input=put)
