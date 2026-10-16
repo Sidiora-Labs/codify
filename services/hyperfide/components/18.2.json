@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "finding-github",
+  "task": "18.2",
+  "roles": [
+    "control"
+  ],
+  "module": "findings/github.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "finding.github.enqueue",
+    "finding.github.dispatch",
+    "finding.github.webhook",
+    "finding.github.process-delivery",
+    "finding.github.reconcile",
+    "finding.github.status"
+  ],
+  "requires": [
+    "finding-registry"
+  ]
+}
