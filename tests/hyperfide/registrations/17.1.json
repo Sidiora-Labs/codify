@@ -66,16 +66,14 @@
   ],
   "source_files": [
     "tests/hyperfide/cases/tasks/17_1.py",
-    "tests/hyperfide/qualify.py",
-    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/support/identity_fixture.py",
     "services/hyperfide/src/review/coverage.ts",
-    "services/hyperfide/src/storage/schema.ts",
     "services/hyperfide/migrations/0017-review.sql",
-    "services/hyperfide/migrations/0001-authority.sql",
     "services/hyperfide/components/17.1.json",
     "services/hyperfide/package.json",
     "services/hyperfide/package-lock.json",
-    "tests/hyperfide/support/identity_fixture.py"
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/check-evidence.py"
   ],
   "source_roots": [
     "services/hyperfide/src",

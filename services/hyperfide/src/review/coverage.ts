@@ -296,7 +296,13 @@ export async function relevantContracts(db:ReviewDb,binding:ReviewScope,reposito
  ORDER BY latest.contract_key`,[binding.organisation_id,binding.run_id,repositories]);
  return result.rows;
 }
+export async function reviewTaskVersions(db:ReviewDb,binding:ReviewScope,sources:unknown[]):Promise<Array<Record<string,unknown>>>{
+ const rows=await db.query(`SELECT DISTINCT task.id AS task_id,task.task_key,task.spec_revision_id,task.spec_generation::text AS spec_generation,task.criteria_digest FROM hyperfide.review_commits commit JOIN jsonb_to_recordset($3::jsonb) AS source(repository_id uuid,source_object_id text) ON source.repository_id=commit.repository_id AND source.source_object_id=commit.source_object_id CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(commit.attribution->'spec_tags')='array' THEN commit.attribution->'spec_tags' ELSE '[]'::jsonb END) tag JOIN hyperfide.tasks task ON task.organisation_id=commit.organisation_id AND task.run_id=commit.run_id AND task.task_key=tag->>'task' WHERE commit.organisation_id=$1 AND commit.run_id=$2 ORDER BY task.id`,[binding.organisation_id,binding.run_id,JSON.stringify(sources)]);
+ return rows.rows;
+}
 export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapshot:Record<string,unknown>):Promise<boolean>{
+ if(snapshot.schema_version!==2||!Array.isArray(snapshot.task_versions)||typeof snapshot.task_attribution_complete!=='boolean')return false;
+ if(snapshot.graph_complete===true&&snapshot.graph_unprojected_semantic_edge_count!=='0')return false;
  const run=await db.query<{spec_revision_id:string;policy_digest:string;source_digest:string}>(`SELECT run.spec_revision_id,run.policy_digest,spec.source_digest
  FROM hyperfide.runs run JOIN hyperfide.spec_revisions spec ON spec.organisation_id=run.organisation_id AND spec.id=run.spec_revision_id
  WHERE run.organisation_id=$1 AND run.id=$2`,[binding.organisation_id,binding.run_id]);
@@ -314,6 +320,7 @@ export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapsho
    [binding.organisation_id,binding.run_id,source.repository_id,source.source_object_id]);
   if(exists.rows.length!==1)return false;
  }
+ if(canonical(snapshot.task_versions)!==canonical(await reviewTaskVersions(db,binding,sources))||snapshot.task_attribution_complete!==await reviewAttributionComplete(db,binding,sources))return false;
  const contracts=await relevantContracts(db,binding,repositories);
  const versions=contracts.map(row=>({id:row.id,revision:row.revision,criteria_digest:row.criteria_digest}));
  if(canonical(snapshot.contract_versions)!==canonical(versions))return false;
@@ -373,7 +380,7 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  if(!rows.rows.length)missing.push({watcher_id:'*',reason:'COMMIT_NOT_DISCOVERED'});
  return {status:stale?'STALE':missing.length?'INCOMPLETE':'COMPLETE',policy_digest:policyDigest,
   repository_id:query.repository_id,source_object_id:query.source_object_id,required:rows.rows.length,complete:receipts.length,
-  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],input_bindings:(()=>{const row=rows.rows.find(row=>row.snapshot&&row.input_manifest_digest===query.input_manifest_digest&&freshness.get(row.input_manifest_digest));if(!row?.snapshot||hash(row.snapshot)!==query.input_manifest_digest)return null;const result:Record<string,unknown>={candidate_digest:row.candidate_digest,input_manifest_digest:row.input_manifest_digest};for(const field of ['source_set','spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','graph_manifest_id','graph_manifest_digest','graph_source_set','graph_provenance_verified','environment_profile_id','environment_digest','toolchain_digest'])result[field]=row.snapshot[field]??null;return result;})(),authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
+  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],input_bindings:(()=>{const row=rows.rows.find(row=>row.snapshot&&row.input_manifest_digest===query.input_manifest_digest&&freshness.get(row.input_manifest_digest));if(!row?.snapshot||hash(row.snapshot)!==query.input_manifest_digest)return null;const result:Record<string,unknown>={candidate_digest:row.candidate_digest,input_manifest_digest:row.input_manifest_digest};for(const field of ['schema_version','source_set','task_versions','task_attribution_complete','spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','graph_manifest_id','graph_manifest_digest','graph_source_set','graph_provenance_verified','graph_unprojected_semantic_edge_count','environment_profile_id','environment_digest','toolchain_digest'])result[field]=row.snapshot[field]??null;return result;})(),authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
 }
 export function createComponent(_context:ComponentContext):Component{
  const guarded=(fn:(context:ComponentContext,input:unknown)=>Promise<unknown>)=>
@@ -389,4 +396,57 @@ export function createComponent(_context:ComponentContext):Component{
     ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})}));
   })
  }};
+}
+
+export interface ReviewControl {
+ scope_kind:'RUN'|'PACKAGE'|'ATTEMPT'|'SANDBOX';scope_id:string;task_ids:string[];
+ mode:'STOP'|'CANCEL';operation_id:string;control_generation:string;
+}
+export async function assertReviewExecutionAllowed(context:ComponentContext,db:ReviewDb,binding:ReviewScope,
+ sourceSet:readonly {repository_id:string;source_object_id:string}[],sandboxId:string|null,
+ operation:'ADMISSION'|'RENEWAL'|'CHECKPOINT'):Promise<void>{
+ const deps=(context as unknown as {dependencies?:{require:(id:string,key:string,guard:(v:unknown)=>boolean)=>unknown}}).dependencies;
+ const cap=deps?.require('5.1','scheduler.controls.v1',(v:unknown)=>!!v&&typeof(v as {assertNoExecutionHold?:unknown}).assertNoExecutionHold==='function') as {assertNoExecutionHold:(tx:ReviewDb,scope:ReviewScope,target:unknown)=>Promise<void>}|undefined;
+ if(!cap)fail('REVIEW_CONTROLS_UNAVAILABLE','Actual scheduler execution-control authority is required');
+ const versions=await reviewTaskVersions(db,binding,[...sourceSet]);
+ const tasks=await db.query<{id:string;feature_package_id:string}>('SELECT id,feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[])',[binding.organisation_id,binding.run_id,versions.map(row=>row.task_id)]);
+ await cap.assertNoExecutionHold(db,binding,{operation,...(sandboxId?{sandbox_id:sandboxId}:{})});
+ for(const task of tasks.rows){
+  await cap.assertNoExecutionHold(db,binding,{operation,package_id:task.feature_package_id,...(sandboxId?{sandbox_id:sandboxId}:{})});
+  const attempts=await db.query<{id:string;sandbox_id:string|null}>('SELECT id,sandbox_id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[binding.organisation_id,binding.run_id,task.id]);
+  for(const attempt of attempts.rows)await cap.assertNoExecutionHold(db,binding,{operation,package_id:task.feature_package_id,attempt_id:attempt.id,...(attempt.sandbox_id?{sandbox_id:attempt.sandbox_id}:{})});
+ }
+ // An untagged source cannot establish a narrower package/attempt boundary.
+ // Check every persisted scope through the owning control helper.
+ if(!await reviewAttributionComplete(db,binding,[...sourceSet])){
+  const controls=await db.query<{package_id:string|null;attempt_id:string|null;sandbox_id:string|null}>('SELECT package_id,attempt_id,sandbox_id FROM hyperfide.execution_controls WHERE organisation_id=$1 AND run_id=$2 LIMIT 1001 FOR SHARE',[binding.organisation_id,binding.run_id]);
+  if(controls.rows.length>1000)fail('REVIEW_CONTROL_SCOPE_UNKNOWN','Unattributed review control scope exceeds the safe inspection bound');
+  for(const row of controls.rows)await cap.assertNoExecutionHold(db,binding,{operation,...(row.package_id?{package_id:row.package_id}:{}),...(row.attempt_id?{attempt_id:row.attempt_id}:{}),...(row.sandbox_id?{sandbox_id:row.sandbox_id}:{})});
+ }
+}
+export async function reviewControlMatches(db:ReviewDb,binding:ReviewScope,control:ReviewControl,
+ taskIds:readonly string[],sandboxId:string|null):Promise<boolean>{
+ uuid(control.scope_id);uuid(control.operation_id);decimal(control.control_generation);
+ if(!['RUN','PACKAGE','ATTEMPT','SANDBOX'].includes(control.scope_kind)||!['STOP','CANCEL'].includes(control.mode))fail('REVIEW_CONTROL_INVALID','Unknown review fencing control');
+ if(control.scope_kind==='RUN')return control.scope_id===binding.run_id;
+ if(!Array.isArray(control.task_ids)||control.task_ids.length>100000)fail('REVIEW_CONTROL_INVALID','Bounded trusted task closure is required');
+ const closure=[...new Set(control.task_ids.map(uuid))];
+ if(closure.length){
+  const actual=await db.query('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[])',[binding.organisation_id,binding.run_id,closure]);
+  if(actual.rows.length!==closure.length)fail('REVIEW_CONTROL_INVALID','Control task closure crosses the run boundary');
+  if(taskIds.some(id=>closure.includes(id)))return true;
+ }
+ if(control.scope_kind==='SANDBOX'&&sandboxId===control.scope_id)return true;
+ if(!taskIds.length)return true;
+ const pins=taskIds.map(uuid);
+ if(control.scope_kind==='PACKAGE')return !!(await db.query('SELECT 1 FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) AND feature_package_id=$4 LIMIT 1',[binding.organisation_id,binding.run_id,pins,control.scope_id])).rows.length;
+ if(control.scope_kind==='ATTEMPT')return !!(await db.query('SELECT 1 FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND task_id=ANY($3::uuid[]) AND id=$4 LIMIT 1',[binding.organisation_id,binding.run_id,pins,control.scope_id])).rows.length;
+ if(control.scope_kind==='SANDBOX')return !!(await db.query('SELECT 1 FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND task_id=ANY($3::uuid[]) AND sandbox_id=$4 LIMIT 1',[binding.organisation_id,binding.run_id,pins,control.scope_id])).rows.length;
+ return false;
+}
+
+export async function reviewAttributionComplete(db:ReviewDb,binding:ReviewScope,sources:unknown[]):Promise<boolean>{
+ if(!sources.length)return false;
+ const rows=await db.query<{complete:boolean}>(`SELECT bool_and(item.complete) AS complete FROM (SELECT source.repository_id,source.source_object_id,count(tag)>0 AND count(tag)=count(task.id) AS complete FROM jsonb_to_recordset($3::jsonb) AS source(repository_id uuid,source_object_id text) LEFT JOIN hyperfide.review_commits commit ON commit.organisation_id=$1 AND commit.run_id=$2 AND commit.repository_id=source.repository_id AND commit.source_object_id=source.source_object_id LEFT JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(commit.attribution->'spec_tags')='array' THEN commit.attribution->'spec_tags' ELSE '[]'::jsonb END) tag ON true LEFT JOIN hyperfide.tasks task ON task.organisation_id=$1 AND task.run_id=$2 AND task.task_key=tag->>'task' GROUP BY source.repository_id,source.source_object_id) item`,[binding.organisation_id,binding.run_id,JSON.stringify(sources)]);
+ return rows.rows[0]?.complete===true;
 }
