@@ -34,6 +34,7 @@ async function preservedReceipt(ctx:ComponentContext,tx:QuerySession,s:Scope,val
  if(!/^[1-9][0-9]{0,18}$/.test(generation)||BigInt(generation)>9223372036854775807n)fail('DECISION_INVALID','Canonical verification lease generation required');
  const assurance=ctx.dependencies.require('16.2','assurance.execution.v1',(value:unknown):value is Assurance=>!!value&&typeof value==='object'&&typeof(value as Assurance).inspectExecutionReceipt==='function');
  const receipt=obj(await assurance.inspectExecutionReceipt(tx,s,uuid(reference.job_id),generation));
+ if(receipt.current_job_generation!==generation||receipt.receipt_is_current!==true)fail('DECISION_STALE','Superseded verification receipt cannot describe the current failure');
  if(receipt.source_attempt_id!==attempt.id||String(receipt.source_attempt_generation)!==String(attempt.generation)||!['SUBMITTED_RESULT','INTEGRATED_PUBLICATION'].includes(String(receipt.source_origin)))fail('DECISION_PACKET_MISMATCH','Verification receipt does not bind the exact source attempt');
  return receipt;
 }

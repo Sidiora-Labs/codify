@@ -53,7 +53,7 @@ def native_admission_probe():
     status,row=f.inner.invoke("decision.recovery.packet",request,component="21.2");native.expect(row.get("ok") is True,"actual native-bound packet refused: "+str(row.get("error",{})));return row["result"]
    p=packet()
    check("native21.same-primary-context",lambda:native.expect(p["state"]["admission_context"]["attempt_id"]==f.inner.ids["attempt"],"native attempt binding lost"))
-   check("native21.policy-domains-distinct",lambda:native.expect(p["state"]["admission_context"]["policy_digest"]==policy_digest and p["revision"]["policy_digest"]!=policy_digest,"admission and accepted run policy confused"))
+   check("native21.policy-domains-distinct",lambda:native.expect(p["state"]["admission_context"]["policy_digest"]==policy_digest and p["state"]["primary_revision"]["policy_digest"]!=policy_digest,"admission and accepted run policy confused"))
    check("native21.no-unproved-retry-or-profile",lambda:native.expect(p["state"]["retry_permitted"]is False and p["state"]["frontier_profile_ids"]==[] and p["state"]["condition_change_proof"]=="UNAVAILABLE","unqualified native profile or reported condition granted retry"))
    def current(packet_id):return f.inner.invoke("fixture.jobs.current",{"packet_id":packet_id},component="20.4")[1]
    check("native21.unchanged-context-fresh",lambda:native.expect(current(p["id"]).get("result",{}).get("fresh")is True,"stable native snapshot rejected"))
