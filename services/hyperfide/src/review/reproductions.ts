@@ -199,7 +199,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   if(!receipt.rows[0])return null;
   if(job.worker_session_id!==trusted.invocation.principal.actor_id)fail('REPRODUCTION_JOB_DENIED','Recorded job belongs to another verifier');
   return {receipt_id:receipt.rows[0].id,result:receipt.rows[0].result,replayed:true,current:String(job.lease_generation)===generation&&await reviewInputCurrent(db,binding,job.snapshot)};
- });
+ },false);
  if(recorded)return recorded;
  const prepared=await transaction(ctx,binding,async db=>{
   const job=await lockJob(db,binding,id);ownerJob(ctx,binding,job,generation);await currentJob(db,binding,job);
@@ -401,6 +401,6 @@ export function createComponent(_context:ComponentContext):Component{
  return {apiVersion:1,actions:{
   'review.reproduction.renew':guarded(renewReproduction),'review.reproduction.plan':guarded(planReproduction),
   'review.reproduction.current.plan':guarded(planCurrentSourceReproduction),'review.reproduction.assign':guarded(assignReproduction),'review.reproduction.execute':guarded(executeReproduction),
-  'review.reproduction.inspect':guarded(async(ctx,input)=>{const v=obj(input,['organisation_id','run_id','plan_id']);return transaction(ctx,scope(v),db=>inspectReproduction(db,scope(v),uuid(v.plan_id)));})
+  'review.reproduction.inspect':guarded(async(ctx,input)=>{const v=obj(input,['organisation_id','run_id','plan_id']);return transaction(ctx,scope(v),db=>inspectReproduction(db,scope(v),uuid(v.plan_id)),false);})
  }};
 }
