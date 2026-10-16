@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import sys,json,subprocess,time
+import sys,json,subprocess,time,os
 ROOT=Path(__file__).resolve().parents[4]
 sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
 from identity_fixture import IdentityFixture,RESULTS,check,expect,uid,canonical,b64,sha
 
 def main():
+    from identity_fixture import cleanup_identity_evidence,write_identity_observations
+    os.environ["HYPERFIDE_IDENTITY_EVIDENCE_TASK"]="14.4"
+    if "--cleanup" in sys.argv:return cleanup_identity_evidence("14.4")
     repo=uid();otherrepo=uid();taskref='refs/heads/task/bounded';protected='refs/heads/main';destination='https://models.example.test'
     def setup(f):
         work=f.path/'git-repository';work.mkdir()
@@ -63,5 +66,6 @@ def main():
         f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[f.ids['provisioner']])
         check('authorization.revoked-credential-denied',lambda:expect(f.invoke('authorization.inspect',{},component='14.4',key='provisioner')[1].get('error',{}).get('code')=='AUTH_REVOKED','Revoked credential passed role policy'))
     finally:f.close()
+    write_identity_observations()
     return int(any(actual!='observed' for _,actual in RESULTS))
 if __name__=='__main__':raise SystemExit(main())

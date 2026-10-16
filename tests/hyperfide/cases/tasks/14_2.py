@@ -7,6 +7,9 @@ sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
 from identity_fixture import IdentityFixture,RESULTS,check,expect,uid,sha,SQL_JS
 
 def main():
+    from identity_fixture import cleanup_identity_evidence,write_identity_observations
+    os.environ["HYPERFIDE_IDENTITY_EVIDENCE_TASK"]="14.2"
+    if "--cleanup" in sys.argv:return cleanup_identity_evidence("14.2")
     canary="HF_TEST_PRIVATE_"+uid()
     other=uid(); expiry=time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+1800))
     def setup(f):
@@ -88,5 +91,6 @@ def main():
         expect(permits.returncode==0,"actual isolation permit primitive failed: "+permits.stderr[:800])
         for name,observed in json.loads(permits.stdout):check("credentials.isolation-permit."+name,lambda value=observed:expect(value,"permit boundary failed"))
     finally:f.close()
+    write_identity_observations()
     return int(any(actual!="observed" for _,actual in RESULTS))
 if __name__=="__main__":raise SystemExit(main())
