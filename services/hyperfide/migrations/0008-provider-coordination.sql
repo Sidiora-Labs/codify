@@ -177,3 +177,64 @@ ALTER TABLE hyperfide.provider_relocation_plans
  ADD FOREIGN KEY(organisation_id,run_id,checkpoint_id) REFERENCES hyperfide.checkpoints(organisation_id,run_id,id),
  ADD FOREIGN KEY(organisation_id,enrolled_sandbox_id,enrolled_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
  ADD CHECK(state NOT IN ('ENROLLED','ADMITTED') OR (enrolled_sandbox_id IS NOT NULL AND enrolled_boot_generation IS NOT NULL AND enrollment_evidence_digest IS NOT NULL));
+
+
+-- Prepared bases are reusable only within the exact trusted pool/profile scope.
+-- The verifier owns proof production; this registry never treats provider RUNNING
+-- or an operator seed as qualification of the desired target preparation.
+CREATE TABLE hyperfide.provider_prepared_bases (
+ organisation_id uuid NOT NULL,
+ id uuid NOT NULL,
+ pool_id uuid NOT NULL,
+ profile_id uuid NOT NULL,
+ preparation_digest hyperfide.digest NOT NULL,
+ provider text NOT NULL CHECK(provider IN ('railway','blaxel')),
+ configuration_digest hyperfide.digest NOT NULL,
+ provider_prepared_digest hyperfide.digest NOT NULL,
+ provider_reference jsonb NOT NULL CHECK(jsonb_typeof(provider_reference)='object' AND octet_length(provider_reference::text)<=16384),
+ source_sandbox_id uuid NOT NULL,
+ source_boot_generation bigint NOT NULL CHECK(source_boot_generation>=1),
+ manifest_artifact_digest hyperfide.digest NOT NULL,
+ execution_receipt_digest hyperfide.digest NOT NULL,
+ verification_receipt_digest hyperfide.digest NOT NULL,
+ verification_scope text NOT NULL CHECK(verification_scope='POOL'),
+ state text NOT NULL CHECK(state IN ('QUALIFIED','STALE','REVOKED')),
+ expires_at timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK(expires_at>created_at),
+ PRIMARY KEY(organisation_id,id),
+ UNIQUE(organisation_id,pool_id,profile_id,preparation_digest,provider_prepared_digest,configuration_digest),
+ FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
+ FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
+ FOREIGN KEY(organisation_id,source_sandbox_id,source_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation)
+);
+CREATE INDEX provider_prepared_current ON hyperfide.provider_prepared_bases(organisation_id,pool_id,profile_id,preparation_digest,state,expires_at);
+CREATE FUNCTION hyperfide.provider_prepared_immutable() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+BEGIN
+ IF (to_jsonb(NEW)-'state') IS DISTINCT FROM (to_jsonb(OLD)-'state') OR
+    (OLD.state='REVOKED' AND NEW.state<>'REVOKED') OR
+    (OLD.state='STALE' AND NEW.state='QUALIFIED') THEN
+  RAISE EXCEPTION 'Prepared base identity/proof is immutable; publish a new verified identity';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER provider_prepared_immutable BEFORE UPDATE ON hyperfide.provider_prepared_bases FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_prepared_immutable();
+
+CREATE TABLE hyperfide.provider_remote_operations (
+ organisation_id uuid NOT NULL,
+ run_id uuid NOT NULL,
+ id uuid NOT NULL,
+ session_id uuid NOT NULL,
+ sandbox_id uuid NOT NULL,
+ boot_generation bigint NOT NULL CHECK(boot_generation>=1),
+ request_digest hyperfide.digest NOT NULL,
+ runner_binding_evidence_digest hyperfide.digest NOT NULL,
+ operation jsonb NOT NULL CHECK(jsonb_typeof(operation)='object' AND octet_length(operation::text)<=1048576),
+ state text NOT NULL CHECK(state IN ('SUBMITTING','OBSERVED','UNKNOWN')),
+ outcome jsonb,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,id),
+ FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,sandbox_id,boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation)
+);

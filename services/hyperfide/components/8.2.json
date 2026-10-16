@@ -3,6 +3,7 @@
   "id": "8.2",
   "task": "8.2",
   "roles": [
+    "control",
     "provisioner"
   ],
   "module": "providers/pools.js",
@@ -17,6 +18,6 @@
     "provider.pools.observe"
   ],
   "requires": [
-    "8.1"
+    "4.2"
   ]
 }
