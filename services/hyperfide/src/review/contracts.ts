@@ -72,9 +72,9 @@ export async function analyseContractImpact(context:ComponentContext,value:unkno
   if(!before||!after)fail('CONTRACT_REVISION_MISSING','Both exact contract revisions must exist');
   const run=await db.query<{authority_epoch:string}>('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[binding.organisation_id,binding.run_id]);
   return {before,after,authority_epoch:run.rows[0]!.authority_epoch};
- });
+ },false);
  const changed=CONTRACT_FACETS.filter(name=>canonical(data.before.definition.facets[name])!==canonical(data.after.definition.facets[name]));
- const unknown=CONTRACT_FACETS.filter(name=>data.after.definition.facets[name]?.status==='UNKNOWN');
+ const unknown=CONTRACT_FACETS.filter(name=>data.after.definition.facets[name]?.status!=='DEFINED');
  const sourceChanged=canonical(data.before.definition.producer)!==canonical(data.after.definition.producer);
  const consumers=new Map<string,Endpoint>();
  for(const consumer of [...data.before.definition.consumers,...data.after.definition.consumers])consumers.set(consumer.repository_id+':'+consumer.source_object_id,consumer);
@@ -169,7 +169,7 @@ export function createComponent(_context:ComponentContext):Component{
   'review.contract.coverage':guarded(async(ctx,input)=>{
    const v=obj(input,['organisation_id','run_id','contract_ids','repository_id','source_object_id','candidate_digest','input_manifest_digest']);
    return transaction(ctx,scope(v),db=>inspectContractCoverage(db,scope(v),strings(v.contract_ids,128),
-    {repository_id:uuid(v.repository_id),source_object_id:oid(v.source_object_id),candidate_digest:digest(v.candidate_digest),input_manifest_digest:digest(v.input_manifest_digest)}));
+    {repository_id:uuid(v.repository_id),source_object_id:oid(v.source_object_id),candidate_digest:digest(v.candidate_digest),input_manifest_digest:digest(v.input_manifest_digest)}),false);
   })
  }};
 }
