@@ -95,7 +95,7 @@ export async function issue(tx:PrimaryTransaction,input:unknown):Promise<unknown
     WHERE e.organisation_id=$1 AND e.run_id=$2 AND e.aggregate_type='attempt.instructions' AND e.aggregate_id=$3 AND d.state<>'ACKNOWLEDGED'`,
     [i.organisation_id,i.run_id,i.attempt_id]);
   if((queued.rows[0]!.count as number)>=256) fail('INSTRUCTION_BACKPRESSURE','Outstanding instruction spool is full; preserve and reconcile existing obligations');
-  const history=await tx.query("SELECT event_type,aggregate_version,payload FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND aggregate_type='attempt.instructions' AND aggregate_id=$3 ORDER BY aggregate_version",
+  const history=await tx.query("SELECT event_type,aggregate_version,payload FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND aggregate_type='attempt.instructions' AND aggregate_id=$3 AND event_type IN('instruction.start','instruction.cancel') ORDER BY aggregate_version",
     [i.organisation_id,i.run_id,i.attempt_id]);
   if(history.rows.some(r=>r.event_type==='instruction.cancel')) fail('INSTRUCTION_CANCELLED','Cancellation intent already fences additional instructions');
   const start=history.rows.find(r=>r.event_type==='instruction.start');
@@ -104,7 +104,9 @@ export async function issue(tx:PrimaryTransaction,input:unknown):Promise<unknown
   if(i.kind==='STEER'&&!start) fail('INSTRUCTION_START_REQUIRED','STEER requires an existing logical START');
   if(i.kind==='START'&&history.rows.some(r=>r.event_type==='instruction.start'))
     fail('INSTRUCTION_START_EXISTS','This attempt already has a stable logical start command');
-  const version=history.rows.length?(BigInt(history.rows.at(-1)!.aggregate_version as string)+1n).toString():'1';
+  const latest=await tx.query("SELECT aggregate_version FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND aggregate_type='attempt.instructions' AND aggregate_id=$3 ORDER BY aggregate_version DESC LIMIT 1",
+    [i.organisation_id,i.run_id,i.attempt_id]);
+  const version=latest.rows.length?(BigInt(latest.rows[0]!.aggregate_version as string)+1n).toString():'1';
   return enqueue(tx,{...scope(i as unknown as Record<string,unknown>),id:i.id,aggregate_type:'attempt.instructions',
     aggregate_id:i.attempt_id,aggregate_version:version,event_type:'instruction.'+i.kind.toLowerCase(),payload:bodyOf(i,target)});
 }
