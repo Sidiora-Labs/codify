@@ -66,10 +66,14 @@ The 49 assertion IDs in registrations/27.1.json correspond, in order, to these a
 47. Reject an output directory containing registered implementation source, which would hide that source under an output exclusion.
 48. Reject timeout with a detached-session descendant retaining stdout/stderr pipes, and independently confirm that descendant no longer executes.
 49. In a real temporary Git repository, accept generated untracked Python bytecode while rejecting a subsequent tracked imported-helper change; runner/checker source-inventory exclusions must agree.
+50. Run two selected cases in one campaign with genuinely different required-artifact bytes; retain both receipts and independently verify both immutable snapshots.
+51. Reject tampering with an older required-artifact snapshot after a later receipt succeeds.
+52. Reject logical artifact aliases that do not bind to their exact receipt snapshot path.
+53. Preserve actual disposable-resource absence evidence through a receipt snapshot after mutable scratch output changes.
 
 ## Evidence and independent checking
 
-A run directory contains immutable manifest.json, registry.json and registration.json snapshots, receipts/<id>.json, artifacts/<id>/ logs and event trace, and a separate checks/<id>.json independent-check result. Receipts form a sequence and previous-seal chain. The checker reconstructs assertions from raw child output, validates exact inventories and input/artifact hashes, and checks scope against the registration and manifest. Recomputing a receipt seal does not authorise an altered assertion or scope.
+A run directory contains immutable manifest.json, registry.json and registration.json snapshots, receipts/<id>.json, artifacts/<id>/ logs and event trace, and a separate checks/<id>.json independent-check result. Required probe artifacts are copied into artifacts/<id>/required/<logical-name>; strict logical aliases preserve registered artifact and cleanup-evidence references without pointing historical receipts at mutable scratch files. Receipts form a sequence and previous-seal chain. The checker reconstructs assertions from raw child output, validates exact inventories and input/artifact hashes, and checks scope against the registration and manifest. Recomputing a receipt seal does not authorise an altered assertion or scope.
 
 The runner accepts only its canonical sibling independent checker; an arbitrary successful executable cannot replace it. Any descendant left by a normally exiting probe is terminated and reported as a failure of cleanup, even if the probe emitted a successful cleanup event.
 
