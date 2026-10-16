@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "finding-remediation",
+  "task": "18.4",
+  "roles": [
+    "control"
+  ],
+  "module": "findings/remediation.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "finding.repair.request",
+    "finding.repair.attach",
+    "finding.repair.submit",
+    "finding.repair.resolve",
+    "finding.repair.fail"
+  ],
+  "requires": [
+    "finding-registry",
+    "finding-routing"
+  ]
+}
