@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
+import type {Writable} from 'node:stream';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {FoundationError,object} from '../policy/programme.js';
@@ -18,6 +19,7 @@ export interface PostgresDrillResult {
 interface Profile {schema_version:1;scope:'ISOLATED_POSTGRESQL_FIXTURE';python_path:string;producer_path:string;producer_sha256:string;evidence_directory:string;timeout_ms:number}
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const SHA=/^[a-f0-9]{64}$/;
+const PYTHON_BOOTSTRAP="import os,sys,hashlib; source=os.fdopen(3,'rb').read(1048577); assert len(source)<=1048576 and hashlib.sha256(source).hexdigest()==sys.argv[2], 'Trusted producer byte mismatch'; exec(compile(source,sys.argv[1],'exec'), {'__name__':'__main__','__file__':sys.argv[1]})";
 async function checkedPath(value:unknown,directory=false,privateMode=false):Promise<string>{
  if(typeof value!=='string'||!path.isAbsolute(value)||path.normalize(value)!==value)
   throw new FoundationError('DRILL_PROFILE_INVALID','Trusted probe paths must be canonical and absolute');
@@ -54,13 +56,18 @@ export function createPostgresRecoveryProbe(_resources:ServiceResources,env:Read
    if(!UUID.test(input[key]))throw new FoundationError('DRILL_INPUT_INVALID','Canonical scope identities are required');
   if(input.signal.aborted)throw new FoundationError('DRILL_ABORTED','Probe was cancelled before execution');
   const profile=await profilePromise;
+  if(input.signal.aborted)throw new FoundationError('DRILL_ABORTED','Probe was cancelled before execution');
+  await checkedPath(profile.producer_path);
+  const currentSource=await fs.readFile(profile.producer_path);
+  if(currentSource.length>1048576||createHash('sha256').update(currentSource).digest('hex')!==profile.producer_sha256)
+   throw new FoundationError('DRILL_PROFILE_INVALID','Probe source changed after trusted configuration');
   const directory=path.join(profile.evidence_directory,input.operation_id);
   try{await fs.mkdir(directory,{mode:0o700});}
   catch(error){throw new FoundationError('DRILL_ALREADY_STARTED','Existing operation evidence requires reconciliation; disruptive probes are never automatically replayed');}
   const payload={schema_version:1,scope:profile.scope,scenario:input.scenario,organisation_id:input.organisation_id,run_id:input.run_id,operation_id:input.operation_id,source_epoch:input.source_epoch,evidence_directory:directory};
   await fs.writeFile(path.join(directory,'intent.json'),JSON.stringify(payload)+'\n',{mode:0o600,flag:'wx'});
   await new Promise<void>((resolve,reject)=>{
-   const child=spawn(profile.python_path,[profile.producer_path],{stdio:['pipe','pipe','pipe'],env:{PATH:'/usr/bin:/bin:/usr/sbin:/sbin',LANG:'C.UTF-8',HYPERFIDE_PROBE_NODE:process.execPath}});
+   const child=spawn(profile.python_path,['-c',PYTHON_BOOTSTRAP,profile.producer_path,profile.producer_sha256],{stdio:['pipe','pipe','pipe','pipe'],env:{PATH:'/usr/bin:/bin:/usr/sbin:/sbin',LANG:'C.UTF-8',HYPERFIDE_PROBE_NODE:process.execPath}});
    let out=0,err=0,aborted=false,force:ReturnType<typeof setTimeout>|undefined;
    const abort=()=>{if(aborted)return;aborted=true;child.kill('SIGTERM');force=setTimeout(()=>child.kill('SIGKILL'),10000);force.unref();};
    const timer=setTimeout(abort,profile.timeout_ms);timer.unref();input.signal.addEventListener('abort',abort,{once:true});
@@ -72,7 +79,8 @@ export function createPostgresRecoveryProbe(_resources:ServiceResources,env:Read
     else if(code!==0)reject(new FoundationError('DRILL_OUTCOME_UNKNOWN','Probe did not return a complete checked result; inspect retained operation evidence'));
     else resolve();
    });
-   child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify(payload));
+   const sourcePipe=child.stdio[3] as Writable;sourcePipe.on('error',()=>{});sourcePipe.end(currentSource);
+   child.stdin.on('error',()=>{});if(input.signal.aborted)abort();else child.stdin.end(JSON.stringify(payload));
   });
   const resultFile=path.join(directory,'result.json');await checkedPath(resultFile,false,true);
   const bytes=await fs.readFile(resultFile);if(bytes.length>1048576)throw new FoundationError('DRILL_EVIDENCE_INVALID','Probe response exceeds bounded size');
