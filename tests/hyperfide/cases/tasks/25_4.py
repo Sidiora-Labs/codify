@@ -10,6 +10,12 @@ def check(name,fn):
  try:fn();actual="observed"
  except Exception as e:FAILED.append(name);actual=type(e).__name__+": "+str(e)
  print(json.dumps({"type":"assertion","id":name,"expected":"observed","actual":actual}),flush=True)
+def artifacts():
+ p=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-release-tests"))/"release";p.mkdir(parents=True,exist_ok=True);return p
+def cleanup():
+ file=artifacts()/"cleanup.json";v=json.loads(file.read_text()) if file.is_file() else {"observed_absent":False}
+ absent=v.get("observed_absent") is True
+ print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":"hf-task25.4-fixtures","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"release/cleanup.json"}]}));return 0 if absent else 1
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-release-") as tmp:
   base=Path(tmp);payload=base/"payload";payload.mkdir()
@@ -108,8 +114,16 @@ def main():
    fixture.sql('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE)',admin=True)
    absent=not fixture.sql("SELECT datname FROM pg_database WHERE datname=$1",[database],admin=True)
    check("release.migrations.actual-database-cleanup",lambda:expect(absent,"owned migration database retained"))
+  import socket
+  database=fixture.database;runtime_role=fixture.runtime_role;port=fixture.port;private_root=fixture.path
   fixture.close()
+  database_absent=not fixture.sql("SELECT datname FROM pg_database WHERE datname=$1",[database],admin=True)
+  role_absent=not fixture.sql("SELECT rolname FROM pg_roles WHERE rolname=$1",[runtime_role],admin=True)
+  with socket.socket() as sock:sock.settimeout(1);listener_absent=sock.connect_ex(("127.0.0.1",port))!=0
+  cleanup_observed=database_absent and role_absent and listener_absent and not private_root.exists() and absent
+  check("release.cleanup.actual-absence",lambda:expect(cleanup_observed,"owned release fixture retained database/role/listener/private files"))
+  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":cleanup_observed,"runtime_database_absent":database_absent,"runtime_role_absent":role_absent,"https_absent":listener_absent,"private_root_absent":not private_root.exists(),"migration_database_absent":absent}))
  out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-release-tests"))/"release";out.mkdir(parents=True,exist_ok=True)
  (out/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"fixture":"real binaries/compiled modules with bounded dependency subset; not a deployable release","deployment_authorized":False}))
  return 1 if FAILED else 0
-if __name__=="__main__":sys.exit(main())
+if __name__=="__main__":sys.exit(cleanup() if "--cleanup" in sys.argv else main())

@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "variant": "task:25.4",
+  "task": "25.4",
+  "scope": "task-component",
+  "cases": [
+    "V-028",
+    "V-052",
+    "V-055"
+  ],
+  "assertion_ids": [
+    "release.bytes.inspect",
+    "release.authorization.separate",
+    "release.compatible.expand",
+    "release.incompatible.client_protocol",
+    "release.incompatible.runner_protocol",
+    "release.incompatible.schema_version",
+    "release.incompatible.contract-old-client",
+    "release.plan.order",
+    "release.plan.no-local-build",
+    "release.path.escape",
+    "release.bytes.tamper",
+    "release.bytes.unpinned",
+    "release.runtime.unqualified",
+    "release.path.symlink",
+    "release.python.required.interpreter",
+    "release.python.required.ctypes",
+    "release.migrations.explicit-operator-credential",
+    "release.migrations.actual-shipped-runner",
+    "release.migrations.actual-ledger-replay",
+    "release.migrations.actual-inspection",
+    "release.migrations.actual-database-cleanup",
+    "release.cleanup.actual-absence"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_4.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "cg",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/deployment/releases.js",
+    "build/hyperfide-native"
+  ],
+  "resources": [
+    {
+      "id": "hf-task25.4-fixtures",
+      "kind": "isolated-postgresql-tls-migration-fixture",
+      "scope": "task25.4-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/25_4.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "release/cleanup.json",
+    "release/observations.json"
+  ],
+  "source_files": [
+    "build/hyperfide-native",
+    "cg",
+    "deploy/hyperfide/control.service",
+    "deploy/hyperfide/dispatch.service",
+    "deploy/hyperfide/issue-watcher.service",
+    "deploy/hyperfide/migrate.mjs",
+    "deploy/hyperfide/provisioner.service",
+    "deploy/hyperfide/supervisory-host.service",
+    "scripts/build-hyperfide-release.sh",
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/deployment/releases.js",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/25_4.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/25.4.json",
+    "tests/hyperfide/registry.json",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations",
+    "src/hyperfide",
+    "tests/hyperfide/support"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen",
+    "operator.migrations.fixture"
+  ]
+}
