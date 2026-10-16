@@ -4,7 +4,7 @@ import type {PrimaryTransaction} from '../storage/transactions.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import {lockRun,enqueue} from '../events/outbox.js';
 import {actorFor,boundedInteger,decimal,dispatchRecipients,fail,fields,gatewayFor,invocationFor,object,operationReplay,
-  recordOutcome,requireSchedulerAuthority,uuid} from './claim.js';
+  recordOutcome,requireSchedulerAuthority,assertNoExecutionHold,uuid} from './claim.js';
 import type {ComputeToken,SchedulerActor,SchedulerScope} from './claim.js';
 
 export interface ComputeAuthority extends ComputeToken {
@@ -22,7 +22,7 @@ export function parseComputeToken(value:unknown):ComputeToken{
 }
 /** Only a branded, live primary transaction may validate current compute authority. */
 export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeToken,
-    options:{allowExpired?:boolean}={}):Promise<ComputeAuthority>{
+    options:{allowExpired?:boolean;operation?:'ADMISSION'|'RENEWAL'|'ADVANCE'|'CLEANUP'}={}):Promise<ComputeAuthority>{
   assertPrimaryTransaction(tx);
   const scope={organisation_id:token.organisation_id,run_id:token.run_id};
   await lockRun(tx,scope);
@@ -31,6 +31,9 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     [token.organisation_id,token.run_id]);
   if(!run.rows[0]||run.rows[0].authority_epoch!==token.authority_epoch)
     fail('STALE_AUTHORITY_EPOCH','Compute token does not belong to the active run epoch');
+  const operation=options.operation??'ADVANCE';
+  if(operation!=='CLEANUP'&&!(operation==='RENEWAL'?['READY','RUNNING','PAUSING','PAUSED']:['READY','RUNNING']).includes(run.rows[0].state))
+    fail('RUN_NOT_EXECUTING','Run state does not permit this compute operation');
   const boot=await tx.query<{boot_generation:string;preparation_digest:string|null}>('SELECT boot_generation,preparation_digest FROM hyperfide.sandboxes '+
     'WHERE organisation_id=$1 AND id=$2 FOR SHARE',[token.organisation_id,token.sandbox_id]);
   if(boot.rows[0]?.boot_generation!==token.sandbox_boot_generation)
@@ -46,6 +49,7 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     'SELECT id,compute_authority,authority_epoch,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at::text,input_packet_digest '+
     'FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND id=$4 AND generation=$5 FOR UPDATE',
     [token.organisation_id,token.run_id,token.task_id,token.attempt_id,token.attempt_generation]);
+  await assertNoExecutionHold(tx,scope,{package_id:task.feature_package_id,attempt_id:token.attempt_id,sandbox_id:token.sandbox_id,operation:options.operation??'ADVANCE'});
   const attempt=attempts.rows[0];
   if(!attempt||attempt.compute_authority!=='CURRENT'||attempt.authority_epoch!==token.authority_epoch||
       attempt.sandbox_id!==token.sandbox_id||attempt.slot_id!==token.slot_id||
@@ -72,6 +76,7 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     spec_generation:task.spec_generation,criteria_digest:task.criteria_digest,preparation_digest:boot.rows[0]!.preparation_digest};
 }
 async function requireWorker(tx:PrimaryTransaction,token:ComputeToken,context:ComponentContext):Promise<void>{
+  await lockRun(tx,token);
   const principal=invocationFor(context).principal;
   if(context.policy.programme_id!==token.run_id||principal.run_id!==token.run_id||principal.organisation_id!==token.organisation_id||principal.deployment_epoch!==token.authority_epoch)
     fail('RUN_SCOPE_DENIED','Trusted actor scope does not match the compute token');
@@ -83,7 +88,7 @@ async function requireWorker(tx:PrimaryTransaction,token:ComputeToken,context:Co
   if(sessions.rows.length!==1)fail('ACTOR_DENIED','Only the registered worker bound to this attempt may renew it');
 }
 export async function renewCompute(tx:PrimaryTransaction,token:ComputeToken,lease_ms:number):Promise<unknown>{
-  const authority=await assertCurrentCompute(tx,token);
+  const authority=await assertCurrentCompute(tx,token,{operation:'RENEWAL'});
   const duration=boundedInteger(lease_ms,'lease_ms',1000,300000);
   const clock=await tx.query<{expires_at:string}>(
     'SELECT (clock_timestamp()+$1::integer*interval\'1 millisecond\')::text AS expires_at',[duration]);
@@ -100,7 +105,7 @@ export async function renewCompute(tx:PrimaryTransaction,token:ComputeToken,leas
  */
 export async function releaseCompute(tx:PrimaryTransaction,token:ComputeToken,
     disposition:{execution_state:'SUBMITTED'|'CANCELLED'}):Promise<void>{
-  await assertCurrentCompute(tx,token,{allowExpired:disposition.execution_state==='CANCELLED'});
+  await assertCurrentCompute(tx,token,{allowExpired:disposition.execution_state==='CANCELLED',operation:disposition.execution_state==='CANCELLED'?'CLEANUP':'ADVANCE'});
   await tx.query('UPDATE hyperfide.attempts SET compute_authority=\'RELEASED\',execution_state=$4,state_version=state_version+1 '+
     'WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
     [token.organisation_id,token.run_id,token.attempt_id,disposition.execution_state]);
