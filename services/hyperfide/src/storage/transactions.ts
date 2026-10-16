@@ -51,7 +51,7 @@ export async function bounded<T>(promise:Promise<T>,deadline:number,signal?:Abor
   finally{if(timer)clearTimeout(timer);if(abort)signal?.removeEventListener('abort',abort);}
 }
 // Trusted callbacks still cannot accidentally escape the broker's transaction boundary.
-function singleStatement(sql:string):void{
+export function assertTransactionStatement(sql:string):void{
   let state:'normal'|'single'|'double'|'line'|'block'|'dollar'='normal',depth=0,tag='',plain='',ended=false,escapeString=false;
   for(let i=0;i<sql.length;i++){
     const c=sql[i]!,next=sql[i+1];
@@ -117,7 +117,7 @@ export class TransactionGateway {
           query:async<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[]):Promise<pg.QueryResult<R>>=>{
             if(!active||!livePrimary.has(tx))throw new StorageError('TX_CLOSED','Transaction capability has expired');
             if(typeof text!=='string'||!text.trim())throw new StorageError('INVALID_REQUEST','SQL text is required');
-            singleStatement(text);
+            assertTransactionStatement(text);
             return bounded(client.query<R>(text,values?[...values]:undefined),deadline,lease!.signal);
           },
           copyFrom:async(sql:string,bytes:Uint8Array):Promise<{rowCount:number}>=>{
