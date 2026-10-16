@@ -133,7 +133,7 @@ int hf_runner_job_execute(const char *request,FILE *out){
  free(argv);for(int k=0;k<64;++k){free(env[k].key);free(env[k].value);}hf_http_response_free(&response);free(job);return hf_native_error(out,"IMMUTABLE_JOB_OR_EXECUTABLE_CONFLICT");}
  int pipes_in[2],pipes_out[2],pipes_err[2],gate[2];if(pipe2(pipes_in,O_CLOEXEC)||pipe2(pipes_out,O_CLOEXEC)||pipe2(pipes_err,O_CLOEXEC)||pipe2(gate,O_CLOEXEC)){sqlite3_close(db);return hf_native_error(out,"IPC_UNAVAILABLE");}
  long long budget=timeout<remaining?timeout:remaining,deadline=request_started+budget*1000000LL;int watch_writer=-1;
- if(hf_slot_watchdog((uid_t)uid,deadline,&watch_writer)<0){sqlite3_close(db);return hf_native_error(out,"JOB_WATCHDOG_UNAVAILABLE");}
+ pid_t watchdog=hf_slot_watchdog((uid_t)uid,deadline,&watch_writer,operation);if(watchdog<0){sqlite3_close(db);return hf_native_error(out,"JOB_WATCHDOG_UNAVAILABLE");}
  char started_at[40],ended_at[40];long long measured_start=mono();if(!utc_now(started_at)){close(watch_writer);sqlite3_close(db);return hf_native_error(out,"CLOCK_UNAVAILABLE");}
  prctl(PR_SET_CHILD_SUBREAPER,1);signal(SIGPIPE,SIG_IGN);pid_t supervisor=getpid();pid_t child=fork();
  if(child==0){close(gate[1]);close(pipes_in[1]);close(pipes_out[0]);close(pipes_err[0]);pid_t parent=supervisor;prctl(PR_SET_PDEATHSIG,SIGKILL);if(getppid()!=parent)_exit(125);setpgid(0,0);char release;
@@ -170,7 +170,7 @@ int hf_runner_job_execute(const char *request,FILE *out){
   if(finished&&mono()>=deadline){interrupted=1;break;}
  }
  if(input_open)close(pipes_in[1]);
- free(stdin_bytes);int absent=terminate_uid((uid_t)uid);close(watch_writer);long long measured_end=mono();if(!utc_now(ended_at)){sqlite3_close(db);return hf_native_error(out,"CLOCK_UNAVAILABLE");}while(waitpid(-1,NULL,WNOHANG)>0){}if(!eof[0])close(pipes_out[0]);if(!eof[1])close(pipes_err[0]);
+ free(stdin_bytes);int absent=terminate_uid((uid_t)uid);hf_slot_watchdog_finish(watchdog,&watch_writer);long long measured_end=mono();if(!utc_now(ended_at)){sqlite3_close(db);return hf_native_error(out,"CLOCK_UNAVAILABLE");}while(waitpid(-1,NULL,WNOHANG)>0){}if(!eof[0])close(pipes_out[0]);if(!eof[1])close(pipes_err[0]);
  char *receipt=NULL;size_t receipt_length=0;FILE *writer=open_memstream(&receipt,&receipt_length);char *raw_argv=hf_json_raw(job,array),*raw_cwd=hf_json_raw(job,hf_json_field(job,plan,"cwd"));
  if(!writer||!raw_argv||!raw_cwd){sqlite3_close(db);return hf_native_error(out,"RECEIPT_UNAVAILABLE");}
  fprintf(writer,"{\"execution_plane\":\"REMOTE\",\"operation_id\":\"%s\",\"argv\":%s,\"cwd\":",operation,raw_argv);fputs(raw_cwd,writer);fputs(",\"requested_cwd\":",writer);fputs(raw_cwd,writer);fputs(",\"workspace_path\":",writer);hf_json_write_string(writer,workspace);

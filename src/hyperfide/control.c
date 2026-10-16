@@ -40,11 +40,12 @@ int hf_component_12_4(const char *action,const char *request,FILE *out) {
  char *rpc=NULL;size_t n=0;FILE *stream=open_memstream(&rpc,&n);int live=0;
  if(stream){live=hf_launch_rpc(b.state_dir,action,request,stream)==0;fclose(stream);}
  if(live){fputs(rpc,out);free(rpc);return 0;}free(rpc);
+ int ownership=hf_slot_control_lock(b.uid,b.launch_id);if(ownership<0)return hf_native_error(out,"SLOT_GENERATION_BUSY_OR_SUPERSEDED");
  int stopped=stopping?stop(&b):0;HfProcessIdentity list[1024];int count=hf_runner_processes(&b,list,1024);HfProcessIdentity broker;
  int broker_alive=hf_process_identity(b.broker_pid,&broker)&&broker.start_time==b.broker_start&&!strcmp(broker.os_boot_id,b.os_boot_id);
- char observation[37];if(!hf_uuid_generate(observation))return hf_native_error(out,"RANDOM_SOURCE_FAILED");
+ char observation[37];if(!hf_uuid_generate(observation)){close(ownership);return hf_native_error(out,"RANDOM_SOURCE_FAILED");}
  fprintf(out,"{\"status\":\"%s\",\"command_id\":",count==0&&!broker_alive&&(!stopping||stopped)?"CONFIRMED_STOPPED":"UNKNOWN");if(*command)hf_json_write_string(out,command);else fputs("null",out);
  fprintf(out,",\"launch_id\":\"%s\",\"observation_id\":\"%s\",\"observed_at_seconds\":%lld,\"binding\":%s,\"processes\":[",b.launch_id,observation,(long long)time(NULL),b.identity);
  for(int k=0;k<count;++k){if(k)fputc(',',out);hf_process_json(out,&list[k]);}
- fprintf(out,"],\"remaining_descendants\":%d,\"ipc_closed\":%s,\"native_context_recoverable\":false,\"required_artifacts\":[],\"credential_revocation\":[],\"cleanup_complete\":false,\"recovery_required\":true}",count,!broker_alive?"true":"false");return 0;
+ fprintf(out,"],\"remaining_descendants\":%d,\"ipc_closed\":%s,\"native_context_recoverable\":false,\"required_artifacts\":[],\"credential_revocation\":[],\"cleanup_complete\":false,\"recovery_required\":true}",count,!broker_alive?"true":"false");close(ownership);return 0;
 }

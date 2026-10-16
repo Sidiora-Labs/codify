@@ -30,4 +30,16 @@ int hf_runner_job_execute(const char *,FILE *);
 #endif
 
 /* Dedicated slot UID cleanup survives a blocked or dead supervising broker. */
-pid_t hf_slot_watchdog(uid_t uid, long long deadline_ns, int *writer);
+pid_t hf_slot_watchdog(uid_t uid, long long deadline_ns, int *writer, const char *owner);
+int hf_slot_watchdog_finish(pid_t guard, int *writer);
+int hf_slot_owner(uid_t uid, const char *owner);
+
+int hf_slot_control_lock(uid_t uid, const char *owner);
+
+typedef struct {
+ char context_path[4096],workspace_path[4096],workspace_parent[4096];
+ char node_path[4096],recipe_path[4096],node_digest[72],recipe_digest[72];
+ char stage_root[4096],out_root[4096],diagnostics_root[4096];
+ uid_t uid;gid_t gid;
+} HfPreparationStage;
+int hf_runner_stage_preparation(const char *config_path,const HfJson *claim,int result,HfPreparationStage *stage);

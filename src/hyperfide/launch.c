@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -47,8 +48,8 @@ static int secure_directory(const char *path) {
 }
 static int load_config(const char *path,RunnerConfig *c) {
  char *data=NULL;size_t length=0;HfJson *j=malloc(sizeof *j);memset(c,0,sizeof *c);
- const char *keys[]={"transport_config","state_dir","slot_root","connector_plan_path","organisation_id","run_id","sandbox_id","boot_id","boot_generation","consumer_id","readiness_env_path"};
- int ok=j&&hf_private_read(path,65536,&data,&length)&&hf_json_parse(j,data)&&hf_json_only(j,0,keys,11)&&
+ const char *keys[]={"transport_config","state_dir","slot_root","connector_plan_path","organisation_id","run_id","sandbox_id","boot_id","boot_generation","consumer_id","readiness_env_path","preparation_recipes"};
+ int ok=j&&hf_private_read(path,65536,&data,&length)&&hf_json_parse(j,data)&&hf_json_only(j,0,keys,12)&&
  hf_json_get(j,"transport_config",c->transport,sizeof c->transport)&&hf_json_get(j,"state_dir",c->state,sizeof c->state)&&
  hf_json_get(j,"slot_root",c->slots,sizeof c->slots)&&hf_json_get(j,"connector_plan_path",c->plan,sizeof c->plan)&&
  hf_json_get(j,"organisation_id",c->organisation,sizeof c->organisation)&&hf_uuid_valid(c->organisation)&&
@@ -194,22 +195,44 @@ static int stop_uid(uid_t uid) {
 /* This separate root process enforces the last primary-observed monotonic
  * deadline even while the broker is blocked in HTTPS or local IPC. Pipe loss
  * means broker death, never authority to keep the dedicated slot UID alive. */
-pid_t hf_slot_watchdog(uid_t uid,long long deadline,int *writer) {
- int channel[2];if(pipe2(channel,O_CLOEXEC|O_NONBLOCK))return -1;
- pid_t child=fork();if(child<0){close(channel[0]);close(channel[1]);return -1;}
+int hf_slot_owner(uid_t uid,const char *owner) {
+ char path[128],value[128]={0};snprintf(path,sizeof path,"/run/hyperfide/slot-%u.lock",(unsigned)uid);
+ int fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);struct stat st;int ok=fd>=0&&!fstat(fd,&st)&&S_ISREG(st.st_mode)&&st.st_uid==0&&!(st.st_mode&077)&&st.st_nlink==1;
+ ssize_t n=ok?read(fd,value,sizeof value-1):-1;if(fd>=0)close(fd);return n>0&&!strcmp(value,owner);
+}
+int hf_slot_control_lock(uid_t uid,const char *owner) {
+ char path[128];snprintf(path,sizeof path,"/run/hyperfide/slot-%u.lock",(unsigned)uid);
+ int fd=open(path,O_RDWR|O_CLOEXEC|O_NOFOLLOW);struct stat st;
+ if(fd<0||fstat(fd,&st)||!S_ISREG(st.st_mode)||st.st_uid!=0||(st.st_mode&077)||st.st_nlink!=1||flock(fd,LOCK_EX|LOCK_NB)||!hf_slot_owner(uid,owner)){if(fd>=0)close(fd);return -1;}
+ return fd;
+}
+pid_t hf_slot_watchdog(uid_t uid,long long deadline,int *writer,const char *owner) {
+ struct stat st;if(!hf_uuid_valid(owner)||geteuid()!=0)return -1;
+ if(mkdir("/run/hyperfide",0700)&&errno!=EEXIST)return -1;
+ if(lstat("/run/hyperfide",&st)||!S_ISDIR(st.st_mode)||st.st_uid!=0||(st.st_mode&077))return -1;
+ char path[128];snprintf(path,sizeof path,"/run/hyperfide/slot-%u.lock",(unsigned)uid);
+ int lock=open(path,O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0600);
+ if(lock<0||fstat(lock,&st)||!S_ISREG(st.st_mode)||st.st_uid!=0||(st.st_mode&077)||st.st_nlink!=1||flock(lock,LOCK_EX|LOCK_NB)||ftruncate(lock,0)||write(lock,owner,strlen(owner))!=(ssize_t)strlen(owner)||fsync(lock)){if(lock>=0)close(lock);return -1;}
+ int channel[2];if(pipe2(channel,O_CLOEXEC|O_NONBLOCK)){close(lock);return -1;}
+ pid_t child=fork();if(child<0){close(channel[0]);close(channel[1]);close(lock);return -1;}
  if(child==0){
-  close(channel[1]);int readfd=channel[0];if(readfd!=3){if(dup3(readfd,3,O_CLOEXEC)<0)_exit(125);close(readfd);}
-  if(close_range(4,~0U,0))_exit(125);
+  close(channel[1]);int readfd=fcntl(channel[0],F_DUPFD_CLOEXEC,10),lockfd=fcntl(lock,F_DUPFD_CLOEXEC,10);
+  if(readfd<0||lockfd<0||dup3(readfd,3,O_CLOEXEC)<0||dup3(lockfd,4,O_CLOEXEC)<0||close_range(5,~0U,0))_exit(125);
   for(;;){
    long long now=monotonic_ns();if(now<0||now>=deadline){stop_uid(uid);_exit(0);}
    long long left=(deadline-now+999999)/1000000;int milliseconds=left>1000?1000:(int)left;
    struct pollfd item={3,POLLIN,0};int n=poll(&item,1,milliseconds);
    if(n<0&&errno==EINTR)continue;
    if(n<0||(item.revents&(POLLHUP|POLLERR|POLLNVAL))){stop_uid(uid);_exit(0);}
-   if(item.revents&POLLIN){long long next;ssize_t bytes=read(3,&next,sizeof next);now=monotonic_ns();if(bytes!=sizeof next||now<0||now>=deadline||next<=now){stop_uid(uid);_exit(0);}deadline=next;}
+   if(item.revents&POLLIN){long long next;ssize_t bytes=read(3,&next,sizeof next);now=monotonic_ns();if(bytes==sizeof next&&next==0){stop_uid(uid);_exit(0);}if(bytes!=sizeof next||now<0||now>=deadline||next<=now){stop_uid(uid);_exit(0);}deadline=next;}
   }
  }
- close(channel[0]);*writer=channel[1];return child;
+ close(channel[0]);close(lock);*writer=channel[1];return child;
+}
+int hf_slot_watchdog_finish(pid_t guard,int *writer) {
+ if(*writer>=0){long long disarm=0;ssize_t written=write(*writer,&disarm,sizeof disarm);(void)written;close(*writer);*writer=-1;}
+ int status;pid_t waited;do{waited=waitpid(guard,&status,0);}while(waited<0&&errno==EINTR);
+ return waited==guard&&WIFEXITED(status)&&WEXITSTATUS(status)==0;
 }
 static char *broker_observation(const RunnerConfig *c,const Instruction *i,const HfProcessIdentity *broker,const HfProcessIdentity *agent,const char *state,int exit_code,const char *command,int ipc_closed) {
  char *data=NULL;size_t n=0;FILE *out=open_memstream(&data,&n);if(!out)return NULL;char observation[37];hf_uuid_generate(observation);time_t now=time(NULL);
@@ -230,7 +253,7 @@ static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char 
  if(server<0||bind(server,(struct sockaddr*)&address,sizeof address)||chmod(socketname,0600)||listen(server,16))goto failed;
  snprintf(path,sizeof path,"%s/%s.stdout",c->state,i->launch);log_out=open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);snprintf(path,sizeof path,"%s/%s.stderr",c->state,i->launch);log_err=open(path,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);
  if(log_out<0||log_err<0||pipe2(input,O_CLOEXEC)||pipe2(output,O_CLOEXEC)||pipe2(error,O_CLOEXEC)||pipe2(gate,O_CLOEXEC))goto failed;
- pid_t watchdog=hf_slot_watchdog(i->uid,i->deadline_ns,&watch_write);if(watchdog<0)goto failed;
+ pid_t watchdog=hf_slot_watchdog(i->uid,i->deadline_ns,&watch_write,i->launch);if(watchdog<0)goto failed;
  pid_t parent=getpid();pid_t agent=fork();if(agent<0)goto failed;
  if(agent==0){close(gate[1]);close(input[1]);close(output[0]);close(error[0]);prctl(PR_SET_PDEATHSIG,SIGKILL);if(getppid()==1)_exit(125);setpgid(0,0);char release;
   if(read(gate[0],&release,1)!=1||release!='G')_exit(125);
@@ -255,12 +278,12 @@ static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char 
  const char *state="RUNNING";int exit_code=-1,stdin_open=1;unsigned long long bytes_out=0,bytes_err=0;char stopped_by[37]="";
  for(;;){
   long long now=monotonic_ns();
-  if(!strcmp(state,"RUNNING")&&now>=deadline){if(stdin_open){close(input[1]);stdin_open=0;}stop_uid(i->uid);state="LEASE_EXPIRED";state_update(db,i->launch,state,exit_code);if(!queue_ack(db,c,i,3,"TERMINAL",&ap)){stop_uid(i->uid);state="UNCERTAIN";state_update(db,i->launch,state,exit_code);}}
+  if(!strcmp(state,"RUNNING")&&now>=deadline){if(stdin_open){close(input[1]);stdin_open=0;}stop_uid(i->uid);hf_slot_watchdog_finish(watchdog,&watch_write);state="LEASE_EXPIRED";state_update(db,i->launch,state,exit_code);if(!queue_ack(db,c,i,3,"TERMINAL",&ap)){stop_uid(i->uid);state="UNCERTAIN";state_update(db,i->launch,state,exit_code);}}
   if(now>=next_refresh){
    if(!strcmp(state,"RUNNING")){Instruction fresh;if(fetch_instruction(c,i->event,&fresh)){if(!strcmp(fresh.command,i->command)&&!strcmp(fresh.digest,i->digest)&&fresh.deadline_ns>monotonic_ns()&&monotonic_ns()<deadline){long long next=fresh.deadline_ns;if(write(watch_write,&next,sizeof next)==sizeof next)deadline=next;else{stop_uid(i->uid);state="UNCERTAIN";}}free(fresh.body);}}
    flush_acks(db,c,i);next_refresh=monotonic_ns()+30000000000LL;
   }
-  int status=0;pid_t reaped;while((reaped=waitpid(-1,&status,WNOHANG))>0)if(reaped==agent){exit_code=WIFEXITED(status)?WEXITSTATUS(status):128+WTERMSIG(status);state_update(db,i->launch,"EXITED",exit_code);state="EXITED";if(!queue_ack(db,c,i,3,"TERMINAL",&ap)){stop_uid(i->uid);state="UNCERTAIN";state_update(db,i->launch,state,exit_code);}}
+  int status=0;pid_t reaped;while((reaped=waitpid(-1,&status,WNOHANG))>0)if(reaped==agent){exit_code=WIFEXITED(status)?WEXITSTATUS(status):128+WTERMSIG(status);if(stdin_open){close(input[1]);stdin_open=0;}int absent=stop_uid(i->uid);hf_slot_watchdog_finish(watchdog,&watch_write);state=absent?"EXITED":"UNCERTAIN";state_update(db,i->launch,state,exit_code);if(!queue_ack(db,c,i,3,"TERMINAL",&ap)){stop_uid(i->uid);state="UNCERTAIN";state_update(db,i->launch,state,exit_code);}}
   struct pollfd fds[]={{server,POLLIN,0},{output[0],POLLIN,0},{error[0],POLLIN,0}};int polled=poll(fds,3,200);if(polled<0&&errno!=EINTR){state="UNCERTAIN";break;}
   for(int k=1;k<3;++k)if(fds[k].revents&(POLLIN|POLLHUP)){char buffer[65536];ssize_t n;while((n=read(fds[k].fd,buffer,sizeof buffer))>0){unsigned long long *total=k==1?&bytes_out:&bytes_err;if(*total+(unsigned long long)n>64ULL*1024*1024||!append_log(k==1?log_out:log_err,buffer,(size_t)n)){state="SPOOL_EXHAUSTED";stop_uid(i->uid);break;}*total+=(unsigned long long)n;}}
   if(!(fds[0].revents&POLLIN))continue;
@@ -270,11 +293,11 @@ static void broker(const RunnerConfig *c,const Instruction *i,HfJson *plan,char 
   valid=valid&&payload>=0&&atstring(j,payload,"launch_id",target,sizeof target)&&!strcmp(target,i->launch);
   const char *ids[]={"attempt_id","attempt_generation","sandbox_id","boot_id","boot_generation"};const char *values[]={i->attempt,i->attempt_generation,c->sandbox,c->boot,c->generation};
   for(unsigned k=0;valid&&k<5;++k){char value[128];valid=atstring(j,payload,ids[k],value,sizeof value)&&!strcmp(value,values[k]);}
-  if(!valid){if(out)hf_native_error(out,"IDENTITY_MISMATCH");}
+  if(!valid||watch_write<0||!hf_slot_owner(i->uid,i->launch)){if(out)hf_native_error(out,"IDENTITY_MISMATCH");}
   else if(!strcmp(action,"runner.observe")||!strcmp(action,"launch.status")){char *obs=broker_observation(c,i,&bp,&ap,state,exit_code,stopped_by,!stdin_open);if(obs){fputs(obs,out);free(obs);}else hf_native_error(out,"OBSERVATION_FAILED");}
   else if(!strcmp(action,"runner.stop")||!strcmp(action,"launch.cancel")){
    char command[37];if(!atstring(j,payload,"command_id",command,sizeof command)||!hf_uuid_valid(command))hf_native_error(out,"INVALID_COMMAND");
-   else{snprintf(stopped_by,sizeof stopped_by,"%s",command);state_update(db,i->launch,"STOPPING",exit_code);if(stdin_open){close(input[1]);stdin_open=0;}int stopped=stop_uid(i->uid);state=stopped?"STOPPED":"UNCERTAIN";state_update(db,i->launch,state,exit_code);fsync(log_out);fsync(log_err);char *obs=broker_observation(c,i,&bp,&ap,state,exit_code,command,1);if(obs){fputs(obs,out);free(obs);}else hf_native_error(out,"OBSERVATION_FAILED");}
+   else{snprintf(stopped_by,sizeof stopped_by,"%s",command);state_update(db,i->launch,"STOPPING",exit_code);if(stdin_open){close(input[1]);stdin_open=0;}int stopped=stop_uid(i->uid);hf_slot_watchdog_finish(watchdog,&watch_write);state=stopped?"STOPPED":"UNCERTAIN";state_update(db,i->launch,state,exit_code);fsync(log_out);fsync(log_err);char *obs=broker_observation(c,i,&bp,&ap,state,exit_code,command,1);if(obs){fputs(obs,out);free(obs);}else hf_native_error(out,"OBSERVATION_FAILED");}
   }else if(!strcmp(action,"launch.send")){
    char request_id[37],digest[72],encoded[8192];int accepted=atstring(j,payload,"request_id",request_id,sizeof request_id)&&hf_uuid_valid(request_id)&&atstring(j,payload,"frame_b64",encoded,sizeof encoded)&&stdin_open&&!strcmp(state,"RUNNING")&&input_permitted(db,i->launch);size_t length=0;unsigned char *frame=accepted?hf_base64url_decode(encoded,&length):NULL;char hash[65];accepted=accepted&&frame&&length>0&&length<=4096&&hf_sha256_bytes(frame,length,hash);snprintf(digest,sizeof digest,"sha256:%s",accepted?hash:"");
    sqlite3_stmt *s=NULL;const char *delivery="REJECTED";

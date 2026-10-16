@@ -23,7 +23,7 @@ int hf_runner_binding(const char *request,HfRunnerBinding *binding) {
  for(unsigned k=0;ok&&k<5;++k){char expected[128],actual[128];ok=hf_json_get(identity,fields[k],expected,sizeof expected)&&hf_json_get(j,fields[k],actual,sizeof actual)&&!strcmp(expected,actual);}
  if(ok){snprintf(binding->state_dir,sizeof binding->state_dir,"%s",state);snprintf(binding->launch_id,sizeof binding->launch_id,"%s",launch);snprintf(binding->identity,sizeof binding->identity,"%s",(const char*)sqlite3_column_text(q,2));const char *boot=(const char*)sqlite3_column_text(q,8),*start=(const char*)sqlite3_column_text(q,7),*broker_start=(const char*)sqlite3_column_text(q,5);if(boot&&start&&broker_start){snprintf(binding->os_boot_id,sizeof binding->os_boot_id,"%s",boot);binding->agent_start=strtoull(start,NULL,10);binding->broker_start=strtoull(broker_start,NULL,10);}else ok=0;}
  sqlite3_finalize(q);sqlite3_close(db);free(j);free(identity);HfProcessIdentity current;
- return ok&&binding->uid>0&&hf_process_identity(getpid(),&current)&&!strcmp(current.os_boot_id,binding->os_boot_id);
+ return ok&&binding->uid>0&&hf_slot_owner(binding->uid,binding->launch_id)&&hf_process_identity(getpid(),&current)&&!strcmp(current.os_boot_id,binding->os_boot_id);
 }
 int hf_runner_processes(const HfRunnerBinding *binding,HfProcessIdentity *list,size_t capacity) {
  DIR *dir=opendir("/proc");if(!dir)return -1;struct dirent *entry;size_t count=0;

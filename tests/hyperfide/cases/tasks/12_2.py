@@ -18,21 +18,34 @@ static void reap(pid_t child){int status;while(waitpid(child,&status,0)<0&&errno
 int main(void){
  signal(SIGPIPE,SIG_IGN);check(geteuid()==0,"runner.watchdog.root-fixture");
  uid_t uid=62031;HfProcessIdentity items[1024];check(uid_processes(uid,items,1024)==0,"runner.watchdog.exclusive-uid");
- pid_t child=worker(uid);int writer=-1;pid_t guard=hf_slot_watchdog(uid,monotonic_ns()+150000000LL,&writer);
+ pid_t child=worker(uid);int writer=-1;pid_t guard=hf_slot_watchdog(uid,monotonic_ns()+150000000LL,&writer,"00000000-0000-4000-8000-000000000001");
  check(guard>0,"runner.watchdog.created");usleep(450000);
  check(dead(child),"runner.watchdog.blocked-controller-deadline");close(writer);reap(child);reap(guard);
- child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+5000000000LL,&writer);
+ child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+5000000000LL,&writer,"00000000-0000-4000-8000-000000000001");
  check(guard>0,"runner.watchdog.pipe-loss-created");close(writer);usleep(300000);
  check(dead(child),"runner.watchdog.broker-death-pipe-loss");reap(child);reap(guard);
- child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+400000000LL,&writer);usleep(100000);
+ child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+400000000LL,&writer,"00000000-0000-4000-8000-000000000001");usleep(100000);
  long long renewed=monotonic_ns()+800000000LL;
  check(write(writer,&renewed,sizeof renewed)==sizeof renewed,"runner.watchdog.renewal-delivered");usleep(450000);
  check(!dead(child),"runner.watchdog.primary-renewal-preserved");close(writer);usleep(300000);
  check(dead(child),"runner.watchdog.renewed-broker-death");reap(child);reap(guard);
- child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+100000000LL,&writer);usleep(350000);
+ child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+100000000LL,&writer,"00000000-0000-4000-8000-000000000001");usleep(350000);
  check(dead(child),"runner.watchdog.expired-cannot-revive");renewed=monotonic_ns()+1000000000LL;
  check(write(writer,&renewed,sizeof renewed)!=sizeof renewed,"runner.watchdog.late-renewal-refused");close(writer);reap(child);reap(guard);
  check(uid_processes(uid,items,1024)==0,"runner.watchdog.no-owned-descendants");
+ child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+500000000LL,&writer,"00000000-0000-4000-8000-000000000001");
+ int collision_writer=-1;pid_t collision=hf_slot_watchdog(uid,monotonic_ns()+500000000LL,&collision_writer,"00000000-0000-4000-8000-000000000002");
+ check(collision<0,"runner.slot.concurrent-owner-refused");
+ check(hf_slot_control_lock(uid,"00000000-0000-4000-8000-000000000001")<0,"runner.slot.active-watchdog-locks-cleanup");
+ check(stop_uid(uid),"runner.slot.old-owner-processes-stopped");
+ check(hf_slot_watchdog_finish(guard,&writer),"runner.slot.old-watchdog-retired");
+ child=worker(uid);guard=hf_slot_watchdog(uid,monotonic_ns()+1500000000LL,&writer,"00000000-0000-4000-8000-000000000002");
+ check(guard>0,"runner.slot.new-generation-owner");
+ check(!hf_slot_owner(uid,"00000000-0000-4000-8000-000000000001"),"runner.slot.stale-owner-rejected");
+ usleep(650000);check(!dead(child),"runner.slot.old-deadline-cannot-kill-new-generation");
+ close(writer);reap(child);reap(guard);
+ int ownership=hf_slot_control_lock(uid,"00000000-0000-4000-8000-000000000002");
+ check(ownership>=0,"runner.slot.quiescent-owner-cleanup-lock");if(ownership>=0)close(ownership);
  sqlite3 *db=NULL;check(sqlite3_open(":memory:",&db)==SQLITE_OK,"runner.ack.real-sqlite");
  check(sqlite3_exec(db,"CREATE TABLE native_ack_outbox(command TEXT,version INTEGER,payload TEXT,PRIMARY KEY(command,version));CREATE TABLE accepted(command TEXT PRIMARY KEY);BEGIN IMMEDIATE;INSERT INTO accepted VALUES('command');",NULL,NULL,NULL)==SQLITE_OK,"runner.ack.acceptance-transaction");
  RunnerConfig config={0};Instruction i={0};
@@ -43,7 +56,7 @@ int main(void){
  check(!queue_ack(db,&config,&i,1,"UNCERTAIN",NULL),"runner.ack.conflicting-replay-denied");
  check(sqlite3_exec(db,"PRAGMA query_only=ON",NULL,NULL,NULL)==SQLITE_OK,"runner.ack.write-fault-injected");
  check(!queue_ack(db,&config,&i,2,"EXECUTING",NULL),"runner.ack.write-failure-observed");
- sqlite3_close(db);return checks==20?0:3;
+ sqlite3_close(db);return checks==28?0:3;
 }
 '''
 def main():
