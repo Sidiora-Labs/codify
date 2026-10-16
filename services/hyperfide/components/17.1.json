@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "17.1",
+  "task": "17.1",
+  "roles": [
+    "control"
+  ],
+  "module": "review/coverage.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "review.policy.configure",
+    "review.commits.discover",
+    "review.coverage.inspect"
+  ],
+  "requires": [
+    "4.1",
+    "4.2",
+    "14.1"
+  ]
+}
