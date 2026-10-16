@@ -174,6 +174,15 @@ def main():
         f.stop();f.start()
         check("identity.closing.restart-retains-supervision",lambda:expect(f.invoke("identity.describe",{})[1].get("ok") is True,"closing run prevented authenticated supervision/restart"))
         check("identity.closing.new-grant-denied",lambda:expect(f.issue(grant=uid())[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","closing run admitted new runner grant"))
+        f.sql("UPDATE hyperfide.runs SET state='PAUSED',state_version=state_version+1 WHERE id=$1",[i["run"]])
+        paused_before=f.sql("SELECT credential_id,public_key_b64,credential_version FROM hyperfide.identity_principals WHERE credential_id=$1",[i["provisioner"]])[0]
+        paused_renew=f.invoke("identity.principal.renew",{"ttl_seconds":600},key="provisioner")[1]
+        check("identity.renew.paused-service-same-id-key",lambda:expect(paused_renew.get("ok") is True and paused_renew["result"]["compute_lease_renewed"] is False and f.sql("SELECT credential_id,public_key_b64 FROM hyperfide.identity_principals WHERE credential_id=$1",[i["provisioner"]])[0]=={"credential_id":paused_before["credential_id"],"public_key_b64":paused_before["public_key_b64"]},"Paused service renewal expanded authority or changed key/id"))
+        check("identity.renew.paused-service-no-admission",lambda:expect(f.bind()[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","Renewed service advanced paused work"))
+        check("identity.renew.paused-operator-denied",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600})[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","Operator gained unapproved paused renewal"))
+        check("identity.renew.paused-runner-denied",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600},key="runner")[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","Runner renewed without persisted cleanup proof"))
+        f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[i["provisioner"]])
+        check("identity.renew.paused-revocation-absolute",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600},key="provisioner")[1].get("error",{}).get("code")=="AUTH_REVOKED","Revoked service renewed while paused"))
         f.close();f=IdentityFixture();fixture=f
         f.sql("UPDATE hyperfide.runs SET state='SUCCEEDED',state_version=state_version+1 WHERE id=$1",[f.ids['run']])
         check('identity.succeeded-run.new-grant-denied',lambda:expect(f.issue(grant=uid())[1].get('error',{}).get('code')=='AUTH_RUN_CLOSED','Succeeded run admitted new authority'))
