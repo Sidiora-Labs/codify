@@ -73,6 +73,13 @@
     "migration.source-v18.after.semantic_route_facts",
     "migration.source-v18.after.journal",
     "migration.source-v18.virtual-shadow-ddl",
+    "migration.namespace.stable-across-snapshot-revisions",
+    "migration.namespace.source-lineage-separated",
+    "migration.namespace.repository-separated",
+    "migration.namespace.table-separated",
+    "migration.types.empty-text-distinct-empty-blob",
+    "migration.types.signed-integer-extremes",
+    "migration.types.unicode-key-bytes-preserved",
     "migration.version.future-refused",
     "migration.schema.checksum-refused",
     "migration.cleanup.actual-absence"

@@ -25,7 +25,7 @@
     "client.distributed.spec-run",
     "client.distributed.mcp",
     "client.distributed.hook-post-edit",
-    "client.distributed.work-update",
+    "client.distributed.work-legacy-update",
     "client.distributed.docs-legacy-close",
     "client.distributed.projection",
     "client.distributed.serve",
@@ -39,6 +39,19 @@
     "client.public-descriptor-denied",
     "client.duplicate-descriptor-denied",
     "client.symlink-descriptor-denied",
+    "client.protected.nonroot-primary-gid",
+    "client.protected.private-state-remains-private",
+    "client.protected.foreign-gid-refused",
+    "client.protected.supplementary-gid-refused",
+    "client.protected.writable-parent-refused",
+    "client.protected.child-owned-parent-refused",
+    "client.protected.symlink-parent-refused",
+    "client.protected.hardlinked-file-refused",
+    "client.protected.transport-config-nonroot",
+    "client.protected.signing-key-nonroot",
+    "client.protected.signing-key-write-refused",
+    "client.protected.owner-private-preserved",
+    "client.protected.mcp-nonroot-root-policy",
     "client.https.real-principal",
     "client.https.real-database-mutation",
     "client.https.idempotent-replay",
@@ -55,6 +68,7 @@
     "client.mcp.bootstrap-generic-escape-refused",
     "client.mcp.bootstrap-catalog-then-real-credential-attach",
     "client.mcp.wrong-supervisor-credential-refused",
+    "client.protected.mcp-nonroot-signed-primary",
     "client.https.business-unknown-exit75-real-pending",
     "client.mcp.business-unknown-error-real-pending",
     "client.cleanup.actual-absence"
@@ -67,8 +81,8 @@
     },
     {
       "path": "cg",
-      "sha256": "56b0086aed62831994e6b7c0134ca3d8d558f426128a2fc59e0569c4ee024b31",
-      "size": 68776840
+      "sha256": "42d2a3ba901ec53b96e91e9243ae82c1b99d004ad6f2be993dade4c8558e924e",
+      "size": 68777000
     },
     {
       "path": "services/hyperfide/components/1.4.json",
@@ -117,8 +131,8 @@
     },
     {
       "path": "services/hyperfide/components/25.2.json",
-      "sha256": "ab7e577df1db68d795bc579003207c12eb7d1271d644f6100809da01dd55a6b7",
-      "size": 441
+      "sha256": "1fa36fa860bf31cafbba75e0d3acc55b3309f29859c14042211140052149e061",
+      "size": 452
     },
     {
       "path": "services/hyperfide/components/25.4.json",
@@ -232,18 +246,18 @@
     },
     {
       "path": "services/hyperfide/dist/deployment/releases.d.ts",
-      "sha256": "fddfcc0386dbfa5a00c63b1bef66d881095a3ae479be0e18183a6b79b174954e",
-      "size": 158
+      "sha256": "177d80aa1bbd6278e7532a027f754b23903fd03ce55d9d2dfe3bbf5a80e7347b",
+      "size": 521
     },
     {
       "path": "services/hyperfide/dist/deployment/releases.js",
-      "sha256": "656402876b2d36976c010a870d9c660f4e87975c5288b48954e01a39734b83ce",
-      "size": 8642
+      "sha256": "7204d4eda773bca791ec7d663220fecba5313ddc4a7ab0e9a14196cc6503bd5d",
+      "size": 13975
     },
     {
       "path": "services/hyperfide/dist/deployment/releases.js.map",
-      "sha256": "5495138a31f884c50b27768ec6c83f4a020a2d0bc2431b0c8943c20b8c1ef4db",
-      "size": 9254
+      "sha256": "016c94b7f72c935ddf5d099c1fe694b652640c3d272de0b69a71005650b4ed0a",
+      "size": 14430
     },
     {
       "path": "services/hyperfide/dist/dispatch.d.ts",
@@ -327,13 +341,13 @@
     },
     {
       "path": "services/hyperfide/dist/migration/cutover.js",
-      "sha256": "3b56e0e1dc9479fd1d18a86164a3d427e8e687821ac308970cea47a66acbb9e8",
-      "size": 10501
+      "sha256": "99ba17d90fec8b20a5035530cf13df59d9aecfa5695f29a11d634334c468d930",
+      "size": 12216
     },
     {
       "path": "services/hyperfide/dist/migration/cutover.js.map",
-      "sha256": "96080d6b23b5927a9abff71477cc1efa07fa402b39e947b00d38f4b569c7e7a7",
-      "size": 7374
+      "sha256": "d89ff77cef8c271df8ac6f01d3377312f4e753ad59dc6001680df02c715d4f01",
+      "size": 9175
     },
     {
       "path": "services/hyperfide/dist/migration/legacy.d.ts",
@@ -592,8 +606,8 @@
     },
     {
       "path": "services/hyperfide/src/deployment/releases.ts",
-      "sha256": "f9e3b7abcdaa7a8385416c31c3ec3777c696ae3622c697eb725bc93ae44ee413",
-      "size": 7829
+      "sha256": "f3c14c119bb315a3075bba0d42d37c7670414f4d2ad599c7b0bab1a7f1d22290",
+      "size": 12628
     },
     {
       "path": "services/hyperfide/src/dispatch.ts",
@@ -622,8 +636,8 @@
     },
     {
       "path": "services/hyperfide/src/migration/cutover.ts",
-      "sha256": "260ca149e9a1ade7ee11b0016815b19703402a561fa18f3bd3a85a5487111083",
-      "size": 8702
+      "sha256": "784f677e15e288949fae50a75e5555109e0f0dbf084763a091654551db5fc0fc",
+      "size": 10688
     },
     {
       "path": "services/hyperfide/src/migration/legacy.ts",
@@ -702,8 +716,8 @@
     },
     {
       "path": "src/hyperfide/client.c",
-      "sha256": "8bf8b59b91cdf2db626195221d9a93806ffc08d370bb311479a9efabdd1fb17b",
-      "size": 32709
+      "sha256": "1224a3268a5e41e5dd5d037b9160ab795a57c05b215625f11486be6b649b2c02",
+      "size": 32710
     },
     {
       "path": "src/hyperfide/component_main.c",
@@ -742,13 +756,13 @@
     },
     {
       "path": "src/hyperfide/transport.c",
-      "sha256": "a826656d2d12906f90d1338edbbb7141c141cd51d27119d3e375cb82708e392f",
-      "size": 26435
+      "sha256": "df496b837f064423a654d995aa36b446625af88a5019c597d870cbc82fdd3460",
+      "size": 29916
     },
     {
       "path": "src/hyperfide/transport.h",
-      "sha256": "e8dddaef334001da21b1e278bac5c7ca8801ae999af1782a6f60f0411153895e",
-      "size": 2433
+      "sha256": "dcd15e4694283751e72d87b6581207665cc166736fb94a19ddf9aefc442179ba",
+      "size": 2687
     },
     {
       "path": "src/integrate.c",
@@ -782,8 +796,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/25_3.py",
-      "sha256": "a8f72a0975e639bb35aa05ac58ea106120ea16fb2b9f1e5be75359a1cec32363",
-      "size": 27344
+      "sha256": "4c0d0c1ab2d14d3558c4aeb2267450c6a12c4e65f595818652f5cdb8e509725d",
+      "size": 36807
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -802,8 +816,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/25.3.json",
-      "sha256": "10a049d553194426e628c161af155bd12fd9fa2a75ec00a3095738ab2aa0da50",
-      "size": 4066
+      "sha256": "c534ab9bd007efd7735e69a589276a0b33328f85823f9baab51ce723dcd2aec1",
+      "size": 4749
     },
     {
       "path": "tests/hyperfide/registry.json",
