@@ -91,7 +91,7 @@ class Fixture:
    global DB,RESOURCE
    DB=identity.database;RESOURCE="hf-task-"+task+"-database"
    observation_dir().joinpath("fixture.json").write_text(json.dumps({"database":DB,"resource":RESOURCE}))
-   for filename in ["0002-spec.sql","0003-hierarchy.sql","0005-scheduling.sql","0007-graph.sql","0032-execution-packets.sql"]:
+   for filename in ["0002-spec.sql","0003-hierarchy.sql","0005-scheduling.sql","0006-event-session-bindings.sql","0007-graph.sql","0032-execution-packets.sql"]:
     raw=(ROOT/"services/hyperfide/migrations"/filename).read_bytes()
     checksum="sha256:"+hashlib.sha256(raw).hexdigest()
     sql("BEGIN;"+raw.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(int(filename[:4]))+",'"+filename[:-4]+"','"+checksum+"');COMMIT;")
@@ -142,6 +142,7 @@ def tests(f):
  snapshot=f.ok("recovery.control.reconstruct",SCOPE)
  check("recovery.control.consistent-snapshot",lambda:expect(snapshot["snapshot_consistency"]=="SERIALIZABLE" and len(snapshot["packages"])==1))
  check("recovery.control.no-duplicate-dispatch",lambda:expect(snapshot["new_work_authorized"] is False and snapshot["adoption_candidates"][0]["authority"]=="NONE"))
+ check("recovery.control.event-state-same-primary",lambda:expect(snapshot["event_recovery"]["source"]=="primary-transaction" and snapshot["event_recovery"]["task_completion_authority"] is False and snapshot["event_recovery"]["counts"]["pending_deliveries"]=="0"))
  check("recovery.control.custody-independent",lambda:expect(len(snapshot["submission_custody"])==1 and len(snapshot["qualification_jobs"])==1))
  check("recovery.control.supervision-limit",lambda:expect(snapshot["uninterrupted_leadership_failover"]=="UNQUALIFIED"))
  check("recovery.control.stale-epoch",lambda:f.rejected("recovery.control.reconstruct",{**SCOPE,"authority_epoch":uid(98)},"RECOVERY_STALE_EPOCH"))

@@ -65,6 +65,10 @@ export function capability<T>(context:ComponentContext,id:string,name:string,gua
  try{return dependencies.require(id,name,guard);}
  catch{fail('RECOVERY_DEPENDENCY_UNAVAILABLE','Required trusted recovery dependency is unavailable');}
 }
+export interface RecoveryEvents {recoverySnapshot(tx:RecoveryTransaction,input:{organisation_id:string;run_id:string;limit:number}):Promise<unknown>}
+export interface RecoverySnapshotReader {read(tx:RecoveryTransaction,scope:RecoveryScope):Promise<Record<string,unknown>>}
+export function isRecoveryEvents(value:unknown):value is RecoveryEvents{return object(value)&&typeof value.recoverySnapshot==='function'}
+export function isRecoverySnapshotReader(value:unknown):value is RecoverySnapshotReader{return object(value)&&typeof value.read==='function'}
 export function isGateway(value:unknown):value is RecoveryGateway{return object(value)&&typeof value.withPrimaryTransaction==='function';}
 export function isAuthority(value:unknown):value is RecoveryAuthority{return object(value)&&typeof value.assertCurrent==='function';}
 export interface RecoveryExecutionControls {
@@ -128,7 +132,7 @@ export async function inspectRecoveryHold(tx:Pick<RecoveryTransaction,'query'>,s
  return rows.rows;
 }
 /** Reads one consistent authoritative snapshot. Candidate adoption grants no new compute authority. */
-export async function readControlSnapshot(tx:Pick<RecoveryTransaction,'query'>,scope:RecoveryScope):Promise<Record<string,unknown>>{
+export async function readControlSnapshot(tx:Pick<RecoveryTransaction,'query'>,scope:RecoveryScope,events?:RecoveryEvents):Promise<Record<string,unknown>>{
   await recoveryReady(tx);
   const runs=await tx.query('SELECT id,authority_epoch,state,spec_generation,state_version,clock_timestamp() AS observed_at FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id]);
   if(runs.rows.length!==1)fail('RECOVERY_RUN_NOT_FOUND','Run is unavailable in this organisation');
@@ -142,8 +146,10 @@ export async function readControlSnapshot(tx:Pick<RecoveryTransaction,'query'>,s
   const debts=await query("SELECT id,operation_id,resource_kind,resource_id,sandbox_boot_generation,command_id,status,desired_state,observed_state,observed_at,created_at FROM hyperfide.recovery_resource_debts WHERE organisation_id=$1 AND run_id=$2 AND status<>'RESOLVED' ORDER BY id LIMIT 10001");
   const controls=await inspectRecoveryHold(tx,scope);
   const integration=await inspectIntegrationRecovery(tx,scope);
+  const eventRecovery=events?await events.recoverySnapshot(tx as RecoveryTransaction,{organisation_id:scope.organisation_id,run_id:scope.run_id,limit:64}):{ready:false,reason:'PRIMARY_BRANDED_EVENT_READER_REQUIRED',task_completion_authority:false};
+
   if([packages,sessions,attempts,custody,jobs,debts].some(rows=>rows.length>10000))fail('RECOVERY_SNAPSHOT_TOO_LARGE','Recovery snapshot exceeds bounded inventory; partition the run explicitly');
-  return {scope,run:runs.rows[0],packages,sessions,attempts,submission_custody:custody,qualification_jobs:jobs,integration_recovery:integration,controls,unreachable_resource_debt:debts,
+  return {scope,run:runs.rows[0],packages,sessions,attempts,submission_custody:custody,qualification_jobs:jobs,integration_recovery:integration,event_recovery:eventRecovery,controls,unreachable_resource_debt:debts,
    adoption_candidates:attempts.filter(row=>row.compute_token_current).map(row=>({attempt_id:row.id,generation:row.generation,authority:'NONE',requires:'EXACT_SUPERVISOR_IDENTITY_OBSERVATION'})),
    supervision_failure_domains:1,uninterrupted_leadership_failover:'UNQUALIFIED',snapshot_consistency:'SERIALIZABLE',new_work_authorized:false};
 }
@@ -200,10 +206,12 @@ export function createRecoveryControlCapability(){
  });
 }
 export function getPoolForRecovery(context:ComponentContext):pg.Pool{return getPool(context.env);}
-export function createComponent(_context:ComponentContext):Component{
- return {apiVersion:1,actions:{
+export function createComponent(startup:ComponentContext):Component{
+ const events=capability(startup,'6.4','events.recovery.v1',isRecoveryEvents);
+ const snapshots:RecoverySnapshotReader=Object.freeze({read:(tx:RecoveryTransaction,scope:RecoveryScope)=>readControlSnapshot(tx,scope,events)});
+ return {apiVersion:1,capabilities:{'recovery.snapshots.v1':snapshots},actions:{
   'recovery.control.describe':(input,context)=>{record(input,[]);return {api_version:1,supervision_failure_domains:1,uninterrupted_failover:'UNQUALIFIED',compute_authority:'PRIMARY_GUARDED',offline_external_mutations:false};},
-  'recovery.control.reconstruct':(input,context)=>{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=>readControlSnapshot(tx,scope),false,true);},
+  'recovery.control.reconstruct':(input,context)=>{const scope=scopeOf(input);return recoveryTransaction(context,scope,tx=>snapshots.read(tx,scope),false,true);},
   'recovery.offline.evaluate':(input,context)=>{
    const mode=context.env.HYPERFIDE_OFFLINE_POLICY??'PAUSE',budget=context.env.HYPERFIDE_MAX_OFFLINE_MS??'0';
    if(!['PAUSE','BOUNDED_LOCAL'].includes(mode)||!/^(0|[1-9][0-9]*)$/.test(budget))fail('RECOVERY_CONFIG_INVALID','Invalid trusted offline policy');
