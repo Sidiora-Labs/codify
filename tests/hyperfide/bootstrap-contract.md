@@ -15,7 +15,7 @@ Default campaign directories are fingerprinted by the actual Git HEAD, dirty and
 
 ## Registered checks
 
-The 49 assertion IDs in registrations/27.1.json correspond, in order, to these actual subprocess experiments:
+The 64 assertion IDs in registrations/27.1.json correspond, in order, to these actual subprocess experiments:
 
 1. Reject absent selector.
 2. Reject unknown case.
@@ -100,3 +100,62 @@ Receipt seals provide canonical content and chain-integrity checks against the r
 Linux child-subreaper supervision kills and reaps surviving descendants after normal exit and timeout, including a detached-session child holding pipes open. A leak remains a failed cleanup outcome after termination. Source coverage is limited to reviewed roots, worktree inventory and explicit pins; ignored or outside-root dependencies require declared pins. Complete prepared-environment provenance is supplied by task11.1 and is not established by this bootstrap component.
 
 The disposable Git fixture disables background auto-maintenance, automatic garbage collection, ambient hooks and commit signing so source-inventory tests do not launch unrelated daemon processes. This fixture policy does not relax the runner’s rejection of surviving probe descendants.
+
+
+## Read-only retained proof inspection
+
+`inspect-proof.py --evidence-root <service-owned absolute staging root> --require-full`
+reads a bounded, closed JSON request on stdin. The admission service supplies the
+root, trusted expected pins and qualified inspector/checker assets. It must not
+forward caller-selected roots, checker paths, executables or argument vectors.
+Without `--require-full`, a genuine canonical component receipt is reported only
+as `CHECKED_COMPONENT`, with `full_case_status: INCOMPLETE` and
+`grants_authority: false`. This mode never satisfies migration admission.
+
+The request has `schema_version: 1`, UUID `request_id` and `receipt_id`, relative
+`campaign`, externally anchored `receipt_digest`, and closed `requirements`:
+`source_revision`, unique `case_ids`, and `policy: {cutover_parity: ...}`.
+The closed parity object has version1; UUID organisation_id/run_id/repository_id/
+import_id/source_id/archive_manifest_artifact_id; decimal-string archive_size_bytes;
+Git implementation_revision; and SHA256-prefixed snapshot_digest,
+archive_manifest_digest, archive_content_digest, corpus_manifest_digest,
+parser_digest, configuration_digest, query_rubric_digest, graph_snapshot_digest,
+prebuilt_manifest_digest. These are proof-policy pins, not inferred database
+columns. Migration admission derives them from actual trusted records and
+requires both V-020 and V-025; it separately verifies authentication, current
+organisation/run/repository membership, actual15 byte custody, actual16 execution
+custody where applicable, and actual26.4 authenticated prebuilt identity.
+This inspector never grants database, cutover or deployment authority.
+
+The inspector anchors exact receipt and manifest bytes, selected cases, original
+source revision and expected policy, invokes only its fixed sibling canonical
+checker, and rereads pinned JSON after checking. Full acceptance additionally
+requires nonempty normative full inventories in the qualified assets registry,
+identical campaign full inventories and the actual independent checker PASS.
+Task components, missing full inventories and unregistered campaign scopes fail
+closed. No full parity or live qualification is established by these selftests.
+
+For portable inspection, the service may stage fixed `trusted-relocation.json`
+under the evidence root. It is service policy, never an untrusted request field.
+Its closed version1 schema is `workspace: {original: absolute, staged: relative}`,
+`campaign_original: absolute`, `files: [{original: absolute, staged: relative}]`,
+`executables: [{original: absolute, argv0: string}]`, `checker_original` and
+`runner_original`. Staging remains immutable and exclusively service-owned for
+the inspection. Every sealed source/input/executable read requires an explicit
+entry; relative workspace identities cannot change. All staged paths are below
+the trusted root, without symbolic links. The checker verifies original sealed
+source, fixture and executable digests, complete source/worktree inventories,
+original Git HEAD, original exclusions, cleanup, assertions and scope. It does
+not execute archived tools or rewrite sealed receipts. Qualified current checker
+code checks archived historical checker/runner bytes as evidence. Git inventory
+inspection disables fsmonitor and hooks. No missing path is skipped.
+The JSON result reports the request/receipt/manifest/checker/relocation digests,
+source, cases, assertions and policy with `grants_authority: false`; mismatch
+returns nonzero `REJECTED`. The trusted service must bind that bounded result to
+its durable admission transaction and the original actual15 custody receipt.
+
+Checks54–64 exercise real versioned component receipts, closed request/policy
+validation, anchors, case/source pin mismatches, symbolic/path escapes, artifact
+changes, byte reread, and portable verification after deleting the original
+checkout. Changed tools, missing mappings and wrong staged revisions reject.
+They are delegated by the standard selftest entrypoint and cannot skip.
