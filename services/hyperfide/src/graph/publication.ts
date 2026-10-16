@@ -5,7 +5,7 @@ import type {InvocationContext} from '../transport/protocol.js';
 import {invocationOf} from '../identity/enrollment.js';
 import {FoundationError} from '../policy/programme.js';
 import {canonical,digest,exact,fail,text,uuid,decimal,sha} from './extraction.js';
-import {getBuild,graphCoverage,graphTransaction,graphGuard,scopeInput} from './ingestion.js';
+import {getBuild,graphCoverage,graphTransaction,graphGuard,scopeInput,semanticProjectionDebt} from './ingestion.js';
 import type {GraphScope,GraphTransaction} from './ingestion.js';
 import type {BundleManifest,ExtractionIdentity,JsonObject} from './extraction.js';
 
@@ -23,7 +23,9 @@ export async function loadGraphSnapshot(tx:GraphTransaction,s:GraphScope,manifes
  const manifest=await publishedGraph(tx,s,uuid(manifestId)),sources=manifest.source_set as ExtractionIdentity[];
  if(pins.length!==sources.length||pins.some(p=>!sources.some(v=>v.repository_id===p.repository_id&&v.commit===p.source_object_id&&v.overlay_digest===p.overlay_digest)))fail('GRAPH_SOURCE_SET_MISMATCH','Published graph differs from exact expected source set');
  const coverage=await tx.query('SELECT repository_id,source_object_id,count(*)::text AS file_count FROM hyperfide.graph_files WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 GROUP BY repository_id,source_object_id ORDER BY repository_id,source_object_id',[s.organisation_id,s.run_id,manifest.build_id]);
- return {...manifest,file_coverage:coverage.rows,expected_sources_validated:true};
+ const debt=await semanticProjectionDebt(tx,s,String(manifest.build_id));
+ const unresolved=(await tx.query<{n:string}>("SELECT count(*)::text AS n FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND resolution_state<>'RESOLVED'",[s.organisation_id,s.run_id,manifest.build_id])).rows[0]!.n;
+ return {...manifest,file_coverage:coverage.rows,expected_sources_validated:true,unknown_semantic_edges:debt.rows,unprojected_semantic_edge_count:debt.count,semantic_projection_complete:debt.count==='0',unresolved_reference_count:unresolved};
 }
 async function publish(input:unknown,ctx:ComponentContext):Promise<unknown>{
  const r=exact(input,['organisation_id','run_id','authority_epoch','operation_id','build_id','channel','expected_generation']),s=scopeInput(r,ctx),
@@ -44,8 +46,8 @@ async function publish(input:unknown,ctx:ComponentContext):Promise<unknown>{
   const coverage=await graphCoverage(tx,s,id);if(!sourceRows.rows.length||coverage.failed_files!==0||sourceRows.rows.some(v=>!v.manifest.complete))fail('GRAPH_INCOMPLETE','Source/parse coverage incomplete');
   // A delayed extraction cannot displace a newer generation on this channel.
   if(current){
-   const old=await tx.query<{identity:ExtractionIdentity}>('SELECT b.identity FROM hyperfide.graph_bundle_inputs b JOIN hyperfide.graph_manifests m ON m.organisation_id=b.organisation_id AND m.run_id=b.run_id AND m.build_id=b.graph_id WHERE m.organisation_id=$1 AND m.run_id=$2 AND m.id=$3',[s.organisation_id,s.run_id,current.manifest_id]);
-   for(const v of sourceRows.rows){const previous=old.rows.find(o=>o.identity.repository_id===v.identity.repository_id);if(previous&&BigInt(previous.identity.generation)>BigInt(v.identity.generation))fail('GRAPH_GENERATION_STALE','Older extraction cannot replace newer published source');}
+   const old=await tx.query<{identity:ExtractionIdentity;bundle_digest:string}>('SELECT b.identity,b.bundle_digest FROM hyperfide.graph_bundle_inputs b JOIN hyperfide.graph_manifests m ON m.organisation_id=b.organisation_id AND m.run_id=b.run_id AND m.build_id=b.graph_id WHERE m.organisation_id=$1 AND m.run_id=$2 AND m.id=$3',[s.organisation_id,s.run_id,current.manifest_id]);
+   for(const v of sourceRows.rows){const previous=old.rows.find(o=>o.identity.repository_id===v.identity.repository_id);if(!previous)continue;const before=BigInt(previous.identity.generation),after=BigInt(v.identity.generation);if(before>after)fail('GRAPH_GENERATION_STALE','Older extraction cannot replace newer published source');if(before===after&&(canonical(previous.identity)!==canonical(v.identity)||previous.bundle_digest!==v.bundle_digest))fail('GRAPH_GENERATION_CONFLICT','One channel extraction generation cannot identify different source or parser facts');}
   }
   const counts=(await tx.query<{files:string;symbols:string;reference_count:string;edges:string;unresolved:string}>(
    "SELECT (SELECT count(*)::text FROM hyperfide.graph_files WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3) AS files,(SELECT count(*)::text FROM hyperfide.graph_symbols WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3) AS symbols,(SELECT count(*)::text FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3) AS reference_count,(SELECT count(*)::text FROM hyperfide.graph_edges WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3) AS edges,(SELECT count(*)::text FROM hyperfide.graph_references WHERE organisation_id=$1 AND run_id=$2 AND graph_id=$3 AND resolution_state<>'RESOLVED') AS unresolved",p)).rows[0]!;
