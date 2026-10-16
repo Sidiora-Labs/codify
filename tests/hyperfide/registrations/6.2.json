@@ -26,7 +26,15 @@
     "inbox.trusted-bootstrap-activates",
     "inbox.bootstrap-replay",
     "inbox.snapshot-covered-delivery",
-    "inbox.bootstrap-then-live-event"
+    "inbox.bootstrap-then-live-event",
+    "inbox.supersession-sql-contract",
+    "inbox.supersession-preserves-pending-replacement",
+    "inbox.supersession-replay",
+    "inbox.supersession-branch-refused",
+    "inbox.supersession-source-reference-refused",
+    "inbox.supersession-same-recipient-new-generation",
+    "inbox.supersession-immutable-original",
+    "inbox.supersession-preserves-prior-admission"
   ],
   "argv": [
     "python3",
