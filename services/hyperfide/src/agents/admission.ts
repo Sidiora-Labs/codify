@@ -1,7 +1,6 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {exactAgentObject,agentString,agentScope,agentDigest,agentTransaction,agentError,getNativeSessionProfile,agentOperation} from './sessions.js';
+import {exactAgentObject,agentString,agentScope,agentDigest,agentTransaction,agentError,getNativeSessionProfile,agentOperation,readTrustedAgentFile,assertNativeRunnerScope} from './sessions.js';
 import {assertInvocation} from '../transport/protocol.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
@@ -12,9 +11,7 @@ type Policy={organisation_id:string;run_id:string;quota_key:string;connector:str
 async function policies(ctx:ComponentContext):Promise<Policy[]>{
  const filename=ctx.env.HF_AGENT_ADMISSION_POLICY_FILE;
  if(!filename||!path.isAbsolute(filename))agentError('ADMISSION_NOT_CONFIGURED');
- const st=await fs.lstat(filename);
- if(!st.isFile()||st.isSymbolicLink()||st.size>131072)agentError('ADMISSION_POLICY_INVALID');
- let value:unknown;try{value=JSON.parse(await fs.readFile(filename,'utf8'));}catch{agentError('ADMISSION_POLICY_INVALID');}
+ let value:unknown;try{value=JSON.parse((await readTrustedAgentFile(filename,131072)).toString('utf8'));}catch{agentError('ADMISSION_POLICY_INVALID');}
  const root=exactAgentObject(value,['schema_version','policies']);
  if(root.schema_version!==1||!Array.isArray(root.policies)||!root.policies.length||root.policies.length>256)agentError('ADMISSION_POLICY_INVALID');
  const seen=new Set<string>();
@@ -52,8 +49,9 @@ export function createComponent(ctx:ComponentContext):Component{
  const selected=await trusted;
  const run=async(client:AuthorityTransaction)=>{
  const execute=async()=>{
- const admitted=await client.query('SELECT s.connector,s.state,s.attempt_id,b.auth_profile,b.connector_version,b.process_exited,b.configuration_digest FROM hyperfide.agent_sessions s JOIN hyperfide.native_session_bindings b ON b.organisation_id=s.organisation_id AND b.run_id=s.run_id AND b.session_id=s.id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.id=$3 FOR UPDATE OF s',[s.organisation_id,s.run_id,s.session_id]);
+ const admitted=await client.query('SELECT s.connector,s.state,s.attempt_id,s.sandbox_id,s.sandbox_boot_generation,b.boot_id,b.auth_profile,b.connector_version,b.process_exited,b.configuration_digest FROM hyperfide.agent_sessions s JOIN hyperfide.native_session_bindings b ON b.organisation_id=s.organisation_id AND b.run_id=s.run_id AND b.session_id=s.id WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.id=$3 FOR UPDATE OF s',[s.organisation_id,s.run_id,s.session_id]);
  if(admitted.rows.length!==1)agentError('AGENT_BINDING_NOT_FOUND');
+ assertNativeRunnerScope(invocation,admitted.rows[0]!,admitted.rows[0]!);
  if(name==='reserve'){
  agentString(v.quota_key);
  const p=selected.find(p=>p.organisation_id===s.organisation_id&&p.run_id===s.run_id&&p.quota_key===v.quota_key);
@@ -88,6 +86,7 @@ export function createComponent(ctx:ComponentContext):Component{
  const p=selected.find(p=>p.organisation_id===s.organisation_id&&p.run_id===s.run_id&&p.quota_key===row.quota_key);
  if(!p||agentDigest(p)!==row.policy_digest)agentError('ADMISSION_POLICY_CHANGED');
  if(name==='context'){
+ const dbNow=new Date((await client.query('SELECT clock_timestamp() AS now')).rows[0]!.now).getTime();
  const native=await getNativeSessionProfile(ctx,p.auth_profile),q=native.qualification as Record<string,unknown>,cap=native.capabilities as Record<string,unknown>;
  const eligible=native.connector===p.connector&&(native.binary as Record<string,unknown>).version===p.connector_version&&native.profile_digest===admitted.rows[0]?.configuration_digest&&native.permission_profile_id===p.permission_profile&&native.configured_provider_id===p.provider&&native.requested_model_id===p.model&&q.state==='QUALIFIED'&&q.live_qualified===true&&q.receipt_digest===p.qualification_digest&&cap.unattended===true&&typeof native.observed_model_id==='string'&&typeof native.observed_provider_id==='string';
  const events=await client.query("SELECT result FROM hyperfide.native_session_events WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND result->>'kind'='ADMISSION_REPORT' AND result->>'reservation_id'=$4 ORDER BY created_at DESC,operation_id DESC LIMIT 1",[s.organisation_id,s.run_id,s.session_id,id]);
@@ -97,7 +96,7 @@ export function createComponent(ctx:ComponentContext):Component{
  const packet={schema_version:1,scope:s,run_policy_digest:runPolicy.rows[0]?.policy_digest??null,admission_policy_digest:row.policy_digest,reservation_id:id,attempt_id:admitted.rows[0]?.attempt_id??null,
  policy_digest:row.policy_digest,capacity_wait:wait,capacity_retained:row.state!=='RELEASED',
  retry:{attempts_used:Number(row.attempt_count),maximum_attempts:p.max_attempts,remaining:Math.max(0,p.max_attempts-Number(row.attempt_count)),retry_after:row.retry_after===null||row.retry_after===undefined?null:new Date(String(row.retry_after)).toISOString(),
- eligible:row.state==='RETRY_WAIT'&&new Date(String(row.retry_after)).getTime()<=Date.now()&&eligible,requires_condition_change:row.state==='ESCALATED'},
+ eligible:row.state==='RETRY_WAIT'&&new Date(String(row.retry_after)).getTime()<=dbNow&&eligible,requires_condition_change:row.state==='ESCALATED'},
  eligible_frontier_profiles:eligible?[{profile_id:p.auth_profile,connector:p.connector,connector_version:p.connector_version,provider:p.provider,requested_model_id:p.model,observed_model_id:native.observed_model_id,observed_provider_id:native.observed_provider_id,qualification_digest:p.qualification_digest}]:[],
  diagnostic_refs:observation?.diagnostic_refs??[],command_receipt_refs:observation?.command_receipt_refs??[],condition_digest:observation?.condition_digest??null,condition_changed_since_previous:false,condition_change_proof:'UNAVAILABLE',
  escalation_required:row.state==='ESCALATED',grants_authority:false};
@@ -128,7 +127,8 @@ let state:string,delay=0,attempts=Number(row.attempt_count);
  else if(v.reason==='RATE_LIMIT'||v.reason==='QUOTA_LIMIT'){
  if(row.state==='RETRY_WAIT'){
  const when=new Date(String(row.retry_after)).getTime();
- if(when>Date.now())return {reservation:row,replayed:true,grants_authority:false};
+ const dbNow=new Date((await client.query('SELECT clock_timestamp() AS now')).rows[0]!.now).getTime();
+ if(when>dbNow)return {reservation:row,replayed:true,grants_authority:false};
  }
  if(attempts>=p.max_attempts)state='ESCALATED';
  else{state='RETRY_WAIT';delay=Math.min(p.retry_max_ms,p.retry_base_ms*2**(attempts-1));attempts++;}

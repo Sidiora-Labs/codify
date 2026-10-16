@@ -10,6 +10,8 @@
   "assertion_ids": [
     "admission.main-startup-sizing-only",
     "admission.actual-unqualified-native-blocked",
+    "admission.rejects-writable-startup-policy",
+    "admission.rejects-symlink-startup-policy",
     "admission.reject-caller-qualified-flag",
     "admission.cross-tenant-denied",
     "admission.existing-reservation-observed",
@@ -21,6 +23,7 @@
     "admission.persisted-diagnostics-and-wait",
     "admission.context-date-is-portable",
     "admission.retry-budget-exhaustion",
+    "admission.worker-self-release-denied",
     "admission.unconfirmed-exit-cannot-release",
     "admission.unknown-outcome-retains-capacity",
     "admission.restart-retains-escalation",

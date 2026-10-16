@@ -71,7 +71,7 @@ class NativeHandshake:
         except BaseException:
             self.close();raise
         stat=Path('/proc/'+str(self.child.pid)+'/stat').read_text()
-        self.process_identity={'process_id':self.child.pid,'process_start_time':stat[stat.rfind(')')+2:].split()[19],'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+        self.process_identity={'process_id':self.child.pid,'process_start_time':stat[stat.rfind(')')+2:].split()[19],'kernel_boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
     def rpc(self,message):
         self.child.stdin.write(json.dumps(message).encode()+b"\n");self.child.stdin.flush();deadline=time.monotonic()+15
         while time.monotonic()<deadline:
@@ -180,12 +180,12 @@ COMMIT;"""
             self.inner=SessionIdentityFixture(extra_components=["14.2","14.3","13.2"]+(["13.4"]if admission else[]),extra_setup=setup)
         except BaseException:
             self.terminate();raise
-    def invoke(self,action,value,component="13.2"):
-        return self.inner.invoke(action,value,component=component)
-    def ok(self,action,value,component="13.2"):
-        status,row=self.invoke(action,value,component);expect(status==200 and row.get("ok")is True,"valid signed action refused: "+str(row.get("error",{}).get("code")));return row["result"]
-    def bad(self,action,value,code=None,component="13.2"):
-        status,row=self.invoke(action,value,component);expect(status>=400 or row.get("ok")is False,"invalid signed action succeeded")
+    def invoke(self,action,value,component="13.2",key="operator"):
+        return self.inner.invoke(action,value,component=component,key=key)
+    def ok(self,action,value,component="13.2",key="operator"):
+        status,row=self.invoke(action,value,component,key);expect(status==200 and row.get("ok")is True,"valid signed action refused: "+str(row.get("error",{}).get("code")));return row["result"]
+    def bad(self,action,value,code=None,component="13.2",key="operator"):
+        status,row=self.invoke(action,value,component,key);expect(status>=400 or row.get("ok")is False,"invalid signed action succeeded")
         if code:expect(row.get("error",{}).get("code")==code,"wrong refusal code: "+str(row.get("error",{}).get("code")))
     def bind(self,session=None,native=None):
         scope=dict(self.scope,session_id=session or self.scope["session_id"]);binding=dict(self.binding,native_session_id=native or self.binding["native_session_id"])
@@ -237,6 +237,7 @@ def main():
         check('sessions.handshake-cleanup-preserves-peer',handshake_isolation)
         fixture=AgentFixture();f=fixture
         check("sessions.signed-registration",lambda:expect(f.bind()["bound"]is True,"binding missing"))
+        f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"])
         registered_version=str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]);running_version=str(int(registered_version)+1)
         def first_binding():
             row=f.ok("agent.session.inspect",{"scope":f.scope})["session"]
@@ -272,10 +273,14 @@ def main():
         check("sessions.actual-checkpoint-registration",lambda:expect(f.ok("agent.session.checkpoint",{"scope":f.scope,"operation_id":uid(),"checkpoint":f.checkpoint})["context_restored"]is False,"metadata registration claimed restored context"))
         resume={"scope":f.scope,"checkpoint_id":f.inner.ids["checkpoint"],"native_session_id":f.binding["native_session_id"],"configuration_digest":f.configuration,"source_manifest_digest":f.source}
         check("sessions.live-process-reconcile",lambda:expect(f.ok("agent.session.resume-check",resume)["decision"]=="RECONCILE_PROCESS","live process duplicated"))
-        check("sessions.reject-unconfirmed-termination",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED"),"AGENT_TERMINATION_UNCONFIRMED"))
+        check("sessions.worker-cannot-observe-own-exit",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED",process=dict(process,exit_observed=True)),"AGENT_EXIT_REPORTER_DENIED",key="native_worker"))
+        check("sessions.operator-cannot-invent-exit",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED",process=dict(process,exit_observed=True)),"AGENT_EXIT_REPORTER_DENIED"))
+        f.bind(f.inner.ids["second"],f.native_sessions[1])
+        check("sessions.runner-foreign-session-denied",lambda:f.bad("agent.session.transition",{"scope":dict(f.scope,session_id=f.inner.ids["second"]),"operation_id":uid(),"expected_state_version":"1","state":"STOPPED","process":dict(process,exit_observed=True)},"AGENT_SCOPE_DENIED",key="runner"))
+        check("sessions.reject-unconfirmed-termination",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED"),"AGENT_TERMINATION_UNCONFIRMED",key="runner"))
         f.terminate()
         stopped=dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED",process=dict(process,exit_observed=True))
-        check("sessions.actual-exit-observation",lambda:expect(f.ok("agent.session.transition",stopped)["state"]=="STOPPED","actual process exit lost"))
+        check("sessions.actual-exit-observation",lambda:expect(f.ok("agent.session.transition",stopped,key="runner")["state"]=="STOPPED","actual process exit lost"))
         check("sessions.unqualified-native-resume-refused",lambda:expect(f.ok("agent.session.resume-check",resume)["decision"]=="FRESH_HANDOFF_REQUIRED","base support flag became qualified native context"))
         check("sessions.exact-checkpoint-session-only",lambda:f.bad("agent.session.resume-check",dict(resume,native_session_id="most-recent-other-session"),"AGENT_CHECKPOINT_MISMATCH"))
         check("sessions.source-tree-crossover-refused",lambda:f.bad("agent.session.resume-check",dict(resume,source_manifest_digest=sha(b"newtree")),"AGENT_CHECKPOINT_MISMATCH"))

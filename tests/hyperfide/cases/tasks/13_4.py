@@ -47,11 +47,28 @@ def main():
     try:
         check('admission.main-startup-sizing-only',startup_budget)
         f=AgentFixture(admission=True);f.bind()
+        f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"])
         reserve={"scope":f.scope,"reservation_id":uid(),"quota_key":"fixture-quota"}
         def blocked():
             f.bad("agent.admission.reserve",reserve,"ADMISSION_NATIVE_UNQUALIFIED",component="13.4")
             rows=f.inner.sql("SELECT id FROM hyperfide.agent_admission_reservations");expect(rows==[],"unqualified launch consumed reservation")
         check("admission.actual-unqualified-native-blocked",blocked)
+        def unsafe_policy(kind):
+            original_mode=f.policy_path.stat().st_mode&0o777
+            saved=f.policy_path.with_suffix(".safe")
+            f.inner.stop()
+            try:
+                if kind=="writable":f.policy_path.chmod(0o666)
+                else:f.policy_path.rename(saved);f.policy_path.symlink_to(saved)
+                f.inner.start()
+                f.bad("agent.admission.reserve",reserve,"ADMISSION_POLICY_INVALID",component="13.4")
+            finally:
+                f.inner.stop()
+                if kind=="writable":f.policy_path.chmod(original_mode)
+                else:f.policy_path.unlink();saved.rename(f.policy_path)
+                f.inner.start()
+        check("admission.rejects-writable-startup-policy",lambda:unsafe_policy("writable"))
+        check("admission.rejects-symlink-startup-policy",lambda:unsafe_policy("symlink"))
         check("admission.reject-caller-qualified-flag",lambda:f.bad("agent.admission.reserve",dict(reserve,live_qualified=True),"AGENT_INPUT_INVALID",component="13.4"))
         check("admission.cross-tenant-denied",lambda:f.bad("agent.admission.reserve",dict(reserve,scope=dict(f.scope,organisation_id=uid())),"AGENT_SCOPE_DENIED",component="13.4"))
         # Historical reservation state is seeded explicitly by trusted fixture SQL.
@@ -93,6 +110,13 @@ def main():
             p=call("agent.admission.report",dict(base,operation_id=uid(),reason="RATE_LIMIT"))
             expect(p["reservation"]["state"]=="ESCALATED" and p["reservation"]["attempt_count"]==2 and p["capacity_retained"],"retry budget exceeded or capacity released")
         check("admission.retry-budget-exhaustion",bounded)
+        def worker_self_release():
+            row=f.ok("agent.session.inspect",{"scope":f.scope})["session"]
+            identity={"boot_id":f.binding["boot_id"],"process_id":f.binding["process_id"],"process_start_time":f.binding["process_start_time"],"exit_observed":True}
+            f.bad("agent.session.transition",{"scope":f.scope,"operation_id":uid(),"expected_state_version":str(row["state_version"]),"state":"FAILED","process":identity},"AGENT_EXIT_REPORTER_DENIED",key="native_worker")
+            f.bad("agent.admission.report",dict(base,operation_id=uid(),reason="COMPLETE"),"AGENT_TERMINATION_UNCONFIRMED",component="13.4",key="native_worker")
+            expect(f.inner.sql("SELECT active FROM hyperfide.agent_admission_accounts")[0]["active"]==1,"worker self-report released native quota")
+        check("admission.worker-self-release-denied",worker_self_release)
         check("admission.unconfirmed-exit-cannot-release",lambda:bad(dict(base,operation_id=uid(),reason="TERMINATED"),"AGENT_TERMINATION_UNCONFIRMED"))
         check("admission.unknown-outcome-retains-capacity",lambda:expect(call("agent.admission.report",dict(base,operation_id=uid(),reason="UNKNOWN_OUTCOME"))["capacity_retained"],"unknown outcome released capacity"))
         f.inner.stop();f.inner.start()
@@ -102,7 +126,7 @@ def main():
         check("admission.actual-primary-capacity-debt",held)
         f.terminate()
         process={"boot_id":f.binding["boot_id"],"process_id":f.child.pid,"process_start_time":f.binding["process_start_time"],"exit_observed":True}
-        f.ok("agent.session.transition",{"scope":f.scope,"operation_id":uid(),"expected_state_version":str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]),"state":"FAILED","process":process})
+        f.ok("agent.session.transition",{"scope":f.scope,"operation_id":uid(),"expected_state_version":str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]),"state":"FAILED","process":process},key="runner")
         release=dict(base,operation_id=uid(),reason="TERMINATED")
         def release_observed():
             p=call("agent.admission.report",release)
