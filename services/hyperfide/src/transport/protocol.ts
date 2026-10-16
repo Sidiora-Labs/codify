@@ -150,7 +150,7 @@ function envelope(raw: Buffer): DecodedRequest<unknown> {
 export function decodeInvoke(raw: Buffer): DecodedRequest<InvokePayload> {
   const decoded = envelope(raw), value = decoded.payload;
   exact(value, ['run_id','component','action','input','expected_version','authority']);
-  if (!uuid(value.run_id) || typeof value.component !== 'string' || !NAME.test(value.component) ||
+  if (!uuid(value.run_id) || typeof value.component !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.component) ||
       typeof value.action !== 'string' || !NAME.test(value.action) ||
       value.expected_version !== null && !decimal(value.expected_version) ||
       value.authority !== null && !object(value.authority))
@@ -207,4 +207,13 @@ export function verifyProof(publicKey: string, item: Proof, origin: string, endp
   const key = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100','hex'), raw]), format: 'der', type: 'spki' });
   if (!verify(null, signingBytes(origin, endpoint, item, body), key, item.signature))
     fail('AUTH_INVALID', 'Request proof is invalid');
+}
+
+// Only genuine authenticated invocations can cross component capability boundaries.
+const authenticatedInvocations=new WeakSet<object>();
+export function authenticatedInvocation(value:InvocationContext):InvocationContext {
+ const result=Object.freeze(value);authenticatedInvocations.add(result);return result;
+}
+export function assertInvocation(value:unknown):asserts value is InvocationContext {
+ if(!object(value)||!authenticatedInvocations.has(value))fail('AUTH_REQUIRED','Verified authenticated invocation required');
 }
