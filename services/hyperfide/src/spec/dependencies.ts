@@ -10,13 +10,13 @@ import {loadProofObligations} from './obligations.js';
 type Tx=AuthorityTransaction;
 export interface DependencyScope {organisation_id:string;run_id:string}
 export interface PlanPins {run_id:string;spec_revision_id:string;spec_generation:string;state_version:string}
-export interface DependencyDiagnostic {code:string;run_id:string;task_key?:string;section?:string|undefined;key?:string|undefined;line?:number|undefined;target?:string|undefined;path?:string[]|undefined}
+export interface DependencyDiagnostic {code:string;run_id:string;task_key?:string;section?:string|undefined;key?:string|undefined;line?:number|undefined;target?:string|undefined;path?:string[]|undefined;path_truncated?:boolean;cycle_length?:number}
 export interface AcceptedDependency {
- task_id:string;predecessor_run_id:string;predecessor_task_id:string;
+ task_id:string;source_spec_generation:string;predecessor_run_id:string;predecessor_task_id:string;
  predecessor_spec_generation:string;predecessor_spec_revision_id:string;
  predecessor_repository_id:string|null;integration_ref:string|null;milestone:'QUALIFIED'|'INTEGRATED';
 }
-interface Task {id:string;task_key:string;definition:Record<string,any>;wave:number;state:string;state_version:string;spec_generation:string;spec_revision_id:string;criteria_digest:string;run_id:string}
+interface Task {package_key:string;package_wave:number;id:string;task_key:string;definition:Record<string,any>;wave:number;state:string;state_version:string;spec_generation:string;spec_revision_id:string;criteria_digest:string;run_id:string}
 interface Snapshot {run:Record<string,any>;tasks:Task[]}
 export interface DependencyReport {
  status:'STRUCTURALLY_VALID'|'INVALID';authority:'STRUCTURAL_VALIDATION';spec_revision_id:string;spec_generation:string;state_version:string;
@@ -55,7 +55,7 @@ async function snapshot(tx:Tx,scope:DependencyScope,run_id:string,lock=false):Pr
  const result=await tx.query('SELECT r.*,r.spec_generation::text,r.state_version::text,pg_is_in_recovery() AS replica FROM hyperfide.runs r WHERE r.organisation_id=$1 AND r.id=$2'+(lock?' FOR UPDATE':' FOR SHARE'),[scope.organisation_id,run_id]);
  const run=result.rows[0];if(!run)fail('SPEC_RUN_NOT_FOUND','Accepted run does not exist in this organisation');
  if(run.replica)fail('PRIMARY_REQUIRED','Accepted plan authority requires primary state');
- const tasks=await tx.query('SELECT id,task_key,definition,wave,state,state_version::text,spec_generation::text,spec_revision_id,criteria_digest,run_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 ORDER BY task_key LIMIT 50001',[scope.organisation_id,run_id]);
+ const tasks=await tx.query('SELECT t.id,t.task_key,t.definition,t.wave,t.state,t.state_version::text,t.spec_generation::text,t.spec_revision_id,t.criteria_digest,t.run_id,p.package_key,p.wave AS package_wave FROM hyperfide.tasks t JOIN hyperfide.feature_packages p ON p.organisation_id=t.organisation_id AND p.run_id=t.run_id AND p.id=t.feature_package_id WHERE t.organisation_id=$1 AND t.run_id=$2 ORDER BY t.task_key LIMIT 50001',[scope.organisation_id,run_id]);
  if(tasks.rows.length>MAX_TASKS)fail('SPEC_GRAPH_LIMIT','Accepted task graph exceeds the bounded validation limit');
  return {run,tasks:tasks.rows as Task[]};
 }
@@ -66,10 +66,10 @@ function assertPins(run:Record<string,any>,input:Record<string,unknown>):void{
   fail('SPEC_PLAN_STALE','Accepted plan changed before the operation');
 }
 function declared(task:Task):unknown{return taskFields(task).requires?.value??[];}
-function referenceRuns(tasks:Task[]):string[]{
+function referenceRuns(tasks:Task[],organisation_id:string):string[]{
  const result=new Set<string>();
  for(const task of tasks){const values=declared(task);if(Array.isArray(values))for(const value of values)
-  if(object(value)&&typeof value.run_id==='string'&&UUID.test(value.run_id))result.add(value.run_id);}
+  if(object(value)&&value.organisation_id===organisation_id&&typeof value.run_id==='string'&&UUID.test(value.run_id))result.add(value.run_id);}
  return [...result];
 }
 // Graph nodes are scoped UUIDs, never human task labels. All referenced run locks and
@@ -78,12 +78,15 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);
  await readySchema(tx);
  const first=await snapshot(tx,scope,scope.run_id);assertPins(first.run,request);
- const snapshots=new Map<string,Snapshot>([[scope.run_id,first]]),queue=[scope.run_id];
+ const snapshots=new Map<string,Snapshot>([[scope.run_id,first]]),queue=[scope.run_id],discovered=new Set<string>([scope.run_id]);
  let total=first.tasks.length;
  while(queue.length){const current=snapshots.get(queue.shift()!)!;
-  for(const runId of referenceRuns(current.tasks))if(!snapshots.has(runId)){
-   if(snapshots.size>=MAX_RUNS)fail('SPEC_GRAPH_LIMIT','Cross-run validation exceeds the bounded run limit');
-   const next=await snapshot(tx,scope,runId);total+=next.tasks.length;if(total>MAX_TASKS)fail('SPEC_GRAPH_LIMIT','Combined task graph exceeds validation limit');
+  for(const runId of referenceRuns(current.tasks,scope.organisation_id))if(!discovered.has(runId)){
+   if(discovered.size>=MAX_RUNS)fail('SPEC_GRAPH_LIMIT','Cross-run validation exceeds the bounded run limit');
+   discovered.add(runId);
+   let next:Snapshot;
+   try{next=await snapshot(tx,scope,runId);}catch(error){if(error instanceof FoundationError&&error.code==='SPEC_RUN_NOT_FOUND')continue;throw error;}
+   total+=next.tasks.length;if(total>MAX_TASKS)fail('SPEC_GRAPH_LIMIT','Combined task graph exceeds validation limit');
    snapshots.set(runId,next);queue.push(runId);
   }
  }
@@ -93,15 +96,15 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
  const adjacency=new Map<string,string[]>(),nodes=new Map<string,Task>(),taskIndex=new Map<string,Task[]>();
  const diagnostic=(code:string,task:Task,target?:string,key='requires',path?:string[])=>{
   diagnosticCount++;if(diagnostics.length<MAX_DIAGNOSTICS)diagnostics.push({code,run_id:task.run_id,task_key:task.task_key,
-   section:typeof task.definition.section?.name==='string'?task.definition.section.name:undefined,key,
-   line:taskFields(task)[key]?.line,...(target?{target}:{}),...(path?{path}:{})});
+   ...(typeof task.definition.section?.name==='string'?{section:task.definition.section.name}:{}),key,
+   ...(typeof taskFields(task)[key]?.line==='number'?{line:taskFields(task)[key].line}:{}),...(target?{target}:{}),...(path?{path:path.length>64?[...path.slice(0,32),...path.slice(-32)]:path,path_truncated:path.length>64,cycle_length:path.length-1}:{})});
  };
  for(const snap of snapshots.values())for(const task of snap.tasks){const key=task.run_id+':'+task.id;nodes.set(key,task);adjacency.set(key,[]);const logical=task.run_id+'\\0'+feature(task)+'\\0'+task.task_key;taskIndex.set(logical,[...(taskIndex.get(logical)??[]),task]);}
  for(const snap of snapshots.values())for(const task of snap.tasks){
   const fields=taskFields(task),raw=declared(task),localEdges=new Set<string>();
-  if(task.spec_generation!==snap.run.spec_generation||task.spec_revision_id!==snap.run.spec_revision_id)
-   diagnostic('TASK_SPEC_STALE',task,undefined,'spec_generation');
   if(!feature(task))diagnostic('FEATURE_NAMESPACE_MISSING',task,undefined,'feature');
+  if(task.package_key!=='feature:'+feature(task)+':wave:'+String(task.definition.declared_wave)||task.package_wave!==task.wave||
+   fields.feature!==undefined&&fields.feature.value!==feature(task))diagnostic('FEATURE_PACKAGE_MISMATCH',task,undefined,'feature');
   if(!Number.isSafeInteger(task.wave)||task.wave<1||!Number.isSafeInteger(task.definition.declared_wave)||task.definition.declared_wave<0)
    diagnostic('WAVE_INVALID',task,undefined,'wave');
   if(fields.touches!==undefined&&(!Array.isArray(fields.touches.value)||fields.touches.value.some((value:unknown)=>!safeTouch(value))))
@@ -136,8 +139,8 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
    const matches=exactMatches.length?exactMatches:(!explicit?taskIndex.get(targetRun+'\\0'+targetFeature+'\\0'+targetFeature+'.'+targetKey)??[]:[]);
    if(matches.length!==1){diagnostic('DEPENDENCY_UNRESOLVED',task,targetKey);continue;}
    const predecessor=matches[0]!;
-   if(targetSnapshot.run.spec_generation!==targetGeneration||targetSnapshot.run.spec_revision_id!==targetRevision||
-     predecessor.spec_generation!==targetGeneration||predecessor.spec_revision_id!==targetRevision){diagnostic('DEPENDENCY_SPEC_STALE',task,targetKey);continue;}
+   if(!explicit){targetGeneration=predecessor.spec_generation;targetRevision=predecessor.spec_revision_id;}
+   if(predecessor.spec_generation!==targetGeneration||predecessor.spec_revision_id!==targetRevision){diagnostic('DEPENDENCY_SPEC_STALE',task,targetKey);continue;}
    if(explicit){
     const repo=await tx.query('SELECT integration_ref FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',
      [scope.organisation_id,targetRun,repository]);
@@ -148,7 +151,7 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
    if(targetRun===task.run_id&&predecessor.id===task.id){diagnostic('DEPENDENCY_SELF',task,targetKey);continue;}
    if(targetRun===task.run_id&&predecessor.wave>task.wave)diagnostic('DEPENDENCY_LATER_WAVE',task,targetKey,'wave');
    adjacency.get(task.run_id+':'+task.id)!.push(identity);
-   if(task.run_id===scope.run_id)edges.push({task_id:task.id,predecessor_run_id:targetRun,predecessor_task_id:predecessor.id,
+   if(task.run_id===scope.run_id)edges.push({task_id:task.id,source_spec_generation:task.spec_generation,predecessor_run_id:targetRun,predecessor_task_id:predecessor.id,
     predecessor_spec_generation:targetGeneration,predecessor_spec_revision_id:targetRevision,predecessor_repository_id:repository,integration_ref:ref,milestone});
   }
  }
@@ -160,7 +163,7 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
    if(frame.next===targets.length){colors.set(frame.key,2);active.delete(frame.key);stack.pop();continue;}
    const target=targets[frame.next++]!;
    if(colors.get(target)===1){const at=active.get(target)!;diagnostic('DEPENDENCY_CYCLE',nodes.get(frame.key)!,undefined,'requires',
-    [...stack.slice(at).map(item=>nodes.get(item.key)!.run_id+'/'+nodes.get(item.key)!.task_key),nodes.get(target)!.run_id+'/'+nodes.get(target)!.task_key].slice(0,64));}
+    diagnostics.length<MAX_DIAGNOSTICS?[...stack.slice(at).map(item=>nodes.get(item.key)!.run_id+'/'+nodes.get(item.key)!.task_key),nodes.get(target)!.run_id+'/'+nodes.get(target)!.task_key]:undefined);}
    else if(!colors.has(target)){colors.set(target,1);active.set(target,stack.length);stack.push({key:target,next:0});}
   }
  }
@@ -175,10 +178,10 @@ export async function admitDependencies(tx:Tx,scope:DependencyScope,input:PlanPi
  if(current.run.state!=='PENDING_VALIDATION')fail('SPEC_ADMISSION_STATE','Only a pending-validation generation can be admitted');
  const report=await validateDependencies(tx,scope,input);
  if(report.status!=='STRUCTURALLY_VALID'){const {edges,...publicReport}=report;return {...publicReport,admitted:false};}
- for(const task of current.tasks)await loadProofObligations(tx,{...scope,task_id:task.id,spec_generation:input.spec_generation,spec_revision_id:input.spec_revision_id});
+ for(const task of current.tasks)await loadProofObligations(tx,{...scope,task_id:task.id,spec_generation:task.spec_generation,spec_revision_id:task.spec_revision_id});
  for(const edge of report.edges)await tx.query(
- 'INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id,predecessor_repository_id,integration_ref) VALUES($1,$2,$3,$4,$5,$6,$7,1,$8,$9,$10,$11)',
- [scope.organisation_id,scope.run_id,edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,input.spec_generation,
+ 'INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id,predecessor_repository_id,integration_ref) VALUES($1,$2,$3,$4,$5,$6,$7,1,$8,$9,$10,$11) ON CONFLICT(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision) DO UPDATE SET binding_schema_version=EXCLUDED.binding_schema_version,predecessor_spec_generation=EXCLUDED.predecessor_spec_generation,predecessor_spec_revision_id=EXCLUDED.predecessor_spec_revision_id,predecessor_repository_id=EXCLUDED.predecessor_repository_id,integration_ref=EXCLUDED.integration_ref',
+ [scope.organisation_id,scope.run_id,edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,edge.source_spec_generation,
  edge.predecessor_spec_generation,edge.predecessor_spec_revision_id,edge.predecessor_repository_id,edge.integration_ref]);
  const updated=await tx.query("UPDATE hyperfide.runs SET state='READY',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND state='PENDING_VALIDATION' AND spec_revision_id=$3 AND spec_generation=$4 AND state_version=$5 RETURNING state_version::text",
  [scope.organisation_id,scope.run_id,input.spec_revision_id,input.spec_generation,input.state_version]);
@@ -190,9 +193,9 @@ export async function resolveTask(tx:Tx,scope:DependencyScope,input:unknown):Pro
  if(typeof request.task_key!=='string'||!request.task_key||request.task_key.length>255)fail('SPEC_INPUT_INVALID','Full task key must be bounded text');
  const snap=await snapshot(tx,scope,scope.run_id),matches=snap.tasks.filter(task=>task.task_key===request.task_key);
  if(matches.length!==1)fail('SPEC_TASK_NOT_FOUND','Exact task key is absent from the authenticated run');
- const task=matches[0]!;if(task.spec_generation!==snap.run.spec_generation||task.spec_revision_id!==snap.run.spec_revision_id)fail('SPEC_PLAN_STALE','Task is outside current accepted generation');
+ const task=matches[0]!;
  return {authority:'ACCEPTED_TASK_IDENTITY',task_id:task.id,task_key:task.task_key,feature_key:feature(task),wave:task.wave,
-  task_state:task.state,task_state_version:task.state_version,spec_revision_id:task.spec_revision_id,spec_generation:task.spec_generation,run_state:snap.run.state,run_state_version:snap.run.state_version};
+  task_state:task.state,task_state_version:task.state_version,spec_revision_id:task.spec_revision_id,spec_generation:task.spec_generation,run_spec_revision_id:snap.run.spec_revision_id,run_spec_generation:snap.run.spec_generation,run_state:snap.run.state,run_state_version:snap.run.state_version};
 }
 export async function structuralFrontier(tx:Tx,scope:DependencyScope,input:unknown):Promise<unknown>{
  const request=scopeInput(scope,input,[],['limit']);
@@ -204,7 +207,7 @@ export async function structuralFrontier(tx:Tx,scope:DependencyScope,input:unkno
   !report.edges.some(edge=>edge.task_id===task.id)).sort((a,b)=>a.wave-b.wave||a.task_key.localeCompare(b.task_key)).slice(0,limit):[];
  return {authority:'CANDIDATE_DISCOVERY',kind:'STRUCTURAL_FRONTIER',operational_eligibility:'UNASSESSED',validation_status:report.status,
   spec_revision_id:report.spec_revision_id,spec_generation:report.spec_generation,state_version:report.state_version,
-  candidates:candidates.map(task=>({task_id:task.id,task_key:task.task_key,wave:task.wave,criteria_digest:task.criteria_digest,task_state_version:task.state_version})),
+  candidates:candidates.map(task=>({task_id:task.id,task_key:task.task_key,wave:task.wave,criteria_digest:task.criteria_digest,spec_revision_id:task.spec_revision_id,spec_generation:task.spec_generation,task_state_version:task.state_version})),
   diagnostic_count:report.diagnostic_count,diagnostics:report.diagnostics};
 }
 export function createComponent(_startup:ComponentContext):Component{
