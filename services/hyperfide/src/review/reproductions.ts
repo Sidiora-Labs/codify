@@ -195,7 +195,13 @@ export async function renewReproduction(ctx:ComponentContext,value:unknown):Prom
   const resources=capability<Data>(ctx,'5.1','scheduler.allocations.v1',['assertJobReservation','readJobAllocation']);
   const allocation=await resources.readJobAllocation(db,{...binding,reservation_id:job.reservation_id});
   if(!allocation||allocation.allocation_id!==job.allocation_id||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Current allocated reservation no longer belongs to this exact job owner');
-  const result=await db.query(`UPDATE hyperfide.review_reproduction_jobs SET lease_expires_at=clock_timestamp()+interval '120 seconds' WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING lease_generation,lease_expires_at`,[binding.organisation_id,binding.run_id,id]);
+  // Renew the actual capacity vector in this same primary transaction so a
+  // long registered check cannot outlive its underlying reservation heartbeat.
+  const renewal=capability<Data>(ctx,'5.1','scheduler.allocations.v1',['renewJobAllocation']);
+  const renewed=await renewal.renewJobAllocation(db,{...binding,reservation_id:job.reservation_id,allocation_id:job.allocation_id,allocation_generation:String(job.allocation_generation),assignee_session_id:job.worker_session_id,lease_ms:120000});
+  if(!renewed||renewed.allocation_id!==job.allocation_id||String(renewed.generation)!==String(job.allocation_generation)||typeof renewed.expires_at!=='string'||!Number.isFinite(Date.parse(renewed.expires_at)))fail('REPRODUCTION_LEASE_STALE','Capacity renewal did not retain the exact current allocation');
+  const result=await db.query(`UPDATE hyperfide.review_reproduction_jobs SET lease_expires_at=$4::timestamptz WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING lease_generation,lease_expires_at`,[binding.organisation_id,binding.run_id,id,renewed.expires_at]);
+  if(!result.rows[0])fail('REPRODUCTION_LEASE_STALE','Current reproduction lease disappeared during renewal');
   return result.rows[0];
  });
 }

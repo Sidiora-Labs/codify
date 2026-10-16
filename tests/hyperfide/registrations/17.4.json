@@ -39,7 +39,8 @@
     "review.inputs.reader-rejects-forged-invocation",
     "review.audit.closed-run-nonprivileged-read-denied",
     "review.reproduction.independent-allocation-and-slot-generations",
-    "review.reproduction.dispatched-slot-pin-immutable"
+    "review.reproduction.dispatched-slot-pin-immutable",
+    "review.reproduction.unassigned-renewal-refused"
   ],
   "argv": [
     "python3",

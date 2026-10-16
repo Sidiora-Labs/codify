@@ -22,7 +22,7 @@ IDS=[
 "review.reproduction.immutable-job-inputs","review.reproduction.unrun-never-proof",
 "review.reproduction.non-verifier-assignment-refused","review.reproduction.capacity-required",
 "review.reproduction.unassigned-execution-refused","review.reproduction.cross-run-refused",
-"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused","review.reproduction.registered-seventy-two-hour-timeout","review.reproduction.inspector-exact-custody-lineage","review.audit.closed-run-reproduction-read-only","review.audit.closed-run-reproduction-write-denied","review.inputs.reader-rejects-raw-client","review.inputs.reader-rejects-forged-invocation","review.audit.closed-run-nonprivileged-read-denied","review.reproduction.independent-allocation-and-slot-generations","review.reproduction.dispatched-slot-pin-immutable",
+"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused","review.reproduction.registered-seventy-two-hour-timeout","review.reproduction.inspector-exact-custody-lineage","review.audit.closed-run-reproduction-read-only","review.audit.closed-run-reproduction-write-denied","review.inputs.reader-rejects-raw-client","review.inputs.reader-rejects-forged-invocation","review.audit.closed-run-nonprivileged-read-denied","review.reproduction.independent-allocation-and-slot-generations","review.reproduction.dispatched-slot-pin-immutable","review.reproduction.unassigned-renewal-refused",
 ]
 SOURCE='''[meta]
 slug = "fixture"
@@ -162,6 +162,7 @@ def main():
    f.identity.bootstrap_runner();f.identity.delegate_principal("verifier",verifier)
    m.check(IDS[15],lambda:f.reject("review.reproduction.assign",dict(assignment,worker_session_id=verifier),"JOB_RESERVATION_INVALID",component="17.4"))
    m.check(IDS[16],lambda:f.reject("review.reproduction.execute",dict(m.SCOPE,job_id=job,lease_generation="1"),"REPRODUCTION_LEASE_STALE",component="17.4",key="verifier"))
+   m.check(IDS[31],lambda:f.reject("review.reproduction.renew",dict(m.SCOPE,job_id=job,lease_generation="1"),"REPRODUCTION_LEASE_STALE",component="17.4",key="verifier"))
    m.check(IDS[17],lambda:f.reject("review.reproduction.inspect",dict(m.SCOPE,run_id=m.xid(0xdead),plan_id=planned["plan_id"]),"REVIEW_SCOPE_DENIED",component="17.4"))
    m.check(IDS[18],lambda:m.expect(f.identity.sql("SELECT count(*)::text AS n FROM hyperfide.runner_remote_jobs")[0]["n"]=="0" and f.identity.sql("SELECT count(*)::text AS n FROM hyperfide.review_reproduction_receipts")[0]["n"]=="0","unassigned validation fabricated physical execution"))
    m.check(IDS[19],lambda:m.expect(inspection["original"]["task_id"]==m.xid(0x301) and inspection["original"]["check_definition_digest"]==sha(canonical(check)) and inspection["original"]["registry_digest"]==inspection["repaired"]["registry_digest"] and inspection["original"]["qualification_scope"]=="SYSTEM","inspector lost exact accepted executable/source identity"))

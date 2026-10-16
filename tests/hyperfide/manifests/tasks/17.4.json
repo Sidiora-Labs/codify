@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-review-17.4-v9",
+  "campaign_id": "hyperfide-review-17.4-v10",
   "case_ids": [
     "V-029",
     "V-030",
@@ -43,7 +43,8 @@
     "review.inputs.reader-rejects-forged-invocation",
     "review.audit.closed-run-nonprivileged-read-denied",
     "review.reproduction.independent-allocation-and-slot-generations",
-    "review.reproduction.dispatched-slot-pin-immutable"
+    "review.reproduction.dispatched-slot-pin-immutable",
+    "review.reproduction.unassigned-renewal-refused"
   ],
   "inputs": [
     {
@@ -828,13 +829,13 @@
     },
     {
       "path": "services/hyperfide/dist/review/reproductions.js",
-      "sha256": "7cd02a63750db742b6ad7c12955fa269710a92097435c8f79f582af628918b1c",
-      "size": 72955
+      "sha256": "db2a865dccea2d2efe2243193871c308718e88f95524020f8cbaf5aee599f0ac",
+      "size": 73959
     },
     {
       "path": "services/hyperfide/dist/review/reproductions.js.map",
-      "sha256": "d4e0c083a45969e46e7ef9bdca08c4190871600caaf3041683632d4310ac04ec",
-      "size": 61161
+      "sha256": "153bce604c3da1e2ac0837200ae63fcb11d1b457ca814dd9862fd1647bbc0a4c",
+      "size": 61925
     },
     {
       "path": "services/hyperfide/dist/runner/bridge.d.ts",
@@ -1403,8 +1404,8 @@
     },
     {
       "path": "services/hyperfide/src/review/reproductions.ts",
-      "sha256": "001901d2962b2c6939a834bce035fe815ad0e654d5d9826f3664eb78888e070b",
-      "size": 68936
+      "sha256": "0e65897458a57d9854aedd06d3fd16f7c66e489c40b601ada8e18feba1da894c",
+      "size": 69845
     },
     {
       "path": "services/hyperfide/src/runner/bridge.ts",
@@ -1513,8 +1514,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/17_4.py",
-      "sha256": "c9f6710e60bca7fa6495392a923b60d1b19e6552740b80383bf7b1fb879fe633",
-      "size": 21424
+      "sha256": "05632f76a0ab9f008a8b9cd3839462d8f643a7e1bc39a83ef0f36d27ec31d74f",
+      "size": 21643
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -1528,8 +1529,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/17.4.json",
-      "sha256": "4a248b72b6677e52089fea174b3baa20eef03f3cd83aed98004e35653adc7d29",
-      "size": 3496
+      "sha256": "52fc597eee81346071ddae2eef0572af6adac3d9956ac7df0576ffcc1052c338",
+      "size": 3550
     },
     {
       "path": "tests/hyperfide/support/identity_fixture.py",
