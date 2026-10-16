@@ -94,7 +94,7 @@ export class MigrationCoordinator {
  async apply(options:{timeoutMs?:number;signal?:AbortSignal}={}):Promise<{applied:number[];alreadyApplied:number[]}>{
   const files=await discoverMigrations(this.directory);
   for(const migration of files)assertMigrationSource(migration.sql);
-  return this.resources.withMigrationConnection(options,async session=>{
+  return this.resources.withMigrationConnection({...options,timeoutMs:options.timeoutMs??30000},async session=>{
    let locked=false;
    try{
     while(!locked){
@@ -134,19 +134,21 @@ export interface ExternalWriterFence {
  isolate(input:{deployment_id:string;operation_id:string;source_epoch:string|null;signal?:AbortSignal}):Promise<FenceReceipt>;
 }
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export async function assertCurrentAuthority(tx:PrimaryTransaction,scope:AuthorityScope&{deployment_id:string}):Promise<void>{
+ if(!uuid.test(scope.deployment_id))throw new FoundationError('AUTHORITY_CONFIG_INVALID','Trusted deployment identity is required');
+  assertPrimaryTransaction(tx);
+  if(!uuid.test(scope.organisation_id)||!uuid.test(scope.run_id)||!uuid.test(scope.authority_epoch))
+   throw new FoundationError('INVALID_REQUEST','Exact authority scope is required');
+  const row=(await tx.query<{epoch:string}>("SELECT epoch FROM hyperfide.authority_epochs WHERE deployment_id=$1 AND state='ACTIVE' FOR SHARE",[scope.deployment_id])).rows[0];
+  const run=(await tx.query<{authority_epoch:string}>('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id])).rows[0];
+  if(!row||row.epoch!==scope.authority_epoch||run?.authority_epoch!==scope.authority_epoch)
+   throw new FoundationError('STALE_AUTHORITY','Current externally activated deployment and run epochs are required');
+}
 export class AuthorityStore {
  constructor(private readonly resources:ServiceResources,private readonly deploymentId:string){
   if(!uuid.test(deploymentId))throw new FoundationError('AUTHORITY_CONFIG_INVALID','A trusted deployment UUID is required');
  }
- async assertCurrent(tx:PrimaryTransaction,scope:AuthorityScope):Promise<void>{
-  assertPrimaryTransaction(tx);
-  if(!uuid.test(scope.organisation_id)||!uuid.test(scope.run_id)||!uuid.test(scope.authority_epoch))
-   throw new FoundationError('INVALID_REQUEST','Exact authority scope is required');
-  const row=(await tx.query<{epoch:string}>("SELECT epoch FROM hyperfide.authority_epochs WHERE deployment_id=$1 AND state='ACTIVE' FOR SHARE",[this.deploymentId])).rows[0];
-  const run=(await tx.query<{authority_epoch:string}>('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.run_id])).rows[0];
-  if(!row||row.epoch!==scope.authority_epoch||run?.authority_epoch!==scope.authority_epoch)
-   throw new FoundationError('STALE_AUTHORITY','Current externally activated deployment and run epochs are required');
- }
+ async assertCurrent(tx:PrimaryTransaction,scope:AuthorityScope):Promise<void>{return assertCurrentAuthority(tx,{...scope,deployment_id:this.deploymentId});}
  async activate(input:{operation_id:string;expected_previous_epoch:string|null},fencer:ExternalWriterFence,options:TransactionOptions={}):Promise<{epoch:string;replayed:boolean}>{
   if(!uuid.test(input.operation_id)||(input.expected_previous_epoch!==null&&!uuid.test(input.expected_previous_epoch)))
    throw new FoundationError('INVALID_REQUEST','Exact activation operation and predecessor are required');
@@ -227,7 +229,9 @@ export async function createComponent(context:ComponentContext):Promise<Componen
   'storage.migrations.apply':async input=>{
    if(!object(input)||Object.keys(input).length)throw new FoundationError('INVALID_REQUEST','Migration job input must be empty');
    if(context.env.HYPERFIDE_MIGRATION_JOB!=='1')throw new FoundationError('MIGRATION_JOB_REQUIRED','DDL only runs in an explicit isolated migration job');
-   return migrations.apply({signal:context.signal});
+   const configured=context.env.HYPERFIDE_MIGRATION_TIMEOUT_MS??'30000';
+   if(!/^[1-9][0-9]*$/.test(configured)||Number(configured)>30000)throw new FoundationError('MIGRATION_CONFIG_INVALID','Trusted migration deadline must be from1to30000milliseconds');
+   return migrations.apply({signal:context.signal,timeoutMs:Number(configured)});
   },
   'storage.durability.inspect':async()=>inspectDurability(context.resources)
  },capabilities:Object.freeze({'storage.authority.v1':authority,'storage.migrations.v1':Object.freeze({inspect:migrations.inspect.bind(migrations),assertReady:(version:number,name:string,checksum:string)=>assertMigrationReady(context.resources,version,name,checksum)})})};
