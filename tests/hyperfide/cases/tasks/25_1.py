@@ -92,6 +92,13 @@ CREATE TABLE files(id INTEGER PRIMARY KEY,branch_id INTEGER,path TEXT);
 CREATE TABLE events(seq INTEGER PRIMARY KEY,kind TEXT);
 CREATE TABLE custom_shape(a TEXT,b TEXT,PRIMARY KEY(a,b)) WITHOUT ROWID;
 CREATE TABLE typed_history(id INTEGER PRIMARY KEY,body BLOB);
+CREATE TABLE typed_keys(k PRIMARY KEY,body TEXT);
+INSERT INTO typed_keys VALUES(1,'integer'),('1','text'),(x'31','blob'),(NULL,'null-a'),(NULL,'null-b');
+CREATE TABLE shadowed_rowid(ROWID TEXT,body TEXT);
+INSERT INTO shadowed_rowid VALUES('same','one'),('same','two');
+CREATE TABLE declared_parent(id INTEGER PRIMARY KEY);
+CREATE TABLE declared_child(id INTEGER PRIMARY KEY,parent_id INTEGER REFERENCES declared_parent(id));
+INSERT INTO declared_child VALUES(1,999);
 INSERT INTO typed_history VALUES(1,x'0063616e617279ff');
 CREATE VIRTUAL TABLE symbol_fts USING fts5(name,tokenize='trigram');
 CREATE TRIGGER local_only AFTER INSERT ON memories BEGIN INSERT INTO events(kind) VALUES('local'); END;
@@ -210,6 +217,16 @@ INSERT INTO symbol_fts VALUES('name_test');
    expect(result["outcome"]=="SUCCEEDED" and result["replayed"] is True,"unknown batch did not reconcile durable identity")
    expect(proxy.row_write_messages-unknown["row_writes_before"]==1 and sql("SELECT count(*) FROM hyperfide_history.rows WHERE table_name='typed_history';")=="1","reconciliation duplicated side effects")
   check("migration.commit.durable-identity-reconciliation",reconcile_commit)
+  check("migration.relationships.declared-fk-inventory",lambda:expect(any(t["name"]=="declared_child" and t["foreign_keys"][0]["table"]=="declared_parent" for t in snap["inventory"]["tables"]),"declared relationships omitted"))
+  check("migration.relationships.dangling-fk-diagnostic",lambda:expect(snap["inventory"]["declared_foreign_key_check"]["violation_counts"].get("declared_child:0")==1 and snap["inventory"]["declared_foreign_key_check"]["semantic_relationship_coverage"]=="UNQUALIFIED","dangling relationship promoted or omitted"))
+  def typed_keys():
+   ok("import",{"source":"fixture","import_id":iid,"table":"typed_keys","offset":"0","limit":50})
+   expect(sql("SELECT count(*)::text||','||count(DISTINCT mapped_id)::text FROM hyperfide_history.rows WHERE table_name='typed_keys';")=="5,5","typed or nullable legacy keys collapsed")
+  check("migration.keys.typed-and-null-primary-identity",typed_keys)
+  def rowid_shadow():
+   ok("import",{"source":"fixture","import_id":iid,"table":"shadowed_rowid","offset":"0","limit":50})
+   expect(sql("SELECT count(*)::text||','||count(DISTINCT mapped_id)::text FROM hyperfide_history.rows WHERE table_name='shadowed_rowid';")=="2,2","case-insensitive SQLite rowid shadowing collapsed history")
+  check("migration.keys.case-insensitive-rowid-alias",rowid_shadow)
   check("migration.import.exact-integer",lambda:expect("9007199254740993" in sql("SELECT payload::text FROM hyperfide_history.rows WHERE table_name='memories';"),"large integer rounded"))
   check("migration.import.exact-blob",lambda:expect("AP8=" in sql("SELECT payload::text FROM hyperfide_history.rows WHERE table_name='memories';"),"blob changed"))
   check("migration.import.unqualified",lambda:expect(sql("SELECT count(*) FROM hyperfide_history.imports WHERE authority<>'NONE' OR qualification<>'UNQUALIFIED';")=="0","historical import qualified"))

@@ -87,13 +87,23 @@ export function inventory(db:DatabaseSync):Json{
  const tables=tableList.filter(t=>t.schema==='main'&&!String(t.name).startsWith('sqlite_')).map(t=>{
  const name=String(t.name),type=String(t.type),virtual=type==='virtual',shadow=type==='shadow';
  const columns=rows(db,'PRAGMA table_xinfo('+quote(name)+')').map(plain);
+ const foreign_keys=rows(db,'PRAGMA foreign_key_list('+quote(name)+')').map(plain);
  let count:string|null=null,diagnostic:string|null=null;
  try{count=String(rows(db,'SELECT count(*) AS count FROM '+quote(name))[0]?.count??'0');}catch{diagnostic='COUNT_UNAVAILABLE';}
- return {name,type,columns,rows:count,without_rowid:String(t.wr)==='1',strict:String(t.strict)==='1',
+ return {name,type,columns,foreign_keys,relationship_reconstruction:'NOT_PERFORMED',rows:count,without_rowid:String(t.wr)==='1',strict:String(t.strict)==='1',
  disposition:shadow?'ARCHIVE_ONLY':virtual?'ARCHIVE_ONLY':known.has(name)||name.startsWith('semantic_')?'HISTORY':'UNSUPPORTED_SEMANTICS',
  diagnostic:diagnostic??(virtual?'VIRTUAL_SEMANTICS_NOT_REBUILT':null)};
- }).sort((a,b)=>a.name.localeCompare(b.name));
+ }).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
+ const foreignKeyViolations:Record<string,number>={};let foreignKeyCheck='OBSERVED';
+ try{
+ const check=db.prepare('PRAGMA foreign_key_check');check.setReadBigInts(true);
+ let count=0;for(const item of check.iterate() as Iterable<Record<string,unknown>>){
+ if(++count>10000){foreignKeyCheck='TRUNCATED';break;}
+ const key=String(item.table)+':'+String(item.fkid);foreignKeyViolations[key]=(foreignKeyViolations[key]??0)+1;
+ }
+ }catch{foreignKeyCheck='UNAVAILABLE';}
  return {schema_version:18,sqlite_version:String(rows(db,'SELECT sqlite_version() AS version')[0]?.version),tables,objects,
+ declared_foreign_key_check:{status:foreignKeyCheck,violation_counts:foreignKeyViolations,semantic_relationship_coverage:'UNQUALIFIED'},
  graph_state:'UNPUBLISHED_HISTORY',search_parity:'UNQUALIFIED',authority:'NONE',qualification:'UNQUALIFIED'};
 }
 async function externalInventory(p:Profile):Promise<unknown[]>{
@@ -174,12 +184,13 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  const keyNames=primary.map(c=>String(c.name));
  const names=cols.map(c=>String(c.name));
  if(names.length>256)fail('MIGRATION_COLUMN_BOUND','Logical history table exceeds bounded column count; immutable source remains preserved');
- const rowidAlias=['rowid','_rowid_','oid'].find(n=>!names.includes(n));
+ const lowerNames=new Set(names.map(n=>n.toLowerCase()));
+ const rowidAlias=['rowid','_rowid_','oid'].find(n=>!lowerNames.has(n));
  if(!keyNames.length&&!rowidAlias)fail('MIGRATION_UNSUPPORTED','No unambiguous stable legacy key');
  const rowid=!keyNames.length;
  const order=rowid?quote(rowidAlias!):keyNames.map(quote).join(',');
  const expressions=names.flatMap((n,i)=>['typeof('+quote(n)+') AS '+quote('type_'+i),quote(n)+' AS '+quote('value_'+i),'CAST('+quote(n)+' AS BLOB) AS '+quote('bytes_'+i)]);
- if(rowid)expressions.push(quote(rowidAlias!)+' AS "__hf_rowid"');
+ if(rowidAlias&&meta.without_rowid!==true)expressions.push(quote(rowidAlias)+' AS "__hf_rowid"');
  // Length metadata is inspected before any BLOB/TEXT value crosses into JS.
  // Both the scan and retained logical batch have explicit byte budgets.
  const lengths=names.map(n=>'CASE WHEN typeof('+quote(n)+") IN ('blob','text') THEN length(CAST("+quote(n)+' AS BLOB)) ELSE 32 END');
@@ -202,6 +213,10 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  for(const r of fetched){
  const values=names.map((_n,i)=>r['type_'+i]==='text'?{type:'text',utf8_base64:Buffer.from(r['bytes_'+i] as Uint8Array).toString('base64')}:cell(r['value_'+i]));
  const key=rowid?[cell(r.__hf_rowid)]:keyNames.map(n=>values[names.indexOf(n)]);
+ if(!rowid&&key.some(value=>object(value)&&value.type==='null')){
+ if(r.__hf_rowid===undefined)fail('MIGRATION_UNSUPPORTED','Nullable primary key has no unambiguous rowid identity; original archive remains preserved');
+ key.push({type:'sqlite-rowid',value:cell(r.__hf_rowid)});
+ }
  const data=names.map((n,i)=>({column:n,value:values[i]}));
  const encoded=canonical(data);
  const encodedBytes=Buffer.byteLength(encoded);
