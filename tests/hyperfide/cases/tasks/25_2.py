@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Concrete legacy admission and kernel writer/mount refusals. Synthetic files only.
-No test claims production isolation or a successful read-only mount proof."""
-import os,json,sys,subprocess,tempfile,sqlite3,uuid,hashlib
+Read-only proof is limited to an owned private namespace; production isolation is not claimed."""
+import os,json,sys,subprocess,tempfile,sqlite3,uuid,hashlib,shutil
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4];IDS=[];FAILED=[]
 def check(name,fn):
@@ -34,6 +34,21 @@ def main():
    try:rejected("disableAdmission","LEGACY_CONFIG_INVALID")
    finally:filename.chmod(0o600)
   check("cutover.legacy.private-topology",private)
+  def bootstrap_admission():
+   root=base/"initial";root.mkdir();(root/".codegraph").mkdir();shutil.copyfile(database,root/".codegraph/graph.db")
+   trusted=dict(config,source_epoch=None,workspace_root=str(root));filename.write_text(json.dumps(trusted))
+   initial=dict(value,source_epoch=None)
+   try:
+    result=call("disableAdmission",initial)
+    expect(result["ok"] and result["result"]["source_epoch"] is None and result["result"]["status"]=="ADMISSION_DISABLED","first activation invented predecessor authority")
+    marker=json.loads((root/".hyperfide/authority.json").read_text())
+    expect(marker["authority_epoch"]==initial["operation_id"],"null predecessor quarantine marker is not bound to operation")
+    p=subprocess.run([str(ROOT/"cg"),"init"],cwd=root,env=environment,capture_output=True,text=True,timeout=20)
+    expect(p.returncode==78 and json.loads(p.stderr)["local_fallback"] is False,"initial quarantine allowed SQLite admission")
+    rejected("observeIsolation","LEGACY_ADMISSION_INVALID",dict(initial,operation_id=str(uuid.uuid4())))
+   finally:filename.write_text(json.dumps(config))
+  check("cutover.legacy.null-predecessor-admission",bootstrap_admission)
+
   def namespace():
    old=config["expected_pid_namespace"];config["expected_pid_namespace"]="pid:[1]";filename.write_text(json.dumps(config))
    try:rejected("disableAdmission","LEGACY_NAMESPACE_MISMATCH")
@@ -83,6 +98,13 @@ def main():
   isolated.update(json.loads(p.stdout))
   expect(isolated['proof']['status']=='ISOLATED' and isolated['proof']['visibility']['scope']=='CONFIGURED_PID_NAMESPACE','actual isolated receipt missing')
  check("cutover.legacy.real-readonly-namespace-proof",private_namespace)
+ def initial_namespace():
+  command=['unshare','--user','--map-root-user','--mount','--pid','--fork','--mount-proc','--propagation','private',sys.executable,str(Path(__file__).resolve()),'--isolated-positive','--initial']
+  p=subprocess.run(command,text=True,capture_output=True,cwd=ROOT,timeout=120)
+  expect(p.returncode==0,'actual null-predecessor readonly proof failed: '+p.stderr[:300])
+  value=json.loads(p.stdout);expect(value["proof"]["source_epoch"] is None and value["proof"]["status"]=="ISOLATED" and value["kernel_write_errno"]==30,"null predecessor manufactured old epoch or skipped kernel isolation")
+ check("cutover.legacy.null-predecessor-real-readonly-proof",initial_namespace)
+
  check("cutover.legacy.outside-writable-hardlink-refused",lambda:expect(isolated.get("outside_hardlink_refused") is True,"outside hardlink escaped readonly isolation"))
  check("cutover.legacy.preexisting-detached-writer-refused",lambda:expect(isolated.get('preexisting_writer_refused') is True,'preexisting writer bypassed readonly bind'))
  check("cutover.legacy.stale-sqlite-reconnect-blocked",lambda:expect(isolated.get('stale_sqlite_reconnect_blocked') is True and isolated.get('kernel_write_errno')==30,'stale writer reconnected to readonly database'))
@@ -96,7 +118,7 @@ def isolated_positive():
  with tempfile.TemporaryDirectory(prefix="hyperfide-fence-positive-",dir="/dev/shm") as directory:
   base=Path(directory);data=base/".codegraph";data.mkdir();database=data/"graph.db"
   c=sqlite3.connect(database);c.execute("CREATE TABLE fixture(value TEXT)");c.commit();c.close()
-  config={"schema_version":1,"deployment_id":str(uuid.uuid4()),"source_epoch":str(uuid.uuid4()),"workspace_root":str(base),"data_roots":[".codegraph"],"legacy_writer_id":"owned-private-namespace-sqlite","expected_pid_namespace":os.readlink("/proc/self/ns/pid"),"expected_mount_namespace":os.readlink("/proc/self/ns/mnt")}
+  config={"schema_version":1,"deployment_id":str(uuid.uuid4()),"source_epoch":None if "--initial" in sys.argv else str(uuid.uuid4()),"workspace_root":str(base),"data_roots":[".codegraph"],"legacy_writer_id":"owned-private-namespace-sqlite","expected_pid_namespace":os.readlink("/proc/self/ns/pid"),"expected_mount_namespace":os.readlink("/proc/self/ns/mnt")}
   filename=base/"legacy.json";filename.write_text(json.dumps(config));filename.chmod(0o600)
   environment=os.environ.copy();environment["HF_LEGACY_WRITER_CONFIG_FILE"]=str(filename)
   value={"deployment_id":config["deployment_id"],"operation_id":str(uuid.uuid4()),"source_epoch":config["source_epoch"]}

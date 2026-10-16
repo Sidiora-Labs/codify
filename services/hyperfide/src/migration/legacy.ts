@@ -6,11 +6,11 @@ import {FoundationError,object} from '../policy/programme.js';
 function canonical(value:unknown):string {if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(object(value))return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value);}
 function hash(value:string|Buffer):string{return 'sha256:'+createHash('sha256').update(value).digest('hex');}
 
-export interface LegacyWriterInput {deployment_id:string;operation_id:string;source_epoch:string;signal?:AbortSignal}
-export interface LegacyAdmissionReceipt {deployment_id:string;operation_id:string;source_epoch:string;status:'ADMISSION_DISABLED';topology_digest:string;observed_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string}}
-export interface LegacyIsolationReceipt {deployment_id:string;operation_id:string;source_epoch:string;status:'ISOLATED';topology_digest:string;isolated_writer:string;observed_at:string;expires_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string;checked_processes:number;checked_mount_namespaces:number};admission_disabled:true;writable_fds:0;writable_shared_mappings:0;read_only_aliases:number}
+export interface LegacyWriterInput {deployment_id:string;operation_id:string;source_epoch:string|null;signal?:AbortSignal}
+export interface LegacyAdmissionReceipt {deployment_id:string;operation_id:string;source_epoch:string|null;status:'ADMISSION_DISABLED';topology_digest:string;observed_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string}}
+export interface LegacyIsolationReceipt {deployment_id:string;operation_id:string;source_epoch:string|null;status:'ISOLATED';topology_digest:string;isolated_writer:string;observed_at:string;expires_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string;checked_processes:number;checked_mount_namespaces:number};admission_disabled:true;writable_fds:0;writable_shared_mappings:0;read_only_aliases:number}
 export interface LegacyWriterCapability {disableAdmission(input:LegacyWriterInput):Promise<LegacyAdmissionReceipt>;observeIsolation(input:LegacyWriterInput):Promise<LegacyIsolationReceipt>}
-interface Config {schema_version:1;deployment_id:string;source_epoch:string;workspace_root:string;data_roots:string[];legacy_writer_id:string;expected_pid_namespace:string;expected_mount_namespace:string}
+interface Config {schema_version:1;deployment_id:string;source_epoch:string|null;workspace_root:string;data_roots:string[];legacy_writer_id:string;expected_pid_namespace:string;expected_mount_namespace:string}
 interface Mount {id:string;device:string;root:string;point:string;readonly:boolean;filesystem:string}
 interface Target {device:string;root:string;directory:string}
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -39,7 +39,7 @@ async function exactDirectory(name:string):Promise<void>{
 }
 async function configuration(env:Readonly<NodeJS.ProcessEnv>,input:LegacyWriterInput):Promise<{config:Config;topology:string;roots:string[]}>{
  alive(input);
- if(!object(input)||Object.keys(input).some(k=>!['deployment_id','operation_id','source_epoch','signal'].includes(k))||![input.deployment_id,input.operation_id,input.source_epoch].every(v=>typeof v==='string'&&uuid.test(v)))fail('LEGACY_FENCE_INPUT','Bound deployment, operation and source epoch required');
+ if(!object(input)||Object.keys(input).some(k=>!['deployment_id','operation_id','source_epoch','signal'].includes(k))||![input.deployment_id,input.operation_id].every(v=>typeof v==='string'&&uuid.test(v))||!(input.source_epoch===null||typeof input.source_epoch==='string'&&uuid.test(input.source_epoch)))fail('LEGACY_FENCE_INPUT','Bound deployment, operation and source epoch required');
  const filename=env.HF_LEGACY_WRITER_CONFIG_FILE;
  if(!filename||!path.isAbsolute(filename)||await fs.realpath(filename)!==filename)fail('LEGACY_CONFIG_REQUIRED','Trusted legacy writer topology is required');
  const stat=await fs.lstat(filename);
@@ -60,12 +60,14 @@ async function namespaces(config:Config):Promise<{scope:'CONFIGURED_PID_NAMESPAC
  if(pid!==config.expected_pid_namespace||mount!==config.expected_mount_namespace)fail('LEGACY_NAMESPACE_MISMATCH','Observer is outside the configured process or mount namespace');
  return {scope:'CONFIGURED_PID_NAMESPACE',pid_namespace:pid,mount_namespace:mount};
 }
-function descriptor(config:Config):string{return canonical({schema_version:1,mode:'distributed',authority_epoch:config.source_epoch})+'\n';}
-async function admission(config:Config):Promise<string>{
+// A null predecessor has no authority epoch. The operation UUID is only an
+// admission-quarantine marker; receipts preserve null and never grant authority.
+function descriptor(config:Config,input:LegacyWriterInput):string{return canonical({schema_version:1,mode:'distributed',authority_epoch:config.source_epoch??input.operation_id})+'\n';}
+async function admission(config:Config,input:LegacyWriterInput):Promise<string>{
  const directory=path.join(config.workspace_root,'.hyperfide');await exactDirectory(directory);
  const ds=await fs.lstat(directory);if(ds.uid!==process.getuid?.()||(ds.mode&0o077)!==0)fail('LEGACY_ADMISSION_INVALID','Admission directory must be owner-private');
  const filename=path.join(directory,'authority.json'),st=await fs.lstat(filename);
- if(!st.isFile()||st.isSymbolicLink()||st.uid!==process.getuid?.()||(st.mode&0o077)!==0||st.size>4096||await fs.readFile(filename,'utf8')!==descriptor(config))fail('LEGACY_ADMISSION_INVALID','Current distributed admission descriptor does not match source epoch');
+ if(!st.isFile()||st.isSymbolicLink()||st.uid!==process.getuid?.()||(st.mode&0o077)!==0||st.size>4096||await fs.readFile(filename,'utf8')!==descriptor(config,input))fail('LEGACY_ADMISSION_INVALID','Current distributed admission descriptor does not match source epoch');
  return hash(await fs.readFile(filename));
 }
 function aliases(all:Mount[],targets:Target[]):string[]{
@@ -105,21 +107,21 @@ export class LegacyWriterAdmission {
  await exactDirectory(directory);
  const directoryInfo=await fs.lstat(directory);if(directoryInfo.uid!==process.getuid?.()||(directoryInfo.mode&0o077)!==0)fail('LEGACY_ADMISSION_INVALID','Admission directory must be owner-private');
  const marker=path.join(directory,'authority.json');
- try{await fs.lstat(marker);await admission(config);}
+ try{await fs.lstat(marker);await admission(config,input);}
  catch(error){
  if(!object(error)||error.code!=='ENOENT')throw error;
  const temporary=path.join(directory,'.admission-'+randomUUID()),handle=await fs.open(temporary,'wx',0o600);
- try{await handle.writeFile(descriptor(config));await handle.sync();}finally{await handle.close();}
+ try{await handle.writeFile(descriptor(config,input));await handle.sync();}finally{await handle.close();}
  try{await fs.link(temporary,marker);}catch(e){if(!object(e)||e.code!=='EEXIST')throw e;}finally{await fs.rm(temporary,{force:true});}
  const dir=await fs.open(directory,'r');try{await dir.sync();}finally{await dir.close();}
  }
  const workspace=await fs.open(config.workspace_root,'r');try{await workspace.sync();}finally{await workspace.close();}
- const admission_digest=await admission(config),observed_at=new Date().toISOString();
+ const admission_digest=await admission(config,input),observed_at=new Date().toISOString();
  return {...this.binding(input),status:'ADMISSION_DISABLED',topology_digest:topology,observed_at,evidence_digest:hash(canonical({topology,admission_digest,visibility,observed_at})),visibility};
  }
  private binding(input:LegacyWriterInput){return {deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch};}
  async observeIsolation(input:LegacyWriterInput):Promise<LegacyIsolationReceipt>{
- const {config,roots,topology}=await configuration(this.env,input),visibility=await namespaces(config),admission_digest=await admission(config);
+ const {config,roots,topology}=await configuration(this.env,input),visibility=await namespaces(config),admission_digest=await admission(config,input);
  const inodes=await identities(roots),selfText=await fs.readFile('/proc/self/mountinfo','utf8'),selfMounts=mounts(selfText),targets:Target[]=roots.map(directory=>{
  const m=covering(selfMounts,directory);if(!['ext4','xfs','tmpfs'].includes(m.filesystem))fail('LEGACY_FILESYSTEM_UNSUPPORTED','Legacy isolation requires a qualified local filesystem; overlay or remote backing cannot be inferred safe');return {device:m.device,root:path.posix.join(m.root,path.posix.relative(m.point,directory)),directory};
  });
@@ -166,7 +168,7 @@ export class LegacyWriterAdmission {
  if(unsafeMount||read_only_aliases<roots.length)fail('LEGACY_STORAGE_WRITABLE','Every legacy storage alias must be observably read-only');
  const after=await pids();if(after.some(pid=>!before.includes(pid)))fail('LEGACY_OBSERVATION_CHANGED','New process appeared during writer observation; repeat the complete observation');
  if(await fs.readFile('/proc/self/mountinfo','utf8')!==selfText)fail('LEGACY_OBSERVATION_CHANGED','Observer mount topology changed');
- await namespaces(config);if(await admission(config)!==admission_digest)fail('LEGACY_OBSERVATION_CHANGED','Legacy admission changed');
+ await namespaces(config);if(await admission(config,input)!==admission_digest)fail('LEGACY_OBSERVATION_CHANGED','Legacy admission changed');
  const observed_at=new Date().toISOString(),expires_at=new Date(Date.now()+10000).toISOString(),observed_visibility={...visibility,checked_processes,checked_mount_namespaces:seen.size};
  const evidence={topology,admission_digest,observations:observations.sort(),observed_visibility,read_only_aliases,observed_at,expires_at};
  return {...this.binding(input),status:'ISOLATED',topology_digest:topology,isolated_writer:config.legacy_writer_id,observed_at,expires_at,evidence_digest:hash(canonical(evidence)),visibility:observed_visibility,admission_disabled:true,writable_fds:0,writable_shared_mappings:0,read_only_aliases};
