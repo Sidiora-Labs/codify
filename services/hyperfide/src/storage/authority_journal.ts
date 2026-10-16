@@ -151,7 +151,7 @@ export class FileExternalAuthorityJournal implements ExternalAuthorityJournal {
    }
    const completed=document?.history.find(row=>row.operation_id===input.operation_id);
    if(completed){if(completed.previous_epoch!==input.expected_previous_epoch||completed.database_predecessor_epoch!==databasePrevious)fail('EXTERNAL_AUTHORITY_CONFLICT','Accepted operation has different prior authority');return {deployment_id:input.deployment_id,operation_id:input.operation_id,expected_previous_epoch:input.expected_previous_epoch,expected_database_epoch:databasePrevious,epoch:completed.epoch,sequence:completed.sequence,replayed:true}}
-   if(!document&&input.expected_previous_epoch!==null)fail('EXTERNAL_AUTHORITY_UNAVAILABLE','A missing external journal cannot reconstruct an accepted epoch from the database');
+   if(!document&&(input.expected_previous_epoch!==null||databasePrevious!==null))fail('EXTERNAL_AUTHORITY_UNAVAILABLE','A missing external journal cannot reconstruct an accepted epoch from the database');
    if(document&&document.epoch!==input.expected_previous_epoch)fail('EXTERNAL_AUTHORITY_STALE','Activation source differs from the independent accepted epoch');
    if(document&&document.history.length>=MAX_HISTORY)fail('EXTERNAL_AUTHORITY_LIMIT','External authority journal requires deliberate archival');
    document??={schema_version:1,deployment_id:input.deployment_id,state:'PENDING',epoch:null,sequence:'0',pending:null,history:[],head_digest:hash({deployment_id:input.deployment_id,initial:true}),document_digest:''};
