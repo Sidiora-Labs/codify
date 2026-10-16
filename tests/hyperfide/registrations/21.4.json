@@ -10,6 +10,7 @@
   "assertion_ids": [
     "audit.service-linked",
     "audit.packet-primary",
+    "audit.common-packet-hash",
     "audit.append-real-database",
     "audit.replay-idempotent",
     "audit.replay-conflict",
@@ -18,6 +19,7 @@
     "audit.cross-scope-refused",
     "audit.missing-invocation",
     "audit.guard-inside-primary",
+    "audit.semantic-barrier-before-identity",
     "audit.secret-rejected",
     "audit.authority-rejected",
     "audit.strict-json-null-prototypes",

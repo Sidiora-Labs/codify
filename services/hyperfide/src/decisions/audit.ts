@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import type {QuerySession} from '../storage/transactions.js';
+import {assertPrimaryTransaction,type QuerySession} from '../storage/transactions.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
 
@@ -7,7 +7,7 @@ import {FoundationError} from '../policy/programme.js';
 export type Data=Record<string,unknown>;
 export interface Scope {organisation_id:string;run_id:string}
 export interface Revision {spec_revision_id:string;spec_generation:string;state_version:string;authority_epoch:string;policy_digest:string;repositories:Data[];graph_channels:Data[];contract_revisions:Data[]}
-export interface Packet {schema_version:1;id:string;purpose:string;packet_hash:string;revision:Revision;state:Data;created_at:string;expires_at:string;authority:'NONE'}
+export interface Packet {schema_version:1;id:string;purpose:string;packet_hash:string;revision:RevisionVector;state:Data;created_at:string;expires_at:string;authority:'NONE'}
 export const STATUSES=['accepted_advice','abstained','invalid_response','unsupported','expired','cancelled','unavailable','budget_exhausted'] as const;
 export function fail(code:string,message:string):never {throw new FoundationError(code,message)}
 export function obj(value:unknown,label='object'):Data {
@@ -48,11 +48,16 @@ export function scope(value:unknown):Scope{
  const data=exact(value,['organisation_id','run_id']);return {organisation_id:uuid(data.organisation_id),run_id:uuid(data.run_id)};
 }
 export interface Invocation {operation:unknown;payload:{action:string;run_id:string};principal:{organisation_id:string;run_id:string;allowed_actions:string[]};signal:AbortSignal;guard(tx:QuerySession):Promise<void>}
+async function advisoryReadBarrier(client:QuerySession,s:Scope):Promise<void>{
+ assertPrimaryTransaction(client);
+ // Identity guards lock the run row; take the semantic barrier first so writers can update it without a lock inversion.
+ await client.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);
+}
 export async function withAuthority<T>(ctx:ComponentContext,s:Scope,action:string,work:(client:QuerySession)=>Promise<T>):Promise<T>{
  const invocation=(ctx as unknown as {invocation?:Invocation}).invocation;
  if(!invocation||typeof invocation.guard!=='function')fail('AUTH_REQUIRED','Authenticated invocation required');
  if(invocation.payload?.action!==action||invocation.payload.run_id!==invocation.principal.run_id||invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id||!invocation.principal.allowed_actions.includes(action))fail('AUTH_FORBIDDEN','Invocation does not permit this scope/action');
- return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:tx=>invocation.guard(tx)},work);
+ return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=>{await advisoryReadBarrier(tx,s);await invocation.guard(tx);}},work);
 }
 export async function currentRevision(client:QuerySession,s:Scope,includeDocument=false):Promise<{revision:Revision;document?:Data;source_digest:string}>{
  const result=await client.query(`SELECT r.spec_revision_id::text,r.spec_generation::text,r.state_version::text,r.authority_epoch::text,r.policy_digest,s.source_digest${includeDocument?',s.document':''}
@@ -71,16 +76,17 @@ export async function loadPacket(client:QuerySession,s:Scope,id:string,requireFr
  const rows=await client.query('SELECT content FROM hyperfide.decision_packets WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[s.organisation_id,s.run_id,uuid(id)]);
  if(rows.rowCount!==1)fail('DECISION_NOT_FOUND','Packet is not visible');const packet=rows.rows[0]!.content as Packet;
  if(requireFresh){const current=await currentRevision(client,s);
- if(canonical(current.revision)!==canonical(packet.revision))fail('DECISION_STALE','Current primary revisions differ from packet');
+ if(!packet.state.primary_revision||canonical(current.revision)!==canonical(packet.state.primary_revision))fail('DECISION_STALE','Current primary revisions differ from packet');
  if(Date.now()>=Date.parse(packet.expires_at))fail('DECISION_EXPIRED','Packet expired');
  if(packet.purpose==='recovery'){const attempt=obj(packet.state.attempt);const rows=await client.query('SELECT state_version::text FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[s.organisation_id,s.run_id,uuid(attempt.id)]);if(rows.rowCount!==1||String(rows.rows[0]!.state_version)!==String(attempt.state_version))fail('DECISION_STALE','Attempt changed after packet');}
 }return packet;
 }
 export async function storePacket(client:QuerySession,s:Scope,purpose:string,state:Data,id=randomUUID(),ttl=30000):Promise<Packet>{
- safe(state);const current=await currentRevision(client,s),created=new Date(),expires=new Date(created.getTime()+ttl);
- const body={schema_version:1 as const,id:uuid(id),purpose,revision:current.revision,state,created_at:created.toISOString(),expires_at:expires.toISOString(),authority:'NONE' as const};
+ const current=await currentRevision(client,s),created=new Date(),expires=new Date(created.getTime()+ttl);
+ state={...state,primary_revision:current.revision};safe(state);
+ const body={schema_version:1 as const,id:uuid(id),purpose,revision:revisionVector(current.revision,purpose,state),state,created_at:created.toISOString(),expires_at:expires.toISOString(),authority:'NONE' as const};
  const packet={...body,packet_hash:digest(body)};
- await client.query('INSERT INTO hyperfide.decision_packets(organisation_id,run_id,id,purpose,packet_hash,revision,content,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[s.organisation_id,s.run_id,id,purpose,packet.packet_hash,current.revision,packet,created,expires]);return packet;
+ await client.query('INSERT INTO hyperfide.decision_packets(organisation_id,run_id,id,purpose,packet_hash,revision,content,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[s.organisation_id,s.run_id,id,purpose,packet.packet_hash,body.revision,packet,created,expires]);return packet;
 }
 export function validateAudit(value:unknown):Data{
  const row=exact(value,['id','packet_id','packet_hash','rubric_version','calibration_version','adapter_version','requested_model','returned_model','route','status','raw_output','interpretation','attempts','latency_ms','usage','cost','action','rejection_reason']);
@@ -122,18 +128,20 @@ export async function persistProposal(client:QuerySession,s:Scope,auditId:unknow
  return {id,state,payload,payload_hash:hash,authority:'NONE',applied:false};
 }
 export interface RevisionVector {spec_revision:string;repository_commits:Record<string,string>;graph_revision:string|null;contract_revisions:Record<string,string>;event_watermark:string;ownership_generation:string|null}
+function revisionVector(current:Revision,purpose:string,state:Data):RevisionVector{
+ return {spec_revision:current.spec_revision_id,repository_commits:Object.fromEntries(current.repositories.map(row=>[String(row.repository_id),String(row.source_object_id)])),
+  graph_revision:current.graph_channels.length?digest(current.graph_channels):null,contract_revisions:Object.fromEntries(current.contract_revisions.map(row=>[String(row.id),String(row.revision)])),
+  event_watermark:digest({kind:'PRIMARY_RELEVANT_STATE_FINGERPRINT',revision:current,purpose,packet_state:state}),ownership_generation:current.state_version};
+}
 export function registerAdvisoryPurpose(ctx:ComponentContext,purpose:string,check?:(tx:QuerySession,s:Scope,packet:Packet,invocation:Invocation)=>Promise<void>):void{
- type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise<{packet:Packet;request:Data;rubric_version:string}>;current(tx:QuerySession,s:Scope,packet:Packet,invocation:Invocation):Promise<RevisionVector>};
+ type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise<{packet:Omit<Packet,'packet_hash'>;request:Data;rubric_version:string}>;current(tx:QuerySession,s:Scope,packet:Omit<Packet,'packet_hash'>,invocation:Invocation):Promise<RevisionVector>};
  const jobs=ctx.dependencies.require('20.4','decision.jobs.v1',(value:unknown):value is {registerPurpose(purpose:string,loader:Loader):void}=>!!value&&typeof value==='object'&&typeof(value as {registerPurpose?:unknown}).registerPurpose==='function');
  jobs.registerPurpose(purpose,{
-  load:async(tx,invocation,value)=>{const s=scope({organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id});await invocation.guard(tx);
+  load:async(tx,invocation,value)=>{const s=scope({organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id});await advisoryReadBarrier(tx,s);await invocation.guard(tx);
    const ref=exact(value,['packet_id']),packet=await loadPacket(tx,s,uuid(ref.packet_id));
    if(packet.purpose!==purpose)fail('DECISION_PURPOSE_MISMATCH','Job purpose differs from server packet');if(check)await check(tx,s,packet,invocation);
-   const {questions,...state}=packet.state;return {packet,request:{state,questions:obj(questions)},rubric_version:'hyperfide.'+purpose+'.v1'};},
-  current:async(tx,s,packet,invocation)=>{await invocation.guard(tx);if(invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id)fail('AUTH_FORBIDDEN','Current job scope differs from verified invocation');const fresh=await loadPacket(tx,s,packet.id);if(check)await check(tx,s,fresh,invocation);const current=(await currentRevision(tx,s)).revision;
-   return {spec_revision:current.spec_revision_id,repository_commits:Object.fromEntries(current.repositories.map(row=>[String(row.repository_id),String(row.source_object_id)])),
-    graph_revision:current.graph_channels.length?digest(current.graph_channels):null,contract_revisions:Object.fromEntries(current.contract_revisions.map(row=>[String(row.id),String(row.revision)])),
-    event_watermark:digest({kind:'PRIMARY_RELEVANT_STATE_FINGERPRINT',revision:current,purpose,packet_state:fresh.state}),ownership_generation:current.state_version};}
+   const {questions,...state}=packet.state,{packet_hash,...body}=packet;void packet_hash;return {packet:body,request:{state,questions:obj(questions)},rubric_version:'hyperfide.'+purpose+'.v1'};},
+  current:async(tx,s,packet,invocation)=>{await advisoryReadBarrier(tx,s);await invocation.guard(tx);if(invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id)fail('AUTH_FORBIDDEN','Current job scope differs from verified invocation');const fresh=await loadPacket(tx,s,packet.id);if(check)await check(tx,s,fresh,invocation);return fresh.revision;}
  });
 }
 export function answers(value:unknown):Data{
