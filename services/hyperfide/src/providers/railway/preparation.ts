@@ -172,14 +172,14 @@ export function configuredClient(context:ComponentContext):RailwayClient {
 }
 export interface PreparedRailwayBase {
   schema_version:1; provider:'railway'; scope:ProviderScope; preparation_digest:string;
-  checkpoint:{id:string;key:string}; disk_only:true; source_boot_id:string; captured_at:string;
+  checkpoint:{id:string;key:string}; disk_only:true; source_native_sandbox_id:string; source_boot_id:string; captured_at:string;
 }
 export function validatePreparedBase(value:unknown,expected:ProviderScope,expectedDigest:string):PreparedRailwayBase {
-  const v=object(value,['schema_version','provider','scope','preparation_digest','checkpoint','disk_only','source_boot_id','captured_at']);
+  const v=object(value,['schema_version','provider','scope','preparation_digest','checkpoint','disk_only','source_native_sandbox_id','source_boot_id','captured_at']);
   if(v.schema_version!==1||v.provider!=='railway'||v.disk_only!==true||!sameScope(scope(v.scope),expected)||
     digest(v.preparation_digest)!==digest(expectedDigest)) throw new Error('Railway preparation affinity');
   const checkpoint=object(v.checkpoint,['id','key']);text(checkpoint.id);text(checkpoint.key);
-  text(v.source_boot_id,128);instant(v.captured_at);
+  text(v.source_native_sandbox_id);text(v.source_boot_id,128);instant(v.captured_at);
   return v as unknown as PreparedRailwayBase;
 }
 export interface PreparationCaptureHooks {
@@ -219,7 +219,7 @@ export async function capturePreparedBase(client:RailwayClient,input:{
   if(!cp||text(cp.key)!==key||cp.environmentId!==input.scope.environment_id) throw new RailwayRequestError('UNKNOWN');
   const base:PreparedRailwayBase={schema_version:1,provider:'railway',scope:input.scope,
     preparation_digest:input.manifest.digest,checkpoint:{id:text(cp.id),key},disk_only:true,
-    source_boot_id:boot,captured_at:instant(new Date(cp.createdAt).toISOString())};
+    source_native_sandbox_id:input.sandbox_id,source_boot_id:boot,captured_at:instant(new Date(cp.createdAt).toISOString())};
   await hooks.persistCheckpoint(base); return base;
   }finally{await before.release();}
   });
@@ -257,7 +257,7 @@ export function freshRestoreObservation(base:PreparedRailwayBase,child:{
   native_sandbox_id:string;boot_id:string;environment_id:string;region:string;preparation_digest:string;
 }):{enrollment_required:true;process_memory_restored:false;authority:'NONE';boot_id:string} {
   text(child.native_sandbox_id);text(child.boot_id,128);
-  if(child.boot_id===base.source_boot_id||child.environment_id!==base.scope.environment_id||child.region!==base.scope.region||
+  if(child.native_sandbox_id===base.source_native_sandbox_id||child.boot_id===base.source_boot_id||child.environment_id!==base.scope.environment_id||child.region!==base.scope.region||
     digest(child.preparation_digest)!==base.preparation_digest) throw new Error('Railway restored identity/affinity mismatch');
   return {enrollment_required:true,process_memory_restored:false,authority:'NONE',boot_id:child.boot_id};
 }

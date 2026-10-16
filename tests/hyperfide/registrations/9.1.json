@@ -20,6 +20,7 @@
     "railway.preparation.copied-boot-refused",
     "railway.preparation.restore-content",
     "railway.preparation.restore-region",
+    "railway.preparation.same-native-id-refused",
     "railway.preparation.real-checkpoint-lookup",
     "railway.preparation.checkpoint-id-not-key",
     "railway.preparation.ambiguous-key",

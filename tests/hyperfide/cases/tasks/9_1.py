@@ -60,7 +60,7 @@ def alter(v,path,value):
 def base():
  return {"schema_version":1,"provider":"railway","scope":clone(SCOPE),"preparation_digest":DIGEST,
          "checkpoint":{"id":"checkpoint-ID-1","key":"checkpoint-key-1"},"disk_only":True,
-         "source_boot_id":"boot-source-1","captured_at":"2026-10-16T10:00:00.000Z"}
+         "source_native_sandbox_id":"source-sandbox","source_boot_id":"boot-source-1","captured_at":"2026-10-16T10:00:00.000Z"}
 def profile():
  body={"schema_version":1,"scope":clone(SCOPE),"preparation_digest":DIGEST,
        "source":{"kind":"CHECKPOINT","reference":"checkpoint-key-1","environment_id":"environment-1","region":"region-1"},
@@ -284,8 +284,8 @@ def main():
       "railway.preparation.checkpoint-id-not-key","railway.preparation.ambiguous-key","railway.preparation.cross-environment-key",
       "railway.preparation.no-mutation","railway.preparation.bounded-response-stream",
       "railway.preparation.lock-before-quiescence","railway.preparation.quiescence-through-capture",
-      "railway.preparation.release-on-refusal","railway.preparation.pinned-sdk-template","railway.preparation.recipe-mismatch"]
- if sys.argv[1:]==["--inventory"]:print(json.dumps(ids));return 0
+      "railway.preparation.release-on-refusal","railway.preparation.pinned-sdk-template","railway.preparation.recipe-mismatch","railway.preparation.same-native-id-refused"]
+ if sys.argv[1:]==["--inventory"]:print(json.dumps(ids[:11]+ids[22:]+ids[11:22]));return 0
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway91-") as folder:
   fixture=Fixture(folder);service=Service(folder,fixture)
@@ -307,6 +307,8 @@ def main():
    for identity,path,value in [(ids[8],["child","boot_id"],"boot-source-1"),(ids[9],["child","preparation_digest"],OTHER),
                               (ids[10],["child","region"],"other-region")]:
     check(identity,lambda path=path,value=value:reject(service.call("9.1","railway.preparation.restore.observe",alter(restore,path,value))))
+   check(ids[22],lambda:reject(service.call("9.1","railway.preparation.restore.observe",
+      alter(restore,["child","native_sandbox_id"],"source-sandbox"))))
    lookup=lambda:result(service.call("9.1","railway.preparation.checkpoint.resolve",{"key":"checkpoint-key-1"}))
    check(ids[11],lambda:expect(lookup()["mode"]=="component-fixture","fixture provenance"))
    check(ids[12],lambda:expect(lookup()["id"]=="checkpoint-ID-1" and lookup()["key"]=="checkpoint-key-1","ID/key distinction"))
