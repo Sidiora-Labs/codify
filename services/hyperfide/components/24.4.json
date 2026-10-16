@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "24.4",
+  "task": "24.4",
+  "roles": [
+    "control"
+  ],
+  "module": "recovery/drills.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "recovery.drill.describe",
+    "recovery.drill.plan",
+    "recovery.drill.execute",
+    "recovery.drill.inspect"
+  ],
+  "requires": [
+    "4.2",
+    "24.1",
+    "14.1"
+  ]
+}
