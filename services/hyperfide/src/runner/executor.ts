@@ -15,6 +15,7 @@ import type {ArtifactStoreCapability} from '../artifacts/objects.js';
 import type {BoundProviderRequest,CapturedProviderOutput} from '../providers/reconcile.js';
 import {readRunnerBinding,readRunnerReadiness,runnerCanonical,runnerResultSigningBytes} from './bridge.js';
 import type {RunnerRemotePlan} from './bridge.js';
+import {readJobAllocation} from '../scheduler/claim.js';
 
 interface Signer {credential_id:string;key:KeyObject;public_key_b64:string}
 interface ProviderResult {outcome:unknown;process_ref:unknown;captured?:CapturedProviderOutput;evidence_digest?:unknown;cleanup_confirmed?:unknown;[name:string]:unknown}
@@ -146,11 +147,13 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  await assertCurrentPrincipal(tx,current.principal);
  const b=await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id});await readRunnerReadiness(tx as PrimaryTransaction,b);
  for(const key of Object.keys(row.plan.binding))if(!same(b[key],row.plan.binding[key]))fail('RUNNER_BINDING_STALE','Admitted physical runner binding changed');
+ const allocation=await readJobAllocation(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,reservation_id:row.reservation_id});
+ if(!allocation||(['allocation_id','generation','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','request_id'] as const).some(key=>!same(allocation[key],row.plan.allocation[key])))fail('RUNNER_ALLOCATION_STALE','Current complete reservation assignment differs from admission');
  const reservation=(await tx.query("SELECT *,clock_timestamp() AS db_now FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='ALLOCATED' FOR SHARE",[row.organisation_id,row.run_id,row.reservation_id])).rows[0];
  if(!reservation||new Date(reservation.expires_at).getTime()<=new Date(reservation.db_now).getTime())fail('RUNNER_RESERVATION_EXPIRED','Current allocated reservation required');
  } catch(error) {
  const code=object(error)&&typeof error.code==='string'?error.code:'';
- if(!/^(AUTH_|RUNNER_|REMOTE_)/.test(code))throw error;
+ if(!/^(AUTH_|RUNNER_|REMOTE_|JOB_|RESOURCE_|RESERVATION_)/.test(code))throw error;
  await tx.query("UPDATE hyperfide.runner_remote_jobs SET state='UNKNOWN' WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND state='ADMITTED'",[row.organisation_id,row.run_id,row.operation_id]);
  unknown++;return null;
  }
@@ -164,7 +167,13 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref||!digest(observed.evidence_digest))fail('RUNNER_PROVIDER_CAPTURE_MISSING','Actual provider process and captured native receipt required');
  const decoded=decodeNative(observed.captured);validateReceipt(row,decoded.receipt);
  const result=await persistableResult(store,i,row,observed,decoded),result_digest=hash(runnerCanonical(result)),result_signature=sign(null,runnerResultSigningBytes(row.organisation_id,row.run_id,row.operation_id,row.plan_digest,result_digest),s.key).toString('base64url');
- await g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=>i.guard(tx)},async tx=>{const update=await tx.query("UPDATE hyperfide.runner_remote_jobs SET state=$6,result=$7,result_digest=$8,result_signature=$9,completed_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND claim_id=$4 AND executor_credential_id=$5 AND state='CLAIMED'",[row.organisation_id,row.run_id,row.operation_id,claim_id,s.credential_id,result.outcome==='UNKNOWN'?'UNKNOWN':'COMPLETED',JSON.stringify(result),result_digest,result_signature]);if(update.rowCount!==1)fail('RUNNER_CLAIM_CHANGED','Execution claim no longer belongs to this executor');});
+ await g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=>i.guard(tx)},async tx=>{
+ const current=(await tx.query('SELECT state,claim_id,executor_credential_id FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR UPDATE',[row.organisation_id,row.run_id,row.operation_id])).rows[0];
+ if(!current||current.state!=='CLAIMED'||current.claim_id!==claim_id||current.executor_credential_id!==s.credential_id)fail('RUNNER_CLAIM_CHANGED','Current owned execution claim required for final links');
+ const references:Array<{role:string;ref:Record<string,any>}>=[{role:'stdout',ref:result.stdout as Record<string,any>},{role:'stderr',ref:result.stderr as Record<string,any>},{role:'native_receipt',ref:result.native_receipt as Record<string,any>}];
+ for(const ref of result.artifacts as Record<string,any>[])references.push({role:'artifact:'+ref.path,ref});
+ for(const {role,ref} of references)await tx.query('INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[row.organisation_id,row.run_id,row.operation_id,role,ref.artifact_id,ref.storage_kind==='manifest'?ref.manifest_digest:ref.digest,ref.digest,ref.size_bytes]);
+ const update=await tx.query("UPDATE hyperfide.runner_remote_jobs SET state=$6,result=$7,result_digest=$8,result_signature=$9,completed_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND claim_id=$4 AND executor_credential_id=$5 AND state='CLAIMED'",[row.organisation_id,row.run_id,row.operation_id,claim_id,s.credential_id,result.outcome==='UNKNOWN'?'UNKNOWN':'COMPLETED',JSON.stringify(result),result_digest,result_signature]);if(update.rowCount!==1)fail('RUNNER_CLAIM_CHANGED','Execution claim no longer belongs to this executor');});
  if(result.outcome==='UNKNOWN')unknown++;else completed++;
  }catch(error){unknown++;last_error=object(error)&&typeof error.code==='string'?error.code:'RUNNER_EXECUTION_UNKNOWN';
  // A crash or ambiguous commit may leave CLAIMED. Neither this loop nor a
@@ -178,14 +187,16 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  }}
  // Control operations use the same actual provider journal and request proof.
  const native:NativeRunnerCapability=Object.freeze({invokeNativeRunner:async(i:InvocationContext,input:NativeRunnerRequest,requestedSignal:AbortSignal)=>{
+ if(signal.aborted)fail('RUNNER_EXECUTOR_CLOSED','Provisioner executor is closed');
+ const controlSignal=AbortSignal.any([signal,requestedSignal,i.signal]);
  assertInvocation(i);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!['runner.observe','runner.stop'].includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.action==='runner.stop'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
- const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:requestedSignal,guard:tx=>i.guard(tx)},tx=>readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id}));
+ const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:controlSignal,guard:tx=>i.guard(tx)},tx=>readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id}));
  const signer=config.signers.find(s=>s.credential_id===i.principal.credential_id);if(!signer)fail('RUNNER_CONTROL_DENIED','Current configured provisioner signer required');
  if(!uuid(b.launch_id)||!uuid(b.attempt_id)||!decimal(b.attempt_generation,true))fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Authoritative native launch and attempt binding required');
  const target={state_dir:b.state_dir,launch_id:b.launch_id,attempt_id:b.attempt_id,attempt_generation:String(b.attempt_generation),sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),...(input.command_id?{command_id:input.command_id}:{})};
  const encoded=Buffer.from(JSON.stringify(target)).toString('base64url');
  const request=boundRequest(b,input.operation_id,[b.runner_binary,'--component','12.4','--action',input.action,'--request-base64',encoded],30000);
- const proof=await authenticate(authority,signer,i.principal.run_id,i.principal.deployment_epoch,request,requestedSignal);
+ const proof=await authenticate(authority,signer,i.principal.run_id,i.principal.deployment_epoch,request,controlSignal);
  const observed=await provider.executeBound(request,requestedSignal,proof);if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
  const captured=observed.captured;if(captured.complete!==true||captured.exit_code!==0)fail('RUNNER_CONTROL_UNKNOWN','Complete native control observation required');
  const result=strictJSON(Buffer.from(captured.stdout),MAX_CAPTURE);if(!object(result)||result.ok!==true||!object(result.result))fail('RUNNER_CONTROL_UNKNOWN','Actual native control receipt required');
@@ -199,5 +210,5 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  for(const signer of config.signers)await next(signer);
  unregister=provider.registerRunnerBindingVerifier(async(tx,b)=>{try{const r=await readRunnerBinding(tx,b);for(const key of Object.keys(b))if(String(r[key])!==String(b[key as keyof typeof b]))return null;await readRunnerReadiness(tx,r);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}});
  const workers=Array.from({length:config.concurrency},(_,index)=>worker(index));
- return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=>{assertInvocation(context.invocation);await authority.authorize(context.invocation);if(context.invocation.principal.role!=='PROVISIONER')fail('ROLE_DENIED','Provisioner status required');return {active,completed,unknown,last_error,concurrency:config.concurrency,replay_policy:'NEVER_RELAUNCH_CLAIMED_OR_UNKNOWN',authority:'NONE'};}},close:async()=>{controller.abort();await Promise.all(workers);if(typeof unregister==='function')unregister();}};
+ return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=>{assertInvocation(context.invocation);await authority.authorize(context.invocation);if(context.invocation.principal.role!=='PROVISIONER'||!config.signers.some(s=>s.credential_id===context.invocation!.principal.credential_id))fail('ROLE_DENIED','Configured provisioner status required');return {active,completed,unknown,last_error,concurrency:config.concurrency,replay_policy:'NEVER_RELAUNCH_CLAIMED_OR_UNKNOWN',authority:'NONE'};}},close:async()=>{controller.abort();await Promise.all(workers);if(typeof unregister==='function')unregister();}};
 }
