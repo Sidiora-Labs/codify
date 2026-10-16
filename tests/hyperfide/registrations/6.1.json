@@ -30,7 +30,20 @@
     "outbox.late-lower-sequence",
     "outbox.targeted-private-delivery",
     "outbox.recipient-replay-conflict",
-    "outbox.unregistered-recipient-refused"
+    "outbox.unregistered-recipient-refused",
+    "outbox.binding-real-session",
+    "outbox.binding-replay",
+    "outbox.binding-separate-namespaces",
+    "outbox.binding-no-implicit-activation",
+    "outbox.binding-real-self-proof",
+    "outbox.binding-other-session-refused",
+    "outbox.binding-wrong-key-refused",
+    "outbox.binding-unknown-namespace-refused",
+    "outbox.binding-resolve-exact-namespace",
+    "outbox.binding-history-immutable",
+    "outbox.binding-disconnected-standing-queue",
+    "outbox.binding-stopped-recipient-held",
+    "outbox.binding-retained-source-history"
   ],
   "argv": [
     "python3",
