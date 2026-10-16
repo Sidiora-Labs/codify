@@ -7,7 +7,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-23.2-actual-observability-final-v3",
+  "campaign_id": "hyperfide-task-23.2-current-proof-final-v4",
   "case_ids": [
     "V-007",
     "V-048"
@@ -354,18 +354,18 @@
     },
     {
       "path": "services/hyperfide/dist/observability/views.d.ts",
-      "sha256": "4a1f39b1c10f196a374730b6f3acac780842b46cf30abbcf8c3243de19568976",
-      "size": 2958
+      "sha256": "2426230a18d14450c2ab4f99399d4e1b30e4c4179b4b634b3cf2f2da5a8bae02",
+      "size": 3048
     },
     {
       "path": "services/hyperfide/dist/observability/views.js",
-      "sha256": "8d793ea0cd824c2abeb2f415ab595f168ca7211387586ae702be74bc42b0362f",
-      "size": 26383
+      "sha256": "bc9f4c560efb60afe74c5f888d24b4f8abf3e8d60e21e614c2f143b9045435c9",
+      "size": 27030
     },
     {
       "path": "services/hyperfide/dist/observability/views.js.map",
-      "sha256": "d9dfcaa06b0a9bf3241f764f9615b298ad517b3bbb6c22ad07b09ddcd8639bbf",
-      "size": 21868
+      "sha256": "1cc5d1e51d7e61ceb37ebfb28b6a62856b8464773e6dd260002281fa1226e5f3",
+      "size": 22521
     },
     {
       "path": "services/hyperfide/dist/policy/programme.d.ts",
@@ -604,8 +604,8 @@
     },
     {
       "path": "services/hyperfide/src/observability/views.ts",
-      "sha256": "0c6955ec9daaccc43c57a42aea9276e42f53127bb999133f0821264e8a5f483c",
-      "size": 26288
+      "sha256": "1ab081e1bc1b6d5a4b9da27d4263847227d23ec82472e1b5fa001ac876daae6e",
+      "size": 26929
     },
     {
       "path": "services/hyperfide/src/policy/programme.ts",
@@ -659,8 +659,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/23_1.py",
-      "sha256": "d52d39e9f8af3227aeabcb1fa1608d24c54c2828173fe62839d2a78bdfe01ca7",
-      "size": 20298
+      "sha256": "a29f2d73d36fb471b61cb99febdaff846e0c70340ec7fc504d14af22d576896e",
+      "size": 20774
     },
     {
       "path": "tests/hyperfide/cases/tasks/23_2.py",
@@ -695,7 +695,7 @@
     "execution": "remote-only",
     "frontier_calls": false,
     "full_case_status": "INCOMPLETE",
-    "simulation": "4320 individually authenticated real alert requests compress one per minute72h workload; wall clock is measured separately. Independent signed loopback S3 is not live provider durability."
+    "simulation": "Synthetic workload values retain origin.4320 individually authenticated alerts compress72h schedule volume; wall clock separately measured. Independent signed loopbackS3 does not qualify live provider durability."
   },
   "registered_variant": "task:23.2",
   "resources": [
