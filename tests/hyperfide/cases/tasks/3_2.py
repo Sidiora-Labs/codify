@@ -31,7 +31,7 @@ def dependencies(stems):
  for stem in stems:visit(stem)
  return tuple(result)
 class PacketFixture(HierarchyFixture):
- def __init__(self,extra_components=(),extra_setup=None,bootstrap=True):
+ def __init__(self,extra_components=(),extra_setup=None,bootstrap=True,seed_historical_runtime=True):
   def setup(f):
    apply_migration(f,"0002-spec");apply_migration(f,"0007-graph");apply_migration(f,"0032-execution-packets")
    i=f.ids;i["profile"]=uid();i["packet_task"]=uid();i["packet_slot"]=uid()
@@ -66,7 +66,7 @@ class PacketFixture(HierarchyFixture):
    f.packet_proof=policy
    f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,1,$4,$5,$6,$7)",[i["organisation"],i["run"],i["packet_task"],i["spec"],f.packet_criteria,identity(policy),json.dumps(policy)])
    if extra_setup:extra_setup(f)
-  super().__init__(extra_components=dependencies(("3.2",)+tuple(extra_components)),extra_setup=setup,bootstrap=bootstrap)
+  super().__init__(extra_components=dependencies(("3.2",)+tuple(extra_components)),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=seed_historical_runtime)
  def packet_input(self,**overrides):
   return dict({"idempotency_key":"packet-create","leader_generation":"1","package_generation":"2","task_id":self.ids["packet_task"],"attempt_id":uid(),"attempt_generation":"1","sandbox_id":self.ids["sandbox"],"slot_id":self.ids["packet_slot"],"sandbox_boot_generation":"1","max_bytes":262144,"optional_context":[]},**overrides)
  def create_packet(self,**overrides):
