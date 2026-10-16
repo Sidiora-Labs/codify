@@ -16,13 +16,17 @@ function bounded<T>(value:T,max:number):T {
  if(Buffer.byteLength(canonical(value))>max)return refuse('WORK_PACKET_BUDGET_TOO_SMALL','Complete accepted intent and required provenance exceed the requested budget');
  return value;
 }
-function field(definition:unknown,name:string):unknown {
+function field(definition:unknown,name:string,structured=true):unknown {
  if(!object(definition))return undefined;
  let value=definition[name];
  if(value===undefined&&object(definition.section)&&object(definition.section.fields))value=definition.section.fields[name];
  if(object(value)&&Object.hasOwn(value,'value'))value=value.value;
- if(typeof value==='string'){try{return JSON.parse(value);}catch{return value;}}
+ if(structured&&typeof value==='string'){try{return JSON.parse(value);}catch{return value;}}
  return value;
+}
+function objectiveLabel(definition:unknown,fallback:string):string {
+ for(const name of ['title','purpose']){const value=field(definition,name,false);if(typeof value==='string')return value;}
+ return fallback;
 }
 async function revision(tx:PrimaryTransaction,a:TrustedActor,key:string):Promise<Data> {
  const rows=await tx.query("SELECT result,request_digest,state FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation=$4 AND idempotency_key=$5",[a.organisation_id,a.run_id,a.session_id,REVISION_OPERATION,digest(key)]);
@@ -73,7 +77,7 @@ export function createComponent(context:ComponentContext):Component {
    const guarded={...a,guard:async(tx:PrimaryTransaction)=>{await a.guard(tx);await task(tx,a,reference,leader,owner);}};
    return operation(g,guarded,'legacy.work.open',{...v,idempotency_key:a.invocation.operation.idempotency_key},async tx=>{
     const current=await task(tx,a,reference,leader,owner),snapshot=await capture(tx,a,current),key=await save(tx,a,snapshot),scope=field(current.definition,'touches');
-    return bounded({revision:key,task_id:current.id,task_key:current.task_key,objective:field(current.definition,'title')??field(current.definition,'purpose')??current.task_key,
+    return bounded({revision:key,task_id:current.id,task_key:current.task_key,objective:objectiveLabel(current.definition,String(current.task_key)),
      criteria:{digest:current.criteria_digest,accepted_definition:current.definition},allowed_scope:Array.isArray(scope)?scope:{available:false,reason:'ACCEPTED_SCOPE_NOT_STRUCTURED'},
      state:snapshot,provenance:await provenance(tx),authority:'NONE',execution_authority:false,read_only:true,omitted_context:omitted()},max);
    });
