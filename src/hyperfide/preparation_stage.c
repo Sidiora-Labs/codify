@@ -179,10 +179,19 @@ int hf_runner_stage_preparation(const char *config_path,const HfJson *claim,int 
  char *config_text=NULL,*context_text=NULL;size_t length=0,context_size=0;HfJson *config=calloc(1,sizeof *config);FILE *json=NULL;
  if(!config||!protected_read(config_path,HF_BODY_LIMIT,&config_text,&length)||!hf_json_parse(config,config_text))goto done;
  int plan=hf_json_field(claim,result,"plan"),p=hf_json_field(claim,plan,"preparation"),b=hf_json_field(claim,result,"binding");
+ int job=hf_json_field(claim,p,"job_binding");
  int entries=hf_json_field(claim,p,"staging"),recipes=hf_json_field(config,0,"preparation_recipes"),bound_recipes=hf_json_field(claim,b,"preparation_recipes");
  char recipe[80],operation[37],plan_digest[72],transport[4096],workspace[4096],repository[37],slot[37],sandbox[37],boot[37],generation[32];
  Fetch fetch={0};int64_t uid=0,gid=0;
  if(!equals(claim,result,"job_class","PREPARATION")||!string(claim,result,"operation_id",operation,sizeof operation)||!hf_uuid_valid(operation)||!string(claim,result,"plan_digest",plan_digest,sizeof plan_digest)||!sha_valid(plan_digest)||!string(claim,p,"recipe_id",recipe,sizeof recipe)||(strcmp(recipe,"environment.prepare.v1")&&strcmp(recipe,"checkpoint.restore.v1"))||!string(config,0,"transport_config",transport,sizeof transport)||transport[0]!='/')goto done;
+ char job_namespace[32],job_id[37],job_lease[32],reservation[37],plan_reservation[37],input_packet[72],job_manifest[72];
+ const char *job_keys[]={"namespace","job_id","lease_generation","reservation_id","input_packet_digest","input_manifest_digest"};
+ if(!hf_json_only(claim,job,job_keys,6)||!string(claim,job,"namespace",job_namespace,sizeof job_namespace)||!string(claim,job,"job_id",job_id,sizeof job_id)||!hf_uuid_valid(job_id)||!string(claim,job,"reservation_id",reservation,sizeof reservation)||!hf_uuid_valid(reservation)||!string(claim,plan,"reservation_id",plan_reservation,sizeof plan_reservation)||strcmp(reservation,plan_reservation)||!string(claim,job,"lease_generation",job_lease,sizeof job_lease)||!string(claim,job,"input_packet_digest",input_packet,sizeof input_packet)||!sha_valid(input_packet)||!string(claim,job,"input_manifest_digest",job_manifest,sizeof job_manifest)||!sha_valid(job_manifest))goto done;
+ if(strcmp(job_namespace,"QUALIFICATION")&&strcmp(job_namespace,"REPRODUCTION")&&strcmp(job_namespace,"CANDIDATE")&&strcmp(job_namespace,"CHECKPOINT")&&strcmp(job_namespace,"PREWARM"))goto done;
+ if((!strcmp(recipe,"checkpoint.restore.v1"))!=(!strcmp(job_namespace,"CHECKPOINT")))goto done;
+ if(!job_lease[0]||job_lease[0]=='0')goto done;
+ for(const char *q=job_lease;*q;q++)if(*q<'0'||*q>'9')goto done;
+ char *lease_end=NULL;errno=0;unsigned long long lease_generation=strtoull(job_lease,&lease_end,10);if(errno||!lease_end||*lease_end||lease_generation>9223372036854775807ULL)goto done;
  if(!string(claim,b,"organisation_id",fetch.org,sizeof fetch.org)||!hf_uuid_valid(fetch.org)||!string(claim,b,"run_id",fetch.run,sizeof fetch.run)||!hf_uuid_valid(fetch.run)||!equals(config,0,"organisation_id",fetch.org)||!equals(config,0,"run_id",fetch.run)||!string(claim,b,"workspace_path",workspace,sizeof workspace)||workspace[0]!='/'||strlen(workspace)<2||workspace[strlen(workspace)-1]=='/'||strstr(workspace,"//")||!hf_json_i64(claim,hf_json_field(claim,b,"uid"),&uid)||uid<=0||uid>=UINT_MAX||!hf_json_i64(claim,hf_json_field(claim,b,"gid"),&gid)||gid<=0||gid>=UINT_MAX)goto done;
  char *transport_text=NULL;size_t transport_size=0;
  if(!protected_read(transport,32768,&transport_text,&transport_size))goto done;
@@ -209,7 +218,11 @@ int hf_runner_stage_preparation(const char *config_path,const HfJson *claim,int 
  uint64_t boot_generation=0;if(!quantity(claim,b,"boot_generation",&boot_generation)||!boot_generation)goto done;
  snprintf(generation,sizeof generation,"%llu",(unsigned long long)boot_generation);
  int source=hf_json_field(claim,p,"source");char source_values[4][4096];const char *source_keys[]={"repository_key","source_object_id","source_tree_id","source_manifest_digest"};
- for(int i=0;i<4;i++)if(!string(claim,source,source_keys[i],source_values[i],sizeof source_values[i])||!source_values[i][0])goto done;
+ int tree_unmeasured=0;
+ for(int i=0;i<4;i++){
+  if(i==2){char *raw=hf_json_raw(claim,hf_json_field(claim,source,source_keys[i]));tree_unmeasured=raw&&!strcmp(raw,"null");free(raw);if(tree_unmeasured){if(strcmp(recipe,"checkpoint.restore.v1"))goto done;source_values[i][0]=0;continue;}}
+  if(!string(claim,source,source_keys[i],source_values[i],sizeof source_values[i])||!source_values[i][0])goto done;
+ }
  if(!sha_valid(source_values[3]))goto done;
  base=strict_dir("/run/hyperfide-stage",1);if(base<0||fchmod(base,0711))goto done;
  dir=mkdir_owned(base,operation,0,stage->gid,0750);if(dir<0)goto done;
@@ -217,7 +230,8 @@ int hf_runner_stage_preparation(const char *config_path,const HfJson *claim,int 
  if(output<0||diagnostics<0)goto done;
  json=open_memstream(&context_text,&context_size);if(!json)goto done;
  fprintf(json,"{\"schema_version\":1,\"operation_id\":\"%s\",\"plan_digest\":\"%s\",\"recipe_id\":\"%s\",\"scope\":{\"organisation_id\":\"%s\",\"run_id\":\"%s\",\"sandbox_id\":\"%s\",\"boot_id\":\"%s\",\"boot_generation\":\"%s\",\"slot_id\":\"%s\",\"repository_id\":\"%s\"},\"source\":{",operation,plan_digest,recipe,fetch.org,fetch.run,sandbox,boot,generation,slot,repository);
- for(int i=0;i<4;i++){if(i)fputc(',',json);hf_json_write_string(json,source_keys[i]);fputc(':',json);hf_json_write_string(json,source_values[i]);}
+ for(int i=0;i<4;i++){if(i)fputc(',',json);hf_json_write_string(json,source_keys[i]);fputc(':',json);if(i==2&&tree_unmeasured)fputs("null",json);else hf_json_write_string(json,source_values[i]);}
+ fprintf(json,"},\"job_binding\":{\"namespace\":\"%s\",\"job_id\":\"%s\",\"lease_generation\":\"%s\",\"reservation_id\":\"%s\",\"input_packet_digest\":\"%s\",\"input_manifest_digest\":\"%s\"",job_namespace,job_id,job_lease,reservation,input_packet,job_manifest);
  fputs("},\"workspace\":{\"parent\":",json);hf_json_write_string(json,stage->workspace_parent);fputs(",\"name\":",json);hf_json_write_string(json,workspace_name);fputs(",\"path\":",json);hf_json_write_string(json,workspace);fputs("},\"staging\":[",json);
  char ids[HF_STAGE_FILES][37],roles[HF_STAGE_FILES][128];uint64_t total=0;int item=entries+1;
  for(int i=0;i<claim->tokens[entries].count;i++){

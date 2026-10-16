@@ -54,11 +54,11 @@ def run_probe(binary, service_root):
         committed=service.ok("artifact.manifest.commit",{**scope,"expected_chunks":len(chunks),"total_size_bytes":str(len(raw)),"content_digest":sha(raw),"complete":True,"truncated":False,"missing_ranges":[],"chunks":chunks,"retention_class":"RUN","retention_until":None,"retention_hold":False})
         manifest_ref=committed["artifact"]
         def claim(refs=None):
-            op=str(uuid.uuid4());operations.append(op)
+            op=str(uuid.uuid4());operations.append(op);reservation=str(uuid.uuid4())
             argv=[pins["node_path"],pins["recipe_path"],"--job-context","/run/hyperfide-stage/"+op+"/context.json"]
             return {"result":{"operation_id":op,"job_class":"PREPARATION","plan_digest":sha(b"bounded real staging claim"),
-                "plan":{"argv":argv,"executable_digest":pins["node_digest"],"preparation":{
-                    "recipe_id":"environment.prepare.v1","input_manifest_artifact_id":input_ref["artifact_id"],"input_manifest_digest":sha(input_bytes),
+                "plan":{"reservation_id":reservation,"argv":argv,"executable_digest":pins["node_digest"],"preparation":{
+                    "recipe_id":"environment.prepare.v1","job_binding":{"namespace":"QUALIFICATION","job_id":str(uuid.uuid4()),"lease_generation":"1","reservation_id":reservation,"input_packet_digest":sha(b"actual fixture packet identity"),"input_manifest_digest":sha(b"semantic job snapshot")},"input_manifest_artifact_id":input_ref["artifact_id"],"input_manifest_digest":sha(input_bytes),
                     "source":{"repository_key":"fixture","source_object_id":"a"*40,"source_tree_id":"b"*40,"source_manifest_digest":sha(b"source")},
                     "staging":refs if refs is not None else [{"role":"source:fixture","artifact_id":manifest_ref["artifact_id"],"storage_kind":"manifest","digest":sha(raw),"manifest_digest":manifest_ref["digest"],"size_bytes":str(len(raw))}]}},
                 "binding":{**scope,"uid":65534,"gid":65534,"workspace_path":str(workspace/"candidate"),"sandbox_id":auth.ids["sandbox"],"boot_id":auth.ids["boot"],"boot_generation":"1","slot_id":str(uuid.uuid4()),"repository_id":str(uuid.uuid4()),"preparation_recipes":{"environment.prepare.v1":pins,"checkpoint.restore.v1":pins}}}}
@@ -93,6 +93,7 @@ def run_probe(binary, service_root):
         result,reply=invoke(claim())
         check("native-staging-refuses-transport-ancestor-symlink",result.returncode!=0 and not reply["ok"])
         config.write_text(saved)
+        check("native-staging-preserves-logical-job-binding",context["job_binding"]==value["result"]["plan"]["preparation"]["job_binding"] and context["job_binding"]["input_manifest_digest"]!=sha(input_bytes))
         tests=[]
         v=claim();v["result"]["binding"]["run_id"]=str(uuid.uuid4());tests.append(("scope",v))
         v=claim();v["result"]["plan"]["argv"][1]="/bin/sh";tests.append(("untrusted-recipe",v))
@@ -104,6 +105,10 @@ def run_probe(binary, service_root):
         v=claim();v["result"]["binding"]["workspace_path"]=str(workspace);tests.append(("existing-target",v))
         link=owned/"parent-link";link.symlink_to(workspace,target_is_directory=True)
         v=claim();v["result"]["binding"]["workspace_path"]=str(link/"target");tests.append(("parent-symlink",v))
+        v=claim();del v["result"]["plan"]["preparation"]["job_binding"];tests.append(("missing-job-binding",v))
+        v=claim();v["result"]["plan"]["preparation"]["job_binding"]["reservation_id"]=str(uuid.uuid4());tests.append(("job-reservation-mismatch",v))
+        v=claim();v["result"]["plan"]["preparation"]["job_binding"]["namespace"]="CALLER_AUTHORITY";tests.append(("job-namespace",v))
+        v=claim();v["result"]["plan"]["preparation"]["source"]["source_tree_id"]=None;tests.append(("unmeasured-environment-tree",v))
         for name,v in tests:
             result,reply=invoke(v)
             check("native-staging-refuses-"+name,result.returncode!=0 and not reply["ok"] and not (Path("/run/hyperfide-stage")/v["result"]["operation_id"]/"context.json").exists())
@@ -112,6 +117,13 @@ def run_probe(binary, service_root):
         v=claim([{"role":"source:small","artifact_id":direct_ref["artifact_id"],"storage_kind":"object","digest":sha(direct),"size_bytes":str(len(direct))}])
         result,reply=invoke(v)
         check("native-staging-direct-object",result.returncode==0 and Path(json.loads(Path(reply["context_path"]).read_text())["staging"][0]["path"]).read_bytes()==direct)
+        restored=claim([{"role":"checkpoint.capsule","artifact_id":manifest_ref["artifact_id"],"storage_kind":"manifest","digest":sha(raw),"manifest_digest":manifest_ref["digest"],"size_bytes":str(len(raw))}])
+        restored["result"]["plan"]["preparation"]["recipe_id"]="checkpoint.restore.v1"
+        restored["result"]["plan"]["preparation"]["job_binding"]["namespace"]="CHECKPOINT"
+        restored["result"]["plan"]["preparation"]["source"]["source_tree_id"]=None
+        result,reply=invoke(restored)
+        checkpoint_context=json.loads(Path(reply["context_path"]).read_text()) if result.returncode==0 else {}
+        check("native-staging-checkpoint-preserves-unmeasured-tree",result.returncode==0 and checkpoint_context["source"]["source_tree_id"] is None and checkpoint_context["job_binding"]==restored["result"]["plan"]["preparation"]["job_binding"])
         fixture.set_mode(pieces[0],"corrupt")
         v=claim();result,reply=invoke(v)
         check("native-staging-refuses-backend-corruption",result.returncode!=0 and not reply["ok"])
