@@ -24,10 +24,17 @@ def main():
    state.update(f.ok("hierarchy.view",base,component="3.3"));expect(state["authority"]=="NONE" and state["provenance"]["source"]=="POSTGRESQL_PRIMARY","Observation asserted authority or omitted provenance")
   check("views.primary.signed",read)
   check("views.aggregate-totals",lambda:expect(state["total_tasks"]=="122" and state["blocking_task_count"]=="20" and state["has_blocking_exceptions"] is True,"Bounded rows hid total or blocking counts"))
+  check("views.current-findings-source-links",lambda:expect(len(state["current_findings"])==1 and state["current_findings"][0]["id"]==i["finding"] and state["current_findings"][0]["repository_id"]==i["repository"] and state["current_findings"][0]["source_object_id"]=="a"*40 and state["current_findings"][0]["evidence_ids"]==[] and state["current_findings"][0]["omitted_evidence"]=="0","Current finding lost exact source/evidence references"))
+  check("views.finding-blocker-totals",lambda:expect(state["active_finding_count"]=="1" and state["blocking_finding_count"]=="1" and state["omitted_context"]["findings"]=="0","Current open ERROR finding hidden by row budget"))
+  def finding_only():
+   result=f.ok("hierarchy.view",dict(base,package_id=i["package"],package_generation="2"),key="manager",component="3.3")
+   expect(result["blocking_task_count"]=="0" and result["blocking_finding_count"]=="1" and result["has_blocking_exceptions"] is True,"Finding-only blocker was hidden")
+  check("views.finding-only-blocker",finding_only)
+
   check("views.page-bounded",lambda:expect(len(state["tasks"])==100 and state["page"]["has_more"] is True and state["omitted_context"]["tasks"]=="22","Page did not preserve bounded/omitted semantics"))
   def budget():
    result=f.ok("hierarchy.view",dict(base,max_bytes=4096),component="3.3")
-   expect(len(json.dumps(result,sort_keys=True,separators=(",",":")).encode())<=4096 and len(result["tasks"])>=1 and result["blocking_task_count"]=="20" and result["has_blocking_exceptions"] is True,"Budget lost complete task or mandatory blocking totals")
+   expect(len(json.dumps(result,sort_keys=True,separators=(",",":")).encode())<=4096 and len(result["tasks"])>=1 and result["blocking_task_count"]=="20" and result["has_blocking_exceptions"] is True and result["blocking_finding_count"]=="1" and int(result["omitted_context"]["findings"])+len(result["current_findings"])==1,"Budget lost complete task or mandatory blocking totals")
   check("views.budget-preserves-mandatory",budget)
   manager=dict(base,package_id=i["package2"],package_generation="2")
   check("views.manager-scoped",lambda:expect(all(t["feature_package_id"]==i["package2"] for t in f.ok("hierarchy.view",manager,key="manager",component="3.3")["tasks"]),"Manager view leaked another package"))

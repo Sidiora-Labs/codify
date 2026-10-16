@@ -1,6 +1,9 @@
 -- Lower runner primitives: no dependency on future AGENT native-session bindings
 -- or recovery-policy tables. Authenticated14 observations are checked at runtime.
 ALTER TABLE hyperfide.agent_sessions ALTER COLUMN native_session_id DROP NOT NULL;
+DROP TRIGGER immutable_binding ON hyperfide.agent_sessions;
+CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.agent_sessions
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','role','parent_session_id','connector','account_key','slot_id','sandbox_id','sandbox_boot_generation','attempt_id');
 ALTER TABLE hyperfide.agent_sessions ADD CONSTRAINT agent_session_unattached_registered
  CHECK(native_session_id IS NOT NULL OR state='REGISTERED');
 CREATE TABLE hyperfide.runner_registry (
@@ -60,3 +63,40 @@ BEGIN
 END $$;
 CREATE TRIGGER agent_native_identity BEFORE UPDATE ON hyperfide.agent_sessions
  FOR EACH ROW EXECUTE FUNCTION hyperfide.guard_agent_native_identity();
+
+
+-- Explicit scoped links retain result objects through actual artifact GC.
+CREATE TABLE hyperfide.runner_result_artifacts (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,operation_id uuid NOT NULL,
+ role text NOT NULL CHECK(length(role)>0 AND length(role)<=4096),
+ artifact_id uuid NOT NULL,artifact_digest hyperfide.digest NOT NULL,
+ content_digest hyperfide.digest NOT NULL,size_bytes bigint NOT NULL CHECK(size_bytes>=0),
+ PRIMARY KEY(organisation_id,run_id,operation_id,role),
+ FOREIGN KEY(organisation_id,run_id,operation_id) REFERENCES hyperfide.runner_remote_jobs(organisation_id,run_id,operation_id),
+ FOREIGN KEY(organisation_id,run_id,artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id)
+);
+CREATE FUNCTION hyperfide.runner_require_complete_artifact() RETURNS trigger
+ LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+DECLARE actual hyperfide.artifacts;
+BEGIN
+ SELECT * INTO actual FROM hyperfide.artifacts WHERE organisation_id=NEW.organisation_id AND run_id=NEW.run_id AND id=NEW.artifact_id FOR SHARE;
+ IF NOT FOUND OR actual.status<>'COMPLETE' OR actual.digest<>NEW.artifact_digest
+ THEN RAISE EXCEPTION 'runner result requires exact COMPLETE artifact' USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER complete_artifact BEFORE INSERT ON hyperfide.runner_result_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.runner_require_complete_artifact();
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.runner_result_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','operation_id','role','artifact_id','artifact_digest','content_digest','size_bytes');
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.runner_registry
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.runner_remote_jobs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.runner_command_receipts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.runner_result_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
