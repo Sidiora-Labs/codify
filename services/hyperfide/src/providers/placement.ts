@@ -173,9 +173,10 @@ export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,po
 export async function recordPoolFailure(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
   const input=obj(value,['observation_id']),observationId=uuid(input.observation_id);
   return transaction(pool,async c=>{
-    const rows=await c.query('SELECT o.*,i.pool_id FROM hyperfide.provider_observations o JOIN hyperfide.provisioning_intents i ON i.organisation_id=o.organisation_id AND i.id=o.intent_id WHERE o.organisation_id=$1 AND o.id=$2 FOR UPDATE OF o',[config.organisation_id,observationId]);
+    const rows=await c.query('SELECT o.*,i.pool_id,i.run_id AS observation_run_id FROM hyperfide.provider_observations o JOIN hyperfide.provisioning_intents i ON i.organisation_id=o.organisation_id AND i.id=o.intent_id WHERE o.organisation_id=$1 AND o.id=$2 FOR UPDATE OF o',[config.organisation_id,observationId]);
     const row=rows.rows[0],code=row?.observation?.outcome?.error?.code;
     if(!row||!['RATE_LIMIT','UNAVAILABLE','TIMEOUT'].includes(code))fail('PROVIDER_FAILURE_UNVERIFIED','A recorded provider rate-limit or partition observation is required');
+    assertInvocationRun(pool,row.observation_run_id);
     await currentPool(c,config,row.pool_id);
     if(row.failure_applied_at)return{recorded:false,pool_id:row.pool_id,replayed:true,reconciliation_required:row.observation.outcome.status==='UNKNOWN'};
     await c.query("INSERT INTO hyperfide.provider_pool_health(organisation_id,pool_id) VALUES($1,$2) ON CONFLICT DO NOTHING",[config.organisation_id,row.pool_id]);
