@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "variant": "task:15.2",
+  "task": "15.2",
+  "scope": "task-component",
+  "cases": [
+    "V-012"
+  ],
+  "assertion_ids": [
+    "artifacts.service.registered",
+    "artifacts.object.roundtrip",
+    "artifacts.object.empty",
+    "artifacts.object.receipt-replay",
+    "artifacts.object.conditional-existing",
+    "artifacts.object.pending-before-http",
+    "artifacts.object.crash-upload-registration",
+    "artifacts.object.pending-absent-recovery",
+    "artifacts.object.ambiguous-upload-reconcile",
+    "artifacts.object.forbidden-not-absent",
+    "artifacts.object.missing-complete",
+    "artifacts.object.corrupt-complete",
+    "artifacts.object.truncated",
+    "artifacts.object.overlarge",
+    "artifacts.object.corrupt-precondition",
+    "artifacts.object.redirect-no-forwarding",
+    "artifacts.object.binding-conflict",
+    "artifacts.scope.before-effects",
+    "artifacts.scope.cross-run-read",
+    "artifacts.scope.nested-run-spoof",
+    "artifacts.input.digest",
+    "artifacts.input.size",
+    "artifacts.input.base64",
+    "artifacts.input.unknown",
+    "artifacts.input.oversize",
+    "artifacts.input.retention",
+    "artifacts.config.endpoint",
+    "artifacts.manifest.ordered-complete",
+    "artifacts.manifest.read",
+    "artifacts.manifest.replay",
+    "artifacts.manifest.empty",
+    "artifacts.manifest.gap",
+    "artifacts.manifest.reordered",
+    "artifacts.manifest.offset",
+    "artifacts.manifest.truncated",
+    "artifacts.manifest.missing-range",
+    "artifacts.manifest.count",
+    "artifacts.manifest.total",
+    "artifacts.manifest.content-hash",
+    "artifacts.manifest.chunk-hash",
+    "artifacts.manifest.pending-child",
+    "artifacts.manifest.foreign-child",
+    "artifacts.manifest.corrupt-child",
+    "artifacts.manifest.missing-child",
+    "artifacts.retention.metadata",
+    "artifacts.retention.children",
+    "artifacts.object.opaque-payload",
+    "artifacts.manifest.promotion-bypass",
+    "artifacts.http.independent-sigv4",
+    "artifacts.secrets.sanitized",
+    "artifacts.object.locate-id-loss",
+    "artifacts.object.locate-absent",
+    "artifacts.object.locate-pending",
+    "artifacts.auth.stdio-required",
+    "artifacts.auth.forged-context",
+    "artifacts.auth.revoked-mid-upload"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/15_2.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/artifacts/objects.js",
+    "services/hyperfide/dist/storage/schema.js",
+    "services/hyperfide/dist/identity/enrollment.js",
+    "services/hyperfide/dist/transport/http.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/storage/transactions.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-15.2-database",
+      "kind": "postgresql-database",
+      "scope": "task15.2-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "objects/database-absence.json",
+    "objects/observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/1.4.json",
+    "services/hyperfide/components/4.1.json",
+    "services/hyperfide/components/schema.json",
+    "services/hyperfide/migrations/0001-authority.sql",
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "services/hyperfide/src/storage/schema.ts",
+    "services/hyperfide/src/contracts/records.ts",
+    "services/hyperfide/src/components/registry.ts",
+    "services/hyperfide/src/components/service.ts",
+    "services/hyperfide/src/policy/programme.ts",
+    "services/hyperfide/src/control.ts",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "services/hyperfide/src/artifacts/objects.ts",
+    "services/hyperfide/components/15.2.json",
+    "tests/hyperfide/cases/tasks/15_2.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/registry.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "artifact.fixture.http.listen",
+    "identity.fixture.https.listen",
+    "identity.fixture.keys.generate"
+  ]
+}
