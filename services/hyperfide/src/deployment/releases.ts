@@ -49,7 +49,7 @@ async function execute(ctx:ComponentContext,action:typeof actions[number],raw:un
  names.add(f.path);const p=await file(root,f.path),st=await fs.stat(p);
  if(BigInt(st.size)!==BigInt(f.size_bytes)||await checksum(p)!==f.digest||(st.mode&0o777)!==parseInt(String(f.mode),8))fail('Prebuilt release file does not match its immutable pin');
  }
- for(const required of ['bin/hyperfide','bin/cg','runtime/node','runtime/python/bin/python3','runtime/python/bin/python3.bin','runtime/python/lib/python3.14/ctypes/__init__.py','services/package.json','services/dist/control.js','services/dist/provisioner.js','services/dist/dispatch.js','services/package-lock.json'])if(!names.has(required))fail('Release lacks a required executable or dependency lock');
+ for(const required of ['bin/hyperfide','bin/cg','bin/hyperfide-native','runtime/node','runtime/python/bin/python3','runtime/python/bin/python3.bin','runtime/python/lib/python3.14/ctypes/__init__.py','services/package.json','services/dist/control.js','services/dist/provisioner.js','services/dist/dispatch.js','services/package-lock.json'])if(!names.has(required))fail('Release lacks a required executable or dependency lock');
  const entries=manifest.files as Record<string,unknown>[];
  if(entries.find(f=>f.path==='bin/hyperfide')!.digest!==entries.find(f=>f.path==='bin/cg')!.digest)fail('Compatibility CLI differs from the canonical executable');
  if(!entries.some(f=>String(f.path).startsWith('lib/hyperfide/'))||!entries.some(f=>String(f.path).startsWith('services/node_modules/')))fail('Prebuilt runtime libraries and production dependencies are required');
