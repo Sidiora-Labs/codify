@@ -141,6 +141,9 @@ export function createComponent(context:ComponentContext):Component{
    const reserved=await claims.reserveCapacity(tx,{organisation_id:a.organisation_id,run_id:a.run_id,request_id:reservationRequest,attempt_id:token.attempt_id,dimensions:policy.dimensions,expires_at:expires.rows[0]!.expiry});
    const compute=await assertCurrentCompute(tx,token,{operation:'ADMISSION'});
    if(compute.feature_package_id!==packageId)return refuse('ACTOR_SCOPE_MISMATCH','Compute package differs from the current task');
+   const running=await tx.query("SELECT 1 FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND generation=$4 AND execution_state='RUNNING'",[a.organisation_id,a.run_id,token.attempt_id,token.attempt_generation]);
+   if(!running.rowCount)return refuse('PARENT_EXECUTION_UNCONFIRMED','Observed native transport or a START request cannot grant descendant authority');
+
    const packet=await validateExecutionInputs(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:compute.input_packet_digest},a.invocation);
    const mandatory=packet.packet.mandatory;
    if(!object(mandatory)||!object(mandatory.identity))return refuse('CHILD_INPUT_STALE','Current compute lacks immutable accepted task inputs');
