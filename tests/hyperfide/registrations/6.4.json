@@ -17,7 +17,10 @@
     "recovery.periodic-poll-without-wakeup",
     "recovery.unknown-outcome-retains-identity",
     "recovery.snapshot-bounded",
-    "recovery.unresponsive-adapter-bounded"
+    "recovery.snapshot-no-raw-receiver-payload",
+    "recovery.unresponsive-adapter-bounded",
+    "recovery.sigkill-before-receiver-commit",
+    "recovery.sigkill-after-receiver-commit"
   ],
   "argv": [
     "python3",
