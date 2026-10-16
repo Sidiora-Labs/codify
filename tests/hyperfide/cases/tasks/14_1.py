@@ -184,6 +184,22 @@ def main():
         f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[i["provisioner"]])
         check("identity.renew.paused-revocation-absolute",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600},key="provisioner")[1].get("error",{}).get("code")=="AUTH_REVOKED","Revoked service renewed while paused"))
         f.close();f=IdentityFixture();fixture=f
+        def renewal_expiry_during_lock_upgrade():
+            from concurrent.futures import ThreadPoolExecutor
+            credential=f.ids['provisioner']
+            f.sql("UPDATE hyperfide.identity_principals SET expires_at=clock_timestamp()+interval '2 seconds' WHERE credential_id=$1",[credential])
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                hold=pool.submit(f.sql,"WITH locked AS MATERIALIZED (SELECT credential_id FROM hyperfide.identity_principals WHERE credential_id=$1 FOR SHARE) SELECT pg_sleep(3) FROM locked /* identity-renew-lock-holder */",[credential])
+                deadline=time.monotonic()+2
+                while time.monotonic()<deadline:
+                    observed=f.sql("SELECT 1 FROM pg_stat_activity WHERE query LIKE '%identity-renew-lock-holder%' AND wait_event='PgSleep'")
+                    if observed:break
+                expect(bool(observed),'Actual shared credential row lock was not observed')
+                answer=f.invoke('identity.principal.renew',{'ttl_seconds':600},key='provisioner')[1]
+                hold.result(timeout=8)
+            row=f.sql("SELECT credential_version::text,expires_at<clock_timestamp() AS expired FROM hyperfide.identity_principals WHERE credential_id=$1",[credential])[0]
+            expect(answer.get('ok') is False and answer.get('error',{}).get('code') in ('AUTH_REVOKED','AUTH_EXPIRED') and row=={'credential_version':'1','expired':True},'Credential expired during actual lock upgrade but renewal revived it')
+        check('identity.renew.expiry-after-exclusive-row-lock',renewal_expiry_during_lock_upgrade)
         f.sql("UPDATE hyperfide.runs SET state='SUCCEEDED',state_version=state_version+1 WHERE id=$1",[f.ids['run']])
         check('identity.succeeded-run.new-grant-denied',lambda:expect(f.issue(grant=uid())[1].get('error',{}).get('code')=='AUTH_RUN_CLOSED','Succeeded run admitted new authority'))
         f.close();f=IdentityFixture();fixture=f
