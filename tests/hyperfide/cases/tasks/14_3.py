@@ -8,6 +8,9 @@ from identity_fixture import IdentityFixture,RESULTS,check,expect,uid,sha,canoni
 def file_hash(p):
     with p.open('rb') as stream:return 'sha256:'+hashlib.file_digest(stream,'sha256').hexdigest()
 def main():
+    from identity_fixture import cleanup_identity_evidence,write_identity_observations
+    os.environ["HYPERFIDE_IDENTITY_EVIDENCE_TASK"]="14.3"
+    if "--cleanup" in sys.argv:return cleanup_identity_evidence("14.3")
     canary='HF_NATIVE_TEST_'+uid();profiles={};expiry=time.strftime('%Y-%m-%dT%H:%M:%S.000Z',time.gmtime(time.time()+1800))
     binaries={
       'claude':Path(os.environ.get('HF_TEST_NATIVE_CLAUDE_BINARY','/root/.local/share/claude/versions/2.1.300')),
@@ -21,7 +24,7 @@ def main():
         for index,(name,p) in enumerate(binaries.items()):
             target=f.path/(name+'-native');shutil.copyfile(p,target);target.chmod(0o755)
             home=f.path/(name+'-empty-home');home.mkdir(mode=0o700);os.chown(home,41201+index,41201+index)
-            profiles[name]={'schema_version':1,'profile_id':name+'-profile','profile_revision':'1','connector':name,'auth_mode':'api_credential','binary':{'path':str(target),'digest':file_hash(target),'version':'2.1.300' if name=='claude' else '0.162.1'},'credential_reference':'inference/native','configured_provider_id':name+'-configured','configured_model_alias':name+'-policy-alias','requested_model_id':'configured-only-model-id','permission_profile_id':'restricted-native','capabilities':{'unattended':False,'refresh':False,'concurrent_account':False,'portable_session':False,'explicit_resume':False},'runtime_home':str(home),'target_uid':41201+index}
+            profiles[name]={'schema_version':1,'profile_id':name+'-profile','profile_revision':'1','connector':name,'auth_mode':'api_credential','binary':{'path':str(target),'digest':file_hash(target),'version':'2.1.300' if name=='claude' else '0.162.1'},'credential_reference':'inference/native','configured_provider_id':name+'-configured','configured_model_alias':name+'-policy-alias','requested_model_id':'configured-only-model-id','permission_profile_id':'restricted-native','capabilities':{'unattended':False,'refresh':False,'concurrent_account':False,'portable_session':False,'explicit_resume':False},'runtime_home':str(home),'target_uid':41201+index,'configured_account_key':'declared-fixture-account-'+name}
         f.profile_file=f.path/'native-profiles.json';f.profile_file.write_text(json.dumps({'schema_version':1,'profiles':list(profiles.values())}));f.profile_file.chmod(0o600);f.env['HF_NATIVE_AUTH_PROFILES_FILE']=str(f.profile_file)
     f=IdentityFixture(extra_components=['14.2','14.3'],extra_setup=setup)
     try:
@@ -39,7 +42,7 @@ def main():
         check('native.unknown-profile-refused',lambda:expect(f.invoke('native.auth.snapshot',{'profile_id':'unknown'},component='14.3')[1].get('error',{}).get('code')=='NATIVE_AUTH_PROFILE_UNKNOWN','Unknown native profile accepted'))
         body=f.operation('14.3','native.auth.snapshot',{'profile_id':'claude-profile'});raw=canonical(body);seconds=str(int(time.time()));nonce=uid();signature=f.sign('operator',('\n'.join(('HYPERFIDE-REQUEST-V1','POST','/v1/invoke',f.origin,f.ids['operator'],seconds,nonce,sha(raw),''))).encode())
         args={'components':str(f.components),'policy':str(f.policy),'body':b64(raw),'headers':['HF-Credential-Id',f.ids['operator'],'HF-Request-Time',seconds,'HF-Request-Nonce',nonce,'HF-Request-Signature',signature]}
-        script="""import fs from 'node:fs';import {ComponentRegistry} from './services/hyperfide/dist/components/registry.js';import {validatePolicy} from './services/hyperfide/dist/policy/programme.js';const a=JSON.parse(fs.readFileSync(0,'utf8')),c=new AbortController(),policy=validatePolicy(JSON.parse(fs.readFileSync(a.policy,'utf8')),'fixture-identity-v1','control'),r=new ComponentRegistry({role:'control',env:process.env,signal:c.signal,policy});try{await r.load(a.components,process.cwd()+'/services/hyperfide/dist');const auth=r.resolveCapability('14.1','identity.authority',v=>typeof v.authenticate==='function'),i=await auth.authenticate(Buffer.from(a.body,'base64url'),a.headers,c.signal),n=r.resolveCapability('14.3','identity.native-auth',v=>typeof v.privateRuntime==='function');let forged=false,missing=false,runtimeAvailable=false;try{await n.privateRuntime({...i},'claude-profile')}catch(e){forged=e.code==='AUTH_REQUIRED'}try{const p=await n.privateRuntime(i,'claude-profile');runtimeAvailable=p.target_uid===41201&&p.snapshot.qualification.state==='UNQUALIFIED'&&p.runtime_home.endsWith('claude-empty-home')}catch(e){missing=e.code==='AUTH_BLOCKED'}process.stdout.write(JSON.stringify({forged,missing,runtimeAvailable}));}finally{await r.close();}"""
+        script="""import fs from 'node:fs';import {ComponentRegistry} from './services/hyperfide/dist/components/registry.js';import {validatePolicy} from './services/hyperfide/dist/policy/programme.js';const a=JSON.parse(fs.readFileSync(0,'utf8')),c=new AbortController(),policy=validatePolicy(JSON.parse(fs.readFileSync(a.policy,'utf8')),'fixture-identity-v1','control'),r=new ComponentRegistry({role:'control',env:process.env,signal:c.signal,policy});try{await r.load(a.components,process.cwd()+'/services/hyperfide/dist');const auth=r.resolveCapability('14.1','identity.authority',v=>typeof v.authenticate==='function'),i=await auth.authenticate(Buffer.from(a.body,'base64url'),a.headers,c.signal),n=r.resolveCapability('14.3','identity.native-auth',v=>typeof v.privateRuntime==='function');let forged=false,missing=false,runtimeAvailable=false;try{await n.privateRuntime({...i},'claude-profile')}catch(e){forged=e.code==='AUTH_REQUIRED'}try{const p=await n.privateRuntime(i,'claude-profile');runtimeAvailable=p.target_uid===41201&&p.snapshot.qualification.state==='UNQUALIFIED'&&p.runtime_home.endsWith('claude-empty-home')&&p.configured_account_key==='declared-fixture-account-claude'&&p.observed_account_id===null}catch(e){missing=e.code==='AUTH_BLOCKED'}process.stdout.write(JSON.stringify({forged,missing,runtimeAvailable}));}finally{await r.close();}"""
         p=subprocess.run(['node','--input-type=module','-e',script],cwd=ROOT,env=f.env,input=json.dumps(args),text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
         expect(p.returncode==0,'Actual private native capability process failed: '+p.stderr[:500]);private=json.loads(p.stdout)
         check('native.private-runtime.rejects-forged-context',lambda:expect(private['forged'],'Forged native runtime context accepted'))
@@ -68,5 +71,6 @@ def main():
             expect(p.returncode==0 and p.stdout=='refused','Wrapper/shim was treated as complete native binary identity: '+p.stdout+p.stderr[:300])
         check('native.shim-wrapper-cannot-stand-in-for-payload',wrapper_refused)
     finally:f.close()
+    write_identity_observations()
     return int(any(actual!='observed' for _,actual in RESULTS))
 if __name__=='__main__':raise SystemExit(main())
