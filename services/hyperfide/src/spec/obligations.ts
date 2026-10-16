@@ -1,10 +1,11 @@
 import path from 'node:path';
 import {promises as fs} from 'node:fs';
 import type {AuthorityTransaction} from '../transport/protocol.js';
-import {identityTransaction} from '../identity/enrollment.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition} from '../storage/dispositions.js';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {canonical,digest} from './import.js';
+import {canonical,digest,specTransaction} from './import.js';
 import type {StoredIntent} from './import.js';
 
 export interface ProofPins {organisation_id:string;run_id:string;task_id:string;spec_generation:string;spec_revision_id:string}
@@ -96,6 +97,7 @@ function obligations(policy:ProofPolicy,registry_digest:string):ProofObligations
 }
 export async function loadProofObligations(db:PrimaryClient,scope:ProofPins):Promise<ProofObligations>{
  pins(scope);
+ assertPrimaryTransaction(db);await readSemanticDisposition(db,scope);
  const result=await db.query(
  'SELECT pg_is_in_recovery() AS replica,p.registry_digest,p.criteria_digest,p.policy,t.criteria_digest AS current_criteria,t.definition,s.document AS accepted_document FROM hyperfide.proof_registries p '+
  'JOIN hyperfide.tasks t ON t.organisation_id=p.organisation_id AND t.run_id=p.run_id AND t.id=p.task_id '+
@@ -247,7 +249,7 @@ export async function registerProofPolicy(client:PrimaryClient,scope:{organisati
  return loadProofObligations(client,pin);
 }
 export function createComponent(_startup:ComponentContext):Component{
- const action=(review:boolean)=>async(input:unknown,context:ComponentContext):Promise<unknown>=>identityTransaction(context,async(tx,invocation)=>{
+ const action=(review:boolean)=>async(input:unknown,context:ComponentContext):Promise<unknown>=>specTransaction(context,'WRITE',async(tx,invocation)=>{
   if(!['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'].includes(invocation.principal.role))
    fail('ACTION_DENIED','Authenticated role cannot register accepted proof policy');
   return registerProofPolicy(tx,{organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id},input,review,operatingMaximum(context));
@@ -255,7 +257,7 @@ export function createComponent(_startup:ComponentContext):Component{
  return {apiVersion:1,actions:{
   'spec.proof.register':action(false),
   'spec.proof.review.register':action(true),
-  'spec.proof.inspect':async(input,context)=>identityTransaction(context,async(tx,invocation)=>{
+  'spec.proof.inspect':async(input,context)=>specTransaction(context,'READ',async(tx,invocation)=>{
    const request=exact(input,['run_id','task_id','spec_revision_id','spec_generation']);
    if(request.run_id!==invocation.principal.run_id||typeof request.spec_generation!=='string')fail('PROOF_REGISTRY_MISMATCH','Proof inspection is outside authenticated run scope');
    return loadProofObligations(tx,{organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id,

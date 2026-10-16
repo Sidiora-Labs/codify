@@ -74,7 +74,7 @@ def check(ident,callback):
 def artifact_root():
     path=Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/task-2.4-auth-standalone'));path.mkdir(parents=True,exist_ok=True);return path
 def setup(f):
-    for version,name in [(2,'0002-spec')]:
+    for version,name in [(2,'0002-spec'),(4,'0004-durability')]:
         raw=(ROOT/('services/hyperfide/migrations/'+name+'.sql')).read_bytes()
         f.sql("BEGIN;\n"+raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
     f.ids.update({key:str(uuid.uuid4()) for key in ['repository','accepted_spec','package','package2','task1','task2','task3','task4','task5']})
@@ -219,7 +219,7 @@ def probe(f):
         candidate=copy.deepcopy(review);mutation(candidate['policy'])
         check('proof.review.'+name,lambda candidate=candidate:refused(f,'spec.proof.review.register',candidate,'PROOF_MAPPING_INVALID'))
     def existing_tx():
-        script="import{createRequire}from'node:module';const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg');import{loadProofObligations}from'./services/hyperfide/dist/spec/obligations.js';const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();try{await c.query('BEGIN');const r=await loadProofObligations(c,JSON.parse(process.env.HF_PROOF_PINS));if(r.registry_digest!==process.env.HF_PROOF_EXPECTED)throw Error('mismatch');await c.query('ROLLBACK');}finally{await c.end();}"
+        script="import{createResourceContainer}from'./services/hyperfide/dist/storage/runtime.js';import{loadProofObligations}from'./services/hyperfide/dist/spec/obligations.js';const c=createResourceContainer({role:'control',env:process.env,signal:new AbortController().signal});try{await c.gateway.withPrimaryTransaction({timeoutMs:5000},async tx=>{const r=await loadProofObligations(tx,JSON.parse(process.env.HF_PROOF_PINS));if(r.registry_digest!==process.env.HF_PROOF_EXPECTED)throw Error('mismatch');});}finally{await c.close();}"
         env=f.env.copy();env.update(HF_PROOF_PINS=json.dumps(dict(inspection(value),organisation_id=f.ids['organisation'])),HF_PROOF_EXPECTED=saved['registry_digest'])
         result=subprocess.run(['node','--input-type=module','-e',script],cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
         expect(result.returncode==0,'Existing primary transaction loader failed')
