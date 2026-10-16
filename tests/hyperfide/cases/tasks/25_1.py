@@ -248,6 +248,25 @@ INSERT INTO symbol_fts VALUES('name_test');
   check("migration.import.large-cell-preflight",lambda:reject("import",{"source":"fixture","import_id":changed["import_id"],"table":"oversize_rows","offset":"0","limit":1},"MIGRATION_CELL_SIZE_BOUND"))
   check("migration.import.aggregate-batch-budget",lambda:reject("import",{"source":"fixture","import_id":changed["import_id"],"table":"aggregate_rows","offset":"0","limit":16},"MIGRATION_BATCH_SIZE_BOUND"))
   check("migration.import.oversize-no-partial-rows",lambda:expect(sql("SELECT count(*) FROM hyperfide_history.rows WHERE table_name IN ('oversize_rows','aggregate_rows');")=="0","bounded refusal committed partial history"))
+  from sqlite_schema_fixture import source_variant
+  variant,additions,widen,variant_provenance=source_variant(ROOT,source/"schema-variants.db")
+  profiles.append(dict(profiles[0],id="source-ddl",source_id="10000000-0000-0000-0000-000000000002",database="schema-variants.db",external=[],archive_approved_digests=[]));pf.write_text(json.dumps(profiles))
+  old_source_ddl=variant.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()
+  old=ok("snapshot",{"source":"source-ddl"})
+  def table_columns(snapshot,table):
+   return {col["name"] for t in snapshot["inventory"]["tables"] if t["name"]==table for col in t["columns"]}
+  for table,columns in additions.items():
+   check("migration.source-v18.before."+table,lambda table=table,columns=columns:expect(not set(columns)&table_columns(old,table),"source-derived pre-addition shape was silently upgraded"))
+  check("migration.source-v18.before.journal",lambda:expect(not any(t["name"]=="journal_applied" for t in old["inventory"]["tables"]),"optional journal table invented"))
+  check("migration.source-v18.source-unchanged",lambda:expect(variant.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()==old_source_ddl,"snapshot mutated source-derived schema"))
+  widen()
+  new=ok("snapshot",{"source":"source-ddl"})
+  for table,columns in additions.items():
+   check("migration.source-v18.after."+table,lambda table=table,columns=columns:expect(set(columns)<=table_columns(new,table),"source-derived v18 additive columns omitted"))
+  check("migration.source-v18.after.journal",lambda:expect(any(t["name"]=="journal_applied" for t in new["inventory"]["tables"]),"actual optional journal DDL omitted"))
+  check("migration.source-v18.virtual-shadow-ddl",lambda:expect(any(t["type"]=="virtual" for t in new["inventory"]["tables"]) and any(t["type"]=="shadow" for t in new["inventory"]["tables"]) and all(o.get("sql") for o in new["inventory"]["objects"] if o["type"]=="table" and not o["name"].startswith("sqlite_")),"actual C schema virtual/shadow/source DDL not preserved"))
+  (artifacts()/"source-variants.json").write_text(json.dumps(variant_provenance,sort_keys=True))
+  variant.close()
   c.execute("UPDATE meta SET value='19' WHERE key='schema_version'");c.commit()
   check("migration.version.future-refused",lambda:reject("snapshot",{"source":"fixture"},"MIGRATION_VERSION"))
   def wrong_schema():
