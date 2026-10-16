@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "12.4",
+  "task": "12.4",
+  "roles": [
+    "control"
+  ],
+  "module": "runner/bridge.js",
+  "entry": "createRemoteComponent",
+  "api_version": 1,
+  "actions": [
+    "runner.job.claim"
+  ],
+  "requires": [
+    "12.1",
+    "14.1",
+    "5.1"
+  ]
+}
