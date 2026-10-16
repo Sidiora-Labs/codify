@@ -302,7 +302,7 @@ export function createAcceptedRunRecoveryVerifier(options:{
   const [{assertExternalAuthorityCurrent,lookupAuthorityActivation},{externalFenceTopologyDigest}]=await Promise.all([import('../storage/durability.js'),import('./fencing.js')]);
   const attestation=await assertExternalAuthorityCurrent(options.resources,options.journal,{deployment_id:input.deployment_id});
   const activation=await lookupAuthorityActivation(options.resources,{deployment_id:input.deployment_id,operation_id:input.activation_operation_id,expected_previous_epoch:input.external_previous_epoch,database_predecessor_epoch:input.database_predecessor_epoch,epoch:input.target_epoch});
-  const physical=await options.fenceJournal.readCompleted({deployment_id:input.deployment_id,operation_id:input.activation_operation_id,source_epoch:input.external_previous_epoch,topology_digest:externalFenceTopologyDigest(trusted)});
+  const physical=await options.fenceJournal.readCompleted({deployment_id:input.deployment_id,operation_id:input.activation_operation_id,source_epoch:input.external_previous_epoch,topology_digest:externalFenceTopologyDigest(trusted),expected_proof_digest:input.fence_proof_digest});
   //04 stores the exact JSON bytes hash of the full eight-field receipt.
   const physicalDigest='sha256:'+createHash('sha256').update(JSON.stringify(physical)).digest('hex');
   if(physicalDigest!==activation.evidence_digest||input.fence_proof_digest!==activation.evidence_digest||attestation.epoch!==input.target_epoch||attestation.evidence_digest!==activation.evidence_digest||attestation.sequence!==input.external_journal_sequence)
