@@ -37,10 +37,11 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
   if(options.allowExpired&&operation!=='CLEANUP')fail('INVALID_REQUEST','Expired authority may only be inspected for cleanup');
   if(operation!=='CLEANUP'&&!(['RENEWAL','CHECKPOINT'].includes(operation)?['READY','RUNNING','DRAINING','PAUSING','PAUSED']:['READY','RUNNING','DRAINING']).includes(run.rows[0].state))
     fail('RUN_NOT_EXECUTING','Run state does not permit this compute operation');
-  const boot=await tx.query<{boot_generation:string;preparation_digest:string|null}>('SELECT boot_generation,preparation_digest FROM hyperfide.sandboxes '+
+  const boot=await tx.query<{boot_generation:string;preparation_digest:string|null;desired_state:string;observed_state:string}>('SELECT boot_generation,preparation_digest,desired_state,observed_state FROM hyperfide.sandboxes '+
     'WHERE organisation_id=$1 AND id=$2 FOR SHARE',[token.organisation_id,token.sandbox_id]);
   if(boot.rows[0]?.boot_generation!==token.sandbox_boot_generation)
     fail('STALE_SANDBOX_BOOT','Compute token belongs to a previous sandbox boot');
+  if(operation!=='CLEANUP'&&(boot.rows[0]!.desired_state!=='RUNNING'||boot.rows[0]!.observed_state!=='RUNNING'))fail('SANDBOX_NOT_ADMITTING','Sandbox destruction or stop intent forbids further execution');
   const allocations=await tx.query(
     "SELECT a.id FROM hyperfide.slot_allocations a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.attempt_id=$3 AND a.attempt_generation=$4 AND a.slot_id=$5 AND a.sandbox_id=$6 AND a.sandbox_boot_generation=$7 AND a.state='ACTIVE' AND w.state='ALLOCATED' FOR UPDATE OF a,w",
     [token.organisation_id,token.run_id,token.attempt_id,token.attempt_generation,token.slot_id,token.sandbox_id,token.sandbox_boot_generation]);
@@ -209,7 +210,7 @@ export function createComponent(context:ComponentContext):Component{
   return {apiVersion:1,capabilities:{'scheduler.compute.v1':Object.freeze({assertCurrentCompute,releaseCompute,renewCompute,fenceCompute,parseComputeToken})},actions:{
     'scheduler.lease.renew':async (value,context)=>{
       const input=fields(value,['token','lease_ms']),token=parseComputeToken(input.token);
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context,tx=>assertCurrentCompute(tx,token,{operation:'RENEWAL'})).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
         await requireWorker(tx,token,context);return renewCompute(tx,token,
           boundedInteger(input.lease_ms,'lease_ms',1000,300000));
       });
@@ -217,7 +218,7 @@ export function createComponent(context:ComponentContext):Component{
     'scheduler.compute.cancel':async (value,context)=>{
       const input=fields(value,['token','request_id','leader_generation'],['package_generation']);
       const token=parseComputeToken(input.token),actor=actorFor(context,token,input),request=uuid(input.request_id,'request_id');
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
         await lockRun(tx,{organisation_id:token.organisation_id,run_id:token.run_id});
         const replay=await operationReplay(tx,token,actor.session_id,'scheduler.cancel',request,input);
         if(replay!==undefined)return replay;
@@ -236,7 +237,7 @@ export function createComponent(context:ComponentContext):Component{
       const input=fields(value,['organisation_id','run_id','authority_epoch','leader_generation'],['package_generation','limit']);
       const scope={organisation_id:uuid(input.organisation_id,'organisation_id'),run_id:uuid(input.run_id,'run_id')};
       const actor=actorFor(context,scope,input);
-      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},
+      return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},
         tx=>expireCompute(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),
           input.limit===undefined?100:boundedInteger(input.limit,'limit',1,1000),dispatchRecipients(context,'native')));
     }

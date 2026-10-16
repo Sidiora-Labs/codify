@@ -33,6 +33,10 @@ class SchedulerFixture(PacketFixture):
    for dimension,limit in limits.items():
     ident=uid();f.accounts[dimension]=ident
     f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,provenance_digest,qualification_state) VALUES($1,$2,$3,$4,'EXECUTION',$5,$6,'QUALIFIED')",[i["organisation"],ident,i["pool"],dimension,str(limit),sha(b"trusted-fixture-budget")])
+   f.physical_accounts={}
+   for dimension,limit in {"SANDBOX":"100","CPU_MILLIS":"400000","MEMORY_BYTES":"858993459200","DISK_BYTES":"2147483648000"}.items():
+    ident=uid();f.physical_accounts[dimension]=ident
+    f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,capacity_class,configured_limit,provenance_digest,qualification_state) VALUES($1,$2,$3,$4,'PHYSICAL',$5,$6,'QUALIFIED')",[i["organisation"],ident,i["pool"],dimension,limit,sha(b"fixed-test-pool-physical-envelope")])
    f.definitions={}
    for name,feature,package_key,path in (("a","alpha","package","src/claim-a.ts"),("b","beta","wave_package","src/claim-b.ts"),("overlap","alpha","package","src/claim-a.ts"),("missing","alpha","package","src/missing.ts")):
     task_id=uid();slot_id=uid();i["task_"+name]=task_id;i["slot_"+name]=slot_id
@@ -81,7 +85,7 @@ process.stdout.write(JSON.stringify({result}));}catch(e){process.stdout.write(JS
   result=subprocess.run(["node","--input-type=module","-e",script],input=json.dumps(payload),text=True,cwd=ROOT,env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
   expect(result.returncode==0,"Trusted product API probe failed: "+result.stderr[:1500]);return json.loads(result.stdout)
  def counts(self):
-  return self.sql("SELECT dimension,reserved::text,allocated::text FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 ORDER BY dimension",[self.ids["organisation"],self.ids["pool"]])
+  return self.sql("SELECT dimension,reserved::text,allocated::text FROM hyperfide.capacity_accounts WHERE organisation_id=$1 AND pool_id=$2 AND capacity_class='EXECUTION' ORDER BY dimension",[self.ids["organisation"],self.ids["pool"]])
 def main():
  f=SchedulerFixture();i=f.ids
  try:
@@ -118,6 +122,8 @@ def main():
    expect(f.request(altered,key="manager")[1].get("error",{}).get("code")=="IDEMPOTENCY_CONFLICT","Fresh inner request bypassed protocol identity")
   check("claim.protocol.identity",envelope_conflict)
   check("claim.no-false-qualification",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.tasks WHERE state IN ('QUALIFIED','INTEGRATED','DONE')")[0]["n"]==0,"Claim manufactured qualification"))
+  f.sql("UPDATE hyperfide.sandboxes SET desired_state='DESTROYED' WHERE organisation_id=$1 AND id=$2",[i["organisation"],i["sandbox"]])
+  check("claim.destroy-intent.blocks-continuation",lambda:expect(f.primary("return leases.assertCurrentCompute(tx,data.token,{operation:'ADVANCE'});",{"token":f.claims["a"]["result"]["token"]}).get("error",{}).get("code")=="SANDBOX_NOT_ADMITTING","Destroy intent allowed continued execution"))
  finally:
   db=f.database;path=f.path;port=f.port;f.close()
   def cleanup():
