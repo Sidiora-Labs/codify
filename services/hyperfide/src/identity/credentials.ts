@@ -120,7 +120,7 @@ export interface IsolationPermitExpectation {
  readonly resource_reference?:string;readonly resource_topology_digest?:string;
 }
 export interface VerifiedIsolationPermit extends IsolationPermitClaims {readonly permit_digest:string;readonly issuer_key_id:string}
-export interface IsolationPermitVerifier {verify(serialized:Buffer|string,expected:IsolationPermitExpectation):VerifiedIsolationPermit}
+export interface IsolationPermitVerifier {verifySigned(serialized:Buffer|string):VerifiedIsolationPermit;verify(serialized:Buffer|string,expected:IsolationPermitExpectation):VerifiedIsolationPermit}
 const verifiedIsolationPermits=new WeakSet<object>();
 function canonicalPermitJSON(value:unknown):string {
  const sorted=(v:unknown):unknown=>Array.isArray(v)?v.map(sorted):object(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sorted(v[k])])):v;
@@ -130,16 +130,19 @@ function digestText(v:unknown):v is string{return typeof v==='string'&&/^sha256:
 function referenceKey(v:unknown):v is string{return typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(v);}
 function validateIsolationClaims(v:unknown,nowMs:number):asserts v is IsolationPermitClaims {
  exact(v,['schema_version','purpose','deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest','resources','issued_at','expires_at','nonce']);
- if(v.schema_version!==1||v.purpose!=='EXTERNAL_WRITER_ISOLATION_ONLY'||!referenceKey(v.deployment_id)||!uuid(v.operation_id)||!uuid(v.organisation_id)||!uuid(v.run_id)||v.source_epoch!==null&&!uuid(v.source_epoch)||!digestText(v.topology_digest)||!uuid(v.nonce)||!Array.isArray(v.resources)||v.resources.length<1||v.resources.length>256)fail('ISOLATION_PERMIT_INVALID','Isolation-only permit bindings are invalid');
+ if(v.schema_version!==1||v.purpose!=='EXTERNAL_WRITER_ISOLATION_ONLY'||!uuid(v.deployment_id)||!uuid(v.operation_id)||!uuid(v.organisation_id)||!uuid(v.run_id)||v.source_epoch!==null&&!uuid(v.source_epoch)||!digestText(v.topology_digest)||!uuid(v.nonce)||!Array.isArray(v.resources)||v.resources.length<1||v.resources.length>256)fail('ISOLATION_PERMIT_INVALID','Isolation-only permit bindings are invalid');
  if(typeof v.issued_at!=='string'||typeof v.expires_at!=='string'||!Number.isFinite(Date.parse(v.issued_at))||!Number.isFinite(Date.parse(v.expires_at))||new Date(v.issued_at).toISOString()!==v.issued_at||new Date(v.expires_at).toISOString()!==v.expires_at)fail('ISOLATION_PERMIT_INVALID','Canonical UTC permit times required');
  const issued=Date.parse(v.issued_at),expires=Date.parse(v.expires_at);
  if(!Number.isFinite(nowMs)||issued>nowMs+30000||expires<=nowMs||expires<=issued||expires-issued>3600000)fail('ISOLATION_PERMIT_EXPIRED','Isolation permit time window is not current');
  let previous='';for(const r of v.resources){exact(r,['reference_key','topology_digest']);if(!referenceKey(r.reference_key)||!digestText(r.topology_digest)||r.reference_key<=previous)fail('ISOLATION_PERMIT_INVALID','Exact sorted unique resource allowlist required');previous=r.reference_key;}
 }
 export function isVerifiedIsolationPermit(value:unknown):value is VerifiedIsolationPermit{return object(value)&&verifiedIsolationPermits.has(value);}
-export function assertIsolationPermit(value:unknown,expected:IsolationPermitExpectation):asserts value is VerifiedIsolationPermit {
+export function assertVerifiedIsolationPermit(value:unknown):asserts value is VerifiedIsolationPermit {
  if(!isVerifiedIsolationPermit(value))fail('ISOLATION_PERMIT_REQUIRED','A genuinely verified isolation-only permit is required');
  const {permit_digest:_digest,issuer_key_id:_issuer,...claims}=value;validateIsolationClaims(claims,Date.now());
+}
+export function assertIsolationPermit(value:unknown,expected:IsolationPermitExpectation):asserts value is VerifiedIsolationPermit {
+ assertVerifiedIsolationPermit(value);
  exact(expected,['deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest',...(Object.hasOwn(expected,'resource_reference')?['resource_reference']:[]),...(Object.hasOwn(expected,'resource_topology_digest')?['resource_topology_digest']:[])]);
  for(const key of ['deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest'] as const)if(value[key]!==expected[key])fail('ISOLATION_PERMIT_SCOPE','Isolation permit binding differs from the durable operation');
  if((expected.resource_reference===undefined)!==(expected.resource_topology_digest===undefined))fail('ISOLATION_PERMIT_SCOPE','Complete resource identity is required');
@@ -161,11 +164,11 @@ export async function loadIsolationPermitVerifier(configFile:string):Promise<Iso
  const config=strictJSON(bytes!);exact(config,['schema_version','issuers']);if(config.schema_version!==1||!Array.isArray(config.issuers)||!config.issuers.length||config.issuers.length>16)fail('ISOLATION_PERMIT_CONFIG','Explicit bounded trusted operator public keys required');
  const keys=new Map<string,ReturnType<typeof createPublicKey>>();
  for(const issuer of config.issuers){exact(issuer,['key_id','public_key_b64']);if(typeof issuer.key_id!=='string'||!NAME.test(issuer.key_id)||keys.has(issuer.key_id))fail('ISOLATION_PERMIT_CONFIG','Unique trusted isolation issuer required');const publicBytes=base64(issuer.public_key_b64,32);keys.set(issuer.key_id,createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),publicBytes]),format:'der',type:'spki'}));}
- return Object.freeze({verify:(serialized:Buffer|string,expected:IsolationPermitExpectation):VerifiedIsolationPermit=>{
+ const verifySigned=(serialized:Buffer|string):VerifiedIsolationPermit=>{
   const envelopeBytes=Buffer.isBuffer(serialized)?Buffer.from(serialized):Buffer.from(serialized,'utf8');if(envelopeBytes.length>131072)fail('ISOLATION_PERMIT_INVALID','Bounded isolation permit envelope required');
   const envelope=strictJSON(envelopeBytes);exact(envelope,['schema_version','key_id','payload_b64','signature_b64']);if(envelope.schema_version!==1||typeof envelope.key_id!=='string'||typeof envelope.payload_b64!=='string'||!keys.has(envelope.key_id))fail('ISOLATION_PERMIT_INVALID','Unknown isolation permit issuer');
   const payload=base64(envelope.payload_b64),signature=base64(envelope.signature_b64,64),claims=strictJSON(payload);validateIsolationClaims(claims,Date.now());
   if(canonicalPermitJSON(claims)!==payload.toString('utf8')||canonicalPermitJSON(envelope)!==envelopeBytes.toString('utf8')||!verify(null,isolationSigningBytes(envelope.key_id,payload),keys.get(envelope.key_id)!,signature))fail('ISOLATION_PERMIT_INVALID','Isolation permit bytes or signature are invalid');
-  const result=frozen({...claims,permit_digest:hash(envelopeBytes),issuer_key_id:envelope.key_id}) as VerifiedIsolationPermit;verifiedIsolationPermits.add(result);assertIsolationPermit(result,expected);return result;
- }});
+  const result=frozen({...claims,permit_digest:hash(envelopeBytes),issuer_key_id:envelope.key_id}) as VerifiedIsolationPermit;verifiedIsolationPermits.add(result);return result;
+ };return Object.freeze({verifySigned,verify:(serialized:Buffer|string,expected:IsolationPermitExpectation)=>{const result=verifySigned(serialized);assertIsolationPermit(result,expected);return result;}});
 }
