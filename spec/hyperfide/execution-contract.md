@@ -135,6 +135,10 @@ Each immutable preparation manifest contains:
 - Required network routes, registry availability, health capabilities, test/browser capabilities, storage limits, process lifetime policy, and credential **references**, without credential values.
 - Preparation evidence and expiration/rebuild policy. A profile is not reusable for an incompatible source/lock/toolchain configuration merely because its name matches.
 
+The recipe `FilePin` binds the exact UTF-8 bytes of a versioned JSON preparation policy. Version 1 has exactly these fields: `schema_version: 1`, `kind: "hyperfide.preparation-policy"`, `commands: [{repository, argv, timeout_seconds}]`, `cache_scope`, `cache_paths: [{repository, path}]`, `minimum_free_bytes`, `minimum_free_inodes`, and `network_timeout_milliseconds`. Repository names must belong to the parent manifest; argument vectors are bounded and contain no NUL bytes. Each command timeout is between 1 and 3,600 seconds, and their total cannot exceed the profile lifetime. Storage minima use canonical nonnegative decimal strings; the network timeout is between 100 and 10,000 milliseconds.
+
+The pure policy reader verifies the full parent manifest and the recipe bytes against its exact `FilePin`. Staging and execution recheck the same verified policy rather than inferring commands from a script digest. Unsupported legacy script bytes or unknown formats are refused explicitly; a recipe digest mismatch is a failure. Effective-result derivation preserves the complete recipe `FilePin` across the parent/result lineage. Parsing a policy or deriving a profile does not grant preparation readiness.
+
 Prepare heavy dependencies remotely, then clone/materialise exact assignment inputs into each writable slot. Shared base source and caches must be immutable or protected against simultaneous writes. Do not bake credentials, native authenticated session state, live ownership, or active agent identities into reusable bases.
 
 ### 4.2 Assignment packet
