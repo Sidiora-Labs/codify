@@ -1,3 +1,4 @@
+import {loadExecutionPacket} from '../hierarchy/packets.js';
 import {randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
@@ -32,6 +33,7 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
   if(!run.rows[0]||run.rows[0].authority_epoch!==token.authority_epoch)
     fail('STALE_AUTHORITY_EPOCH','Compute token does not belong to the active run epoch');
   const operation=options.operation??'ADVANCE';
+  if(options.allowExpired&&operation!=='CLEANUP')fail('INVALID_REQUEST','Expired authority may only be inspected for cleanup');
   if(operation!=='CLEANUP'&&!(['RENEWAL','CHECKPOINT'].includes(operation)?['READY','RUNNING','DRAINING','PAUSING','PAUSED']:['READY','RUNNING','DRAINING']).includes(run.rows[0].state))
     fail('RUN_NOT_EXECUTING','Run state does not permit this compute operation');
   const boot=await tx.query<{boot_generation:string;preparation_digest:string|null}>('SELECT boot_generation,preparation_digest FROM hyperfide.sandboxes '+
@@ -74,6 +76,12 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     '$1::timestamptz=$2::timestamptz AS same_expiry',[lease.expires_at,attempt.lease_expires_at]);
   if(!clock.rows[0]!.same_expiry)fail('AUTHORITY_INCONSISTENT','Attempt and compute lease expiries do not agree');
   if(!options.allowExpired&&!clock.rows[0]!.live)fail('COMPUTE_LEASE_EXPIRED','An expired compute lease cannot renew or submit');
+  const packet=object((await loadExecutionPacket(tx,{organisation_id:token.organisation_id,run_id:token.run_id,digest:attempt.input_packet_digest})).packet);
+  const identity=object(object(packet.mandatory).identity);
+  if(object(object(packet.mandatory).runtime).preparation_digest!==boot.rows[0]!.preparation_digest)
+   fail('STALE_PREPARATION','Current sandbox preparation differs from accepted compute inputs');
+  if(identity.task_id!==token.task_id||identity.attempt_id!==token.attempt_id||identity.attempt_generation!==token.attempt_generation||identity.spec_revision_id!==task.spec_revision_id||identity.spec_generation!==task.spec_generation||identity.criteria_digest!==task.criteria_digest)
+   fail('STALE_TASK_SPEC','Compute packet no longer matches accepted task intent');
   return {...token,compute_lease_id:lease.id,lease_expires_at:lease.expires_at,
     primary_now:clock.rows[0]!.primary_now,feature_package_id:task.feature_package_id,
     input_packet_digest:attempt.input_packet_digest,spec_revision_id:task.spec_revision_id,

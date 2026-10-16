@@ -28,7 +28,11 @@ CREATE TABLE hyperfide.resource_waiters (
  request_id uuid NOT NULL,
  pool_id uuid NOT NULL,
  owner_session_id uuid NOT NULL,
- task_id uuid,
+ task_id uuid NOT NULL,
+ spec_revision_id uuid NOT NULL,
+ spec_generation bigint NOT NULL CHECK(spec_generation>=1),
+ criteria_digest hyperfide.digest NOT NULL,
+ resource_policy_digest hyperfide.digest NOT NULL,
  job_kind text NOT NULL CHECK(job_kind IN ('AGENT','BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION','EXCLUSIVE_SERVICE')),
  priority integer NOT NULL CHECK(priority BETWEEN -1000 AND 1000),
  state text NOT NULL DEFAULT 'WAITING' CHECK(state IN ('WAITING','ADMITTED','CANCELLED','EXPIRED')),
@@ -300,3 +304,15 @@ ALTER TABLE hyperfide.reservations ADD CONSTRAINT reservation_request_identity U
 ALTER TABLE hyperfide.resource_job_allocations ADD CONSTRAINT job_reservation_binding FOREIGN KEY(organisation_id,run_id,reservation_id,request_id) REFERENCES hyperfide.reservations(organisation_id,run_id,id,request_id);
 ALTER TABLE hyperfide.worker_slots DROP CONSTRAINT worker_slots_capacity_kind_check;
 ALTER TABLE hyperfide.worker_slots ADD CONSTRAINT worker_slots_capacity_kind_check CHECK(capacity_kind IN ('AGENT','BUILD','TEST','INDEX','REVIEW','INTEGRATION','PREPARATION','EXCLUSIVE_SERVICE'));
+
+-- Job reservations retain the accepted task and resource-policy identity independently
+-- of an execution packet or native command digest.
+CREATE FUNCTION hyperfide.scheduler_waiter_pins() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM hyperfide.tasks t WHERE t.organisation_id=NEW.organisation_id AND t.run_id=NEW.run_id AND t.id=NEW.task_id AND t.spec_revision_id=NEW.spec_revision_id AND t.spec_generation=NEW.spec_generation AND t.criteria_digest=NEW.criteria_digest) THEN
+ RAISE EXCEPTION 'Job pins do not match accepted task intent' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER accepted_resource_pins BEFORE INSERT ON hyperfide.resource_waiters FOR EACH ROW EXECUTE FUNCTION hyperfide.scheduler_waiter_pins();
+CREATE TRIGGER immutable_resource_pins BEFORE UPDATE ON hyperfide.resource_waiters FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('task_id','spec_revision_id','spec_generation','criteria_digest','resource_policy_digest');

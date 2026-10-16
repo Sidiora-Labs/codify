@@ -40,6 +40,7 @@ export class DispatchReconciler {
   const found=await tx.query<DispatchRow>('SELECT * FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',
    [scope.organisation_id,scope.run_id,request_id]);
   const row=found.rows[0];if(!row)fail('DISPATCH_MISSING','Dispatch intent does not exist');
+  if(['STOPPED','ABSENT','COMPLETED','FAILED'].includes(row.state))return {operation_id:row.id,state:row.state,replayed:true,replacement_allowed:false,resource_release_confirmed:false};
   if(!this.reader)fail('DEPENDENCY_UNAVAILABLE','Trusted central native receipt reconciliation is required');
   const token=rowToken(scope,row);
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':dispatch:'+row.attempt_id]);
@@ -64,7 +65,7 @@ export class DispatchReconciler {
    try{await assertCurrentCompute(tx,token);authoritative=true;}
    catch(error){
     const code=typeof error==='object'&&error!==null&&'code' in error?String(error.code):'';
-    if(!['STALE_AUTHORITY_EPOCH','STALE_SANDBOX_BOOT','STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','ACTIVE_SUBMISSION_CUSTODY','EXECUTION_HELD','RUN_NOT_EXECUTING'].includes(code))throw error;
+    if(!['STALE_AUTHORITY_EPOCH','STALE_SANDBOX_BOOT','STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','ACTIVE_SUBMISSION_CUSTODY','EXECUTION_HELD','RUN_NOT_EXECUTING','STALE_TASK_SPEC','STALE_PREPARATION','COMPUTE_ALLOCATION_INVALID'].includes(code))throw error;
    }
   }else{
    if(!observation.terminal_kind)fail('NATIVE_RECEIPT_INCOMPLETE','A terminal observation must identify the observed terminal condition');

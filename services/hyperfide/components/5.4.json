@@ -12,7 +12,9 @@
     "scheduler.resources.queue",
     "scheduler.resources.admit",
     "scheduler.resources.inspect",
-    "scheduler.resources.release"
+    "scheduler.resources.release",
+    "scheduler.resources.eligible",
+    "scheduler.resources.demand"
   ],
   "requires": [
     "5.1",

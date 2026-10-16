@@ -425,6 +425,8 @@ export async function requirePacketAdmission(tx:PrimaryTransaction,input:ClaimRe
  runtime.sandbox_id!==input.sandbox_id||runtime.slot_id!==input.slot_id||runtime.sandbox_boot_generation!==input.sandbox_boot_generation||
  intent.registry_digest!==proof.registry_digest||input.package_generation!==undefined&&identity.package_generation!==input.package_generation)
   fail('EXECUTION_PACKET_MISMATCH','Prospective execution packet does not pin this exact admission');
+ const prepared=await tx.query<{preparation_digest:string|null}>('SELECT preparation_digest FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.sandbox_id]);
+ if(prepared.rows[0]?.preparation_digest!==runtime.preparation_digest)fail('PREPARATION_MISMATCH','Current sandbox preparation differs from the admitted packet');
  return packetPolicyResources(loaded.packet);
 }
 
@@ -461,15 +463,19 @@ export async function allocateReservations(tx:PrimaryTransaction,input:Scheduler
 }
 export async function assertJobReservation(tx:PrimaryTransaction,input:SchedulerScope&{
  task_id:string;job_kind:string;reservation_id:string;
-}):Promise<{request_id:string;pool_id:string;reservations:unknown[];resource_requirements:PacketResourceRequirements}>{
+}):Promise<{request_id:string;pool_id:string;reservations:unknown[];resource_requirements:PacketResourceRequirements;spec_revision_id:string;spec_generation:string;criteria_digest:string;resource_policy_digest:string}>{
  assertPrimaryTransaction(tx);await lockRun(tx,input);
  if(!['BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION'].includes(input.job_kind))fail('INVALID_REQUEST','Unknown qualified job kind');
- const row=await tx.query<{request_id:string;pool_id:string}>(
- "SELECT r.request_id,w.pool_id FROM hyperfide.reservations r JOIN hyperfide.resource_waiters w ON w.organisation_id=r.organisation_id AND w.run_id=r.run_id AND w.request_id=r.request_id JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id "+
+ const row=await tx.query<{request_id:string;pool_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string;resource_policy_digest:string}>(
+ "SELECT r.request_id,w.pool_id,w.spec_revision_id,w.spec_generation,w.criteria_digest,w.resource_policy_digest FROM hyperfide.reservations r JOIN hyperfide.resource_waiters w ON w.organisation_id=r.organisation_id AND w.run_id=r.run_id AND w.request_id=r.request_id JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id "+
  "WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=$3 AND w.task_id=$4 AND w.job_kind=$5 AND w.state='ADMITTED' AND r.state='ALLOCATED' AND a.dimension=$5 AND a.qualification_state='QUALIFIED'",
  [input.organisation_id,input.run_id,input.reservation_id,input.task_id,input.job_kind]);
  const selected=row.rows[0];if(!selected)fail('JOB_RESERVATION_INVALID','Job requires its own admitted allocated reservation in a qualified account');
  const policy=await jobPolicy(tx,input,input.task_id),expected=await approvedDimensions(tx,input,selected.pool_id,policy,input.job_kind);
+ const accepted=await tx.query<{spec_revision_id:string;spec_generation:string;criteria_digest:string}>('SELECT spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[input.organisation_id,input.run_id,input.task_id]);
+ if(!accepted.rows[0]||['spec_revision_id','spec_generation','criteria_digest'].some(key=>accepted.rows[0]![key as keyof typeof accepted.rows[0]]!==selected[key as 'spec_revision_id'|'spec_generation'|'criteria_digest'])||selected.resource_policy_digest!==requestDigest(policy))
+ fail('JOB_POLICY_STALE','Job reservation pins no longer match accepted task intent');
+
  const reservations=await tx.query<{id:string;capacity_account_id:string;quantity:string;state:string;qualification_state:string;live:boolean}>(
  'SELECT r.id,r.capacity_account_id,r.quantity,r.state,a.qualification_state,r.expires_at>clock_timestamp() AS live FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.request_id=$3 ORDER BY r.capacity_account_id FOR SHARE OF r,a',
  [input.organisation_id,input.run_id,selected.request_id]);
@@ -580,7 +586,7 @@ export async function releaseJobAllocation(tx:PrimaryTransaction,input:JobLeaseR
   fail('JOB_ALLOCATION_STALE','Cleanup must identify the exact job allocation and assignee');
  if(row.state!=='ACTIVE')return {allocation_id:row.id,state:row.state,resources_still_counted:row.state!=='RELEASED',replayed:true};
  await tx.query("UPDATE hyperfide.resource_job_allocations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[input.organisation_id,input.run_id,row.id]);
- await tx.query("UPDATE hyperfide.reservations SET state='RELEASE_PENDING',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 AND state IN ('PROVISIONING','ALLOCATED')",[input.organisation_id,input.run_id,row.request_id]);
+ await tx.query("UPDATE hyperfide.reservations r SET state='RELEASE_PENDING',state_version=r.state_version+1 FROM hyperfide.capacity_accounts c WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.request_id=$3 AND r.state IN ('PROVISIONING','ALLOCATED') AND c.organisation_id=r.organisation_id AND c.id=r.capacity_account_id AND c.capacity_class<>'PHYSICAL'",[input.organisation_id,input.run_id,row.request_id]);
  await tx.query("UPDATE hyperfide.worker_slots SET state='DRAINING',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND sandbox_id=$3 AND boot_generation=$4 AND state='ALLOCATED'",[input.organisation_id,row.slot_id,row.sandbox_id,row.sandbox_boot_generation]);
  return {allocation_id:row.id,state:'RELEASE_PENDING',resources_still_counted:true,replayed:false};
 }
