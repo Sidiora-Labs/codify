@@ -2,7 +2,10 @@
   "actions": [
     "postgresql.fixture.create",
     "postgresql.fixture.drop",
-    "https.fixture.listen"
+    "https.fixture.listen",
+    "git.fixture.create",
+    "filesystem.fixture.create",
+    "filesystem.fixture.remove"
   ],
   "argv": [
     "python3",
@@ -32,6 +35,20 @@
     "readiness.observed-later-cleanup",
     "readiness.exact-manifest-byte-binding",
     "readiness.reject-manifest-changed-after-checker",
+    "readiness.portable-actual-canonical-component-only",
+    "readiness.portable-closed-environment",
+    "readiness.portable-refuses-exposed-stage",
+    "readiness.portable-refuses-busy-stage",
+    "readiness.portable-refuses-missing-relocation",
+    "readiness.portable-refuses-changed-original-tool",
+    "readiness.portable-refuses-changed-artifact",
+    "readiness.portable-refuses-unmapped-original-source",
+    "readiness.portable-anchored-receipt-unchanged",
+    "readiness.portable-temporary-sources-and-stage-removed",
+    "readiness.protected-scoped-index-v2",
+    "readiness.refuses-writable-admission-index",
+    "readiness.refuses-symbolic-admission-index",
+    "readiness.refuses-nonportable-index-v1",
     "readiness.actual-service-refuses-unadmitted-proof",
     "readiness.actual-service-rejects-empty-inventory",
     "readiness.actual-seal-refuses-unadmitted-proof",
@@ -58,7 +75,8 @@
   ],
   "required_artifacts": [
     "docs/task-28.3-cleanup.json",
-    "docs/task-28.3-databases.json"
+    "docs/task-28.3-databases.json",
+    "docs/task-28.3-portable.json"
   ],
   "required_env": [
     "DATABASE_URL"
@@ -67,6 +85,11 @@
     {
       "id": "task28.3-fixture-resources",
       "kind": "fixture-resource-set",
+      "scope": "task28.3-disposable"
+    },
+    {
+      "id": "task28.3-portable-fixtures",
+      "kind": "filesystem-fixture",
       "scope": "task28.3-disposable"
     }
   ],
@@ -103,7 +126,17 @@
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
     "tests/hyperfide/registry.json",
-    "tests/hyperfide/support/identity_fixture.py"
+    "tests/hyperfide/support/identity_fixture.py",
+    "services/hyperfide/dist/release-proof-assets/bootstrap-contract.md",
+    "services/hyperfide/dist/release-proof-assets/check-evidence.py",
+    "services/hyperfide/dist/release-proof-assets/inspect-proof.py",
+    "services/hyperfide/dist/release-proof-assets/manifest.schema.json",
+    "services/hyperfide/dist/release-proof-assets/proof_relocation.py",
+    "services/hyperfide/dist/release-proof-assets/qualify.py",
+    "services/hyperfide/dist/release-proof-assets/registry.json",
+    "services/hyperfide/dist/release-proof-assets/selftest_harness.py",
+    "services/hyperfide/dist/release-proof-assets/test_inspect_proof.py",
+    "services/hyperfide/dist/release-proof-assets/test_required_artifact_receipts.py"
   ],
   "source_roots": [
     "services/hyperfide/src",

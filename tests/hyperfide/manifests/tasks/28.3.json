@@ -3,7 +3,10 @@
     "allowed_actions": [
       "postgresql.fixture.create",
       "postgresql.fixture.drop",
-      "https.fixture.listen"
+      "https.fixture.listen",
+      "git.fixture.create",
+      "filesystem.fixture.create",
+      "filesystem.fixture.remove"
     ],
     "approved": true
   },
@@ -39,6 +42,20 @@
     "readiness.observed-later-cleanup",
     "readiness.exact-manifest-byte-binding",
     "readiness.reject-manifest-changed-after-checker",
+    "readiness.portable-actual-canonical-component-only",
+    "readiness.portable-closed-environment",
+    "readiness.portable-refuses-exposed-stage",
+    "readiness.portable-refuses-busy-stage",
+    "readiness.portable-refuses-missing-relocation",
+    "readiness.portable-refuses-changed-original-tool",
+    "readiness.portable-refuses-changed-artifact",
+    "readiness.portable-refuses-unmapped-original-source",
+    "readiness.portable-anchored-receipt-unchanged",
+    "readiness.portable-temporary-sources-and-stage-removed",
+    "readiness.protected-scoped-index-v2",
+    "readiness.refuses-writable-admission-index",
+    "readiness.refuses-symbolic-admission-index",
+    "readiness.refuses-nonportable-index-v1",
     "readiness.actual-service-refuses-unadmitted-proof",
     "readiness.actual-service-rejects-empty-inventory",
     "readiness.actual-seal-refuses-unadmitted-proof",
@@ -47,8 +64,8 @@
   "inputs": [
     {
       "path": "docs/hyperfide/operations.md",
-      "sha256": "4f52f46b288f90bcfcecd1b030b9abc6466cb9f8c2ed175d9d16a765f2cf31c5",
-      "size": 14269
+      "sha256": "a48576c6c0957d5d15543f4586feaedd433794a3af1218109bc92b8d45335088",
+      "size": 15214
     },
     {
       "path": "services/hyperfide/components/1.4.json",
@@ -346,19 +363,69 @@
       "size": 191
     },
     {
+      "path": "services/hyperfide/dist/release-proof-assets/bootstrap-contract.md",
+      "sha256": "77e1898c6e9f4b6167e1102266274794bd05510bc8fa6e23efef37a464a635e3",
+      "size": 17537
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/inspect-proof.py",
+      "sha256": "b07cbdb417bf100c4b37386745af8bd441e9814ad6f03da869ab0013b10193e5",
+      "size": 11983
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/proof_relocation.py",
+      "sha256": "dc5d5e1c96bcd792a69460bbe3f4d6045c467e7b347a835117a6a6ec9513a97c",
+      "size": 10796
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/registry.json",
+      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
+      "size": 8284
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/selftest_harness.py",
+      "sha256": "443edc59b5a640e5cfbf85a0cc4c70aef3d034f4b60dfe881e28a17aad35638e",
+      "size": 34670
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/test_inspect_proof.py",
+      "sha256": "612303e79d5dea97739493d613a1a915726e1000b584d0dc89c4b61d709c99c0",
+      "size": 14970
+    },
+    {
+      "path": "services/hyperfide/dist/release-proof-assets/test_required_artifact_receipts.py",
+      "sha256": "8a2bc11c8262a64a20604d3c74372067cc98cb40f38747d901bf63d5b4eb54cc",
+      "size": 6123
+    },
+    {
       "path": "services/hyperfide/dist/release/readiness.d.ts",
-      "sha256": "0182ffcb3cd0d913105ab91a5fb542aee21bab3b40d53c944684a6db1d11facb",
-      "size": 1977
+      "sha256": "106f49f501266fe91c1ed7bb949d3547a4ef3681b97a8daf8c49c2642cedd53d",
+      "size": 2698
     },
     {
       "path": "services/hyperfide/dist/release/readiness.js",
-      "sha256": "c021ce919ad8e1a9f92f615f7939fe9e4f742d108d584328931178b38f59fb6a",
-      "size": 21730
+      "sha256": "6ee77dc2e08b6b4111f3cf9b01f69839fb662834d44e6f797bcd2cfc0e0a8c3f",
+      "size": 26612
     },
     {
       "path": "services/hyperfide/dist/release/readiness.js.map",
-      "sha256": "e481263fd85a71a8ba9e0a982a5e5bbeb027bd89024d96a32fa2c6eb658d365b",
-      "size": 21273
+      "sha256": "8411be73c6691fe41ffa966b66233afc547cb403a143700732a87167046fdc9d",
+      "size": 25222
     },
     {
       "path": "services/hyperfide/dist/release/traceability.d.ts",
@@ -552,8 +619,8 @@
     },
     {
       "path": "services/hyperfide/src/release/readiness.ts",
-      "sha256": "b14999f3f058d8b0f5d64113337cec22b778c928ded05f3deb0a4565113c1e53",
-      "size": 20830
+      "sha256": "79f4dd2d09da44be10a7df5d2882031a77267a844b21218794910a4e92dfcd2b",
+      "size": 25387
     },
     {
       "path": "services/hyperfide/src/release/traceability.ts",
@@ -697,8 +764,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/28_3.py",
-      "sha256": "cdea847e6e82136db1feccdd5dd131289f7fb31d7d8455e0a6541e171ae72975",
-      "size": 8353
+      "sha256": "925cb945e9f359497211e185265d62ddbe50221399d905896954b22ffad90868",
+      "size": 18686
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -717,8 +784,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/28.3.json",
-      "sha256": "239a729136ee28ef9a6016d1f6746b2c8c74a41ba6a715d9949bb1cb1f29256b",
-      "size": 3692
+      "sha256": "93ebeb491ceade7714e0afd57f1fe9ad50ce5119ae945fa33c7e94af3179b4fc",
+      "size": 5387
     },
     {
       "path": "tests/hyperfide/registry.json",
@@ -739,6 +806,9 @@
     "frontier_calls": false,
     "full_case_status": "INCOMPLETE",
     "physical_runner_qualification": "UNRUN",
+    "portable_stage_required": true,
+    "proof_asset_mode": "actual-source-preview",
+    "proof_asset_source_revision": "56a8731799a9c24345b1892aef6aa65b0dc1ad80",
     "release_qualification": "UNRUN"
   },
   "registered_variant": "task:28.3",
@@ -746,6 +816,11 @@
     {
       "id": "task28.3-fixture-resources",
       "kind": "fixture-resource-set",
+      "scope": "task28.3-disposable"
+    },
+    {
+      "id": "task28.3-portable-fixtures",
+      "kind": "filesystem-fixture",
       "scope": "task28.3-disposable"
     }
   ],

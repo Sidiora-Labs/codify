@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import {constants} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
@@ -82,30 +83,83 @@ export function validateReadinessInventory(contract:ReleaseContract,value:unknow
  evidence_receipts:[...used].sort().map(r=>({reference:r,receipt_digest:evidence.get(r)?.receipt_digest??null})),
  checker_result_is_release_authority:false,seal_requires_self_digest:false};
 }
-interface CampaignReference{reference:string;campaign:string;receipt_id:string;receipt_digest:string;gate_kinds:string[]}
-async function checker(campaign:string,receipt:string,signal:AbortSignal):Promise<RecordValue>{
- const root=path.resolve(fileURLToPath(new URL('../../../../',import.meta.url))),script=path.join(root,'tests/hyperfide/check-evidence.py');
- return new Promise((resolve,reject)=>execFile('python3',[script,'--campaign',campaign,'--receipt',receipt],{timeout:30000,maxBuffer:1024*1024,signal},(error,out)=>{
- if(error){reject(new FoundationError('RELEASE_EVIDENCE_INVALID','Canonical independent checker refused a release proof'));return;}
+interface CampaignReference{reference:string;evidence_root:string;campaign:string;receipt_id:string;receipt_digest:string;gate_kinds:string[]}
+async function protectedReleaseFile(filename:string,maximum:number):Promise<Buffer>{
+ if(!path.isAbsolute(filename)||path.normalize(filename)!==filename)invalid('Protected absolute release asset required');
+ const owner=process.getuid?.()??0;let ancestor=path.dirname(filename);
+ for(;;){const st=await fs.lstat(ancestor);const sticky=st.uid===0&&(st.mode&0o1000)!==0;
+ if(!st.isDirectory()||st.isSymbolicLink()||(st.uid!==0&&st.uid!==owner)||((st.mode&0o022)!==0&&!sticky))invalid('Release asset ancestry is not protected');
+ if(ancestor==='/')break;ancestor=path.dirname(ancestor);}
+ const fd=await fs.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+ try{const before=await fd.stat({bigint:true});if(!before.isFile()||(before.uid!==0n&&before.uid!==BigInt(owner))||(before.mode&0o022n)!==0n||before.nlink!==1n||before.size<1n||before.size>BigInt(maximum))invalid('Release asset is not a protected bounded regular file');
+ const buffer=Buffer.alloc(maximum+1);let size=0;
+ while(size<buffer.length){const read=await fd.read(buffer,size,buffer.length-size,null);if(!read.bytesRead)break;size+=read.bytesRead;}
+ const after=await fd.stat({bigint:true});if(size>maximum||BigInt(size)!==before.size||['dev','ino','mode','uid','gid','nlink','size','mtimeNs','ctimeNs'].some(k=>before[k as keyof typeof before]!==after[k as keyof typeof after]))invalid('Release asset changed while reading');
+ return buffer.subarray(0,size);}finally{await fd.close();}
+}
+const PORTABLE_RELEASE_CHECK=String.raw`
+import fcntl, hashlib, importlib.util, json, os, pathlib, sys
+assets, root, campaign = map(pathlib.Path, sys.argv[1:4])
+receipt = sys.argv[4]
+sys.path.insert(0, str(assets))
+from proof_relocation import guard_staging
+def require(ok, message):
+    if not ok:
+        raise ValueError(message)
+guard_staging(root, require)
+require(campaign.is_relative_to(root) and campaign.is_dir(), 'campaign outside private admission stage')
+relocation = root / 'trusted-relocation.json'
+require(relocation.is_file() and not relocation.is_symlink(), 'portable relocation policy required')
+descriptor = os.open(root / '.inspection.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+try:
+    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    guard_staging(root, require)
+    spec = importlib.util.spec_from_file_location('qualified_release_inspector', assets / 'inspect-proof.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    checked, tool = module.canonical_check(campaign, receipt, relocation)
+    require(checked.get('observed_outcome') == 'PASS', 'canonical proof is not PASS')
+    print(json.dumps(checked, sort_keys=True))
+finally:
+    os.close(descriptor)
+`;
+/** Byte consistency only. The deployment owns both the admission stage and the
+ * qualified assets; no request may choose executable code or grant release authority. */
+export async function checkReleaseCampaign(evidenceRoot:string,campaign:string,receipt:string,context:Pick<ComponentContext,'env'|'signal'>):Promise<RecordValue>{
+ uuid(receipt);
+ if(!path.isAbsolute(evidenceRoot)||!path.isAbsolute(campaign)||path.resolve(evidenceRoot)!==evidenceRoot||path.resolve(campaign)!==campaign||await fs.realpath(evidenceRoot)!==evidenceRoot||await fs.realpath(campaign)!==campaign||!path.relative(evidenceRoot,campaign)||path.relative(evidenceRoot,campaign)==='..'||path.relative(evidenceRoot,campaign).startsWith('..'+path.sep)||path.isAbsolute(path.relative(evidenceRoot,campaign)))invalid('Invalid private release stage/campaign');
+ const repository=path.resolve(fileURLToPath(new URL('../../../../',import.meta.url)));
+ const assets=context.env.HYPERFIDE_RELEASE_QUALIFIED_PROOF_ROOT??path.join(repository,'tests/hyperfide');
+ if(!path.isAbsolute(assets)||await fs.realpath(assets)!==assets)invalid('Qualified proof assets must have an exact protected path');
+ const pins=await Promise.all(['inspect-proof.py','check-evidence.py','proof_relocation.py','registry.json'].map(async name=>({name,bytes:await protectedReleaseFile(path.join(assets,name),1024*1024)})));
+ const python=await fs.realpath(context.env.HYPERFIDE_RELEASE_PYTHON??'/usr/bin/python3');
+ await protectedReleaseFile(python,64*1024*1024);
+ const checked=await new Promise<RecordValue>((resolve,reject)=>execFile(python,['-I','-c',PORTABLE_RELEASE_CHECK,assets,evidenceRoot,campaign,receipt],{timeout:150000,maxBuffer:1024*1024,signal:context.signal,env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8',LC_ALL:'C.UTF-8'}},(error,out)=>{
+ if(error){reject(new FoundationError('RELEASE_EVIDENCE_INVALID','Canonical portable checker refused a release proof'));return;}
  try{const result=JSON.parse(out) as unknown;if(!object(result)||result.checked!==true||result.observed_outcome!=='PASS')invalid('Independent evidence outcome is not PASS');resolve(result);}catch{reject(new FoundationError('RELEASE_EVIDENCE_INVALID','Invalid independent checker result'));}
  }));
+ for(const pin of pins)if(!(await protectedReleaseFile(path.join(assets,pin.name),1024*1024)).equals(pin.bytes))invalid('Qualified proof assets changed during inspection');
+ return checked;
+}
+export async function loadReleaseAdmissionIndex(context:Pick<ComponentContext,'env'>,scope:{organisation_id:string;run_id:string}):Promise<CampaignReference[]>{
+ const configured=context.env.HYPERFIDE_RELEASE_EVIDENCE_INDEX;
+ if(!configured||!path.isAbsolute(configured))throw new FoundationError('RELEASE_EVIDENCE_UNAVAILABLE','Trusted scoped release evidence index is required');
+ const raw=JSON.parse((await protectedReleaseFile(configured,16*1024*1024)).toString('utf8')) as unknown;
+ const index=fields(raw,['schema_version','organisation_id','run_id','entries']);
+ if(index.schema_version!==2||index.organisation_id!==scope.organisation_id||index.run_id!==scope.run_id)invalid('Release evidence scope mismatch');
+ const entries=values(index.entries).map(v=>{const r=fields(v,['reference','evidence_root','campaign','receipt_id','receipt_digest','gate_kinds']);return {reference:boundedText(r.reference),evidence_root:boundedText(r.evidence_root,4096),campaign:boundedText(r.campaign,4096),receipt_id:uuid(r.receipt_id),receipt_digest:digest(r.receipt_digest),gate_kinds:stringList(r.gate_kinds,0)};});
+ if(new Set(entries.map(e=>e.reference)).size!==entries.length)invalid('Duplicate trusted evidence reference');
+ return entries;
 }
 async function trustedEvidence(context:ComponentContext,scope:{organisation_id:string;run_id:string},references:string[]):Promise<Map<string,VerifiedReleaseEvidence>>{
  // This index is trusted deployment input maintained after authoritative admission,
  // never a request field. The final seal additionally recomputes the live programme gate.
- const configured=context.env.HYPERFIDE_RELEASE_EVIDENCE_INDEX;
- if(!configured||!path.isAbsolute(configured))throw new FoundationError('RELEASE_EVIDENCE_UNAVAILABLE','Trusted scoped release evidence index is required');
- const info=await fs.lstat(configured);if(!info.isFile()||info.isSymbolicLink()||info.size>16*1024*1024)invalid('Invalid trusted release index');
- const raw=JSON.parse(await fs.readFile(configured,'utf8')) as unknown;
- const index=fields(raw,['schema_version','organisation_id','run_id','entries']);
- if(index.schema_version!==1||index.organisation_id!==scope.organisation_id||index.run_id!==scope.run_id)invalid('Release evidence scope mismatch');
- const entries=values(index.entries).map(v=>{const r=fields(v,['reference','campaign','receipt_id','receipt_digest','gate_kinds']);return {reference:boundedText(r.reference),campaign:boundedText(r.campaign,4096),receipt_id:uuid(r.receipt_id),receipt_digest:digest(r.receipt_digest),gate_kinds:stringList(r.gate_kinds,0)};});
- if(new Set(entries.map(e=>e.reference)).size!==entries.length)invalid('Duplicate trusted evidence reference');
+ const entries=await loadReleaseAdmissionIndex(context,scope);
  const result=new Map<string,VerifiedReleaseEvidence>();
  for(const reference of references){
  const entry=entries.find(e=>e.reference===reference);if(!entry)invalid('Evidence is not in the trusted admission index');
  if(!path.isAbsolute(entry.campaign)||await fs.realpath(entry.campaign)!==entry.campaign)invalid('Invalid immutable campaign root');
- const checked=await checker(entry.campaign,entry.receipt_id,context.signal);
+ const checked=await checkReleaseCampaign(entry.evidence_root,entry.campaign,entry.receipt_id,context);
  const receiptBytes=await fs.readFile(path.join(entry.campaign,'receipts',entry.receipt_id+'.json'));
  if(sha256(receiptBytes)!==entry.receipt_digest||checked.receipt_sha256!==entry.receipt_digest.slice(7))invalid('Anchored release receipt bytes changed');
  const receipt=JSON.parse(receiptBytes.toString('utf8')) as unknown;
