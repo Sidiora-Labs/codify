@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real installed-base verification and native runtime observations for 11.3."""
-import copy,hashlib,importlib.util,json,os,shutil,socket,subprocess,tempfile,threading,time
+import copy,hashlib,importlib.util,json,os,shutil,socket,subprocess,tempfile,threading,time,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 spec=importlib.util.spec_from_file_location("preparation_fixture",Path(__file__).with_name("11_1.py"))
@@ -109,6 +109,34 @@ def main():
                     try:fn(f)
                     finally:f.close()
             check(identity,run)
+
+        def package_readiness(f,manager,mutation=None):
+            installed=prep.install_local_package(f.repo,manager)
+            git(f.repo,"add","package.json","local-pkg",installed["lock"]);git(f.repo,"commit","-qm","actual local package installation")
+            f.prep.profile["repositories"][0]["commit"]=git(f.repo,"rev-parse","HEAD")
+            relative="fixture/"+installed["lock"];target=f.prep.candidate/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(f.repo/installed["lock"],target)
+            f.prep.profile["package_managers"]=[{"name":manager,"version":installed["version"],"locks":[f.prep.pin(relative)]}]
+            resolved=subprocess.check_output(["mise","which",manager],text=True).strip()
+            version_bytes=subprocess.check_output([resolved,"--version"])
+            f.bindings["bindings"].append({"name":manager,"version":installed["version"],"executable":resolved,"argv":["--version"],"output_digest":digest(version_bytes)})
+            f.bindingsfile.write_text(json.dumps(f.bindings));f.publish()
+            inventory=json.loads(Path(f.env["HF_READINESS_WORKSPACE_MANIFEST_FILE"]).read_text())
+            expect(inventory["schema_version"]==2 and len(inventory["symlinks"])>0,"actual installed package links not measured")
+            if manager=="pnpm":expect(len(inventory["hardlinks"])>0,"actual pnpm hardlink groups not measured")
+            if mutation=="link":
+                links=[f.workspace/row["path"] for row in inventory["symlinks"]]
+                link=links[0];link.unlink();link.symlink_to("/etc/passwd");f.refused("WORKSPACE_INVENTORY_INVALID")
+            elif mutation=="hardlink":
+                group=inventory["hardlinks"][0];p=f.workspace/group["paths"][0];data=p.read_bytes();mode=p.stat().st_mode&0o777;p.unlink();p.write_bytes(data);p.chmod(mode);f.refused("WORKSPACE_INVENTORY_INVALID")
+            else:f.ready()
+        case("packages.actual-npm-native-verification",lambda f:package_readiness(f,"npm"))
+        case("packages.actual-pnpm-native-verification",lambda f:package_readiness(f,"pnpm"))
+        case("packages.actual-npm-link-drift",lambda f:package_readiness(f,"npm","link"))
+        case("packages.actual-pnpm-hardlink-drift",lambda f:package_readiness(f,"pnpm","hardlink"))
+        if "--packages" in sys.argv:
+            print(json.dumps({"type":"cleanup","status":"complete"}),flush=True)
+            return bool(FAILED)
+
         case("actual-base-source-tools-network",lambda f:f.ready())
 
         def absent_inventory(f):
