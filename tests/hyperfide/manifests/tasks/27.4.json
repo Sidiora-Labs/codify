@@ -1,0 +1,129 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-driver-component-27-4-v3",
+  "case_ids": [
+    "V-002",
+    "V-003",
+    "V-004",
+    "V-005",
+    "V-009",
+    "V-010",
+    "V-012",
+    "V-015",
+    "V-016",
+    "V-017",
+    "V-033",
+    "V-037",
+    "V-040",
+    "V-049",
+    "V-053",
+    "V-054"
+  ],
+  "expected_assertion_ids": [
+    "campaign.faults.complete-composite-schedule",
+    "campaign.faults.actual-overlap-reference",
+    "campaign.faults.independent-state-reference",
+    "campaign.faults.actual-canonical-component-receipt",
+    "campaign.faults.component-receipt-not-full-proof",
+    "campaign.faults.incomplete-inventory",
+    "campaign.faults.orphan-resource",
+    "campaign.faults.lost-git-ack-unknown",
+    "campaign.faults.resource-debt",
+    "campaign.faults.hidden-backlog",
+    "campaign.faults.unacknowledged-effects",
+    "campaign.faults.unqualified-ref",
+    "campaign.faults.wrong-reference-state",
+    "campaign.faults.duplicate-accepted-effect",
+    "campaign.faults.conflicting-owners",
+    "campaign.faults.unqualified-publications",
+    "campaign.faults.source-revision-drift",
+    "campaign.faults.repository-manifest-drift",
+    "campaign.faults.missing-fault-observation",
+    "campaign.faults.controller-only-recovery",
+    "campaign.faults.rto-invented",
+    "campaign.faults.rpo-exceeded",
+    "campaign.faults.unverified-recovery",
+    "campaign.faults.missing-observed-timing",
+    "campaign.faults.duration-mismatch",
+    "campaign.faults.duplicate-observation",
+    "campaign.faults.sequential-real-drills-not-composite",
+    "campaign.faults.external-anchor-required",
+    "campaign.faults.observer-cannot-invent-anchor",
+    "campaign.faults.pass-label-not-proof",
+    "campaign.faults.missing-fault-kind",
+    "campaign.faults.single-fault-only-rejected",
+    "campaign.faults.duplicate-fault-id",
+    "campaign.faults.unknown-fault-kind",
+    "campaign.faults.approved-composites-required",
+    "campaign.faults.tolerance-cannot-erase-duration",
+    "campaign.faults.independent-observer",
+    "campaign.faults.no-implicit-execution"
+  ],
+  "inputs": [
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "ee8df7d7218bcfbe0229a96bd2c039fe74516bb51a7093fc85e3f1724ef019f9",
+      "size": 28641
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/registry.json",
+      "sha256": "77d72fc82aa56142b5cd19b93b0e8ecc469c01ed6182ea3d5ae53b2955580e61",
+      "size": 8284
+    },
+    {
+      "path": "tests/hyperfide/campaigns/deterministic.py",
+      "sha256": "f2606c0f64787c5a5ab8bb13e08b8aafdb4230f083dd45987596eab92ee61577",
+      "size": 44458
+    },
+    {
+      "path": "tests/hyperfide/campaigns/live.py",
+      "sha256": "d8de80d861b90a86f45766d0a98cbfbdbb999ca135f56d04f4612fde54495314",
+      "size": 18441
+    },
+    {
+      "path": "tests/hyperfide/campaigns/faults.py",
+      "sha256": "06a7548a2b2b7b5aed7039d3886f0d363bdb0c141a04e1086089d87b694f3c10",
+      "size": 14356
+    },
+    {
+      "path": "tests/hyperfide/selftest_harness.py",
+      "sha256": "e9d87abe2420dde60da99a64860712885acda617440fde227ec26cde47d430d8",
+      "size": 31610
+    },
+    {
+      "path": "tests/hyperfide/test_required_artifact_receipts.py",
+      "sha256": "8a2bc11c8262a64a20604d3c74372067cc98cb40f38747d901bf63d5b4eb54cc",
+      "size": 6123
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/27_4.py",
+      "sha256": "559a4a641e983657248ae1fc21931db8e384c1cb009f02128e1b703f8405a352",
+      "size": 10349
+    }
+  ],
+  "policy": {
+    "evidence_scope": "DRIVER_COMPONENT_ONLY",
+    "fixture_scope": "Public synthetic component validation plus actual bounded subprocess/canonical-checker boundaries; no live fleet occupancy",
+    "full_campaign_source_binding": "policy.source_manifest_digest must equal actual19 integratedRepositoryManifest sha256-prefixed digest",
+    "full_campaigns": "UNRUN; require actual signed API bridges and approved pinned corpus/auth/profile/SLO inputs",
+    "full_case_status": "INCOMPLETE"
+  },
+  "registered_variant": "task:27.4",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 17
+}
