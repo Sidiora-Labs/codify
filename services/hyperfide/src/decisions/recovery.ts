@@ -19,6 +19,12 @@ export function recoveryFallback(state:Data,reason:string):Data{
 }
 interface Admission {recoveryContextInTransaction(tx:QuerySession,input:Data,invocation:Invocation):Promise<unknown>}
 function admission(ctx:ComponentContext):Admission{return ctx.dependencies.require('13.4','agent.admission.v1',(value:unknown):value is Admission=>!!value&&typeof value==='object'&&typeof(value as Admission).recoveryContextInTransaction==='function')}
+function admissionData(value:unknown):Data{
+ const context=obj(value),retry=obj(context.retry),deadline=retry.retry_after;
+ const retryAfter=deadline instanceof Date?deadline.toISOString():deadline;
+ if(retryAfter!==null&&(typeof retryAfter!=='string'||!Number.isFinite(Date.parse(retryAfter))))fail('DECISION_INVALID','Native retry deadline must be an observed timestamp or null');
+ return {...context,retry:{...retry,retry_after:retryAfter}};
+}
 async function checkpointSnapshot(tx:QuerySession,s:Scope,attemptId:string):Promise<Data[]>{
  return (await tx.query("SELECT to_jsonb(c)||jsonb_build_object('attempt_generation',c.attempt_generation::text) AS checkpoint FROM hyperfide.checkpoints c WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 ORDER BY created_at DESC,id LIMIT 16",[s.organisation_id,s.run_id,attemptId])).rows.map(row=>obj(row.checkpoint));
 }
@@ -37,8 +43,8 @@ async function recoveryCurrent(ctx:ComponentContext,tx:QuerySession,s:Scope,pack
  if(packet.state.assurance_reference){const current=await preservedReceipt(ctx,tx,s,packet.state.assurance_reference,attempt),saved=obj(packet.state.assurance_context);
   if(current.receipt_digest!==saved.receipt_digest||String(current.current_job_generation)!==String(saved.current_job_generation)||current.state!==saved.state||current.outcome!==saved.outcome)fail('DECISION_STALE','Preserved verification receipt changed after recovery capture');
  }
- if(packet.state.recovery_binding){const binding=obj(packet.state.recovery_binding),current=obj(await admission(ctx).recoveryContextInTransaction(tx,{scope:{...s,session_id:uuid(binding.session_id)},reservation_id:uuid(binding.reservation_id)},i));
-  if(current.packet_digest!==obj(packet.state.admission_context).packet_digest||current.policy_digest!==obj(packet.state.admission_context).policy_digest||current.attempt_id!==attempt.id)fail('DECISION_STALE','Native admission context changed after recovery capture');
+ if(packet.state.recovery_binding){const binding=obj(packet.state.recovery_binding),current=admissionData(await admission(ctx).recoveryContextInTransaction(tx,{scope:{...s,session_id:uuid(binding.session_id)},reservation_id:uuid(binding.reservation_id)},i));
+  if(canonical(current)!==canonical(packet.state.admission_context)||current.attempt_id!==attempt.id)fail('DECISION_STALE','Native admission context changed after recovery capture');
  }
 }
 export function createComponent(ctx:ComponentContext):Component{
@@ -56,7 +62,7 @@ export function createComponent(ctx:ComponentContext):Component{
   const choices:Data={refresh_context:{action:'refresh_context',frontier_profile_id:null},repair_environment:{action:'repair_environment',frontier_profile_id:null},manager_review:{action:'manager_review',frontier_profile_id:null},insufficient_evidence:{action:'insufficient_evidence',frontier_profile_id:null}};
   if(q.data.session_id!==undefined){
    const binding={session_id:uuid(q.data.session_id),reservation_id:uuid(q.data.reservation_id)},i=(ctx as unknown as {invocation:Invocation}).invocation;
-   const context=obj(await admission(ctx).recoveryContextInTransaction(client,{scope:{...q.scope,session_id:binding.session_id},reservation_id:binding.reservation_id},i));
+   const context=admissionData(await admission(ctx).recoveryContextInTransaction(client,{scope:{...q.scope,session_id:binding.session_id},reservation_id:binding.reservation_id},i));
    if(context.grants_authority!==false||context.attempt_id!==attempt.id||!/^sha256:[0-9a-f]{64}$/.test(str(context.policy_digest)))fail('DECISION_PACKET_MISMATCH','Native recovery context does not bind this attempt and accepted policy');
    const wait=str(context.capacity_wait),known=['NONE','PROVIDER_RATE_LIMIT','MODEL_QUOTA','RETRY_BACKOFF','RECONCILIATION_REQUIRED'];
    if(!known.includes(wait))fail('DECISION_INVALID','Unknown native capacity classification');
