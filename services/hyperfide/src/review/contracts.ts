@@ -58,7 +58,7 @@ export async function publishContract(context:ComponentContext,value:unknown):Pr
   return {contract_id:inserted.rows[0]!.id,criteria_digest:identity,replayed:false};
  });
 }
-interface GraphCapability {traverse(input:unknown,context:ComponentContext):Promise<unknown>;status(input:unknown,context:ComponentContext):Promise<unknown>}
+interface GraphCapability {traverse(input:unknown,invocation:unknown):Promise<unknown>;status(input:unknown,invocation:unknown):Promise<unknown>}
 function graphCapability(value:unknown):value is GraphCapability{
  return !!value&&typeof value==='object'&&typeof(value as GraphCapability).traverse==='function'&&typeof(value as GraphCapability).status==='function';
 }
@@ -87,7 +87,7 @@ export async function analyseContractImpact(context:ComponentContext,value:unkno
    const capability=dependencies.require('7.4','graph.query.v1',graphCapability);
    if(!graphCapability(capability))fail('CONTRACT_GRAPH_UNAVAILABLE','Graph capability is incompatible');
    const response=await capability.traverse({...binding,authority_epoch:data.authority_epoch,manifest_id:manifestId,
-    symbol_ids:data.after.definition.producer.symbol_ids,direction:'callers',depth:4,max_nodes:500},context);
+    symbol_ids:data.after.definition.producer.symbol_ids,direction:'callers',depth:4,max_nodes:500},context.invocation);
    if(!response||typeof response!=='object')fail('CONTRACT_GRAPH_UNAVAILABLE','Graph traversal did not return provenance');
    const facts=response as Record<string,unknown>;
    if(facts.manifest_id!==manifestId||!Array.isArray(facts.nodes)||!Array.isArray(facts.unknown_references))
