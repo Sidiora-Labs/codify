@@ -1265,7 +1265,9 @@
         "tests/hyperfide/manifests/tasks/14.3.json",
         "tests/hyperfide/cases/tasks/14_3.py",
         "tests/hyperfide/registrations/14.3.json",
-        "services/hyperfide/components/14.3.json"
+        "services/hyperfide/components/14.3.json",
+        "services/hyperfide/src/identity/qualification.ts",
+        "services/hyperfide/migrations/0042-native-qualification.sql"
       ],
       "do_steps": [
         "Resolve the unanswered current-auth choice through non-secret operator configuration and qualified per-connector account/API profiles.",
@@ -1965,7 +1967,9 @@
         "services/hyperfide/src/graph/projection_extract.ts",
         "tests/hyperfide/cases/support/graph_contracts.py",
         "tests/hyperfide/cases/support/graph_projection.py",
-        "services/hyperfide/migrations/0704-graph-query-parity.sql"
+        "services/hyperfide/migrations/0704-graph-query-parity.sql",
+        "services/hyperfide/src/graph/replica_query.ts",
+        "tests/hyperfide/cases/support/graph_replicas.py"
       ],
       "do_steps": [
         "Implement grouped context/traversal and PostgreSQL word/body/comment/trigram queries with provenance, branch and budget controls.",
@@ -1977,9 +1981,10 @@
         "V-020",
         "V-021",
         "V-025",
-        "V-048"
+        "V-048",
+        "V-023"
       ],
-      "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-020 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-021 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-025 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/7.4.json",
+      "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-020 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-021 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-025 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-048 --manifest tests/hyperfide/manifests/tasks/7.4.json && python3 tests/hyperfide/qualify.py --case V-023 --manifest tests/hyperfide/manifests/tasks/7.4.json",
       "artifacts": [
         "artifacts/hyperfide/tasks/7.4/manifest.json",
         "artifacts/hyperfide/tasks/7.4/evidence-index.json"
@@ -2193,7 +2198,7 @@
       "id": "21.1",
       "title": "Add advisory clause critique with validated change proposals",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "20.4",
         "2.3",
@@ -2231,12 +2236,13 @@
       "id": "21.4",
       "title": "Persist complete decision audit records and eventual outcomes",
       "status": "pending",
-      "wave": 11,
+      "wave": 22,
       "requires": [
         "20.4",
         "15.2",
         "4.4",
-        "12.1"
+        "12.1",
+        "25.3"
       ],
       "reqs": [
         "21.4"
@@ -2249,7 +2255,8 @@
         "services/hyperfide/components/21.4.json",
         "services/hyperfide/migrations/0021-decisions.sql",
         "src/hyperfide/advisory.c",
-        "src/hyperfide/advisory.h"
+        "src/hyperfide/advisory.h",
+        "src/hyperfide/components/21.4.kvx"
       ],
       "do_steps": [
         "Record purpose/packet hash/revisions/rubric/model/route/raw output/calibrated interpretation/action/latency/usage and outcome links.",
@@ -2450,7 +2457,8 @@
         "tests/hyperfide/registrations/13.1.json",
         "src/hyperfide/components/13.1.kvx",
         "runtime/supervisory_host.py",
-        "tests/hyperfide/cases/tasks/13_1_host.py"
+        "tests/hyperfide/cases/tasks/13_1_host.py",
+        "services/hyperfide/src/agents/qualification.ts"
       ],
       "do_steps": [
         "Qualify actual launch/input/output/steer/cancel/child/resume capabilities for each pinned CLI/auth mode and resolve user frontier aliases from real configuration.",
@@ -2566,7 +2574,7 @@
       "id": "22.1",
       "title": "Build temporally valid labelled evaluation datasets",
       "status": "pending",
-      "wave": 12,
+      "wave": 23,
       "requires": [
         "21.4"
       ],
@@ -2721,7 +2729,8 @@
         "15.2",
         "11.3",
         "5.1",
-        "8.2"
+        "8.2",
+        "5.2"
       ],
       "reqs": [
         "12.4"
@@ -2743,7 +2752,12 @@
         "services/hyperfide/src/runner/preparation_receipts.ts",
         "services/hyperfide/migrations/0035-runner-preparation-receipts.sql",
         "src/hyperfide/budget.c",
-        "tests/hyperfide/support/runner_budget_fixture.py"
+        "tests/hyperfide/support/runner_budget_fixture.py",
+        "services/hyperfide/src/runner/workspaces.ts",
+        "tests/hyperfide/support/workspace_registration_fixture.py",
+        "services/hyperfide/src/runner/capture.ts",
+        "services/hyperfide/components/12.4-capture.json",
+        "tests/hyperfide/support/preparation_receipts.test.mjs"
       ],
       "do_steps": [
         "Implement distinct control semantics with fenced authority and artifact-safe cleanup; report confirmed and unresolved termination explicitly.",
@@ -2933,7 +2947,7 @@
       "id": "22.2",
       "title": "Measure calibrated quality, latency and billed cost against baseline",
       "status": "pending",
-      "wave": 13,
+      "wave": 24,
       "requires": [
         "22.1",
         "20.3"
@@ -3523,7 +3537,7 @@
       "id": "23.3",
       "title": "Instrument lifecycle, graph freshness, recovery and qualified outcome cost",
       "status": "pending",
-      "wave": 22,
+      "wave": 23,
       "requires": [
         "6.4",
         "7.3",
@@ -3785,7 +3799,9 @@
         "24.2",
         "15.4",
         "5.1",
-        "25.1"
+        "25.1",
+        "9.3",
+        "10.3"
       ],
       "reqs": [
         "24.3"
@@ -3876,7 +3892,9 @@
         "16.4",
         "17.4",
         "18.4",
-        "4.4"
+        "4.4",
+        "5.1",
+        "5.2"
       ],
       "reqs": [
         "19.1"
