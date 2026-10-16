@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "10.1",
+  "task": "10.1",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/blaxel/images.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "blaxel.image.describe",
+    "blaxel.image.plan",
+    "blaxel.image.publish",
+    "blaxel.image.inspect"
+  ],
+  "requires": [
+    "8.1",
+    "11.1"
+  ]
+}
