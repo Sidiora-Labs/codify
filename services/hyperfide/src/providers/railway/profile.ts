@@ -1,6 +1,6 @@
 import type { CreateOptions, SandboxInfo } from 'railway';
 import type { Component, ComponentContext } from '../../components/registry.js';
-import type { ProviderScope } from '../contract.js';
+import type { ProviderScope, ProviderOperation } from '../contract.js';
 import { absolute, digest, hash, integer, object, sameScope, scope, text, type JsonObject, type RailwayClient } from './preparation.js';
 
 export interface RailwayRuntimeProfile {
@@ -69,7 +69,7 @@ export function validateRuntimeProfile(value:unknown):RailwayRuntimeProfile {
   if(digest(v.digest)!==hash(body)) throw new Error('Railway runtime profile digest');
   return v as unknown as RailwayRuntimeProfile;
 }
-export type CredentialResolver=(references:Readonly<Record<string,string>>,signal:AbortSignal)=>Promise<Record<string,string>>;
+export type CredentialResolver=(references:Readonly<Record<string,string>>,signal:AbortSignal,layer?:'runtime'|'process',operation?:ProviderOperation)=>Promise<Record<string,string>>;
 export async function runtimeOptions(profile:RailwayRuntimeProfile,client:RailwayClient,resolve:CredentialResolver,
   signal:AbortSignal):Promise<CreateOptions> {
   client.assertScope(profile.scope);
@@ -77,7 +77,7 @@ export async function runtimeOptions(profile:RailwayRuntimeProfile,client:Railwa
   for(const [name,variable] of Object.entries(profile.runtime_variables)) {
     if(variable.kind==='PUBLIC') env[name]=variable.value; else refs[name]=variable.value;
   }
-  const values=await resolve(Object.freeze(refs),signal);
+  const values=await resolve(Object.freeze(refs),signal,'runtime');
   if(Object.keys(values).length!==Object.keys(refs).length||Object.keys(values).some(key=>!Object.hasOwn(refs,key)))
     throw new Error('Railway credential resolution inventory mismatch');
   for(const name of Object.keys(refs)) {
