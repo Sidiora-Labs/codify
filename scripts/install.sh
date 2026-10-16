@@ -5,13 +5,45 @@
 set -euo pipefail
 python3 - <<'PY'
 from pathlib import Path,PurePosixPath
-import fcntl,hashlib,json,os,re,shutil,sys,tarfile,tempfile,urllib.parse,urllib.request,uuid
+import fcntl,hashlib,json,os,re,shutil,stat,subprocess,sys,tarfile,tempfile,urllib.parse,urllib.request,uuid
 def die(message):raise SystemExit('hyperfide install: '+message)
 def alias(canonical,legacy,default=None):
  a=os.environ.get(canonical);b=os.environ.get(legacy)
  if a is not None and b is not None and a!=b:die('conflicting '+canonical+' / '+legacy+' (values redacted)')
  return a if a is not None else b if b is not None else default
 def sha(data):return 'sha256:'+hashlib.sha256(data).hexdigest()
+def strict_json(data):
+ def pairs(items):
+  result={}
+  for key,value in items:
+   if key in result:die('duplicate JSON field')
+   result[key]=value
+  return result
+ try:return json.loads(data.decode('utf-8'),object_pairs_hook=pairs,parse_constant=lambda _:(_ for _ in ()).throw(ValueError()))
+ except (ValueError,UnicodeError):die('invalid strict JSON')
+def authenticate_manifest(key_path,encoded,signature,descriptor):
+ if not isinstance(descriptor,dict) or set(descriptor)!={'algorithm','file','key_fingerprint'} or descriptor['algorithm']!='ED25519' or descriptor['file']!='manifest.sig' or len(signature)!=64:die('a detached Ed25519 manifest signature is required')
+ if not Path(key_path).is_absolute():die('trusted public key must be an absolute reference')
+ fd=os.open(key_path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ try:
+  before=os.fstat(fd)
+  if not stat.S_ISREG(before.st_mode) or before.st_size>16384 or before.st_uid not in [0,os.geteuid()] or before.st_mode&0o022:die('trusted public key must be an ordinary protected file')
+  key=os.read(fd,16385);after=os.fstat(fd)
+  if (before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns):die('trusted public key changed')
+ finally:os.close(fd)
+ verifier=Path('/usr/bin/openssl')
+ if not verifier.is_file() or not os.access(verifier,os.X_OK):die('trusted OpenSSL signature verifier is required')
+ with tempfile.TemporaryDirectory(prefix='hyperfide-signature-') as temporary:
+  temporary=Path(temporary);public=temporary/'public.pem';public.write_bytes(key);public.chmod(0o600)
+  manifest=temporary/'manifest.json';manifest.write_bytes(encoded)
+  detached=temporary/'manifest.sig';detached.write_bytes(signature)
+  exported=subprocess.run([str(verifier),'pkey','-pubin','-in',str(public),'-outform','DER'],capture_output=True,stdin=subprocess.DEVNULL,timeout=30)
+  if exported.returncode or len(exported.stdout)!=44 or not exported.stdout.startswith(bytes.fromhex('302a300506032b6570032100')):die('trusted public key must be Ed25519')
+  fingerprint=sha(exported.stdout)
+  if descriptor['key_fingerprint']!=fingerprint:die('release signer differs from the trusted key')
+  verified=subprocess.run([str(verifier),'pkeyutl','-verify','-pubin','-inkey',str(public),'-rawin','-in',str(manifest),'-sigfile',str(detached)],capture_output=True,stdin=subprocess.DEVNULL,timeout=30)
+  if verified.returncode:die('release manifest signature verification failed')
+ return {'mode':'ED25519','key_fingerprint':fingerprint}
 def sync_path(path,directory=False):
  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|(os.O_DIRECTORY if directory else 0))
  try:os.fsync(fd)
@@ -21,18 +53,28 @@ base=alias('HYPERFIDE_BASE_URL','CODIFY_BASE_URL')
 if not base:die('set HYPERFIDE_BASE_URL to the controlled release endpoint')
 pin=os.environ.get('HYPERFIDE_MANIFEST_SHA256','')
 if pin and not pin.startswith('sha256:'):pin='sha256:'+pin
+if pin and not re.fullmatch(r'sha256:[0-9a-f]{64}',pin):die('invalid explicit manifest pin')
+trusted_key=os.environ.get('HYPERFIDE_TRUSTED_RELEASE_KEY_FILE')
+if not pin and not trusted_key:die('an explicit trusted release key or manifest pin is required')
 url=urllib.parse.urlsplit(base)
 if url.username or url.password or url.query or url.fragment:die('release endpoint must not contain credentials, query or fragment')
-if url.scheme!='https' and not(pin and (url.scheme=='file' or(url.scheme=='http' and url.hostname in ['127.0.0.1','localhost','::1']))):die('HTTPS or a pinned local fixture endpoint is required')
+if url.scheme!='https' and not((pin or trusted_key) and (url.scheme=='file' or(url.scheme=='http' and url.hostname in ['127.0.0.1','localhost','::1']))):die('HTTPS or a pinned local fixture endpoint is required')
 def fetch(name,maximum):
  with urllib.request.urlopen(base.rstrip('/')+'/'+name,timeout=60) as response:
   data=response.read(maximum+1)
   if len(data)>maximum:die('release artifact exceeds the declared installer bound')
   return data
-index=json.loads(fetch('release.json',1048576))
-if set(index)!={'schema_version','release_version','manifest_digest','archive','archive_digest'} or index['schema_version']!=1:die('unsupported download index')
+index=strict_json(fetch('release.json',1048576))
+index_keys={'schema_version','release_version','manifest_digest','archive','archive_digest'}
+if not isinstance(index,dict) or set(index) not in [index_keys,index_keys|{'signature'}] or type(index['schema_version']) is not int or index['schema_version']!=1:die('unsupported download index')
 if not re.fullmatch(r'hyperfide-[A-Za-z0-9._-]+\.tar\.gz',index['archive']):die('unsafe archive name')
 if pin and pin!=index['manifest_digest']:die('release manifest differs from the operator pin')
+authentication={'mode':'EXPLICIT_MANIFEST_PIN','key_fingerprint':None}
+verified_manifest=None
+if trusted_key:
+ verified_manifest=fetch('manifest.json',16777216)
+ if sha(verified_manifest)!=index['manifest_digest']:die('signed manifest checksum mismatch')
+ authentication=authenticate_manifest(trusted_key,verified_manifest,fetch('manifest.sig',128),index.get('signature'))
 archive=fetch(index['archive'],1073741824)
 if sha(archive)!=index['archive_digest']:die('archive checksum mismatch')
 directory=Path(alias('HYPERFIDE_INSTALL_DIR','CODIFY_INSTALL_DIR',str(Path.home()/'.local/bin'))).expanduser().resolve()
@@ -58,10 +100,11 @@ with os.fdopen(lock_fd,'a+b') as lock:
     seen.add(name);members.append(member);total+=member.size
     if len(members)>200000 or total>4294967296 or member.size>1073741824:die('expanded artifact exceeds installer bounds')
    manifest_member=next((m for m in members if m.name=='manifest.json' and m.isfile()),None)
-   if not manifest_member:die('archive has no canonical manifest')
+   if not manifest_member or manifest_member.size>16777216:die('archive has no bounded canonical manifest')
    encoded=tar.extractfile(manifest_member).read()
    if sha(encoded)!=index['manifest_digest']:die('manifest checksum mismatch')
-   manifest=json.loads(encoded)
+   if verified_manifest is not None and encoded!=verified_manifest:die('archive differs from the signed exact manifest')
+   manifest=strict_json(encoded)
    keys={'schema_version','release_version','source_commit','source_date_epoch','protocol_version','schema_min','schema_max','runtime','files'}
    if set(manifest)!=keys or manifest['schema_version']!=1 or manifest['release_version']!=index['release_version']:die('incompatible release manifest')
    if not isinstance(manifest['files'],list) or not manifest['files']:die('empty artifact inventory')
@@ -120,8 +163,8 @@ with os.fdopen(lock_fd,'a+b') as lock:
   current=state/('current.new-'+uuid.uuid4().hex);current.symlink_to(release);os.replace(current,state/'current')
   for name in ['hyperfide','cg']:
    link=directory/(name+'.new-'+uuid.uuid4().hex);link.symlink_to(state/'current/bin'/name);os.replace(link,directory/name)
-  receipt={'schema_version':1,'owner':'hyperfide-installer','command_directory':str(directory),'state_directory':str(state),'release_directory':str(release),'manifest_digest':index['manifest_digest'],'commands':['hyperfide','cg']}
+  receipt={'schema_version':1,'owner':'hyperfide-installer','command_directory':str(directory),'state_directory':str(state),'release_directory':str(release),'manifest_digest':index['manifest_digest'],'commands':['hyperfide','cg'],'authentication':authentication}
   record=state/('receipt.new-'+uuid.uuid4().hex);record.write_text(json.dumps(receipt,sort_keys=True)+'\n');record.chmod(0o600);sync_path(record);os.replace(record,state/'receipt.json')
   for folder in [releases,state,directory]:sync_path(folder,True)
-  print(json.dumps({'installed':True,'activated_services':False,'release_version':manifest['release_version'],'manifest_digest':index['manifest_digest'],'commands':['hyperfide','cg'],'command_directory':str(directory)}))
+  print(json.dumps({'installed':True,'activated_services':False,'release_version':manifest['release_version'],'manifest_digest':index['manifest_digest'],'commands':['hyperfide','cg'],'command_directory':str(directory),'authentication':authentication}))
 PY

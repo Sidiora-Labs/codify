@@ -29,6 +29,7 @@ import gzip,hashlib,json,os,re,shutil,stat,subprocess,sys,tarfile,tempfile
 root=Path.cwd();output=Path(sys.argv[1]).resolve();output.mkdir(parents=True,exist_ok=True)
 def run(*args,**kw):return subprocess.check_output(args,text=True,**kw).strip()
 def digest(p):return 'sha256:'+hashlib.sha256(p.read_bytes()).hexdigest()
+def digest_bytes(value):return 'sha256:'+hashlib.sha256(value).hexdigest()
 def copy_file(source,target,mode=None):
  target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target);target.chmod(mode if mode else (0o755 if source.stat().st_mode&0o111 else 0o644))
 node=Path(shutil.which('node')).resolve()
@@ -64,6 +65,10 @@ with tempfile.TemporaryDirectory(prefix='hyperfide-release-build-') as temporary
  shutil.copytree(root/'services/hyperfide/components',stage/'services/components')
  migrations=root/'services/hyperfide/migrations'
  if migrations.exists():shutil.copytree(migrations,stage/'services/migrations')
+ deploy=root/'deploy/hyperfide'
+ if deploy.exists():shutil.copytree(deploy,stage/'deploy/hyperfide')
+ host=root/'runtime/supervisory_host.py'
+ if host.exists():copy_file(host,stage/'services/runtime/supervisory_host.py')
  subprocess.run(['npm','ci','--omit=dev','--ignore-scripts'],cwd=stage/'services',check=True)
  # Bundle the actual linked dependencies instead of replacing qualified link flags.
  executables=[(root/'hyperfide',stage/'lib/hyperfide'),(root/'build/hyperfide-native',stage/'lib/hyperfide'),(node,stage/'lib/hyperfide')]+[(item,python_stage/'lib') for item in [Path(sys.executable).resolve()]+sorted((stdlib/'lib-dynload').glob('*.so'))]
@@ -93,6 +98,27 @@ with tempfile.TemporaryDirectory(prefix='hyperfide-release-build-') as temporary
  manifest={'schema_version':1,'release_version':'2.0.0-dev','source_commit':commit,'source_date_epoch':epoch,'protocol_version':1,'schema_min':1,'schema_max':1,'runtime':{'node':'24.22.0','npm':'11.19.1','python':'3.14.8','platform':'linux','architecture':'x64'},'files':files}
  encoded=(json.dumps(manifest,sort_keys=True,separators=(',',':'))+'\n').encode()
  (stage/'manifest.json').write_bytes(encoded)
+ signature=None
+ signing_key=os.environ.get('HYPERFIDE_RELEASE_SIGNING_KEY_FILE')
+ if signing_key:
+  if not Path(signing_key).is_absolute():raise SystemExit('hyperfide release: signing key must be an absolute private reference')
+  fd=os.open(signing_key,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+  try:
+   before=os.fstat(fd)
+   if not stat.S_ISREG(before.st_mode) or before.st_size>16384 or before.st_mode&0o077 or before.st_uid!=os.geteuid():raise SystemExit('hyperfide release: signing key must be a protected owner file')
+   key_bytes=os.read(fd,16385);after=os.fstat(fd)
+   if (before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns):raise SystemExit('hyperfide release: signing key changed')
+  finally:os.close(fd)
+  key_file=temp/'signing-key.pem';key_file.write_bytes(key_bytes);key_file.chmod(0o600)
+  verifier='/usr/bin/openssl'
+  public=subprocess.run([verifier,'pkey','-in',str(key_file),'-pubout','-outform','DER'],stdin=subprocess.DEVNULL,capture_output=True,timeout=30)
+  if public.returncode or len(public.stdout)!=44 or not public.stdout.startswith(bytes.fromhex('302a300506032b6570032100')):raise SystemExit('hyperfide release: configured signing key must be Ed25519')
+  signature_file=output/'manifest.sig'
+  signed=subprocess.run([verifier,'pkeyutl','-sign','-inkey',str(key_file),'-rawin','-in',str(stage/'manifest.json'),'-out',str(signature_file)],stdin=subprocess.DEVNULL,capture_output=True,timeout=30)
+  key_file.unlink()
+  if signed.returncode or signature_file.stat().st_size!=64:raise SystemExit('hyperfide release: exact manifest signing failed')
+  signature_file.chmod(0o644)
+  signature={'algorithm':'ED25519','file':'manifest.sig','key_fingerprint':digest_bytes(public.stdout)}
  manifest_digest=hashlib.sha256(encoded).hexdigest();name='hyperfide-2.0.0-dev-linux-x64-'+manifest_digest[:16]+'.tar.gz'
  archive=output/name
  with archive.open('wb') as raw:
@@ -107,6 +133,7 @@ with tempfile.TemporaryDirectory(prefix='hyperfide-release-build-') as temporary
      else:raise SystemExit('hyperfide release: unsupported artifact member')
  index={'schema_version':1,'release_version':manifest['release_version'],'manifest_digest':'sha256:'+manifest_digest,'archive':name,'archive_digest':digest(archive)}
  (output/'manifest.json').write_bytes(encoded)
+ if signature:index['signature']=signature
  (output/'release.json').write_text(json.dumps(index,sort_keys=True)+'\n')
  shutil.copyfile(root/'scripts/install.sh',output/'install')
  shutil.copyfile(root/'scripts/uninstall.sh',output/'uninstall')

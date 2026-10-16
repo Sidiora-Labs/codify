@@ -9,4 +9,4 @@ target="$root/bin/python3.bin"
 unset PYTHONHOME PYTHONPATH PYTHONSTARTUP PYTHONUSERBASE
 LD_LIBRARY_PATH="$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export LD_LIBRARY_PATH
-exec "$target" "$@"
+exec "$target" -B "$@"

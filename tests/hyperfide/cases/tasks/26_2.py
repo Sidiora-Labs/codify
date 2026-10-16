@@ -14,7 +14,10 @@ def run(*args,**kw):return subprocess.run(args,text=True,capture_output=True,tim
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-release-probe-") as d:
   base=Path(d);release=base/"release";home=base/"home";home.mkdir()
-  e=dict(os.environ,PATH=str(NODE.parent)+":"+os.environ["PATH"],HOME=str(home),HYPERFIDE_BUILD_PLACEMENT="remote")
+  signing=base/"release-signing.pem";trusted=base/"release-signing.pub"
+  expect(run("/usr/bin/openssl","genpkey","-algorithm","Ed25519","-out",str(signing)).returncode==0);signing.chmod(0o600)
+  expect(run("/usr/bin/openssl","pkey","-in",str(signing),"-pubout","-out",str(trusted)).returncode==0);trusted.chmod(0o644)
+  e=dict(os.environ,PATH=str(NODE.parent)+":"+os.environ["PATH"],HOME=str(home),HYPERFIDE_BUILD_PLACEMENT="remote",HYPERFIDE_RELEASE_SIGNING_KEY_FILE=str(signing))
   constructed=run("bash",str(ROOT/"scripts/release.sh"),"--output",str(release),"--skip-tests",cwd=ROOT,env=e)
   if constructed.returncode:
    sys.stderr.write(constructed.stdout[-2000:]+constructed.stderr[-2000:]);raise RuntimeError("actual nonpublishing construction failed")
@@ -25,11 +28,23 @@ def main():
   check("actual-native-and-service-runtime-inventory",lambda:expect({"bin/hyperfide-native","runtime/node","runtime/python/bin/python3.bin","services/dist/control.js","services/dist/provisioner.js","services/dist/dispatch.js","services/package-lock.json"}<=files.keys() and any(x.startswith("services/node_modules/") for x in files) and any(x.startswith("lib/hyperfide/libcurl") for x in files)))
   check("actual-source-commit-pin",lambda:expect(manifest["source_commit"]==run("git","rev-parse","HEAD",cwd=ROOT).stdout.strip()))
   directory=base/"prefix/bin"
-  install_env=dict(e,HYPERFIDE_BASE_URL=release.as_uri(),HYPERFIDE_MANIFEST_SHA256=index["manifest_digest"],HYPERFIDE_INSTALL_DIR=str(directory))
+  install_env=dict(e,HYPERFIDE_BASE_URL=release.as_uri(),HYPERFIDE_MANIFEST_SHA256=index["manifest_digest"],HYPERFIDE_INSTALL_DIR=str(directory),HYPERFIDE_TRUSTED_RELEASE_KEY_FILE=str(trusted))
   def install(env=None):
    v=dict(install_env);v.update(env or {});return run("bash",str(ROOT/"scripts/install.sh"),env=v)
   first=install()
   check("actual-install-custom-prefix",lambda:expect(first.returncode==0 and json.loads(first.stdout)["commands"]==["hyperfide","cg"]))
+  check("actual-ed25519-manifest-proof",lambda:expect(first.returncode==0 and json.loads(first.stdout)["authentication"]=={"mode":"ED25519","key_fingerprint":index["signature"]["key_fingerprint"]}))
+  sig=release/"manifest.sig";saved_signature=sig.read_bytes();sig.write_bytes(bytes([saved_signature[0]^1])+saved_signature[1:])
+  denied=install({"HYPERFIDE_INSTALL_DIR":str(base/"bad-signature/bin")})
+  check("tampered-signature-denied-before-install",lambda:expect(denied.returncode!=0 and not(base/"bad-signature/bin").exists()))
+  sig.write_bytes(saved_signature)
+  wrong=base/"wrong-signing.pem";wrong_pub=base/"wrong-signing.pub"
+  expect(run("/usr/bin/openssl","genpkey","-algorithm","Ed25519","-out",str(wrong)).returncode==0);wrong.chmod(0o600)
+  expect(run("/usr/bin/openssl","pkey","-in",str(wrong),"-pubout","-out",str(wrong_pub)).returncode==0);wrong_pub.chmod(0o644)
+  denied=install({"HYPERFIDE_INSTALL_DIR":str(base/"wrong-signer/bin"),"HYPERFIDE_TRUSTED_RELEASE_KEY_FILE":str(wrong_pub)})
+  check("different-trusted-signer-denied",lambda:expect(denied.returncode!=0 and not(base/"wrong-signer/bin").exists()))
+  denied=install({"HYPERFIDE_INSTALL_DIR":str(base/"no-trust/bin"),"HYPERFIDE_TRUSTED_RELEASE_KEY_FILE":"","HYPERFIDE_MANIFEST_SHA256":""})
+  check("missing-trust-anchor-denied",lambda:expect(denied.returncode!=0 and not(base/"no-trust/bin").exists()))
   def command(name,*args):return run(str(directory/name),*args,cwd=base,env=e)
   check("installed-canonical-version",lambda:expect(command("hyperfide","--version").stdout.strip()=="2.0.0-dev"))
   check("installed-legacy-version-parity",lambda:expect(command("cg","--version").stdout==command("hyperfide","--version").stdout))
@@ -44,6 +59,11 @@ def main():
   probe="import ctypes,os,sys; v=ctypes.c_int(); c=ctypes.CDLL(None); assert sys.version_info[:3]==(3,14,8); assert os.path.realpath(sys.base_prefix)==os.path.realpath(sys.argv[1]); assert c.prctl(36,1,0,0,0)==0; assert c.prctl(37,ctypes.byref(v),0,0,0)==0 and v.value==1; assert os.access('/proc/self/task/'+str(os.getpid())+'/children',os.R_OK); p=os.fork(); os._exit(0) if p==0 else None; assert os.waitpid(p,0)[0]==p"
   observed=run(str(python),"-I","-c",probe,str(current/"runtime/python"),env=dict(e,PYTHONHOME=str(current/"runtime/python"),LD_LIBRARY_PATH=str(current/"lib/hyperfide")))
   check("bundled-python-actual-subreaper-procfs-waitpid",lambda:expect(observed.returncode==0))
+  check("bundled-python-leaves-immutable-runtime",lambda:expect(not any((current/"runtime/python").rglob("__pycache__"))))
+  helper=run(str(current/"bin/hyperfide-native"),"--component","26.1","--action","branding.identity.describe",input="{}",env=e)
+  check("bundled-native-helper-actually-executes",lambda:expect(helper.returncode==0 and json.loads(helper.stdout)["result"]["product"]=="Hyperfide"))
+  linked=run("ldd",str(current/"bin/hyperfide"),env=e)
+  check("native-actually-loads-bundled-curl-and-crypto",lambda:expect(linked.returncode==0 and all(any(name in line and str(current/"lib/hyperfide") in line for line in linked.stdout.splitlines()) for name in ["libcurl","libcrypto"])))
   unknown=base/"unknown/bin";unknown.mkdir(parents=True);(unknown/"hyperfide").write_bytes(b"USER-OWNED-COMMAND")
   check("refuses-unowned-executable",lambda:expect(install({"HYPERFIDE_INSTALL_DIR":str(unknown)}).returncode!=0 and(unknown/"hyperfide").read_bytes()==b"USER-OWNED-COMMAND"))
   legacy=base/"legacy/bin";legacy.mkdir(parents=True);shutil.copy2(ROOT/"cg",legacy/"cg");legacy_hash=hashlib.sha256((legacy/"cg").read_bytes()).hexdigest()
