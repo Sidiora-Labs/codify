@@ -8,6 +8,8 @@ import {object} from '../policy/programme.js';
 import {assertInvocation,exact,fail,frozen,hash,NAME,strictJSON} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import {gatewayOf,invocationOf} from './enrollment.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import type {PrimaryTransaction} from '../storage/transactions.js';
 import {isCredentialAuthority} from './credentials.js';
 export interface AuthProfileSnapshot {
  schema_version:1;profile_id:string;profile_revision:string;profile_digest:string;connector:'codex'|'claude';
@@ -16,9 +18,9 @@ export interface AuthProfileSnapshot {
  permission_profile_id:string;capabilities:{unattended:boolean;refresh:boolean;concurrent_account:boolean;portable_session:boolean;explicit_resume:boolean};
  qualification:{state:'UNQUALIFIED'|'QUALIFIED'|'STALE';live_qualified:boolean;receipt_digest:string|null};
 }
-interface Profile {snapshot:AuthProfileSnapshot;runtime_home:string;target_uid:number}
-export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntime(i:InvocationContext,profileId:string):Promise<{snapshot:AuthProfileSnapshot;runtime_home:string;target_uid:number}>;probe(i:InvocationContext,profileId:string):Promise<unknown>}
-export function isNativeAuthAuthority(v:unknown):v is NativeAuthAuthority{return object(v)&&typeof v.resolve==='function'&&typeof v.privateRuntime==='function'&&typeof v.probe==='function';}
+interface Profile {snapshot:AuthProfileSnapshot;runtime_home:string;target_uid:number;configured_account_key:string}
+export interface NativeAuthAuthority {resolve(profileId:string):AuthProfileSnapshot;privateRuntimeInTransaction(tx:PrimaryTransaction,i:InvocationContext,profileId:string):Promise<{snapshot:AuthProfileSnapshot;runtime_home:string;target_uid:number;configured_account_key:string;observed_account_id:null}>;privateRuntime(i:InvocationContext,profileId:string):Promise<{snapshot:AuthProfileSnapshot;runtime_home:string;target_uid:number;configured_account_key:string;observed_account_id:null}>;probe(i:InvocationContext,profileId:string):Promise<unknown>}
+export function isNativeAuthAuthority(v:unknown):v is NativeAuthAuthority{return object(v)&&typeof v.resolve==='function'&&typeof v.privateRuntime==='function'&&typeof v.privateRuntimeInTransaction==='function'&&typeof v.probe==='function';}
 function sorted(v:unknown):unknown {if(Array.isArray(v))return v.map(sorted);if(object(v))return Object.fromEntries(Object.keys(v).sort().map(k=>[k,sorted(v[k])]));return v;}
 function nonempty(v:unknown):v is string{return typeof v==='string'&&v.length>0&&v.length<=255&&!/[\x00-\x1f]/.test(v);}
 async function binaryIdentity(filename:string):Promise<{digest:string;header:Buffer}>{
@@ -36,15 +38,15 @@ async function profiles(ctx:ComponentContext):Promise<Map<string,Profile>>{
  const raw=strictJSON(await fs.readFile(file));exact(raw,['schema_version','profiles']);if(raw.schema_version!==1||!Array.isArray(raw.profiles)||!raw.profiles.length||raw.profiles.length>128)fail('NATIVE_AUTH_CONFIG','Invalid profiles inventory');
  const result=new Map<string,Profile>(),homes=new Set<string>(),uids=new Set<number>();
  for(const v of raw.profiles){
-  exact(v,['schema_version','profile_id','profile_revision','connector','auth_mode','binary','credential_reference','configured_provider_id','configured_model_alias','requested_model_id','permission_profile_id','capabilities','runtime_home','target_uid']);
-  if(v.schema_version!==1||typeof v.profile_id!=='string'||!NAME.test(v.profile_id)||result.has(v.profile_id)||!nonempty(v.profile_revision)||typeof v.connector!=='string'||!['codex','claude'].includes(v.connector)||typeof v.auth_mode!=='string'||!['account_session','api_credential'].includes(v.auth_mode)||!nonempty(v.credential_reference)||!nonempty(v.configured_provider_id)||!nonempty(v.configured_model_alias)||!nonempty(v.requested_model_id)||!nonempty(v.permission_profile_id)||typeof v.runtime_home!=='string'||!path.isAbsolute(v.runtime_home)||!Number.isInteger(v.target_uid)||Number(v.target_uid)<1000||Number(v.target_uid)>2147483647||homes.has(v.runtime_home)||uids.has(Number(v.target_uid)))fail('NATIVE_AUTH_CONFIG','Invalid connector/auth profile or shared native home');
+  exact(v,['schema_version','profile_id','profile_revision','connector','auth_mode','binary','credential_reference','configured_provider_id','configured_model_alias','requested_model_id','permission_profile_id','capabilities','runtime_home','target_uid','configured_account_key']);
+  if(v.schema_version!==1||typeof v.profile_id!=='string'||!NAME.test(v.profile_id)||result.has(v.profile_id)||!nonempty(v.profile_revision)||typeof v.connector!=='string'||!['codex','claude'].includes(v.connector)||typeof v.auth_mode!=='string'||!['account_session','api_credential'].includes(v.auth_mode)||!nonempty(v.credential_reference)||!nonempty(v.configured_provider_id)||!nonempty(v.configured_model_alias)||!nonempty(v.requested_model_id)||!nonempty(v.permission_profile_id)||!nonempty(v.configured_account_key)||typeof v.runtime_home!=='string'||!path.isAbsolute(v.runtime_home)||!Number.isInteger(v.target_uid)||Number(v.target_uid)<1000||Number(v.target_uid)>2147483647||homes.has(v.runtime_home)||uids.has(Number(v.target_uid)))fail('NATIVE_AUTH_CONFIG','Invalid connector/auth profile or shared native home');
   exact(v.binary,['path','digest','version']);if(typeof v.binary.path!=='string'||!path.isAbsolute(v.binary.path)||typeof v.binary.digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(v.binary.digest)||!nonempty(v.binary.version))fail('NATIVE_AUTH_CONFIG','Pinned binary identity required');
   exact(v.capabilities,['unattended','refresh','concurrent_account','portable_session','explicit_resume']);if(Object.values(v.capabilities).some(x=>typeof x!=='boolean'))fail('NATIVE_AUTH_CONFIG','Explicit capability booleans required');
   const real=await fs.realpath(v.binary.path),identity=await binaryIdentity(real);if(identity.digest!==v.binary.digest)fail('NATIVE_BINARY_DRIFT','Configured binary bytes differ from pinned digest');
   const home=await fs.lstat(v.runtime_home);if(!home.isDirectory()||home.isSymbolicLink()||home.uid!==Number(v.target_uid)||(home.mode&0o077)!==0)fail('NATIVE_AUTH_CONFIG','Native home requires private per-UID ownership');
   homes.add(v.runtime_home);uids.add(Number(v.target_uid));
   const snapshot:AuthProfileSnapshot=frozen({schema_version:1,profile_id:v.profile_id,profile_revision:v.profile_revision,profile_digest:hash(JSON.stringify(sorted(v))),connector:v.connector as 'codex'|'claude',auth_mode:v.auth_mode as 'account_session'|'api_credential',binary:{path:real,digest:v.binary.digest,version:v.binary.version},credential_reference:v.credential_reference,configured_provider_id:v.configured_provider_id,observed_provider_id:null,configured_model_alias:v.configured_model_alias,requested_model_id:v.requested_model_id,observed_model_id:null,permission_profile_id:v.permission_profile_id,capabilities:v.capabilities as unknown as AuthProfileSnapshot['capabilities'],qualification:{state:'UNQUALIFIED',live_qualified:false,receipt_digest:null}});
-  result.set(v.profile_id,{snapshot,runtime_home:v.runtime_home,target_uid:Number(v.target_uid)});
+  result.set(v.profile_id,{snapshot,runtime_home:v.runtime_home,target_uid:Number(v.target_uid),configured_account_key:v.configured_account_key as string});
  }
  return result;
 }
@@ -65,14 +67,13 @@ async function run(profile:Profile,args:string[],signal:AbortSignal):Promise<{ex
 export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const inventory=await profiles(ctx),gateway=gatewayOf(ctx),credentials=ctx.dependencies.require('14.2','identity.credentials',isCredentialAuthority);
  const resolve=(id:string):AuthProfileSnapshot=>{const p=inventory.get(id);if(!p)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');return p.snapshot;};
- const privateRuntime:NativeAuthAuthority['privateRuntime']=async(i,id)=>{
-  assertInvocation(i);const profile=inventory.get(id);if(!profile)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');
-  return gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async tx=>{
-   const available=await credentials.inspectInTransaction(tx,i,profile.snapshot.credential_reference);
-   if(available.status!=='AVAILABLE')fail('AUTH_BLOCKED','Native profile credential reference is unavailable');
-   await i.guard(tx);return frozen({snapshot:profile.snapshot,runtime_home:profile.runtime_home,target_uid:profile.target_uid});
-  });
+ const privateRuntimeInTransaction:NativeAuthAuthority['privateRuntimeInTransaction']=async(tx,i,id)=>{
+  assertInvocation(i);await i.guard(tx);const profile=inventory.get(id);if(!profile)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');
+  const available=await credentials.inspectInTransaction(tx,i,profile.snapshot.credential_reference);
+  if(available.status!=='AVAILABLE')fail('AUTH_BLOCKED','Native profile credential reference is unavailable');
+  await i.guard(tx);return frozen({snapshot:profile.snapshot,runtime_home:profile.runtime_home,target_uid:profile.target_uid,configured_account_key:profile.configured_account_key,observed_account_id:null});
  };
+ const privateRuntime:NativeAuthAuthority['privateRuntime']=(i,id)=>gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async tx=>{assertPrimaryTransaction(tx);return privateRuntimeInTransaction(tx,i,id);});
  const probe:NativeAuthAuthority['probe']=async(i,id)=>{
   assertInvocation(i);await gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async()=>{});
   const profile=inventory.get(id);if(!profile)fail('NATIVE_AUTH_PROFILE_UNKNOWN','Unknown configured authentication profile');
@@ -87,7 +88,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
     auth_mode:profile.snapshot.auth_mode,refresh_qualified:false,portability_qualified:false,endurance_72h_qualified:false,live_qualified:false,
     reason:'Version/auth-status probes do not qualify inference, model identity, permission behaviour, refresh or endurance'};
  };
- const authority:NativeAuthAuthority=Object.freeze({resolve,probe,privateRuntime});
+ const authority:NativeAuthAuthority=Object.freeze({resolve,probe,privateRuntime,privateRuntimeInTransaction});
  const input=(v:unknown):string=>{exact(v,['profile_id']);if(typeof v.profile_id!=='string')fail('INVALID_REQUEST','Configured profile identity required');return v.profile_id;};
  return {apiVersion:1,capabilities:{'identity.native-auth':authority},actions:{
   'native.auth.snapshot':async(v,context)=>{const i=invocationOf(context);return gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async()=>resolve(input(v)));},

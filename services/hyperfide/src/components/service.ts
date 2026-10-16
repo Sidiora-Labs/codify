@@ -115,6 +115,7 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
     let identity;
     if(registry.hasComponent('14.1')) {
       identity=registry.resolveCapability('14.1','identity.transport',isIdentityAuthority);
+      identity.sealTrustedRegistrations();
       let extra:((invocation:InvocationContext)=>Promise<void>)|undefined;
       if(registry.hasComponent('14.4')) {
         const authorization=registry.resolveCapability('14.4','identity.authorization',(value:unknown):value is {authorize:(invocation:InvocationContext)=>Promise<void>}=>object(value)&&typeof value.authorize==='function');
