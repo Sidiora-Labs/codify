@@ -19,7 +19,9 @@
     "contract.source.cross-run-refused",
     "contract.source.tree-refused",
     "contract.coverage.no-proof-no-completion",
-    "contract.api.caller-outcome-refused"
+    "contract.api.caller-outcome-refused",
+    "contract.impact.operational-invariants",
+    "contract.facets.missing-operational-refused"
   ],
   "argv": [
     "python3",

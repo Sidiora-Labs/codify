@@ -2,7 +2,7 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import {authorizeReview,canonical,digest,fail,hash,obj,oid,primary,reviewError,scope,strings,text,transaction,uuid,decimal,reviewInputCurrent,lockReviewDisposition} from './coverage.js';
 import type {ReviewDb,ReviewScope} from './coverage.js';
 
-export const CONTRACT_FACETS=['schema','signatures','errors','authentication','state','units','precision','ordering','idempotency','compatibility'] as const;
+export const CONTRACT_FACETS=['schema','signatures','errors','authentication','state','units','precision','ordering','idempotency','compatibility','operational_invariants'] as const;
 interface Endpoint {repository_id:string;source_object_id:string;symbol_ids:string[]}
 interface ContractDefinition {
  producer:Endpoint;consumers:Endpoint[];facets:Record<string,{status:'DEFINED'|'UNKNOWN';definition:unknown}>;
