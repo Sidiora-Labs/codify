@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {FoundationError,object} from '../policy/programme.js';
+import type {ProviderIsolationBinding,ProviderIsolationReceipt} from '../providers/placement.js';
 import {assertInvocation,type InvocationContext} from '../transport/protocol.js';
 import {assertIsolationPermit,type VerifiedIsolationPermit} from '../identity/credentials.js';
 import {assertPrimaryTransaction,type TransactionGateway} from '../storage/transactions.js';
@@ -10,11 +11,8 @@ import {assertPrimaryTransaction,type TransactionGateway} from '../storage/trans
 type Binding={deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string;authority_digest:string;authority_nonce:string|null};
 export interface ExternalFenceReceipt {deployment_id:string;operation_id:string;fence_id:string;source_epoch:string|null;isolated_writer:string;observed_at:string;expires_at:string;evidence_digest:string}
 export interface ExternalWriterFence {isolate(input:{deployment_id:string;operation_id:string;source_epoch:string|null;signal?:AbortSignal}):Promise<ExternalFenceReceipt>}
-export interface WriterIsolationReceipt {
- evidence_scope:'LIVE_PROVIDER'|'COMPONENT_FIXTURE';reference_key:string;operation_id:string;status:'ISOLATED'|'UNKNOWN';topology_digest:string;resource_identity_digest:string;
- observed_state:'DESTROYED'|'ABSENT'|'UNKNOWN';observed_at:string;expires_at:string;evidence_digest:string;
-}
-export interface IsolationJournalBinding {schema_version:1;reference_key:string;operation_id:string;topology_digest:string;resource_identity_digest:string;destroy_operation:unknown;authority_digest:string;custody_evidence_digest:string;custody_expires_at:string}
+export type WriterIsolationReceipt=ProviderIsolationReceipt;
+export type IsolationJournalBinding=ProviderIsolationBinding;
 export interface IsolationJournalRecord {binding:IsolationJournalBinding;state:'PREPARED'|'UNKNOWN'|'ISOLATED';receipt:WriterIsolationReceipt|null;observations:readonly {operation:unknown;outcome:unknown}[]}
 export interface IsolationJournal {
  read():Promise<IsolationJournalRecord|null>;
@@ -22,7 +20,7 @@ export interface IsolationJournal {
  record(outcome:{binding:IsolationJournalBinding;receipt:WriterIsolationReceipt|null;observations:readonly {operation:unknown;outcome:unknown}[]}):Promise<void>;
 }
 export interface ProviderIsolationBackend {
- isolateConfiguredResource(referenceKey:string,operationId:string,signal:AbortSignal|undefined,journal:IsolationJournal):Promise<WriterIsolationReceipt>;
+ isolateConfiguredResource(referenceKey:string,operationId:string,signal:AbortSignal,journal:IsolationJournal):Promise<WriterIsolationReceipt>;
 }
 export interface LegacyWriterReceipt {
  deployment_id:string;operation_id:string;source_epoch:string|null;status:'ADMISSION_DISABLED'|'ISOLATED';topology_digest:string;
@@ -42,13 +40,13 @@ export interface ExternalFenceTopology {
 }
 export type ExternalFenceAuthority={kind:'INVOCATION';invocation:InvocationContext;gateway:Pick<TransactionGateway,'withPrimaryTransaction'>}|{kind:'ISOLATION_PERMIT';permit:VerifiedIsolationPermit};
 export interface ProviderIsolationCapability {
- isolateConfiguredResource(referenceKey:string,operationId:string,authority:InvocationContext|VerifiedIsolationPermit,signal:AbortSignal|undefined,journal:IsolationJournal):Promise<WriterIsolationReceipt>;
+ isolateConfiguredResource(referenceKey:string,operationId:string,authority:InvocationContext|VerifiedIsolationPermit,signal:AbortSignal,journal:IsolationJournal):Promise<WriterIsolationReceipt>;
 }
 export function bindProviderIsolation(capability:ProviderIsolationCapability,authority:InvocationContext|VerifiedIsolationPermit):ProviderIsolationBackend {
  if(!capability||typeof capability.isolateConfiguredResource!=='function')fail('EXTERNAL_FENCE_BACKEND_UNAVAILABLE','Actual provisioner isolation capability is required');
- return Object.freeze({isolateConfiguredResource:(key:string,id:string,signal:AbortSignal|undefined,journal:IsolationJournal)=>capability.isolateConfiguredResource(key,id,authority,signal,journal)});
+ return Object.freeze({isolateConfiguredResource:(key:string,id:string,signal:AbortSignal,journal:IsolationJournal)=>capability.isolateConfiguredResource(key,id,authority,signal,journal)});
 }
-type JournalDocument={schema_version:1;binding:Binding;authorizations:{authority_digest:string;authority_nonce:string|null}[];resources:Record<string,IsolationJournalRecord>};
+type JournalDocument={schema_version:1;binding:Binding;authorizations:{authority_digest:string;authority_nonce:string|null}[];resources:Record<string,IsolationJournalRecord>;completion_receipt?:ExternalFenceReceipt;completion_receipt_json?:string};
 function coreBinding(v:Binding){return {deployment_id:v.deployment_id,operation_id:v.operation_id,source_epoch:v.source_epoch,topology_digest:v.topology_digest}}
 function fail(code:string,message:string):never{throw new FoundationError(code,message)}
 function canonical(v:unknown):string{if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(canonical).join(',')+']';return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical((v as Record<string,unknown>)[k])).join(',')+'}'}
@@ -73,7 +71,30 @@ function checkFresh(observed:string,expires:string,now:number):void{
  */
 export class FileExternalFenceJournal {
  constructor(private readonly directory:string){}
- async withOperation<T>(binding:Binding,body:(resource:(key:string)=>IsolationJournal)=>Promise<T>):Promise<T>{
+ async readCompleted(input:{deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string}):Promise<ExternalFenceReceipt>{
+  if(!uuid(input.deployment_id)||!uuid(input.operation_id)||input.source_epoch!==null&&!uuid(input.source_epoch)||!digest(input.topology_digest))fail('EXTERNAL_FENCE_INVALID','Exact completed operation identity is required');
+  if(!path.isAbsolute(this.directory)||path.resolve(this.directory)!==this.directory)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Canonical private journal required');
+  const rootInfo=await fs.lstat(this.directory);
+  if(!rootInfo.isDirectory()||rootInfo.isSymbolicLink()||rootInfo.uid!==process.getuid?.()||(rootInfo.mode&0o077)!==0||await fs.realpath(this.directory)!==this.directory)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Private owned journal required');
+  const root=await fs.open(this.directory,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+  try{
+   const opened=await root.stat();if(opened.dev!==rootInfo.dev||opened.ino!==rootInfo.ino)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Journal root changed');
+   const file=await fs.open('/proc/self/fd/'+root.fd+'/'+input.operation_id+'.json',constants.O_RDONLY|constants.O_NOFOLLOW);
+   try{
+    const info=await file.stat();if(!info.isFile()||info.nlink!==1||info.uid!==process.getuid?.()||(info.mode&0o077)!==0||info.size>1048576)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Private bounded completion record required');
+    const doc=JSON.parse(await file.readFile('utf8')) as JournalDocument;
+    if(doc.schema_version!==1||!object(doc.binding)||canonical(coreBinding(doc.binding))!==canonical(input)||!object(doc.completion_receipt))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','No matching durable completed physical fence');
+    if(typeof doc.completion_receipt_json!=='string'||doc.completion_receipt_json.length>16384)fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Exact completed receipt bytes are absent');
+    const receipt=JSON.parse(doc.completion_receipt_json) as ExternalFenceReceipt;
+    if(canonical(receipt)!==canonical(doc.completion_receipt))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Completed receipt bytes differ from journal value');
+    if(receipt.deployment_id!==input.deployment_id||receipt.operation_id!==input.operation_id||receipt.source_epoch!==input.source_epoch||receipt.fence_id!==input.operation_id||receipt.isolated_writer!=='topology:'+input.topology_digest.slice(7)||!digest(receipt.evidence_digest))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Completed physical fence scope mismatch');
+    time(receipt.observed_at);time(receipt.expires_at);
+    return Object.freeze(structuredClone(receipt));
+   }finally{await file.close()}
+  }finally{await root.close()}
+ }
+
+ async withOperation<T>(binding:Binding,body:(resource:(key:string)=>IsolationJournal,recordCompletion:(receipt:ExternalFenceReceipt)=>Promise<void>)=>Promise<T>):Promise<T>{
   checkBinding(binding);
   if(!path.isAbsolute(this.directory)||path.resolve(this.directory)!==this.directory)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Canonical absolute private journal directory required');
   const info=await fs.lstat(this.directory);
@@ -127,7 +148,11 @@ export class FileExternalFenceJournal {
     });
    };
    await save();
-   return await body(resource);
+   return await body(resource,receipt=>serialize(async()=>{
+    if(receipt.deployment_id!==binding.deployment_id||receipt.operation_id!==binding.operation_id||receipt.source_epoch!==binding.source_epoch||receipt.fence_id!==binding.operation_id||!digest(receipt.evidence_digest)||receipt.isolated_writer!=='topology:'+binding.topology_digest.slice(7))fail('EXTERNAL_FENCE_JOURNAL_CONFLICT','Completed fence receipt differs from its immutable topology');
+    checkFresh(receipt.observed_at,receipt.expires_at,Date.now());
+    document.completion_receipt=structuredClone(receipt);document.completion_receipt_json=JSON.stringify(receipt);await save();
+   }));
   }finally{
    await queue;active=false;
    try{if(lock){await lock.close();await fs.unlink(lockname);await root.sync()}}finally{await root.close()}
@@ -169,19 +194,19 @@ export function createExternalWriterFence(config:ExternalFenceTopology,providers
  const checkLegacy=(v:LegacyWriterReceipt,input:{deployment_id:string;operation_id:string;source_epoch:string|null},isolated:boolean)=>{
   if(!object(v)||v.deployment_id!==input.deployment_id||v.operation_id!==input.operation_id||v.source_epoch!==input.source_epoch||v.topology_digest!==trusted.legacy_topology_digest||!digest(v.evidence_digest)||v.visibility?.scope!=='CONFIGURED_PID_NAMESPACE'||v.visibility.pid_namespace!==trusted.legacy_pid_namespace||v.visibility.mount_namespace!==trusted.legacy_mount_namespace||v.status!==(isolated?'ISOLATED':'ADMISSION_DISABLED'))fail('EXTERNAL_FENCE_LEGACY_UNVERIFIED','Legacy observation does not cover the configured namespace and source');
   time(v.observed_at);
-  if(isolated){if(v.admission_disabled!==true||v.writable_fds!==0||v.writable_shared_mappings!==0||!Number.isSafeInteger(v.read_only_aliases)||v.read_only_aliases!<1||!name(v.isolated_writer)||!v.expires_at)fail('EXTERNAL_FENCE_LEGACY_UNVERIFIED','Read-only storage and writer quiescence were not actually observed');checkFresh(v.observed_at,v.expires_at,Date.now())}
+  if(isolated){if(v.admission_disabled!==true||v.writable_fds!==0||v.writable_shared_mappings!==0||!Number.isSafeInteger(v.read_only_aliases)||v.read_only_aliases!<1||!name(v.isolated_writer)||!v.expires_at)fail('EXTERNAL_FENCE_LEGACY_UNVERIFIED','Read-only storage and writer quiescence were not actually observed');checkFresh(v.observed_at,v.expires_at,Date.now());if(!trusted.required_writer_ids.includes(v.isolated_writer!)||!trusted.resources.some(r=>r.writer_ids.includes(v.isolated_writer!)))fail('EXTERNAL_FENCE_CONFIG_INCOMPLETE','Legacy namespace observations require an actual declared physical isolation boundary for that writer')}
  };
  return Object.freeze({isolate:async(input:{deployment_id:string;operation_id:string;source_epoch:string|null;signal?:AbortSignal})=>{
   if(input.deployment_id!==trusted.deployment_id||input.source_epoch!==trusted.source_epoch||!uuid(input.operation_id))fail('EXTERNAL_FENCE_SCOPE_MISMATCH','Activation does not match the trusted deployment source epoch');
   input.signal?.throwIfAborted();
   const authorization=await authorize(input);
-  return journal.withOperation({deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,topology_digest:configDigest,...authorization},async resource=>{
+  return journal.withOperation({deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,topology_digest:configDigest,...authorization},async(resource,recordCompletion)=>{
    await authorize(input);
    const admission=await legacy.disableAdmission(input);checkLegacy(admission,input,false);
    const isolate=async(r:ExternalFenceTopology['resources'][number])=>{
     input.signal?.throwIfAborted();const custody=resource(r.reference_key),backend=r.backend==='PROVIDER'?providers:ownedHost!;
     let observed:WriterIsolationReceipt;
-    try{observed=await backend.isolateConfiguredResource(r.reference_key,input.operation_id,input.signal,custody)}
+    try{observed=await backend.isolateConfiguredResource(r.reference_key,input.operation_id,input.signal??new AbortController().signal,custody)}
     catch(e){const row=await custody.read();if(row?.state==='PREPARED')await custody.record({binding:row.binding,receipt:null,observations:[]});throw e}
     const persisted=await custody.read();
     if(!persisted||persisted.state!=='ISOLATED'||persisted.binding.topology_digest!==r.topology_digest||canonical(persisted.receipt)!==canonical(observed))fail('EXTERNAL_FENCE_OUTCOME_UNKNOWN','Actual provider isolation must be durably observed before activation');
@@ -199,7 +224,8 @@ export function createExternalWriterFence(config:ExternalFenceTopology,providers
    const now=Date.now();for(const receipt of receipts)checkFresh(receipt.observed_at,receipt.expires_at,now);
    const observedAt=Math.max(...receipts.map(r=>time(r.observed_at)),time(legacyReceipt.observed_at)),expiresAt=Math.min(...receipts.map(r=>time(r.expires_at)),time(legacyReceipt.expires_at!),observedAt+30000);
    if(expiresAt<=now)fail('EXTERNAL_FENCE_STALE','Full writer coverage was not observed within one proof interval');
-   return {deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,fence_id:input.operation_id,isolated_writer:'topology:'+configDigest.slice(7),observed_at:new Date(observedAt).toISOString(),expires_at:new Date(expiresAt).toISOString(),evidence_digest:hash({topology_digest:configDigest,required_writer_ids:trusted.required_writer_ids,admission,resources:receipts,legacy:legacyReceipt})};
+   const completed={deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,fence_id:input.operation_id,isolated_writer:'topology:'+configDigest.slice(7),observed_at:new Date(observedAt).toISOString(),expires_at:new Date(expiresAt).toISOString(),evidence_digest:hash({topology_digest:configDigest,required_writer_ids:trusted.required_writer_ids,admission,resources:receipts,legacy:legacyReceipt})};
+   await recordCompletion(completed);return completed;
   });
  }});
 }

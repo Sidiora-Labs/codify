@@ -3,6 +3,7 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
+import {createProviderIsolation,type ProviderIsolationRuntime} from '../providers/placement.js';
 import {loadIsolationPermitVerifier,assertVerifiedIsolationPermit,type VerifiedIsolationPermit} from '../identity/credentials.js';
 import {startIsolationHttpTransport,type IsolationHttpTransport} from '../transport/isolation.js';
 import {createExternalWriterFence,bindProviderIsolation,externalFenceTopologyDigest,FileExternalFenceJournal,type ExternalFenceTopology,type ExternalFenceReceipt,type ProviderIsolationCapability,type ProviderIsolationBackend,type LegacyWriterBackend} from './fencing.js';
@@ -62,6 +63,11 @@ export async function startExternalFencingService(options:ExternalFencingService
   ...(config.transport.deadline_ms===undefined?{}:{deadlineMs:config.transport.deadline_ms})
  });
  return Object.freeze({address:listener.address,isolate,describe:()=>description,close:()=>listener.close()});
+}
+/** Offline provisioner bootstrap uses the real lower provider factory without constructing a database context. */
+export async function startProviderExternalFencingService(options:Omit<ExternalFencingServiceOptions,'providers'>&{runtime:Omit<ProviderIsolationRuntime,'env'|'signal'>}):Promise<ExternalFencingService>{
+ const isolateConfiguredResource=createProviderIsolation({...options.runtime,env:options.env,signal:options.signal});
+ return startExternalFencingService({env:options.env,signal:options.signal,providers:{isolateConfiguredResource},legacy:options.legacy,...(options.ownedHost?{ownedHost:options.ownedHost}:{})});
 }
 function provider(value:unknown):value is ProviderIsolationCapability{return object(value)&&typeof value.isolateConfiguredResource==='function'}
 function legacy(value:unknown):value is LegacyWriterBackend{return object(value)&&typeof value.disableAdmission==='function'&&typeof value.observeIsolation==='function'}

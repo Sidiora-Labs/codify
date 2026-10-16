@@ -7,7 +7,7 @@ const ranks:Record<string,number>={PAUSE:2,DRAIN:1,CANCEL:4,STOP:3};
 export async function publicationBlocked(tx:{query:(sql:string,values:unknown[])=>Promise<{rows:Record<string,unknown>[]}>},org:string,run:string):Promise<boolean>{
  const result=await tx.query("SELECT EXISTS(SELECT 1 FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','RUNNING','OUTCOME_UNKNOWN')) OR EXISTS(SELECT 1 FROM hyperfide.publication_intents WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','EXECUTING')) AS blocked",[org,run]);
  const integration=await inspectIntegrationRecovery(tx as Parameters<typeof inspectIntegrationRecovery>[0],{organisation_id:org,run_id:run,authority_epoch:'00000000-0000-4000-8000-000000000000'});
- return result.rows[0]?.blocked!==false||!integration.ready||integration.jobs.length>0||integration.scope_jobs.length>0;
+ return result.rows[0]?.blocked!==false||!integration.ready||integration.jobs.length>0||integration.scope_jobs.length>0||integration.preparations.length>0;
 }
 async function requestScopedControl(input:unknown,context:ComponentContext):Promise<unknown>{
    const value=record(input,['scope','operation_id','scope_kind','scope_id','mode','reason']);
