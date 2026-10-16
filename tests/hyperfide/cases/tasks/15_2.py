@@ -38,7 +38,7 @@ BUCKET = "hyperfide-artifacts-fixture"
 MAX_BYTES = 256 * 1024
 ACTIONS = ["artifact.object.put", "artifact.object.read", "artifact.object.inspect",
            "artifact.object.reconcile", "artifact.manifest.commit", "artifact.manifest.read",
-           "artifact.pending.list"]
+           "artifact.pending.list", "artifact.object.locate"]
 IDS = [
  "artifacts.service.registered", "artifacts.object.roundtrip", "artifacts.object.empty",
  "artifacts.object.receipt-replay", "artifacts.object.conditional-existing",
@@ -60,6 +60,7 @@ IDS = [
  "artifacts.retention.metadata", "artifacts.retention.children", "artifacts.object.opaque-payload",
 
  "artifacts.manifest.promotion-bypass", "artifacts.http.independent-sigv4", "artifacts.secrets.sanitized",
+ "artifacts.object.locate-id-loss", "artifacts.object.locate-absent", "artifacts.object.locate-pending",
  "artifacts.auth.stdio-required", "artifacts.auth.forged-context", "artifacts.auth.revoked-mid-upload",
 ]
 FAILED = []
@@ -764,6 +765,39 @@ def main():
                        "observations leaked trusted configuration")
                 expect(artifacts(), "no actual database observations")
             check("artifacts.secrets.sanitized", sanitized)
+
+
+            def locate_after_id_loss():
+                blob = b"locate complete object after caller lost its id"
+                original = service.put(blob)
+                found = service.ok("artifact.object.locate", dict(SCOPE, digest=digest(blob), expected_size_bytes=str(len(blob))))
+                verified(found, blob)
+                expect(found["artifact"]["artifact_id"] == original["artifact"]["artifact_id"]
+                       and found["receipt"] == original["receipt"], "scoped lookup changed durable object identity")
+            check("artifacts.object.locate-id-loss", locate_after_id_loss)
+
+            def locate_absent_metadata():
+                before = len(fixture.events)
+                found = service.ok("artifact.object.locate", dict(SCOPE, digest=digest(b"never registered lookup"), expected_size_bytes="23"))
+                expect(found["outcome"] == "NOT_FOUND" and found["metadata_state"] == "ABSENT"
+                       and found["availability"] == "NOT_EVALUATED" and found["receipt"] is None
+                       and found["retry_authority"] == "NONE" and len(fixture.events) == before,
+                       "missing metadata was confused with confirmed physical absence or retry authority")
+            check("artifacts.object.locate-absent", locate_absent_metadata)
+
+            def locate_pending():
+                blob = b"read-only locate retains incomplete upload"
+                fixture.set_mode(blob, "reject")
+                pending = service.put(blob)
+                expect(pending["artifact"]["status"] == "PENDING", "fixture did not preserve upload intent")
+                before = len(fixture.events)
+                found = service.ok("artifact.object.locate", dict(SCOPE, digest=digest(blob), expected_size_bytes=str(len(blob))))
+                expect(found["outcome"] == "UNKNOWN" and found["artifact"]["status"] == "PENDING"
+                       and found["receipt"] is None and found["requires_reconciliation"] is True
+                       and found["artifact"]["artifact_id"] == pending["artifact"]["artifact_id"]
+                       and len(fixture.events) == before, "lookup promoted or retried an incomplete upload")
+                fixture.set_mode(blob, "")
+            check("artifacts.object.locate-pending", locate_pending)
 
             def raw_stdio_denied():
                 frame = {"id": "artifact-stdio-auth-probe", "component": "15.2",
