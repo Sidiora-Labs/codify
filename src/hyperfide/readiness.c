@@ -564,6 +564,7 @@ static int source_config_safe(const char *repository, const char *diagnostics,
         !strncmp(line, "fsck.", 5) || !strncmp(line, "fetch.fsck.", 11) ||
         !strncmp(line, "receive.fsck.", 13) ||
         !strcmp(line, "extensions.partialclone") ||
+        !strcmp(line, "extensions.worktreeconfig") ||
         (n >= 9 && !strcmp(line + n - 9, ".promisor"))) {
       ok = 0;
       break;

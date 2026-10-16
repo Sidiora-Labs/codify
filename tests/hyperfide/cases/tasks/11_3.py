@@ -169,6 +169,12 @@ def main():
         def fsck_override(f):
             git(f.repo,"config","fsck.missingEmail","ignore");f.workspace_inventory();source_refused(f)
         case("source-only.repository-fsck-override-denied",fsck_override)
+        def worktree_config(f,setting):
+            git(f.repo,"config","extensions.worktreeConfig","true")
+            (f.repo/".git/config.worktree").write_text(setting);f.workspace_inventory();source_refused(f)
+        case("source-only.worktree-fsck-config-refused",lambda f:worktree_config(f,"[fsck]\\n missingEmail = ignore\\n"))
+        case("source-only.worktree-include-config-refused",lambda f:worktree_config(f,"[include]\\n path = ignored-local-config\\n"))
+
         if "--source" in sys.argv:
             print(json.dumps({"type":"cleanup","status":"complete"}),flush=True)
             return bool(FAILED)
