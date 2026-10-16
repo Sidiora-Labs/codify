@@ -20,7 +20,16 @@
     "recovery.snapshot-no-raw-receiver-payload",
     "recovery.unresponsive-adapter-bounded",
     "recovery.sigkill-before-receiver-commit",
-    "recovery.sigkill-after-receiver-commit"
+    "recovery.sigkill-after-receiver-commit",
+    "recovery.daemon-real-service-identity",
+    "recovery.daemon-separate-process-stdin-eof",
+    "recovery.daemon-after-commit-response-loss",
+    "recovery.daemon-restart-stable-effect",
+    "recovery.daemon-missing-handler-held",
+    "recovery.daemon-real-runtime-status",
+    "recovery.daemon-renews-service-not-compute",
+    "recovery.daemon-no-operator-fallback",
+    "recovery.daemon-revocation-holds-work"
   ],
   "argv": [
     "python3",
@@ -60,6 +69,11 @@
       "id": "hf-task-6.4-directory",
       "kind": "temporary-test-directory",
       "scope": "task6.4-disposable"
+    },
+    {
+      "id": "hf-task-6.4-dispatch-process",
+      "kind": "local-https-service",
+      "scope": "task6.4-disposable"
     }
   ],
   "cleanup_argv": [
@@ -70,7 +84,8 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "events/resource-absence.json",
-    "events/observations.json"
+    "events/observations.json",
+    "events/daemon-observations.json"
   ],
   "source_files": [
     "services/hyperfide/package.json",
@@ -94,6 +109,9 @@
     "postgresql.fixture.drop",
     "https.loopback.serve",
     "fixture.process.spawn",
-    "fixture.process.stop"
+    "fixture.process.stop",
+    "identity.fixture.service-issue",
+    "identity.fixture.service-renew",
+    "identity.fixture.service-revoke"
   ]
 }
