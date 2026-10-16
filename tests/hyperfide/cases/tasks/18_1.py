@@ -44,7 +44,7 @@ def scoped(f,**data):return dict(organisation_id=f.ids['organisation'],run_id=f.
 def seed(f,task):
     record_database(task,f.database,str(f.path))
     # Apply actual reviewed migrations only; missing prerequisite source is an error.
-    for filename in ('0002-spec.sql','0003-hierarchy.sql','0017-review.sql','0018-findings.sql'):
+    for filename in ('0004-durability.sql','0002-spec.sql','0003-hierarchy.sql','0017-review.sql','0018-findings.sql'):
         sql=(ROOT/'services/hyperfide/migrations'/filename).read_text();f.sql('BEGIN;\n'+sql+'\nCOMMIT;')
     f.x={key:uid() for key in ('repository','package','collaborator','task','attempt','watcher','manager','successor','peer','artifact','evidence','policy','obligation','receipt')}
     x=f.x;i=f.ids
@@ -92,8 +92,10 @@ def main():
     if '--cleanup' in sys.argv:return cleanup('18.1')
     f=fixture('18.1')
     try:
+        initial_generation=f.sql('SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE id=$1',[f.ids['run']])[0]['generation']
         a=observation(f);first=finding(f,a,collaborators=[f.x['collaborator']]);fid=first['finding_id']
         check('findings.registry.signed-report',lambda:expect(first['phase']=='OPEN' and first['replayed'] is False))
+        check('findings.registry.common-write-fence-advances',lambda:expect(int(f.sql('SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE id=$1',[f.ids['run']])[0]['generation'])>int(initial_generation)))
         check('findings.registry.exact-replay',lambda:expect(finding(f,a,collaborators=[f.x['collaborator']])['replayed'] is True))
         changed=dict(CONDITION,condition_id='finding.other')
         check('findings.registry.replay-intent-conflict',lambda:reject(f,'finding.report',{'observation_id':a,'resolution_condition':changed},'IDEMPOTENCY_CONFLICT'))
@@ -124,8 +126,10 @@ def main():
         f.sql("UPDATE hyperfide.finding_registry_records SET phase='RESOLVED',state_version=state_version+1 WHERE finding_id=$1",[fid]);f.sql("UPDATE hyperfide.findings SET state='RESOLVED',state_version=state_version+1 WHERE id=$1",[fid])
         reopened=finding(f,observation(f,'different-reproducer'))
         check('findings.registry.alias-observation-reopens-canonical',lambda:expect(reopened['finding_id']==fid and reopened['reopened'] is True and reopened['phase']=='REOPENED'))
+        read_generation=f.sql('SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE id=$1',[f.ids['run']])[0]['generation']
         context=call(f,'finding.context.read',{'limit':100});check('findings.registry.context-preserves-provenance',lambda:expect(context['qualifies_findings'] is False and any(row['observation_id']==a and row['evidence_id']==f.x['evidence'] and row['source_object_id']==OID for row in context['observations']) and context['context_digest'].startswith('sha256:')))
         check('findings.registry.context-explicit-pagination',lambda:expect(call(f,'finding.context.read',{'limit':1})['next_observation_id'] is not None))
+        check('findings.registry.common-read-fence-preserves-generation',lambda:expect(f.sql('SELECT semantic_generation::text AS generation FROM hyperfide.runs WHERE id=$1',[f.ids['run']])[0]['generation']==read_generation))
         check('findings.registry.no-implicit-repair',lambda:expect(f.sql('SELECT count(*)::text AS n FROM hyperfide.finding_repairs')[0]['n']=='0'))
         check('findings.registry.append-only-report-history',lambda:assert_sql_refused(f,'DELETE FROM hyperfide.finding_registry_reports'))
         check('findings.registry.operator-audit-identity',lambda:expect(f.sql('SELECT actor_id,actor_role,credential_id FROM hyperfide.finding_duplicate_links')[0]=={'actor_id':f.ids['operator'],'actor_role':'OPERATOR','credential_id':f.ids['operator']}))
