@@ -53,7 +53,7 @@ CREATE TABLE hyperfide.finding_route_acknowledgements (
 );
 CREATE TABLE hyperfide.finding_github_operations (
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, id uuid NOT NULL DEFAULT gen_random_uuid(), finding_id uuid NOT NULL,
- request_id uuid NOT NULL, payload_digest hyperfide.digest NOT NULL,
+ request_id uuid NOT NULL, payload_digest hyperfide.digest NOT NULL, operation_sequence bigint GENERATED ALWAYS AS IDENTITY,
  repository_id uuid NOT NULL, owner_name text NOT NULL CHECK(owner_name~'^[A-Za-z0-9_.-]{1,100}$'), repository_name text NOT NULL CHECK(repository_name~'^[A-Za-z0-9_.-]{1,100}$'),
  kind text NOT NULL CHECK(kind IN ('CREATE','UPDATE')), payload jsonb NOT NULL CHECK(jsonb_typeof(payload)='object' AND octet_length(payload::text)<=524288),
  state text NOT NULL DEFAULT 'PENDING' CHECK(state IN ('PENDING','IN_FLIGHT','UNKNOWN','ACKNOWLEDGED','FAILED')),
@@ -64,6 +64,7 @@ CREATE TABLE hyperfide.finding_github_operations (
  FOREIGN KEY(organisation_id,run_id,finding_id) REFERENCES hyperfide.findings(organisation_id,run_id,id),
  FOREIGN KEY(organisation_id,run_id,repository_id) REFERENCES hyperfide.run_repositories(organisation_id,run_id,repository_id)
 );
+CREATE UNIQUE INDEX finding_github_one_create ON hyperfide.finding_github_operations(organisation_id,run_id,finding_id) WHERE kind='CREATE';
 CREATE TABLE hyperfide.finding_github_mappings (
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, finding_id uuid NOT NULL, repository_id uuid NOT NULL,
  owner_name text NOT NULL, repository_name text NOT NULL, issue_number bigint NOT NULL CHECK(issue_number>0),

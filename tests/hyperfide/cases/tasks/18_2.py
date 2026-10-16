@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Actual signed finding API plus controlled loopback HTTP; never contacts GitHub."""
 from __future__ import annotations
-import base64,copy,hashlib,hmac,http.server,importlib.util,json,sys,threading
+import base64,concurrent.futures,copy,hashlib,hmac,http.server,importlib.util,json,sys,threading
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('finding_test_fixture',Path(__file__).with_name('18_1.py'));common=importlib.util.module_from_spec(spec);spec.loader.exec_module(common)
 from types import SimpleNamespace
@@ -39,6 +39,14 @@ def main():
         check('findings.github.conflicting-intent-refused',lambda:reject('finding.github.enqueue',dict(packet,title='Changed public intent'),'IDEMPOTENCY_CONFLICT'))
         check('findings.github.reserved-marker-refused',lambda:reject('finding.github.enqueue',dict(packet,request_id=uid(),body='hyperfide-finding:forged'),'INVALID_REQUEST'))
         check('findings.github.due-inventory',lambda:expect(call('finding.github.due',{})['operations']==[{'operation_id':op['operation_id']}]))
+        check('findings.github.distinct-create-identity-refused',lambda:reject('finding.github.enqueue',dict(packet,request_id=uid()),'GITHUB_CREATE_ALREADY_REGISTERED'))
+        second_fid=common.finding(f,common.observation(f,'parallel-create'))['finding_id']
+        parallel_packets=[dict(packet,finding_id=second_fid,request_id=uid()) for _ in range(2)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            attempts=list(pool.map(lambda value:f.invoke('finding.github.enqueue',value,component='finding-github'),parallel_packets))
+        check('findings.github.parallel-create-one-durable-intent',lambda:expect(sum(body.get('ok') is True for _,body in attempts)==1 and sum(body.get('error',{}).get('code')=='GITHUB_CREATE_ALREADY_REGISTERED' for _,body in attempts)==1))
+        update=call('finding.github.enqueue',dict(packet,request_id=uid(),kind='UPDATE',title='Later immutable public intent'))
+        check('findings.github.out-of-order-update-no-network',lambda:ordered_refusal(reject,update,github))
         lost=call('finding.github.dispatch',{'operation_id':op['operation_id']})
         check('findings.github.lost-create-ack-unknown',lambda:expect(lost['state']=='UNKNOWN' and github.posts==1))
         f.sql('UPDATE hyperfide.finding_github_operations SET next_attempt_at=clock_timestamp()-interval \'1 second\' WHERE id=$1',[op['operation_id']])
@@ -74,6 +82,8 @@ def main():
         try:f.close()
         finally:github.close()
     return int(any(actual!='observed' for _,actual in common.RESULTS))
+def ordered_refusal(reject,op,github):
+    before=(github.posts,github.gets);reject('finding.github.dispatch',{'operation_id':op['operation_id']},'OPERATION_ORDER_BLOCKED');expect((github.posts,github.gets)==before)
 def ack_replay(call,op,github):
     count=github.gets;result=call('finding.github.dispatch',{'operation_id':op['operation_id']});expect(result['replayed'] is True and github.gets==count)
 def not_due(call,payload,github):
