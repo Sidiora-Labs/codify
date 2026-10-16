@@ -6,7 +6,7 @@ import type {KeyObject} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {object} from '../policy/programme.js';
-import {gatewayOf,isIdentityAuthority,assertCurrentPrincipal} from '../identity/enrollment.js';
+import {gatewayOf,isIdentityAuthority} from '../identity/enrollment.js';
 import type {IdentityAuthority} from '../identity/enrollment.js';
 import {assertInvocation,base64,decimal,DIGEST,exact,fail,hash,signingBytes,strictJSON,uuid} from '../transport/protocol.js';
 import type {InvocationContext,Principal} from '../transport/protocol.js';
@@ -15,6 +15,7 @@ import type {ArtifactStoreCapability} from '../artifacts/objects.js';
 import type {BoundProviderRequest,CapturedProviderOutput} from '../providers/reconcile.js';
 import {readRunnerBinding,readRunnerReadiness,runnerCanonical,runnerResultSigningBytes} from './bridge.js';
 import type {RunnerRemotePlan} from './bridge.js';
+import {readJobAllocation} from '../scheduler/claim.js';
 
 interface Signer {credential_id:string;key:KeyObject;public_key_b64:string}
 interface ProviderResult {outcome:unknown;process_ref:unknown;captured?:CapturedProviderOutput;evidence_digest?:unknown;cleanup_confirmed?:unknown;[name:string]:unknown}
@@ -22,7 +23,7 @@ interface ProviderExecution {
  executeBound(input:BoundProviderRequest,signal:AbortSignal,invocation:InvocationContext):Promise<ProviderResult>;
  registerRunnerBindingVerifier(reader:(tx:PrimaryTransaction,binding:BoundProviderRequest['binding'])=>Promise<{evidence_digest:string;observed_at:string}|null>):void|(()=>void);
 }
-interface Packet {request:RunnerRemotePlan;binding:Record<string,any>;allocation:Record<string,any>;reservations:unknown}
+interface Packet {source_state_digest:string;workspace_digest:string;request:RunnerRemotePlan;binding:Record<string,any>;allocation:Record<string,any>;reservations:unknown}
 interface Job {organisation_id:string;run_id:string;operation_id:string;session_id:string;plan:Packet;plan_digest:string;principal:Principal;authority_epoch:string;reservation_id:string;expires_at:Date|string;state:string;claim_id:string|null;executor_credential_id:string|null;[name:string]:any}
 interface ObjectReference {storage_kind:'manifest';artifact_id:string;digest:string;manifest_digest:string;size_bytes:string;complete:boolean}
 export interface NativeRunnerRequest {session_id:string;operation_id:string;action:'runner.observe'|'runner.stop';command_id?:string}
@@ -57,10 +58,10 @@ async function configuration(ctx:ComponentContext):Promise<{signers:Signer[];con
  return {signers,concurrency:Number(value.concurrency)};
 }
 function currentSigner(row:Record<string,any>|undefined,s:Signer):row is Record<string,any>{
- return !!row&&row.role==='PROVISIONER'&&row.public_key_b64===s.public_key_b64&&row.state==='ACTIVE'&&row.deployment_epoch===row.authority_epoch&&!['STOPPED','STOPPING','CANCELLED','FAILED'].includes(row.run_state)&&new Date(row.expires_at).getTime()>new Date(row.db_now).getTime()&&row.attempt_id===null;
+ return !!row&&row.role==='PROVISIONER'&&row.public_key_b64===s.public_key_b64&&row.state==='ACTIVE'&&row.deployment_epoch===row.authority_epoch&&!['STOPPED','STOPPING','CANCELLED','FAILED'].includes(row.run_state)&&new Date(row.expires_at).getTime()>new Date(row.db_now).getTime()&&row.attempt_id===null&&Array.isArray(row.allowed_actions)&&row.allowed_actions.includes('provider.remote.execute-bound');
 }
 async function authenticate(authority:IdentityAuthority,signer:Signer,run:string,epoch:string,input:BoundProviderRequest,signal:AbortSignal):Promise<InvocationContext>{
- const payload=Buffer.from(JSON.stringify({run_id:run,component:'8.3',action:'provider.remote.execute-bound',input,expected_version:null,authority:{deployment_epoch:epoch}}));
+ const payload=Buffer.from(JSON.stringify({run_id:run,component:'8.3',action:'provider.remote.execute-bound',input,expected_version:null,authority:null}));
  const operation=randomUUID(),body=Buffer.from(JSON.stringify({protocol_version:1,operation_id:operation,idempotency_key:operation,payload_digest:hash(payload),correlation_id:operation,causation_id:null,payload_b64:payload.toString('base64url')}));
  const proof={id:signer.credential_id,time:String(Math.floor(Date.now()/1000)),nonce:randomUUID()};
  const signature=sign(null,signingBytes(authority.origin,'/v1/invoke',proof,body),signer.key).toString('base64url');
@@ -93,6 +94,9 @@ function capturedItem(value:unknown):{base64:string;digest:string;size_bytes:str
 function validateReceipt(row:Job,value:Record<string,any>):void{
  const p=row.plan.request,b=row.plan.binding;
  const expected:Record<string,unknown>={operation_id:row.operation_id,organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id,repository_id:p.repository_id,sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),slot_id:b.slot_id,slot_generation:String(b.slot_generation),plan_digest:row.plan_digest,argv:p.argv,requested_cwd:p.cwd,executable_digest:p.executable_digest,environment_digest:p.environment_digest,source_manifest_digest:p.source_digest,policy_digest:p.policy_digest};
+ expected.source_object_id=b.source_object_id;expected.source_tree_id=b.source_tree_id;
+ if(!digest(row.plan.source_state_digest)||!digest(row.plan.workspace_digest))fail('RUNNER_MEASURED_INPUT_UNPINNED','Actual physical source and workspace measurements must be pinned in admission');
+ expected.source_state_digest=row.plan.source_state_digest;expected.workspace_digest=row.plan.workspace_digest;
  for(const [key,wanted] of Object.entries(expected))if(!same(value[key],wanted))fail('RUNNER_RECEIPT_BINDING_MISMATCH','Native receipt differs from the immutable admitted plan: '+key);
  if(value.execution_plane!=='REMOTE'||value.workspace_path!==b.workspace_path||!digest(value.source_state_digest)||p.source_provenance_digest!==undefined&&value.source_provenance_digest!==p.source_provenance_digest||!object(value.start_identity)||!Number.isSafeInteger(value.start_identity.pid)||Number(value.start_identity.pid)<=0||!decimal(value.start_identity.start_time,true)||typeof value.start_identity.os_boot_id!=='string'||!uuid(value.start_identity.os_boot_id)||!Number.isSafeInteger(value.start_identity.pgid)||Number(value.start_identity.pgid)<=0||value.start_identity.uid!==b.uid)fail('RUNNER_PROCESS_IDENTITY_MISMATCH','Exact source and kernel process identity required');
  if(!Number.isSafeInteger(value.exit_code)||!Number.isSafeInteger(value.signal)||value.signal<0||![value.timed_out,value.interrupted,value.truncated,value.output_complete,value.artifacts_complete,value.observed_process_absent].every(x=>typeof x==='boolean')||!['CONFIRMED','UNKNOWN'].includes(value.cleanup_status)||!Number.isFinite(Date.parse(value.started_at))||!Number.isFinite(Date.parse(value.ended_at))||Date.parse(value.ended_at)<Date.parse(value.started_at)||!Number.isSafeInteger(value.duration_ms)||value.duration_ms<0)fail('RUNNER_RECEIPT_INVALID','Actual process outcome, timing and cleanup observations required');
@@ -117,10 +121,23 @@ async function persistableResult(store:ArtifactStoreCapability,i:InvocationConte
  const stdoutRef=await storeBytes(store,i,stdout.bytes),stderrRef=await storeBytes(store,i,stderr.bytes),nativeRef=await storeBytes(store,i,decoded.raw);
  const artifacts:Record<string,unknown>[]=[];for(const item of n.artifacts){const capture=capturedItem(item);artifacts.push({path:item.path,...await storeBytes(store,i,capture.bytes),complete:capture.complete&&n.artifacts_complete});}
  const complete=provider.cleanup_confirmed===true&&stdout.complete&&stderr.complete&&artifacts.every(a=>a.complete===true)&&n.output_complete&&!n.truncated&&n.artifacts_complete&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent;
- return {execution_plane:'REMOTE',outcome:complete?(n.exit_code===0&&n.signal===0&&!n.timed_out&&!n.interrupted?'SUCCEEDED':'FAILED'):'UNKNOWN',status:complete?(n.timed_out?'TIMED_OUT':'COMPLETED'):'UNKNOWN',operation_id:row.operation_id,session_id:row.session_id,organisation_id:row.organisation_id,run_id:row.run_id,repository_id:p.repository_id,sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),sandbox_boot_generation:String(b.boot_generation),slot_id:b.slot_id,slot_generation:String(b.slot_generation),provider:b.provider,native_resource_id:b.external_sandbox_id,process_ref:provider.process_ref,start_identity:n.start_identity,argv:p.argv,cwd:n.requested_cwd,workspace_path:n.workspace_path,source_digest:p.source_digest,source_manifest_digest:p.source_digest,source_state_digest:n.source_state_digest,...(p.source_provenance_digest!==undefined?{source_provenance_digest:p.source_provenance_digest}:{}),policy_digest:p.policy_digest,executable_digest:p.executable_digest,environment_digest:p.environment_digest,exit_code:n.signal===0?n.exit_code:null,signal:n.signal===0?null:n.signal,timed_out:n.timed_out,interrupted:n.interrupted,truncated:n.truncated,started_at:n.started_at,ended_at:n.ended_at,duration_ms:n.duration_ms,stdout:{...stdoutRef,complete:stdout.complete&&n.output_complete&&!n.truncated},stderr:{...stderrRef,complete:stderr.complete&&n.output_complete&&!n.truncated},stdout_digest:stdout.digest,stderr_digest:stderr.digest,spool_digest:provider.captured!.spool_digest,output_complete:n.output_complete,artifacts,artifacts_complete:n.artifacts_complete,cleanup_status:n.cleanup_status,cleanup:{complete:provider.cleanup_confirmed===true&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent,observed_process_absent:n.observed_process_absent,receipt_digest:decoded.digest},native_receipt:nativeRef,provider_evidence_digest:provider.evidence_digest};
+ return {execution_plane:'REMOTE',outcome:complete?(n.exit_code===0&&n.signal===0&&!n.timed_out&&!n.interrupted?'SUCCEEDED':'FAILED'):'UNKNOWN',status:complete?(n.timed_out?'TIMED_OUT':'COMPLETED'):'UNKNOWN',operation_id:row.operation_id,session_id:row.session_id,organisation_id:row.organisation_id,run_id:row.run_id,repository_id:p.repository_id,sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),sandbox_boot_generation:String(b.boot_generation),slot_id:b.slot_id,slot_generation:String(b.slot_generation),provider:b.provider,native_resource_id:b.external_sandbox_id,process_ref:provider.process_ref,start_identity:n.start_identity,argv:p.argv,cwd:n.requested_cwd,workspace_path:n.workspace_path,source_digest:p.source_digest,source_manifest_digest:p.source_digest,source_state_digest:n.source_state_digest,workspace_digest:n.workspace_digest,source_object_id:n.source_object_id,source_tree_id:n.source_tree_id,...(p.source_provenance_digest!==undefined?{source_provenance_digest:p.source_provenance_digest}:{}),policy_digest:p.policy_digest,executable_digest:p.executable_digest,environment_digest:p.environment_digest,exit_code:n.signal===0?n.exit_code:null,signal:n.signal===0?null:n.signal,timed_out:n.timed_out,interrupted:n.interrupted,truncated:n.truncated,started_at:n.started_at,ended_at:n.ended_at,duration_ms:n.duration_ms,stdout:{...stdoutRef,complete:stdout.complete&&n.output_complete&&!n.truncated},stderr:{...stderrRef,complete:stderr.complete&&n.output_complete&&!n.truncated},stdout_digest:stdout.digest,stderr_digest:stderr.digest,spool_digest:provider.captured!.spool_digest,output_complete:n.output_complete,artifacts,artifacts_complete:n.artifacts_complete,cleanup_status:n.cleanup_status,cleanup:{complete:provider.cleanup_confirmed===true&&n.cleanup_status==='CONFIRMED'&&n.observed_process_absent,observed_process_absent:n.observed_process_absent,receipt_digest:decoded.digest},native_receipt:nativeRef,provider_evidence_digest:provider.evidence_digest};
 }
 async function wait(ms:number,signal:AbortSignal):Promise<void>{
  if(signal.aborted)return;await new Promise<void>(resolve=>{const timer=setTimeout(done,ms);function done(){signal.removeEventListener('abort',cancel);resolve();}function cancel(){clearTimeout(timer);done();}signal.addEventListener('abort',cancel,{once:true});});
+}
+export interface NativeControlTarget {readonly launch_id:string;readonly attempt_id:string;readonly attempt_generation:string;readonly sandbox_id:string;readonly boot_id:string;readonly boot_generation:string;readonly uid:number}
+// Coherence validation grants no authority. The runtime derives its target from
+// guarded primary state and its receipt from actual provider-captured stdout.
+export function validateNativeControlReceipt(value:unknown,target:NativeControlTarget,command_id?:string):Record<string,unknown>{
+ if(!object(value))fail('RUNNER_CONTROL_RECEIPT_INVALID','Native observation object required');
+ const receipt=value,scope=object(receipt.binding)?receipt.binding:receipt;
+ for(const field of ['launch_id','attempt_id','attempt_generation','sandbox_id','boot_id','boot_generation'] as const){const actual=field==='launch_id'?receipt.launch_id:scope[field];if(String(actual)!==String(target[field]))fail('RUNNER_CONTROL_RECEIPT_MISMATCH','Physical observation target differs');}
+ if(!['RUNNING','CONFIRMED_STOPPED','UNKNOWN'].includes(String(receipt.status))||!uuid(receipt.observation_id)||!Number.isSafeInteger(receipt.observed_at_seconds)||!Array.isArray(receipt.processes)||!Number.isSafeInteger(receipt.remaining_descendants)||Number(receipt.remaining_descendants)<0||receipt.remaining_descendants!==receipt.processes.length||typeof receipt.ipc_closed!=='boolean'||typeof receipt.cleanup_complete!=='boolean'||command_id!==undefined&&receipt.command_id!==command_id)fail('RUNNER_CONTROL_RECEIPT_INVALID','Full physical process and IPC observation required');
+ if(receipt.status==='CONFIRMED_STOPPED'&&(receipt.processes.length!==0||receipt.remaining_descendants!==0||receipt.ipc_closed!==true))fail('RUNNER_CONTROL_RECEIPT_CONTRADICTION','Stopped process observation requires an empty tree and closed IPC');
+ // Physical process absence does not discharge artifact/credential/provider debt.
+ for(const value of receipt.processes){if(!object(value)||!Number.isSafeInteger(value.pid)||Number(value.pid)<=0||!Number.isSafeInteger(value.pgid)||Number(value.pgid)<=0||value.uid!==target.uid||!decimal(value.start_time,true)||!uuid(value.os_boot_id))fail('RUNNER_CONTROL_RECEIPT_INVALID','Actual kernel process identities required');}
+ return receipt;
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component>{
  if(ctx.role!=='provisioner')fail('ROLE_DENIED','Runner queue execution belongs to the provisioner');
@@ -135,7 +152,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  async function next(s:Signer):Promise<Job|null>{return g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal},async tx=>{
  const p=(await tx.query('SELECT p.*,r.authority_epoch,r.state AS run_state,clock_timestamp() AS db_now FROM hyperfide.identity_principals p JOIN hyperfide.runs r ON r.organisation_id=p.organisation_id AND r.id=p.run_id WHERE p.credential_id=$1 FOR SHARE OF p,r',[s.credential_id])).rows[0];
  if(!currentSigner(p,s))fail('RUNNER_EXECUTOR_IDENTITY_MISMATCH','Configured credential must be a live current provisioner with the matching public key');
- const row=(await tx.query("SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND state='ADMITTED' AND expires_at>clock_timestamp() ORDER BY created_at,operation_id LIMIT 1",[p.organisation_id,p.run_id])).rows[0];return row?row as Job:null;
+ const row=(await tx.query("SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND state='ADMITTED' AND authority_epoch=$3 AND expires_at>clock_timestamp() ORDER BY created_at,operation_id LIMIT 1",[p.organisation_id,p.run_id,p.deployment_epoch])).rows[0];return row?row as Job:null;
  });}
  async function claim(row:Job,s:Signer,i:InvocationContext):Promise<string|null>{
  return g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=>i.guard(tx)},async tx=>{
@@ -143,14 +160,16 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  if(!current||current.state!=='ADMITTED')return null;
  try {
  if(current.plan_digest!==row.plan_digest||hash(runnerCanonical(current.plan))!==row.plan_digest||current.authority_epoch!==i.principal.deployment_epoch||new Date(current.expires_at).getTime()<=new Date(current.db_now).getTime())fail('RUNNER_ADMISSION_STALE','Current immutable admission and run epoch required');
- await assertCurrentPrincipal(tx,current.principal);
+ await authority.guard(tx,current.principal);
  const b=await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id});await readRunnerReadiness(tx as PrimaryTransaction,b);
  for(const key of Object.keys(row.plan.binding))if(!same(b[key],row.plan.binding[key]))fail('RUNNER_BINDING_STALE','Admitted physical runner binding changed');
+ const allocation=await readJobAllocation(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,reservation_id:row.reservation_id});
+ if(!allocation||(['allocation_id','generation','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','request_id'] as const).some(key=>!same(allocation[key],row.plan.allocation[key])))fail('RUNNER_ALLOCATION_STALE','Current complete reservation assignment differs from admission');
  const reservation=(await tx.query("SELECT *,clock_timestamp() AS db_now FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='ALLOCATED' FOR SHARE",[row.organisation_id,row.run_id,row.reservation_id])).rows[0];
  if(!reservation||new Date(reservation.expires_at).getTime()<=new Date(reservation.db_now).getTime())fail('RUNNER_RESERVATION_EXPIRED','Current allocated reservation required');
  } catch(error) {
  const code=object(error)&&typeof error.code==='string'?error.code:'';
- if(!/^(AUTH_|RUNNER_|REMOTE_)/.test(code))throw error;
+ if(!/^(AUTH_|RUNNER_|REMOTE_|JOB_|RESOURCE_|RESERVATION_)/.test(code))throw error;
  await tx.query("UPDATE hyperfide.runner_remote_jobs SET state='UNKNOWN' WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND state='ADMITTED'",[row.organisation_id,row.run_id,row.operation_id]);
  unknown++;return null;
  }
@@ -164,7 +183,13 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref||!digest(observed.evidence_digest))fail('RUNNER_PROVIDER_CAPTURE_MISSING','Actual provider process and captured native receipt required');
  const decoded=decodeNative(observed.captured);validateReceipt(row,decoded.receipt);
  const result=await persistableResult(store,i,row,observed,decoded),result_digest=hash(runnerCanonical(result)),result_signature=sign(null,runnerResultSigningBytes(row.organisation_id,row.run_id,row.operation_id,row.plan_digest,result_digest),s.key).toString('base64url');
- await g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=>i.guard(tx)},async tx=>{const update=await tx.query("UPDATE hyperfide.runner_remote_jobs SET state=$6,result=$7,result_digest=$8,result_signature=$9,completed_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND claim_id=$4 AND executor_credential_id=$5 AND state='CLAIMED'",[row.organisation_id,row.run_id,row.operation_id,claim_id,s.credential_id,result.outcome==='UNKNOWN'?'UNKNOWN':'COMPLETED',JSON.stringify(result),result_digest,result_signature]);if(update.rowCount!==1)fail('RUNNER_CLAIM_CHANGED','Execution claim no longer belongs to this executor');});
+ await g.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal,guard:tx=>i.guard(tx)},async tx=>{
+ const current=(await tx.query('SELECT state,claim_id,executor_credential_id FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR UPDATE',[row.organisation_id,row.run_id,row.operation_id])).rows[0];
+ if(!current||current.state!=='CLAIMED'||current.claim_id!==claim_id||current.executor_credential_id!==s.credential_id)fail('RUNNER_CLAIM_CHANGED','Current owned execution claim required for final links');
+ const references:Array<{role:string;ref:Record<string,any>}>=[{role:'stdout',ref:result.stdout as Record<string,any>},{role:'stderr',ref:result.stderr as Record<string,any>},{role:'native_receipt',ref:result.native_receipt as Record<string,any>}];
+ for(const ref of result.artifacts as Record<string,any>[])references.push({role:'artifact:'+hash(String(ref.path)).slice(7),ref});
+ for(const {role,ref} of references)await tx.query('INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[row.organisation_id,row.run_id,row.operation_id,role,ref.artifact_id,ref.storage_kind==='manifest'?ref.manifest_digest:ref.digest,ref.digest,ref.size_bytes]);
+ const update=await tx.query("UPDATE hyperfide.runner_remote_jobs SET state=$6,result=$7,result_digest=$8,result_signature=$9,completed_at=clock_timestamp() WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 AND claim_id=$4 AND executor_credential_id=$5 AND state='CLAIMED'",[row.organisation_id,row.run_id,row.operation_id,claim_id,s.credential_id,result.outcome==='UNKNOWN'?'UNKNOWN':'COMPLETED',JSON.stringify(result),result_digest,result_signature]);if(update.rowCount!==1)fail('RUNNER_CLAIM_CHANGED','Execution claim no longer belongs to this executor');});
  if(result.outcome==='UNKNOWN')unknown++;else completed++;
  }catch(error){unknown++;last_error=object(error)&&typeof error.code==='string'?error.code:'RUNNER_EXECUTION_UNKNOWN';
  // A crash or ambiguous commit may leave CLAIMED. Neither this loop nor a
@@ -178,26 +203,25 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  }}
  // Control operations use the same actual provider journal and request proof.
  const native:NativeRunnerCapability=Object.freeze({invokeNativeRunner:async(i:InvocationContext,input:NativeRunnerRequest,requestedSignal:AbortSignal)=>{
- assertInvocation(i);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!['runner.observe','runner.stop'].includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.action==='runner.stop'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
- const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:requestedSignal,guard:tx=>i.guard(tx)},tx=>readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id}));
+ if(signal.aborted)fail('RUNNER_EXECUTOR_CLOSED','Provisioner executor is closed');
+ assertInvocation(i);
+ const controlSignal=AbortSignal.any([signal,requestedSignal,i.signal]);await authority.authorize(i);if(i.principal.role!=='PROVISIONER'||!object(input)||!uuid(input.session_id)||!uuid(input.operation_id)||!['runner.observe','runner.stop'].includes(input.action)||input.command_id!==undefined&&!uuid(input.command_id)||input.action==='runner.stop'&&!uuid(input.command_id)||Object.keys(input).some(k=>!['session_id','operation_id','action','command_id'].includes(k)))fail('RUNNER_CONTROL_DENIED','Actual provisioner and bounded native control request required');
+ const b=await g.withPrimaryTransaction<Record<string,any>>({timeoutMs:5000,signal:controlSignal,guard:tx=>i.guard(tx)},tx=>readRunnerBinding(tx as PrimaryTransaction,{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,session_id:input.session_id}));
  const signer=config.signers.find(s=>s.credential_id===i.principal.credential_id);if(!signer)fail('RUNNER_CONTROL_DENIED','Current configured provisioner signer required');
  if(!uuid(b.launch_id)||!uuid(b.attempt_id)||!decimal(b.attempt_generation,true))fail('RUNNER_CONTROL_TARGET_UNREGISTERED','Authoritative native launch and attempt binding required');
  const target={state_dir:b.state_dir,launch_id:b.launch_id,attempt_id:b.attempt_id,attempt_generation:String(b.attempt_generation),sandbox_id:b.sandbox_id,boot_id:b.boot_id,boot_generation:String(b.boot_generation),...(input.command_id?{command_id:input.command_id}:{})};
  const encoded=Buffer.from(JSON.stringify(target)).toString('base64url');
  const request=boundRequest(b,input.operation_id,[b.runner_binary,'--component','12.4','--action',input.action,'--request-base64',encoded],30000);
- const proof=await authenticate(authority,signer,i.principal.run_id,i.principal.deployment_epoch,request,requestedSignal);
- const observed=await provider.executeBound(request,requestedSignal,proof);if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
+ const proof=await authenticate(authority,signer,i.principal.run_id,i.principal.deployment_epoch,request,controlSignal);
+ const observed=await provider.executeBound(request,controlSignal,proof);if(!observed.captured||typeof observed.process_ref!=='string'||!observed.process_ref)fail('RUNNER_CONTROL_UNKNOWN','Actual provider native control capture required');
  const captured=observed.captured;if(captured.complete!==true||captured.exit_code!==0)fail('RUNNER_CONTROL_UNKNOWN','Complete native control observation required');
  const result=strictJSON(Buffer.from(captured.stdout),MAX_CAPTURE);if(!object(result)||result.ok!==true||!object(result.result))fail('RUNNER_CONTROL_UNKNOWN','Actual native control receipt required');
- const receipt=result.result,scope=object(receipt.binding)?receipt.binding:receipt;
- for(const field of ['launch_id','attempt_id','attempt_generation','sandbox_id','boot_id','boot_generation'] as const){const actual=field==='launch_id'?receipt.launch_id:scope[field];if(String(actual)!==String(target[field]))fail('RUNNER_CONTROL_RECEIPT_MISMATCH','Physical observation target differs');}
- if(!['RUNNING','CONFIRMED_STOPPED','UNKNOWN'].includes(String(receipt.status))||!uuid(receipt.observation_id)||!Number.isSafeInteger(receipt.observed_at_seconds)||!Array.isArray(receipt.processes)||!Number.isSafeInteger(receipt.remaining_descendants)||Number(receipt.remaining_descendants)<0||receipt.remaining_descendants!==receipt.processes.length||typeof receipt.ipc_closed!=='boolean'||typeof receipt.cleanup_complete!=='boolean'||input.action==='runner.stop'&&receipt.command_id!==input.command_id)fail('RUNNER_CONTROL_RECEIPT_INVALID','Full physical process and IPC observation required');
- for(const value of receipt.processes){if(!object(value)||!Number.isSafeInteger(value.pid)||Number(value.pid)<=0||!Number.isSafeInteger(value.pgid)||Number(value.pgid)<=0||value.uid!==b.uid||!decimal(value.start_time,true)||!uuid(value.os_boot_id))fail('RUNNER_CONTROL_RECEIPT_INVALID','Actual kernel process identities required');}
+ const receipt=validateNativeControlReceipt(result.result,{...target,uid:b.uid},input.action==='runner.stop'?input.command_id:undefined);
  const evidence=await storeBytes(store,proof,Buffer.from(captured.stdout));
  return {native:receipt,native_receipt:evidence,provider:{process_ref:observed.process_ref,evidence_digest:observed.evidence_digest,spool_digest:captured.spool_digest},authority:'OBSERVATION_ONLY'};
  }});
  for(const signer of config.signers)await next(signer);
  unregister=provider.registerRunnerBindingVerifier(async(tx,b)=>{try{const r=await readRunnerBinding(tx,b);for(const key of Object.keys(b))if(String(r[key])!==String(b[key as keyof typeof b]))return null;await readRunnerReadiness(tx,r);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}});
  const workers=Array.from({length:config.concurrency},(_,index)=>worker(index));
- return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=>{assertInvocation(context.invocation);await authority.authorize(context.invocation);if(context.invocation.principal.role!=='PROVISIONER')fail('ROLE_DENIED','Provisioner status required');return {active,completed,unknown,last_error,concurrency:config.concurrency,replay_policy:'NEVER_RELAUNCH_CLAIMED_OR_UNKNOWN',authority:'NONE'};}},close:async()=>{controller.abort();await Promise.all(workers);if(typeof unregister==='function')unregister();}};
+ return {apiVersion:1,capabilities:{'runner.native.v1':native},actions:{'runner.executor.describe':async(_input,context)=>{assertInvocation(context.invocation);await authority.authorize(context.invocation);if(context.invocation.principal.role!=='PROVISIONER'||!config.signers.some(s=>s.credential_id===context.invocation!.principal.credential_id))fail('ROLE_DENIED','Configured provisioner status required');return {active,completed,unknown,last_error,concurrency:config.concurrency,replay_policy:'NEVER_RELAUNCH_CLAIMED_OR_UNKNOWN',authority:'NONE'};}},close:async()=>{controller.abort();await Promise.all(workers);if(typeof unregister==='function')unregister();}};
 }
