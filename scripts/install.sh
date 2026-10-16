@@ -23,8 +23,15 @@ def strict_json(data):
  except (ValueError,UnicodeError):die('invalid strict JSON')
 def authenticate_manifest(key_path,encoded,signature,descriptor):
  if not isinstance(descriptor,dict) or set(descriptor)!={'algorithm','file','key_fingerprint'} or descriptor['algorithm']!='ED25519' or descriptor['file']!='manifest.sig' or len(signature)!=64:die('a detached Ed25519 manifest signature is required')
- if not Path(key_path).is_absolute():die('trusted public key must be an absolute reference')
- fd=os.open(key_path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ if not Path(key_path).is_absolute() or any(part in ['.','..'] for part in key_path.split('/')):die('trusted public key must be an exact absolute reference')
+ parts=[part for part in key_path.split('/') if part];directory_fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:
+  for part in parts[:-1]:
+   next_fd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=directory_fd);os.close(directory_fd);directory_fd=next_fd
+   parent=os.fstat(directory_fd);sticky_root=parent.st_uid==0 and bool(parent.st_mode&stat.S_ISVTX)
+   if parent.st_uid not in [0,os.geteuid()] or (parent.st_mode&0o022 and not sticky_root):die('trusted public key ancestors must be protected')
+  fd=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory_fd)
+ finally:os.close(directory_fd)
  try:
   before=os.fstat(fd)
   if not stat.S_ISREG(before.st_mode) or before.st_size>16384 or before.st_uid not in [0,os.geteuid()] or before.st_mode&0o022:die('trusted public key must be an ordinary protected file')

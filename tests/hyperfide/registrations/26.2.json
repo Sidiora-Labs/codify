@@ -18,6 +18,8 @@
     "entrypoint.tampered-signature-denied-before-install",
     "entrypoint.different-trusted-signer-denied",
     "entrypoint.missing-trust-anchor-denied",
+    "entrypoint.foreign-owned-trust-key-ancestor-denied",
+    "entrypoint.symlink-trust-key-ancestor-denied",
     "entrypoint.installed-canonical-version",
     "entrypoint.installed-legacy-version-parity",
     "entrypoint.installed-help-argument-parity",
