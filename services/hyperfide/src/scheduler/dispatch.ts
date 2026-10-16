@@ -133,9 +133,14 @@ export function createComponent(_startup:ComponentContext):Component{
    const actor=actorFor(context,scope,input);
    return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
     guard:tx=>invocationFor(context).guard(tx)},async tx=>{
-    await requireSchedulerAuthority(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),
-     input.package_id===undefined?undefined:uuid(input.package_id,'package_id'));
-    return reconciler.reconcile(tx,scope,uuid(input.request_id,'request_id'));
+    await lockRun(tx,scope);
+    const request=uuid(input.request_id,'request_id');
+    const target=await tx.query<{feature_package_id:string}>('SELECT t.feature_package_id FROM hyperfide.scheduler_dispatches d JOIN hyperfide.tasks t ON t.organisation_id=d.organisation_id AND t.run_id=d.run_id AND t.id=d.task_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.request_id=$3 FOR SHARE OF t',[scope.organisation_id,scope.run_id,request]);
+    if(!target.rows[0])fail('DISPATCH_MISSING','Dispatch intent does not exist in this run');
+    if(input.package_id!==undefined&&uuid(input.package_id,'package_id')!==target.rows[0].feature_package_id)
+     fail('PACKAGE_SCOPE_DENIED','Requested package does not own this dispatch task');
+    await requireSchedulerAuthority(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),target.rows[0].feature_package_id);
+    return reconciler.reconcile(tx,scope,request);
    });
   }
  }};

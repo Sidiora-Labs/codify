@@ -22,13 +22,17 @@ def main():
   check("dispatch.replay.token-conflict",lambda:f.reject("scheduler.dispatch.ensure",dict(request,token=dict(token,attempt_generation="2")),"IDEMPOTENCY_CONFLICT",key="manager",component="5.3"))
   reconcile={"organisation_id":i["organisation"],"run_id":i["run"],"request_id":request["request_id"],"authority_epoch":i["epoch"],"leader_generation":"1","package_generation":"2","package_id":i["package"]}
   check("dispatch.no-forged-receipt",lambda:f.reject("scheduler.dispatch.reconcile",dict(reconcile,receipt={"state":"EXECUTING"}),"INVALID_REQUEST",key="manager",component="5.3"))
+  other=f.claim("b");other_request={"token":other["token"],"request_id":uid(),"leader_generation":"1","package_generation":"2"}
+  f.ok("scheduler.dispatch.ensure",other_request,key="manager2",component="5.3")
+  check("dispatch.reconcile.package-spoof-denied",lambda:f.reject("scheduler.dispatch.reconcile",dict(reconcile,request_id=other_request["request_id"]),"PACKAGE_SCOPE_DENIED",key="manager",component="5.3"))
+  check("dispatch.reconcile.target-owner-required",lambda:f.reject("scheduler.dispatch.reconcile",dict(reconcile,request_id=other_request["request_id"],package_id=i["wave_package"]),"PACKAGE_OWNER_MISMATCH",key="manager",component="5.3"))
   check("dispatch.unbound-reader.refusal",lambda:f.reject("scheduler.dispatch.reconcile",reconcile,"DEPENDENCY_UNAVAILABLE",key="manager",component="5.3"))
   check("dispatch.unknown.keeps-owner",lambda:expect(f.sql("SELECT compute_authority,execution_state FROM hyperfide.attempts WHERE id=$1",[token["attempt_id"]])[0]=={"compute_authority":"CURRENT","execution_state":"RESERVED"},"Missing external receipt changed execution authority"))
   check("dispatch.no-native-proof.no-release",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.reservations WHERE state='RELEASED'")[0]["n"]==0,"Unconfirmed dispatch freed resources"))
   def race():
    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:responses=list(pool.map(lambda _:f.invoke("scheduler.dispatch.ensure",request,key="manager",component="5.3")[1],range(2)))
    expect(all(r.get("ok") and r["result"]["operation_id"]==result["operation_id"] for r in responses),"Concurrent retries changed command identity")
-   expect(f.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches")[0]["n"]==1,"Retry created duplicate physical intent")
+   expect(f.sql("SELECT count(*)::int n FROM hyperfide.scheduler_dispatches WHERE attempt_id=$1",[token["attempt_id"]])[0]["n"]==1,"Retry created duplicate physical intent")
   check("dispatch.concurrent.one-command",race)
  finally:
   db=f.database;path=f.path;f.close();check("dispatch.cleanup.observed",lambda:expect(not path.exists() and f.sql("SELECT count(*)::int n FROM pg_database WHERE datname=$1",[db],admin=True)[0]["n"]==0,"Fixture resource remains"))
