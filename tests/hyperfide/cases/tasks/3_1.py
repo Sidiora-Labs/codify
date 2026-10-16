@@ -22,7 +22,7 @@ def apply_migration(f,name):
  data=(ROOT/"services/hyperfide/migrations"/(name+".sql")).read_bytes()
  f.sql("BEGIN;"+data.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(int(name[:4]))+",'"+name+"','"+sha(data)+"');COMMIT;")
 class HierarchyFixture(IdentityFixture):
- def __init__(self,extra_components=(),extra_setup=None,bootstrap=True,extra_env=None):
+ def __init__(self,extra_components=(),extra_setup=None,bootstrap=True,extra_env=None,seed_historical_runtime=True):
   def setup(f):
    apply_migration(f,"0003-hierarchy")
    i=f.ids
@@ -44,10 +44,11 @@ class HierarchyFixture(IdentityFixture):
    for key,package,wave in (("task","package",1),("task2","package2",2)):
     f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",[i["organisation"],i["run"],i[key],"alpha."+str(wave),i[package],i["spec"],sha(b"criteria"),json.dumps({"feature_key":"alpha","purpose":"Preserve mandatory intent","touches":["src/a.c"]}),wave])
    f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES($1,$2,$3,'worker',1,'AGENT')",[i["organisation"],i["slot"],i["sandbox"]])
-   f.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,execution_state,compute_authority,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at) VALUES($1,$2,$3,$4,1,$5,$6,'RUNNING','CURRENT',$7,$8,1,clock_timestamp()+interval '1 hour')",[i["organisation"],i["run"],i["attempt"],i["task"],i["epoch"],sha(b"historical-attempt-packet"),i["sandbox"],i["slot"]])
-   f.sql("UPDATE hyperfide.tasks SET generation=1,current_attempt_id=$1,state='RUNNING',state_version=state_version+1 WHERE organisation_id=$2 AND run_id=$3 AND id=$4",[i["attempt"],i["organisation"],i["run"],i["task"]])
-   f.sql("INSERT INTO hyperfide.compute_leases(organisation_id,run_id,id,attempt_id,attempt_generation,authority_epoch,sandbox_boot_generation,expires_at) VALUES($1,$2,$3,$4,1,$5,1,clock_timestamp()+interval '1 hour')",[i["organisation"],i["run"],i["lease"],i["attempt"],i["epoch"]])
-   f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id,state) VALUES($1,$2,$3,'WORKER',$4,'fixture','fixture','worker-one',$5,$6,1,$7,'RUNNING')",[i["organisation"],i["run"],i["worker"],i["manager"],i["slot"],i["sandbox"],i["attempt"]])
+   if seed_historical_runtime:
+    f.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,execution_state,compute_authority,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at) VALUES($1,$2,$3,$4,1,$5,$6,'RUNNING','CURRENT',$7,$8,1,clock_timestamp()+interval '1 hour')",[i["organisation"],i["run"],i["attempt"],i["task"],i["epoch"],sha(b"historical-attempt-packet"),i["sandbox"],i["slot"]])
+    f.sql("UPDATE hyperfide.tasks SET generation=1,current_attempt_id=$1,state='RUNNING',state_version=state_version+1 WHERE organisation_id=$2 AND run_id=$3 AND id=$4",[i["attempt"],i["organisation"],i["run"],i["task"]])
+    f.sql("INSERT INTO hyperfide.compute_leases(organisation_id,run_id,id,attempt_id,attempt_generation,authority_epoch,sandbox_boot_generation,expires_at) VALUES($1,$2,$3,$4,1,$5,1,clock_timestamp()+interval '1 hour')",[i["organisation"],i["run"],i["lease"],i["attempt"],i["epoch"]])
+    f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id,state) VALUES($1,$2,$3,'WORKER',$4,'fixture','fixture','worker-one',$5,$6,1,$7,'RUNNING')",[i["organisation"],i["run"],i["worker"],i["manager"],i["slot"],i["sandbox"],i["attempt"]])
    f.sql("INSERT INTO hyperfide.findings(organisation_id,run_id,id,dedup_digest,owner_package_id,repository_id,source_object_id,severity,summary) VALUES($1,$2,$3,$4,$5,$6,$7,'ERROR','Persistent accountable finding')",[i["organisation"],i["run"],i["finding"],sha(b"finding"),i["package"],i["repository"],"a"*40])
    if extra_setup:extra_setup(f)
   super().__init__(extra_components=("3.1",)+tuple(extra_components),extra_setup=setup,extra_env=extra_env)
