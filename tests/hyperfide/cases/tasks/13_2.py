@@ -44,8 +44,10 @@ class SessionIdentityFixture(IdentityFixture):
             self.child.communicate(timeout=5);self.child=None;return
         super().stop()
 
-class AgentFixture:
-    def __init__(self,admission=False,qualified=False):
+class NativeHandshake:
+    """Import-safe bounded native transport; no inference, auth copying or DB authority."""
+    def __init__(self,count=4):
+        expect(type(count)is int and 1<=count<=16,"bounded native thread count required")
         enable_subreaper()
         self.native_folder=tempfile.TemporaryDirectory(prefix="hyperfide-native-transport-")
         native_root=Path(self.native_folder.name);native_env=os.environ.copy();native_env["CODEX_HOME"]=str(native_root/"codex-home");Path(native_env["CODEX_HOME"]).mkdir(mode=0o700)
@@ -53,19 +55,52 @@ class AgentFixture:
         expect(executable and Path(executable).is_file(),"actual installed Codex payload unavailable")
         self.executable=executable
         expect(subprocess.check_output([executable,"--version"],text=True).strip()=="codex-cli 0.162.1","pinned actual Codex version mismatch")
-        self.child=subprocess.Popen([executable,"app-server","--listen","stdio://","--disable","multi_agent"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=native_env,cwd=native_root,start_new_session=True)
-        self.native_buffer=b"";self.inner=None
+        self.child=subprocess.Popen([executable,"app-server","--listen","stdio://","--disable","multi_agent","--disable","multi_agent_v2","--disable","multi_agent_v2_dynamic_tools","-c","agents.enabled=false"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=native_env,cwd=native_root,start_new_session=True)
+        self.native_buffer=b""
         try:
             self.rpc({"id":"init","method":"initialize","params":{"clientInfo":{"name":"hyperfide-session-component-probe","version":"1"}}})
             self.child.stdin.write(b'{"method":"initialized","params":{}}\n');self.child.stdin.flush()
             self.native_sessions=[]
-            for index in range(4):
+            for index in range(count):
                 value=self.rpc({"id":"thread-"+str(index),"method":"thread/start","params":{"cwd":str(native_root),"approvalPolicy":"never","sandbox":"read-only"}})
                 expect(isinstance(value.get("thread",{}).get("id"),str),"actual CLI omitted native thread identity")
                 self.native_sessions.append(value["thread"]["id"])
                 if index==0:
                     self.requested_model=value.get("model");self.configured_provider=value["thread"].get("modelProvider")
                     expect(isinstance(self.requested_model,str)and isinstance(self.configured_provider,str),"actual CLI omitted configured model/provider")
+        except BaseException:
+            self.terminate();self.native_folder.cleanup();drain_owned_children();raise
+        stat=Path('/proc/'+str(self.child.pid)+'/stat').read_text()
+        self.process_identity={'process_id':self.child.pid,'process_start_time':stat[stat.rfind(')')+2:].split()[19],'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+    def rpc(self,message):
+        self.child.stdin.write(json.dumps(message).encode()+b"\n");self.child.stdin.flush();deadline=time.monotonic()+15
+        while time.monotonic()<deadline:
+            if b"\n"not in self.native_buffer:
+                if not select.select([self.child.stdout],[],[],.2)[0]:continue
+                chunk=os.read(self.child.stdout.fileno(),65536);expect(chunk,"native transport closed before response");self.native_buffer+=chunk
+                expect(len(self.native_buffer)<=1048576,"native protocol exceeded response bound")
+            while b"\n"in self.native_buffer:
+                line,self.native_buffer=self.native_buffer.split(b"\n",1)
+                if not line.strip():continue
+                row=json.loads(line)
+                if row.get("id")==message["id"]:
+                    expect("error"not in row,"actual native protocol refused request: "+json.dumps(row.get("error",{})))
+                    return row["result"]
+        raise AssertionError("actual native protocol response timed out")
+    def terminate(self):
+        if self.child.poll()is None:os.killpg(self.child.pid,signal.SIGTERM)
+        try:self.child.communicate(timeout=5)
+        except subprocess.TimeoutExpired:os.killpg(self.child.pid,signal.SIGKILL);self.child.communicate(timeout=5)
+    def close(self):
+        self.terminate();self.native_folder.cleanup();expect(drain_owned_children(),'native descendants survived bounded handshake cleanup')
+    def __enter__(self):return self
+    def __exit__(self,*_):self.close()
+
+class AgentFixture(NativeHandshake):
+    def __init__(self,admission=False,qualified=False):
+        super().__init__();self.inner=None
+        native_root=Path(self.native_folder.name)
+        try:
             def setup(f):
                 self.f=f;i=f.ids
                 for key in ["repository","feature","task","attempt","slot","parent","session","second","reviewer","bad_reviewer","artifact","checkpoint"]:i[key]=uid()
@@ -112,24 +147,6 @@ COMMIT;"""
             self.inner=SessionIdentityFixture(extra_components=["14.2","14.3","13.2"]+(["13.4"]if admission else[]),extra_setup=setup)
         except BaseException:
             self.terminate();raise
-    def rpc(self,message):
-        self.child.stdin.write(json.dumps(message).encode()+b"\n");self.child.stdin.flush();deadline=time.monotonic()+15
-        while time.monotonic()<deadline:
-            if b"\n"not in self.native_buffer:
-                if not select.select([self.child.stdout],[],[],.2)[0]:continue
-                chunk=os.read(self.child.stdout.fileno(),65536);expect(chunk,"native transport closed before response");self.native_buffer+=chunk
-            while b"\n"in self.native_buffer:
-                line,self.native_buffer=self.native_buffer.split(b"\n",1)
-                if not line.strip():continue
-                row=json.loads(line)
-                if row.get("id")==message["id"]:
-                    expect("error"not in row,"actual native protocol refused request: "+json.dumps(row.get("error",{})))
-                    return row["result"]
-        raise AssertionError("actual native protocol response timed out")
-    def terminate(self):
-        if self.child.poll()is None:os.killpg(self.child.pid,signal.SIGTERM)
-        try:self.child.communicate(timeout=5)
-        except subprocess.TimeoutExpired:os.killpg(self.child.pid,signal.SIGKILL);self.child.communicate(timeout=5)
     def invoke(self,action,value,component="13.2"):
         return self.inner.invoke(action,value,component=component)
     def ok(self,action,value,component="13.2"):
