@@ -244,13 +244,91 @@ export async function retry(tx:PrimaryTransaction,input:unknown):Promise<unknown
     [c.scope.organisation_id,c.scope.run_id,c.event_id,c.consumer_id,delay,error]);
   return {pending:true,event_id:c.event_id};
 }
+
+export type SessionConsumerNamespace='human_intent'|'fleet_notification';
+export interface SessionConsumerBinding extends Scope {consumer_id:string;session_id:string;namespace:SessionConsumerNamespace;
+  consumer_key:string;consumer_state:string;session_role:string;session_state:string;registered_actor_id:string;registered_at:string}
+function sessionNamespace(value:unknown):SessionConsumerNamespace {
+  if(value!=='human_intent'&&value!=='fleet_notification') fail('EVENT_NAMESPACE_INVALID','Only a registered server-owned session channel is supported');
+  return value;
+}
+export function sessionConsumerKey(session_id:string,namespace:SessionConsumerNamespace):string {
+  return 'session:'+uuid(session_id)+':'+sessionNamespace(namespace);
+}
+async function sessionBindingAuthority(tx:PrimaryTransaction,s:Scope,session:string,invocation:InvocationContext):Promise<void> {
+  assertPrimaryTransaction(tx);assertInvocation(invocation);
+  const p=invocation.principal;
+  if(p.organisation_id!==s.organisation_id||p.run_id!==s.run_id)
+    fail('AUTH_SCOPE_DENIED','Session binding is outside the authenticated run');
+  await invocation.guard(tx);
+  const row=await tx.query('SELECT role,state FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
+    [s.organisation_id,s.run_id,session]);
+  if(!row.rows[0]||!['LEADER','FEATURE_MANAGER'].includes(row.rows[0].role as string)||
+    !['REGISTERED','RUNNING','DISCONNECTED'].includes(row.rows[0].state as string))
+    fail('EVENT_SESSION_NOT_FOUND','A registered nonterminal leader or manager session is required');
+  if(!['OPERATOR','COORDINATOR'].includes(p.role)&&(p.actor_id!==session||p.role!==row.rows[0].role))
+    fail('AUTH_SCOPE_DENIED','Only this session or an authorised coordinator can bind its channel');
+}
+async function readSessionBinding(tx:PrimaryTransaction,s:Scope,where:string,values:unknown[]):Promise<SessionConsumerBinding|null> {
+  assertPrimaryTransaction(tx);
+  const rows=await tx.query(`SELECT b.*,c.consumer_key,c.state AS consumer_state,a.role AS session_role,a.state AS session_state
+    FROM hyperfide.event_session_bindings b JOIN hyperfide.event_consumers c
+      ON(c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.id=b.consumer_id)
+    JOIN hyperfide.agent_sessions a ON(a.organisation_id=b.organisation_id AND a.run_id=b.run_id AND a.id=b.session_id)
+    WHERE b.organisation_id=$1 AND b.run_id=$2 AND `+where,[s.organisation_id,s.run_id,...values]);
+  if(!rows.rows.length)return null;
+  const r=rows.rows[0]!;
+  if(r.consumer_key!==sessionConsumerKey(uuid(r.session_id),sessionNamespace(r.namespace)))
+    fail('EVENT_BINDING_INVALID','Stored session channel disagrees with its immutable consumer key');
+  return {...s,consumer_id:uuid(r.consumer_id),session_id:uuid(r.session_id),namespace:sessionNamespace(r.namespace),
+    consumer_key:r.consumer_key as string,consumer_state:r.consumer_state as string,session_role:r.session_role as string,
+    session_state:r.session_state as string,registered_actor_id:uuid(r.registered_actor_id),registered_at:(r.registered_at as Date).toISOString()};
+}
+export async function lookupConsumerBinding(tx:PrimaryTransaction,input:unknown):Promise<SessionConsumerBinding|null> {
+  const v=fields(input,[...scopeKeys,'consumer_id']),s=scope(v);
+  return readSessionBinding(tx,s,'b.consumer_id=$3',[uuid(v.consumer_id)]);
+}
+export async function resolveSessionConsumer(tx:PrimaryTransaction,input:unknown):Promise<SessionConsumerBinding|null> {
+  const v=fields(input,[...scopeKeys,'session_id','namespace']),s=scope(v),session=uuid(v.session_id),namespace=sessionNamespace(v.namespace);
+  const found=await readSessionBinding(tx,s,'b.session_id=$3 AND b.namespace=$4',[session,namespace]);
+  return found&&['ACTIVE','BUFFERING'].includes(found.consumer_state)&&['LEADER','FEATURE_MANAGER'].includes(found.session_role)&&
+    ['REGISTERED','RUNNING','DISCONNECTED'].includes(found.session_state)?found:null;
+}
+export async function bindSessionConsumer(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<SessionConsumerBinding&{replayed:boolean}> {
+  const v=fields(input,[...scopeKeys,'session_id','consumer_id','namespace']),s=scope(v),session=uuid(v.session_id),
+    consumer=uuid(v.consumer_id),namespace=sessionNamespace(v.namespace);
+  await lockRun(tx,s,'exclusive');await sessionBindingAuthority(tx,s,session,invocation);
+  const row=await tx.query('SELECT consumer_key,state FROM hyperfide.event_consumers WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
+    [s.organisation_id,s.run_id,consumer]);
+  if(row.rows[0]?.consumer_key!==sessionConsumerKey(session,namespace)||!['ACTIVE','BUFFERING'].includes(row.rows[0]?.state as string))
+    fail('EVENT_BINDING_INVALID','Consumer must be the exact registered session channel');
+  const previous=await lookupConsumerBinding(tx,{...s,consumer_id:consumer});
+  if(previous) {
+    if(previous.session_id!==session||previous.namespace!==namespace) fail('EVENT_BINDING_CONFLICT','Consumer already has another immutable recipient');
+    return {...previous,replayed:true};
+  }
+  const other=await tx.query('SELECT consumer_id FROM hyperfide.event_session_bindings WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND namespace=$4',
+    [s.organisation_id,s.run_id,session,namespace]);
+  if(other.rows.length)fail('EVENT_BINDING_CONFLICT','Session already has a standing consumer for this namespace');
+  await tx.query('INSERT INTO hyperfide.event_session_bindings(organisation_id,run_id,consumer_id,session_id,namespace,registered_actor_id) VALUES($1,$2,$3,$4,$5,$6)',
+    [s.organisation_id,s.run_id,consumer,session,namespace,invocation.principal.actor_id]);
+  return {...(await lookupConsumerBinding(tx,{...s,consumer_id:consumer}))!,replayed:false};
+}
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
-  const component={apiVersion:1 as const,capabilities:{'events.outbox.v1':Object.freeze({enqueue,lockRun,registerConsumer,claimPending,acknowledge,retry})},actions:{
+  const component={apiVersion:1 as const,capabilities:{'events.outbox.v1':Object.freeze({enqueue,lockRun,registerConsumer,claimPending,acknowledge,retry,sessionConsumerKey,bindSessionConsumer,resolveSessionConsumer,lookupConsumerBinding})},actions:{
     'outbox.describe':()=>({schema_version:1,delivery:'at-least-once',ordering:'per-aggregate-version',global_cursor:false,
       acknowledgement:'durable-matching-inbox',full_case_status:'INCOMPLETE'}),
     'outbox.consumer.register':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>registerConsumer(tx,input)),
-    'outbox.enqueue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>enqueue(tx,input)),
+    'outbox.consumer.bind-session':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','LEADER','FEATURE_MANAGER'],(tx,invocation)=>bindSessionConsumer(tx,input,invocation)),
+    'outbox.consumer.resolve-session':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','LEADER','FEATURE_MANAGER'],async(tx,invocation)=>{
+      const v=fields(input,[...scopeKeys,'session_id','namespace']);await sessionBindingAuthority(tx,scope(v),uuid(v.session_id),invocation);
+      return resolveSessionConsumer(tx,input);
+    }),
+    'outbox.enqueue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>{
+      if(event(input).aggregate_type==='attempt.instructions')fail('EVENT_TRUSTED_HANDLER_REQUIRED','Native instructions require the typed generation-bound emitter');
+      return enqueue(tx,input);
+    }),
     'outbox.claim':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>claimPending(tx,input)),
     'outbox.acknowledge':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acknowledge(tx,input)),
     'outbox.retry':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>retry(tx,input))
@@ -261,7 +339,8 @@ export function createComponent(context:ComponentContext):Component {
 export interface EventOutboxCapability {
   enqueue:typeof enqueue; lockRun:typeof lockRun; registerConsumer:typeof registerConsumer;
   claimPending:typeof claimPending; acknowledge:typeof acknowledge; retry:typeof retry;
+  sessionConsumerKey:typeof sessionConsumerKey;bindSessionConsumer:typeof bindSessionConsumer;resolveSessionConsumer:typeof resolveSessionConsumer;lookupConsumerBinding:typeof lookupConsumerBinding;
 }
 export function isEventOutboxCapability(value:unknown):value is EventOutboxCapability {
-  return object(value)&&['enqueue','lockRun','registerConsumer','claimPending','acknowledge','retry'].every(key=>typeof value[key]==='function');
+  return object(value)&&['enqueue','lockRun','registerConsumer','claimPending','acknowledge','retry','sessionConsumerKey','bindSessionConsumer','resolveSessionConsumer','lookupConsumerBinding'].every(key=>typeof value[key]==='function');
 }
