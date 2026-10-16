@@ -2,11 +2,12 @@ import fs from 'node:fs/promises';
 import {randomUUID,randomInt} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {getPool} from '../storage/schema.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import type {PrimaryTransaction} from '../storage/transactions.js';
 import {operationPayloadDigest,validateProviderOutcome} from './contract.js';
-import type {ProviderOperation,ProviderScope} from './contract.js';
-import {obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
-import type {DeploymentConfig} from './pools.js';
+import type {ProviderOperation,ProviderScope,ProviderOutcome} from './contract.js';
+import {providerDatabase,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
+import type {ProviderDatabase,DeploymentConfig} from './pools.js';
 
 export interface FreshEnrollmentRequest {
   organisation_id:string;run_id:string;pool_id:string;sandbox_id:string;sandbox_boot_generation:string;nonce:string;
@@ -74,6 +75,13 @@ const probeProgram=[
   "results.push({name:t.name,denied_status:denied.status,status:allowed.status,body_sha256:allowed.hash});}",
   "process.stdout.write(JSON.stringify({nonce:input.nonce,results})+'\\n');})().catch(()=>{process.stderr.write('authenticated pool connectivity probe failed\\n');process.exitCode=1;});",
 ].join('\n');
+async function boundedEffect<T>(effect:Promise<T>,signal:AbortSignal,deadline:number):Promise<T>{
+ let timer:ReturnType<typeof setTimeout>|undefined;let abort:(()=>void)|undefined;
+ try{return await Promise.race([effect,new Promise<never>((_resolve,reject)=>{
+  const stop=()=>reject(new Error('Provider effect requires reconciliation'));
+  timer=setTimeout(stop,Math.max(1,deadline-Date.now()));abort=stop;signal.addEventListener('abort',stop,{once:true});if(signal.aborted||Date.now()>=deadline)stop();
+ })]);}finally{if(timer)clearTimeout(timer);if(abort)signal.removeEventListener('abort',abort);}
+}
 async function verifyEnrollment(config:DeploymentConfig,poolId:string,sandbox:Record<string,any>,runId:string,signal:AbortSignal,maxAge:number):Promise<FreshEnrollmentProof>{
   if(!enrollmentVerifier)fail('ENROLLMENT_VERIFIER_UNAVAILABLE','Fresh authenticated enrollment verification is required');
   const nonce=randomUUID(),request={organisation_id:config.organisation_id,run_id:runId,pool_id:poolId,sandbox_id:sandbox.id,sandbox_boot_generation:String(sandbox.boot_generation),nonce};
@@ -83,7 +91,7 @@ async function verifyEnrollment(config:DeploymentConfig,poolId:string,sandbox:Re
   if(Date.parse(proof.verified_at)>Date.now()||Date.now()-Date.parse(proof.verified_at)>maxAge)fail('ENROLLMENT_STALE','Enrollment proof is stale');
   return proof;
 }
-export async function probePool(pool:pg.Pool,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,signal:AbortSignal):Promise<unknown>{
+export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,signal:AbortSignal):Promise<unknown>{
   const input=obj(value,['pool_id','sandbox_id','run_id']),poolId=uuid(input.pool_id),sandboxId=uuid(input.sandbox_id),runId=uuid(input.run_id);
   const {scope}=await currentPool(pool,config,poolId);
   const rows=await pool.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND observed_state='RUNNING'",[config.organisation_id,sandboxId,poolId]);
@@ -100,25 +108,60 @@ export async function probePool(pool:pg.Pool,config:DeploymentConfig,policy:Conn
       cwd:'/',env_refs:env,stdin:false,durable:false,process_timeout_ms:duration,wait_timeout_ms:duration},
     identity:{operation_id:id,idempotency_key:id,payload_digest:'',correlation_id:id,causation_id:id}};
   base.identity.payload_digest=operationPayloadDigest(base);
-  const unavailable=async()=>fail('PROVIDER_HOOK_UNAVAILABLE','Connectivity execution cannot create or journal provisioning resources');
-  const adapter=providerAdapter(scope,{assignedBootGeneration:unavailable,persistEarlyResource:unavailable,recordObservation:async()=>{}});
-  const outcome=await adapter.execute(base,AbortSignal.any([signal,AbortSignal.timeout(duration)]));
+  // Persist possible delivery before any SDK call. Only the final verified
+  // receipt can promote this row to PASS; journal callbacks never grant it.
+  const initialDigest=digestDocument({operation:base,enrollment:proof});
+  await transaction(pool,async c=>{
+   await currentPool(c,config,poolId);
+   await c.query('INSERT INTO hyperfide.provider_connectivity_probes(organisation_id,id,pool_id,sandbox_id,boot_generation,configuration_digest,endpoints_digest,credential_lineage,enrollment_evidence_digest,evidence_digest,evidence_scope,status,observation,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,\'UNKNOWN\',$12,$13)',
+    [config.organisation_id,id,poolId,sandboxId,sandbox.boot_generation,scope.configuration_digest,digestDocument(policy.targets),proof.credential_lineage,proof.evidence_digest,initialDigest,policy.evidence_scope,{operation:base,outcome:null},new Date(Date.now()+policy.proof_max_age_ms).toISOString()]);
+  });
+  const unavailable=async()=>fail('PROVIDER_HOOK_UNAVAILABLE','Connectivity execution cannot create provisioning resources');
+  const journal=async(op:ProviderOperation,outcome:ProviderOutcome)=>{
+   validateProviderOutcome({operation:op,outcome});
+   if(digestDocument(op)!==digestDocument(base))fail('OBSERVATION_SCOPE_MISMATCH','Connectivity observation differs from persisted command');
+   await pool.query("UPDATE hyperfide.provider_connectivity_probes SET observation=$3,evidence_digest=$4 WHERE organisation_id=$1 AND id=$2 AND status='UNKNOWN'",
+    [config.organisation_id,id,{operation:base,outcome},digestDocument({operation:base,outcome,enrollment:proof})]);
+  };
+  const adapter=providerAdapter(scope,{assignedBootGeneration:unavailable,persistEarlyResource:unavailable,recordObservation:journal},pool.runtime) as ReturnType<typeof providerAdapter>&{
+   readCapturedOutput?:(scope:ProviderScope,resource:NonNullable<ProviderOperation['resource']>,processRef:string,maxBytes:number)=>Promise<{stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string}>;
+  };
+  if(typeof adapter.readCapturedOutput!=='function')fail('REMOTE_CAPTURE_UNAVAILABLE','Actual bounded probe receipt bytes are required');
+  const combined=AbortSignal.any([signal,AbortSignal.timeout(duration)]),limit=Date.parse(base.deadline_at);
+  const outcome=await boundedEffect(adapter.execute(base,combined),combined,limit);await journal(base,outcome);
   validateProviderOutcome({operation:base,outcome});
   const result=outcome.status==='SUCCEEDED'?outcome.result:null;
-  const pass=outcome.status==='SUCCEEDED'&&result?.phase==='EXITED'&&result.exit_code===0&&!result.timed_out&&result.output.complete&&!result.output.truncated&&result.output.sha256!==null;
-  const digest=digestDocument({operation:base,outcome,enrollment:proof}),status=pass?'PASS':outcome.status==='UNKNOWN'?'UNKNOWN':'FAIL';
+  let pass=outcome.status==='SUCCEEDED'&&result?.phase==='EXITED'&&result.exit_code===0&&!result.timed_out&&result.output.complete&&!result.output.truncated&&result.output.sha256!==null;
+  let receipt:unknown=null;
+  if(pass&&result){
+   const captured=await boundedEffect(adapter.readCapturedOutput(scope,base.resource,result.process_ref,65536),combined,limit);
+   if(captured.complete!==true||captured.exit_code!==0||captured.stdout.byteLength>65536||captured.stderr.byteLength!==0)pass=false;
+   else{
+    try{
+     receipt=JSON.parse(Buffer.from(captured.stdout).toString('utf8'));const r=obj(receipt,['nonce','results']);
+     if(r.nonce!==nonce||!Array.isArray(r.results)||r.results.length!==policy.targets.length)pass=false;
+     else for(let n=0;n<policy.targets.length;n++){
+      const observed=obj(r.results[n],['name','denied_status','status','body_sha256']),target=policy.targets[n]!;
+      if(observed.name!==target.name||observed.status!==target.expected_status||!target.denied_statuses.includes(observed.denied_status as number)||
+       (target.expected_body_sha256&&observed.body_sha256!==target.expected_body_sha256))pass=false;
+      dg(observed.body_sha256);
+     }
+    }catch{pass=false;}
+   }
+  }
+  const digest=digestDocument({operation:base,outcome,enrollment:proof,receipt}),status=pass?'PASS':outcome.status==='UNKNOWN'?'UNKNOWN':'FAIL';
   await transaction(pool,async c=>{
     await currentPool(c,config,poolId);
     const current=await c.query('SELECT boot_generation,native_sandbox_id FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 FOR SHARE',[config.organisation_id,sandboxId]);
     if(String(current.rows[0]?.boot_generation)!==String(sandbox.boot_generation)||current.rows[0]?.native_sandbox_id!==sandbox.native_sandbox_id)
       fail('STALE_SANDBOX_GENERATION','Sandbox identity changed during connectivity probing');
-    await c.query('INSERT INTO hyperfide.provider_connectivity_probes(organisation_id,id,pool_id,sandbox_id,boot_generation,configuration_digest,endpoints_digest,credential_lineage,enrollment_evidence_digest,evidence_digest,evidence_scope,status,observation,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
-      [config.organisation_id,id,poolId,sandboxId,sandbox.boot_generation,scope.configuration_digest,digestDocument(policy.targets),proof.credential_lineage,proof.evidence_digest,digest,policy.evidence_scope,status,{operation:base,outcome},new Date(Date.now()+policy.proof_max_age_ms).toISOString()]);
+    await c.query('UPDATE hyperfide.provider_connectivity_probes SET evidence_digest=$3,status=$4,observation=$5 WHERE organisation_id=$1 AND id=$2',
+     [config.organisation_id,id,digest,status,{operation:base,outcome,receipt}]);
     if(pass)await c.query("INSERT INTO hyperfide.provider_pool_health(organisation_id,pool_id) VALUES($1,$2) ON CONFLICT(organisation_id,pool_id) DO UPDATE SET failure_count=0,state='CLOSED',retry_after=NULL,state_version=hyperfide.provider_pool_health.state_version+1",[config.organisation_id,poolId]);
   });
   return{id,status,evidence_digest:digest,evidence_scope:policy.evidence_scope,live_pool_qualified:pass&&policy.evidence_scope==='LIVE_POOL',admission_granted:false};
 }
-export async function recordPoolFailure(pool:pg.Pool,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
+export async function recordPoolFailure(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
   const input=obj(value,['observation_id']),observationId=uuid(input.observation_id);
   return transaction(pool,async c=>{
     const rows=await c.query('SELECT o.*,i.pool_id FROM hyperfide.provider_observations o JOIN hyperfide.provisioning_intents i ON i.organisation_id=o.organisation_id AND i.id=o.intent_id WHERE o.organisation_id=$1 AND o.id=$2',[config.organisation_id,observationId]);
@@ -127,20 +170,21 @@ export async function recordPoolFailure(pool:pg.Pool,config:DeploymentConfig,pol
     await currentPool(c,config,row.pool_id);
     await c.query("INSERT INTO hyperfide.provider_pool_health(organisation_id,pool_id) VALUES($1,$2) ON CONFLICT DO NOTHING",[config.organisation_id,row.pool_id]);
     const health=(await c.query('SELECT * FROM hyperfide.provider_pool_health WHERE organisation_id=$1 AND pool_id=$2 FOR UPDATE',[config.organisation_id,row.pool_id])).rows[0];
+    if(!health)fail('POOL_HEALTH_UNKNOWN','Pool health row disappeared');
     const count=health.failure_count+1,delay=Math.min(policy.max_backoff_ms,policy.base_backoff_ms*2**Math.min(16,count-1)+randomInt(policy.base_backoff_ms));
     const retry=new Date(Date.now()+delay).toISOString();
     await c.query("UPDATE hyperfide.provider_pool_health SET failure_count=$3,state='OPEN',retry_after=$4,last_outcome_digest=$5,state_version=state_version+1 WHERE organisation_id=$1 AND pool_id=$2",[config.organisation_id,row.pool_id,count,retry,row.evidence_digest]);
     return{pool_id:row.pool_id,retry_after:retry,maximum_attempts:policy.maximum_attempts,automatic_retry_allowed:count<policy.maximum_attempts,reconciliation_required:row.observation.outcome.status==='UNKNOWN'};
   });
 }
-export async function planRelocation(pool:pg.Pool,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
+export async function planRelocation(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
   const input=obj(value,['run_id','old_attempt_id','expected_generation','expected_authority_epoch','target_pool_id','checkpoint_id','reason_observation_id']);
   const run=uuid(input.run_id),attemptId=uuid(input.old_attempt_id),generation=dec(input.expected_generation),epoch=uuid(input.expected_authority_epoch),targetId=uuid(input.target_pool_id);
   if(generation==='0')fail('INVALID_REQUEST','Attempt generation must be positive');
   return transaction(pool,async c=>{
     const previous=await c.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND old_attempt_id=$3 AND old_attempt_generation=$4',[config.organisation_id,run,attemptId,generation]);
     if(previous.rows.length){
-      if(previous.rows[0].target_pool_id!==targetId||previous.rows[0].checkpoint_id!==input.checkpoint_id||previous.rows[0].reason_observation_id!==input.reason_observation_id)fail('IDEMPOTENCY_CONFLICT','Relocation identity was reused with different inputs');
+      if(previous.rows[0]!.target_pool_id!==targetId||previous.rows[0]!.checkpoint_id!==input.checkpoint_id||previous.rows[0]!.reason_observation_id!==input.reason_observation_id)fail('IDEMPOTENCY_CONFLICT','Relocation identity was reused with different inputs');
       return{created:false,plan:previous.rows[0],admission_granted:false};
     }
     const rows=await c.query('SELECT a.*,s.pool_id,s.preparation_digest,p.profile_id FROM hyperfide.attempts a JOIN hyperfide.sandboxes s ON s.organisation_id=a.organisation_id AND s.id=a.sandbox_id JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3 FOR UPDATE OF a',[config.organisation_id,run,attemptId]);
@@ -173,7 +217,7 @@ export async function planRelocation(pool:pg.Pool,config:DeploymentConfig,policy
     const checkpoints=await c.query("SELECT p.*,a.digest AS artifact_digest FROM hyperfide.checkpoints p JOIN hyperfide.artifacts a ON a.organisation_id=p.organisation_id AND a.run_id=p.run_id AND a.id=p.artifact_id WHERE p.organisation_id=$1 AND p.run_id=$2 AND p.id=$3 AND p.attempt_id=$4 AND p.attempt_generation=$5 AND a.status='COMPLETE' AND p.support_level<>'UNSUPPORTED'",[config.organisation_id,run,uuid(input.checkpoint_id),attemptId,generation]);
     const checkpoint=checkpoints.rows[0];
     if(!checkpoint||checkpoint.input_packet_digest!==old.input_packet_digest)fail('CHECKPOINT_UNQUALIFIED','Complete checkpoint bound to the exact source packet is required');
-    const count=(await c.query('SELECT count(*)::int AS n FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[config.organisation_id,run,old.task_id])).rows[0].n;
+    const count=(await c.query('SELECT count(*)::int AS n FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3',[config.organisation_id,run,old.task_id])).rows[0]!.n;
     if(count>=policy.maximum_attempts)fail('RELOCATION_RETRIES_EXHAUSTED','Bounded relocation policy exhausted');
     const source={checkpoint_id:checkpoint.id,artifact_digest:checkpoint.artifact_digest,repository_id:checkpoint.repository_id,source_object_id:checkpoint.source_object_id,input_packet_digest:checkpoint.input_packet_digest,support_level:checkpoint.support_level};
     const id=randomUUID();
@@ -186,24 +230,25 @@ export async function planRelocation(pool:pg.Pool,config:DeploymentConfig,policy
   });
 }
 export function createComponent(context:ComponentContext):Component{
+  const database=providerDatabase(context);
   const guarded=(fn:(i:unknown,c:DeploymentConfig,p:ConnectivityConfig)=>Promise<unknown>)=>async(input:unknown)=>{
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider placement is shutting down');
     return fn(input,await readDeployment(context.env),await connectivity(context.env));
   };
   return{apiVersion:1,actions:{
-    'provider.placement.probe':guarded((i,c,p)=>probePool(getPool(context.env),c,p,i,context.signal)),
-    'provider.placement.record-failure':guarded((i,c,p)=>recordPoolFailure(getPool(context.env),c,p,i)),
-    'provider.relocation.plan':guarded((i,c,p)=>planRelocation(getPool(context.env),c,p,i)),
+    'provider.placement.probe':guarded((i,c,p)=>probePool(database,c,p,i,context.signal)),
+    'provider.placement.record-failure':guarded((i,c,p)=>recordPoolFailure(database,c,p,i)),
+    'provider.relocation.plan':guarded((i,c,p)=>planRelocation(database,c,p,i)),
     'provider.relocation.confirm-enrollment':guarded(async(input,c,p)=>{
       const i=obj(input,['run_id','plan_id','sandbox_id']),run=uuid(i.run_id),planId=uuid(i.plan_id),sandboxId=uuid(i.sandbox_id);
-      const plan=(await getPool(context.env).query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[c.organisation_id,run,planId])).rows[0];
+      const plan=(await database.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[c.organisation_id,run,planId])).rows[0];
       if(!plan||!['PENDING_ADMISSION','ENROLLED'].includes(plan.state))fail('RELOCATION_PLAN_INVALID','An unadmitted relocation plan is required');
-      const {scope}=await currentPool(getPool(context.env),c,plan.target_pool_id);
+      const {scope}=await currentPool(database,c,plan.target_pool_id);
       if(scope.configuration_digest!==plan.target_configuration_digest)fail('RELOCATION_CONFIG_CHANGED','Target configuration changed since planning');
-      const sandbox=(await getPool(context.env).query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND observed_state='RUNNING' AND preparation_digest=$4",[c.organisation_id,sandboxId,plan.target_pool_id,plan.preparation_digest])).rows[0];
+      const sandbox=(await database.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND observed_state='RUNNING' AND preparation_digest=$4",[c.organisation_id,sandboxId,plan.target_pool_id,plan.preparation_digest])).rows[0];
       if(!sandbox)fail('RELOCATION_RESOURCE_INVALID','Exact target environment and sandbox identity are required');
       const proof=await verifyEnrollment(c,plan.target_pool_id,sandbox,run,context.signal,p.proof_max_age_ms);
-      await getPool(context.env).query("UPDATE hyperfide.provider_relocation_plans SET state='ENROLLED',enrolled_sandbox_id=$4,enrolled_boot_generation=$5,enrollment_evidence_digest=$6 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING_ADMISSION','ENROLLED')",[c.organisation_id,run,planId,sandboxId,sandbox.boot_generation,proof.evidence_digest]);
+      await database.query("UPDATE hyperfide.provider_relocation_plans SET state='ENROLLED',enrolled_sandbox_id=$4,enrolled_boot_generation=$5,enrollment_evidence_digest=$6 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state IN ('PENDING_ADMISSION','ENROLLED')",[c.organisation_id,run,planId,sandboxId,sandbox.boot_generation,proof.evidence_digest]);
       return{id:planId,state:'ENROLLED',fresh_enrollment_required:true,admission_granted:false};
     }),
   }};
