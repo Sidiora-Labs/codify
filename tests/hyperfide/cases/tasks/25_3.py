@@ -346,6 +346,11 @@ def mapping_checks():
     expect(replies[1]["result"]["isError"] is False,"actual nonroot root-protected credential did not reach signed HTTPS: "+str(replies[1]))
     verify(json.loads(replies[1]["result"]["content"][0]["text"]))
     expect(replies[2]["error"]["code"]==-32601,"nonroot protected policy granted generic operator escape")
+    os.chown(ca,33025,33025);ca.chmod(0o600)
+    denied=subprocess.run([str(native),"mcp"],cwd=root,env=e,preexec_fn=drop,input=json.dumps(tool("fleet_status",4))+"\n",capture_output=True,text=True,timeout=20)
+    reply=json.loads(denied.stdout)
+    expect(denied.returncode==0 and reply["result"]["isError"] is True,"child-mutable TLS trust anchor was accepted")
+    os.chown(ca,0,33025);ca.chmod(0o640)
     expect(not (root/".codegraph").exists(),"nonroot signed bridge opened local SQLite")
   check("client.protected.mcp-nonroot-signed-primary",nonroot_signed)
 
