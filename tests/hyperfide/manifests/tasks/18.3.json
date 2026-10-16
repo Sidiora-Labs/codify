@@ -286,8 +286,8 @@
     },
     {
       "path": "services/hyperfide/dist/findings/remediation.js",
-      "sha256": "1767f3dddce1fe0b91c8002381dcd66fffaa4d2a14ebfed8da28a375fde7969f",
-      "size": 27447
+      "sha256": "88235485210fcc7c2a3d1f8dda49eac4c0bc4fea75a22326d6a27a04091a140d",
+      "size": 27602
     },
     {
       "path": "services/hyperfide/dist/findings/routing.d.ts",
@@ -701,8 +701,8 @@
     },
     {
       "path": "services/hyperfide/src/findings/remediation.ts",
-      "sha256": "7b799f017279734e7acf36f6499932470013dc99f4abfa2425f45552a419caa9",
-      "size": 26051
+      "sha256": "e60be8aec56ff848af975de8fee9d50223faaf93a91c871295f361275c9f11d9",
+      "size": 26194
     },
     {
       "path": "services/hyperfide/src/findings/routing.ts",
