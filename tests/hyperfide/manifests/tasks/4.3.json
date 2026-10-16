@@ -114,8 +114,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/3_1.py",
-      "sha256": "f4c475dce9d0dd716f1181d34bcaafb490e3ab03df4da6ba31f1e93d4ad144db",
-      "size": 17035
+      "sha256": "22b1a340de54a04dff4cc4624eb458f28efa54b28c9d881669331472b9801c36",
+      "size": 16972
     },
     {
       "path": "tests/hyperfide/cases/tasks/3_2.py",
@@ -124,8 +124,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_3.py",
-      "sha256": "6a4ae8db26ac80041bd97603a7908b80c666536a0249ffd82f6a0712bfb5297b",
-      "size": 19332
+      "sha256": "baf4b35077e7899602730066e934fe493ba6f0f0270ea009d2ddc77b77e43afc",
+      "size": 19655
     },
     {
       "path": "tests/hyperfide/check-evidence.py",

@@ -72,6 +72,7 @@ class Fixture:
    created=f.create_packet();self.created={k:created[k] for k in ("packet_id","digest","mandatory_digest","packet")};self.digest=self.created["digest"];self.authority_snapshot=f.snapshot()
    self.runtime_version=c.sql("SELECT version()")
    # This is explicit operator setup, not a runtime role elevation.
+   f.sql("REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system(),pg_catalog.pg_control_checkpoint() FROM PUBLIC")
    f.sql('GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system(),pg_catalog.pg_control_checkpoint() TO "'+f.runtime_role+'"')
    self.graph1=self.publish_graph("1","0");self.graph_packet1=self.graph_packet(self.graph1,"1")
    self.graph2=self.publish_graph("2","1");self.graph_packet2=self.graph_packet(self.graph2,"2")
@@ -186,7 +187,9 @@ def main():
   def privilege():
    role=f.f.runtime_role
    f.f.sql('REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM "'+role+'"')
-   try:f.reject("storage.packet.barrier",{"digest":f.digest},"TOPOLOGY_PRIVILEGE_REQUIRED")
+   try:
+    expect(f.f.sql("SELECT has_function_privilege($1,'pg_catalog.pg_control_system()','EXECUTE') AS allowed",[role])[0]["allowed"] is False,"Negative fixture retained an effective topology privilege")
+    f.reject("storage.packet.barrier",{"digest":f.digest},"TOPOLOGY_PRIVILEGE_REQUIRED")
    finally:f.f.sql('GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system() TO "'+role+'"')
   check("replica.missing-runtime-topology-privilege-explicit",privilege)
   def lag():
