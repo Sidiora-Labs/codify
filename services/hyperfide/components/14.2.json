@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "14.2",
+  "task": "14.2",
+  "roles": [
+    "control"
+  ],
+  "module": "identity/credentials.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "credentials.inspect",
+    "credentials.attach",
+    "credentials.environment.plan",
+    "credentials.reference.rotate",
+    "credentials.reference.revoke"
+  ],
+  "requires": [
+    "14.1"
+  ]
+}
