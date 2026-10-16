@@ -33,11 +33,14 @@ export async function requireLeaderReplacement(tx:PrimaryTransaction,input:Leade
  const current=await leadership(tx,{organisation_id:org,run_id:run});
  await requireAuthority(tx,{organisation_id:org,run_id:run,authority_epoch:current.authority_epoch,session_id:actorId,leader_generation:currentGeneration,roles:['LEADER']});
  if(BigInt(priorGeneration)>=BigInt(currentGeneration)||BigInt(currentGeneration)-BigInt(priorGeneration)>1024n)return refuse('LEADER_REPLACEMENT_UNPROVEN','A bounded actual replacement chain is required');
- const found=await tx.query("SELECT id,actor_session_id,leader_generation::text,payload FROM hyperfide.hierarchy_ownership_events WHERE organisation_id=$1 AND run_id=$2 AND kind='LEADER_ACQUIRED' AND leader_generation >= $3 AND leader_generation <= $4 ORDER BY leader_generation,id",[org,run,priorGeneration,currentGeneration]);
+ const selectionSchema=await tx.query("SELECT to_regclass('hyperfide.hierarchy_leadership_selections') IS NOT NULL AS ready");
+ const source="SELECT id,actor_session_id,leader_generation,payload,'OWNERSHIP_EVENT'::text AS proof_kind FROM hyperfide.hierarchy_ownership_events WHERE organisation_id=$1 AND run_id=$2 AND kind='LEADER_ACQUIRED' AND leader_generation >= $3 AND leader_generation <= $4";
+ const selections=" UNION ALL SELECT id,leader_session_id AS actor_session_id,leader_generation,jsonb_build_object('authority_epoch',authority_epoch,'predecessor_id',predecessor_session_id,'predecessor_generation',predecessor_generation::text,'predecessor_authority_epoch',predecessor_authority_epoch),'LEADERSHIP_SELECTION'::text AS proof_kind FROM hyperfide.hierarchy_leadership_selections WHERE organisation_id=$1 AND run_id=$2 AND leader_generation >= $3 AND leader_generation <= $4";
+ const found=await tx.query("SELECT id,actor_session_id,leader_generation::text,payload,proof_kind FROM ("+source+(selectionSchema.rows[0]?.ready?selections:"")+") history ORDER BY leader_generation::bigint,id",[org,run,priorGeneration,currentGeneration]);
  const expected=Number(BigInt(currentGeneration)-BigInt(priorGeneration)+1n);
  if(found.rowCount!==expected)return refuse('LEADER_REPLACEMENT_UNPROVEN','Immutable leadership replacement history is incomplete or ambiguous');
  let session=priorId,epoch=priorEpoch,generation=priorGeneration;
- const eventIds:string[]=[];
+ const eventIds:string[]=[],proofRefs:{kind:string;id:string}[]=[];
  for(let index=0;index<found.rows.length;index++){
   const row=found.rows[index]!,p=row.payload;
   if(!object(p)||row.leader_generation!==(BigInt(priorGeneration)+BigInt(index)).toString()||typeof p.authority_epoch!=='string')return refuse('LEADER_REPLACEMENT_UNPROVEN','History lacks exact platform epoch pins');
@@ -47,12 +50,12 @@ export async function requireLeaderReplacement(tx:PrimaryTransaction,input:Leade
   }else{
    if(p.predecessor_id!==session||p.predecessor_generation!==generation||p.predecessor_authority_epoch!==epoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Replacement history is not a contiguous actor/generation/epoch chain');
   }
-  session=uuid(row.actor_session_id);epoch=p.authority_epoch;generation=row.leader_generation;eventIds.push(uuid(row.id));
+  session=uuid(row.actor_session_id);epoch=p.authority_epoch;generation=row.leader_generation;eventIds.push(uuid(row.id));proofRefs.push(Object.freeze({kind:String(row.proof_kind),id:uuid(row.id)}));
  }
  if(session!==actorId||session!==current.leader_session_id||generation!==currentGeneration||epoch!==current.authority_epoch)return refuse('LEADER_REPLACEMENT_UNPROVEN','Replacement chain does not terminate at the current primary leader');
  const proof={organisation_id:org,run_id:run,predecessor_session_id:priorId,predecessor_generation:priorGeneration,predecessor_authority_epoch:priorEpoch,
-  current_leader_session_id:session,current_leader_generation:generation,current_authority_epoch:epoch,event_ids:eventIds};
- return Object.freeze({authority:'LEADER_REPLACEMENT_PROOF',...proof,event_ids:Object.freeze(eventIds),proof_digest:hash(proof)});
+  current_leader_session_id:session,current_leader_generation:generation,current_authority_epoch:epoch,event_ids:eventIds,proof_refs:proofRefs};
+ return Object.freeze({authority:'LEADER_REPLACEMENT_PROOF',...proof,event_ids:Object.freeze(eventIds),proof_refs:Object.freeze(proofRefs),proof_digest:hash(proof)});
 }
 
 type Data=Record<string,unknown>;
