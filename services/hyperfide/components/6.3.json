@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "6.3",
+  "task": "6.3",
+  "roles": [
+    "control",
+    "dispatch"
+  ],
+  "module": "events/instructions.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "instructions.describe",
+    "instructions.issue",
+    "instructions.accept",
+    "instructions.handoff",
+    "instructions.replay",
+    "instructions.ack"
+  ],
+  "requires": [
+    "4.2",
+    "6.1",
+    "6.2"
+  ]
+}
