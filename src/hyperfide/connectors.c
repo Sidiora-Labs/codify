@@ -113,7 +113,7 @@ if(!strcmp(action,"connector.initialize")){
  char second[160];snprintf(second,sizeof second,"%s:thread",request);quoted(out,second);
  fputs(",\"method\":",out);quoted(out,session[0]?"thread/resume":"thread/start");fputs(",\"params\":{",out);
  if(session[0]){fputs("\"threadId\":",out);quoted(out,session);}
- else{fputs("\"model\":",out);quoted(out,profile.model);fputs(",\"modelProvider\":",out);quoted(out,profile.provider);fputs(",\"cwd\":",out);quoted(out,workspace);fputs(",\"approvalPolicy\":\"never\",\"sandbox\":\"workspaceWrite\"",out);}
+ else{fputs("\"model\":",out);quoted(out,profile.model);fputs(",\"modelProvider\":",out);quoted(out,profile.provider);fputs(",\"cwd\":",out);quoted(out,workspace);fputs(",\"approvalPolicy\":\"never\",\"sandbox\":\"workspace-write\"",out);}
  fputs("}}}],\"native_identity_source\":\"result.thread.id\",\"context_restored\":false}",out);return 0;
 }
 if(!strcmp(action,"connector.launch")){
@@ -122,16 +122,20 @@ char alias[129],auth[129],workspace[4096],home[4096],temp[4096],permission[32],s
 if(!string(field(fs,n,"expected_version"),ev,sizeof ev)||strcmp(ev,pin)||!string(field(fs,n,"alias"),alias,sizeof alias)||!safe_id(alias)||
 !string(field(fs,n,"auth_profile"),auth,sizeof auth)||!safe_id(auth)||!string(field(fs,n,"workspace"),workspace,sizeof workspace)||!absdir(workspace)||
 !string(field(fs,n,"home"),home,sizeof home)||!absdir(home)||!string(field(fs,n,"temp"),temp,sizeof temp)||!absdir(temp)||
-!string(field(fs,n,"permission_mode"),permission,sizeof permission)||strcmp(permission,"workspace-write")||n<8||n>9||
+!string(field(fs,n,"permission_mode"),permission,sizeof permission)||(strcmp(permission,"workspace-write")&&strcmp(permission,"supervision"))||n<8||n>9||
 (field(fs,n,"native_session_id")&&!string(field(fs,n,"native_session_id"),session,sizeof session))||(session[0]&&!safe_id(session))||
 !strcmp(workspace,home)||!strcmp(workspace,temp)||!strcmp(home,temp))return error(out,"CONNECTOR_INVALID");
+const int supervisory=!strcmp(permission,"supervision");
+const char *mcp_config=getenv("HF_SUPERVISOR_MCP_CONFIG_FILE");
+if(supervisory&& (strcmp(name,"claude")||session[0]||!mcp_config||mcp_config[0]!='/'))return error(out,"CONNECTOR_UNSUPPORTED");
 const char *resolved=profile.model,*configured_alias=profile.alias,*provider_name=profile.provider,*auth_ref=profile.profile_id;
 if(!profile.unattended||(session[0]&&!profile.explicit_resume))return error(out,"CONNECTOR_UNSUPPORTED");
 if(!resolved||!safe_id(resolved)||!configured_alias||strcmp(alias,configured_alias)||!provider_name||!safe_id(provider_name)||!auth_ref||strcmp(auth,auth_ref))return error(out,"CONNECTOR_PROFILE_UNRESOLVED");
 fputs("{\"connector\":",out);quoted(out,name);fputs(",\"version\":",out);quoted(out,pin);fputs(",\"requested_model_id\":",out);quoted(out,resolved);fputs(",\"configured_provider_id\":",out);quoted(out,provider_name);fputs(",\"observed_model_id\":",out);fputs("null",out);fputs(",\"observed_provider_id\":",out);fputs("null",out);fputs(",\"auth_profile\":",out);quoted(out,auth);fputs(",\"argv\":[",out);quoted(out,exe);
-if(!strcmp(name,"codex"))fputs(",\"app-server\",\"--listen\",\"stdio://\",\"--disable\",\"multi_agent\"",out);
+if(!strcmp(name,"codex"))fputs(",\"app-server\",\"--listen\",\"stdio://\",\"--disable\",\"multi_agent\",\"--disable\",\"multi_agent_v2\",\"--disable\",\"multi_agent_v2_dynamic_tools\",\"-c\",\"agents.enabled=false\"",out);
+else if(supervisory){fputs(",\"--print\",\"--restricted\",\"--tools\",\"\",\"--strict-mcp-config\",\"--mcp-config\",",out);quoted(out,mcp_config);fputs(",\"--input-format\",\"stream-json\",\"--output-format\",\"stream-json\",\"--verbose\",\"--permission-mode\",\"dontAsk\",\"--permission-prompts\",\"none\",\"--setting-sources\",\"\",\"--model\",",out);quoted(out,resolved);}
 else {fputs(",\"--print\",\"--input-format\",\"stream-json\",\"--output-format\",\"stream-json\",\"--verbose\",\"--permission-mode\",\"dontAsk\",\"--permission-prompts\",\"none\",\"--strict-mcp-config\",\"--setting-sources\",\"\",\"--disallowedTools\",\"Agent,Task\",\"--model\",",out);quoted(out,resolved);if(session[0]){fputs(",\"--resume\",",out);quoted(out,session);}}
-fputs("],\"binary_digest\":",out);quoted(out,profile.digest);fputs(",\"profile_digest\":",out);quoted(out,profile.profile_digest);fputs(",\"permission_profile_id\":",out);quoted(out,profile.permission);fputs(",\"dispatch_eligible\":false",out);fputs(",\"cwd\":",out);quoted(out,workspace);fputs(",\"home\":",out);quoted(out,home);fputs(",\"temp\":",out);quoted(out,temp);fputs(",\"native_session_id\":",out);if(session[0])quoted(out,session);else fputs("null",out);fputs(",\"delegation_enabled\":false,\"requires_supervisor\":true,\"live_qualified\":false}",out);return 0;}
+fputs("],\"permission_mode\":",out);quoted(out,permission);fputs(",\"binary_digest\":",out);quoted(out,profile.digest);fputs(",\"profile_digest\":",out);quoted(out,profile.profile_digest);fputs(",\"permission_profile_id\":",out);quoted(out,profile.permission);fputs(",\"dispatch_eligible\":false",out);fputs(",\"cwd\":",out);quoted(out,workspace);fputs(",\"home\":",out);quoted(out,home);fputs(",\"temp\":",out);quoted(out,temp);fputs(",\"native_session_id\":",out);if(session[0])quoted(out,session);else fputs("null",out);fputs(",\"delegation_enabled\":false,\"requires_supervisor\":true,\"live_qualified\":false}",out);return 0;}
 if(!strcmp(action,"connector.encode")){
 if(!keys(fs,n,"|connector||operation||native_session_id||turn_id||text||request_id|"))return error(out,"CONNECTOR_INVALID");
 char op[32],session[129],turn[129]="",text[65536]="",request_id[129];

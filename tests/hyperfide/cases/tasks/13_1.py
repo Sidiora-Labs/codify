@@ -32,12 +32,53 @@ def profile(name,executable):
       "permission_profile_id":"fixture-workspace","capabilities":{"unattended":True,"refresh":False,"concurrent_account":False,"portable_session":False,"explicit_resume":False},
       "qualification":{"state":"UNQUALIFIED","live_qualified":False,"receipt_digest":None}}
     return value
+def enable_subreaper():
+    import ctypes
+    expect(ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0,"actual Linux child ownership tracking unavailable")
+def drain_owned_children():
+    children=Path("/proc/self/task/"+str(os.getpid())+"/children")
+    deadline=time.monotonic()+8;signalled=set()
+    while time.monotonic()<deadline:
+        pending=[int(value)for value in children.read_text().split()]
+        if not pending:return True
+        for pid in pending:
+            try:
+                reaped,_=os.waitpid(pid,os.WNOHANG)
+                if reaped:continue
+                stat=Path("/proc/"+str(pid)+"/stat").read_text();rest=stat[stat.rfind(")")+2:].split()
+                if int(rest[1])!=os.getpid():continue
+                start=rest[19];fresh=Path("/proc/"+str(pid)+"/stat").read_text();now=fresh[fresh.rfind(")")+2:].split()
+                if now[19]!=start or int(now[1])!=os.getpid():continue
+                os.kill(pid,signal.SIGKILL if pid in signalled else signal.SIGTERM);signalled.add(pid)
+            except (ChildProcessError,FileNotFoundError,ProcessLookupError):pass
+        time.sleep(.05)
+    return not children.read_text().strip()
+
+def actual_supervisory_host():
+    result=subprocess.run([sys.executable,str(ROOT/"tests/hyperfide/cases/tasks/13_1_host.py")],cwd=ROOT,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=240)
+    rows=[json.loads(line)for line in result.stdout.splitlines()if line.strip()]
+    assertions=[row for row in rows if row.get("type")=="assertion"]
+    cleanup=[row for row in rows if row.get("type")=="cleanup"]
+    expect(len(assertions)==65 and len({row.get("id")for row in assertions})==65,"host assertion inventory changed or duplicated")
+    for row in assertions:
+        expect(row.get("id")not in IDS,"duplicate host/native assertion identity")
+        IDS.append(row["id"])
+        if row.get("actual")!=row.get("expected"):FAILED.append(row["id"])
+        print(json.dumps(row),flush=True)
+    expect(result.returncode==0 and all(row.get("actual")==row.get("expected")for row in assertions),"actual supervisory host probe failed: "+result.stderr[-1000:])
+    expect(len(cleanup)==1 and cleanup[0].get("complete")is True and cleanup[0].get("resources")==[],"host fixture cleanup incomplete")
+
 def main():
+    enable_subreaper()
     with tempfile.TemporaryDirectory(prefix="hyperfide-13-1-") as temporary:
         base=Path(temporary);env=os.environ.copy();env.pop("HF_NATIVE_AUTH_SNAPSHOT_FILE",None)
         config=base/"snapshot.json"
         def configure(name):
-            exe=shutil.which(name);expect(exe is not None,"required installed native CLI missing")
+            exe=shutil.which(name)
+            if shutil.which("mise"):
+                selected=subprocess.run(["mise","which",name],text=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+                if selected.returncode==0:exe=selected.stdout.strip()
+            expect(exe is not None,"required installed native CLI missing")
             p=profile(name,exe);config.write_text(json.dumps(p));env["HF_NATIVE_AUTH_SNAPSHOT_FILE"]=str(config);return p
         check("connectors.registered-describe",lambda:expect(success("connector.describe",{},env)["live_qualified"] is False,"presence became live qualification"))
         check("connectors.unknown-field",lambda:refuse("connector.describe",{"fake":True},env))
@@ -60,7 +101,14 @@ def main():
                 value={"connector":name,"expected_version":p["binary"]["version"],"alias":p["configured_model_alias"],"auth_profile":p["profile_id"],"workspace":str(dirs[0]),"home":str(dirs[1]),"temp":str(dirs[2]),"permission_mode":"workspace-write"}
                 result=success("connector.launch",value,env)
                 expect(result["argv"][0]==p["binary"]["path"] and result["requires_supervisor"] and not result["delegation_enabled"],"launch lost process/delegation boundary")
+                if name=="codex":
+                    args=result["argv"];expect(all(["--disable",feature]==args[index:index+2]for feature in ["multi_agent","multi_agent_v2","multi_agent_v2_dynamic_tools"]for index in [args.index(feature)-1])and "agents.enabled=false"in args,"configured delegation variant escaped explicit disabling")
                 expect(not result["dispatch_eligible"] and result["observed_model_id"] is None and result["requested_model_id"]=="fixture-model","fixture config became observed model/qualified dispatch")
+                if name=="claude":
+                    mcp=base/"finite-supervisor-mcp.json";mcp.write_text('{"mcpServers":{}}');env["HF_SUPERVISOR_MCP_CONFIG_FILE"]=str(mcp)
+                    restricted=success("connector.launch",dict(value,permission_mode="supervision"),env)
+                    args=restricted["argv"];expect("--restricted"in args and args[args.index("--tools")+1]==""and "--strict-mcp-config"in args and args[args.index("--mcp-config")+1]==str(mcp)and restricted["permission_mode"]=="supervision"and not restricted["dispatch_eligible"],"native supervisor adapter lost fixed tool controls")
+                else:refuse("connector.launch",dict(value,permission_mode="supervision"),env)
                 forged=copy.deepcopy(p);forged["qualification"]={"state":"QUALIFIED","live_qualified":True,"receipt_digest":"sha256:"+"b"*64};forged["observed_model_id"]="forged-model";forged["observed_provider_id"]="forged-provider";config.write_text(json.dumps(forged))
                 denied=success("connector.launch",value,env)
                 expect(not denied["dispatch_eligible"]and denied["observed_model_id"]is None and denied["observed_provider_id"]is None,"offline flags forged authoritative native qualification")
@@ -89,30 +137,52 @@ def main():
             expect(steps[2]["frame"]["params"]["model"]=="fixture-model","requested model dropped")
         check("connectors.initialize-sequencing",initialize)
         def actual_init():
-            p=configure("codex")
-            proc=subprocess.Popen([p["binary"]["path"],"app-server","--listen","stdio://","--disable","multi_agent"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True,cwd=base)
+            p=configure("codex");native_home=base/"protocol-home";native_home.mkdir(mode=0o700)
+            native_env=os.environ.copy();native_env["CODEX_HOME"]=str(native_home)
+            proc=subprocess.Popen([p["binary"]["path"],"app-server","--listen","stdio://","--disable","multi_agent"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=native_env,start_new_session=True,cwd=base)
+            pending=b""
+            def rpc(frame,reply=True):
+                nonlocal pending
+                proc.stdin.write(json.dumps(frame).encode()+b"\n");proc.stdin.flush()
+                if not reply:return None
+                selector=selectors.DefaultSelector();selector.register(proc.stdout,selectors.EVENT_READ);deadline=time.monotonic()+15
+                try:
+                    while time.monotonic()<deadline:
+                        if b"\n"not in pending:
+                            if not selector.select(.25):continue
+                            data=os.read(proc.stdout.fileno(),65536);expect(data,"actual native transport closed");pending+=data
+                        while b"\n"in pending:
+                            line,pending=pending.split(b"\n",1)
+                            if not line.strip():continue
+                            row=json.loads(line)
+                            if row.get("id")==frame["id"]:
+                                expect("error"not in row,"actual generated protocol rejected: "+json.dumps(row.get("error",{})))
+                                return row["result"]
+                    raise AssertionError("actual generated protocol timed out: "+str(frame.get("method"))+" "+str(frame.get("id")))
+                finally:selector.close()
             try:
-                proc.stdin.write(json.dumps({"id":"actual-init","method":"initialize","params":{"clientInfo":{"name":"hyperfide-component-probe","version":"1"}}})+"\n");proc.stdin.flush()
-                select=selectors.DefaultSelector();select.register(proc.stdout,selectors.EVENT_READ)
-                deadline=time.monotonic()+15;response=None
-                while time.monotonic()<deadline:
-                    if not select.select(.25):continue
-                    line=proc.stdout.readline()
-                    if not line:break
-                    row=json.loads(line)
-                    if row.get("id")=="actual-init":response=row;break
-                expect(response is not None and "result" in response and "error" not in response,"installed app-server handshake failed")
-                expect(isinstance(response["result"],dict),"installed protocol returned wrong initialize schema")
+                steps=success("connector.initialize",{"connector":"codex","request_id":"actual-init","workspace":str(base)},env)["steps"]
+                for step in steps[:2]:rpc(step["frame"],step["await_response"])
+                observed=rpc({"id":"observe-config","method":"thread/start","params":{"cwd":str(base),"approvalPolicy":"never","sandbox":"read-only"}})
+                expect(isinstance(observed["thread"]["id"],str),"installed runtime omitted native identity")
+                p["requested_model_id"]=observed["model"];p["configured_provider_id"]=observed["thread"]["modelProvider"];config.write_text(json.dumps(p))
+                generated=success("connector.initialize",{"connector":"codex","request_id":"generated-thread","workspace":str(base)},env)["steps"][2]["frame"]
+                response=rpc(generated)
+                expect(isinstance(response["thread"]["id"],str)and response["thread"]["id"]!=observed["thread"]["id"],"generated start lost actual distinct native identity")
+                expect(response["model"]==p["requested_model_id"]and response["thread"]["modelProvider"]==p["configured_provider_id"],"generated profile changed configured model/provider")
             finally:
-                if proc.poll() is None:os.killpg(proc.pid,signal.SIGTERM)
+                if proc.poll()is None:os.killpg(proc.pid,signal.SIGTERM)
                 try:proc.communicate(timeout=5)
                 except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.communicate(timeout=5)
-                expect(proc.poll() is not None,"actual CLI process escaped cleanup")
+                expect(proc.poll()is not None,"actual CLI process escaped cleanup")
         check("connectors.actual-codex-initialize",actual_init)
         configure("claude")
         claude={"connector":"claude","request_id":"user-1","native_session_id":"session-exact","operation":"input","text":"bounded instruction"}
         check("connectors.claude-user-frame",lambda:expect(success("connector.encode",claude,env)["frame"]["message"]["content"]=="bounded instruction","Claude frame lost input"))
         check("connectors.claude-steer-unsupported",lambda:refuse("connector.encode",dict(claude,operation="steer",turn_id="turn-1"),env))
-    print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
+    check("connectors.supervisory-host-probe-complete",actual_supervisory_host)
+    absent=drain_owned_children()
+    print(json.dumps({"type":"cleanup","resources":[],"complete":absent,"descendant_processes_observed_absent":absent}),flush=True)
+    expect(absent,"actual native descendants survived fixture cleanup")
     return 1 if FAILED else 0
 if __name__=="__main__":sys.exit(main())
