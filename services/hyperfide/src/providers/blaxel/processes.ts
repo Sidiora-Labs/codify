@@ -72,12 +72,13 @@ interface BlaxelProcess{
 }
 interface BlaxelSandbox{metadata:Obj;spec:Obj;status?:string;process:BlaxelProcess;fs:{readBinary(path:string):Promise<Blob>}}
 interface BlaxelSDK{
+ createSandbox(request:{body:Obj;throwOnError:false;signal:AbortSignal}):Promise<{data?:unknown;error?:unknown;response:Response}>;
  SandboxInstance:{get(name:string):Promise<BlaxelSandbox>;create(model:Obj,options:{safe:false;timeout:number}):Promise<BlaxelSandbox>;
  list(query:Obj):Promise<{data:BlaxelSandbox[];hasMore:boolean;nextCursor?:string}>;delete(name:string):Promise<unknown>};
 }
 function runtimeSDK(v:unknown):BlaxelSDK{
  if(!v||typeof v!=='object')fail('BLAXEL_PROCESS_UNAVAILABLE','Pinned SDK unavailable');const s=(v as Obj).SandboxInstance as Obj|undefined;
- if(!s||!['get','create','list','delete'].every(k=>typeof s[k]==='function'))fail('BLAXEL_PROCESS_UNAVAILABLE','Pinned SDK runtime methods differ');
+ if(typeof(v as Obj).createSandbox!=='function'||!s||!['get','list','delete'].every(k=>typeof s[k]==='function'))fail('BLAXEL_PROCESS_UNAVAILABLE','Pinned SDK runtime methods differ');
  return v as BlaxelSDK;
 }
 export async function boundedBlaxelOperation<T>(fn:(signal:AbortSignal)=>Promise<T>,parent:AbortSignal,deadline:number):Promise<T>{
@@ -127,6 +128,17 @@ export function verifyBlaxelCreate(observation:unknown,expected:Obj,scope:Provid
  for(const key of Object.keys(desired))if(!equal(runtime[key],desired[key]))fail('BLAXEL_CREATE_CONFLICT','Existing sandbox runtime configuration differs');
  if(['FAILED','TERMINATED','DELETING','ARCHIVED','ARCHIVING','UNARCHIVING'].includes(String(o.status)))fail('BLAXEL_CREATE_CONFLICT','Named sandbox cannot be silently replaced or restored');
  return{matches:true,native_sandbox_id:nativeName(m.name)};
+}
+/** Record candidate identity before validating ownership. This callback boundary
+ * carries no readiness authority; persistence failures still retain the known ID. */
+export async function retainBlaxelCreateCandidate(actual:{metadata:Obj;spec:Obj;status:string|undefined},expected:Obj,scope:ProviderScope,generation:string,remember:(resource:ResourceRef)=>void,persist:(nativeId:string)=>Promise<ResourceRef>):Promise<ResourceRef>{
+ const returnedName=nativeName(actual.metadata?.name),candidate={native_sandbox_id:returnedName,sandbox_boot_generation:generation};
+ remember(candidate);
+ const persisted=await persist(returnedName);
+ if(persisted.sandbox_boot_generation!==generation||persisted.native_sandbox_id!==returnedName)fail('BLAXEL_CREATE_CONFLICT','Persistence changed assigned boot identity');
+ remember(persisted);
+ verifyBlaxelCreate(actual,expected,scope);
+ return persisted;
 }
 function state(raw:string|undefined):ProviderState{
  if(raw==='DEPLOYED')return 'RUNNING';if(raw==='FAILED')return 'FAILED';if(raw==='TERMINATED')return 'DESTROYED';
@@ -261,14 +273,21 @@ export function createBlaxelAdapter(scope:ProviderScope,hooks:BlaxelPersistenceH
     let actual=existing;
     if(!actual){
      await hooks.assertResourceBinding(op);attempted=true;
-     try{actual=await read(()=>api.SandboxInstance.create(model,{safe:false,timeout:Math.max(1,Math.min(50,Math.floor((Date.parse(op.deadline_at)-Date.now())/1000)))}),op,parent);}
-     catch(e){if(statusCode(e)!==409)throw e;actual=await read(()=>api.SandboxInstance.get(name),op,parent);}
+     // The high-level helper can poll after a gateway timeout and perform
+     // H2 warmup before returning. Use one official raw control-plane POST.
+     const response=await read(signal=>api.createSandbox({body:model,throwOnError:false,signal}),op,parent);
+     if(response.error!==undefined){
+      if(response.response.status!==409)throw{status:response.response.status};
+      actual=await read(()=>api.SandboxInstance.get(name),op,parent);
+     }else{
+      const value=object(response.data);
+      actual={metadata:object(value.metadata),spec:object(value.spec),status:typeof value.status==='string'?value.status:undefined} as BlaxelSandbox;
+     }
     }
-    // A known returned identity survives later validation/persistence failure.
-    if(actual.metadata?.name===name&&actual.metadata.workspace===scope.environment_id&&equal(actual.metadata.labels,(model.metadata as Obj).labels))known={native_sandbox_id:name,sandbox_boot_generation:generation};
-    verifyBlaxelCreate({metadata:actual.metadata,spec:actual.spec,status:actual.status},model,scope);
-    known=await hooks.persistEarlyResource(create,name);
-    if(known.sandbox_boot_generation!==generation||known.native_sandbox_id!==name)fail('BLAXEL_CREATE_CONFLICT','Persistence changed assigned boot identity');
+    // Persist the actual returned candidate before placement/runtime validation.
+    // A mismatch never grants ownership/readiness, but cannot erase an orphan.
+    known=await retainBlaxelCreateCandidate({metadata:actual.metadata,spec:actual.spec,status:actual.status},model,scope,generation,
+     candidate=>{known=candidate;},returnedName=>hooks.persistEarlyResource(create,returnedName));
     if(parent.aborted||Date.now()>Date.parse(op.deadline_at))return save(op,outcome(op,'UNKNOWN',null,known));
     return save(op,outcome(create,'SUCCEEDED',{provider_state:state(actual.status)==='RUNNING'?'RUNNING':'CREATING'},known));
    }

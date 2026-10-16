@@ -121,6 +121,13 @@ def main():
    o=operation("create");o["parameters"]["resources"]["cpu_millis"]=1000;rehash(o)
    f.bad("create-plan",{"operation":o,"boot_generation":"1","base":prepared(o)},"BLAXEL_RESOURCE_UNSUPPORTED")
   check("create.reject-silent-cpu-memory-change",vector)
+
+  def retained_mismatch():
+   o=operation("create");plan=f.good("create-plan",{"operation":o,"boot_generation":"1","base":prepared(o)})["plan"]
+   script="import assert from 'node:assert/strict';import fs from 'node:fs';import{retainBlaxelCreateCandidate}from './services/hyperfide/dist/providers/blaxel/processes.js';const plan="+json.dumps(plan)+";const scope="+json.dumps(o["scope"])+";const record="+json.dumps(str(b/"persisted-candidate"))+";for(const field of['name','workspace','region','status']){const actual=structuredClone(plan);actual.status='DEPLOYED';actual.metadata.workspace='workspace';if(field==='name')actual.metadata.name='hf-actual-unexpected';else if(field==='workspace')actual.metadata.workspace='different';else if(field==='region')actual.spec.region='different';else actual.status='FAILED';let known=null;await assert.rejects(retainBlaxelCreateCandidate(actual,plan,scope,'1',r=>{known=r},async name=>{const fd=fs.openSync(record,'w',384);fs.writeFileSync(fd,name);fs.fsyncSync(fd);fs.closeSync(fd);return{native_sandbox_id:name,sandbox_boot_generation:'1'}}),e=>e.code==='BLAXEL_CREATE_CONFLICT');assert.equal(known.native_sandbox_id,actual.metadata.name);assert.equal(fs.readFileSync(record,'utf8'),actual.metadata.name);}const actual=structuredClone(plan);actual.metadata.workspace='workspace';let known=null;await assert.rejects(retainBlaxelCreateCandidate(actual,plan,scope,'1',r=>{known=r},async name=>{await fs.promises.writeFile(record+'/missing',name);return{native_sandbox_id:name,sandbox_boot_generation:'1'}}));assert.equal(known.native_sandbox_id,actual.metadata.name);"
+   row=subprocess.run(["node","--input-type=module","-e",script],cwd=ROOT,capture_output=True,text=True,timeout=10);expect(row.returncode==0,row.stderr)
+  check("create.actual-candidate-persisted-before-validation",retained_mismatch)
+
   binary=b/"sandbox-api"
   with urllib.request.urlopen(images.RELEASE,timeout=60)as stream:content=stream.read()
   expect(hashlib.sha256(content).hexdigest()==images.RELEASE_SHA);binary.write_bytes(content);binary.chmod(0o700)
