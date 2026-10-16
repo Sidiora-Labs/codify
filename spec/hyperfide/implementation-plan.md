@@ -164,7 +164,7 @@ These are approved implementation assignments for existing requirements, not cla
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 3.4 | Register native descendants and adopt valid work after manager replacement | hierarchy | 3.1, 5.2, 12.1 | V-007, V-008 |
-| 5.3 | Reconcile idempotent dispatch and uncertain external outcomes | scheduler | 5.2, 6.1, 1.1, 5.4 | V-004, V-037 |
+| 5.3 | Reconcile idempotent dispatch and uncertain external outcomes | scheduler | 5.2, 6.1, 1.1, 5.4, 6.2 | V-004, V-037 |
 | 6.3 | Deliver generation-bound start, steering and cancellation instructions | delivery | 6.2, 5.2, 14.1 | V-006 |
 | 8.2 | Implement pool inventory and separately qualified account quotas | providers | 8.1, 5.4 | V-007, V-036 |
 | 22.2 | Measure calibrated quality, latency and billed cost against baseline | evaluation | 22.1, 20.3 | V-046 |
@@ -174,10 +174,10 @@ These are approved implementation assignments for existing requirements, not cla
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 6.4 | Recover durable dispatch after controller restart | delivery | 6.2, 14.1, 6.3 | V-005, V-008 |
-| 1.2 | Expose one human programme interface through primary leader | policy | 3.1, 6.3 | V-001, V-008 |
+| 1.2 | Expose one human programme interface through primary leader | policy | 3.1, 6.3, 6.2 | V-001, V-008 |
 | 9.2 | Apply complete Railway runtime profiles for every launch | railway | 9.1, 8.2 | V-036, V-038 |
 | 10.2 | Apply explicit Blaxel process and sandbox lifetime controls | blaxel | 10.1, 8.2 | V-036, V-041 |
-| 12.2 | Persist local start ledger and own agent IPC across reconnects | runner | 12.1, 6.3 | V-006, V-041, V-043 |
+| 12.2 | Persist local start ledger and own agent IPC across reconnects | runner | 12.1, 6.3, 6.2, 5.1 | V-006, V-041, V-043 |
 
 ### Wave 15 — 4 packages
 
@@ -206,7 +206,7 @@ These are approved implementation assignments for existing requirements, not cla
 | 15.3 | Adopt stale-attempt artifacts without restoring stale authority | artifacts | 15.1, 15.2, 5.2, 13.2, 3.2 | V-003, V-014, V-043 |
 | 8.4 | Implement authenticated cross-pool connectivity and compatible relocation | providers | 8.2, 14.1, 11.4, 12.4 | V-036, V-049 |
 | 13.4 | Integrate native quotas, permission profiles and autonomous escalation | connectors | 13.1, 5.4, 13.2, 5.1, 1.1 | V-007, V-042, V-044 |
-| 16.2 | Reject false qualification from missing checks and legacy force paths | assurance | 16.1, 27.1, 12.4, 5.1 | V-013, V-056 |
+| 16.2 | Reject false qualification from missing checks and legacy force paths | assurance | 16.1, 27.1, 12.4, 5.1, 11.4 | V-013, V-056 |
 | 17.1 | Discover every commit and enforce the full watcher obligation matrix | review | 16.1, 13.1, 14.1, 4.2 | V-031 |
 
 ### Wave 18 — 6 packages
@@ -228,22 +228,22 @@ These are approved implementation assignments for existing requirements, not cla
 | 17.2 | Build producer-consumer contracts and behavioural impact analysis | review | 7.4, 16.3, 17.1 | V-029, V-034 |
 | 24.1 | Recover supervisory desired state and bounded offline continuation | recovery | 6.4, 3.4, 13.3, 12.4, 4.4, 5.1 | V-008, V-043 |
 
-### Wave 20 — 5 packages
+### Wave 20 — 4 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
-| 17.3 | Persist revision-specific review receipts and invalidate stale conclusions | review | 17.1, 17.2, 16.4 | V-031, V-034 |
-| 17.4 | Dispatch remote reproductions and contract/system qualification jobs | review | 17.2, 16.2, 11.3, 12.4, 15.2, 2.4 | V-029, V-030, V-052 |
+| 17.3 | Persist revision-specific review receipts and invalidate stale conclusions | review | 17.1, 17.2, 16.4, 5.1 | V-031, V-034 |
 | 23.1 | Expose desired/observed fleet state, evidence and critical paths | observability | 3.3, 5.4, 16.4, 4.2, 14.1 | V-010, V-034 |
 | 24.2 | Recover lost sandboxes and processes with fenced compatible replacement | recovery | 24.1, 8.4, 15.3 | V-004, V-041, V-049 |
 | 25.3 | Route CLI, MCP, editor, hooks and offline workflows through authority modes | migration | 4.3, 6.3, 16.4, 2.1, 12.2, 14.1, 12.1, 1.4 | V-019, V-027, V-028 |
 
-### Wave 21 — 6 packages
+### Wave 21 — 7 packages
 
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 23.2 | Account for distinct infrastructure and model resource dimensions | observability | 5.4, 8.2, 12.3, 23.1 | V-007, V-048 |
 | 18.1 | Implement canonical findings and provenance-preserving deduplication | findings | 16.3, 3.1, 17.3 | V-032 |
+| 17.4 | Dispatch remote reproductions and contract/system qualification jobs | review | 17.2, 16.2, 11.3, 12.4, 15.2, 2.4, 17.3, 16.3 | V-029, V-030, V-052 |
 | 23.3 | Instrument lifecycle, graph freshness, recovery and qualified outcome cost | observability | 6.4, 7.3, 16.4, 21.4, 23.1 | V-011, V-048 |
 | 23.4 | Deliver bounded actionable notifications and durable evidence links | observability | 23.1, 6.2 | V-016, V-048 |
 | 24.3 | Implement scoped pause, drain, cancel and fleet stop controllers | recovery | 12.4, 24.2, 15.4, 5.1, 25.1 | V-017, V-054 |
@@ -286,7 +286,7 @@ These are approved implementation assignments for existing requirements, not cla
 | Task | Deliverable | Owner | Requires | Cases |
 |---|---|---|---|---|
 | 19.3 | Evaluate task, wave and programme closure against required milestones | integration | 19.2, 16.3, 18.4 | V-034 |
-| 25.2 | Rehearse single-authority cutover and separate rollback boundaries | migration | 25.1, 7.4, 4.4, 24.3, 26.4, 25.4 | V-019, V-028, V-055 |
+| 25.2 | Rehearse single-authority cutover and separate rollback boundaries | migration | 25.1, 7.4, 4.4, 24.3, 26.4, 25.4, 27.1 | V-019, V-028, V-055 |
 
 ### Wave 27 — 1 package
 
@@ -347,7 +347,7 @@ Requires: Approval boundary only.
 3. Reject absent or unknown selectors, zero assertions, missing required fixtures/credentials, failed children and unresolved cleanup; self-tests assert these failures rather than treating absence as success.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `tests/hyperfide/qualify.py`, `tests/hyperfide/manifests/tasks/27.1.json`, `tests/hyperfide/check-evidence.py`, `tests/hyperfide/registry.json`, `tests/hyperfide/selftest_harness.py`, `tests/hyperfide/manifest.schema.json`, `tests/hyperfide/cases/tasks/27_1.py`, `tests/hyperfide/registrations/27.1.json`, `tests/hyperfide/bootstrap-contract.md`, `tests/hyperfide/test_required_artifact_receipts.py`.
+Owns: `tests/hyperfide/qualify.py`, `tests/hyperfide/manifests/tasks/27.1.json`, `tests/hyperfide/check-evidence.py`, `tests/hyperfide/registry.json`, `tests/hyperfide/selftest_harness.py`, `tests/hyperfide/manifest.schema.json`, `tests/hyperfide/cases/tasks/27_1.py`, `tests/hyperfide/registrations/27.1.json`, `tests/hyperfide/bootstrap-contract.md`, `tests/hyperfide/test_required_artifact_receipts.py`, `tests/hyperfide/inspect-proof.py`, `tests/hyperfide/test_inspect_proof.py`.
 
 Verification interface:
 
@@ -675,7 +675,7 @@ Requires: 4.2.
 6. Qualify privilege separation and readiness refusal against actual disposable PostgreSQL processes. Production authority epoch activation requires trusted external old-primary/control-writer fencing; caller booleans or matching epoch rows do not prove fencing. Component drills do not qualify cloud high availability or independent failure domains.
 7. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/storage/durability.ts`, `tests/hyperfide/manifests/tasks/4.4.json`, `tests/hyperfide/cases/tasks/4_4.py`, `tests/hyperfide/registrations/4.4.json`, `services/hyperfide/components/4.4.json`, `services/hyperfide/migrations/0004-durability.sql`, `services/hyperfide/src/storage/schema.ts`, `tests/hyperfide/cases/support/postgres_cluster.py`, `services/hyperfide/src/storage/runtime.ts`, `services/hyperfide/src/storage/transactions.ts`, `services/hyperfide/src/storage/authority_journal.ts`.
+Owns: `services/hyperfide/src/storage/durability.ts`, `tests/hyperfide/manifests/tasks/4.4.json`, `tests/hyperfide/cases/tasks/4_4.py`, `tests/hyperfide/registrations/4.4.json`, `services/hyperfide/components/4.4.json`, `services/hyperfide/migrations/0004-durability.sql`, `services/hyperfide/src/storage/schema.ts`, `tests/hyperfide/cases/support/postgres_cluster.py`, `services/hyperfide/src/storage/runtime.ts`, `services/hyperfide/src/storage/transactions.ts`, `services/hyperfide/src/storage/authority_journal.ts`, `services/hyperfide/src/storage/dispositions.ts`.
 
 Planned verification:
 
@@ -773,7 +773,7 @@ Requires: 14.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/identity/credentials.ts`, `tests/hyperfide/manifests/tasks/14.2.json`, `tests/hyperfide/cases/tasks/14_2.py`, `tests/hyperfide/registrations/14.2.json`, `services/hyperfide/components/14.2.json`, `services/hyperfide/src/transport/isolation.ts`, `tests/hyperfide/cases/tasks/14_isolation_transport.py`.
+Owns: `services/hyperfide/src/identity/credentials.ts`, `tests/hyperfide/manifests/tasks/14.2.json`, `tests/hyperfide/cases/tasks/14_2.py`, `tests/hyperfide/registrations/14.2.json`, `services/hyperfide/components/14.2.json`, `services/hyperfide/src/transport/isolation.ts`, `tests/hyperfide/cases/tasks/14_isolation_transport.py`, `services/hyperfide/src/transport/writer_observation.ts`.
 
 Verification interface:
 
@@ -916,7 +916,7 @@ Requires: 2.2.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/spec/revisions.ts`, `tests/hyperfide/manifests/tasks/2.3.json`, `tests/hyperfide/cases/tasks/2_3.py`, `tests/hyperfide/registrations/2.3.json`, `services/hyperfide/components/2.3.json`.
+Owns: `services/hyperfide/src/spec/revisions.ts`, `tests/hyperfide/manifests/tasks/2.3.json`, `tests/hyperfide/cases/tasks/2_3.py`, `tests/hyperfide/registrations/2.3.json`, `services/hyperfide/components/2.3.json`, `services/hyperfide/src/spec/import.ts`, `services/hyperfide/src/spec/dependencies.ts`.
 
 Verification interface:
 
@@ -1329,7 +1329,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 13 · owner `scheduler` · clause `5.3`
 
-Requires: 5.2, 6.1, 1.1, 5.4.
+Requires: 5.2, 6.1, 1.1, 5.4, 6.2.
 
 1. Bind dispatch requests to stable operation identity and persisted outcomes; reconcile uncertain create/spawn effects before compatible replacement.
 2. Lose responses across crash windows and return delayed surviving workers; permit duplicate physical execution only with one accepted authority.
@@ -1446,7 +1446,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 14 · owner `policy` · clause `1.2`
 
-Requires: 3.1, 6.3.
+Requires: 3.1, 6.3, 6.2.
 
 1. Route human intent/criteria/programme changes only through registered primary leader; routine scheduling/provision/repair/review/qualification follows approved autonomous policy.
 2. Simulate manager/task escalation and leader replacement; unresolved intent reaches leader while routine job execution does not demand human worker prompts.
@@ -1587,7 +1587,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 14 · owner `runner` · clause `12.2`
 
-Requires: 12.1, 6.3.
+Requires: 12.1, 6.3, 6.2, 5.1.
 
 1. Durably accept generation-bound starts before spawn, record process/session associations and retain supervisor-owned IPC independently of controller transport.
 2. Crash immediately before/after spawn and ledger writes; inspect/adopt existing process or record uncertainty rather than blindly launching another session.
@@ -1596,7 +1596,7 @@ Requires: 12.1, 6.3.
 5. Run a separate coordinator/dispatch process and a native supervisor process over HTTPS, interrupt their transport around spawn/ack windows, and verify restored command identity, existing-process adoption and bounded spool replay without duplicate logical starts.
 6. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `src/hyperfide/launch.c`, `tests/hyperfide/manifests/tasks/12.2.json`, `tests/hyperfide/cases/tasks/12_2.py`, `tests/hyperfide/registrations/12.2.json`, `src/hyperfide/components/12.2.kvx`.
+Owns: `src/hyperfide/launch.c`, `tests/hyperfide/manifests/tasks/12.2.json`, `tests/hyperfide/cases/tasks/12_2.py`, `tests/hyperfide/registrations/12.2.json`, `src/hyperfide/components/12.2.kvx`, `services/hyperfide/src/runner/dispatch.ts`.
 
 Verification interface:
 
@@ -1688,7 +1688,7 @@ Requires: 10.2, 12.2, 8.3, 14.1, 14.2.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/providers/blaxel/processes.ts`, `tests/hyperfide/manifests/tasks/10.3.json`, `tests/hyperfide/cases/tasks/10_3.py`, `tests/hyperfide/registrations/10.3.json`, `services/hyperfide/components/10.3.json`.
+Owns: `services/hyperfide/src/providers/blaxel/processes.ts`, `tests/hyperfide/manifests/tasks/10.3.json`, `tests/hyperfide/cases/tasks/10_3.py`, `tests/hyperfide/registrations/10.3.json`, `services/hyperfide/components/10.3.json`, `services/hyperfide/src/providers/blaxel/images.ts`.
 
 Verification interface:
 
@@ -1711,7 +1711,7 @@ Requires: 11.1, 5.4, 8.3, 1.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/preparation/prewarm.ts`, `tests/hyperfide/manifests/tasks/11.4.json`, `tests/hyperfide/cases/tasks/11_4.py`, `tests/hyperfide/registrations/11.4.json`, `services/hyperfide/components/11.4.json`, `services/hyperfide/migrations/0011-prewarm.sql`, `services/hyperfide/components/11.4-provisioner.json`.
+Owns: `services/hyperfide/src/preparation/prewarm.ts`, `tests/hyperfide/manifests/tasks/11.4.json`, `tests/hyperfide/cases/tasks/11_4.py`, `tests/hyperfide/registrations/11.4.json`, `services/hyperfide/components/11.4.json`, `services/hyperfide/migrations/0011-prewarm.sql`, `services/hyperfide/components/11.4-provisioner.json`, `services/hyperfide/src/preparation/effective.ts`, `services/hyperfide/src/preparation/recipe.ts`.
 
 Verification interface:
 
@@ -1757,7 +1757,7 @@ Requires: 12.2, 14.3.
 3. Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `src/hyperfide/connectors.c`, `tests/hyperfide/manifests/tasks/13.1.json`, `tests/hyperfide/cases/tasks/13_1.py`, `tests/hyperfide/registrations/13.1.json`, `src/hyperfide/components/13.1.kvx`.
+Owns: `src/hyperfide/connectors.c`, `tests/hyperfide/manifests/tasks/13.1.json`, `tests/hyperfide/cases/tasks/13_1.py`, `tests/hyperfide/registrations/13.1.json`, `src/hyperfide/components/13.1.kvx`, `runtime/supervisory_host.py`, `tests/hyperfide/cases/tasks/13_1_host.py`.
 
 Verification interface:
 
@@ -1922,7 +1922,7 @@ Requires: 12.3, 15.2, 11.3, 5.1, 8.2.
 3. Link this module through its task-owned native component/build fragment and exercise the resulting runner/client interface; disconnected compilation cannot satisfy the component gate. Public legacy/new CLI integration remains task25.3/26.2 responsibility.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `src/hyperfide/control.c`, `tests/hyperfide/manifests/tasks/12.4.json`, `tests/hyperfide/cases/tasks/12_4.py`, `tests/hyperfide/registrations/12.4.json`, `src/hyperfide/components/12.4.kvx`, `services/hyperfide/components/12.4-executor.json`, `services/hyperfide/components/12.4.json`, `services/hyperfide/src/runner/bridge.ts`, `src/hyperfide/job.c`, `services/hyperfide/src/runner/executor.ts`.
+Owns: `src/hyperfide/control.c`, `tests/hyperfide/manifests/tasks/12.4.json`, `tests/hyperfide/cases/tasks/12_4.py`, `tests/hyperfide/registrations/12.4.json`, `src/hyperfide/components/12.4.kvx`, `services/hyperfide/components/12.4-executor.json`, `services/hyperfide/components/12.4.json`, `services/hyperfide/src/runner/bridge.ts`, `src/hyperfide/job.c`, `services/hyperfide/src/runner/executor.ts`, `tests/hyperfide/cases/tasks/12_4_executor.py`, `src/hyperfide/preparation_stage.c`, `tests/hyperfide/support/preparation_stage_fixture.py`.
 
 Verification interface:
 
@@ -1968,7 +1968,7 @@ Requires: 13.1, 5.4, 13.2, 5.1, 1.1.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/agents/admission.ts`, `tests/hyperfide/manifests/tasks/13.4.json`, `tests/hyperfide/cases/tasks/13_4.py`, `tests/hyperfide/registrations/13.4.json`, `services/hyperfide/components/13.4.json`, `services/hyperfide/src/agents/supervision.ts`, `services/hyperfide/components/13.4-supervision.json`.
+Owns: `services/hyperfide/src/agents/admission.ts`, `tests/hyperfide/manifests/tasks/13.4.json`, `tests/hyperfide/cases/tasks/13_4.py`, `tests/hyperfide/registrations/13.4.json`, `services/hyperfide/components/13.4.json`, `services/hyperfide/src/agents/supervision.ts`, `services/hyperfide/components/13.4-supervision.json`, `services/hyperfide/src/agents/dispatch.ts`, `services/hyperfide/components/13.4-dispatch.json`.
 
 Verification interface:
 
@@ -1984,14 +1984,14 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 17 · owner `assurance` · clause `16.2`
 
-Requires: 16.1, 27.1, 12.4, 5.1.
+Requires: 16.1, 27.1, 12.4, 5.1, 11.4.
 
 1. Execute registered gates with complete command/environment/exit/artifact receipts; reject skipped/empty/unknown/interrupted/stale required checks.
 2. Import forced-done KVX/task and proof-text-only records as history; assert those states never release qualification-dependent work.
 3. Register this module through its task-owned component fragment in the established service entrypoint and verify its externally observable internal API behavior; an unreferenced source file or direct function-only test cannot satisfy the component gate.
 4. Implement the task's registered positive/negative assertions and immutable manifest; execute them remotely after approval, preserving command, exact revisions, complete artifacts and independent observed outcomes.
 
-Owns: `services/hyperfide/src/assurance/executor.ts`, `tests/hyperfide/manifests/tasks/16.2.json`, `tests/hyperfide/cases/tasks/16_2.py`, `tests/hyperfide/registrations/16.2.json`, `services/hyperfide/components/16.2.json`.
+Owns: `services/hyperfide/src/assurance/executor.ts`, `tests/hyperfide/manifests/tasks/16.2.json`, `tests/hyperfide/cases/tasks/16_2.py`, `tests/hyperfide/registrations/16.2.json`, `services/hyperfide/components/16.2.json`, `services/hyperfide/src/assurance/preparation.ts`, `services/hyperfide/migrations/0016-qualification.sql`.
 
 Verification interface:
 
@@ -2239,7 +2239,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 20 · owner `review` · clause `17.3`
 
-Requires: 17.1, 17.2, 16.4.
+Requires: 17.1, 17.2, 16.4, 5.1.
 
 1. Record reviewer/rubric/contract/spec/source/dependency inputs, coverage, findings and limitations; invalidate relevant changed inputs.
 2. Ensure duplicate reviewer activity cannot substitute a required independent obligation and decision-model risk ranks never certify correctness.
@@ -2260,9 +2260,9 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 ### Task 17.4 — Dispatch remote reproductions and contract/system qualification jobs
 
-Planning baseline pending · wave 20 · owner `review` · clause `17.4`
+Planning baseline pending · wave 21 · owner `review` · clause `17.4`
 
-Requires: 17.2, 16.2, 11.3, 12.4, 15.2, 2.4.
+Requires: 17.2, 16.2, 11.3, 12.4, 15.2, 2.4, 17.3, 16.3.
 
 1. Run reproductions and contract/system scenarios remotely with identified candidate inputs; retain projection conflicts as uncertain guidance.
 2. Demonstrate separately passing components fail an integrated behavioural fixture and prove no main-server execution was scheduled.
@@ -2778,7 +2778,7 @@ Registered task-component variant only; all cases remain UNRUN now. This task re
 
 Planning baseline pending · wave 26 · owner `migration` · clause `25.2`
 
-Requires: 25.1, 7.4, 4.4, 24.3, 26.4, 25.4.
+Requires: 25.1, 7.4, 4.4, 24.3, 26.4, 25.4, 27.1.
 
 1. Quiesce all legacy writers, snapshot/import/reconcile source/Git/artifacts and commit one named authority epoch; allow read-only shadow comparison only.
 2. Rehearse rollback before new writes and recovery/reverse migration after external effects; old SQLite snapshot cannot reopen as current distributed authority.
