@@ -236,6 +236,11 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
   if(previous&&previous.request_digest!==eventHash) fail('INSTRUCTION_ACK_CONFLICT','Runner state no longer binds the immutable command');
   if(prior&&prior.ledger_receipt_id!==ledger) fail('INSTRUCTION_ACK_CONFLICT','One logical command cannot switch local durable ledger identity');
   const newer=!prior||BigInt(version)>BigInt(integer(prior.ledger_version));
+  const pinned=prior?.pinned_process??prior?.observed_process??null;
+  if(pinned!==null&&v.observed_process!==null&&canonical(pinned)!==canonical(v.observed_process))
+    fail('INSTRUCTION_ACK_CONFLICT','Stable command acknowledgement changed the pinned supervised process identity');
+  const nextPinned=pinned??v.observed_process;
+  const nextState=newer?{...v,pinned_process:nextPinned}:{...prior,pinned_process:nextPinned};
   if(newer&&prior) {
     if(prior.state==='TERMINAL'&&v.state!=='TERMINAL'||prior.state!=='ACCEPTED'&&v.state==='ACCEPTED')
       fail('INSTRUCTION_ACK_REGRESSION','Runner observation cannot regress an established execution state');
@@ -246,11 +251,11 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
     reported_state:v.state,current:newer,authority:'NONE',task_qualified:false};
   await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result) VALUES($1,$2,$3,$4,'instruction.runner-ack',$5,$6,'COMPLETED',$7::jsonb)",
     [s.organisation_id,s.run_id,randomUUID(),principal,idempotency,requestHash,canonical(result)]);
-  if(newer) {
+  if(newer||pinned===null&&v.observed_process!==null) {
     if(previous) await tx.query("UPDATE hyperfide.command_inbox SET result=$5::jsonb,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND principal_scope=$3 AND operation='instruction.runner-state' AND idempotency_key=$4",
-      [s.organisation_id,s.run_id,principal,command,canonical(v)]);
+      [s.organisation_id,s.run_id,principal,command,canonical(nextState)]);
     else await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result) VALUES($1,$2,$3,$4,'instruction.runner-state',$5,$6,'COMPLETED',$7::jsonb)",
-      [s.organisation_id,s.run_id,randomUUID(),principal,command,eventHash,canonical(v)]);
+      [s.organisation_id,s.run_id,randomUUID(),principal,command,eventHash,canonical(nextState)]);
   }
   return result;
 }
