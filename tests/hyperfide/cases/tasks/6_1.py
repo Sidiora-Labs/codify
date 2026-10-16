@@ -66,7 +66,7 @@ def cleanup():
     return 0 if complete else 1
 FIXTURE="""
 import {enqueue,lockRun,authorizedRun} from './events/outbox.js';
-import {receive,bootstrapConsumer} from './events/inbox.js';
+import {receive,bootstrapConsumer,supersedeDelivery} from './events/inbox.js';
 import {DurableDispatcher,recoverySnapshot} from './events/recovery.js';
 export function createComponent(ctx) {
  const g=ctx.dependencies.require('4.2','storage.transactions.v1',v=>typeof v?.withPrimaryTransaction==='function');
@@ -86,6 +86,10 @@ export function createComponent(ctx) {
   'fixture.bootstrap':(input,context)=>auth(context,input,tx=>bootstrapConsumer(tx,input,async tx=>{
     const r=await tx.query('SELECT state,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.run_id]);
     return {run:r.rows[0]};
+  })),
+  'fixture.supersede':(input,context)=>auth(context,input,tx=>supersedeDelivery(tx,input,async tx=>{
+    const r=await tx.query('SELECT authority_epoch,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.run_id]);
+    return {scope:'authenticated-operator-SQL-fixture-only',credential_id:context.invocation.principal.credential_id,primary_run:r.rows[0]};
   })),
   'fixture.snapshot': (input,context)=>auth(context,input,tx=>recoverySnapshot(tx,input)),
   'fixture.hung': async(input,context)=>{
@@ -125,7 +129,7 @@ class Service(identity.IdentityFixture):
             for p in (ROOT/"services/hyperfide/dist").rglob("*") if p.is_file())
         (module/"fixture.js").write_text(FIXTURE)
         (module/"package.json").write_text('{"type":"module"}')
-        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap"]
+        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede"]
         fragment={"schema_version":1,"id":"fixture.events","task":"6.1","roles":["control"],"module":"fixture.js","entry":"createComponent",
             "api_version":1,"actions":actions,"requires":["4.2","6.1","6.2","6.4"]}
         (self.components/"fixture.json").write_text(json.dumps(fragment))
@@ -291,6 +295,32 @@ def suite62(s):
     check("inbox.snapshot-covered-delivery",lambda:expect(s.ok("inbox.receive",dict(S,event_id=e["id"],consumer_id=late))["status"]=="DUPLICATE","Snapshot-covered event reapplied"))
     next_e=event(2042,version="2",aggregate=2040);s.ok("fixture.selected",{"event":next_e,"consumer_ids":[late]})
     check("inbox.bootstrap-then-live-event",lambda:expect(s.ok("inbox.receive",dict(S,event_id=next_e["id"],consumer_id=late))["status"]=="APPLIED","Live event did not follow primary snapshot baseline"))
+
+    source=dict(event(2051),aggregate_type="human_command",event_type="leader.intent.requested",
+        payload={"leader_generation":"1","target_session_id":uid(850),"authority_epoch":s.ids["epoch"],"message":"original fixture user intent"})
+    adopted=dict(event(2052),aggregate_type="human_intent_transfer",event_type="leader.intent.adopted",
+        payload={"leader_generation":"2","target_session_id":uid(851),"authority_epoch":s.ids["epoch"],"supersedes_event_id":source["id"],"original_event_id":source["id"],"original_intent":source["payload"]})
+    s.ok("fixture.selected",{"event":source,"consumer_ids":[CONSUMER]})
+    s.ok("fixture.selected",{"event":adopted,"consumer_ids":[late]})
+    transfer=dict(S,transfer_id=uid(2500),original_event_id=source["id"],original_consumer_id=CONSUMER,
+        replacement_event_id=adopted["id"],replacement_consumer_id=late)
+    check("inbox.supersession-sql-contract",lambda:expect(s.ok("fixture.supersede",transfer)["task_completed"] is False,
+        "SQL supersession claimed applied main-agent work"))
+    check("inbox.supersession-preserves-pending-replacement",lambda:expect(sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(source["id"])+" AND consumer_id="+q(CONSUMER))=="ACKNOWLEDGED" and
+        sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(adopted["id"])+" AND consumer_id="+q(late))=="PENDING","Transfer lost replacement or failed to retire old route"))
+    check("inbox.supersession-replay",lambda:expect(s.ok("fixture.supersede",transfer)["replayed"],"Transfer replay duplicated the edge"))
+    branched=dict(adopted,id=uid(2053),aggregate_id=uid(2053),payload=dict(adopted["payload"],leader_generation="3"))
+    s.ok("fixture.selected",{"event":branched,"consumer_ids":[late]})
+    check("inbox.supersession-branch-refused",lambda:s.reject("fixture.supersede",dict(transfer,transfer_id=uid(2501),replacement_event_id=branched["id"]),"INBOX_SUPERSESSION_CONFLICT"))
+    wrong=dict(adopted,id=uid(2054),aggregate_id=uid(2054),payload=dict(adopted["payload"],supersedes_event_id=uid(999)))
+    s.ok("fixture.selected",{"event":wrong,"consumer_ids":[late]})
+    check("inbox.supersession-source-reference-refused",lambda:s.reject("fixture.supersede",dict(transfer,transfer_id=uid(2502),replacement_event_id=wrong["id"]),"INBOX_SUPERSESSION_INVALID"))
+    chained=dict(adopted,id=uid(2055),aggregate_id=uid(2055),payload=dict(adopted["payload"],leader_generation="3",supersedes_event_id=adopted["id"],original_intent=source["payload"]))
+    s.ok("fixture.selected",{"event":chained,"consumer_ids":[late]})
+    check("inbox.supersession-same-recipient-new-generation",lambda:expect(s.ok("fixture.supersede",dict(transfer,transfer_id=uid(2503),original_event_id=adopted["id"],original_consumer_id=late,replacement_event_id=chained["id"],replacement_consumer_id=late))["source_preserved"],
+        "Proved newer-generation chain with same standing recipient was rejected"))
+    check("inbox.supersession-immutable-original",lambda:expect(json.loads(sql("SELECT payload::text FROM hyperfide.outbox_events WHERE id="+q(source["id"])))==source["payload"],
+        "Adoption relabelled original human intent"))
 
 def concurrent_duplicate(s):
     e=event(2031,aggregate=2030);s.ok("outbox.enqueue",e)
