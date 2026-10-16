@@ -1,8 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
+import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {canonical,hash} from './sqlite.js';
+function canonical(value:unknown):string {if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(object(value))return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value);}
+function hash(value:string|Buffer):string{return 'sha256:'+createHash('sha256').update(value).digest('hex');}
 
 export interface LegacyWriterInput {deployment_id:string;operation_id:string;source_epoch:string;signal?:AbortSignal}
 export interface LegacyAdmissionReceipt {deployment_id:string;operation_id:string;source_epoch:string;status:'ADMISSION_DISABLED';topology_digest:string;observed_at:string;evidence_digest:string;visibility:{scope:'CONFIGURED_PID_NAMESPACE';pid_namespace:string;mount_namespace:string}}
@@ -111,6 +113,7 @@ export class LegacyWriterAdmission {
  try{await fs.link(temporary,marker);}catch(e){if(!object(e)||e.code!=='EEXIST')throw e;}finally{await fs.rm(temporary,{force:true});}
  const dir=await fs.open(directory,'r');try{await dir.sync();}finally{await dir.close();}
  }
+ const workspace=await fs.open(config.workspace_root,'r');try{await workspace.sync();}finally{await workspace.close();}
  const admission_digest=await admission(config),observed_at=new Date().toISOString();
  return {...this.binding(input),status:'ADMISSION_DISABLED',topology_digest:topology,observed_at,evidence_digest:hash(canonical({topology,admission_digest,visibility,observed_at})),visibility};
  }
@@ -170,3 +173,11 @@ export class LegacyWriterAdmission {
  }
 }
 export function createLegacyWriterAdmission(env:Readonly<NodeJS.ProcessEnv>):LegacyWriterAdmission{return new LegacyWriterAdmission(env);}
+
+export function createLegacyComponent(ctx:ComponentContext):Component {
+ return {apiVersion:1,capabilities:{'migration.legacy-writers.v1':createLegacyWriterAdmission(ctx.env)},actions:{
+ 'legacy.writer.describe':async(raw:unknown)=>{
+ if(!object(raw)||Object.keys(raw).length)fail('LEGACY_FENCE_INPUT','Description takes empty input');
+ return {server_only:true,proof_visibility:'CONFIGURED_PID_NAMESPACE',whole_host_authority:false,request_fence_registration:false};
+ }}};
+}

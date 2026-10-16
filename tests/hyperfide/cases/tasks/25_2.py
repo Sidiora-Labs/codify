@@ -75,7 +75,58 @@ def main():
    try:rejected("disableAdmission","LEGACY_CONFIG_INVALID")
    finally:data.unlink();actual.rename(data)
   check("cutover.legacy.symlink-scope-refused",symlink)
+ isolated={}
+ def private_namespace():
+  command=['unshare','--user','--map-root-user','--mount','--pid','--fork','--mount-proc','--propagation','private',sys.executable,str(Path(__file__).resolve()),'--isolated-positive']
+  p=subprocess.run(command,text=True,capture_output=True,cwd=ROOT,timeout=120)
+  expect(p.returncode==0,'actual private mount/PID isolation probe failed: '+p.stderr[:300])
+  isolated.update(json.loads(p.stdout))
+  expect(isolated['proof']['status']=='ISOLATED' and isolated['proof']['visibility']['scope']=='CONFIGURED_PID_NAMESPACE','actual isolated receipt missing')
+ check("cutover.legacy.real-readonly-namespace-proof",private_namespace)
+ check("cutover.legacy.preexisting-detached-writer-refused",lambda:expect(isolated.get('preexisting_writer_refused') is True,'preexisting writer bypassed readonly bind'))
+ check("cutover.legacy.stale-sqlite-reconnect-blocked",lambda:expect(isolated.get('stale_sqlite_reconnect_blocked') is True and isolated.get('kernel_write_errno')==30,'stale writer reconnected to readonly database'))
  out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-cutover-tests"))/"cutover";out.mkdir(parents=True,exist_ok=True)
- (out/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"production_isolation_proven":False,"full_cases_qualified":False,"visibility":"configured namespace only","actual_readonly_mount_positive":"NOT_EXECUTED"}))
+ (out/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"production_isolation_proven":False,"full_cases_qualified":False,"visibility":"configured namespace only","actual_readonly_mount_positive":"CONFIGURED_PRIVATE_NAMESPACE","production_host_qualified":False,"isolation_observation":isolated}))
  return 1 if FAILED else 0
-if __name__=="__main__":sys.exit(main())
+
+
+def isolated_positive():
+ import errno
+ with tempfile.TemporaryDirectory(prefix="hyperfide-fence-positive-",dir="/dev/shm") as directory:
+  base=Path(directory);data=base/".codegraph";data.mkdir();database=data/"graph.db"
+  c=sqlite3.connect(database);c.execute("CREATE TABLE fixture(value TEXT)");c.commit();c.close()
+  config={"schema_version":1,"deployment_id":str(uuid.uuid4()),"source_epoch":str(uuid.uuid4()),"workspace_root":str(base),"data_roots":[".codegraph"],"legacy_writer_id":"owned-private-namespace-sqlite","expected_pid_namespace":os.readlink("/proc/self/ns/pid"),"expected_mount_namespace":os.readlink("/proc/self/ns/mnt")}
+  filename=base/"legacy.json";filename.write_text(json.dumps(config));filename.chmod(0o600)
+  environment=os.environ.copy();environment["HF_LEGACY_WRITER_CONFIG_FILE"]=str(filename)
+  value={"deployment_id":config["deployment_id"],"operation_id":str(uuid.uuid4()),"source_epoch":config["source_epoch"]}
+  def call(action):
+   p=subprocess.run(["node","--input-type=module","-e",NODE],input=json.dumps({"action":action,"input":value}),text=True,capture_output=True,cwd=ROOT,env=environment,timeout=45)
+   expect(p.returncode==0,"actual isolated module process failed");return json.loads(p.stdout)
+  expect(call("disableAdmission")["ok"],"private namespace admission failed")
+  old_fd=os.open(database,os.O_RDWR);mounted=False
+  try:
+   subprocess.run(["mount","--bind",str(data),str(data)],check=True,capture_output=True);mounted=True
+   subprocess.run(["mount","-o","remount,bind,ro",str(data)],check=True,capture_output=True)
+   old=call("observeIsolation");expect(not old["ok"] and old["error"]["code"]=="LEGACY_WRITER_ACTIVE","preexisting writable descriptor passed isolation")
+   os.close(old_fd);old_fd=None
+   kernel_errno=None
+   try:
+    fd=os.open(database,os.O_WRONLY);os.close(fd)
+   except OSError as error:kernel_errno=error.errno
+   expect(kernel_errno==errno.EROFS,"kernel did not prohibit stale writable reconnect")
+   stale=False
+   try:
+    c=sqlite3.connect(database)
+    try:c.execute("INSERT INTO fixture VALUES('forbidden')");c.commit()
+    finally:c.close()
+   except sqlite3.OperationalError as error:stale=error.sqlite_errorcode==sqlite3.SQLITE_READONLY
+   expect(stale,"actual SQLite stale reconnect wrote after readonly fence")
+   result=call("observeIsolation");expect(result["ok"],"actual readonly mount proof refused: "+str(result))
+   proof=result["result"]
+   expect(all(proof[k]==v for k,v in value.items()) and proof["writable_fds"]==0 and proof["writable_shared_mappings"]==0 and proof["read_only_aliases"]>=1,"isolation receipt is not bound to actual scope")
+   print(json.dumps({"proof":proof,"preexisting_writer_refused":True,"kernel_write_errno":kernel_errno,"stale_sqlite_reconnect_blocked":stale}))
+  finally:
+   if old_fd is not None:os.close(old_fd)
+   if mounted:subprocess.run(["umount",str(data)],check=True,capture_output=True)
+ return 0
+if __name__=="__main__":sys.exit(isolated_positive() if "--isolated-positive" in sys.argv else main())
