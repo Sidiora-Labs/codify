@@ -3,9 +3,10 @@ import fs from 'node:fs/promises';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {getPool,databaseError} from '../storage/schema.js';
+import {databaseError} from '../storage/schema.js';
 import {assertPrimaryTransaction,type PrimaryTransaction} from '../storage/transactions.js';
 import {lockRun as lockEventRun} from '../events/outbox.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import {invocationOf} from '../identity/enrollment.js';
 
 export interface RecoveryScope {organisation_id:string;run_id:string;authority_epoch:string}
@@ -109,7 +110,7 @@ export async function recoveryTransaction<T>(context:ComponentContext,scope:Reco
  const gateway=capability(context,'4.2','storage.transactions.v1',isGateway);
  const authority=requiresExternalAuthority?capability(context,'4.4','storage.authority.v1',isAuthority):undefined;
  try{return await gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:context.signal,
-  guard:async tx=>{await lockEventRun(tx as PrimaryTransaction,scope,observation?'shared':'exclusive');await invocation.guard(tx);await recoveryReady(tx);await lockRun(tx,scope,!observation);if(authority)await authority.assertCurrent(tx,scope);}
+  guard:async tx=>{await (observation?readSemanticDisposition:writeSemanticDisposition)(tx as PrimaryTransaction,scope);await lockEventRun(tx as PrimaryTransaction,scope,observation?'shared':'exclusive');await invocation.guard(tx);await recoveryReady(tx);await lockRun(tx,scope,!observation);if(authority)await authority.assertCurrent(tx,scope);}
  },body);}catch(error){if(error instanceof FoundationError)throw error;throw databaseError(error);}
 }
 export async function operationReplay(tx:RecoveryTransaction,scope:RecoveryScope,operationId:string,kind:string,input:unknown):Promise<Record<string,unknown>|null>{
@@ -141,6 +142,7 @@ export async function readControlSnapshot(tx:Pick<RecoveryTransaction,'query'>,s
   const packages=await query('SELECT id,package_key,wave,revision,manager_session_id,state_version FROM hyperfide.feature_packages WHERE organisation_id=$1 AND run_id=$2 ORDER BY wave,id LIMIT 10001');
   const sessions=await query('SELECT id,role,connector,native_session_id,attempt_id,sandbox_id,sandbox_boot_generation,state,state_version FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 ORDER BY id LIMIT 10001');
   const attempts=await query("SELECT a.id,a.task_id,a.generation,a.authority_epoch,a.execution_state,a.compute_authority,a.sandbox_id,a.sandbox_boot_generation,a.lease_expires_at,a.state_version,l.state AS lease_state,l.expires_at AS durable_lease_expires_at,COALESCE((a.compute_authority='CURRENT' AND a.authority_epoch=r.authority_epoch AND a.lease_expires_at>clock_timestamp() AND l.state='ACTIVE' AND l.expires_at>clock_timestamp() AND a.sandbox_boot_generation=s.boot_generation AND t.current_attempt_id=a.id AND t.generation=a.generation),false) AS compute_token_current FROM hyperfide.attempts a JOIN hyperfide.runs r ON r.organisation_id=a.organisation_id AND r.id=a.run_id JOIN hyperfide.tasks t ON t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id LEFT JOIN hyperfide.compute_leases l ON l.organisation_id=a.organisation_id AND l.run_id=a.run_id AND l.attempt_id=a.id AND l.state='ACTIVE' LEFT JOIN hyperfide.sandboxes s ON s.organisation_id=a.organisation_id AND s.id=a.sandbox_id WHERE a.organisation_id=$1 AND a.run_id=$2 ORDER BY a.id LIMIT 10001");
+  const restorationRequests=await query("SELECT id,task_id,source_attempt_id,source_attempt_generation,source_boot_generation,authority_epoch,state,state_version,created_at,updated_at FROM hyperfide.recovery_replacement_requests WHERE organisation_id=$1 AND run_id=$2 AND state NOT IN ('READY','CANCELLED') ORDER BY id LIMIT 10001");
   const custody=await query("SELECT id,task_id,source_attempt_id,source_generation,custody_generation,authority,qualification_outcome,source_manifest_digest,evidence_manifest_digest FROM hyperfide.submission_custodies WHERE organisation_id=$1 AND run_id=$2 AND authority='ACTIVE' ORDER BY id LIMIT 10001");
   const jobs=await query("SELECT id,custody_id,state,lease_generation,lease_expires_at,outcome FROM hyperfide.qualification_jobs WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','RUNNING') ORDER BY id LIMIT 10001");
   const debts=await query("SELECT id,operation_id,resource_kind,resource_id,sandbox_boot_generation,command_id,status,desired_state,observed_state,observed_at,created_at FROM hyperfide.recovery_resource_debts WHERE organisation_id=$1 AND run_id=$2 AND status<>'RESOLVED' ORDER BY id LIMIT 10001");
@@ -149,7 +151,7 @@ export async function readControlSnapshot(tx:Pick<RecoveryTransaction,'query'>,s
   const eventRecovery=events?await events.recoverySnapshot(tx as RecoveryTransaction,{organisation_id:scope.organisation_id,run_id:scope.run_id,limit:64}):{ready:false,reason:'PRIMARY_BRANDED_EVENT_READER_REQUIRED',task_completion_authority:false};
 
   if([packages,sessions,attempts,custody,jobs,debts].some(rows=>rows.length>10000))fail('RECOVERY_SNAPSHOT_TOO_LARGE','Recovery snapshot exceeds bounded inventory; partition the run explicitly');
-  return {scope,run:runs.rows[0],packages,sessions,attempts,submission_custody:custody,qualification_jobs:jobs,integration_recovery:integration,event_recovery:eventRecovery,controls,unreachable_resource_debt:debts,
+  return {scope,run:runs.rows[0],packages,sessions,attempts,submission_custody:custody,worker_restoration_requests:restorationRequests,qualification_jobs:jobs,integration_recovery:integration,event_recovery:eventRecovery,controls,unreachable_resource_debt:debts,
    adoption_candidates:attempts.filter(row=>row.compute_token_current).map(row=>({attempt_id:row.id,generation:row.generation,authority:'NONE',requires:'EXACT_SUPERVISOR_IDENTITY_OBSERVATION'})),
    supervision_failure_domains:1,uninterrupted_leadership_failover:'UNQUALIFIED',snapshot_consistency:'SERIALIZABLE',new_work_authorized:false};
 }
@@ -179,13 +181,14 @@ export function evaluateOffline(input:unknown,now=Date.now(),limits:{mode:'PAUSE
   new_claims:false,renewals:false,submission:false,publication:false,provisioning:false,qualification:false,
   reason:now>=deadline?'OFFLINE_BUDGET_EXPIRED':local&&limits.mode==='BOUNDED_LOCAL'&&value.policy==='BOUNDED_LOCAL'?'WITHIN_CONSERVATIVE_LOCAL_CEILING':'SAFE_PAUSE'};
 }
-export async function inspectIntegrationRecovery(tx:Pick<RecoveryTransaction,'query'>,scope:RecoveryScope):Promise<{ready:boolean;jobs:pg.QueryResultRow[];scope_jobs:pg.QueryResultRow[]}>{
- const found=await tx.query("SELECT to_regclass('hyperfide.integration_jobs') IS NOT NULL AND to_regclass('hyperfide.integration_scope_jobs') IS NOT NULL AS ready");
- if(found.rows[0]?.ready!==true)return {ready:false,jobs:[],scope_jobs:[]};
+export async function inspectIntegrationRecovery(tx:Pick<RecoveryTransaction,'query'>,scope:RecoveryScope):Promise<{ready:boolean;jobs:pg.QueryResultRow[];scope_jobs:pg.QueryResultRow[];preparations:pg.QueryResultRow[]}>{
+ const found=await tx.query("SELECT to_regclass('hyperfide.integration_jobs') IS NOT NULL AND to_regclass('hyperfide.integration_scope_jobs') IS NOT NULL AND to_regclass('hyperfide.integration_preparations') IS NOT NULL AS ready");
+ if(found.rows[0]?.ready!==true)return {ready:false,jobs:[],scope_jobs:[],preparations:[]};
  const jobs=await tx.query("SELECT id,executor_id,reservation_id,state FROM hyperfide.integration_jobs WHERE organisation_id=$1 AND run_id=$2 AND state IN ('RUNNING','OUTCOME_UNKNOWN') ORDER BY id LIMIT 10001",[scope.organisation_id,scope.run_id]);
  const scopes=await tx.query("SELECT id,executor_id,reservation_id,state,level,wave,input_manifest_digest FROM hyperfide.integration_scope_jobs WHERE organisation_id=$1 AND run_id=$2 AND state IN ('RUNNING','OUTCOME_UNKNOWN') ORDER BY id LIMIT 10001",[scope.organisation_id,scope.run_id]);
- if(jobs.rows.length>10000||scopes.rows.length>10000)fail('RECOVERY_SNAPSHOT_TOO_LARGE','Integration recovery inventory exceeds bounded snapshot');
- return {ready:true,jobs:jobs.rows,scope_jobs:scopes.rows};
+ const preparations=await tx.query("SELECT request_id,request_digest,state,created_at,false AS execution_manifest_included FROM hyperfide.integration_preparations WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PREPARING','OUTCOME_UNKNOWN') ORDER BY request_id LIMIT 10001",[scope.organisation_id,scope.run_id]);
+ if(jobs.rows.length>10000||scopes.rows.length>10000||preparations.rows.length>10000)fail('RECOVERY_SNAPSHOT_TOO_LARGE','Integration recovery inventory exceeds bounded snapshot');
+ return {ready:true,jobs:jobs.rows,scope_jobs:scopes.rows,preparations:preparations.rows};
 }
 export function createRecoveryControlCapability(){
  return Object.freeze({
@@ -201,11 +204,10 @@ export function createRecoveryControlCapability(){
    assertPrimaryTransaction(tx);await lockRun(tx,scope);
    const effects=await tx.query("SELECT EXISTS(SELECT 1 FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','RUNNING','OUTCOME_UNKNOWN')) OR EXISTS(SELECT 1 FROM hyperfide.publication_intents WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','EXECUTING')) AS blocked",[scope.organisation_id,scope.run_id]);
    const integration=await inspectIntegrationRecovery(tx,scope);
-   if(effects.rows[0]?.blocked!==false||!integration.ready||integration.jobs.length||integration.scope_jobs.length)fail('RECOVERY_EXTERNAL_EFFECTS_UNRESOLVED','External effects require owner reconciliation');
+   if(effects.rows[0]?.blocked!==false||!integration.ready||integration.jobs.length||integration.scope_jobs.length||integration.preparations.length)fail('RECOVERY_EXTERNAL_EFFECTS_UNRESOLVED','External effects require owner reconciliation');
   }
  });
 }
-export function getPoolForRecovery(context:ComponentContext):pg.Pool{return getPool(context.env);}
 export function createComponent(startup:ComponentContext):Component{
  const events=capability(startup,'6.4','events.recovery.v1',isRecoveryEvents);
  const snapshots:RecoverySnapshotReader=Object.freeze({read:(tx:RecoveryTransaction,scope:RecoveryScope)=>readControlSnapshot(tx,scope,events)});
@@ -269,4 +271,68 @@ export function createComponent(startup:ComponentContext):Component{
    });
   }
  }};
+}
+
+export interface AcceptedRunRebindInput {
+ schema_version:1;organisation_id:string;run_id:string;recovery_operation_id:string;activation_operation_id:string;deployment_id:string;
+ expected_run_epoch:string;target_epoch:string;expected_spec_generation:string;expected_spec_revision_id:string;expected_revision_digest:string;
+ external_previous_epoch:string|null;database_predecessor_epoch:string|null;fence_proof_digest:string;external_journal_sequence:string;
+}
+export interface AcceptedRunRecoveryIntent extends AcceptedRunRebindInput {intent_digest:string}
+/** Only trusted local deployment composition receives this factory. A signed isolation
+ * permit cannot call it or authorise run rebind. All proof is read from retained journals.
+ */
+export function createAcceptedRunRecoveryVerifier(options:{
+ resources:import('../storage/runtime.js').ServiceResources;
+ journal:import('../storage/authority_journal.js').ExternalAuthorityJournal;
+ fenceJournal:import('./fencing.js').FileExternalFenceJournal;
+ topology:import('./fencing.js').ExternalFenceTopology;
+ revokeCompute:(tx:PrimaryTransaction,input:AcceptedRunRebindInput)=>Promise<{revoked_attempts:string;revoked_allocations:string;retained_debt_references:readonly string[]}>;
+}){
+ return Object.freeze({prepare:async(raw:AcceptedRunRebindInput)=>{
+  const fields=['schema_version','organisation_id','run_id','recovery_operation_id','activation_operation_id','deployment_id','expected_run_epoch','target_epoch','expected_spec_generation','expected_spec_revision_id','expected_revision_digest','external_previous_epoch','database_predecessor_epoch','fence_proof_digest','external_journal_sequence'];
+  const value=record(raw,fields);
+  if(value.schema_version!==1)fail('RECOVERY_INPUT_INVALID','Versioned accepted-run recovery identity required');
+  for(const key of ['organisation_id','run_id','recovery_operation_id','activation_operation_id','deployment_id','expected_run_epoch','target_epoch','expected_spec_revision_id'])uuid(value[key]);
+  for(const key of ['external_previous_epoch','database_predecessor_epoch'])if(value[key]!==null)uuid(value[key]);
+  positive(value.expected_spec_generation);positive(value.external_journal_sequence);digest(value.expected_revision_digest);digest(value.fence_proof_digest);
+  const input=structuredClone(raw),trusted=options.topology;
+  if(input.target_epoch===input.expected_run_epoch||input.deployment_id!==trusted.deployment_id||input.organisation_id!==trusted.organisation_id||input.run_id!==trusted.run_id||input.external_previous_epoch!==trusted.source_epoch||trusted.evidence_scope!=='LIVE_PROVIDER')
+   fail('RECOVERY_REBIND_SCOPE_DENIED','Recovery does not match the trusted live writer topology');
+  const [{assertExternalAuthorityCurrent,lookupAuthorityActivation},{externalFenceTopologyDigest}]=await Promise.all([import('../storage/durability.js'),import('./fencing.js')]);
+  const attestation=await assertExternalAuthorityCurrent(options.resources,options.journal,{deployment_id:input.deployment_id});
+  const activation=await lookupAuthorityActivation(options.resources,{deployment_id:input.deployment_id,operation_id:input.activation_operation_id,expected_previous_epoch:input.external_previous_epoch,database_predecessor_epoch:input.database_predecessor_epoch,epoch:input.target_epoch});
+  const physical=await options.fenceJournal.readCompleted({deployment_id:input.deployment_id,operation_id:input.activation_operation_id,source_epoch:input.external_previous_epoch,topology_digest:externalFenceTopologyDigest(trusted)});
+  //04 stores the exact JSON bytes hash of the full eight-field receipt.
+  const physicalDigest='sha256:'+createHash('sha256').update(JSON.stringify(physical)).digest('hex');
+  if(physicalDigest!==activation.evidence_digest||input.fence_proof_digest!==activation.evidence_digest||attestation.epoch!==input.target_epoch||attestation.evidence_digest!==activation.evidence_digest||attestation.sequence!==input.external_journal_sequence)
+   fail('RECOVERY_REBIND_PROOF_MISMATCH','Physical fence, committed activation and non-restored journal head differ');
+  const intent=Object.freeze({...input,intent_digest:inputDigest(input)});
+  const verified=new WeakSet<PrimaryTransaction>();
+  return Object.freeze({
+   verify:async(tx:PrimaryTransaction):Promise<AcceptedRunRecoveryIntent>=>{
+    assertPrimaryTransaction(tx);await writeSemanticDisposition(tx,input);await recoveryReady(tx);
+    const current=(await tx.query<{epoch:string;proof_digest:string;now:string}>("SELECT epoch::text,proof_digest,clock_timestamp()::text AS now FROM hyperfide.authority_epochs WHERE deployment_id=$1 AND state='ACTIVE' FOR SHARE",[input.deployment_id])).rows[0];
+    if(!current||current.epoch!==input.target_epoch||current.proof_digest!==input.fence_proof_digest||Date.parse(attestation.expires_at)<=Date.parse(current.now)||Date.parse(attestation.observed_at)>Date.parse(current.now)+1000)
+     fail('RECOVERY_REBIND_PROOF_STALE','Recovery journal attestation changed or expired before the primary transaction');
+    const run=(await tx.query<{authority_epoch:string;spec_generation:string;spec_revision_id:string;revision_digest:string|null;state:string}>(
+     'SELECT r.authority_epoch::text,r.spec_generation::text,r.spec_revision_id::text,s.revision_digest,r.state FROM hyperfide.runs r JOIN hyperfide.run_spec_revisions a ON a.organisation_id=r.organisation_id AND a.run_id=r.id AND a.spec_generation=r.spec_generation AND a.spec_revision_id=r.spec_revision_id AND a.accepted JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.id=$2 FOR UPDATE OF r',[input.organisation_id,input.run_id])).rows[0];
+    if(!run||run.spec_generation!==input.expected_spec_generation||run.spec_revision_id!==input.expected_spec_revision_id||run.revision_digest!==input.expected_revision_digest||['CANCELLED','SUCCEEDED'].includes(run.state))
+     fail('RECOVERY_ACCEPTED_INTENT_MISMATCH','Only the exact nonterminal accepted run intent may be rebound');
+    const prior=(await tx.query<{intent_digest:string}>('SELECT intent_digest FROM hyperfide.recovery_accepted_run_intents WHERE organisation_id=$1 AND run_id=$2 AND recovery_operation_id=$3',[input.organisation_id,input.run_id,input.recovery_operation_id])).rows[0];
+    if(prior&&prior.intent_digest!==intent.intent_digest)fail('RECOVERY_IDEMPOTENCY_CONFLICT','Recovery operation already binds different accepted intent');
+    if(run.authority_epoch!==input.expected_run_epoch&&!(prior&&run.authority_epoch===input.target_epoch))fail('RECOVERY_STALE_EPOCH','Run epoch differs from the exact recovery predecessor');
+    await tx.query('INSERT INTO hyperfide.recovery_accepted_run_intents(organisation_id,run_id,recovery_operation_id,activation_operation_id,deployment_id,source_epoch,target_epoch,spec_generation,spec_revision_id,revision_digest,fence_proof_digest,external_journal_sequence,intent_digest,intent) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb) ON CONFLICT(organisation_id,run_id,recovery_operation_id) DO NOTHING',[input.organisation_id,input.run_id,input.recovery_operation_id,input.activation_operation_id,input.deployment_id,input.expected_run_epoch,input.target_epoch,input.expected_spec_generation,input.expected_spec_revision_id,input.expected_revision_digest,input.fence_proof_digest,input.external_journal_sequence,intent.intent_digest,JSON.stringify(input)]);
+    verified.add(tx);return intent;
+   },
+   revokeCompute:async(tx:PrimaryTransaction)=>{
+    assertPrimaryTransaction(tx);if(!verified.has(tx))fail('RECOVERY_REBIND_UNVERIFIED','Verify the accepted recovery intent in this exact primary transaction first');
+    const result=await options.revokeCompute(tx,input);
+    for(const count of [result.revoked_attempts,result.revoked_allocations])if(typeof count!=='string'||!/^(0|[1-9][0-9]*)$/.test(count))fail('RECOVERY_REBIND_REVOCATION_INVALID','Actual scheduler revocation counts must be canonical decimals');
+    if(!Array.isArray(result.retained_debt_references)||result.retained_debt_references.length>10000||result.retained_debt_references.some(v=>typeof v!=='string'||v.length<1||v.length>512))fail('RECOVERY_REBIND_REVOCATION_INVALID','Bounded retained physical debt references are required');
+    for(const reference of new Set(result.retained_debt_references))await tx.query('INSERT INTO hyperfide.recovery_accepted_run_debts(organisation_id,run_id,recovery_operation_id,reference,source_epoch,target_epoch) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[input.organisation_id,input.run_id,input.recovery_operation_id,reference,input.expected_run_epoch,input.target_epoch]);
+    return result;
+   }
+  });
+ }});
 }

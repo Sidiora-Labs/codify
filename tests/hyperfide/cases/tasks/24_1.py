@@ -65,7 +65,7 @@ UPDATE hyperfide.tasks SET generation=1,current_attempt_id='00000000-0000-4000-8
 INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest) VALUES('%s','%s','%s','%s','%s',1,1,'%s','%s',repeat('a',40),'%s','%s','%s');
 INSERT INTO hyperfide.qualification_jobs(organisation_id,run_id,id,custody_id,custody_generation,rubric_digest,state,lease_generation,lease_owner,lease_expires_at) VALUES('%s','%s','%s','%s',1,'%s','RUNNING',1,'%s',clock_timestamp()-interval '1 minute');
 COMMIT;
-"""%(ORG,ORG,uid(2),ORG,uid(3),uid(2),ORG,uid(3),ORG,uid(4),uid(2),ORG,RUN,uid(2),uid(4),D,EPOCH,ORG,RUN,uid(3),ORG,RUN,uid(6),ORG,RUN,uid(7),uid(6),uid(4),D,ORG,uid(8),ORG,uid(9),uid(8),ORG,uid(10),uid(9),ORG,RUN,ATTEMPT,uid(7),EPOCH,D,uid(9),uid(10),ATTEMPT,ORG,RUN,ORG,RUN,uid(21),ATTEMPT,EPOCH,ORG,RUN,uid(22),ATTEMPT,uid(9),uid(10),ORG,RUN,uid(23),ORG,RUN,uid(24),uid(27),uid(28),EPOCH,uid(3),D,D,D,ORG,RUN,uid(25),uid(24),D,uid(26)))
+""".replace(uid(99),EPOCH)%(ORG,ORG,uid(2),ORG,uid(3),uid(2),ORG,uid(3),ORG,uid(4),uid(2),ORG,RUN,uid(2),uid(4),D,EPOCH,ORG,RUN,uid(3),ORG,RUN,uid(6),ORG,RUN,uid(7),uid(6),uid(4),D,ORG,uid(8),ORG,uid(9),uid(8),ORG,uid(10),uid(9),ORG,RUN,ATTEMPT,uid(7),EPOCH,D,uid(9),uid(10),ATTEMPT,ORG,RUN,ORG,RUN,uid(21),ATTEMPT,EPOCH,ORG,RUN,uid(22),ATTEMPT,uid(9),uid(10),ORG,RUN,uid(23),ORG,RUN,uid(24),uid(27),uid(28),EPOCH,uid(3),D,D,D,ORG,RUN,uid(25),uid(24),D,uid(26)))
 def component_dependencies(names):
  fragments={}
  for file in (ROOT/"services/hyperfide/components").glob("*.json"):
@@ -88,21 +88,19 @@ class Fixture:
   module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
   self.task=task
   def prepare(identity):
-   global DB,RESOURCE
+   global DB,RESOURCE,EPOCH,SCOPE
+   EPOCH=identity.ids["epoch"];SCOPE={"organisation_id":ORG,"run_id":RUN,"authority_epoch":EPOCH}
    DB=identity.database;RESOURCE="hf-task-"+task+"-database"
    observation_dir().joinpath("fixture.json").write_text(json.dumps({"database":DB,"resource":RESOURCE}))
-   for filename in ["0002-spec.sql","0003-hierarchy.sql","0005-scheduling.sql","0006-event-session-bindings.sql","0007-graph.sql","0032-execution-packets.sql"]:
-    raw=(ROOT/"services/hyperfide/migrations"/filename).read_bytes()
-    checksum="sha256:"+hashlib.sha256(raw).hexdigest()
-    sql("BEGIN;"+raw.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(int(filename[:4]))+",'"+filename[:-4]+"','"+checksum+"');COMMIT;")
-   raw=(ROOT/"services/hyperfide/migrations/0024-recovery.sql").read_bytes()
-   checksum="sha256:"+hashlib.sha256(raw).hexdigest()
-   sql("BEGIN;"+raw.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(24,'0024-recovery','"+checksum+"');COMMIT;")
    seed()
    identity.ids["organisation"]=ORG;identity.ids["run"]=RUN;identity.ids["epoch"]=EPOCH
    config=json.loads(identity.identity_config.read_text())
    for principal in config["principals"]:
+    name="operator" if principal["role"]=="OPERATOR" else "provisioner"
+    credential=str(uuid.uuid4());identity.ids[name]=credential
+    principal["credential_id"]=credential;principal["actor_id"]=credential
     principal["organisation_id"]=ORG;principal["run_id"]=RUN;principal["deployment_epoch"]=EPOCH
+    identity.seed_fixture_principal(principal)
    identity.identity_config.write_text(json.dumps(config))
   self.identity=module.IdentityFixture(extra_components=component_dependencies(["24."+str(i) for i in range(1,int(task[-1])+1)]),extra_env={"HYPERFIDE_OFFLINE_POLICY":"BOUNDED_LOCAL","HYPERFIDE_MAX_OFFLINE_MS":"60000"},extra_setup=prepare)
  def request(self,action,payload,component=None):
