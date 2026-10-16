@@ -235,14 +235,17 @@ export function createComponent(_context:ComponentContext):Component{
    const value=record(input,['scope','operation_id']);const scope=scopeOf(value.scope),id=uuid(value.operation_id);
    return recoveryTransaction(context,scope,async tx=>{
     const replay=await operationReplay(tx,scope,id,'RESUME',value);if(replay)return replay;
+    const holds=await inspectRecoveryHold(tx,scope);
+    const run=(await tx.query('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id])).rows[0]!;
+    if(holds.some(row=>row.mode==='CANCEL')||['CANCELLING','CANCELLED'].includes(String(run.state)))fail('RECOVERY_TERMINAL_CONTROL','Cancelled scopes cannot resume');
+    if(!['PAUSED','DRAINED','STOPPED'].includes(String(run.state)))fail('RECOVERY_RUN_STATE_INVALID','Only a paused or fully stopped run can resume');
     const open=await tx.query("SELECT count(*)::text AS count FROM hyperfide.recovery_resource_debts WHERE organisation_id=$1 AND run_id=$2 AND status<>'RESOLVED'",[scope.organisation_id,scope.run_id]);
     if(open.rows[0]!.count!=='0')fail('RECOVERY_DEBT_OPEN','External recovery debt must reconcile before resume');
     const blocked=await tx.query("SELECT (SELECT count(*) FROM hyperfide.publication_operations WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','RUNNING','OUTCOME_UNKNOWN'))+(SELECT count(*) FROM hyperfide.publication_intents WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','EXECUTING')) AS count",[scope.organisation_id,scope.run_id]);
     if(String(blocked.rows[0]!.count)!=='0')fail('RECOVERY_PUBLICATION_UNRESOLVED','External publication outcomes must reconcile before resume');
     await createRecoveryControlCapability().assertQuiesced(tx,scope);
     await createRecoveryControlCapability().assertNoNewEffects(tx,scope);
-    const holds=await inspectRecoveryHold(tx,scope);
-    if(holds.some(row=>row.mode==='CANCEL'))fail('RECOVERY_TERMINAL_CONTROL','Cancelled scopes cannot resume');
+    await capability(context,'4.4','storage.authority.v1',isAuthority).assertCurrent(tx,scope);
     const gate=capability(context,'5.1','scheduler.controls.v1',isExecutionControls);
     for(const hold of holds){
      const current=await tx.query("SELECT generation,mode FROM hyperfide.execution_controls WHERE organisation_id=$1 AND run_id=$2 AND scope_kind=$3 AND scope_id=$4 FOR UPDATE",[scope.organisation_id,scope.run_id,hold.scope_kind,hold.scope_id]);
@@ -255,7 +258,7 @@ export function createComponent(_context:ComponentContext):Component{
     if(changed.rowCount!==1)fail('RECOVERY_RUN_STATE_INVALID','Only a paused or fully stopped run can resume');
     const result={resumed:true,scope,state_version:changed.rows[0]!.state_version,reconciled:true,fresh_attempts_required:true};
     await finishOperation(tx,scope,id,result);return result;
-   },true);
+   });
   }
  }};
 }

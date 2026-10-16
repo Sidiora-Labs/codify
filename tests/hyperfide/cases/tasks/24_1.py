@@ -160,10 +160,12 @@ def tests(f):
  check("recovery.offline.malformed-time",lambda:f.rejected("recovery.offline.evaluate",{**base,"disconnected_at":"2026-02-30T12:00:00.000Z"},"RECOVERY_INPUT_INVALID"))
  check("recovery.offline.unknown-field",lambda:f.rejected("recovery.offline.evaluate",{**base,"authority":True},"RECOVERY_INPUT_INVALID"))
  check("recovery.control.adopt-unproven-supervisor",lambda:f.rejected("recovery.control.adopt",{"scope":SCOPE,"operation_id":uid(51),"session_id":uid(22)},"RECOVERY_DEPENDENCY_UNAVAILABLE"))
- check("recovery.control.resume-unproven-fencing",lambda:f.rejected("recovery.control.resume",{"scope":SCOPE,"operation_id":uid(50)},"RECOVERY_DEPENDENCY_UNAVAILABLE"))
+ check("recovery.control.active-run-cannot-resume",lambda:f.rejected("recovery.control.resume",{"scope":SCOPE,"operation_id":uid(50)},"RECOVERY_RUN_STATE_INVALID"))
  sql("UPDATE hyperfide.tasks SET current_attempt_id=NULL,generation=generation+1,state_version=state_version+1 WHERE id='"+uid(7)+"';")
  stale=f.ok("recovery.control.reconstruct",SCOPE)
  check("recovery.control.task-pointer-fences-adoption",lambda:expect(stale["attempts"][0]["compute_token_current"] is False and len(stale["adoption_candidates"])==0))
+ sql("UPDATE hyperfide.runs SET state='CANCELLING',state_version=state_version+1 WHERE organisation_id='"+ORG+"' AND id='"+RUN+"';")
+ check("recovery.control.cancellation-is-terminal",lambda:f.rejected("recovery.control.resume",{"scope":SCOPE,"operation_id":uid(52)},"RECOVERY_TERMINAL_CONTROL"))
  sql("UPDATE hyperfide.schema_migrations SET checksum='sha256:'||repeat('b',64) WHERE version=24;")
  check("recovery.control.schema-drift-refusal",lambda:f.rejected("recovery.control.reconstruct",SCOPE,"RECOVERY_SCHEMA_NOT_READY"))
 def run(task,callback):
