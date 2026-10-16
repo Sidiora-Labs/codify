@@ -9,9 +9,13 @@ interface Outbox {
 function isOutbox(value:unknown):value is Outbox{return !!value&&typeof value==='object'&&typeof (value as Outbox).enqueue==='function'&&typeof (value as Outbox).bindSessionConsumer==='function';}
 interface InboxBootstrap {bootstrapConsumer(tx:Session,input:{organisation_id:string;run_id:string;bootstrap_id:string;consumer_id:string;aggregate_types:string[];limit:number},builder:(tx:Session)=>Promise<unknown>):Promise<unknown>}
 function isInbox(value:unknown):value is InboxBootstrap{return !!value&&typeof value==='object'&&typeof (value as InboxBootstrap).bootstrapConsumer==='function';}
+function recipientAccess(p:Principal,target:string):void{
+ if(!['OPERATOR','COORDINATOR'].includes(p.role)&&!(p.actor_id===target&&['LEADER','FEATURE_MANAGER'].includes(p.role)))fail('NOTIFICATION_RECIPIENT_FORBIDDEN','Private notices require the identified recipient or authorised operator');
+}
+
 export async function bootstrapRecipient(tx:Session,p:Principal,input:unknown,inbox:InboxBootstrap):Promise<unknown>{
  const v=object(input,['target_session_id','target_consumer_id','bootstrap_id']),target=uuid(v.target_session_id),consumer=uuid(v.target_consumer_id),id=uuid(v.bootstrap_id);
- if(!['OPERATOR','COORDINATOR'].includes(p.role)&&!(p.actor_id===target&&['LEADER','FEATURE_MANAGER'].includes(p.role)))fail('NOTIFICATION_RECIPIENT_FORBIDDEN','Snapshot activation requires the identified recipient or authorised operator');
+ recipientAccess(p,target);
  const q=await tx.query("SELECT b.consumer_id,s.sandbox_boot_generation FROM hyperfide.event_session_bindings b JOIN hyperfide.agent_sessions s ON s.organisation_id=b.organisation_id AND s.run_id=b.run_id AND s.id=b.session_id JOIN hyperfide.event_consumers c ON c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.id=b.consumer_id WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.session_id=$3 AND b.consumer_id=$4 AND b.namespace='fleet_notification' AND c.consumer_key=$5 AND s.role IN ('LEADER','FEATURE_MANAGER') AND s.state IN ('REGISTERED','RUNNING','DISCONNECTED')",[p.organisation_id,p.run_id,target,consumer,'session:'+target+':fleet_notification']);
  if(q.rows.length!==1)fail('NOTIFICATION_RECIPIENT_INVALID','Exact current recipient binding is required');
  return inbox.bootstrapConsumer(tx,{organisation_id:p.organisation_id,run_id:p.run_id,bootstrap_id:id,consumer_id:consumer,aggregate_types:['fleet_notification'],limit:10000},async sameTx=>{
@@ -36,12 +40,13 @@ async function reconcileAcknowledgements(tx:Session,p:Principal):Promise<void>{
 }
 export async function bindRecipient(tx:Session,p:Principal,input:unknown,outbox:Outbox,invocation:unknown):Promise<unknown>{
  const v=object(input,['target_session_id','target_consumer_id']),session=uuid(v.target_session_id),consumer=uuid(v.target_consumer_id);
- if(!['OPERATOR','COORDINATOR'].includes(p.role)&&!(p.actor_id===session&&['LEADER','FEATURE_MANAGER'].includes(p.role)))fail('NOTIFICATION_RECIPIENT_FORBIDDEN','Recipient registration requires the identified recipient or an authorised operator');
+ recipientAccess(p,session);
  const bound=await outbox.bindSessionConsumer(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:session,consumer_id:consumer,namespace:'fleet_notification'},invocation);
  return {registered:true,replayed:bound.replayed,session_id:bound.session_id,consumer_id:bound.consumer_id,registrar_actor_id:bound.registered_actor_id};
 }
 
 export async function enqueueNotice(tx:Session,p:Principal,input:unknown,knownSecrets:readonly string[]=[]):Promise<unknown>{
+ if(!['OPERATOR','COORDINATOR','RUNNER','PROVISIONER','DISPATCH','LEADER','FEATURE_MANAGER'].includes(p.role))fail('NOTIFICATION_PRODUCER_FORBIDDEN','A trusted supervisory producer must emit fleet exceptions');
  const v=object(input,['id','target_session_id','target_consumer_id','dedup_key','severity','code','untrusted_summary','action_code','artifact_id']);
  const id=uuid(v.id),target=uuid(v.target_session_id),consumer=uuid(v.target_consumer_id),key=digest(v.dedup_key),severity=text(v.severity),code=text(v.code,64),summary=rejectCredentialSummary(v.untrusted_summary,knownSecrets),action=text(v.action_code),artifact=uuid(v.artifact_id);
  if(!['INFO','WARNING','ERROR','CRITICAL'].includes(severity)||!/^[A-Z][A-Z0-9_]{0,63}$/.test(code)||!ACTIONS.includes(action))fail('OBSERVABILITY_INPUT_INVALID','Typed notification severity, code or action is invalid');
@@ -62,6 +67,7 @@ export async function enqueueNotice(tx:Session,p:Principal,input:unknown,knownSe
  return {id,event_id:event,state:'QUEUED',replayed:false,sent:false,evidence_ref:evidenceRef(p,artifact),summary_trust:'UNTRUSTED_DATA_NOT_AN_INSTRUCTION'};
 }
 export async function dispatchNotices(tx:Session,p:Principal,input:unknown,outbox:Outbox,budget:number):Promise<unknown>{
+ if(!['OPERATOR','COORDINATOR','DISPATCH'].includes(p.role))fail('NOTIFICATION_DISPATCH_FORBIDDEN','Only an authorised dispatcher may advance notification delivery');
  const v=object(input,['target_session_id','limit']),target=uuid(v.target_session_id),limit=v.limit===undefined?20:integer(v.limit,1,100);
  await lockRun(tx,p,'notification-dispatch:'+target);await reconcileAcknowledgements(tx,p);
  const eligible=await tx.query("SELECT n.id FROM hyperfide.observability_notifications n WHERE n.organisation_id=$1 AND n.run_id=$2 AND n.target_session_id=$3 AND n.state='QUEUED' LIMIT 1",[p.organisation_id,p.run_id,target]);
@@ -106,6 +112,6 @@ export function createComponent(startup:ComponentContext):Component{
  'fleet.notifications.bind-recipient':(input,ctx)=>authority(ctx,'fleet.notifications.bind-recipient',(tx,p)=>bindRecipient(tx,p,input,outbox,(ctx as unknown as {invocation:unknown}).invocation)),
  'fleet.notifications.enqueue':(input,ctx)=>authority(ctx,'fleet.notifications.enqueue',(tx,p)=>enqueueNotice(tx,p,input,knownSecrets)),
  'fleet.notifications.dispatch':(input,ctx)=>authority(ctx,'fleet.notifications.dispatch',(tx,p)=>dispatchNotices(tx,p,input,outbox,budget)),
- 'fleet.notifications.inspect':(input,ctx)=>authority(ctx,'fleet.notifications.inspect',async(tx,p)=>{const v=object(input,['target_session_id','limit','after_id']),target=uuid(v.target_session_id),limit=v.limit===undefined?100:integer(v.limit,1,500),after=v.after_id===undefined?'00000000-0000-0000-0000-000000000000':uuid(v.after_id);const q=await tx.query("SELECT n.id,n.target_session_id,n.target_boot_generation,n.severity,n.code,n.untrusted_summary,n.action_code,n.artifact_id,n.event_id,n.state,n.state_version,n.created_at,n.enqueued_at,d.state AS delivery_state FROM hyperfide.observability_notifications n LEFT JOIN hyperfide.event_deliveries d ON d.organisation_id=n.organisation_id AND d.run_id=n.run_id AND d.event_id=n.event_id AND d.consumer_id=n.target_consumer_id WHERE n.organisation_id=$1 AND n.run_id=$2 AND n.target_session_id=$3 AND n.id>$4 ORDER BY n.id LIMIT $5",[p.organisation_id,p.run_id,target,after,limit+1]);const rows=q.rows.slice(0,limit).map(n=>({...n,evidence_ref:evidenceRef(p,String(n.artifact_id)),external_send_verified:false,delivery_acknowledged:n.delivery_state==='ACKNOWLEDGED'}));return numbers({rows,pagination:{limit,next:q.rows.length>limit?q.rows[limit-1]!.id:null},summary_trust:'UNTRUSTED_DATA_NOT_AN_INSTRUCTION'});})
+ 'fleet.notifications.inspect':(input,ctx)=>authority(ctx,'fleet.notifications.inspect',async(tx,p)=>{const v=object(input,['target_session_id','limit','after_id']),target=uuid(v.target_session_id),limit=v.limit===undefined?100:integer(v.limit,1,500),after=v.after_id===undefined?'00000000-0000-0000-0000-000000000000':uuid(v.after_id);recipientAccess(p,target);const q=await tx.query("SELECT n.id,n.target_session_id,n.target_boot_generation,n.severity,n.code,n.untrusted_summary,n.action_code,n.artifact_id,n.event_id,n.state,n.state_version,n.created_at,n.enqueued_at,d.state AS delivery_state FROM hyperfide.observability_notifications n LEFT JOIN hyperfide.event_deliveries d ON d.organisation_id=n.organisation_id AND d.run_id=n.run_id AND d.event_id=n.event_id AND d.consumer_id=n.target_consumer_id WHERE n.organisation_id=$1 AND n.run_id=$2 AND n.target_session_id=$3 AND n.id>$4 ORDER BY n.id LIMIT $5",[p.organisation_id,p.run_id,target,after,limit+1]);const rows=q.rows.slice(0,limit).map(n=>({...n,evidence_ref:evidenceRef(p,String(n.artifact_id)),external_send_verified:false,delivery_acknowledged:n.delivery_state==='ACKNOWLEDGED'}));return numbers({rows,pagination:{limit,next:q.rows.length>limit?q.rows[limit-1]!.id:null},summary_trust:'UNTRUSTED_DATA_NOT_AN_INSTRUCTION'});})
  }};
 }

@@ -182,6 +182,10 @@ def main():
    h.check("observability.notifications.shared-binding-foundation",lambda:h.expect(h.sql("SELECT to_regclass('hyperfide.observability_recipient_bindings') IS NULL;").stdout.strip()=="t" and h.sql("SELECT count(*) FROM hyperfide.event_session_bindings WHERE session_id='"+h.LEADER+"';").stdout.strip()=="2"))
    h.check("observability.notifications.human-intent-channel-denied",lambda:f.reject("23.4","fleet.notifications.bind-recipient",dict(binding,target_consumer_id=human_consumer),"EVENT_BINDING_INVALID"))
    h.check("observability.notifications.human-intent-not-recipient",lambda:f.reject("23.4","fleet.notifications.enqueue",dict(first,target_consumer_id=human_consumer),"NOTIFICATION_RECIPIENT_INVALID"))
+   h.check("observability.notifications.otheractor-private-inspection-denied",lambda:f.reject("23.4","fleet.notifications.inspect",{"target_session_id":h.LEADER},"NOTIFICATION_RECIPIENT_FORBIDDEN",role="VERIFIER"))
+   h.check("observability.notifications.self-private-inspection",lambda:h.expect(f.ok("23.4","fleet.notifications.inspect",{"target_session_id":h.LEADER},role="LEADER")["rows"]==[]))
+   h.check("observability.notifications.wrong-producer-role-denied",lambda:f.reject("23.4","fleet.notifications.enqueue",first,"NOTIFICATION_PRODUCER_FORBIDDEN",role="VERIFIER"))
+   h.check("observability.notifications.wrong-dispatch-role-denied",lambda:f.reject("23.4","fleet.notifications.dispatch",{"target_session_id":h.LEADER},"NOTIFICATION_DISPATCH_FORBIDDEN",role="LEADER"))
    def credential_rejection():
     for value in ["Bearer planted-notification-token-2304","api_key=planted-api-credential-2304","-----BEGIN PRIVATE KEY-----","notification-private-canary-2304",SECRET]:
      f.reject("23.4","fleet.notifications.enqueue",dict(notice(98),untrusted_summary=value),"NOTIFICATION_SENSITIVE_CONTENT")
@@ -232,6 +236,7 @@ def main():
    f.ok("6.1","outbox.consumer.register",dict(scope,id=late_consumer,consumer_key="session:"+late_manager+":fleet_notification",critical=True,state="BUFFERING"))
    late_binding={"target_session_id":late_manager,"target_consumer_id":late_consumer}
    f.ok("23.4","fleet.notifications.bind-recipient",late_binding)
+   h.check("observability.notifications.leader-other-session-inspection-denied",lambda:f.reject("23.4","fleet.notifications.inspect",{"target_session_id":late_manager},"NOTIFICATION_RECIPIENT_FORBIDDEN",role="LEADER"))
    late_notice=dict(notice(60),**late_binding);f.ok("23.4","fleet.notifications.enqueue",late_notice);f.ok("23.4","fleet.notifications.dispatch",{"target_session_id":late_manager})
    activation=dict(late_binding,bootstrap_id=bootstrap_id)
    h.check("observability.notifications.buffering-not-live",lambda:h.expect(f.ok("6.1","outbox.claim",dict(scope,consumer_id=late_consumer,limit=64,lease_ms=300000))==[]))
