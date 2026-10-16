@@ -147,12 +147,37 @@ class IdentityFixture:
         conn=http.client.HTTPSConnection("localhost",self.port,context=context,timeout=10)
         try:conn.request("POST",endpoint,raw,proof);response=conn.getresponse();data=response.read();return response.status,json.loads(data)
         finally:conn.close()
-    def invoke(self,action,input,component="14.1",key="operator",**kwargs):
-        return self.request(self.operation(component,action,input),key=key,**kwargs)
+    def invoke(self,action,input,component="14.1",key="operator",authority=None,**kwargs):
+        authority=authority or getattr(self,"authorities",{}).get(key)
+        return self.request(self.operation(component,action,input,authority=authority),key=key,**kwargs)
     def bind(self):
         return self.invoke("identity.binding.observe",{"provisioning_intent_id":self.ids["intent"],"sandbox_id":self.ids["sandbox"],"boot_generation":"1","boot_id":self.ids["boot"],"native_sandbox_id":"fixture-resource","observation_digest":sha(b"provider-observation"),"expected_version":"1"},key="provisioner")
-    def issue(self,grant=None,ttl=300):
-        return self.invoke("identity.grant.issue",{"grant_id":grant or self.grant,"provisioning_intent_id":self.ids["intent"],"verifier":sha(self.secret),"allowed_actions":["identity.describe","identity.runner.register","identity.runner.heartbeat"],"ttl_seconds":ttl})
+    def issue(self,grant=None,ttl=300,actions=None):
+        return self.invoke("identity.grant.issue",{"grant_id":grant or self.grant,"provisioning_intent_id":self.ids["intent"],"verifier":sha(self.secret),"allowed_actions":actions or ["identity.describe","identity.runner.register","identity.runner.heartbeat"],"ttl_seconds":ttl})
     def enrollment(self,key="runner",boot=None):
         payload=canonical({"run_id":self.ids["run"],"provisioning_intent_id":self.ids["intent"],"sandbox_id":self.ids["sandbox"],"boot_generation":"1","boot_id":boot or self.ids["boot"],"public_key_b64":self.keys[key]["public_key_b64"]})
         return {"protocol_version":1,"operation_id":uid(),"idempotency_key":uid(),"payload_digest":sha(payload),"correlation_id":uid(),"causation_id":None,"payload_b64":b64(payload)}
+
+# Runner delegation uses the production enrollment and registered-session APIs.
+def _bootstrap_runner(self,actions=None):
+    expect(self.bind()[1].get("ok") is True,"trusted fixture binding failed")
+    expect(self.issue(actions=actions or self.actions)[1].get("ok") is True,"runner grant issue failed")
+    response=self.request(self.enrollment(),key="runner",endpoint="/v1/enroll",credential=self.grant)[1]
+    expect(response.get("ok") is True,"actual runner enrollment failed")
+    self.ids["runner"]=response["result"]["credential_id"]
+    return response["result"]
+def _delegate_principal(self,name,session_id,allowed_actions=None):
+    if name in self.keys:raise ValueError("Fresh principal name required")
+    key=self.path/(name+".pem")
+    subprocess.run(["openssl","genpkey","-algorithm","Ed25519","-out",str(key)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);key.chmod(0o600)
+    public=subprocess.check_output(["openssl","pkey","-in",str(key),"-pubout","-outform","DER"],stderr=subprocess.DEVNULL)
+    self.keys[name]={"path":key,"public_key_b64":b64(public[-32:])}
+    response=self.invoke("identity.principal.delegate",{"session_id":session_id,"public_key_b64":self.keys[name]["public_key_b64"],"allowed_actions":allowed_actions or self.actions,"ttl_seconds":600},key="runner")[1]
+    expect(response.get("ok") is True,"actual runner delegation failed: "+json.dumps(response))
+    self.ids[name]=response["result"]["credential_id"]
+    if response["result"]["authority"]["attempt_id"] is not None:
+        if not hasattr(self,"authorities"):self.authorities={}
+        self.authorities[name]=response["result"]["authority"]
+    return response["result"]
+IdentityFixture.bootstrap_runner=_bootstrap_runner
+IdentityFixture.delegate_principal=_delegate_principal
