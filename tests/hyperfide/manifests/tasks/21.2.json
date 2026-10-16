@@ -75,36 +75,6 @@
       "size": 1439
     },
     {
-      "path": "services/hyperfide/dist/agents/admission.d.ts",
-      "sha256": "3b9880c77dbaaab49913394bebb5073d10358ce1d151222ba56b382a3f42cd35",
-      "size": 680
-    },
-    {
-      "path": "services/hyperfide/dist/agents/admission.js",
-      "sha256": "20122d3064d23526b9de0a4379b171ace463d3117afe7bdc40161aadf1be7007",
-      "size": 17523
-    },
-    {
-      "path": "services/hyperfide/dist/agents/admission.js.map",
-      "sha256": "4dfaa9099b2696223df9ebf14199a6dd36b4aa60ed3610ca879d6b624882f3b5",
-      "size": 14952
-    },
-    {
-      "path": "services/hyperfide/dist/agents/sessions.d.ts",
-      "sha256": "5646df6ada299d0c688dbb4ba3b8f8bbdaacc4993ec2824f51953a38d02dcd95",
-      "size": 1546
-    },
-    {
-      "path": "services/hyperfide/dist/agents/sessions.js",
-      "sha256": "7f647f89786acb8e7aec3740f20c23363e761f4343a220ddcbfdb18b9f1c6d30",
-      "size": 18797
-    },
-    {
-      "path": "services/hyperfide/dist/agents/sessions.js.map",
-      "sha256": "8e77fec6288012658f856f399d0e043ea2cea3f2bb4f1194cb13cf710de58197",
-      "size": 16045
-    },
-    {
       "path": "services/hyperfide/dist/components/registry.d.ts",
       "sha256": "f601f985192d6eaebc336de4a4e06b79c81ebbbec044fe854a3f31642ba8f4e4",
       "size": 1538
@@ -240,66 +210,6 @@
       "size": 185
     },
     {
-      "path": "services/hyperfide/dist/identity/authorization.d.ts",
-      "sha256": "7627e22c4bb575378a8a86dea0e603d77410a883588f8f38e56857e1ae696014",
-      "size": 486
-    },
-    {
-      "path": "services/hyperfide/dist/identity/authorization.js",
-      "sha256": "42eba900c8a9dde8dd01dcfd928894e52af6a1de72f259fe384fe9e186cda340",
-      "size": 6440
-    },
-    {
-      "path": "services/hyperfide/dist/identity/authorization.js.map",
-      "sha256": "9f9f75a41d6a718d59fc5ca63e45b0340d8a515b29deb674096099a8b9b04777",
-      "size": 7464
-    },
-    {
-      "path": "services/hyperfide/dist/identity/credentials.d.ts",
-      "sha256": "54bf4f7c7607fe8a0ee3e5c8fc2f3918bc63cb13207a72c57801147176c53dc4",
-      "size": 1443
-    },
-    {
-      "path": "services/hyperfide/dist/identity/credentials.js",
-      "sha256": "c432501339eef21cbd7e3d51353f46d76283e0a988fed19d89e4f45f850f5c7d",
-      "size": 18245
-    },
-    {
-      "path": "services/hyperfide/dist/identity/credentials.js.map",
-      "sha256": "43a6b6414fff7180b6243bdc380deeaddd9645efb44cdcceab46af136eaf7bcd",
-      "size": 19035
-    },
-    {
-      "path": "services/hyperfide/dist/identity/enrollment.d.ts",
-      "sha256": "54e2531084e186f60a6883abb2c3eb68a4b9b8479b329c9de004a7a327efddb5",
-      "size": 1651
-    },
-    {
-      "path": "services/hyperfide/dist/identity/enrollment.js",
-      "sha256": "e12bf2d7958668db73599c541c0c9355279a9fc2d50aa2bbacf35b09043b6e3b",
-      "size": 26251
-    },
-    {
-      "path": "services/hyperfide/dist/identity/enrollment.js.map",
-      "sha256": "dd799edb46fed5c63031bb34dc76f4b07ac5d3380f3471f26fb07c71656bb57b",
-      "size": 24762
-    },
-    {
-      "path": "services/hyperfide/dist/identity/native_auth.d.ts",
-      "sha256": "358b1d4d33be7172f5164717e703f2f8c05ca4b7d494f7f366785de915fb702f",
-      "size": 1398
-    },
-    {
-      "path": "services/hyperfide/dist/identity/native_auth.js",
-      "sha256": "6649a101726b9a95dd20be7a5b684702c49ac8d27c5aa208d45ba85ba71901d4",
-      "size": 8777
-    },
-    {
-      "path": "services/hyperfide/dist/identity/native_auth.js.map",
-      "sha256": "535e86a887ceabccff66e977b861d1f215289b31e4e0c4d54a7ddf37248b3793",
-      "size": 9867
-    },
-    {
       "path": "services/hyperfide/dist/policy/programme.d.ts",
       "sha256": "8386faed4722998f9e3fb9b3413c6b0e7e56879a0bb497a4a19d654d11c44e86",
       "size": 1076
@@ -403,36 +313,6 @@
       "path": "services/hyperfide/dist/storage/transactions.js.map",
       "sha256": "5ffc54ab6fafb5a372998e375fa6d8ea9f5fdcb40fe10dc86a6e73d152683131",
       "size": 7391
-    },
-    {
-      "path": "services/hyperfide/dist/transport/http.d.ts",
-      "sha256": "017f090b6934553b889835fd8d0da2bce76e939d4f998ab23da9c121aee76fab",
-      "size": 738
-    },
-    {
-      "path": "services/hyperfide/dist/transport/http.js",
-      "sha256": "ed37ae18529bb877a7940fb7c6ab8d2a8cef37f27a65a50af425753b0719488d",
-      "size": 8241
-    },
-    {
-      "path": "services/hyperfide/dist/transport/http.js.map",
-      "sha256": "4a25f19b2974ce6521ec414bcb78f04e7d83439b9acc455d1643c264809ea651",
-      "size": 9623
-    },
-    {
-      "path": "services/hyperfide/dist/transport/protocol.d.ts",
-      "sha256": "ce6aaeedbe94baf4fa8bf4efd1c4691850f6d94fcc3532c5adc8ea0288c6571d",
-      "size": 3704
-    },
-    {
-      "path": "services/hyperfide/dist/transport/protocol.js",
-      "sha256": "fe965513abe410e78b8941de532bd2e4b7df12056a7fb35cd8645dc429e1e88d",
-      "size": 12240
-    },
-    {
-      "path": "services/hyperfide/dist/transport/protocol.js.map",
-      "sha256": "8c950ffed26bdb4cf68cc66859c21fe0286dcc43b9c150d03746744ce5ac3d05",
-      "size": 12643
     },
     {
       "path": "services/hyperfide/migrations/0001-authority.sql",
