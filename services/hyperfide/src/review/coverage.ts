@@ -328,7 +328,7 @@ export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapsho
 export interface ReviewCoverageSummary {
  status:'COMPLETE'|'INCOMPLETE'|'STALE';policy_digest:string;repository_id:string;source_object_id:string;
  required:number;complete:number;missing:Array<Record<string,unknown>>;receipt_ids:string[];limitations:string[];
- authority:'POSTGRESQL_REVIEW_OBLIGATIONS';
+ authority:'POSTGRESQL_REVIEW_OBLIGATIONS';input_bindings:Record<string,unknown>|null;
 }
 export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,query:ReviewCoverageQuery):Promise<ReviewCoverageSummary>{
  await primary(db);await lockReviewDisposition(db,binding);
@@ -340,15 +340,15 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  receipt.id AS receipt_id,receipt.outcome,receipt.limitations,inputs.snapshot,(commit.source_object_id IS NOT NULL) AS discovered,
  (inputs.snapshot->>'spec_revision_id'=current_run.spec_revision_id::text) AS spec_current,
  (EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id)
- AND NOT EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x JOIN hyperfide.evidence e ON e.organisation_id=x.organisation_id AND e.run_id=x.run_id AND e.id=x.evidence_id
- WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id AND e.admission_state<>'ADMITTED')) AS evidence_current
+ AND NOT EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x JOIN hyperfide.evidence e ON e.organisation_id=x.organisation_id AND e.run_id=x.run_id AND e.id=x.evidence_id LEFT JOIN hyperfide.artifacts a ON a.organisation_id=e.organisation_id AND a.run_id=e.run_id AND a.id=e.artifact_id
+ WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id AND (e.admission_state<>'ADMITTED' OR a.status IS DISTINCT FROM 'COMPLETE' OR e.repository_id<>o.repository_id OR e.source_object_id<>o.source_object_id))) AS evidence_current
  FROM hyperfide.review_watchers w
  JOIN hyperfide.review_policies policy ON policy.organisation_id=w.organisation_id AND policy.run_id=w.run_id AND policy.digest=w.policy_digest
  JOIN hyperfide.runs current_run ON current_run.organisation_id=w.organisation_id AND current_run.id=w.run_id
  LEFT JOIN hyperfide.review_commits commit ON commit.organisation_id=w.organisation_id AND commit.run_id=w.run_id AND commit.repository_id=$3 AND commit.source_object_id=$4
  LEFT JOIN hyperfide.review_obligations o ON o.organisation_id=w.organisation_id AND o.run_id=w.run_id AND o.policy_digest=w.policy_digest AND o.watcher_id=w.watcher_id AND o.repository_id=$3 AND o.source_object_id=$4
  LEFT JOIN hyperfide.review_obligation_inputs inputs ON inputs.organisation_id=o.organisation_id AND inputs.run_id=o.run_id AND inputs.obligation_id=o.id AND inputs.generation=o.generation
- LEFT JOIN hyperfide.review_receipts receipt ON receipt.organisation_id=o.organisation_id AND receipt.run_id=o.run_id AND receipt.id=o.current_receipt_id AND receipt.generation=o.generation AND receipt.obligation_id=o.id
+ LEFT JOIN hyperfide.review_receipts receipt ON receipt.organisation_id=o.organisation_id AND receipt.run_id=o.run_id AND receipt.id=o.current_receipt_id AND receipt.generation=o.generation AND receipt.obligation_id=o.id AND receipt.input_manifest_digest=o.input_manifest_digest AND receipt.candidate_digest=o.candidate_digest AND receipt.reviewer_session_id=w.reviewer_session_id AND receipt.rubric_digest=w.rubric_digest
  WHERE w.organisation_id=$1 AND w.run_id=$2 AND w.policy_digest=$5
  AND(policy.definition->>'mode'='ALL_COMMITS' OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(commit.changed_paths)p,jsonb_array_elements_text(w.path_prefixes)x WHERE starts_with(p.value,x.value)))
  ORDER BY w.watcher_id`,
@@ -373,7 +373,7 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  if(!rows.rows.length)missing.push({watcher_id:'*',reason:'COMMIT_NOT_DISCOVERED'});
  return {status:stale?'STALE':missing.length?'INCOMPLETE':'COMPLETE',policy_digest:policyDigest,
   repository_id:query.repository_id,source_object_id:query.source_object_id,required:rows.rows.length,complete:receipts.length,
-  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
+  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],input_bindings:(()=>{const row=rows.rows.find(row=>row.snapshot&&row.input_manifest_digest===query.input_manifest_digest&&freshness.get(row.input_manifest_digest));if(!row?.snapshot||hash(row.snapshot)!==query.input_manifest_digest)return null;const result:Record<string,unknown>={candidate_digest:row.candidate_digest,input_manifest_digest:row.input_manifest_digest};for(const field of ['source_set','spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','graph_manifest_id','graph_manifest_digest','graph_source_set','graph_provenance_verified','environment_profile_id','environment_digest','toolchain_digest'])result[field]=row.snapshot[field]??null;return result;})(),authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
 }
 export function createComponent(_context:ComponentContext):Component{
  const guarded=(fn:(context:ComponentContext,input:unknown)=>Promise<unknown>)=>
