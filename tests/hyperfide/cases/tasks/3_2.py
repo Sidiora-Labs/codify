@@ -96,6 +96,10 @@ def main():
    try:f.sql("UPDATE hyperfide.hierarchy_execution_packets SET packet='{}'");raise RuntimeError("Immutable packet updated")
    except AssertionError:pass
   check("packet.immutable-row",immutable)
+  def repeatable_read_refused():
+   try:f.sql("BEGIN ISOLATION LEVEL REPEATABLE READ;INSERT INTO hyperfide.hierarchy_execution_packets DEFAULT VALUES;ROLLBACK;");raise RuntimeError("RR authority write accepted")
+   except AssertionError as error:expect('"code":"25001"' in str(error),"Wrong isolation refusal")
+  check("packet.repeatable-read-write-refused",repeatable_read_refused)
   optional=[{"source_id":"context:"+str(n),"digest":sha(str(n).encode()),"text":"x"*4000} for n in range(5)]
   def trim():
    limited=f.create_packet(idempotency_key="trim",max_bytes=len(canonical(packet).encode())+100,optional_context=optional)
