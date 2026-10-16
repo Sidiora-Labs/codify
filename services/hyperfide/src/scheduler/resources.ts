@@ -1,3 +1,4 @@
+import {releaseSandboxCharges} from './claim.js';
 import {randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
@@ -44,7 +45,7 @@ export async function eligibleTasks(tx:PrimaryTransaction,input:SchedulerScope&{
  if(!['READY','RUNNING'].includes(current.state))return {...result,availability:'UNAVAILABLE',reason:'RUN_NOT_ADMITTING'};
  const tasks=await tx.query<{id:string;task_key:string;state_version:string;spec_revision_id:string;spec_generation:string;criteria_digest:string;feature_package_id:string;current_attempt_id:string|null;wave:number;generation:string}>(
  "SELECT * FROM hyperfide.tasks t WHERE organisation_id=$1 AND run_id=$2 AND state IN ('PENDING','READY','FAILED','STALE') "+
- "AND NOT EXISTS(SELECT 1 FROM hyperfide.attempts a WHERE a.organisation_id=t.organisation_id AND a.run_id=t.run_id AND a.task_id=t.id AND a.compute_authority='CURRENT') "+
+ "AND NOT(t.definition ? 'retirement') AND NOT EXISTS(SELECT 1 FROM hyperfide.attempts a WHERE a.organisation_id=t.organisation_id AND a.run_id=t.run_id AND a.task_id=t.id AND a.compute_authority='CURRENT') "+
  "AND NOT EXISTS(SELECT 1 FROM hyperfide.submission_custodies c WHERE c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.task_id=t.id AND c.authority='ACTIVE') "+
  "AND ($4::uuid[] IS NULL OR t.feature_package_id=ANY($4::uuid[])) ORDER BY wave,task_key,id LIMIT $3",
  [input.organisation_id,input.run_id,limit,ownedPackages]);
@@ -77,6 +78,9 @@ export async function eligibleTasks(tx:PrimaryTransaction,input:SchedulerScope&{
     [input.organisation_id,demand.map(row=>row.capacity_account_id)]);
    if(!input.preparation&&demand.some(item=>BigInt(accounts.rows.find(row=>row.id===item.capacity_account_id)?.free??'-1')<BigInt(item.quantity)))
     fail('CAPACITY_WAIT','Approved resource vector is currently occupied');
+   const local=await tx.query<{free_cpu:string;free_memory:string;free_disk:string}>('SELECT (hard_cpu_millis-headroom_cpu_millis-held_cpu_millis)::text free_cpu,(hard_memory_bytes-headroom_memory_bytes-held_memory_bytes)::text free_memory,(hard_disk_bytes-headroom_disk_bytes-held_disk_bytes)::text free_disk FROM hyperfide.sandbox_execution_budgets WHERE organisation_id=$1 AND sandbox_id=$2 AND sandbox_boot_generation=$3 FOR SHARE',[input.organisation_id,runtime.sandbox_id,runtime.sandbox_boot_generation]);
+   if(!local.rows[0])fail('SANDBOX_BUDGET_UNQUALIFIED','No actual usable budget is qualified for this executor');
+   if(BigInt(local.rows[0].free_cpu)<BigInt(requirements.cpu_millis)||BigInt(local.rows[0].free_memory)<BigInt(requirements.memory_bytes)||BigInt(local.rows[0].free_disk)<BigInt(requirements.disk_bytes))fail('SANDBOX_CAPACITY_WAIT','Pinned sandbox has no safe execution headroom');
    result.eligible.push({task_id:task.id,task_key:task.task_key,task_state_version:task.state_version,spec_revision_id:task.spec_revision_id,
     spec_generation:task.spec_generation,criteria_digest:task.criteria_digest,profile_id:profileId,profile_version:profile.profile_version,
     packet_digest:loaded.digest,mandatory_digest:loaded.mandatory_digest,attempt_id:uuid(identity.attempt_id,'packet attempt'),
@@ -123,7 +127,7 @@ export async function eligibleDemand(tx:PrimaryTransaction,input:SchedulerScope&
  "SELECT t.id,t.feature_package_id,t.current_attempt_id,t.wave FROM hyperfide.tasks t WHERE t.organisation_id=$1 AND t.run_id=$2 AND t.state IN ('PENDING','READY','FAILED','STALE') "+
  "AND ($3::uuid[] IS NULL OR t.feature_package_id=ANY($3::uuid[])) "+
  "AND COALESCE(t.definition->>'environment_profile_id',t.definition#>>'{section,fields,environment_profile_id,value}')=$4 "+
- "AND NOT EXISTS(SELECT 1 FROM hyperfide.attempts a WHERE a.organisation_id=t.organisation_id AND a.run_id=t.run_id AND a.task_id=t.id AND a.compute_authority='CURRENT') "+
+ "AND NOT(t.definition ? 'retirement') AND NOT EXISTS(SELECT 1 FROM hyperfide.attempts a WHERE a.organisation_id=t.organisation_id AND a.run_id=t.run_id AND a.task_id=t.id AND a.compute_authority='CURRENT') "+
  "AND NOT EXISTS(SELECT 1 FROM hyperfide.submission_custodies c WHERE c.organisation_id=t.organisation_id AND c.run_id=t.run_id AND c.task_id=t.id AND c.authority='ACTIVE') ORDER BY t.wave,t.task_key,t.id LIMIT 501",
  [input.organisation_id,input.run_id,packages,input.profile_id]);
  let count=0,maximum:PacketResourceRequirements|undefined,version='';
@@ -219,6 +223,8 @@ export class ResourceScheduler {
     assertPrimaryTransaction(tx);await lockRun(tx,input);
     if(!input.reservation_ids.length||input.reservation_ids.length>1000)fail('INVALID_REQUEST','Release requires one to1000 exact reservation IDs');
     if(!this.readers.size)fail('DEPENDENCY_UNAVAILABLE','A trusted durable quiescence proof reader is required');
+    const pools=await tx.query<{pool_id:string}>('SELECT DISTINCT a.pool_id FROM hyperfide.reservations r JOIN hyperfide.capacity_accounts a ON a.organisation_id=r.organisation_id AND a.id=r.capacity_account_id WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.id=ANY($3::uuid[]) ORDER BY a.pool_id',[input.organisation_id,input.run_id,input.reservation_ids]);
+    for(const pool of pools.rows)await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[input.organisation_id+':'+pool.pool_id+':resource-admission']);
     const initial=await tx.query<{capacity_account_id:string}>('SELECT DISTINCT capacity_account_id FROM hyperfide.reservations '+
       'WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) ORDER BY capacity_account_id',
       [input.organisation_id,input.run_id,input.reservation_ids]);
@@ -277,6 +283,8 @@ export class ResourceScheduler {
      await tx.query("UPDATE hyperfide.resource_job_allocations SET state='RELEASED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[input.organisation_id,input.run_id,job.id]);
      await tx.query("UPDATE hyperfide.worker_slots w SET state=CASE WHEN s.observed_state='DESTROYED' THEN 'RETIRED' ELSE 'READY' END,state_version=w.state_version+1 FROM hyperfide.sandboxes s WHERE w.organisation_id=$1 AND w.id=$2 AND w.sandbox_id=$3 AND w.boot_generation=$4 AND w.state='DRAINING' AND s.organisation_id=w.organisation_id AND s.id=w.sandbox_id AND s.boot_generation=w.boot_generation AND s.observed_state IN ('RUNNING','DESTROYED') AND NOT EXISTS(SELECT 1 FROM hyperfide.resource_job_allocations a WHERE a.organisation_id=w.organisation_id AND a.slot_id=w.id AND a.state IN ('ACTIVE','RELEASE_PENDING')) AND NOT EXISTS(SELECT 1 FROM hyperfide.slot_allocations a WHERE a.organisation_id=w.organisation_id AND a.slot_id=w.id AND a.state IN ('ACTIVE','RELEASE_PENDING'))",[input.organisation_id,job.slot_id,job.sandbox_id,job.sandbox_boot_generation]);
     }
+    const requests=await tx.query<{request_id:string}>('SELECT DISTINCT request_id FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[])',[input.organisation_id,input.run_id,input.reservation_ids]);
+    await releaseSandboxCharges(tx,input,requests.rows.map(row=>row.request_id));
     return {released_reservation_ids:released};
   }
 }

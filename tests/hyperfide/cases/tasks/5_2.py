@@ -20,7 +20,7 @@ def main():
   result=f.ok("scheduler.compute.expire",scope,component="5.2")
   check("lease.expiry.exact-attempt",lambda:expect(result["expired_attempt_ids"]==[t["attempt_id"]] and result["resources_still_counted"] is True,"Expiry did not identify exact current attempt"))
   check("lease.expiry.fences-authority",lambda:expect(f.sql("SELECT compute_authority,execution_state FROM hyperfide.attempts WHERE id=$1",[t["attempt_id"]])[0]=={"compute_authority":"EXPIRED","execution_state":"FAILED"},"Expired compute retains authority"))
-  check("lease.expiry.keeps-quota",lambda:expect(all(x["reserved"]!="0" for x in f.counts() if x["dimension"] in ("AGENT","CPU_MILLIS","MEMORY_BYTES","DISK_BYTES")),"TTL freed occupied capacity"))
+  check("lease.expiry.keeps-quota",lambda:expect(all(int(x["reserved"])+int(x["allocated"])>0 for x in f.counts() if x["dimension"] in ("AGENT","CPU_MILLIS","MEMORY_BYTES","DISK_BYTES")),"TTL freed occupied capacity"))
   check("lease.expiry.requests-cleanup",lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.outbox_events WHERE event_type='scheduler.compute.stop.requested'")[0]["n"]==1 and f.sql("SELECT state FROM hyperfide.worker_slots WHERE id=$1",[t["slot_id"]])[0]["state"]=="DRAINING","Expiry omitted durable cleanup or slot fence"))
   check("lease.expiry.idempotent",lambda:expect(f.ok("scheduler.compute.expire",scope,component="5.2")["expired_attempt_ids"]==[],"Expiry repeated authority transition"))
   b=f.claim("b");bt=b["token"];request={"token":bt,"request_id":uid(),"leader_generation":"1","package_generation":"2"}

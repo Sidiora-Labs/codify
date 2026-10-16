@@ -1,3 +1,4 @@
+import {markSandboxReleasePending} from './claim.js';
 import {loadExecutionPacket} from '../hierarchy/packets.js';
 import {randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
@@ -44,6 +45,8 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
     "SELECT a.id FROM hyperfide.slot_allocations a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.attempt_id=$3 AND a.attempt_generation=$4 AND a.slot_id=$5 AND a.sandbox_id=$6 AND a.sandbox_boot_generation=$7 AND a.state='ACTIVE' AND w.state='ALLOCATED' FOR UPDATE OF a,w",
     [token.organisation_id,token.run_id,token.attempt_id,token.attempt_generation,token.slot_id,token.sandbox_id,token.sandbox_boot_generation]);
   if(allocations.rows.length!==1)fail('COMPUTE_ALLOCATION_INVALID','Current compute requires its exact active slot allocation');
+  const charge=await tx.query("SELECT id FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND slot_id=$4 AND sandbox_id=$5 AND sandbox_boot_generation=$6 AND job_kind='AGENT' AND state='HELD'",[token.organisation_id,token.run_id,token.attempt_id,token.slot_id,token.sandbox_id,token.sandbox_boot_generation]);
+  if(charge.rows.length!==1)fail('COMPUTE_SANDBOX_BUDGET_INVALID','Current compute requires its exact held per-sandbox charge');
   const tasks=await tx.query<{current_attempt_id:string|null;generation:string;feature_package_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string}>(
     'SELECT current_attempt_id,generation,feature_package_id,spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
     [token.organisation_id,token.run_id,token.task_id]);
@@ -118,6 +121,7 @@ export async function renewCompute(tx:PrimaryTransaction,token:ComputeToken,leas
 export async function releaseCompute(tx:PrimaryTransaction,token:ComputeToken,
     disposition:{execution_state:'SUBMITTED'|'CANCELLED'}):Promise<void>{
   await assertCurrentCompute(tx,token,{allowExpired:disposition.execution_state==='CANCELLED',operation:disposition.execution_state==='CANCELLED'?'CLEANUP':'ADVANCE'});
+  await markSandboxReleasePending(tx,{organisation_id:token.organisation_id,run_id:token.run_id,attempt_id:token.attempt_id});
   await tx.query('UPDATE hyperfide.attempts SET compute_authority=\'RELEASED\',execution_state=$4,state_version=state_version+1 '+
     'WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
     [token.organisation_id,token.run_id,token.attempt_id,disposition.execution_state]);
@@ -167,6 +171,7 @@ export async function fenceCompute(tx:PrimaryTransaction,token:ComputeToken,opti
   if(!due.rows[0]?.expired)return {fenced:false,reason:'LEASE_CURRENT',resource_disposition:'UNCHANGED'};
  }
  const authority=options.reason==='EXPIRED'?'EXPIRED':'REVOKED';
+ await markSandboxReleasePending(tx,{organisation_id:token.organisation_id,run_id:token.run_id,attempt_id:token.attempt_id});
  await tx.query('UPDATE hyperfide.attempts SET compute_authority=$4,execution_state=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
  [token.organisation_id,token.run_id,token.attempt_id,authority,options.reason==='STOP'?'CANCELLED':'FAILED']);
  await tx.query("UPDATE hyperfide.compute_leases SET state=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND state='ACTIVE'",

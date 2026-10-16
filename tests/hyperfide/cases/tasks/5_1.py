@@ -45,6 +45,9 @@ class SchedulerFixture(PacketFixture):
      f.sql("INSERT INTO hyperfide.proof_registries(organisation_id,run_id,task_id,spec_generation,spec_revision_id,criteria_digest,registry_digest,policy) VALUES($1,$2,$3,1,$4,$5,$6,$7)",[i["organisation"],i["run"],task_id,i["spec"],criteria,identity(policy),json.dumps(policy)])
    if extra_setup:extra_setup(f)
   super().__init__(extra_components=("5.1","5.2","5.3","5.4")+tuple(extra_components),extra_setup=setup,bootstrap=bootstrap,seed_historical_runtime=False)
+  # Explicit trusted fixed test envelope; not provider/kernel measurement evidence.
+  qualified=self.primary("return claims.qualifySandboxBudget(tx,data.qualification);",{"qualification":{"organisation_id":self.ids["organisation"],"sandbox_id":self.ids["sandbox"],"sandbox_boot_generation":"1","qualification_id":uid(),"evidence_digest":sha(b"explicit-fixed-test-envelope"),"source":"OPERATOR_FIXED","hard_limits":{"cpu_millis":"8000","memory_bytes":"17179869184","disk_bytes":"34359738368"},"headroom":{"cpu_millis":"1000","memory_bytes":"1073741824","disk_bytes":"0"}}})
+  expect("result" in qualified,"Trusted fixture budget failed: "+json.dumps(qualified))
  def capacity(self,job="AGENT"):
   requirements=self.packet_definition["resource_requirements"]
   dimensions={"CPU_MILLIS":str(requirements["cpu_millis"]),"MEMORY_BYTES":requirements["memory_bytes"],"DISK_BYTES":requirements["disk_bytes"],job:"1"}

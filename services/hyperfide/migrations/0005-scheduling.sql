@@ -316,3 +316,57 @@ BEGIN
 END $$;
 CREATE TRIGGER accepted_resource_pins BEFORE INSERT ON hyperfide.resource_waiters FOR EACH ROW EXECUTE FUNCTION hyperfide.scheduler_waiter_pins();
 CREATE TRIGGER immutable_resource_pins BEFORE UPDATE ON hyperfide.resource_waiters FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('task_id','spec_revision_id','spec_generation','criteria_digest','resource_policy_digest');
+
+-- Pool quotas and usable execution capacity on one boot are independent budgets.
+CREATE TABLE hyperfide.sandbox_execution_budgets(
+ organisation_id uuid NOT NULL,
+ sandbox_id uuid NOT NULL,
+ sandbox_boot_generation bigint NOT NULL CHECK(sandbox_boot_generation>=1),
+ qualification_id uuid NOT NULL,
+ evidence_digest hyperfide.digest NOT NULL,
+ qualification_source text NOT NULL CHECK(qualification_source IN ('PROVIDER_OBSERVATION','OPERATOR_FIXED')),
+ hard_cpu_millis bigint NOT NULL CHECK(hard_cpu_millis>0),
+ hard_memory_bytes bigint NOT NULL CHECK(hard_memory_bytes>0),
+ hard_disk_bytes bigint NOT NULL CHECK(hard_disk_bytes>=0),
+ headroom_cpu_millis bigint NOT NULL CHECK(headroom_cpu_millis>=0 AND headroom_cpu_millis<hard_cpu_millis),
+ headroom_memory_bytes bigint NOT NULL CHECK(headroom_memory_bytes>=0 AND headroom_memory_bytes<hard_memory_bytes),
+ headroom_disk_bytes bigint NOT NULL CHECK(headroom_disk_bytes>=0 AND headroom_disk_bytes<=hard_disk_bytes),
+ held_cpu_millis bigint NOT NULL DEFAULT 0 CHECK(held_cpu_millis>=0 AND held_cpu_millis<=hard_cpu_millis-headroom_cpu_millis),
+ held_memory_bytes bigint NOT NULL DEFAULT 0 CHECK(held_memory_bytes>=0 AND held_memory_bytes<=hard_memory_bytes-headroom_memory_bytes),
+ held_disk_bytes bigint NOT NULL DEFAULT 0 CHECK(held_disk_bytes>=0 AND held_disk_bytes<=hard_disk_bytes-headroom_disk_bytes),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ state_version bigint NOT NULL DEFAULT 1 CHECK(state_version>=1),
+ PRIMARY KEY(organisation_id,sandbox_id,sandbox_boot_generation),
+ UNIQUE(organisation_id,qualification_id),
+ FOREIGN KEY(organisation_id,sandbox_id,sandbox_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation)
+);
+CREATE TABLE hyperfide.sandbox_execution_charges(
+ organisation_id uuid NOT NULL,
+ run_id uuid NOT NULL,
+ id uuid NOT NULL,
+ request_id uuid NOT NULL,
+ sandbox_id uuid NOT NULL,
+ sandbox_boot_generation bigint NOT NULL,
+ slot_id uuid NOT NULL,
+ attempt_id uuid,
+ job_kind text NOT NULL CHECK(job_kind IN ('AGENT','CHILD','BUILD','TEST','REVIEW','INDEX','INTEGRATION','PREPARATION')),
+ cpu_millis bigint NOT NULL CHECK(cpu_millis>0),
+ memory_bytes bigint NOT NULL CHECK(memory_bytes>0),
+ disk_bytes bigint NOT NULL CHECK(disk_bytes>=0),
+ generation bigint NOT NULL DEFAULT 1 CHECK(generation>=1),
+ state text NOT NULL DEFAULT 'HELD' CHECK(state IN ('HELD','RELEASE_PENDING','RELEASED')),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ released_at timestamptz,
+ state_version bigint NOT NULL DEFAULT 1 CHECK(state_version>=1),
+ PRIMARY KEY(organisation_id,run_id,id),
+ UNIQUE(organisation_id,run_id,request_id),
+ FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,sandbox_id,sandbox_boot_generation) REFERENCES hyperfide.sandbox_execution_budgets(organisation_id,sandbox_id,sandbox_boot_generation),
+ FOREIGN KEY(organisation_id,sandbox_id,slot_id,sandbox_boot_generation) REFERENCES hyperfide.worker_slots(organisation_id,sandbox_id,id,boot_generation),
+ FOREIGN KEY(organisation_id,run_id,attempt_id) REFERENCES hyperfide.attempts(organisation_id,run_id,id),
+ CHECK((state='RELEASED')=(released_at IS NOT NULL))
+);
+CREATE TRIGGER supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.sandbox_execution_budgets FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.sandbox_execution_charges FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER immutable_budget BEFORE UPDATE ON hyperfide.sandbox_execution_budgets FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','sandbox_id','sandbox_boot_generation','qualification_id','evidence_digest','qualification_source','hard_cpu_millis','hard_memory_bytes','hard_disk_bytes','headroom_cpu_millis','headroom_memory_bytes','headroom_disk_bytes','created_at');
+CREATE TRIGGER immutable_charge BEFORE UPDATE ON hyperfide.sandbox_execution_charges FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','request_id','sandbox_id','sandbox_boot_generation','slot_id','attempt_id','job_kind','cpu_millis','memory_bytes','disk_bytes','generation','created_at');
