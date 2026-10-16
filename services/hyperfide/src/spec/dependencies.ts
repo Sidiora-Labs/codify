@@ -16,7 +16,8 @@ export interface AcceptedDependency {
  predecessor_spec_generation:string;predecessor_spec_revision_id:string;
  predecessor_repository_id:string|null;integration_ref:string|null;milestone:'QUALIFIED'|'INTEGRATED';
 }
-interface Task {package_key:string;package_wave:number;id:string;task_key:string;definition:Record<string,any>;wave:number;state:string;state_version:string;spec_generation:string;spec_revision_id:string;criteria_digest:string;run_id:string}
+export interface ProposedDependencyTask {package_key:string;package_wave:number;id:string;task_key:string;definition:Record<string,any>;wave:number;state:string;state_version:string;spec_generation:string;spec_revision_id:string;criteria_digest:string;run_id:string}
+type Task=ProposedDependencyTask;
 interface Snapshot {run:Record<string,any>;tasks:Task[]}
 export interface DependencyReport {
  status:'STRUCTURALLY_VALID'|'INVALID';authority:'STRUCTURAL_VALIDATION';spec_revision_id:string;spec_generation:string;state_version:string;
@@ -74,10 +75,12 @@ function referenceRuns(tasks:Task[],organisation_id:string):string[]{
 }
 // Graph nodes are scoped UUIDs, never human task labels. All referenced run locks and
 // reads share the caller's SERIALIZABLE transaction; admission retries revalidate it.
-export async function validateDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<DependencyReport>{
+async function validateGraph(tx:Tx,scope:DependencyScope,input:PlanPins,proposed?:Task[]):Promise<DependencyReport>{
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);
  await readySchema(tx);
- const first=await snapshot(tx,scope,scope.run_id);assertPins(first.run,request);
+ const current=await snapshot(tx,scope,scope.run_id);assertPins(current.run,request);
+ if(proposed&&(proposed.length>MAX_TASKS||proposed.some(task=>task.run_id!==scope.run_id)||new Set(proposed.map(task=>task.id)).size!==proposed.length))fail('SPEC_GRAPH_LIMIT','Proposed graph must remain bounded and exactly scoped');
+ const first=proposed?{run:current.run,tasks:proposed}:current;
  const snapshots=new Map<string,Snapshot>([[scope.run_id,first]]),queue=[scope.run_id],discovered=new Set<string>([scope.run_id]);
  let total=first.tasks.length;
  while(queue.length){const current=snapshots.get(queue.shift()!)!;
@@ -164,7 +167,7 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
  const expectedBindings=new Map(edges.map(edge=>[[edge.task_id,edge.predecessor_run_id,edge.predecessor_task_id,edge.milestone,edge.source_spec_generation].join(':'),edge]));
  for(const binding of acceptedBindings.rows){
   const owner=nodes.get(scope.run_id+':'+binding.task_id);
-  if(!owner)continue;
+  if(!owner||owner.spec_generation!==binding.source_spec_generation)continue;
   if(binding.binding_schema_version!==1){diagnostic('DEPENDENCY_LEGACY_BINDING_UNSUPPORTED',owner);continue;}
   const expected=expectedBindings.get([binding.task_id,binding.predecessor_run_id,binding.predecessor_task_id,binding.milestone,binding.source_spec_generation].join(':'));
   if(!expected){diagnostic('DEPENDENCY_UNDECLARED_BINDING',owner);continue;}
@@ -189,6 +192,13 @@ export async function validateDependencies(tx:Tx,scope:DependencyScope,input:Pla
   spec_revision_id:first.run.spec_revision_id,spec_generation:first.run.spec_generation,state_version:first.run.state_version,
   task_count:first.tasks.length,edge_count:edges.length,diagnostic_count:diagnosticCount,diagnostics_truncated:diagnosticCount>diagnostics.length,
   diagnostics,coordination_diagnostics:coordination,edges};
+}
+// Proposed graphs share the exact structural engine; this never grants admission.
+export async function validateProposedDependencies(tx:Tx,scope:DependencyScope,input:PlanPins,tasks:ProposedDependencyTask[]):Promise<DependencyReport>{
+ return validateGraph(tx,scope,input,tasks);
+}
+export async function validateDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<DependencyReport>{
+ return validateGraph(tx,scope,input);
 }
 export async function admitDependencies(tx:Tx,scope:DependencyScope,input:PlanPins):Promise<Omit<DependencyReport,'edges'>&{admitted:boolean}>{
  const request=scopeInput(scope,input,['spec_revision_id','spec_generation','state_version']);

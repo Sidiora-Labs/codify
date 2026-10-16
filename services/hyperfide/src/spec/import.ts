@@ -43,7 +43,7 @@ export function canonical(value:unknown):string{
  return JSON.stringify(value);
 }
 export const digest=(value:string|Buffer):string=>'sha256:'+createHash('sha256').update(value).digest('hex');
-function derivedId(value:string):string{
+export function derivedId(value:string):string{
  const hex=createHash('sha256').update(value).digest('hex').slice(0,32).split('');
  hex[12]='8';hex[16]=((parseInt(hex[16]!,16)&3)|8).toString(16);
  const v=hex.join('');return v.slice(0,8)+'-'+v.slice(8,12)+'-'+v.slice(12,16)+'-'+v.slice(16,20)+'-'+v.slice(20);
@@ -174,7 +174,7 @@ export interface StoredIntent {
  closure_policy:ImportEnvelope['closure_policy'];provenance:ImportEnvelope['provenance'];parsed:KvxDocument;runtime_wave_offset:number;
 }
 function value(section:KvxSection,key:string):unknown{return section.fields[key]?.value;}
-function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feature_key:string;declared_wave:unknown;wave:number;package_key:string}[]{
+export function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feature_key:string;declared_wave:unknown;wave:number;package_key:string}[]{
  const features=new Set(parsed.sections.filter(section=>section.name.startsWith('feature.')).map(section=>section.name.slice(8)));
  const programme=String(parsed.sections.find(section=>section.name==='meta')?.fields.slug?.value??'programme');
  const offset=parsed.sections.some(section=>section.name.startsWith('task.')&&value(section,'wave')===0)?1:0;
@@ -212,18 +212,25 @@ function summary(run:PinnedRun):unknown{
  spec_generation:run.spec_generation,state_version:run.state_version,state:run.state,validation_status:run.state==='PENDING_VALIDATION'?'PENDING':'NOT_ASSERTED',
  counts:run.document.parsed.counts};
 }
-export async function importRunTransaction(client:SpecTransaction,scope:SpecScope,raw:unknown):Promise<unknown>{
- const expected=digest(await fs.readFile(new URL('../../migrations/0002-spec.sql',import.meta.url)));
- const readiness=await client.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
- if(readiness.rows.length!==1||readiness.rows[0]!.name!=='0002-spec'||readiness.rows[0]!.checksum!==expected)
-  fail('SPEC_SCHEMA_NOT_INITIALISED','Apply the exact versioned specification migration before importing');
- const input=validateImport(raw,scope),source=await readPinnedSource(scope.root,input.source),parsed=parseKvx(source.text);
+export async function prepareAcceptedIntent(scope:SpecScope,raw:unknown,rawSource?:Buffer){
+ const input=validateImport(raw,scope);
+ const source=rawSource===undefined?await readPinnedSource(scope.root,input.source):{bytes:rawSource,text:new TextDecoder('utf-8',{fatal:true}).decode(rawSource)};
+ if(source.bytes.length!==Number(input.source.size_bytes)||digest(source.bytes)!=='sha256:'+input.source.sha256||!Buffer.from(source.text,'utf8').equals(source.bytes)||source.text.includes('\0'))fail('DIGEST_MISMATCH','Stored proposed intent differs from its immutable source pin');
+ const parsed=parseKvx(source.text);
  if(parsed.sections.some(section=>section.name==='hyperfide.projection'))fail('PROJECTION_WRITE_FORBIDDEN','Projections cannot replace authoritative specification state');
  const accepted={schema_version:1,source_digest:digest(source.bytes),repositories:[...input.repositories].sort((a,b)=>a.repository_id.localeCompare(b.repository_id)),
  allowed_actions:[...input.allowed_actions].sort(),closure_policy:input.closure_policy,provenance:input.provenance};
  const revision_digest=digest(canonical(accepted)),tasks=taskDefinitions(parsed);
  const document:StoredIntent={...accepted,schema_version:1,revision_digest,parsed,runtime_wave_offset:tasks.some(task=>task.declared_wave===0)?1:0};
  const specId=derivedId(scope.organisation_id+':'+scope.project_id+':'+revision_digest);
+ return {input,source,parsed,tasks,document,specId,revision_digest,accepted};
+}
+export async function importRunTransaction(client:SpecTransaction,scope:SpecScope,raw:unknown):Promise<unknown>{
+ const expected=digest(await fs.readFile(new URL('../../migrations/0002-spec.sql',import.meta.url)));
+ const readiness=await client.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
+ if(readiness.rows.length!==1||readiness.rows[0]!.name!=='0002-spec'||readiness.rows[0]!.checksum!==expected)
+  fail('SPEC_SCHEMA_NOT_INITIALISED','Apply the exact versioned specification migration before importing');
+ const {input,source,tasks,document,specId,revision_digest,accepted}=await prepareAcceptedIntent(scope,raw);
   await primary(client);
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id]);
   const existing=await client.query('SELECT id FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[scope.organisation_id,scope.run_id]);
