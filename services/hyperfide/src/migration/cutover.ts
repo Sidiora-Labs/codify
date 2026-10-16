@@ -9,6 +9,26 @@ interface RecoveryControls {
  assertQuiesced(tx:IdentityTransaction,scope:Scope):Promise<void>;
  assertNoNewEffects(tx:IdentityTransaction,scope:Scope):Promise<void>;
 }
+interface HierarchyAuthority {
+ leadership(tx:IdentityTransaction,input:{organisation_id:string;run_id:string}):Promise<{leader_session_id:string;leader_generation:string;authority_epoch:string}>;
+ requireAuthority(tx:IdentityTransaction,input:{organisation_id:string;run_id:string;authority_epoch:string;session_id:string;leader_generation:string;roles:string[]}):Promise<unknown>;
+}
+async function guarded<T>(ctx:ComponentContext,action:string,fn:(tx:IdentityTransaction)=>Promise<T>):Promise<T>{
+ const i=invocationOf(ctx),p=i.principal;
+ return identityTransaction(ctx,async tx=>{
+ const result=await tx.query('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',[p.organisation_id,p.run_id]);
+ const state=result.rows[0]?.state;
+ const closing=['PAUSED','PAUSING','DRAINING','DRAINED','STOPPING','STOPPED','CANCELLING','CANCELLED','FAILED'];
+ const readable=['cutover.describe','cutover.inspect','cutover.recovery'].includes(action);
+ if(closing.includes(state)&&!(readable?['PAUSED','DRAINED','STOPPED','CANCELLED']:['PAUSED','DRAINED','STOPPED']).includes(state))fail('CUTOVER_STATE','This metadata operation is unavailable in the current closing state');
+ if(p.role==='LEADER'){
+ const hierarchy=ctx.dependencies.require('3.1','hierarchy.authority.v1',(v:unknown):v is HierarchyAuthority=>object(v)&&typeof v.leadership==='function'&&typeof v.requireAuthority==='function');
+ const scope={organisation_id:p.organisation_id,run_id:p.run_id},current=await hierarchy.leadership(tx,scope);
+ await hierarchy.requireAuthority(tx,{...scope,authority_epoch:p.deployment_epoch,session_id:p.actor_id,leader_generation:current.leader_generation,roles:['LEADER']});
+ }
+ return fn(tx);
+ });
+}
 const names=['cutover.describe','cutover.inspect','cutover.prepare','cutover.validate','cutover.activate','cutover.rollback','cutover.recovery'] as const;
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 function fail(code:string,message:string):never{throw new FoundationError(code,message);}
@@ -30,7 +50,7 @@ export function createComponent(_startup:ComponentContext):Component{return {api
  if(i.payload.component!=='25.2'||i.payload.action!==action||i.payload.run_id!==principal.run_id||!['OPERATOR','LEADER','COORDINATOR'].includes(principal.role))fail('CUTOVER_FORBIDDEN','Authenticated scoped supervisor required');
  if(action==='cutover.describe'){
  if(!object(raw)||Object.keys(raw).length)fail('CUTOVER_INPUT','Description takes empty input');
- return identityTransaction(ctx,async()=>({schema_version:1,authority_granted:false,request_readiness_flags:false,
+ return guarded(ctx,action,async()=>({schema_version:1,authority_granted:false,request_readiness_flags:false,
  states:['LOCAL','QUIESCED','VALIDATED','ACTIVE','RECOVERY_REQUIRED','ROLLED_BACK'],
  implemented:['SCOPED_HISTORICAL_INTENT','PRIMARY_INSPECTION','ACTUAL_RUN_QUIESCENCE','ACTUAL_EFFECT_HOLDS'],
  required_for_activation:['VERIFIED_DURABLE_SOURCE_ARCHIVE','FULL_CASE_CHECKER_PARITY_RECEIPTS','PRODUCTION_EXTERNAL_WRITER_FENCER','SEPARATE_4_4_ACTIVATION','FRESH_EPOCH_REBIND'],
@@ -39,7 +59,7 @@ export function createComponent(_startup:ComponentContext):Component{return {api
  const v=input(raw,action!=='cutover.inspect');
  if(v.scope_id!==principal.run_id)fail('CUTOVER_SCOPE','Cutover scope must equal the authenticated run');
  const scope:Scope={organisation_id:principal.organisation_id,run_id:principal.run_id,authority_epoch:principal.deployment_epoch};
- if(action==='cutover.inspect')return identityTransaction(ctx,async tx=>{
+ if(action==='cutover.inspect')return guarded(ctx,action,async tx=>{
  const result=await tx.query('SELECT c.scope_id,c.state,c.generation::text,c.epoch,c.source_import_id,c.checkpoint_digest,c.evidence FROM hyperfide_history.cutovers c JOIN hyperfide_history.imports h ON h.id=c.source_import_id WHERE c.scope_id=$1 AND h.organisation_id=$2',[scope.run_id,scope.organisation_id]);
  return {scope_id:scope.run_id,state:result.rows[0]??null,authority_granted:false,activation_available:false};
  });
@@ -47,12 +67,12 @@ export function createComponent(_startup:ComponentContext):Component{return {api
  if(action==='cutover.activate')fail('CUTOVER_EXTERNAL_FENCER_UNAVAILABLE','A production external-writer fencer, independently checked parity, separate 4.4 activation and fresh-epoch rebind are not installed');
  if(action==='cutover.rollback')fail('CUTOVER_RESTORE_UNAVAILABLE','Restoring legacy authority requires a real external restoration controller and guarded proof of no new authoritative effects');
  const requestDigest=hash(canonical({action,...v})),recovery=controls(ctx);
- try{return await identityTransaction(ctx,async tx=>{
+ try{return await guarded(ctx,action,async tx=>{
  const source=await tx.query('SELECT h.id,h.snapshot_digest,h.inventory FROM hyperfide_history.imports h JOIN hyperfide.run_repositories r ON r.organisation_id=h.organisation_id AND r.repository_id=h.repository_id WHERE h.id=$1 AND h.organisation_id=$2 AND r.run_id=$3',[v.source_import_id,scope.organisation_id,scope.run_id]);
  if(!source.rows[0])fail('CUTOVER_SOURCE','Import is not part of the authenticated run');
  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,25))',[scope.run_id]);
  const prior=await tx.query('SELECT request_digest,result FROM hyperfide_history.cutover_receipts WHERE scope_id=$1 AND operation_id=$2',[scope.run_id,v.operation_id]);
- if(prior.rows[0]){
+ if(prior.rows[0]&&action!=='cutover.recovery'){
  if(prior.rows[0].request_digest!==requestDigest)fail('CUTOVER_CONFLICT','Immutable intent replay changed');
  return {...prior.rows[0].result,replayed:true,authority_granted:false};
  }
@@ -77,7 +97,8 @@ export function createComponent(_startup:ComponentContext):Component{return {api
  }
  let next=String(current.state);
  if(action==='cutover.recovery'){
- await recovery.assertNoNewEffects(tx,scope);next='RECOVERY_REQUIRED';
+ await recovery.assertNoNewEffects(tx,scope);
+ return {outcome:'SUCCEEDED',scope_id:scope.run_id,state:'RECOVERY_REQUIRED',recorded_state:current.state,generation:String(current.generation),source_import_id:v.source_import_id,inspection_only:true,authority_granted:false,activation_available:false,restoration_performed:false};
  }else if(action!=='cutover.prepare')fail('CUTOVER_STATE','Unsupported transition');
  const generation=(BigInt(String(current.generation))+1n).toString();
  const evidence={run_quiescence:'OBSERVED',legacy_writer_isolation:'UNAVAILABLE',durable_archive:'UNQUALIFIED',semantic_parity:'UNAVAILABLE',external_epoch_activation:'NOT_PERFORMED'};
