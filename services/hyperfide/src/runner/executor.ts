@@ -6,7 +6,7 @@ import type {KeyObject} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {object} from '../policy/programme.js';
-import {gatewayOf,isIdentityAuthority,assertCurrentPrincipal} from '../identity/enrollment.js';
+import {gatewayOf,isIdentityAuthority} from '../identity/enrollment.js';
 import type {IdentityAuthority} from '../identity/enrollment.js';
 import {assertInvocation,base64,decimal,DIGEST,exact,fail,hash,signingBytes,strictJSON,uuid} from '../transport/protocol.js';
 import type {InvocationContext,Principal} from '../transport/protocol.js';
@@ -160,7 +160,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  if(!current||current.state!=='ADMITTED')return null;
  try {
  if(current.plan_digest!==row.plan_digest||hash(runnerCanonical(current.plan))!==row.plan_digest||current.authority_epoch!==i.principal.deployment_epoch||new Date(current.expires_at).getTime()<=new Date(current.db_now).getTime())fail('RUNNER_ADMISSION_STALE','Current immutable admission and run epoch required');
- await assertCurrentPrincipal(tx,current.principal);
+ await authority.guard(tx,current.principal);
  const b=await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,session_id:row.session_id});await readRunnerReadiness(tx as PrimaryTransaction,b);
  for(const key of Object.keys(row.plan.binding))if(!same(b[key],row.plan.binding[key]))fail('RUNNER_BINDING_STALE','Admitted physical runner binding changed');
  const allocation=await readJobAllocation(tx as PrimaryTransaction,{organisation_id:row.organisation_id,run_id:row.run_id,reservation_id:row.reservation_id});
