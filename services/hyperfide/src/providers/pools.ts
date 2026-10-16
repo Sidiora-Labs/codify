@@ -43,7 +43,7 @@ export interface OwnershipObservation {matches:boolean;operation_id:string;nativ
 export type ProviderOwnershipProbe=(scope:ProviderScope,operationId:string,nativeId:string,signal:AbortSignal)=>Promise<OwnershipObservation>;
 export interface ProviderRunnerBinding extends Record<string,unknown> {organisation_id:string;run_id:string;session_id:string;pool_id:string;sandbox_id:string;external_sandbox_id:string;boot_generation:string;preparation_digest:string}
 export interface ProviderRunnerBindingProof {evidence_digest:string;observed_at:string}
-export type ProviderRunnerBindingVerifier=(tx:PrimaryTransaction,binding:ProviderRunnerBinding)=>Promise<ProviderRunnerBindingProof|null>;
+export type ProviderRunnerBindingVerifier=(tx:PrimaryTransaction,binding:ProviderRunnerBinding,request:unknown)=>Promise<ProviderRunnerBindingProof|null>;
 export interface ProviderIsolationTransport {
  destroy(operation:ProviderOperation<'destroy'>,signal?:AbortSignal):Promise<ProviderOutcome<'destroy'>>;
  observe(operation:ProviderOperation<'observe'>,signal?:AbortSignal):Promise<ProviderOutcome<'observe'>>;
@@ -348,19 +348,19 @@ export async function readSelectedEnvironmentProfile(tx:PrimaryTransaction,input
 }
 
 export interface RuntimeReadinessInput {
- organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;slot_id:string;preparation_digest:string;source_digest:string;
+ organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string;slot_id:string;boot_preparation_digest:string;preparation_digest:string;source_digest:string;
 }
 export interface RuntimeReadinessRecord extends Record<string,unknown> {
- readiness_digest:string;profile_digest:string;preparation_digest:string;source_digest:string;source_manifest_digest:string;source_state_digest:string;
+ readiness_digest:string;profile_digest:string;boot_preparation_digest:string;preparation_digest:string;source_digest:string;source_manifest_digest:string;source_state_digest:string;
  source_object_id:string;source_tree_id:string;source_repository_id:string;source_repository_key:string;execution_receipt_artifact_digest:string;verification_receipt_artifact_digest:string;source_bindings:Array<{id:string;commit:string;tree:string}>;
  execution_receipt_digest:string;verification_receipt_digest:string;observed_at:string;expires_at:string;readiness_input:Record<string,unknown>;readiness_input_digest:string;
 }
 export async function readRuntimeReadiness(tx:PrimaryTransaction,input:RuntimeReadinessInput):Promise<RuntimeReadinessRecord|null>{
- assertPrimaryTransaction(tx);uuid(input.organisation_id);uuid(input.run_id);uuid(input.sandbox_id);dec(input.boot_generation);uuid(input.slot_id);dg(input.preparation_digest);dg(input.source_digest);
+ assertPrimaryTransaction(tx);uuid(input.organisation_id);uuid(input.run_id);uuid(input.sandbox_id);dec(input.boot_generation);uuid(input.slot_id);dg(input.boot_preparation_digest);dg(input.preparation_digest);dg(input.source_digest);
  const rows=await tx.query("SELECT o.*,s.boot_generation::text AS current_generation,s.preparation_digest AS current_preparation,b.boot_id AS current_boot_id,p.profile_id AS current_profile,p.id AS current_pool,pc.configuration_digest AS current_configuration,pc.document->'pool'->>'preparation_digest' AS parent_preparation,w.state AS slot_state,ep.manifest AS profile_manifest,ep.content_digest AS current_profile_preparation FROM hyperfide.runtime_environment_observations o JOIN hyperfide.sandboxes s ON s.organisation_id=o.organisation_id AND s.id=o.sandbox_id JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.provider_pool_configurations pc ON pc.organisation_id=p.organisation_id AND pc.pool_id=p.id AND pc.active JOIN hyperfide.worker_slots w ON w.organisation_id=o.organisation_id AND w.id=o.slot_id AND w.sandbox_id=o.sandbox_id AND w.boot_generation=o.boot_generation JOIN hyperfide.environment_profiles ep ON ep.organisation_id=o.organisation_id AND ep.id=o.profile_id WHERE o.organisation_id=$1 AND o.run_id=$2 AND o.sandbox_id=$3 AND o.boot_generation=$4 AND o.slot_id=$5 ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC LIMIT 1 FOR SHARE OF o,s,b,p,pc,w,ep",
   [input.organisation_id,input.run_id,input.sandbox_id,input.boot_generation,input.slot_id]);
  const row=rows.rows[0];if(!row||row.state!=='READY'||row.current_generation!==input.boot_generation||row.current_boot_id!==row.boot_id||
-  row.current_preparation!==input.preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
+  row.current_preparation!==input.boot_preparation_digest||row.boot_preparation_digest!==input.boot_preparation_digest||row.preparation_digest!==input.preparation_digest||row.current_profile_preparation!==input.preparation_digest||
   row.source_manifest_digest!==input.source_digest||row.source_digest!==row.source_manifest_digest||!['READY','ALLOCATED'].includes(row.slot_state)||new Date(row.observed_at).getTime()>Date.now()||new Date(row.expires_at).getTime()<=Date.now())return null;
  const selected=await readSelectedEnvironmentProfile(tx,{organisation_id:input.organisation_id,pool_id:row.current_pool,configuration_digest:row.current_configuration,parent_profile_id:row.current_profile,parent_preparation_digest:row.parent_preparation,profile_id:row.profile_id,preparation_digest:input.preparation_digest,source_manifest_digest:row.source_manifest_digest});if(!selected)return null;
  const manifest=row.profile_manifest as Record<string,unknown>,manifestBody={...manifest};delete manifestBody.digest;

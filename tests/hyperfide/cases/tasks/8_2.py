@@ -17,26 +17,13 @@ def check(name,fn):
  print(json.dumps({"type":"assertion","id":name,"expected":"observed","actual":actual}),flush=True)
 def sha(data):return "sha256:"+hashlib.sha256(data).hexdigest()
 class ProvisionerFixture(identity.IdentityFixture):
- def start(self):
-  argv=["node",str(ROOT/"services/hyperfide/dist/provisioner.js"),"--policy",str(self.policy),"--spec-revision","fixture-identity-v1","--components",str(self.components),"--module-root",str(ROOT/"services/hyperfide/dist"),"--mode","https","--host","127.0.0.1","--port",str(self.port),"--tls-cert",str(self.ca),"--tls-key",str(self.tlskey)]
-  self.child=subprocess.Popen(argv,cwd=ROOT,env=self.env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-  deadline=time.monotonic()+15;lines=[]
-  while time.monotonic()<deadline:
-   ready,_,_=select.select([self.child.stderr],[],[],0.1)
-   if ready:
-    line=self.child.stderr.readline();lines.append(line)
-    if '"event":"ready"' in line:return
-   if self.child.poll() is not None:break
-  raise AssertionError("Actual provisioner did not become ready: "+"".join(lines)[:1500])
+ def __init__(self,*args,**kwargs):super().__init__(*args,service_role="provisioner",**kwargs)
 def main():
  if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS));return 0
  expect(not sys.argv[1:],"unknown argument")
  cleanup=False;f=None
  def setup(f):
-  scheduler=(ROOT/"services/hyperfide/migrations/0005-scheduling.sql").read_bytes()
-  f.sql("BEGIN;\n"+scheduler.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(5,'0005-scheduling','"+sha(scheduler)+"');\nCOMMIT;")
-  migration=(ROOT/"services/hyperfide/migrations/0008-provider-coordination.sql").read_bytes()
-  f.sql("BEGIN;\n"+migration.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(8,'0008-provider-coordination','"+sha(migration)+"');\nCOMMIT;")
+  f.apply_migration("0005-scheduling");f.apply_migration("0008-provider-coordination")
   f.provider_pool=str(uuid.uuid4())
   limits={"SANDBOX":"100","PROVISIONING":"10","CPU_MILLIS":"1000000","MEMORY_BYTES":"107374182400","DISK_BYTES":"1073741824000"}
   f.deployment={"schema_version":1,"organisation_id":f.ids["organisation"],"revision":"component-fixture-only","accounts":[{"provider":"railway","account_key":"component-fixture-account","approved_limits":limits,"planning_limits":{"SANDBOX":"3000"}}],"pools":[{"id":f.provider_pool,"provider":"railway","account_key":"component-fixture-account","environment_key":"component-fixture-environment","region":"component-fixture-region","profile_id":None,"preparation_digest":f.preparation,"approved_limits":limits,"planning_limits":{"SANDBOX":"3000"},"create_policy":{"seed_reference":"component-fixture-seed","network":"ISOLATED","stdin_required":False}}],"maximum_operation_ms":10000}
@@ -92,7 +79,7 @@ const startup={role:'provisioner',policy:c.policy,env:process.env,signal:control
 const resources=createResourceContainer(startup),context={...startup,resources,dependencies:{require(){throw Error('not needed')}}};
 let results={};try{
  await assert.rejects(()=>readRuntimeReadiness({},{}),e=>e.code==='TX_CLOSED');results['provider.pools.primary-brand']=true;
- const empty=await resources.gateway.withPrimaryTransaction({timeoutMs:5000},tx=>readRuntimeReadiness(tx,{organisation_id:c.org,run_id:c.run,sandbox_id:c.sandbox,boot_generation:'1',slot_id:c.slot,preparation_digest:c.digest,source_digest:c.digest}));
+ const empty=await resources.gateway.withPrimaryTransaction({timeoutMs:5000},tx=>readRuntimeReadiness(tx,{organisation_id:c.org,run_id:c.run,sandbox_id:c.sandbox,boot_generation:'1',slot_id:c.slot,boot_preparation_digest:c.digest,preparation_digest:c.digest,source_digest:c.digest}));
  assert.equal(empty,null);results['provider.pools.runtime-readiness-empty']=true;
  const one=createProviderDatabase(context),two=createProviderDatabase(context);
  registerProviderAdapter(one.runtime,'railway',()=>{throw Error('component registration fixture must not execute')});
