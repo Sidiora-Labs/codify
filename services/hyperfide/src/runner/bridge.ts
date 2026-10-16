@@ -155,24 +155,71 @@ async function observe(tx:PrimaryTransaction,v:Record<string,unknown>,i:Invocati
  if(!r)fail('RUNNER_REGISTRATION_CONFLICT','Runner cannot overwrite a different slot/process registry identity');
  return {registered:true,runner_session_id:v.session_id,registration_version:String(r.registration_version),observed_at:new Date(r.observed_at).toISOString(),authority:'OBSERVATION_ONLY',task_qualified:false};
 }
-async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:Record<string,unknown>):Promise<unknown> {
+
+export type RunnerJobNamespace='QUALIFICATION'|'REPRODUCTION'|'CANDIDATE';
+export interface RunnerEnvironmentRequest {
+ job_namespace?:RunnerJobNamespace;job_id:string;lease_generation?:string;reservation_id:string;
+ input_manifest_digest?:string;environment_digest:string;
+}
+export interface RunnerExpectedInputs {
+ authority:'EXPECTED_AUTHORITY';namespace:RunnerJobNamespace;organisation_id:string;run_id:string;
+ job_id:string;lease_generation?:string;reservation_id:string;runner_session_id:string;
+ input_manifest_digest:string;input_packet_digest:string;input_manifest:Record<string,unknown>;
+ profile_id:string;profile_digest:string;preparation_digest:string;
+ repository_id:string;source_manifest_digest:string;source_object_id:string;source_tree_id:string;
+ source_state_digest:string;workspace_digest:string;environment_digest:string;
+ receipt_digest:string;baseline_packet_digest?:string;effective_result_input_receipt_digest?:string;
+ custody_id?:string;custody_generation?:string;
+}
+export type RunnerInputReader=(tx:PrimaryTransaction,i:InvocationContext,request:RunnerEnvironmentRequest)=>Promise<RunnerExpectedInputs|null>;
+async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest,
+ readers:ReadonlyMap<RunnerJobNamespace,RunnerInputReader>):Promise<unknown>{
  assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);
- if(i.principal.role!=='VERIFIER'||!uuid(v.job_id)||!uuid(v.reservation_id)||!digest(v.environment_digest))fail('QUALIFICATION_ENVIRONMENT_DENIED','Actual assigned verifier job required');
- const p=i.principal;
- const a=(await tx.query('SELECT * FROM hyperfide.assurance_job_assignments WHERE organisation_id=$1 AND run_id=$2 AND job_id=$3 ORDER BY assignment_generation DESC LIMIT 1',[p.organisation_id,p.run_id,v.job_id])).rows[0];
- if(!a||a.verifier_id!==p.actor_id||a.reservation_id!==v.reservation_id||a.environment_digest!==v.environment_digest||a.sandbox_id!==p.sandbox_id||String(a.sandbox_boot_generation)!==p.boot_generation)fail('QUALIFICATION_ENVIRONMENT_DENIED','Current verifier assignment differs');
- const job=(await tx.query(`SELECT j.*,c.source_attempt_id,COALESCE(i.manifest,s.manifest) AS manifest FROM hyperfide.qualification_jobs j JOIN hyperfide.submission_custodies c ON c.organisation_id=j.organisation_id AND c.run_id=j.run_id AND c.id=j.custody_id JOIN hyperfide.assurance_submissions s ON s.organisation_id=c.organisation_id AND s.run_id=c.run_id AND s.custody_id=c.id LEFT JOIN hyperfide.requalification_operations q ON q.organisation_id=j.organisation_id AND q.run_id=j.run_id AND q.qualification_job_id=j.id LEFT JOIN hyperfide.assurance_requalification_inputs i ON i.organisation_id=q.organisation_id AND i.run_id=q.run_id AND i.operation_id=q.id WHERE j.organisation_id=$1 AND j.run_id=$2 AND j.id=$3`,[p.organisation_id,p.run_id,v.job_id])).rows[0];
- if(!job||!object(job.manifest))fail('QUALIFICATION_ENVIRONMENT_DENIED','Immutable result source manifest required');
- const current=(await tx.query('SELECT session_id FROM hyperfide.runner_registry WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id=$3 AND slot_id=$4 AND boot_generation=$5 AND state=\'CURRENT\'',[p.organisation_id,p.run_id,a.sandbox_id,a.slot_id,a.sandbox_boot_generation])).rows[0];
- if(!current)fail('QUALIFICATION_ENVIRONMENT_DENIED','Actual runner workspace registration required');
- const r=await readRunnerBinding(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:current.session_id}),ready=await readRunnerReadiness(tx,r);
- if(r.source_object_id!==job.manifest.source_object_id||r.source_tree_id!==job.manifest.source_tree_id||r.source_digest!==job.manifest.source_manifest_digest)fail('QUALIFICATION_SOURCE_MISMATCH','Verifier must inspect the submitted result source');
- const source=(await tx.query('SELECT sandbox_id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[p.organisation_id,p.run_id,job.source_attempt_id])).rows[0];
- if(!source||source.sandbox_id===r.sandbox_id)fail('QUALIFICATION_NOT_INDEPENDENT','Dedicated verifier resource is required');
- return Object.freeze({runner_session_id:r.session_id,workspace_path:r.workspace_path,sandbox_id:r.sandbox_id,boot_id:r.boot_id,boot_generation:r.boot_generation,slot_id:r.slot_id,preparation_digest:r.preparation_digest,readiness_digest:r.readiness_digest,provider_observation_id:ready.id,runner_credential_id:r.credential_id,observed_at:r.observed_at,registration_version:r.registration_version,source_object_id:r.source_object_id,source_tree_id:r.source_tree_id,source_digest:r.source_digest,source_manifest_digest:r.source_digest,source_state_digest:ready.source_state_digest});
+ const namespace=v.job_namespace??'QUALIFICATION';
+ if(!['QUALIFICATION','REPRODUCTION','CANDIDATE'].includes(namespace)||!uuid(v.job_id)||!uuid(v.reservation_id)||!digest(v.environment_digest)||
+    v.lease_generation!==undefined&&!decimal(v.lease_generation,true)||v.input_manifest_digest!==undefined&&!digest(v.input_manifest_digest))
+  fail('QUALIFICATION_ENVIRONMENT_DENIED','Exact namespace-bound immutable job inputs required');
+ const reader=readers.get(namespace);if(!reader)fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Trusted job input reader is not registered for this namespace');
+ const expected=await reader(tx,i,v);const p=i.principal;
+ if(!expected||expected.authority!=='EXPECTED_AUTHORITY'||expected.namespace!==namespace||expected.organisation_id!==p.organisation_id||
+ expected.run_id!==p.run_id||expected.job_id!==v.job_id||expected.reservation_id!==v.reservation_id||
+ v.lease_generation!==undefined&&expected.lease_generation!==v.lease_generation||
+ v.input_manifest_digest!==undefined&&expected.input_manifest_digest!==v.input_manifest_digest||
+ expected.environment_digest!==v.environment_digest||!uuid(expected.runner_session_id)||!uuid(expected.repository_id)||
+ !object(expected.input_manifest)||!['dependency','toolchain','configuration','graph','contract'].every(key=>key in expected.input_manifest)||
+ ![expected.input_manifest_digest,expected.input_packet_digest,expected.profile_digest,expected.preparation_digest,
+ expected.source_manifest_digest,expected.source_state_digest,expected.workspace_digest,expected.environment_digest,expected.receipt_digest].every(digest))
+  fail('QUALIFICATION_ENVIRONMENT_DENIED','Trusted expected-input receipt is incomplete or differs from the assigned job');
+ const r=await readRunnerBinding(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:expected.runner_session_id});
+ const ready=await readRunnerReadiness(tx,r);
+ if(r.repository_id!==expected.repository_id||r.source_object_id!==expected.source_object_id||r.source_tree_id!==expected.source_tree_id||
+ r.source_digest!==expected.source_manifest_digest||r.preparation_digest!==expected.preparation_digest||
+ ready.profile_id!==expected.profile_id||ready.profile_digest!==expected.profile_digest||
+ ready.source_state_digest!==expected.source_state_digest||ready.workspace_digest!==expected.workspace_digest)
+  fail('QUALIFICATION_MEASURED_INPUT_MISMATCH','Current physical workspace differs from the immutable prepared-input receipt');
+ const descriptor={status:'VERIFIED',namespace,job_id:v.job_id,lease_generation:expected.lease_generation??null,
+ input_manifest_digest:expected.input_manifest_digest,input_packet_digest:expected.input_packet_digest,input_manifest:expected.input_manifest,
+ baseline_packet_digest:expected.baseline_packet_digest??null,effective_result_input_receipt_digest:expected.effective_result_input_receipt_digest??null,
+ environment_digest:expected.environment_digest,expected_receipt_digest:expected.receipt_digest,
+ runner_session_id:r.session_id,sandbox_id:r.sandbox_id,boot_id:r.boot_id,boot_generation:r.boot_generation,slot_id:r.slot_id,
+ repository_id:r.repository_id,source_manifest_digest:r.source_digest,source_state_digest:ready.source_state_digest,
+ workspace_digest:ready.workspace_digest,profile_digest:ready.profile_digest,preparation_digest:r.preparation_digest,
+ readiness_digest:r.readiness_digest,provider_observation_id:ready.id};
+ const input_validation=Object.freeze({...descriptor,receipt_digest:hash(runnerCanonical(descriptor))});
+ return Object.freeze({runner_session_id:r.session_id,workspace_path:r.workspace_path,sandbox_id:r.sandbox_id,boot_id:r.boot_id,
+ boot_generation:r.boot_generation,slot_id:r.slot_id,preparation_digest:r.preparation_digest,readiness_digest:r.readiness_digest,
+ provider_observation_id:ready.id,runner_credential_id:r.credential_id,source_object_id:r.source_object_id,source_tree_id:r.source_tree_id,
+ source_digest:r.source_digest,source_manifest_digest:r.source_digest,source_state_digest:ready.source_state_digest,
+ workspace_digest:ready.workspace_digest,input_validation});
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component> {
  await schema(ctx);
+ const readers=new Map<RunnerJobNamespace,RunnerInputReader>();
+ const environment=Object.freeze({verify:(tx:PrimaryTransaction,i:InvocationContext,v:RunnerEnvironmentRequest)=>verifyEnvironment(tx,i,v,readers),
+ registerInputReader:(namespace:RunnerJobNamespace,reader:RunnerInputReader)=>{
+  if(!['QUALIFICATION','REPRODUCTION','CANDIDATE'].includes(namespace)||typeof reader!=='function'||readers.has(namespace))fail('RUNNER_INPUT_READER_CONFLICT','One trusted input reader owns each job namespace');
+  readers.set(namespace,reader);return()=>{if(readers.get(namespace)===reader)readers.delete(namespace);};
+ }});
  const registry=Object.freeze({lookup:readRunnerBinding,lookupSlot:async(tx:PrimaryTransaction,v:{organisation_id:string;run_id:string;sandbox_id:string;slot_id:string;boot_generation:string;preparation_digest:string})=>{
  assertPrimaryTransaction(tx);
  const rows=(await tx.query("SELECT session_id FROM hyperfide.runner_registry WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id=$3 AND slot_id=$4 AND boot_generation=$5 AND state='CURRENT'",[v.organisation_id,v.run_id,v.sandbox_id,v.slot_id,v.boot_generation])).rows;
@@ -184,7 +231,7 @@ export async function createComponent(ctx:ComponentContext):Promise<Component> {
  const rows=(await tx.query("SELECT session_id FROM hyperfide.runner_registry WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id=$3 AND boot_generation=$4 AND state='CURRENT' ORDER BY session_id",[v.organisation_id,v.run_id,v.sandbox_id,v.boot_generation])).rows;
  if(rows.length!==1)return null;return readRunnerBinding(tx,{organisation_id:v.organisation_id,run_id:v.run_id,session_id:rows[0]!.session_id});},
 verifyBinding:async(tx:PrimaryTransaction,v:Record<string,unknown>)=>{try{const r=await readRunnerBinding(tx,v as any);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}}});
- return {apiVersion:1,capabilities:{'runner.registry.v1':registry,'qualification.environment.v1':Object.freeze({verify:verifyEnvironment})},actions:{
+ return {apiVersion:1,capabilities:{'runner.registry.v1':registry,'qualification.environment.v1':environment},actions:{
   'runner.registry.observe':(v,context)=>identityTransaction(context,(tx,i)=>{if(!object(v))fail('INVALID_REQUEST','Object required');return observe(tx as PrimaryTransaction,v,i);}),
   'runner.registry.prepare':(v,context)=>identityTransaction(context,async(tx,i)=>{
    if(!object(v)||i.principal.role!=='RUNNER')fail('ROLE_DENIED','Actual bound runner preparation observation required');
