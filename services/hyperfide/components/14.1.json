@@ -19,7 +19,8 @@
     "identity.runner.heartbeat",
     "identity.principal.delegate",
     "identity.principal.renew",
-    "identity.service.issue"
+    "identity.service.issue",
+    "identity.main.issue"
   ],
   "requires": [
     "4.2",

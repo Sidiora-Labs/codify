@@ -4,7 +4,48 @@ import sys,json,subprocess,os,time
 ROOT=Path(__file__).resolve().parents[4]
 sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
 from identity_fixture import IdentityFixture,RESULTS,check,expect,uid,b64,sha
+def service_rpc_probe(f):
+    import socket,select,signal
+    with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+    f.evidence_extra_ports=[port]
+    origin='https://localhost:'+str(port);config=json.loads(f.identity_config.read_text());config['origin']=origin
+    file=f.path/'provisioner-identity.json';file.write_text(json.dumps(config));file.chmod(0o600)
+    env=f.env.copy();env['HF_IDENTITY_CONFIG_FILE']=str(file)
+    argv=['node',str(ROOT/'services/hyperfide/dist/provisioner.js'),'--policy',str(f.policy),'--spec-revision','fixture-identity-v1','--components',str(f.components),'--module-root',str(ROOT/'services/hyperfide/dist'),'--mode','https','--host','127.0.0.1','--port',str(port),'--tls-cert',str(f.ca),'--tls-key',str(f.tlskey)]
+    child=subprocess.Popen(argv,cwd=ROOT,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        deadline=time.monotonic()+15;ready=False;lines=[]
+        while time.monotonic()<deadline:
+            readers,_,_=select.select([child.stderr],[],[],0.1)
+            if readers:
+                line=child.stderr.readline();lines.append(line)
+                if '"event":"ready"' in line:ready=True;break
+            if child.poll() is not None:break
+        expect(ready,'Actual provisioner HTTPS peer failed: '+''.join(lines)[:800])
+        from identity_fixture import canonical,b64
+        body=f.operation('14.1','identity.describe',{});raw=canonical(body);seconds=str(int(time.time()));nonce=uid()
+        headers=['HF-Credential-Id',f.ids['operator'],'HF-Request-Time',seconds,'HF-Request-Nonce',nonce,'HF-Request-Signature',f.sign('operator',('\n'.join(('HYPERFIDE-REQUEST-V1','POST','/v1/invoke',f.origin,f.ids['operator'],seconds,nonce,sha(raw),''))).encode())]
+        with socket.socket() as sock:sock.bind(('127.0.0.1',0));unused=sock.getsockname()[1]
+        args={'components':str(f.components),'policy':str(f.policy),'body':b64(raw),'headers':headers,'origin':origin,'ca':str(f.ca),'key':str(f.keys['provisioner']['path']),'credential':f.ids['provisioner'],'run':f.ids['run'],'command':f.operation('14.1','identity.describe',{}),'denied':f.operation('14.1','identity.principal.revoke',{}),'unreachable':'https://localhost:'+str(unused)}
+        script="import fs from 'node:fs';import {ComponentRegistry} from './services/hyperfide/dist/components/registry.js';import {validatePolicy} from './services/hyperfide/dist/policy/programme.js';import {createServiceClient} from './services/hyperfide/dist/transport/http.js';const a=JSON.parse(fs.readFileSync(0,'utf8')),c=new AbortController(),policy=validatePolicy(JSON.parse(fs.readFileSync(a.policy,'utf8')),'fixture-identity-v1','control'),r=new ComponentRegistry({role:'control',env:process.env,signal:c.signal,policy});try{await r.load(a.components,process.cwd()+'/services/hyperfide/dist');const auth=r.resolveCapability('14.1','identity.authority',v=>typeof v.authenticate==='function'),i=await auth.authenticate(Buffer.from(a.body,'base64url'),a.headers,c.signal),config={origin:a.origin,caFile:a.ca,keyFile:a.key,credentialId:a.credential,runId:a.run,routes:{'identity.describe':{roles:['OPERATOR'],components:['14.1'],actions:['identity.describe']}},timeoutMs:2000,maxConcurrent:2},gateway=r.resolveCapability('4.2','storage.resources.v1',v=>!!v?.gateway).gateway;const command=x=>{const {payload_b64,...operation}=x;return{operation,payloadBytes:Buffer.from(payload_b64,'base64url')}};const client=await createServiceClient(config,gateway);auth.sealTrustedRegistrations();let late=false;try{auth.installMainSessionVerifier({verify:async()=>{throw Error('must never run')}})}catch(e){late=e.code==='IDENTITY_REGISTRY_SEALED'}let route=false,forged=false;const response=await client.invoke(i,command(a.command));try{await client.invoke(i,command(a.denied))}catch(e){route=e.code==='AUTH_SCOPE_DENIED'}try{await client.invoke({...i},command(a.command))}catch(e){forged=e.code==='AUTH_REQUIRED'}const dead=await createServiceClient({...config,origin:a.unreachable},gateway),unknown=await dead.invoke(i,command(a.command));process.stdout.write(JSON.stringify({role:response.transport==='RESPONSE'&&response.body.ok&&response.body.result.principal.role,late,matching:response.transport==='RESPONSE'&&response.body.operation_id===a.command.operation_id,route,forged,unknown:unknown.transport==='UNKNOWN'}));}finally{c.abort();await r.close();}"
+        process=subprocess.run(['node','--input-type=module','-e',script],input=json.dumps(args),cwd=ROOT,env=f.env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+        expect(process.returncode==0,'Actual authenticated service client failed: '+process.stderr[:800]);data=json.loads(process.stdout)
+        check('identity.service-rpc.actual-provisioner-principal',lambda:expect(data['role']=='PROVISIONER','RPC reused caller identity rather than real scoped service credential'))
+        check('identity.main.startup-verifier-registry-sealed',lambda:expect(data['late'],'MAIN verifier could be replaced after listener readiness'))
+        check('identity.service-rpc.operation-binding',lambda:expect(data['matching'],'RPC response lost operation binding'))
+        check('identity.service-rpc.fixed-route-denial',lambda:expect(data['route'],'RPC expanded configured destination action'))
+        check('identity.service-rpc.forged-context-denial',lambda:expect(data['forged'],'RPC accepted structural principal'))
+        check('identity.service-rpc.unreachable-is-unknown',lambda:expect(data['unknown'],'Transport failure claimed success/replay safety'))
+    finally:
+        child.send_signal(signal.SIGTERM)
+        try:_,err=child.communicate(timeout=8)
+        except subprocess.TimeoutExpired:child.kill();child.communicate();raise AssertionError('RPC peer failed bounded shutdown')
+        expect(child.returncode==0,'RPC peer termination failed: '+err[:500])
+
 def main():
+    from identity_fixture import cleanup_identity_evidence,write_identity_observations
+    os.environ["HYPERFIDE_IDENTITY_EVIDENCE_TASK"]="14.1"
+    if "--cleanup" in sys.argv:return cleanup_identity_evidence("14.1")
     fixture=IdentityFixture()
     try:
         f=fixture
@@ -111,10 +152,40 @@ def main():
             held.communicate(timeout=5)
             expect(response.get("error",{}).get("code")=="AUTH_EXPIRED","identity expired during lock wait was admitted: "+json.dumps(response))
         check("identity.expiry.after-row-lock",expiry_crossing_lock)
+        def global_expiry_lock():
+            f.add_principal('globalexpiring','OPERATOR')
+            f.sql("UPDATE hyperfide.identity_principals SET expires_at=clock_timestamp()+interval '800 milliseconds' WHERE credential_id=$1",[f.ids['globalexpiring']])
+            held_script="const {createRequire}=require('module'),pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg');(async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();try{await c.query('BEGIN ISOLATION LEVEL SERIALIZABLE');await c.query('SELECT epoch FROM hyperfide.authority_epochs WHERE deployment_id=$1 FOR UPDATE',[process.argv[1]]);process.stdout.write('locked\\n');await c.query('SELECT pg_sleep(1.3)');await c.query('COMMIT');}finally{await c.end();}})().catch(e=>{process.stderr.write(e.code||'ERROR');process.exitCode=1});"
+            held=subprocess.Popen(['node','--input-type=commonjs','-e',held_script,f.ids['deployment']],cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            try:
+                expect(held.stdout.readline().strip()=='locked','Global epoch test lock missing')
+                response=f.invoke('identity.describe',{},key='globalexpiring')[1]
+                _,error=held.communicate(timeout=5);expect(held.returncode==0,'Global lock process failed: '+error)
+                expect(response.get('error',{}).get('code') in ['AUTH_EXPIRED','AUTH_REVOKED'],'Credential expiring across global authority lock was admitted: '+json.dumps(response))
+            finally:
+                if held.poll() is None:held.kill();held.communicate()
+                config=json.loads(f.identity_config.read_text());config['principals']=[x for x in config['principals'] if x['credential_id']!=f.ids['globalexpiring']];f.identity_config.write_text(json.dumps(config))
+        check('identity.expiry.after-global-authority-lock',global_expiry_lock)
+        main_request={'session_id':uid(),'public_key_b64':f.keys['other']['public_key_b64'],'allowed_actions':['identity.describe'],'ttl_seconds':300}
+        check('identity.main.missing-real-verifier-refused',lambda:expect(f.invoke('identity.main.issue',main_request)[1].get('error',{}).get('code')=='MAIN_VERIFIER_REQUIRED','MAIN credential issued without observed host/native verifier'))
+        check('identity.main.nonoperator-refused',lambda:expect(f.invoke('identity.main.issue',main_request,key='provisioner')[1].get('error',{}).get('code')=='ROLE_DENIED','Provisioner minted MAIN supervisor authority'))
+        service_rpc_probe(f)
         f.sql("UPDATE hyperfide.runs SET state='STOPPING',state_version=state_version+1 WHERE id=$1",[i["run"]])
         f.stop();f.start()
         check("identity.closing.restart-retains-supervision",lambda:expect(f.invoke("identity.describe",{})[1].get("ok") is True,"closing run prevented authenticated supervision/restart"))
         check("identity.closing.new-grant-denied",lambda:expect(f.issue(grant=uid())[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","closing run admitted new runner grant"))
+        f.sql("UPDATE hyperfide.runs SET state='PAUSED',state_version=state_version+1 WHERE id=$1",[i["run"]])
+        paused_before=f.sql("SELECT credential_id,public_key_b64,credential_version FROM hyperfide.identity_principals WHERE credential_id=$1",[i["provisioner"]])[0]
+        paused_renew=f.invoke("identity.principal.renew",{"ttl_seconds":600},key="provisioner")[1]
+        check("identity.renew.paused-service-same-id-key",lambda:expect(paused_renew.get("ok") is True and paused_renew["result"]["compute_lease_renewed"] is False and f.sql("SELECT credential_id,public_key_b64 FROM hyperfide.identity_principals WHERE credential_id=$1",[i["provisioner"]])[0]=={"credential_id":paused_before["credential_id"],"public_key_b64":paused_before["public_key_b64"]},"Paused service renewal expanded authority or changed key/id"))
+        check("identity.renew.paused-service-no-admission",lambda:expect(f.bind()[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","Renewed service advanced paused work"))
+        check("identity.renew.paused-operator-denied",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600})[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","Operator gained unapproved paused renewal"))
+        check("identity.renew.paused-runner-denied",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600},key="runner")[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","Runner renewed without persisted cleanup proof"))
+        f.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[i["provisioner"]])
+        check("identity.renew.paused-revocation-absolute",lambda:expect(f.invoke("identity.principal.renew",{"ttl_seconds":600},key="provisioner")[1].get("error",{}).get("code")=="AUTH_REVOKED","Revoked service renewed while paused"))
+        f.close();f=IdentityFixture();fixture=f
+        f.sql("UPDATE hyperfide.runs SET state='SUCCEEDED',state_version=state_version+1 WHERE id=$1",[f.ids['run']])
+        check('identity.succeeded-run.new-grant-denied',lambda:expect(f.issue(grant=uid())[1].get('error',{}).get('code')=='AUTH_RUN_CLOSED','Succeeded run admitted new authority'))
         f.close();f=IdentityFixture();fixture=f
         def no_runtime_seed():
             f.stop();config=json.loads(f.identity_config.read_text());bad={**config["principals"][0],"credential_id":uid(),"actor_id":uid()};config["principals"].append(bad);f.identity_config.write_text(json.dumps(config))
@@ -129,10 +200,26 @@ def main():
             expect(not f.sql("SELECT credential_id FROM hyperfide.identity_principals WHERE credential_id=$1",[bad["credential_id"]]),"runtime created missing identity")
             f.start()
         check("identity.bootstrap.config-cannot-issue",no_runtime_seed)
-        f.sql("UPDATE hyperfide.authority_epochs SET state='REVOKED' WHERE deployment_id=$1",[f.ids["deployment"]])
-        f.sql("INSERT INTO hyperfide.authority_epochs(deployment_id,epoch,previous_epoch,state,fence_id,proof_digest) VALUES($1,$2,$3,'ACTIVE','declared-test-rotation',$4)",[f.ids["deployment"],uid(),f.ids["epoch"],sha(b"declared fixture epoch rotation")])
+        def missing_journal_refuses():
+            f.stop();head=f.authority_journal/(f.ids['deployment']+'.authority.json');hidden=f.path/'held-authority-head';head.rename(hidden)
+            rejected=False
+            try:
+                try:f.start()
+                except AssertionError:
+                    rejected=True
+                    if f.child:f.child.communicate(timeout=5);f.child=None
+            finally:hidden.rename(head)
+            expect(rejected,'Runtime accepted database rows without its actual external authority journal')
+            f.start()
+        check('identity.journal.missing-head-refuses-readiness',missing_journal_refuses)
+        expect(f.bind()[1].get('ok') is True and f.issue()[1].get('ok') is True,'Current grant fixture setup failed')
+        # Corrupt only the fixture's run/key/grant snapshot to an old epoch; do not manufacture an activated journal head.
+        stale=uid()
+        f.sql('WITH changed_run AS (UPDATE hyperfide.runs SET authority_epoch=$2,state_version=state_version+1 WHERE id=$1 RETURNING id),changed_keys AS (UPDATE hyperfide.identity_principals SET deployment_epoch=$2 WHERE run_id=$1 RETURNING credential_id) UPDATE hyperfide.identity_enrollment_grants SET deployment_epoch=$2 WHERE run_id=$1',[f.ids['run'],stale])
         check("identity.global-epoch.stale-run-and-key-denied",lambda:expect(f.invoke("identity.describe",{})[1].get("error",{}).get("code")=="STALE_AUTHORITY","matching stale run/key bypassed deployment epoch"))
+        check('identity.enroll.stale-global-epoch-denied',lambda:expect(f.request(f.enrollment(),key='runner',endpoint='/v1/enroll',credential=f.grant)[1].get('error',{}).get('code')=='STALE_AUTHORITY','Old global epoch minted runner identity'))
         check("identity.shutdown.orderly",lambda:f.stop())
     finally:fixture.close()
+    write_identity_observations()
     return int(any(actual!="observed" for _,actual in RESULTS))
 if __name__=="__main__":raise SystemExit(main())
