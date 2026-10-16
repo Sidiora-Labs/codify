@@ -14,7 +14,8 @@
     "finding.github.webhook",
     "finding.github.process-delivery",
     "finding.github.reconcile",
-    "finding.github.status"
+    "finding.github.status",
+    "finding.github.due"
   ],
   "requires": [
     "finding-registry"
