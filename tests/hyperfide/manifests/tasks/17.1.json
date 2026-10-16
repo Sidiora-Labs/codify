@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-review-17.1-v2",
+  "campaign_id": "hyperfide-review-17.1-v8",
   "case_ids": [
     "V-031"
   ],
@@ -1162,8 +1162,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0008-provider-coordination.sql",
-      "sha256": "8cae39aeefb0022c3a1bfcb7a6bde99f659019287517008068a0f3280086ba09",
-      "size": 17729
+      "sha256": "501cb79c39510114a58dc50658769088beba0affbb14ac9ff3b8de1e0d773b72",
+      "size": 31388
     },
     {
       "path": "services/hyperfide/migrations/0012-runner-registry.sql",
