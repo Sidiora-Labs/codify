@@ -25,8 +25,9 @@ SQL_JS="""const fs=require('fs'),{createRequire}=require('module'),pg=createRequ
 (async()=>{const q=JSON.parse(fs.readFileSync(0,'utf8')),c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();try{if(q.serial)await c.query('BEGIN ISOLATION LEVEL SERIALIZABLE');try{const r=await c.query(q.sql,q.values);if(q.serial)await c.query('COMMIT');process.stdout.write(JSON.stringify(r.rows??[]));}catch(e){if(q.serial)await c.query('ROLLBACK');throw e;}}finally{await c.end();}})().catch(e=>{process.stderr.write(JSON.stringify({code:e.code??'SQL_ERROR',message:e.message}));process.exitCode=1;});"""
 SIGN_JS="""const fs=require('fs'),crypto=require('crypto');process.stdout.write(crypto.sign(null,fs.readFileSync(0),fs.readFileSync(process.argv[1])).toString('base64url'));"""
 class IdentityFixture:
-    def __init__(self,extra_components=(),extra_env=None,extra_setup=None,components=None,database=None,service_role="control"):
+    def __init__(self,extra_components=(),extra_env=None,extra_setup=None,components=None,database=None,service_role="control",extra_actions=()):
         if service_role not in ("control","provisioner","dispatch"):raise ValueError("Known service role required")
+        if not isinstance(extra_actions,(list,tuple)) or len(extra_actions)>256 or any(not isinstance(a,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9._-]{0,127}',a) for a in extra_actions):raise ValueError('Finite reviewed fixture extra_actions required')
         self.service_role=service_role
         self.folder=tempfile.TemporaryDirectory(prefix="hyperfide-identity-")
         self.path=Path(self.folder.name);self.child=None;self.database=database or "hf_identity_"+uuid.uuid4().hex;self.database_created=False;self.runtime_role="hf_ir_"+uuid.uuid4().hex;self.runtime_role_created=False
@@ -41,6 +42,7 @@ class IdentityFixture:
         try:
             self.sql('CREATE DATABASE "'+self.database+'"',admin=True)
             self.database_created=True
+            _record_fixture(self)
             # Actual04 migration engine applies the complete trusted source release. This is fixture DDL, never a handler route.
             migrate="""import {createResourceContainer} from './services/hyperfide/dist/storage/runtime.js';import {MigrationCoordinator} from './services/hyperfide/dist/storage/durability.js';const signal=new AbortController().signal,env={...process.env,HYPERFIDE_MIGRATION_DATABASE_URL:process.env.DATABASE_URL};const r=createResourceContainer({role:'control',env,signal});try{await new MigrationCoordinator(r).apply({timeoutMs:30000,signal});}finally{await r.close();}"""
             result=subprocess.run(["node","--input-type=module","-e",migrate],cwd=ROOT,env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=40)
@@ -73,7 +75,7 @@ class IdentityFixture:
             self.components=self.path/"components";self.components.mkdir()
             defaults=("1.4","4.1","4.2","4.4","14.1") if service_role=="control" else ("1.4","4.2","4.4","14.1")
             names=list(components or defaults)+list(extra_components)
-            actions=["programme.activate","programme.provision","programme.dispatch"]
+            actions=["programme.activate","programme.provision","programme.dispatch"]+list(extra_actions)
             for name in dict.fromkeys(names):
                 fragment=ROOT/("services/hyperfide/components/"+name+".json")
                 shutil.copyfile(fragment,self.components/(name+".json"))
@@ -96,6 +98,7 @@ class IdentityFixture:
             password=base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
             self.sql('CREATE ROLE "'+self.runtime_role+'" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT PASSWORD \''+password+'\'',admin=True)
             self.runtime_role_created=True
+            _record_fixture(self)
             self.sql('GRANT CONNECT ON DATABASE "'+self.database+'" TO "'+self.runtime_role+'"')
             self.sql('GRANT USAGE ON SCHEMA hyperfide TO "'+self.runtime_role+'"; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA hyperfide TO "'+self.runtime_role+'"; REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON hyperfide.schema_migrations FROM "'+self.runtime_role+'"')
             from urllib.parse import quote
@@ -105,6 +108,7 @@ class IdentityFixture:
             for role in ("CONTROL","PROVISIONER","DISPATCH"):self.env["HYPERFIDE_"+role+"_PRIMARY_DATABASE_URL"]=self.runtime_url
             self.env["HYPERFIDE_DEPLOYMENT_ID"]=i["deployment"];self.env["HYPERFIDE_REQUIRE_SYNC_REPLICA"]="0"
             self.env.pop("HYPERFIDE_MIGRATION_DATABASE_URL",None);self.env.pop("HYPERFIDE_MIGRATION_JOB",None)
+            _record_fixture(self)
             self.start()
         except BaseException:
             self.close();raise
@@ -132,6 +136,7 @@ class IdentityFixture:
             expect(self.child.returncode==0,"Service termination failed: "+err[:1000])
             self.child=None
     def close(self):
+        _record_fixture(self)
         try:self.stop()
         finally:
             try:
@@ -214,3 +219,62 @@ def _delegate_principal(self,name,session_id,allowed_actions=None):
     return response["result"]
 IdentityFixture.bootstrap_runner=_bootstrap_runner
 IdentityFixture.delegate_principal=_delegate_principal
+
+
+
+# Only domain14's registered drivers enable this retained, non-secret resource ledger.
+def _evidence_base():
+    task=os.environ.get('HYPERFIDE_IDENTITY_EVIDENCE_TASK')
+    if task not in ('14.1','14.2','14.3','14.4'):return None
+    campaign=os.environ.get('HYPERFIDE_CAMPAIGN_DIR')
+    if not campaign:return None
+    base=Path(campaign)/'identity14';base.mkdir(parents=True,exist_ok=True)
+    return base
+
+def _record_fixture(fixture):
+    base=_evidence_base()
+    if base is None:return
+    file=base/'resources.json'
+    rows=json.loads(file.read_text()) if file.exists() else []
+    row=next((x for x in rows if x['database']==fixture.database),None)
+    if row is None:
+        row={'database':fixture.database,'runtime_role':fixture.runtime_role,'path':str(fixture.path),'database_owned':False,'runtime_role_owned':False,'ports':[]};rows.append(row)
+    row['database_owned']=row['database_owned'] or fixture.database_created
+    row['runtime_role_owned']=row['runtime_role_owned'] or fixture.runtime_role_created
+    row['ports']=sorted(set(row['ports']+[p for p in [getattr(fixture,'port',None),*getattr(fixture,'evidence_extra_ports',[])] if p is not None]))
+    temporary=base/'resources.tmp';temporary.write_text(json.dumps(rows,sort_keys=True)+'\n');temporary.replace(file)
+
+def write_identity_observations():
+    base=_evidence_base()
+    if base is not None:
+        (base/'observations.json').write_text(json.dumps({'scope':'task-component','assertions':[{'id':name,'actual':actual} for name,actual in RESULTS],'vendor_qualification':'UNRUN','physical_fencing_qualification':'UNRUN'},sort_keys=True)+'\n')
+
+def cleanup_identity_evidence(task):
+    os.environ['HYPERFIDE_IDENTITY_EVIDENCE_TASK']=task;base=_evidence_base()
+    if base is None:raise RuntimeError('An explicit campaign directory is required for independent cleanup')
+    file=base/'resources.json'
+    if not file.exists():raise RuntimeError('Actual owned-resource inventory is missing')
+    rows=json.loads(file.read_text());observed=[]
+    def admin(sql,values=()):
+        result=subprocess.run(['node','--input-type=commonjs','-e',SQL_JS],cwd=ROOT,env=os.environ.copy(),input=json.dumps({'sql':sql,'values':list(values),'serial':False}),text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+        expect(result.returncode==0,'Independent fixture cleanup query failed: '+result.stderr[:500]);return json.loads(result.stdout)
+    for row in rows:
+        database=row['database'];role=row['runtime_role'];directory=Path(row['path'])
+        if not re.fullmatch(r'hf_identity_[0-9a-f]{32}',database) or not re.fullmatch(r'hf_ir_[0-9a-f]{32}',role) or directory.parent!=Path(tempfile.gettempdir()) or not directory.name.startswith('hyperfide-identity-'):
+            raise RuntimeError('Resource inventory is not an owned domain14 fixture')
+        if row['database_owned']:admin('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE)')
+        if row['runtime_role_owned']:admin('DROP ROLE IF EXISTS "'+role+'"')
+        # The native runner cannot outlive the supervised probe; the harness independently rejects surviving descendants.
+        if directory.exists():shutil.rmtree(directory)
+        state=admin('SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1) AS database_present,EXISTS(SELECT 1 FROM pg_roles WHERE rolname=$2) AS role_present',[database,role])[0]
+        ports=[]
+        for port in row['ports']:
+            if not isinstance(port,int) or isinstance(port,bool) or not 1<=port<=65535:raise RuntimeError('Invalid fixture listener identity')
+            with socket.socket() as probe:
+                probe.settimeout(.2);absent=probe.connect_ex(('127.0.0.1',port))!=0
+            ports.append({'port':port,'absent':absent})
+        observed.append({'database':database,'runtime_role':role,'database_absent':not state['database_present'],'runtime_role_absent':not state['role_present'],'private_path_absent':not directory.exists(),'listeners':ports})
+    complete=bool(observed) and all(r['database_absent'] and r['runtime_role_absent'] and r['private_path_absent'] and all(p['absent'] for p in r['listeners']) for r in observed)
+    artifact='identity14/resource-absence.json';(base/'resource-absence.json').write_text(json.dumps({'complete':complete,'observations':observed},sort_keys=True)+'\n')
+    print(json.dumps({'type':'cleanup','complete':complete,'resources':[{'id':'hf-task-'+task+'-fixtures','status':'deleted' if complete else 'unknown','observed_absent':complete,'evidence_artifact':artifact}]}),flush=True)
+    return 0 if complete else 1
