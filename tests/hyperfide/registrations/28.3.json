@@ -36,6 +36,7 @@
     "readiness.exact-manifest-byte-binding",
     "readiness.reject-manifest-changed-after-checker",
     "readiness.portable-actual-canonical-component-only",
+    "readiness.portable-qualified-assets-remain-immutable",
     "readiness.portable-closed-environment",
     "readiness.portable-refuses-exposed-stage",
     "readiness.portable-refuses-busy-stage",

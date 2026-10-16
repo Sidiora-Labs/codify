@@ -77,12 +77,23 @@ def portable_cases():
         root,mapping=proof.portable()
         paths.append(str(root));record_paths()
         receipt=proof.request["receipt_id"]
-        def inspect(expected=True):
-            request={"root":str(root),"campaign":str(root/"campaign"),"receipt":receipt,"assets":str(assets)}
+        def inspect(expected=True,proof_assets=None):
+            request={"root":str(root),"campaign":str(root/"campaign"),"receipt":receipt,"assets":str(proof_assets or assets)}
             script="import{checkReleaseCampaign}from'./services/hyperfide/dist/release/readiness.js';const p="+json.dumps(request)+";try{const r=await checkReleaseCampaign(p.root,p.campaign,p.receipt,{env:{HYPERFIDE_RELEASE_QUALIFIED_PROOF_ROOT:p.assets},signal:new AbortController().signal});if(!"+str(expected).lower()+"||r.scope!=='task-component'||r.full_case_status!=='INCOMPLETE')throw Error('scope or expected refusal mismatch')}catch(e){if("+str(expected).lower()+"||!e.code)throw e}"
             result=node(script)
             require(result.returncode==0,"portable readiness check failed: "+result.stderr)
         check("readiness.portable-actual-canonical-component-only",inspect)
+        def immutable_qualified_assets():
+            import shutil
+            with tempfile.TemporaryDirectory(prefix="hyperfide-proof-staging-assets-")as folder:
+                isolated=Path(folder);paths.append(str(isolated));record_paths()
+                for name in ("inspect-proof.py","check-evidence.py","proof_relocation.py","registry.json"):
+                    shutil.copyfile(assets/name,isolated/name)
+                before={p.name:p.read_bytes()for p in isolated.iterdir()}
+                inspect(proof_assets=isolated)
+                require(not list(isolated.rglob("__pycache__"))and not list(isolated.rglob("*.pyc")),"portable readiness wrote bytecode into qualified assets")
+                require({p.name:p.read_bytes()for p in isolated.iterdir()}==before,"portable readiness changed qualified assets")
+        check("readiness.portable-qualified-assets-remain-immutable",immutable_qualified_assets)
         def closed_environment():
             saved={key:os.environ.get(key)for key in["PATH","PYTHONHOME","PYTHONPATH","GIT_CONFIG_COUNT","GIT_CONFIG_KEY_0","GIT_CONFIG_VALUE_0"]}
             # Invalid benign paths demonstrate that no inherited lookup or import is used.

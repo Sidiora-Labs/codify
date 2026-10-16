@@ -134,7 +134,7 @@ export async function checkReleaseCampaign(evidenceRoot:string,campaign:string,r
  const pins=await Promise.all(['inspect-proof.py','check-evidence.py','proof_relocation.py','registry.json'].map(async name=>({name,bytes:await protectedReleaseFile(path.join(assets,name),1024*1024)})));
  const python=await fs.realpath(context.env.HYPERFIDE_RELEASE_PYTHON??'/usr/bin/python3');
  await protectedReleaseFile(python,64*1024*1024);
- const checked=await new Promise<RecordValue>((resolve,reject)=>execFile(python,['-I','-c',PORTABLE_RELEASE_CHECK,assets,evidenceRoot,campaign,receipt],{timeout:150000,maxBuffer:1024*1024,signal:context.signal,env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8',LC_ALL:'C.UTF-8'}},(error,out)=>{
+ const checked=await new Promise<RecordValue>((resolve,reject)=>execFile(python,['-I','-B','-c',PORTABLE_RELEASE_CHECK,assets,evidenceRoot,campaign,receipt],{timeout:150000,maxBuffer:1024*1024,signal:context.signal,env:{PATH:'/usr/bin:/bin',LANG:'C.UTF-8',LC_ALL:'C.UTF-8'}},(error,out)=>{
  if(error){reject(new FoundationError('RELEASE_EVIDENCE_INVALID','Canonical portable checker refused a release proof'));return;}
  try{const result=JSON.parse(out) as unknown;if(!object(result)||result.checked!==true||result.observed_outcome!=='PASS')invalid('Independent evidence outcome is not PASS');resolve(result);}catch{reject(new FoundationError('RELEASE_EVIDENCE_INVALID','Invalid independent checker result'));}
  }));

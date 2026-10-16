@@ -43,6 +43,7 @@
     "readiness.exact-manifest-byte-binding",
     "readiness.reject-manifest-changed-after-checker",
     "readiness.portable-actual-canonical-component-only",
+    "readiness.portable-qualified-assets-remain-immutable",
     "readiness.portable-closed-environment",
     "readiness.portable-refuses-exposed-stage",
     "readiness.portable-refuses-busy-stage",
@@ -364,8 +365,8 @@
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/bootstrap-contract.md",
-      "sha256": "77e1898c6e9f4b6167e1102266274794bd05510bc8fa6e23efef37a464a635e3",
-      "size": 17537
+      "sha256": "7e0d37d6285ecc52c21715341fe8140a2c3cf499305b87b4ea669c002cbbdd33",
+      "size": 18014
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/check-evidence.py",
@@ -374,8 +375,8 @@
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/inspect-proof.py",
-      "sha256": "b07cbdb417bf100c4b37386745af8bd441e9814ad6f03da869ab0013b10193e5",
-      "size": 11983
+      "sha256": "c23e6e4c23379d138d8b59268035ebaa7d7c4825002a30d0b5ca0bc3f519346d",
+      "size": 12271
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/manifest.schema.json",
@@ -399,13 +400,13 @@
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/selftest_harness.py",
-      "sha256": "443edc59b5a640e5cfbf85a0cc4c70aef3d034f4b60dfe881e28a17aad35638e",
-      "size": 34670
+      "sha256": "62e964148c0d8e9cfc6450bc96f3c4ff5e663668507fb0e238a0c2d963c4b840",
+      "size": 34865
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/test_inspect_proof.py",
-      "sha256": "612303e79d5dea97739493d613a1a915726e1000b584d0dc89c4b61d709c99c0",
-      "size": 14970
+      "sha256": "d919fc37821cf8917d55acab003a04d0e461ec7f9b91e82085a41809b1b6c511",
+      "size": 16297
     },
     {
       "path": "services/hyperfide/dist/release-proof-assets/test_required_artifact_receipts.py",
@@ -419,13 +420,13 @@
     },
     {
       "path": "services/hyperfide/dist/release/readiness.js",
-      "sha256": "6ee77dc2e08b6b4111f3cf9b01f69839fb662834d44e6f797bcd2cfc0e0a8c3f",
-      "size": 26612
+      "sha256": "3854c500d34ef4be9e119ab70e4e186986bbc7b74471631a1d943b98e11c97ca",
+      "size": 26618
     },
     {
       "path": "services/hyperfide/dist/release/readiness.js.map",
-      "sha256": "8411be73c6691fe41ffa966b66233afc547cb403a143700732a87167046fdc9d",
-      "size": 25222
+      "sha256": "5e296c5102dfe14a0dd2814159d1e188ff56e703386e1a9b6f68ce1ee7c1fae1",
+      "size": 25232
     },
     {
       "path": "services/hyperfide/dist/release/traceability.d.ts",
@@ -619,8 +620,8 @@
     },
     {
       "path": "services/hyperfide/src/release/readiness.ts",
-      "sha256": "79f4dd2d09da44be10a7df5d2882031a77267a844b21218794910a4e92dfcd2b",
-      "size": 25387
+      "sha256": "4981a232fd2fa971b07b0d2f53c73f5160fff189760a7d6536d898f5d3c7f810",
+      "size": 25392
     },
     {
       "path": "services/hyperfide/src/release/traceability.ts",
@@ -764,8 +765,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/28_3.py",
-      "sha256": "925cb945e9f359497211e185265d62ddbe50221399d905896954b22ffad90868",
-      "size": 18686
+      "sha256": "401d3f2fb8cf627a05c4b7be7a4f28b7f361d1c8af5c80e404fcb3c8690fd4fe",
+      "size": 19645
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -784,8 +785,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/28.3.json",
-      "sha256": "93ebeb491ceade7714e0afd57f1fe9ad50ce5119ae945fa33c7e94af3179b4fc",
-      "size": 5387
+      "sha256": "c906e89a6a1db7b5b9d3e0ed2c5e23091a38f4b17ea406c60166042ab4c65aae",
+      "size": 5447
     },
     {
       "path": "tests/hyperfide/registry.json",
@@ -808,7 +809,7 @@
     "physical_runner_qualification": "UNRUN",
     "portable_stage_required": true,
     "proof_asset_mode": "actual-source-preview",
-    "proof_asset_source_revision": "56a8731799a9c24345b1892aef6aa65b0dc1ad80",
+    "proof_asset_source_revision": "cc244719cc6ab1d8b862632b6bd8e68c6189f21f",
     "release_qualification": "UNRUN"
   },
   "registered_variant": "task:28.3",
