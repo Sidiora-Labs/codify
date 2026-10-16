@@ -63,7 +63,9 @@ export function planBlaxelRecovery(input:unknown):unknown{
  fail('BLAXEL_AUTHENTICATED_CLONE_DISABLED','Restoring or forking authenticated process memory is disabled before every outward action');
  if(o.source==='DISK_CHECKPOINT'&&o.checkpoint_digest===null)fail('BLAXEL_RECOVERY_INVALID','Disk recovery requires an independently verified checkpoint');
  if(o.source==='FRESH_IMAGE'&&o.checkpoint_digest!==null)fail('BLAXEL_RECOVERY_INVALID','Fresh image recovery cannot silently import a checkpoint');
- return{candidate_compatible:true,baseline:'FRESH_IMAGE_BOOT',source:o.source,checkpoint_digest:o.checkpoint_digest,
+ return{candidate_compatible:o.source==='FRESH_IMAGE'&&o.retained_volumes.length===0,baseline:'FRESH_IMAGE_BOOT',source:o.source,checkpoint_digest:o.checkpoint_digest,
+ blocked_reason:o.source==='DISK_CHECKPOINT'?'VERIFIED_DISK_RESTORE_UNAVAILABLE':o.retained_volumes.length?'RETAINED_VOLUME_OWNERSHIP_UNVERIFIED':null,
+ disk_restore_supported:false,
  sequence:['VERIFY_QUALIFIED_IMMUTABLE_IMAGE','ALLOCATE_NEW_BOOT_GENERATION','CREATE_FRESH_SANDBOX','PERSIST_PROVIDER_ID',
  'VERIFY_ACTUAL_CONFIGURATION','RECONCILE_RETAINED_VOLUMES',...(o.source==='DISK_CHECKPOINT'?['VERIFY_AND_RESTORE_DISK_CHECKPOINT']:[]),
  'FRESH_SIGNED_RUNNER_ENROLLMENT','VERIFY_OLD_CREDENTIALS_REVOKED','INDEPENDENT_READINESS','ALLOW_OUTWARD_ACTION'],

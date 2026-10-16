@@ -38,7 +38,7 @@ def main():
   check("preview.caller-cannot-enable",forge)
   def disk():
    q=request();q.update(source="DISK_CHECKPOINT",checkpoint_digest="sha256:"+"a"*64)
-   r=f.good("plan",q);p.expect("VERIFY_AND_RESTORE_DISK_CHECKPOINT"in r["sequence"]and not r["credentials_restored"]and not r["outward_action_authorized"])
+   r=f.good("plan",q);p.expect("VERIFY_AND_RESTORE_DISK_CHECKPOINT"in r["sequence"]and not r["credentials_restored"]and not r["outward_action_authorized"]and not r["candidate_compatible"]and not r["disk_restore_supported"]and r["blocked_reason"]=="VERIFIED_DISK_RESTORE_UNAVAILABLE")
   check("disk.restore-requires-independent-verification",disk)
   def missing():
    q=request();q["source"]="DISK_CHECKPOINT";f.bad("plan",q,"BLAXEL_RECOVERY_INVALID")
@@ -48,7 +48,7 @@ def main():
   check("disk.reject-silent-import-into-fresh-image",surprise)
   def volumes():
    q=request();q["retained_volumes"]=["retained-cache"];r=f.good("plan",q)
-   p.expect(r["retained_volumes"]==[{"reference":"retained-cache","adopted":False,"mounted":False,"ownership":"UNVERIFIED","deleted_with_old_sandbox":False}])
+   p.expect(not r["candidate_compatible"]and r["blocked_reason"]=="RETAINED_VOLUME_OWNERSHIP_UNVERIFIED");p.expect(r["retained_volumes"]==[{"reference":"retained-cache","adopted":False,"mounted":False,"ownership":"UNVERIFIED","deleted_with_old_sandbox":False}])
    p.expect(r["sequence"].index("RECONCILE_RETAINED_VOLUMES")<r["sequence"].index("FRESH_SIGNED_RUNNER_ENROLLMENT"))
   check("volume.separate-lifetime-and-unverified-ownership",volumes)
   def duplicate():
@@ -86,17 +86,22 @@ def main():
   add("10.4")
   def setup(auth):
    auth.apply_migration("0008-provider-coordination")
+   auth.ids["pool"]=str(p.uuid.uuid4());auth.ids["sandbox"]=str(p.uuid.uuid4());auth.ids["intent"]=str(p.uuid.uuid4());auth.profile=str(p.uuid.uuid4())
+   prepared=p.images.up.Fixture(auth.path/"source-preparation");prepared.profile["image"]["provider"]="blaxel";manifest=prepared.create();auth.preparation=manifest["digest"]
+   auth.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,'blaxel','linux-x86_64',$3,$4)",[auth.ids["organisation"],auth.profile,auth.preparation,json.dumps(manifest)])
    account={"provider":"blaxel","account_key":"component-account","approved_limits":{"SANDBOX":"10","PROVISIONING":"2"},"planning_limits":{"SANDBOX":"10","PROVISIONING":"2"}}
-   pool={"id":auth.ids["pool"],"provider":"blaxel","account_key":"component-account","environment_key":"component-workspace","region":"us-pdx-1","profile_id":None,"preparation_digest":auth.preparation,"approved_limits":{"SANDBOX":"10","PROVISIONING":"2"},"planning_limits":{"SANDBOX":"10","PROVISIONING":"2"},"create_policy":{"seed_reference":"sandbox/coding:"+"d"*64,"network":"ISOLATED","stdin_required":False}}
+   pool={"id":auth.ids["pool"],"provider":"blaxel","account_key":"component-account","environment_key":"component-workspace","region":"us-pdx-1","profile_id":auth.profile,"preparation_digest":auth.preparation,"approved_limits":{"SANDBOX":"10","PROVISIONING":"2"},"planning_limits":{"SANDBOX":"10","PROVISIONING":"2"},"create_policy":{"seed_reference":"sandbox/coding:"+"d"*64,"network":"ISOLATED","stdin_required":False}}
    config={"schema_version":1,"organisation_id":auth.ids["organisation"],"revision":"fresh-enrollment-component-v1","accounts":[account],"pools":[pool],"maximum_operation_ms":30000}
    config_path=auth.path/"pools.json";config_path.write_text(json.dumps(config));config_path.chmod(0o600);auth.env["HYPERFIDE_POOL_CONFIG"]=str(config_path)
-   auth.sql("UPDATE hyperfide.provider_pools SET provider=$3,account_key=$4,environment_key=$5,region=$6 WHERE organisation_id=$1 AND id=$2",[auth.ids["organisation"],auth.ids["pool"],"blaxel","component-account","component-workspace","us-pdx-1"])
+   auth.sql("INSERT INTO hyperfide.provider_pools(organisation_id,id,provider,account_key,environment_key,region) VALUES($1,$2,'blaxel','component-account','component-workspace','us-pdx-1')",[auth.ids["organisation"],auth.ids["pool"]])
+   auth.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state,preparation_digest) VALUES($1,$2,$3,'fixture-resource','RUNNING',$4)",[auth.ids["organisation"],auth.ids["sandbox"],auth.ids["pool"],auth.preparation])
+   auth.ids["boot"]=auth.sql("SELECT boot_id FROM hyperfide.sandbox_boots WHERE organisation_id=$1 AND sandbox_id=$2",[auth.ids["organisation"],auth.ids["sandbox"]])[0]["boot_id"]
    selected.update({"organisation_id":auth.ids["organisation"],"pool_id":auth.ids["pool"],"provider":"blaxel","provider_account_id":"component-account","environment_id":"component-workspace","region":"us-pdx-1","configuration_digest":p.dg({"revision":config["revision"],"pool":pool,"account":account})})
   auth=p.identity.IdentityFixture(service_role="provisioner",extra_components=sorted(added),extra_env={"HF_CREDENTIAL_CONFIG_FILE":str(credentials)},extra_setup=setup)
   try:
    status,row=auth.invoke("provider.pools.configure",{},component="8.2",key="provisioner");p.expect(row.get("ok"),json.dumps(row))
    op=p.operation("create");op["scope"]=selected;op["preparation_digest"]=auth.preparation;p.rehash(op)
-   auth.sql("INSERT INTO hyperfide.provisioning_intents(organisation_id,run_id,id,pool_id,sandbox_id,configuration_digest,kind,preparation_purpose,request_key,request_digest,payload_digest,operation,state,native_sandbox_id,boot_generation) VALUES($1,$2,$3,$4,$5,$6,'CREATE','EXECUTION',$7,$8,$9,$10,'ID_KNOWN','fixture-resource',1)",[auth.ids["organisation"],auth.ids["run"],auth.ids["intent"],auth.ids["pool"],auth.ids["sandbox"],selected["configuration_digest"],op["identity"]["idempotency_key"],p.dg(op),op["identity"]["payload_digest"],json.dumps(op)])
+   auth.sql("INSERT INTO hyperfide.provisioning_intents(organisation_id,run_id,id,pool_id,sandbox_id,configuration_digest,profile_id,kind,preparation_purpose,request_key,request_digest,payload_digest,operation,state,native_sandbox_id,boot_generation) VALUES($1,$2,$3,$4,$5,$6,$11,'CREATE','EXECUTION',$7,$8,$9,$10,'ID_KNOWN','fixture-resource',1)",[auth.ids["organisation"],auth.ids["run"],auth.ids["intent"],auth.ids["pool"],auth.ids["sandbox"],selected["configuration_digest"],op["identity"]["idempotency_key"],p.dg(op),op["identity"]["payload_digest"],json.dumps(op),auth.profile])
    target={"scope":selected,"resource":{"native_sandbox_id":"fixture-resource","sandbox_boot_generation":"1"}}
    def enrolled():
     auth.bootstrap_runner()
@@ -108,6 +113,16 @@ def main():
     q=copy.deepcopy(target);q["resource"]["sandbox_boot_generation"]="2"
     _,result=auth.invoke("blaxel.recovery.enrollment",q,component="10.4",key="provisioner");p.expect(not result.get("ok"),json.dumps(result))
    check("enrollment.reject-other-boot",wrong_boot)
+   def old_heartbeat():
+    auth.sql("UPDATE hyperfide.identity_runner_status SET heartbeat_at=(SELECT created_at-interval '1 second' FROM hyperfide.provisioning_intents WHERE organisation_id=$1 AND id=$2) WHERE credential_id=$3",[auth.ids["organisation"],auth.ids["intent"],auth.ids["runner"]])
+    _,result=auth.invoke("blaxel.recovery.enrollment",target,component="10.4",key="provisioner");p.expect(not result.get("ok"),json.dumps(result))
+    _,heartbeat=auth.invoke("identity.runner.heartbeat",{"expected_version":"1"},key="runner");p.expect(heartbeat.get("ok"),json.dumps(heartbeat))
+    _,fresh=auth.invoke("blaxel.recovery.enrollment",target,component="10.4",key="provisioner");p.expect(fresh.get("ok"),json.dumps(fresh))
+   check("enrollment.reject-heartbeat-before-durable-operation",old_heartbeat)
+   def wrong_config():
+    q=copy.deepcopy(target);q["scope"]["configuration_digest"]="sha256:"+"f"*64
+    _,result=auth.invoke("blaxel.recovery.enrollment",q,component="10.4",key="provisioner");p.expect(not result.get("ok"),json.dumps(result))
+   check("enrollment.reject-other-pool-configuration",wrong_config)
    def revoked():
     auth.sql("UPDATE hyperfide.identity_principals SET state='REVOKED',credential_version=credential_version+1 WHERE credential_id=$1",[auth.ids["runner"]])
     _,result=auth.invoke("blaxel.recovery.enrollment",target,component="10.4",key="provisioner");p.expect(not result.get("ok"),json.dumps(result))
