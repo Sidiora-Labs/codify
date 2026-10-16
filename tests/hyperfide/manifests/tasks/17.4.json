@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-review-17.4-v10",
+  "campaign_id": "hyperfide-review-17.4-v11",
   "case_ids": [
     "V-029",
     "V-030",
@@ -824,18 +824,18 @@
     },
     {
       "path": "services/hyperfide/dist/review/reproductions.d.ts",
-      "sha256": "2864378b4aa9285aebc9f8c739055ff8d0a8204781a93c02d1a3118cd15b60de",
-      "size": 3005
+      "sha256": "09739d913ac94f610b1afa1ca0a097156b4716f911272ffb74400b322bdcf0e6",
+      "size": 3004
     },
     {
       "path": "services/hyperfide/dist/review/reproductions.js",
-      "sha256": "db2a865dccea2d2efe2243193871c308718e88f95524020f8cbaf5aee599f0ac",
-      "size": 73959
+      "sha256": "e7c7695df4584378b40e115f0a22ef1de6a606c869a7ca45da28dca27bed27c4",
+      "size": 74157
     },
     {
       "path": "services/hyperfide/dist/review/reproductions.js.map",
-      "sha256": "153bce604c3da1e2ac0837200ae63fcb11d1b457ca814dd9862fd1647bbc0a4c",
-      "size": 61925
+      "sha256": "f74b87639b92e5042bf19bd790f3b805a4414e0eae5ea6028d26740014e2e343",
+      "size": 62054
     },
     {
       "path": "services/hyperfide/dist/runner/bridge.d.ts",
@@ -881,6 +881,21 @@
       "path": "services/hyperfide/dist/runner/executor.js.map",
       "sha256": "d794207aa4acf03d9cec036ff5d22857255a8fb55e5afcd6bde522e4f68a6433",
       "size": 34894
+    },
+    {
+      "path": "services/hyperfide/dist/runner/reproduction_jobs.d.ts",
+      "sha256": "4e354d9b6ba1145d113a2aa267f54e01107db3d0b88d821b5618023e39d970fe",
+      "size": 2925
+    },
+    {
+      "path": "services/hyperfide/dist/runner/reproduction_jobs.js",
+      "sha256": "f42249fb0f40eacce18fb948f0f3c5425946d9de69a5734ae65a9d3cd1984dae",
+      "size": 5776
+    },
+    {
+      "path": "services/hyperfide/dist/runner/reproduction_jobs.js.map",
+      "sha256": "8b8718cb086633bbee3e70891d0c7787d6dcd217bbf496d4357ab4ea65eb96fb",
+      "size": 4995
     },
     {
       "path": "services/hyperfide/dist/scheduler/claim.d.ts",
@@ -1404,8 +1419,8 @@
     },
     {
       "path": "services/hyperfide/src/review/reproductions.ts",
-      "sha256": "0e65897458a57d9854aedd06d3fd16f7c66e489c40b601ada8e18feba1da894c",
-      "size": 69845
+      "sha256": "51b364be180404dbc44c6718f5152e79e310fb106767ace74fed57d2b6444469",
+      "size": 70033
     },
     {
       "path": "services/hyperfide/src/runner/bridge.ts",
@@ -1421,6 +1436,11 @@
       "path": "services/hyperfide/src/runner/executor.ts",
       "sha256": "6b0cd09103483979189c1036cfe8872d3f0f57245ed8a73f847d6907ff00e02f",
       "size": 34733
+    },
+    {
+      "path": "services/hyperfide/src/runner/reproduction_jobs.ts",
+      "sha256": "52b8b79abc80cb542fcc176571436125527abedef4ed71d79f00e7b67ca31587",
+      "size": 7802
     },
     {
       "path": "services/hyperfide/src/scheduler/claim.ts",

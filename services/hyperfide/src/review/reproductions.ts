@@ -7,6 +7,7 @@ import type {PrimaryTransaction} from '../storage/transactions.js';
 import {authorizeReview,canonical,decimal,digest,fail,hash,obj,oid,primary,reviewError,reviewInputCurrent,lockReviewDisposition,assertReviewExecutionAllowed,reviewControlMatches,scope,text,transaction,uuid} from './coverage.js';
 import type {ReviewControl,ReviewDb,ReviewScope} from './coverage.js';
 import {buildReviewSnapshot} from './receipts.js';
+import {registerReproductionJobInputs} from '../runner/reproduction_jobs.js';
 
 type Data=Record<string,any>;
 interface Runner {
@@ -251,9 +252,9 @@ export async function readReproductionJobInputs(tx:PrimaryTransaction,invocation
   source_origin:snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:snapshot.publication_operation_id??null};
 }
 async function measuredReproductionInputs(ctx:ComponentContext,db:ReviewDb,binding:ReviewScope,job:Data):Promise<Data>{
- // The current qualification-only supplier refuses this namespace. A genuine
- // reproduction reader must derive these bindings from its job and measured
- // runtime facts before this path may dispatch; echoed request labels are not proof.
+ // The registered REPRODUCTION adapter joins this exact semantic job to its
+ // retained preparation proof before12 validates current physical facts. Missing
+ // or mismatched preparation remains unavailable; echoed labels are not proof.
  const reader=capability<Data>(ctx,'12.1','qualification.environment.v1',['verify']);
  const observed=await reader.verify(db,(ctx as Data).invocation,{job_namespace:'REPRODUCTION',job_id:job.id,lease_generation:String(job.lease_generation),reservation_id:job.reservation_id,input_manifest_digest:job.input_manifest_digest,environment_digest:job.snapshot.environment_digest});
  const validation=observed?.input_validation,roles:Data={};
@@ -477,9 +478,10 @@ export async function planCurrentSourceReproduction(ctx:ComponentContext,value:u
  });
 }
 
-export function createComponent(_context:ComponentContext):Component{
+export function createComponent(context:ComponentContext):Component{
+ const unregisterInputs=registerReproductionJobInputs(context,readReproductionJobInputs);
  const guarded=(fn:(ctx:ComponentContext,input:unknown)=>Promise<unknown>)=>async(input:unknown,ctx:ComponentContext)=>{try{return await fn(ctx,input);}catch(error){throw reviewError(error);}};
- return {apiVersion:1,actions:{
+ return {apiVersion:1,close:unregisterInputs,actions:{
   'review.reproduction.renew':guarded(renewReproduction),'review.reproduction.plan':guarded(planReproduction),
   'review.reproduction.current.plan':guarded(planCurrentSourceReproduction),'review.reproduction.assign':guarded(assignReproduction),'review.reproduction.execute':guarded(executeReproduction),
   'review.reproduction.inspect':guarded(async(ctx,input)=>{const v=obj(input,['organisation_id','run_id','plan_id']);return transaction(ctx,scope(v),db=>inspectReproduction(db,scope(v),uuid(v.plan_id)),false);})
