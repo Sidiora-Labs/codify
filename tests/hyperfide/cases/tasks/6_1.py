@@ -73,11 +73,15 @@ FIXTURE="""
 import {enqueue,lockRun,authorizedRun,lookupConsumerBinding,lookupNativeLaunch} from './events/outbox.js';
 import {receive,bootstrapConsumer,supersedeDelivery} from './events/inbox.js';
 import {applyExecutionControl} from './scheduler/claim.js';
+import {registerRunnerConsumer} from './events/instructions.js';
 import {DurableDispatcher,recoverySnapshot} from './events/recovery.js';
 export function createComponent(ctx) {
  const g=ctx.dependencies.require('4.2','storage.transactions.v1',v=>typeof v?.withPrimaryTransaction==='function');
  const auth=(context,input,op)=>authorizedRun(g,context,input,['OPERATOR'],op);
  const actions={
+  'fixture.native-registration-rollback':(input,context)=>authorizedRun(g,context,input,['RUNNER'],async(tx,i)=>{
+    await registerRunnerConsumer(tx,input,i);throw new Error('INTENTIONAL_NATIVE_BOOTSTRAP_ROLLBACK');
+  }),
   'fixture.runtime-role':(input,context)=>auth(context,input,async tx=>{
    const r=await tx.query("SELECT current_user AS role,rolsuper,rolcreatedb,rolcreaterole,has_table_privilege(current_user,'hyperfide.schema_migrations','INSERT,UPDATE,DELETE') AS migrations_mutable FROM pg_roles WHERE rolname=current_user");
    return r.rows[0];
@@ -136,7 +140,7 @@ export function createComponent(ctx) {
    return {sends,passes,first};
   }
  };
- if(ctx.env.HF_TEST_EXECUTION_CONTROLS!=='1')delete actions['fixture.control'];
+ if(ctx.env.HF_TEST_EXECUTION_CONTROLS!=='1'){delete actions['fixture.control'];delete actions['fixture.native-registration-rollback'];}
  return {apiVersion:1,actions};
 }
 """
@@ -171,11 +175,12 @@ class Service(identity.IdentityFixture):
         syntax=subprocess.run(["node","--check",str(module/"fixture.js")],capture_output=True,text=True)
         expect(syntax.returncode==0,"Trusted fixture module syntax failed: "+syntax.stderr[:1000])
         (module/"package.json").write_text('{"type":"module"}')
-        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role"]
+        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role","fixture.native-registration-rollback"]
         fragment={"schema_version":1,"id":"fixture.events","task":"6.1","roles":["control"],"module":"fixture.js","entry":"createComponent",
             "api_version":1,"actions":actions,"requires":["4.2","6.1","6.2","6.4"]}
-        if self.include_instructions:fragment["requires"].append("5.1")
-        else:actions.remove("fixture.control")
+        if self.include_instructions:fragment["requires"]+=["5.1","6.3"]
+        else:
+            actions.remove("fixture.control");actions.remove("fixture.native-registration-rollback")
         (self.components/"fixture.json").write_text(json.dumps(fragment))
         self.actions+=actions
         for path in [self.policy,self.identity_config]:
@@ -201,7 +206,7 @@ class Service(identity.IdentityFixture):
     def request_action(self,action,value,runner=None):
         component={"outbox":"6.1","inbox":"6.2","instructions":"6.3","recovery":"6.4","fixture":"fixture.events"}[action.split(".")[0]]
         value={**S,**value} if action.startswith("fixture.") else value
-        use_runner=action in ("instructions.handoff","instructions.ack","instructions.lookup-native") if runner is None else runner
+        use_runner=action in ("instructions.handoff","instructions.ack","instructions.lookup-native","instructions.consumer.register","fixture.native-registration-rollback") if runner is None else runner
         kwargs={"key":"runner","credential":self.runner_credential} if use_runner else {}
         status,response=self.invoke(action,value,component=component,**kwargs)
         OBS.append({"action":action,"http_status":status,"ok":response.get("ok"),"error_code":response.get("error",{}).get("code")})
@@ -217,7 +222,7 @@ class Service(identity.IdentityFixture):
     def enroll_runner(self):
         expect(self.bind()[1].get("ok") is True,"Real provisioner binding failed")
         issue=self.invoke("identity.grant.issue",{"grant_id":self.grant,"provisioning_intent_id":self.ids["intent"],"verifier":identity.sha(self.secret),
-            "allowed_actions":["identity.describe","instructions.handoff","instructions.ack","instructions.lookup-native"],"ttl_seconds":300})
+            "allowed_actions":["identity.describe","instructions.handoff","instructions.ack","instructions.lookup-native","instructions.consumer.register","fixture.native-registration-rollback"],"ttl_seconds":300})
         expect(issue[1].get("ok") is True,"Real runner grant failed: "+str(issue[1].get("error")))
         enrolled=self.request(self.enrollment(),key="runner",endpoint="/v1/enroll",credential=self.grant)
         expect(enrolled[1].get("ok") is True,"Real runner enrollment failed")
@@ -438,6 +443,20 @@ def control(s,mode,operation,expected=None):
     return s.ok("fixture.control",dict(S,control=value))
 def suite63(s):
     seed_native_attempt(s);s.enroll_runner();start=command(3001,"START")
+    check("instructions.missing-native-binding-refused",lambda:s.reject("instructions.issue",start,"INSTRUCTION_CONSUMER_REQUIRED"))
+    registration=dict(S,consumer_id=CONSUMER)
+    check("instructions.bootstrap-interruption-refused",lambda:s.reject("fixture.native-registration-rollback",registration))
+    check("instructions.bootstrap-interruption-atomic",lambda:expect(sql("SELECT (SELECT count(*) FROM hyperfide.event_consumers WHERE id="+q(CONSUMER)+")+(SELECT count(*) FROM hyperfide.event_runner_bindings WHERE consumer_id="+q(CONSUMER)+")+(SELECT count(*) FROM hyperfide.command_inbox WHERE operation='instruction.consumer-genesis' AND principal_scope="+q(CONSUMER)+")")=="0","Interrupted native bootstrap left an active consumer, binding or receipt"))
+    registered=s.ok("instructions.consumer.register",registration)
+    check("instructions.actual-native-bootstrap",lambda:expect(registered["consumer_state"]=="ACTIVE" and registered["boot_id"]==s.ids["boot"] and registered["execution_authority"] is False,"Authenticated native genesis did not bind the actual boot"))
+    check("instructions.native-bootstrap-recovery-reference",lambda:expect(s.ok("fixture.snapshot",dict(S,limit=64))["runner_consumers"][0]["bootstrap_receipt_id"]==registered["bootstrap_receipt_id"],"Primary recovery lost the actual immutable native binding receipt"))
+    check("instructions.native-bootstrap-exact-replay",lambda:expect(s.ok("instructions.consumer.register",registration)["replayed"],"Existing boot history was replaced"))
+    check("instructions.native-bootstrap-retarget-refused",lambda:s.reject("instructions.consumer.register",dict(S,consumer_id=uid(609)),"INSTRUCTION_CONSUMER_CONFLICT"))
+    check("instructions.native-bootstrap-caller-boot-refused",lambda:s.reject("instructions.consumer.register",dict(registration,boot_id=uid(999)),"EVENT_INPUT_INVALID"))
+    check("instructions.native-bootstrap-nonrunner-refused",lambda:s.reject("instructions.consumer.register",registration,"AUTH_ROLE_DENIED",runner=False))
+    # Other standing inboxes exist before the first command, and must never receive native instructions.
+    for n,label in [(610,"human-private"),(611,"notification-private")]:
+        s.ok("outbox.consumer.register",dict(S,id=uid(n),consumer_key=label,critical=True,state="ACTIVE"))
     actors={name:s.add_principal(name,role) for name,role in [("oldleader","LEADER"),("currentleader","LEADER"),("manager","FEATURE_MANAGER"),("othermanager","FEATURE_MANAGER")]}
     def actor_call(name,action,value,component="6.3",expected=None):
         status,response=s.invoke(action,value,component=component,key=name,credential=s.ids[name])
@@ -461,6 +480,7 @@ def suite63(s):
     check("instructions.former-manager-replay-refused",lambda:actor_call("manager","instructions.issue",start,expected="PACKAGE_OWNER_MISMATCH"))
     check("instructions.successor-manager-exact-replay",lambda:expect(actor_call("othermanager","instructions.issue",start)["replayed"],"Actual successor manager could not replay the same committed START"))
     check("instructions.handoff-preserves-attempt-lineage",lambda:expect(lineage==sql("SELECT row_to_json(a)::text FROM hyperfide.attempts a WHERE id="+q(uid(30))),"Current package handoff rewrote historical native attempt lineage"))
+    check("instructions.exact-native-recipient-only",lambda:expect(sql("SELECT count(*)::text||','||min(consumer_id::text) FROM hyperfide.event_deliveries WHERE event_id="+q(start["id"]))=="1,"+CONSUMER,"START was broadcast to unrelated standing inboxes"))
     check("instructions.real-service",lambda:expect(s.ok("instructions.describe")["execution"]=="native-connector-required","Acceptance claimed physical execution"))
     check("instructions.stable-start",lambda:expect(s.ok("instructions.issue",start)["obligations"]==1,"Start obligation missing"))
     check("instructions.start-replay",lambda:expect(s.ok("instructions.issue",start)["replayed"],"Replay created new start"))
@@ -471,6 +491,7 @@ def suite63(s):
     for field,value,label in [("attempt_generation","2","generation"),("authority_epoch",uid(99),"epoch"),("sandbox_boot_generation","2","boot")]:
         check("instructions.stale-"+label,lambda f=field,v=value:s.reject("instructions.issue",dict(command(3010,"STEER"),**{f:v}),"INSTRUCTION_STALE_AUTHORITY"))
     check("instructions.unsupported-kind",lambda:s.reject("instructions.issue",dict(command(3010,"STEER"),kind="SHELL"),"INSTRUCTION_INPUT_INVALID"))
+    check("instructions.native-frame-budget-refused",lambda:s.reject("instructions.issue",dict(command(3010,"STEER"),body=dict(command(3010,"STEER")["body"],frame_b64=base64.urlsafe_b64encode(b"x"*4097).decode().rstrip("="))),"INSTRUCTION_INPUT_INVALID"))
     check("instructions.padded-steer-refused",lambda:s.reject("instructions.issue",dict(command(3010,"STEER"),body=dict(command(3010,"STEER")["body"],frame_b64="YQ==")),"INSTRUCTION_INPUT_INVALID"))
     control(s,"PAUSE",860)
     check("instructions.pause-defers-start-admission",lambda:s.reject("instructions.accept",dict(S,event_id=start["id"],consumer_id=CONSUMER),"EXECUTION_HELD"))
@@ -549,8 +570,14 @@ def suite63(s):
     sql("UPDATE hyperfide.compute_leases SET expires_at=clock_timestamp()-interval '1 second',state_version=state_version+1 WHERE id="+q(uid(40))+";")
     check("instructions.expired-compute-can-report-terminal",lambda:expect(s.ok("instructions.ack",dict(report,ledger_version="4",state="TERMINAL",observed_process=process))["authority"]=="NONE","Expired worker observation was lost or gained authority"))
     check("instructions.expired-cancel-has-zero-budget",lambda:expect(s.ok("instructions.handoff",dict(S,event_id=cancel["id"],consumer_id=CONSUMER))["remaining_lease_ms"]==0,"Cleanup granted compute budget"))
+    sql("UPDATE hyperfide.runs SET state='STOPPING',state_version=state_version+1 WHERE id="+q(S["run_id"]))
+    check("instructions.closing-cancel-handoff",lambda:expect(s.ok("instructions.handoff",dict(S,event_id=cancel["id"],consumer_id=CONSUMER))["remaining_lease_ms"]==0,"Closing cleanup was denied or granted compute"))
+    check("instructions.closing-start-refused",lambda:s.reject("instructions.handoff",dict(S,event_id=start["id"],consumer_id=CONSUMER),"AUTH_RUN_CLOSED"))
+    check("instructions.closing-terminal-observation",lambda:expect(s.ok("instructions.ack",dict(report,ledger_version="5",state="TERMINAL",observed_process=process))["authority"]=="NONE","Closing observation granted compute or lost actual terminal receipt"))
+    sql("UPDATE hyperfide.runs SET state='RUNNING',state_version=state_version+1 WHERE id="+q(S["run_id"]))
     sql("UPDATE hyperfide.sandboxes SET boot_generation=2,state_version=state_version+1 WHERE id="+q(s.ids["sandbox"])+";")
     check("instructions.stale-native-boot-refused",lambda:s.reject("instructions.handoff",dict(S,event_id=cancel["id"],consumer_id=CONSUMER)))
+    check("instructions.stale-boot-registration-refused",lambda:s.reject("instructions.consumer.register",dict(S,consumer_id=uid(612))))
 def suite64(s):
     for n in [4001,4002,4003]:s.ok("outbox.enqueue",event(n))
     check("recovery.real-service",lambda:expect(s.ok("recovery.describe")["notifications"]=="wakeups-only","Notification became authority"))
@@ -604,7 +631,7 @@ def main(task="6.1"):
     if "--cleanup" in sys.argv:return cleanup()
     service=Service();ACTIVE=service;S={"organisation_id":service.ids["organisation"],"run_id":service.ids["run"]}
     try:
-        service.ok("outbox.consumer.register",dict(S,id=CONSUMER,consumer_key="fixture-dispatch",critical=True,state="ACTIVE"))
+        if task!="6.3":service.ok("outbox.consumer.register",dict(S,id=CONSUMER,consumer_key="fixture-dispatch",critical=True,state="ACTIVE"))
         {"6.1":suite61,"6.2":suite62,"6.3":suite63,"6.4":suite64}[task](service)
         observations={"scope":"task-component","task":task,"assertion_ids":IDS,"failed_ids":FAILED,"service_operations":OBS,
             "postgresql_version":sql("SHOW server_version;"),"transport":"actual-signed-HTTPS","full_case_status":"INCOMPLETE"}
