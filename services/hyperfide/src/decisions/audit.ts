@@ -48,16 +48,20 @@ export function scope(value:unknown):Scope{
  const data=exact(value,['organisation_id','run_id']);return {organisation_id:uuid(data.organisation_id),run_id:uuid(data.run_id)};
 }
 export interface Invocation {operation:unknown;payload:{action:string;run_id:string};principal:{organisation_id:string;run_id:string;allowed_actions:string[]};signal:AbortSignal;guard(tx:QuerySession):Promise<void>}
-async function advisoryReadBarrier(client:QuerySession,s:Scope):Promise<void>{
+async function semanticDisposition(client:QuerySession,s:Scope,mode:'READ'|'WRITE'):Promise<void>{
  assertPrimaryTransaction(client);
- // Identity guards lock the run row; take the semantic barrier first so writers can update it without a lock inversion.
- await client.query('SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))',[s.organisation_id+':'+s.run_id+':finding-disposition']);
+ const moduleName='../storage/dispositions.js';let fence:unknown;
+ try{const api=await import(moduleName);fence=mode==='WRITE'?api.writeSemanticDisposition:api.readSemanticDisposition;}
+ catch{fail('DECISION_SEMANTIC_FENCE_UNAVAILABLE','Actual primary semantic disposition fence required');}
+ if(typeof fence!=='function')fail('DECISION_SEMANTIC_FENCE_UNAVAILABLE','Actual primary semantic disposition fence required');
+ await fence(client,s);
 }
+const READ_ACTIONS=new Set(['decision.audit.inspect','decision.spec.flags']);
 export async function withAuthority<T>(ctx:ComponentContext,s:Scope,action:string,work:(client:QuerySession)=>Promise<T>):Promise<T>{
  const invocation=(ctx as unknown as {invocation?:Invocation}).invocation;
  if(!invocation||typeof invocation.guard!=='function')fail('AUTH_REQUIRED','Authenticated invocation required');
  if(invocation.payload?.action!==action||invocation.payload.run_id!==invocation.principal.run_id||invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id||!invocation.principal.allowed_actions.includes(action))fail('AUTH_FORBIDDEN','Invocation does not permit this scope/action');
- return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=>{await advisoryReadBarrier(tx,s);await invocation.guard(tx);}},work);
+ return ctx.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:async tx=>{await semanticDisposition(tx,s,READ_ACTIONS.has(action)?'READ':'WRITE');await invocation.guard(tx);}},work);
 }
 export async function currentRevision(client:QuerySession,s:Scope,includeDocument=false):Promise<{revision:Revision;document?:Data;source_digest:string}>{
  const result=await client.query(`SELECT r.spec_revision_id::text,r.spec_generation::text,r.state_version::text,r.authority_epoch::text,r.policy_digest,s.source_digest${includeDocument?',s.document':''}
@@ -137,11 +141,11 @@ export function registerAdvisoryPurpose(ctx:ComponentContext,purpose:string,chec
  type Loader={load(tx:QuerySession,invocation:Invocation,value:unknown):Promise<{packet:Omit<Packet,'packet_hash'>;request:Data;rubric_version:string}>;current(tx:QuerySession,s:Scope,packet:Omit<Packet,'packet_hash'>,invocation:Invocation):Promise<RevisionVector>};
  const jobs=ctx.dependencies.require('20.4','decision.jobs.v1',(value:unknown):value is {registerPurpose(purpose:string,loader:Loader):void}=>!!value&&typeof value==='object'&&typeof(value as {registerPurpose?:unknown}).registerPurpose==='function');
  jobs.registerPurpose(purpose,{
-  load:async(tx,invocation,value)=>{const s=scope({organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id});await advisoryReadBarrier(tx,s);await invocation.guard(tx);
+  load:async(tx,invocation,value)=>{const s=scope({organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id});await semanticDisposition(tx,s,'READ');await invocation.guard(tx);
    const ref=exact(value,['packet_id']),packet=await loadPacket(tx,s,uuid(ref.packet_id));
    if(packet.purpose!==purpose)fail('DECISION_PURPOSE_MISMATCH','Job purpose differs from server packet');if(check)await check(tx,s,packet,invocation);
    const {questions,...state}=packet.state,{packet_hash,...body}=packet;void packet_hash;return {packet:body,request:{state,questions:obj(questions)},rubric_version:'hyperfide.'+purpose+'.v1'};},
-  current:async(tx,s,packet,invocation)=>{await advisoryReadBarrier(tx,s);await invocation.guard(tx);if(invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id)fail('AUTH_FORBIDDEN','Current job scope differs from verified invocation');const fresh=await loadPacket(tx,s,packet.id);if(check)await check(tx,s,fresh,invocation);return fresh.revision;}
+  current:async(tx,s,packet,invocation)=>{await semanticDisposition(tx,s,'READ');await invocation.guard(tx);if(invocation.principal.organisation_id!==s.organisation_id||invocation.principal.run_id!==s.run_id)fail('AUTH_FORBIDDEN','Current job scope differs from verified invocation');const fresh=await loadPacket(tx,s,packet.id);if(check)await check(tx,s,fresh,invocation);return fresh.revision;}
  });
 }
 export function answers(value:unknown):Data{

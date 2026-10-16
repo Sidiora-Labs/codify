@@ -12,6 +12,7 @@
     "audit.packet-primary",
     "audit.common-packet-hash",
     "audit.append-real-database",
+    "audit.semantic-write-preserves-business-pins",
     "audit.replay-idempotent",
     "audit.replay-conflict",
     "audit.inspect-complete",
@@ -160,13 +161,13 @@
     },
     {
       "path": "services/hyperfide/dist/decisions/audit.js",
-      "sha256": "d80e50365030941599f4db7864beac4530ae7d026f72b6f1b76acaed2d7413db",
-      "size": 23007
+      "sha256": "9c9c34004d9a7977baf87f0e11df8dd670d06feee9ac6a397f5366c181161fcb",
+      "size": 23403
     },
     {
       "path": "services/hyperfide/dist/decisions/audit.js.map",
-      "sha256": "d29a0b1bf42958c1b100c91a700f11ec9b97a5fb00ce547796bba6c493be111e",
-      "size": 22081
+      "sha256": "3181c7b3203de6fa6c2865865c602d31479227011b54331020625dd2ad3381bb",
+      "size": 22548
     },
     {
       "path": "services/hyperfide/dist/decisions/ranking.d.ts",
@@ -375,8 +376,8 @@
     },
     {
       "path": "services/hyperfide/src/decisions/audit.ts",
-      "sha256": "c3cc2fee4d6b5f424fb1e43d0180753c6284f3826a69650b36b7a667a246449d",
-      "size": 22113
+      "sha256": "294a202e49b6415b2205f966f529bc7a6212b01c69a7db63a2993f206b694d4d",
+      "size": 22448
     },
     {
       "path": "services/hyperfide/src/decisions/ranking.ts",
@@ -440,8 +441,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/21_4.py",
-      "sha256": "b2f6ece66c8868c784b7ba8e6a77a4223841d42878afc071e654122c5a6b5638",
-      "size": 42193
+      "sha256": "f34c0eeabd696f94ea8a582fd6a13a9c50763975472296b384836884f8fae0f5",
+      "size": 43994
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_1.py",
@@ -465,8 +466,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/21.4.json",
-      "sha256": "2eacaf061671c3684ee241f155939f9a453541d46c72242beee1f23f572e10c3",
-      "size": 2225
+      "sha256": "d21a194606371d2779cfc7ec5b3fe48a27d5a3dac3da86efe71daf8330475a94",
+      "size": 2277
     }
   ],
   "resources": [

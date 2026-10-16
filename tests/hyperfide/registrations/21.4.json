@@ -12,6 +12,7 @@
     "audit.packet-primary",
     "audit.common-packet-hash",
     "audit.append-real-database",
+    "audit.semantic-write-preserves-business-pins",
     "audit.replay-idempotent",
     "audit.replay-conflict",
     "audit.inspect-complete",
