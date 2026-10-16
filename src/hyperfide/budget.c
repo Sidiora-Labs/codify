@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <sched.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -194,9 +195,20 @@ static int process_credentials(pid_t pid,uid_t uid,gid_t gid){
  if(ferror(file))ok=0;
  free(line);fclose(file);return ok&&checked==63;
 }
+static int quiescent(const HfBudgetHandle *h){
+ char procs[65536],events[4096];
+ if(!pinned(h,1)||read_at(h->scope_fd,"cgroup.procs",procs,sizeof procs)!=1||*procs||read_at(h->scope_fd,"cgroup.events",events,sizeof events)!=1)return 0;
+ const char *at=strstr(events,"populated ");return at&&(at==events||at[-1]=='\n')&&at[10]=='0'&&(at[11]==0||at[11]=='\n');
+}
 int hf_budget_attach(HfBudgetHandle *h,const HfProcessIdentity *expected){
  if(!h||!expected)return HF_BUDGET_ERROR;
- if(h->status!=HF_BUDGET_READY||h->child_attached||!limits_current(h))return state(h,HF_BUDGET_ERROR,"BUDGET_ATTACHMENT_NOT_ADMITTED");
+ if(h->status!=HF_BUDGET_READY||!limits_current(h))return state(h,HF_BUDGET_ERROR,"BUDGET_ATTACHMENT_NOT_ADMITTED");
+ /* Sequential fixed phases share the charge only after the previous child
+  * is absent and the complete owned cgroup is quiescent. PID reuse refuses. */
+ if(h->child_attached){
+  errno=0;if(kill(h->attached.pid,0)!=-1||errno!=ESRCH||!quiescent(h))return state(h,HF_BUDGET_ERROR,"PREVIOUS_PHASE_NOT_QUIESCENT");
+  h->child_attached=0;memset(&h->attached,0,sizeof h->attached);
+ }
  HfProcessIdentity actual,current;if(expected->pid<=1||expected->uid!=h->slot_uid||!hf_process_matches(expected,&actual)||actual.ppid!=getpid()||actual.uid!=h->slot_uid||!process_credentials(actual.pid,h->slot_uid,h->slot_gid)||!hf_process_identity(getpid(),&current)||strcmp(current.os_boot_id,h->kernel_boot_id)||strcmp(actual.os_boot_id,h->kernel_boot_id)||actual.state=='Z'||actual.state=='X')return state(h,HF_BUDGET_ERROR,"CHILD_KERNEL_IDENTITY_MISMATCH");
  char pid[32];snprintf(pid,sizeof pid,"%ld\n",(long)actual.pid);if(!write_at(h->scope_fd,"cgroup.procs",pid)||!pinned(h,1)||!hf_process_matches(expected,&actual)||!member(h,actual.pid))return state(h,HF_BUDGET_ERROR,"CHILD_CGROUP_ATTACHMENT_UNCERTAIN");
  h->attached=actual;h->child_attached=1;return state(h,HF_BUDGET_READY,"CHILD_CGROUP_VERIFIED");
@@ -213,7 +225,7 @@ int hf_budget_observe(const HfBudgetHandle *h,FILE *out){
 }
 int hf_budget_release(HfBudgetHandle *h){
  if(!h)return HF_BUDGET_ERROR;
- if(h->scope_fd>=0){if(!pinned(h,1))return state(h,HF_BUDGET_ERROR,"CGROUP_RELEASE_IDENTITY_CHANGED");char procs[65536],events[4096];if(read_at(h->scope_fd,"cgroup.procs",procs,sizeof procs)!=1||*procs||read_at(h->scope_fd,"cgroup.events",events,sizeof events)!=1||!word(events,"populated")||!strstr(events,"populated 0\n"))return state(h,HF_BUDGET_ERROR,"CGROUP_RELEASE_NOT_QUIESCENT");
+ if(h->scope_fd>=0){if(!pinned(h,1))return state(h,HF_BUDGET_ERROR,"CGROUP_RELEASE_IDENTITY_CHANGED");if(!quiescent(h))return state(h,HF_BUDGET_ERROR,"CGROUP_RELEASE_NOT_QUIESCENT");
   if(unlinkat(h->root_fd,leaf(h),AT_REMOVEDIR))return state(h,HF_BUDGET_ERROR,"CGROUP_RELEASE_UNCERTAIN");
   struct stat s;if(!fstatat(h->root_fd,leaf(h),&s,AT_SYMLINK_NOFOLLOW)||errno!=ENOENT)return state(h,HF_BUDGET_ERROR,"CGROUP_REMOVAL_UNCONFIRMED");close(h->scope_fd);h->scope_fd=-1;}
  if(h->scope_fd<0&&h->root_fd>=0&&*h->cgroup_path&&h->scope_ino==0){struct stat existing;if(!fstatat(h->root_fd,leaf(h),&existing,AT_SYMLINK_NOFOLLOW)||errno!=ENOENT)return state(h,HF_BUDGET_ERROR,"CGROUP_CREATION_CUSTODY_UNCERTAIN");}

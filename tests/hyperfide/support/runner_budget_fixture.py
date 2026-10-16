@@ -62,7 +62,7 @@ int main(int argc,char **argv){
  if(!hf_private_read(argv[2],65536,&charge,&length))return 3;
  HfBudgetHandle h;int prepared=hf_budget_prepare(argv[1],charge,&h);free(charge);
  printf("{\"prepare_code\":%d,\"prepare\":",prepared);hf_budget_observe(&h,stdout);
- int attached=-2;pid_t child=-1;int control[2]={-1,-1},ready[2]={-1,-1};int waited=0,oom=0,live_release=-2;
+ int attached=-2;pid_t child=-1;int control[2]={-1,-1},ready[2]={-1,-1};int waited=0,oom=0,live_release=-2,live_reattach=-2;
  if(prepared==HF_BUDGET_READY&&strcmp(argv[3],"prepare")){
   if(prctl(PR_SET_CHILD_SUBREAPER,1,0,0,0)||pipe(control)||pipe(ready))return 4;
   child=fork();
@@ -72,10 +72,11 @@ int main(int argc,char **argv){
   if(read(ready[0],&byte,1)==1&&byte=='R'&&hf_process_identity(child,&identity)){
    if(!strcmp(argv[3],"wrong-start"))identity.start_time++;
    attached=hf_budget_attach(&h,&identity);
-   if(attached==HF_BUDGET_READY){byte='G';if(write(control[1],&byte,1)!=1)return 6;wait_enforcement(&h,argv[3]);}
+   if(attached==HF_BUDGET_READY){byte='G';if(write(control[1],&byte,1)!=1)return 6;if(!strcmp(argv[3],"cpu")||!strcmp(argv[3],"memory"))wait_enforcement(&h,argv[3]);}
   }
   close(ready[0]);close(control[1]);
  }
+ if(attached==HF_BUDGET_READY&&!strcmp(argv[3],"phase-live")){HfProcessIdentity same;if(hf_process_identity(child,&same))live_reattach=hf_budget_attach(&h,&same);}
  if(attached==HF_BUDGET_READY&&!strcmp(argv[3],"cpu"))live_release=hf_budget_release(&h);
  printf(",\"attach_code\":%d,\"live_release_code\":%d,\"during\":",attached,live_release);hf_budget_observe(&h,stdout);
  fputs(",\"cpu_stat\":",stdout);measured(h.scope_fd,"cpu.stat");
@@ -85,6 +86,16 @@ int main(int argc,char **argv){
   if(kill(child,SIGKILL)&&errno!=ESRCH)return 8;
   for(;;){int status=0;pid_t pid=waitpid(-1,&status,0);if(pid<0){if(errno==EINTR)continue;if(errno!=ECHILD)return 9;break;}waited++;if(WIFSIGNALED(status)&&WTERMSIG(status)==SIGKILL)oom++;}
  }
+ int second_attach=-2;
+ if(prepared==HF_BUDGET_READY&&!strcmp(argv[3],"phases")){
+  if(pipe(control)||pipe(ready))return 10;
+  child=fork();if(child==0){close(control[1]);close(ready[0]);run_child(&h,ready[1],control[0],"hold");_exit(98);}
+  if(child<0)return 11;close(control[0]);close(ready[1]);char byte=0;HfProcessIdentity identity;
+  if(read(ready[0],&byte,1)==1&&byte=='R'&&hf_process_identity(child,&identity)){second_attach=hf_budget_attach(&h,&identity);if(second_attach==HF_BUDGET_READY){byte='G';if(write(control[1],&byte,1)!=1)return 12;}}
+  close(ready[0]);close(control[1]);if(kill(-child,SIGKILL)&&errno!=ESRCH)return 13;if(kill(child,SIGKILL)&&errno!=ESRCH)return 14;
+  for(;;){int status=0;pid_t pid=waitpid(-1,&status,0);if(pid<0){if(errno==EINTR)continue;if(errno!=ECHILD)return 15;break;}waited++;}
+ }
+ printf(",\"second_attach_code\":%d,\"live_reattach_code\":%d",second_attach,live_reattach);
  int released=hf_budget_release(&h);
  printf(",\"release_code\":%d,\"waited_children\":%d,\"sigkill_observations\":%d,\"authority\":\"NONE\",\"signed_charge_qualification\":\"NOT_EVALUATED\"}\n",released,waited,oom);
  return 0;
@@ -171,7 +182,7 @@ def run():
         if not capability["available"]:
             return {"scope":"kernel-budget-primitive","observations":observations,"kernel_enforcement":"UNAVAILABLE","capability":capability,"native_claim_integration":"NOT_QUALIFIED","signed_charge_authentication":"NOT_EVALUATED"}
         no_new_privs=next(line.split()[1] for line in Path("/proc/self/status").read_text().splitlines() if line.startswith("NoNewPrivs:"))
-        modes=("wrong-start","extra-group",*(("no-new-privs",) if no_new_privs=="0" else ()),"cpu","memory")
+        modes=("wrong-start","extra-group",*(("no-new-privs",) if no_new_privs=="0" else ()),"phase-live","phases","cpu","memory")
         if no_new_privs!="0":observations.append({"id":"budget.no-new-privs-refusal","observed":False,"reason":"INHERITED_KERNEL_NO_NEW_PRIVS_CANNOT_BE_UNSET"})
         for mode in modes:
             fixture.charge["charge"]["charge_id"]=uid()
@@ -180,6 +191,10 @@ def run():
             check(result["release_code"]==1,"Fresh charge cgroup removal not confirmed")
             if mode in ("wrong-start","extra-group","no-new-privs"):
                 check(result["attach_code"]==-1 and result["during"]["process"] is None,"Invalid kernel identity or privilege state attached: "+mode+" "+json.dumps(result))
+            elif mode=="phase-live":
+                check(result["attach_code"]==1 and result["live_reattach_code"]==-1,"A live prior phase permitted another attachment")
+            elif mode=="phases":
+                check(result["attach_code"]==1 and result["second_attach_code"]==1 and result["waited_children"]==2,"Sequential actual children could not share the unchanged quiescent charge")
             else:
                 check(result["attach_code"]==1,"Actual gated child did not attach")
                 if mode=="cpu":check(result["live_release_code"]==-1,"Populated actual cgroup released while child tree lived")
