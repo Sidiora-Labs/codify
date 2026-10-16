@@ -454,20 +454,61 @@ async function apply(root:FileHandle,m:NamesManifest,signal:AbortSignal):Promise
   return {state:'APPLIED',migration_id:m.migration_id,manifest_digest:m.digest,copied:m.files.length,legacy_inputs_preserved:true};
  });
 }
+// Rollback moves files into a durable private quarantine; it never unlinks user bytes.
+// Every move is journalled before rename, so a crash or an uncooperative writer remains recoverable.
+async function quarantineContained(root:FileHandle,relative:string,targetRelative:string):Promise<void>{
+ const sourceParent=path.posix.dirname(relative),targetParent=path.posix.dirname(targetRelative);
+ const source=await openDirectory(root,sourceParent==='.'?'':sourceParent),target=await openDirectory(root,targetParent,true);
+ try{
+  const destination='/proc/self/fd/'+target.fd+'/'+path.posix.basename(targetRelative);
+  const reservation=await fs.open(destination,F.O_WRONLY|F.O_CREAT|F.O_EXCL|F.O_NOFOLLOW,0o600);
+  await reservation.close();
+  await fs.rename('/proc/self/fd/'+source.fd+'/'+path.posix.basename(relative),destination);
+  const file=await fs.open(destination,F.O_RDONLY|F.O_NOFOLLOW|F.O_NONBLOCK);
+  try{await file.sync();}finally{await file.close();}
+  await target.sync();await source.sync();
+ }finally{await source.close();await target.close();}
+}
 async function rollback(root:FileHandle,m:NamesManifest):Promise<unknown>{
  return locked(root,async()=>{
   const base='.hyperfide/migrations/'+m.migration_id,recorded=await json(root,base+'/manifest.json');
   if(!recorded||manifest(recorded).digest!==m.digest)fail('MIGRATION_CONFLICT','No matching durable migration');
-  for(const item of m.files){
+  const previous=await json(root,base+'/state.json') as {state?:string}|null;
+  if(previous?.state==='ROLLED_BACK')return {state:'ROLLED_BACK',migration_id:m.migration_id,legacy_inputs_preserved:true,backups_retained:true,quarantine_retained:true};
+  if(previous?.state==='ROLLING_BACK')fail('ROLLBACK_REQUIRES_RECOVERY','Prior rollback journal requires explicit recovery; quarantined bytes remain retained');
+  for(const [index,item] of m.files.entries()){
+   const source=await readContained(root,item.from),backup=await readContained(root,base+'/backups/'+index+'.bin');
+   if(!source||contentDigest(source.bytes)!==item.digest||source.bytes.length!==item.size||source.mode!==item.mode||
+      !backup||contentDigest(backup.bytes)!==item.digest||backup.bytes.length!==item.size)
+    fail('ROLLBACK_SOURCE_UNAVAILABLE','Exact legacy inputs and durable backups are required before rollback');
    const destination=await readContained(root,item.to);
-   if(destination&&contentDigest(destination.bytes)!==item.digest)fail('NAME_CONFLICT','Rollback would remove a user-modified canonical file');
+   if(destination&&(contentDigest(destination.bytes)!==item.digest||destination.bytes.length!==item.size||destination.mode!==item.mode))
+    fail('NAME_CONFLICT','Rollback would remove a user-modified canonical file');
   }
-  await writeJSON(root,base+'/state.json',{state:'ROLLING_BACK',manifest_digest:m.digest});
-  for(const item of m.files)if(await readContained(root,item.to))await removeContained(root,item.to);
-  const current=await json(root,'.hyperfide/names.json') as {migration_id?:string;manifest_digest?:string}|null;
-  if(current?.migration_id===m.migration_id&&current.manifest_digest===m.digest)await removeContained(root,'.hyperfide/names.json');
-  await writeJSON(root,base+'/state.json',{state:'ROLLED_BACK',manifest_digest:m.digest});
-  return {state:'ROLLED_BACK',migration_id:m.migration_id,legacy_inputs_preserved:true,backups_retained:true};
+  const journal:{state:string;manifest_digest:string;moves:{from:string;to:string;digest:string;state:string}[]}={state:'ROLLING_BACK',manifest_digest:m.digest,moves:[]};
+  await writeJSON(root,base+'/state.json',journal);
+  for(const [index,item] of m.files.entries()){
+   if(!await readContained(root,item.to))continue;
+   const target=base+'/rollback/'+index+'-'+createHash('sha256').update(String(process.pid)+':'+process.hrtime.bigint()).digest('hex')+'.bin';
+   const move={from:item.to,to:target,digest:item.digest,state:'PLANNED'};journal.moves.push(move);await writeJSON(root,base+'/state.json',journal);
+   await quarantineContained(root,item.to,target);
+   const saved=await readContained(root,target);move.state='RETAINED';await writeJSON(root,base+'/state.json',journal);
+   if(!saved||contentDigest(saved.bytes)!==item.digest||saved.bytes.length!==item.size||saved.mode!==item.mode)
+    fail('ROLLBACK_REQUIRES_RECOVERY','Canonical file changed during rollback; moved bytes remain in the durable quarantine');
+  }
+  const current=await readContained(root,'.hyperfide/names.json');
+  if(current){
+   const descriptor=JSON.parse(current.bytes.toString('utf8')) as {migration_id?:string;manifest_digest?:string};
+   if(descriptor.migration_id===m.migration_id&&descriptor.manifest_digest===m.digest){
+    const target=base+'/rollback/names-'+createHash('sha256').update(String(process.hrtime.bigint())).digest('hex')+'.json';
+    const move={from:'.hyperfide/names.json',to:target,digest:contentDigest(current.bytes),state:'PLANNED'};journal.moves.push(move);await writeJSON(root,base+'/state.json',journal);
+    await quarantineContained(root,'.hyperfide/names.json',target);
+    const saved=await readContained(root,target);move.state='RETAINED';await writeJSON(root,base+'/state.json',journal);
+    if(!saved||contentDigest(saved.bytes)!==move.digest)fail('ROLLBACK_REQUIRES_RECOVERY','Portable descriptor changed; quarantined bytes remain retained');
+   }
+  }
+  journal.state='ROLLED_BACK';await writeJSON(root,base+'/state.json',journal);
+  return {state:'ROLLED_BACK',migration_id:m.migration_id,legacy_inputs_preserved:true,backups_retained:true,quarantine_retained:true};
  });
 }
 export function createComponent(context:ComponentContext):Component{

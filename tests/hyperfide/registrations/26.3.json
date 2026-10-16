@@ -46,7 +46,12 @@
     "names.plan.reject-both-configs",
     "names.apply.reject-drift",
     "names.apply.kernel-lock-exclusion",
-    "names.apply.kernel-lock-release"
+    "names.apply.kernel-lock-release",
+    "names.rollback.refuses-missing-backup",
+    "names.rollback.last-canonical-copy-preserved",
+    "names.rollback.refuses-missing-legacy",
+    "names.rollback.missing-legacy-keeps-canonical",
+    "names.rollback.retains-actual-quarantine"
   ],
   "argv": [
     "python3",
