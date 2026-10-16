@@ -22,7 +22,7 @@ IDS=[
  "decision.transport.unqualified","decision.transport.wrong-model","decision.transport.wrong-answer",
  "decision.transport.duplicate-json","decision.transport.nonfinite-json","decision.transport.failed-usage",
  "decision.transport.http-auth","decision.transport.http-overload-one-send","decision.transport.timeout",
- "decision.configuration.legacy-preserved",
+ "decision.configuration.legacy-preserved","decision.transport.escaped-credential","decision.prepare.extensions-reserved",
 ]
 ACTIONS=["decision.routes.describe","decision.adapter.prepare","decision.adapter.invoke","decision.configuration.migrate"]
 
@@ -79,7 +79,9 @@ class HTTPFixture:
     if outer.mode=="wrong-model":response["model"]="unqualified-model-version"
     if outer.mode=="wrong-answer":response["answers"]={"other":{"type":"noul","noul":.7}}
     if outer.mode=="failed-usage":response["usage"]["input_tokens"]=-1
+    if outer.mode=="escaped-credential":response["secret_note"]="synthetic-fixture-credential"
     encoded=json.dumps(response).encode()
+    if outer.mode=="escaped-credential":encoded=encoded.replace(b"synthetic",b"syntheti"+bytes([92])+b"u0063")
     if outer.mode=="duplicate-json":encoded=b'{"model":"span-02","model":"span-02","answers":{},"usage":{}}'
     if outer.mode=="nonfinite-json":encoded=b'{"model":"span-02","answers":{"urgent":{"type":"noul","noul":1e400}},"usage":{"input_tokens":1,"output_tokens":0}}'
     status=401 if outer.mode=="auth" else 503 if outer.mode=="overload" else 200
@@ -175,6 +177,19 @@ def run_checks(fixture,emit=True):
   value=success("decision.configuration.migrate",env={"CG_JEV_MODEL":"historical-model","CG_RECAP_DECIDE_MODEL":"historical-recap"})
   expect(value["legacy_jev"]["model"]=="historical-model" and value["legacy_recap"]["model"]=="historical-recap" and value["model_upgrade_automatic"] is False,"legacy configuration silently upgraded")
  check(IDS[27],legacy)
+ check(IDS[28],lambda:negative("escaped-credential","DECISION_RESPONSE"))
+ def reserved():
+  script="""import {prepare} from './services/hyperfide/dist/decisions/adapters.js';
+const request={state:'synthetic',questions:{q:{type:'noul',instructions:'question'}}};
+for(const extensions of [{body:{model:'forged-model'}},{body:{state:'forged-state'}},{body:{questions:{}}},{headers:{Authorization:'forged'}}]){
+let rejected=false;try{prepare('span-native',request,extensions);}catch(e){rejected=e.code==='DECISION_SCHEMA';}
+if(!rejected)process.exit(1);
+}
+console.log('reserved fields rejected');
+"""
+  process=subprocess.run(["node","--input-type=module","-e",script],cwd=ROOT,text=True,capture_output=True,timeout=10)
+  expect(process.returncode==0 and "reserved fields rejected"in process.stdout,"extension overwrote validated fields")
+ check(IDS[29],reserved)
  return failures
 
 def main():

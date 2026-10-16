@@ -34,7 +34,9 @@
     "decision.transport.http-auth",
     "decision.transport.http-overload-one-send",
     "decision.transport.timeout",
-    "decision.configuration.legacy-preserved"
+    "decision.configuration.legacy-preserved",
+    "decision.transport.escaped-credential",
+    "decision.prepare.extensions-reserved"
   ],
   "argv": [
     "python3",

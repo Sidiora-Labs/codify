@@ -162,6 +162,8 @@ export function validateRequest(input: unknown, profile: RouteProfile, enabled: 
 export interface PreparedRequest { route: RouteProfile; body: Record<string,unknown>; headers: Record<string,string>; request_hash:string; source_request:DecisionRequest }
 const prepared = new WeakSet<object>();
 export function prepare(id: unknown, input: unknown, extensions: {types?:readonly QuestionType[];body?:Record<string,unknown>;headers?:Record<string,string>} = {}): PreparedRequest {
+  if(extensions.body)exact(extensions.body,['images','assets','reasoning']);
+  if(extensions.headers)exact(extensions.headers,['TypeSafe-Danger-Zone-Images','TypeSafe-Danger-Zone-Long-Context']);
   const profile=route(id), source=validateRequest(input,profile,extensions.types);
   const body={model:profile.model,...source,...extensions.body};
   const serialized=canonical(body);
@@ -219,6 +221,12 @@ export async function invokePrepared(request:PreparedRequest,env:Readonly<NodeJS
     let raw:string;try{raw=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks));}catch{return fail('DECISION_RESPONSE','Provider returned invalid UTF-8');}
     if(raw.includes(token!))fail('DECISION_RESPONSE','Provider response contains credential material');
     const parsed=record(strictJson(raw),'provider response');
+    const containsCredential=(value:unknown):boolean=>{
+      if(typeof value==='string')return value.includes(token!);
+      if(Array.isArray(value))return value.some(containsCredential);
+      return object(value)&&Object.entries(value).some(([key,item])=>key.includes(token!)||containsCredential(item));
+    };
+    if(containsCredential(parsed))fail('DECISION_RESPONSE','Decoded provider response contains credential material');
     if(typeof parsed.model!=='string'||!config.returned_models.includes(parsed.model))fail('DECISION_MODEL_CHANGED','Returned model is not independently qualified');
     record(parsed.answers,'provider answers');record(parsed.usage,'provider usage');
     const answers=parsed.answers as Record<string,unknown>;
@@ -236,7 +244,7 @@ export async function invokePrepared(request:PreparedRequest,env:Readonly<NodeJS
     if(error instanceof DecisionError)throw error;
     throw new DecisionError(controller.signal.aborted?'DECISION_TIMEOUT':'DECISION_TRANSPORT',
       controller.signal.aborted?'Decision transport cancelled or expired':'Decision transport failed',!controller.signal.aborted);
-  } finally {clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
+  } finally {controller.abort();clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
 }
 function legacyEndpoint(value:string|undefined):string|null {
   if(!value)return null;
