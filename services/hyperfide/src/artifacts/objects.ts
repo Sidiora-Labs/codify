@@ -2,14 +2,16 @@ import {createHash,createHmac} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
-import {getPool} from '../storage/schema.js';
+import type {PrimaryTransaction,QuerySession} from '../storage/transactions.js';
 
-const MAX_OBJECT=256*1024,MAX_MANIFEST=900*1024,MAX_CHUNKS=4096;
+const MAX_OBJECT=256*1024,MAX_MANIFEST=512*1024,MAX_CHUNKS=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^sha256:[0-9a-f]{64}$/;
 const BACKEND='s3-v1';
 export const ARTIFACT_ACTIONS=Object.freeze(['artifact.object.put','artifact.object.read','artifact.object.inspect','artifact.object.reconcile','artifact.manifest.commit','artifact.manifest.read','artifact.pending.list'] as const);
 type Scope={organisation_id:string;run_id:string};
+type Invocation={principal:{organisation_id:string;run_id:string;role:string};guard:(tx:QuerySession)=>Promise<void>;signal:AbortSignal};
+type RequestContext=ComponentContext&{invocation?:Invocation};
 type Retention={retention_class:string;retention_until:string|null;retention_hold:boolean};
 type Artifact=Scope&Retention&{id:string;digest:string;size_bytes:string;storage_backend:string;storage_key:string;status:string;state_version:string;completed_at:Date|null};
 type Chunk={sequence:number;artifact_id:string;digest:string;size_bytes:string;offset_bytes:string};
@@ -122,16 +124,30 @@ function envelope(row:Artifact,availability:'VERIFIED'|'ABSENT'|'UNKNOWN',extra:
 }
 export class ArtifactStore{
  private configValue:Config|undefined;
- constructor(private readonly context:ComponentContext){}
+ constructor(private readonly context:RequestContext){}
  private config():Config{return this.configValue??=configuration(this.context.env);}
- private pool():pg.Pool{return getPool(this.context.env);}
  private scope(value:Record<string,unknown>):Scope{
  const scope={organisation_id:uuid(value.organisation_id),run_id:uuid(value.run_id)},config=this.config();
  if(scope.organisation_id!==config.organisation||!config.runs.has(scope.run_id))fail('ARTIFACT_SCOPE_DENIED','Artifact scope is not permitted');
+ const invocation=this.context.invocation;
+ if(invocation){
+ if(typeof invocation.guard!=='function'||!invocation.principal||invocation.principal.organisation_id!==scope.organisation_id||invocation.principal.run_id!==scope.run_id)fail('ARTIFACT_SCOPE_DENIED','Verified caller scope differs from artifact scope');
+ if(invocation.signal.aborted)fail('AUTH_REQUIRED','Artifact caller authority is no longer active');
+ }else fail('AUTH_REQUIRED','Artifact operation requires verified caller authority');
  return scope;
  }
- private backend():S3{return new S3(this.config(),this.context.signal);}
- private async load(scope:Scope,id:string,client:pg.Pool|pg.PoolClient=this.pool()):Promise<Artifact>{
+ private backend():S3{return new S3(this.config(),AbortSignal.any([this.context.signal,this.context.invocation?.signal??this.context.signal]));}
+ private async transaction<T>(operation:(client:PrimaryTransaction)=>Promise<T>):Promise<T>{
+ const invocation=this.context.invocation;
+ if(!invocation)fail('AUTH_REQUIRED','Artifact operation requires verified caller authority');
+ return this.context.resources.gateway.withPrimaryTransaction({timeoutMs:10000,maxRetries:2,signal:invocation.signal,guard:tx=>invocation.guard(tx)},async tx=>{
+ const result=await operation(tx);
+ await invocation.guard(tx);
+ return result;
+ });
+ }
+ private async load(scope:Scope,id:string,client?:QuerySession):Promise<Artifact>{
+ if(!client)return this.transaction(tx=>this.load(scope,id,tx));
  const result=await client.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[scope.organisation_id,scope.run_id,id]);
  const row=result.rows[0];if(!row)fail('ARTIFACT_NOT_FOUND','Artifact is not registered in this scope');
  if(row.storage_backend!==BACKEND||(row.storage_key!==keyOf(scope,row.digest)&&row.storage_key!==keyOf(scope,row.digest,true)))fail('ARTIFACT_BINDING_CONFLICT','Artifact backend binding differs');
@@ -142,13 +158,16 @@ export class ArtifactStore{
  if(!['PENDING','COMPLETE'].includes(row.status))fail('ARTIFACT_NOT_COMPLETE','Artifact is unavailable');
  }
  private async intent(scope:Scope,value:string,size:string,policy:Retention,manifest:boolean):Promise<{row:Artifact;created:boolean}>{
- const result=await this.pool().query<Artifact>('INSERT INTO hyperfide.artifacts(organisation_id,run_id,digest,size_bytes,storage_backend,storage_key,retention_class,retention_until,retention_hold) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(organisation_id,run_id,digest) DO NOTHING RETURNING '+selected,[scope.organisation_id,scope.run_id,value,size,BACKEND,keyOf(scope,value,manifest),policy.retention_class,policy.retention_until,policy.retention_hold]);
+ return this.transaction(async client=>{
+ const result=await client.query<Artifact>('INSERT INTO hyperfide.artifacts(organisation_id,run_id,digest,size_bytes,storage_backend,storage_key,retention_class,retention_until,retention_hold) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(organisation_id,run_id,digest) DO NOTHING RETURNING '+selected,[scope.organisation_id,scope.run_id,value,size,BACKEND,keyOf(scope,value,manifest),policy.retention_class,policy.retention_until,policy.retention_hold]);
  const created=!!result.rows[0];
- const row=result.rows[0]??(await this.pool().query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[scope.organisation_id,scope.run_id,value])).rows[0];
+ const row=result.rows[0]??(await client.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[scope.organisation_id,scope.run_id,value])).rows[0];
  if(!row)fail('ARTIFACT_DATABASE_UNAVAILABLE','Artifact upload intent could not be established');
  this.same(row,size,policy,manifest);return {row,created};
+ });
  }
- private async complete(row:Artifact,client:pg.Pool|pg.PoolClient=this.pool()):Promise<Artifact>{
+ private async complete(row:Artifact,client?:PrimaryTransaction):Promise<Artifact>{
+ if(!client)return this.transaction(tx=>this.complete(row,tx));
  const result=await client.query<Artifact>("UPDATE hyperfide.artifacts SET status='COMPLETE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND status='PENDING' RETURNING "+selected,[row.organisation_id,row.run_id,row.id]);
  const actual=result.rows[0]??await this.load(row,row.id,client);
  if(actual.status!=='COMPLETE')fail('ARTIFACT_NOT_COMPLETE','Artifact cannot become complete');
@@ -181,7 +200,7 @@ export class ArtifactStore{
  if(observation.availability!=='VERIFIED')return envelope(row,observation.availability);
  // Manifest promotion requires validated child references; generic reconciliation cannot bypass them.
  let current=row;
- const edgeCount=await this.pool().query<{count:string}>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[scope.organisation_id,scope.run_id,row.id]);
+ const edgeCount=await this.transaction(tx=>tx.query<{count:string}>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[scope.organisation_id,scope.run_id,row.id]));
  if(operation==='reconcile'&&row.status==='PENDING'){
  if(row.storage_key===keyOf(scope,row.digest,true)||edgeCount.rows[0]!.count!=='0')fail('ARTIFACT_NOT_COMPLETE','Resume manifest commit to validate chunk closure');
  current=await this.complete(row);
@@ -231,7 +250,8 @@ export class ArtifactStore{
  }
  if('sha256:'+hasher.digest('hex')!==manifest.content_digest)fail('ARTIFACT_INTEGRITY','Concatenated content checksum differs');
  }
- private async edges(scope:Scope,parent:string,client:pg.Pool|pg.PoolClient=this.pool()):Promise<Chunk[]>{
+ private async edges(scope:Scope,parent:string,client?:QuerySession):Promise<Chunk[]>{
+ if(!client)return this.transaction(tx=>this.edges(scope,parent,tx));
  const result=await client.query<{sequence:number;child_artifact_id:string;offset_bytes:string;size_bytes:string;digest:string}>('SELECT d.sequence,d.child_artifact_id,d.offset_bytes::text,d.size_bytes::text,a.digest FROM hyperfide.artifact_dependencies d JOIN hyperfide.artifacts a ON a.organisation_id=d.organisation_id AND a.run_id=d.run_id AND a.id=d.child_artifact_id WHERE d.organisation_id=$1 AND d.run_id=$2 AND d.parent_artifact_id=$3 ORDER BY d.sequence',[scope.organisation_id,scope.run_id,parent]);
  return result.rows.map(row=>({sequence:row.sequence,artifact_id:row.child_artifact_id,digest:row.digest,size_bytes:row.size_bytes,offset_bytes:row.offset_bytes}));
  }
@@ -243,9 +263,8 @@ export class ArtifactStore{
  await this.verifyChunks(scope,manifest);
  const stored=await this.store(scope,bytes,policy,true);
  if(stored.observation.availability!=='VERIFIED')return envelope(stored.row,stored.observation.availability);
- const client=await this.pool().connect();let row=stored.row;
- try{
- await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+ let row=stored.row;
+ row=await this.transaction(async client=>{
  const ids=[row.id,...manifest.chunks.map(chunk=>chunk.artifact_id)].sort();
  await client.query('SELECT id FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) ORDER BY id FOR UPDATE',[scope.organisation_id,scope.run_id,ids]);
  row=await this.load(scope,row.id,client);
@@ -257,22 +276,23 @@ export class ArtifactStore{
  for(const chunk of manifest.chunks){const child=await this.load(scope,chunk.artifact_id,client);if(child.status!=='COMPLETE'||child.digest!==chunk.digest||child.size_bytes!==chunk.size_bytes)fail('ARTIFACT_NOT_COMPLETE','A chunk changed before manifest completion');}
  row=await this.complete(row,client);
  }else fail('ARTIFACT_NOT_COMPLETE','Manifest is unavailable');
- await client.query('COMMIT');
- }catch(error){try{await client.query('ROLLBACK');}catch{/* Preserve unknown transaction outcome for explicit replay. */}throw error;}
- finally{client.release();}
+ return row;
+ });
  return envelope(row,'VERIFIED',{manifest_digest:row.digest,content_digest:manifest.content_digest,chunk_count:manifest.chunks.length});
  }
  private async pending(input:unknown):Promise<unknown>{
  const value=fields(input,scopeKeys,['limit','after_artifact_id']),scope=this.scope(value),limit=value.limit??100;
  if(typeof limit!=='number'||!Number.isInteger(limit)||limit<1||limit>1000)fail('ARTIFACT_INPUT_INVALID','Invalid inventory limit');
  const after=value.after_artifact_id===undefined?null:uuid(value.after_artifact_id);
- const rows=await this.pool().query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]);
+ const rows=await this.transaction(tx=>tx.query<Artifact>("SELECT "+selected+" FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND status='PENDING' AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4",[scope.organisation_id,scope.run_id,after,limit+1]));
  return {artifacts:rows.rows.slice(0,limit).map(publicArtifact),next_cursor:rows.rows.length>limit?rows.rows[limit-1]!.id:null,destructive_action:false,authority:'NONE',live_qualification:'NOT_EVALUATED'};
  }
- async invoke(action:string,input:unknown):Promise<unknown>{
+ async invoke(action:string,input:unknown,context?:ComponentContext):Promise<unknown>{
+ if(context&&context!==this.context)return new ArtifactStore(context as RequestContext).invoke(action,input);
+ if(!this.context.invocation)fail('AUTH_REQUIRED','Artifact operation requires verified caller authority');
  if(this.context.signal.aborted)fail('ARTIFACT_NOT_COMPLETE','Artifact service is shutting down');
  try{
- switch(action){
+ const result=await (async()=>{switch(action){
  case 'artifact.object.put':return await this.put(input);
  case 'artifact.object.read':return await this.object(input,'read');
  case 'artifact.object.inspect':return await this.object(input,'inspect');
@@ -281,13 +301,15 @@ export class ArtifactStore{
  case 'artifact.manifest.read':return await this.object(input,'manifest');
  case 'artifact.pending.list':return await this.pending(input);
  default:fail('ARTIFACT_INPUT_INVALID','Unknown artifact operation');
- }
+ }})();
+ if(this.context.invocation)await this.transaction(async()=>undefined);
+ return result;
  }catch(error){if(error instanceof FoundationError)throw error;fail('ARTIFACT_DATABASE_UNAVAILABLE','Artifact metadata operation failed; reconcile before retry');}
  }
  close():void{/* Shared PostgreSQL pool lifecycle belongs to the storage resource owner. */}
 }
 export function createArtifactStore(context:ComponentContext):ArtifactStore{return new ArtifactStore(context);}
 export function createComponent(context:ComponentContext):Component{
- const store=createArtifactStore(context),actions=Object.fromEntries(ARTIFACT_ACTIONS.map(action=>[action,(input:unknown)=>store.invoke(action,input)]));
- return {apiVersion:1,actions,close:()=>store.close()};
+ const store=createArtifactStore(context),actions=Object.fromEntries(ARTIFACT_ACTIONS.map(action=>[action,(input:unknown,invocationContext:ComponentContext)=>store.invoke(action,input,invocationContext)]));
+ return {apiVersion:1,actions,capabilities:{'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
 }
