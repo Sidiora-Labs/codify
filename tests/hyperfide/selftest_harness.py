@@ -40,6 +40,10 @@ ASSERTIONS = [
     "harness.source.output-equals-workspace", "harness.source.output-contains-probe",
     "harness.child.detached-pipe-timeout",
     "harness.source.git-bytecode-parity",
+    "harness.artifact.required-per-receipt",
+    "harness.artifact.old-snapshot-tamper",
+    "harness.artifact.logical-alias-forgery",
+    "harness.cleanup.immutable-absence-reference",
 ]
 
 PROBE = r"""import json
@@ -622,6 +626,27 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(list((fixture.root / "__pycache__").glob("helper.*.pyc")), "fixture did not exercise generated Git-untracked bytecode")
         helper.write_text("VALUE = False\n", encoding="utf-8")
         self.rejected(fixture.check(campaign))
+
+
+    def required_artifact_regression(self, method):
+        from test_required_artifact_receipts import RequiredArtifactReceiptTests
+        result = unittest.TestResult()
+        RequiredArtifactReceiptTests(method).run(result)
+        self.assertEqual(result.testsRun, 1)
+        self.assertFalse(result.skipped, "required artifact regression cannot skip")
+        self.assertTrue(result.wasSuccessful(), str(result.errors + result.failures))
+
+    def test_50_required_artifacts_per_receipt(self):
+        self.required_artifact_regression("test_two_cases_preserve_distinct_artifact_bytes")
+
+    def test_51_required_artifact_old_snapshot_tamper(self):
+        self.required_artifact_regression("test_tampered_old_snapshot_still_fails")
+
+    def test_52_required_artifact_logical_alias_forgery(self):
+        self.required_artifact_regression("test_alias_cannot_redirect_to_another_logical_artifact")
+
+    def test_53_cleanup_immutable_absence_reference(self):
+        self.required_artifact_regression("test_real_cleanup_reference_uses_immutable_absence_evidence")
 
 
 class InventoryResult(unittest.TextTestResult):
