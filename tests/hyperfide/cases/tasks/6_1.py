@@ -34,7 +34,7 @@ def target():
     p.mkdir(parents=True,exist_ok=True);return p
 def cleanup():
     resources=[];complete=True
-    for kind in ["database","process","directory"]:
+    for kind in ["database","role","process","directory"]:
         resources.append({"id":"hf-task-"+TASK+"-"+kind,"status":"unknown","observed_absent":False})
     try:
         descriptor=target()/"resource.json"
@@ -49,12 +49,17 @@ def cleanup():
             if Path("/proc/"+str(pid)).exists():os.kill(pid,signal.SIGKILL)
         sql('DROP DATABASE IF EXISTS "'+database()+'" WITH (FORCE)',True)
         absent=sql("SELECT count(*) FROM pg_database WHERE datname="+q(database()),True)=="0"
+        role=record.get("runtime_role")
+        if role:
+            expect(re.fullmatch(r"hf_ir_[a-f0-9]{32}",role),"Unexpected fixture runtime role")
+            sql('DROP ROLE IF EXISTS "'+role+'"',True)
+        role_absent=bool(role) and sql("SELECT count(*) FROM pg_roles WHERE rolname="+q(role),True)=="0"
         directory=record.get("directory")
         if directory:
             p=Path(directory)
             expect(p.parent==Path(tempfile.gettempdir()) and p.name.startswith("hyperfide-identity-"),"Unexpected fixture cleanup path")
             shutil.rmtree(p,ignore_errors=True)
-        observed=[absent,not pid or not Path("/proc/"+str(pid)).exists(),not directory or not Path(directory).exists()]
+        observed=[absent,role_absent,not pid or not Path("/proc/"+str(pid)).exists(),not directory or not Path(directory).exists()]
         for row,value in zip(resources,observed):
             row.update(status="deleted" if value else "unknown",observed_absent=value,evidence_artifact="events/resource-absence.json")
         complete=all(observed)
@@ -73,6 +78,10 @@ export function createComponent(ctx) {
  const g=ctx.dependencies.require('4.2','storage.transactions.v1',v=>typeof v?.withPrimaryTransaction==='function');
  const auth=(context,input,op)=>authorizedRun(g,context,input,['OPERATOR'],op);
  const actions={
+  'fixture.runtime-role':(input,context)=>auth(context,input,async tx=>{
+   const r=await tx.query("SELECT current_user AS role,rolsuper,rolcreatedb,rolcreaterole,has_table_privilege(current_user,'hyperfide.schema_migrations','INSERT,UPDATE,DELETE') AS migrations_mutable FROM pg_roles WHERE rolname=current_user");
+   return r.rows[0];
+  }),
   'fixture.atomic': (input,context)=>auth(context,input,async tx=>{
    await lockRun(tx,input.event);
    await tx.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.run_id]);
@@ -136,11 +145,19 @@ class Service(identity.IdentityFixture):
         self.include_instructions=TASK=="6.3" if include_instructions is None else include_instructions
         extras=["6.1","6.2","6.4"]
         if self.include_instructions:extras+=["2.1","2.4","3.1","3.2","5.1","5.2","5.4","7.2","7.3","6.3"]
-        super().__init__(extra_components=extras,extra_setup=self.prepare,database=database())
+        try:super().__init__(extra_components=extras,extra_setup=self.prepare,database=database())
+        except BaseException:
+            child=getattr(self,"child",None);pid=child.pid if child else None
+            stat=Path("/proc/"+str(pid)+"/stat") if pid else None
+            record={"database":getattr(self,"database",database()),"runtime_role":getattr(self,"runtime_role",None),
+                "directory":str(self.path) if hasattr(self,"path") else None,"pid":pid,
+                "start_time":stat.read_text().split()[21] if stat and stat.exists() else None,
+                "boot_id":Path("/proc/sys/kernel/random/boot_id").read_text().strip()}
+            (target()/"resource.json").write_text(json.dumps(record)+"\n")
+            raise
     def prepare(self,f):
         for name,version in [('0002-spec',2),('0003-hierarchy',3),('0005-scheduling',5),('0006-event-session-bindings',6),('0007-graph',7),('0032-execution-packets',32)]:
-            data=(ROOT/'services/hyperfide/migrations'/(name+'.sql')).read_bytes()
-            self.sql("BEGIN;"+data.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+","+q(name)+","+q(identity.sha(data))+");COMMIT;")
+            self.apply_migration(name)
         self.env['HF_SCHEDULER_DISPATCH_CONSUMER_ID']=CONSUMER
         self.env['HF_TEST_EXECUTION_CONTROLS']='1' if self.include_instructions else '0'
         self.runtime_root=self.path/"runtime";module=self.runtime_root/"services/hyperfide/dist"
@@ -154,7 +171,7 @@ class Service(identity.IdentityFixture):
         syntax=subprocess.run(["node","--check",str(module/"fixture.js")],capture_output=True,text=True)
         expect(syntax.returncode==0,"Trusted fixture module syntax failed: "+syntax.stderr[:1000])
         (module/"package.json").write_text('{"type":"module"}')
-        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash"]
+        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash","fixture.runtime-role"]
         fragment={"schema_version":1,"id":"fixture.events","task":"6.1","roles":["control"],"module":"fixture.js","entry":"createComponent",
             "api_version":1,"actions":actions,"requires":["4.2","6.1","6.2","6.4"]}
         if self.include_instructions:fragment["requires"].append("5.1")
@@ -165,10 +182,11 @@ class Service(identity.IdentityFixture):
             value=json.loads(path.read_text())
             if path==self.policy:value["allowed_actions"]=self.actions
             else:
-                for record in value["principals"]:record["allowed_actions"]=self.actions
+                for record in value["principals"]:
+                    record["allowed_actions"]=self.actions
+                    # Fixed fixture actions are trusted startup preconditions, seeded before the first HTTPS process.
+                    self.sql("UPDATE hyperfide.identity_principals SET allowed_actions=$2 WHERE credential_id=$1",[record["credential_id"],self.actions])
             path.write_text(json.dumps(value))
-        for role in ("CONTROL","PROVISIONER","DISPATCH"):
-            for prefix in ("HF_PG_","HYPERFIDE_PG_"):self.env[prefix+role+"_PRIMARY_DATABASE_URL"]=self.url
     def start(self):
         original=identity.ROOT
         try:
@@ -176,7 +194,7 @@ class Service(identity.IdentityFixture):
             super().start()
         finally:identity.ROOT=original
         pid=self.child.pid
-        record={"database":self.database,"directory":str(self.path),"pid":pid,
+        record={"database":self.database,"runtime_role":self.runtime_role,"directory":str(self.path),"pid":pid,
             "start_time":Path("/proc/"+str(pid)+"/stat").read_text().split()[21],
             "boot_id":Path("/proc/sys/kernel/random/boot_id").read_text().strip()}
         (target()/"resource.json").write_text(json.dumps(record)+"\n")
@@ -233,6 +251,11 @@ class Session:
 def suite61(s):
     check("outbox.real-service",lambda:expect(s.ok("outbox.describe")["global_cursor"] is False,"Global cursor was enabled"))
     check("outbox.module-copy-integrity",lambda:expect(s.module_equal,"Fixture changed actual compiled modules"))
+    def runtime_role():
+        actual=s.ok("fixture.runtime-role",S)
+        expect(actual["role"]==s.runtime_role and all(actual[key] is False for key in ["rolsuper","rolcreatedb","rolcreaterole","migrations_mutable"]),
+            "Actual HTTPS SQL handler retained migration/superuser credentials")
+    check("outbox.least-privilege-runtime",runtime_role)
     e=event(1001)
     check("outbox.enqueue-committed",lambda:expect(s.ok("outbox.enqueue",e)["obligations"]==1,"No actual obligation"))
     check("outbox.idempotent-replay",lambda:expect(s.ok("outbox.enqueue",e)["replayed"] is True,"Replay changed event"))
@@ -415,6 +438,29 @@ def control(s,mode,operation,expected=None):
     return s.ok("fixture.control",dict(S,control=value))
 def suite63(s):
     seed_native_attempt(s);s.enroll_runner();start=command(3001,"START")
+    actors={name:s.add_principal(name,role) for name,role in [("oldleader","LEADER"),("currentleader","LEADER"),("manager","FEATURE_MANAGER"),("othermanager","FEATURE_MANAGER")]}
+    def actor_call(name,action,value,component="6.3",expected=None):
+        status,response=s.invoke(action,value,component=component,key=name,credential=s.ids[name])
+        if expected:
+            expect(response.get("ok") is False and response.get("error",{}).get("code")==expected,"Unexpected hierarchy-bound refusal: "+str(response))
+        else:
+            expect(status==200 and response.get("ok"),"Actual hierarchy-bound operation failed: "+str(response))
+            return response["result"]
+    actor_call("oldleader","hierarchy.leader.acquire",{"idempotency_key":str(uuid.uuid4()),"expected_generation":"0","reason":"actual instruction boundary fixture"},component="3.1")
+    actor_call("currentleader","hierarchy.leader.acquire",{"idempotency_key":str(uuid.uuid4()),"expected_generation":"1","reason":"actual selected leader replacement"},component="3.1")
+    actor_call("currentleader","hierarchy.package.configure",{"idempotency_key":str(uuid.uuid4()),"leader_generation":"2","package_id":uid(6),"feature_key":"native-fixture","allocation_policy":"WAVE"},component="3.1")
+    actor_call("currentleader","hierarchy.package.assign",{"idempotency_key":str(uuid.uuid4()),"leader_generation":"2","package_id":uid(6),"expected_generation":"1","manager_session_id":actors["manager"]["actor_id"]},component="3.1")
+    check("instructions.other-manager-refused",lambda:actor_call("othermanager","instructions.issue",start,expected="PACKAGE_OWNER_MISMATCH"))
+    check("instructions.former-leader-refused",lambda:actor_call("oldleader","instructions.issue",start,expected="LEADER_GENERATION_STALE"))
+    check("instructions.refused-actor-no-start-obligation",lambda:expect(sql("SELECT count(*) FROM hyperfide.outbox_events WHERE aggregate_type='attempt.instructions'")=="0","Refused actor committed a START"))
+    check("instructions.actual-owning-manager-start",lambda:expect(actor_call("manager","instructions.issue",start)["obligations"]==1,"Actual assigned manager could not issue its START"))
+    check("instructions.actual-selected-leader-replay",lambda:expect(actor_call("currentleader","instructions.issue",start)["replayed"],"Current selected leader could not inspect/replay its exact instruction"))
+    lineage=sql("SELECT row_to_json(a)::text FROM hyperfide.attempts a WHERE id="+q(uid(30)))
+    proposed=actor_call("currentleader","hierarchy.package.handoff.propose",{"idempotency_key":str(uuid.uuid4()),"leader_generation":"2","package_ids":[uid(6)],"expected_generations":{uid(6):"2"},"successor_id":actors["othermanager"]["actor_id"],"context":{"summary":"actual manager transfer while native START remains immutable","decision_refs":[],"pending_instruction_refs":[],"native_session_refs":[]}},component="3.1")
+    check("instructions.actual-acknowledged-manager-handoff",lambda:expect(actor_call("othermanager","hierarchy.package.handoff.acknowledge",{"idempotency_key":str(uuid.uuid4()),"leader_generation":"2","handoff_id":proposed["handoff_id"]},component="3.1")["ownership_changed"],"Acknowledged actual handoff did not transfer current ownership"))
+    check("instructions.former-manager-replay-refused",lambda:actor_call("manager","instructions.issue",start,expected="PACKAGE_OWNER_MISMATCH"))
+    check("instructions.successor-manager-exact-replay",lambda:expect(actor_call("othermanager","instructions.issue",start)["replayed"],"Actual successor manager could not replay the same committed START"))
+    check("instructions.handoff-preserves-attempt-lineage",lambda:expect(lineage==sql("SELECT row_to_json(a)::text FROM hyperfide.attempts a WHERE id="+q(uid(30))),"Current package handoff rewrote historical native attempt lineage"))
     check("instructions.real-service",lambda:expect(s.ok("instructions.describe")["execution"]=="native-connector-required","Acceptance claimed physical execution"))
     check("instructions.stable-start",lambda:expect(s.ok("instructions.issue",start)["obligations"]==1,"Start obligation missing"))
     check("instructions.start-replay",lambda:expect(s.ok("instructions.issue",start)["replayed"],"Replay created new start"))
