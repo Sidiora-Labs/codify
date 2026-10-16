@@ -49,6 +49,7 @@
     "blaxel.images.template.uv-style-hardlink-denied",
     "blaxel.images.template.volume-budget-and-paths",
     "blaxel.images.process.detached-descendant-reaped",
+    "blaxel.images.process.supervisor-spawn-error-structured",
     "blaxel.images.sdk.repository-dotenv-denied",
     "blaxel.images.sdk.endpoint-override-denied"
   ],

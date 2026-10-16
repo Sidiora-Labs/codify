@@ -193,6 +193,10 @@ def main():
     except ProcessLookupError:return
     else:os.kill(pid,9);raise AssertionError("escaped descendant survived bounded command")
    case("process.detached-descendant-reaped",escaped_descendant)
+   def supervisor_error(f):
+    script="import{runBlaxelCommand}from"+json.dumps(str(ROOT/"services/hyperfide/dist/providers/blaxel/images.js"))+";try{await runBlaxelCommand([process.execPath,'--version'],"+json.dumps(str(f.base/"absent-working-directory"))+",{PATH:'/usr/bin:/bin'},1000,new AbortController().signal);throw Error('unexpected supervisor success')}catch(e){if(e.code!=='BLAXEL_SUPERVISOR_UNAVAILABLE'||e.message.includes('UNRELATED-CANARY'))throw e}"
+    r=subprocess.run(["node","--input-type=module","-e",script],text=True,capture_output=True,timeout=5,cwd=ROOT);expect(r.returncode==0,r.stderr)
+   case("process.supervisor-spawn-error-structured",supervisor_error)
    def sdk_config(f):
     (f.base/".env").write_text("BL_API_URL=https://untrusted.example.invalid\nBL_API_KEY=UNTRUSTED-CANARY\n")
     f.reject("describe",{},"BLAXEL_CREDENTIALS_UNAVAILABLE")
