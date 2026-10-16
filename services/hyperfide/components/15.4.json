@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "15.4",
+  "task": "15.4",
+  "roles": [
+    "control"
+  ],
+  "module": "artifacts/retention.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "artifact.retention.inspect",
+    "artifact.retention.hold",
+    "artifact.retention.release",
+    "artifact.retention.policy",
+    "artifact.retention.collect",
+    "artifact.retention.reconcile"
+  ],
+  "requires": [
+    "4.2",
+    "15.2"
+  ]
+}

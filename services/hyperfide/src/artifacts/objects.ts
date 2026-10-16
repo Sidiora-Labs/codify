@@ -19,7 +19,7 @@ type Artifact=Scope&Retention&{id:string;digest:string;size_bytes:string;storage
 type Chunk={sequence:number;artifact_id:string;digest:string;size_bytes:string;offset_bytes:string};
 type Manifest=Scope&{schema_version:1;kind:'chunk-manifest';expected_chunks:number;total_size_bytes:string;content_digest:string;complete:true;truncated:false;missing_ranges:never[];chunks:Chunk[]};
 type Config={endpoint:URL;region:string;bucket:string;access:string;secret:string;token:string|undefined;organisation:string;runs:ReadonlySet<string>};
-type Observation={availability:'VERIFIED';bytes:Buffer}|{availability:'ABSENT'|'UNKNOWN'};
+type Observation={availability:'VERIFIED';bytes:Buffer;etag:string|null}|{availability:'ABSENT'|'UNKNOWN'};
 const hash=(bytes:Buffer|string)=>'sha256:'+createHash('sha256').update(bytes).digest('hex');
 function fail(code:string,message:string):never{throw new FoundationError(code,message);}
 function fields(input:unknown,required:readonly string[],optional:readonly string[]=[]):Record<string,unknown>{
@@ -66,13 +66,14 @@ function encode(value:string):string{return encodeURIComponent(value).replace(/[
 /** Requests use a fixed trusted origin and never follow redirects with credentials. */
 class S3 {
  constructor(private readonly config:Config,private readonly signal:AbortSignal){}
- private async request(method:'GET'|'PUT',key:string,body?:Buffer):Promise<Response>{
+ private async request(method:'GET'|'PUT'|'DELETE',key:string,body?:Buffer,etag?:string):Promise<Response>{
  const c=this.config,now=new Date().toISOString().replace(/[:-]|\.\d{3}/g,''),day=now.slice(0,8);
  const pathname='/'+encode(c.bucket)+'/'+key.split('/').map(encode).join('/');
  const url=new URL(pathname,c.endpoint),payload=createHash('sha256').update(body??Buffer.alloc(0)).digest('hex');
  const headers:Record<string,string>={'host':url.host,'x-amz-content-sha256':payload,'x-amz-date':now};
  if(c.token)headers['x-amz-security-token']=c.token;
  if(method==='PUT')headers['if-none-match']='*';
+ if(method==='DELETE'&&etag)headers['if-match']=etag;
  const names=Object.keys(headers).sort(),canonicalHeaders=names.map(name=>name+':'+headers[name]!.trim()+'\n').join('');
  const canonical=[method,pathname,'',canonicalHeaders,names.join(';'),payload].join('\n');
  const credentialScope=day+'/'+c.region+'/s3/aws4_request';
@@ -107,11 +108,25 @@ class S3 {
  finally{reader.releaseLock();}
  const bytes=Buffer.concat(parts);
  if(received!==max||hash(bytes)!==expectedDigest)fail('ARTIFACT_INTEGRITY','Stored object checksum or length does not match');
- return {availability:'VERIFIED',bytes};
+ return {availability:'VERIFIED',bytes,etag:response.headers.get('etag')};
  }catch(error){if(error instanceof FoundationError)throw error;if(attempt===1)return {availability:'UNKNOWN'};}
  }
  return {availability:'UNKNOWN'};
  }
+ async destroy(key:string,expectedDigest:string,size:string):Promise<'ABSENT'|'UNKNOWN'>{
+ const observed=await this.observe(key,expectedDigest,size);
+ if(observed.availability==='ABSENT')return 'ABSENT';
+ if(observed.availability!=='VERIFIED')return 'UNKNOWN';
+ if(!observed.etag||!/^"[\x21\x23-\x7e]{1,1024}"$/.test(observed.etag))fail('ARTIFACT_BACKEND_PROTOCOL','Conditional destruction requires a strong opaque ETag');
+ try{
+ const response=await this.request('DELETE',key,undefined,observed.etag);await response.body?.cancel();
+ if(response.status===412||response.status===409||response.status===429||response.status>=500)return 'UNKNOWN';
+ if(!((response.status>=200&&response.status<300)||response.status===404))fail('ARTIFACT_BACKEND_REJECTED','Object backend rejected destruction');
+ }catch(error){if(error instanceof FoundationError)throw error;return 'UNKNOWN';}
+ const after=await this.observe(key,expectedDigest,size);
+ return after.availability==='ABSENT'?'ABSENT':'UNKNOWN';
+ }
+
 }
 const selected='organisation_id,run_id,id,digest,size_bytes::text,storage_backend,storage_key,status,retention_class,retention_until,retention_hold,state_version::text,completed_at';
 function iso(value:Date|string|null):string|null{return value===null?null:new Date(value).toISOString();}
@@ -320,6 +335,22 @@ export class ArtifactStore{
  return result;
  }catch(error){if(error instanceof FoundationError)throw error;fail('ARTIFACT_DATABASE_UNAVAILABLE','Artifact metadata operation failed; reconcile before retry');}
  }
+ async destroyTombstoned(input:unknown,context?:ComponentContext):Promise<unknown>{
+ const actor=context?context.invocation:this.context.invocation;assertInvocation(actor);
+ if(actor!==this.context.invocation)return new ArtifactStore({...this.context,invocation:actor}).destroyTombstoned(input);
+ assertInvocation(this.context.invocation);
+ const value=fields(input,[...scopeKeys,'artifact_id','gc_operation_id','expected_digest']),scope=this.scope(value),id=uuid(value.artifact_id),operation=uuid(value.gc_operation_id),expected=digest(value.expected_digest);
+ const row=await this.transaction(async tx=>{
+ const artifact=await this.load(scope,id,tx);
+ const intent=(await tx.query("SELECT * FROM hyperfide.artifact_gc_operations WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE",[scope.organisation_id,scope.run_id,operation])).rows[0];
+ if(!intent||!['REQUESTED','UNKNOWN'].includes(String(intent.state))||artifact.status!=='QUARANTINED'||intent.artifact_id!==id||artifact.digest!==expected||intent.digest!==expected||intent.storage_backend!==artifact.storage_backend||intent.storage_key!==artifact.storage_key||String(intent.size_bytes)!==artifact.size_bytes)fail('ARTIFACT_GC_AUTHORITY_INVALID','Destruction requires its matching persisted quarantine intent');
+ return artifact;
+ });
+ const observed=await this.backend().destroy(row.storage_key,row.digest,row.size_bytes);
+ await this.transaction(async()=>undefined);
+ return {outcome:observed,current_object_absent:observed==='ABSENT',physical_version_erasure:'NOT_QUALIFIED',grants_authority:false};
+ }
+
  close():void{/* Shared PostgreSQL pool lifecycle belongs to the storage resource owner. */}
 }
 export interface ArtifactStoreCapability{invoke(action:string,input:unknown,context:ComponentContext|InvocationContext):Promise<unknown>}
@@ -327,5 +358,5 @@ export function isArtifactStoreCapability(value:unknown):value is ArtifactStoreC
 export function createArtifactStore(context:ComponentContext):ArtifactStore{return new ArtifactStore(context);}
 export function createComponent(context:ComponentContext):Component{
  const store=createArtifactStore(context),actions=Object.fromEntries(ARTIFACT_ACTIONS.map(action=>[action,(input:unknown,invocationContext:ComponentContext)=>store.invoke(action,input,invocationContext)]));
- return {apiVersion:1,actions,capabilities:{'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext|InvocationContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
+ return {apiVersion:1,actions,capabilities:{'artifact.backend.v1':Object.freeze({destroyTombstoned:(input:unknown,ctx:ComponentContext)=>store.destroyTombstoned(input,ctx)}),'artifact.store.v1':Object.freeze({invoke:(action:string,input:unknown,ctx:ComponentContext|InvocationContext)=>store.invoke(action,input,ctx)})},close:()=>store.close()};
 }
