@@ -6,6 +6,7 @@ CREATE TABLE hyperfide.identity_run_rebindings (
  spec_generation bigint NOT NULL CHECK(spec_generation>0), spec_revision_id uuid NOT NULL,
  accepted_revision_digest hyperfide.digest NOT NULL, input_digest hyperfide.digest NOT NULL,
  intent_digest hyperfide.digest NOT NULL, receipt_digest hyperfide.digest NOT NULL,
+ evidence_scope text NOT NULL CHECK(evidence_scope IN ('LIVE_PROVIDER','ISOLATED_POSTGRESQL_FIXTURE')),
  receipt jsonb NOT NULL CHECK(jsonb_typeof(receipt)='object'),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(organisation_id,run_id,recovery_operation_id),

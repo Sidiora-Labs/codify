@@ -14,7 +14,8 @@ export interface AcceptedRunRebindInput {
  readonly external_previous_epoch:string|null;readonly database_predecessor_epoch:string|null;
  readonly fence_proof_digest:string;readonly external_journal_sequence:string;
 }
-export interface AcceptedRunRecoveryIntent extends AcceptedRunRebindInput {readonly intent_digest:string}
+export type RecoveryEvidenceScope='LIVE_PROVIDER'|'ISOLATED_POSTGRESQL_FIXTURE';
+export interface AcceptedRunRecoveryIntent extends AcceptedRunRebindInput {readonly intent_digest:string;readonly evidence_scope:RecoveryEvidenceScope}
 export interface RecoveryComputeRevocation {readonly revoked_attempts:string;readonly revoked_allocations:string;readonly retained_debt_references:readonly string[]}
 export interface PreparedAcceptedRunRecovery {
  verify(tx:PrimaryTransaction):Promise<AcceptedRunRecoveryIntent>;
@@ -24,7 +25,7 @@ export interface RunRebindReceipt {
  readonly schema_version:1;readonly organisation_id:string;readonly run_id:string;readonly recovery_operation_id:string;
  readonly deployment_id:string;readonly activation_operation_id:string;readonly source_epoch:string;readonly target_epoch:string;
  readonly spec_generation:string;readonly spec_revision_id:string;readonly accepted_revision_digest:string;
- readonly input_digest:string;readonly intent_digest:string;readonly receipt_digest:string;
+ readonly input_digest:string;readonly intent_digest:string;readonly receipt_digest:string;readonly evidence_scope:RecoveryEvidenceScope;
  readonly revoked_principals:string;readonly revoked_grants:string;readonly revoked_attachments:string;
  readonly revoked_attempts:string;readonly revoked_allocations:string;readonly retained_debt_references:readonly string[];
  readonly run_state:'PAUSED';readonly state_version:string;readonly created_at:string;
@@ -32,7 +33,7 @@ export interface RunRebindReceipt {
 }
 export interface RunRebindReceiptExpectation {
  readonly organisation_id:string;readonly run_id:string;readonly recovery_operation_id:string;readonly receipt_digest:string;
- readonly deployment_id:string;readonly target_epoch:string;readonly accepted_revision_digest:string;
+ readonly deployment_id:string;readonly target_epoch:string;readonly accepted_revision_digest:string;readonly evidence_scope:RecoveryEvidenceScope;
 }
 const fields=['schema_version','organisation_id','run_id','recovery_operation_id','activation_operation_id','deployment_id','expected_run_epoch','target_epoch','expected_spec_generation','expected_spec_revision_id','expected_revision_digest','external_previous_epoch','database_predecessor_epoch','fence_proof_digest','external_journal_sequence'];
 const digest=(v:unknown):v is string=>typeof v==='string'&&/^sha256:[0-9a-f]{64}$/.test(v);
@@ -52,7 +53,7 @@ async function schema(tx:PrimaryTransaction):Promise<void>{
  if(!row||row.name!=='0040-identity-recovery'||row.checksum!==hash(bytes))fail('IDENTITY_RECOVERY_SCHEMA_REQUIRED','Apply exact trusted recovery migration before offline recovery');
 }
 async function accepted(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string}){
- return (await tx.query('SELECT r.authority_epoch::text,r.spec_generation::text,r.spec_revision_id::text,r.state,r.state_version::text,s.revision_digest,s.document FROM hyperfide.runs r JOIN hyperfide.run_spec_revisions a ON a.organisation_id=r.organisation_id AND a.run_id=r.id AND a.spec_generation=r.spec_generation AND a.spec_revision_id=r.spec_revision_id AND a.accepted JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.id=$2 FOR UPDATE OF r',[input.organisation_id,input.run_id])).rows[0];
+ return (await tx.query('SELECT r.authority_epoch::text,r.spec_generation::text,r.spec_revision_id::text,r.state,r.state_version::text,s.revision_digest FROM hyperfide.runs r JOIN hyperfide.run_spec_revisions a ON a.organisation_id=r.organisation_id AND a.run_id=r.id AND a.spec_generation=r.spec_generation AND a.spec_revision_id=r.spec_revision_id AND a.accepted JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.id=$2 FOR UPDATE OF r',[input.organisation_id,input.run_id])).rows[0];
 }
 async function fresh(tx:PrimaryTransaction,input:AcceptedRunRebindInput,attestation:ExternalAuthorityAttestation):Promise<void>{
  const row=(await tx.query("SELECT epoch::text,proof_digest,clock_timestamp()::text AS now FROM hyperfide.authority_epochs WHERE deployment_id=$1 AND state='ACTIVE' FOR SHARE",[input.deployment_id])).rows[0];
@@ -63,7 +64,7 @@ function receiptOf(row:Record<string,any>):RunRebindReceipt {
  const receipt=row.receipt as RunRebindReceipt;
  if(!receipt||typeof receipt!=='object'||!digest(receipt.receipt_digest))fail('RECOVERY_RECEIPT_INVALID','Immutable recovery receipt is incomplete');
  const {receipt_digest,...body}=receipt;
- if(pin(body)!==receipt_digest||row.receipt_digest!==receipt_digest||row.input_digest!==receipt.input_digest||row.intent_digest!==receipt.intent_digest)fail('RECOVERY_RECEIPT_INVALID','Immutable recovery receipt bytes do not match persisted pins');
+ if(pin(body)!==receipt_digest||row.receipt_digest!==receipt_digest||row.input_digest!==receipt.input_digest||row.intent_digest!==receipt.intent_digest||row.evidence_scope!==receipt.evidence_scope)fail('RECOVERY_RECEIPT_INVALID','Immutable recovery receipt bytes do not match persisted pins');
  return frozen(structuredClone(receipt));
 }
 /** Local trusted deployment composition only. The prepared verifier reads actual24
@@ -87,9 +88,9 @@ export async function rebindAcceptedRun(resources:ServiceResources,journal:Exter
    await assertCurrentAuthority(tx,{...input,authority_epoch:input.target_epoch});await fresh(tx,input,attestation);return receiptOf(prior);
   }
   await writeSemanticDisposition(tx,input);
-  const intent=await prepared.verify(tx);exact(intent,[...fields,'intent_digest']);
-  const {intent_digest,...verifiedInput}=intent;
-  if(!digest(intent_digest)||pin(verifiedInput)!==inputDigest)fail('RECOVERY_REBIND_PROOF_MISMATCH','Trusted recovery verifier returned a different exact accepted intent');
+  const intent=await prepared.verify(tx);exact(intent,[...fields,'intent_digest','evidence_scope']);
+  const {intent_digest,evidence_scope,...verifiedInput}=intent;
+  if(!digest(intent_digest)||!['LIVE_PROVIDER','ISOLATED_POSTGRESQL_FIXTURE'].includes(evidence_scope)||pin(verifiedInput)!==inputDigest)fail('RECOVERY_REBIND_PROOF_MISMATCH','Trusted recovery verifier returned a different exact accepted intent');
   const run=await accepted(tx,input);
   if(!run||run.authority_epoch!==input.expected_run_epoch||run.spec_generation!==input.expected_spec_generation||run.spec_revision_id!==input.expected_spec_revision_id||run.revision_digest!==input.expected_revision_digest||['CANCELLED','SUCCEEDED','CANCELLING'].includes(run.state))fail('RECOVERY_ACCEPTED_INTENT_MISMATCH','Exact nonterminal accepted predecessor is required');
   await fresh(tx,input,attestation);
@@ -103,9 +104,9 @@ export async function rebindAcceptedRun(resources:ServiceResources,journal:Exter
   const changed=(await tx.query("UPDATE hyperfide.runs SET authority_epoch=$3,state='PAUSED',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2 AND authority_epoch=$4 RETURNING state_version::text,clock_timestamp()::text AS now",[input.organisation_id,input.run_id,input.target_epoch,input.expected_run_epoch])).rows[0];
   if(!changed)fail('RECOVERY_STALE_EPOCH','Run epoch changed during accepted recovery');
   await assertCurrentAuthority(tx,{...input,authority_epoch:input.target_epoch});await fresh(tx,input,attestation);
-  const body={schema_version:1 as const,organisation_id:input.organisation_id,run_id:input.run_id,recovery_operation_id:input.recovery_operation_id,deployment_id:input.deployment_id,activation_operation_id:input.activation_operation_id,source_epoch:input.expected_run_epoch,target_epoch:input.target_epoch,spec_generation:input.expected_spec_generation,spec_revision_id:input.expected_spec_revision_id,accepted_revision_digest:input.expected_revision_digest,input_digest:inputDigest,intent_digest,revoked_principals:String(principals.rowCount??0),revoked_grants:String(grants.rowCount??0),revoked_attachments:String(attachments.rowCount??0),revoked_attempts:compute.revoked_attempts,revoked_allocations:compute.revoked_allocations,retained_debt_references:[...new Set(compute.retained_debt_references)].sort(),run_state:'PAUSED' as const,state_version:changed.state_version,created_at:new Date(changed.now).toISOString(),compute_admission_granted:false as const,publication_authorized:false as const};
+  const body={schema_version:1 as const,organisation_id:input.organisation_id,run_id:input.run_id,recovery_operation_id:input.recovery_operation_id,deployment_id:input.deployment_id,activation_operation_id:input.activation_operation_id,source_epoch:input.expected_run_epoch,target_epoch:input.target_epoch,spec_generation:input.expected_spec_generation,spec_revision_id:input.expected_spec_revision_id,accepted_revision_digest:input.expected_revision_digest,input_digest:inputDigest,intent_digest,evidence_scope,revoked_principals:String(principals.rowCount??0),revoked_grants:String(grants.rowCount??0),revoked_attachments:String(attachments.rowCount??0),revoked_attempts:compute.revoked_attempts,revoked_allocations:compute.revoked_allocations,retained_debt_references:[...new Set(compute.retained_debt_references)].sort(),run_state:'PAUSED' as const,state_version:changed.state_version,created_at:new Date(changed.now).toISOString(),compute_admission_granted:false as const,publication_authorized:false as const};
   const receipt=frozen({...body,receipt_digest:pin(body)});
-  await tx.query('INSERT INTO hyperfide.identity_run_rebindings(organisation_id,run_id,recovery_operation_id,deployment_id,activation_operation_id,source_epoch,target_epoch,spec_generation,spec_revision_id,accepted_revision_digest,input_digest,intent_digest,receipt_digest,receipt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)',[input.organisation_id,input.run_id,input.recovery_operation_id,input.deployment_id,input.activation_operation_id,input.expected_run_epoch,input.target_epoch,input.expected_spec_generation,input.expected_spec_revision_id,input.expected_revision_digest,inputDigest,intent_digest,receipt.receipt_digest,JSON.stringify(receipt)]);
+  await tx.query('INSERT INTO hyperfide.identity_run_rebindings(organisation_id,run_id,recovery_operation_id,deployment_id,activation_operation_id,source_epoch,target_epoch,spec_generation,spec_revision_id,accepted_revision_digest,input_digest,intent_digest,receipt_digest,evidence_scope,receipt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)',[input.organisation_id,input.run_id,input.recovery_operation_id,input.deployment_id,input.activation_operation_id,input.expected_run_epoch,input.target_epoch,input.expected_spec_generation,input.expected_spec_revision_id,input.expected_revision_digest,inputDigest,intent_digest,receipt.receipt_digest,evidence_scope,JSON.stringify(receipt)]);
   await fresh(tx,input,attestation);return receipt;
  });
 }
@@ -113,14 +114,14 @@ export async function rebindAcceptedRun(resources:ServiceResources,journal:Exter
  * external journal verification. It does not accept a serialized receipt as proof.
  */
 export async function inspectRunRebindReceipt(tx:PrimaryTransaction,expected:RunRebindReceiptExpectation):Promise<RunRebindReceipt>{
- assertPrimaryTransaction(tx);exact(expected,['organisation_id','run_id','recovery_operation_id','receipt_digest','deployment_id','target_epoch','accepted_revision_digest']);
+ assertPrimaryTransaction(tx);exact(expected,['organisation_id','run_id','recovery_operation_id','receipt_digest','deployment_id','target_epoch','accepted_revision_digest','evidence_scope']);
  for(const key of ['organisation_id','run_id','recovery_operation_id','deployment_id','target_epoch'] as const)if(!uuid(expected[key]))fail('INVALID_REQUEST','Exact recovery receipt scope required');
- if(!digest(expected.receipt_digest)||!digest(expected.accepted_revision_digest))fail('INVALID_REQUEST','Exact recovery receipt digests required');
+ if(!digest(expected.receipt_digest)||!digest(expected.accepted_revision_digest)||!['LIVE_PROVIDER','ISOLATED_POSTGRESQL_FIXTURE'].includes(expected.evidence_scope))fail('INVALID_REQUEST','Exact recovery receipt digests required');
  await schema(tx);await readSemanticDisposition(tx,expected);
  const row=(await tx.query('SELECT * FROM hyperfide.identity_run_rebindings WHERE organisation_id=$1 AND run_id=$2 AND recovery_operation_id=$3 FOR SHARE',[expected.organisation_id,expected.run_id,expected.recovery_operation_id])).rows[0];
  if(!row)fail('RECOVERY_RECEIPT_REQUIRED','No immutable accepted-run recovery receipt exists');
  const receipt=receiptOf(row);
- if(receipt.receipt_digest!==expected.receipt_digest||receipt.deployment_id!==expected.deployment_id||receipt.target_epoch!==expected.target_epoch||receipt.accepted_revision_digest!==expected.accepted_revision_digest)fail('RECOVERY_RECEIPT_INVALID','Persisted recovery receipt differs from exact issuer pins');
+ if(receipt.receipt_digest!==expected.receipt_digest||receipt.deployment_id!==expected.deployment_id||receipt.target_epoch!==expected.target_epoch||receipt.accepted_revision_digest!==expected.accepted_revision_digest||receipt.evidence_scope!==expected.evidence_scope)fail('RECOVERY_RECEIPT_INVALID','Persisted recovery receipt differs from exact issuer pins');
  const run=await accepted(tx,expected);
  if(!run||run.state!=='PAUSED'||run.authority_epoch!==receipt.target_epoch||run.spec_generation!==receipt.spec_generation||run.spec_revision_id!==receipt.spec_revision_id||run.revision_digest!==receipt.accepted_revision_digest)fail('RECOVERY_RECEIPT_STALE','Recovery issuance requires the current paused accepted run');
  await assertCurrentAuthority(tx,{...expected,authority_epoch:receipt.target_epoch});return receipt;
