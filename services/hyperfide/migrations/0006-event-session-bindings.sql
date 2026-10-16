@@ -79,3 +79,7 @@ CREATE TRIGGER binding_identity BEFORE INSERT ON hyperfide.event_runner_bindings
  FOR EACH ROW EXECUTE FUNCTION hyperfide.validate_event_runner_binding();
 CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.event_runner_bindings
  FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','consumer_id','sandbox_id','boot_id','boot_generation','registered_credential_id','bootstrap_receipt_id','registered_at');
+
+-- Boot genesis proves absence within this exact targeted native stream.
+CREATE INDEX instruction_boot_history ON hyperfide.outbox_events(organisation_id,run_id,(payload->>'sandbox_id'),(payload->>'boot_id'))
+ WHERE aggregate_type='attempt.instructions';

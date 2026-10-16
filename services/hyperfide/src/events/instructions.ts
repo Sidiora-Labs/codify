@@ -139,7 +139,8 @@ export async function registerRunnerConsumer(tx:PrimaryTransaction,input:unknown
     registered:true,replayed:false,needs_recovery:false,execution_authority:false};
 }
 async function instructionRecipient(tx:PrimaryTransaction,s:Scope,target:{sandbox_id:string;boot_id:string},generation:string,active:boolean):Promise<string> {
-  const binding=await resolveRunnerConsumer(tx,{...s,...target,boot_generation:generation});
+  const binding=await resolveRunnerConsumer(tx,{organisation_id:s.organisation_id,run_id:s.run_id,
+    sandbox_id:target.sandbox_id,boot_id:target.boot_id,boot_generation:generation});
   if(!binding||active&&binding.consumer_state!=='ACTIVE')
     fail('INSTRUCTION_CONSUMER_REQUIRED','A current boot-bound standing native consumer is required; broadcasting is forbidden');
   return binding.consumer_id;
