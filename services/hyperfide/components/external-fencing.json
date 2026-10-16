@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "external-fencing",
+  "task": "24.3",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "recovery/fencing_service.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "recovery.fencing.describe"
+  ],
+  "requires": [
+    "8.4",
+    "legacy-writer-isolation"
+  ]
+}
