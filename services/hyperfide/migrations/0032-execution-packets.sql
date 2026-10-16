@@ -18,3 +18,5 @@ CREATE TABLE hyperfide.hierarchy_execution_packets (
  FOREIGN KEY(organisation_id,run_id,package_id) REFERENCES hyperfide.feature_packages(organisation_id,run_id,id)
 );
 CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_execution_packets FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','digest','mandatory_digest','task_id','attempt_id','attempt_generation','spec_revision_id','spec_generation','package_id','package_generation','authority_epoch','leader_generation','policy_digest','registry_digest','packet','created_at');
+
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_execution_packets FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
