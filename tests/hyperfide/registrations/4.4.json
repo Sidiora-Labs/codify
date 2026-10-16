@@ -82,7 +82,22 @@
     "durability.restore_database_immutable",
     "durability.journal_replay_proof",
     "durability.journal_unknown_fork",
-    "durability.journal_unchanged_head"
+    "durability.journal_unchanged_head",
+    "durability.semantic_retry",
+    "durability.semantic_fresh",
+    "durability.semantic_wait",
+    "durability.semantic_idempotent",
+    "durability.semantic_generation",
+    "durability.semantic_upgrade",
+    "durability.semantic_missing",
+    "durability.semantic_concurrent_writes",
+    "durability.semantic_concurrent_write_read",
+    "durability.semantic_concurrent_read_write",
+    "durability.semantic_business_version",
+    "durability.semantic_business_guard",
+    "durability.semantic_monotonic",
+    "durability.semantic_single_step",
+    "durability.semantic_spec_monotonic"
   ],
   "cases": [
     "V-009",
