@@ -184,6 +184,58 @@ def mapping_checks():
    p=subprocess.run([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=environment,input=json.dumps(request)+"\n",capture_output=True,text=True,timeout=20)
    r=json.loads(p.stdout);expect(p.returncode==0 and not r["result"]["isError"],"finite MCP fleet status rejected");verify(json.loads(r["result"]["content"][0]["text"]))
   check("client.mapping.mcp-fleet-status-real-primary",mcp)
+  policy=fixture.path/"mcp-tool-policy.json";policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}));policy.chmod(0o600)
+  restricted=environment.copy();restricted["HYPERFIDE_MCP_TOOL_POLICY_FILE"]=str(policy)
+  def tool(name,id):
+   return {"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":{"run_id":fixture.ids["run"],"input":{},"operation_id":uid(),"idempotency_key":uid(),"correlation_id":uid()}}}
+  def finite_policy():
+   requests=[{"jsonrpc":"2.0","id":1,"method":"tools/list"},tool("fleet_status",2),tool("authority_invoke",3),tool("human_submit",4)]
+   p=subprocess.run([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=restricted,input="".join(json.dumps(r)+"\n" for r in requests),capture_output=True,text=True,timeout=20)
+   replies=[json.loads(r) for r in p.stdout.splitlines()]
+   expect(p.returncode==0 and [t["name"] for t in replies[0]["result"]["tools"]]==["fleet_status"],"tool policy did not filter catalog exactly")
+   verify(json.loads(replies[1]["result"]["content"][0]["text"]))
+   expect(replies[2]["error"]["code"]==-32601 and replies[3]["error"]["code"]==-32601,"denied generic or unlisted authority tool executed")
+  check("client.mcp.trusted-finite-tool-policy",finite_policy)
+  def bad_policy(fields,mode=0o600):
+   policy.write_text(json.dumps(fields));policy.chmod(mode)
+   p=subprocess.run([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=restricted,input="",capture_output=True,text=True,timeout=10)
+   expect(p.returncode==78 and json.loads(p.stderr)["error"]["code"]=="MCP_TOOL_POLICY_INVALID","invalid trusted policy admitted")
+   policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}));policy.chmod(0o600)
+  check("client.mcp.public-tool-policy-refused",lambda:bad_policy({"schema_version":1,"allowed_tools":["fleet_status"]},0o644))
+  check("client.mcp.unknown-tool-policy-refused",lambda:bad_policy({"schema_version":1,"allowed_tools":["build_project"]}))
+  check("client.mcp.duplicate-tool-policy-refused",lambda:bad_policy({"schema_version":1,"allowed_tools":["fleet_status","fleet_status"]}))
+  check("client.mcp.bootstrap-generic-escape-refused",lambda:bad_policy({"schema_version":1,"allowed_tools":["authority_invoke"],"bootstrap_catalog":True}))
+  def bootstrap():
+   policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"],"bootstrap_catalog":True,"target_session_id":fixture.ids["operator"],"run_id":fixture.ids["run"],"target_role":"OPERATOR"}))
+   pending=fixture.path/"pending-target-transport.json";e=restricted.copy();e["HYPERFIDE_TRANSPORT_CONFIG"]=str(pending)
+   p=subprocess.Popen([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=e,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,bufsize=1)
+   def exchange(value):
+    p.stdin.write(json.dumps(value)+"\n");p.stdin.flush()
+    import select
+    expect(select.select([p.stdout],[],[],15)[0],"bootstrap MCP response deadline exceeded")
+    return json.loads(p.stdout.readline())
+   try:
+    initialized=exchange({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})
+    listed=exchange({"jsonrpc":"2.0","id":2,"method":"tools/list"})
+    expect(initialized["result"]["serverInfo"]["name"]=="Hyperfide" and [t["name"] for t in listed["result"]["tools"]]==["fleet_status"],"credential-free bounded catalog failed")
+    refused=exchange(tool("fleet_status",3))
+    expect(refused["result"]["isError"] and json.loads(refused["result"]["content"][0]["text"])["error"]["code"]=="TRANSPORT_CONFIG_REQUIRED","bootstrap call acquired authority before target credential attachment")
+    pending.write_bytes(config.read_bytes());pending.chmod(0o600)
+    actual=exchange(tool("fleet_status",4));expect(not actual["result"]["isError"],"same MCP process did not reload attached target credential")
+    verify(json.loads(actual["result"]["content"][0]["text"]))
+   finally:
+    p.stdin.close();p.wait(timeout=10)
+    expect(p.returncode==0,"bootstrap MCP process failed shutdown")
+    pending.unlink(missing_ok=True)
+    policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}))
+  check("client.mcp.bootstrap-catalog-then-real-credential-attach",bootstrap)
+  def wrong_subject():
+   policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"],"target_session_id":uid(),"run_id":fixture.ids["run"],"target_role":"LEADER"}))
+   p=subprocess.run([str(ROOT/"cg"),"mcp"],cwd=fixture.path,env=restricted,input=json.dumps(tool("fleet_status",1))+"\n",capture_output=True,text=True,timeout=20)
+   r=json.loads(p.stdout)
+   expect(p.returncode==0 and r["result"]["isError"] and json.loads(r["result"]["content"][0]["text"])["error"]["code"]=="AUTHORITY_SUBJECT_MISMATCH","operator credential acquired supervisor authority")
+   policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}))
+  check("client.mcp.wrong-supervisor-credential-refused",wrong_subject)
  finally:fixture.close()
 
 if __name__=="__main__":sys.exit(main())

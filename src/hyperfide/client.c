@@ -108,9 +108,15 @@ static char *hf_read25(const char *filename,size_t *length){
  for(;;){ssize_t r=read(fd,bytes+n,HF_CLIENT_BYTES25+1-n);if(r<0&&errno==EINTR)continue;if(r<0){free(bytes);close(fd);return NULL;}if(!r)break;n+=(size_t)r;if(n>HF_CLIENT_BYTES25){free(bytes);close(fd);return NULL;}}
  close(fd);bytes[n]=0;*length=n;return bytes;
 }
-static int hf_invoke25(const char *payload,const char *operation,const char *idempotency,const char *correlation,const char *causation,FILE *out,FILE *err){
- const char *configuration=getenv("HYPERFIDE_TRANSPORT_CONFIG");if(!configuration||!configuration[0])return hf_client_error25(err,"TRANSPORT_CONFIG_REQUIRED","Trusted transport configuration is required");
- HfTransportConfig config;if(!hf_transport_config(configuration,&config))return hf_client_error25(err,"TRANSPORT_CONFIG_INVALID","Trusted transport configuration is invalid");
+static int hf_load_transport25(HfTransportConfig *config,FILE *err){
+ const char *configuration=getenv("HYPERFIDE_TRANSPORT_CONFIG");if(!configuration||!configuration[0])return hf_client_error25(err,"TRANSPORT_CONFIG_REQUIRED","Trusted target transport configuration is required");
+ struct stat info;if(lstat(configuration,&info)!=0&&errno==ENOENT)return hf_client_error25(err,"TRANSPORT_CONFIG_REQUIRED","Target transport credential has not been attached");
+ if(!hf_transport_config(configuration,config))return hf_client_error25(err,"TRANSPORT_CONFIG_INVALID","Trusted transport configuration is invalid");
+ return 0;
+}
+static int hf_invoke_config25(const HfTransportConfig *supplied,const char *payload,const char *operation,const char *idempotency,const char *correlation,const char *causation,FILE *out,FILE *err){
+ HfTransportConfig config;
+ if(supplied)config=*supplied;else{int result=hf_load_transport25(&config,err);if(result)return result;}
  const char *origin=getenv("HYPERFIDE_AUTHORITY_URL");if(origin&&strcmp(origin,config.origin))return hf_client_error25(err,"AUTHORITY_ORIGIN_CONFLICT","Authority origin conflicts with signed transport configuration");
  if(!hf_uuid25(operation)||!hf_uuid25(idempotency)||!hf_uuid25(correlation)||(causation&&!hf_uuid25(causation)))return hf_client_error25(err,"OPERATION_ID_INVALID","Explicit canonical operation idempotency and correlation UUIDs are required");
  if(!hf_json25(payload,strlen(payload),0,NULL))return hf_client_error25(err,"INVALID_JSON","A bounded protocol1 JSON object is required");
@@ -125,6 +131,9 @@ static int hf_invoke25(const char *payload,const char *operation,const char *ide
  if(!parsed||(parsed==2&&(response.status<200||response.status>=300))){hf_http_response_free(&response);return hf_client_error25(err,"AUTHORITY_PROTOCOL_INVALID","Authority returned an invalid protocol1 response");}
  fwrite(response.body,1,response.length,out);fputc('\n',out);
  int success=response.status>=200&&response.status<300&&parsed==2;hf_http_response_free(&response);return success?0:1;
+}
+static int hf_invoke25(const char *payload,const char *operation,const char *idempotency,const char *correlation,const char *causation,FILE *out,FILE *err){
+ return hf_invoke_config25(NULL,payload,operation,idempotency,correlation,causation,out,err);
 }
 typedef struct {const char *command,*subcommand,*component,*action;} HfRoute25;
 static const HfRoute25 hf_routes25[]={
@@ -204,26 +213,89 @@ int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err){
  free(data);free(proof);return result;
 }
 
+typedef struct {int restricted,bootstrap,bound;size_t count;char names[128][128],target[37],run[37],role[33];} HfMcpPolicy25;
+static int hf_mcp_allowed25(const HfMcpPolicy25 *policy,const char *name){
+ if(!policy->restricted)return 1;
+ for(size_t i=0;i<policy->count;i++)if(!strcmp(policy->names[i],name))return 1;
+ return 0;
+}
+static int hf_mcp_known25(const char *name){
+ if(!strcmp(name,"authority_invoke"))return 1;
+ for(const HfRoute25 *r=hf_routes25;r->command;r++){char candidate[128];snprintf(candidate,sizeof candidate,"%s_%s",r->command,r->subcommand);if(!strcmp(candidate,name))return 1;}
+ return 0;
+}
+static int hf_mcp_policy25(HfMcpPolicy25 *policy){
+ memset(policy,0,sizeof *policy);
+ const char *filename=getenv("HYPERFIDE_MCP_TOOL_POLICY_FILE");if(!filename)return 1;
+ char *text=NULL;size_t length=0;HfJson *j=malloc(sizeof *j);if(!j)return 0;
+ int valid=filename[0]=='/'&&hf_private_read(filename,32768,&text,&length)&&hf_json_parse(j,text);
+ const char *const allowed[]={"schema_version","allowed_tools","bootstrap_catalog","target_session_id","run_id","target_role"};int64_t version=0;
+ if(valid)valid=hf_json_only(j,0,allowed,6)&&hf_json_i64(j,hf_json_field(j,0,"schema_version"),&version)&&version==1;
+ unsigned seen=0;
+ if(valid)for(int key=1;key<j->tokens[0].next;key=j->tokens[key+1].next){
+ char name[64];if(!hf_json_string(j,key,name,sizeof name)){valid=0;break;}
+ unsigned bit=!strcmp(name,"schema_version")?1:!strcmp(name,"allowed_tools")?2:!strcmp(name,"bootstrap_catalog")?4:!strcmp(name,"target_session_id")?8:!strcmp(name,"run_id")?16:32;
+ if(seen&bit){valid=0;break;}seen|=bit;
+ }
+ int array=valid?hf_json_field(j,0,"allowed_tools"):-1;
+ if(valid)valid=array>=0&&j->tokens[array].type=='[';
+ if(valid)for(int token=array+1;token<j->tokens[array].next;token=j->tokens[token].next){
+ if(policy->count>=128||!hf_json_string(j,token,policy->names[policy->count],128)||!hf_mcp_known25(policy->names[policy->count])){valid=0;break;}
+ for(size_t i=0;i<policy->count;i++)if(!strcmp(policy->names[i],policy->names[policy->count]))valid=0;
+ if(!valid)break;
+ policy->count++;
+ }
+ int bootstrap=valid?hf_json_field(j,0,"bootstrap_catalog"):-1;
+ if(valid&&bootstrap>=0)valid=hf_json_bool(j,bootstrap,&policy->bootstrap);
+ policy->restricted=1;
+ if(valid&&(seen&56)){
+ policy->bound=1;
+ valid=(seen&56)==56&&hf_json_get(j,"target_session_id",policy->target,sizeof policy->target)&&hf_uuid25(policy->target)&&hf_json_get(j,"run_id",policy->run,sizeof policy->run)&&hf_uuid25(policy->run)&&hf_json_get(j,"target_role",policy->role,sizeof policy->role)&&policy->role[0];
+ if(valid)for(const char *q=policy->role;*q;q++)if(!(*q>='A'&&*q<='Z')&&*q!='_')valid=0;
+ }
+ if(valid&&policy->bootstrap&&(!policy->bound||hf_mcp_allowed25(policy,"authority_invoke")))valid=0;
+ free(text);free(j);return valid;
+}
+static int hf_mcp_subject25(const HfMcpPolicy25 *policy,HfTransportConfig *config,FILE *err){
+ if(!policy->bound)return 0;
+ int loaded=hf_load_transport25(config,err);if(loaded)return loaded;
+ char operation[37],idempotency[37],correlation[37],payload[512];
+ if(!hf_uuid_generate(operation)||!hf_uuid_generate(idempotency)||!hf_uuid_generate(correlation))return hf_client_error25(err,"RESOURCE_LIMIT","Cannot allocate subject verification identity");
+ snprintf(payload,sizeof payload,"{\"run_id\":\"%s\",\"component\":\"14.1\",\"action\":\"identity.describe\",\"input\":{},\"expected_version\":null,\"authority\":null}",policy->run);
+ char *body=NULL;size_t length=0;FILE *capture=open_memstream(&body,&length);if(!capture)return hf_client_error25(err,"RESOURCE_LIMIT","Cannot allocate subject verification response");
+ int result=hf_invoke_config25(config,payload,operation,idempotency,correlation,NULL,capture,err);fclose(capture);
+ if(result){if(length)fwrite(body,1,length,err);free(body);return result;}
+ HfJson *j=malloc(sizeof *j);char actor[37],run[37],role[33],credential[37];int valid=j&&hf_json_parse(j,body);
+ if(valid){int principal=hf_json_field(j,hf_json_field(j,0,"result"),"principal");
+ valid=hf_json_string(j,hf_json_field(j,principal,"actor_id"),actor,sizeof actor)&&!strcmp(actor,policy->target)&&hf_json_string(j,hf_json_field(j,principal,"run_id"),run,sizeof run)&&!strcmp(run,policy->run)&&hf_json_string(j,hf_json_field(j,principal,"role"),role,sizeof role)&&!strcmp(role,policy->role)&&hf_json_string(j,hf_json_field(j,principal,"credential_id"),credential,sizeof credential)&&!strcmp(credential,config->credential_id);}
+ free(j);free(body);
+ if(!valid)return hf_client_error25(err,"AUTHORITY_SUBJECT_MISMATCH","Attached credential does not match trusted supervisor session run and role");
+ return 0;
+}
 static void hf_rpc_error25(FILE *out,const char *id,int code,const char *message){
  fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":",id?id:"null",code);
  hf_json_write_string(out,message);fputs("}}\n",out);
 }
-static void hf_rpc_tools25(FILE *out,const char *id){
+static void hf_rpc_tools25(FILE *out,const char *id,const HfMcpPolicy25 *policy){
+ int emitted=0;
  fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"tools\":[",id);
- fputs("{\"name\":\"authority_invoke\",\"description\":\"Invoke a scoped protocol1 operation through verified TLS and Ed25519. Explicit stable operation identities are mandatory.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"payload\":{\"type\":\"object\"},\"operation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"idempotency_key\":{\"type\":\"string\",\"format\":\"uuid\"},\"correlation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"causation_id\":{\"type\":[\"string\",\"null\"]}},\"required\":[\"payload\",\"operation_id\",\"idempotency_key\",\"correlation_id\"]}}",out);
+ if(hf_mcp_allowed25(policy,"authority_invoke")){emitted=1;fputs("{\"name\":\"authority_invoke\",\"description\":\"Invoke a scoped protocol1 operation through verified TLS and Ed25519. Explicit stable operation identities are mandatory.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"payload\":{\"type\":\"object\"},\"operation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"idempotency_key\":{\"type\":\"string\",\"format\":\"uuid\"},\"correlation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"causation_id\":{\"type\":[\"string\",\"null\"]}},\"required\":[\"payload\",\"operation_id\",\"idempotency_key\",\"correlation_id\"]}}",out);}
  for(const HfRoute25 *r=hf_routes25;r->command;r++){
- fprintf(out,",{\"name\":\"%s_%s\",\"description\":\"Scoped %s. The server enforces current role, scope and authority; this mapping grants none.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"run_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"input\":{\"type\":\"object\"},\"operation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"idempotency_key\":{\"type\":\"string\",\"format\":\"uuid\"},\"correlation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"causation_id\":{\"type\":[\"string\",\"null\"]},\"expected_version\":{\"type\":[\"string\",\"null\"]},\"authority\":{\"type\":[\"object\",\"null\"]}},\"required\":[\"run_id\",\"input\",\"operation_id\",\"idempotency_key\",\"correlation_id\"]}}",r->command,r->subcommand,r->action);
+ char candidate[128];snprintf(candidate,sizeof candidate,"%s_%s",r->command,r->subcommand);if(!hf_mcp_allowed25(policy,candidate))continue;
+ if(emitted++)fputc(',',out);
+ fprintf(out,"{\"name\":\"%s_%s\",\"description\":\"Scoped %s. The server enforces current role, scope and authority; this mapping grants none.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"run_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"input\":{\"type\":\"object\"},\"operation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"idempotency_key\":{\"type\":\"string\",\"format\":\"uuid\"},\"correlation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"causation_id\":{\"type\":[\"string\",\"null\"]},\"expected_version\":{\"type\":[\"string\",\"null\"]},\"authority\":{\"type\":[\"object\",\"null\"]}},\"required\":[\"run_id\",\"input\",\"operation_id\",\"idempotency_key\",\"correlation_id\"]}}",r->command,r->subcommand,r->action);
  }
  fputs("]}}\n",out);
 }
 static int hf_arg_string25(const HfJson *j,int args,const char *name,char *out,size_t capacity){
  return hf_json_string(j,hf_json_field(j,args,name),out,capacity);
 }
-static void hf_rpc_call25(HfJson *j,FILE *out,const char *id){
+static void hf_rpc_call25(HfJson *j,FILE *out,const char *id,const HfMcpPolicy25 *policy){
  int params=hf_json_field(j,0,"params"),args=hf_json_field(j,params,"arguments");
  char name[128],operation[37],idempotency[37],correlation[37],causation[37],run[37],expected[32];
- if(!hf_json_string(j,hf_json_field(j,params,"name"),name,sizeof name)||
- !hf_arg_string25(j,args,"operation_id",operation,sizeof operation)||!hf_uuid25(operation)||
+ if(!hf_json_string(j,hf_json_field(j,params,"name"),name,sizeof name)){hf_rpc_error25(out,id,-32602,"A finite tool name is required");return;}
+ if(!hf_mcp_allowed25(policy,name)){hf_rpc_error25(out,id,-32601,"Tool is not permitted by trusted supervisor policy");return;}
+ if(!hf_arg_string25(j,args,"operation_id",operation,sizeof operation)||!hf_uuid25(operation)||
  !hf_arg_string25(j,args,"idempotency_key",idempotency,sizeof idempotency)||!hf_uuid25(idempotency)||
  !hf_arg_string25(j,args,"correlation_id",correlation,sizeof correlation)||!hf_uuid25(correlation)){
  hf_rpc_error25(out,id,-32602,"Explicit canonical operation idempotency and correlation identities are required");return;}
@@ -257,13 +329,15 @@ static void hf_rpc_call25(HfJson *j,FILE *out,const char *id){
  char *body=NULL,*failure=NULL;size_t body_size=0,failure_size=0;
  FILE *success=open_memstream(&body,&body_size),*errors=open_memstream(&failure,&failure_size);
  if(!success||!errors){if(success)fclose(success);if(errors)fclose(errors);free(body);free(failure);free(payload);free(input);free(authority);hf_rpc_error25(out,id,-32603,"Response allocation failed");return;}
- int result=hf_invoke25(payload,operation,idempotency,correlation,cause,success,errors);fclose(success);fclose(errors);
+ HfTransportConfig subject_config;int result=hf_mcp_subject25(policy,&subject_config,errors);
+ if(!result)result=hf_invoke_config25(policy->bound?&subject_config:NULL,payload,operation,idempotency,correlation,cause,success,errors);
+ fclose(success);fclose(errors);
  fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"content\":[{\"type\":\"text\",\"text\":",id);
  hf_json_write_string(out,body_size?body:failure_size?failure:"Authority returned no result");
  fprintf(out,"}],\"isError\":%s}}\n",result?"true":"false");
  free(body);free(failure);free(payload);free(input);free(authority);
 }
-static void hf_rpc_line25(const char *line,FILE *out){
+static void hf_rpc_line25(const char *line,FILE *out,const HfMcpPolicy25 *policy){
  HfJson *j=malloc(sizeof *j);if(!j){hf_rpc_error25(out,NULL,-32603,"Request allocation failed");return;}
  if(!hf_json_parse(j,line)){free(j);hf_rpc_error25(out,NULL,-32700,"Invalid bounded JSON request");return;}
  char version[16],method[128];char *id=hf_json_raw(j,hf_json_field(j,0,"id"));
@@ -273,21 +347,26 @@ static void hf_rpc_line25(const char *line,FILE *out){
  if(id[0]=='{'||id[0]=='['||!strcmp(id,"null")||!strcmp(id,"true")||!strcmp(id,"false")){hf_rpc_error25(out,NULL,-32600,"Invalid request identity");free(id);free(j);return;}
  if(!strcmp(method,"initialize"))fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"Hyperfide\",\"version\":\"2.0.0-dev\"},\"instructions\":\"Distributed tools use verified authority. Stable operation identities are required. No local fallback or forced task qualification.\"}}\n",id);
  else if(!strcmp(method,"ping"))fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\n",id);
- else if(!strcmp(method,"tools/list"))hf_rpc_tools25(out,id);
- else if(!strcmp(method,"tools/call"))hf_rpc_call25(j,out,id);
+ else if(!strcmp(method,"tools/list"))hf_rpc_tools25(out,id,policy);
+ else if(!strcmp(method,"tools/call"))hf_rpc_call25(j,out,id,policy);
  else hf_rpc_error25(out,id,-32601,"Unsupported distributed method");
  free(id);free(j);
 }
 static int hf_client_mcp25(FILE *out,FILE *err){
+ HfMcpPolicy25 policy;if(!hf_mcp_policy25(&policy))return hf_client_error25(err,"MCP_TOOL_POLICY_INVALID","Trusted finite MCP tool policy is invalid");
  const char *configuration=getenv("HYPERFIDE_TRANSPORT_CONFIG");HfTransportConfig config;
- if(!configuration||!hf_transport_config(configuration,&config))return hf_client_error25(err,"TRANSPORT_CONFIG_REQUIRED","Distributed MCP requires trusted transport configuration");
+ int configured=configuration&&hf_transport_config(configuration,&config);
+ if(!configured){
+ struct stat pending;int absent=configuration&&configuration[0]=='/'&&lstat(configuration,&pending)!=0&&errno==ENOENT;
+ if(!absent||!policy.restricted||!policy.bootstrap)return hf_client_error25(err,"TRANSPORT_CONFIG_REQUIRED","Distributed MCP requires trusted target transport configuration");
+ }
  char *line=malloc(HF_BODY_LIMIT+1);if(!line)return hf_client_error25(err,"RESOURCE_LIMIT","Request allocation failed");
  size_t length=0;int invalid=0,ch;
  while((ch=fgetc(stdin))!=EOF){
- if(ch=='\n'){line[length]=0;if(invalid)hf_rpc_error25(out,NULL,-32700,"Request exceeds protocol byte limit or contains NUL");else if(length)hf_rpc_line25(line,out);fflush(out);length=0;invalid=0;continue;}
+ if(ch=='\n'){line[length]=0;if(invalid)hf_rpc_error25(out,NULL,-32700,"Request exceeds protocol byte limit or contains NUL");else if(length)hf_rpc_line25(line,out,&policy);fflush(out);length=0;invalid=0;continue;}
  if(ch==0)invalid=1;
  if(length<HF_BODY_LIMIT)line[length++]=(char)ch;else invalid=1;
  }
- if(length||invalid){line[length]=0;if(invalid)hf_rpc_error25(out,NULL,-32700,"Invalid bounded request");else hf_rpc_line25(line,out);fflush(out);}
+ if(length||invalid){line[length]=0;if(invalid)hf_rpc_error25(out,NULL,-32700,"Invalid bounded request");else hf_rpc_line25(line,out,&policy);fflush(out);}
  free(line);return ferror(stdin)?1:0;
 }
