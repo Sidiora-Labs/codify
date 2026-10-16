@@ -14,7 +14,9 @@ IDS=[
  "railway.process.upload-unknown-no-retry","railway.process.upload-reconcile-bound","railway.process.binary-output-exact",
  "railway.process.segmented-archive","railway.process.archive-lost-reply-recovery","railway.process.archive-boot-bound",
  "railway.process.archive-byte-corruption","railway.process.session-index-restart","railway.process.session-index-corruption",
- "railway.process.reconciled-duplicate-receipt","railway.process.conflicting-duplicate-receipt"
+ "railway.process.reconciled-duplicate-receipt","railway.process.conflicting-duplicate-receipt",
+ "railway.process.final-receipt-replay","railway.process.final-receipt-conflict","railway.process.trailing-unknown-receipt",
+ "railway.process.ordered-capture-proof","railway.process.capture-proof-limit"
 ]
 def wait_exit(service,session,timeout=30):
  deadline=time.monotonic()+timeout
@@ -68,6 +70,15 @@ import {RailwaySessionSpool,createRailwayArtifactChunkSink,RailwayArtifactUpload
 const root=process.argv[1],folder=process.argv[2],session=process.argv[3],size=Number(process.argv[4]);
 const spool=new RailwaySessionSpool(root),resource={native_sandbox_id:'sandbox-1',sandbox_boot_generation:'7'};
 const output=spool.readCapturedOutput(resource,session,16*1024*1024);
+const captureHash=createHash('sha256'),captureOffsets={stdout:0,stderr:0};
+let captureOrdered=output.capture.schema_version===1&&output.capture.scheme==='ORDERED_CHUNKS_SHA256'&&output.capture.chunks.length===1;
+for(const chunk of output.capture.chunks){
+ const bytes=output[chunk.stream].subarray(Number(chunk.offset_bytes),Number(chunk.offset_bytes)+Number(chunk.size_bytes));
+ captureOrdered&&=chunk.offset_bytes===String(captureOffsets[chunk.stream])&&String(bytes.length)===chunk.size_bytes&&
+  'sha256:'+createHash('sha256').update(bytes).digest('hex')===chunk.digest;
+ captureOffsets[chunk.stream]+=bytes.length;captureHash.update(bytes);
+}
+captureOrdered&&='sha256:'+captureHash.digest('hex')===output.spool_digest&&captureOffsets.stdout===output.stdout.length&&captureOffsets.stderr===output.stderr.length;
 let tooSmall=false;try{spool.readCapturedOutput(resource,session,1024);}catch{tooSmall=true;}
 fs.mkdirSync(folder,{recursive:true});
 let calls=0;
@@ -151,6 +162,14 @@ fs.writeFileSync(receiptsPath,[JSON.stringify(firstReceipt),JSON.stringify(confl
 let conflictingReceipt=false;
 try{await spool.sealStreams('large-output',invoke,binding,64);}catch{conflictingReceipt=true;}
 fs.writeFileSync(receiptsPath,replayedBytes);
+const finalReceipt=JSON.parse(receipts.at(-1));
+fs.appendFileSync(receiptsPath,JSON.stringify({...finalReceipt,reconciled:true})+'\n');
+const finalReplay=(await spool.sealStreams('large-output',invoke,binding,64)).complete;
+fs.writeFileSync(receiptsPath,replayedBytes+JSON.stringify({...finalReceipt,receipt:{...finalReceipt.receipt,receipt_id:'sha256:'+'0'.repeat(64)}})+'\n');
+let finalConflict=false;try{await spool.sealStreams('large-output',invoke,binding,64);}catch{finalConflict=true;}
+fs.writeFileSync(receiptsPath,replayedBytes+JSON.stringify({...finalReceipt,sequence:finalReceipt.sequence+1})+'\n');
+let unknownTail=false;try{await spool.sealStreams('large-output',invoke,binding,64);}catch{unknownTail=true;}
+fs.writeFileSync(receiptsPath,replayedBytes);
 const segmented=verified.complete&&archive.index.streams.stdout.segments.length>=3&&
  archive.index.streams.stdout.digest==='sha256:'+createHash('sha256').update(Buffer.alloc(size,120)).digest('hex')&&
  archive.index.streams.stderr.size_bytes==='0'&&archive.index.byte_count===String(size);
@@ -170,7 +189,46 @@ fs.writeFileSync(indexFile,JSON.stringify(indexObject));
 let indexCorrupt=false;try{new RailwaySessionSpool(root).find(resource,session);}catch{indexCorrupt=true;}
 fs.writeFileSync(indexFile,indexBytes);
 
-process.stdout.write(JSON.stringify({readMatches:output.stdout.byteLength===size&&output.stderr.byteLength===0&&output.exit_code===0,
+// Synthetic adversarial spool journal: preserves the actual process binding,
+// changes only fixture bytes, and must refuse an over-bound proof before return.
+const operationFolder=path.join(root,createHash('sha256').update('large-output').digest('hex'));
+const saved=new Map(['session.json','chunks.ndjson','stdout.spool','stderr.spool'].map(name=>{
+ const filename=path.join(operationFolder,name);return [name,fs.existsSync(filename)?fs.readFileSync(filename):null];
+}));
+let captureLimit=false;
+try{
+ const record=JSON.parse(saved.get('session.json'));
+ // Explicit byte-journal fixtures prove empty and cross-stream order; these
+ // are local component inputs, not additional cloud/process observations.
+ record.chunk_count=0;record.byte_count='0';record.stream_bytes={stdout:'0',stderr:'0'};
+ fs.writeFileSync(path.join(operationFolder,'session.json'),JSON.stringify(record));
+ for(const name of ['chunks.ndjson','stdout.spool','stderr.spool']){const filename=path.join(operationFolder,name);if(fs.existsSync(filename))fs.unlinkSync(filename);}
+ const empty=spool.readCapturedOutput(resource,session,16*1024*1024);
+ captureOrdered&&=empty.capture.chunks.length===0&&empty.spool_digest==='sha256:'+createHash('sha256').update(Buffer.alloc(0)).digest('hex');
+ const mixed=[{stream:'stdout',offset:'0',byte:'A'},{stream:'stderr',offset:'0',byte:'B'},{stream:'stdout',offset:'1',byte:'C'}];
+ record.chunk_count=3;record.byte_count='3';record.stream_bytes={stdout:'2',stderr:'1'};
+ fs.writeFileSync(path.join(operationFolder,'session.json'),JSON.stringify(record));
+ fs.writeFileSync(path.join(operationFolder,'stdout.spool'),'AC',{mode:0o600});
+ fs.writeFileSync(path.join(operationFolder,'stderr.spool'),'B',{mode:0o600});
+ fs.writeFileSync(path.join(operationFolder,'chunks.ndjson'),mixed.map((item,sequence)=>JSON.stringify({sequence,stream:item.stream,offset:item.offset,size:1,digest:'sha256:'+createHash('sha256').update(item.byte).digest('hex'),file:item.stream+'.spool'})).join('\n')+'\n',{mode:0o600});
+ const interleaved=spool.readCapturedOutput(resource,session,16*1024*1024);
+ captureOrdered&&=interleaved.capture.chunks.length===3&&interleaved.capture.chunks.map(chunk=>chunk.stream).join(',')==='stdout,stderr,stdout'&&
+  interleaved.spool_digest==='sha256:'+createHash('sha256').update('ABC').digest('hex')&&
+  interleaved.spool_digest!=='sha256:'+createHash('sha256').update(Buffer.concat([interleaved.stdout,interleaved.stderr])).digest('hex');
+ const offsets={stdout:0,stderr:0},rows=[];
+ for(let sequence=0;sequence<4097;sequence++){
+  const stream=sequence%2?'stderr':'stdout';
+  rows.push({sequence,stream,offset:String(offsets[stream]++),size:1,digest:'sha256:'+createHash('sha256').update('x').digest('hex'),file:stream+'.spool'});
+ }
+ record.chunk_count=rows.length;record.byte_count=String(rows.length);record.stream_bytes={stdout:String(offsets.stdout),stderr:String(offsets.stderr)};
+ fs.writeFileSync(path.join(operationFolder,'session.json'),JSON.stringify(record));
+ fs.writeFileSync(path.join(operationFolder,'chunks.ndjson'),rows.map(row=>JSON.stringify(row)).join('\n')+'\n');
+ for(const stream of ['stdout','stderr'])fs.writeFileSync(path.join(operationFolder,stream+'.spool'),Buffer.alloc(offsets[stream],120),{mode:0o600});
+ try{spool.readCapturedOutput(resource,session,16*1024*1024);}catch(error){captureLimit=String(error).includes('RAILWAY_CAPTURE_PROOF_LIMIT');}
+}finally{for(const [name,bytes]of saved){const filename=path.join(operationFolder,name);if(bytes===null)fs.unlinkSync(filename);else fs.writeFileSync(filename,bytes);}}
+captureLimit&&=spool.find(resource,session).phase==='EXITED'&&spool.readCapturedOutput(resource,session,16*1024*1024).complete;
+
+process.stdout.write(JSON.stringify({captureOrdered,captureLimit,finalReplay,finalConflict,unknownTail,readMatches:output.stdout.byteLength===size&&output.stderr.byteLength===0&&output.exit_code===0,
  tooSmall,calls,status,unknownNoRetry,reconcileBound,segmented,archiveRecovery,wrongBoot,archiveCorrupt,indexRestart,indexCorrupt,receiptReplay,conflictingReceipt}));
 """
    upload=subprocess.run(["node","--input-type=module","-e",uploader_js,str(Path(folder)/"spool"),
@@ -184,7 +242,7 @@ process.stdout.write(JSON.stringify({readMatches:output.stdout.byteLength===size
       "actual byte reader, artifact facade uploads and manifest distinction"))
    c.check(IDS[22],lambda:c.expect(uploaded["unknownNoRetry"],"unknown accepted object put was blindly retried"))
    c.check(IDS[23],lambda:c.expect(uploaded["reconcileBound"],"upload reconciliation receipt binding"))
-   for index,key in [(25,"segmented"),(26,"archiveRecovery"),(27,"wrongBoot"),(28,"archiveCorrupt"),(29,"indexRestart"),(30,"indexCorrupt"),(31,"receiptReplay"),(32,"conflictingReceipt")]:
+   for index,key in [(25,"segmented"),(26,"archiveRecovery"),(27,"wrongBoot"),(28,"archiveCorrupt"),(29,"indexRestart"),(30,"indexCorrupt"),(31,"receiptReplay"),(32,"conflictingReceipt"),(33,"finalReplay"),(34,"finalConflict"),(35,"unknownTail"),(36,"captureOrdered"),(37,"captureLimit")]:
     c.check(IDS[index],lambda key=key:c.expect(uploaded[key],"archive/session regression: "+key))
 
    binary_bytes=bytes([255,0,254,195,169])

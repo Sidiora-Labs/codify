@@ -78,6 +78,10 @@ function archiveReceipt(value:unknown,binding:Pick<RailwayArchiveBinding,'organi
 
 interface UploadState {schema_version:1;acknowledged:number;index_offset:number;
   pending:null|{sequence:number;digest:string;size_bytes:string;candidate_artifact_id?:string|null}}
+export interface RailwayCaptureProof {
+  schema_version:1;scheme:'ORDERED_CHUNKS_SHA256';
+  chunks:Array<{stream:'stdout'|'stderr';offset_bytes:string;size_bytes:string;digest:string}>;
+}
 export class RailwaySessionSpool {
   readonly directory:string;
   private readonly handles=new Map<string,ExecHandle>();
@@ -394,7 +398,14 @@ export class RailwaySessionSpool {
         references=[];segmentSize=0n;segmentHash=createHash('sha256');
       };
       let chunkSequence=0,receiptSequence=-1,lastReceiptHash='';
-      const receiptRows=record.chunk_count?archiveLines(path.join(this.folder(operationId),'upload-receipts.ndjson')):undefined;
+      const receiptFile=path.join(this.folder(operationId),'upload-receipts.ndjson');
+      const receiptRows=record.chunk_count||fs.existsSync(receiptFile)?archiveLines(receiptFile):undefined;
+      const fingerprintReceipt=(row:Record<string,unknown>):string=>{
+        if(Object.keys(row).some(key=>!['sequence','stream','offset','size','digest','file','receipt','reconciled'].includes(key))||
+          (Object.hasOwn(row,'reconciled')&&row.reconciled!==true))throw new Error('Railway receipt journal fields');
+        return hash({sequence:row.sequence,stream:row.stream,offset:row.offset,size:row.size,
+          digest:row.digest,file:row.file,receipt:row.receipt});
+      };
       try{for(const raw of record.chunk_count?archiveLines(path.join(this.folder(operationId),'chunks.ndjson')):[]){
         const chunk=raw as unknown as Chunk;
         if(chunk.sequence!==chunkSequence++)throw new Error('Railway stream sequence gap');
@@ -402,10 +413,7 @@ export class RailwaySessionSpool {
         while(true){
           const next=receiptRows!.next();if(next.done)throw new Error('Railway stream receipt gap');
           const row=next.value;
-          if(Object.keys(row).some(key=>!['sequence','stream','offset','size','digest','file','receipt','reconciled'].includes(key))||
-            (Object.hasOwn(row,'reconciled')&&row.reconciled!==true))throw new Error('Railway receipt journal fields');
-          const fingerprint=hash({sequence:row.sequence,stream:row.stream,offset:row.offset,size:row.size,
-            digest:row.digest,file:row.file,receipt:row.receipt});
+          const fingerprint=fingerprintReceipt(row);
           if(row.sequence===receiptSequence){
             if(fingerprint!==lastReceiptHash)throw new Error('Railway duplicate receipt conflict');continue;
           }
@@ -428,7 +436,14 @@ export class RailwaySessionSpool {
           size_bytes:String(chunk.size),offset_bytes:String(segmentSize)});
         total+=BigInt(chunk.size);segmentSize+=BigInt(chunk.size);
         if(references.length===maxSegmentChunks)await flush();
-      }}finally{receiptRows?.return(undefined);}
+      }
+        // EOF belongs to the proof: a final conflicting replay or unknown
+        // receipt cannot be hidden after the last consumed raw chunk.
+        if(receiptRows)for(let next=receiptRows.next();!next.done;next=receiptRows.next()){
+          if(next.value.sequence!==receiptSequence||receiptSequence<0||fingerprintReceipt(next.value)!==lastReceiptHash)
+            throw new Error('Railway trailing receipt conflict');
+        }
+      }finally{receiptRows?.return(undefined);}
       if(chunkSequence!==record.chunk_count||String(total)!==record.stream_bytes[stream])throw new Error('Railway stream incomplete');
       if(references.length||!segments.length)await flush();
       streams[stream]={size_bytes:String(total),digest:'sha256:'+whole.digest('hex'),segments};
@@ -587,7 +602,7 @@ export class RailwaySessionSpool {
     current.phase='UNKNOWN';current.output_complete=false;this.save(current);
   }
   readCapturedOutput(resource:ResourceRef,sessionName:string,maxBytes:number):{
-    stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;
+    stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;capture:RailwayCaptureProof;
   } {
     integer(maxBytes,1,16*1024*1024);
     const record=this.find(resource,sessionName),proof=this.verify(record.operation_id);
@@ -602,14 +617,24 @@ export class RailwaySessionSpool {
     }
     // Recheck the returned bytes, not only an earlier filesystem observation.
     const returned=createHash('sha256');let count=0;
+    const ranges:Array<{stream:'stdout'|'stderr';offset:number;size:number}>=[];
     for(const chunk of this.index(record.operation_id)){
       const start=Number(BigInt(chunk.offset)),content=streams[chunk.stream].subarray(start,start+chunk.size);
       if(content.length!==chunk.size||'sha256:'+createHash('sha256').update(content).digest('hex')!==chunk.digest)
         throw new Error('Railway returned output changed');
       returned.update(content);count++;
+      const previous=ranges.at(-1);
+      if(previous?.stream===chunk.stream&&previous.offset+previous.size===start)previous.size+=chunk.size;
+      else{
+        if(ranges.length===4096)throw new Error('RAILWAY_CAPTURE_PROOF_LIMIT: complete evidence unavailable; process unchanged');
+        ranges.push({stream:chunk.stream,offset:start,size:chunk.size});
+      }
     }
     if(count!==record.chunk_count||'sha256:'+returned.digest('hex')!==proof.digest)throw new Error('Railway returned output index changed');
-    return {...streams,exit_code:record.exit_code,complete:true,spool_digest:proof.digest};
+    const capture:RailwayCaptureProof={schema_version:1,scheme:'ORDERED_CHUNKS_SHA256',chunks:ranges.map(range=>({
+      stream:range.stream,offset_bytes:String(range.offset),size_bytes:String(range.size),
+      digest:'sha256:'+createHash('sha256').update(streams[range.stream].subarray(range.offset,range.offset+range.size)).digest('hex')}))};
+    return {...streams,exit_code:record.exit_code,complete:true,spool_digest:proof.digest,capture};
   }
   async detachAll():Promise<void> {
     for(const [operationId,handle] of this.handles){
