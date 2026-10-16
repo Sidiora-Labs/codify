@@ -1,0 +1,346 @@
+{
+  "approval": {
+    "allowed_actions": [],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-11.1-preparation-v1",
+  "case_ids": [
+    "V-038",
+    "V-040"
+  ],
+  "expected_assertion_ids": [
+    "preparation.inventory.actual-bytes",
+    "preparation.manifest.roundtrip",
+    "preparation.manifest.portable",
+    "preparation.scan.coverage-counts",
+    "preparation.drift.file-content",
+    "preparation.drift.file-added",
+    "preparation.drift.file-deleted",
+    "preparation.drift.file-mode",
+    "preparation.drift.root-mode",
+    "preparation.drift.directory-mode",
+    "preparation.drift.empty-directory",
+    "preparation.drift.toolchain",
+    "preparation.drift.recipe",
+    "preparation.drift.lock",
+    "preparation.tamper.digest",
+    "preparation.tamper.file-digest",
+    "preparation.tamper.file-size",
+    "preparation.tamper.file-order",
+    "preparation.tamper.file-duplicate",
+    "preparation.tamper.directory-omitted",
+    "preparation.tamper.scan-omitted",
+    "preparation.tamper.unknown-field",
+    "preparation.tamper.profile-runtime-identity",
+    "preparation.path.invalid-0",
+    "preparation.path.invalid-1",
+    "preparation.path.invalid-2",
+    "preparation.path.invalid-3",
+    "preparation.path.invalid-4",
+    "preparation.path.invalid-5",
+    "preparation.path.invalid-6",
+    "preparation.path.invalid-7",
+    "preparation.authority.missing-root",
+    "preparation.authority.request-root",
+    "preparation.authority.role-denied",
+    "preparation.filesystem.root-symlink",
+    "preparation.filesystem.file-symlink",
+    "preparation.filesystem.ancestor-symlink",
+    "preparation.filesystem.hardlink",
+    "preparation.filesystem.fifo",
+    "preparation.filesystem.special-mode",
+    "preparation.filesystem.manifest-not-excluded",
+    "preparation.contamination.secret",
+    "preparation.contamination.identity",
+    "preparation.contamination.lease",
+    "preparation.contamination.filename-canary",
+    "preparation.contamination.dirname-canary",
+    "preparation.contamination.path-.env",
+    "preparation.contamination.path-.npmrc",
+    "preparation.contamination.path-.netrc",
+    "preparation.contamination.path-.ssh-id_rsa",
+    "preparation.contamination.path-.aws-credentials",
+    "preparation.contamination.path-.codex-auth.json",
+    "preparation.contamination.path-.claude-.credentials.json",
+    "preparation.contamination.authority-lease_token",
+    "preparation.contamination.authority-lease_id",
+    "preparation.contamination.authority-agent_session_id",
+    "preparation.contamination.authority-ownership_generation",
+    "preparation.contamination.authority-enrollment_token",
+    "preparation.contamination.private-key",
+    "preparation.contamination.example-allowed",
+    "preparation.scan.explicit-empty",
+    "preparation.profile.invalid-schema-bool",
+    "preparation.profile.invalid-unknown",
+    "preparation.profile.invalid-nested-unknown",
+    "preparation.profile.invalid-cpu-bool",
+    "preparation.profile.invalid-cpu-zero",
+    "preparation.profile.invalid-memory-noncanonical",
+    "preparation.profile.invalid-memory-zero",
+    "preparation.profile.invalid-version-range",
+    "preparation.profile.invalid-version-latest",
+    "preparation.profile.invalid-duplicate-toolchain",
+    "preparation.profile.invalid-empty-agents",
+    "preparation.profile.invalid-empty-locks",
+    "preparation.profile.invalid-missing-pin",
+    "preparation.profile.invalid-wrong-pin",
+    "preparation.profile.invalid-commit-invalid",
+    "preparation.profile.invalid-url-credentials",
+    "preparation.profile.invalid-url-query",
+    "preparation.profile.invalid-expiry-past",
+    "preparation.profile.invalid-expiry-noncanonical",
+    "preparation.profile.invalid-duplicate-capability",
+    "preparation.scan.short-canary",
+    "preparation.filesystem.file-bound",
+    "preparation.filesystem.streaming-real-binary",
+    "preparation.contamination.streaming-boundary",
+    "preparation.filesystem.late-file-mutation",
+    "preparation.contamination.schema-property-allowed",
+    "preparation.contamination.duplicate-credential",
+    "preparation.contamination.escaped-credential-key",
+    "preparation.contamination.json-without-extension",
+    "preparation.profile.oci-reference",
+    "preparation.profile.oci-digest-mismatch",
+    "preparation.transport.large-inventory-roundtrip",
+    "preparation.transport.default-request-bound",
+    "preparation.transport.invalid-hf_service_max_request_bytes-empty",
+    "preparation.transport.invalid-hf_service_max_request_bytes-0",
+    "preparation.transport.invalid-hf_service_max_request_bytes-1",
+    "preparation.transport.invalid-hf_service_max_request_bytes-255",
+    "preparation.transport.invalid-hf_service_max_request_bytes--1",
+    "preparation.transport.invalid-hf_service_max_request_bytes-01",
+    "preparation.transport.invalid-hf_service_max_request_bytes-1.5",
+    "preparation.transport.invalid-hf_service_max_request_bytes-1e6",
+    "preparation.transport.invalid-hf_service_max_request_bytes-67108865",
+    "preparation.transport.invalid-hf_service_max_response_bytes-empty",
+    "preparation.transport.invalid-hf_service_max_response_bytes-0",
+    "preparation.transport.invalid-hf_service_max_response_bytes-1",
+    "preparation.transport.invalid-hf_service_max_response_bytes-255",
+    "preparation.transport.invalid-hf_service_max_response_bytes--1",
+    "preparation.transport.invalid-hf_service_max_response_bytes-01",
+    "preparation.transport.invalid-hf_service_max_response_bytes-1.5",
+    "preparation.transport.invalid-hf_service_max_response_bytes-1e6",
+    "preparation.transport.invalid-hf_service_max_response_bytes-67108865",
+    "preparation.transport.request-cannot-configure",
+    "preparation.filesystem.outside-sibling-mutation",
+    "preparation.filesystem.scan-cancellation",
+    "preparation.contamination.pem-marker-only-allowed",
+    "preparation.contamination.pem-adjacent-markers-allowed",
+    "preparation.filesystem.actual-mise-binary",
+    "preparation.contamination.pem-unwrapped-crosschunk",
+    "preparation.filesystem.empty-candidate"
+  ],
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/1.4.json",
+      "sha256": "bad91dd5fb9ed7e60aaad3dfd43510a848ee86a5f95c5bb682082f029c8f1f26",
+      "size": 274
+    },
+    {
+      "path": "services/hyperfide/components/11.1.json",
+      "sha256": "4ec8f4eab9f301fe163a3de17b2599eb78db279af45490e1d4864b8ae4948afd",
+      "size": 293
+    },
+    {
+      "path": "services/hyperfide/components/schema.json",
+      "sha256": "8895f135cc1ce6aad30858d5e15d0810157e49a8fa266cbd2c1ae385f76f8961",
+      "size": 1439
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.d.ts",
+      "sha256": "96d1c4eb11b3357c0f6227457c015c683e8a2025b7547d11a77a1d2c27d21d1c",
+      "size": 934
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js",
+      "sha256": "e18f7c5acaaf4db08b5ed7c796c6628f238f63b24efca730d3a500d4a9f1f6fe",
+      "size": 9048
+    },
+    {
+      "path": "services/hyperfide/dist/components/registry.js.map",
+      "sha256": "a9dbdb2872c2c36f44fbc1ccb7819a7301362de71b1f835d54c5b272762b175f",
+      "size": 9123
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.d.ts",
+      "sha256": "a929c983b727c212d0feef3c35f4fd6c07c14139a47c8928e1a03fa1c7d6039f",
+      "size": 550
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js",
+      "sha256": "a4ea7869c63fe9b462333335638bce151a7eca357104d4641e8a503cda21a40b",
+      "size": 8443
+    },
+    {
+      "path": "services/hyperfide/dist/components/service.js.map",
+      "sha256": "ac74724c7a452a85fe96044a315f67224e4c21b1947de0c4a021414c5a668299",
+      "size": 8599
+    },
+    {
+      "path": "services/hyperfide/dist/control.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/control.js.map",
+      "sha256": "48349cca9de2de36e81e287513d65b9d7112d94f02e116fe52cde8a33ceac76f",
+      "size": 183
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js",
+      "sha256": "993b2fcdb5f4599e9475a27d29d15f861794bea9b611e85968b4d9a37cfc8216",
+      "size": 120
+    },
+    {
+      "path": "services/hyperfide/dist/dispatch.js.map",
+      "sha256": "657b88f6e4c3cf5371864771b82cd7e29e42aad56b78c5c3e13ea06f508491cd",
+      "size": 185
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.d.ts",
+      "sha256": "8386faed4722998f9e3fb9b3413c6b0e7e56879a0bb497a4a19d654d11c44e86",
+      "size": 1076
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js",
+      "sha256": "2f9b0745664f79b55492989112528b423decdf553fb303778425c4f9685fa6a5",
+      "size": 4611
+    },
+    {
+      "path": "services/hyperfide/dist/policy/programme.js.map",
+      "sha256": "1d0832f8dbf790abd212afdfde928b6093ca4689a292315f60f1e3ab13813f38",
+      "size": 4311
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/manifests.d.ts",
+      "sha256": "2c9e4352fdab21b70d4b8db73d8b90b3de2a7382095777ed7d71628eb232f74a",
+      "size": 2903
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/manifests.js",
+      "sha256": "e22e022777a218ffaae65c0486698b93c31962434d8b5dc9e6c33c53212ed49f",
+      "size": 26172
+    },
+    {
+      "path": "services/hyperfide/dist/preparation/manifests.js.map",
+      "sha256": "aca1596594b19c245ee696d5849b5f5f76b349f32eb36f6181318e0f6887a0f8",
+      "size": 29147
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.d.ts",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881",
+      "size": 11
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js",
+      "sha256": "0747f45b91ff8319ea22f6ced47d0af9c812f502d8240b543d06c7f1ba0d030a",
+      "size": 126
+    },
+    {
+      "path": "services/hyperfide/dist/provisioner.js.map",
+      "sha256": "ce33225f34728722e868c0c125f9c8ccac69df9b08573c2388fa580707d4bc0e",
+      "size": 191
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "99a2fc1bea6f51c7963c5d9b692d2f4753b34161dee50da37ddef06c8af5f489",
+      "size": 19220
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "6c760a3bc5749bf5944e9618d4a1b8133c28e7bade8027a7ab09d152c53e3720",
+      "size": 570
+    },
+    {
+      "path": "services/hyperfide/src/components/registry.ts",
+      "sha256": "992079df4d9cf0e3c8c0b257987da423096bf3982f20b84894d93d6516a40736",
+      "size": 8993
+    },
+    {
+      "path": "services/hyperfide/src/components/service.ts",
+      "sha256": "92a25e0487f46a3af29bde817e063a3d784f7e86182b3d2731f72a2e7347ee9d",
+      "size": 8256
+    },
+    {
+      "path": "services/hyperfide/src/control.ts",
+      "sha256": "576b9b5b40fc508edf560682bc4de73f850ec590a996ad94d951f44a1c4d5cbf",
+      "size": 83
+    },
+    {
+      "path": "services/hyperfide/src/dispatch.ts",
+      "sha256": "924dc43a3711361ebb60168ae0556d1a212d10f5507bf372e4ace17c398448a6",
+      "size": 84
+    },
+    {
+      "path": "services/hyperfide/src/policy/programme.ts",
+      "sha256": "64addcffe3ccc4b106982123688e07abf19b7656ffbceaebcd7e2d581343692e",
+      "size": 5089
+    },
+    {
+      "path": "services/hyperfide/src/preparation/manifests.ts",
+      "sha256": "c3987060cbc7bf8c091a26e53da193d37b7b57e95c21e1ded04fd09a78017280",
+      "size": 27108
+    },
+    {
+      "path": "services/hyperfide/src/provisioner.ts",
+      "sha256": "56d68c3c582bac9ed6ab73c70fa566072a48126b49111033ee70b1e6567aadb7",
+      "size": 87
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/11_1.py",
+      "sha256": "6fc77ce9d1810273a1fb38865f75142199fbac9bcac42a0cade74c67e9bebfab",
+      "size": 32997
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "7f97dbde67eb6e0824543e8a382c745c4ef352411d7ce54d0a962c6814b75d93",
+      "size": 27891
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
+      "size": 36837
+    },
+    {
+      "path": "tests/hyperfide/registrations/11.1.json",
+      "sha256": "e9959bf2f64b2a55f160f1b6c32f69aea7d9b6fa18bee7c21ecb0a8177098896",
+      "size": 8259
+    }
+  ],
+  "policy": {
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "frontier_calls": false,
+    "qualification_limitations": [
+      "Component filesystem/profile/transport contract only; no provider preparation or full readiness qualification.",
+      "Bounded designated-canary and known-state scanning does not establish absence of arbitrary secrets.",
+      "Final merged-source receipts require refreshed complete service inventory pins."
+    ]
+  },
+  "registered_variant": "task:11.1",
+  "resources": [],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}

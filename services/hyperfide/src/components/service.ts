@@ -6,6 +6,19 @@ import type { ServiceRole } from '../policy/programme.js';
 import { ComponentRegistry } from './registry.js';
 
 const MAX_BYTES = 1024 * 1024;
+const HARD_PROTOCOL_BYTES = 64 * 1024 * 1024;
+function protocolLimits(): { request: number; response: number } {
+  const read = (name: string): number => {
+    const configured = process.env[name];
+    if (configured === undefined) return MAX_BYTES;
+    if (!/^[1-9][0-9]*$/.test(configured)) throw new FoundationError('PROTOCOL_CONFIG', 'Invalid trusted protocol byte limit');
+    const value = Number(configured);
+    if (!Number.isSafeInteger(value) || value < 256 || value > HARD_PROTOCOL_BYTES)
+      throw new FoundationError('PROTOCOL_CONFIG', 'Invalid trusted protocol byte limit');
+    return value;
+  };
+  return { request: read('HF_SERVICE_MAX_REQUEST_BYTES'), response: read('HF_SERVICE_MAX_RESPONSE_BYTES') };
+}
 function errorValue(error: unknown): { code: string; message: string } {
   return error instanceof FoundationError ? { code: error.code, message: error.message } :
     { code: 'HANDLER_FAILED', message: error instanceof Error ? error.message : 'Unknown component failure' };
@@ -27,9 +40,11 @@ export type ProtocolResponse =
   | { id: string | number; ok: true; result: unknown }
   | { id: string | number | null; ok: false; error: { code: string; message: string } };
 // Shared internal dispatcher: later authenticated transports reuse these exact admission checks.
-export async function handleRequest(registry: ComponentRegistry, request: unknown): Promise<ProtocolResponse> {
+export async function handleRequest(registry: ComponentRegistry, request: unknown, responseLimit = MAX_BYTES): Promise<ProtocolResponse> {
   let id: string | number | null = null;
   try {
+    if (!Number.isSafeInteger(responseLimit) || responseLimit < 256 || responseLimit > HARD_PROTOCOL_BYTES)
+      throw new FoundationError('PROTOCOL_CONFIG', 'Invalid trusted protocol byte limit');
     if (!object(request) || Object.keys(request).some(key => !['id','component','action','input'].includes(key)) ||
         !Object.hasOwn(request, 'input') || !(typeof request.id === 'string' && request.id.length > 0 && request.id.length <= 128 ||
           typeof request.id === 'number' && Number.isSafeInteger(request.id)) ||
@@ -44,11 +59,14 @@ export async function handleRequest(registry: ComponentRegistry, request: unknow
           typeof value === 'number' && !Number.isFinite(value)) throw new Error('Result is not JSON serializable');
       return value;
     });
-    if (Buffer.byteLength(encoded) > MAX_BYTES) throw new Error('Response exceeds protocol limit');
+    if (Buffer.byteLength(encoded) > responseLimit) throw new Error('Response exceeds protocol limit');
     // Snapshot validated bytes so later wire serialization cannot invoke component toJSON or getters.
     return JSON.parse(encoded) as ProtocolResponse;
   } catch (error) {
-    return { id, ok: false, error: errorValue(error) };
+    const response = { id, ok: false as const, error: errorValue(error) };
+    if (Buffer.byteLength(JSON.stringify(response)) > responseLimit)
+      return { id: null, ok: false, error: { code: 'RESPONSE_TOO_LARGE', message: 'Response exceeds protocol limit' } };
+    return response;
   }
 }
 export async function runService(role: ServiceRole, args = process.argv.slice(2)): Promise<void> {
@@ -69,6 +87,8 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
   process.once('SIGTERM', terminate);
   process.once('SIGINT', terminate);
   try {
+    // Operator-owned startup configuration is frozen before policy reads or component factories run.
+    const limits = protocolLimits();
     const config = options(args);
     const policyFile = config['--policy']!;
     let stat;
@@ -86,7 +106,7 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
     const reply = async (line: string): Promise<void> => {
       let request: unknown;
       try { request = JSON.parse(line); } catch { request = undefined; }
-      const response = await handleRequest(registry!, request);
+      const response = await handleRequest(registry!, request, limits.response);
       if (!response.ok) process.exitCode = 1;
       if (!process.stdout.write(JSON.stringify(response) + '\n'))
         await new Promise<void>(resolve => process.stdout.once('drain', resolve));
@@ -99,7 +119,7 @@ export async function runService(role: ServiceRole, args = process.argv.slice(2)
       while (offset < data.length && !stopping) {
         const newline = data.indexOf(10, offset);
         const end = newline < 0 ? data.length : newline;
-        if (buffered.length + end - offset > MAX_BYTES) throw new FoundationError('INVALID_REQUEST', 'Request exceeds protocol limit');
+        if (buffered.length + end - offset > limits.request) throw new FoundationError('INVALID_REQUEST', 'Request exceeds protocol limit');
         buffered = Buffer.concat([buffered, data.subarray(offset, end)]);
         offset = end + (newline < 0 ? 0 : 1);
         if (newline >= 0) { await reply(buffered.toString('utf8')); buffered = Buffer.alloc(0); }

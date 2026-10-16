@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "11.1",
+  "task": "11.1",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "preparation/manifests.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "preparation.manifest.create",
+    "preparation.manifest.verify"
+  ],
+  "requires": []
+}
