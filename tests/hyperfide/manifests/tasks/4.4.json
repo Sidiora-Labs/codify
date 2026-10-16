@@ -9,7 +9,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-4.4-external-journal-and-semantic-fence-v2",
+  "campaign_id": "hyperfide-task-4.4-merged-durability-integration-v1",
   "case_ids": [
     "V-009",
     "V-053"
@@ -189,13 +189,13 @@
     },
     {
       "path": "services/hyperfide/package-lock.json",
-      "sha256": "99a2fc1bea6f51c7963c5d9b692d2f4753b34161dee50da37ddef06c8af5f489",
-      "size": 19220
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
     },
     {
       "path": "services/hyperfide/package.json",
-      "sha256": "6c760a3bc5749bf5944e9618d4a1b8133c28e7bade8027a7ab09d152c53e3720",
-      "size": 570
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
     },
     {
       "path": "services/hyperfide/src/components/registry.ts",
