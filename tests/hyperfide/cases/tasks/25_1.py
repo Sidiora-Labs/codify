@@ -27,6 +27,53 @@ def cleanup():
  value=json.loads(filename.read_text()) if filename.exists() else {"observed_absent":False}
  absent=value.get("observed_absent") is True
  print(json.dumps({"type":"cleanup","complete":absent,"resources":[{"id":"hf-task25.1-database","status":"deleted" if absent else "unknown","observed_absent":absent,"evidence_artifact":"migration/cleanup.json"}]}));return 0 if absent else 1
+def history_commit_proxy(directory):
+ import importlib.util
+ spec=importlib.util.spec_from_file_location("shared_transaction_fixture",ROOT/"tests/hyperfide/cases/tasks/4_2.py")
+ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+ class HistoryCommitProxy(module.CommitAckProxy):
+  # The shared fixture drops a real backend COMMIT acknowledgement. This bounded
+  # specialization arms only for a transaction that wrote a history batch.
+  def forward(self,source,target,state,frontend):
+   buffer=b'';startup=frontend
+   try:
+    while True:
+     data=source.recv(65536)
+     if not data:return
+     buffer+=data
+     while True:
+      if startup:
+       if len(buffer)<4:break
+       length=int.from_bytes(buffer[:4],'big')
+       if length<8 or length>16777216:raise OSError('startup bound')
+       if len(buffer)<length:break
+       packet,buffer=buffer[:length],buffer[length:];target.sendall(packet);startup=False;continue
+      if len(buffer)<5:break
+      length=int.from_bytes(buffer[1:5],'big')+1
+      if length<5 or length>16777216:raise OSError('packet bound')
+      if len(buffer)<length:break
+      packet,buffer=buffer[:length],buffer[length:]
+      if frontend and packet[:1] in (b'Q',b'P'):
+       sql=packet[5:]
+       if packet[:1]==b'Q' and sql.rstrip(b'\0').strip().upper().startswith(b'BEGIN'):state.update(commit=False,target=False)
+       if b'INSERT INTO hyperfide_history.batches' in sql:state['target']=True
+       if b'INSERT INTO hyperfide_history.rows' in sql:
+        with self.lock:self.row_write_messages+=1
+       if packet[:1]==b'Q' and sql.rstrip(b'\0').strip().upper()==b'COMMIT':state['commit']=True
+      if not frontend and state.get('commit') and state.get('target') and packet[:1]==b'C' and packet[5:]==b'COMMIT\0':
+       with self.lock:
+        if self.drop:self.drop=False;self.dropped=True;return
+      target.sendall(packet)
+      if not frontend and packet[:1]==b'Z' and packet[5:]==b'I':state.update(commit=False,target=False)
+   except OSError:pass
+   finally:
+    for connection in [source,target]:
+     try:connection.shutdown(self.socket.SHUT_RDWR)
+     except OSError:pass
+     connection.close()
+ proxy=HistoryCommitProxy(str(directory));proxy.drop=False;proxy.row_write_messages=0
+ return proxy
+
 def main():
  global FIXTURE
  sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
@@ -44,6 +91,8 @@ CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT);
 CREATE TABLE files(id INTEGER PRIMARY KEY,branch_id INTEGER,path TEXT);
 CREATE TABLE events(seq INTEGER PRIMARY KEY,kind TEXT);
 CREATE TABLE custom_shape(a TEXT,b TEXT,PRIMARY KEY(a,b)) WITHOUT ROWID;
+CREATE TABLE typed_history(id INTEGER PRIMARY KEY,body BLOB);
+INSERT INTO typed_history VALUES(1,x'0063616e617279ff');
 CREATE VIRTUAL TABLE symbol_fts USING fts5(name,tokenize='trigram');
 CREATE TRIGGER local_only AFTER INSERT ON memories BEGIN INSERT INTO events(kind) VALUES('local'); END;
 INSERT INTO attempts VALUES('old-attempt','feature/1',9223372036854775807,'running');
@@ -62,10 +111,14 @@ INSERT INTO symbol_fts VALUES('name_test');
   spec=importlib.util.spec_from_file_location("artifact_fixture",ROOT/"tests/hyperfide/cases/tasks/15_2.py")
   artifact_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(artifact_module)
   backend=artifact_module.ObjectFixture()
+  proxy_directory=base/"pg-proxy";proxy_directory.mkdir(mode=0o700);proxy=history_commit_proxy(proxy_directory)
   def setup(fixture):
    data=(ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes()
    fixture.sql("BEGIN;"+data.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(25,'0025-sqlite-history','"+sha(data)+"');COMMIT;")
    i=fixture.ids;repository=profiles[0]['repository_id'];profiles[0]['organisation_id']=i['organisation'];pf.write_text(json.dumps(profiles))
+   from urllib.parse import parse_qsl,urlencode
+   parsed=urlsplit(fixture.url);query=dict(parse_qsl(parsed.query));query['host']=str(proxy_directory)
+   fixture.env['DATABASE_URL']=urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(query),parsed.fragment))
    fixture.env.update(HF_ARTIFACT_S3_ENDPOINT=backend.endpoint,HF_ARTIFACT_ALLOW_LOOPBACK_HTTP='1',HF_ARTIFACT_S3_REGION=artifact_module.REGION,HF_ARTIFACT_S3_BUCKET=artifact_module.BUCKET,HF_ARTIFACT_S3_ACCESS_KEY_ID=artifact_module.KEY,HF_ARTIFACT_S3_SECRET_ACCESS_KEY=artifact_module.SECRET,HF_ARTIFACT_S3_SESSION_TOKEN=artifact_module.TOKEN,HF_ARTIFACT_ORGANISATION_ID=i['organisation'],HF_ARTIFACT_ALLOWED_RUN_IDS=json.dumps([i['run']]))
    fixture.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'legacy','fixture:legacy')",[i['organisation'],repository,i['project']])
    fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i['organisation'],repository,'1'*40])
@@ -143,6 +196,20 @@ INSERT INTO symbol_fts VALUES('name_test');
   for table in ["memories","attempts","custom_shape","events","branches","files","memory_superseded"]:
    v={"source":"fixture","import_id":iid,"table":table,"offset":"0","limit":50}
    check("migration.import."+table,lambda v=v:expect(ok("import",v)["outcome"]=="SUCCEEDED","batch did not commit"))
+  unknown={}
+  def commit_loss():
+   before=proxy.row_write_messages;proxy.drop=True
+   value={"source":"fixture","import_id":iid,"table":"typed_history","offset":"0","limit":1}
+   result=ok("import",value);unknown.update(value=value,row_writes_before=before)
+   expect(result["outcome"]=="UNKNOWN" and result["automatic_replay"] is False and proxy.dropped,"lost actual PG COMMIT acknowledgement was asserted successful")
+   expect(proxy.row_write_messages-before==1,"gateway automatically replayed uncertain batch callback")
+   expect(sql("SELECT count(*) FROM hyperfide_history.rows WHERE table_name='typed_history';")=="1" and sql("SELECT count(*) FROM hyperfide_history.batches WHERE table_name='typed_history';")=="1","independent primary did not retain exactly one committed batch")
+  check("migration.commit.actual-ack-loss-unknown",commit_loss)
+  def reconcile_commit():
+   result=ok("import",unknown["value"])
+   expect(result["outcome"]=="SUCCEEDED" and result["replayed"] is True,"unknown batch did not reconcile durable identity")
+   expect(proxy.row_write_messages-unknown["row_writes_before"]==1 and sql("SELECT count(*) FROM hyperfide_history.rows WHERE table_name='typed_history';")=="1","reconciliation duplicated side effects")
+  check("migration.commit.durable-identity-reconciliation",reconcile_commit)
   check("migration.import.exact-integer",lambda:expect("9007199254740993" in sql("SELECT payload::text FROM hyperfide_history.rows WHERE table_name='memories';"),"large integer rounded"))
   check("migration.import.exact-blob",lambda:expect("AP8=" in sql("SELECT payload::text FROM hyperfide_history.rows WHERE table_name='memories';"),"blob changed"))
   check("migration.import.unqualified",lambda:expect(sql("SELECT count(*) FROM hyperfide_history.imports WHERE authority<>'NONE' OR qualification<>'UNQUALIFIED';")=="0","historical import qualified"))
@@ -171,9 +238,9 @@ INSERT INTO symbol_fts VALUES('name_test');
    try:reject('describe',{},'MIGRATION_SCHEMA_REQUIRED')
    finally:FIXTURE.sql("UPDATE hyperfide.schema_migrations SET checksum=$1 WHERE version=25",[sha((ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes())])
   check("migration.schema.checksum-refused",wrong_schema)
-  c.close();frozen.close();database=FIXTURE.database;FIXTURE.close();backend_absent=backend.stop()
+  c.close();frozen.close();database=FIXTURE.database;FIXTURE.close();backend_absent=backend.stop();proxy.close();proxy_absent=not Path(proxy.path).exists()
   absent=not FIXTURE.sql('SELECT datname FROM pg_database WHERE datname=$1',[database],admin=True)
-  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL pg_database after fixture close","object_backend_observed_absent":backend_absent}))
+  (artifacts()/"cleanup.json").write_text(json.dumps({"observed_absent":absent,"database":database,"observer":"actual PostgreSQL pg_database after fixture close","object_backend_observed_absent":backend_absent,"commit_proxy_observed_absent":proxy_absent}))
   check("migration.cleanup.actual-absence",lambda:expect(absent,"synthetic database still exists"))
  (artifacts()/"observations.json").write_text(json.dumps({"scope":"task-component","assertion_ids":IDS,"failed_ids":FAILED,"private_records_used":False,"full_cases_qualified":False},sort_keys=True))
  return 1 if FAILED else 0
