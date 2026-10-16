@@ -32,7 +32,14 @@
     "review.reproduction.current-source-unrun-causal-refused",
     "review.reproduction.current-source-caller-head-refused",
     "review.reproduction.registered-seventy-two-hour-timeout",
-    "review.reproduction.inspector-exact-custody-lineage"
+    "review.reproduction.inspector-exact-custody-lineage",
+    "review.audit.closed-run-reproduction-read-only",
+    "review.audit.closed-run-reproduction-write-denied",
+    "review.inputs.reader-rejects-raw-client",
+    "review.inputs.reader-rejects-forged-invocation",
+    "review.audit.closed-run-nonprivileged-read-denied",
+    "review.reproduction.independent-allocation-and-slot-generations",
+    "review.reproduction.dispatched-slot-pin-immutable"
   ],
   "argv": [
     "python3",
@@ -69,6 +76,10 @@
   "required_artifacts": [
     "review/database-absence.json",
     "review/observations.json",
+    "review/closed-run-audit-read.json",
+    "review/closed-run-audit-write.json",
+    "review/input-reader-boundary.json",
+    "review/generation-storage-boundary.json",
     "review/remote-fixture-observations.json"
   ],
   "source_files": [

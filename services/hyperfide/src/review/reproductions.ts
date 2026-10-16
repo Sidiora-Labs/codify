@@ -142,7 +142,7 @@ export async function assignReproduction(ctx:ComponentContext,value:unknown):Pro
   await resources.assertJobReservation(db,{...binding,task_id:job.snapshot.task_id,job_kind:'TEST',reservation_id:reservation});
   const allocation=await resources.readJobAllocation(db,{...binding,reservation_id:reservation});
   if(!allocation||allocation.assignee_session_id!==worker||allocation.slot_id!==owner.slot_id||allocation.sandbox_id!==owner.sandbox_id||String(allocation.sandbox_boot_generation)!==String(owner.sandbox_boot_generation))fail('REPRODUCTION_RESERVATION_INVALID','Actual allocated TEST vector does not belong to the exact assigned session and boot');
-  const updated=await db.query(`UPDATE hyperfide.review_reproduction_jobs SET state='LEASED',worker_session_id=$4,sandbox_id=$5,sandbox_boot_generation=$6,reservation_id=$8,slot_id=$9,allocation_generation=$10,lease_generation=lease_generation+1,lease_expires_at=clock_timestamp()+$7*interval '1 second' WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation,lease_expires_at`,[binding.organisation_id,binding.run_id,id,worker,owner.sandbox_id,owner.sandbox_boot_generation,seconds,reservation,owner.slot_id,decimal(allocation.generation)]);
+  const updated=await db.query(`UPDATE hyperfide.review_reproduction_jobs SET state='LEASED',worker_session_id=$4,sandbox_id=$5,sandbox_boot_generation=$6,reservation_id=$8,slot_id=$9,allocation_generation=$10,allocation_id=$11,lease_generation=lease_generation+1,lease_expires_at=clock_timestamp()+$7*interval '1 second' WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING id,lease_generation,lease_expires_at`,[binding.organisation_id,binding.run_id,id,worker,owner.sandbox_id,owner.sandbox_boot_generation,seconds,reservation,owner.slot_id,decimal(allocation.generation),uuid(allocation.allocation_id)]);
   return {...updated.rows[0],execution_plane:'REMOTE',status:'UNRUN'};
  });
 }
@@ -194,7 +194,7 @@ export async function renewReproduction(ctx:ComponentContext,value:unknown):Prom
   await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT',[job.snapshot.task_id]);
   const resources=capability<Data>(ctx,'5.1','scheduler.allocations.v1',['assertJobReservation','readJobAllocation']);
   const allocation=await resources.readJobAllocation(db,{...binding,reservation_id:job.reservation_id});
-  if(!allocation||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Current allocated reservation no longer belongs to this exact job owner');
+  if(!allocation||allocation.allocation_id!==job.allocation_id||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Current allocated reservation no longer belongs to this exact job owner');
   const result=await db.query(`UPDATE hyperfide.review_reproduction_jobs SET lease_expires_at=clock_timestamp()+interval '120 seconds' WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING lease_generation,lease_expires_at`,[binding.organisation_id,binding.run_id,id]);
   return result.rows[0];
  });
@@ -206,8 +206,8 @@ export interface ReproductionExpectedInputs {
  authority:'EXPECTED_AUTHORITY';namespace:'REPRODUCTION';organisation_id:string;run_id:string;
  job_id:string;lease_generation:string;reservation_id:string;input_manifest_digest:string;
  input_packet_digest:string;input_manifest:Record<string,unknown>;execution_inputs:Record<string,unknown>;
- task_id:string;worker_session_id:string;sandbox_id:string;sandbox_boot_generation:string;slot_id:string;allocation_generation:string;
- recorded_runner_session_id:string|null;recorded_runner_boot_id:string|null;
+ task_id:string;worker_session_id:string;sandbox_id:string;sandbox_boot_generation:string;slot_id:string;allocation_id:string;allocation_generation:string;
+ recorded_runner_session_id:string|null;recorded_runner_boot_id:string|null;recorded_runner_slot_generation:string|null;
  repository_id:string;source_manifest_digest:string;source_object_id:string;source_tree_id:string;
  profile_id:string;profile_digest:string;environment_digest:string;toolchain_digest:string;
  registry_digest:string;criteria_digest:string;check:Record<string,unknown>;
@@ -236,8 +236,8 @@ export async function readReproductionJobInputs(tx:PrimaryTransaction,invocation
  }
  return {authority:'EXPECTED_AUTHORITY',namespace:'REPRODUCTION',organisation_id:binding.organisation_id,run_id:binding.run_id,job_id:id,lease_generation:generation,reservation_id:reservation,input_manifest_digest:inputDigest,
   input_packet_digest:hash(snapshot.execution_inputs),input_manifest:roles,execution_inputs:snapshot.execution_inputs,
-  task_id:snapshot.task_id,worker_session_id:job.worker_session_id,sandbox_id:job.sandbox_id,sandbox_boot_generation:String(job.sandbox_boot_generation),slot_id:job.slot_id,allocation_generation:String(job.allocation_generation),
-  recorded_runner_session_id:job.runner_session_id??null,recorded_runner_boot_id:job.runner_boot_id??null,
+  task_id:snapshot.task_id,worker_session_id:job.worker_session_id,sandbox_id:job.sandbox_id,sandbox_boot_generation:String(job.sandbox_boot_generation),slot_id:job.slot_id,allocation_id:uuid(job.allocation_id),allocation_generation:String(job.allocation_generation),
+  recorded_runner_session_id:job.runner_session_id??null,recorded_runner_boot_id:job.runner_boot_id??null,recorded_runner_slot_generation:job.runner_slot_generation?decimal(job.runner_slot_generation):null,
   repository_id:snapshot.repository_id,source_manifest_digest:snapshot.source_manifest_digest,source_object_id:snapshot.source_object_id,source_tree_id:snapshot.source_tree_id,
   profile_id:snapshot.environment_profile_id,profile_digest:snapshot.environment_digest,environment_digest:snapshot.environment_digest,toolchain_digest:snapshot.toolchain_digest,
   registry_digest:snapshot.registry_digest,criteria_digest:snapshot.criteria_digest,check:snapshot.check,
@@ -279,14 +279,14 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   if(actual.rows.length!==1)fail('REPRODUCTION_RUNNER_UNAVAILABLE','An exact current registered runner observation is required');
   const registry=capability<Data>(ctx,'12.1','runner.registry.v1',['lookup']),registered=await registry.lookup(db,{...binding,session_id:actual.rows[0]!.session_id});
   if(registered.sandbox_id!==job.sandbox_id||registered.slot_id!==job.slot_id||String(registered.boot_generation)!==String(job.sandbox_boot_generation)||registered.repository_id!==job.snapshot.repository_id||registered.source_object_id!==job.snapshot.source_object_id||registered.source_tree_id!==job.snapshot.source_tree_id||registered.source_digest!==job.snapshot.source_manifest_digest)fail('REPRODUCTION_SOURCE_MISMATCH','Actual prepared runner source differs from the immutable reproduction source');
-  if(job.runner_session_id&&job.runner_session_id!==registered.session_id)fail('REPRODUCTION_RECONCILE_REQUIRED','Recorded runner was replaced; reconcile the existing operation without relaunching');
+  if(job.runner_session_id&&(job.runner_session_id!==registered.session_id||String(job.runner_slot_generation)!==String(registered.slot_generation)))fail('REPRODUCTION_RECONCILE_REQUIRED','Recorded runner was replaced; reconcile the existing operation without relaunching');
   const measuredJob={...job,runner_session_id:registered.session_id};
   const inputValidation=await measuredReproductionInputs(ctx,db,binding,measuredJob);
   const permit=await runner.prepare(db,(ctx as Data).invocation,{job_namespace:'REPRODUCTION',input_validation:inputValidation,session_id:registered.session_id,operation_id:id,repository_id:job.snapshot.repository_id,reservation_id:job.reservation_id,task_id:job.snapshot.task_id,job_id:id,job_kind:'TEST',argv:check.argv,cwd:'.',environment:{},environment_digest:hash({}),artifact_paths:artifactPaths,
    timeout_ms:check.timeout_ms,source_digest:job.snapshot.source_manifest_digest,source_provenance_digest:hash(job.snapshot.execution_inputs),policy_digest:job.snapshot.registry_digest,
    executable_digest:check.executable_digest});
-  await db.query("UPDATE hyperfide.review_reproduction_jobs SET state='RUNNING',runner_session_id=$4,runner_boot_id=$5,workspace_path=$6 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[binding.organisation_id,binding.run_id,id,registered.session_id,registered.boot_id,registered.workspace_path]);
-  return {permit,inputValidation,job:{...job,runner_session_id:registered.session_id,runner_boot_id:registered.boot_id,workspace_path:registered.workspace_path} as Data};
+  await db.query("UPDATE hyperfide.review_reproduction_jobs SET state='RUNNING',runner_session_id=$4,runner_boot_id=$5,workspace_path=$6,runner_slot_generation=$7 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[binding.organisation_id,binding.run_id,id,registered.session_id,registered.boot_id,registered.workspace_path,decimal(registered.slot_generation)]);
+  return {permit,inputValidation,job:{...job,runner_session_id:registered.session_id,runner_boot_id:registered.boot_id,runner_slot_generation:decimal(registered.slot_generation),workspace_path:registered.workspace_path} as Data};
  });
  // The runner executes only after the guarded dispatch intent commits. No transaction spans remote work or artifact I/O.
  const leaseAbort=new AbortController(),signal=AbortSignal.any([trusted.invocation.signal,leaseAbort.signal]);
@@ -303,7 +303,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
  if(!physical||physical.execution_plane!=='REMOTE'||physical.organisation_id!==binding.organisation_id||physical.run_id!==binding.run_id||
  physical.operation_id!==id||physical.repository_id!==prepared.job.snapshot.repository_id||physical.session_id!==prepared.job.runner_session_id||physical.boot_id!==prepared.job.runner_boot_id||physical.sandbox_id!==prepared.job.sandbox_id||String(physical.boot_generation)!==String(prepared.job.sandbox_boot_generation)||
  physical.source_digest!==sourceDigest||physical.source_object_id!==prepared.job.snapshot.source_object_id||physical.source_tree_id!==prepared.job.snapshot.source_tree_id||physical.source_provenance_digest!==hash(prepared.job.snapshot.execution_inputs)||physical.policy_digest!==prepared.job.snapshot.registry_digest||physical.executable_digest!==check.executable_digest||
- physical.slot_id!==prepared.job.slot_id||String(physical.slot_generation)!==String(prepared.job.allocation_generation)||![ '.',prepared.job.workspace_path].includes(physical.cwd)||typeof physical.process_ref!=='string'||!physical.process_ref||!physical.start_identity||typeof physical.start_identity!=='object'||!Number.isSafeInteger(physical.start_identity.pid)||physical.start_identity.pid<1||!Number.isSafeInteger(physical.start_identity.pgid)||physical.start_identity.pgid<1||!Number.isSafeInteger(physical.start_identity.uid)||physical.start_identity.uid<1||typeof physical.start_identity.start_time!=='string'||!(/^(0|[1-9][0-9]*)$/).test(physical.start_identity.start_time)||typeof physical.start_identity.os_boot_id!=='string'||!(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/).test(physical.start_identity.os_boot_id)||physical.environment_digest!==hash({})||canonical(physical.input_validation)!==canonical(prepared.inputValidation)||canonical(physical.argv)!==canonical(check.argv)||physical.output_complete!==true||physical.truncated!==false||physical.status!=='COMPLETED'||
+ physical.slot_id!==prepared.job.slot_id||String(physical.slot_generation)!==String(prepared.job.runner_slot_generation)||![ '.',prepared.job.workspace_path].includes(physical.cwd)||typeof physical.process_ref!=='string'||!physical.process_ref||!physical.start_identity||typeof physical.start_identity!=='object'||!Number.isSafeInteger(physical.start_identity.pid)||physical.start_identity.pid<1||!Number.isSafeInteger(physical.start_identity.pgid)||physical.start_identity.pgid<1||!Number.isSafeInteger(physical.start_identity.uid)||physical.start_identity.uid<1||typeof physical.start_identity.start_time!=='string'||!(/^(0|[1-9][0-9]*)$/).test(physical.start_identity.start_time)||typeof physical.start_identity.os_boot_id!=='string'||!(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/).test(physical.start_identity.os_boot_id)||physical.environment_digest!==hash({})||canonical(physical.input_validation)!==canonical(prepared.inputValidation)||canonical(physical.argv)!==canonical(check.argv)||physical.output_complete!==true||physical.truncated!==false||physical.status!=='COMPLETED'||
  !Number.isSafeInteger(physical.exit_code)||physical.timed_out!==false||physical.interrupted!==false||physical.cleanup_status!=='CONFIRMED'||physical.cleanup?.complete!==true||physical.cleanup?.observed_process_absent!==true)
  fail('REPRODUCTION_RECEIPT_INCOMPLETE','Actual remote executable/source/process/output provenance is incomplete; job cannot qualify');
  const stdout=captured(physical.stdout),stderr=captured(physical.stderr),out=await upload(ctx,binding,stdout),err=await upload(ctx,binding,stderr);
@@ -330,7 +330,10 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   const resources=capability<Data>(ctx,'5.1','scheduler.allocations.v1',['assertJobReservation','readJobAllocation']);
   await resources.assertJobReservation(db,{...binding,task_id:job.snapshot.task_id,job_kind:'TEST',reservation_id:job.reservation_id});
   const allocation=await resources.readJobAllocation(db,{...binding,reservation_id:job.reservation_id});
-  if(!allocation||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||allocation.sandbox_id!==job.sandbox_id||String(allocation.sandbox_boot_generation)!==String(job.sandbox_boot_generation)||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Remote reservation was revoked or reassigned before output admission');
+  if(!allocation||allocation.allocation_id!==job.allocation_id||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||allocation.sandbox_id!==job.sandbox_id||String(allocation.sandbox_boot_generation)!==String(job.sandbox_boot_generation)||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Remote reservation was revoked or reassigned before output admission');
+  const runnerRegistry=capability<Data>(ctx,'12.1','runner.registry.v1',['lookup']);
+  const finalRunner=await runnerRegistry.lookup(db,{...binding,session_id:job.runner_session_id});
+  if(String(finalRunner.slot_generation)!==String(job.runner_slot_generation)||String(job.runner_slot_generation)!==String(prepared.job.runner_slot_generation))fail('REPRODUCTION_RUNNER_STALE','Physical runner slot generation changed independently of its scheduler allocation');
   const finalInputs=await measuredReproductionInputs(ctx,db,binding,job);
   if(canonical(finalInputs)!==canonical(prepared.inputValidation))fail('REPRODUCTION_INPUTS_STALE','Measured execution context changed before evidence admission');
   const snapshot=job.snapshot;

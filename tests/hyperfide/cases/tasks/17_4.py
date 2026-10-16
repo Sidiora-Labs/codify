@@ -22,7 +22,7 @@ IDS=[
 "review.reproduction.immutable-job-inputs","review.reproduction.unrun-never-proof",
 "review.reproduction.non-verifier-assignment-refused","review.reproduction.capacity-required",
 "review.reproduction.unassigned-execution-refused","review.reproduction.cross-run-refused",
-"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused","review.reproduction.registered-seventy-two-hour-timeout","review.reproduction.inspector-exact-custody-lineage",
+"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused","review.reproduction.registered-seventy-two-hour-timeout","review.reproduction.inspector-exact-custody-lineage","review.audit.closed-run-reproduction-read-only","review.audit.closed-run-reproduction-write-denied","review.inputs.reader-rejects-raw-client","review.inputs.reader-rejects-forged-invocation","review.audit.closed-run-nonprivileged-read-denied","review.reproduction.independent-allocation-and-slot-generations","review.reproduction.dispatched-slot-pin-immutable",
 ]
 SOURCE='''[meta]
 slug = "fixture"
@@ -82,6 +82,34 @@ def seed(f):
   d.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest) VALUES($1,$2,$3,$4,$5,$6,$7)",[m.ORG,m.RUN,attempt,m.xid(0x301),generation,d.ids["epoch"],m.DIGEST])
   d.sql("INSERT INTO hyperfide.submission_custodies(organisation_id,run_id,id,task_id,source_attempt_id,source_generation,custody_generation,authority_epoch,repository_id,source_object_id,source_manifest_digest,evidence_manifest_digest,criteria_digest,authority) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$10,$11,$12)",[m.ORG,m.RUN,custody,m.xid(0x301),attempt,generation,d.ids["epoch"],m.REPOSITORY,commit,m.DIGEST,f.criteria,"RELEASED" if generation==1 else "ACTIVE"])
  return {"source_set":[{"repository_id":m.REPOSITORY,"source_object_id":f.second}],"graph_manifest_id":graph,"contract_ids":[],"environment_profile_id":profile}
+def reader_boundaries(f):
+ # Actual PG plus actual gateway branding; deliberately invalid invocation is a
+ # refusal test, never a substituted positive authentication context.
+ js=r'''import{createRequire}from'node:module';import{TransactionGateway}from'./services/hyperfide/dist/storage/transactions.js';import{readReproductionJobInputs}from'./services/hyperfide/dist/review/reproductions.js';
+ const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg'),pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:2});
+ const request={job_id:process.argv[1],lease_generation:'1',reservation_id:process.argv[2],input_manifest_digest:process.argv[3]},out={};
+ const refusal=async fn=>{try{await fn();return 'ACCEPTED';}catch(e){return e.code??'UNKNOWN';}};
+ const raw=await pool.connect();try{out.raw=await refusal(()=>readReproductionJobInputs(raw,{},request));}finally{raw.release();}
+ const gateway=new TransactionGateway({acquirePrimary:async(_deadline,signal)=>{const client=await pool.connect();return{client,signal:signal??new AbortController().signal,release:destroy=>client.release(destroy)}}});
+ out.forged=await refusal(()=>gateway.withPrimaryTransaction({},tx=>readReproductionJobInputs(tx,{},request)));
+ await pool.end();process.stdout.write(JSON.stringify(out));'''
+ observed=json.loads(subprocess.check_output(['node','--input-type=module','-e',js,m.xid(0xa40),m.xid(0xb00),m.DIGEST],cwd=ROOT,env=f.identity.env))
+ (m.evidence_dir('17.4')/'input-reader-boundary.json').write_text(json.dumps({'scope':'COMPONENT_SECURITY_BOUNDARY','authenticated_positive':False,'outcomes':observed},sort_keys=True)+'\n')
+ return observed
+
+def generation_storage_boundary(f,job):
+ # This is an isolated, always-rolled-back SQL guard unit. It does not admit a
+ # physical dispatch, runner observation or execution receipt.
+ js=r'''import{createRequire}from'node:module';const pg=createRequire(process.cwd()+'/services/hyperfide/package.json')('pg'),c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();const out={};
+ try{await c.query('BEGIN ISOLATION LEVEL SERIALIZABLE');await c.query("UPDATE hyperfide.review_reproduction_jobs SET allocation_id=$2,allocation_generation=3,runner_session_id=$3,runner_boot_id=$4,runner_slot_generation=7,workspace_path='/fixture/sql-unit' WHERE id=$1",process.argv.slice(1,5));
+ const row=(await c.query('SELECT allocation_generation::text,runner_slot_generation::text FROM hyperfide.review_reproduction_jobs WHERE id=$1',[process.argv[1]])).rows[0];out.independent=row?.allocation_generation==='3'&&row?.runner_slot_generation==='7';
+ await c.query('SAVEPOINT immutable');try{await c.query('UPDATE hyperfide.review_reproduction_jobs SET runner_slot_generation=8 WHERE id=$1',[process.argv[1]]);out.refusal='ACCEPTED';}catch(e){out.refusal=e.code;}await c.query('ROLLBACK TO SAVEPOINT immutable');
+ }finally{await c.query('ROLLBACK');out.rolled_back=(await c.query('SELECT allocation_id IS NULL AND runner_session_id IS NULL AND runner_slot_generation IS NULL AS absent FROM hyperfide.review_reproduction_jobs WHERE id=$1',[process.argv[1]])).rows[0]?.absent===true;await c.end();}
+ process.stdout.write(JSON.stringify(out));'''
+ result=json.loads(subprocess.check_output(['node','--input-type=module','-e',js,job,m.xid(0xf11),m.xid(0xf12),f.identity.ids['boot']],cwd=ROOT,env=f.identity.env))
+ (m.evidence_dir('17.4')/'generation-storage-boundary.json').write_text(json.dumps({'scope':'ROLLED_BACK_STORAGE_GUARD_UNIT','physical_execution':False,'observed':result},sort_keys=True)+'\n')
+ return result
+
 def main():
  with tempfile.TemporaryDirectory(prefix="hf-review-repro-") as folder:
   f=m.Fixture("17.4",Path(folder),["17.4"],extra_setup=setup)
@@ -141,6 +169,15 @@ def main():
    current_request=dict(m.SCOPE,request_id=m.xid(0xf01),causal_plan_id=planned["plan_id"],repair_custody_id=m.xid(0xa22),publication_operation_id=m.xid(0xf02),candidate_digest=m.DIGEST,candidate_input_manifest_digest=bound["input_manifest_digest"],template_id="units-system",qualification_scope="SYSTEM",snapshot=snapshot)
    m.check(IDS[20],lambda:f.reject("review.reproduction.current.plan",current_request,"REPRODUCTION_CAUSAL_PROOF_INCOMPLETE",component="17.4"))
    m.check(IDS[21],lambda:f.reject("review.reproduction.current.plan",dict(current_request,source_object_id=f.second),"REVIEW_INPUT_INVALID",component="17.4"))
+   generation_boundary=generation_storage_boundary(f,job)
+   m.check(IDS[29],lambda:m.expect(generation_boundary['independent'] and generation_boundary['rolled_back'],'independent scheduler/physical generation storage was conflated or fixture changed durable state'))
+   m.check(IDS[30],lambda:m.expect(generation_boundary['refusal']=='23514' and generation_boundary['rolled_back'],'dispatched physical slot pin changed or fixture rollback failed'))
+   boundaries=reader_boundaries(f)
+   m.check(IDS[26],lambda:m.expect(boundaries['raw']=='TX_CLOSED','raw PG client acquired trusted reproduction reader authority'))
+   m.check(IDS[27],lambda:m.expect(boundaries['forged']=='AUTH_REQUIRED','unbranded invocation acquired trusted reproduction reader authority'))
+   m.check(IDS[24],lambda:m.closed_audit(f,'review.reproduction.inspect',dict(m.SCOPE,plan_id=planned['plan_id']),'17.4'))
+   m.check(IDS[25],lambda:m.closed_audit(f,'review.reproduction.current.plan',current_request,'17.4',write=True))
+   m.check(IDS[28],lambda:f.reject('review.reproduction.inspect',dict(m.SCOPE,plan_id=planned['plan_id']),'AUTH_RUN_CLOSED',component='17.4',key='verifier'))
    (m.evidence_dir("17.4")/"remote-fixture-observations.json").write_text(json.dumps(outcomes,indent=2)+"\n")
   finally:f.identity.close();f.save(m.FAILED)
  return int(bool(m.FAILED))
