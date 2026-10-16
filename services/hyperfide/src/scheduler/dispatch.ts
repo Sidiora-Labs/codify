@@ -37,11 +37,13 @@ export class DispatchReconciler {
  close():void{this.reader=undefined;}
  async reconcile(tx:PrimaryTransaction,scope:SchedulerScope,request_id:string):Promise<unknown>{
   assertPrimaryTransaction(tx);await lockRun(tx,scope);
-  const found=await tx.query<DispatchRow>('SELECT * FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',
+  const found=await tx.query<DispatchRow>('SELECT * FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',
    [scope.organisation_id,scope.run_id,request_id]);
   const row=found.rows[0];if(!row)fail('DISPATCH_MISSING','Dispatch intent does not exist');
   if(!this.reader)fail('DEPENDENCY_UNAVAILABLE','Trusted central native receipt reconciliation is required');
   const token=rowToken(scope,row);
+  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':dispatch:'+row.attempt_id]);
+  await tx.query('SELECT id FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[scope.organisation_id,scope.run_id,row.id]);
   // Reader performs primary SQL verification of persisted signed native receipts;
   // it must never call a provider or wait for an external process while locks are held.
   const observation=await this.reader(tx,{...scope,operation_id:row.id,token,payload_digest:row.payload_digest});
@@ -62,11 +64,11 @@ export class DispatchReconciler {
    try{await assertCurrentCompute(tx,token);authoritative=true;}
    catch(error){
     const code=typeof error==='object'&&error!==null&&'code' in error?String(error.code):'';
-    if(!['STALE_AUTHORITY_EPOCH','STALE_SANDBOX_BOOT','STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','ACTIVE_SUBMISSION_CUSTODY'].includes(code))throw error;
+    if(!['STALE_AUTHORITY_EPOCH','STALE_SANDBOX_BOOT','STALE_COMPUTE','COMPUTE_LEASE_EXPIRED','ACTIVE_SUBMISSION_CUSTODY','EXECUTION_HELD','RUN_NOT_EXECUTING'].includes(code))throw error;
    }
   }else{
    if(!observation.terminal_kind)fail('NATIVE_RECEIPT_INCOMPLETE','A terminal observation must identify the observed terminal condition');
-   state=observation.terminal_kind==='ABSENT'?'ABSENT':observation.terminal_kind==='STOPPED'?'STOPPED':'FAILED';
+   state=observation.terminal_kind==='ABSENT'?'ABSENT':observation.terminal_kind==='STOPPED'?'STOPPED':observation.terminal_kind==='SUCCEEDED'?'COMPLETED':'FAILED';
   }
   await tx.query('UPDATE hyperfide.scheduler_dispatches SET state=$4,observation_receipt_id=$5,native_session_id=$6,'+
    'observed_at=clock_timestamp(),state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
@@ -93,6 +95,7 @@ export function createComponent(_startup:ComponentContext):Component{
    return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
     guard:tx=>invocationFor(context).guard(tx)},async tx=>{
     await lockRun(tx,scope);
+    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':dispatch:'+token.attempt_id]);
     const task=await tx.query<{feature_package_id:string}>('SELECT feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
      [scope.organisation_id,scope.run_id,token.task_id]);
     if(!task.rows[0])fail('TASK_MISSING','Dispatch task is absent');
@@ -105,9 +108,9 @@ export function createComponent(_startup:ComponentContext):Component{
     }
     const authority=await assertCurrentCompute(tx,token);
     const existing=await tx.query('SELECT id,state FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND attempt_generation=$4 '+
-     'AND state IN (\'INTENT\',\'UNKNOWN\',\'RUNNING\',\'STOP_REQUESTED\') FOR UPDATE',
+     'FOR UPDATE',
      [scope.organisation_id,scope.run_id,token.attempt_id,token.attempt_generation]);
-    if(existing.rows.length)fail('RECONCILIATION_REQUIRED','An existing physical spawn outcome must be reconciled before replacement');
+    if(existing.rows.length)fail('REPLACEMENT_REQUIRES_NEW_ATTEMPT','An attempt has one physical dispatch identity; replacement requires an explicitly admitted new attempt');
     const packets=await tx.query<{digest:string}>('SELECT digest FROM hyperfide.hierarchy_execution_packets WHERE organisation_id=$1 AND run_id=$2 '+
      'AND task_id=$3 AND attempt_id=$4 AND attempt_generation=$5 AND digest=$6',
      [scope.organisation_id,scope.run_id,token.task_id,token.attempt_id,token.attempt_generation,authority.input_packet_digest]);
