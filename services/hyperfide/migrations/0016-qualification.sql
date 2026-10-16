@@ -124,3 +124,45 @@ CREATE TRIGGER monotonic_version BEFORE UPDATE ON hyperfide.assurance_applicabil
 
 CREATE INDEX assurance_receipts_digest ON hyperfide.assurance_job_receipts(organisation_id,run_id,receipt_digest);
 CREATE INDEX assurance_jobs_current_custody ON hyperfide.qualification_jobs(organisation_id,run_id,custody_id,state,outcome);
+
+-- Preparation intent is durable before any remote hydration or command. These
+-- metadata rows never substitute for a native seal or grant runtime readiness.
+CREATE TABLE hyperfide.assurance_preparation_intents (
+ organisation_id uuid NOT NULL, run_id uuid NOT NULL, operation_id uuid NOT NULL,
+ job_id uuid NOT NULL, job_lease_generation bigint NOT NULL CHECK(job_lease_generation>=0),
+ custody_id uuid NOT NULL, custody_generation bigint NOT NULL CHECK(custody_generation>=1),
+ request_digest hyperfide.digest NOT NULL, context_digest hyperfide.digest NOT NULL,
+ session_id uuid NOT NULL, reservation_id uuid NOT NULL,
+ allocation_id uuid NOT NULL, allocation_generation bigint NOT NULL CHECK(allocation_generation>=1),
+ derived_profile_id uuid NOT NULL, plan jsonb NOT NULL CHECK(jsonb_typeof(plan)='object'),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,operation_id),
+ FOREIGN KEY(organisation_id,run_id,job_id) REFERENCES hyperfide.qualification_jobs(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,custody_id) REFERENCES hyperfide.submission_custodies(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,session_id) REFERENCES hyperfide.agent_sessions(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,reservation_id) REFERENCES hyperfide.reservations(organisation_id,run_id,id)
+);
+CREATE TABLE hyperfide.assurance_effective_result_inputs (
+ organisation_id uuid NOT NULL, run_id uuid NOT NULL, job_id uuid NOT NULL,
+ preparation_operation_id uuid NOT NULL, custody_id uuid NOT NULL,
+ custody_generation bigint NOT NULL CHECK(custody_generation>=1), profile_id uuid NOT NULL,
+ baseline_packet_digest hyperfide.digest NOT NULL, accepted_context_digest hyperfide.digest NOT NULL,
+ input_manifest jsonb NOT NULL CHECK(jsonb_typeof(input_manifest)='object'),
+ receipt_digest hyperfide.digest NOT NULL, receipt_artifact_id uuid NOT NULL,
+ receipt jsonb NOT NULL CHECK(jsonb_typeof(receipt)='object'),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,job_id), UNIQUE(organisation_id,run_id,receipt_digest),
+ FOREIGN KEY(organisation_id,run_id,job_id) REFERENCES hyperfide.qualification_jobs(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,preparation_operation_id) REFERENCES hyperfide.assurance_preparation_intents(organisation_id,run_id,operation_id),
+ FOREIGN KEY(organisation_id,run_id,custody_id) REFERENCES hyperfide.submission_custodies(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
+ FOREIGN KEY(organisation_id,run_id,receipt_artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id)
+);
+CREATE TRIGGER immutable_history BEFORE UPDATE OR DELETE ON hyperfide.assurance_preparation_intents
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.assurance_immutable();
+CREATE TRIGGER supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.assurance_preparation_intents
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER immutable_history BEFORE UPDATE OR DELETE ON hyperfide.assurance_effective_result_inputs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.assurance_immutable();
+CREATE TRIGGER supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.assurance_effective_result_inputs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();

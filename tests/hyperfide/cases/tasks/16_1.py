@@ -43,10 +43,14 @@ def authority_cases():
             criteria_digest=d, contract_digests=[]),
         "submission.revoke": dict(common, reason="bounded unauthenticated negative"),
         "submission.inspect": dict(scope, submission_id=u),
+        "qualification.preparation.plan": dict(scope,job_id=u,request_id=u,session_id=u,reservation_id=u,recipe_policy_artifact_id=u,
+            source_bundles=[{"repository_key":"fixture","artifact_id":u,"storage_kind":"object"}],timeout_ms=1000),
+        "qualification.preparation.inspect": dict(scope,operation_id=u),
         "qualification.job.assign": dict(scope, job_id=u, expected_state_version="1", verifier_id=u,
             sandbox_id=u, slot_id=u, sandbox_boot_generation="1", reservation_id=u, environment_digest=d),
         "qualification.job.claim": dict(scope, job_id=u, expected_state_version="1"),
         "qualification.execute": dict(scope, job_id=u, lease_generation="1"),
+        "qualification.execution.inspect": dict(scope, job_id=u, lease_generation="1"),
         "qualification.history.import": dict(scope, task_id=u, provenance="untrusted fixture claim", legacy_claim={"PASS":True}),
         "qualification.coverage.inspect": dict(scope, submission_id=u),
         "qualification.review.record": dict(common, clause_id="clause", rubric_digest=d,
@@ -58,7 +62,7 @@ def authority_cases():
     }
     actions = {
         "16.1": ("submission", ["submission.submit", "submission.revoke", "submission.inspect"]),
-        "16.2": ("executor", ["qualification.job.assign", "qualification.job.claim", "qualification.execute", "qualification.history.import"]),
+        "16.2": ("executor", ["qualification.job.assign", "qualification.job.claim", "qualification.execute", "qualification.history.import", "qualification.preparation.plan", "qualification.preparation.inspect", "qualification.execution.inspect"]),
         "16.3": ("coverage", ["qualification.coverage.inspect", "qualification.review.record", "qualification.accept"]),
         "16.4": ("validity", ["assurance.validity.inspect", "assurance.invalidate", "assurance.requalification.accept"]),
     }
@@ -103,6 +107,24 @@ console.log(JSON.stringify({code,accepted,queries}));
 """ % (module, json.dumps(scope), json.dumps(u), expression))
     emit("assurance."+TASK+".primary.unbranded-denied",
          results == [{"code":"QUALIFICATION_PRIMARY_REQUIRED","accepted":False,"queries":0}])
+    if TASK=="16.2":
+        results=node("""
+const m=await import('./services/hyperfide/dist/assurance/preparation.js');
+const scope=%s,id=%s;
+for(const [key,call,expected] of [
+ ['context',db=>m.loadResultPreparationContext(db,scope,{job_id:id}),'QUALIFICATION_PRIMARY_REQUIRED'],
+ ['effective-inputs',db=>m.inspectEffectiveResultInputs(db,scope,{job_id:id}),'TX_CLOSED'],
+ ['intent',db=>m.inspectResultPreparationIntent(db,scope,{operation_id:id}),'TX_CLOSED']
+]){
+ let queries=0,code=null,accepted=false;
+ const db={query(){queries++;throw new Error('No unbranded decision query');}};
+ try{await call(db);accepted=true;}catch(error){code=error.code??error.name;}
+ console.log(JSON.stringify({key,valid:!accepted&&queries===0&&code===expected}));
+}
+""" % (json.dumps(scope),json.dumps(u)))
+        if len(results)!=3:raise AssertionError("Incomplete preparation primary-capability negative inventory")
+        for row in results:emit("assurance.16.2.primary.preparation-"+row["key"],row["valid"])
+
 
 def sql(text, database=None, accept_error=False):
     result = subprocess.run(["psql","-X","-q","-A","-t","-v","ON_ERROR_STOP=1",
@@ -201,16 +223,14 @@ def signed_cases():
         record.write_text(json.dumps(state))
         org,run=fixture.ids["organisation"],fixture.ids["run"]
         u,d=str(uuid.uuid4()),"sha256:"+"b"*64
-        read={"16.1":"submission.inspect","16.2":"qualification.job.assign","16.3":"qualification.coverage.inspect","16.4":"assurance.validity.inspect"}[TASK]
+        read={"16.1":"submission.inspect","16.2":"qualification.execution.inspect","16.3":"qualification.coverage.inspect","16.4":"assurance.validity.inspect"}[TASK]
         value={"organisation_id":org,"run_id":run,"submission_id":u}
         if TASK=="16.2":
-            value={"organisation_id":org,"run_id":run,"job_id":u,"expected_state_version":"1",
-                   "verifier_id":u,"sandbox_id":u,"slot_id":u,"sandbox_boot_generation":"1",
-                   "reservation_id":u,"environment_digest":d}
+            value={"organisation_id":org,"run_id":run,"job_id":u,"lease_generation":"1"}
         def error(action,payload,key="operator"):
             status,response=fixture.invoke(action,payload,component=TASK,key=key)
             return status==200 and response.get("ok") is False and response.get("error",{}).get("code")
-        emit("assurance."+TASK+".https.signed-missing",error(read,value)=="QUALIFICATION_NOT_FOUND")
+        emit("assurance."+TASK+".https.signed-missing",error(read,value)==("QUALIFICATION_RECEIPT_INVALID" if TASK=="16.2" else "QUALIFICATION_NOT_FOUND"))
         emit("assurance."+TASK+".https.cross-scope",error(read,dict(value,organisation_id=str(uuid.uuid4()))) in ("AUTH_SCOPE_DENIED","QUALIFICATION_SCOPE_DENIED"))
         action,payload,key={
             "16.1":("submission.submit",{"organisation_id":org,"run_id":run,"task_id":u,"request_id":u,"attempt_id":u,"attempt_generation":"1",\
@@ -499,7 +519,7 @@ def schema_cases():
     subprocess.run(["createdb",DATABASE],cwd=ROOT,check=True,capture_output=True,timeout=30)
     for name in ["0001-authority.sql","0004-durability.sql","0016-qualification.sql"]:
         sql((ROOT/"services/hyperfide/migrations"/name).read_text())
-    emit("assurance.16.1.schema.applied", sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='hyperfide' AND table_name LIKE 'assurance_%';").stdout.strip()=="11")
+    emit("assurance.16.1.schema.applied", sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='hyperfide' AND table_name LIKE 'assurance_%';").stdout.strip()=="13")
     ids=[str(uuid.uuid4()) for _ in range(7)]
     org,project,spec,run,epoch,package,task=ids
     import hashlib

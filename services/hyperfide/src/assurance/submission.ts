@@ -417,6 +417,23 @@ export async function inspectSubmittedResult(db:PrimaryClient,scopeValue:{organi
   input_packet_digest:m.input_packet_digest,input_manifest:m.input_manifest,registry_digest:m.registry_digest};
  return {...binding,binding_digest:hash(binding),authority:row.authority,object_bytes_reverified:false};
 }
+export function rawDigest(bytes:Uint8Array):string{return 'sha256:'+createHash('sha256').update(bytes).digest('hex');}
+export async function retainArtifactBytes(ctx:ComponentContext,s:[string,string],bytes:Buffer):Promise<Data>{
+ if(bytes.length>32*1024*1024)fail('QUALIFICATION_ARTIFACT_BUDGET','Bounded artifact publication limit exceeded');
+ const common={organisation_id:s[0],run_id:s[1],retention_class:'RUN',retention_until:null,retention_hold:false};
+ const chunks:Data[]=[];
+ for(let offset=0;offset<bytes.length||offset===0;offset+=256*1024){
+  const part=bytes.subarray(offset,Math.min(offset+256*1024,bytes.length));
+  const result=await artifact(ctx,'artifact.object.put',{...common,digest:rawDigest(part),size_bytes:String(part.length),data_base64:part.toString('base64')});
+  chunks.push({sequence:chunks.length,artifact_id:result.artifact.artifact_id,digest:result.artifact.digest,
+   size_bytes:String(part.length),offset_bytes:String(offset)});
+  if(bytes.length===0)break;
+ }
+ if(chunks.length===1)return {artifact_id:chunks[0]!.artifact_id,digest:chunks[0]!.digest,size_bytes:String(bytes.length),storage_kind:'OBJECT'};
+ const result=await artifact(ctx,'artifact.manifest.commit',{...common,expected_chunks:chunks.length,total_size_bytes:String(bytes.length),
+ content_digest:rawDigest(bytes),complete:true,truncated:false,missing_ranges:[],chunks});
+ return {artifact_id:result.artifact.artifact_id,digest:result.artifact.digest,content_digest:rawDigest(bytes),size_bytes:String(bytes.length),manifest_size_bytes:result.artifact.size_bytes,storage_kind:'CHUNK_MANIFEST'};
+}
 export function createComponent(ctx:ComponentContext):Component & {capabilities:Record<string,unknown>}{
  return {apiVersion:1,capabilities:{'assurance.custody.v1':Object.freeze({fenceQualificationJobs,revokeCustodies,inspectSubmittedResult})},actions:{
   'submission.submit':(input,requestContext)=>submit(requestContext,input),
