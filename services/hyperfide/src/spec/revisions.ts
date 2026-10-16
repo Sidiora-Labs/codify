@@ -1,8 +1,9 @@
 import type {AuthorityTransaction,InvocationContext} from '../transport/protocol.js';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {identityTransaction} from '../identity/enrollment.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
+import {readSemanticDisposition} from '../storage/dispositions.js';
 import {FoundationError,object} from '../policy/programme.js';
-import {prepareAcceptedIntent,canonical,digest,derivedId} from './import.js';
+import {prepareAcceptedIntent,canonical,digest,derivedId,specTransaction} from './import.js';
 import type {SpecScope,KvxSection,StoredIntent} from './import.js';
 import {validateProposedDependencies} from './dependencies.js';
 import type {ProposedDependencyTask,DependencyReport} from './dependencies.js';
@@ -48,6 +49,7 @@ function ids(section:KvxSection|undefined,key:string):string[]{
 // Analysis shares the real dependency validator. It neither inserts accepted
 // revisions nor changes task/compute/evidence authority.
 async function analyse(tx:Tx,scope:SpecScope,input:unknown,storedSource?:Buffer):Promise<InternalAnalysis>{
+ assertPrimaryTransaction(tx);await readSemanticDisposition(tx,scope);
  const request=requestOf(input,scope);
  const row=(await tx.query('SELECT r.*,r.spec_generation::text,r.state_version::text,s.document,s.source_digest FROM hyperfide.runs r JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.id=$2 AND r.project_id=$3 FOR SHARE OF r',
   [scope.organisation_id,scope.run_id,scope.project_id])).rows[0];
@@ -139,7 +141,7 @@ async function scopeOf(tx:Tx,context:ComponentContext,invocation:InvocationConte
  return {organisation_id:p.organisation_id,project_id:row.project_id,run_id:p.run_id,authority_epoch:row.authority_epoch,root:context.env.HF_SPEC_ALLOWED_ROOT,allowed_actions:p.allowed_actions};
 }
 export function createComponent(_startup:ComponentContext):Component{
- const action=(persist:boolean)=>async(input:unknown,context:ComponentContext)=>identityTransaction(context,async(tx,invocation)=>{
+ const action=(persist:boolean)=>async(input:unknown,context:ComponentContext)=>specTransaction(context,'READ',async(tx,invocation)=>{
   if(!['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'].includes(invocation.principal.role))fail('ACTION_DENIED','Role cannot propose accepted-plan amendments');
   const scope=await scopeOf(tx,context,invocation),analysis=await analyse(tx,scope,input);
   if(analysis.request.purpose==='INTENT_CHANGE'&&invocation.principal.role!=='OPERATOR')fail('ACTION_DENIED','Intent changes require an explicit operator');

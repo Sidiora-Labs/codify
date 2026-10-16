@@ -6,7 +6,7 @@ sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
 from identity_fixture import IdentityFixture,sha,canonical
 SOURCE="[meta]\nslug = \"fixture\"\n[req.1]\nac_1 = \"An actual executable obligation\"\n[acceptance.1]\nreq = \"1.1\"\nchecks = [\"actual-check\"]\n[acceptance.2]\nreq = \"2.1\"\n[task.1]\nwave = 1\nfeature = \"fixture\"\nreqs = [\"1.1\"]\nverify_cmd = \"printf accepted\"\nartifacts = [\"proof.json\"]\nacceptance_ids = [\"1\"]\nrequires = []\ntouches = [\"src/a.ts\"]\n[task.2]\nwave = 2\nfeature = \"fixture\"\nreqs = [\"1.1\"]\nverify_cmd = \"printf accepted\"\nartifacts = [\"proof.json\"]\nacceptance_ids = [\"1\"]\nrequires = [\"1\"]\ntouches = [\"src/b.ts\"]\n"
 def setup(f):
-    for version,name in [(2,'0002-spec'),(202,'0202-spec-dependencies')]:
+    for version,name in [(2,'0002-spec'),(4,'0004-durability'),(202,'0202-spec-dependencies')]:
         raw=(ROOT/('services/hyperfide/migrations/'+name+'.sql')).read_bytes()
         f.sql("BEGIN;\n"+raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
     f.ids.update({key:f.ids.get(key,str(uuid.uuid4())) for key in ['repository','accepted_spec','package','package2','task1','task2','task3','task4','task5']})
