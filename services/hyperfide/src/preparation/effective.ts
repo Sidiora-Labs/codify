@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {validateProfile} from './manifests.js';
+import {validateProfile,validateManifestMetadata} from './manifests.js';
 import type {EnvironmentProfile,PreparationManifest} from './manifests.js';
 
 type FilePin={path:string;digest:string};
@@ -137,4 +137,67 @@ export function deriveEffectiveProfile(input:EffectiveProfileInput):{
  validateProfile(profile);
  return {profile,profile_digest:hash(profile),lineage,lineage_digest:hash(lineage),
   dependency_inputs_changed:changes.length>0,requires_preparation:true,readiness_granted:false};
+}
+
+export interface PreparationRecipePolicy {
+ schema_version:1;kind:'hyperfide.preparation-policy';
+ commands:{repository:string;argv:string[];timeout_seconds:number}[];
+ cache_scope:string;cache_paths:{repository:string;path:string}[];
+ minimum_free_bytes:string;minimum_free_inodes:string;network_timeout_milliseconds:number;
+}
+function policyError(code:string):never{throw new Error(code);}
+function policyKeys(source:string):void{
+ const frames:(Set<string>|null)[]=[];
+ for(let i=0;i<source.length;i++){
+  const character=source[i];
+  if(character==='{')frames.push(new Set());else if(character==='[')frames.push(null);
+  else if(character==='}'||character===']')frames.pop();
+  else if(character==='"'){
+   const begin=i;for(i++;i<source.length;i++){if(source[i]==='\\')i++;else if(source[i]==='"')break;}
+   let next=i+1;while(/\s/.test(source[next]??'')&&next<source.length)next++;
+   const frame=frames[frames.length-1];
+   if(source[next]===':'&&frame){const key=JSON.parse(source.slice(begin,i+1));if(frame.has(key))policyError('PREPARATION_POLICY_UNSUPPORTED');frame.add(key);}
+  }
+ }
+}
+/** The approved manifest pins these policy bytes; this pure parser grants no execution authority. */
+export function readPreparationRecipePolicy(parent:PreparationManifest,recipeBytes:Uint8Array):PreparationRecipePolicy {
+ const manifest=validateManifestMetadata(parent),bytes=Buffer.from(recipeBytes);
+ if(bytes.length<2||bytes.length>262144)policyError('PREPARATION_POLICY_UNSUPPORTED');
+ if('sha256:'+createHash('sha256').update(bytes).digest('hex')!==manifest.profile.recipe.digest)policyError('PREPARATION_POLICY_DIGEST_MISMATCH');
+ const source=bytes.toString('utf8');if(!Buffer.from(source,'utf8').equals(bytes))policyError('PREPARATION_POLICY_UNSUPPORTED');
+ let parsed:unknown;try{parsed=JSON.parse(source);policyKeys(source);}catch{policyError('PREPARATION_POLICY_UNSUPPORTED');}
+ let row:Record<string,unknown>;
+ try{row=record(parsed,['schema_version','kind','commands','cache_scope','cache_paths','minimum_free_bytes','minimum_free_inodes','network_timeout_milliseconds']);}
+ catch{policyError('PREPARATION_POLICY_UNSUPPORTED');}
+ if(row.schema_version!==1||row.kind!=='hyperfide.preparation-policy'||!Array.isArray(row.commands)||row.commands.length>64||!Array.isArray(row.cache_paths)||row.cache_paths.length>128)policyError('PREPARATION_POLICY_UNSUPPORTED');
+ const repositories=new Set(manifest.profile.repositories.map(repository=>repository.id));let lifetime=0;
+ const commands=row.commands.map(value=>{
+  let command:Record<string,unknown>;try{command=record(value,['repository','argv','timeout_seconds']);}catch{policyError('PREPARATION_POLICY_UNSUPPORTED');}
+  if(typeof command.repository!=='string'||!repositories.has(command.repository)||!Array.isArray(command.argv)||!command.argv.length||command.argv.length>64||
+   typeof command.timeout_seconds!=='number'||!Number.isSafeInteger(command.timeout_seconds)||command.timeout_seconds<1||command.timeout_seconds>3600)policyError('PREPARATION_POLICY_UNSUPPORTED');
+  let total=0;const argv=command.argv.map((argument,index)=>{
+   if(typeof argument!=='string'||argument.includes('\0')||Buffer.byteLength(argument)>4096||(index===0&&!argument.length))policyError('PREPARATION_POLICY_UNSUPPORTED');
+   total+=Buffer.byteLength(argument);return argument;
+  });
+  if(total>65536)policyError('PREPARATION_POLICY_UNSUPPORTED');lifetime+=command.timeout_seconds;
+  return {repository:command.repository,argv,timeout_seconds:command.timeout_seconds};
+ });
+ if(lifetime>manifest.profile.policy.max_process_lifetime_seconds)policyError('PREPARATION_POLICY_UNSUPPORTED');
+ if(typeof row.cache_scope!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(row.cache_scope))policyError('PREPARATION_POLICY_UNSUPPORTED');
+ const seen=new Set<string>();
+ const cache_paths=row.cache_paths.map(value=>{
+  let item:Record<string,unknown>;try{item=record(value,['repository','path']);}catch{policyError('PREPARATION_POLICY_UNSUPPORTED');}
+  if(typeof item.repository!=='string'||!repositories.has(item.repository))policyError('PREPARATION_POLICY_UNSUPPORTED');
+  let name:string;try{name=relative(item.path);}catch{policyError('PREPARATION_POLICY_UNSUPPORTED');}
+  if(name.split('/').some(part=>['.env','.npmrc','.netrc','.ssh','.aws','.codex','.claude','.git'].some(unsafe=>part===unsafe||part.startsWith(unsafe+'.'))))policyError('PREPARATION_POLICY_UNSUPPORTED');
+  const key=item.repository+'/'+name;if(seen.has(key))policyError('PREPARATION_POLICY_UNSUPPORTED');seen.add(key);
+  return {repository:item.repository,path:name};
+ });
+ const storage=(value:unknown):string=>{
+  if(typeof value!=='string'||!/^(0|[1-9][0-9]{0,18})$/.test(value)||BigInt(value)>9223372036854775807n)policyError('PREPARATION_POLICY_UNSUPPORTED');return value;
+ };
+ const network=row.network_timeout_milliseconds;if(typeof network!=='number'||!Number.isSafeInteger(network)||network<100||network>10000)policyError('PREPARATION_POLICY_UNSUPPORTED');
+ return {schema_version:1,kind:'hyperfide.preparation-policy',commands,cache_scope:row.cache_scope,cache_paths,
+ minimum_free_bytes:storage(row.minimum_free_bytes),minimum_free_inodes:storage(row.minimum_free_inodes),network_timeout_milliseconds:network};
 }
