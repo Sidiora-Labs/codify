@@ -102,7 +102,7 @@ def main():
         check("admission.actual-primary-capacity-debt",held)
         f.terminate()
         process={"boot_id":f.binding["boot_id"],"process_id":f.child.pid,"process_start_time":f.binding["process_start_time"],"exit_observed":True}
-        f.ok("agent.session.transition",{"scope":f.scope,"operation_id":uid(),"expected_state_version":"1","state":"FAILED","process":process})
+        f.ok("agent.session.transition",{"scope":f.scope,"operation_id":uid(),"expected_state_version":str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]),"state":"FAILED","process":process})
         release=dict(base,operation_id=uid(),reason="TERMINATED")
         def release_observed():
             p=call("agent.admission.report",release)
