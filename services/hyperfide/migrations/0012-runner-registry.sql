@@ -12,11 +12,14 @@ CREATE TABLE hyperfide.runner_registry (
  slot_id uuid NOT NULL,repository_id uuid,launch_id uuid,
  state_dir text NOT NULL CHECK(state_dir ~ '^/[^[:cntrl:]]+$'),runner_binary text NOT NULL CHECK(runner_binary ~ '^/[^[:cntrl:]]+$'),
  workspace_path text NOT NULL CHECK(workspace_path ~ '^/[^[:cntrl:]]+$'),runner_binary_digest hyperfide.digest NOT NULL,
- preparation_digest hyperfide.digest NOT NULL,readiness_digest hyperfide.digest NOT NULL,
- source_digest hyperfide.digest NOT NULL,source_object_id text NOT NULL,source_tree_id text NOT NULL,
+ boot_preparation_digest hyperfide.digest NOT NULL,preparation_digest hyperfide.digest NOT NULL,readiness_digest hyperfide.digest,
+ source_digest hyperfide.digest,source_object_id text,source_tree_id text,
+ preparation_policy_digest hyperfide.digest,
+ preparation_recipes jsonb CHECK(preparation_recipes IS NULL OR jsonb_typeof(preparation_recipes)='object'),
  slot_generation bigint NOT NULL CHECK(slot_generation>0),uid integer NOT NULL CHECK(uid>0),gid integer NOT NULL CHECK(gid>0),
  observation_digest hyperfide.digest NOT NULL,registration_version bigint NOT NULL DEFAULT 1 CHECK(registration_version>0),
- observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),state text NOT NULL DEFAULT'CURRENT' CHECK(state IN('CURRENT','REVOKED')),
+ observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),state text NOT NULL DEFAULT'CURRENT' CHECK(state IN('CURRENT','PREPARING','REVOKED')),
+ CHECK(state<>'CURRENT' OR (readiness_digest IS NOT NULL AND source_digest IS NOT NULL AND source_object_id IS NOT NULL AND source_tree_id IS NOT NULL)),
  PRIMARY KEY(organisation_id,run_id,session_id),
  FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
  FOREIGN KEY(organisation_id,sandbox_id,slot_id,boot_generation) REFERENCES hyperfide.worker_slots(organisation_id,sandbox_id,id,boot_generation),
@@ -25,6 +28,7 @@ CREATE TABLE hyperfide.runner_registry (
 );
 CREATE TABLE hyperfide.runner_remote_jobs (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,operation_id uuid NOT NULL,session_id uuid NOT NULL,
+ job_class text NOT NULL DEFAULT 'EXECUTION' CHECK(job_class IN('EXECUTION','PREPARATION')),
  plan jsonb NOT NULL CHECK(jsonb_typeof(plan)='object'),plan_digest hyperfide.digest NOT NULL,
  principal jsonb NOT NULL CHECK(jsonb_typeof(principal)='object'),admission_digest hyperfide.digest NOT NULL,
  authority_epoch uuid NOT NULL,reservation_id uuid NOT NULL,expires_at timestamptz NOT NULL,
@@ -100,3 +104,31 @@ CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hype
 
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.runner_result_artifacts
  FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+CREATE TRIGGER immutable_binding BEFORE UPDATE ON hyperfide.runner_remote_jobs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','operation_id','session_id','job_class','plan','plan_digest','principal','admission_digest','authority_epoch','reservation_id','expires_at','created_at');
+CREATE FUNCTION hyperfide.guard_runner_remote_result() RETURNS trigger
+ LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+BEGIN
+ IF OLD.claim_id IS NOT NULL AND ROW(NEW.claim_id,NEW.executor_credential_id,NEW.claimed_at) IS DISTINCT FROM ROW(OLD.claim_id,OLD.executor_credential_id,OLD.claimed_at)
+ THEN RAISE EXCEPTION 'runner execution claim is immutable' USING ERRCODE='23514'; END IF;
+ IF OLD.state='ADMITTED' AND NEW.state NOT IN('ADMITTED','CLAIMED','UNKNOWN')
+ OR OLD.state='CLAIMED' AND NEW.state NOT IN('CLAIMED','COMPLETED','UNKNOWN')
+ OR OLD.state='COMPLETED' AND NEW.state<>'COMPLETED'
+ OR OLD.state='UNKNOWN' AND NEW.state NOT IN('UNKNOWN','COMPLETED')
+ THEN RAISE EXCEPTION 'runner operation transition requires reconciliation, never relaunch' USING ERRCODE='23514'; END IF;
+ IF OLD.result IS NOT NULL AND ROW(NEW.result,NEW.result_digest,NEW.result_signature,NEW.completed_at) IS DISTINCT FROM ROW(OLD.result,OLD.result_digest,OLD.result_signature,OLD.completed_at)
+ THEN RAISE EXCEPTION 'signed runner result metadata is immutable' USING ERRCODE='23514'; END IF;
+ IF NEW.result IS NOT NULL AND (
+ NEW.result->>'organisation_id' IS DISTINCT FROM NEW.organisation_id::text
+ OR NEW.result->>'run_id' IS DISTINCT FROM NEW.run_id::text
+ OR NEW.result->>'operation_id' IS DISTINCT FROM NEW.operation_id::text
+ OR NEW.result->>'session_id' IS DISTINCT FROM NEW.session_id::text
+ OR jsonb_path_exists(NEW.result,'$.**.base64')
+ OR jsonb_path_exists(NEW.result,'$.**.data_base64')
+ OR jsonb_path_exists(NEW.result,'$.**.bytes'))
+ THEN RAISE EXCEPTION 'runner result must be scoped metadata and immutable artifact references only' USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER guarded_result BEFORE UPDATE ON hyperfide.runner_remote_jobs
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.guard_runner_remote_result();

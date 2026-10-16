@@ -10,7 +10,8 @@
   "api_version": 1,
   "actions": [
     "runner.registry.observe",
-    "runner.registry.describe"
+    "runner.registry.describe",
+    "runner.registry.prepare"
   ],
   "requires": [
     "4.2",
