@@ -65,13 +65,14 @@ def cleanup():
     print(json.dumps({"type":"cleanup","complete":complete,"resources":resources}),flush=True)
     return 0 if complete else 1
 FIXTURE="""
-import {enqueue,lockRun,authorizedRun} from './events/outbox.js';
+import {enqueue,lockRun,authorizedRun,lookupConsumerBinding,lookupNativeLaunch} from './events/outbox.js';
 import {receive,bootstrapConsumer,supersedeDelivery} from './events/inbox.js';
+import {applyExecutionControl} from './scheduler/claim.js';
 import {DurableDispatcher,recoverySnapshot} from './events/recovery.js';
 export function createComponent(ctx) {
  const g=ctx.dependencies.require('4.2','storage.transactions.v1',v=>typeof v?.withPrimaryTransaction==='function');
  const auth=(context,input,op)=>authorizedRun(g,context,input,['OPERATOR'],op);
- return {apiVersion:1,actions:{
+ const actions={
   'fixture.atomic': (input,context)=>auth(context,input,async tx=>{
    await lockRun(tx,input.event);
    await tx.query('UPDATE hyperfide.runs SET state_version=state_version+1 WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.run_id]);
@@ -91,6 +92,18 @@ export function createComponent(ctx) {
     const r=await tx.query('SELECT authority_epoch,state_version FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',[input.organisation_id,input.run_id]);
     return {scope:'authenticated-operator-SQL-fixture-only',credential_id:context.invocation.principal.credential_id,primary_run:r.rows[0]};
   })),
+  'fixture.native-lookup':(input,context)=>authorizedRun(g,context,input,['OPERATOR','PROVISIONER','LEADER'],(tx,i)=>lookupNativeLaunch(tx,input,i)),
+  'fixture.native-forged':(input,context)=>auth(context,input,(tx,i)=>lookupNativeLaunch(tx,input,{...i,principal:{...i.principal,role:'PROVISIONER'}})),
+  'fixture.crash':async(input,context)=>{
+   const dispatch=new DurableDispatcher(g,input.config,async(claim)=>{
+    if(input.after_receive)await auth(context,input,tx=>receive(tx,{organisation_id:claim.organisation_id,run_id:claim.run_id,event_id:claim.id,consumer_id:claim.consumer_id}));
+    process.kill(process.pid,'SIGKILL');
+    await new Promise(()=>{});
+   },context);
+   return dispatch.pass();
+  },
+  'fixture.binding':(input,context)=>auth(context,input,tx=>lookupConsumerBinding(tx,input)),
+  'fixture.control':(input,context)=>auth(context,input,tx=>applyExecutionControl(tx,input,input.control)),
   'fixture.snapshot': (input,context)=>auth(context,input,tx=>recoverySnapshot(tx,input)),
   'fixture.hung': async(input,context)=>{
    const dispatcher=new DurableDispatcher(g,input.config,async()=>new Promise(()=>{}),context);
@@ -113,13 +126,23 @@ export function createComponent(ctx) {
    }else{await new Promise(r=>setTimeout(r,30));await dispatch.pass();passes++;await dispatch.close();}
    return {sends,passes,first};
   }
- }};
+ };
+ if(ctx.env.HF_TEST_EXECUTION_CONTROLS!=='1')delete actions['fixture.control'];
+ return {apiVersion:1,actions};
 }
 """
 class Service(identity.IdentityFixture):
-    def __init__(self):
-        super().__init__(extra_components=("6.1","6.2","6.3","6.4"),extra_setup=self.prepare,database=database())
+    def __init__(self,include_instructions=None):
+        self.include_instructions=TASK=="6.3" if include_instructions is None else include_instructions
+        extras=["6.1","6.2","6.4"]
+        if self.include_instructions:extras+=["2.1","2.4","3.1","3.2","5.1","5.2","5.4","7.2","7.3","6.3"]
+        super().__init__(extra_components=extras,extra_setup=self.prepare,database=database())
     def prepare(self,f):
+        for name,version in [('0002-spec',2),('0003-hierarchy',3),('0005-scheduling',5),('0006-event-session-bindings',6),('0007-graph',7),('0032-execution-packets',32)]:
+            data=(ROOT/'services/hyperfide/migrations'/(name+'.sql')).read_bytes()
+            self.sql("BEGIN;"+data.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+","+q(name)+","+q(identity.sha(data))+");COMMIT;")
+        self.env['HF_SCHEDULER_DISPATCH_CONSUMER_ID']=CONSUMER
+        self.env['HF_TEST_EXECUTION_CONTROLS']='1' if self.include_instructions else '0'
         self.runtime_root=self.path/"runtime";module=self.runtime_root/"services/hyperfide/dist"
         module.parent.mkdir(parents=True)
         shutil.copytree(ROOT/"services/hyperfide/dist",module)
@@ -128,10 +151,14 @@ class Service(identity.IdentityFixture):
         self.module_equal=all(hashlib.sha256(p.read_bytes()).digest()==hashlib.sha256((module/p.relative_to(ROOT/"services/hyperfide/dist")).read_bytes()).digest()
             for p in (ROOT/"services/hyperfide/dist").rglob("*") if p.is_file())
         (module/"fixture.js").write_text(FIXTURE)
+        syntax=subprocess.run(["node","--check",str(module/"fixture.js")],capture_output=True,text=True)
+        expect(syntax.returncode==0,"Trusted fixture module syntax failed: "+syntax.stderr[:1000])
         (module/"package.json").write_text('{"type":"module"}')
-        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede"]
+        actions=["fixture.atomic","fixture.selected","fixture.effect","fixture.snapshot","fixture.hung","fixture.dispatch","fixture.bootstrap","fixture.supersede","fixture.control","fixture.binding","fixture.native-lookup","fixture.native-forged","fixture.crash"]
         fragment={"schema_version":1,"id":"fixture.events","task":"6.1","roles":["control"],"module":"fixture.js","entry":"createComponent",
             "api_version":1,"actions":actions,"requires":["4.2","6.1","6.2","6.4"]}
+        if self.include_instructions:fragment["requires"].append("5.1")
+        else:actions.remove("fixture.control")
         (self.components/"fixture.json").write_text(json.dumps(fragment))
         self.actions+=actions
         for path in [self.policy,self.identity_config]:
@@ -156,7 +183,7 @@ class Service(identity.IdentityFixture):
     def request_action(self,action,value,runner=None):
         component={"outbox":"6.1","inbox":"6.2","instructions":"6.3","recovery":"6.4","fixture":"fixture.events"}[action.split(".")[0]]
         value={**S,**value} if action.startswith("fixture.") else value
-        use_runner=action in ("instructions.handoff","instructions.ack") if runner is None else runner
+        use_runner=action in ("instructions.handoff","instructions.ack","instructions.lookup-native") if runner is None else runner
         kwargs={"key":"runner","credential":self.runner_credential} if use_runner else {}
         status,response=self.invoke(action,value,component=component,**kwargs)
         OBS.append({"action":action,"http_status":status,"ok":response.get("ok"),"error_code":response.get("error",{}).get("code")})
@@ -172,7 +199,7 @@ class Service(identity.IdentityFixture):
     def enroll_runner(self):
         expect(self.bind()[1].get("ok") is True,"Real provisioner binding failed")
         issue=self.invoke("identity.grant.issue",{"grant_id":self.grant,"provisioning_intent_id":self.ids["intent"],"verifier":identity.sha(self.secret),
-            "allowed_actions":["identity.describe","instructions.handoff","instructions.ack"],"ttl_seconds":300})
+            "allowed_actions":["identity.describe","instructions.handoff","instructions.ack","instructions.lookup-native"],"ttl_seconds":300})
         expect(issue[1].get("ok") is True,"Real runner grant failed: "+str(issue[1].get("error")))
         enrolled=self.request(self.enrollment(),key="runner",endpoint="/v1/enroll",credential=self.grant)
         expect(enrolled[1].get("ok") is True,"Real runner enrollment failed")
@@ -259,6 +286,33 @@ def suite61(s):
         sql("SELECT count(*) FROM hyperfide.event_deliveries WHERE event_id="+q(private["id"])+" AND consumer_id="+q(uid(601))+";")=="0","Private payload was broadcast to another critical consumer"))
     check("outbox.recipient-replay-conflict",lambda:s.reject("fixture.selected",{"event":private,"consumer_ids":[uid(601)]},"EVENT_IDEMPOTENCY_CONFLICT"))
     check("outbox.unregistered-recipient-refused",lambda:s.reject("fixture.selected",{"event":event(1051),"consumer_ids":[uid(699)]},"EVENT_CONSUMER_REQUIRED"))
+
+    # These principals/session rows come from the actual14 fixture; native CLI observation is outside this component receipt.
+    leader=s.add_principal("leader","LEADER");other=s.add_principal("otherleader","LEADER");session=leader["actor_id"]
+    human=uid(610);notice=uid(611)
+    for consumer,namespace in [(human,"human_intent"),(notice,"fleet_notification")]:
+        s.ok("outbox.consumer.register",dict(S,id=consumer,consumer_key="session:"+session+":"+namespace,critical=True,state="BUFFERING"))
+    binding=dict(S,session_id=session,consumer_id=human,namespace="human_intent")
+    check("outbox.binding-real-session",lambda:expect(s.ok("outbox.consumer.bind-session",binding)["session_id"]==session,"No typed registered recipient binding"))
+    check("outbox.binding-replay",lambda:expect(s.ok("outbox.consumer.bind-session",binding)["replayed"],"Binding replay changed the edge"))
+    check("outbox.binding-separate-namespaces",lambda:expect(s.ok("outbox.consumer.bind-session",dict(binding,consumer_id=notice,namespace="fleet_notification"))["consumer_id"]==notice,
+        "Different trusted namespaces forced a shared consumer"))
+    check("outbox.binding-no-implicit-activation",lambda:expect(sql("SELECT state FROM hyperfide.event_consumers WHERE id="+q(human))=="BUFFERING","Binding fabricated snapshot activation"))
+    check("outbox.binding-real-self-proof",lambda:expect(s.invoke("outbox.consumer.bind-session",binding,component="6.1",key="leader")[1].get("ok") is True,"Actual signed self binding failed"))
+    check("outbox.binding-other-session-refused",lambda:expect(s.invoke("outbox.consumer.bind-session",binding,component="6.1",key="otherleader")[1].get("error",{}).get("code")=="AUTH_SCOPE_DENIED","Another real principal claimed recipient ownership"))
+    check("outbox.binding-wrong-key-refused",lambda:s.reject("outbox.consumer.bind-session",dict(binding,consumer_id=CONSUMER),"EVENT_BINDING_INVALID"))
+    check("outbox.binding-unknown-namespace-refused",lambda:s.reject("outbox.consumer.bind-session",dict(binding,namespace="arbitrary"),"EVENT_NAMESPACE_INVALID"))
+    check("outbox.binding-resolve-exact-namespace",lambda:expect(s.ok("outbox.consumer.resolve-session",dict(S,session_id=session,namespace="fleet_notification"))["consumer_id"]==notice,"Resolution crossed the namespace"))
+    def immutable_binding():
+        p=subprocess.run(["psql","-X","-q","-v","ON_ERROR_STOP=1","-d",database()],input="DELETE FROM hyperfide.event_session_bindings WHERE consumer_id="+q(human),text=True,capture_output=True,env=env(),timeout=30)
+        expect(p.returncode!=0 and "immutable history cannot be deleted" in p.stderr,"Typed binding history was deleted")
+    check("outbox.binding-history-immutable",immutable_binding)
+    sql("UPDATE hyperfide.agent_sessions SET state='DISCONNECTED',state_version=state_version+1 WHERE id="+q(session))
+    check("outbox.binding-disconnected-standing-queue",lambda:expect(s.ok("outbox.consumer.resolve-session",dict(S,session_id=session,namespace="human_intent"))["session_state"]=="DISCONNECTED","Disconnected standing recipient was silently replaced"))
+    sql("UPDATE hyperfide.agent_sessions SET state='STOPPED',state_version=state_version+1 WHERE id="+q(session))
+    check("outbox.binding-stopped-recipient-held",lambda:s.reject("outbox.consumer.resolve-session",dict(S,session_id=session,namespace="human_intent")))
+    check("outbox.binding-retained-source-history",lambda:expect(s.ok("fixture.binding",dict(S,consumer_id=human))["session_state"]=="STOPPED","Stopped binding history was erased or granted current authority"))
+
 def suite62(s):
     e1=event(2001,aggregate=2000);e2=event(2002,version="2",aggregate=2000)
     s.ok("outbox.enqueue",e2)
@@ -322,6 +376,16 @@ def suite62(s):
     check("inbox.supersession-immutable-original",lambda:expect(json.loads(sql("SELECT payload::text FROM hyperfide.outbox_events WHERE id="+q(source["id"])))==source["payload"],
         "Adoption relabelled original human intent"))
 
+    pending=dict(source,id=uid(2061),aggregate_id=uid(2061))
+    replacement=dict(adopted,id=uid(2062),aggregate_id=uid(2062),payload=dict(adopted["payload"],supersedes_event_id=pending["id"],original_event_id=pending["id"]))
+    s.ok("fixture.selected",{"event":pending,"consumer_ids":[CONSUMER]})
+    s.ok("fixture.selected",{"event":replacement,"consumer_ids":[late]})
+    admitted=s.ok("inbox.receive",dict(S,event_id=pending["id"],consumer_id=CONSUMER))
+    receipt_before=sql("SELECT row_to_json(c)::text FROM hyperfide.command_inbox c WHERE operation='event.receive' AND principal_scope="+q(CONSUMER)+" AND idempotency_key="+q(pending["id"]))
+    s.ok("fixture.supersede",dict(transfer,transfer_id=uid(2504),original_event_id=pending["id"],replacement_event_id=replacement["id"]))
+    check("inbox.supersession-preserves-prior-admission",lambda:expect(receipt_before==sql("SELECT row_to_json(c)::text FROM hyperfide.command_inbox c WHERE operation='event.receive' AND principal_scope="+q(CONSUMER)+" AND idempotency_key="+q(pending["id"])) and admitted["inbox_id"],
+        "Route transfer rewrote admission receipt or treated it as logical processing"))
+
 def concurrent_duplicate(s):
     e=event(2031,aggregate=2030);s.ok("outbox.enqueue",e)
     before=int(sql("SELECT state_version FROM hyperfide.runs WHERE id="+q(S["run_id"])))
@@ -345,6 +409,10 @@ def command(n,kind):
     if kind=="START":body.update(slot_id=uid(10),agent_session_id=uid(701),connector_plan_digest="sha256:"+"b"*64)
     if kind=="STEER":body.update(request_id=uid(n+5000),frame_b64=base64.urlsafe_b64encode(b"steer").decode().rstrip("="))
     return dict(S,id=uid(n),attempt_id=uid(30),attempt_generation="1",authority_epoch=ACTIVE.ids["epoch"],sandbox_boot_generation="1",kind=kind,body=body)
+def control(s,mode,operation,expected=None):
+    value={"scope_kind":"ATTEMPT","scope_id":uid(30),"mode":mode,"operation_id":uid(operation),"reason":"registered component control test"}
+    if expected is not None:value.update(expected_generation=str(expected),resume=mode=="ACTIVE")
+    return s.ok("fixture.control",dict(S,control=value))
 def suite63(s):
     seed_native_attempt(s);s.enroll_runner();start=command(3001,"START")
     check("instructions.real-service",lambda:expect(s.ok("instructions.describe")["execution"]=="native-connector-required","Acceptance claimed physical execution"))
@@ -358,9 +426,17 @@ def suite63(s):
         check("instructions.stale-"+label,lambda f=field,v=value:s.reject("instructions.issue",dict(command(3010,"STEER"),**{f:v}),"INSTRUCTION_STALE_AUTHORITY"))
     check("instructions.unsupported-kind",lambda:s.reject("instructions.issue",dict(command(3010,"STEER"),kind="SHELL"),"INSTRUCTION_INPUT_INVALID"))
     check("instructions.padded-steer-refused",lambda:s.reject("instructions.issue",dict(command(3010,"STEER"),body=dict(command(3010,"STEER")["body"],frame_b64="YQ==")),"INSTRUCTION_INPUT_INVALID"))
+    control(s,"PAUSE",860)
+    check("instructions.pause-defers-start-admission",lambda:s.reject("instructions.accept",dict(S,event_id=start["id"],consumer_id=CONSUMER),"EXECUTION_HELD"))
+    check("instructions.pause-no-completed-start-receipt",lambda:expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='instruction.spool'")=="0","PAUSE created a completed start receipt"))
+    control(s,"ACTIVE",861,1)
     def accept(c):return s.ok("instructions.accept",dict(S,event_id=c["id"],consumer_id=CONSUMER))
     check("instructions.start-durably-accepted",lambda:expect(accept(start)["result"]["execution"]=="PENDING_NATIVE_CONNECTOR","Central admission invented a process"))
+    control(s,"PAUSE",862,2)
+    check("instructions.pause-defers-queued-handoff",lambda:s.reject("instructions.handoff",dict(S,event_id=start["id"],consumer_id=CONSUMER),"EXECUTION_HELD"))
+    control(s,"ACTIVE",863,3)
     packet=s.ok("instructions.handoff",dict(S,event_id=start["id"],consumer_id=CONSUMER))
+    check("instructions.resume-preserves-command",lambda:expect(packet["command_id"]==start["id"],"Verified resume replaced committed command identity"))
     def native_packet():
         decoded=base64.urlsafe_b64decode(packet["payload_base64url"]+"="*((-len(packet["payload_base64url"]))%4))
         expect(packet["accepted"] and packet["command_id"]==start["id"]==packet["operation_id"] and packet["sandbox_id"]==s.ids["sandbox"] and
@@ -372,19 +448,52 @@ def suite63(s):
     base={key:packet[key] for key in ["organisation_id","run_id","command_id","operation_id","attempt_id","attempt_generation","authority_epoch","sandbox_id","boot_id","sandbox_boot_generation","sequence","payload_digest"]}
     report=dict(base,ledger_receipt_id=uid(800),ledger_version="1",state="ACCEPTED",observed_process=None)
     check("instructions.native-ack-recorded",lambda:expect(s.ok("instructions.ack",report)["authority"]=="NONE","Native observation gained task authority"))
+    observed=s.ok("instructions.lookup-native",dict(S,launch_id=start["body"]["launch_id"]))
+    check("instructions.native-recorded-launch-reader",lambda:expect(observed["command_id"]==start["id"] and
+        observed["runner_ack"]["ledger_receipt_id"]==report["ledger_receipt_id"] and observed["runner_ack"]["credential_id"]==s.runner_credential and
+        observed["authority"]=="NONE" and observed["current_target"],"Launch reader lost actual authenticated ledger binding or granted compute"))
+    check("instructions.lookup-forged-role-refused",lambda:s.reject("fixture.native-forged",dict(S,launch_id=uid(700))))
+    s.add_principal("observer","PROVISIONER")
+    def internal_lookup(value):
+        status,response=s.invoke("fixture.native-lookup",value,component="fixture.events",key="observer",credential=s.ids["observer"])
+        return status,response
+    def provisioner_lookup():
+        status,response=internal_lookup(dict(S,launch_id=uid(700)))
+        expect(status==200 and response.get("ok") and response["result"]["runner_ack"]["credential_id"]==s.runner_credential and response["result"]["authority"]=="NONE","Genuine scoped provisioner observation failed")
+    check("instructions.lookup-genuine-provisioner-observation",provisioner_lookup)
+    check("instructions.lookup-cross-run-refused",lambda:expect(internal_lookup(dict(S,run_id=uid(999),launch_id=uid(700)))[1].get("ok") is False,"Cross-run observation accepted"))
+    state_sql="SELECT result::text FROM hyperfide.command_inbox WHERE operation='instruction.runner-state' AND idempotency_key="+q(start["id"])
+    original_state=json.loads(sql(state_sql))
+    def mismatched_state(field,value):
+        changed=dict(original_state,**{field:value})
+        sql("UPDATE hyperfide.command_inbox SET result="+q(json.dumps(changed))+"::jsonb,state_version=state_version+1 WHERE operation='instruction.runner-state' AND idempotency_key="+q(start["id"]))
+        try:s.reject("instructions.lookup-native",dict(S,launch_id=uid(700)),"INSTRUCTION_OBSERVATION_INVALID")
+        finally:sql("UPDATE hyperfide.command_inbox SET result="+q(json.dumps(original_state))+"::jsonb,state_version=state_version+1 WHERE operation='instruction.runner-state' AND idempotency_key="+q(start["id"]))
+    check("instructions.lookup-attempt-mismatch-refused",lambda:mismatched_state("attempt_id",uid(999)))
+    check("instructions.lookup-state-mismatch-refused",lambda:mismatched_state("state","EXECUTING"))
+    check("instructions.lookup-digest-mismatch-refused",lambda:mismatched_state("payload_digest","sha256:"+"f"*64))
     check("instructions.native-ack-replay",lambda:expect(s.ok("instructions.ack",report)["replayed"],"Lost native ACK duplicated receipt"))
     check("instructions.native-ack-conflict",lambda:s.reject("instructions.ack",dict(report,state="UNCERTAIN"),"INSTRUCTION_ACK_CONFLICT"))
     check("instructions.native-ack-target-refused",lambda:s.reject("instructions.ack",dict(report,sandbox_id=uid(999)),"INSTRUCTION_ACK_INVALID"))
     process={"os_boot_id":uid(801),"pid":42,"start_time":"1000","pgid":42}
+    def start_index(aggregate):
+        statement="INSERT INTO hyperfide.outbox_events(organisation_id,run_id,id,aggregate_type,aggregate_id,aggregate_version,event_type,payload) SELECT organisation_id,run_id,"+q(uid(3980+aggregate))+",aggregate_type,"+q(uid(30 if aggregate==0 else 9998))+",99,event_type,payload FROM hyperfide.outbox_events WHERE id="+q(start["id"])
+        p=subprocess.run(["psql","-X","-q","-v","ON_ERROR_STOP=1","-d",database()],input=statement,text=True,capture_output=True,env=env(),timeout=30)
+        expect(p.returncode!=0 and "duplicate key value" in p.stderr,"Trusted SQL bypassed the native START identity index")
+    check("instructions.database-one-start-per-attempt",lambda:start_index(0))
+    check("instructions.database-one-launch-per-run",lambda:start_index(1))
+    check("instructions.generic-protected-emission-refused",lambda:s.reject("outbox.enqueue",dict(S,id=uid(3999),aggregate_type="attempt.instructions",aggregate_id=uid(30),aggregate_version="9",event_type="instruction.start",payload={}),"EVENT_TRUSTED_HANDLER_REQUIRED"))
     check("instructions.native-executing-observation",lambda:expect(s.ok("instructions.ack",dict(report,ledger_version="2",state="EXECUTING",observed_process=process))["task_qualified"] is False,"Observed process qualified task"))
     check("instructions.native-state-regression-refused",lambda:s.reject("instructions.ack",dict(report,ledger_version="3"),"INSTRUCTION_ACK_REGRESSION"))
     check("instructions.native-process-rebinding-refused",lambda:s.reject("instructions.ack",dict(report,ledger_version="3",state="EXECUTING",observed_process=dict(process,pid=43)),"INSTRUCTION_ACK_CONFLICT"))
     check("instructions.uncertainty-retains-process-pin",lambda:expect(s.ok("instructions.ack",dict(report,ledger_version="3",state="UNCERTAIN"))["recorded"],"Uncertainty observation failed"))
     check("instructions.uncertain-process-rebinding-refused",lambda:s.reject("instructions.ack",dict(report,ledger_version="4",state="EXECUTING",observed_process=dict(process,pid=43)),"INSTRUCTION_ACK_CONFLICT"))
     steer=command(3020,"STEER");cancel=command(3030,"CANCEL")
-    s.ok("instructions.issue",steer);s.ok("instructions.issue",cancel)
-    check("instructions.cancel-fences-future-input",lambda:s.reject("instructions.issue",command(3040,"STEER"),"INSTRUCTION_CANCELLED"))
+    s.ok("instructions.issue",steer);control(s,"PAUSE",864,4)
+    check("instructions.pause-allows-cancel-cleanup",lambda:expect(s.ok("instructions.issue",cancel)["obligations"]==1,"PAUSE blocked cleanup or invented completion"))
     check("instructions.typed-replay",lambda:expect([r["status"] for r in s.ok("instructions.replay",dict(S,attempt_id=uid(30),consumer_id=CONSUMER,limit=64))["results"]]==["APPLIED","APPLIED"],"Typed replay skipped generation-bound handler"))
+    control(s,"ACTIVE",865,5)
+    check("instructions.cancel-fences-future-input",lambda:s.reject("instructions.issue",command(3040,"STEER"),"INSTRUCTION_CANCELLED"))
     check("instructions.accepted-start-cannot-respawn",lambda:expect(accept(start)["status"]=="DUPLICATE" and s.ok("instructions.handoff",dict(S,event_id=start["id"],consumer_id=CONSUMER))["accepted"] is False,"Native start escaped cancellation"))
     check("instructions.late-steer-suppressed",lambda:expect(accept(steer)["result"]["disposition"]=="SUPPRESSED_BY_CANCELLATION","Late steering escaped cancellation"))
     check("instructions.cancel-durably-accepted",lambda:expect(accept(cancel)["result"]["execution"]=="PENDING_NATIVE_CONNECTOR","Receipt invented external cancellation"))
@@ -419,6 +528,26 @@ def suite64(s):
     s.ok("outbox.enqueue",event(4020))
     hung=s.ok("fixture.hung",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=100,poll_ms=10,retry_ms=0)})
     check("recovery.unresponsive-adapter-bounded",lambda:expect(hung["result"]["pending"]==1 and hung["elapsed_ms"]<3000,"Unresponsive adapter prevented bounded shutdown"))
+
+    def crash_recover(number,after):
+        e=event(number);s.ok("outbox.enqueue",e)
+        # Retire the intentionally hung prior obligation through the actual receiver before isolating this crash.
+        for pending in claim(s,lease=5000):
+            if pending["id"]!=e["id"]:ack(s,pending,receipt(pending))
+            else:s.ok("outbox.retry",dict(S,event_id=e["id"],consumer_id=CONSUMER,attempt_count=pending["attempt_count"],delay_ms=0,error="CRASH_TEST_READY"))
+        old=s.child;disconnected=False
+        try:s.ok("fixture.crash",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=50,poll_ms=10,retry_ms=0),"after_receive":after})
+        except Exception:disconnected=True
+        old.wait(timeout=10);expect(disconnected and old.returncode==-signal.SIGKILL,"Fixture did not actually kill its dispatcher process")
+        s.child=None
+        expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"]))==("1" if after else "0"),"Crash boundary did not match committed receiver state")
+        s.start();sql("SELECT pg_sleep(0.1)")
+        restarted=s.ok("fixture.dispatch",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=5000,poll_ms=10,retry_ms=0),"poll":True})
+        expect(restarted["sends"]==1 and sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(e["id"]))=="ACKNOWLEDGED" and
+            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"]))=="1","Crash recovery lost identity or duplicated receiver effect")
+    sql("SELECT pg_sleep(0.2)")
+    check("recovery.sigkill-before-receiver-commit",lambda:crash_recover(4030,False))
+    check("recovery.sigkill-after-receiver-commit",lambda:crash_recover(4040,True))
 
 def main(task="6.1"):
     global TASK,ACTIVE,S
