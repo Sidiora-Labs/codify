@@ -90,9 +90,9 @@ export async function rebindAcceptedRun(resources:ServiceResources,journal:Exter
   await writeSemanticDisposition(tx,input);
   const intent=await prepared.verify(tx);exact(intent,[...fields,'intent_digest','evidence_scope']);
   const {intent_digest,evidence_scope,...verifiedInput}=intent;
-  if(!digest(intent_digest)||!['LIVE_PROVIDER','ISOLATED_POSTGRESQL_FIXTURE'].includes(evidence_scope)||pin(verifiedInput)!==inputDigest)fail('RECOVERY_REBIND_PROOF_MISMATCH','Trusted recovery verifier returned a different exact accepted intent');
+  if(!digest(intent_digest)||!['LIVE_PROVIDER','ISOLATED_POSTGRESQL_FIXTURE'].includes(evidence_scope)||pin(verifiedInput)!==inputDigest||intent_digest!==pin({...input,evidence_scope}))fail('RECOVERY_REBIND_PROOF_MISMATCH','Trusted recovery verifier returned a different exact accepted intent');
   const run=await accepted(tx,input);
-  if(!run||run.authority_epoch!==input.expected_run_epoch||run.spec_generation!==input.expected_spec_generation||run.spec_revision_id!==input.expected_spec_revision_id||run.revision_digest!==input.expected_revision_digest||['CANCELLED','SUCCEEDED','CANCELLING'].includes(run.state))fail('RECOVERY_ACCEPTED_INTENT_MISMATCH','Exact nonterminal accepted predecessor is required');
+  if(!run||run.authority_epoch!==input.expected_run_epoch||run.spec_generation!==input.expected_spec_generation||run.spec_revision_id!==input.expected_spec_revision_id||run.revision_digest!==input.expected_revision_digest||['CANCELLED','SUCCEEDED','CANCELLING'].includes(run.state))fail('RECOVERY_ACCEPTED_INTENT_MISMATCH','Exact recoverable accepted predecessor is required');
   await fresh(tx,input,attestation);
   // Scheduler must still observe the OLD epoch; it retains custody/effects as debt.
   const compute=await prepared.revokeCompute(tx);
