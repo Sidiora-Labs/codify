@@ -129,10 +129,11 @@ export function route(id: unknown): RouteProfile {
   if (!Object.hasOwn(ROUTES, name)) fail('DECISION_UNSUPPORTED', 'Unknown decision route');
   return ROUTES[name as RouteId];
 }
-export function validateRequest(input: unknown, profile: RouteProfile, enabled: readonly QuestionType[] = []): DecisionRequest {
+export function validateRequest(input: unknown, profile: RouteProfile, enabled: readonly QuestionType[] = [], gatewayMedia = false): DecisionRequest {
   const request = record(input, 'decision request'); exact(request,['state','questions'],['state','questions']);
   canonical(request.state);
   if (request.state === null || !['object','string'].includes(typeof request.state)) fail('DECISION_SCHEMA','State must be text or structured JSON');
+  if(profile.route_class==='gateway'&&Array.isArray(request.state)&&!gatewayMedia)fail('DECISION_UNSUPPORTED','Gateway content parts require qualified media preparation');
   const questions = record(request.questions,'questions');
   if (!Object.keys(questions).length || Object.keys(questions).length > 256) fail('DECISION_SCHEMA','Local question count limit is 1..256');
   const checked: Record<string,Question> = Object.create(null) as Record<string,Question>;
@@ -161,10 +162,10 @@ export function validateRequest(input: unknown, profile: RouteProfile, enabled: 
 }
 export interface PreparedRequest { route: RouteProfile; body: Record<string,unknown>; headers: Record<string,string>; request_hash:string; source_request:DecisionRequest }
 const prepared = new WeakSet<object>();
-export function prepare(id: unknown, input: unknown, extensions: {types?:readonly QuestionType[];body?:Record<string,unknown>;headers?:Record<string,string>} = {}): PreparedRequest {
+export function prepare(id: unknown, input: unknown, extensions: {gateway_media?:true;types?:readonly QuestionType[];body?:Record<string,unknown>;headers?:Record<string,string>} = {}): PreparedRequest {
   if(extensions.body)exact(extensions.body,['images','assets','reasoning']);
   if(extensions.headers)exact(extensions.headers,['TypeSafe-Danger-Zone-Images','TypeSafe-Danger-Zone-Long-Context']);
-  const profile=route(id), source=validateRequest(input,profile,extensions.types);
+  const profile=route(id), source=validateRequest(input,profile,extensions.types,extensions.gateway_media===true);
   const body={model:profile.model,...source,...extensions.body};
   const serialized=canonical(body);
   if (Buffer.byteLength(serialized)>8*1024*1024) fail('DECISION_LIMIT','Local request body exceeds 8 MiB');

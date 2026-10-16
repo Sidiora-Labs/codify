@@ -22,7 +22,7 @@ IDS=[
  "decision.transport.unqualified","decision.transport.wrong-model","decision.transport.wrong-answer",
  "decision.transport.duplicate-json","decision.transport.nonfinite-json","decision.transport.failed-usage",
  "decision.transport.http-auth","decision.transport.http-overload-one-send","decision.transport.timeout",
- "decision.configuration.legacy-preserved","decision.transport.escaped-credential","decision.prepare.extensions-reserved",
+ "decision.configuration.legacy-preserved","decision.transport.escaped-credential","decision.prepare.extensions-reserved","decision.transport.gateway-media-opt-in",
 ]
 ACTIONS=["decision.routes.describe","decision.adapter.prepare","decision.adapter.invoke","decision.configuration.migrate"]
 
@@ -190,6 +190,14 @@ console.log('reserved fields rejected');
   process=subprocess.run(["node","--input-type=module","-e",script],cwd=ROOT,text=True,capture_output=True,timeout=10)
   expect(process.returncode==0 and "reserved fields rejected"in process.stdout,"extension overwrote validated fields")
  check(IDS[29],reserved)
+ def gateway_media():
+  http=HTTPFixture()
+  try:
+   r=request();r["state"]=["Synthetic",{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}]
+   process,payload=fixture.invoke("decision.adapter.invoke",{"route_id":"jev-openrouter","request":r,"timeout_ms":1000},http.env("jev-openrouter","typesafe/jev-1.14"))
+   expect(process.returncode!=0 and payload["error"]["code"]=="DECISION_UNSUPPORTED"and not http.received,"baseline gateway state bypassed qualified media opt-in")
+  finally:http.close()
+ check(IDS[30],gateway_media)
  return failures
 
 def main():
