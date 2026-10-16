@@ -370,7 +370,7 @@ do_8 = "Implement the task's registered positive/negative assertions and immutab
 
 [task.4.2]
 title = "Implement bounded primary transaction gateway"
-status = "pending"
+status = "in_progress"
 wave = 4
 requires = ["4.1", "1.4"]
 touches = ["services/hyperfide/src/storage/transactions.ts", "tests/hyperfide/manifests/tasks/4.2.json", "tests/hyperfide/cases/tasks/4_2.py", "tests/hyperfide/registrations/4.2.json", "services/hyperfide/components/4.2.json", "services/hyperfide/src/storage/runtime.ts", "services/hyperfide/src/components/registry.ts", "services/hyperfide/src/storage/schema.ts"]
