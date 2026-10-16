@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='hyperfide-release-build-') as temporary
  if migrations.exists():shutil.copytree(migrations,stage/'services/migrations')
  subprocess.run(['npm','ci','--omit=dev','--ignore-scripts'],cwd=stage/'services',check=True)
  # Bundle the actual linked dependencies instead of replacing qualified link flags.
- executables=[(stage/'bin/hyperfide',stage/'lib/hyperfide'),(stage/'bin/hyperfide-native',stage/'lib/hyperfide'),(stage/'runtime/node',stage/'lib/hyperfide')]+[(item,python_stage/'lib') for item in [python_stage/'bin/python3.bin']+sorted((python_stage/'lib/python3.14/lib-dynload').glob('*.so'))]
+ executables=[(root/'hyperfide',stage/'lib/hyperfide'),(root/'build/hyperfide-native',stage/'lib/hyperfide'),(node,stage/'lib/hyperfide')]+[(item,python_stage/'lib') for item in [Path(sys.executable).resolve()]+sorted((stdlib/'lib-dynload').glob('*.so'))]
  for executable,library_root in executables:
   observed=subprocess.run(['ldd',str(executable)],text=True,capture_output=True)
   if observed.returncode:raise SystemExit('hyperfide release: cannot enumerate native runtime dependencies')
