@@ -26,8 +26,10 @@ CREATE TABLE hyperfide.provider_quota_observations (
  observed_at timestamptz NOT NULL,
  expires_at timestamptz NOT NULL,
  evidence_digest hyperfide.digest NOT NULL,
- basis text NOT NULL CHECK(basis IN ('PROVIDER_API','VERIFIED_OPERATOR_ATTESTATION')),
+ basis text NOT NULL CHECK(basis IN ('PROVIDER_API','VERIFIED_OPERATOR_ATTESTATION','OPERATOR_DECLARED_CAPACITY')),
  evidence_reference text NOT NULL CHECK(length(evidence_reference) BETWEEN 1 AND 2048),
+ declaration_id uuid,
+ CHECK((basis='OPERATOR_DECLARED_CAPACITY')=(declaration_id IS NOT NULL)),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  CHECK(expires_at>observed_at),
  PRIMARY KEY(organisation_id,id),
@@ -404,3 +406,73 @@ DO $$ DECLARE table_name text; BEGIN
   EXECUTE format('CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation()',table_name);
  END LOOP;
 END $$;
+
+CREATE TABLE hyperfide.provider_remote_observations (
+ organisation_id uuid NOT NULL,
+ run_id uuid NOT NULL,
+ remote_operation_id uuid NOT NULL,
+ id uuid NOT NULL,
+ observation jsonb NOT NULL CHECK(jsonb_typeof(observation)='object' AND octet_length(observation::text)<=1048576),
+ evidence_digest hyperfide.digest NOT NULL,
+ observed_at timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,id),
+ UNIQUE(organisation_id,remote_operation_id,evidence_digest),
+ FOREIGN KEY(organisation_id,run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,remote_operation_id) REFERENCES hyperfide.provider_remote_operations(organisation_id,id)
+);
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.provider_remote_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER provider_remote_observation_immutable BEFORE UPDATE OR DELETE ON hyperfide.provider_remote_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','remote_operation_id','id','observation','evidence_digest','observed_at','created_at');
+
+CREATE TABLE hyperfide.provider_capacity_attestations (
+ organisation_id uuid NOT NULL,
+ id uuid NOT NULL,
+ pool_id uuid NOT NULL,
+ configuration_digest hyperfide.digest NOT NULL,
+ provenance_run_id uuid NOT NULL,
+ provenance_artifact_id uuid NOT NULL,
+ provenance_digest hyperfide.digest NOT NULL,
+ declaration_digest hyperfide.digest NOT NULL,
+ declaration jsonb NOT NULL CHECK(jsonb_typeof(declaration)='object' AND octet_length(declaration::text)<=16384),
+ declared_at timestamptz NOT NULL,
+ expires_at timestamptz NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,id),
+ CHECK(expires_at>declared_at),
+ FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
+ FOREIGN KEY(organisation_id,provenance_run_id,provenance_artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id)
+);
+ALTER TABLE hyperfide.provider_quota_observations ADD CONSTRAINT capacity_declaration_provenance FOREIGN KEY(organisation_id,declaration_id) REFERENCES hyperfide.provider_capacity_attestations(organisation_id,id);
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.provider_capacity_attestations FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+CREATE TRIGGER provider_capacity_declaration_immutable BEFORE UPDATE OR DELETE ON hyperfide.provider_capacity_attestations FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','id','pool_id','configuration_digest','provenance_run_id','provenance_artifact_id','provenance_digest','declaration_digest','declaration','declared_at','expires_at','created_at');
+
+ALTER TABLE hyperfide.provider_remote_operations ADD CONSTRAINT provider_remote_operation_run_identity UNIQUE(organisation_id,run_id,id);
+ALTER TABLE hyperfide.provider_remote_observations ADD CONSTRAINT provider_remote_observation_run FOREIGN KEY(organisation_id,run_id,remote_operation_id) REFERENCES hyperfide.provider_remote_operations(organisation_id,run_id,id);
+CREATE TABLE hyperfide.provider_process_archives (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,id uuid NOT NULL,remote_operation_id uuid NOT NULL,
+ sandbox_id uuid NOT NULL,boot_generation bigint NOT NULL,
+ process_ref text NOT NULL,native_process_ref text NOT NULL,payload_digest hyperfide.digest NOT NULL,
+ index_artifact_id uuid NOT NULL,index_digest hyperfide.digest NOT NULL,index_receipt_id text NOT NULL,index_size_bytes bigint NOT NULL CHECK(index_size_bytes>=0),
+ evidence_digest hyperfide.digest NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,run_id,id),UNIQUE(organisation_id,remote_operation_id),
+ FOREIGN KEY(organisation_id,run_id,remote_operation_id) REFERENCES hyperfide.provider_remote_operations(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,sandbox_id,boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation),
+ FOREIGN KEY(organisation_id,run_id,index_artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id)
+);
+CREATE TABLE hyperfide.provider_process_archive_links (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,archive_id uuid NOT NULL,artifact_id uuid NOT NULL,artifact_digest hyperfide.digest NOT NULL,
+ receipt_id text NOT NULL,size_bytes bigint NOT NULL CHECK(size_bytes>=0),role text NOT NULL CHECK(role IN ('TOP_INDEX','SEGMENT')),ordinal integer NOT NULL CHECK(ordinal BETWEEN 0 AND 8192),
+ PRIMARY KEY(organisation_id,run_id,archive_id,role,ordinal),
+ FOREIGN KEY(organisation_id,run_id,archive_id) REFERENCES hyperfide.provider_process_archives(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id)
+);
+CREATE FUNCTION hyperfide.provider_archive_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Provider output archive custody is immutable' USING ERRCODE='23514'; END $$;
+DO $$ DECLARE table_name text; BEGIN
+ FOREACH table_name IN ARRAY ARRAY['provider_process_archives','provider_process_archive_links'] LOOP
+  EXECUTE format('CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation()',table_name);
+  EXECUTE format('CREATE TRIGGER archive_identity_immutable BEFORE UPDATE OR DELETE ON hyperfide.%I FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_archive_immutable()',table_name);
+ END LOOP;
+END $$;
+
+ALTER TABLE hyperfide.provisioning_intent_reservations ADD CONSTRAINT provider_physical_reservation_once UNIQUE(organisation_id,run_id,reservation_id);
+CREATE TRIGGER provider_observation_identity_immutable BEFORE UPDATE OR DELETE ON hyperfide.provider_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','id','intent_id','operation_id','payload_digest','observation','observed_at','evidence_digest');

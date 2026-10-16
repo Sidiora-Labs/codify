@@ -8,6 +8,7 @@ spec=importlib.util.spec_from_file_location("identity_fixture",ROOT/"tests/hyper
 identity=importlib.util.module_from_spec(spec);spec.loader.exec_module(identity)
 IDS=["provider.pools.describe","provider.pools.real-schema","provider.pools.configure","provider.pools.persisted-config","provider.pools.planning-no-authority","provider.pools.unknown-request","provider.pools.quota-no-adapter","provider.pools.quota-operator-denied","provider.pools.private-mode","provider.pools.private-symlink","provider.pools.unknown-config","provider.pools.duplicate-account","provider.pools.duplicate-pool","provider.pools.unconfigured-account","provider.pools.noncanonical-quantity","provider.pools.zero-deadline","provider.pools.planning-separated","provider.pools.primary-brand","provider.pools.runtime-readiness-empty","provider.pools.registry-isolated"]
 IDS+=["provider.pools.account-env-quota","provider.pools.observed-not-planning","provider.pools.quota-expiry","provider.pools.unknown-orphan-held","provider.pools.physical-execution-separated","provider.pools.release-pending-held","provider.pools.config-invalidates-observation"]
+IDS+=["provider.pools.operator-declaration","provider.pools.declaration-provenance-held","provider.pools.declaration-other-role","provider.pools.declaration-private-file","provider.pools.declaration-id-conflict","provider.pools.declaration-expired"]
 FAILED=[]
 def expect(condition,detail):
  if not condition:raise AssertionError(str(detail))
@@ -29,6 +30,7 @@ def main():
   f.deployment={"schema_version":1,"organisation_id":f.ids["organisation"],"revision":"component-fixture-only","accounts":[{"provider":"railway","account_key":"component-fixture-account","approved_limits":limits,"planning_limits":{"SANDBOX":"3000"}}],"pools":[{"id":f.provider_pool,"provider":"railway","account_key":"component-fixture-account","environment_key":"component-fixture-environment","region":"component-fixture-region","profile_id":None,"preparation_digest":f.preparation,"approved_limits":limits,"planning_limits":{"SANDBOX":"3000"},"create_policy":{"seed_reference":"component-fixture-seed","network":"ISOLATED","stdin_required":False}}],"maximum_operation_ms":10000}
   f.config_path=f.path/"pools.json";f.config_path.write_text(json.dumps(f.deployment));f.config_path.chmod(0o600)
   f.env["HYPERFIDE_POOL_CONFIG"]=str(f.config_path)
+  f.declaration_path=f.path/"capacity-declarations.json";f.env["HYPERFIDE_CAPACITY_ATTESTATIONS"]=str(f.declaration_path)
  def invoke(action,input=None,key="operator"):
   status,response=f.invoke(action,input or {},component="8.2",key=key)
   return status,response
@@ -100,7 +102,7 @@ let results={};try{
   def dimension(name):return next(d for d in result("provider.pools.capacity",{"pool_id":f.provider_pool})["dimensions"] if d["name"]==name)
   for name,value in [("SANDBOX","1000"),("PROVISIONING","50"),("CPU_MILLIS","2000000"),("MEMORY_BYTES","214748364800"),("DISK_BYTES","2147483648000")]:observation(name,value)
   check(IDS[20],lambda:expect(dimension("SANDBOX")["qualified"] is True,"fresh exact account/environment observations not recognised"))
-  check(IDS[21],lambda:expect(dimension("SANDBOX")["budgets"][0]["approved_limit"]=="100" and dimension("SANDBOX")["budgets"][0]["observed_limit"]=="1000","observed limits replaced approved operating budget"))
+  check(IDS[21],lambda:expect(dimension("SANDBOX")["budgets"][0]["approved_limit"]=="100" and dimension("SANDBOX")["budgets"][0]["capacity_limit"]=="1000" and dimension("SANDBOX")["budgets"][0]["observed_limit"] is None,"observed limits replaced approved operating budget"))
   def expired():
    f.sql("UPDATE hyperfide.provider_quota_observations SET expires_at=clock_timestamp()-interval '1 second' WHERE organisation_id=$1 AND dimension='SANDBOX'",[org])
    expect(dimension("SANDBOX")["qualified"] is False,"expired provider observations retained authority")
@@ -131,6 +133,43 @@ let results={};try{
    result("provider.pools.configure")
    expect(dimension("SANDBOX")["qualified"] is False,"prior configuration observations crossed changed scope")
   check(IDS[26],changed)
+  provenance=f.path/"operator-component-provenance.txt";provenance.write_bytes(b"Explicit component-fixture operator declaration; not provider API or live capacity evidence.")
+  aid=str(uuid.uuid4());adigest=sha(provenance.read_bytes())
+  f.sql("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,completed_at) VALUES($1,$2,$3,$4,$5,'COMPONENT_FIXTURE',$6,'COMPLETE',clock_timestamp())",[org,run,aid,adigest,str(provenance.stat().st_size),str(provenance)])
+  active=f.sql("SELECT configuration_digest FROM hyperfide.provider_pool_configurations WHERE organisation_id=$1 AND pool_id=$2 AND active",[org,f.provider_pool])[0]["configuration_digest"]
+  stamp=lambda seconds:time.strftime("%Y-%m-%dT%H:%M:%S.000Z",time.gmtime(time.time()+seconds))
+  declaration={"schema_version":1,"organisation_id":org,"attestations":[{"id":str(uuid.uuid4()),"pool_id":f.provider_pool,"configuration_digest":active,"scope_kind":kind,"scope_key":key,"dimension":"SANDBOX","limit":"55","declared_at":stamp(-1),"expires_at":stamp(3600),"provenance":{"run_id":run,"artifact_id":aid,"digest":adigest}} for kind,key in [("ACCOUNT","component-fixture-account"),("ENVIRONMENT","component-fixture-environment")]]}
+  def save_declaration():f.declaration_path.write_text(json.dumps(declaration));f.declaration_path.chmod(0o600)
+  save_declaration()
+  def declare():
+   answer=result("provider.pools.attest-capacity")
+   expect(answer["recorded"]==2 and answer["provider_observed"] is False and answer["free_inventory_granted"] is False,"operator declaration was promoted to provider/free-inventory authority")
+   value=dimension("SANDBOX")
+   expect(value["qualified"] is True and value["budgets"][0]["observed_limit"] is None and value["budgets"][0]["operator_declared_limit"]=="55" and value["budgets"][0]["capacity_limit"]=="55","capacity source was mislabeled or operating ledger not selected")
+  check(IDS[27],declare)
+  def held_provenance():
+   f.sql("UPDATE hyperfide.artifacts SET status='QUARANTINED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,aid])
+   try:
+    refused("provider.pools.attest-capacity",code="CAPACITY_PROVENANCE_UNRETAINED")
+    expect(dimension("SANDBOX")["qualified"] is False,"lost provenance continued to qualify declared capacity")
+   finally:f.sql("UPDATE hyperfide.artifacts SET status='COMPLETE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,aid])
+  check(IDS[28],held_provenance)
+  check(IDS[29],lambda:refused("provider.pools.attest-capacity",key="provisioner",code="AUTH_SCOPE_DENIED"))
+  def private_declaration():
+   f.declaration_path.chmod(0o644)
+   try:refused("provider.pools.attest-capacity",code="CAPACITY_DECLARATION_INVALID")
+   finally:f.declaration_path.chmod(0o600)
+  check(IDS[30],private_declaration)
+  def conflict():
+   declaration["attestations"][0]["limit"]="56";save_declaration()
+   try:refused("provider.pools.attest-capacity",code="CAPACITY_DECLARATION_CONFLICT")
+   finally:declaration["attestations"][0]["limit"]="55";save_declaration()
+  check(IDS[31],conflict)
+  def expired_declaration():
+   declaration["attestations"][0]["expires_at"]=stamp(-2);save_declaration()
+   try:refused("provider.pools.attest-capacity",code="CAPACITY_DECLARATION_STALE")
+   finally:declaration["attestations"][0]["expires_at"]=stamp(3600);save_declaration()
+  check(IDS[32],expired_declaration)
   f.close();f=None;cleanup=True
  finally:
   if f is not None:f.close()

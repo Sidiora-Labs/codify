@@ -15,7 +15,8 @@
     "provider.pools.configure",
     "provider.pools.list",
     "provider.pools.capacity",
-    "provider.pools.observe"
+    "provider.pools.observe",
+    "provider.pools.attest-capacity"
   ],
   "requires": [
     "4.2",
