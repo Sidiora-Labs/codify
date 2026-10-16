@@ -190,7 +190,8 @@ function taskDefinitions(parsed:KvxDocument):{section:KvxSection;key:string;feat
   return {section,key,feature_key,declared_wave,wave:Math.max(1,wave),package_key};
  });
 }
-async function primary(client:pg.PoolClient):Promise<void>{
+export interface SpecTransaction {query<Row extends pg.QueryResultRow = pg.QueryResultRow>(text:string,values?:unknown[]):Promise<pg.QueryResult<Row>>}
+async function primary(client:SpecTransaction):Promise<void>{
  const result=await client.query<{replica:boolean}>('SELECT pg_is_in_recovery() AS replica');
  if(result.rows[0]?.replica)fail('PRIMARY_REQUIRED','Specification authority requires the primary database');
 }
@@ -199,7 +200,7 @@ function storageFailure(error:unknown):never{
  fail('STORAGE_UNAVAILABLE','PostgreSQL rejected specification operation');
 }
 export interface PinnedRun {id:string;spec_revision_id:string;spec_generation:string;state_version:string;state:string;source_content:string;source_digest:string;document:StoredIntent}
-export async function loadPinnedRun(client:pg.Pool|pg.PoolClient,scope:SpecScope):Promise<PinnedRun>{
+export async function loadPinnedRun(client:SpecTransaction,scope:SpecScope):Promise<PinnedRun>{
  const rows=await client.query<PinnedRun>(
  'SELECT r.id,r.spec_revision_id,r.spec_generation::text,r.state_version::text,r.state,s.source_content,s.source_digest,s.document FROM hyperfide.runs r JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.project_id=$2 AND r.id=$3',
  [scope.organisation_id,scope.project_id,scope.run_id]);
@@ -211,7 +212,7 @@ function summary(run:PinnedRun):unknown{
  spec_generation:run.spec_generation,state_version:run.state_version,state:run.state,validation_status:run.state==='PENDING_VALIDATION'?'PENDING':'NOT_ASSERTED',
  counts:run.document.parsed.counts};
 }
-export async function importRunTransaction(client:pg.PoolClient,scope:SpecScope,raw:unknown):Promise<unknown>{
+export async function importRunTransaction(client:SpecTransaction,scope:SpecScope,raw:unknown):Promise<unknown>{
  const expected=digest(await fs.readFile(new URL('../../migrations/0002-spec.sql',import.meta.url)));
  const readiness=await client.query<{checksum:string;name:string}>('SELECT checksum,name FROM hyperfide.schema_migrations WHERE version=2');
  if(readiness.rows.length!==1||readiness.rows[0]!.name!=='0002-spec'||readiness.rows[0]!.checksum!==expected)
@@ -287,7 +288,7 @@ function current(run:PinnedRun,input:Record<string,unknown>):void{
  if(input.revision_digest!==run.document.revision_digest||input.spec_generation!==run.spec_generation||input.state_version!==run.state_version)
   fail('STALE_PROJECTION','Projection no longer identifies current authoritative state');
 }
-export async function exportProjection(pool:pg.Pool,scope:SpecScope,input:unknown):Promise<unknown>{
+export async function exportProjection(pool:SpecTransaction,scope:SpecScope,input:unknown):Promise<unknown>{
  const request=scoped(input,scope,['run_id','revision_digest','cursor','max_bytes']);
  if(typeof request.revision_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(request.revision_digest)||
  !Number.isSafeInteger(request.max_bytes)||(request.max_bytes as number)<1||(request.max_bytes as number)>196608)
