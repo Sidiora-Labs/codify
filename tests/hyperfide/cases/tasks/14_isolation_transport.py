@@ -73,7 +73,7 @@ try{
  }
  await check('isolation.transport.issuer-rejected',async()=>{const value=await issueIsolationPermit(claims(),{key_id:'untrusted-operator',private_key_file:privateFile});const result=await server.client.isolate(value,new AbortController().signal);expect(result.outcome==='REJECTED');});
  await check('isolation.transport.signature-rejected',async()=>{const value=JSON.parse(permit);value.signature_b64=(value.signature_b64[0]==='A'?'B':'A')+value.signature_b64.slice(1);expect((await server.client.isolate(canonical(value),new AbortController().signal)).outcome==='REJECTED');});
- await check('isolation.transport.purpose-rejected',async()=>expect((await server.client.isolate(rawSigned(claims({purpose:'ACTIVATE_AUTHORITY'})),new AbortController().signal)).outcome==='REJECTED'));
+ await check('isolation.transport.purpose-rejected',async()=>{const before=effects;const result=await raw(server,{body:Buffer.from(JSON.stringify({schema_version:1,permit_envelope:rawSigned(claims({purpose:'ACTIVATE_AUTHORITY'}))}))});expect(result.body?.outcome==='REJECTED'&&effects===before);});
  await check('isolation.transport.expiry-rejected',async()=>expect((await server.client.isolate(rawSigned(claims({issued_at:new Date(Date.now()-2000).toISOString(),expires_at:new Date(Date.now()-1000).toISOString()})),new AbortController().signal)).outcome==='REJECTED'));
  await check('isolation.transport.nonce-shape-rejected',async()=>expect((await server.client.isolate(rawSigned(claims({nonce:'not-a-nonce'})),new AbortController().signal)).outcome==='REJECTED'));
  await check('isolation.transport.no-normal-auth-route',async()=>{const result=await raw(server,{route:'/v1/invoke'});expect(result.body?.outcome==='REJECTED'&&result.body?.code==='ISOLATION_ROUTE_INVALID');});
@@ -104,8 +104,25 @@ try{
  });
  await check('isolation.transport.pre-send-abort-rejected',async()=>{const cancel=new AbortController();cancel.abort();expect((await server.client.isolate(permit,cancel.signal)).outcome==='REJECTED');});
  await check('isolation.transport.deadline-unknown',async()=>{
-  const slow=await start({deadlineMs:100,dispatch:async()=>new Promise(()=>{})});
-  try{expect((await slow.client.isolate(permit,new AbortController().signal)).outcome==='UNKNOWN');}finally{await slow.instance.close();}
+  let finish;const slow=await start({deadlineMs:100,dispatch:async()=>new Promise(resolve=>{finish=()=>resolve(receipt());})});
+  try{expect((await slow.client.isolate(permit,new AbortController().signal)).outcome==='UNKNOWN');}finally{finish();await new Promise(resolve=>setImmediate(resolve));await slow.instance.close();}
+ });
+ await check('isolation.transport.noncooperative-dispatch-retains-admission',async()=>{
+  let calls=0,finish;const slow=await start({deadlineMs:100,maxConcurrent:1,dispatch:async()=>{calls++;return await new Promise(resolve=>{finish=()=>resolve(receipt());});}});
+  try{
+   expect((await slow.client.isolate(permit,new AbortController().signal)).outcome==='UNKNOWN'&&calls===1);
+   const next=await issueIsolationPermit(claims({nonce:uid(45)}),{key_id:'fixture-operator',private_key_file:privateFile});
+   const denied=await slow.client.isolate(next,new AbortController().signal);
+   expect(denied.outcome==='REJECTED'&&denied.code==='ISOLATION_ADMISSION_BUSY'&&calls===1);
+  }finally{finish();await new Promise(resolve=>setImmediate(resolve));await slow.instance.close();}
+ });
+ await check('isolation.transport.shutdown-reports-live-dispatch',async()=>{
+  let finish;const slow=await start({deadlineMs:100,maxConcurrent:1,dispatch:async()=>new Promise(resolve=>{finish=()=>resolve(receipt());})});
+  try{
+   expect((await slow.client.isolate(permit,new AbortController().signal)).outcome==='UNKNOWN');
+   let incomplete=false;try{await slow.instance.close();}catch(error){incomplete=error?.code==='ISOLATION_SHUTDOWN_INCOMPLETE';}
+   expect(incomplete&&await absent(slow.port));
+  }finally{finish();await new Promise(resolve=>setImmediate(resolve));await slow.instance.close();}
  });
  await check('isolation.transport.private-key-permissions',async()=>{
   const unsafe=base+'/unsafe-key.pem';await fs.copyFile(key,unsafe);await fs.chmod(unsafe,0o644);let refused=false;

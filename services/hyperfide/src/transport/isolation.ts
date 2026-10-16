@@ -101,7 +101,7 @@ export async function startIsolationHttpTransport(options:IsolationHttpTransport
  const [cert,key]=await Promise.all([tlsFile(options.certificate,false),tlsFile(options.privateKey,true)]);
  if(options.signal.aborted){key.fill(0);fail('ISOLATION_SHUTTING_DOWN');}
  let accepting=true,active=0;
- const controllers=new Set<AbortController>(),requests=new Set<Promise<void>>();
+ const controllers=new Set<AbortController>(),requests=new Set<Promise<void>>(),dispatches=new Set<Promise<IsolationFenceReceipt>>();
  const server=https.createServer({cert,key,minVersion:'TLSv1.3',handshakeTimeout:5000,maxHeaderSize:8192,headersTimeout:5000,requestTimeout:5000,keepAliveTimeout:1000,rejectNonStandardBodyWrites:true},(req,res)=>{
   const pending=handle(req,res).finally(()=>requests.delete(pending));requests.add(pending);
  });
@@ -111,7 +111,7 @@ export async function startIsolationHttpTransport(options:IsolationHttpTransport
  async function handle(req:IncomingMessage,res:ServerResponse):Promise<void>{
   if(!accepting){respond(res,503,'REJECTED',null,'ISOLATION_SHUTTING_DOWN');req.resume();return;}
   if(active>=max){respond(res,429,'REJECTED',null,'ISOLATION_ADMISSION_BUSY');req.resume();return;}
-  active++;let dispatched=false,permitDigest:string|null=null;
+  active++;let dispatched=false,ownsDispatch=false,permitDigest:string|null=null;
   const controller=new AbortController();controllers.add(controller);
   const abort=():void=>{controller.abort();req.destroy();};
   const disconnected=():void=>{if(!res.writableEnded)controller.abort();};
@@ -137,6 +137,10 @@ export async function startIsolationHttpTransport(options:IsolationHttpTransport
    if(controller.signal.aborted)fail('ISOLATION_OUTCOME_UNKNOWN');
    dispatched=true;
    const operation=Promise.resolve().then(()=>{if(controller.signal.aborted)fail('ISOLATION_OUTCOME_UNKNOWN');return options.dispatch(permit,controller.signal);});
+   // The HTTP deadline cannot release a still-running external effect's admission.
+   ownsDispatch=true;dispatches.add(operation);
+   const settled=():void=>{dispatches.delete(operation);controllers.delete(controller);active--;};
+   void operation.then(settled,settled);
    const receipt=parseIsolationFenceReceipt(await abortable(operation,controller.signal));
    assertVerifiedIsolationPermit(permit);
    if(receipt.deployment_id!==permit.deployment_id||receipt.operation_id!==permit.operation_id||receipt.source_epoch!==permit.source_epoch)fail('ISOLATION_RECEIPT_BINDING');
@@ -146,7 +150,7 @@ export async function startIsolationHttpTransport(options:IsolationHttpTransport
    const unknown=dispatched||controller.signal.aborted;
    respond(res,unknown?504:errorCode(error).includes('TOO_LARGE')?413:400,unknown?'UNKNOWN':'REJECTED',permitDigest,unknown?'ISOLATION_OUTCOME_UNKNOWN':errorCode(error));
   }finally{
-   clearTimeout(timer);controllers.delete(controller);active--;
+   clearTimeout(timer);if(!ownsDispatch){controllers.delete(controller);active--;}
    options.signal.removeEventListener('abort',abort);req.removeListener('aborted',abort);res.removeListener('close',disconnected);
   }
  }
@@ -160,10 +164,16 @@ export async function startIsolationHttpTransport(options:IsolationHttpTransport
   accepting=false;for(const controller of controllers)controller.abort();
   const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
   server.closeIdleConnections();
-  const timeout=setTimeout(()=>server.closeAllConnections(),Math.min(deadline,5000));
-  try{await Promise.allSettled([...requests]);await closed;}finally{clearTimeout(timeout);options.signal.removeEventListener('abort',onAbort);}
- })();
- const onAbort=():void=>{void close();};
+  const bound=Math.min(deadline,5000);
+  const timeout=setTimeout(()=>server.closeAllConnections(),bound);
+  let dispatchTimeout:ReturnType<typeof setTimeout>|undefined;
+  try{
+   await Promise.allSettled([...requests]);await closed;
+   await Promise.race([Promise.allSettled([...dispatches]),new Promise<void>(resolve=>{dispatchTimeout=setTimeout(resolve,bound);})]);
+   if(dispatches.size)fail('ISOLATION_SHUTDOWN_INCOMPLETE');
+  }finally{clearTimeout(timeout);if(dispatchTimeout)clearTimeout(dispatchTimeout);options.signal.removeEventListener('abort',onAbort);}
+ })().catch(error=>{closing=undefined;throw error;});
+ const onAbort=():void=>{void close().catch(()=>{});};
  options.signal.addEventListener('abort',onAbort,{once:true});
  if(options.signal.aborted){await close();fail('ISOLATION_SHUTTING_DOWN');}
  return Object.freeze({address:origin,close});
