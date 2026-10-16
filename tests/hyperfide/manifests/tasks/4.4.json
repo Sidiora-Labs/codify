@@ -9,7 +9,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-4.4-physical-durability-v1",
+  "campaign_id": "hyperfide-task-4.4-external-journal-and-semantic-fence-v2",
   "case_ids": [
     "V-009",
     "V-053"
@@ -58,7 +58,50 @@
     "durability.sync_policy_required",
     "durability.sync_policy_missing",
     "durability.sync_policy_ready",
-    "durability.sync_policy_precommit"
+    "durability.sync_policy_precommit",
+    "durability.external_current",
+    "durability.journal_persisted_uuid",
+    "durability.journal_pending",
+    "durability.journal_absence_refuses",
+    "durability.journal_other_operation",
+    "durability.journal_unconfirmed",
+    "durability.restore_old_startup_refused",
+    "durability.restore_external_mismatch",
+    "durability.restore_ordinary_refused",
+    "durability.restore_wrong_lineage",
+    "durability.restore_external_head",
+    "durability.restore_lineages",
+    "durability.restore_replay",
+    "durability.journal_concurrent",
+    "durability.journal_missing_head",
+    "durability.journal_unknown_ack",
+    "durability.journal_unknown_pending",
+    "durability.journal_unknown_committed",
+    "durability.journal_unknown_reconcile",
+    "durability.journal_unknown_no_replay",
+    "durability.journal_missing_database_head",
+    "durability.restore_writer_binding",
+    "durability.restore_receipt_digest",
+    "durability.restore_external_immutable",
+    "durability.restore_database_immutable",
+    "durability.journal_replay_proof",
+    "durability.journal_unknown_fork",
+    "durability.journal_unchanged_head",
+    "durability.semantic_retry",
+    "durability.semantic_fresh",
+    "durability.semantic_wait",
+    "durability.semantic_idempotent",
+    "durability.semantic_generation",
+    "durability.semantic_upgrade",
+    "durability.semantic_missing",
+    "durability.semantic_concurrent_writes",
+    "durability.semantic_concurrent_write_read",
+    "durability.semantic_concurrent_read_write",
+    "durability.semantic_business_version",
+    "durability.semantic_business_guard",
+    "durability.semantic_monotonic",
+    "durability.semantic_single_step",
+    "durability.semantic_spec_monotonic"
   ],
   "inputs": [
     {
@@ -102,9 +145,19 @@
       "size": 4611
     },
     {
+      "path": "services/hyperfide/dist/storage/authority_journal.js",
+      "sha256": "fc3ded1c722173ae999ca59b558dbcb133502e4365b20ebb97cba059f3ab01a5",
+      "size": 23960
+    },
+    {
+      "path": "services/hyperfide/dist/storage/dispositions.js",
+      "sha256": "3af6631b377b74dd7f82d00c0f4e1357d60eedf31825bb49bccfca8d1fd15d34",
+      "size": 2929
+    },
+    {
       "path": "services/hyperfide/dist/storage/durability.js",
-      "sha256": "381b9ad7258d4e73fef8a05f1f4627ef92de22f30877a7a6083690af517d89de",
-      "size": 22253
+      "sha256": "4df6cec256cba5f6804c19cf089d7e21d171c137e1288dd861d6766cc74b709c",
+      "size": 31282
     },
     {
       "path": "services/hyperfide/dist/storage/runtime.js",
@@ -128,8 +181,8 @@
     },
     {
       "path": "services/hyperfide/migrations/0004-durability.sql",
-      "sha256": "459ac363f2eadf911352e438914b85025211c452d67be9620fa01d79147a564a",
-      "size": 2712
+      "sha256": "78ae25a9a07f14e67ab05f3ddc5f99a60b85e07673fa67c0bddc4b495e902908",
+      "size": 4202
     },
     {
       "path": "services/hyperfide/package-lock.json",
@@ -167,9 +220,19 @@
       "size": 5089
     },
     {
+      "path": "services/hyperfide/src/storage/authority_journal.ts",
+      "sha256": "d23b129d4bf8ec06487f7213b773bac7e087e69231ded721a93b7617ffb3ffc9",
+      "size": 22380
+    },
+    {
+      "path": "services/hyperfide/src/storage/dispositions.ts",
+      "sha256": "6d636efb2558b7c4306abf3764c738c7995dc37c4d01fc47623e2972c4e79b19",
+      "size": 3277
+    },
+    {
       "path": "services/hyperfide/src/storage/durability.ts",
-      "sha256": "287c6fe684efa549315417ddde1b9fe97b19b41cb964cf6fed28ac7df2c03d0c",
-      "size": 20099
+      "sha256": "dd4ef3a972cb74c6755e8c901667ee269da8cc2710285d43d6157f9b80430898",
+      "size": 29639
     },
     {
       "path": "services/hyperfide/src/storage/runtime.ts",
@@ -198,13 +261,13 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_4.py",
-      "sha256": "d9dd145809e064cd09b130419be8149c270b0216245e8020d52d01ccef072273",
-      "size": 21458
+      "sha256": "c2db2594b7825b25b8ce4499f00b7c56ff533b7b000d3b72489909714cb2ce8c",
+      "size": 41677
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
-      "sha256": "7f97dbde67eb6e0824543e8a382c745c4ef352411d7ce54d0a962c6814b75d93",
-      "size": 27891
+      "sha256": "ee8df7d7218bcfbe0229a96bd2c039fe74516bb51a7093fc85e3f1724ef019f9",
+      "size": 28641
     },
     {
       "path": "tests/hyperfide/manifest.schema.json",
@@ -213,13 +276,13 @@
     },
     {
       "path": "tests/hyperfide/qualify.py",
-      "sha256": "0be8e267c9d80cfa8b2b3526e937c7dac1da7040f3c4d13871b5625c2677ff41",
-      "size": 36837
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
     },
     {
       "path": "tests/hyperfide/registrations/4.4.json",
-      "sha256": "4c7cd0897d41b9bf85b67b419734d22664aae0e7f78ea1c2b93d7c9f36960169",
-      "size": 4072
+      "sha256": "53639846f547854b151de1127310c6ec997512a79c4bf079bd4016f1795c967c",
+      "size": 6031
     }
   ],
   "policy": {
@@ -229,7 +292,9 @@
     "execution": "remote-only",
     "frontier_calls": false,
     "full_case_status": "INCOMPLETE",
-    "postgresql_fixture": "disposable-task-database"
+    "postgresql_fixture": "owned-physical-primary-standby-restore",
+    "external_authority": "fsynced-private-journal-outside-PG-restores;whole-host-recovery-not-qualified",
+    "pending_recovery": "positive-exact-operation-only;absence-never-clears-custody"
   },
   "registered_variant": "task:4.4",
   "resources": [
