@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "7.2",
+  "task": "7.2",
+  "roles": [
+    "control"
+  ],
+  "module": "graph/ingestion.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "graph.ingest.describe",
+    "graph.ingest.create",
+    "graph.ingest.chunk",
+    "graph.ingest.seal",
+    "graph.ingest.resolve",
+    "graph.ingest.inspect"
+  ],
+  "requires": [
+    "4.2",
+    "14.1"
+  ]
+}
