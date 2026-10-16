@@ -368,7 +368,7 @@ export async function inspectExecutionReceipt(db:Pick<pg.PoolClient,'query'>,
  row.receipt.environment_digest!==row.environment_digest)
   fail('QUALIFICATION_RECEIPT_INVALID','Actual server-generated execution receipt is missing or does not bind its job');
  return {job_id:row.id,task_id:row.task_id,source_attempt_id:row.source_attempt_id,source_attempt_generation:String(row.source_generation),custody_id:row.custody_id,custody_generation:String(row.custody_generation),
-  lease_generation:generation,current_job_generation:String(row.lease_generation)===generation,
+  lease_generation:generation,current_job_generation:String(row.lease_generation),receipt_is_current:String(row.lease_generation)===generation,
   state:row.state,outcome:row.outcome,source_origin:row.receipt.source_origin,receipt_digest:row.receipt_digest,evidence_id:row.evidence_id,receipt_artifact_id:row.receipt_artifact_id,receipt:row.receipt,
   qualification:'NOT_GRANTED',preparation_readiness:'NOT_EVALUATED'};
 }
