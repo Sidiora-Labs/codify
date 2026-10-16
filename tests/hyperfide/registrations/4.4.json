@@ -125,7 +125,8 @@
   "required_artifacts": [
     "storage44/observations.json",
     "storage44/cluster-commands.json",
-    "storage44/absence.json"
+    "storage44/absence.json",
+    "storage44/semantic-race.json"
   ],
   "required_env": [],
   "resources": [
