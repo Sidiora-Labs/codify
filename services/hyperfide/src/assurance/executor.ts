@@ -1,7 +1,8 @@
 import {randomUUID} from 'node:crypto';
+import {inspectEffectiveResultInputs,registerQualificationInputReader,planResultPreparation,inspectResultPreparation} from './preparation.js';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {artifact,canonical,currentCustody,custodyLock,decimal,digest,fail,fields,hash,scope,transaction,uuid,invocation,roles,executionGate,assuranceBarrier,loadPolicy} from './submission.js';
+import {artifact,canonical,currentCustody,custodyLock,decimal,digest,fail,fields,hash,scope,transaction,uuid,invocation,roles,executionGate,assuranceBarrier,loadPolicy,retainArtifactBytes as uploadBytes} from './submission.js';
 import type {Data,PrimaryClient} from './submission.js';
 
 const MAX_OUTPUT=32*1024*1024;
@@ -39,10 +40,10 @@ async function verifyEnvironment(ctx:ComponentContext,tx:unknown,job:Data,owner:
  const result=await reader!.verify(tx,invocation(ctx),{job_id:job.id,reservation_id:owner.reservation_id,environment_digest:owner.environment_digest});
  if(!result||result.sandbox_id!==owner.sandbox_id||result.slot_id!==bound.slot_id||String(result.boot_generation)!==String(bound.sandbox_boot_generation)||result.boot_id!==principal.boot_id||!result.preparation_digest||!result.readiness_digest||!result.provider_observation_id||!result.runner_credential_id||!result.boot_id||!result.slot_id)
  fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Current independent environment observation is incomplete or mismatched');
- const expected=(await (tx as Data).query("SELECT COALESCE(i.manifest,s.manifest) AS manifest FROM hyperfide.qualification_jobs j JOIN hyperfide.assurance_submissions s ON s.organisation_id=j.organisation_id AND s.run_id=j.run_id AND s.custody_id=j.custody_id LEFT JOIN hyperfide.requalification_operations q ON q.organisation_id=j.organisation_id AND q.run_id=j.run_id AND q.qualification_job_id=j.id LEFT JOIN hyperfide.assurance_requalification_inputs i ON i.organisation_id=q.organisation_id AND i.run_id=q.run_id AND i.operation_id=q.id WHERE j.organisation_id=$1 AND j.run_id=$2 AND j.id=$3",[job.organisation_id,job.run_id,job.id])).rows[0]?.manifest;
+ const expected=await inspectEffectiveResultInputs(tx as PrimaryClient,{organisation_id:job.organisation_id,run_id:job.run_id},{job_id:job.id});
  const validation=result.input_validation;
  if(!expected||!validation||validation.status!=='VERIFIED'||validation.job_id!==job.id||
-  validation.input_packet_digest!==expected.input_packet_digest||!/^sha256:[0-9a-f]{64}$/.test(validation.receipt_digest??'')||
+  validation.namespace!=='QUALIFICATION'||String(validation.lease_generation)!==String(job.lease_generation)||validation.effective_result_input_receipt_digest!==expected.receipt_digest||validation.input_packet_digest!==expected.input_packet_digest||!/^sha256:[0-9a-f]{64}$/.test(validation.receipt_digest??'')||
   ['dependency','toolchain','configuration','graph','contract'].some(key=>validation.input_manifest?.[key]!==expected.input_manifest?.[key]))
   fail('QUALIFICATION_ENVIRONMENT_UNAVAILABLE','Measured preparation and runtime inputs have not been independently validated against the immutable job packet');
  const registry=dependencies.require('12.1','runner.registry.v1',(value:unknown):boolean=>
@@ -80,6 +81,9 @@ async function assignJob(ctx:ComponentContext,raw:unknown):Promise<Data>{
   }
   if(String(job.state_version)!==version||!['PENDING','RUNNING'].includes(job.state)||(job.state==='RUNNING'&&job.lease_alive))
    fail('QUALIFICATION_CONFLICT','Only pending or expired verification jobs can receive an independent assignment');
+  const prepared=await inspectEffectiveResultInputs(db,{organisation_id:s[0],run_id:s[1]},{job_id:id});
+  if(prepared.runner_session_id!==v.verifier_id||prepared.environment_digest!==v.environment_digest)
+   fail('QUALIFICATION_ENVIRONMENT_INPUT_CONFLICT','Assignment must name the actual prepared TEST runner and server-derived effective environment receipt');
   const source=await db.query('SELECT sandbox_id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...s,job.custody.source_attempt_id]);
   if(source.rows[0]?.sandbox_id===v.sandbox_id)fail('QUALIFICATION_NOT_INDEPENDENT','Verifier assignment must use a separate coding sandbox');
   const session=await db.query("SELECT a.id FROM hyperfide.agent_sessions a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation JOIN hyperfide.sandboxes b ON b.organisation_id=w.organisation_id AND b.id=w.sandbox_id AND b.boot_generation=w.boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.id=$3 AND a.role='VERIFIER' AND a.state IN ('REGISTERED','RUNNING') AND a.sandbox_id=$4 AND a.slot_id=$5 AND a.sandbox_boot_generation=$6 AND w.capacity_kind='TEST' AND w.state IN ('READY','ALLOCATED') AND b.observed_state='RUNNING' FOR SHARE OF a,w,b",
@@ -131,21 +135,7 @@ export async function claimJob(ctx:ComponentContext,raw:unknown):Promise<Data>{
   return {...lease.rows[0],...owner,authority:'VERIFICATION_JOB_ONLY'};
  });
 }
-async function uploadBytes(ctx:ComponentContext,s:[string,string],bytes:Buffer):Promise<Data>{
- const common={organisation_id:s[0],run_id:s[1],retention_class:'RUN',retention_until:null,retention_hold:false};
- const chunks:Data[]=[];
- for(let offset=0;offset<bytes.length||offset===0;offset+=256*1024){
-  const part=bytes.subarray(offset,Math.min(offset+256*1024,bytes.length));
-  const result=await artifact(ctx,'artifact.object.put',{...common,digest:bytesHash(part),size_bytes:String(part.length),data_base64:part.toString('base64')});
-  chunks.push({sequence:chunks.length,artifact_id:result.artifact.artifact_id,digest:result.artifact.digest,
-   size_bytes:String(part.length),offset_bytes:String(offset)});
-  if(bytes.length===0)break;
- }
- if(chunks.length===1)return {artifact_id:chunks[0]!.artifact_id,digest:chunks[0]!.digest,size_bytes:String(bytes.length),storage_kind:'OBJECT'};
- const result=await artifact(ctx,'artifact.manifest.commit',{...common,expected_chunks:chunks.length,total_size_bytes:String(bytes.length),
- content_digest:bytesHash(bytes),complete:true,truncated:false,missing_ranges:[],chunks});
- return {artifact_id:result.artifact.artifact_id,digest:result.artifact.digest,content_digest:bytesHash(bytes),size_bytes:String(bytes.length),manifest_size_bytes:result.artifact.size_bytes,storage_kind:'CHUNK_MANIFEST'};
-}
+
 function bytesHash(bytes:Buffer):string{return 'sha256:'+requireHash(bytes);}
 import {createHash} from 'node:crypto';
 function requireHash(bytes:Buffer):string{return createHash('sha256').update(bytes).digest('hex');}
@@ -291,6 +281,7 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
   if(!operations.rows[0])currentCustody(job.custody,String(job.custody_generation));
   else if(!['ACTIVE','RELEASED'].includes(job.custody.authority))fail('QUALIFICATION_STALE_CUSTODY','Requalification disposition revoked');
   const submitted=await client.query('SELECT manifest,policy FROM hyperfide.assurance_submissions WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,job.custody_id]);
+  const preparedInputs=await inspectEffectiveResultInputs(client,{organisation_id:s[0],run_id:s[1]},{job_id:id});
   const applicability=await client.query('SELECT input_manifest FROM hyperfide.assurance_applicability WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3',[...s,job.custody_id]);
   if(!submitted.rows[0])fail('QUALIFICATION_MANIFEST_INVALID','Job has no immutable admitted submission');
   const currentPolicy=await loadPolicy(ctx,job.custody.task,client);
@@ -298,10 +289,10 @@ async function execute(ctx:ComponentContext,raw:unknown):Promise<Data>{
    const requalified=await client.query('SELECT manifest,policy,input_manifest FROM hyperfide.assurance_requalification_inputs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[...s,operations.rows[0].id]);
    if(!requalified.rows[0])fail('QUALIFICATION_MANIFEST_INVALID','Requalification immutable inputs missing');
    if(hash(currentPolicy)!==hash(requalified.rows[0].policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed before execution');
-   return {job,snapshot:{manifest:requalified.rows[0].manifest,policy:requalified.rows[0].policy,inputs:requalified.rows[0].input_manifest},requalification:operations.rows[0].id};
+   return {job,snapshot:{manifest:requalified.rows[0].manifest,policy:requalified.rows[0].policy,inputs:preparedInputs.input_manifest},requalification:operations.rows[0].id};
   }
   if(hash(currentPolicy)!==hash(submitted.rows[0].policy))fail('QUALIFICATION_POLICY_STALE','Accepted proof registry changed before execution');
-  return {job,snapshot:{...submitted.rows[0],inputs:applicability.rows[0]?.input_manifest},requalification:operations.rows[0]?.id};
+  return {job,snapshot:{...submitted.rows[0],inputs:preparedInputs.input_manifest},requalification:operations.rows[0]?.id};
  });
  if(admission.replayed)return {...admission.replayed,replayed:true,task_qualified:false};
  const receipt=await runRegisteredChecks(ctx,admission.job!,admission.snapshot!),receiptDigest=hash(receipt);
@@ -378,8 +369,19 @@ export async function inspectExecutionReceipt(db:PrimaryClient,
   state:row.state,outcome:row.outcome,source_origin:row.receipt.source_origin,receipt_digest:row.receipt_digest,evidence_id:row.evidence_id,receipt_artifact_id:row.receipt_artifact_id,receipt:row.receipt,
   qualification:'NOT_GRANTED',preparation_readiness:'NOT_EVALUATED'};
 }
+/** Read-only access to actual server-owned verifier execution observations.
+ * This does not grant task qualification or authenticate privileged migration jobs. */
+export async function inspectExecution(ctx:ComponentContext,raw:unknown):Promise<Data>{
+ roles(ctx,['OPERATOR','COORDINATOR','VERIFIER','INTEGRATOR']);
+ const v=fields(raw,['organisation_id','run_id','job_id','lease_generation']),s=scope(ctx,v);
+ return transaction(ctx,db=>inspectExecutionReceipt(db,{organisation_id:s[0],run_id:s[1]},uuid(v.job_id),decimal(v.lease_generation)),false,'READ');
+}
 export function createComponent(ctx:ComponentContext):Component & {capabilities:Record<string,unknown>}{
- return {apiVersion:1,capabilities:{'assurance.execution.v1':Object.freeze({inspectExecutionReceipt})},actions:{
+ const unregister=ctx.dependencies?registerQualificationInputReader(ctx):undefined;
+ return {apiVersion:1,close:async()=>{unregister?.();},capabilities:{'assurance.execution.v1':Object.freeze({inspectExecutionReceipt})},actions:{
+  'qualification.execution.inspect':(raw,requestContext)=>inspectExecution(requestContext,raw),
+  'qualification.preparation.plan':(raw,requestContext)=>planResultPreparation(requestContext,raw),
+  'qualification.preparation.inspect':(raw,requestContext)=>inspectResultPreparation(requestContext,raw),
   'qualification.job.assign':(raw,requestContext)=>assignJob(requestContext,raw),
   'qualification.job.claim':(raw,requestContext)=>claimJob(requestContext,raw),
   'qualification.execute':(raw,requestContext)=>execute(requestContext,raw),

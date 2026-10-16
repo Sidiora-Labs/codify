@@ -12,7 +12,10 @@
     "qualification.job.assign",
     "qualification.job.claim",
     "qualification.execute",
-    "qualification.history.import"
+    "qualification.history.import",
+    "qualification.preparation.plan",
+    "qualification.preparation.inspect",
+    "qualification.execution.inspect"
   ],
   "requires": [
     "16.1",

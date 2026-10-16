@@ -24,7 +24,16 @@
     "assurance.16.2.preparation.exact-retained-bytes",
     "assurance.16.2.preparation.missing-newline",
     "assurance.16.2.preparation.field-relabel",
-    "assurance.16.2.preparation.malformed-utf8"
+    "assurance.16.2.preparation.malformed-utf8",
+    "assurance.16.2.auth.absent.qualification.preparation.plan",
+    "assurance.16.2.auth.forged.qualification.preparation.plan",
+    "assurance.16.2.auth.absent.qualification.preparation.inspect",
+    "assurance.16.2.auth.forged.qualification.preparation.inspect",
+    "assurance.16.2.auth.absent.qualification.execution.inspect",
+    "assurance.16.2.auth.forged.qualification.execution.inspect",
+    "assurance.16.2.primary.preparation-context",
+    "assurance.16.2.primary.preparation-effective-inputs",
+    "assurance.16.2.primary.preparation-intent"
   ],
   "argv": [
     "python3",
