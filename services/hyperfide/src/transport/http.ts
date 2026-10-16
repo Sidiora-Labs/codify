@@ -35,3 +35,62 @@ export async function startHttpTransport(o:HttpTransportOptions):Promise<HttpTra
  let cleanup:Promise<void>|undefined;const close=():Promise<void>=>cleanup??=(async()=>{accepting=false;const closed=new Promise<void>(resolve=>server.close(()=>resolve()));for(const c of controllers)c.abort();server.closeIdleConnections();const timer=setTimeout(()=>server.closeAllConnections(),Math.min(deadline,5000));try{await Promise.allSettled([...requests]);await closed;}finally{clearTimeout(timer);o.signal.removeEventListener('abort',onAbort);}})();const onAbort=():void=>{void close();};o.signal.addEventListener('abort',onAbort,{once:true});
  return Object.freeze({address:origin,close});
 }
+
+
+export interface ServiceClientConfiguration {
+  readonly origin:string;readonly caFile:string;readonly keyFile:string;readonly credentialId:string;readonly runId:string;
+  readonly routes:Readonly<Record<string,{readonly roles:readonly string[];readonly components:readonly string[];readonly actions:readonly string[]}>>;
+  readonly timeoutMs?:number;readonly maxConcurrent?:number;
+}
+export interface ServiceCommand {readonly operation:import('./protocol.js').Operation;readonly payloadBytes:Buffer}
+export type ServiceResponse={transport:'RESPONSE';status:number;body:unknown;operation_id:string}|{transport:'UNKNOWN';operation_id:string;reason:string};
+export interface ServiceClient {invoke(invocation:InvocationContext,command:ServiceCommand):Promise<ServiceResponse>}
+export async function createServiceClient(config:ServiceClientConfiguration,gateway:import('../identity/enrollment.js').IdentityGateway):Promise<ServiceClient>{
+ const {createPrivateKey,sign,randomUUID}=await import('node:crypto');
+ const {assertInvocation,decodeInvoke,hash,signingBytes,strictJSON,uuid,frozen}=await import('./protocol.js');
+ const trusted=frozen({...config,routes:JSON.parse(JSON.stringify(config.routes)) as ServiceClientConfiguration['routes']});
+ const origin=canonicalOrigin(trusted.origin),timeout=trusted.timeoutMs??15000,max=trusted.maxConcurrent??16;
+ if(!uuid(trusted.credentialId)||!uuid(trusted.runId)||!Number.isInteger(timeout)||timeout<100||timeout>120000||!Number.isInteger(max)||max<1||max>128)fail('TRANSPORT_CONFIG','Invalid fixed service client configuration');
+ const [ca,keyBytes]=await Promise.all([tlsFile(trusted.caFile,false),tlsFile(trusted.keyFile,true)]);
+ const key=createPrivateKey(keyBytes);keyBytes.fill(0);
+ if(key.asymmetricKeyType!=='ed25519')fail('TRANSPORT_CONFIG','Service proof requires an Ed25519 private key');
+ let active=0;
+ return Object.freeze({invoke:async(invocation:InvocationContext,command:ServiceCommand):Promise<ServiceResponse>=>{
+  const assertVerified:(value:unknown)=>asserts value is InvocationContext=assertInvocation;
+  assertVerified(invocation);
+  const operation=command.operation,body=Buffer.from(JSON.stringify({...operation,payload_b64:command.payloadBytes.toString('base64url')}));
+  const decoded=decodeInvoke(body),route=trusted.routes[invocation.payload.action];
+  if(!route||!route.roles.includes(invocation.principal.role)||!route.components.includes(decoded.payload.component)||
+      !route.actions.includes(decoded.payload.action)||decoded.payload.run_id!==trusted.runId||invocation.principal.run_id!==trusted.runId)
+    fail('AUTH_SCOPE_DENIED','Service RPC is outside the trusted source/action/run route');
+  await gateway.withPrimaryTransaction({timeoutMs:Math.min(timeout,5000),signal:invocation.signal,guard:invocation.guard},async()=>{});
+  if(active>=max)fail('ADMISSION_BUSY','Service client concurrency budget exhausted');
+  active++;
+  const item={id:trusted.credentialId,time:String(Math.floor(Date.now()/1000)),nonce:randomUUID()};
+  const signature=sign(null,signingBytes(origin,'/v1/invoke',item,body),key).toString('base64url');
+  return await new Promise<ServiceResponse>(resolve=>{
+   let settled=false;
+   const finish=(result:ServiceResponse):void=>{if(settled)return;settled=true;active--;resolve(result);};
+   const request=https.request(new URL('/v1/invoke',origin),{method:'POST',ca,rejectUnauthorized:true,minVersion:'TLSv1.3',agent:false,
+    headers:{'Content-Type':'application/json','Content-Length':body.length,'HF-Credential-Id':item.id,'HF-Request-Time':item.time,'HF-Request-Nonce':item.nonce,'HF-Request-Signature':signature},
+    signal:AbortSignal.any([invocation.signal,AbortSignal.timeout(timeout)])},response=>{
+     const chunks:Buffer[]=[];let size=0;
+     response.on('data',(part:Buffer)=>{size+=part.length;if(size>MAX_BODY_BYTES){response.destroy();finish({transport:'UNKNOWN',operation_id:operation.operation_id,reason:'Response exceeds protocol limit'});}else chunks.push(part);});
+     response.once('aborted',()=>finish({transport:'UNKNOWN',operation_id:operation.operation_id,reason:'Response interrupted after send'}));
+     response.once('error',()=>finish({transport:'UNKNOWN',operation_id:operation.operation_id,reason:'Response failed after send'}));
+     response.once('end',()=>{
+      try{
+       const value=strictJSON(Buffer.concat(chunks));
+       if(!value||typeof value!=='object'||!('ok' in value)||typeof value.ok!=='boolean'||!('protocol_version' in value)||value.protocol_version!==1)
+        throw new Error('Invalid response envelope');
+       if(value.ok===true&&(!('result' in value)||!('operation_id' in value)||value.operation_id!==operation.operation_id||!('id' in value)||value.id!==operation.operation_id))throw new Error('Response operation mismatch');
+       if('operation_id' in value&&value.operation_id!==operation.operation_id)throw new Error('Response operation mismatch');
+       finish({transport:'RESPONSE',status:response.statusCode??0,body:value,operation_id:operation.operation_id});
+      }catch{finish({transport:'UNKNOWN',operation_id:operation.operation_id,reason:'Unverifiable response after send'});}
+     });
+    });
+   request.once('error',()=>finish({transport:'UNKNOWN',operation_id:operation.operation_id,reason:'Transport failed; reconcile the original operation identity'}));
+   request.end(body);
+  });
+ }});
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "8.4",
+  "task": "8.4",
+  "roles": [
+    "provisioner"
+  ],
+  "module": "providers/placement.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "provider.placement.probe",
+    "provider.placement.record-failure",
+    "provider.relocation.plan",
+    "provider.relocation.confirm-enrollment"
+  ],
+  "requires": [
+    "8.2"
+  ]
+}

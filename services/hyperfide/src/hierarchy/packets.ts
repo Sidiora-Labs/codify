@@ -41,7 +41,7 @@ async function preparationManifest(tx:QuerySession,organisationId:string,profile
  if(manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan)||manifest.digest!==row.content_digest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest identity is invalid');
  const {digest:manifestDigest,...body}=manifest;
  if(hash(body)!==manifestDigest)return refuse('ENVIRONMENT_PROFILE_INVALID','Stored preparation manifest bytes do not match its identity');
- return {preparation_digest:digest(row.content_digest),declared_profile:profile};
+ return {preparation_digest:digest(row.content_digest),preparation_manifest:freeze(manifest),declared_profile:profile};
 }
 /** Accepted physical preparation demand, independent of a not-yet-created executor. */
 export async function loadPreparationIntent(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;task_id:string;profile_id?:string}){
@@ -91,6 +91,47 @@ export async function readExecutionPacket(tx:QuerySession,input:{organisation_id
  deriveQualificationInputs(p);
  return freeze({packet_id:row.id,digest:identity,mandatory_digest:row.mandatory_digest,packet:p});
 }
+
+/** Current input eligibility for NEW admission only; never replace historical packet reads. */
+export async function validateExecutionInputs(tx:PrimaryTransaction,input:{organisation_id:string;run_id:string;digest:string}){
+ const loaded=await loadExecutionPacket(tx,input),m=loaded.packet.mandatory;
+ if(!object(m)||!object(m.identity)||!object(m.runtime)||!object(m.inputs)||!Array.isArray(m.inputs.repositories)||!object(m.inputs.graph))return refuse('PACKET_INPUTS_MISSING','Admission requires complete immutable runtime/source inputs');
+ const prepared=await preparationManifest(tx,uuid(input.organisation_id),uuid(m.runtime.environment_profile_id));
+ if(prepared.preparation_digest!==m.runtime.preparation_digest||hash(prepared.declared_profile)!==hash(m.runtime.declared_profile))return refuse('EXECUTION_INPUTS_STALE','Accepted environment manifest differs from immutable packet inputs');
+ const graph=m.inputs.graph,checked=['IMMUTABLE_PACKET','ACCEPTED_ENVIRONMENT_MANIFEST'];
+ if(graph.required){
+  const source=await import(new URL('../graph/publication.js',import.meta.url).href);
+  if(typeof source.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual current graph eligibility loader is unavailable');
+  const current=await source.loadGraphSnapshot(tx,{organisation_id:uuid(input.organisation_id),run_id:uuid(input.run_id),authority_epoch:uuid(m.identity.authority_epoch)},uuid(graph.manifest_id),
+   m.inputs.repositories.map(value=>{if(!object(value))return refuse('PACKET_INPUTS_MISSING','Invalid immutable repository pin');return {repository_id:uuid(value.repository_id),source_object_id:text(value.source_object_id,64),overlay_digest:null};}));
+  const exact=['manifest_digest','source_manifest_digest','input_digest','parser_digest','schema_digest','config_digest','source_set','file_coverage','source_coverage'];
+  if(!Array.isArray(current.source_coverage)||current.source_coverage.length<1||current.source_coverage.length>64||exact.some(key=>canonical(current[key])!==canonical(graph[key])))
+   return refuse('EXECUTION_INPUTS_STALE','Current required graph provenance differs from the exact immutable packet inputs');
+  checked.push('CURRENT_REQUIRED_GRAPH_ARTIFACTS');
+ }else checked.push('GRAPH_EXPLICITLY_NOT_REQUIRED');
+ return freeze({...loaded,checked_inputs:checked,execution_authority:false as const});
+}
+
+
+/** Pure hashes of supplied prepared bytes. The caller must establish provenance and readiness. */
+export function derivePreparedEnvironmentRoles(manifest:unknown,context:unknown){
+ if(!object(manifest)||manifest.schema_version!==1||!Array.isArray(manifest.files)||!Array.isArray(manifest.directories)||!object(manifest.scan))
+  return refuse('ENVIRONMENT_PROFILE_INVALID','Complete immutable preparation manifest required');
+ const {digest:preparationDigest,...body}=manifest;
+ if(hash(body)!==digest(preparationDigest))return refuse('ENVIRONMENT_PROFILE_INVALID','Preparation manifest bytes differ from their digest');
+ const profile=validateProfile(manifest.profile),ctx=record(context,['execution_profile','resource_requirements','policy_digest']);
+ const execution=record(ctx.execution_profile,['connector','model_profile_ref','credential_profile_ref','timeout_seconds']);
+ if(!['codex','claude-code'].includes(String(execution.connector)))return refuse('EXECUTION_PROFILE_INVALID','An explicit frontier execution profile is required');
+ text(execution.model_profile_ref);text(execution.credential_profile_ref);
+ if(!Number.isSafeInteger(execution.timeout_seconds)||Number(execution.timeout_seconds)<1||Number(execution.timeout_seconds)>profile.policy.max_process_lifetime_seconds)
+  return refuse('EXECUTION_PROFILE_INVALID','Effective execution lifetime exceeds its actual preparation policy');
+ const resources=resourceRequirements(ctx.resource_requirements),policyDigest=digest(ctx.policy_digest);
+ return freeze({preparation_digest:preparationDigest,profile_digest:hash(profile),
+  toolchain_digest:hash({os:profile.os,image:profile.image,toolchains:profile.toolchains,package_managers:profile.package_managers,native_agents:profile.native_agents,connectors:profile.connectors,supervisor:profile.supervisor,hyperfide:profile.hyperfide,system_packages:profile.system_packages}),
+  configuration_digest:hash({preparation_digest:preparationDigest,build_config:profile.build_config,generated_inputs:profile.generated_inputs,recipe:profile.recipe,execution_profile:execution,resource_requirements:resources,policy_digest:policyDigest}),
+  authority:'NONE' as const});
+}
+
 /** Hash actual non-result inputs; source-result commit/tree provenance stays distinct. */
 export function deriveQualificationInputs(packet:unknown):{
  dependency_digest:string;toolchain_digest:string;configuration_digest:string;graph_digest:string;
@@ -104,7 +145,7 @@ export function deriveQualificationInputs(packet:unknown):{
  const profile=validateProfile(m.runtime.declared_profile),graph=m.inputs.graph;
  if(typeof graph.required!=='boolean')return refuse('PACKET_INPUTS_MISSING','Graph requirement was not explicitly pinned');
  let graphDigest:string|null=null;
- if(graph.required){graphDigest=digest(graph.manifest_digest);uuid(graph.manifest_id);digest(graph.source_manifest_digest);}
+ if(graph.required){graphDigest=digest(graph.manifest_digest);uuid(graph.manifest_id);digest(graph.source_manifest_digest);if(!Array.isArray(graph.source_coverage)||graph.source_coverage.length<1||graph.source_coverage.length>64)return refuse('PACKET_INPUTS_MISSING','Required graph input lacks exact immutable source coverage');}
  else {if(graph.manifest_id!==null)return refuse('PACKET_CORRUPT','An unavailable graph cannot carry a substituted manifest');text(graph.reason,4096);}
  resourceRequirements(m.resource_requirements);digest(m.runtime.preparation_digest);digest(m.policy_digest);
  return freeze({dependency_digest:hash(m.inputs.dependencies),
@@ -115,7 +156,7 @@ export function deriveQualificationInputs(packet:unknown):{
 
 export function createComponent(context:ComponentContext):Component {
  const g=gateway(context);
- return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,deriveQualificationInputs})},actions:{
+ return {apiVersion:1,capabilities:{'hierarchy.packets.v1':Object.freeze({loadExecutionPacket,readExecutionPacket,loadPreparationIntent,validateExecutionInputs,derivePreparedEnvironmentRoles,deriveQualificationInputs})},actions:{
  'hierarchy.packet.describe':async input=>{record(input,[]);return {schema_version:1,packet_phase:'PROSPECTIVE_ADMISSION',execution_authority:false,hash:'SHA256_CANONICAL_JSON',max_packet_bytes:262144,post_admission_required:['CURRENT_COMPUTE_GRANT','VERIFIED_MATERIALISATION','QUALIFIED_CONNECTOR_LAUNCH']};},
  'hierarchy.packet.create':async (input,invocation)=>{
   const v=record(input,['idempotency_key','leader_generation','package_generation','task_id','attempt_id','attempt_generation','sandbox_id','slot_id','sandbox_boot_generation','max_bytes','optional_context']);
@@ -183,9 +224,10 @@ export function createComponent(context:ComponentContext):Component {
     const graphModule=await import(new URL('../graph/publication.js',import.meta.url).href);
     if(typeof graphModule.loadGraphSnapshot!=='function')return refuse('GRAPH_INPUT_UNAVAILABLE','Actual guarded graph snapshot loader is unavailable');
     const graph=await graphModule.loadGraphSnapshot(tx,{organisation_id:a.organisation_id,run_id:a.run_id,authority_epoch:a.authority_epoch},graphId,repos.rows.map(r=>({repository_id:r.repository_id,source_object_id:r.source_object_id,overlay_digest:null})));
+    if(!Array.isArray(graph.source_coverage)||graph.source_coverage.length<1||graph.source_coverage.length>64)return refuse('GRAPH_INPUT_UNAVAILABLE','Published graph lacks exact bundle-to-logical-source coverage');
     graphInputs={required:true,manifest_id:graphId,manifest_digest:digest(graph.manifest_digest),source_manifest_digest:digest(graph.source_manifest_digest),
      input_digest:digest(graph.input_digest),parser_digest:digest(graph.parser_digest),schema_digest:digest(graph.schema_digest),config_digest:digest(graph.config_digest),
-     source_set:graph.source_set,file_coverage:graph.file_coverage};
+     source_set:graph.source_set,file_coverage:graph.file_coverage,source_coverage:graph.source_coverage};
    }else{
     if(graphPolicy.manifest_id!==null)return refuse('GRAPH_INPUT_REQUIRED','Non-required graph policy cannot substitute a graph manifest');
     graphInputs={required:false,manifest_id:null,reason:text(graphPolicy.reason,4096)};
@@ -211,6 +253,15 @@ export function createComponent(context:ComponentContext):Component {
    await tx.query('INSERT INTO hyperfide.hierarchy_execution_packets(organisation_id,run_id,id,digest,mandatory_digest,task_id,attempt_id,attempt_generation,spec_revision_id,spec_generation,package_id,package_generation,authority_epoch,leader_generation,policy_digest,registry_digest,packet) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)',
     [a.organisation_id,a.run_id,id,packetDigest,mandatoryDigest,taskId,attemptId,generation,task.spec_revision_id,task.spec_generation,task.feature_package_id,auth.package_generation,a.authority_epoch,auth.leader_generation,run.policy_digest,proof.registry_digest,JSON.stringify(packet)]);
    return {packet_id:id,digest:packetDigest,mandatory_digest:mandatoryDigest,packet};
+  });
+ },
+ 'hierarchy.packet.validate':async (input,invocation)=>{
+  const v=record(input,['leader_generation','package_generation','digest']),a=trustedActor(invocation),identity=digest(v.digest);
+  return g.withPrimaryTransaction({timeoutMs:10000,guard:a.guard,signal:a.signal},async tx=>{
+   const loaded=await loadExecutionPacket(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity});
+   const m=loaded.packet.mandatory;if(!object(m)||!object(m.identity))return refuse('PACKET_CORRUPT','Immutable task identity is missing');
+   await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),package_id:uuid(m.identity.package_id),package_generation:decimal(v.package_generation),roles:['LEADER','FEATURE_MANAGER']});
+   return validateExecutionInputs(tx,{organisation_id:a.organisation_id,run_id:a.run_id,digest:identity});
   });
  },
  'hierarchy.packet.inspect':async (input,invocation)=>{
