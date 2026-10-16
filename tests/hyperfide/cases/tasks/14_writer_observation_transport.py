@@ -53,6 +53,7 @@ async function dispatch(proof,signal){
  if(mode==='WRONG_TOPOLOGY')value.topology_digest='sha256:'+'f'.repeat(64);
  if(mode==='WRONG_JOURNAL')value.journal_operation_id=uid(98);
  if(mode==='BAD_COUNTS')value.unknown_count=2;
+ if(mode==='WRONG_RESOURCE_COUNT'){value.resource_count=2;value.unknown_count=2;}
  if(mode==='DESTRUCTIVE_RECEIPT')return {deployment_id:deployment,operation_id:operation,source_epoch:epoch,fence_id:'HOSTILE_WRONG_RESPONSE',isolated_writer:'fixture-only',observed_at:value.observed_at,expires_at:value.expires_at,evidence_digest:value.evidence_digest};
  return value;
 }
@@ -101,7 +102,7 @@ try{
   const result=await server.client.observe(permit,new AbortController().signal);
   expect(result.outcome==='OBSERVED'&&result.observation.status==='UNKNOWN'&&result.observation.destruction_authority===false&&result.observation.activation_authority===false&&!Object.hasOwn(result,'receipt'));
  });
- for(const value of ['DESTRUCTIVE_AUTHORITY','ACTIVATION_AUTHORITY','WRONG_TOPOLOGY','WRONG_JOURNAL','BAD_COUNTS','DESTRUCTIVE_RECEIPT']){
+ for(const value of ['DESTRUCTIVE_AUTHORITY','ACTIVATION_AUTHORITY','WRONG_TOPOLOGY','WRONG_JOURNAL','BAD_COUNTS','WRONG_RESOURCE_COUNT','DESTRUCTIVE_RECEIPT']){
   await check('writer.observation.transport.response-refuses-'+value.toLowerCase(),async()=>{mode=value;try{expect((await server.client.observe(permit,new AbortController().signal)).outcome==='UNKNOWN');}finally{mode='NORMAL';}});
  }
  await check('writer.observation.transport.destructive-purpose-brand-and-route-separated',async()=>{

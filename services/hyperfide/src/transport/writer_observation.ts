@@ -149,7 +149,7 @@ export async function startWriterObservationHttpTransport(options:WriterObservat
    void operation.then(settled,settled);
    const receipt=parseWriterObservation(await abortable(operation,controller.signal));
    assertVerifiedWriterObservationPermit(permit);
-   if(receipt.deployment_id!==permit.deployment_id||receipt.operation_id!==permit.operation_id||receipt.source_epoch!==permit.source_epoch||receipt.topology_digest!==permit.topology_digest)fail('WRITER_OBSERVATION_RECEIPT_BINDING');
+   if(receipt.deployment_id!==permit.deployment_id||receipt.operation_id!==permit.operation_id||receipt.source_epoch!==permit.source_epoch||receipt.topology_digest!==permit.topology_digest||receipt.resource_count!==permit.resources.length)fail('WRITER_OBSERVATION_RECEIPT_BINDING');
    if(controller.signal.aborted)fail('WRITER_OBSERVATION_OUTCOME_UNKNOWN');
    respond(res,200,'OBSERVED',permitDigest,receipt);
   }catch(error){
@@ -187,13 +187,13 @@ export async function startWriterObservationHttpTransport(options:WriterObservat
 
 // Parsing pins a response to the requested operation; only the server's real
 // verifier and configured fencing handler grant permission to observe the existing fenced topology.
-function requestedBindings(serialized:string):{deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string}{
+function requestedBindings(serialized:string):{deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string;resource_count:number}{
  const envelope=strictJSON(Buffer.from(serialized),LIMIT);exact(envelope,['schema_version','key_id','payload_b64','signature_b64']);
  const claims=strictJSON(base64(envelope.payload_b64),LIMIT);
  if(!claims||typeof claims!=='object'||Array.isArray(claims))fail('WRITER_OBSERVATION_REQUEST_INVALID');
  const v=claims as Record<string,unknown>;
- if(typeof v.topology_digest!=='string'||!DIGEST.test(v.topology_digest)||v.schema_version!==1||v.purpose!=='EXTERNAL_WRITER_OBSERVATION_ONLY'||typeof v.deployment_id!=='string'||!UUID.test(v.deployment_id)||typeof v.operation_id!=='string'||!UUID.test(v.operation_id)||v.source_epoch!==null&&(typeof v.source_epoch!=='string'||!UUID.test(v.source_epoch)))fail('WRITER_OBSERVATION_REQUEST_INVALID');
- return {deployment_id:v.deployment_id,operation_id:v.operation_id,source_epoch:v.source_epoch as string|null,topology_digest:v.topology_digest as string};
+ if(!Array.isArray(v.resources)||v.resources.length<1||v.resources.length>256||typeof v.topology_digest!=='string'||!DIGEST.test(v.topology_digest)||v.schema_version!==1||v.purpose!=='EXTERNAL_WRITER_OBSERVATION_ONLY'||typeof v.deployment_id!=='string'||!UUID.test(v.deployment_id)||typeof v.operation_id!=='string'||!UUID.test(v.operation_id)||v.source_epoch!==null&&(typeof v.source_epoch!=='string'||!UUID.test(v.source_epoch)))fail('WRITER_OBSERVATION_REQUEST_INVALID');
+ return {deployment_id:v.deployment_id,operation_id:v.operation_id,source_epoch:v.source_epoch as string|null,topology_digest:v.topology_digest as string,resource_count:(v.resources as unknown[]).length};
 }
 /** No redirects, dynamic URLs, bearer identity or PG fallback are accepted. */
 export async function createWriterObservationHttpClient(options:WriterObservationHttpClientOptions):Promise<WriterObservationHttpClient>{
@@ -228,7 +228,7 @@ export async function createWriterObservationHttpClient(options:WriterObservatio
        exact(result,['schema_version','outcome','permit_digest','observation']);
        if(response.statusCode!==200||result.permit_digest!==expected)throw new Error('binding');
        const receipt=parseWriterObservation(result.observation);
-       if(receipt.deployment_id!==binding.deployment_id||receipt.operation_id!==binding.operation_id||receipt.source_epoch!==binding.source_epoch||receipt.topology_digest!==binding.topology_digest)throw new Error('receipt binding');
+       if(receipt.deployment_id!==binding.deployment_id||receipt.operation_id!==binding.operation_id||receipt.source_epoch!==binding.source_epoch||receipt.topology_digest!==binding.topology_digest||receipt.resource_count!==binding.resource_count)throw new Error('receipt binding');
        finish({outcome:'OBSERVED',observation:receipt});
       }else{
        exact(result,['schema_version','outcome','permit_digest','code']);
