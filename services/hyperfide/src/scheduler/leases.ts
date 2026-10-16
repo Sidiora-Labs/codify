@@ -22,7 +22,7 @@ export function parseComputeToken(value:unknown):ComputeToken{
 }
 /** Only a branded, live primary transaction may validate current compute authority. */
 export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeToken,
-    options:{allowExpired?:boolean;operation?:'ADMISSION'|'RENEWAL'|'ADVANCE'|'CLEANUP'}={}):Promise<ComputeAuthority>{
+    options:{allowExpired?:boolean;operation?:'ADMISSION'|'RENEWAL'|'CHECKPOINT'|'ADVANCE'|'CLEANUP'}={}):Promise<ComputeAuthority>{
   assertPrimaryTransaction(tx);
   const scope={organisation_id:token.organisation_id,run_id:token.run_id};
   await lockRun(tx,scope);
@@ -32,12 +32,16 @@ export async function assertCurrentCompute(tx:PrimaryTransaction,token:ComputeTo
   if(!run.rows[0]||run.rows[0].authority_epoch!==token.authority_epoch)
     fail('STALE_AUTHORITY_EPOCH','Compute token does not belong to the active run epoch');
   const operation=options.operation??'ADVANCE';
-  if(operation!=='CLEANUP'&&!(operation==='RENEWAL'?['READY','RUNNING','PAUSING','PAUSED']:['READY','RUNNING']).includes(run.rows[0].state))
+  if(operation!=='CLEANUP'&&!(['RENEWAL','CHECKPOINT'].includes(operation)?['READY','RUNNING','DRAINING','PAUSING','PAUSED']:['READY','RUNNING','DRAINING']).includes(run.rows[0].state))
     fail('RUN_NOT_EXECUTING','Run state does not permit this compute operation');
   const boot=await tx.query<{boot_generation:string;preparation_digest:string|null}>('SELECT boot_generation,preparation_digest FROM hyperfide.sandboxes '+
     'WHERE organisation_id=$1 AND id=$2 FOR SHARE',[token.organisation_id,token.sandbox_id]);
   if(boot.rows[0]?.boot_generation!==token.sandbox_boot_generation)
     fail('STALE_SANDBOX_BOOT','Compute token belongs to a previous sandbox boot');
+  const allocations=await tx.query(
+    "SELECT a.id FROM hyperfide.slot_allocations a JOIN hyperfide.worker_slots w ON w.organisation_id=a.organisation_id AND w.id=a.slot_id AND w.sandbox_id=a.sandbox_id AND w.boot_generation=a.sandbox_boot_generation WHERE a.organisation_id=$1 AND a.run_id=$2 AND a.attempt_id=$3 AND a.attempt_generation=$4 AND a.slot_id=$5 AND a.sandbox_id=$6 AND a.sandbox_boot_generation=$7 AND a.state='ACTIVE' AND w.state='ALLOCATED' FOR SHARE OF a,w",
+    [token.organisation_id,token.run_id,token.attempt_id,token.attempt_generation,token.slot_id,token.sandbox_id,token.sandbox_boot_generation]);
+  if(allocations.rows.length!==1)fail('COMPUTE_ALLOCATION_INVALID','Current compute requires its exact active slot allocation');
   const tasks=await tx.query<{current_attempt_id:string|null;generation:string;feature_package_id:string;spec_revision_id:string;spec_generation:string;criteria_digest:string}>(
     'SELECT current_attempt_id,generation,feature_package_id,spec_revision_id,spec_generation,criteria_digest FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
     [token.organisation_id,token.run_id,token.task_id]);
@@ -135,7 +139,7 @@ export async function expireCompute(tx:PrimaryTransaction,scope:SchedulerScope,a
   for(const candidate of candidates.rows){
     const token:ComputeToken={...scope,task_id:candidate.task_id,attempt_id:candidate.id,attempt_generation:candidate.generation,
       authority_epoch,sandbox_id:candidate.sandbox_id,slot_id:candidate.slot_id,sandbox_boot_generation:candidate.sandbox_boot_generation};
-    const authority=await assertCurrentCompute(tx,token,{allowExpired:true});
+    const authority=await assertCurrentCompute(tx,token,{allowExpired:true,operation:'CLEANUP'});
     const due=await tx.query<{expired:boolean}>('SELECT $1::timestamptz<=clock_timestamp() AS expired',[authority.lease_expires_at]);
     if(!due.rows[0]!.expired)continue;
     await tx.query('UPDATE hyperfide.attempts SET compute_authority=\'EXPIRED\',execution_state=\'FAILED\',state_version=state_version+1 '+
@@ -174,7 +178,7 @@ export function createComponent(context:ComponentContext):Component{
         await lockRun(tx,{organisation_id:token.organisation_id,run_id:token.run_id});
         const replay=await operationReplay(tx,token,actor.session_id,'scheduler.cancel',request,input);
         if(replay!==undefined)return replay;
-        const authority=await assertCurrentCompute(tx,token,{allowExpired:true});
+        const authority=await assertCurrentCompute(tx,token,{allowExpired:true,operation:'CLEANUP'});
         await requireSchedulerAuthority(tx,token,actor,token.authority_epoch,authority.feature_package_id);
         await releaseCompute(tx,token,{execution_state:'CANCELLED'});
         await tx.query('UPDATE hyperfide.tasks SET state=\'CANCELLED\',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
