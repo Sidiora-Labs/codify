@@ -402,11 +402,15 @@ export class RailwaySessionSpool {
         while(true){
           const next=receiptRows!.next();if(next.done)throw new Error('Railway stream receipt gap');
           const row=next.value;
+          if(Object.keys(row).some(key=>!['sequence','stream','offset','size','digest','file','receipt','reconciled'].includes(key))||
+            (Object.hasOwn(row,'reconciled')&&row.reconciled!==true))throw new Error('Railway receipt journal fields');
+          const fingerprint=hash({sequence:row.sequence,stream:row.stream,offset:row.offset,size:row.size,
+            digest:row.digest,file:row.file,receipt:row.receipt});
           if(row.sequence===receiptSequence){
-            if(hash(row)!==lastReceiptHash)throw new Error('Railway duplicate receipt conflict');continue;
+            if(fingerprint!==lastReceiptHash)throw new Error('Railway duplicate receipt conflict');continue;
           }
           if(row.sequence!==chunk.sequence)throw new Error('Railway stream receipt sequence');
-          receiptSequence=chunk.sequence;lastReceiptHash=hash(row);uploaded=row;break;
+          receiptSequence=chunk.sequence;lastReceiptHash=fingerprint;uploaded=row;break;
         }
         const receipt=object(uploaded.receipt) as unknown as RailwayChunkReceipt;
         if(uploaded.stream!==chunk.stream||uploaded.offset!==chunk.offset||uploaded.digest!==chunk.digest||

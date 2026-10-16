@@ -13,7 +13,8 @@ IDS=[
  "railway.process.unsupported-before-spawn","railway.process.cleanup-real-children","railway.process.unconfirmed-stop-bounded","railway.process.unconfirmed-is-alive",
  "railway.process.upload-unknown-no-retry","railway.process.upload-reconcile-bound","railway.process.binary-output-exact",
  "railway.process.segmented-archive","railway.process.archive-lost-reply-recovery","railway.process.archive-boot-bound",
- "railway.process.archive-byte-corruption","railway.process.session-index-restart","railway.process.session-index-corruption"
+ "railway.process.archive-byte-corruption","railway.process.session-index-restart","railway.process.session-index-corruption",
+ "railway.process.reconciled-duplicate-receipt","railway.process.conflicting-duplicate-receipt"
 ]
 def wait_exit(service,session,timeout=30):
  deadline=time.monotonic()+timeout
@@ -103,6 +104,12 @@ await spool.uploadPending('large-output',sink);
 const reconcileBound=mismatch&&reconciled&&!spool.uploadStatus('large-output').pending_unknown;
 const status=spool.uploadStatus('large-output');
 
+const receiptsPath=path.join(root,createHash('sha256').update('large-output').digest('hex'),'upload-receipts.ndjson');
+const receipts=fs.readFileSync(receiptsPath,'utf8').trimEnd().split('\n'),firstReceipt=JSON.parse(receipts[0]);
+delete firstReceipt.reconciled;
+const replayedReceipt={...firstReceipt,reconciled:true};
+const replayedBytes=[JSON.stringify(firstReceipt),JSON.stringify(replayedReceipt),...receipts.slice(1)].join('\n')+'\n';
+fs.writeFileSync(receiptsPath,replayedBytes);
 let manifestCalls=0,lostReply=true;
 const invoke=async(action,input)=>{
  if(input.organisation_id!=='org-1'||input.run_id!=='run-1')throw new Error('archive scope');
@@ -138,6 +145,12 @@ const archive=await spool.sealStreams('large-output',invoke,binding,64);
 const expected=Object.fromEntries(['organisation_id','run_id','sandbox_id','boot_id','boot_generation','resource',
  'logical_process_ref','native_process_ref','operation_id','payload_digest','scope_digest'].map(k=>[k,archive.index[k]]));
 const verified=await verifyRailwayStreamArchive(invoke,archive.reference,expected);
+const receiptReplay=verified.complete;
+const conflicting={...replayedReceipt,receipt:{...replayedReceipt.receipt,receipt_id:'sha256:'+'0'.repeat(64)}};
+fs.writeFileSync(receiptsPath,[JSON.stringify(firstReceipt),JSON.stringify(conflicting),...receipts.slice(1)].join('\n')+'\n');
+let conflictingReceipt=false;
+try{await spool.sealStreams('large-output',invoke,binding,64);}catch{conflictingReceipt=true;}
+fs.writeFileSync(receiptsPath,replayedBytes);
 const segmented=verified.complete&&archive.index.streams.stdout.segments.length>=3&&
  archive.index.streams.stdout.digest==='sha256:'+createHash('sha256').update(Buffer.alloc(size,120)).digest('hex')&&
  archive.index.streams.stderr.size_bytes==='0'&&archive.index.byte_count===String(size);
@@ -158,7 +171,7 @@ let indexCorrupt=false;try{new RailwaySessionSpool(root).find(resource,session);
 fs.writeFileSync(indexFile,indexBytes);
 
 process.stdout.write(JSON.stringify({readMatches:output.stdout.byteLength===size&&output.stderr.byteLength===0&&output.exit_code===0,
- tooSmall,calls,status,unknownNoRetry,reconcileBound,segmented,archiveRecovery,wrongBoot,archiveCorrupt,indexRestart,indexCorrupt}));
+ tooSmall,calls,status,unknownNoRetry,reconcileBound,segmented,archiveRecovery,wrongBoot,archiveCorrupt,indexRestart,indexCorrupt,receiptReplay,conflictingReceipt}));
 """
    upload=subprocess.run(["node","--input-type=module","-e",uploader_js,str(Path(folder)/"spool"),
       str(Path(folder)/"artifact-fixture"),session,str(size)],cwd=c.ROOT,capture_output=True,text=True,timeout=40)
@@ -171,7 +184,7 @@ process.stdout.write(JSON.stringify({readMatches:output.stdout.byteLength===size
       "actual byte reader, artifact facade uploads and manifest distinction"))
    c.check(IDS[22],lambda:c.expect(uploaded["unknownNoRetry"],"unknown accepted object put was blindly retried"))
    c.check(IDS[23],lambda:c.expect(uploaded["reconcileBound"],"upload reconciliation receipt binding"))
-   for index,key in [(25,"segmented"),(26,"archiveRecovery"),(27,"wrongBoot"),(28,"archiveCorrupt"),(29,"indexRestart"),(30,"indexCorrupt")]:
+   for index,key in [(25,"segmented"),(26,"archiveRecovery"),(27,"wrongBoot"),(28,"archiveCorrupt"),(29,"indexRestart"),(30,"indexCorrupt"),(31,"receiptReplay"),(32,"conflictingReceipt")]:
     c.check(IDS[index],lambda key=key:c.expect(uploaded[key],"archive/session regression: "+key))
 
    binary_bytes=bytes([255,0,254,195,169])
