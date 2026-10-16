@@ -7,6 +7,8 @@ always runs the actual15.2 publication/read pipeline after prerequisite integrat
 from __future__ import annotations
 import base64
 import hashlib
+import fcntl
+import threading
 import importlib.util
 import json
 import os
@@ -230,6 +232,42 @@ def native_suite(f):
     def large(x):
         with (x.repo/"large").open("wb") as stream:stream.truncate(16*1024*1024+1)
     check("checkpoint.source.file-bound",lambda:mutation_case("large",large,"FILE_LIMIT"))
+    def lfs(x):
+        (x.repo/"lfs-pointer").write_bytes(b"version https://git-lfs.github.com/spec/v1\\noid sha256:"+b"0"*64+b"\\nsize 99\\n")
+    check("checkpoint.source.lfs-refused",lambda:mutation_case("lfs",lfs,"LFS_UNSUPPORTED"))
+    def capture_busy():
+        lock=f.repo/".git/hyperfide-checkpoint.lock"
+        with lock.open("r+") as stream:
+            fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            f.refuse("checkpoint.capture",f.request,"CAPTURE_BUSY")
+    check("checkpoint.source.concurrent-capture-lock",capture_busy)
+    def nested_spool():
+        inner=f.repo/"nested-spool";inner.mkdir(mode=0o700)
+        try:f.refuse("checkpoint.capture",f.request,"SPOOL_INSIDE_CANDIDATE",
+                     env=dict(f.env,HF_CHECKPOINT_SPOOL_ROOT=str(inner)))
+        finally:inner.rmdir()
+    check("checkpoint.source.spool-recursion-refused",nested_spool)
+    def live_writer():
+        base=f.base/"live-writer";base.mkdir();other=Fixture(base)
+        stop=threading.Event();started=threading.Event()
+        def write():
+            fd=os.open(other.repo/"tracked.bin",os.O_WRONLY)
+            try:
+                sequence=0
+                while not stop.is_set():
+                    sequence+=1
+                    os.pwrite(fd,sequence.to_bytes(8,"big")*2048,0)
+                    started.set()
+            finally:os.close(fd)
+        thread=threading.Thread(target=write);thread.start()
+        try:
+            expect(started.wait(5),"real writer failed to start")
+            other.capture_refused(lambda:None,"UNSTABLE_SOURCE")
+        finally:
+            stop.set();thread.join(timeout=5)
+            expect(not thread.is_alive(),"owned source writer leaked")
+    check("checkpoint.source.live-writer-instability",live_writer)
+
 def durable_suite(f):
     """Trusted supervisor fixture owns service/DB; native environment remains scrubbed."""
     module_path=ROOT/"tests/hyperfide/cases/tasks/15_2.py"
