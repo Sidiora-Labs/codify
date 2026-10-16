@@ -281,6 +281,10 @@ def main():
             check("executor.placement-operator-denied",lambda:f.refused(f.actor.request({"op":"placement",**f.proof(key="operator",component="8.4-probe",action="provider.placement.probe",value=placement_input),"input":probe}),"RUNNER_PROBE_AUTHORITY_DENIED"))
             check("executor.placement-operation-mismatch-refused",lambda:f.refused(f.actor.request({"op":"placement",**f.proof(component="8.4-probe",action="provider.placement.probe",value=placement_input),"input":probe}),"RUNNER_PROBE_AUTHORITY_DENIED"))
             check("executor.placement-invalid-identity-refused",lambda:f.refused(f.actor.request({"op":"placement",**f.proof(component="8.4-probe",action="provider.placement.probe",value=placement_input),"input":{"probe_id":"../invalid"}}),"RUNNER_PROBE_AUTHORITY_DENIED"))
+            check("executor.retained-launch-invalid-identity-refused",lambda:f.refused(f.command("native",input=dict(native,launch_id="../invalid")),"RUNNER_CONTROL_DENIED"))
+            guards=f.f.sql("SELECT tgname FROM pg_trigger WHERE tgrelid='hyperfide.runner_registry'::regclass AND NOT tgisinternal AND tgenabled IN('O','A') AND tgname=ANY($1::text[])",[["immutable_physical_binding","retain_runner_registry"]])
+            expected="RUNNER_CONTROL_TARGET_UNREGISTERED" if len(guards)==2 else "RUNNER_RETAINED_SCHEMA_REQUIRED"
+            check("executor.retained-target-prerequisites-refused",lambda:f.refused(f.command("native",input=dict(native,launch_id=uid())),expected))
             # Hostile metadata fixtures exercise the exact runtime validator;
             # they are not observations of a physical runner or stop event.
             target={"launch_id":uid(),"attempt_id":uid(),"attempt_generation":"1","sandbox_id":uid(),"boot_id":uid(),"boot_generation":"1","uid":65534}
