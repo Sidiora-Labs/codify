@@ -1,5 +1,7 @@
 import {Buffer} from 'node:buffer';
 import type {Component,ComponentContext} from '../components/registry.js';
+import {invocationOf} from '../identity/enrollment.js';
+import type {InvocationContext} from '../transport/protocol.js';
 import {FoundationError} from '../policy/programme.js';
 import {canonical,digest,exact,fail,text,uuid} from './extraction.js';
 import {graphTransaction,scopeInput} from './ingestion.js';
@@ -13,7 +15,7 @@ function provenance(manifest:JsonObject):JsonObject{return {manifest_id:manifest
 function budget(value:unknown):number{return bounded(value,262144,4096,786432);}
 function packet<T extends JsonObject>(value:T,max:number):T {if(Buffer.byteLength(JSON.stringify(value))>max)fail('GRAPH_PACKET_TOO_LARGE','Exact graph packet exceeds requested byte budget');return value;}
 async function status(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch'],['manifest_id','channel']),s=scopeInput(r);
+ const r=exact(input,['organisation_id','run_id','authority_epoch'],['manifest_id','channel']),s=scopeInput(r,ctx);
  if((r.manifest_id===undefined)===(r.channel===undefined))fail('GRAPH_INVALID','Name exactly one manifest or channel');
  return graphTransaction(ctx,s,async tx=>{
   let manifestId:string;let channel:JsonObject|null=null;
@@ -26,9 +28,9 @@ async function status(input:unknown,ctx:ComponentContext):Promise<unknown>{
  },false);
 }
 async function search(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','mode','q'],['limit','cursor','max_bytes']),s=scopeInput(r),manifestId=uuid(r.manifest_id),
+ const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','mode','q'],['limit','cursor','max_bytes']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
  q=text(r.q,'search query',256),limit=bounded(r.limit,50,1,200),max=budget(r.max_bytes),mode=r.mode;
- if(!['symbol','body','comment','trigram'].includes(String(mode)))fail('GRAPH_INVALID','Unsupported search mode');
+ if(!['symbol','body','comment','trigram','body-trigram'].includes(String(mode)))fail('GRAPH_INVALID','Unsupported search mode');
  const queryDigest=digest(canonical({manifest_id:manifestId,mode,q,limit,max_bytes:max}));let offset=0;
  if(r.cursor!==undefined){
   const raw=text(r.cursor,'cursor',1024);let c:JsonObject;
@@ -39,20 +41,22 @@ async function search(input:unknown,ctx:ComponentContext):Promise<unknown>{
   const manifest=await publishedGraph(tx,s,manifestId),p=[s.organisation_id,s.run_id,manifest.build_id,q,limit+1,offset];
   let sql:string;
   if(mode==='body')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND b.search_vector@@plainto_tsquery('simple',$4) ORDER BY ts_rank_cd(b.search_vector,plainto_tsquery('simple',$4)) DESC,b.bundle_digest,b.path LIMIT $5 OFFSET $6";
-  else if(mode==='trigram')sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,'1'::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family IN ('symbols','comments') AND position(lower($4) IN lower(COALESCE(f.payload->>'name',f.payload->>'body','')))>0 AND (char_length($4)<3 OR EXISTS(SELECT 1 FROM hyperfide.graph_trigram_postings t WHERE t.organisation_id=f.organisation_id AND t.run_id=f.run_id AND t.graph_id=f.graph_id AND t.bundle_digest=f.bundle_digest AND t.family=f.family AND t.fact_key=f.fact_key AND t.gram=substring(lower($4) FROM 1 FOR 3))) ORDER BY f.family,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
+  else if(mode==='body-trigram')sql="SELECT b.bundle_digest,b.path,b.content_digest,left(b.body,512) AS snippet,'1'::text AS score FROM hyperfide.graph_source_bodies b WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.graph_id=$3 AND position(lower($4) IN lower(b.body))>0 AND b.body ILIKE $7 ORDER BY b.bundle_digest,b.path LIMIT $5 OFFSET $6";
+  else if(mode==='trigram')sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,'1'::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family IN ('symbols','comments') AND position(lower($4) IN lower(COALESCE(f.payload->>'name',f.payload->>'body','')))>0 AND COALESCE(f.payload->>'name',f.payload->>'body','') ILIKE $7 ORDER BY f.family,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
   else{
    const family=mode==='symbol'?'symbols':'comments',expression=mode==='symbol'?"COALESCE(f.payload->>'name','')||' '||COALESCE(f.payload->>'sig','')":"COALESCE(f.payload->>'body','')";
    sql="SELECT f.bundle_digest,f.family,f.fact_key,f.payload,ts_rank_cd(to_tsvector('simple',"+expression+"),plainto_tsquery('simple',$4))::text AS score FROM hyperfide.graph_fact_rows f WHERE f.organisation_id=$1 AND f.run_id=$2 AND f.graph_id=$3 AND f.family='"+family+"' AND to_tsvector('simple',"+expression+")@@plainto_tsquery('simple',$4) ORDER BY ts_rank_cd(to_tsvector('simple',"+expression+"),plainto_tsquery('simple',$4)) DESC,f.bundle_digest,f.fact_key LIMIT $5 OFFSET $6";
   }
+  if(mode==='body-trigram'||mode==='trigram')p.push('%'+q.replace(/[\\%_]/g,c=>'\\'+c)+'%');
   const all=(await tx.query(sql,p)).rows;const truncated=all.length>limit,rows=all.slice(0,limit);
-  const result={...provenance(manifest),mode,ranking:mode==='trigram'?'STABLE_IDENTITY':'POSTGRES_SIMPLE_TS_RANK_CD_WITH_STABLE_TIES',
+  const result={...provenance(manifest),mode,ranking:(mode==='trigram'||mode==='body-trigram')?'STABLE_IDENTITY':'POSTGRES_SIMPLE_TS_RANK_CD_WITH_STABLE_TIES',
    rows,complete:!truncated,truncated,next_cursor:truncated?Buffer.from(canonical({query_digest:queryDigest,offset:offset+rows.length})).toString('base64url'):null,
    limitations:['Task component ranking is explicit; full legacy FTS/ranking parity requires its independently approved corpus']};
   return packet(result,max);
  },false);
 }
 async function context(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','files'],['max_bytes']),s=scopeInput(r),manifestId=uuid(r.manifest_id),symbols=ids(r.symbol_ids),max=budget(r.max_bytes);
+ const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','files'],['max_bytes']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),symbols=ids(r.symbol_ids),max=budget(r.max_bytes);
  if(!Array.isArray(r.files)||r.files.length>128)fail('GRAPH_INVALID','Bounded repository/file set required');
  const files=r.files.map(value=>{const v=exact(value,['repository_id','path']);return {repository_id:uuid(v.repository_id),path:text(v.path,'file path',4096)};});
  return graphTransaction(ctx,s,async tx=>{
@@ -69,7 +73,7 @@ async function context(input:unknown,ctx:ComponentContext):Promise<unknown>{
  },false);
 }
 async function traverse(input:unknown,ctx:ComponentContext):Promise<unknown>{
- const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','direction','depth','max_nodes'],['max_bytes']),s=scopeInput(r),manifestId=uuid(r.manifest_id),
+ const r=exact(input,['organisation_id','run_id','authority_epoch','manifest_id','symbol_ids','direction','depth','max_nodes'],['max_bytes']),s=scopeInput(r,ctx),manifestId=uuid(r.manifest_id),
  seeds=ids(r.symbol_ids),depth=bounded(r.depth,1,0,4),maxNodes=bounded(r.max_nodes,100,1,500),max=budget(r.max_bytes),direction=r.direction;
  if(!['callers','callees','both'].includes(String(direction))||seeds.length>maxNodes)fail('GRAPH_INVALID','Invalid traversal');
  return graphTransaction(ctx,s,async tx=>{
@@ -93,8 +97,14 @@ async function traverse(input:unknown,ctx:ComponentContext):Promise<unknown>{
  },false);
 }
 export function createComponent(ctx:ComponentContext):Component {
- const wrap=(fn:(input:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown)=>{try{return await fn(input,ctx);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_QUERY_FAILED','Exact graph query could not complete within its storage budget');}};
- return {apiVersion:1,actions:{
+ const wrap=(fn:(input:unknown,context:ComponentContext)=>Promise<unknown>)=>async(input:unknown,context:ComponentContext)=>{try{return await fn(input,context);}catch(e){if(e instanceof FoundationError)throw e;throw new FoundationError('GRAPH_QUERY_FAILED','Exact graph query could not complete within its storage budget');}};
+ const bound=(invocation:InvocationContext):ComponentContext=>{const context=Object.freeze({...ctx,invocation});invocationOf(context);return context;};
+ return {apiVersion:1,capabilities:{'graph.query.v1':Object.freeze({
+ traverse:(input:unknown,invocation:InvocationContext)=>traverse(input,bound(invocation)),
+ context:(input:unknown,invocation:InvocationContext)=>context(input,bound(invocation)),
+ search:(input:unknown,invocation:InvocationContext)=>search(input,bound(invocation)),
+ status:(input:unknown,invocation:InvocationContext)=>status(input,bound(invocation))
+ })},actions:{
   'graph.query.describe':input=>{exact(input,[]);return {schema_version:1,exact_manifest_required:true,max_depth:4,max_nodes:500,route:'PRIMARY',replica_qualification:'NOT_CLAIMED',cache_authority:'NONE'};},
   'graph.query.status':wrap(status),'graph.query.search':wrap(search),'graph.query.context':wrap(context),'graph.query.traverse':wrap(traverse)
  }};
