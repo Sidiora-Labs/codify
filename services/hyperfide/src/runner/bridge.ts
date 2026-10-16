@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import {constants} from 'node:fs';
 import path from 'node:path';
 import {createPrivateKey,createPublicKey,randomBytes,randomUUID,sign,verify} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
@@ -16,8 +17,21 @@ export interface RunnerRemotePlan {
  session_id:string;operation_id:string;repository_id:string;reservation_id:string;
  job_id?:string;task_id?:string;job_kind?:string;argv:string[];cwd:string;
  environment:Record<string,string>;stdin?:string;timeout_ms:number;
+ preparation?:RunnerPreparationInput;
  source_digest:string;source_provenance_digest?:string;policy_digest:string;executable_digest:string;
  environment_digest:string;artifact_paths:string[];
+}
+export interface RunnerStagingReference {
+ role:string;artifact_id:string;storage_kind:'object'|'manifest';digest:string;manifest_digest?:string;size_bytes:string;
+}
+export interface RunnerPreparationInput {
+ recipe_id:'environment.prepare.v1'|'checkpoint.restore.v1';
+ input_manifest_artifact_id:string;input_manifest_digest:string;
+ source:{repository_key:string;source_object_id:string;source_tree_id:string;source_manifest_digest:string};
+ staging:RunnerStagingReference[];
+}
+export interface RunnerPreparationPlan extends RunnerPreparationInput {
+ operation_id:string;session_id:string;reservation_id:string;repository_id:string;timeout_ms:number;
 }
 declare const permitBrand:unique symbol;
 export interface RunnerRemotePermit {readonly [permitBrand]:true}
@@ -59,6 +73,8 @@ interface Resources {
 const isRemote=(v:unknown):v is RunnerRemote=>object(v)&&typeof v.prepare==='function'&&typeof v.execute==='function';
 const isResources=(v:unknown):v is Resources=>object(v)&&typeof v.assertJobReservation==='function'&&typeof v.readJobAllocation==='function';
 const isProvider=(v:unknown):v is ProviderExecution=>object(v)&&typeof v.executeBound==='function'&&typeof v.registerRunnerBindingVerifier==='function';
+export interface RunnerPreparation {prepare(tx:PrimaryTransaction,i:InvocationContext,plan:RunnerPreparationPlan):Promise<RunnerRemotePermit>;execute(permit:RunnerRemotePermit,signal:AbortSignal):Promise<RunnerRemoteResult>}
+export function requireRunnerPreparation(ctx:ComponentContext):RunnerPreparation{return ctx.dependencies.require('12.4','runner.preparation.v1',(v:unknown):v is RunnerPreparation=>object(v)&&typeof v.prepare==='function'&&typeof v.execute==='function');}
 export function requireRunnerRemote(ctx:ComponentContext):RunnerRemote {
  return ctx.dependencies.require('12.4','runner.remote.v1',isRemote);
 }
@@ -88,15 +104,33 @@ export async function readRunnerBinding(tx:PrimaryTransaction,scope:{organisatio
  JOIN hyperfide.worker_slots w ON w.organisation_id=r.organisation_id AND w.id=r.slot_id AND w.sandbox_id=r.sandbox_id AND w.boot_generation=r.boot_generation
  JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id
  JOIN hyperfide.identity_principals c ON c.credential_id=r.credential_id AND c.organisation_id=r.organisation_id AND c.run_id=r.run_id AND c.role='RUNNER' AND c.sandbox_id=r.sandbox_id AND c.boot_id=r.boot_id AND c.boot_generation=r.boot_generation
- JOIN hyperfide.identity_runner_status st ON st.credential_id=c.credential_id AND st.preparation_digest=r.preparation_digest
+ JOIN hyperfide.identity_runner_status st ON st.credential_id=c.credential_id AND st.preparation_digest=r.boot_preparation_digest
  WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.session_id=$3 AND r.state='CURRENT'
  AND s.observed_state='RUNNING' AND w.state IN('READY','ALLOCATED','DRAINING') FOR SHARE OF r,s,b,w,c,st`,[scope.organisation_id,scope.run_id,scope.session_id])).rows[0];
  if(!r||r.credential_state!=='ACTIVE'||new Date(r.credential_expires_at).getTime()<=new Date(r.db_now).getTime()||new Date(r.heartbeat_at).getTime()+90000<=new Date(r.db_now).getTime())fail('RUNNER_NOT_CURRENT','Current authenticated runner/boot/slot observation required');
  r.boot_generation=String(r.boot_generation);r.slot_generation=String(r.slot_generation);r.registration_version=String(r.registration_version);
  return r as Binding;
 }
+export async function readRunnerPreparationBinding(tx:PrimaryTransaction,scope:{organisation_id:string;run_id:string;session_id:string}):Promise<Binding> {
+ assertPrimaryTransaction(tx);
+ const row=(await tx.query(`SELECT r.*,s.pool_id,s.native_sandbox_id AS external_sandbox_id,p.provider,w.capacity_kind,c.public_key_b64,
+ clock_timestamp() AS db_now FROM hyperfide.runner_registry r
+ JOIN hyperfide.sandboxes s ON s.organisation_id=r.organisation_id AND s.id=r.sandbox_id AND s.boot_generation=r.boot_generation
+ JOIN hyperfide.sandbox_boots b ON b.organisation_id=s.organisation_id AND b.sandbox_id=s.id AND b.boot_generation=s.boot_generation AND b.boot_id=r.boot_id
+ JOIN hyperfide.worker_slots w ON w.organisation_id=r.organisation_id AND w.id=r.slot_id AND w.sandbox_id=r.sandbox_id AND w.boot_generation=r.boot_generation
+ JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id
+ JOIN hyperfide.environment_profiles ep ON ep.organisation_id=p.organisation_id AND ep.id=p.profile_id
+ JOIN hyperfide.identity_principals c ON c.credential_id=r.credential_id AND c.organisation_id=r.organisation_id AND c.run_id=r.run_id AND c.role='RUNNER' AND c.sandbox_id=r.sandbox_id AND c.boot_id=r.boot_id AND c.boot_generation=r.boot_generation
+ JOIN hyperfide.identity_runner_status st ON st.credential_id=c.credential_id
+ WHERE r.organisation_id=$1 AND r.run_id=$2 AND r.session_id=$3 AND r.state IN('PREPARING','CURRENT') AND s.observed_state='RUNNING'
+ AND w.state IN('READY','ALLOCATED') AND r.boot_preparation_digest=s.preparation_digest AND st.preparation_digest=s.preparation_digest
+ AND ep.content_digest=s.preparation_digest AND c.state='ACTIVE' AND c.expires_at>clock_timestamp()
+ AND st.heartbeat_at>clock_timestamp()-interval '90 seconds' FOR SHARE OF r,s,b,w,p,ep,c,st`,[scope.organisation_id,scope.run_id,scope.session_id])).rows[0];
+ if(!row||!object(row.preparation_recipes))fail('RUNNER_PREPARATION_UNAVAILABLE','Bound live runner and approved parent preparation identity required');
+ row.boot_generation=String(row.boot_generation);row.slot_generation=String(row.slot_generation);row.registration_version=String(row.registration_version);return row as Binding;
+}
 export async function readRunnerReadiness(tx:PrimaryTransaction,r:Binding):Promise<Record<string,any>> {
- const result=await readRuntimeReadiness(tx,{organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,boot_generation:r.boot_generation,slot_id:r.slot_id,preparation_digest:r.preparation_digest,source_digest:r.source_digest});
+ const request={organisation_id:r.organisation_id,run_id:r.run_id,sandbox_id:r.sandbox_id,boot_generation:r.boot_generation,slot_id:r.slot_id,boot_preparation_digest:String(r.boot_preparation_digest),preparation_digest:r.preparation_digest,source_digest:r.source_digest};const result=await readRuntimeReadiness(tx,request);
  if(!result||result.readiness_digest!==r.readiness_digest||result.source_object_id!==r.source_object_id||result.source_tree_id!==r.source_tree_id)fail('RUNNER_READINESS_STALE','Actual current source-specific runtime readiness required');
  return result;
 }
@@ -109,9 +143,9 @@ async function observe(tx:PrimaryTransaction,v:Record<string,unknown>,i:Invocati
  if(!Array.isArray(inventory)||!inventory.some(item=>runnerCanonical(item)===runnerCanonical(v)))fail('RUNNER_OBSERVATION_UNREGISTERED','Observation must match the authenticated registered slot inventory');
  const ready=await readRuntimeReadiness(tx,{organisation_id:p.organisation_id,run_id:p.run_id,sandbox_id:p.sandbox_id!,boot_generation:p.boot_generation!,slot_id:v.slot_id,preparation_digest:v.preparation_digest as string,source_digest:v.source_digest as string});
  if(!ready||ready.readiness_digest!==v.readiness_digest||ready.source_object_id!==v.source_object_id||ready.source_tree_id!==v.source_tree_id)fail('RUNNER_READINESS_STALE','Source-specific actual runtime readiness proof is required');
- const r=(await tx.query(`INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,launch_id,state_dir,runner_binary,workspace_path,runner_binary_digest,preparation_digest,readiness_digest,source_digest,source_object_id,source_tree_id,slot_generation,uid,gid,observation_digest)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
- ON CONFLICT(organisation_id,run_id,session_id) DO UPDATE SET credential_id=EXCLUDED.credential_id,launch_id=EXCLUDED.launch_id,preparation_digest=EXCLUDED.preparation_digest,readiness_digest=EXCLUDED.readiness_digest,source_digest=EXCLUDED.source_digest,source_object_id=EXCLUDED.source_object_id,source_tree_id=EXCLUDED.source_tree_id,observation_digest=EXCLUDED.observation_digest,registration_version=hyperfide.runner_registry.registration_version+1,observed_at=clock_timestamp()
+ const r=(await tx.query(`INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,launch_id,state_dir,runner_binary,workspace_path,runner_binary_digest,boot_preparation_digest,preparation_digest,readiness_digest,source_digest,source_object_id,source_tree_id,slot_generation,uid,gid,observation_digest)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,(SELECT preparation_digest FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$5 AND boot_generation=$6),$15,$16,$17,$18,$19,$20,$21,$22,$23)
+ ON CONFLICT(organisation_id,run_id,session_id) DO UPDATE SET state=\'CURRENT\',credential_id=EXCLUDED.credential_id,launch_id=EXCLUDED.launch_id,boot_preparation_digest=EXCLUDED.boot_preparation_digest,preparation_digest=EXCLUDED.preparation_digest,readiness_digest=EXCLUDED.readiness_digest,source_digest=EXCLUDED.source_digest,source_object_id=EXCLUDED.source_object_id,source_tree_id=EXCLUDED.source_tree_id,observation_digest=EXCLUDED.observation_digest,registration_version=hyperfide.runner_registry.registration_version+1,observed_at=clock_timestamp()
  WHERE hyperfide.runner_registry.sandbox_id=EXCLUDED.sandbox_id AND hyperfide.runner_registry.boot_generation=EXCLUDED.boot_generation AND hyperfide.runner_registry.boot_id=EXCLUDED.boot_id AND hyperfide.runner_registry.slot_id=EXCLUDED.slot_id AND hyperfide.runner_registry.state_dir=EXCLUDED.state_dir AND hyperfide.runner_registry.runner_binary=EXCLUDED.runner_binary AND hyperfide.runner_registry.workspace_path=EXCLUDED.workspace_path AND hyperfide.runner_registry.repository_id=EXCLUDED.repository_id AND hyperfide.runner_registry.uid=EXCLUDED.uid AND hyperfide.runner_registry.gid=EXCLUDED.gid
  RETURNING registration_version,observed_at`,[p.organisation_id,p.run_id,v.session_id,p.credential_id,p.sandbox_id,p.boot_generation,p.boot_id,v.slot_id,v.repository_id,v.launch_id,v.state_dir,v.runner_binary,v.workspace_path,v.runner_binary_digest,v.preparation_digest,v.readiness_digest,v.source_digest,v.source_object_id,v.source_tree_id,v.slot_generation,v.uid,v.gid,hash(runnerCanonical(v))])).rows[0];
  if(!r)fail('RUNNER_REGISTRATION_CONFLICT','Runner cannot overwrite a different slot/process registry identity');
@@ -135,11 +169,47 @@ async function verifyEnvironment(tx:PrimaryTransaction,i:InvocationContext,v:Rec
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component> {
  await schema(ctx);
- const registry=Object.freeze({lookup:readRunnerBinding,verifyBinding:async(tx:PrimaryTransaction,v:Record<string,unknown>)=>{try{const r=await readRunnerBinding(tx,v as any);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}}});
+ const registry=Object.freeze({lookup:readRunnerBinding,lookupPreparation:readRunnerPreparationBinding,lookupSandbox:async(tx:PrimaryTransaction,v:{organisation_id:string;run_id:string;sandbox_id:string;boot_generation:string})=>{
+ const rows=(await tx.query("SELECT session_id FROM hyperfide.runner_registry WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id=$3 AND boot_generation=$4 AND state='CURRENT' ORDER BY session_id",[v.organisation_id,v.run_id,v.sandbox_id,v.boot_generation])).rows;
+ if(rows.length!==1)return null;return readRunnerBinding(tx,{organisation_id:v.organisation_id,run_id:v.run_id,session_id:rows[0]!.session_id});},
+verifyBinding:async(tx:PrimaryTransaction,v:Record<string,unknown>)=>{try{const r=await readRunnerBinding(tx,v as any);return {evidence_digest:r.observation_digest,observed_at:new Date(r.db_now).toISOString()};}catch{return null;}}});
  return {apiVersion:1,capabilities:{'runner.registry.v1':registry,'qualification.environment.v1':Object.freeze({verify:verifyEnvironment})},actions:{
   'runner.registry.observe':(v,context)=>identityTransaction(context,(tx,i)=>{if(!object(v))fail('INVALID_REQUEST','Object required');return observe(tx as PrimaryTransaction,v,i);}),
+  'runner.registry.prepare':(v,context)=>identityTransaction(context,async(tx,i)=>{
+   if(!object(v)||i.principal.role!=='RUNNER')fail('ROLE_DENIED','Actual bound runner preparation observation required');
+   exact(v,['session_id','slot_id','repository_id','state_dir','runner_binary','workspace_path','runner_binary_digest','preparation_digest','slot_generation','uid','gid','preparation_recipes']);
+   if(!uuid(v.session_id)||!uuid(v.slot_id)||!uuid(v.repository_id)||![v.state_dir,v.runner_binary,v.workspace_path].every(absolute)||![v.runner_binary_digest,v.preparation_digest].every(digest)||!decimal(v.slot_generation,true)||!Number.isSafeInteger(v.uid)||Number(v.uid)<=0||!Number.isSafeInteger(v.gid)||Number(v.gid)<=0||!object(v.preparation_recipes)||!Object.keys(v.preparation_recipes).length)fail('INVALID_REQUEST','Bound preparation registry identity required');
+   for(const [name,item] of Object.entries(v.preparation_recipes)){
+    if(!['environment.prepare.v1','checkpoint.restore.v1'].includes(name)||!object(item))fail('INVALID_REQUEST','Only release-owned preparation recipes are accepted');
+    exact(item,['node_path','node_digest','recipe_path','recipe_digest','native_path','native_digest','base_root','max_stage_bytes']);
+    if(!decimal(item.max_stage_bytes,true)||BigInt(item.max_stage_bytes)>68719476736n||![item.node_path,item.recipe_path,item.native_path,item.base_root].every(absolute)||![item.node_digest,item.recipe_digest,item.native_digest].every(digest))fail('INVALID_REQUEST','Pinned trusted recipe files required');
+   }
+   const policy=await approvedRecipePolicy(ctx,tx as PrimaryTransaction,i);if(runnerCanonical(policy.recipes)!==runnerCanonical(v.preparation_recipes))fail('RUNNER_RECIPE_POLICY_INVALID','RUNNER inventory cannot approve its own executable recipes');
+   const p=i.principal,inventory=(await tx.query('SELECT inventory FROM hyperfide.identity_runner_status WHERE credential_id=$1 FOR SHARE',[p.credential_id])).rows[0]?.inventory;
+   if(!Array.isArray(inventory)||!inventory.some(item=>runnerCanonical(item)===runnerCanonical(v)))fail('RUNNER_OBSERVATION_UNREGISTERED','Exact authenticated boot inventory required');
+   const base=(await tx.query(`SELECT s.preparation_digest,ep.content_digest FROM hyperfide.sandboxes s JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id JOIN hyperfide.environment_profiles ep ON ep.organisation_id=p.organisation_id AND ep.id=p.profile_id JOIN hyperfide.worker_slots w ON w.organisation_id=s.organisation_id AND w.sandbox_id=s.id AND w.boot_generation=s.boot_generation WHERE s.organisation_id=$1 AND s.id=$2 AND s.boot_generation=$3 AND w.id=$4 FOR SHARE OF s,p,ep,w`,[p.organisation_id,p.sandbox_id,p.boot_generation,v.slot_id])).rows[0];
+   if(!base||base.preparation_digest!==v.preparation_digest||base.content_digest!==v.preparation_digest)fail('RUNNER_PREPARATION_UNAVAILABLE','Current accepted parent profile required');
+   const result=await tx.query(`INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,state_dir,runner_binary,workspace_path,runner_binary_digest,boot_preparation_digest,preparation_digest,slot_generation,uid,gid,preparation_recipes,preparation_policy_digest,observation_digest,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14,$15,$16,$17,$18,$19,$20,'PREPARING') ON CONFLICT(organisation_id,run_id,session_id) DO NOTHING`,[p.organisation_id,p.run_id,v.session_id,p.credential_id,p.sandbox_id,p.boot_generation,p.boot_id,v.slot_id,v.repository_id,v.state_dir,v.runner_binary,v.workspace_path,v.runner_binary_digest,v.preparation_digest,v.slot_generation,v.uid,v.gid,JSON.stringify(v.preparation_recipes),policy.digest,hash(runnerCanonical(v))]);
+   const current=await readRunnerPreparationBinding(tx as PrimaryTransaction,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:v.session_id as string});
+   if(current.observation_digest!==hash(runnerCanonical(v)))fail('RUNNER_REGISTRATION_CONFLICT','Prepared boot identity cannot change');
+   return {registered:true,inserted:result.rowCount===1,runner_session_id:v.session_id,state:'PREPARING',ready:false,authority:'OBSERVATION_ONLY'};
+  }),
   'runner.registry.describe':async(_v,context)=>{const i=invocationOf(context);return {protocol_version:1,organisation_id:i.principal.organisation_id,run_id:i.principal.run_id,authority:'OBSERVATION_ONLY'};}
  }};
+}
+async function approvedRecipePolicy(ctx:ComponentContext,tx:PrimaryTransaction,i:InvocationContext):Promise<{digest:string;recipes:Record<string,any>}> {
+ const file=ctx.env.HF_RUNNER_PREPARATION_RECIPES_FILE,pin=ctx.env.HF_RUNNER_PREPARATION_RECIPES_DIGEST;
+ if(!absolute(file)||!digest(pin))fail('RUNNER_RECIPE_POLICY_REQUIRED','Independently pinned deployment recipe policy required');
+ let ancestor=path.dirname(file);
+ for(;;){const st=await fs.lstat(ancestor);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==(process.getuid?.()??0)||(st.mode&0o022)!==0)fail('RUNNER_RECIPE_POLICY_INVALID','Deployment policy ancestry must be protected');if(ancestor==='/')break;ancestor=path.dirname(ancestor);}
+ const fd=await fs.open(file,constants.O_RDONLY|constants.O_NOFOLLOW);let bytes:Buffer;
+ try{const before=await fd.stat();if(!before.isFile()||before.uid!==(process.getuid?.()??0)||(before.mode&0o077)!==0||before.nlink!==1||before.size>1048576)fail('RUNNER_RECIPE_POLICY_INVALID','Protected bounded policy descriptor required');bytes=await fd.readFile();const after=await fd.stat();if(before.dev!==after.dev||before.ino!==after.ino||before.size!==after.size||before.mtimeMs!==after.mtimeMs||hash(bytes)!==pin)fail('RUNNER_RECIPE_POLICY_INVALID','Policy bytes differ from trusted deployment pin');}finally{await fd.close();}
+ const parsed=strictJSON(bytes!);if(!object(parsed)||parsed.schema_version!==1||!Array.isArray(parsed.policies))fail('RUNNER_RECIPE_POLICY_INVALID','Deployment recipe policy required');
+ const p=i.principal,entries=parsed.policies.filter(v=>object(v)&&v.organisation_id===p.organisation_id&&v.run_id===p.run_id&&v.authority_epoch===p.deployment_epoch);
+ if(entries.length!==1||!object(entries[0])||!Array.isArray(entries[0].base_profiles)||!object(entries[0].recipes))fail('RUNNER_RECIPE_POLICY_INVALID','Unique current organisation/run authority policy required');
+ const item=entries[0],base=(await tx.query('SELECT p.profile_id,s.preparation_digest FROM hyperfide.sandboxes s JOIN hyperfide.provider_pools p ON p.organisation_id=s.organisation_id AND p.id=s.pool_id WHERE s.organisation_id=$1 AND s.id=$2 AND s.boot_generation=$3 FOR SHARE OF s,p',[p.organisation_id,p.sandbox_id,p.boot_generation])).rows[0];
+ if(!base||!(item.base_profiles as unknown[]).some((v:unknown)=>object(v)&&v.profile_id===base.profile_id&&v.preparation_digest===base.preparation_digest))fail('RUNNER_RECIPE_POLICY_INVALID','Actual parent pool profile is not approved by deployment policy');
+ return {digest:pin,recipes:item.recipes as Record<string,any>};
 }
 const permits=new WeakMap<object,{context:ComponentContext;plan:RunnerRemotePlan;binding:Binding;principal:Principal;invocation:InvocationContext;digest:string}>();
 function validatePlan(plan:RunnerRemotePlan):void {
@@ -210,7 +280,7 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
  await schema(ctx);const resources=ctx.dependencies.require('5.1','scheduler.allocations.v1',isResources),g=gatewayOf(ctx),store=ctx.dependencies.require('15.2','artifact.store.v1',isArtifactStoreCapability);
  const remote:RunnerRemote=Object.freeze({
   prepare:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerRemotePlan)=>{
-   assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);validatePlan(request);
+   assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);validatePlan(request);if(request.preparation!==undefined)fail('PREPARATION_CAPABILITY_REQUIRED','Use the dedicated guarded preparation primitive');
    const plan=structuredClone(request),p=i.principal;
    // An exact durable operation is inspectable after a disconnect without
    // readmitting or relaunching work, even if its original allocation expired.
@@ -226,7 +296,7 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
    const admitted=await resources.assertJobReservation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,task_id:allocation.task_id,job_kind:allocation.job_kind,reservation_id:plan.reservation_id});
    const reservation=(await tx.query('SELECT expires_at,clock_timestamp() AS db_now FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state=\'ALLOCATED\' FOR SHARE',[p.organisation_id,p.run_id,plan.reservation_id])).rows[0];
    if(!reservation||new Date(reservation.expires_at).getTime()<=new Date(reservation.db_now).getTime())fail('REMOTE_RESERVATION_EXPIRED','Current allocated reservation required');
-   const stableBinding=Object.fromEntries(['organisation_id','run_id','session_id','credential_id','sandbox_id','boot_id','boot_generation','slot_id','slot_generation','repository_id','launch_id','state_dir','runner_binary','runner_binary_digest','workspace_path','preparation_digest','readiness_digest','source_digest','source_object_id','source_tree_id','uid','gid','provider','pool_id','external_sandbox_id'].map(key=>[key,r[key]]));
+   const stableBinding=Object.fromEntries(['organisation_id','run_id','session_id','credential_id','sandbox_id','boot_id','boot_generation','slot_id','slot_generation','repository_id','launch_id','state_dir','runner_binary','runner_binary_digest','workspace_path','boot_preparation_digest','preparation_digest','readiness_digest','source_digest','source_object_id','source_tree_id','uid','gid','provider','pool_id','external_sandbox_id'].map(key=>[key,r[key]]));
    const stableAllocation=Object.fromEntries(['allocation_id','request_id','task_id','job_kind','reservation_id','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','generation'].map(key=>[key,allocation[key]]));
    const checkedReadiness=await readRunnerReadiness(tx,r);
    const packet=JSON.parse(JSON.stringify({request:plan,binding:stableBinding,allocation:stableAllocation,source_state_digest:checkedReadiness.source_state_digest,workspace_digest:checkedReadiness.workspace_digest})) as Record<string,unknown>;const pin=hash(runnerCanonical(packet));
@@ -252,16 +322,46 @@ export async function createRemoteComponent(ctx:ComponentContext):Promise<Compon
    }
   }
  });
- return {apiVersion:1,capabilities:{'runner.remote.v1':remote},actions:{
+ const preparation:RunnerPreparation=Object.freeze({
+  prepare:async(tx:PrimaryTransaction,i:InvocationContext,request:RunnerPreparationPlan)=>{
+   assertPrimaryTransaction(tx);assertInvocation(i);await i.guard(tx);
+   if(!object(request))fail('INVALID_PREPARATION_PLAN','Bound preparation object required');
+   exact(request,['operation_id','session_id','reservation_id','repository_id','timeout_ms','recipe_id','input_manifest_artifact_id','input_manifest_digest','source','staging']);
+   if(![request.operation_id,request.session_id,request.reservation_id,request.repository_id,request.input_manifest_artifact_id].every(uuid)||!digest(request.input_manifest_digest)||!['environment.prepare.v1','checkpoint.restore.v1'].includes(request.recipe_id)||!Number.isSafeInteger(request.timeout_ms)||request.timeout_ms<1||request.timeout_ms>259200000||!object(request.source)||!Array.isArray(request.staging)||request.staging.length>64)fail('INVALID_PREPARATION_PLAN','Exact bounded preparation identities required');
+   exact(request.source,['repository_key','source_object_id','source_tree_id','source_manifest_digest']);
+   if(typeof request.source.repository_key!=='string'||!request.source.repository_key.trim()||request.source.repository_key.length>128||![request.source.source_object_id,request.source.source_tree_id].every(x=>typeof x==='string'&&/^[a-f0-9]{40}([a-f0-9]{24})?$/.test(x))||!digest(request.source.source_manifest_digest))fail('INVALID_PREPARATION_PLAN','Accepted source envelope and exact Git facts required');
+   const roles=new Set<string>();for(const ref of request.staging){if(!object(ref)||typeof ref.role!=='string'||!ref.role||ref.role.length>128||roles.has(ref.role)||!uuid(ref.artifact_id)||!['object','manifest'].includes(ref.storage_kind)||!digest(ref.digest)||!decimal(ref.size_bytes)||BigInt(ref.size_bytes)>536870912n||ref.storage_kind==='manifest'&&!digest(ref.manifest_digest))fail('INVALID_PREPARATION_PLAN','Exact bounded immutable staging refs required');roles.add(ref.role);}
+   const p=i.principal,r=await readRunnerPreparationBinding(tx,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:request.session_id});
+   if(r.repository_id!==request.repository_id)fail('REMOTE_SOURCE_MISMATCH','Preparation repository differs from trusted slot');
+   const approved=await approvedRecipePolicy(ctx,tx,i);if(approved.digest!==r.preparation_policy_digest||runnerCanonical(approved.recipes)!==runnerCanonical(r.preparation_recipes))fail('RUNNER_RECIPE_POLICY_INVALID','Current independently approved policy differs from registered inventory');
+   const recipe=r.preparation_recipes[request.recipe_id];if(!object(recipe)||!digest(r.preparation_policy_digest)||recipe.native_path!==r.runner_binary||recipe.native_digest!==r.runner_binary_digest)fail('RUNNER_RECIPE_POLICY_REQUIRED','Independently approved native recipe binding required');
+   if(!decimal(recipe.max_stage_bytes,true)||request.staging.reduce((n,v)=>n+BigInt(v.size_bytes),0n)>BigInt(recipe.max_stage_bytes))fail('PREPARATION_STAGE_BUDGET_EXCEEDED','Declared stage exceeds independently approved recipe budget');
+   const allocation=await resources.readJobAllocation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,reservation_id:request.reservation_id});
+   if(!allocation||allocation.slot_id!==r.slot_id||allocation.sandbox_id!==r.sandbox_id||String(allocation.sandbox_boot_generation)!==r.boot_generation||allocation.assignee_session_id!==p.actor_id||allocation.job_kind!=='PREPARATION')fail('REMOTE_JOB_ASSIGNMENT_MISMATCH','Actual dedicated preparation reservation/slot/assignee required');
+   await resources.assertJobReservation(tx,{organisation_id:p.organisation_id,run_id:p.run_id,task_id:allocation.task_id,job_kind:'PREPARATION',reservation_id:request.reservation_id});
+   const environment={LANG:'C.UTF-8',LC_ALL:'C.UTF-8'},plan:RunnerRemotePlan={operation_id:request.operation_id,session_id:request.session_id,repository_id:request.repository_id,reservation_id:request.reservation_id,argv:[String(recipe.node_path),String(recipe.recipe_path),'--job-context','/run/hyperfide-stage/'+request.operation_id+'/context.json'],cwd:'.',environment,timeout_ms:request.timeout_ms,source_digest:request.source.source_manifest_digest,policy_digest:request.input_manifest_digest,executable_digest:String(recipe.node_digest),environment_digest:hash(runnerCanonical(environment)),artifact_paths:[],preparation:{recipe_id:request.recipe_id,input_manifest_artifact_id:request.input_manifest_artifact_id,input_manifest_digest:request.input_manifest_digest,source:structuredClone(request.source),staging:structuredClone(request.staging)}};
+   validatePlan(plan);
+   const prior=(await tx.query('SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE',[p.organisation_id,p.run_id,plan.operation_id])).rows[0];
+   if(prior){if(prior.job_class!=='PREPARATION'||runnerCanonical(prior.plan.request)!==runnerCanonical(plan)||prior.principal.actor_id!==p.actor_id||prior.authority_epoch!==p.deployment_epoch)fail('REMOTE_OPERATION_CONFLICT','Preparation identity or exact inputs changed');const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:prior.plan.binding as Binding,principal:p,invocation:i,digest:prior.plan_digest});return permit;}
+   const reservation=(await tx.query("SELECT expires_at,clock_timestamp() AS db_now FROM hyperfide.reservations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='ALLOCATED' FOR SHARE",[p.organisation_id,p.run_id,request.reservation_id])).rows[0];if(!reservation||new Date(reservation.expires_at).getTime()<=new Date(reservation.db_now).getTime())fail('REMOTE_RESERVATION_EXPIRED','Current preparation reservation required');
+   const binding=Object.fromEntries(['organisation_id','run_id','session_id','credential_id','sandbox_id','boot_id','boot_generation','slot_id','slot_generation','repository_id','launch_id','state_dir','runner_binary','runner_binary_digest','workspace_path','boot_preparation_digest','preparation_digest','preparation_recipes','preparation_policy_digest','uid','gid','provider','pool_id','external_sandbox_id'].map(k=>[k,r[k]])),pins=Object.fromEntries(['allocation_id','request_id','task_id','job_kind','reservation_id','slot_id','sandbox_id','sandbox_boot_generation','assignee_session_id','generation'].map(k=>[k,allocation[k]]));
+   const packet={job_class:'PREPARATION',request:plan,binding,allocation:pins},pin=hash(runnerCanonical(packet));
+   await tx.query("INSERT INTO hyperfide.runner_remote_jobs(organisation_id,run_id,operation_id,session_id,job_class,plan,plan_digest,principal,admission_digest,authority_epoch,reservation_id,expires_at) VALUES($1,$2,$3,$4,'PREPARATION',$5,$6,$7,$8,$9,$10,LEAST($11::timestamptz,$12::timestamptz))",[p.organisation_id,p.run_id,plan.operation_id,plan.session_id,JSON.stringify(packet),pin,JSON.stringify(p),hash(runnerCanonical(pins)),p.deployment_epoch,plan.reservation_id,reservation.expires_at,p.expires_at]);
+   const refs=[{role:'input-manifest',artifact_id:request.input_manifest_artifact_id,storage_kind:'object',digest:request.input_manifest_digest,size_bytes:null},...request.staging];
+   for(const ref of refs){const objectDigest=ref.storage_kind==='manifest'?(ref as RunnerStagingReference).manifest_digest!:ref.digest;const artifact=(await tx.query("SELECT digest,size_bytes FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND status='COMPLETE' FOR SHARE",[p.organisation_id,p.run_id,ref.artifact_id])).rows[0];if(!artifact||artifact.digest!==objectDigest||ref.storage_kind==='object'&&ref.size_bytes!==null&&String(artifact.size_bytes)!==ref.size_bytes)fail('PREPARATION_ARTIFACT_UNAVAILABLE','Actual scoped immutable COMPLETE inputs required');await tx.query('INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[p.organisation_id,p.run_id,plan.operation_id,'input:'+hash(ref.role).slice(7),ref.artifact_id,objectDigest,ref.digest,ref.size_bytes??String(artifact.size_bytes)]);}
+   const permit=Object.freeze({}) as RunnerRemotePermit;permits.set(permit,{context:ctx,plan,binding:r,principal:p,invocation:i,digest:pin});return permit;
+  },execute:remote.execute
+ });
+ return {apiVersion:1,capabilities:{'runner.remote.v1':remote,'runner.preparation.v1':preparation},actions:{
   'runner.job.claim':(v,context)=>identityTransaction(context,async(tx,i)=>{
    exact(v,['operation_id']);if(!uuid(v.operation_id)||i.principal.role!=='RUNNER')fail('ROLE_DENIED','Bound runner operation required');const p=i.principal;
    const row=(await tx.query('SELECT * FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3 FOR SHARE',[p.organisation_id,p.run_id,v.operation_id])).rows[0];
    if(!row||row.state!=='CLAIMED')fail('REMOTE_JOB_NOT_CLAIMED','Provisioner must claim the committed operation first');
-   const r=await readRunnerBinding(tx as PrimaryTransaction,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:row.session_id});
-   if(r.credential_id!==p.credential_id||r.boot_id!==p.boot_id||r.boot_generation!==p.boot_generation)fail('REMOTE_JOB_SCOPE_DENIED','Operation belongs to another authenticated runner boot');const checked=await readRunnerReadiness(tx as PrimaryTransaction,r);
+   const r=await (row.job_class==='PREPARATION'?readRunnerPreparationBinding:readRunnerBinding)(tx as PrimaryTransaction,{organisation_id:p.organisation_id,run_id:p.run_id,session_id:row.session_id});
+   if(r.credential_id!==p.credential_id||r.boot_id!==p.boot_id||r.boot_generation!==p.boot_generation)fail('REMOTE_JOB_SCOPE_DENIED','Operation belongs to another authenticated runner boot');const checked=row.job_class==='PREPARATION'?null:await readRunnerReadiness(tx as PrimaryTransaction,r);
    const clock=(await tx.query('SELECT clock_timestamp() AS db_now')).rows[0]!;const remaining_ms=Math.max(0,Math.floor(new Date(row.expires_at).getTime()-new Date(clock.db_now).getTime()));
    if(remaining_ms<=0)fail('REMOTE_RESERVATION_EXPIRED','Job admission expired');
-   return {operation_id:row.operation_id,plan_digest:row.plan_digest,plan:row.plan.request,binding:{...r,public_key_b64:undefined},allocation:row.plan.allocation,readiness:checked,remaining_ms,expires_at:new Date(row.expires_at).toISOString(),authority:'BOUNDED_JOB_ONLY'};
+   return {operation_id:row.operation_id,job_class:row.job_class,plan_digest:row.plan_digest,plan:row.plan.request,binding:{...r,public_key_b64:undefined},allocation:row.plan.allocation,readiness:checked,remaining_ms,expires_at:new Date(row.expires_at).toISOString(),authority:'BOUNDED_JOB_ONLY'};
   })
  }};
 }

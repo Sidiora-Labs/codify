@@ -1,0 +1,8 @@
+[component]
+schema_version = 1
+id = "12.3"
+source = "src/hyperfide/process_tree.c"
+entry = "hf_component_12_3"
+actions = ["process_tree.observe"]
+requires = ["12.2"]
+headers = ["src/hyperfide/supervisor.h"]
