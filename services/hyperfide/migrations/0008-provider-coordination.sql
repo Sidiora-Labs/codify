@@ -86,6 +86,7 @@ CREATE TABLE hyperfide.provider_observations (
  id uuid NOT NULL,
  intent_id uuid NOT NULL,
  operation_id text NOT NULL,
+ failure_applied_at timestamptz,
  payload_digest hyperfide.digest NOT NULL,
  observation jsonb NOT NULL CHECK(jsonb_typeof(observation)='object' AND octet_length(observation::text)<=1048576),
  observed_at timestamptz NOT NULL,
@@ -194,6 +195,7 @@ CREATE TABLE hyperfide.provider_prepared_bases (
  configuration_digest hyperfide.digest NOT NULL,
  provider_prepared_digest hyperfide.digest NOT NULL,
  provider_reference jsonb NOT NULL CHECK(jsonb_typeof(provider_reference)='object' AND octet_length(provider_reference::text)<=16384),
+ source_run_id uuid NOT NULL,
  source_sandbox_id uuid NOT NULL,
  source_boot_generation bigint NOT NULL CHECK(source_boot_generation>=1),
  manifest_artifact_digest hyperfide.digest NOT NULL,
@@ -208,6 +210,8 @@ CREATE TABLE hyperfide.provider_prepared_bases (
  UNIQUE(organisation_id,pool_id,profile_id,preparation_digest,provider_prepared_digest,configuration_digest),
  FOREIGN KEY(organisation_id,pool_id,configuration_digest) REFERENCES hyperfide.provider_pool_configurations(organisation_id,pool_id,configuration_digest),
  FOREIGN KEY(organisation_id,profile_id) REFERENCES hyperfide.environment_profiles(organisation_id,id),
+ FOREIGN KEY(organisation_id,source_run_id) REFERENCES hyperfide.runs(organisation_id,id),
+ FOREIGN KEY(organisation_id,source_run_id,manifest_artifact_digest) REFERENCES hyperfide.artifacts(organisation_id,run_id,digest),
  FOREIGN KEY(organisation_id,source_sandbox_id,source_boot_generation) REFERENCES hyperfide.sandbox_boots(organisation_id,sandbox_id,boot_generation)
 );
 CREATE INDEX provider_prepared_current ON hyperfide.provider_prepared_bases(organisation_id,pool_id,profile_id,preparation_digest,state,expires_at);
@@ -232,6 +236,9 @@ CREATE TABLE hyperfide.provider_remote_operations (
  request_digest hyperfide.digest NOT NULL,
  runner_binding_evidence_digest hyperfide.digest NOT NULL,
  operation jsonb NOT NULL CHECK(jsonb_typeof(operation)='object' AND octet_length(operation::text)<=1048576),
+ process_claimed boolean NOT NULL DEFAULT false,
+ native_process_ref text,
+ process_record jsonb CHECK(process_record IS NULL OR (jsonb_typeof(process_record)='object' AND octet_length(process_record::text)<=65536)),
  state text NOT NULL CHECK(state IN ('SUBMITTING','OBSERVED','UNKNOWN')),
  outcome jsonb,
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -302,3 +309,38 @@ BEGIN
  RETURN NEW;
 END $$;
 CREATE TRIGGER runtime_environment_immutable BEFORE UPDATE ON hyperfide.runtime_environment_observations FOR EACH ROW EXECUTE FUNCTION hyperfide.runtime_environment_immutable();
+
+
+CREATE FUNCTION hyperfide.provider_process_claim_immutable() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+BEGIN
+ IF OLD.native_process_ref IS NOT NULL AND NEW.native_process_ref IS DISTINCT FROM OLD.native_process_ref OR
+    OLD.process_claimed AND NOT NEW.process_claimed OR
+    OLD.process_record IS NOT NULL AND
+    (NEW.process_record IS NULL OR
+     (NEW.process_record-'state') IS DISTINCT FROM (OLD.process_record-'state')) THEN
+  RAISE EXCEPTION 'Provider process claim and identity cannot be reset';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER provider_process_claim_immutable BEFORE UPDATE ON hyperfide.provider_remote_operations FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_process_claim_immutable();
+
+
+CREATE TABLE hyperfide.provider_process_candidates (
+ organisation_id uuid NOT NULL,
+ remote_operation_id uuid NOT NULL,
+ native_process_ref text NOT NULL CHECK(length(native_process_ref) BETWEEN 1 AND 2048),
+ evidence_digest hyperfide.digest NOT NULL,
+ observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organisation_id,remote_operation_id,native_process_ref),
+ FOREIGN KEY(organisation_id,remote_operation_id) REFERENCES hyperfide.provider_remote_operations(organisation_id,id)
+);
+
+
+-- All remote work admission marks the physical boot irreversibly before SDK I/O.
+ALTER TABLE hyperfide.sandboxes ADD COLUMN work_admitted boolean NOT NULL DEFAULT false;
+CREATE FUNCTION hyperfide.provider_work_admission_immutable() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,hyperfide AS $$
+BEGIN
+ IF OLD.work_admitted AND NOT NEW.work_admitted THEN RAISE EXCEPTION 'Physical work admission cannot be reset'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER provider_work_admission_immutable BEFORE UPDATE ON hyperfide.sandboxes FOR EACH ROW EXECUTE FUNCTION hyperfide.provider_work_admission_immutable();
