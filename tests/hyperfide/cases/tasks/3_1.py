@@ -20,6 +20,10 @@ def check(identity,callback):
  print(json.dumps({"type":"assertion","id":identity,"expected":"observed","actual":actual}),flush=True)
 def apply_migration(f,name):
  data=(ROOT/"services/hyperfide/migrations"/(name+".sql")).read_bytes()
+ existing=f.sql("SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=$1",[int(name[:4])])
+ if existing:
+  expect(existing==[{"name":name,"checksum":sha(data)}],"Previously applied fixture migration differs from exact trusted stem/raw bytes")
+  return
  f.sql("BEGIN;"+data.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(int(name[:4]))+",'"+name+"','"+sha(data)+"');COMMIT;")
 class HierarchyFixture(IdentityFixture):
  def __init__(self,extra_components=(),extra_setup=None,bootstrap=True,extra_env=None,seed_historical_runtime=True,source_object_id=None):
