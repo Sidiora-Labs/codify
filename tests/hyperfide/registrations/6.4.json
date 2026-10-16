@@ -47,6 +47,11 @@
       "scope": "task6.4-disposable"
     },
     {
+      "id": "hf-task-6.4-role",
+      "kind": "postgresql-role",
+      "scope": "task6.4-disposable"
+    },
+    {
       "id": "hf-task-6.4-process",
       "kind": "local-https-service",
       "scope": "task6.4-disposable"
