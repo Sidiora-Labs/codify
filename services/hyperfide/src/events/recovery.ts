@@ -40,17 +40,23 @@ export async function recoverySnapshot(tx:PrimaryTransaction,input:unknown):Prom
     FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2
       AND operation IN('event.aggregate','instruction.spool','instruction.runner-state')
     ORDER BY operation,principal_scope,idempotency_key LIMIT $3`,[s.organisation_id,s.run_id,limit+1]);
+  const nativeConsumers=await tx.query(`SELECT b.consumer_id,b.sandbox_id,b.boot_id,b.boot_generation,b.bootstrap_receipt_id,
+    c.state,c.state_version FROM hyperfide.event_runner_bindings b JOIN hyperfide.event_consumers c
+      ON(c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.id=b.consumer_id)
+    WHERE b.organisation_id=$1 AND b.run_id=$2 ORDER BY b.sandbox_id,b.boot_generation LIMIT $3`,[s.organisation_id,s.run_id,limit+1]);
   const counts=await tx.query(`SELECT
     (SELECT count(*)::text FROM hyperfide.event_deliveries WHERE organisation_id=$1 AND run_id=$2 AND state<>'ACKNOWLEDGED') AS pending_deliveries,
     (SELECT count(*)::text FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2
-      AND operation IN('event.aggregate','instruction.spool','instruction.runner-state')) AS cursor_and_instruction_records`,[s.organisation_id,s.run_id]);
+      AND operation IN('event.aggregate','instruction.spool','instruction.runner-state')) AS cursor_and_instruction_records,
+    (SELECT count(*)::text FROM hyperfide.event_runner_bindings WHERE organisation_id=$1 AND run_id=$2) AS runner_consumers`,[s.organisation_id,s.run_id]);
   return {source:'primary-transaction',scope:s,counts:counts.rows[0],
+    runner_consumers:nativeConsumers.rows.slice(0,limit),
     pending_deliveries:deliveries.rows.slice(0,limit).map(row=>({...row,next_attempt_at:row.next_attempt_at instanceof Date?row.next_attempt_at.toISOString():null})),
     cursor_and_instruction_records:cursors.rows.slice(0,limit).map(row=>({...row,
       result_reference:{inbox_id:row.id,request_digest:row.request_digest,state_version:row.state_version},
       result_payload_included:false})),
     record_projection:'bounded-metadata-with-retained-inbox-reference',
-    truncated:{pending_deliveries:deliveries.rows.length>limit,cursor_and_instruction_records:cursors.rows.length>limit},
+    truncated:{pending_deliveries:deliveries.rows.length>limit,cursor_and_instruction_records:cursors.rows.length>limit,runner_consumers:nativeConsumers.rows.length>limit},
     task_completion_authority:false};
 }
 export interface DispatchConfig extends Scope { consumer_id:string; batch_size:number; lease_ms:number; poll_ms:number; retry_ms:number }
