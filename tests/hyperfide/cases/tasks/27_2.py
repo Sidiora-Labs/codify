@@ -13,6 +13,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "tests/hyperfide/campaigns"))
 import deterministic as d
+EPOCH1="11111111-1111-4111-8111-111111111111"
+EPOCH2="22222222-2222-4222-8222-222222222222"
+DEPLOYMENT="33333333-3333-4333-8333-333333333333"
+ACTIVATION="44444444-4444-4444-8444-444444444444"
 IDS, FAILED = [], []
 
 def check(identity, function):
@@ -42,7 +46,7 @@ def pin(path):
 def trace():
     events = []
     def event(kind, accepted=True, **fields):
-        events.append({"sequence": len(events) + 1, "virtual_ms": len(events), "kind": kind, "operation_id": "op" + str(len(events)), "epoch": 1, "accepted": accepted, **fields})
+        events.append({"sequence": len(events) + 1, "virtual_ms": len(events), "kind": kind, "operation_id": "op" + str(len(events)), "epoch": EPOCH1, "accepted": accepted, **fields})
     for number in range(100):
         op = "op" + str(len(events))
         event("create_intent")
@@ -60,16 +64,24 @@ def trace():
     return events
 
 def model(events, sandboxes=100, slots=200):
-    value = d.Reference(sandboxes, slots)
+    value = d.Reference(sandboxes, slots, EPOCH1, DEPLOYMENT)
     for event in events:
         value.apply(event)
     return value
 
 def small(kind, accepted=True, sequence=1, **fields):
-    return {"sequence": sequence, "virtual_ms": sequence, "kind": kind, "operation_id": "small" + str(sequence), "epoch": 1, "accepted": accepted, **fields}
+    return {"sequence": sequence, "virtual_ms": sequence, "kind": kind, "operation_id": "small" + str(sequence), "epoch": EPOCH1, "accepted": accepted, **fields}
+
+def activation(sequence=1):
+    receipt={'deployment_id':DEPLOYMENT,'operation_id':ACTIVATION,'source_epoch':EPOCH1,'fence_id':'component-real-contract-fence','isolated_writer':'component-previous-writer','observed_at':'2026-10-16T12:00:00Z','expires_at':'2026-10-16T12:00:30Z','evidence_digest':'sha256:'+'c'*64}
+    raw=json.dumps(receipt,ensure_ascii=False,separators=(',',':'))
+    request={'deployment_id':DEPLOYMENT,'operation_id':ACTIVATION,'expected_previous_epoch':EPOCH1}
+    request_digest='sha256:'+d.digest(json.dumps(request,ensure_ascii=False,separators=(',',':')).encode())
+    proof={'activation':{'operation_id':ACTIVATION,'deployment_id':DEPLOYMENT,'epoch':EPOCH2,'request_digest':request_digest,'accepted_at':'2026-10-16T12:00:01Z'},'authority_epoch':{'deployment_id':DEPLOYMENT,'epoch':EPOCH2,'previous_epoch':EPOCH1,'state':'ACTIVE','fence_id':receipt['fence_id'],'proof_digest':'sha256:'+d.digest(raw.encode()),'activated_at':'2026-10-16T12:00:01Z'},'previous_authority_epoch':{'deployment_id':DEPLOYMENT,'epoch':EPOCH1,'state':'REVOKED'},'fencer_receipt_json':raw}
+    return small('epoch',True,sequence,operation_id=ACTIVATION,new_epoch=EPOCH2,activation_proof=proof)
 
 def run():
-    check("campaign.deterministic.exact1500-reference", lambda: d.reconstruct(trace(), {"sandboxes": 100, "slots": 200})["session_lifetimes"] == 1500)
+    check("campaign.deterministic.exact1500-reference", lambda: d.reconstruct(trace(), {"sandboxes": 100, "slots": 200, "initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT})["session_lifetimes"] == 1500)
     state = model(trace()).state()
     check("campaign.deterministic.200-simultaneous", lambda: state["peak_slots"] == 200)
     check("campaign.deterministic.72-virtual-hours", lambda: state["virtual_elapsed_ms"] == 72 * 3600000)
@@ -100,7 +112,7 @@ def run():
     check("campaign.deterministic.git-cas-lost-ack", lambda: model(publication).publications == {"refs/heads/main": revision})
     unsigned = copy.deepcopy(publication[:4]);unsigned[-1]["gateway_authorised"] = False
     check("campaign.deterministic.worker-push-rejected", lambda: reject(lambda: model(unsigned)))
-    restored = publication[:3] + [small("epoch", True, 4, new_epoch=2), small("publish", False, 5, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True)]
+    restored = publication[:3] + [activation(4), small("publish", False, 5, task_id="task", revision=revision, ref="refs/heads/main", expected_head=None, gateway_authorised=True)]
     check("campaign.deterministic.restore-fences-old-proof", lambda: not model(restored).publications)
     custody_claim = small("claim", False, 3, task_id="task", attempt_id="new", slot_id="new", generation=2)
     check("campaign.deterministic.submission-retains-custody", lambda: bool(model(publication[:2]+[custody_claim]).state()["custody"]))
@@ -110,17 +122,27 @@ def run():
     reclaim=small("claim",True,4,task_id="task",attempt_id="new",slot_id="new",generation=2)
     check("campaign.deterministic.custody-expiry-releases-task",lambda:model(publication[:2]+[release,reclaim]).owners["task"][0]=="new")
     old_effect=small("effect",False,2,effect_key="stale")
-    check("campaign.deterministic.restore-rejects-old-effects",lambda:not model([small("epoch",True,new_epoch=2),old_effect]).effects)
-    fresh_claim=small("claim",True,3,task_id="task",attempt_id="fresh",slot_id="fresh",generation=1);fresh_claim["epoch"]=2
-    check("campaign.deterministic.restore-resets-epoch-generations",lambda:model([claim,small("epoch",True,2,new_epoch=2),fresh_claim]).owners["task"][0]=="fresh")
-    prior_effect=small("effect",True,effect_key="external");replay=small("effect",False,3,effect_key="external");replay["epoch"]=2
-    check("campaign.deterministic.restore-preserves-effect-idempotency",lambda:model([prior_effect,small("epoch",True,2,new_epoch=2),replay]).effects=={"external"})
+    check("campaign.deterministic.restore-rejects-old-effects",lambda:not model([activation(),old_effect]).effects)
+    fresh_claim=small("claim",True,3,task_id="task",attempt_id="fresh",slot_id="fresh",generation=1);fresh_claim["epoch"]=EPOCH2
+    check("campaign.deterministic.restore-resets-epoch-generations",lambda:model([claim,activation(2),fresh_claim]).owners["task"][0]=="fresh")
+    prior_effect=small("effect",True,effect_key="external");replay=small("effect",False,3,effect_key="external");replay["epoch"]=EPOCH2
+    check("campaign.deterministic.restore-preserves-effect-idempotency",lambda:model([prior_effect,activation(2),replay]).effects=={"external"})
+    fresh=small('epoch',True,new_epoch=EPOCH2)
+    check('campaign.deterministic.fresh-uuid-is-not-authority',lambda:reject(lambda:model([fresh])))
+    predecessor=activation();predecessor['activation_proof']['authority_epoch']['previous_epoch']='55555555-5555-4555-8555-555555555555'
+    check('campaign.deterministic.activation-predecessor-cas',lambda:reject(lambda:model([predecessor])))
+    wrong_digest=activation();wrong_digest['activation_proof']['activation']['request_digest']='sha256:'+'f'*64
+    check('campaign.deterministic.actual-activation-request-digest',lambda:reject(lambda:model([wrong_digest])))
+    boolean_writer=activation();proof=boolean_writer['activation_proof'];receipt=json.loads(proof['fencer_receipt_json']);receipt['isolated_writer']=True;proof['fencer_receipt_json']=json.dumps(receipt,separators=(',',':'));proof['authority_epoch']['proof_digest']='sha256:'+d.digest(proof['fencer_receipt_json'].encode())
+    check('campaign.deterministic.fenced-writer-is-identity-not-boolean',lambda:reject(lambda:model([boolean_writer])))
+    replay_epoch=small('epoch',False,2,epoch=EPOCH2,new_epoch=EPOCH1)
+    check('campaign.deterministic.superseded-uuid-cannot-return',lambda:model([activation(),replay_epoch]).epoch==EPOCH2)
     reversed_events = copy.deepcopy(trace()[:2]);reversed_events[1]["sequence"] = 1
     check("campaign.deterministic.reordered-observations", lambda: reject(lambda: model(reversed_events)))
     check("campaign.deterministic.unknown-event", lambda: reject(lambda: model([small("invented", False)])))
     check("campaign.deterministic.duplicate-json-rejected", lambda: reject(lambda: d.decode('{"same":1,"same":2}')))
     check("campaign.deterministic.nonfinite-json-rejected", lambda: reject(lambda: d.decode('{"x":NaN}')))
-    profile = {"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72}
+    profile = {"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT}
     commands = d.schedule(profile, 17)
     check("campaign.deterministic.seeded-schedule", lambda: commands == d.schedule(profile, 17) and commands != d.schedule(profile, 19))
     check("campaign.deterministic.schedule-workload-count", lambda: len([row for row in commands if row["operation"] == "session"]) == 1500)
@@ -191,10 +213,15 @@ def run():
             def interrupt(process,*args,**kwargs):
                 if first[0]:
                     first[0]=False
-                    try:
-                        kwargs["timeout"]=0.2
-                        original(process,*args,**kwargs)
+                    import time
+                    kwargs["timeout"]=0.2
+                    try:original(process,*args,**kwargs)
                     except d.subprocess.TimeoutExpired:pass
+                    deadline=time.monotonic()+4
+                    while not pid_file.is_file() and time.monotonic()<deadline:
+                        try:original(process,timeout=0.1)
+                        except d.subprocess.TimeoutExpired:pass
+                    if not pid_file.is_file():raise AssertionError("real detached child did not acknowledge startup before interruption")
                     raise KeyboardInterrupt("actual component interrupt after Popen")
                 return original(process,*args,**kwargs)
             with patch.object(d.subprocess.Popen,"communicate",interrupt):
@@ -211,6 +238,36 @@ def run():
             unknown=list((root/"interrupted").glob("*/unknown.json"))
             return rejected and not executing and len(unknown)==1 and json.loads(unknown[0].read_text())["cause"]=="KeyboardInterrupt" and json.loads(unknown[0].read_text())["owned_process_cleanup"]["complete"]
         check("campaign.deterministic.interrupted-detached-child",interrupted)
+        def constructor_interrupt():
+            import time
+            from unittest.mock import patch
+            real=d.subprocess.Popen
+            held=[]
+            def launch_then_interrupt(*args,**kwargs):
+                process=real(*args,**kwargs);held.append((process,d.process_identity(process.pid)))
+                time.sleep(0.05)
+                raise KeyboardInterrupt('after actual child spawn, before constructor return')
+            try:
+                with patch.object(d.subprocess,'Popen',launch_then_interrupt):
+                    rejected=reject(lambda:adapter('constructor-interrupt').call({'mode':'ok'}),d.Blocked)
+                process,identity=held[0];after=d.process_identity(process.pid)
+                unknown=list((root/'constructor-interrupt').glob('*/unknown.json'))
+                outcome=list((root/'constructor-interrupt').glob('*/outcome.json'))
+                record=json.loads(unknown[0].read_text())
+                return rejected and len(unknown)==1 and json.loads(outcome[0].read_text())['status']=='UNKNOWN' and record['owned_process_cleanup']['complete'] and after is None and any(row['pid']==process.pid and row['start_ticks']==identity[0]for row in record['owned_process_cleanup']['owned_processes_observed'])
+            finally:
+                for process,identity in held:
+                    for stream in (process.stdin,process.stdout,process.stderr):
+                        if stream:stream.close()
+        check('campaign.deterministic.constructor-interruption-is-unknown',constructor_interrupt)
+        def definite_spawn_failure():
+            missing_cwd=root/'removed-cwd';missing_cwd.mkdir()
+            selected={**spec,'cwd':str(missing_cwd)}
+            call=adapter('definite-spawn-failure',selected);missing_cwd.rmdir()
+            rejected=reject(lambda:call.call({'mode':'ok'}))
+            outcomes=list((root/'definite-spawn-failure').glob('*/outcome.json'))
+            return rejected and len(outcomes)==1 and json.loads(outcomes[0].read_text())['status']=='FAILED_BEFORE_EXEC' and not list((root/'definite-spawn-failure').glob('*/unknown.json'))
+        check('campaign.deterministic.definite-preexec-failure',definite_spawn_failure)
         unpinned = {**spec,"pins":[pin(fixture)]}
         check("campaign.deterministic.unpinned-executable", lambda: reject(lambda: adapter("unpinned", unpinned)))
     with tempfile.TemporaryDirectory(prefix="hyperfide-manifest-component-") as temporary:
@@ -220,7 +277,7 @@ def run():
         repositories = [{"repository_id":"00000000-0000-0000-0000-000000000001", "candidate_head":"a"*40, "input_manifest_digest":"sha256:"+"b"*64}]
         source = folder / "source-set.json"
         source.write_bytes(d.canonical(repositories))
-        value = {"schema_version":1, "campaign_id":"component-input-validation", "kind":"deterministic", "source_revision":"a"*40, "source_manifest_digest":"sha256:"+d.digest(d.canonical(repositories)), "approval":{"approved":True,"kind":"deterministic"}, "profile":{"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72}, "inputs":{"planning":[pin(corpus)],"graph":[pin(corpus)],"source_manifest":[pin(source)]},"adapters":{},"seeds":[17,19]}
+        value = {"schema_version":1, "campaign_id":"component-input-validation", "kind":"deterministic", "source_revision":"a"*40, "source_manifest_digest":"sha256:"+d.digest(d.canonical(repositories)), "approval":{"approved":True,"kind":"deterministic"}, "profile":{"sandboxes":100,"slots":200,"session_lifetimes":1500,"virtual_hours":72,"initial_authority_epoch":EPOCH1,"deployment_id":DEPLOYMENT}, "inputs":{"planning":[pin(corpus)],"graph":[pin(corpus)],"source_manifest":[pin(source)]},"adapters":{},"seeds":[17,19]}
         manifest_path = folder / "profile.json"
         def load(candidate):
             manifest_path.write_text(json.dumps(candidate))

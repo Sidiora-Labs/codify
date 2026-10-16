@@ -64,6 +64,10 @@ def integer(value, name, minimum=1):
     require(type(value) is int and value >= minimum, name + " must be an integer >= " + str(minimum))
     return value
 
+def authority_uuid(value, name='authority epoch'):
+    require(isinstance(value,str) and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',value),name+' must be an exact canonical UUID')
+    return value
+
 def sealed_write(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +118,9 @@ def load_manifest(path, kind):
     for name, value in (("sandboxes", 100), ("slots", 200), ("session_lifetimes", 1500)):
         integer(profile.get(name), name)
         require(profile[name] >= value, "large-run profile below declared " + name)
+    if kind in {"deterministic", "faults"}:
+        authority_uuid(profile.get("initial_authority_epoch"))
+        authority_uuid(profile.get("deployment_id"), "deployment identity")
     integer(profile.get("virtual_hours"), "virtual_hours")
     require(profile["virtual_hours"] >= 72, "72 virtual hours required")
     require(isinstance(manifest["inputs"], dict) and {"planning", "graph"} <= set(manifest["inputs"]), "approved planning and graph inputs required")
@@ -153,8 +160,9 @@ def observer_trust(manifest, root):
     require(trust['observer_id']!=trust['controller_id'],'controller cannot be its own independent observer')
     scope=trust['scope']
     require(isinstance(scope,dict) and set(scope)=={'organisation_id','run_id','authority_epoch'},'exact trusted observer scope required')
-    require(all(isinstance(scope[key],str) and scope[key] for key in ('organisation_id','run_id')),'trusted organisation/run identities required')
-    integer(scope['authority_epoch'],'trusted observer authority epoch')
+    for key in ('organisation_id','run_id'):
+        authority_uuid(scope[key],'trusted '+key)
+    authority_uuid(scope['authority_epoch'],'trusted observer authority epoch')
     allowed={'DURABLE_READER','PROVIDER_READER','NATIVE_READER','MAIN_HOST_AUDITOR'}
     require(isinstance(trust['roles'],list) and trust['roles']==sorted(set(trust['roles'])) and set(trust['roles'])<=allowed,'approved independent reader roles required')
     _,key=pinned_file(trust['public_key'],root)
@@ -163,7 +171,7 @@ def observer_trust(manifest, root):
     require(executable.is_absolute() and os.access(executable,os.X_OK),'pinned crypto verifier executable required')
     return trust
 
-def verify_observation(observation, manifest, root, request, roles):
+def verify_observation(observation, manifest, root, request, roles, authority_epoch=None):
     """Signature grants no authority: approved identities/roles/scope are the anchor."""
     import tempfile
     trust=observer_trust(manifest,root)
@@ -173,7 +181,10 @@ def verify_observation(observation, manifest, root, request, roles):
     fields={'reader_id','key_id','scope','roles','source_revision','source_manifest_digest','request_sha256','observation_sha256','signature_hex'}
     require(isinstance(proof,dict) and set(proof)==fields,'immutable signed read provenance required')
     require(proof['reader_id']==trust['observer_id'] and proof['key_id']==trust['key_id'],'unapproved independent observer identity/key')
-    require(proof['scope']==trust['scope'] and proof['roles']==trust['roles'],'independent observer scope/roles mismatch')
+    expected_scope = dict(trust['scope'])
+    if authority_epoch is not None:
+        expected_scope['authority_epoch'] = authority_uuid(authority_epoch)
+    require(proof['scope']==expected_scope and proof['roles']==trust['roles'],'independent observer scope/roles mismatch')
     require(proof['source_revision']==manifest['source_revision'] and proof['source_manifest_digest']==manifest['source_manifest_digest'],'signed observer source mismatch')
     require(proof['request_sha256']==digest(canonical(request)+b'\n'),'signed observation is not bound to this exact campaign request')
     unsigned={key:value for key,value in observation.items()if key!='provenance'}
@@ -211,12 +222,19 @@ def verify_full_receipt(pin, manifest, root, evidence=None, policy=None):
     require(result.returncode==0,'canonical independent checker rejected full receipt')
     return receipt
 
-def anchored_full_receipt(record, manifest, root, input_name, evidence=None, policy=None):
+def require_case_coverage(receipt, required_cases):
+    cases=receipt.get("selected_case_ids")
+    require(isinstance(cases,list) and set(required_cases)<=set(cases),"full receipt does not cover required case obligations")
+    return True
+
+def anchored_full_receipt(record, manifest, root, input_name, evidence=None, policy=None, required_cases=None):
     anchors=manifest['inputs'].get(input_name)
     require(isinstance(anchors,list) and anchors,'externally approved full receipt anchors absent: '+input_name)
     require(isinstance(record,dict) and set(record)=={'pin','trusted_anchor_sha256'},'exact externally anchored full receipt required')
     require(record['pin'] in anchors and record['trusted_anchor_sha256']==record['pin']['sha256'],'receipt is not an approved full receipt anchor')
-    return verify_full_receipt(record['pin'],manifest,root,evidence,policy)
+    receipt=verify_full_receipt(record['pin'],manifest,root,evidence,policy)
+    require_case_coverage(receipt,required_cases or set())
+    return receipt
 
 def child_pids():
     return {int(value) for value in Path('/proc/self/task/' + str(os.getpid()) + '/children').read_text().split()}
@@ -310,6 +328,7 @@ class CommandAdapter:
         started = time.monotonic_ns()
         timed_out, stdout, stderr, child, unknown_reason = False, b'', b'', None, None
         caught = None
+        definite_preexec = False
         try:
             child = subprocess.Popen(self.spec['argv'], cwd=self.spec['cwd'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
             stdout, stderr = child.communicate(body, timeout=self.spec['timeout_seconds'])
@@ -319,9 +338,9 @@ class CommandAdapter:
             caught = exc
         except BaseException as exc:
             caught = exc
-            unknown_reason = type(exc).__name__ if child is not None else None
-            if child is None:
-                sealed_write(directory / 'outcome.json', {'operation_id': operation, 'status': 'FAILED_BEFORE_EXEC', 'error_type': type(exc).__name__, 'at': utc()})
+            import errno
+            definite_preexec = child is None and isinstance(exc, OSError) and exc.errno in {errno.ENOENT, errno.ENOTDIR, errno.EACCES, errno.ENOEXEC}
+            unknown_reason = None if definite_preexec else type(exc).__name__
         finally:
             if child is not None and unknown_reason:
                 try:
@@ -331,6 +350,14 @@ class CommandAdapter:
             cleanup = reap_owned_children(original)
             sealed_write(directory / 'process-cleanup.json', cleanup)
         if child is None:
+            # Popen can be interrupted after fork/exec before returning its object.
+            # An observed child overrides even a nominal spawn error classification.
+            uncertain = not definite_preexec or bool(cleanup['owned_processes_observed']) or not cleanup['complete']
+            status = 'UNKNOWN' if uncertain else 'FAILED_BEFORE_EXEC'
+            sealed_write(directory / 'outcome.json', {'operation_id': operation, 'status': status, 'error_type': type(caught).__name__, 'owned_process_cleanup': cleanup, 'at': utc()})
+            if uncertain:
+                sealed_write(directory / 'unknown.json', {'operation_id': operation, 'status': 'UNKNOWN', 'cause': type(caught).__name__, 'reason': 'Spawn may have executed; reconcile before retry', 'owned_process_cleanup': cleanup, 'at': utc()})
+                raise Blocked('adapter spawn outcome UNKNOWN; reconcile operation ' + operation + ' before retry') from caught
             raise CampaignError('Adapter could not execute; operation ' + operation) from caught
         for observed in cleanup['reaped_exit_codes']:
             if observed['pid'] == child.pid:
@@ -361,11 +388,44 @@ class CommandAdapter:
         require(result.get('request_sha256') == digest(body), 'adapter observation does not bind exact request')
         return result, receipt
 
+def validate_activation(proof, previous_epoch, new_epoch, deployment_id, operation_id):
+    """Validate actual04 record/CAS bindings, not a claimed physical isolation.
+
+    Full physical fence proof remains a required anchored recovery-case obligation.
+    The exact receipt JSON bytes come from the independent external journal:04's
+    current proof digest is insertion-ordered JSON.stringify, not sorted JSON.
+    """
+    require(isinstance(proof,dict) and set(proof)=={'activation','authority_epoch','previous_authority_epoch','fencer_receipt_json'},'actual authority activation proof records required')
+    activation,authority,previous=(proof[key] for key in ('activation','authority_epoch','previous_authority_epoch'))
+    require(all(isinstance(row,dict)for row in (activation,authority,previous)),'actual authority rows required')
+    authority_uuid(operation_id,'activation operation identity')
+    require(activation.get('operation_id')==operation_id and activation.get('deployment_id')==deployment_id and activation.get('epoch')==new_epoch,'activation operation/deployment/epoch mismatch')
+    request={'deployment_id':deployment_id,'operation_id':operation_id,'expected_previous_epoch':previous_epoch}
+    raw_request=json.dumps(request,ensure_ascii=False,separators=(',',':'),allow_nan=False).encode()
+    require(activation.get('request_digest')=='sha256:'+digest(raw_request),'activation request predecessor/CAS digest mismatch')
+    require(authority.get('deployment_id')==deployment_id and authority.get('epoch')==new_epoch and authority.get('previous_epoch')==previous_epoch and authority.get('state')=='ACTIVE','accepted authority successor/predecessor state mismatch')
+    require(previous.get('deployment_id')==deployment_id and previous.get('epoch')==previous_epoch and previous.get('state')=='REVOKED','previous writer authority was not durably superseded')
+    raw=proof['fencer_receipt_json']
+    require(isinstance(raw,str) and 0<len(raw.encode())<=32768,'bounded exact external-journal fencer receipt bytes required')
+    require(authority.get('proof_digest')=='sha256:'+digest(raw.encode()),'authority proof digest differs from exact bound fencer receipt')
+    receipt=decode(raw)
+    require(isinstance(receipt,dict) and receipt.get('deployment_id')==deployment_id and receipt.get('operation_id')==operation_id and receipt.get('source_epoch')==previous_epoch,'external fence receipt scope/operation/source epoch mismatch')
+    require(isinstance(receipt.get('fence_id'),str) and receipt['fence_id'] and receipt['fence_id']==authority.get('fence_id'),'authority fence identity mismatch')
+    require(isinstance(receipt.get('isolated_writer'),str) and receipt['isolated_writer'],'isolated_writer must identify the actual fenced writer')
+    require(isinstance(receipt.get('evidence_digest'),str) and re.fullmatch('sha256:[0-9a-f]{64}',receipt['evidence_digest']),'external physical fence evidence reference required')
+    observed,expires=timestamp(receipt.get('observed_at')),timestamp(receipt.get('expires_at'))
+    accepted,activated=timestamp(activation.get('accepted_at')),timestamp(authority.get('activated_at'))
+    require(0<(expires-observed).total_seconds()<=30 and observed<=activated<=accepted<=expires,'accepted activation is outside the bounded actual fence receipt lifetime')
+    return True
+
 class Reference:
     """Reference semantics use attempted events, never the reported accepted flag."""
-    def __init__(self, sandboxes=100, slots=200):
+    def __init__(self, sandboxes=100, slots=200, initial_epoch=None, deployment_id=None):
         self.limit, self.sandbox_limit = slots, sandboxes
-        self.epoch, self.owners, self.slots, self.generations = 1, {}, {}, {}
+        self.epoch = authority_uuid(initial_epoch)
+        self.deployment_id = authority_uuid(deployment_id, "deployment identity")
+        self.seen_epochs = {self.epoch}
+        self.owners, self.slots, self.generations = {}, {}, {}
         self.resources, self.intents, self.publications, self.effects = set(), set(), {}, set()
         self.pending_creates, self.observed_creates, self.attempts, self.faults = set(), {}, set(), set()
         self.submitted, self.qualified, self.custody_generations = {}, set(), {}
@@ -428,10 +488,13 @@ class Reference:
                 self.submitted.pop(task)
                 self.qualified.discard((task, revision))
         elif kind == "epoch":
-            epoch = integer(event.get("new_epoch"), "restore epoch")
-            accepted = epoch > self.epoch
+            epoch = authority_uuid(event.get("new_epoch"), "restore epoch")
+            accepted = event.get("epoch") == self.epoch and epoch not in self.seen_epochs and event.get("activation_proof") is not None
+            if accepted:
+                validate_activation(event["activation_proof"], self.epoch, epoch, self.deployment_id, op)
             if accepted:
                 self.epoch = epoch
+                self.seen_epochs.add(epoch)
                 self.owners.clear()
                 self.slots.clear()
                 # A restore requires fresh evidence/custody, not rewound qualification.
@@ -485,7 +548,7 @@ class Reference:
 
 def reconstruct(events, profile):
     require(isinstance(events, list) and events, "nonempty independently observed event stream required")
-    reference = Reference(profile["sandboxes"], profile["slots"])
+    reference = Reference(profile["sandboxes"], profile["slots"], profile.get("initial_authority_epoch"), profile.get("deployment_id"))
     for event in events:
         reference.apply(event)
     return reference.state()

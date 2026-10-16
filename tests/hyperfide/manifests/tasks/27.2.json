@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-2-v2",
+  "campaign_id": "hyperfide-driver-component-27-2-v3",
   "case_ids": [
     "V-024",
     "V-047",
@@ -33,6 +33,11 @@
     "campaign.deterministic.restore-rejects-old-effects",
     "campaign.deterministic.restore-resets-epoch-generations",
     "campaign.deterministic.restore-preserves-effect-idempotency",
+    "campaign.deterministic.fresh-uuid-is-not-authority",
+    "campaign.deterministic.activation-predecessor-cas",
+    "campaign.deterministic.actual-activation-request-digest",
+    "campaign.deterministic.fenced-writer-is-identity-not-boolean",
+    "campaign.deterministic.superseded-uuid-cannot-return",
     "campaign.deterministic.reordered-observations",
     "campaign.deterministic.unknown-event",
     "campaign.deterministic.duplicate-json-rejected",
@@ -57,6 +62,8 @@
     "campaign.deterministic.normal-exit-detached-child",
     "campaign.deterministic.timeout-detached-child",
     "campaign.deterministic.interrupted-detached-child",
+    "campaign.deterministic.constructor-interruption-is-unknown",
+    "campaign.deterministic.definite-preexec-failure",
     "campaign.deterministic.unpinned-executable",
     "campaign.deterministic.pinned-source-manifest",
     "campaign.deterministic.unapproved-manifest",
@@ -88,13 +95,13 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "f45deed3643f1e74b542e480666049c5d68627679cfe64e8e5ac7e6ff7eefcee",
-      "size": 38730
+      "sha256": "f2606c0f64787c5a5ab8bb13e08b8aafdb4230f083dd45987596eab92ee61577",
+      "size": 44458
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_2.py",
-      "sha256": "90b8d9aa6b7dbdec095222925373aa2407abec13e1c915ad9c6150f3c2f29282",
-      "size": 19930
+      "sha256": "2e790430783911b2f0b050347a2fc70a4d14bf98b99ef087aff4d2df046ad319",
+      "size": 25316
     }
   ],
   "policy": {
