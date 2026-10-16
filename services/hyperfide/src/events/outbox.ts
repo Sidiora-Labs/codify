@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Component, ComponentContext } from '../components/registry.js';
 import { FoundationError, object } from '../policy/programme.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
+import { assertInvocation } from '../transport/protocol.js';
+import type { InvocationContext } from '../transport/protocol.js';
 import type { PrimaryTransaction, TransactionGateway } from '../storage/transactions.js';
 
 export interface Scope { organisation_id: string; run_id: string }
@@ -87,6 +89,24 @@ export function gateway(context: ComponentContext): TransactionGateway {
 export async function run<T>(g: TransactionGateway, operation:(tx:PrimaryTransaction)=>Promise<T>): Promise<T> {
   return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3},operation);
 }
+export function requireInvocation(context:ComponentContext,input:unknown,roles:readonly string[]):InvocationContext {
+  const invocation=context.invocation;
+  if(!invocation) fail('AUTH_REQUIRED','Authenticated invocation is required for event authority');
+  assertInvocation(invocation);
+  if(!object(input)) fail('EVENT_INPUT_INVALID','Event operation input must be an object');
+  const requested=scope(input),principal=invocation.principal;
+  if(requested.organisation_id!==principal.organisation_id||requested.run_id!==principal.run_id)
+    fail('AUTH_SCOPE_DENIED','Event scope differs from the authenticated principal');
+  if(!roles.includes(principal.role)) fail('AUTH_ROLE_DENIED','Principal role cannot perform this event operation');
+  return invocation;
+}
+export function authorizedRun<T>(g:TransactionGateway,context:ComponentContext,input:unknown,roles:readonly string[],
+    operation:(tx:PrimaryTransaction,invocation:InvocationContext)=>Promise<T>):Promise<T> {
+  const invocation=requireInvocation(context,input,roles);
+  return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=>invocation.guard(tx)},
+    tx=>operation(tx,invocation));
+}
+
 // Registration and creation use the same short run lock, preventing a subscriber gap.
 export async function lockRun(tx: PrimaryTransaction, s: Scope, mode: 'shared'|'exclusive' = 'shared'): Promise<void> {
   assertPrimaryTransaction(tx);
@@ -224,16 +244,160 @@ export async function retry(tx:PrimaryTransaction,input:unknown):Promise<unknown
     [c.scope.organisation_id,c.scope.run_id,c.event_id,c.consumer_id,delay,error]);
   return {pending:true,event_id:c.event_id};
 }
+
+export type SessionConsumerNamespace='human_intent'|'fleet_notification';
+export interface SessionConsumerBinding extends Scope {consumer_id:string;session_id:string;namespace:SessionConsumerNamespace;
+  consumer_key:string;consumer_state:string;session_role:string;session_state:string;registered_actor_id:string;registered_at:string}
+function sessionNamespace(value:unknown):SessionConsumerNamespace {
+  if(value!=='human_intent'&&value!=='fleet_notification') fail('EVENT_NAMESPACE_INVALID','Only a registered server-owned session channel is supported');
+  return value;
+}
+export function sessionConsumerKey(session_id:string,namespace:SessionConsumerNamespace):string {
+  return 'session:'+uuid(session_id)+':'+sessionNamespace(namespace);
+}
+async function sessionBindingAuthority(tx:PrimaryTransaction,s:Scope,session:string,invocation:InvocationContext):Promise<void> {
+  assertPrimaryTransaction(tx);assertInvocation(invocation);
+  const p=invocation.principal;
+  if(p.organisation_id!==s.organisation_id||p.run_id!==s.run_id)
+    fail('AUTH_SCOPE_DENIED','Session binding is outside the authenticated run');
+  await invocation.guard(tx);
+  const row=await tx.query('SELECT role,state FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
+    [s.organisation_id,s.run_id,session]);
+  if(!row.rows[0]||!['LEADER','FEATURE_MANAGER'].includes(row.rows[0].role as string)||
+    !['REGISTERED','RUNNING','DISCONNECTED'].includes(row.rows[0].state as string))
+    fail('EVENT_SESSION_NOT_FOUND','A registered nonterminal leader or manager session is required');
+  if(!['OPERATOR','COORDINATOR'].includes(p.role)&&(p.actor_id!==session||p.role!==row.rows[0].role))
+    fail('AUTH_SCOPE_DENIED','Only this session or an authorised coordinator can bind its channel');
+}
+async function readSessionBinding(tx:PrimaryTransaction,s:Scope,where:string,values:unknown[]):Promise<SessionConsumerBinding|null> {
+  assertPrimaryTransaction(tx);
+  const rows=await tx.query(`SELECT b.*,c.consumer_key,c.state AS consumer_state,a.role AS session_role,a.state AS session_state
+    FROM hyperfide.event_session_bindings b JOIN hyperfide.event_consumers c
+      ON(c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.id=b.consumer_id)
+    JOIN hyperfide.agent_sessions a ON(a.organisation_id=b.organisation_id AND a.run_id=b.run_id AND a.id=b.session_id)
+    WHERE b.organisation_id=$1 AND b.run_id=$2 AND `+where,[s.organisation_id,s.run_id,...values]);
+  if(!rows.rows.length)return null;
+  const r=rows.rows[0]!;
+  if(r.consumer_key!==sessionConsumerKey(uuid(r.session_id),sessionNamespace(r.namespace)))
+    fail('EVENT_BINDING_INVALID','Stored session channel disagrees with its immutable consumer key');
+  return {...s,consumer_id:uuid(r.consumer_id),session_id:uuid(r.session_id),namespace:sessionNamespace(r.namespace),
+    consumer_key:r.consumer_key as string,consumer_state:r.consumer_state as string,session_role:r.session_role as string,
+    session_state:r.session_state as string,registered_actor_id:uuid(r.registered_actor_id),registered_at:(r.registered_at as Date).toISOString()};
+}
+export async function lookupConsumerBinding(tx:PrimaryTransaction,input:unknown):Promise<SessionConsumerBinding|null> {
+  const v=fields(input,[...scopeKeys,'consumer_id']),s=scope(v);
+  return readSessionBinding(tx,s,'b.consumer_id=$3',[uuid(v.consumer_id)]);
+}
+export async function resolveSessionConsumer(tx:PrimaryTransaction,input:unknown):Promise<SessionConsumerBinding|null> {
+  const v=fields(input,[...scopeKeys,'session_id','namespace']),s=scope(v),session=uuid(v.session_id),namespace=sessionNamespace(v.namespace);
+  const found=await readSessionBinding(tx,s,'b.session_id=$3 AND b.namespace=$4',[session,namespace]);
+  return found&&['ACTIVE','BUFFERING'].includes(found.consumer_state)&&['LEADER','FEATURE_MANAGER'].includes(found.session_role)&&
+    ['REGISTERED','RUNNING','DISCONNECTED'].includes(found.session_state)?found:null;
+}
+export async function bindSessionConsumer(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<SessionConsumerBinding&{replayed:boolean}> {
+  const v=fields(input,[...scopeKeys,'session_id','consumer_id','namespace']),s=scope(v),session=uuid(v.session_id),
+    consumer=uuid(v.consumer_id),namespace=sessionNamespace(v.namespace);
+  await lockRun(tx,s,'exclusive');await sessionBindingAuthority(tx,s,session,invocation);
+  const row=await tx.query('SELECT consumer_key,state FROM hyperfide.event_consumers WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
+    [s.organisation_id,s.run_id,consumer]);
+  if(row.rows[0]?.consumer_key!==sessionConsumerKey(session,namespace)||!['ACTIVE','BUFFERING'].includes(row.rows[0]?.state as string))
+    fail('EVENT_BINDING_INVALID','Consumer must be the exact registered session channel');
+  const previous=await lookupConsumerBinding(tx,{...s,consumer_id:consumer});
+  if(previous) {
+    if(previous.session_id!==session||previous.namespace!==namespace) fail('EVENT_BINDING_CONFLICT','Consumer already has another immutable recipient');
+    return {...previous,replayed:true};
+  }
+  const other=await tx.query('SELECT consumer_id FROM hyperfide.event_session_bindings WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 AND namespace=$4',
+    [s.organisation_id,s.run_id,session,namespace]);
+  if(other.rows.length)fail('EVENT_BINDING_CONFLICT','Session already has a standing consumer for this namespace');
+  await tx.query('INSERT INTO hyperfide.event_session_bindings(organisation_id,run_id,consumer_id,session_id,namespace,registered_actor_id) VALUES($1,$2,$3,$4,$5,$6)',
+    [s.organisation_id,s.run_id,consumer,session,namespace,invocation.principal.actor_id]);
+  return {...(await lookupConsumerBinding(tx,{...s,consumer_id:consumer}))!,replayed:false};
+}
+// This reader exposes retained authenticated observations; it grants no execution or release authority.
+export async function lookupNativeLaunch(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<unknown> {
+  assertPrimaryTransaction(tx);assertInvocation(invocation);
+  const v=fields(input,[...scopeKeys,'launch_id']),s=scope(v),launch=uuid(v.launch_id),principal=invocation.principal;
+  if(principal.organisation_id!==s.organisation_id||principal.run_id!==s.run_id||
+    !['RUNNER','OPERATOR','COORDINATOR','DISPATCH','PROVISIONER'].includes(principal.role))
+    fail('AUTH_SCOPE_DENIED','Native launch observations are outside this principal scope');
+  await invocation.guard(tx);
+  const rows=await tx.query(`SELECT e.*,i.result AS runner_state,i.request_digest AS runner_event_digest,
+    t.current_attempt_id,t.generation AS current_generation,r.authority_epoch AS current_epoch,b.boot_id AS current_boot_id
+    FROM hyperfide.outbox_events e
+    LEFT JOIN hyperfide.command_inbox i ON(i.organisation_id=e.organisation_id AND i.run_id=e.run_id
+      AND i.operation='instruction.runner-state' AND i.idempotency_key=e.id::text
+      AND i.principal_scope='runner:'||(e.payload->>'sandbox_id')||':'||(e.payload->>'boot_id') AND i.state='COMPLETED')
+    LEFT JOIN hyperfide.attempts a ON(a.organisation_id=e.organisation_id AND a.run_id=e.run_id AND a.id=e.aggregate_id)
+    LEFT JOIN hyperfide.tasks t ON(t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id)
+    JOIN hyperfide.runs r ON(r.organisation_id=e.organisation_id AND r.id=e.run_id)
+    LEFT JOIN hyperfide.sandboxes box ON(box.organisation_id=a.organisation_id AND box.id=a.sandbox_id)
+    LEFT JOIN hyperfide.sandbox_boots b ON(b.organisation_id=box.organisation_id AND b.sandbox_id=box.id AND b.boot_generation=box.boot_generation)
+    WHERE e.organisation_id=$1 AND e.run_id=$2 AND e.aggregate_type='attempt.instructions'
+      AND e.event_type='instruction.start' AND e.payload->'body'->>'launch_id'=$3`,[s.organisation_id,s.run_id,launch]);
+  if(!rows.rows.length)return null;
+  if(rows.rows.length!==1)fail('INSTRUCTION_LAUNCH_CONFLICT','Launch identity has ambiguous committed START records');
+  const r=rows.rows[0]!,e=event({...s,id:r.id,aggregate_type:r.aggregate_type,aggregate_id:r.aggregate_id,
+    aggregate_version:r.aggregate_version,event_type:r.event_type,payload:r.payload}),
+    p=fields(e.payload,['instruction_id','attempt_id','attempt_generation','authority_epoch','sandbox_boot_generation','kind','body','sandbox_id','boot_id']),
+    body=fields(p.body,['launch_id','slot_id','agent_session_id','connector_plan_digest']),
+    attempt=uuid(p.attempt_id),generation=integer(p.attempt_generation),epoch=uuid(p.authority_epoch),
+    bootGeneration=integer(p.sandbox_boot_generation),sandbox=uuid(p.sandbox_id),boot=uuid(p.boot_id);
+  if(p.instruction_id!==e.id||p.kind!=='START'||attempt!==e.aggregate_id||body.launch_id!==launch||
+    typeof body.connector_plan_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(body.connector_plan_digest))
+    fail('INSTRUCTION_OBSERVATION_INVALID','Committed START fields disagree with their immutable event');
+  if(principal.role==='RUNNER'&&(principal.sandbox_id!==sandbox||principal.boot_id!==boot||principal.boot_generation!==bootGeneration||
+    principal.attempt_id!==null&&principal.attempt_id!==attempt||principal.attempt_generation!==null&&principal.attempt_generation!==generation))
+    fail('AUTH_SCOPE_DENIED','Runner cannot inspect another sandbox boot or attempt');
+  const state=r.runner_state as Record<string,unknown>|null,payloadDigest=digest(body);
+  if(state) {
+    const expected={command_id:e.id,operation_id:e.id,...s,attempt_id:attempt,attempt_generation:generation,authority_epoch:epoch,
+      sandbox_id:sandbox,boot_id:boot,sandbox_boot_generation:bootGeneration,sequence:e.aggregate_version,payload_digest:payloadDigest};
+    if(r.runner_event_digest!==eventDigest(e)||Object.entries(expected).some(([key,value])=>state[key]!==value)||
+      !['ACCEPTED','EXECUTING','TERMINAL','UNCERTAIN'].includes(String(state.state)))
+      fail('INSTRUCTION_OBSERVATION_INVALID','Runner observation no longer matches its exact committed START');
+    uuid(state.ledger_receipt_id);integer(state.ledger_version);
+    for(const process of [state.observed_process,state.pinned_process??null])if(process!==null) {
+      const processFields=fields(process,['os_boot_id','pid','start_time','pgid']);
+      uuid(processFields.os_boot_id);bounded(processFields.pid,1,2147483647);integer(processFields.start_time,true);bounded(processFields.pgid,1,2147483647);
+    }
+    if(state.state==='EXECUTING'&&state.observed_process===null||state.state==='ACCEPTED'&&state.observed_process!==null||
+      state.pinned_process!=null&&state.observed_process!==null&&canonical(state.pinned_process)!==canonical(state.observed_process))
+      fail('INSTRUCTION_OBSERVATION_INVALID','Runner state contradicts its retained process observation');
+    const credential=uuid(state.credential_id);
+    const recorded=await tx.query(`SELECT 1 FROM hyperfide.identity_principals WHERE organisation_id=$1 AND run_id=$2
+      AND credential_id=$3 AND role='RUNNER' AND sandbox_id=$4 AND boot_id=$5 AND boot_generation=$6
+      AND (attempt_id IS NULL OR attempt_id=$7) AND (attempt_generation IS NULL OR attempt_generation=$8)`,
+      [s.organisation_id,s.run_id,credential,sandbox,boot,bootGeneration,attempt,generation]);
+    if(recorded.rowCount!==1)fail('INSTRUCTION_OBSERVATION_INVALID','Retained observation lost its recorded authenticated runner binding');
+  }
+  return {launch_id:launch,command_id:e.id,operation_id:e.id,...s,attempt_id:attempt,attempt_generation:generation,
+    authority_epoch:epoch,sandbox_id:sandbox,boot_id:boot,sandbox_boot_generation:bootGeneration,sequence:e.aggregate_version,
+    slot_id:uuid(body.slot_id),agent_session_id:uuid(body.agent_session_id),agent_session_attachment_evaluated:false,
+    payload_digest:payloadDigest,runner_ack:state?{ledger_receipt_id:state.ledger_receipt_id,ledger_version:state.ledger_version,
+      state:state.state,credential_id:state.credential_id,observed_process:state.observed_process,pinned_process:state.pinned_process??state.observed_process}:null,
+    current_target:r.current_attempt_id===attempt&&r.current_generation===generation&&r.current_epoch===epoch&&r.current_boot_id===boot,
+    execution_observed_only:true,authority:'NONE',task_completed:false};
+}
+
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
-  const component={apiVersion:1 as const,capabilities:{'events.outbox.v1':Object.freeze({enqueue,lockRun,registerConsumer,claimPending,acknowledge,retry})},actions:{
+  const component={apiVersion:1 as const,capabilities:{'events.outbox.v1':Object.freeze({enqueue,lockRun,registerConsumer,claimPending,acknowledge,retry,sessionConsumerKey,bindSessionConsumer,resolveSessionConsumer,lookupConsumerBinding,lookupNativeLaunch})},actions:{
     'outbox.describe':()=>({schema_version:1,delivery:'at-least-once',ordering:'per-aggregate-version',global_cursor:false,
       acknowledgement:'durable-matching-inbox',full_case_status:'INCOMPLETE'}),
-    'outbox.consumer.register':(input:unknown)=>run(g,tx=>registerConsumer(tx,input)),
-    'outbox.enqueue':(input:unknown)=>run(g,tx=>enqueue(tx,input)),
-    'outbox.claim':(input:unknown)=>run(g,tx=>claimPending(tx,input)),
-    'outbox.acknowledge':(input:unknown)=>run(g,tx=>acknowledge(tx,input)),
-    'outbox.retry':(input:unknown)=>run(g,tx=>retry(tx,input))
+    'outbox.consumer.register':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>registerConsumer(tx,input)),
+    'outbox.consumer.bind-session':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','LEADER','FEATURE_MANAGER'],(tx,invocation)=>bindSessionConsumer(tx,input,invocation)),
+    'outbox.consumer.resolve-session':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','LEADER','FEATURE_MANAGER'],async(tx,invocation)=>{
+      const v=fields(input,[...scopeKeys,'session_id','namespace']);await sessionBindingAuthority(tx,scope(v),uuid(v.session_id),invocation);
+      return resolveSessionConsumer(tx,input);
+    }),
+    'outbox.enqueue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR'],tx=>{
+      if(event(input).aggregate_type==='attempt.instructions')fail('EVENT_TRUSTED_HANDLER_REQUIRED','Native instructions require the typed generation-bound emitter');
+      return enqueue(tx,input);
+    }),
+    'outbox.claim':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>claimPending(tx,input)),
+    'outbox.acknowledge':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acknowledge(tx,input)),
+    'outbox.retry':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>retry(tx,input))
   }};
   return component;
 }
@@ -241,7 +405,8 @@ export function createComponent(context:ComponentContext):Component {
 export interface EventOutboxCapability {
   enqueue:typeof enqueue; lockRun:typeof lockRun; registerConsumer:typeof registerConsumer;
   claimPending:typeof claimPending; acknowledge:typeof acknowledge; retry:typeof retry;
+  sessionConsumerKey:typeof sessionConsumerKey;bindSessionConsumer:typeof bindSessionConsumer;resolveSessionConsumer:typeof resolveSessionConsumer;lookupConsumerBinding:typeof lookupConsumerBinding;lookupNativeLaunch:typeof lookupNativeLaunch;
 }
 export function isEventOutboxCapability(value:unknown):value is EventOutboxCapability {
-  return object(value)&&['enqueue','lockRun','registerConsumer','claimPending','acknowledge','retry'].every(key=>typeof value[key]==='function');
+  return object(value)&&['enqueue','lockRun','registerConsumer','claimPending','acknowledge','retry','sessionConsumerKey','bindSessionConsumer','resolveSessionConsumer','lookupConsumerBinding','lookupNativeLaunch'].every(key=>typeof value[key]==='function');
 }

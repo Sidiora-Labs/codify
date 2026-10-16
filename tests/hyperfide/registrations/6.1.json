@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "variant": "task:6.1",
+  "task": "6.1",
+  "scope": "task-component",
+  "cases": [
+    "V-005"
+  ],
+  "assertion_ids": [
+    "outbox.real-service",
+    "outbox.module-copy-integrity",
+    "outbox.least-privilege-runtime",
+    "outbox.enqueue-committed",
+    "outbox.idempotent-replay",
+    "outbox.conflicting-payload",
+    "outbox.aggregate-version-unique",
+    "outbox.reject-unknown-fields",
+    "outbox.require-buffered-bootstrap",
+    "outbox.actual-claim",
+    "outbox.stale-generation",
+    "outbox.refuse-unproven-ack",
+    "outbox.durable-receipt-ack",
+    "outbox.ack-replay",
+    "outbox.ack-terminal",
+    "outbox.expired-claim-recovered",
+    "outbox.expired-ack-refused",
+    "outbox.retry-retained",
+    "outbox.concurrent-disjoint-claims",
+    "outbox.atomic-rollback-refused",
+    "outbox.atomic-rollback-observed",
+    "outbox.late-lower-sequence",
+    "outbox.targeted-private-delivery",
+    "outbox.recipient-replay-conflict",
+    "outbox.unregistered-recipient-refused",
+    "outbox.binding-real-session",
+    "outbox.binding-replay",
+    "outbox.binding-separate-namespaces",
+    "outbox.binding-no-implicit-activation",
+    "outbox.binding-real-self-proof",
+    "outbox.binding-other-session-refused",
+    "outbox.binding-wrong-key-refused",
+    "outbox.binding-unknown-namespace-refused",
+    "outbox.binding-resolve-exact-namespace",
+    "outbox.binding-history-immutable",
+    "outbox.binding-disconnected-standing-queue",
+    "outbox.binding-stopped-recipient-held",
+    "outbox.binding-retained-source-history"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/6_1.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/events/outbox.js",
+    "services/hyperfide/dist/events/inbox.js",
+    "services/hyperfide/dist/events/instructions.js",
+    "services/hyperfide/dist/events/recovery.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-6.1-database",
+      "kind": "postgresql-database",
+      "scope": "task6.1-disposable"
+    },
+    {
+      "id": "hf-task-6.1-role",
+      "kind": "postgresql-role",
+      "scope": "task6.1-disposable"
+    },
+    {
+      "id": "hf-task-6.1-process",
+      "kind": "local-https-service",
+      "scope": "task6.1-disposable"
+    },
+    {
+      "id": "hf-task-6.1-directory",
+      "kind": "temporary-test-directory",
+      "scope": "task6.1-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/6_1.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "events/resource-absence.json",
+    "events/observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/6_1.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.loopback.serve",
+    "fixture.process.spawn",
+    "fixture.process.stop"
+  ]
+}

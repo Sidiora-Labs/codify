@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "variant": "task:6.2",
+  "task": "6.2",
+  "scope": "task-component",
+  "cases": [
+    "V-005",
+    "V-016"
+  ],
+  "assertion_ids": [
+    "inbox.real-service",
+    "inbox.missing-history-resnapshot",
+    "inbox.reorder-gap",
+    "inbox.expected-version-applied",
+    "inbox.duplicate-no-effect",
+    "inbox.gap-recovered",
+    "inbox.two-durable-receipts",
+    "inbox.cross-consumer-refused",
+    "inbox.cross-organisation-refused",
+    "inbox.terminal-nonregression",
+    "inbox.ordered-replay",
+    "inbox.source-provenance-preserved",
+    "inbox.concurrent-duplicate-single-effect",
+    "inbox.buffering-cannot-apply",
+    "inbox.bootstrap-bound-retains-buffer",
+    "inbox.trusted-bootstrap-activates",
+    "inbox.bootstrap-replay",
+    "inbox.snapshot-covered-delivery",
+    "inbox.bootstrap-then-live-event",
+    "inbox.supersession-sql-contract",
+    "inbox.supersession-preserves-pending-replacement",
+    "inbox.supersession-replay",
+    "inbox.supersession-branch-refused",
+    "inbox.supersession-source-reference-refused",
+    "inbox.supersession-same-recipient-new-generation",
+    "inbox.supersession-immutable-original",
+    "inbox.supersession-preserves-prior-admission"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/6_2.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/events/outbox.js",
+    "services/hyperfide/dist/events/inbox.js",
+    "services/hyperfide/dist/events/instructions.js",
+    "services/hyperfide/dist/events/recovery.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-6.2-database",
+      "kind": "postgresql-database",
+      "scope": "task6.2-disposable"
+    },
+    {
+      "id": "hf-task-6.2-role",
+      "kind": "postgresql-role",
+      "scope": "task6.2-disposable"
+    },
+    {
+      "id": "hf-task-6.2-process",
+      "kind": "local-https-service",
+      "scope": "task6.2-disposable"
+    },
+    {
+      "id": "hf-task-6.2-directory",
+      "kind": "temporary-test-directory",
+      "scope": "task6.2-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/6_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "events/resource-absence.json",
+    "events/observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/6_1.py",
+    "tests/hyperfide/cases/tasks/6_2.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.loopback.serve",
+    "fixture.process.spawn",
+    "fixture.process.stop"
+  ]
+}

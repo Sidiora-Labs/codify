@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "variant": "task:6.3",
+  "task": "6.3",
+  "scope": "task-component",
+  "cases": [
+    "V-006"
+  ],
+  "assertion_ids": [
+    "instructions.missing-native-binding-refused",
+    "instructions.bootstrap-interruption-refused",
+    "instructions.bootstrap-interruption-atomic",
+    "instructions.bootstrap-sigkill-before-commit",
+    "instructions.late-native-genesis-preserves-other-streams",
+    "instructions.actual-native-bootstrap",
+    "instructions.native-bootstrap-recovery-reference",
+    "instructions.native-bootstrap-exact-replay",
+    "instructions.native-bootstrap-retarget-refused",
+    "instructions.native-bootstrap-caller-boot-refused",
+    "instructions.native-bootstrap-nonrunner-refused",
+    "instructions.other-manager-refused",
+    "instructions.former-leader-refused",
+    "instructions.refused-actor-no-start-obligation",
+    "instructions.actual-owning-manager-start",
+    "instructions.actual-selected-leader-replay",
+    "instructions.actual-acknowledged-manager-handoff",
+    "instructions.former-manager-replay-refused",
+    "instructions.successor-manager-exact-replay",
+    "instructions.handoff-preserves-attempt-lineage",
+    "instructions.exact-native-recipient-only",
+    "instructions.real-service",
+    "instructions.stable-start",
+    "instructions.start-replay",
+    "instructions.duplicate-logical-start-refused",
+    "instructions.conflicting-command-refused",
+    "instructions.extra-native-body-refused",
+    "instructions.wrong-slot-refused",
+    "instructions.stale-generation",
+    "instructions.stale-epoch",
+    "instructions.stale-boot",
+    "instructions.unsupported-kind",
+    "instructions.native-frame-budget-refused",
+    "instructions.padded-steer-refused",
+    "instructions.pause-defers-start-admission",
+    "instructions.pause-no-completed-start-receipt",
+    "instructions.start-durably-accepted",
+    "instructions.native-registration-preserves-history",
+    "instructions.pause-defers-queued-handoff",
+    "instructions.resume-preserves-command",
+    "instructions.native-handoff-binding",
+    "instructions.lease-budget-fresh",
+    "instructions.operator-cannot-impersonate-runner",
+    "instructions.native-ack-recorded",
+    "instructions.native-recorded-launch-reader",
+    "instructions.lookup-forged-role-refused",
+    "instructions.lookup-genuine-provisioner-observation",
+    "instructions.lookup-cross-run-refused",
+    "instructions.lookup-attempt-mismatch-refused",
+    "instructions.lookup-state-mismatch-refused",
+    "instructions.lookup-digest-mismatch-refused",
+    "instructions.native-ack-replay",
+    "instructions.native-ack-conflict",
+    "instructions.native-ack-target-refused",
+    "instructions.database-one-start-per-attempt",
+    "instructions.database-one-launch-per-run",
+    "instructions.generic-protected-emission-refused",
+    "instructions.native-executing-observation",
+    "instructions.native-state-regression-refused",
+    "instructions.native-process-rebinding-refused",
+    "instructions.uncertainty-retains-process-pin",
+    "instructions.uncertain-process-rebinding-refused",
+    "instructions.pause-allows-cancel-cleanup",
+    "instructions.typed-replay",
+    "instructions.cancel-fences-future-input",
+    "instructions.accepted-start-cannot-respawn",
+    "instructions.late-steer-suppressed",
+    "instructions.cancel-durably-accepted",
+    "instructions.lost-ack-deduplicated",
+    "instructions.spool-bounded-identities",
+    "instructions.generic-inbox-bypass-refused",
+    "instructions.expired-compute-can-report-terminal",
+    "instructions.expired-cancel-has-zero-budget",
+    "instructions.closing-cancel-handoff",
+    "instructions.closing-start-refused",
+    "instructions.closing-terminal-observation",
+    "instructions.stale-native-boot-refused",
+    "instructions.stale-boot-registration-refused"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/6_3.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/events/outbox.js",
+    "services/hyperfide/dist/events/inbox.js",
+    "services/hyperfide/dist/events/instructions.js",
+    "services/hyperfide/dist/events/recovery.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-6.3-database",
+      "kind": "postgresql-database",
+      "scope": "task6.3-disposable"
+    },
+    {
+      "id": "hf-task-6.3-role",
+      "kind": "postgresql-role",
+      "scope": "task6.3-disposable"
+    },
+    {
+      "id": "hf-task-6.3-process",
+      "kind": "local-https-service",
+      "scope": "task6.3-disposable"
+    },
+    {
+      "id": "hf-task-6.3-directory",
+      "kind": "temporary-test-directory",
+      "scope": "task6.3-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/6_3.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "events/resource-absence.json",
+    "events/observations.json"
+  ],
+  "source_files": [
+    "services/hyperfide/package.json",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/6_1.py",
+    "tests/hyperfide/cases/tasks/6_3.py",
+    "tests/hyperfide/support/identity_fixture.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.loopback.serve",
+    "fixture.process.spawn",
+    "fixture.process.stop"
+  ]
+}
