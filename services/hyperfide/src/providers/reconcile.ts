@@ -64,7 +64,7 @@ export async function preparationParameters(c:PrimaryTransaction,config:Deployme
    [config.organisation_id,poolId,profileId,desired,pool.provider,scope.configuration_digest]);
   if(bases.rows.length!==1)fail('PREPARED_BASE_UNAVAILABLE','Exactly one current verified provider base must bind the desired preparation');
   const base=bases.rows[0]!;
-  const custody=await c.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' FOR SHARE",[config.organisation_id,base.source_run_id,[...new Set([base.manifest_artifact_digest,base.execution_receipt_artifact_digest,base.verification_receipt_artifact_digest])]]);
+  const custody=await c.query("SELECT digest FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=ANY($3::text[]) AND status='COMPLETE' AND completed_at IS NOT NULL FOR SHARE",[config.organisation_id,base.source_run_id,[...new Set([base.manifest_artifact_digest,base.execution_receipt_artifact_digest,base.verification_receipt_artifact_digest])]]);
   if(custody.rows.length!==new Set([base.manifest_artifact_digest,base.execution_receipt_artifact_digest,base.verification_receipt_artifact_digest]).size)fail('PREPARED_BASE_CUSTODY_UNAVAILABLE','Prepared-base manifest artifact must remain complete under admission lock');
   reference=str(obj(base.provider_reference).preparation_reference);
  }
@@ -559,7 +559,7 @@ export async function executeBound(pool:ProviderDatabase,config:DeploymentConfig
   await record(op,outcome);
   const captured=verifyCapturedProviderOutput(outcome.result,await boundedProvider(adapter.readCapturedOutput(op.scope,op.resource!,outcome.result.process_ref,16*1024*1024),combined,op.deadline_at));
   return{operation:op,outcome,completion_observation:{operation:observedOperation,outcome:observed},process_ref:outcome.result.process_ref,scope:op.scope,resource:op.resource,captured,
-   evidence_digest:digestDocument({operation:op,outcome,spool_digest:captured.spool_digest}),cleanup_confirmed:outcome.result.termination_confirmed};
+   evidence_digest:digestDocument({operation:op,outcome,spool_digest:captured.spool_digest}),provider_process_termination_confirmed:outcome.result.termination_confirmed,cleanup_confirmed:false,cleanup_evidence_scope:'PROVIDER_PROCESS_ONLY'};
  }catch(error){await record(op,unknownOutcome(op,op.resource));throw error;}
 }
 export async function observeKnownSandbox(pool:ProviderDatabase,config:DeploymentConfig,value:unknown,signal:AbortSignal):Promise<unknown>{
@@ -635,4 +635,19 @@ export function createComponent(context:ComponentContext):Component {
     'provider.inventory.observe-known':guarded(async(input,c,database)=>{provisioner();if(providerInvocation(database).principal.role!=='PROVISIONER')fail('AUTH_SCOPE_DENIED','Inventory requires the provisioner principal');return observeKnownSandbox(database,c,input,context.signal);}),
     'provider.orphans.list':guarded(async(input,c,database)=>{const i=obj(input,['pool_id']);await currentPool(database,c,uuid(i.pool_id));return(await database.query('SELECT native_sandbox_id,state,ownership_evidence_digest,first_observed_at,last_observed_at FROM hyperfide.provider_orphans WHERE organisation_id=$1 AND pool_id=$2',[c.organisation_id,i.pool_id])).rows;}),
   }};
+}
+
+/** Control composition installs a durable PG reader; provider effects stay in the provisioner. */
+export function createAccountingComponent(context:ComponentContext):Component {
+ if(context.role!=='control')fail('ROLE_FORBIDDEN','Provider accounting belongs to the control service');
+ const intents=context.dependencies.require('8.3','provider.intents.v1',isProviderIntentCapability);
+ type SchedulerProofRegistry={registerProofReader(source:'provider.absence',reader:typeof readConfirmedAbsence):()=>void};
+ const scheduler=context.dependencies.require('5.4','scheduler.resources.v1',(value):value is SchedulerProofRegistry=>
+  !!value&&typeof value==='object'&&typeof (value as SchedulerProofRegistry).registerProofReader==='function');
+ const unregister=scheduler.registerProofReader('provider.absence',intents.readConfirmedAbsence);
+ let closed=false;
+ return{apiVersion:1,actions:{'provider.accounting.describe':input=>{
+  obj(input,[]);if(closed)fail('PROVIDER_CLOSED','Provider accounting bridge is closed');
+  return{proof_source:'provider.absence',installed:true,authority:'NONE',provider_execution_available:false};
+ }},close:()=>{if(!closed){closed=true;unregister();}}};
 }
