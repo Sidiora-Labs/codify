@@ -3,7 +3,9 @@
   "id": "14.2",
   "task": "14.2",
   "roles": [
-    "control"
+    "control",
+    "provisioner",
+    "dispatch"
   ],
   "module": "identity/credentials.js",
   "entry": "createComponent",
