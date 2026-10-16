@@ -154,6 +154,7 @@ static const HfRoute25 hf_routes25[]={
  {"human","status","1.2","human.status"},
  {NULL,NULL,NULL,NULL}
 };
+static int hf_client_mcp25(FILE *out,FILE *err);
 int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err){
  if(argc<2)return -1;
  int authority=!strcmp(argv[1],"authority");
@@ -164,6 +165,7 @@ int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err){
  int mode=hf_client_authority_mode();if(mode<0)return hf_client_error25(err,"AUTHORITY_MODE_INVALID","Authority configuration is invalid");
  if(!authority&&(mode==HF_LOCAL||mode==HF_OFFLINE_LOCAL)){int guard=hf_client_authority_guard_args("cli",argc,argv,err);return guard?guard:-1;}
  if(mode==HF_OFFLINE||mode==HF_OFFLINE_LOCAL)return hf_client_error25(err,"OFFLINE_AUTHORITY_UNAVAILABLE","Remote authority is unavailable while offline");
+ if(!authority&&!strcmp(argv[1],"mcp")){if(argc!=2)return hf_client_error25(err,"INVALID_ARGS","Distributed MCP accepts no legacy options");return hf_client_mcp25(out,err);}
  const HfRoute25 *route=NULL;
  if(!authority){for(const HfRoute25 *r=hf_routes25;r->command;r++)if(argc>2&&!strcmp(argv[1],r->command)&&!strcmp(argv[2],r->subcommand)){route=r;break;}if(!route)return hf_client_error25(err,"DISTRIBUTED_COMMAND_UNSUPPORTED","This legacy command has no qualified distributed mapping");}
  else if(argc<3||strcmp(argv[2],"invoke"))return hf_client_error25(err,"INVALID_ARGS","Use authority mode or authority invoke with explicit operation identities");
@@ -200,4 +202,92 @@ int hf_client_dispatch(int argc,char **argv,FILE *out,FILE *err){
  int result=hf_invoke25(payload,operation,idempotency,correlation,causation,out,err);
  if(payload!=data)free(payload);
  free(data);free(proof);return result;
+}
+
+static void hf_rpc_error25(FILE *out,const char *id,int code,const char *message){
+ fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":",id?id:"null",code);
+ hf_json_write_string(out,message);fputs("}}\n",out);
+}
+static void hf_rpc_tools25(FILE *out,const char *id){
+ fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"tools\":[",id);
+ fputs("{\"name\":\"authority_invoke\",\"description\":\"Invoke a scoped protocol1 operation through verified TLS and Ed25519. Explicit stable operation identities are mandatory.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"payload\":{\"type\":\"object\"},\"operation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"idempotency_key\":{\"type\":\"string\",\"format\":\"uuid\"},\"correlation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"causation_id\":{\"type\":[\"string\",\"null\"]}},\"required\":[\"payload\",\"operation_id\",\"idempotency_key\",\"correlation_id\"]}}",out);
+ for(const HfRoute25 *r=hf_routes25;r->command;r++){
+ fprintf(out,",{\"name\":\"%s_%s\",\"description\":\"Scoped %s. The server enforces current role, scope and authority; this mapping grants none.\",\"inputSchema\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"run_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"input\":{\"type\":\"object\"},\"operation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"idempotency_key\":{\"type\":\"string\",\"format\":\"uuid\"},\"correlation_id\":{\"type\":\"string\",\"format\":\"uuid\"},\"causation_id\":{\"type\":[\"string\",\"null\"]},\"expected_version\":{\"type\":[\"string\",\"null\"]},\"authority\":{\"type\":[\"object\",\"null\"]}},\"required\":[\"run_id\",\"input\",\"operation_id\",\"idempotency_key\",\"correlation_id\"]}}",r->command,r->subcommand,r->action);
+ }
+ fputs("]}}\n",out);
+}
+static int hf_arg_string25(const HfJson *j,int args,const char *name,char *out,size_t capacity){
+ return hf_json_string(j,hf_json_field(j,args,name),out,capacity);
+}
+static void hf_rpc_call25(HfJson *j,FILE *out,const char *id){
+ int params=hf_json_field(j,0,"params"),args=hf_json_field(j,params,"arguments");
+ char name[128],operation[37],idempotency[37],correlation[37],causation[37],run[37],expected[32];
+ if(!hf_json_string(j,hf_json_field(j,params,"name"),name,sizeof name)||
+ !hf_arg_string25(j,args,"operation_id",operation,sizeof operation)||!hf_uuid25(operation)||
+ !hf_arg_string25(j,args,"idempotency_key",idempotency,sizeof idempotency)||!hf_uuid25(idempotency)||
+ !hf_arg_string25(j,args,"correlation_id",correlation,sizeof correlation)||!hf_uuid25(correlation)){
+ hf_rpc_error25(out,id,-32602,"Explicit canonical operation idempotency and correlation identities are required");return;}
+ const char *cause=NULL;int cause_token=hf_json_field(j,args,"causation_id");
+ if(cause_token>=0){char *raw=hf_json_raw(j,cause_token);int nil=raw&&!strcmp(raw,"null");free(raw);
+ if(!nil){if(!hf_arg_string25(j,args,"causation_id",causation,sizeof causation)||!hf_uuid25(causation)){hf_rpc_error25(out,id,-32602,"Invalid causation identity");return;}cause=causation;}}
+ char *payload=NULL,*input=NULL,*authority=NULL;
+ if(!strcmp(name,"authority_invoke")){
+ const char *const allowed[]={"payload","operation_id","idempotency_key","correlation_id","causation_id"};
+ if(!hf_json_only(j,args,allowed,5)){hf_rpc_error25(out,id,-32602,"Unexpected authority tool fields");return;}
+ payload=hf_json_raw(j,hf_json_field(j,args,"payload"));
+ }else{
+ const HfRoute25 *route=NULL;
+ for(const HfRoute25 *r=hf_routes25;r->command;r++){char route_name[128];snprintf(route_name,sizeof route_name,"%s_%s",r->command,r->subcommand);if(!strcmp(route_name,name)){route=r;break;}}
+ if(!route){hf_rpc_error25(out,id,-32602,"Unsupported distributed tool mapping");return;}
+ const char *const allowed[]={"run_id","input","operation_id","idempotency_key","correlation_id","causation_id","expected_version","authority"};
+ if(!hf_json_only(j,args,allowed,8)||!hf_arg_string25(j,args,"run_id",run,sizeof run)||!hf_uuid25(run)){hf_rpc_error25(out,id,-32602,"Scoped run and finite tool fields are required");return;}
+ input=hf_json_raw(j,hf_json_field(j,args,"input"));authority=hf_json_raw(j,hf_json_field(j,args,"authority"));
+ char version[40]="null";int version_token=hf_json_field(j,args,"expected_version");
+ if(version_token>=0){char *raw=hf_json_raw(j,version_token);int nil=raw&&!strcmp(raw,"null");free(raw);
+ if(!nil){
+ if(!hf_arg_string25(j,args,"expected_version",expected,sizeof expected)||!expected[0]||strlen(expected)>19||(*expected=='0'&&expected[1])){free(input);free(authority);hf_rpc_error25(out,id,-32602,"Canonical decimal state version required");return;}
+ for(const char *p=expected;*p;p++)if(!isdigit((unsigned char)*p)){free(input);free(authority);hf_rpc_error25(out,id,-32602,"Canonical decimal state version required");return;}
+ snprintf(version,sizeof version,"\"%s\"",expected);
+ }}
+ if(!input||!hf_json25(input,strlen(input),0,NULL)){free(input);free(authority);hf_rpc_error25(out,id,-32602,"A bounded JSON input object is required");return;}
+ size_t size=strlen(input)+(authority?strlen(authority):4)+1024;payload=malloc(size);
+ if(payload)snprintf(payload,size,"{\"run_id\":\"%s\",\"component\":\"%s\",\"action\":\"%s\",\"input\":%s,\"expected_version\":%s,\"authority\":%s}",run,route->component,route->action,input,version,authority?authority:"null");
+ }
+ if(!payload||!hf_json25(payload,strlen(payload),0,NULL)){free(payload);free(input);free(authority);hf_rpc_error25(out,id,-32602,"A bounded protocol1 JSON payload is required");return;}
+ char *body=NULL,*failure=NULL;size_t body_size=0,failure_size=0;
+ FILE *success=open_memstream(&body,&body_size),*errors=open_memstream(&failure,&failure_size);
+ if(!success||!errors){if(success)fclose(success);if(errors)fclose(errors);free(body);free(failure);free(payload);free(input);free(authority);hf_rpc_error25(out,id,-32603,"Response allocation failed");return;}
+ int result=hf_invoke25(payload,operation,idempotency,correlation,cause,success,errors);fclose(success);fclose(errors);
+ fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"content\":[{\"type\":\"text\",\"text\":",id);
+ hf_json_write_string(out,body_size?body:failure_size?failure:"Authority returned no result");
+ fprintf(out,"}],\"isError\":%s}}\n",result?"true":"false");
+ free(body);free(failure);free(payload);free(input);free(authority);
+}
+static void hf_rpc_line25(const char *line,FILE *out){
+ HfJson *j=malloc(sizeof *j);if(!j){hf_rpc_error25(out,NULL,-32603,"Request allocation failed");return;}
+ if(!hf_json_parse(j,line)){free(j);hf_rpc_error25(out,NULL,-32700,"Invalid bounded JSON request");return;}
+ char version[16],method[128];char *id=hf_json_raw(j,hf_json_field(j,0,"id"));
+ if(!hf_json_get(j,"jsonrpc",version,sizeof version)||strcmp(version,"2.0")||!hf_json_get(j,"method",method,sizeof method)){
+ hf_rpc_error25(out,id,-32600,"JSON-RPC2 method required");free(id);free(j);return;}
+ if(!id){free(j);return;} /* Notifications cannot start unobservable authority mutations. */
+ if(id[0]=='{'||id[0]=='['||!strcmp(id,"null")||!strcmp(id,"true")||!strcmp(id,"false")){hf_rpc_error25(out,NULL,-32600,"Invalid request identity");free(id);free(j);return;}
+ if(!strcmp(method,"initialize"))fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"Hyperfide\",\"version\":\"2.0.0-dev\"},\"instructions\":\"Distributed tools use verified authority. Stable operation identities are required. No local fallback or forced task qualification.\"}}\n",id);
+ else if(!strcmp(method,"ping"))fprintf(out,"{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\n",id);
+ else if(!strcmp(method,"tools/list"))hf_rpc_tools25(out,id);
+ else if(!strcmp(method,"tools/call"))hf_rpc_call25(j,out,id);
+ else hf_rpc_error25(out,id,-32601,"Unsupported distributed method");
+ free(id);free(j);
+}
+static int hf_client_mcp25(FILE *out,FILE *err){
+ const char *configuration=getenv("HYPERFIDE_TRANSPORT_CONFIG");HfTransportConfig config;
+ if(!configuration||!hf_transport_config(configuration,&config))return hf_client_error25(err,"TRANSPORT_CONFIG_REQUIRED","Distributed MCP requires trusted transport configuration");
+ char *line=malloc(HF_BODY_LIMIT+1);if(!line)return hf_client_error25(err,"RESOURCE_LIMIT","Request allocation failed");
+ size_t length=0;int invalid=0,ch;
+ while((ch=fgetc(stdin))!=EOF){
+ if(ch=='\n'){line[length]=0;if(invalid)hf_rpc_error25(out,NULL,-32700,"Request exceeds protocol byte limit or contains NUL");else if(length)hf_rpc_line25(line,out);fflush(out);length=0;invalid=0;continue;}
+ if(ch==0)invalid=1;
+ if(length<HF_BODY_LIMIT)line[length++]=(char)ch;else invalid=1;
+ }
+ if(length||invalid){line[length]=0;if(invalid)hf_rpc_error25(out,NULL,-32700,"Invalid bounded request");else hf_rpc_line25(line,out);fflush(out);}
+ free(line);return ferror(stdin)?1:0;
 }
