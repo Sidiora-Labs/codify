@@ -51,7 +51,7 @@ def cleanup_event(task,extra_resources=None):
     fixture_artifact("task-"+task+"-cleanup.json").write_text(json.dumps({"complete":complete,"observations":entries,"extra_resources":extra_resources or[]},sort_keys=True)+"\n")
     resources=[{"id":"task"+task+"-fixture-resources","status":"deleted"if complete else"unknown","observed_absent":complete,"evidence_artifact":relative}]+(extra_resources or[])
     complete=complete and all(r.get("observed_absent")is True for r in resources)
-    print(json.dumps({"type":"cleanup","resources":resources,"complete":complete}),flush=True)
+    if "--cleanup"in sys.argv or not os.environ.get("HYPERFIDE_CAMPAIGN_DIR"):print(json.dumps({"type":"cleanup","resources":resources,"complete":complete}),flush=True)
     return complete
 def cleanup_only(task):
     configure_task(task)
@@ -117,7 +117,7 @@ def positive_fixture_setup(f):
     setup(f)
     repo=f.path/"repository";repo.mkdir()
     def git(*args):
-        return subprocess.check_output(["git","-C",str(repo),*args],env=f.env,stderr=subprocess.PIPE).decode().strip()
+        return subprocess.check_output(["git","-c","core.hooksPath=/dev/null","-c","core.fsmonitor=false","-c","maintenance.auto=false","-c","gc.auto=0","-c","commit.gpgSign=false","-C",str(repo),*args],env=f.env,stderr=subprocess.PIPE).decode().strip()
     git("init","-q")
     git("config","user.name","Hyperfide fixture");git("config","user.email","fixture@example.invalid")
     (repo/"README.md").write_text("Fixture documentation baseline.\n")

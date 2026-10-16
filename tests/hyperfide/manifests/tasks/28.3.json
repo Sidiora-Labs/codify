@@ -47,8 +47,8 @@
   "inputs": [
     {
       "path": "docs/hyperfide/operations.md",
-      "sha256": "0dfd31589b12a26f0ace38e3327f70a06ca12517150dca89585761872e746965",
-      "size": 14230
+      "sha256": "4f52f46b288f90bcfcecd1b030b9abc6466cb9f8c2ed175d9d16a765f2cf31c5",
+      "size": 14269
     },
     {
       "path": "services/hyperfide/components/1.4.json",
@@ -692,8 +692,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/28_2.py",
-      "sha256": "8bc1fae83fca953b825305ce4bf6951680d04f803c8e5b9ec5c5a998f47c425c",
-      "size": 24008
+      "sha256": "9a01798a24ec6856e4effe74e66bd66eec64f1b615148f9a579d50f75235e77c",
+      "size": 24217
     },
     {
       "path": "tests/hyperfide/cases/tasks/28_3.py",
