@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "variant": "task:19.2",
+  "task": "19.2",
+  "scope": "task-component",
+  "cases": [
+    "V-033"
+  ],
+  "assertion_ids": [
+    "publication.registered-wire",
+    "publication.strict-input",
+    "publication.role-denied",
+    "publication.unsigned-push-denied",
+    "publication.target-unchanged",
+    "publication.immutable-admission",
+    "publication.target-lock-exclusive",
+    "publication.effective-hook-path-pinned",
+    "publication.github-configured-boundary",
+    "publication.github-sole-publisher",
+    "publication.github-worker-bypass-refused",
+    "publication.github-force-bypass-refused",
+    "publication.github-unknown-bypass-refused"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/19_2.py"
+  ],
+  "timeout_seconds": 300,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/integration/candidates.js",
+    "services/hyperfide/dist/integration/publication.js",
+    "services/hyperfide/dist/integration/github.js",
+    "services/hyperfide/dist/integration/closure.js",
+    "services/hyperfide/dist/integration/release_barrier.js"
+  ],
+  "resources": [
+    {
+      "id": "integration-19.2-database",
+      "kind": "postgresql-database",
+      "scope": "task19.2-synthetic"
+    },
+    {
+      "id": "integration-19.2-identity-database",
+      "kind": "postgresql-database",
+      "scope": "task19.2-authenticated-fixture"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/19_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "integration/database-absence.json",
+    "integration/identity-database-absence.json"
+  ],
+  "source_files": [
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/19_1.py",
+    "tests/hyperfide/cases/tasks/19_2.py",
+    "tests/hyperfide/cases/tasks/4_1.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/support/identity_fixture.py"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "git.fixture.create",
+    "git.fixture.delete"
+  ]
+}
