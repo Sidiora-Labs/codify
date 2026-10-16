@@ -60,6 +60,11 @@ with tempfile.TemporaryDirectory(prefix='hyperfide-release-build-') as temporary
   copy_file(library.resolve(),python_stage/'lib'/library.name,0o755)
 
  for name in ['install.sh','uninstall.sh','hyperfide-entrypoint.sh','hyperfide-python.sh']:copy_file(root/'scripts'/name,stage/'scripts'/name,0o755)
+ copy_file(Path('/usr/bin/git').resolve(),stage/'runtime/git',0o755)
+ for name in ['inspect-proof.py','check-evidence.py','proof_relocation.py','registry.json','manifest.schema.json']:
+  source=root/'tests/hyperfide'/name
+  if not source.is_file():raise SystemExit('hyperfide release: actual reviewed proof inspector assets are required')
+  copy_file(source,stage/'services/proof'/name,0o644)
  for name in ['package.json','package-lock.json']:copy_file(build/name,stage/'services'/name)
  shutil.copytree(build/'dist',stage/'services/dist')
  shutil.copytree(root/'services/hyperfide/components',stage/'services/components')
@@ -71,7 +76,7 @@ with tempfile.TemporaryDirectory(prefix='hyperfide-release-build-') as temporary
  if host.exists():copy_file(host,stage/'services/runtime/supervisory_host.py')
  subprocess.run(['npm','ci','--omit=dev','--ignore-scripts'],cwd=stage/'services',check=True)
  # Bundle the actual linked dependencies instead of replacing qualified link flags.
- executables=[(root/'hyperfide',stage/'lib/hyperfide'),(root/'build/hyperfide-native',stage/'lib/hyperfide'),(node,stage/'lib/hyperfide')]+[(item,python_stage/'lib') for item in [Path(sys.executable).resolve()]+sorted((stdlib/'lib-dynload').glob('*.so'))]
+ executables=[(root/'hyperfide',stage/'lib/hyperfide'),(root/'build/hyperfide-native',stage/'lib/hyperfide'),(node,stage/'lib/hyperfide'),(Path('/usr/bin/git'),stage/'lib/hyperfide')]+[(item,python_stage/'lib') for item in [Path(sys.executable).resolve()]+sorted((stdlib/'lib-dynload').glob('*.so'))]
  for executable,library_root in executables:
   observed=subprocess.run(['ldd',str(executable)],text=True,capture_output=True)
   if observed.returncode:raise SystemExit('hyperfide release: cannot enumerate native runtime dependencies')
