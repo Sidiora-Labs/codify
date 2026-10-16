@@ -81,7 +81,7 @@ async function saveIssue(value:FindingTransaction,repositoryId:string,owner:stri
 }
 async function dispatch(context:ComponentContext,input:unknown):Promise<Record<string,unknown>>{
  const p=record(input);fields(p,['operation_id']);const id=uuid(p.operation_id),client=new GitHubClient(context.env);
- const claimed=await withFindingTransaction(context,'finding.github.dispatch',async value=>{
+ const claimed=await withFindingTransaction<Record<string,any>>(context,'finding.github.dispatch',async value=>{
   await admin(value);const rows=await value.tx.query('SELECT *,lease_expires_at>clock_timestamp() AS live FROM hyperfide.finding_github_operations WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',[value.scope.organisation_id,value.scope.run_id,id]);
   if(rows.rows.length!==1)fail('OPERATION_NOT_FOUND','GitHub operation does not exist in this run');const op=rows.rows[0]!;
   if(op.state==='ACKNOWLEDGED')return {...op,done:true};if(op.state==='IN_FLIGHT'&&op.live)fail('OPERATION_BUSY','GitHub operation is held by another live dispatch');
