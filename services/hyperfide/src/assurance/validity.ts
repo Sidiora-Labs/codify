@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
+import {FoundationError} from '../policy/programme.js';
 import type {Component,ComponentContext} from '../components/registry.js';
-import {canonical,custodyLock,decimal,digest,fail,fields,hash,INPUT_KEYS,loadPacketInputs,loadPolicy,resultInputs,scope,transaction,uuid,roles,invocation,assuranceBarrier,artifact,executionGate} from './submission.js';
+import {canonical,custodyLock,decimal,digest,fail,fields,hash,INPUT_KEYS,loadPacketInputs,loadPolicy,resultInputs,scope,transaction,uuid,roles,invocation,assuranceBarrier,artifact,executionGate,currentCustody} from './submission.js';
 import type {Data,PrimaryClient} from './submission.js';
 import {verifyReceiptRecordArtifacts} from './executor.js';
 import {inspectCoverage} from './coverage.js';
@@ -39,8 +40,10 @@ export async function inspectValidity(db:PrimaryClient,s:CoverageScope,id:string
  const integrated=c.authority==='RELEASED'?await publication(db,s,c):{status:'MISSING'};
  return {...coverage,implementation_progress:c.task.state,historical_receipt_count:history.rows[0].count,
   current_integrated_assurance:c.authority==='RELEASED'&&coverage.applicability==='CURRENT'&&coverage.proof_complete&&
-   c.qualification_outcome==='PASS'&&integrated.status==='PUBLISHED'&&coverage.proof_registry_current===true&&
-   coverage.proof_source_object_id===integrated.source_object_id&&coverage.proof_source_manifest_digest===integrated.source_manifest_digest,
+   c.qualification_outcome==='PASS'&&integrated.status==='PUBLISHED'&&integrated.lineage_status==='VERIFIED_PUBLISHED_CHAIN'&&coverage.proof_registry_current===true&&
+   integrated.current_source?.source_object_id===integrated.latest_repository_head&&coverage.proof_source_object_id===integrated.current_source?.source_object_id&&
+   coverage.proof_source_tree_id===integrated.current_source?.tree&&coverage.proof_git_provenance_manifest_digest===integrated.current_source?.git_provenance_manifest_digest&&
+   coverage.proof_integration_input_manifest_digest===integrated.current_source?.integration_input_manifest_digest,
   integration_receipt:integrated,original_compute_authority:'NOT_USED',released_custody_resurrected:false};
 }
 async function inspect(ctx:ComponentContext,raw:unknown):Promise<Data>{
@@ -50,22 +53,35 @@ async function inspect(ctx:ComponentContext,raw:unknown):Promise<Data>{
 async function freshContext(ctx:ComponentContext,db:PrimaryClient,s:[string,string],c:Data,saved:Data,v:Data):Promise<Data>{
  if(v.input_packet_digest===undefined)fail('QUALIFICATION_PACKET_REQUIRED','Fresh requalification requires an actual immutable execution packet');
  const packet=await loadPacketInputs(db,s,digest(v.input_packet_digest)),policy=await loadPolicy(ctx,c.task,db);
- if(packet.packet.mandatory.identity.task_id!==c.task_id)
-  fail('QUALIFICATION_PACKET_INVALID','Fresh packet belongs to another task');
+ const accepted=packet.packet.mandatory.identity;
+ if(accepted.organisation_id!==s[0]||accepted.run_id!==s[1]||accepted.task_id!==c.task_id||
+  accepted.spec_revision_id!==c.task.spec_revision_id||String(accepted.spec_generation)!==String(c.task.spec_generation)||
+  accepted.criteria_digest!==c.task.criteria_digest||accepted.authority_epoch!==c.task.run_epoch||
+  packet.packet.mandatory.intent.registry_digest!==hash(policy))
+  fail('QUALIFICATION_PACKET_INVALID','Fresh packet does not bind the task current accepted proof tuple');
  let manifest={...saved.manifest};
- if(c.authority==='RELEASED'){
+ if(policy.repository_id!==manifest.repository_id)fail('QUALIFICATION_SOURCE_MISMATCH','Accepted proof repository differs from the custody result');
+ const integratedTarget=c.authority==='RELEASED'||v.publication_operation_id!==undefined;
+ if(!integratedTarget&&c.authority==='ACTIVE'&&policy.source_object_id!==manifest.baseline_source_object_id)fail('QUALIFICATION_SOURCE_MISMATCH','Active result lineage requires its original accepted baseline');
+ if(integratedTarget){
   const observed=await publication(db,{organisation_id:s[0],run_id:s[1]},c);
-  if(observed.status!=='PUBLISHED'||observed.observed_head!==observed.source_object_id||!Array.isArray(observed.parents)||
-   !observed.tree||!observed.source_manifest_digest||
-   v.publication_operation_id!==undefined&&v.publication_operation_id!==observed.operation_id)
-   fail('QUALIFICATION_INTEGRATION_RECEIPT_REQUIRED','Released custody requires exact immutable published commit/tree/parent provenance');
-  manifest={...manifest,repository_id:observed.repository_id,source_object_id:observed.source_object_id,
-   source_tree_id:observed.tree,source_parent_ids:observed.parents,baseline_source_object_id:policy.source_object_id,
-   source_manifest_digest:observed.source_manifest_digest,original_source_manifest_artifact_id:manifest.source_manifest_artifact_id,
-   source_manifest_artifact_id:null,publication_operation_id:observed.operation_id,source_origin:'INTEGRATED_PUBLICATION'};
+  const current=observed.current_source;
+  if(observed.status!=='PUBLISHED'||observed.lineage_status!=='VERIFIED_PUBLISHED_CHAIN'||!current||
+   observed.latest_repository_head!==current.source_object_id||!Array.isArray(current.parents)||!current.tree||
+   current.repository_id!==policy.repository_id||!current.git_provenance_manifest_digest||!current.integration_input_manifest_digest||
+   v.publication_operation_id!==undefined&&v.publication_operation_id!==current.operation_id)
+   fail('QUALIFICATION_INTEGRATION_RECEIPT_REQUIRED','Released custody requires the exact latest terminal published source and verified ownership chain');
+  digest(current.git_provenance_manifest_digest);digest(current.integration_input_manifest_digest);
+  const acceptedManifest=digest(current.source_manifest_digest??current.git_provenance_manifest_digest);
+  manifest={...manifest,repository_id:current.repository_id,source_object_id:current.source_object_id,
+   source_tree_id:current.tree,source_parent_ids:current.parents,baseline_source_object_id:policy.source_object_id,
+   source_manifest_digest:acceptedManifest,git_provenance_manifest_digest:current.git_provenance_manifest_digest,
+   integration_input_manifest_digest:current.integration_input_manifest_digest,original_source_manifest_artifact_id:manifest.source_manifest_artifact_id,
+   original_publication_operation_id:observed.original_publication?.operation_id??null,
+   source_manifest_artifact_id:null,publication_operation_id:current.operation_id,source_origin:'INTEGRATED_PUBLICATION'};
  }
  const inputs=resultInputs(manifest,manifest.source_manifest_digest,packet.derived);
- return {manifest:{...manifest,input_packet_digest:packet.digest,mandatory_digest:packet.mandatory_digest,
+ return {manifest:{...manifest,criteria_digest:policy.criteria_digest,spec_revision_id:policy.spec_revision_id,spec_generation:policy.spec_generation,contract_digests:policy.contract_digests,input_packet_digest:packet.digest,mandatory_digest:packet.mandatory_digest,
   registry_digest:hash(policy),input_manifest:inputs,graph_manifest_digest:packet.derived.graph_manifest_digest,
   graph_status:packet.derived.graph_status},policy,inputs};
 }
@@ -103,11 +119,19 @@ async function invalidate(ctx:ComponentContext,raw:unknown):Promise<Data>{
    await db.query("UPDATE hyperfide.assurance_applicability SET applicability='STALE',input_manifest=$4,reasons=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3",
     [...s,id,after,JSON.stringify(changed.map(key=>({input:key,before:applicable.input_manifest[key],after:after[key]})))]);
    if(c.authority==='ACTIVE')await db.query("UPDATE hyperfide.tasks SET state='STALE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.task_id]);
+   await db.query('SAVEPOINT assurance_fresh_context');
    try{
     await executionGate(ctx,db,s,'ADMISSION');
     context=await freshContext(ctx,db,s,c,saved,v);
     if(canonical(context.inputs)!==canonical(after))blocked='QUALIFICATION_INPUT_MISMATCH';
-   }catch(error){if(error&&typeof error==='object'&&'code' in error)blocked=String(error.code);else throw error;}
+    await db.query('RELEASE SAVEPOINT assurance_fresh_context');
+   }catch(error){
+    await db.query('ROLLBACK TO SAVEPOINT assurance_fresh_context');
+    await db.query('RELEASE SAVEPOINT assurance_fresh_context');context=undefined;
+    if(error instanceof FoundationError)blocked=error.code;
+    else if(error&&typeof error==='object'&&'code' in error)blocked='QUALIFICATION_CONTEXT_DATABASE_UNAVAILABLE';
+    else throw error;
+   }
    if(context&&!blocked){
     if(hash(context.policy)!==hash(saved.policy))affected=context.policy.checks.map((check:Data)=>check.id);
     const pending=await db.query("SELECT q.id,q.qualification_job_id,i.policy,q.input_manifest_digest FROM hyperfide.requalification_operations q JOIN hyperfide.assurance_requalification_inputs i ON i.organisation_id=q.organisation_id AND i.run_id=q.run_id AND i.operation_id=q.id WHERE q.organisation_id=$1 AND q.run_id=$2 AND q.custody_id=$3 AND q.state IN ('PENDING','RUNNING') FOR UPDATE OF q",[...s,id]);
@@ -160,15 +184,20 @@ async function acceptRequalification(ctx:ComponentContext,raw:unknown):Promise<D
    fail('QUALIFICATION_CONFLICT','Requalification inputs or expected version changed');
   if(hash(await loadPolicy(ctx,c.task,db))!==hash(operation.policy))
    fail('QUALIFICATION_POLICY_STALE','Accepted proof obligations changed during requalification');
-  if(c.authority==='RELEASED'){
+  if(operation.manifest.source_origin==='INTEGRATED_PUBLICATION'){
    const integrated=await publication(db,{organisation_id:s[0],run_id:s[1]},c);
-   if(integrated.status!=='PUBLISHED'||integrated.operation_id!==operation.manifest.publication_operation_id||
-    integrated.source_object_id!==operation.manifest.source_object_id||integrated.tree!==operation.manifest.source_tree_id)
+   if(integrated.status!=='PUBLISHED'||integrated.lineage_status!=='VERIFIED_PUBLISHED_CHAIN'||
+    integrated.current_source?.source_object_id!==integrated.latest_repository_head||integrated.current_source?.operation_id!==operation.manifest.publication_operation_id||
+    integrated.current_source?.source_object_id!==operation.manifest.source_object_id||integrated.current_source?.tree!==operation.manifest.source_tree_id||
+    integrated.current_source?.git_provenance_manifest_digest!==operation.manifest.git_provenance_manifest_digest||
+    integrated.current_source?.integration_input_manifest_digest!==operation.manifest.integration_input_manifest_digest)
     fail('QUALIFICATION_INTEGRATION_RECEIPT_REQUIRED','Fresh proof no longer binds the current integrated publication');
   }
   const proof=(await db.query("SELECT p.receipt,p.receipt_digest,p.evidence_id FROM hyperfide.assurance_job_receipts p JOIN hyperfide.qualification_jobs q ON q.organisation_id=p.organisation_id AND q.run_id=p.run_id AND q.id=p.job_id AND q.lease_generation=p.lease_generation WHERE q.organisation_id=$1 AND q.run_id=$2 AND q.id=$3 AND q.state='SUCCEEDED' AND q.outcome='PASS'",[...s,operation.qualification_job_id])).rows[0];
   if(!proof||proof.receipt_digest!==checked.receipt_digest||hash(proof.receipt)!==proof.receipt_digest||proof.receipt.outcome!=='PASS'||
    proof.receipt.source_object_id!==operation.manifest.source_object_id||proof.receipt.rubric_digest!==operation.policy.rubric_digest||
+   proof.receipt.registry_digest!==hash(operation.policy)||proof.receipt.criteria_digest!==operation.policy.criteria_digest||
+   proof.receipt.source_manifest_digest!==operation.manifest.source_manifest_digest||
    canonical(proof.receipt.required_check_ids)!==canonical(operation.policy.checks.map((check:Data)=>check.id))||
    proof.receipt.checks.length!==operation.policy.checks.length||
    !proof.receipt.checks.every((check:Data)=>check.outcome==='PASS'&&canonical(check.input_manifest)===canonical(operation.input_manifest)))
@@ -188,6 +217,7 @@ async function acceptRequalification(ctx:ComponentContext,raw:unknown):Promise<D
   await db.query('INSERT INTO hyperfide.assurance_requalification_acceptances(organisation_id,run_id,operation_id,receipt_digest) VALUES($1,$2,$3,$4)',[...s,id,proof.receipt_digest]);
   await db.query("UPDATE hyperfide.assurance_applicability SET applicability='CURRENT',current_receipt_digest=$4,reasons='[]',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND custody_id=$3",[...s,c.id,proof.receipt_digest]);
   if(c.authority==='ACTIVE'){
+   currentCustody(c,String(c.custody_generation));
    await db.query("UPDATE hyperfide.submission_custodies SET qualification_outcome='PASS',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.id]);
    await db.query("UPDATE hyperfide.tasks SET state='QUALIFIED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[...s,c.task_id]);
   }
