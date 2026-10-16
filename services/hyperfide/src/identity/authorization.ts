@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {object} from '../policy/programme.js';
-import {canonicalOrigin,exact,fail,frozen,NAME,strictJSON,uuid} from '../transport/protocol.js';
+import {assertInvocation,canonicalOrigin,exact,fail,frozen,NAME,strictJSON,uuid} from '../transport/protocol.js';
 import type {InvocationContext} from '../transport/protocol.js';
 import {gatewayOf,invocationOf} from './enrollment.js';
 interface Rule {role:string;actions:string[];repositories:string[];artifact_prefixes:string[];git_refs:string[];model_destinations:string[];model_profiles:string[]}
@@ -18,7 +18,7 @@ async function rules(ctx:ComponentContext):Promise<readonly Rule[]>{
 export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const policy=await rules(ctx),gateway=gatewayOf(ctx);
  const authorize=async(i:InvocationContext):Promise<void>=>{
-  const p=i.principal,b=i.payload;
+  assertInvocation(i);const p=i.principal,b=i.payload;
   await gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.identityGuard},async()=>{});
   if(b.run_id!==p.run_id||!p.allowed_actions.includes(b.action)||!policy.some(r=>r.role===p.role&&r.actions.includes(b.action)))fail('AUTH_SCOPE_DENIED','Operation denied by trusted role/run/action policy');
   if(object(b.input)){
@@ -31,10 +31,15 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
   const permitted=policy.filter(r=>r.role===i.principal.role&&r.actions.includes(i.payload.action));
   if(input.kind==='artifact'){
    const prefix='hyperfide/v1/'+i.principal.organisation_id+'/'+i.principal.run_id+'/';
-   if(!input.target.startsWith(prefix)||input.target.includes('..')||input.target.includes('\\')||!permitted.some(r=>r.artifact_prefixes.some(x=>(input.target as string).startsWith(x))))fail('AUTH_SCOPE_DENIED','Artifact namespace denied');
+   if(!input.target.startsWith(prefix)||input.target.includes('..')||/[\x00-\x20\x7f%?#\\]/.test(input.target)||!permitted.some(r=>r.artifact_prefixes.some(x=>input.target===x||(input.target as string).startsWith(x.endsWith('/')?x:x+'/'))))fail('AUTH_SCOPE_DENIED','Artifact namespace denied');
   }else if(input.kind==='git'){
    if(typeof input.repository_id!=='string'||!gitRef(input.target)||!permitted.some(r=>r.repositories.includes(input.repository_id as string)&&r.git_refs.includes(input.target as string)))fail('AUTH_SCOPE_DENIED','Repository/ref policy denied');
-   if(input.target.startsWith('refs/heads/')&&!['INTEGRATOR','COORDINATOR','OPERATOR'].includes(i.principal.role))fail('AUTH_SCOPE_DENIED','Protected publication requires a dedicated publication principal');
+   await gateway.withPrimaryTransaction({timeoutMs:5000,signal:i.signal,guard:i.guard},async tx=>{
+    const binding=(await tx.query('SELECT integration_ref FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 FOR SHARE',[i.principal.organisation_id,i.principal.run_id,input.repository_id])).rows[0];
+    if(!binding)fail('AUTH_SCOPE_DENIED','Repository is not bound to the accepted run');
+    if(input.target===binding.integration_ref&&!['INTEGRATOR','COORDINATOR','OPERATOR'].includes(i.principal.role))fail('AUTH_SCOPE_DENIED','Protected integration ref requires a dedicated publication principal');
+    await i.guard(tx);
+   });
   }else if(input.kind==='model'){
    const destination=canonicalOrigin(input.target);
    if(typeof input.profile_id!=='string'||!permitted.some(r=>r.model_destinations.includes(destination)&&r.model_profiles.includes(input.profile_id as string)))fail('AUTH_SCOPE_DENIED','Model egress destination/profile denied');
