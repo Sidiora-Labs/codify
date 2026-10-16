@@ -68,7 +68,7 @@ CREATE TRIGGER agent_native_identity BEFORE UPDATE ON hyperfide.agent_sessions
 -- Explicit scoped links retain result objects through actual artifact GC.
 CREATE TABLE hyperfide.runner_result_artifacts (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,operation_id uuid NOT NULL,
- role text NOT NULL CHECK(length(role)>0 AND length(role)<=4096),
+ role text NOT NULL CHECK(length(role)>0 AND length(role)<=128),
  artifact_id uuid NOT NULL,artifact_digest hyperfide.digest NOT NULL,
  content_digest hyperfide.digest NOT NULL,size_bytes bigint NOT NULL CHECK(size_bytes>=0),
  PRIMARY KEY(organisation_id,run_id,operation_id,role),
