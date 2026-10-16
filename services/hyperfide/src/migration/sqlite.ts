@@ -7,6 +7,7 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError,object} from '../policy/programme.js';
 import {identityTransaction,invocationOf} from '../identity/enrollment.js';
 import type {IdentityTransaction} from '../identity/enrollment.js';
+import {createLegacyWriterAdmission} from './legacy.js';
 
 type Json=Record<string,unknown>;
 interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];archive_approved_digests?:string[]}
@@ -262,7 +263,7 @@ async function scoped(tx:IdentityTransaction,p:Profile,ctx:ComponentContext):Pro
  const r=await tx.query('SELECT repository_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[principal.organisation_id,principal.run_id,p.repository_id]);
  if(!r.rows[0])fail('MIGRATION_SCOPE','Source repository is not part of authenticated run');
 }
-export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:Object.fromEntries(MIGRATION_ACTIONS.map(action=>[action,async(raw:unknown,ctx:ComponentContext)=>{
+export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,capabilities:{'migration.legacy-writers.v1':createLegacyWriterAdmission(_startup.env)},actions:Object.fromEntries(MIGRATION_ACTIONS.map(action=>[action,async(raw:unknown,ctx:ComponentContext)=>{
  const i=invocationOf(ctx);
  if(i.payload.action!==action||i.payload.component!=='25.1'||i.payload.run_id!==i.principal.run_id)fail('MIGRATION_SCOPE','Authenticated action scope mismatch');
  if(!['OPERATOR','LEADER','COORDINATOR'].includes(i.principal.role))fail('MIGRATION_ROLE','Migration requires an authenticated supervisory role');
