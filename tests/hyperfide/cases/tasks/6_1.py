@@ -134,6 +134,7 @@ export function createComponent(ctx) {
   'fixture.native-forged':(input,context)=>auth(context,input,(tx,i)=>lookupNativeLaunch(tx,input,{...i,principal:{...i.principal,role:'PROVISIONER'}})),
   'fixture.crash':async(input,context)=>{
    const dispatch=new DurableDispatcher(g,input.config,async(claim)=>{
+    if(claim.id!==input.expected_event_id)throw new Error('UNEXPECTED_CRASH_DELIVERY');
     if(input.after_receive)await auth(context,input,tx=>receive(tx,{organisation_id:claim.organisation_id,run_id:claim.run_id,event_id:claim.id,consumer_id:claim.consumer_id}));
     process.kill(process.pid,'SIGKILL');
     await new Promise(()=>{});
@@ -648,21 +649,21 @@ def suite64(s):
     check("recovery.unresponsive-adapter-bounded",lambda:expect(hung["result"]["pending"]==1 and hung["elapsed_ms"]<3000,"Unresponsive adapter prevented bounded shutdown"))
 
     def crash_recover(number,after):
-        e=event(number);s.ok("outbox.enqueue",e)
-        # Retire the intentionally hung prior obligation through the actual receiver before isolating this crash.
-        for pending in claim(s,lease=5000):
-            if pending["id"]!=e["id"]:ack(s,pending,receipt(pending))
-            else:s.ok("outbox.retry",dict(S,event_id=e["id"],consumer_id=CONSUMER,attempt_count=pending["attempt_count"],delay_ms=0,error="CRASH_TEST_READY"))
+        # Each fault boundary owns a real bootstrapped consumer; unrelated expired work must not choose the killed effect.
+        consumer=uid(number+10000)
+        s.ok("outbox.consumer.register",dict(S,id=consumer,consumer_key="crash-boundary-"+str(number),critical=True,state="BUFFERING"))
+        s.ok("fixture.bootstrap",dict(S,bootstrap_id=uid(number+20000),consumer_id=consumer,aggregate_types=["fixture"],limit=128))
+        e=event(number);s.ok("fixture.selected",{"event":e,"consumer_ids":[consumer]})
         old=s.child;disconnected=False
-        try:s.ok("fixture.crash",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=50,poll_ms=10,retry_ms=0),"after_receive":after})
+        try:s.ok("fixture.crash",{"config":dict(S,consumer_id=consumer,batch_size=1,lease_ms=1000,poll_ms=10,retry_ms=0),"expected_event_id":e["id"],"after_receive":after})
         except Exception:disconnected=True
         old.wait(timeout=10);expect(disconnected and old.returncode==-signal.SIGKILL,"Fixture did not actually kill its dispatcher process")
         s.child=None
-        expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"]))==("1" if after else "0"),"Crash boundary did not match committed receiver state")
-        s.start();sql("SELECT pg_sleep(0.1)")
-        restarted=s.ok("fixture.dispatch",{"config":dict(S,consumer_id=CONSUMER,batch_size=1,lease_ms=5000,poll_ms=10,retry_ms=0),"poll":True})
-        expect(restarted["sends"]==1 and sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(e["id"]))=="ACKNOWLEDGED" and
-            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"]))=="1","Crash recovery lost identity or duplicated receiver effect")
+        expect(sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"])+" AND principal_scope="+q(consumer))==("1" if after else "0"),"Crash boundary did not match committed receiver state")
+        s.start();sql("SELECT pg_sleep(1.1)")
+        restarted=s.ok("fixture.dispatch",{"config":dict(S,consumer_id=consumer,batch_size=1,lease_ms=5000,poll_ms=10,retry_ms=0),"poll":True})
+        expect(restarted["sends"]==1 and sql("SELECT state FROM hyperfide.event_deliveries WHERE event_id="+q(e["id"])+" AND consumer_id="+q(consumer))=="ACKNOWLEDGED" and
+            sql("SELECT count(*) FROM hyperfide.command_inbox WHERE operation='event.receive' AND idempotency_key="+q(e["id"])+" AND principal_scope="+q(consumer))=="1","Crash recovery lost identity or duplicated receiver effect")
     sql("SELECT pg_sleep(0.2)")
     check("recovery.sigkill-before-receiver-commit",lambda:crash_recover(4030,False))
     check("recovery.sigkill-after-receiver-commit",lambda:crash_recover(4040,True))
