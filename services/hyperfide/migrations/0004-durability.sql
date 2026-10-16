@@ -3,6 +3,8 @@ CREATE TABLE hyperfide.authority_epochs (
  deployment_id uuid NOT NULL,
  epoch uuid NOT NULL,
  previous_epoch uuid,
+ database_predecessor_epoch uuid,
+ activation_kind text NOT NULL CHECK(activation_kind IN ('BOOTSTRAP','ROTATE','RESTORE')),
  state text NOT NULL CHECK(state IN ('ACTIVE','REVOKED')),
  fence_id text NOT NULL CHECK(length(fence_id)>0),
  proof_digest text NOT NULL CHECK(proof_digest ~ '^sha256:[0-9a-f]{64}$'),
@@ -23,7 +25,7 @@ CREATE TRIGGER authority_epochs_isolation BEFORE INSERT OR UPDATE OR DELETE ON h
 CREATE TRIGGER authority_activations_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.authority_activations
  FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
 CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.authority_epochs
- FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('deployment_id','epoch','previous_epoch','fence_id','proof_digest','activated_at');
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('deployment_id','epoch','previous_epoch','database_predecessor_epoch','activation_kind','fence_id','proof_digest','activated_at');
 CREATE TRIGGER immutable_activation BEFORE UPDATE OR DELETE ON hyperfide.authority_activations
  FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('operation_id','deployment_id','epoch','request_digest','accepted_at');
 REVOKE CREATE ON SCHEMA hyperfide FROM PUBLIC;
@@ -42,3 +44,7 @@ CREATE TRIGGER no_epoch_reactivation BEFORE UPDATE ON hyperfide.authority_epochs
 -- Match the published bounded environment profile contract without altering migration0001.
 ALTER TABLE hyperfide.environment_profiles DROP CONSTRAINT environment_profiles_manifest_check;
 ALTER TABLE hyperfide.environment_profiles ADD CONSTRAINT environment_profiles_manifest_check CHECK(jsonb_typeof(manifest)='object' AND octet_length(manifest::text)<=67108864);
+
+-- Every semantic writer updates this existing row before mutation. SERIALIZABLE
+-- readers lock it FOR SHARE so stale waiting snapshots abort and retry.
+ALTER TABLE hyperfide.runs ADD COLUMN semantic_generation bigint NOT NULL DEFAULT 1 CHECK(semantic_generation>0);
