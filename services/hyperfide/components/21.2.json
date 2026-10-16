@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "21.2",
+  "task": "21.2",
+  "roles": [
+    "control"
+  ],
+  "module": "decisions/recovery.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "decision.recovery.describe",
+    "decision.recovery.packet",
+    "decision.recovery.recommend"
+  ],
+  "requires": [
+    "4.2",
+    "21.4",
+    "20.4"
+  ]
+}
