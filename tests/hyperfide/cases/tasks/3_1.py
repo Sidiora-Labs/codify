@@ -142,7 +142,6 @@ def main():
    expect(not path.exists(),"Fixture key/config directory remains")
    with socket.socket() as s:expect(s.connect_ex(("127.0.0.1",port))!=0,"HTTPS listener remains")
   check("hierarchy.cleanup.observed",absence)
-  print(json.dumps({"type":"cleanup","complete":True,"resources":[]}),flush=True)
  return 1 if FAILED else 0
 if __name__=="__main__":
  if "--cleanup" in sys.argv:print(json.dumps({"type":"cleanup","complete":True,"resources":[]}));raise SystemExit(0)
