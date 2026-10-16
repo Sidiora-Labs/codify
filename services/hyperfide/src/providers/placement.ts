@@ -3,12 +3,15 @@ import {randomUUID,randomInt} from 'node:crypto';
 import type pg from 'pg';
 import type {Component,ComponentContext} from '../components/registry.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
+import * as identityCredentials from '../identity/credentials.js';
+import {assertInvocation} from '../transport/protocol.js';
+import type {InvocationContext} from '../transport/protocol.js';
 import {invocationOf} from '../identity/enrollment.js';
-import type {PrimaryTransaction} from '../storage/transactions.js';
-import {operationPayloadDigest,validateProviderOutcome} from './contract.js';
+import type {TransactionGateway,PrimaryTransaction} from '../storage/transactions.js';
+import {operationPayloadDigest,validateProviderOperation,validateProviderOutcome} from './contract.js';
 import type {ProviderOperation,ProviderScope,ProviderOutcome} from './contract.js';
-import {providerDatabase,providerInvocation,bindProviderInvocation,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
-import type {ProviderDatabase,DeploymentConfig} from './pools.js';
+import {providerDatabase,resolveSandboxBinding,assertInvocationRun,providerInvocation,bindProviderInvocation,obj,str,uuid,dec,dg,utc,fail,readDeployment,currentPool,configuredScope,transaction,digestDocument,providerAdapter,poolCapacity} from './pools.js';
+import type {ProviderDatabase,DeploymentConfig,ProviderIsolationFactory} from './pools.js';
 
 export interface FreshEnrollmentRequest {
   organisation_id:string;run_id:string;pool_id:string;sandbox_id:string;sandbox_boot_generation:string;nonce:string;
@@ -94,6 +97,7 @@ async function verifyEnrollment(config:DeploymentConfig,poolId:string,sandbox:Re
 }
 export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown,signal:AbortSignal):Promise<unknown>{
   const input=obj(value,['pool_id','sandbox_id','run_id']),poolId=uuid(input.pool_id),sandboxId=uuid(input.sandbox_id),runId=uuid(input.run_id);
+  assertInvocationRun(pool,runId);
   const {scope}=await currentPool(pool,config,poolId);
   const rows=await pool.query("SELECT * FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3 AND observed_state='RUNNING'",[config.organisation_id,sandboxId,poolId]);
   const sandbox=rows.rows[0];if(!sandbox?.native_sandbox_id)fail('POOL_PROBE_UNAVAILABLE','An identified running sandbox is required');
@@ -124,7 +128,7 @@ export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,po
    await pool.query("UPDATE hyperfide.provider_connectivity_probes SET observation=$3,evidence_digest=$4 WHERE organisation_id=$1 AND id=$2 AND status='UNKNOWN'",
     [config.organisation_id,id,{operation:base,outcome},digestDocument({operation:base,outcome,enrollment:proof})]);
   };
-  const adapter=providerAdapter(scope,{invocation:providerInvocation(pool),resolvePreparation:unavailable,assertResourceBinding:async observed=>{
+  const adapter=providerAdapter(scope,{invocation:providerInvocation(pool),resolveResourceBinding:observed=>resolveSandboxBinding(pool,config,runId,sandboxId,observed),resolvePreparation:unavailable,persistEarlyProcess:unavailable,claimProcess:unavailable,resolveProcess:unavailable,assertResourceBinding:async observed=>{
    if(digestDocument(observed)!==digestDocument(base))fail('PROVIDER_SCOPE_MISMATCH','Connectivity operation changed');
    const current=(await pool.query('SELECT native_sandbox_id,boot_generation FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2',[config.organisation_id,sandboxId])).rows[0];
    if(!current||current.native_sandbox_id!==sandbox.native_sandbox_id||String(current.boot_generation)!==String(sandbox.boot_generation))fail('STALE_SANDBOX_GENERATION','Connectivity boot binding changed');
@@ -169,22 +173,25 @@ export async function probePool(pool:ProviderDatabase,config:DeploymentConfig,po
 export async function recordPoolFailure(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
   const input=obj(value,['observation_id']),observationId=uuid(input.observation_id);
   return transaction(pool,async c=>{
-    const rows=await c.query('SELECT o.*,i.pool_id FROM hyperfide.provider_observations o JOIN hyperfide.provisioning_intents i ON i.organisation_id=o.organisation_id AND i.id=o.intent_id WHERE o.organisation_id=$1 AND o.id=$2',[config.organisation_id,observationId]);
+    const rows=await c.query('SELECT o.*,i.pool_id FROM hyperfide.provider_observations o JOIN hyperfide.provisioning_intents i ON i.organisation_id=o.organisation_id AND i.id=o.intent_id WHERE o.organisation_id=$1 AND o.id=$2 FOR UPDATE OF o',[config.organisation_id,observationId]);
     const row=rows.rows[0],code=row?.observation?.outcome?.error?.code;
     if(!row||!['RATE_LIMIT','UNAVAILABLE','TIMEOUT'].includes(code))fail('PROVIDER_FAILURE_UNVERIFIED','A recorded provider rate-limit or partition observation is required');
     await currentPool(c,config,row.pool_id);
+    if(row.failure_applied_at)return{recorded:false,pool_id:row.pool_id,replayed:true,reconciliation_required:row.observation.outcome.status==='UNKNOWN'};
     await c.query("INSERT INTO hyperfide.provider_pool_health(organisation_id,pool_id) VALUES($1,$2) ON CONFLICT DO NOTHING",[config.organisation_id,row.pool_id]);
     const health=(await c.query('SELECT * FROM hyperfide.provider_pool_health WHERE organisation_id=$1 AND pool_id=$2 FOR UPDATE',[config.organisation_id,row.pool_id])).rows[0];
     if(!health)fail('POOL_HEALTH_UNKNOWN','Pool health row disappeared');
     const count=health.failure_count+1,delay=Math.min(policy.max_backoff_ms,policy.base_backoff_ms*2**Math.min(16,count-1)+randomInt(policy.base_backoff_ms));
     const retry=new Date(Date.now()+delay).toISOString();
     await c.query("UPDATE hyperfide.provider_pool_health SET failure_count=$3,state='OPEN',retry_after=$4,last_outcome_digest=$5,state_version=state_version+1 WHERE organisation_id=$1 AND pool_id=$2",[config.organisation_id,row.pool_id,count,retry,row.evidence_digest]);
-    return{pool_id:row.pool_id,retry_after:retry,maximum_attempts:policy.maximum_attempts,automatic_retry_allowed:count<policy.maximum_attempts,reconciliation_required:row.observation.outcome.status==='UNKNOWN'};
+    await c.query('UPDATE hyperfide.provider_observations SET failure_applied_at=clock_timestamp() WHERE organisation_id=$1 AND id=$2',[config.organisation_id,observationId]);
+    return{recorded:true,pool_id:row.pool_id,retry_after:retry,maximum_attempts:policy.maximum_attempts,automatic_retry_allowed:count<policy.maximum_attempts,reconciliation_required:row.observation.outcome.status==='UNKNOWN'};
   });
 }
 export async function planRelocation(pool:ProviderDatabase,config:DeploymentConfig,policy:ConnectivityConfig,value:unknown):Promise<unknown>{
   const input=obj(value,['run_id','old_attempt_id','expected_generation','expected_authority_epoch','target_pool_id','checkpoint_id','reason_observation_id']);
   const run=uuid(input.run_id),attemptId=uuid(input.old_attempt_id),generation=dec(input.expected_generation),epoch=uuid(input.expected_authority_epoch),targetId=uuid(input.target_pool_id);
+  assertInvocationRun(pool,run);
   if(generation==='0')fail('INVALID_REQUEST','Attempt generation must be positive');
   return transaction(pool,async c=>{
     const previous=await c.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND old_attempt_id=$3 AND old_attempt_generation=$4',[config.organisation_id,run,attemptId,generation]);
@@ -234,18 +241,157 @@ export async function planRelocation(pool:ProviderDatabase,config:DeploymentConf
       old_compute_fenced:true,physical_termination_confirmed:false,old_capacity_released:false,fresh_enrollment_required:true,admission_granted:false};
   });
 }
+export interface ProviderIsolationReceipt {
+ reference_key:string;operation_id:string;status:'ISOLATED'|'UNKNOWN';topology_digest:string;resource_identity_digest:string;
+ observed_state:'DESTROYED'|'ABSENT'|'UNKNOWN';observed_at:string;expires_at:string;evidence_digest:string;
+ evidence_scope:'LIVE_PROVIDER'|'COMPONENT_FIXTURE';
+}
+export interface ProviderIsolationBinding {
+ schema_version:1;reference_key:string;operation_id:string;topology_digest:string;resource_identity_digest:string;
+ destroy_operation:ProviderOperation<'destroy'>;authority_digest:string;custody_evidence_digest:string;
+}
+export interface ProviderIsolationState {binding:ProviderIsolationBinding;receipt:ProviderIsolationReceipt|null}
+export interface ProviderIsolationJournal {
+ read():Promise<ProviderIsolationState|null>;
+ prepare(binding:ProviderIsolationBinding):Promise<{created:boolean;state:ProviderIsolationState}>;
+ record(value:{binding:ProviderIsolationBinding;receipt:ProviderIsolationReceipt;observations:Array<{operation:ProviderOperation;outcome:ProviderOutcome}>}):Promise<void>;
+}
+export interface IsolationTarget {
+ reference_key:string;scope:ProviderScope;resource:NonNullable<ProviderOperation['resource']>;boot_id:string;
+ preparation_digest:string;resource_topology_digest:string;
+}
+interface IsolationConfiguration {
+ schema_version:1;deployment_id:string;organisation_id:string;run_id:string;source_epoch:string;topology_digest:string;
+ evidence_scope:'LIVE_PROVIDER'|'COMPONENT_FIXTURE';maximum_operation_ms:number;proof_max_age_ms:number;resources:IsolationTarget[];
+}
+async function isolationConfiguration(env:Readonly<NodeJS.ProcessEnv>):Promise<IsolationConfiguration>{
+ const file=env.HYPERFIDE_WRITER_ISOLATION_CONFIG;if(!file?.startsWith('/'))fail('ISOLATION_CONFIG_REQUIRED','Protected writer topology configuration required');
+ const stat=await fs.lstat(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1048576||(stat.mode&0o077)||(process.getuid&&stat.uid!==process.getuid()))fail('ISOLATION_CONFIG_INVALID','Writer topology must be bounded and owner-only');
+ const c=obj(JSON.parse(await fs.readFile(file,'utf8')),['schema_version','deployment_id','organisation_id','run_id','source_epoch','topology_digest','evidence_scope','maximum_operation_ms','proof_max_age_ms','resources']);
+ if(c.schema_version!==1||!['LIVE_PROVIDER','COMPONENT_FIXTURE'].includes(String(c.evidence_scope)))fail('ISOLATION_CONFIG_INVALID','Invalid isolation schema/evidence scope');
+ uuid(c.deployment_id);uuid(c.organisation_id);uuid(c.run_id);str(c.source_epoch,128);dg(c.topology_digest);
+ for(const k of ['maximum_operation_ms','proof_max_age_ms'])if(!Number.isSafeInteger(c[k])||(c[k] as number)<100||(c[k] as number)>30000)fail('ISOLATION_CONFIG_INVALID','Isolation deadline/evidence lifetime must be bounded to30seconds');
+ if(!Array.isArray(c.resources)||!c.resources.length||c.resources.length>10000)fail('ISOLATION_CONFIG_INVALID','Explicit writer resources required');
+ const names=new Set<string>();
+ for(const raw of c.resources){
+  const r=obj(raw,['reference_key','scope','resource','boot_id','preparation_digest','resource_topology_digest']),key=str(r.reference_key,128);
+  if(names.has(key))fail('ISOLATION_CONFIG_INVALID','Duplicate writer resource');names.add(key);uuid(r.boot_id);dg(r.preparation_digest);dg(r.resource_topology_digest);
+  const scope=obj(r.scope);if(scope.organisation_id!==c.organisation_id)fail('ISOLATION_CONFIG_INVALID','Writer belongs to another deployment organisation');
+ }
+ return c as unknown as IsolationConfiguration;
+}
+function isolationOperation<K extends 'destroy'|'observe'>(kind:K,target:IsolationTarget,id:string,deadline:string,correlation:string):ProviderOperation<K>{
+ const base={schema_version:1 as const,kind,scope:target.scope,deadline_at:deadline,resource:target.resource,preparation_digest:target.preparation_digest,
+  parameters:kind==='destroy'?{reason:'Authenticated external writer isolation'}:{},
+  identity:{operation_id:id,idempotency_key:id,payload_digest:'',correlation_id:correlation,causation_id:correlation}};
+ base.identity.payload_digest=operationPayloadDigest(base as ProviderOperation);return validateProviderOperation(base) as ProviderOperation<K>;
+}
+function unknownIsolationOutcome(op:ProviderOperation):ProviderOutcome {
+ return{schema_version:1,status:'UNKNOWN',acceptance:'UNKNOWN',operation_id:op.identity.operation_id,payload_digest:op.identity.payload_digest,
+  scope:op.scope,observed_at:new Date().toISOString(),provider_request_id:null,resource:op.resource,result:null,
+  error:{code:'UNAVAILABLE',provider_code:null,message:'Physical resource isolation is not confirmed',retry_after_ms:null},reconcile_required:true,retry:'AFTER_RECONCILIATION'};
+}
+export interface ProviderIsolationCustodyProof {
+ operation_id:string;resource_identity_digest:string;evidence_digest:string;observed_at:string;expires_at:string;
+}
+export type ProviderIsolationCustodyPreflight=(target:Readonly<IsolationTarget>,operationId:string,authority:unknown,signal:AbortSignal)=>Promise<ProviderIsolationCustodyProof|null>;
+export interface ProviderIsolationRuntime {
+ destructionPreflight?:ProviderIsolationCustodyPreflight;
+ env:Readonly<NodeJS.ProcessEnv>;signal:AbortSignal;registry:Map<string,ProviderIsolationFactory>;gateway?:Pick<TransactionGateway,'withPrimaryTransaction'>;
+}
+export function createProviderIsolation(runtime:ProviderIsolationRuntime){
+ return async(referenceKey:string,operationId:string,authority:unknown,signal:AbortSignal,journal:ProviderIsolationJournal):Promise<ProviderIsolationReceipt>=>{
+  str(referenceKey,128);uuid(operationId);
+  const config=await isolationConfiguration(runtime.env),target=config.resources.find(r=>r.reference_key===referenceKey);
+  if(!target)fail('ISOLATION_SCOPE_DENIED','Writer resource is not in protected deployment topology');
+  const resourceDigest=digestDocument({scope:target.scope,resource:target.resource,boot_id:target.boot_id,preparation_digest:target.preparation_digest});
+  let authorityDigest:string,authorityExpiry:string;
+  const permitModule=identityCredentials as unknown as Record<string,unknown>;
+  if(typeof permitModule.isVerifiedIsolationPermit==='function'&&(permitModule.isVerifiedIsolationPermit as (v:unknown)=>boolean)(authority)){
+   if(typeof permitModule.assertIsolationPermit!=='function')fail('ISOLATION_AUTHORITY_UNAVAILABLE','Actual isolation permit verifier unavailable');
+   const expected={operation_id:operationId,organisation_id:config.organisation_id,run_id:config.run_id,deployment_id:config.deployment_id,source_epoch:config.source_epoch,topology_digest:config.topology_digest,resource_reference:referenceKey,resource_topology_digest:target.resource_topology_digest};
+   (permitModule.assertIsolationPermit as (v:unknown,e:unknown)=>void)(authority,expected);
+   const verified=authority as {permit_digest:string;expires_at:string};authorityDigest=dg(verified.permit_digest);authorityExpiry=utc(verified.expires_at);
+  }else{
+   assertInvocation(authority);const invocation=authority as InvocationContext;
+   if(invocation.principal.organisation_id!==config.organisation_id||invocation.principal.run_id!==config.run_id||!['OPERATOR','COORDINATOR','PROVISIONER'].includes(invocation.principal.role))
+    fail('ISOLATION_SCOPE_DENIED','Actual principal cannot isolate configured writers');
+   // Ordinary requests retain current-primary authority. The separate actual14
+   // permit path is the only outage mechanism and never grants a new epoch.
+   if(!runtime.gateway)fail('ISOLATION_AUTHORITY_UNAVAILABLE','Normal authority requires actual primary gateway');
+   await runtime.gateway.withPrimaryTransaction({timeoutMs:5000,signal,guard:tx=>invocation.guard(tx)},async()=>{});
+   authorityDigest=dg(invocation.operation.payload_digest);authorityExpiry=utc(invocation.principal.expires_at);
+  }
+  if(Date.parse(authorityExpiry)<=Date.now())fail('AUTH_EXPIRED','Isolation authority expired');
+  if(!journal||typeof journal.read!=='function'||typeof journal.prepare!=='function'||typeof journal.record!=='function')fail('ISOLATION_JOURNAL_REQUIRED','Durable external custody is required');
+  const deadline=Math.min(Date.now()+config.maximum_operation_ms,Date.parse(authorityExpiry));
+  const prior=await journal.read();let state:ProviderIsolationState,first=false;
+  if(prior)state=prior;
+  else{
+   // Destructive outage fencing still preserves required workspace/artifact custody.
+   // The trusted caller must obtain an actual, resource-bound retained-custody proof;
+   // topology metadata and an isolation permit alone never authorise data loss.
+   if(!runtime.destructionPreflight)fail('DESTRUCTION_PREFLIGHT_UNAVAILABLE','Actual retained-custody proof required before destructive isolation');
+   const proof=await boundedEffect(runtime.destructionPreflight(target,operationId,authority,signal),signal,deadline);
+   if(!proof||proof.operation_id!==operationId||proof.resource_identity_digest!==resourceDigest||Date.parse(utc(proof.observed_at))>Date.now()||Date.parse(utc(proof.expires_at))<=Date.now())fail('DESTRUCTION_CUSTODY_UNPROVEN','Fresh retained-custody proof must bind this exact resource and isolation operation');
+   const custodyDigest=dg(proof.evidence_digest);
+   const binding:ProviderIsolationBinding={schema_version:1,reference_key:referenceKey,operation_id:operationId,topology_digest:config.topology_digest,resource_identity_digest:resourceDigest,
+    destroy_operation:isolationOperation('destroy',target,operationId,new Date(deadline).toISOString(),operationId),authority_digest:authorityDigest,custody_evidence_digest:custodyDigest};
+   const claimed=await journal.prepare(binding);state=claimed.state;first=claimed.created;
+  }
+  const binding=state.binding;
+  if(binding.schema_version!==1||binding.reference_key!==referenceKey||binding.operation_id!==operationId||binding.topology_digest!==config.topology_digest||binding.resource_identity_digest!==resourceDigest||binding.authority_digest!==authorityDigest)
+   fail('ISOLATION_JOURNAL_CONFLICT','Durable operation/source authority differs from protected topology');
+  dg(binding.custody_evidence_digest);
+  const destroy=validateProviderOperation(binding.destroy_operation);
+  if(destroy.kind!=='destroy'||destroy.identity.operation_id!==operationId||digestDocument(destroy.scope)!==digestDocument(target.scope)||digestDocument(destroy.resource)!==digestDocument(target.resource)||destroy.preparation_digest!==target.preparation_digest)
+   fail('ISOLATION_JOURNAL_CONFLICT','Journal resource operation binding changed');
+  const observations:Array<{operation:ProviderOperation;outcome:ProviderOutcome}>=[],seen=new Set<string>();
+  const add=(op:ProviderOperation,outcome:ProviderOutcome)=>{
+   validateProviderOutcome({operation:op,outcome});const digest=digestDocument({operation:op,outcome});if(seen.has(digest))return;
+   if(observations.length>=8)fail('ISOLATION_EVIDENCE_LIMIT','Bounded provider observations exceeded');seen.add(digest);observations.push({operation:op,outcome});
+  };
+  const receipt=(observed:ProviderOutcome|null):ProviderIsolationReceipt=>{
+   const now=Date.now(),at=observed?Date.parse(observed.observed_at):now;
+   const fact=observed?.status==='SUCCEEDED'&&observed.acceptance==='CONFIRMED_ACCEPTED'&&'provider_state' in observed.result&&observed.result.provider_state==='DESTROYED'&&'health' in observed.result&&observed.result.health==='ABSENT'&&at<=now&&now-at<config.proof_max_age_ms;
+   const end=Math.min((fact?at:now)+config.proof_max_age_ms,Date.parse(authorityExpiry));
+   const result={reference_key:referenceKey,operation_id:operationId,status:fact&&end>now?'ISOLATED' as const:'UNKNOWN' as const,topology_digest:config.topology_digest,resource_identity_digest:resourceDigest,
+    observed_state:fact?'ABSENT' as const:'UNKNOWN' as const,observed_at:new Date(fact?at:now).toISOString(),expires_at:new Date(end).toISOString(),evidence_scope:config.evidence_scope};
+   return{...result,evidence_digest:digestDocument({binding,observations,result})};
+  };
+  const factory=runtime.registry.get(target.scope.provider);
+  if(!factory){const result=receipt(null);await journal.record({binding,receipt:result,observations});return result;}
+  const combined=AbortSignal.any([signal,runtime.signal,AbortSignal.timeout(Math.max(1,deadline-Date.now()))]);
+  let transport:Awaited<ReturnType<typeof factory>>;
+  try{transport=await boundedEffect(Promise.resolve(factory(target.scope)),combined,deadline);}
+  catch{const result=receipt(null);await journal.record({binding,receipt:result,observations});return result;}
+  if(typeof transport.destroy!=='function'||typeof transport.observe!=='function')fail('ISOLATION_TRANSPORT_INVALID','Actual typed admin transport required');
+  if(first){
+   let outcome:ProviderOutcome;
+   try{outcome=await boundedEffect(transport.destroy(destroy as ProviderOperation<'destroy'>,combined),combined,deadline);}
+   catch{outcome=unknownIsolationOutcome(destroy);}
+   add(destroy,outcome);await journal.record({binding,receipt:receipt(null),observations:[...observations]});
+  }
+  // Never infer absence from accepted deletion, list omission or a cached proof.
+  const observe=isolationOperation('observe',target,randomUUID(),new Date(deadline).toISOString(),operationId);
+  let observed:ProviderOutcome;
+  try{observed=await boundedEffect(transport.observe(observe,combined),combined,deadline);}
+  catch{observed=unknownIsolationOutcome(observe);}
+  add(observe,observed);const result=receipt(observed);await journal.record({binding,receipt:result,observations});return result;
+ };
+}
 export function createComponent(context:ComponentContext):Component{
   const database=providerDatabase(context);
   const guarded=(fn:(i:unknown,c:DeploymentConfig,p:ConnectivityConfig,database:ProviderDatabase)=>Promise<unknown>)=>async(input:unknown,requestContext:ComponentContext)=>{
     if(context.signal.aborted)fail('PROVIDER_CLOSED','Provider placement is shutting down');
     const config=await readDeployment(context.env);return fn(input,config,await connectivity(context.env),bindProviderInvocation(database,config,invocationOf(requestContext),['PROVISIONER','COORDINATOR','OPERATOR']));
   };
-  return{apiVersion:1,actions:{
+  return{apiVersion:1,capabilities:{'provider.isolation.v1':{isolateConfiguredResource:createProviderIsolation({env:context.env,signal:context.signal,registry:database.runtime.isolation,gateway:database.gateway})}},actions:{
     'provider.placement.probe':guarded((i,c,p,database)=>probePool(database,c,p,i,context.signal)),
     'provider.placement.record-failure':guarded((i,c,p,database)=>recordPoolFailure(database,c,p,i)),
     'provider.relocation.plan':guarded((i,c,p,database)=>planRelocation(database,c,p,i)),
     'provider.relocation.confirm-enrollment':guarded(async(input,c,p,database)=>{
-      const i=obj(input,['run_id','plan_id','sandbox_id']),run=uuid(i.run_id),planId=uuid(i.plan_id),sandboxId=uuid(i.sandbox_id);
+      const i=obj(input,['run_id','plan_id','sandbox_id']),run=uuid(i.run_id),planId=uuid(i.plan_id),sandboxId=uuid(i.sandbox_id);assertInvocationRun(database,run);
       const plan=(await database.query('SELECT * FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[c.organisation_id,run,planId])).rows[0];
       if(!plan||!['PENDING_ADMISSION','ENROLLED'].includes(plan.state))fail('RELOCATION_PLAN_INVALID','An unadmitted relocation plan is required');
       const {scope}=await currentPool(database,c,plan.target_pool_id);
