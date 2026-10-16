@@ -10,7 +10,7 @@ const MAX_OBJECT=256*1024,MAX_MANIFEST=512*1024,MAX_CHUNKS=4096;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^sha256:[0-9a-f]{64}$/;
 const BACKEND='s3-v1';
-export const ARTIFACT_ACTIONS=Object.freeze(['artifact.object.put','artifact.object.read','artifact.object.inspect','artifact.object.reconcile','artifact.manifest.commit','artifact.manifest.read','artifact.pending.list'] as const);
+export const ARTIFACT_ACTIONS=Object.freeze(['artifact.object.put','artifact.object.read','artifact.object.inspect','artifact.object.reconcile','artifact.manifest.commit','artifact.manifest.read','artifact.pending.list','artifact.object.locate'] as const);
 type Scope={organisation_id:string;run_id:string};
 type Invocation={principal:{organisation_id:string;run_id:string;role:string};guard:(tx:QuerySession)=>Promise<void>;signal:AbortSignal};
 type RequestContext=ComponentContext&{invocation?:Invocation};
@@ -282,6 +282,15 @@ export class ArtifactStore{
  });
  return envelope(row,'VERIFIED',{manifest_digest:row.digest,content_digest:manifest.content_digest,chunk_count:manifest.chunks.length});
  }
+ private async locate(input:unknown):Promise<unknown>{
+ const value=fields(input,[...scopeKeys,'digest','expected_size_bytes']),scope=this.scope(value),identity=digest(value.digest),size=decimal(value.expected_size_bytes,BigInt(MAX_MANIFEST));
+ const row=await this.transaction(async tx=>(await tx.query<Artifact>('SELECT '+selected+' FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND digest=$3',[scope.organisation_id,scope.run_id,identity])).rows[0]);
+ if(!row)return {outcome:'NOT_FOUND',metadata_state:'ABSENT',availability:'NOT_EVALUATED',artifact:null,receipt:null,retry_authority:'NONE',authority:'NONE',live_qualification:'NOT_EVALUATED'};
+ if(row.size_bytes!==size)fail('ARTIFACT_BINDING_CONFLICT','Located object size differs from expected immutable identity');
+ if(row.status!=='COMPLETE')return envelope(row,'UNKNOWN',{metadata_state:'PRESENT',requires_reconciliation:row.status==='PENDING',retry_authority:'NONE'});
+ return this.object({...scope,artifact_id:row.id},'inspect');
+ }
+
  private async pending(input:unknown):Promise<unknown>{
  const value=fields(input,scopeKeys,['limit','after_artifact_id']),scope=this.scope(value),limit=value.limit??100;
  if(typeof limit!=='number'||!Number.isInteger(limit)||limit<1||limit>1000)fail('ARTIFACT_INPUT_INVALID','Invalid inventory limit');
@@ -304,6 +313,7 @@ export class ArtifactStore{
  case 'artifact.manifest.commit':return await this.commit(input);
  case 'artifact.manifest.read':return await this.object(input,'manifest');
  case 'artifact.pending.list':return await this.pending(input);
+ case 'artifact.object.locate':return await this.locate(input);
  default:fail('ARTIFACT_INPUT_INVALID','Unknown artifact operation');
  }})();
  if(this.context.invocation)await this.transaction(async()=>undefined);
