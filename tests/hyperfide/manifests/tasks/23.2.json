@@ -7,29 +7,16 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-23.2-external-authority-sandbox-budget-v5",
+  "campaign_id": "hyperfide-task-23.2-external-authority-sandbox-budget-v6",
   "case_ids": [
     "V-007",
     "V-048"
   ],
   "expected_assertion_ids": [
-    "observability.resources.boot-budget-missing-unqualified",
-    "observability.resources.boot-free-vector-exact",
-    "observability.resources.pending-release-remains-charged",
-    "observability.resources.pool-free-not-boot-headroom",
-    "observability.resources.boot-no-kernel-proof",
-    "observability.resources.boot-primary-source",
-    "observability.resources.boot-source-age-unknown",
-    "observability.resources.boot-other-run-hidden",
-    "observability.resources.boot-unqualified-not-zero-free",
-    "observability.resources.boot-pagination",
-    "observability.resources.boot-replica-preference-primary-fallback",
-    "observability.resources.boot-input-closed",
-    "observability.resources.boot-cursor-typed",
-    "observability.resources.boot-preference-typed",
-    "observability.resources.boot-cross-run-denied",
-    "observability.resources.old-boot-debt-retained",
     "observability.resources.dimensions",
+    "observability.resources.profile-density-2",
+    "observability.resources.profile-density-4",
+    "observability.resources.profile-density-8",
     "observability.resources.profile-replay",
     "observability.resources.profile-conflict",
     "observability.resources.unknown-dimension",
@@ -51,11 +38,24 @@
     "observability.resources.old-sequence-denied",
     "observability.resources.profile-density-not-session-count",
     "observability.resources.observation-not-admission",
+    "observability.resources.boot-budget-missing-unqualified",
+    "observability.resources.boot-free-vector-exact",
+    "observability.resources.pending-release-remains-charged",
+    "observability.resources.pool-free-not-boot-headroom",
+    "observability.resources.boot-no-kernel-proof",
+    "observability.resources.boot-primary-source",
+    "observability.resources.boot-source-age-unknown",
+    "observability.resources.boot-other-run-hidden",
+    "observability.resources.boot-unqualified-not-zero-free",
+    "observability.resources.boot-pagination",
+    "observability.resources.boot-replica-preference-primary-fallback",
+    "observability.resources.boot-input-closed",
+    "observability.resources.boot-cursor-typed",
+    "observability.resources.boot-preference-typed",
+    "observability.resources.boot-cross-run-denied",
+    "observability.resources.old-boot-debt-retained",
     "observability.resources.cross-run-denied",
-    "observability.resources.untyped-capacity-not-inferred",
-    "observability.resources.profile-density-2",
-    "observability.resources.profile-density-4",
-    "observability.resources.profile-density-8"
+    "observability.resources.untyped-capacity-not-inferred"
   ],
   "inputs": [
     {
@@ -795,7 +795,7 @@
     },
     {
       "path": "tests/hyperfide/registrations/23.2.json",
-      "sha256": "243416cf26cbdac28472703d04b82c9cef512037d460c6cbfe487e450e29bffe",
+      "sha256": "cae6218d4f553b91608d6ab04feb0da1d2b928a543744c0b0a69042cb1a2ad27",
       "size": 4118
     },
     {
