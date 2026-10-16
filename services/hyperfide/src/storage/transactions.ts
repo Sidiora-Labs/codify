@@ -23,6 +23,7 @@ export interface TransactionOptions {
 }
 export interface DatabaseLease {client:pg.PoolClient;signal:AbortSignal;release(destroy?:boolean):void}
 export interface PrimaryConnectionSource {
+  commitMode?(): 'on'|'remote_apply';
   acquirePrimary(deadline:number,signal?:AbortSignal):Promise<DatabaseLease>;
 }
 export function deadlineFrom(timeoutMs=5000):number {
@@ -34,6 +35,8 @@ function codeOf(error:unknown):string {
   return typeof error==='object'&&error!==null&&'code' in error?String(error.code):'';
 }
 export async function bounded<T>(promise:Promise<T>,deadline:number,signal?:AbortSignal):Promise<T>{
+  // Observe already-started work even when cancellation wins before the race attaches.
+  void promise.catch(()=>{});
   if(signal?.aborted)throw new StorageError('TX_TIMEOUT','Operation was cancelled');
   const remaining=Math.ceil(deadline-performance.now());
   if(remaining<=0)throw new StorageError('TX_TIMEOUT','Operation deadline expired');
@@ -46,6 +49,39 @@ export async function bounded<T>(promise:Promise<T>,deadline:number,signal?:Abor
   });
   try{return await Promise.race([promise,limit]);}
   finally{if(timer)clearTimeout(timer);if(abort)signal?.removeEventListener('abort',abort);}
+}
+// Trusted callbacks still cannot accidentally escape the broker's transaction boundary.
+function singleStatement(sql:string):void{
+  let state:'normal'|'single'|'double'|'line'|'block'|'dollar'='normal',depth=0,tag='',plain='',ended=false,escapeString=false;
+  for(let i=0;i<sql.length;i++){
+    const c=sql[i]!,next=sql[i+1];
+    if(state==='line'){if(c==='\n'){state='normal';plain+=' ';}continue;}
+    if(state==='block'){
+      if(c==='/'&&next==='*'){depth++;i++;}else if(c==='*'&&next==='/'){depth--;i++;if(!depth)state='normal';}continue;
+    }
+    if(state==='single'){
+      if(c==='\\'){if(!escapeString)throw new StorageError('INVALID_REQUEST','Backslash literals require parameters or explicit E strings');i++;continue;}
+      if(c==="'"){if(next==="'")i++;else state='normal';}continue;
+    }
+    if(state==='double'){if(c==='"'){if(next==='"')i++;else state='normal';}continue;}
+    if(state==='dollar'){if(sql.startsWith(tag,i)){i+=tag.length-1;state='normal';}continue;}
+    if(c==='-'&&next==='-'){state='line';plain+=' ';i++;continue;}
+    if(c==='/'&&next==='*'){state='block';depth=1;plain+=' ';i++;continue;}
+    if(/\s/.test(c)){plain+=' ';continue;}
+    if(c===';'){if(ended)throw new StorageError('INVALID_REQUEST','Multiple SQL statements are forbidden');ended=true;continue;}
+    if(ended)throw new StorageError('INVALID_REQUEST','Multiple SQL statements are forbidden');
+    if(c==="'"){escapeString=i>0&&/[eE]/.test(sql[i-1]!)&&(i<2||!/[A-Za-z0-9_$]/.test(sql[i-2]!));state='single';plain+=' VALUE ';continue;}
+    if(c==='"'){state='double';plain+=' IDENT ';continue;}
+    if(c==='$'){
+      const match=/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      if(match){tag=match[0];state='dollar';i+=tag.length-1;plain+=' VALUE ';continue;}
+    }
+    plain+=c.toUpperCase();
+  }
+  if(!['normal','line'].includes(state))throw new StorageError('INVALID_REQUEST','Unterminated SQL token');
+  const first=/^[A-Z]+/.exec(plain.trimStart())?.[0];
+  if(!first||['BEGIN','START','COMMIT','END','ROLLBACK','ABORT','SAVEPOINT','RELEASE','PREPARE','SET','RESET','DISCARD','VACUUM'].includes(first))
+    throw new StorageError('INVALID_REQUEST','Transaction and session control are owned by the gateway');
 }
 interface CopyConnection {sendCopyFromChunk(chunk:Buffer):void;endCopyFrom():void}
 class BoundedCopyInput extends pg.Query {
@@ -81,6 +117,7 @@ export class TransactionGateway {
           query:async<R extends pg.QueryResultRow=pg.QueryResultRow>(text:string,values?:readonly unknown[]):Promise<pg.QueryResult<R>>=>{
             if(!active||!livePrimary.has(tx))throw new StorageError('TX_CLOSED','Transaction capability has expired');
             if(typeof text!=='string'||!text.trim())throw new StorageError('INVALID_REQUEST','SQL text is required');
+            singleStatement(text);
             return bounded(client.query<R>(text,values?[...values]:undefined),deadline,lease!.signal);
           },
           copyFrom:async(sql:string,bytes:Uint8Array):Promise<{rowCount:number}>=>{
@@ -103,14 +140,15 @@ export class TransactionGateway {
           if(options.guard)await bounded(Promise.resolve().then(()=>options.guard!(tx)),deadline,lease.signal);
           value=await bounded(Promise.resolve().then(()=>operation(tx)),deadline,lease.signal);
         }finally{active=false;livePrimary.delete(tx);}
+        // Restore the selected durability floor immediately before commit; callers cannot retain a weaker session setting.
+        await client.query("SELECT set_config('synchronous_commit',$1,true)",[this.source.commitMode?.()??'on']);
         phase='commit';
         await client.query('COMMIT');
         phase='committed';
         return value;
       }catch(error){
         const code=codeOf(error),knownAbort=code==='40001'||code==='40P01';
-        const serverError=typeof error==='object'&&error!==null&&'severity' in error&&typeof error.severity==='string';
-        if(phase==='commit'&&!knownAbort&&!serverError){
+        if(phase==='commit'&&!knownAbort){
           healthy=false;
           throw new StorageError('COMMIT_AMBIGUOUS','Commit acknowledgement was lost; reconcile the durable operation identity before retry','unknown',attempt,false);
         }
