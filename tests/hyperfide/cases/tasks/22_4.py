@@ -32,6 +32,25 @@ def main():
                 value=f.ask("evaluation.drift.check",{"gate_id":gate["artifact_id"],"scorecard_id":score["artifact_id"],"current_profile":changed})
                 require(not value["model_action_policy_enabled"]and"model_route_or_rubric_changed"in value["reasons"]and value["retain_existing_workers"]and not value["alter_accepted_evidence"],"drift did not preserve fallback/history")
             check("evaluation.promotion.version-drift-disables",drift)
+            def expired_qualification():
+                bad=copy.deepcopy(request);proof=bad["route_qualification"]
+                proof["body"]["payload"]["expires_at"]=utc(f.now-timedelta(minutes=1))
+                proof["body"]["subject_digest"]=digest(proof["body"]["payload"])
+                bad["route_qualification"]=f.resign(proof)
+                expired=f.ask("evaluation.promotion.assess",bad)
+                value=f.ask("evaluation.drift.check",{"gate_id":expired["artifact_id"],"scorecard_id":score["artifact_id"],"current_profile":candidate})
+                require(not value["model_action_policy_enabled"]and"required_qualification_expired"in value["reasons"]and expired["valid_until"]<payload["expires_at"],"earlier qualification deadline lost")
+            check("evaluation.promotion.drift-rechecks-qualification-expiry",expired_qualification)
+            def substituted_scorecard():
+                from_fixture=H["H"]["build_scorecard"]
+                _,_,_,req,_=from_fixture(f)
+                req["predictions"][-1]["body"]["payload"]["latency_ms"]+=1
+                req["predictions"][-1]["body"]["subject_digest"]=digest(req["predictions"][-1]["body"]["payload"])
+                req["predictions"][-1]=f.resign(req["predictions"][-1])
+                replacement=f.ask("evaluation.scorecard",req)
+                value=f.ask("evaluation.drift.check",{"gate_id":gate["artifact_id"],"scorecard_id":replacement["artifact_id"],"current_profile":candidate})
+                require(not value["model_action_policy_enabled"]and"unapproved_scorecard_revision"in value["reasons"],"unapproved evidence substituted")
+            check("evaluation.promotion.reject-scorecard-substitution",substituted_scorecard)
             def missing_route():
                 bad=copy.deepcopy(request);bad["route_qualification"]=None
                 f.ask("evaluation.promotion.assess",bad,False)

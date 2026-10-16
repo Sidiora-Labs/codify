@@ -12,6 +12,8 @@
     "evaluation.promotion.no-fleet-authority",
     "evaluation.promotion.hosted-no-gpu-block",
     "evaluation.promotion.version-drift-disables",
+    "evaluation.promotion.drift-rechecks-qualification-expiry",
+    "evaluation.promotion.reject-scorecard-substitution",
     "evaluation.promotion.reject-missing-route-proof",
     "evaluation.promotion.reject-stale-profile-proof",
     "evaluation.promotion.reject-component-qualification",

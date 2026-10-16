@@ -5,7 +5,7 @@ import type { TrialReport } from './trials.js';
 
 interface Thresholds { minimum_coverage:number; minimum_accuracy_lower:number; maximum_ece:number; maximum_risk:number; maximum_p95_ms:number; maximum_actual_cost_microusd:number }
 interface Policy { version:string; purpose:string; profile:Profile; dataset_id:string; holdout_digest:string; thresholds:Thresholds; expires_at:string; required_cases:{route:string[];invariants:string[]} }
-interface Gate { policy:Policy; scorecard_id:string; trial_report_id:string; eligible:boolean; reasons:string[]; mode:string; evidence_digests:string[] }
+interface Gate { policy:Policy; scorecard_id:string; trial_report_id:string; eligible:boolean; reasons:string[]; mode:string; evidence_digests:string[]; valid_until:string }
 function thresholds(v:unknown):Thresholds{
   const t=fields(v,['minimum_coverage','minimum_accuracy_lower','maximum_ece','maximum_risk','maximum_p95_ms','maximum_actual_cost_microusd']);
   return {minimum_coverage:finite(t.minimum_coverage,0,1),minimum_accuracy_lower:finite(t.minimum_accuracy_lower,0,1),
@@ -29,7 +29,7 @@ function quality(score:Scorecard,p:Policy):string[]{
   if(metrics.actual_usage_complete!==true||typeof metrics.actual_cost_microusd!=='number'||metrics.actual_cost_microusd>bound.maximum_actual_cost_microusd)reasons.push('actual_cost_unproven');
   return reasons;
 }
-function validQualification(context:ComponentContext,input:unknown,kind:string,profileDigest:string,requiredCases:string[]):string[]{
+function validQualification(context:ComponentContext,input:unknown,kind:string,profileDigest:string,requiredCases:string[]):{reasons:string[];expires_at:string}{
   const receipt=attestation(context,input,kind);
   const payload=fields(receipt.payload,['profile_digest','passed','expires_at','evidence_refs','qualification_scope','case_ids']);
   strings(payload.evidence_refs,1,1000);
@@ -41,7 +41,7 @@ function validQualification(context:ComponentContext,input:unknown,kind:string,p
   if(payload.passed!==true)reasons.push(kind+':not_passed');
   if(requiredCases.some(c=>!cases.includes(c)))reasons.push(kind+':required_case_missing');
   if(Date.parse(time(payload.expires_at))<Date.now())reasons.push(kind+':expired');
-  return reasons;
+  return {reasons,expires_at:time(payload.expires_at)};
 }
 export async function assessPromotion(input:unknown,context:ComponentContext):Promise<Obj>{
   const r=fields(input,['policy','scorecard_id','trial_report_id','route_qualification','invariant_qualification','mode','selfhost_qualification']);
@@ -62,16 +62,19 @@ export async function assessPromotion(input:unknown,context:ComponentContext):Pr
   if(trial.mode!=='controlled'||!trial.complete||!trial.production_eligible||trial.evidence_class!=='live')reasons.push('controlled_live_trial_unproven');
   if(!trial.benefit_demonstrated||!trial.noninferiority_demonstrated||trial.stop_required)reasons.push('trial_benefit_or_noninferiority_unproven');
   const profileDigest=digest(policy.profile);
-  reasons.push(...validQualification(context,r.route_qualification,'route_qualification',profileDigest,policy.required_cases.route));
-  reasons.push(...validQualification(context,r.invariant_qualification,'invariant_qualification',profileDigest,policy.required_cases.invariants));
+  const route=validQualification(context,r.route_qualification,'route_qualification',profileDigest,policy.required_cases.route);
+  const invariant=validQualification(context,r.invariant_qualification,'invariant_qualification',profileDigest,policy.required_cases.invariants);
+  reasons.push(...route.reasons,...invariant.reasons);
+  const validity=[policy.expires_at,route.expires_at,invariant.expires_at];
   if(r.mode==='self_hosted'){
     const receipt=attestation(context,r.selfhost_qualification,'selfhost_qualification');
     const q=fields(receipt.payload,['profile_digest','gpu','license_evidence','engine_version','correctness','overload','restart','expires_at','evidence_refs']);
     id(q.gpu);hash(q.license_evidence);id(q.engine_version);strings(q.evidence_refs,1,1000);
+    validity.push(time(q.expires_at));
     if(receipt.evidence_class!=='live'||hash(q.profile_digest)!==profileDigest||q.correctness!==true||q.overload!==true||q.restart!==true||Date.parse(time(q.expires_at))<Date.now())reasons.push('selfhost_capability_unqualified');
   }else if(r.selfhost_qualification!==null)fail('Hosted baseline does not consume optional GPU qualification');
   const gate:Gate={policy,scorecard_id:hash(r.scorecard_id),trial_report_id:hash(r.trial_report_id),eligible:reasons.length===0,
-    reasons:[...new Set(reasons)],mode:String(r.mode),
+    reasons:[...new Set(reasons)],mode:String(r.mode),valid_until:new Date(Math.min(...validity.map(Date.parse))).toISOString(),
     evidence_digests:[approved.receipt_digest,digest(r.route_qualification),digest(r.invariant_qualification)]};
   const artifact_id=await store.put('promotion_gate',gate);
   return {artifact_id,...gate,grants_fleet_authority:false,action:gate.eligible?'eligible_for_separately_authorised_policy_activation':'remain_shadow',
@@ -82,6 +85,8 @@ export async function checkDrift(input:unknown,context:ComponentContext):Promise
   const store=new EvaluationStore(context),gate=await store.get<Gate>(r.gate_id,'promotion_gate'),score=await store.get<Scorecard>(r.scorecard_id,'scorecard');
   const reasons=quality(score,gate.policy);
   if(!gate.eligible)reasons.push('original_gate_not_eligible');
+  if(hash(r.scorecard_id)!==gate.scorecard_id)reasons.push('unapproved_scorecard_revision');
+  if(Date.parse(gate.valid_until)<Date.now())reasons.push('required_qualification_expired');
   if(canonical(profile(r.current_profile))!==canonical(gate.policy.profile))reasons.push('model_route_or_rubric_changed');
   if(Date.parse(gate.policy.expires_at)<Date.now())reasons.push('policy_expired');
   const result={gate_id:hash(r.gate_id),scorecard_id:hash(r.scorecard_id),policy_version:gate.policy.version,
