@@ -4,7 +4,7 @@
 This component test does not qualify domain17 review execution or any live GitHub account.
 """
 from __future__ import annotations
-import hashlib, importlib.util, json, os, subprocess, sys, uuid
+import hashlib, importlib.util, json, os, shutil, subprocess, sys, uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[4]
 sys.path.insert(0,str(ROOT/'tests/hyperfide/support'))
@@ -19,9 +19,9 @@ def check(name,callback):
     except Exception as error:actual=type(error).__name__+': '+str(error)[:500]
     RESULTS.append((name,actual));print(json.dumps({'type':'assertion','id':name,'expected':'observed','actual':actual}),flush=True)
 def campaign():return Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/domain18-standalone'))
-def record_database(task,database):
+def record_database(task,database,directory):
     target=campaign()/'findings';target.mkdir(parents=True,exist_ok=True)
-    (target/('task-'+task+'-resource.json')).write_text(json.dumps({'database':database})+'\n')
+    (target/('task-'+task+'-resource.json')).write_text(json.dumps({'database':database,'directory':directory})+'\n')
 def cleanup(task):
     target=campaign()/'findings';target.mkdir(parents=True,exist_ok=True);complete=False
     try:
@@ -30,16 +30,19 @@ def cleanup(task):
         for query in ('DROP DATABASE IF EXISTS "'+database+'" WITH (FORCE)',"SELECT datname FROM pg_database WHERE datname='"+database+"'"):
             result=subprocess.run(['node','--input-type=commonjs','-e',SQL_JS],input=json.dumps({'sql':query,'values':[]}),text=True,cwd=ROOT,env=os.environ.copy(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
             expect(result.returncode==0,'Database absence observer failed')
-        complete=json.loads(result.stdout)==[]
+        database_absent=json.loads(result.stdout)==[]
+        directory=Path(profile['directory']);expect(directory.parent==Path('/tmp') and directory.name.startswith('hyperfide-identity-') and not directory.is_symlink(),'Unexpected fixture directory identity')
+        if directory.exists():shutil.rmtree(directory)
+        complete=database_absent and not directory.exists()
     except Exception:complete=False
     relative='findings/task-'+task+'-absence.json';(campaign()/relative).write_text(json.dumps({'observed_absent':complete,'observer':'actual PostgreSQL pg_database after DROP DATABASE','scope':'synthetic local component fixture'})+'\n')
-    print(json.dumps({'type':'cleanup','complete':complete,'resources':[{'id':'hf-task-'+task+'-database','status':'deleted' if complete else 'unknown','observed_absent':complete,'evidence_artifact':relative}]}),flush=True)
+    print(json.dumps({'type':'cleanup','complete':complete,'resources':[{'id':'hf-task-'+task+'-'+kind,'status':'deleted' if complete else 'unknown','observed_absent':complete,'evidence_artifact':relative} for kind in ('database','tls-directory')]}),flush=True)
     return int(not complete)
 def insert(f,table,data):
-    columns=list(data);return f.sql('INSERT INTO hyperfide.'+table+'('+','.join(columns)+') VALUES('+','.join('$'+str(i+1) for i in range(len(columns)))+')',[data[c] for c in columns])
+    columns=list(data);return f.sql('INSERT INTO hyperfide.'+table+'('+','.join(columns)+') VALUES('+','.join('$'+str(i+1) for i in range(len(columns)))+')',[json.dumps(data[c]) if isinstance(data[c],(dict,list)) else data[c] for c in columns])
 def scoped(f,**data):return dict(organisation_id=f.ids['organisation'],run_id=f.ids['run'],**data)
 def seed(f,task):
-    record_database(task,f.database)
+    record_database(task,f.database,str(f.path))
     # Apply actual reviewed migrations only; missing prerequisite source is an error.
     for filename in ('0002-spec.sql','0003-hierarchy.sql','0017-review.sql','0018-findings.sql'):
         sql=(ROOT/'services/hyperfide/migrations'/filename).read_text();f.sql('BEGIN;\n'+sql+'\nCOMMIT;')
@@ -54,7 +57,7 @@ def seed(f,task):
         insert(f,'feature_packages',scoped(f,id=x[key],package_key='fixture-'+key,wave=1,manager_session_id=x[manager]))
         insert(f,'hierarchy_packages',scoped(f,package_id=x[key],feature_key='fixture-'+key,allocation_policy='FEATURE_STABLE',state='ACTIVE'))
     insert(f,'tasks',scoped(f,id=x['task'],task_key='18.fixture.origin',feature_package_id=x['package'],spec_revision_id=i['spec'],criteria_digest=D,definition={},wave=1))
-    executable=Path('/usr/bin/node');proof_check={'id':'finding.repaired','argv':[str(executable),'--version'],'executable_digest':sha(executable.read_bytes()),'timeout_ms':1000,'required_artifacts':['fixture/stdout.log'],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}
+    executable=Path(subprocess.check_output(['node','-p','process.execPath'],text=True).strip()).resolve(strict=True);proof_check={'id':'finding.repaired','argv':[str(executable),'--version'],'executable_digest':sha(executable.read_bytes()),'timeout_ms':1000,'required_artifacts':['fixture/stdout.log'],'input_keys':['source','dependency','toolchain','configuration','graph','contract']}
     proof_policy={'schema_version':1,'criteria_digest':D,'spec_revision_id':i['spec'],'spec_generation':'1','repository_id':x['repository'],'source_object_id':OID,'rubric_digest':RUBRIC,'checks':[proof_check,dict(proof_check,id='finding.other')],'clauses':[{'id':'18.1','mode':'EXECUTABLE','acceptance_ids':['V-032'],'checks':['finding.repaired','finding.other']}],'inputs':{name:sha(('fixture-'+name).encode()) for name in ('source','dependency','toolchain','configuration','graph','contract')},'contract_digests':[]}
     insert(f,'proof_registries',scoped(f,task_id=x['task'],spec_generation='1',spec_revision_id=i['spec'],criteria_digest=D,registry_digest=sha(json.dumps(proof_policy,sort_keys=True,separators=(',',':')).encode()),policy=proof_policy))
     insert(f,'attempts',scoped(f,id=x['attempt'],task_id=x['task'],generation='1',authority_epoch=i['epoch'],input_packet_digest=sha(b'fixture-input'),execution_state='SUBMITTED',compute_authority='RELEASED'))
@@ -118,6 +121,8 @@ def main():
         f.sql("UPDATE hyperfide.finding_registry_records SET phase='RESOLVED',state_version=state_version+1 WHERE finding_id=$1",[fid]);f.sql("UPDATE hyperfide.findings SET state='RESOLVED',state_version=state_version+1 WHERE id=$1",[fid])
         reopened=finding(f,observation(f,'different-reproducer'))
         check('findings.registry.alias-observation-reopens-canonical',lambda:expect(reopened['finding_id']==fid and reopened['reopened'] is True and reopened['phase']=='REOPENED'))
+        context=call(f,'finding.context.read',{'limit':100});check('findings.registry.context-preserves-provenance',lambda:expect(context['qualifies_findings'] is False and any(row['observation_id']==a and row['evidence_id']==f.x['evidence'] and row['source_object_id']==OID for row in context['observations']) and context['context_digest'].startswith('sha256:')))
+        check('findings.registry.context-explicit-pagination',lambda:expect(call(f,'finding.context.read',{'limit':1})['next_observation_id'] is not None))
         check('findings.registry.no-implicit-repair',lambda:expect(f.sql('SELECT count(*)::text AS n FROM hyperfide.finding_repairs')[0]['n']=='0'))
         check('findings.registry.append-only-report-history',lambda:assert_sql_refused(f,'DELETE FROM hyperfide.finding_registry_reports'))
         check('findings.registry.operator-audit-identity',lambda:expect(f.sql('SELECT actor_id,actor_role,credential_id FROM hyperfide.finding_duplicate_links')[0]=={'actor_id':f.ids['operator'],'actor_role':'OPERATOR','credential_id':f.ids['operator']}))

@@ -13,7 +13,8 @@
     "finding.inspect",
     "finding.list",
     "finding.duplicate.confirm",
-    "finding.blockers.inspect"
+    "finding.blockers.inspect",
+    "finding.context.read"
   ],
   "requires": [
     "4.1",
