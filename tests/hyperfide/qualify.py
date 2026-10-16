@@ -487,12 +487,23 @@ def execute(args, root, registry_path, registry, registration, registration_path
             immutable(path, content)
             artifacts.append({"path": str(path.relative_to(output_dir)), "sha256": digest(content), "size": len(content), "kind": kind, "complete": True})
         for relative in registration.get("required_artifacts", []):
-            path = output_dir / relative
-            if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(output_dir.resolve()):
+            name = Path(relative)
+            path = output_dir / name
+            unsafe = name.is_absolute() or ".." in name.parts
+            unsafe = unsafe or any((output_dir / Path(*name.parts[:index])).is_symlink()
+                                   for index in range(1, len(name.parts) + 1))
+            if unsafe or not path.is_file() or not path.resolve().is_relative_to(output_dir.resolve()):
                 diagnostics.append("required artifact missing or unsafe: " + relative)
             else:
+                # Probes use campaign-relative scratch paths. Every receipt owns
+                # immutable copies so a later execution cannot rewrite history.
                 data = path.read_bytes()
-                artifacts.append({"path": relative, "sha256": digest(data), "size": len(data), "kind": "required", "complete": True})
+                frozen = artifacts_dir / "required" / name
+                frozen.parent.mkdir(parents=True, exist_ok=True)
+                immutable(frozen, data)
+                artifacts.append({"path": frozen.relative_to(output_dir).as_posix(),
+                                  "logical_path": relative, "sha256": digest(data),
+                                  "size": len(data), "kind": "required", "complete": True})
         outcome = "BLOCKED" if blocked else "FAIL" if diagnostics else "PASS"
         receipt = {"schema_version": 1, "receipt_id": receipt_id, "sequence": len(previous) + 1,
                    "previous_seal": previous[-1]["seal"] if previous else None, "sealed_at": utc(),
