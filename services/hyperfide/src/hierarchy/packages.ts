@@ -1,3 +1,4 @@
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
 import {readFileSync} from 'node:fs';
 import {createHash,randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
@@ -158,10 +159,16 @@ export async function event(tx:PrimaryTransaction,actor:TrustedActor,generation:
  await tx.query('INSERT INTO hyperfide.hierarchy_ownership_events(organisation_id,run_id,id,kind,actor_session_id,leader_generation,payload) VALUES($1,$2,$3,$4,$5,$6,$7)',
   [actor.organisation_id,actor.run_id,randomUUID(),kind,actor.session_id,generation,JSON.stringify(payload)]);
 }
+export function hierarchyReadGuard(actor:TrustedActor):(tx:PrimaryTransaction)=>Promise<void> {
+ return async tx=>{await readSemanticDisposition(tx,actor);await actor.guard(tx);};
+}
+export function hierarchyWriteGuard(actor:TrustedActor):(tx:PrimaryTransaction)=>Promise<void> {
+ return async tx=>{await writeSemanticDisposition(tx,actor);await actor.guard(tx);};
+}
 export async function operation<T>(g:TransactionGateway,actor:TrustedActor,name:string,input:Data,fn:(tx:PrimaryTransaction)=>Promise<T>):Promise<T> {
  const key=text(input.idempotency_key),identity=hash({name,actor:actor.session_id,input});
  const envelope=actor.invocation.operation;
- return g.withPrimaryTransaction({timeoutMs:10000,guard:actor.guard,signal:actor.signal},async tx=>{
+ return g.withPrimaryTransaction({timeoutMs:10000,guard:hierarchyWriteGuard(actor),signal:actor.signal},async tx=>{
   await ready(tx);
   const lookup=async(operationName:string,operationKey:string,requestDigest:string)=>{
    await tx.query("INSERT INTO hyperfide.command_inbox(organisation_id,run_id,principal_scope,operation,idempotency_key,request_digest) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
@@ -320,7 +327,7 @@ export function createComponent(context:ComponentContext):Component {
  },
  'hierarchy.inspect':async (input,invocation)=>{
   const v=record(input,['leader_generation']);const a=trustedActor(invocation);
-  return g.withPrimaryTransaction({timeoutMs:5000,guard:a.guard,signal:a.signal},async tx=>{
+  return g.withPrimaryTransaction({timeoutMs:5000,guard:hierarchyReadGuard(a),signal:a.signal},async tx=>{
    await ready(tx);const authority=await requireAuthority(tx,{...a,leader_generation:decimal(v.leader_generation),roles:['LEADER']});
    const packages=await tx.query('SELECT h.*,h.owner_generation::text AS owner_generation,h.state_version::text AS state_version,p.manager_session_id,p.wave FROM hyperfide.hierarchy_packages h JOIN hyperfide.feature_packages p ON p.organisation_id=h.organisation_id AND p.run_id=h.run_id AND p.id=h.package_id WHERE h.organisation_id=$1 AND h.run_id=$2 ORDER BY p.wave,h.package_id LIMIT 257',[a.organisation_id,a.run_id]);
    return {authority,packages:packages.rows.slice(0,256),has_more:packages.rows.length>256,dispatch_authority:false};
