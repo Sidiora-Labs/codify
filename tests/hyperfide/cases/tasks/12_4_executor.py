@@ -34,7 +34,7 @@ const {validatePolicy}=await mod('policy/programme.js');
 const {isIdentityAuthority}=await mod('identity/enrollment.js');
 const {isArtifactStoreCapability}=await mod('artifacts/objects.js');
 const {hash}=await mod('transport/protocol.js');
-const {runnerCanonical,runnerResultSigningBytes}=await mod('runner/bridge.js');
+const {runnerCanonical,runnerResultSigningBytes,resolveRunnerCapturedReference}=await mod('runner/bridge.js');
 const {validateNativeControlReceipt}=await mod('runner/executor.js');
 const controller=new AbortController();
 const registry=new ComponentRegistry({role:'provisioner',policy:validatePolicy(JSON.parse(await fs.readFile(policyPath,'utf8')),'fixture-identity-v1','provisioner'),signal:controller.signal,env:process.env});
@@ -54,6 +54,11 @@ try{
     if(q.op==='public')result=await registry.invoke(i.payload.component,i.payload.action,i.payload.input,i);
     else if(q.op==='native')result=await native.invokeNativeRunner(i,q.input,controller.signal);
     else if(q.op==='artifact')result=await store.invoke(q.action,q.input,i);
+    else if(q.op==='resolve'){
+     if(typeof resolveRunnerCapturedReference!=='function')throw new Error('Actual runner captured-reference resolver prerequisite is missing');
+     const captured=await resolveRunnerCapturedReference(store,i,q.reference);
+     result={...captured,bytes_base64:Buffer.from(captured.bytes).toString('base64')};delete result.bytes;
+    }
     else if(q.op==='coherence')result=validateNativeControlReceipt(q.receipt,q.target,q.command_id);
     else if(q.op==='signature'){
      const key=createPrivateKey(await fs.readFile(keyPath)),publicKey=createPublicKey(key);
@@ -100,22 +105,20 @@ class Fixture:
             f.env.update({"HF_ARTIFACT_S3_ENDPOINT":self.objects.endpoint,"HF_ARTIFACT_ALLOW_LOOPBACK_HTTP":"1","HF_ARTIFACT_S3_REGION":m.REGION,"HF_ARTIFACT_S3_BUCKET":m.BUCKET,"HF_ARTIFACT_S3_ACCESS_KEY_ID":m.KEY,"HF_ARTIFACT_S3_SECRET_ACCESS_KEY":m.SECRET,"HF_ARTIFACT_S3_SESSION_TOKEN":m.TOKEN,"HF_ARTIFACT_ORGANISATION_ID":f.ids["organisation"],"HF_ARTIFACT_ALLOWED_RUN_IDS":json.dumps([f.ids["run"]])})
             for filename,version,name in (("0008-provider-coordination.sql",8,"0008-provider-coordination"),("0012-runner-registry.sql",12,"0012-runner-registry")):
                 data=(ROOT/"services/hyperfide/migrations"/filename).read_bytes()
-                f.sql("BEGIN;\n"+data.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+digest(data)+"');\nCOMMIT;")
+                applied=f.sql("SELECT name,checksum FROM hyperfide.schema_migrations WHERE version=$1",[version])
+                expect(len(applied)==1 and applied[0]["name"]==name and applied[0]["checksum"]==digest(data),"Actual migration authority did not apply exact runner/provider schema")
             self.components=f.path/"executor-components";self.components.mkdir()
-            names=("4.2","14.1","8.2","8.3","15.2","12.4-executor")
+            names=("4.2","4.4","14.1","8.2","8.3","15.2","12.4-executor")
             actions=list(f.actions)+["provider.remote.execute-bound"]
             for name in names:
                 source=ROOT/"services/hyperfide/components"/(name+".json")
                 shutil.copyfile(source,self.components/source.name)
                 actions+=json.loads(source.read_text())["actions"]
             actions=list(dict.fromkeys(actions))
-            config=json.loads(f.identity_config.read_text())
-            for p in config["principals"]:p["allowed_actions"]=actions
-            f.identity_config.write_text(json.dumps(config))
             policy=json.loads(f.policy.read_text());policy["allowed_actions"]=actions;f.policy.write_text(json.dumps(policy))
             self.config=f.path/"executor.json";self.configuration={"schema_version":1,"principals":[{"credential_id":f.ids["provisioner"],"key_path":str(f.keys["provisioner"]["path"])}],"concurrency":2}
             self.config.write_text(json.dumps(self.configuration));self.config.chmod(0o600)
-        try:self.f=self.identity_module.IdentityFixture(extra_components=("15.2",),extra_setup=setup,database="hf_task_12_4_executor")
+        try:self.f=self.identity_module.IdentityFixture(extra_components=("15.2",),extra_setup=setup,database="hf_task_12_4_executor",extra_actions=("provider.remote.execute-bound","runner.executor.describe","provider.placement.probe"))
         except BaseException:self.objects.stop();raise
         try:
             self.scope={"organisation_id":self.f.ids["organisation"],"run_id":self.f.ids["run"]}
@@ -133,15 +136,18 @@ class Fixture:
         f.sql("INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,dimension,configured_limit,provenance_digest) VALUES($1,$2,$3,'TEST',1,$4)",[org,self.account,i["pool"],digest(b"fixture-not-qualified")])
         f.sql("INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at) VALUES($1,$2,$3,$4,$5,0,clock_timestamp()+interval '1 hour')",[org,run,self.reservation,uid(),self.account])
         pin=digest(b"HOSTILE_INPUT_NOT_ACTUAL_SOURCE")
-        f.sql("INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,state_dir,runner_binary,workspace_path,runner_binary_digest,boot_preparation_digest,preparation_digest,readiness_digest,source_digest,source_object_id,source_tree_id,slot_generation,uid,gid,observation_digest) VALUES($1,$2,$3,$4,$5,1,$6,$7,$8,'/invalid/never-run','/invalid/no-native-binary','/invalid/no-workspace',$9,$9,$9,$9,$9,$10,$10,1,65534,65534,$9)",[org,run,self.session,i["provisioner"],i["sandbox"],i["boot"],self.slot,self.repository,pin,"1"*40])
+        f.sql("INSERT INTO hyperfide.runner_registry(organisation_id,run_id,session_id,credential_id,sandbox_id,boot_generation,boot_id,slot_id,repository_id,state_dir,runner_binary,workspace_path,home_path,tmp_path,runner_binary_digest,boot_preparation_digest,preparation_digest,readiness_digest,source_digest,source_object_id,source_tree_id,slot_generation,uid,gid,observation_digest) VALUES($1,$2,$3,$4,$5,1,$6,$7,$8,'/invalid/never-run','/invalid/no-native-binary','/invalid/no-workspace','/invalid/no-home','/invalid/no-tmp',$9,$9,$9,$9,$9,$10,$10,1,65534,65534,$9)",[org,run,self.session,i["provisioner"],i["sandbox"],i["boot"],self.slot,self.repository,pin,"1"*40])
         self.ids={}
         request={"session_id":self.session,"operation_id":uid(),"repository_id":self.repository,"reservation_id":self.reservation,"argv":["/invalid/never-run"],"cwd":".","environment":{},"timeout_ms":1000,"source_digest":pin,"policy_digest":pin,"executable_digest":pin,"environment_digest":digest(b"{}"),"artifact_paths":[]}
-        binding={"organisation_id":org,"run_id":run,"session_id":self.session,"credential_id":i["provisioner"],"sandbox_id":i["sandbox"],"boot_id":i["boot"],"boot_generation":"1","slot_id":self.slot,"slot_generation":"1","repository_id":self.repository,"state_dir":"/invalid/never-run","runner_binary":"/invalid/no-native-binary","workspace_path":"/invalid/no-workspace","preparation_digest":pin,"source_digest":pin,"source_object_id":"1"*40,"source_tree_id":"1"*40,"uid":65534,"gid":65534,"provider":"fixture","pool_id":i["pool"],"external_sandbox_id":"fixture-resource"}
+        binding={"organisation_id":org,"run_id":run,"session_id":self.session,"credential_id":i["provisioner"],"sandbox_id":i["sandbox"],"boot_id":i["boot"],"boot_generation":"1","slot_id":self.slot,"slot_generation":"1","repository_id":self.repository,"state_dir":"/invalid/never-run","runner_binary":"/invalid/no-native-binary","workspace_path":"/invalid/no-workspace","boot_preparation_digest":pin,"preparation_digest":pin,"source_digest":pin,"source_object_id":"1"*40,"source_tree_id":"1"*40,"uid":65534,"gid":65534,"provider":"fixture","pool_id":i["pool"],"external_sandbox_id":"fixture-resource"}
         for state in ("CLAIMED","UNKNOWN","ADMITTED"):
             operation=uid();self.ids[state]=operation
             packet={"request":dict(request,operation_id=operation),"binding":binding,"allocation":{},"reservations":[]}
             packet_bytes=json.dumps(packet,sort_keys=True,separators=(",",":")).encode()
-            f.sql("INSERT INTO hyperfide.runner_remote_jobs(organisation_id,run_id,operation_id,session_id,plan,plan_digest,principal,admission_digest,authority_epoch,reservation_id,expires_at,state,claim_id,executor_credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+interval '1 hour',$11,$12,$13)",[org,run,operation,self.session,json.dumps(packet),digest(packet_bytes),json.dumps(self.principal),pin,i["epoch"],self.reservation,state,None if state=="ADMITTED" else uid(),None if state=="ADMITTED" else i["provisioner"]])
+            f.sql("INSERT INTO hyperfide.runner_remote_jobs(organisation_id,run_id,operation_id,session_id,plan,plan_digest,principal,admission_digest,authority_epoch,reservation_id,expires_at,state,claim_id,executor_credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+interval '1 hour',$11,$12,$13)",[org,run,operation,self.session,json.dumps(packet),digest(packet_bytes),json.dumps(self.principal),pin,i["epoch"],self.reservation,"ADMITTED",None,None])
+            if state!="ADMITTED":
+                f.sql("UPDATE hyperfide.runner_remote_jobs SET state='CLAIMED',claim_id=$2,executor_credential_id=$3,claimed_at=clock_timestamp() WHERE operation_id=$1",[operation,uid(),i["provisioner"]])
+                if state=="UNKNOWN":f.sql("UPDATE hyperfide.runner_remote_jobs SET state='UNKNOWN' WHERE operation_id=$1",[operation])
         self.claimed_before=f.sql("SELECT claim_id::text,executor_credential_id::text FROM hyperfide.runner_remote_jobs WHERE operation_id=$1",[self.ids["CLAIMED"]])[0]
     def proof(self,key="provisioner",component="14.1",action="identity.describe",value=None):
         f=self.f;body=canonical(f.operation(component,action,{} if value is None else value))
@@ -193,6 +199,45 @@ class Fixture:
         check("executor.inline-result-bytes-refused",lambda:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET result=$4::jsonb,result_digest=$5"+base,[*scope,json.dumps(metadata),digest(b"hostile-result")]))
         metadata.pop("stdout");metadata["run_id"]=uid()
         check("executor.result-cross-scope-refused",lambda:self.sql_refused("UPDATE hyperfide.runner_remote_jobs SET result=$4::jsonb,result_digest=$5"+base,[*scope,json.dumps(metadata),digest(b"hostile-scope")]))
+        # Hostile fixture INSERTs are not authenticated producer receipts.
+        clone="INSERT INTO hyperfide.runner_remote_jobs(organisation_id,run_id,operation_id,session_id,job_class,plan,plan_digest,principal,admission_digest,authority_epoch,reservation_id,expires_at,state,claim_id,executor_credential_id,result,result_digest) SELECT organisation_id,run_id,$4,session_id,job_class,plan,plan_digest,principal,admission_digest,authority_epoch,reservation_id,expires_at,$5,$6,$7,$8::jsonb,$9 FROM hyperfide.runner_remote_jobs WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3"
+        operation=uid();inline={**self.scope,"operation_id":operation,"session_id":self.session,"stdout":{"base64":"eA=="}}
+        check("executor.insert-inline-result-refused",lambda:self.sql_refused(clone,[*scope,operation,"ADMITTED",None,None,json.dumps(inline),digest(b"hostile-insert")]))
+        check("executor.insert-preclaimed-intent-refused",lambda:self.sql_refused(clone,[*scope,uid(),"CLAIMED",uid(),self.f.ids["provisioner"],None,None]))
+        check("executor.unreferenced-intent-delete-refused",lambda:self.sql_refused("DELETE FROM hyperfide.runner_remote_jobs"+base,scope))
+    def stored_read_tests(self,artifact,payload):
+        ref={"storage_kind":"object","artifact_id":artifact["artifact_id"],"digest":artifact["digest"],"size_bytes":artifact["size_bytes"],"complete":False}
+        with self.objects.lock:before_reads=sum(e["method"]=="GET" for e in self.objects.events)
+        result=self.command("resolve",reference=ref)
+        with self.objects.lock:after_reads=sum(e["method"]=="GET" for e in self.objects.events)
+        check("executor.runtime-reader-rechecks-actual-backend",lambda:expect(after_reads>before_reads,"Runtime resolver did not read the actual HTTP byte backend"))
+        check("executor.runtime-object-reader-actual-bytes",lambda:expect(result.get("ok") and result["result"]["bytes_base64"]==base64.b64encode(payload).decode() and result["result"]["digest"]==digest(payload),"Actual runtime reader did not return verified stored bytes"))
+        check("executor.storage-complete-preserves-capture-incomplete",lambda:expect(result.get("ok") and result["result"]["complete"] is False,"Stored object completion promoted incomplete capture"))
+        for label,changed in (("digest",dict(ref,digest=digest(b"wrong-content"))),("size",dict(ref,size_bytes=str(len(payload)+1))),("missing",dict(ref,artifact_id=uid()))):
+            check("executor.runtime-object-reader-"+label+"-refused",lambda changed=changed:expect(self.command("resolve",reference=changed).get("ok") is False,"Actual runtime reader accepted altered or unavailable reference"))
+        manifest={**self.scope,"expected_chunks":1,"total_size_bytes":str(len(payload)),"content_digest":digest(payload),"complete":True,"truncated":False,"missing_ranges":[],"chunks":[{"sequence":0,"artifact_id":artifact["artifact_id"],"digest":artifact["digest"],"size_bytes":str(len(payload)),"offset_bytes":"0"}],"retention_class":"RUN","retention_until":None,"retention_hold":False}
+        saved=self.command("artifact",action="artifact.manifest.commit",input=manifest)
+        check("executor.actual15-manifest-for-runtime-reader",lambda:expect(saved.get("ok") and saved["result"]["availability"]=="VERIFIED","Actual ordered manifest publication failed"))
+        if saved.get("ok"):
+            parent=saved["result"]["artifact"]
+            mref={"storage_kind":"manifest","artifact_id":parent["artifact_id"],"digest":digest(payload),"manifest_digest":parent["digest"],"size_bytes":str(len(payload)),"complete":False}
+            read=self.command("resolve",reference=mref)
+            check("executor.runtime-manifest-reader-actual-bytes",lambda:expect(read.get("ok") and read["result"]["bytes_base64"]==base64.b64encode(payload).decode() and read["result"]["complete"] is False,"Actual ordered child read/hash failed or completeness changed"))
+            for label,changed in (("parent",dict(mref,manifest_digest=digest(b"wrong-parent"))),("content",dict(mref,digest=digest(b"wrong-content")))):
+                check("executor.runtime-manifest-reader-"+label+"-refused",lambda changed=changed:expect(self.command("resolve",reference=changed).get("ok") is False,"Actual runtime manifest reader accepted altered binding"))
+            # Corrupt actual stored HTTP backend bytes while the row/reference
+            # still says COMPLETE. This is a storage fault input, not a native
+            # physical execution receipt.
+            with self.objects.lock:
+                keys=[key for key,value in self.objects.objects.items() if value==payload]
+                expect(len(keys)==1,"Actual uploaded child byte object was not uniquely observed")
+                key=keys[0];original=self.objects.objects[key]
+                self.objects.objects[key]=bytes([original[0]^1])+original[1:]
+            try:
+                check("executor.runtime-object-corrupt-backend-refused",lambda:expect(self.command("resolve",reference=ref).get("ok") is False,"COMPLETE row substituted for actual object integrity"))
+                check("executor.runtime-manifest-corrupt-child-refused",lambda:expect(self.command("resolve",reference=mref).get("ok") is False,"Manifest substituted for actual child byte integrity"))
+            finally:
+                with self.objects.lock:self.objects.objects[key]=original
     def reference_link_tests(self,artifact):
         insert="INSERT INTO hyperfide.runner_result_artifacts(organisation_id,run_id,operation_id,role,artifact_id,artifact_digest,content_digest,size_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
         values=[self.scope["organisation_id"],self.scope["run_id"],self.ids["UNKNOWN"],"stdout",artifact["artifact_id"],artifact["digest"],artifact["digest"],artifact["size_bytes"]]
@@ -253,7 +298,7 @@ def main():
             check("executor.forged-artifact-brand-refused",lambda:f.refused(f.actor.request({"op":"forged-artifact","forged":{"principal":f.principal},"action":"artifact.object.put","input":put}),"AUTH_REQUIRED"))
             check("executor.artifact-cross-scope-refused",lambda:expect(f.command("artifact",action="artifact.object.put",input=dict(put,organisation_id=uid())).get("ok") is False,"Cross-organisation artifact scope admitted"))
             if saved.get("ok"):
-                a=saved["result"]["artifact"];f.reference_link_tests(a);ref={"storage_kind":"object","artifact_id":a["artifact_id"],"digest":a["digest"],"size_bytes":a["size_bytes"],"complete":False}
+                a=saved["result"]["artifact"];f.reference_link_tests(a);f.stored_read_tests(a,payload);ref={"storage_kind":"object","artifact_id":a["artifact_id"],"digest":a["digest"],"size_bytes":a["size_bytes"],"complete":False}
                 s=f.command("signature",reference=ref,operation_id=uid(),other_operation_id=uid(),plan_digest=digest(b"plan"),other_plan_digest=digest(b"other-plan"))
                 check("executor.actual-provisioner-metadata-signature",lambda:expect(s.get("ok") and s["result"]["valid"] is True,"Actual registered Ed25519 signature did not verify"))
                 check("executor.signature-result-tamper-refused",lambda:expect(s["result"]["changed_result"] is False,"Result mutation preserved signature"))
