@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "24.2",
+  "task": "24.2",
+  "roles": [
+    "control"
+  ],
+  "module": "recovery/workers.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "recovery.worker.describe",
+    "recovery.worker.loss",
+    "recovery.worker.inventory"
+  ],
+  "requires": [
+    "4.2",
+    "24.1",
+    "14.1"
+  ]
+}
