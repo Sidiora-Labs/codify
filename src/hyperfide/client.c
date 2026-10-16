@@ -11,6 +11,8 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
+#include <time.h>
+#include "client.h"
 #include <fcntl.h>
 #include "transport.h"
 
@@ -136,6 +138,48 @@ static int hf_invoke_config25(const HfTransportConfig *supplied,const char *payl
  if(parsed==3){fprintf(err,"{\"ok\":false,\"error\":{\"code\":\"AUTHORITY_OUTCOME_UNKNOWN\",\"message\":\"Authority explicitly reported UNKNOWN; reconcile the same operation before retry\"},\"operation_id\":\"%s\",\"idempotency_key\":\"%s\",\"automatic_replay\":false,\"local_fallback\":false}\n",operation,idempotency);return 75;}
  return success?0:1;
 }
+
+static long hf_remaining25(const struct timespec *start,long budget){
+ struct timespec now;if(clock_gettime(CLOCK_MONOTONIC,&now))return 0;
+ int64_t elapsed=(int64_t)(now.tv_sec-start->tv_sec)*1000+(now.tv_nsec-start->tv_nsec)/1000000;
+ return elapsed>=budget?0:budget-(long)elapsed;
+}
+int hf_client_decision_invoke(HfDecisionPurpose purpose,HfDecisionPhase phase,const char *input,
+ const char *operation,const char *idempotency,const char *correlation,long budget,FILE *out,FILE *err){
+ static const char *const purposes[]={NULL,"guard","readiness","triage","memory","recap"};
+ if(purpose<HF_DECISION_GUARD||purpose>HF_DECISION_RECAP||(phase!=HF_DECISION_SUBMIT&&phase!=HF_DECISION_RESULT)||budget<1||budget>2000||
+ !operation||!idempotency||!correlation||!hf_uuid25(operation)||!hf_uuid25(idempotency)||!hf_uuid25(correlation)||!input||strnlen(input,HF_CLIENT_BYTES25+1)>HF_CLIENT_BYTES25||!hf_json25(input,strlen(input),0,NULL))
+ return hf_client_error25(err,"ADVISORY_INPUT_INVALID","A finite decision purpose, phase, JSON observation and immutable operation identities are required");
+ struct timespec start;if(clock_gettime(CLOCK_MONOTONIC,&start))return hf_client_error25(err,"ADVISORY_DEADLINE_UNAVAILABLE","A monotonic advisory deadline is required");
+ if(hf_client_authority_mode()!=HF_DISTRIBUTED)return hf_client_error25(err,"ADVISORY_CONTEXT_REQUIRED","Distributed advice requires a current protected run context");
+ HfTransportConfig config;int rc=hf_load_transport25(&config,err);if(rc)return rc;
+ if(!hf_uuid25(config.run_id))return hf_client_error25(err,"ADVISORY_CONTEXT_REQUIRED","Protected transport configuration has no enrolled run context");
+ long remaining=hf_remaining25(&start,budget);
+ if(remaining<1)return hf_client_error25(err,"ADVISORY_DEADLINE_EXCEEDED","Decision was not submitted before the advisory deadline");
+ if(config.timeout_ms>remaining)config.timeout_ms=remaining;
+ char probe[37],key[37],trace[37],payload[512];
+ if(!hf_uuid_generate(probe)||!hf_uuid_generate(key)||!hf_uuid_generate(trace))return hf_client_error25(err,"RESOURCE_LIMIT","Cannot allocate current identity probe");
+ snprintf(payload,sizeof payload,"{\"run_id\":\"%s\",\"component\":\"14.1\",\"action\":\"identity.describe\",\"input\":{},\"expected_version\":null,\"authority\":null}",config.run_id);
+ char *response=NULL;size_t size=0;FILE *capture=open_memstream(&response,&size);
+ if(!capture)return hf_client_error25(err,"RESOURCE_LIMIT","Cannot inspect current identity");
+ rc=hf_invoke_config25(&config,payload,probe,key,trace,NULL,capture,err);fclose(capture);
+ if(rc){if(size)fwrite(response,1,size,err);free(response);return rc;}
+ HfJson *json=malloc(sizeof *json);char actual_run[37],credential[37];int valid=json&&hf_json_parse(json,response);
+ int result=valid?hf_json_field(json,0,"result"):-1,principal=valid?hf_json_field(json,result,"principal"):-1;
+ valid=valid&&hf_json_string(json,hf_json_field(json,principal,"run_id"),actual_run,sizeof actual_run)&&!strcmp(actual_run,config.run_id)&&
+ hf_json_string(json,hf_json_field(json,principal,"credential_id"),credential,sizeof credential)&&!strcmp(credential,config.credential_id);
+ free(json);free(response);
+ if(!valid)return hf_client_error25(err,"ADVISORY_SUBJECT_MISMATCH","Current identity differs from the enrolled decision context");
+ remaining=hf_remaining25(&start,budget);
+ if(remaining<1)return hf_client_error25(err,"ADVISORY_DEADLINE_EXCEEDED","Decision was not submitted before the advisory deadline");
+ if(config.timeout_ms>remaining)config.timeout_ms=remaining;
+ char *request=NULL;size_t length=0;FILE *encoded=open_memstream(&request,&length);
+ if(!encoded)return hf_client_error25(err,"RESOURCE_LIMIT","Cannot encode finite decision request");
+ fprintf(encoded,"{\"run_id\":\"%s\",\"component\":\"21.4\",\"action\":\"decision.legacy.%s.%s\",\"input\":%s,\"expected_version\":null,\"authority\":null}",
+ config.run_id,purposes[purpose],phase==HF_DECISION_SUBMIT?"submit":"result",input);
+ fclose(encoded);rc=hf_invoke_config25(&config,request,operation,idempotency,correlation,NULL,out,err);free(request);return rc;
+}
+
 static int hf_invoke25(const char *payload,const char *operation,const char *idempotency,const char *correlation,const char *causation,FILE *out,FILE *err){
  return hf_invoke_config25(NULL,payload,operation,idempotency,correlation,causation,out,err);
 }
@@ -185,6 +229,20 @@ static const HfRoute25 hf_routes25[]={
  {"human","escalate","1.2","human.escalate"},
  {"human","autonomous","1.2","human.autonomous"},
  {"human","status","1.2","human.status"},
+ {"human","bootstrap","1.2","human.bootstrap"},
+ {"human","adopt","1.2","human.adopt"},
+ {"human","read","1.2","human.intent.read"},
+ {"human","complete","1.2","human.intent.complete"},
+ {"guard","rank","21.4","decision.legacy.guard.submit"},
+ {"guard","rank-result","21.4","decision.legacy.guard.result"},
+ {"fleet","readiness","21.4","decision.legacy.readiness.submit"},
+ {"fleet","readiness-result","21.4","decision.legacy.readiness.result"},
+ {"spec","triage","21.4","decision.legacy.triage.submit"},
+ {"spec","triage-result","21.4","decision.legacy.triage.result"},
+ {"memory","classify","21.4","decision.legacy.memory.submit"},
+ {"memory","classify-result","21.4","decision.legacy.memory.result"},
+ {"recap","classify","21.4","decision.legacy.recap.submit"},
+ {"recap","classify-result","21.4","decision.legacy.recap.result"},
  {NULL,NULL,NULL,NULL}
 };
 static int hf_client_mcp25(FILE *out,FILE *err);

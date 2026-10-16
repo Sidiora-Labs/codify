@@ -6,5 +6,5 @@ entry = "hf_component_25_3"
 actions = ["authority.mode"]
 requires = ["12.1"]
 support_sources = ["src/hyperfide/transport.c"]
-headers = ["src/hyperfide/transport.h"]
+headers = ["src/hyperfide/transport.h", "src/hyperfide/client.h"]
 libraries = ["curl", "crypto"]

@@ -74,14 +74,15 @@ def protected_reader_checks():
  with tempfile.TemporaryDirectory(prefix="hf-protected-reader-") as temporary:
   base=Path(temporary);base.chmod(0o755);auth=base/"auth";auth.mkdir(mode=0o750);os.chown(auth,0,33025)
   source=base/"probe.c";binary=base/"probe"
-  source.write_text('#include "transport.h"\n#include <stdlib.h>\n#include <string.h>\nint main(int n,char **v){if(n!=3)return 2;char *b=0;size_t z=0;int ok=0;if(!strcmp(v[1],"read"))ok=hf_protected_read(v[2],32768,&b,&z);else if(!strcmp(v[1],"private"))ok=hf_private_read(v[2],32768,&b,&z);else if(!strcmp(v[1],"config")){HfTransportConfig c;ok=hf_transport_config(v[2],&c);}else if(!strcmp(v[1],"sign")){char sig[87];ok=hf_transport_sign(v[2],"HYPERFIDE-REQUEST-V1","/v1/invoke","https://localhost","10000000-0000-0000-0000-000000000001","1","10000000-0000-0000-0000-000000000002","{}",sig);}free(b);return ok?0:1;}\n')
-  subprocess.run(["cc","-Wall","-Wextra","-Werror","-O2","-I",str(ROOT/"src/hyperfide"),str(source),str(ROOT/"src/hyperfide/transport.c"),"-lcurl","-lcrypto","-lpthread","-o",str(binary)],check=True,capture_output=True);binary.chmod(0o755)
+  source.write_text('#include "transport.h"\n#include "client.h"\n#include <stdlib.h>\n#include <string.h>\nint main(int n,char **v){if(n!=3)return 2;if(!strcmp(v[1],"decision-invalid"))return hf_client_decision_invoke(HF_DECISION_GUARD,HF_DECISION_SUBMIT,"{}",NULL,NULL,NULL,2000,stdout,stderr)==78?0:1;char *b=0;size_t z=0;int ok=0;if(!strcmp(v[1],"read"))ok=hf_protected_read(v[2],32768,&b,&z);else if(!strcmp(v[1],"private"))ok=hf_private_read(v[2],32768,&b,&z);else if(!strcmp(v[1],"config")){HfTransportConfig c;ok=hf_transport_config(v[2],&c);}else if(!strcmp(v[1],"sign")){char sig[87];ok=hf_transport_sign(v[2],"HYPERFIDE-REQUEST-V1","/v1/invoke","https://localhost","10000000-0000-0000-0000-000000000001","1","10000000-0000-0000-0000-000000000002","{}",sig);}free(b);return ok?0:1;}\n')
+  subprocess.run(["cc","-Wall","-Wextra","-Werror","-O2","-I",str(ROOT/"src/hyperfide"),str(source),str(ROOT/"src/hyperfide/transport.c"),str(ROOT/"src/hyperfide/client.c"),"-lcurl","-lcrypto","-lpthread","-o",str(binary)],check=True,capture_output=True);binary.chmod(0o755)
   def drop(gid=33025):
    os.setgroups([]);os.setresgid(gid,gid,gid);os.setresuid(33025,33025,33025)
   def run(mode,p,gid=33025):
    return subprocess.run([str(binary),mode,str(p)],preexec_fn=lambda:drop(gid),capture_output=True,timeout=10).returncode
   file=auth/"protected";file.write_text('{"canary":"protected"}');file.chmod(0o640);os.chown(file,0,33025)
   check("client.protected.nonroot-primary-gid",lambda:expect(run("read",file)==0,"root-owned primary-GID read refused"))
+  check("client.decision.null-operation-refused",lambda:expect(run("decision-invalid",file)==0,"invalid decision operation reached transport or crashed"))
   check("client.protected.private-state-remains-private",lambda:expect(run("private",file)!=0,"strict supervisor state reader acquired group mode"))
   def foreign_group():
    os.chown(file,0,33026)
@@ -116,8 +117,13 @@ def protected_reader_checks():
   check("client.protected.hardlinked-file-refused",hardlink)
   key=auth/"key.pem"
   subprocess.run(["openssl","genpkey","-algorithm","ED25519","-out",str(key)],check=True,capture_output=True);key.chmod(0o640);os.chown(key,0,33025)
-  config=auth/"config.json";config.write_text(json.dumps({"origin":"https://localhost","key_path":str(key),"credential_id":"10000000-0000-0000-0000-000000000001"}));config.chmod(0o640);os.chown(config,0,33025)
+  config=auth/"config.json";config.write_text(json.dumps({"origin":"https://localhost","key_path":str(key),"credential_id":"10000000-0000-0000-0000-000000000001","run_id":"10000000-0000-0000-0000-000000000004"}));config.chmod(0o640);os.chown(config,0,33025)
   check("client.protected.transport-config-nonroot",lambda:expect(run("config",config)==0,"actual transport config did not use protected reader"))
+  def malformed_run_context():
+   original=config.read_bytes();value=json.loads(original);value["run_id"]="invented-env-run";config.write_text(json.dumps(value))
+   try:expect(run("config",config)!=0,"noncanonical protected run context accepted")
+   finally:config.write_bytes(original)
+  check("client.protected.transport-run-context-refused",malformed_run_context)
   check("client.protected.signing-key-nonroot",lambda:expect(run("sign",key)==0,"actual Ed25519 signing key did not use protected reader"))
   key.chmod(0o660)
   check("client.protected.signing-key-write-refused",lambda:expect(run("sign",key)!=0,"group-writable signing key accepted"));key.chmod(0o640)
