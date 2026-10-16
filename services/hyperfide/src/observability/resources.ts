@@ -1,6 +1,7 @@
 import type {Component,ComponentContext} from '../components/registry.js';
 import {authority,object,text,uuid,digest,integer,generation,timestamp,hash,fail,lockRun,requireArtifact,numbers,requireCollector} from './views.js';
 import type {Session,Principal} from './views.js';
+import {assertInvocation} from '../transport/protocol.js';
 export const DIMENSIONS=['SANDBOX','AGENT_SESSION','CPU_MILLIS','MEMORY_BYTES','DISK_BYTES','BUILD','LINK','TEST','EXCLUSIVE_SERVICE','INDEX','MODEL_REQUEST','MODEL_TOKEN','PROVIDER_API'] as const;
 const UNITS:Record<string,string>={SANDBOX:'instances',AGENT_SESSION:'sessions',CPU_MILLIS:'millicpu',MEMORY_BYTES:'bytes',DISK_BYTES:'bytes',BUILD:'jobs',LINK:'jobs',TEST:'jobs',EXCLUSIVE_SERVICE:'services',INDEX:'jobs',MODEL_REQUEST:'requests',MODEL_TOKEN:'tokens',PROVIDER_API:'requests'};
 export function decimal(value:unknown):string{
@@ -62,9 +63,69 @@ export async function resourceSnapshot(tx:Session,p:Principal,input:unknown):Pro
  const sessions=await tx.query("SELECT state,role,count(*) AS count FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 GROUP BY state,role ORDER BY state,role",scope);
  return numbers({schema_version:1,profiles:profiles.rows.map(r=>({...r,dimensions:DIMENSIONS.map(d=>limits.rows.find(l=>l.profile_id===r.id&&l.dimension===d)??{dimension:d,configured_limit:null,declared_reservation:null,unit:UNITS[d],status:'UNDECLARED'})})),measurements:measured,capacity_accounts:infrastructure.rows,capacity_accounts_status:installed.rows[0]!.capacity_class?'AVAILABLE':'UNAVAILABLE',capacity_accounts_reason:installed.rows[0]!.capacity_class?null:'SCHEDULER_CAPACITY_CLASS_NOT_INSTALLED',registered_sessions:sessions.rows,prepared_spares_are_running_sessions:false,uniform_agent_capacity_assumed:false,pagination:{limit,next:q.rows.length>limit?(()=>{const r=q.rows[limit-1]!;return r.profile_id+':'+r.subject_id+':'+r.dimension;})():null},admission_authority:false});
 }
+
+export async function sandboxBudgets(input:unknown,ctx:ComponentContext):Promise<unknown>{
+ const v=object(input,['limit','after','prefer_replica']),limit=v.limit===undefined?100:integer(v.limit,1,500);
+ if(v.prefer_replica!==undefined&&typeof v.prefer_replica!=='boolean')fail('OBSERVABILITY_INPUT_INVALID','Replica preference must be boolean');
+ const cursor=v.after===undefined?null:object(v.after,['sandbox_id','boot_generation']);
+ const afterId=cursor?uuid(cursor.sandbox_id):'00000000-0000-0000-0000-000000000000',afterBoot=cursor?generation(cursor.boot_generation):'0';
+ const i=ctx.invocation;assertInvocation(i);
+ if(i.payload.action!=='fleet.resources.sandbox-budgets'||i.payload.run_id!==i.principal.run_id)fail('AUTHENTICATION_REQUIRED','Exact authenticated observation action required');
+ const scope=[i.principal.organisation_id,i.principal.run_id];
+ // Admission is checked on the primary before and after the read-only snapshot.
+ // The observation session never becomes a primary mutation capability.
+ const guard=()=>ctx.resources.gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:tx=>i.guard(tx)},async()=>undefined);
+ await guard();
+ const observed=await ctx.resources.observe({preferReplica:v.prefer_replica===true,timeoutMs:5000,signal:i.signal},async tx=>{
+  const source=(await tx.query("SELECT transaction_timestamp() AS snapshot_at,pg_is_in_recovery() AS in_recovery,CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn()::text ELSE pg_current_wal_lsn()::text END AS visible_wal_lsn,CASE WHEN pg_is_in_recovery() THEN pg_last_xact_replay_timestamp() ELSE NULL END AS last_replayed_transaction_at")).rows[0]!;
+  const run=(await tx.query('SELECT authority_epoch FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2',scope)).rows[0];
+  if(!run||run.authority_epoch!==i.principal.deployment_epoch)fail('OBSERVABILITY_SCOPE_INVALID','Observation does not contain the authenticated authority epoch');
+  const schema=(await tx.query("SELECT to_regclass('hyperfide.sandbox_execution_budgets')::text AS budgets,to_regclass('hyperfide.sandbox_execution_charges')::text AS charges")).rows[0]!;
+  if(!schema.budgets||!schema.charges)return {status:'UNAVAILABLE',reason:'SCHEDULER_SANDBOX_BUDGET_SCHEMA_NOT_INSTALLED',rows:[],pagination:{limit,next:null},source};
+  const q=await tx.query(`
+   WITH visible AS (
+    SELECT sandbox_id,sandbox_boot_generation AS boot_generation FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id IS NOT NULL
+    UNION SELECT sandbox_id,sandbox_boot_generation FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 AND sandbox_id IS NOT NULL AND sandbox_boot_generation IS NOT NULL
+    UNION SELECT sandbox_id,sandbox_boot_generation FROM hyperfide.sandbox_execution_charges WHERE organisation_id=$1 AND run_id=$2
+   ), page AS (
+    SELECT v.sandbox_id,v.boot_generation FROM visible v WHERE (v.sandbox_id,v.boot_generation)>($3::uuid,$4::bigint) ORDER BY v.sandbox_id,v.boot_generation LIMIT $5
+   ), charges AS (
+    SELECT c.sandbox_id,c.sandbox_boot_generation,
+     count(*) FILTER(WHERE c.state='HELD')::text AS held_count,
+     count(*) FILTER(WHERE c.state='RELEASE_PENDING')::text AS release_pending_count,
+     count(*) FILTER(WHERE c.state='RELEASED')::text AS released_count,
+     COALESCE(sum(c.cpu_millis) FILTER(WHERE c.state<>'RELEASED'),0)::text AS retained_cpu_millis,
+     COALESCE(sum(c.memory_bytes) FILTER(WHERE c.state<>'RELEASED'),0)::text AS retained_memory_bytes,
+     COALESCE(sum(c.disk_bytes) FILTER(WHERE c.state<>'RELEASED'),0)::text AS retained_disk_bytes
+    FROM hyperfide.sandbox_execution_charges c JOIN page p ON p.sandbox_id=c.sandbox_id AND p.boot_generation=c.sandbox_boot_generation
+    WHERE c.organisation_id=$1 AND c.run_id=$2 GROUP BY c.sandbox_id,c.sandbox_boot_generation
+   )
+   SELECT p.sandbox_id,p.boot_generation,s.boot_generation AS current_boot_generation,b.qualification_id,b.evidence_digest,b.qualification_source,b.created_at AS qualified_recorded_at,b.state_version,
+    b.hard_cpu_millis,b.hard_memory_bytes,b.hard_disk_bytes,b.headroom_cpu_millis,b.headroom_memory_bytes,b.headroom_disk_bytes,
+    b.held_cpu_millis,b.held_memory_bytes,b.held_disk_bytes,
+    (b.hard_cpu_millis-b.headroom_cpu_millis-b.held_cpu_millis)::text AS free_cpu_millis,
+    (b.hard_memory_bytes-b.headroom_memory_bytes-b.held_memory_bytes)::text AS free_memory_bytes,
+    (b.hard_disk_bytes-b.headroom_disk_bytes-b.held_disk_bytes)::text AS free_disk_bytes,
+    COALESCE(c.held_count,'0') AS run_held_count,COALESCE(c.release_pending_count,'0') AS run_release_pending_count,COALESCE(c.released_count,'0') AS run_released_count,
+    COALESCE(c.retained_cpu_millis,'0') AS run_retained_cpu_millis,COALESCE(c.retained_memory_bytes,'0') AS run_retained_memory_bytes,COALESCE(c.retained_disk_bytes,'0') AS run_retained_disk_bytes
+   FROM page p JOIN hyperfide.sandboxes s ON s.organisation_id=$1 AND s.id=p.sandbox_id
+   LEFT JOIN hyperfide.sandbox_execution_budgets b ON b.organisation_id=$1 AND b.sandbox_id=p.sandbox_id AND b.sandbox_boot_generation=p.boot_generation
+   LEFT JOIN charges c ON c.sandbox_id=p.sandbox_id AND c.sandbox_boot_generation=p.boot_generation ORDER BY p.sandbox_id,p.boot_generation
+  `,[...scope,afterId,afterBoot,limit+1]);
+  const rows=q.rows.slice(0,limit).map(r=>({...r,sandbox_id:r.sandbox_id,boot_generation:r.boot_generation,budget_status:r.qualification_id?'QUALIFIED_RECORDED':'UNQUALIFIED',current_boot:r.boot_generation===r.current_boot_generation,kernel_enforcement:'NOT_EVALUATED'}));
+  const last=rows.at(-1);
+  return {status:'AVAILABLE',reason:null,rows,pagination:{limit,next:q.rows.length>limit&&last?{sandbox_id:last.sandbox_id,boot_generation:last.boot_generation}:null},source};
+ });
+ await guard();
+ return numbers({schema_version:1,scope:{organisation_id:scope[0],run_id:scope[1]},...observed.value,
+  freshness:{route:observed.route.toUpperCase(),read_completed_at:observed.observedAt,snapshot:'REPEATABLE_READ_READ_ONLY',replica_lag_ms:null,replica_lag_status:observed.route==='replica'?'UNKNOWN':'NOT_APPLICABLE',source_fact_freshness:'UNKNOWN_UNTIL_REOBSERVED'},
+  counter_scope:'SANDBOX_BOOT_SHARED_TOTAL_WITH_SEPARATE_AUTHENTICATED_RUN_CHARGES',release_pending_retains_charge:true,admission_authority:false,kernel_enforcement:'NOT_EVALUATED'});
+}
+
 export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:{
  'fleet.resources.describe':async input=>{object(input,[]);return {schema_version:1,dimensions:DIMENSIONS,profile_limit:64,measurement_limit:10000,batch_limit:100,unknown_measurements:'NULL_OR_ABSENT',admission_authority:false};},
  'fleet.resources.profile.put':(input,ctx)=>authority(ctx,'fleet.resources.profile.put',(tx,p)=>putProfile(tx,p,input)),
  'fleet.resources.observe':(input,ctx)=>authority(ctx,'fleet.resources.observe',(tx,p)=>recordSamples(tx,p,input,ctx.env.HYPERFIDE_OBSERVABILITY_ALLOW_REPLAY==='1')),
+ 'fleet.resources.sandbox-budgets':(input,ctx)=>sandboxBudgets(input,ctx),
  'fleet.resources.snapshot':(input,ctx)=>authority(ctx,'fleet.resources.snapshot',(tx,p)=>resourceSnapshot(tx,p,input))
 }};}

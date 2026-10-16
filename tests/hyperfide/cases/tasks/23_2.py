@@ -5,6 +5,52 @@ from pathlib import Path
 spec=importlib.util.spec_from_file_location("observability_fixture",Path(__file__).with_name("23_1.py"))
 h=importlib.util.module_from_spec(spec);spec.loader.exec_module(h)
 DIMENSIONS=["SANDBOX","AGENT_SESSION","CPU_MILLIS","MEMORY_BYTES","DISK_BYTES","BUILD","LINK","TEST","EXCLUSIVE_SERVICE","INDEX","MODEL_REQUEST","MODEL_TOKEN","PROVIDER_API"]
+
+def budget_cases(f):
+ def read(value=None):return f.ok("23.2","fleet.resources.sandbox-budgets",value)
+ h.check("observability.resources.boot-budget-missing-unqualified",lambda:h.expect(read()["rows"][0]["budget_status"]=="UNQUALIFIED" and read()["rows"][0]["free_cpu_millis"] is None))
+ h.sql(f"""
+ BEGIN;
+ INSERT INTO hyperfide.capacity_accounts(organisation_id,id,pool_id,capacity_class,dimension,configured_limit,provenance_digest,qualification_state)
+ VALUES('{h.ORG}','{h.uid(250)}','{h.POOL}','EXECUTION','CPU_MILLIS',999999999,'{h.DIGEST}','QUALIFIED');
+ INSERT INTO hyperfide.reservations(organisation_id,run_id,id,request_id,capacity_account_id,quantity,expires_at)
+ VALUES('{h.ORG}','{h.RUN}','{h.uid(251)}','{h.uid(252)}','{h.uid(250)}',0,clock_timestamp()+interval '1 hour');
+ INSERT INTO hyperfide.sandbox_execution_budgets(organisation_id,sandbox_id,sandbox_boot_generation,qualification_id,evidence_digest,qualification_source,hard_cpu_millis,hard_memory_bytes,hard_disk_bytes,headroom_cpu_millis,headroom_memory_bytes,headroom_disk_bytes,held_cpu_millis,held_memory_bytes,held_disk_bytes)
+ VALUES('{h.ORG}','{h.SANDBOX}',1,'{h.uid(253)}','{h.DIGEST}','OPERATOR_FIXED',1000,10000,50000,100,1000,5000,600,6000,6000);
+ INSERT INTO hyperfide.sandbox_execution_charges(organisation_id,run_id,id,request_id,sandbox_id,sandbox_boot_generation,slot_id,attempt_id,job_kind,cpu_millis,memory_bytes,disk_bytes,state)
+ VALUES('{h.ORG}','{h.RUN}','{h.uid(254)}','{h.uid(255)}','{h.SANDBOX}',1,'{h.SLOT}','{h.ATTEMPT}','AGENT',600,6000,6000,'RELEASE_PENDING');
+ INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,boot_generation,observed_state)
+ VALUES('{h.ORG}','{h.uid(256)}','{h.POOL}',1,'UNKNOWN'),('{h.ORG}','{h.uid(257)}','{h.POOL}',1,'UNKNOWN');
+ INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES('{h.ORG}','{h.uid(260)}','{h.uid(256)}','budget-unqualified',1,'AGENT'),('{h.ORG}','{h.uid(261)}','{h.uid(257)}','budget-other-run',1,'AGENT');
+ INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,state,sandbox_id,sandbox_boot_generation,slot_id)
+ VALUES('{h.ORG}','{h.RUN}','{h.uid(258)}','WORKER','fixture','fixture','fixture-unqualified-budget','RUNNING','{h.uid(256)}',1,'{h.uid(260)}'),
+ ('{h.ORG}','{h.RUN2}','{h.uid(259)}','WORKER','fixture','fixture','fixture-other-run-budget','RUNNING','{h.uid(257)}',1,'{h.uid(261)}');
+ COMMIT;
+ """)
+ def qualified():
+  r=read();b=next(x for x in r["rows"] if x["sandbox_id"]==h.SANDBOX)
+  h.expect(b["budget_status"]=="QUALIFIED_RECORDED" and b["free_cpu_millis"]=="300" and b["free_memory_bytes"]=="3000" and b["free_disk_bytes"]=="39000")
+ h.check("observability.resources.boot-free-vector-exact",qualified)
+ h.check("observability.resources.pending-release-remains-charged",lambda:h.expect(read()["rows"][0]["run_release_pending_count"]=="1" and read()["rows"][0]["run_retained_cpu_millis"]=="600"))
+ h.check("observability.resources.pool-free-not-boot-headroom",lambda:h.expect(f.ok("23.2","fleet.resources.snapshot")["capacity_accounts"][0]["free"]=="999999999" and read()["rows"][0]["free_cpu_millis"]=="300"))
+ h.check("observability.resources.boot-no-kernel-proof",lambda:h.expect(read()["kernel_enforcement"]=="NOT_EVALUATED" and read()["admission_authority"] is False))
+ h.check("observability.resources.boot-primary-source",lambda:h.expect(read()["freshness"]["route"]=="PRIMARY" and read()["freshness"]["snapshot"]=="REPEATABLE_READ_READ_ONLY" and read()["source"]["in_recovery"] is False and read()["source"]["visible_wal_lsn"]))
+ h.check("observability.resources.boot-source-age-unknown",lambda:h.expect(read()["freshness"]["source_fact_freshness"]=="UNKNOWN_UNTIL_REOBSERVED" and read()["freshness"]["replica_lag_ms"] is None))
+ h.check("observability.resources.boot-other-run-hidden",lambda:h.expect(h.uid(257) not in [x["sandbox_id"] for x in read()["rows"]]))
+ h.check("observability.resources.boot-unqualified-not-zero-free",lambda:h.expect(next(x for x in read()["rows"] if x["sandbox_id"]==h.uid(256))["free_cpu_millis"] is None))
+ def page():
+  a=read({"limit":1});b=read({"limit":1,"after":a["pagination"]["next"]})
+  h.expect(len(a["rows"])==len(b["rows"])==1 and a["rows"][0]["sandbox_id"]!=b["rows"][0]["sandbox_id"] and b["pagination"]["next"] is None)
+ h.check("observability.resources.boot-pagination",page)
+ h.check("observability.resources.boot-replica-preference-primary-fallback",lambda:h.expect(read({"prefer_replica":True})["freshness"]["route"]=="PRIMARY"))
+ h.check("observability.resources.boot-input-closed",lambda:f.reject("23.2","fleet.resources.sandbox-budgets",{"authority":True},"OBSERVABILITY_INPUT_INVALID"))
+ h.check("observability.resources.boot-cursor-typed",lambda:f.reject("23.2","fleet.resources.sandbox-budgets",{"after":{"sandbox_id":h.SANDBOX,"boot_generation":1}},"OBSERVABILITY_INPUT_INVALID"))
+ h.check("observability.resources.boot-preference-typed",lambda:f.reject("23.2","fleet.resources.sandbox-budgets",{"prefer_replica":"true"},"OBSERVABILITY_INPUT_INVALID"))
+ h.check("observability.resources.boot-cross-run-denied",lambda:f.reject("23.2","fleet.resources.sandbox-budgets",{},run=h.RUN2))
+ h.sql(f"BEGIN;UPDATE hyperfide.sandboxes SET boot_generation=2,state_version=state_version+1 WHERE organisation_id='{h.ORG}' AND id='{h.SANDBOX}';COMMIT;")
+ h.check("observability.resources.old-boot-debt-retained",lambda:h.expect(read()["rows"][0]["boot_generation"]=="1" and read()["rows"][0]["current_boot"] is False and read()["rows"][0]["run_release_pending_count"]=="1" and read()["rows"][0]["free_cpu_millis"]=="300"))
+ # Typed OPERATOR_FIXED fixture records test accounting only, never physical qualification.
+
 def main():
  h.set_task("23.2")
  if "--cleanup" in sys.argv:return h.cleanup()
@@ -45,8 +91,9 @@ def main():
     r=f.ok("23.2","fleet.resources.snapshot");h.expect(r["uniform_agent_capacity_assumed"] is False and r["prepared_spares_are_running_sessions"] is False and sum(int(x["count"]) for x in r["registered_sessions"])==2 and len(r["profiles"])==3)
    h.check("observability.resources.profile-density-not-session-count",distinct)
    h.check("observability.resources.observation-not-admission",lambda:h.expect(f.ok("23.2","fleet.resources.snapshot")["admission_authority"] is False))
+   budget_cases(f)
    h.check("observability.resources.cross-run-denied",lambda:f.reject("23.2","fleet.resources.snapshot",{},run=h.RUN2))
-   h.check("observability.resources.untyped-capacity-not-inferred",lambda:h.expect(f.ok("23.2","fleet.resources.snapshot")["capacity_accounts_status"]=="UNAVAILABLE"))
+   h.check("observability.resources.untyped-capacity-not-inferred",lambda:h.expect(f.ok("23.2","fleet.resources.snapshot")["capacity_accounts_status"]=="AVAILABLE"))
   return h.finish()
  except Exception as e:print(json.dumps({"type":"fatal","error":type(e).__name__+": "+str(e)}),flush=True);return 1
 if __name__=="__main__":raise SystemExit(main())

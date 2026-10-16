@@ -12,7 +12,8 @@
     "fleet.resources.describe",
     "fleet.resources.profile.put",
     "fleet.resources.observe",
-    "fleet.resources.snapshot"
+    "fleet.resources.snapshot",
+    "fleet.resources.sandbox-budgets"
   ],
   "requires": [
     "23.1"
