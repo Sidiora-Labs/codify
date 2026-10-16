@@ -20,3 +20,17 @@ CREATE TABLE hyperfide.hierarchy_execution_packets (
 CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_execution_packets FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','id','digest','mandatory_digest','task_id','attempt_id','attempt_generation','spec_revision_id','spec_generation','package_id','package_generation','authority_epoch','leader_generation','policy_digest','registry_digest','packet','created_at');
 
 CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_execution_packets FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Prospective continuation packets retain their actual bytes before a new claim.
+CREATE TABLE hyperfide.hierarchy_execution_packet_artifacts (
+ organisation_id uuid NOT NULL,run_id uuid NOT NULL,packet_id uuid NOT NULL,
+ artifact_role text NOT NULL CHECK(artifact_role IN ('CAPSULE','DEPENDENCY','SUMMARY','FINDINGS')),
+ artifact_id uuid NOT NULL,
+ PRIMARY KEY(organisation_id,run_id,packet_id,artifact_role),
+ FOREIGN KEY(organisation_id,run_id,packet_id) REFERENCES hyperfide.hierarchy_execution_packets(organisation_id,run_id,id),
+ FOREIGN KEY(organisation_id,run_id,artifact_id) REFERENCES hyperfide.artifacts(organisation_id,run_id,id)
+);
+CREATE TRIGGER immutable_binding BEFORE UPDATE OR DELETE ON hyperfide.hierarchy_execution_packet_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','packet_id','artifact_role','artifact_id');
+CREATE TRIGGER aaa_supported_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.hierarchy_execution_packet_artifacts
+ FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
