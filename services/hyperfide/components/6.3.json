@@ -15,7 +15,8 @@
     "instructions.handoff",
     "instructions.replay",
     "instructions.ack",
-    "instructions.lookup-native"
+    "instructions.lookup-native",
+    "instructions.consumer.register"
   ],
   "requires": [
     "4.2",

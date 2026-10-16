@@ -6,7 +6,7 @@ import type { InvocationContext, Principal } from '../transport/protocol.js';
 import type { Component, ComponentContext } from '../components/registry.js';
 import type { PrimaryTransaction } from '../storage/transactions.js';
 import { assertPrimaryTransaction } from '../storage/transactions.js';
-import { fields,scope,uuid,integer,bounded,canonical,digest,eventDigest,event,fail,gateway,run,lockRun,enqueue,authorizedRun,lookupNativeLaunch } from './outbox.js';
+import { fields,scope,uuid,integer,bounded,canonical,digest,eventDigest,event,fail,gateway,run,lockRun,enqueue,authorizedRun,lookupNativeLaunch,registerConsumer,requireInvocation } from './outbox.js';
 import type { Scope,OutboxEvent } from './outbox.js';
 import { receive } from './inbox.js';
 export { lookupNativeLaunch } from './outbox.js';
@@ -28,7 +28,7 @@ function instruction(value:unknown):Instruction {
   if(v.kind==='STEER') {
     uuid(body.request_id);
     if(typeof body.frame_b64!=='string'||body.frame_b64.length===0||!/^[A-Za-z0-9_-]+$/.test(body.frame_b64)||
-      Buffer.from(body.frame_b64,'base64url').toString('base64url')!==body.frame_b64)
+      Buffer.from(body.frame_b64,'base64url').toString('base64url')!==body.frame_b64||Buffer.from(body.frame_b64,'base64url').length>4096)
       fail('INSTRUCTION_INPUT_INVALID','STEER frame must use canonical unpadded base64url');
   }
   const encoded=canonical(body);
@@ -46,7 +46,7 @@ async function currentAuthority(tx:PrimaryTransaction,i:Instruction,allowExpired
   if(target.rowCount!==1) fail('INSTRUCTION_STALE_AUTHORITY','Attempt does not exist in this run');
   await tx.query('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR UPDATE',
     [i.organisation_id,i.run_id,target.rows[0]!.task_id]);
-  const found=await tx.query(`SELECT a.*,r.authority_epoch AS current_epoch,t.current_attempt_id,t.generation AS current_generation,t.feature_package_id AS current_package_id,
+  const found=await tx.query(`SELECT a.*,r.authority_epoch AS current_epoch,r.state AS current_run_state,t.current_attempt_id,t.generation AS current_generation,t.feature_package_id AS current_package_id,
     s.boot_generation AS current_boot,b.boot_id AS current_boot_id,l.state AS lease_state,l.expires_at AS observed_lease_expires_at
     FROM hyperfide.attempts a JOIN hyperfide.runs r ON(r.organisation_id=a.organisation_id AND r.id=a.run_id)
     JOIN hyperfide.tasks t ON(t.organisation_id=a.organisation_id AND t.run_id=a.run_id AND t.id=a.task_id)
@@ -66,7 +66,7 @@ async function currentAuthority(tx:PrimaryTransaction,i:Instruction,allowExpired
     fail('INSTRUCTION_STALE_AUTHORITY','START slot does not match the current attempt placement');
   const clock=await tx.query('SELECT clock_timestamp() AS checked_at');
   const leaseUnexpired=a?.observed_lease_expires_at instanceof Date && a.observed_lease_expires_at.getTime()>(clock.rows[0]!.checked_at as Date).getTime();
-  if(!allowExpiredCancel&&(a.compute_authority!=='CURRENT'||a.lease_state!=='ACTIVE'||!leaseUnexpired||
+  if(!allowExpiredCancel&&(a.current_run_state!=='RUNNING'||a.compute_authority!=='CURRENT'||a.lease_state!=='ACTIVE'||!leaseUnexpired||
       !['PLANNED','RESERVED','PREPARING','START_REQUESTED','RUNNING'].includes(a.execution_state as string)))
     fail('INSTRUCTION_STALE_AUTHORITY','Current live compute authority is required');
   const observed=clock.rows[0]!.checked_at as Date;
@@ -80,6 +80,70 @@ function bodyOf(i:Instruction,target:{sandbox_id:string;boot_id:string}):Record<
   return {instruction_id:i.id,attempt_id:i.attempt_id,attempt_generation:i.attempt_generation,
     authority_epoch:i.authority_epoch,sandbox_boot_generation:i.sandbox_boot_generation,kind:i.kind,body:i.body,sandbox_id:target.sandbox_id,boot_id:target.boot_id};
 }
+export interface RunnerConsumerBinding extends Scope {consumer_id:string;sandbox_id:string;boot_id:string;boot_generation:string;
+  consumer_key:string;consumer_state:string;registered_credential_id:string;bootstrap_receipt_id:string}
+function runnerConsumerIdentity(s:Scope,consumer:string,sandbox:string,boot:string,generation:string):Record<string,unknown> {
+  return {...s,consumer_id:consumer,sandbox_id:sandbox,boot_id:boot,boot_generation:generation};
+}
+export async function resolveRunnerConsumer(tx:PrimaryTransaction,input:unknown):Promise<RunnerConsumerBinding|null> {
+  assertPrimaryTransaction(tx);
+  const v=fields(input,['organisation_id','run_id','sandbox_id','boot_id','boot_generation']),s=scope(v),
+    sandbox=uuid(v.sandbox_id),boot=uuid(v.boot_id),generation=integer(v.boot_generation);
+  const r=(await tx.query(`SELECT b.*,c.consumer_key,c.state AS consumer_state,i.request_digest AS bootstrap_digest,
+    i.operation AS bootstrap_operation,i.state AS bootstrap_state,i.result AS bootstrap_result
+    FROM hyperfide.event_runner_bindings b JOIN hyperfide.event_consumers c
+      ON(c.organisation_id=b.organisation_id AND c.run_id=b.run_id AND c.id=b.consumer_id)
+    JOIN hyperfide.command_inbox i ON(i.organisation_id=b.organisation_id AND i.run_id=b.run_id AND i.id=b.bootstrap_receipt_id)
+    JOIN hyperfide.sandbox_boots boot ON(boot.organisation_id=b.organisation_id AND boot.sandbox_id=b.sandbox_id
+      AND boot.boot_generation=b.boot_generation AND boot.boot_id=b.boot_id)
+    WHERE b.organisation_id=$1 AND b.run_id=$2 AND b.sandbox_id=$3 AND b.boot_id=$4 AND b.boot_generation=$5 FOR SHARE OF c`,
+    [s.organisation_id,s.run_id,sandbox,boot,generation])).rows[0];
+  if(!r)return null;
+  const consumer=uuid(r.consumer_id),expected=runnerConsumerIdentity(s,consumer,sandbox,boot,generation);
+  if(r.consumer_key!=='runner:'+sandbox+':'+boot||r.bootstrap_digest!==digest(expected)||
+    r.bootstrap_operation!=='instruction.consumer-genesis'||r.bootstrap_state!=='COMPLETED'||
+    !r.bootstrap_result||r.bootstrap_result.empty_native_history!==true||
+    Object.entries(expected).some(([key,value])=>r.bootstrap_result[key]!==value))
+    fail('INSTRUCTION_CONSUMER_INVALID','Native consumer lost its exact immutable boot and bootstrap receipt');
+  return {...s,consumer_id:consumer,sandbox_id:sandbox,boot_id:boot,boot_generation:generation,
+    consumer_key:r.consumer_key as string,consumer_state:r.consumer_state as string,
+    registered_credential_id:uuid(r.registered_credential_id),bootstrap_receipt_id:uuid(r.bootstrap_receipt_id)};
+}
+export async function registerRunnerConsumer(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<unknown> {
+  assertPrimaryTransaction(tx);assertInvocation(invocation);
+  const v=fields(input,['organisation_id','run_id','consumer_id']),s=scope(v),consumer=uuid(v.consumer_id),p=invocation.principal;
+  if(p.role!=='RUNNER'||p.organisation_id!==s.organisation_id||p.run_id!==s.run_id||
+    !p.sandbox_id||!p.boot_id||!p.boot_generation)fail('AUTH_SCOPE_DENIED','Only the authenticated native boot may register its standing consumer');
+  await invocation.guard(tx);await lockRun(tx,s,'exclusive');
+  const identity=runnerConsumerIdentity(s,consumer,uuid(p.sandbox_id),uuid(p.boot_id),integer(p.boot_generation));
+  const existing=await resolveRunnerConsumer(tx,{...s,sandbox_id:p.sandbox_id,boot_id:p.boot_id,boot_generation:p.boot_generation});
+  if(existing) {
+    if(existing.consumer_id!==consumer)fail('INSTRUCTION_CONSUMER_CONFLICT','A boot cannot replace its immutable standing native consumer');
+    return {...existing,registered:true,replayed:true,needs_recovery:existing.consumer_state!=='ACTIVE',execution_authority:false};
+  }
+  const history=await tx.query(`SELECT 1 FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2
+    AND aggregate_type='attempt.instructions' AND payload->>'sandbox_id'=$3 AND payload->>'boot_id'=$4 LIMIT 1`,
+    [s.organisation_id,s.run_id,p.sandbox_id,p.boot_id]);
+  if(history.rows.length)fail('INSTRUCTION_BOOTSTRAP_REQUIRES_RECOVERY','Existing native history cannot be replaced by an empty bootstrap');
+  await registerConsumer(tx,{...s,id:consumer,consumer_key:'runner:'+p.sandbox_id+':'+p.boot_id,critical:true,state:'BUFFERING'});
+  const receipt=randomUUID(),result={...identity,empty_native_history:true,covered_native_events:'0',
+    bootstrap_scope:'EMPTY_TARGETED_NATIVE_STREAM',execution_authority:false};
+  await tx.query(`INSERT INTO hyperfide.command_inbox(organisation_id,run_id,id,principal_scope,operation,idempotency_key,request_digest,state,result)
+    VALUES($1,$2,$3,$4,'instruction.consumer-genesis',$4,$5,'COMPLETED',$6::jsonb)`,
+    [s.organisation_id,s.run_id,receipt,consumer,digest(identity),canonical(result)]);
+  await tx.query(`INSERT INTO hyperfide.event_runner_bindings(organisation_id,run_id,consumer_id,sandbox_id,boot_id,boot_generation,registered_credential_id,bootstrap_receipt_id)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[s.organisation_id,s.run_id,consumer,p.sandbox_id,p.boot_id,p.boot_generation,p.credential_id,receipt]);
+  await tx.query("UPDATE hyperfide.event_consumers SET state='ACTIVE',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='BUFFERING'",
+    [s.organisation_id,s.run_id,consumer]);
+  return {...(await resolveRunnerConsumer(tx,{...s,sandbox_id:p.sandbox_id,boot_id:p.boot_id,boot_generation:p.boot_generation}))!,
+    registered:true,replayed:false,needs_recovery:false,execution_authority:false};
+}
+async function instructionRecipient(tx:PrimaryTransaction,s:Scope,target:{sandbox_id:string;boot_id:string},generation:string,active:boolean):Promise<string> {
+  const binding=await resolveRunnerConsumer(tx,{...s,...target,boot_generation:generation});
+  if(!binding||active&&binding.consumer_state!=='ACTIVE')
+    fail('INSTRUCTION_CONSUMER_REQUIRED','A current boot-bound standing native consumer is required; broadcasting is forbidden');
+  return binding.consumer_id;
+}
 export async function issue(tx:PrimaryTransaction,input:unknown):Promise<unknown> {
   assertPrimaryTransaction(tx);
   const i=instruction(input);
@@ -91,10 +155,12 @@ export async function issue(tx:PrimaryTransaction,input:unknown):Promise<unknown
     if(r.aggregate_type!=='attempt.instructions'||r.aggregate_id!==i.attempt_id||
       r.event_type!=='instruction.'+i.kind.toLowerCase()||canonical(r.payload)!==canonical(bodyOf(i,{sandbox_id:uuid(r.payload.sandbox_id),boot_id:uuid(r.payload.boot_id)})))
       fail('INSTRUCTION_IDEMPOTENCY_CONFLICT','Stable command ID was reused with a different instruction');
+    const consumer=await instructionRecipient(tx,i,{sandbox_id:uuid(r.payload.sandbox_id),boot_id:uuid(r.payload.boot_id)},i.sandbox_boot_generation,false);
     return enqueue(tx,{...scope(i as unknown as Record<string,unknown>),id:r.id,aggregate_type:r.aggregate_type,
-      aggregate_id:r.aggregate_id,aggregate_version:r.aggregate_version,event_type:r.event_type,payload:r.payload});
+      aggregate_id:r.aggregate_id,aggregate_version:r.aggregate_version,event_type:r.event_type,payload:r.payload},{consumer_ids:[consumer]});
   }
   const target=await currentAuthority(tx,i,i.kind==='CANCEL');
+  const consumer=await instructionRecipient(tx,i,target,i.sandbox_boot_generation,true);
   const queued=await tx.query(`SELECT count(DISTINCT e.id)::int AS count FROM hyperfide.outbox_events e
     JOIN hyperfide.event_deliveries d ON(d.organisation_id=e.organisation_id AND d.run_id=e.run_id AND d.event_id=e.id)
     WHERE e.organisation_id=$1 AND e.run_id=$2 AND e.aggregate_type='attempt.instructions' AND e.aggregate_id=$3 AND d.state<>'ACKNOWLEDGED'`,
@@ -118,7 +184,7 @@ export async function issue(tx:PrimaryTransaction,input:unknown):Promise<unknown
     [i.organisation_id,i.run_id,i.attempt_id]);
   const version=latest.rows.length?(BigInt(latest.rows[0]!.aggregate_version as string)+1n).toString():'1';
   return enqueue(tx,{...scope(i as unknown as Record<string,unknown>),id:i.id,aggregate_type:'attempt.instructions',
-    aggregate_id:i.attempt_id,aggregate_version:version,event_type:'instruction.'+i.kind.toLowerCase(),payload:bodyOf(i,target)});
+    aggregate_id:i.attempt_id,aggregate_version:version,event_type:'instruction.'+i.kind.toLowerCase(),payload:bodyOf(i,target)},{consumer_ids:[consumer]});
 }
 export async function acceptInstruction(tx:PrimaryTransaction,input:unknown):Promise<unknown> {
   return receive(tx,input,async(inner,e)=>{
@@ -271,6 +337,29 @@ export async function recordRunnerAcknowledgement(tx:PrimaryTransaction,input:un
 }
 
 
+async function nativeInvocation<T>(g:ReturnType<typeof gateway>,context:ComponentContext,input:unknown,
+    operation:'HANDOFF'|'ACK',apply:(tx:PrimaryTransaction,invocation:InvocationContext)=>Promise<T>):Promise<T> {
+  const invocation=requireInvocation(context,input,['RUNNER']);
+  return g.withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:invocation.signal,guard:tx=>invocation.identityGuard(tx)},async tx=>{
+    const v=input as Record<string,unknown>,s=scope(v),id=uuid(operation==='HANDOFF'?v.event_id:v.command_id);
+    const row=(await tx.query("SELECT * FROM hyperfide.outbox_events WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND aggregate_type='attempt.instructions'",
+      [s.organisation_id,s.run_id,id])).rows[0];
+    if(!row)fail('INSTRUCTION_EVENT_INVALID','Native cleanup requires an already committed exact instruction');
+    const p=row.payload as Record<string,unknown>,i=instruction({...s,id:p.instruction_id,attempt_id:p.attempt_id,
+      attempt_generation:p.attempt_generation,authority_epoch:p.authority_epoch,sandbox_boot_generation:p.sandbox_boot_generation,kind:p.kind,body:p.body}),
+      target={sandbox_id:uuid(p.sandbox_id),boot_id:uuid(p.boot_id)};
+    if(i.id!==id||i.attempt_id!==row.aggregate_id||row.event_type!=='instruction.'+i.kind.toLowerCase())
+      fail('INSTRUCTION_EVENT_INVALID','Stored native instruction metadata is inconsistent');
+    runnerMatches(invocation.principal,i,target);
+    const consumer=await instructionRecipient(tx,s,target,i.sandbox_boot_generation,false);
+    if(operation==='HANDOFF'&&uuid(v.consumer_id)!==consumer)fail('AUTH_SCOPE_DENIED','Handoff does not address the authenticated boot consumer');
+    // The exception is selected only by immutable server state. ACKs report observations, never execution permission.
+    if(operation==='HANDOFF'&&i.kind!=='CANCEL')await invocation.guard(tx);
+    const result=await apply(tx,invocation);
+    if(operation==='HANDOFF'&&i.kind!=='CANCEL')await invocation.guard(tx);else await invocation.identityGuard(tx);
+    return result;
+  });
+}
 async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:InvocationContext):Promise<void> {
   const principal=invocation.principal;
   if(!['LEADER','FEATURE_MANAGER'].includes(principal.role))return;
@@ -290,15 +379,16 @@ async function issueAuthority(tx:PrimaryTransaction,input:unknown,invocation:Inv
 }
 export function createComponent(context:ComponentContext):Component {
   const g=gateway(context);
-  const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch})},actions:{
+  const component={apiVersion:1 as const,capabilities:{'events.instructions.v1':Object.freeze({issue,acceptInstruction,handoff,replayInstructions,recordRunnerAcknowledgement,lookupNativeLaunch,registerRunnerConsumer,resolveRunnerConsumer})},actions:{
+    'instructions.consumer.register':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>registerRunnerConsumer(tx,input,invocation)),
     'instructions.describe':()=>({schema_version:1,kinds:['START','STEER','CANCEL'],identity:'stable-command-UUID',
       bounds:{body_bytes:65536,outstanding:256},execution:'native-connector-required',full_case_status:'INCOMPLETE'}),
     'instructions.issue':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','LEADER','FEATURE_MANAGER','COORDINATOR'],async(tx,invocation)=>{await issueAuthority(tx,input,invocation);return issue(tx,input);}),
     'instructions.accept':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>acceptInstruction(tx,input)),
-    'instructions.handoff':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>handoff(tx,input,invocation.principal)),
+    'instructions.handoff':(input:unknown,context:ComponentContext)=>nativeInvocation(g,context,input,'HANDOFF',(tx,invocation)=>handoff(tx,input,invocation.principal)),
     'instructions.replay':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['OPERATOR','COORDINATOR','DISPATCH'],tx=>replayInstructions(tx,input)),
     'instructions.lookup-native':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER','OPERATOR','COORDINATOR','DISPATCH'],(tx,invocation)=>lookupNativeLaunch(tx,input,invocation)),
-    'instructions.ack':(input:unknown,context:ComponentContext)=>authorizedRun(g,context,input,['RUNNER'],(tx,invocation)=>recordRunnerAcknowledgement(tx,input,invocation))
+    'instructions.ack':(input:unknown,context:ComponentContext)=>nativeInvocation(g,context,input,'ACK',(tx,invocation)=>recordRunnerAcknowledgement(tx,input,invocation))
   }};
   return component;
 }
