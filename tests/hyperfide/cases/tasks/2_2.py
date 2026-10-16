@@ -10,6 +10,7 @@ slug = "fixture"
 ac_1 = "An actual executable obligation"
 [acceptance.1]
 req = "1.1"
+checks = ["actual-check"]
 [acceptance.2]
 req = "2.1"
 [task.1]
@@ -38,16 +39,18 @@ RESOURCE='hf-task-2.2-database'
 def artifact_root():
     path=Path(os.environ.get('HYPERFIDE_CAMPAIGN_DIR','/tmp/hyperfide/task-2.2-auth-standalone'));path.mkdir(parents=True,exist_ok=True);return path
 def setup(f):
-    for version,name in [(2,'0002-spec'),(202,'0202-spec-dependencies')]:
+    for version,name in [(2,'0002-spec'),(4,'0004-durability'),(202,'0202-spec-dependencies')]:
         raw=(ROOT/('services/hyperfide/migrations/'+name+'.sql')).read_bytes()
         f.sql("BEGIN;\n"+raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','"+sha(raw)+"');COMMIT;")
     f.ids.update({key:f.ids.get(key,str(uuid.uuid4())) for key in ['repository','accepted_spec','package','package2','task1','task2','task3','task4','task5']})
     i=f.ids
-    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=SOURCE.encode(),cwd=ROOT))
-    intent={'schema_version':1,'revision_digest':sha(b'accepted-envelope'),'source_digest':sha(SOURCE.encode()),'repositories':[{'repository_id':i['repository'],'source_object_id':'a'*40,'integration_ref':'refs/heads/main'}],'allowed_actions':f.actions,'closure_policy':{'required_evidence':['actual-check'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
+    executable=str(Path(sys.executable).resolve())
+    source=SOURCE+'\n[proof]\nrubric_digest = '+json.dumps(sha(b'rubric'))+'\n[proof.check.actual-check]\n'+''.join(key+' = '+json.dumps(value)+'\n' for key,value in {'argv':[executable,'-c','raise SystemExit(1)',''],'executable_digest':sha(Path(executable).read_bytes()),'timeout_ms':600000,'required_artifacts':['proof.json'],'input_keys':['source']}.items())
+    parsed=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
+    intent={'schema_version':1,'revision_digest':sha(b'accepted-envelope'),'source_digest':sha(source.encode()),'repositories':[{'repository_id':i['repository'],'source_object_id':'a'*40,'integration_ref':'refs/heads/main'}],'allowed_actions':f.actions,'closure_policy':{'required_evidence':['actual-check'],'required_review_roles':[],'publication':'AFTER_QUALIFICATION'},'provenance':None,'parsed':parsed,'runtime_wave_offset':0}
     f.sql("INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url,object_format) VALUES($1,$2,$3,'fixture','https://example.invalid/fixture.git','sha1')",[i['organisation'],i['project'],i['repository']])
     f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id,object_type) VALUES($1,$2,$3,'commit')",[i['organisation'],i['repository'],'a'*40])
-    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[i['organisation'],i['project'],i['accepted_spec'],sha(SOURCE.encode()),SOURCE,json.dumps(intent),intent['revision_digest']])
+    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[i['organisation'],i['project'],i['accepted_spec'],sha(source.encode()),source,json.dumps(intent),intent['revision_digest']])
     f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[i['organisation'],i['run'],i['accepted_spec']])
     f.sql("UPDATE hyperfide.runs SET spec_generation=2,spec_revision_id=$3,state='PENDING_VALIDATION',state_version=2 WHERE organisation_id=$1 AND id=$2",[i['organisation'],i['run'],i['accepted_spec']])
     f.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i['organisation'],i['run'],i['repository'],'a'*40])
@@ -104,6 +107,19 @@ def run_fixture(source,callback,missing_schema=False):
     (root/'storage/database-names.json').write_text(json.dumps({'databases':DATABASES}))
     try:callback(f)
     finally:f.close()
+def advance_run_snapshot(f):
+    current=f.sql("SELECT r.spec_generation::text,r.state_version::text,s.source_content,s.document FROM hyperfide.runs r JOIN hyperfide.spec_revisions s ON s.organisation_id=r.organisation_id AND s.id=r.spec_revision_id WHERE r.organisation_id=$1 AND r.id=$2",[f.ids['organisation'],f.ids['run']])[0]
+    source=current['source_content']+'\n# An unrelated accepted run revision\n'
+    document=copy.deepcopy(current['document']);document['source_digest']=sha(source.encode())
+    document['parsed']=json.loads(subprocess.check_output(['node','--input-type=module','-e',"import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
+    accepted={key:document[key] for key in ['schema_version','source_digest','repositories','allowed_actions','closure_policy','provenance']}
+    document['revision_digest']=sha(json.dumps(accepted,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode())
+    spec=str(uuid.uuid4());generation=str(int(current['spec_generation'])+1)
+    f.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[f.ids['organisation'],f.ids['project'],spec,document['source_digest'],source,json.dumps(document),document['revision_digest']])
+    f.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,$3,$4)",[f.ids['organisation'],f.ids['run'],generation,spec])
+    f.sql("UPDATE hyperfide.runs SET spec_generation=$3,spec_revision_id=$4,state='PENDING_VALIDATION',state_version=state_version+1 WHERE organisation_id=$1 AND id=$2",[f.ids['organisation'],f.ids['run'],generation,spec])
+    return {'run_id':f.ids['run'],'spec_revision_id':spec,'spec_generation':generation,'state_version':str(int(current['state_version'])+1)}
+
 def positive(f):
     p=pins(f);run=f.ids['run'];saved={}
     def check_graph():
@@ -140,9 +156,14 @@ def positive(f):
         finally:f.sql("DROP TRIGGER zzz_injected ON hyperfide.runs;DROP FUNCTION hyperfide.inject_admission_failure();")
     check('dependencies.transaction.late-failure-rollback',late_failure)
     def admit():
-        result=success(f,'spec.dependencies.admit',p)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:responses=list(pool.map(lambda _:request(f,'spec.dependencies.admit',p),range(2)))
+        accepted=[r['result'] for r in responses if r.get('ok') is True]
+        expect(len(accepted)==1 and any(r.get('error',{}).get('code')=='SPEC_PLAN_STALE' for r in responses),'Concurrent admission did not enforce one exact CAS winner')
+        result=accepted[0]
         expect(result['admitted'] is True and result['state_version']=='3' and current_state(f)['state']=='READY','Atomic admission did not advance exact run generation')
     check('dependencies.admit.atomic-ready',admit)
+    check('dependencies.admit.concurrent-cas',lambda:expect(current_state(f)['state_version']=='3','Concurrent admission advanced state more than once'))
     def exact_edge():
         rows=f.sql("SELECT predecessor_task_id,predecessor_spec_generation::text,predecessor_spec_revision_id,binding_schema_version,revision::text,milestone FROM hyperfide.task_dependencies")
         expect(rows==[{'predecessor_task_id':f.ids['task1'],'predecessor_spec_generation':'2','predecessor_spec_revision_id':f.ids['accepted_spec'],'binding_schema_version':1,'revision':'2','milestone':'QUALIFIED'}],'Resolved edge lost exact accepted predecessor identity')
@@ -167,6 +188,23 @@ def positive(f):
         expect(result['spec_generation']=='2' and result['run_state']=='READY' and len(f.sql('SELECT 1 FROM hyperfide.task_dependencies'))==1,'Restart lost admitted plan')
     check('dependencies.restart.durable-plan',restart)
     check('dependencies.status-not-qualification',lambda:expect(f.sql("SELECT count(*)::int n FROM hyperfide.tasks WHERE state<>'PENDING'")[0]['n']==0 and f.sql("SELECT count(*)::int n FROM hyperfide.evidence")[0]['n']==0,'Structural admission manufactured task qualification'))
+    def legacy_binding():
+        f.sql("INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision) VALUES($1,$2,$3,$2,$4,'QUALIFIED',2)",[f.ids['organisation'],run,f.ids['task1'],f.ids['task2']])
+        result=success(f,'spec.dependencies.check',dict(p,state_version='3'))
+        expect(result['status']=='INVALID' and any(d['code']=='DEPENDENCY_LEGACY_BINDING_UNSUPPORTED' for d in result['diagnostics']),'Legacy persisted edge gained structural authority')
+    check('dependencies.binding.legacy-refused',legacy_binding)
+    def undeclared_binding():
+        f.sql("INSERT INTO hyperfide.task_dependencies(organisation_id,run_id,task_id,predecessor_run_id,predecessor_task_id,milestone,revision,binding_schema_version,predecessor_spec_generation,predecessor_spec_revision_id,predecessor_repository_id,integration_ref) VALUES($1,$2,$3,$2,$4,'INTEGRATED',2,1,2,$5,$6,'refs/heads/main')",[f.ids['organisation'],run,f.ids['task1'],f.ids['task2'],f.ids['accepted_spec'],f.ids['repository']])
+        result=success(f,'spec.dependencies.check',dict(p,state_version='3'))
+        expect(any(d['code']=='DEPENDENCY_UNDECLARED_BINDING' for d in result['diagnostics']),'Undeclared persisted edge gained authority')
+    check('dependencies.binding.undeclared-refused',undeclared_binding)
+    def stale_binding():
+        current=advance_run_snapshot(f)
+        f.sql("UPDATE hyperfide.tasks SET spec_generation=$4,spec_revision_id=$5,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[f.ids['organisation'],run,f.ids['task1'],current['spec_generation'],current['spec_revision_id']])
+        result=success(f,'spec.dependencies.check',current)
+        expect(any(d['code']=='DEPENDENCY_ACCEPTED_BINDING_STALE' for d in result['diagnostics']),'Accepted predecessor binding silently rebound to changed task')
+    check('dependencies.binding.stale-predecessor-refused',stale_binding)
+
 def header():return '[meta]\nslug="fixture"\n[req.1]\nac_1="An actual executable obligation"\n[acceptance.1]\nreq="1.1"\n'
 def task(key,requires,wave=1,**fields):
     values={'wave':wave,'reqs':['1.1'],'acceptance_ids':['1'],'requires':requires,**fields}

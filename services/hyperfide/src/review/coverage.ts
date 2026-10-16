@@ -8,6 +8,8 @@ import type {Component,ComponentContext} from '../components/registry.js';
 import {FoundationError} from '../policy/programme.js';
 import {databaseError} from '../storage/schema.js';
 import {assertInvocation} from '../transport/protocol.js';
+import {readSemanticDisposition,writeSemanticDisposition} from '../storage/dispositions.js';
+import {assertPrimaryTransaction} from '../storage/transactions.js';
 
 const execute=promisify(execFile);
 export type ReviewDb=Pick<pg.PoolClient,'query'>;
@@ -87,16 +89,16 @@ export function authorizeReview(context:ComponentContext,binding:ReviewScope,rol
  return {invocation,gateway,scope:actual};
 }
 export async function lockReviewDisposition(db:ReviewDb,binding:ReviewScope,exclusive=false):Promise<void>{
- await db.query('SELECT '+(exclusive?'pg_advisory_xact_lock':'pg_advisory_xact_lock_shared')+'(hashtextextended($1,0))',[binding.organisation_id+':'+binding.run_id+':finding-disposition']);
+ assertPrimaryTransaction(db);
+ await (exclusive?writeSemanticDisposition:readSemanticDisposition)(db,binding);
 }
 export async function transaction<T>(context:ComponentContext,binding:ReviewScope,
  operation:(db:ReviewDb)=>Promise<T>,exclusive=true):Promise<T>{
  const trusted=authorizeReview(context,binding);
  try{
   return await trusted.gateway.withPrimaryTransaction({timeoutMs:5000,signal:trusted.invocation.signal,
-   guard:db=>trusted.invocation.guard(db)},async db=>{
+   guard:async db=>{await lockReviewDisposition(db,binding,exclusive);await trusted.invocation.guard(db);}},async db=>{
    await primary(db);
-   await lockReviewDisposition(db,binding,exclusive);
    const run=await db.query<{state:string}>('SELECT state FROM hyperfide.runs WHERE organisation_id=$1 AND id=$2 FOR SHARE',
     [trusted.scope.organisation_id,trusted.scope.run_id]);
    if(!run.rows.length)fail('REVIEW_SCOPE_INVALID','Run does not exist in this organisation');
@@ -210,16 +212,16 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
  authorizeReview(context,binding,['OPERATOR','LEADER','COORDINATOR','FEATURE_MANAGER','COMMIT_WATCHER','INTEGRATOR']);
  const config=await repositoryConfig(context.env,repositoryId);
  const snapshot=await heads(config);
- const initial=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[binding.organisation_id,binding.run_id,repositoryId]));
+ const initial=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.run_repositories WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3',[binding.organisation_id,binding.run_id,repositoryId]),false);
  if(initial.rows.length!==1)fail('REVIEW_SCOPE_INVALID','Repository is not part of this run');
  const base=oid(initial.rows[0]!.source_object_id);
  await git(config.path,['cat-file','-e',base+'^{commit}']);
  const reachable=(await git(config.path,['rev-list','--reverse','--topo-order','--max-count=100001',...Object.values(snapshot),'--not',base])).trim().split('\n').filter(Boolean).map(oid);
  if(reachable.length>100000)fail('REVIEW_DISCOVERY_LIMIT','History exceeds the explicit discovery bound; narrow the approved branch/base range');
- const existing=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=ANY($4::text[])',[binding.organisation_id,binding.run_id,repositoryId,reachable]));
+ const existing=await transaction(context,binding,db=>db.query<{source_object_id:string}>('SELECT source_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=ANY($4::text[])',[binding.organisation_id,binding.run_id,repositoryId,reachable]),false);
  const known=new Set(existing.rows.map(row=>row.source_object_id));
  const selected=reachable.filter(commit=>!known.has(commit)).slice(0,Number(batch));
- const tasks=await transaction(context,binding,db=>db.query<{task_key:string}>('SELECT task_key FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2',[binding.organisation_id,binding.run_id]));
+ const tasks=await transaction(context,binding,db=>db.query<{task_key:string}>('SELECT task_key FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2',[binding.organisation_id,binding.run_id]),false);
  const taskKeys=new Set(tasks.rows.map(task=>task.task_key));
  const commits:Commit[]=[];
  for(const commit of selected){
@@ -232,7 +234,7 @@ export async function discoverReviewCommits(context:ComponentContext,value:unkno
   commits.push({source_object_id:commit,tree_object_id:tree,parent_objects:parents,changed_paths:paths,
     attribution:{state:!tags.length?'UNATTRIBUTED':unknown.length?'UNKNOWN_TASK':'ATTRIBUTED',spec_tags:tags}});
  }
- const latest=await transaction(context,binding,db=>db.query<{refs:Record<string,string>}>('SELECT refs FROM hyperfide.review_head_observations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 ORDER BY observed_at DESC LIMIT 1',[binding.organisation_id,binding.run_id,repositoryId]));
+ const latest=await transaction(context,binding,db=>db.query<{refs:Record<string,string>}>('SELECT refs FROM hyperfide.review_head_observations WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 ORDER BY observed_at DESC LIMIT 1',[binding.organisation_id,binding.run_id,repositoryId]),false);
  const rewrites:Array<{ref:string;previous:string;current:string}>=[];
  for(const [ref,prior]of Object.entries(latest.rows[0]?.refs??{})){
   if(snapshot[ref]&&snapshot[ref]!==prior){
@@ -296,7 +298,13 @@ export async function relevantContracts(db:ReviewDb,binding:ReviewScope,reposito
  ORDER BY latest.contract_key`,[binding.organisation_id,binding.run_id,repositories]);
  return result.rows;
 }
+export async function reviewTaskVersions(db:ReviewDb,binding:ReviewScope,sources:unknown[]):Promise<Array<Record<string,unknown>>>{
+ const rows=await db.query(`SELECT task.id AS task_id,task.task_key,task.spec_revision_id,task.spec_generation::text AS spec_generation,task.criteria_digest FROM hyperfide.tasks task WHERE task.organisation_id=$1 AND task.run_id=$2 AND task.task_key IN (SELECT tag->>'task' FROM hyperfide.review_commits commit JOIN jsonb_to_recordset($3::jsonb) AS source(repository_id uuid,source_object_id text) ON source.repository_id=commit.repository_id AND source.source_object_id=commit.source_object_id CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(commit.attribution->'spec_tags')='array' THEN commit.attribution->'spec_tags' ELSE '[]'::jsonb END) tag WHERE commit.organisation_id=$1 AND commit.run_id=$2) ORDER BY task.id FOR SHARE OF task`,[binding.organisation_id,binding.run_id,JSON.stringify(sources)]);
+ return rows.rows;
+}
 export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapshot:Record<string,unknown>):Promise<boolean>{
+ if(snapshot.schema_version!==2||!Array.isArray(snapshot.task_versions)||typeof snapshot.task_attribution_complete!=='boolean')return false;
+ if(snapshot.graph_complete===true&&snapshot.graph_unprojected_semantic_edge_count!=='0')return false;
  const run=await db.query<{spec_revision_id:string;policy_digest:string;source_digest:string}>(`SELECT run.spec_revision_id,run.policy_digest,spec.source_digest
  FROM hyperfide.runs run JOIN hyperfide.spec_revisions spec ON spec.organisation_id=run.organisation_id AND spec.id=run.spec_revision_id
  WHERE run.organisation_id=$1 AND run.id=$2`,[binding.organisation_id,binding.run_id]);
@@ -314,23 +322,27 @@ export async function reviewInputCurrent(db:ReviewDb,binding:ReviewScope,snapsho
    [binding.organisation_id,binding.run_id,source.repository_id,source.source_object_id]);
   if(exists.rows.length!==1)return false;
  }
+ if(canonical(snapshot.task_versions)!==canonical(await reviewTaskVersions(db,binding,sources))||snapshot.task_attribution_complete!==await reviewAttributionComplete(db,binding,sources))return false;
  const contracts=await relevantContracts(db,binding,repositories);
  const versions=contracts.map(row=>({id:row.id,revision:row.revision,criteria_digest:row.criteria_digest}));
  if(canonical(snapshot.contract_versions)!==canonical(versions))return false;
  const profile=await db.query<{content_digest:string;manifest:Record<string,unknown>}>('SELECT content_digest,manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2',
   [binding.organisation_id,snapshot.environment_profile_id]);
  if(profile.rows.length!==1||snapshot.environment_digest!==profile.rows[0]!.content_digest||snapshot.toolchain_digest!==hash(profile.rows[0]!.manifest))return false;
- const graph=await db.query<{manifest_digest:string}>('SELECT manifest_digest FROM hyperfide.graph_manifests WHERE organisation_id=$1 AND run_id=$2 AND id=$3',
+ const graph=await db.query<{manifest_digest:string}>('SELECT manifest.manifest_digest FROM hyperfide.graph_manifests manifest JOIN hyperfide.graph_builds build ON build.organisation_id=manifest.organisation_id AND build.run_id=manifest.run_id AND build.id=manifest.build_id WHERE manifest.organisation_id=$1 AND manifest.run_id=$2 AND manifest.id=$3 AND build.state=\'PUBLISHED\' FOR SHARE OF manifest,build',
   [binding.organisation_id,binding.run_id,snapshot.graph_manifest_id]);
+ if(snapshot.graph_provenance_verified===true&&!await reviewGraphCustodyCurrent(db,binding,String(snapshot.graph_manifest_id)))return false;
  return graph.rows.length===1&&snapshot.graph_manifest_digest===graph.rows[0]!.manifest_digest;
 }
 
 export interface ReviewCoverageSummary {
  status:'COMPLETE'|'INCOMPLETE'|'STALE';policy_digest:string;repository_id:string;source_object_id:string;
  required:number;complete:number;missing:Array<Record<string,unknown>>;receipt_ids:string[];limitations:string[];
- authority:'POSTGRESQL_REVIEW_OBLIGATIONS';
+ authority:'POSTGRESQL_REVIEW_OBLIGATIONS';authority_generation:string;input_bindings:Record<string,unknown>|null;
 }
 export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,query:ReviewCoverageQuery):Promise<ReviewCoverageSummary>{
+ assertPrimaryTransaction(db);
+ const semantic=await readSemanticDisposition(db,binding);
  await primary(db);await lockReviewDisposition(db,binding);
  const policyResult=await db.query<{digest:string;active:boolean}>('SELECT digest,active FROM hyperfide.review_policies WHERE organisation_id=$1 AND run_id=$2 AND '+(query.policy_digest?'digest=$3':'active'),query.policy_digest?[binding.organisation_id,binding.run_id,query.policy_digest]:[binding.organisation_id,binding.run_id]);
  if(policyResult.rows.length!==1)fail('REVIEW_POLICY_MISSING','Review policy is unavailable');
@@ -340,15 +352,15 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  receipt.id AS receipt_id,receipt.outcome,receipt.limitations,inputs.snapshot,(commit.source_object_id IS NOT NULL) AS discovered,
  (inputs.snapshot->>'spec_revision_id'=current_run.spec_revision_id::text) AS spec_current,
  (EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id)
- AND NOT EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x JOIN hyperfide.evidence e ON e.organisation_id=x.organisation_id AND e.run_id=x.run_id AND e.id=x.evidence_id
- WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id AND e.admission_state<>'ADMITTED')) AS evidence_current
+ AND NOT EXISTS(SELECT 1 FROM hyperfide.review_receipt_evidence x JOIN hyperfide.evidence e ON e.organisation_id=x.organisation_id AND e.run_id=x.run_id AND e.id=x.evidence_id LEFT JOIN hyperfide.artifacts a ON a.organisation_id=e.organisation_id AND a.run_id=e.run_id AND a.id=e.artifact_id
+ WHERE x.organisation_id=receipt.organisation_id AND x.run_id=receipt.run_id AND x.receipt_id=receipt.id AND (e.admission_state<>'ADMITTED' OR a.status IS DISTINCT FROM 'COMPLETE' OR e.repository_id<>o.repository_id OR e.source_object_id<>o.source_object_id))) AS evidence_current
  FROM hyperfide.review_watchers w
  JOIN hyperfide.review_policies policy ON policy.organisation_id=w.organisation_id AND policy.run_id=w.run_id AND policy.digest=w.policy_digest
  JOIN hyperfide.runs current_run ON current_run.organisation_id=w.organisation_id AND current_run.id=w.run_id
  LEFT JOIN hyperfide.review_commits commit ON commit.organisation_id=w.organisation_id AND commit.run_id=w.run_id AND commit.repository_id=$3 AND commit.source_object_id=$4
  LEFT JOIN hyperfide.review_obligations o ON o.organisation_id=w.organisation_id AND o.run_id=w.run_id AND o.policy_digest=w.policy_digest AND o.watcher_id=w.watcher_id AND o.repository_id=$3 AND o.source_object_id=$4
  LEFT JOIN hyperfide.review_obligation_inputs inputs ON inputs.organisation_id=o.organisation_id AND inputs.run_id=o.run_id AND inputs.obligation_id=o.id AND inputs.generation=o.generation
- LEFT JOIN hyperfide.review_receipts receipt ON receipt.organisation_id=o.organisation_id AND receipt.run_id=o.run_id AND receipt.id=o.current_receipt_id AND receipt.generation=o.generation AND receipt.obligation_id=o.id
+ LEFT JOIN hyperfide.review_receipts receipt ON receipt.organisation_id=o.organisation_id AND receipt.run_id=o.run_id AND receipt.id=o.current_receipt_id AND receipt.generation=o.generation AND receipt.obligation_id=o.id AND receipt.input_manifest_digest=o.input_manifest_digest AND receipt.candidate_digest=o.candidate_digest AND receipt.reviewer_session_id=w.reviewer_session_id AND receipt.rubric_digest=w.rubric_digest
  WHERE w.organisation_id=$1 AND w.run_id=$2 AND w.policy_digest=$5
  AND(policy.definition->>'mode'='ALL_COMMITS' OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(commit.changed_paths)p,jsonb_array_elements_text(w.path_prefixes)x WHERE starts_with(p.value,x.value)))
  ORDER BY w.watcher_id`,
@@ -373,7 +385,7 @@ export async function inspectReviewCoverage(db:ReviewDb,binding:ReviewScope,quer
  if(!rows.rows.length)missing.push({watcher_id:'*',reason:'COMMIT_NOT_DISCOVERED'});
  return {status:stale?'STALE':missing.length?'INCOMPLETE':'COMPLETE',policy_digest:policyDigest,
   repository_id:query.repository_id,source_object_id:query.source_object_id,required:rows.rows.length,complete:receipts.length,
-  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],authority:'POSTGRESQL_REVIEW_OBLIGATIONS'};
+  missing,receipt_ids:receipts,limitations:[...new Set(limitations)],input_bindings:(()=>{const row=rows.rows.find(row=>row.snapshot&&row.input_manifest_digest===query.input_manifest_digest&&freshness.get(row.input_manifest_digest));if(!row?.snapshot||hash(row.snapshot)!==query.input_manifest_digest)return null;const result:Record<string,unknown>={candidate_digest:row.candidate_digest,input_manifest_digest:row.input_manifest_digest};for(const field of ['schema_version','source_set','task_versions','task_attribution_complete','spec_revision_id','spec_digest','configuration_digest','dependency_manifest_digest','contract_versions','graph_manifest_id','graph_manifest_digest','graph_source_set','graph_provenance_verified','graph_unprojected_semantic_edge_count','environment_profile_id','environment_digest','toolchain_digest'])result[field]=row.snapshot[field]??null;return result;})(),authority:'POSTGRESQL_REVIEW_OBLIGATIONS',authority_generation:semantic.generation};
 }
 export function createComponent(_context:ComponentContext):Component{
  const guarded=(fn:(context:ComponentContext,input:unknown)=>Promise<unknown>)=>
@@ -386,7 +398,67 @@ export function createComponent(_context:ComponentContext):Component{
    return transaction(context,scope(v),db=>inspectReviewCoverage(db,scope(v),{repository_id:uuid(v.repository_id),source_object_id:oid(v.source_object_id),
     ...(v.candidate_digest?{candidate_digest:digest(v.candidate_digest)}:{}),
     ...(v.input_manifest_digest?{input_manifest_digest:digest(v.input_manifest_digest)}:{}),
-    ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})}));
+    ...(v.policy_digest?{policy_digest:digest(v.policy_digest)}:{})}),false);
   })
  }};
+}
+
+export interface ReviewControl {
+ scope_kind:'RUN'|'PACKAGE'|'ATTEMPT'|'SANDBOX';scope_id:string;task_ids:string[];
+ mode:'STOP'|'CANCEL';operation_id:string;control_generation:string;
+}
+export async function assertReviewExecutionAllowed(context:ComponentContext,db:ReviewDb,binding:ReviewScope,
+ sourceSet:readonly {repository_id:string;source_object_id:string}[],sandboxId:string|null,
+ operation:'ADMISSION'|'RENEWAL'|'CHECKPOINT',knownTaskIds:string[]=[]):Promise<void>{
+ const deps=(context as unknown as {dependencies?:{require:(id:string,key:string,guard:(v:unknown)=>boolean)=>unknown}}).dependencies;
+ const cap=deps?.require('5.1','scheduler.controls.v1',(v:unknown)=>!!v&&typeof(v as {assertNoExecutionHold?:unknown}).assertNoExecutionHold==='function') as {assertNoExecutionHold:(tx:ReviewDb,scope:ReviewScope,target:unknown)=>Promise<void>}|undefined;
+ if(!cap)fail('REVIEW_CONTROLS_UNAVAILABLE','Actual scheduler execution-control authority is required');
+ const versions=await reviewTaskVersions(db,binding,[...sourceSet]),explicit=[...new Set(knownTaskIds.map(uuid))];
+ const tasks=await db.query<{id:string;feature_package_id:string}>('SELECT id,feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[])',[binding.organisation_id,binding.run_id,[...new Set([...versions.map(row=>row.task_id),...explicit])]]);
+ if(explicit.some(id=>!tasks.rows.some(task=>task.id===id)))fail('REVIEW_SCOPE_INVALID','Explicit execution task crosses the run boundary');
+ await cap.assertNoExecutionHold(db,binding,{operation,...(sandboxId?{sandbox_id:sandboxId}:{})});
+ for(const task of tasks.rows){
+  await cap.assertNoExecutionHold(db,binding,{operation,package_id:task.feature_package_id,...(sandboxId?{sandbox_id:sandboxId}:{})});
+  const attempts=await db.query<{id:string;sandbox_id:string|null}>('SELECT id,sandbox_id FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND task_id=$3 AND compute_authority=\'CURRENT\'',[binding.organisation_id,binding.run_id,task.id]);
+  for(const attempt of attempts.rows)await cap.assertNoExecutionHold(db,binding,{operation,package_id:task.feature_package_id,attempt_id:attempt.id,...(attempt.sandbox_id?{sandbox_id:attempt.sandbox_id}:{})});
+ }
+ // An untagged source cannot establish a narrower package/attempt boundary.
+ // Check every persisted scope through the owning control helper.
+ if(!explicit.length&&!await reviewAttributionComplete(db,binding,[...sourceSet])){
+  const controls=await db.query<{package_id:string|null;attempt_id:string|null;sandbox_id:string|null}>('SELECT package_id,attempt_id,sandbox_id FROM hyperfide.execution_controls WHERE organisation_id=$1 AND run_id=$2 LIMIT 1001 FOR SHARE',[binding.organisation_id,binding.run_id]);
+  if(controls.rows.length>1000)fail('REVIEW_CONTROL_SCOPE_UNKNOWN','Unattributed review control scope exceeds the safe inspection bound');
+  for(const row of controls.rows)await cap.assertNoExecutionHold(db,binding,{operation,...(row.package_id?{package_id:row.package_id}:{}),...(row.attempt_id?{attempt_id:row.attempt_id}:{}),...(row.sandbox_id?{sandbox_id:row.sandbox_id}:{})});
+ }
+}
+export async function reviewControlMatches(db:ReviewDb,binding:ReviewScope,control:ReviewControl,
+ taskIds:readonly string[],sandboxId:string|null):Promise<boolean>{
+ uuid(control.scope_id);uuid(control.operation_id);decimal(control.control_generation);
+ if(!['RUN','PACKAGE','ATTEMPT','SANDBOX'].includes(control.scope_kind)||!['STOP','CANCEL'].includes(control.mode))fail('REVIEW_CONTROL_INVALID','Unknown review fencing control');
+ if(control.scope_kind==='RUN')return control.scope_id===binding.run_id;
+ if(!Array.isArray(control.task_ids)||control.task_ids.length>100000)fail('REVIEW_CONTROL_INVALID','Bounded trusted task closure is required');
+ const closure=[...new Set(control.task_ids.map(uuid))];
+ if(closure.length){
+  const actual=await db.query('SELECT id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[])',[binding.organisation_id,binding.run_id,closure]);
+  if(actual.rows.length!==closure.length)fail('REVIEW_CONTROL_INVALID','Control task closure crosses the run boundary');
+  if(taskIds.some(id=>closure.includes(id)))return true;
+ }
+ if(control.scope_kind==='SANDBOX'&&sandboxId===control.scope_id)return true;
+ if(!taskIds.length)return true;
+ const pins=taskIds.map(uuid);
+ if(control.scope_kind==='PACKAGE')return !!(await db.query('SELECT 1 FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) AND feature_package_id=$4 LIMIT 1',[binding.organisation_id,binding.run_id,pins,control.scope_id])).rows.length;
+ if(control.scope_kind==='ATTEMPT')return !!(await db.query('SELECT 1 FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND task_id=ANY($3::uuid[]) AND id=$4 LIMIT 1',[binding.organisation_id,binding.run_id,pins,control.scope_id])).rows.length;
+ if(control.scope_kind==='SANDBOX')return false;
+ return false;
+}
+
+export async function reviewAttributionComplete(db:ReviewDb,binding:ReviewScope,sources:unknown[]):Promise<boolean>{
+ if(!sources.length)return false;
+ const rows=await db.query<{complete:boolean}>(`SELECT bool_and(item.complete) AS complete FROM (SELECT source.repository_id,source.source_object_id,count(tag)>0 AND count(tag)=count(task.id) AS complete FROM jsonb_to_recordset($3::jsonb) AS source(repository_id uuid,source_object_id text) LEFT JOIN hyperfide.review_commits commit ON commit.organisation_id=$1 AND commit.run_id=$2 AND commit.repository_id=source.repository_id AND commit.source_object_id=source.source_object_id LEFT JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(commit.attribution->'spec_tags')='array' THEN commit.attribution->'spec_tags' ELSE '[]'::jsonb END) tag ON true LEFT JOIN hyperfide.tasks task ON task.organisation_id=$1 AND task.run_id=$2 AND task.task_key=tag->>'task' GROUP BY source.repository_id,source.source_object_id) item`,[binding.organisation_id,binding.run_id,JSON.stringify(sources)]);
+ return rows.rows[0]?.complete===true;
+}
+
+/** Trusted same-primary freshness observation; callers retain their invocation guard. */
+export async function reviewGraphCustodyCurrent(db:ReviewDb,binding:ReviewScope,manifestId:string):Promise<boolean>{
+ const rows=await db.query<{id:string;status:string;digest:string;bundle_digest:string;size_bytes:string;expected_size:string}>(`SELECT artifact.id,artifact.status,artifact.digest,input.bundle_digest,artifact.size_bytes::text,octet_length(input.manifest_text)::text AS expected_size FROM hyperfide.graph_manifests manifest JOIN hyperfide.graph_bundle_inputs input ON input.organisation_id=manifest.organisation_id AND input.run_id=manifest.run_id AND input.graph_id=manifest.build_id JOIN hyperfide.artifacts artifact ON artifact.organisation_id=input.organisation_id AND artifact.run_id=input.run_id AND artifact.id=input.artifact_id WHERE manifest.organisation_id=$1 AND manifest.run_id=$2 AND manifest.id=$3 ORDER BY artifact.id FOR SHARE OF artifact`,[binding.organisation_id,binding.run_id,uuid(manifestId)]);
+ return rows.rows.length>0&&rows.rows.every(row=>row.status==='COMPLETE'&&row.digest===row.bundle_digest&&row.size_bytes===row.expected_size);
 }

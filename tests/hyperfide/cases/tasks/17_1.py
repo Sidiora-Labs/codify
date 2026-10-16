@@ -61,7 +61,8 @@ def cleanup(task):
  except Exception:
   print(json.dumps({"type":"cleanup","complete":False,"resources":[{"id":"hf-review-"+task+"-database","status":"unknown"}]}),flush=True);return 1
 class Fixture:
- def __init__(self,task,base,components=None):
+ def __init__(self,task,base,components=None,extra_setup=None):
+  self.extra_setup=extra_setup
   self.task=task;self.base=base;self.repo=base/"repository";self.repo.mkdir()
   self.events=[];self.commits=[]
   self.git("init","--initial-branch=main","--object-format=sha1")
@@ -71,10 +72,12 @@ class Fixture:
   self.first=self.commit("[spec:fixture/1.1] change units","price=100; units=cents")
   self.second=self.commit("[spec:fixture/1.1] change error order","price=100; units=cents; errors=auth-first")
   self.component_ids=components or ["17.1"]
+  catalog={v["id"]:path.stem for path in (ROOT/"services/hyperfide/components").glob("*.json") if "id" in (v:=json.loads(path.read_text()))}
   linked=set(self.component_ids)
   def add_dependencies(name):
    for dep in json.loads((ROOT/f"services/hyperfide/components/{name}.json").read_text())["requires"]:
-    if dep not in linked:linked.add(dep);add_dependencies(dep)
+    filename=catalog[dep]
+    if filename not in linked:linked.add(filename);add_dependencies(filename)
   for name in self.component_ids:add_dependencies(name)
   self.linked_components=linked
   self.identity=IdentityFixture(extra_components=sorted(linked),extra_env={
@@ -87,8 +90,13 @@ class Fixture:
   ORG=f.ids["organisation"];RUN=f.ids["run"];SCOPE={"organisation_id":ORG,"run_id":RUN}
   (evidence_dir(self.task)/"fixture-database.json").write_text(json.dumps({"database":f.database})+"\n")
   self.preparing_identity=f
-  if any(name.startswith("7.") for name in self.linked_components):
-   f.sql((ROOT/"services/hyperfide/migrations/0007-graph.sql").read_text())
+  migrations=["0002-spec","0004-durability"]
+  if "5.1" in self.linked_components:migrations+=["0003-hierarchy","0032-execution-packets","0005-scheduling"]
+  if any(name.startswith("7.") for name in self.linked_components):migrations+=["0007-graph"]
+  if "12.1" in self.linked_components:migrations+=["0008-provider-coordination","0012-runner-registry"]
+  for name in migrations:
+   raw=(ROOT/("services/hyperfide/migrations/"+name+".sql")).read_bytes();version=int(name[:4])
+   f.sql(raw.decode()+"\nINSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(version)+",'"+name+"','sha256:"+hashlib.sha256(raw).hexdigest()+"');")
   f.sql((ROOT/"services/hyperfide/migrations/0017-review.sql").read_text())
   f.sql("INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url) VALUES($1,$2,$3,'review-fixture','https://example.invalid/review.git')",[ORG,f.ids["project"],REPOSITORY])
   f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[ORG,REPOSITORY,self.pinned])
@@ -96,6 +104,7 @@ class Fixture:
   f.sql("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,'review-fixture',1)",[ORG,RUN,xid(0x300)])
   f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES($1,$2,$3,'1.1',$4,$5,$6,'{}',1)",[ORG,RUN,xid(0x301),xid(0x300),f.ids["spec"],DIGEST])
   for number in range(10):self.session(number)
+  if self.extra_setup:self.extra_setup(self,f)
  def git(self,*args):
   result=subprocess.run(["git",*args],cwd=self.repo,capture_output=True,text=True,timeout=20)
   expect(result.returncode==0,"fixture Git operation failed");return result.stdout
