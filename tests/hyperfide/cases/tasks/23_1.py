@@ -83,7 +83,7 @@ class Fixture:
   for field in ("DATABASE_URL","PGHOST","PGPORT","PGUSER"): expect(os.environ.get(field),"Required PostgreSQL fixture is absent: "+field)
   self.temp=tempfile.TemporaryDirectory(prefix="hf-observability-"+TASK+"-");self.base=Path(self.temp.name)
   subprocess.run(["createdb",database()],env=db_env("postgres"),check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
-  paths=["0001-authority.sql","0014-enrollment.sql","0023-observability.sql"]
+  paths=["0001-authority.sql","0006-event-session-bindings.sql","0014-enrollment.sql","0023-observability.sql"]
   for name in paths:
    p=ROOT/"services/hyperfide/migrations"/name;expect(p.is_file(),"Actual dependency migration is absent: "+name)
    r=subprocess.run(["psql","-X","-q","-v","ON_ERROR_STOP=1","--single-transaction","-d",database(),"-f",str(p)],env=db_env(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
