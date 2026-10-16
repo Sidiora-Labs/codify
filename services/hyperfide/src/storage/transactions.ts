@@ -24,6 +24,7 @@ export interface TransactionOptions {
 export interface DatabaseLease {client:pg.PoolClient;signal:AbortSignal;release(destroy?:boolean):void}
 export interface PrimaryConnectionSource {
   commitMode?(): 'on'|'remote_apply';
+  validateCommit?(client:pg.PoolClient):Promise<void>;
   acquirePrimary(deadline:number,signal?:AbortSignal):Promise<DatabaseLease>;
 }
 export function deadlineFrom(timeoutMs=5000):number {
@@ -142,6 +143,7 @@ export class TransactionGateway {
         }finally{active=false;livePrimary.delete(tx);}
         // Restore the selected durability floor immediately before commit; callers cannot retain a weaker session setting.
         await client.query("SELECT set_config('synchronous_commit',$1,true)",[this.source.commitMode?.()??'on']);
+        if(this.source.validateCommit)await this.source.validateCommit(client);
         phase='commit';
         await client.query('COMMIT');
         phase='committed';
