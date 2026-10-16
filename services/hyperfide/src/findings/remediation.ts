@@ -1,4 +1,5 @@
 import type {Component,ComponentContext} from '../components/registry.js';
+import {FoundationError} from '../policy/programme.js';
 import {admittedEvidence,decimal,digest,emit,fail,fields,finding,manager,oid,record,revalidateResolution,text,uuid,withFindingTransaction} from './registry.js';
 import type {FindingScope,FindingTransaction} from './registry.js';
 async function repair(value:FindingTransaction,id:string):Promise<Record<string,any>>{
@@ -91,8 +92,7 @@ async function failure(value:FindingTransaction,input:unknown):Promise<Record<st
  await emit(tx,scope,String(r.finding_id),(BigInt(f.registry_version)+1n).toString(),escalated?'finding.repair-escalated':'finding.repair-failed',{finding_id:r.finding_id,repair_id:id,reason});return {repair_id:id,state,escalated};
 }
 export async function inspectFindingResolution(tx:FindingTransaction['tx'],scope:FindingScope,findingId:string):Promise<{current:boolean;reason?:string}>{
- await tx.query('SAVEPOINT finding_resolution_inspection');
- try{const f=await finding(tx,scope,uuid(findingId));if(f.phase!=='RESOLVED'){await tx.query('RELEASE SAVEPOINT finding_resolution_inspection');return {current:false,reason:'FINDING_NOT_RESOLVED'};}const rows=await tx.query('SELECT * FROM hyperfide.finding_repairs WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3 AND state=\'RESOLVED\' ORDER BY updated_at DESC,id DESC LIMIT 1',[scope.organisation_id,scope.run_id,findingId]);const r=rows.rows[0];if(!r||r.resolution_digest!==f.resolution_digest){await tx.query('RELEASE SAVEPOINT finding_resolution_inspection');return {current:false,reason:'RESOLUTION_PROOF_MISSING'};}await qualifiedRepairProof(tx,scope,r,f,r.resolution_proof?.reproduction_plan_id,true);await tx.query('RELEASE SAVEPOINT finding_resolution_inspection');return {current:true};}catch{await tx.query('ROLLBACK TO SAVEPOINT finding_resolution_inspection');await tx.query('RELEASE SAVEPOINT finding_resolution_inspection');return {current:false,reason:'RESOLUTION_PROOF_STALE_OR_UNAVAILABLE'};}
+ try{const f=await finding(tx,scope,uuid(findingId));if(f.phase!=='RESOLVED'){return {current:false,reason:'FINDING_NOT_RESOLVED'};}const rows=await tx.query('SELECT * FROM hyperfide.finding_repairs WHERE organisation_id=$1 AND run_id=$2 AND finding_id=$3 AND state=\'RESOLVED\' ORDER BY updated_at DESC,id DESC LIMIT 1',[scope.organisation_id,scope.run_id,findingId]);const r=rows.rows[0];if(!r||r.resolution_digest!==f.resolution_digest){return {current:false,reason:'RESOLUTION_PROOF_MISSING'};}await qualifiedRepairProof(tx,scope,r,f,r.resolution_proof?.reproduction_plan_id,true);return {current:true};}catch(error){if(error instanceof FoundationError)return {current:false,reason:'RESOLUTION_PROOF_STALE_OR_UNAVAILABLE'};throw error;}
 }
 export function createComponent(_context:ComponentContext):Component{return {apiVersion:1,actions:{
  'finding.repair.request':(input,context)=>withFindingTransaction(context,'finding.repair.request',value=>request(value,input)),
