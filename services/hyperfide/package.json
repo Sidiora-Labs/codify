@@ -15,11 +15,20 @@
     "dispatch": "node dist/dispatch.js"
   },
   "dependencies": {
-    "pg": "8.23.1"
+    "@blaxel/core": "0.3.30",
+    "pg": "8.23.1",
+    "railway": "3.16.0",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/pg": "8.23.1",
+    "@types/ws": "8.18.2",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@hey-api/json-schema-ref-parser": {
+      "js-yaml": "4.3.2"
+    }
   }
 }
