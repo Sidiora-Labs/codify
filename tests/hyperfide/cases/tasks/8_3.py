@@ -10,6 +10,7 @@ pools=load("provider_pool_fixture","tests/hyperfide/cases/tasks/8_2.py")
 prepared=load("provider_preparation_fixture","tests/hyperfide/cases/tasks/11_1.py")
 expect=pools.expect
 IDS=["provider.intent.configure","provider.intent.seed-admission","provider.intent.persist-before-effects","provider.intent.resource-reservations-bound","provider.intent.idempotent","provider.intent.key-payload-conflict","provider.intent.no-parameter-overrides","provider.intent.no-reservation","provider.intent.duplicate-reservation","provider.intent.stale-deadline","provider.intent.wrong-run","provider.intent.wrong-preparation","provider.intent.execution-needs-qualified-base","provider.intent.operator-no-effects","provider.intent.missing-adapter-no-submission","provider.intent.recorded-reconcile-no-effects","provider.intent.crash-state-no-replay","provider.intent.unknown-state-held","provider.intent.no-caller-remote-execution","provider.intent.no-known-resource-from-model","provider.intent.empty-boot-destroy","provider.intent.destroy-idempotent","provider.intent.destroy-stops-admission","provider.intent.worked-boot-needs-custody","provider.intent.remote-history-needs-custody","provider.intent.orphans-observation-only","provider.intent.exact-primary-brand","provider.intent.absence-unproven"]
+IDS+=["provider.intent.physical-reservation-single-owner"]
 FAILED=[]
 def check(name,fn):
  try:fn();actual="observed"
@@ -112,6 +113,7 @@ def main():
    p=subprocess.run(["node","--input-type=module","-e",script],cwd=ROOT,env=f.env,capture_output=True,text=True,timeout=10);expect(p.returncode==0,p.stderr)
   check(IDS[26],branded)
   check(IDS[27],lambda:expect(f.sql("SELECT count(*)::int AS n FROM hyperfide.provider_observations WHERE organisation_id=$1",[org])[0]["n"]==0,"absence evidence invented without actual provider observation"))
+  check(IDS[28],lambda:reject("provider.intents.prepare-create",changed(request_key=str(uuid.uuid4()),sandbox_id=str(uuid.uuid4()),deadline_at=utc()),"RESERVATION_ALREADY_BOUND"))
   f.close();f=None;cleanup=True
  finally:
   if f is not None:f.close()
