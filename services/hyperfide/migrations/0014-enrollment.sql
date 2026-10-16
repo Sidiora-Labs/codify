@@ -67,6 +67,7 @@ CREATE TABLE hyperfide.identity_operation_results (
 );
 -- Secret values remain in a separate supervisor-only secret store, never these metadata rows.
 CREATE TABLE hyperfide.identity_credential_references (
+ purposes text[] NOT NULL CHECK(cardinality(purposes) BETWEEN 1 AND 4 AND purposes <@ ARRAY['WORKER_BUILD','WORKER_RUNTIME','WORKER_PROCESS','PROVIDER_API']::text[]),
  organisation_id uuid NOT NULL, run_id uuid NOT NULL, reference_id hyperfide.name NOT NULL,
  credential_version bigint NOT NULL CHECK(credential_version>0), secret_locator hyperfide.name NOT NULL,
  refresh_owner uuid NOT NULL, allowed_layers text[] NOT NULL CHECK(cardinality(allowed_layers)>0),
