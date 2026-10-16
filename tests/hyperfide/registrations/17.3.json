@@ -36,7 +36,7 @@
     "review.execution.old-sandbox-stop-preserves-current-review",
     "review.lease.owner-renewal",
     "review.lease.wrong-owner-renewal-refused",
-    "review.lock-order.disposition-before-auth-run",
+    "review.semantic-fence.current-authenticated-read",
     "review.graph-custody.quarantine-and-scope-fenced"
   ],
   "argv": [
@@ -73,7 +73,8 @@
   "cleanup_timeout_seconds": 60,
   "required_artifacts": [
     "review/database-absence.json",
-    "review/observations.json"
+    "review/observations.json",
+    "review/semantic-fence-signed-boundary.json"
   ],
   "source_files": [
     "tests/hyperfide/cases/tasks/17_3.py",
