@@ -1,4 +1,7 @@
 -- Domain 07 queryable source facts and resumable immutable bundle transport.
+-- PostgreSQL standard pg_trgm extension supplies bounded GIN index maintenance.
+-- https://www.postgresql.org/docs/18/pgtrgm.html
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 -- Applied by task 4.4's migration engine; service handlers never execute DDL.
 CREATE TABLE hyperfide.graph_bundle_inputs (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,graph_id uuid NOT NULL,
@@ -36,7 +39,7 @@ CREATE INDEX graph_facts_file ON hyperfide.graph_fact_rows(organisation_id,run_i
 CREATE INDEX graph_facts_name ON hyperfide.graph_fact_rows(organisation_id,run_id,graph_id,family,(payload->>'name'));
 CREATE TABLE hyperfide.graph_resolution_progress (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,graph_id uuid NOT NULL,
- phase text NOT NULL DEFAULT 'files' CHECK(phase IN ('files','symbols','refs','semantic_edges','source_bodies','TRIGRAMS','COMPLETE')),
+ phase text NOT NULL DEFAULT 'files' CHECK(phase IN ('files','symbols','refs','semantic_edges','source_bodies','COMPLETE')),
  cursor_bundle text NOT NULL DEFAULT '',cursor_key text NOT NULL DEFAULT '',
  rows_processed bigint NOT NULL DEFAULT 0 CHECK(rows_processed>=0),
  PRIMARY KEY(organisation_id,run_id,graph_id),
@@ -53,18 +56,10 @@ CREATE TABLE hyperfide.graph_source_bodies (
  CHECK(octet_length(body)<=2097152)
 );
 CREATE INDEX graph_bodies_fts ON hyperfide.graph_source_bodies USING gin(search_vector);
--- No extension dependency is assumed. Trigram postings preserve literal
--- substring candidates including Unicode; exact ILIKE performs final filtering.
-CREATE TABLE hyperfide.graph_trigram_postings (
- organisation_id uuid NOT NULL,run_id uuid NOT NULL,graph_id uuid NOT NULL,
- bundle_digest hyperfide.digest NOT NULL,family text NOT NULL,fact_key text NOT NULL,
- gram text NOT NULL,
- PRIMARY KEY(organisation_id,run_id,graph_id,bundle_digest,family,fact_key,gram),
- FOREIGN KEY(organisation_id,run_id,graph_id,bundle_digest)
- REFERENCES hyperfide.graph_bundle_inputs(organisation_id,run_id,graph_id,bundle_digest),
- CHECK(char_length(gram)=3)
-);
-CREATE INDEX graph_trigrams_lookup ON hyperfide.graph_trigram_postings(organisation_id,run_id,graph_id,gram,family);
+CREATE INDEX graph_bodies_trigram ON hyperfide.graph_source_bodies USING gin(body public.gin_trgm_ops);
+CREATE INDEX graph_facts_trigram ON hyperfide.graph_fact_rows USING gin((COALESCE(payload->>'name',payload->>'body','')) public.gin_trgm_ops) WHERE family IN ('symbols','comments');
+CREATE INDEX graph_comments_fts ON hyperfide.graph_fact_rows USING gin(to_tsvector('simple'::regconfig,COALESCE(payload->>'body',''))) WHERE family='comments';
+CREATE INDEX graph_symbols_fts ON hyperfide.graph_fact_rows USING gin(to_tsvector('simple'::regconfig,COALESCE(payload->>'name','')||' '||COALESCE(payload->>'sig',''))) WHERE family='symbols';
 CREATE TABLE hyperfide.graph_publication_receipts (
  organisation_id uuid NOT NULL,run_id uuid NOT NULL,operation_id uuid NOT NULL,
  graph_id uuid NOT NULL,channel text NOT NULL,expected_generation bigint NOT NULL,
@@ -89,5 +84,4 @@ CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperf
 CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_fact_rows FOR EACH ROW EXECUTE FUNCTION hyperfide.protect_graph_extension();
 CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_resolution_progress FOR EACH ROW EXECUTE FUNCTION hyperfide.protect_graph_extension();
 CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_source_bodies FOR EACH ROW EXECUTE FUNCTION hyperfide.protect_graph_extension();
-CREATE TRIGGER graph_extension_guard BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.graph_trigram_postings FOR EACH ROW EXECUTE FUNCTION hyperfide.protect_graph_extension();
 CREATE TRIGGER graph_receipt_immutable BEFORE UPDATE OR DELETE ON hyperfide.graph_publication_receipts FOR EACH ROW EXECUTE FUNCTION hyperfide.immutable_fields('organisation_id','run_id','operation_id','graph_id','channel','expected_generation','manifest_id','manifest_digest','publication_generation','receipt');
