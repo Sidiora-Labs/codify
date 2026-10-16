@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import sys,json
+import sys,json,subprocess,os,time
 ROOT=Path(__file__).resolve().parents[4]
 sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
 from identity_fixture import IdentityFixture,RESULTS,check,expect,uid,b64,sha
@@ -45,6 +45,53 @@ def main():
         f.stop();f.start()
         check("identity.restart.no-reactivation",lambda:expect(f.request(f.operation("14.1","identity.describe",{}),key="runner",credential=credential)[1].get("ok") is False,"restart reactivated quarantined identity"))
         check("identity.secret.absent-database",lambda:expect(b64(f.secret) not in json.dumps(f.sql("SELECT row_to_json(g) AS value FROM hyperfide.identity_enrollment_grants g")),"reusable grant secret persisted"))
+        watcher=f.add_principal("watcher","COMMIT_WATCHER")
+        check("identity.fixture.registered-watcher",lambda:expect(f.invoke("identity.describe",{},key="watcher")[1].get("result",{}).get("principal",{}).get("actor_id")==watcher["actor_id"],"registered watcher actor binding failed"))
+        check("identity.fixture.reviewer-no-compute-attempt",lambda:expect(f.invoke("identity.describe",{},key="watcher")[1].get("result",{}).get("principal",{}).get("attempt_id") is None,"reviewer inherited coding compute attempt"))
+        def existing_database():
+            try:
+                other=IdentityFixture(database=f.database)
+            except AssertionError:
+                expect(f.invoke("identity.describe",{})[1].get("ok") is True,"failed constructor removed a pre-existing database")
+            else:
+                other.close();raise AssertionError("pre-existing database was accepted")
+        check("identity.fixture.database-ownership",existing_database)
+        f.close()
+        f=IdentityFixture();fixture=f
+        f.bootstrap_runner()
+        slot=uid();session=uid();i=f.ids
+        f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES($1,$2,$3,'review-slot',1,'REVIEW')",[i["organisation"],slot,i["sandbox"]])
+        f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation) VALUES($1,$2,$3,'COMMIT_WATCHER','fixture','fixture',$4,$5,$6,1)",[i["organisation"],i["run"],session,uid(),slot,i["sandbox"]])
+        delegated=f.delegate_principal("reviewer",session)
+        principal=f.invoke("identity.describe",{},key="reviewer")[1].get("result",{}).get("principal",{})
+        check("identity.delegate.boot-bound-reviewer",lambda:expect(principal.get("sandbox_id")==i["sandbox"] and principal.get("boot_id")==i["boot"] and principal.get("attempt_id") is None,"reviewer boot/job identity invalid"))
+        f.sql("UPDATE hyperfide.agent_sessions SET state='STOPPED',state_version=state_version+1 WHERE id=$1",[session])
+        check("identity.delegate.stopped-session-denied",lambda:expect(f.invoke("identity.describe",{},key="reviewer")[1].get("ok") is False,"stopped session retained authority"))
+        f.sql("UPDATE hyperfide.agent_sessions SET state='REGISTERED',state_version=state_version+1 WHERE id=$1",[session])
+        package=uid();task=uid();attempt=uid();worker_slot=uid();worker_session=uid()
+        f.sql("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,'identity-worker',1)",[i["organisation"],i["run"],package])
+        f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave) VALUES($1,$2,$3,'identity-worker',$4,$5,$6,'{}',1)",[i["organisation"],i["run"],task,package,i["spec"],sha(b"criteria")])
+        f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES($1,$2,$3,'worker-slot',1,'AGENT')",[i["organisation"],worker_slot,i["sandbox"]])
+        f.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,compute_authority,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at) VALUES($1,$2,$3,$4,1,$5,$6,'CURRENT',$7,$8,1,clock_timestamp()+interval '5 minutes')",[i["organisation"],i["run"],attempt,task,i["epoch"],sha(b"input"),i["sandbox"],worker_slot])
+        f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id) VALUES($1,$2,$3,'WORKER','fixture','fixture',$4,$5,$6,1,$7)",[i["organisation"],i["run"],worker_session,uid(),worker_slot,i["sandbox"],attempt])
+        f.delegate_principal("worker",worker_session)
+        check("identity.delegate.current-implementation-worker",lambda:expect(f.invoke("identity.describe",{},key="worker")[1].get("result",{}).get("principal",{}).get("attempt_id")==attempt,"worker lacks genuine attempt binding"))
+        f.sql("UPDATE hyperfide.attempts SET compute_authority='RELEASED',state_version=state_version+1 WHERE id=$1",[attempt])
+        # A read-only identity description may use current identity; mutation requires strict compute authority.
+        check("identity.delegate.released-worker-mutation-denied",lambda:expect(f.invoke("identity.runner.register",{"preparation_digest":f.preparation,"inventory":[]},key="worker")[1].get("error",{}).get("code")=="AUTH_STALE_ATTEMPT","released worker reached a mutation"))
+        def expiry_crossing_lock():
+            f.sql("UPDATE hyperfide.identity_principals SET expires_at=clock_timestamp()+interval '1 second' WHERE credential_id=$1",[f.ids["reviewer"]])
+            js="const pg=require('./services/hyperfide/node_modules/pg');(async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query('BEGIN');await c.query('SELECT id FROM hyperfide.agent_sessions WHERE id=$1 FOR UPDATE',[process.argv[1]]);process.stdout.write('locked\\n');await new Promise(r=>setTimeout(r,2200));await c.query('ROLLBACK');await c.end();})().catch(e=>{console.error(e);process.exit(1)});"
+            held=subprocess.Popen(["node","-e",js,session],cwd=ROOT,env=f.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            expect(held.stdout.readline().strip()=="locked","test did not acquire real row lock")
+            response=f.invoke("identity.describe",{},key="reviewer")[1]
+            held.communicate(timeout=5)
+            expect(response.get("error",{}).get("code")=="AUTH_EXPIRED","identity expired during lock wait was admitted: "+json.dumps(response))
+        check("identity.expiry.after-row-lock",expiry_crossing_lock)
+        f.sql("UPDATE hyperfide.runs SET state='STOPPING',state_version=state_version+1 WHERE id=$1",[i["run"]])
+        f.stop();f.start()
+        check("identity.closing.restart-retains-supervision",lambda:expect(f.invoke("identity.describe",{})[1].get("ok") is True,"closing run prevented authenticated supervision/restart"))
+        check("identity.closing.new-grant-denied",lambda:expect(f.issue(grant=uid())[1].get("error",{}).get("code")=="AUTH_RUN_CLOSED","closing run admitted new runner grant"))
         check("identity.shutdown.orderly",lambda:f.stop())
     finally:fixture.close()
     return int(any(actual!="observed" for _,actual in RESULTS))
