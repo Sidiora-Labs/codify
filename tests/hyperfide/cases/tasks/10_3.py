@@ -64,6 +64,13 @@ def reap():
   if time.monotonic()>deadline:return False
   time.sleep(.01)
 
+
+def capture_deadline():
+ script="import assert from 'node:assert/strict';import{blaxelCaptureControl,boundedBlaxelOperation}from './services/hyperfide/dist/providers/blaxel/processes.js';const op=OPERATION;op.deadline_at=new Date(Date.now()+150).toISOString();const c=new AbortController(),r=new AbortController(),i=new AbortController(),control=blaxelCaptureControl(op,c.signal,r.signal,i.signal);const started=Date.now();await boundedBlaxelOperation(()=>new Promise(ok=>setTimeout(ok,90)),control.signal,control.deadline);await assert.rejects(boundedBlaxelOperation(()=>new Promise(ok=>setTimeout(ok,90)),control.signal,control.deadline),e=>e.code==='BLAXEL_OPERATION_UNAVAILABLE');assert(Date.now()-started<280);const fresh=blaxelCaptureControl({...op,deadline_at:new Date(Date.now()+5000).toISOString()},c.signal,r.signal,i.signal);const cancelled=boundedBlaxelOperation(()=>new Promise(()=>{}),fresh.signal,fresh.deadline);r.abort();await assert.rejects(cancelled,e=>e.code==='BLAXEL_OPERATION_UNAVAILABLE');let called=false;const expired=blaxelCaptureControl({...op,deadline_at:new Date(Date.now()-1000).toISOString()},c.signal,new AbortController().signal,i.signal);await assert.rejects(boundedBlaxelOperation(async()=>{called=true},expired.signal,expired.deadline));assert(!called);"
+ script=script.replace('OPERATION',json.dumps(operation()),1)
+ result=subprocess.run(['node','--input-type=module','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=5)
+ expect(result.returncode==0,result.stderr)
+
 def pure_isolation():
  script="import assert from 'node:assert/strict';\nimport {createHash,randomUUID} from 'node:crypto';\nimport {createBlaxelIsolationTransport} from './services/hyperfide/dist/providers/blaxel/processes.js';\nimport {validateProviderOutcome} from './services/hyperfide/dist/providers/contract.js';\nconst scope={organisation_id:'org',pool_id:'pool',provider:'blaxel',provider_account_id:'account',environment_id:'workspace',region:'us-pdx-1',configuration_digest:'sha256:'+'a'.repeat(64)};\nconst ctx={env:{HF_BLAXEL_ACCOUNT_ID:'account',HF_BLAXEL_WORKSPACE:'workspace'},signal:new AbortController().signal},t=createBlaxelIsolationTransport(scope,ctx);\nassert.equal(typeof t.destroy,'function');assert.equal(typeof t.observe,'function');\nfor(const key of ['provider_account_id','environment_id'])assert.throws(()=>createBlaxelIsolationTransport({...scope,[key]:'other'},ctx),e=>e.code==='BLAXEL_PROCESS_INVALID');\nconst canonical=v=>v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(canonical).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical(v[k])).join(',')+'}';\nfor(const kind of ['destroy','observe']){const body={kind,scope,deadline_at:new Date(Date.now()+10000).toISOString(),resource:{native_sandbox_id:'hf-isolation-negative',sandbox_boot_generation:'1'},preparation_digest:'sha256:'+'b'.repeat(64),parameters:kind==='destroy'?{reason:'owned qualification negative'}:{}};const op={schema_version:1,...body,identity:{operation_id:randomUUID(),idempotency_key:randomUUID(),payload_digest:'sha256:'+createHash('sha256').update(canonical(body)).digest('hex'),correlation_id:randomUUID(),causation_id:randomUUID()}};const result=await t[kind](op);assert.equal(result.status,'UNKNOWN');assert.equal(result.result,null);validateProviderOutcome({operation:op,outcome:result});}\nconsole.log(JSON.stringify({pure_factory:true,minimal_context_keys:Object.keys(ctx),wrong_account_workspace_refused:true,missing_credentials_never_absence:true,database_used:false}));"
  env=os.environ.copy();env.pop('DATABASE_URL',None)
@@ -73,6 +80,7 @@ def pure_isolation():
 
 def main():
  check("isolation.actual-pure-env-signal-no-database",pure_isolation)
+ check("capture.actual-shared-deadline-and-cancellation",capture_deadline)
  expect(ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0)
  cleanup=True;daemon=None;names=[];spools=[]
  with tempfile.TemporaryDirectory(prefix="hyperfide-blaxel-process-")as td:
@@ -121,6 +129,11 @@ def main():
    o=operation("create");o["parameters"]["resources"]["cpu_millis"]=1000;rehash(o)
    f.bad("create-plan",{"operation":o,"boot_generation":"1","base":prepared(o)},"BLAXEL_RESOURCE_UNSUPPORTED")
   check("create.reject-silent-cpu-memory-change",vector)
+  def wrong_artifact():
+   o=operation("create");base=prepared(o);base["provider_prepared_digest"]="sha256:"+"e"*64
+   f.bad("create-plan",{"operation":o,"boot_generation":"1","base":base},"BLAXEL_PREPARATION_MISMATCH")
+  check("create.reject-provider-artifact-tag-digest-mismatch",wrong_artifact)
+
 
   def retained_mismatch():
    o=operation("create");plan=f.good("create-plan",{"operation":o,"boot_generation":"1","base":prepared(o)})["plan"]

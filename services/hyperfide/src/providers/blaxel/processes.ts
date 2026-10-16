@@ -91,6 +91,10 @@ export async function boundedBlaxelOperation<T>(fn:(signal:AbortSignal)=>Promise
  try{return await Promise.race([interrupted,Promise.resolve().then(()=>{c.signal.throwIfAborted();return fn(c.signal);})]);}
  finally{clearTimeout(timer);parent.removeEventListener('abort',abort);c.abort();}
 }
+/** One capture shares the original deadline and every cancellation owner. */
+export function blaxelCaptureControl(operation:ProviderOperation,contextSignal:AbortSignal,requestSignal:AbortSignal,identitySignal:AbortSignal):{deadline:number;signal:AbortSignal}{
+ return{deadline:Math.min(Date.parse(operation.deadline_at),Date.now()+15000),signal:AbortSignal.any([contextSignal,requestSignal,identitySignal])};
+}
 export function blaxelCreateName(operation:ProviderOperation<'create'>,generation:string):string{
  if(!/^[1-9][0-9]{0,18}$/.test(generation))fail('BLAXEL_PROCESS_INVALID','Assigned boot generation required');
  return 'hf-'+digest({scope:operation.scope,operation_id:operation.identity.operation_id,generation}).slice(7,47);
@@ -103,6 +107,8 @@ export function planBlaxelCreate(operation:ProviderOperation<'create'>,generatio
  base.network_mode!==operation.parameters.network||!(base.qualification_status==='QUALIFIED'?/^sandbox\/[a-z0-9-]+:[a-f0-9]{64}$/:/(?:@sha256:|:)[a-f0-9]{64}$/).test(base.preparation_reference)||
  base.qualification_status==='TRUSTED_PREPARATION_SEED'&&base.purpose!=='PREPARATION')
  fail('BLAXEL_PREPARATION_MISMATCH','Actual qualified base does not match the durable pool operation');
+ const immutable=/(?:@sha256:|:)([a-f0-9]{64})$/.exec(base.preparation_reference);
+ if(!immutable||base.provider_prepared_digest!=='sha256:'+immutable[1])fail('BLAXEL_PREPARATION_MISMATCH','Prepared artifact digest differs from immutable provider image reference');
  const memory=BigInt(base.resources.memory_bytes);
  // Blaxel couples CPU allocation to memory. Do not silently provision a different vector.
  if(memory%1048576n!==0n||memory/1048576n>BigInt(Number.MAX_SAFE_INTEGER)||
@@ -223,7 +229,7 @@ export interface BlaxelAdapter extends ProviderAdapter{
 export function createBlaxelAdapter(scope:ProviderScope,hooks:BlaxelPersistenceHooks,deps:Partial<BlaxelTrustedDependencies>,ctx:ComponentContext):BlaxelAdapter{
  if(scope.provider!=='blaxel'||scope.environment_id!==ctx.env.HF_BLAXEL_WORKSPACE||scope.provider_account_id!==ctx.env.HF_BLAXEL_ACCOUNT_ID)fail('BLAXEL_PROCESS_INVALID','Adapter scope differs from private account configuration');
  for(const key of ['persistEarlyProcess','resolvePreparation','resolveResourceBinding','assignedBootGeneration','persistEarlyResource','recordObservation','assertResourceBinding','claimProcess','resolveProcess'] as const)if(typeof hooks[key]!=='function')fail('BLAXEL_PROCESS_UNAVAILABLE','Durable provider hooks unavailable');
- let activeOperation:ProviderOperation|null=null;
+ let activeOperation:ProviderOperation|null=null;let activeSignal:AbortSignal|null=null;
  const sdk=async()=>runtimeSDK(await configuredBlaxelSDK(ctx));
  const bound=async(op:ProviderOperation,signal:AbortSignal)=>{await hooks.assertResourceBinding(op);if(!deps.assertPreparedResource)fail('BLAXEL_PROCESS_UNAVAILABLE','Qualified preparation binding unavailable');await deps.assertPreparedResource(op);if(signal.aborted)fail('BLAXEL_OPERATION_UNAVAILABLE','Cancelled');};
  const read=<T>(fn:(s:AbortSignal)=>Promise<T>,op:ProviderOperation,signal:AbortSignal)=>boundedBlaxelOperation(fn,signal,Date.parse(op.deadline_at));
@@ -236,17 +242,19 @@ export function createBlaxelAdapter(scope:ProviderScope,hooks:BlaxelPersistenceH
  const capture=async(sc:ProviderScope,resource:ResourceRef,ref:string,max:number):Promise<CapturedBlaxelOutput>=>{
   if(!equal(sc,scope)||!deps.assertPreparedResource||max>MAX_OUTPUT||max<0)fail('BLAXEL_CAPTURE_UNAVAILABLE','Trusted process binding unavailable');
   if(!activeOperation||!equal(activeOperation.scope,sc)||!equal(activeOperation.resource,resource))fail('BLAXEL_CAPTURE_UNAVAILABLE','No active authenticated operation binds this capture');
-  await hooks.assertResourceBinding(activeOperation);await deps.assertPreparedResource(activeOperation);
-  const expected=await processBinding(activeOperation,text(ref,128));
+  const operation=activeOperation,control=blaxelCaptureControl(operation,ctx.signal,activeSignal??hooks.invocation.signal,hooks.invocation.signal);
+  const observe=<T>(fn:(signal:AbortSignal)=>Promise<T>)=>boundedBlaxelOperation(fn,control.signal,control.deadline);
+  await observe(()=>hooks.assertResourceBinding(operation));await observe(()=>deps.assertPreparedResource!(operation));
+  const expected=await observe(()=>processBinding(operation,text(ref,128)));
   const expectedPath='/tmp/hyperfide-output/'+resource.sandbox_boot_generation+'/'+ref;
   if(expected.spool_path!==expectedPath||expected.scope_digest!==scopeDigest(scope)||!/^hf-[a-f0-9]{40}$/.test(ref))fail('BLAXEL_CAPTURE_UNAVAILABLE','Process path binding differs');
-  const instance=await boundedBlaxelOperation(async()=>await(await sdk()).SandboxInstance.get(nativeName(resource.native_sandbox_id)),ctx.signal,Date.now()+15000);
+  const instance=await observe(async()=>await(await sdk()).SandboxInstance.get(nativeName(resource.native_sandbox_id)));
   const readFile=async(path:string,limit:number)=>{
-   const blob=await boundedBlaxelOperation(()=>instance.fs.readBinary(path),ctx.signal,Date.now()+15000);
+   const blob=await observe(()=>instance.fs.readBinary(path));
    if(!(blob instanceof Blob)||blob.size>limit)fail('BLAXEL_CAPTURE_UNAVAILABLE','Capture exceeds byte limit');
-   return new Uint8Array(await blob.arrayBuffer());
+   return new Uint8Array(await observe(()=>blob.arrayBuffer()));
   };
-  const providerProcess=await boundedBlaxelOperation(signal=>instance.process.get(ref,{signal,retry:false}),ctx.signal,Date.now()+15000);
+  const providerProcess=await observe(signal=>instance.process.get(ref,{signal,retry:false}));
   if(providerProcess.status==='running'||providerProcess.name!==ref||providerProcess.pid!==expected.native_process_ref||!Number.isSafeInteger(providerProcess.exitCode))fail('BLAXEL_CAPTURE_UNAVAILABLE','Native process identity/terminal exit is not current');
   const receipt=JSON.parse(Buffer.from(await readFile(expectedPath+'/receipt.json',32768)).toString('utf8')) as unknown;
   const r=object(receipt),outSize=r.stdout_size,errSize=r.stderr_size;
@@ -256,11 +264,14 @@ export function createBlaxelAdapter(scope:ProviderScope,hooks:BlaxelPersistenceH
   // Re-read the atomically published receipt to refuse a concurrent replacement.
   const after=JSON.parse(Buffer.from(await readFile(expectedPath+'/receipt.json',32768)).toString('utf8'));
   if(!equal(receipt,after))fail('BLAXEL_CAPTURE_UNAVAILABLE','Capture changed during read');
-  return verifyBlaxelCapturedOutput({receipt,stdout,stderr,scope,resource,process_ref:ref,expected,maxBytes:max});
+  await observe(()=>hooks.assertResourceBinding(operation));await observe(()=>deps.assertPreparedResource!(operation));
+  const verified=verifyBlaxelCapturedOutput({receipt,stdout,stderr,scope,resource,process_ref:ref,expected,maxBytes:max});
+  if(control.signal.aborted||Date.now()>=control.deadline)fail('BLAXEL_CAPTURE_UNAVAILABLE','Capture deadline expired before verified evidence was released');
+  return verified;
  };
  const adapter:Partial<BlaxelAdapter>={provider:'blaxel',readCapturedOutput:capture};
  for(const kind of PROVIDER_METHODS)(adapter as Obj)[kind]=async(raw:unknown,parent=ctx.signal)=>{
-  const op=requireOperation(raw,kind,scope);activeOperation=op;let attempted=false,known:ResourceRef|null=op.resource;
+  const op=requireOperation(raw,kind,scope);activeOperation=op;activeSignal=parent;let attempted=false,known:ResourceRef|null=op.resource;
   if(parent.aborted||Date.parse(op.deadline_at)<=Date.now())return outcome(op,'UNKNOWN',null);
   try{
    if(kind==='create'){
@@ -458,7 +469,7 @@ function trustedBlaxelDependencies(ctx:ComponentContext,hooks:BlaxelPersistenceH
       Date.parse(String(row.expires_at))<=Date.now())fail('BLAXEL_PREPARATION_MISMATCH','Actual qualified provider base is expired or mismatched');
     const pinned=/^sandbox\/[a-z0-9-]+:([a-f0-9]{64})$/.exec(op.parameters.preparation_reference);
     if(!pinned)fail('BLAXEL_PREPARATION_MISMATCH','Published provider image must bind an immutable full plan');
-    artifactDigest='sha256:'+pinned[1];qualification='QUALIFIED';
+    artifactDigest='sha256:'+pinned[1];if(row.provider_prepared_digest!==artifactDigest)fail('BLAXEL_PREPARATION_MISMATCH','Qualified registry artifact digest differs from immutable provider image');qualification='QUALIFIED';
    }
    return{qualification_status:qualification,purpose:resolved.purpose,scope:op.scope,
     preparation_digest:resolved.preparation_digest,preparation_reference:op.parameters.preparation_reference,
