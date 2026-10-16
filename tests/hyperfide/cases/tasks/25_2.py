@@ -83,6 +83,7 @@ def main():
   isolated.update(json.loads(p.stdout))
   expect(isolated['proof']['status']=='ISOLATED' and isolated['proof']['visibility']['scope']=='CONFIGURED_PID_NAMESPACE','actual isolated receipt missing')
  check("cutover.legacy.real-readonly-namespace-proof",private_namespace)
+ check("cutover.legacy.outside-writable-hardlink-refused",lambda:expect(isolated.get("outside_hardlink_refused") is True,"outside hardlink escaped readonly isolation"))
  check("cutover.legacy.preexisting-detached-writer-refused",lambda:expect(isolated.get('preexisting_writer_refused') is True,'preexisting writer bypassed readonly bind'))
  check("cutover.legacy.stale-sqlite-reconnect-blocked",lambda:expect(isolated.get('stale_sqlite_reconnect_blocked') is True and isolated.get('kernel_write_errno')==30,'stale writer reconnected to readonly database'))
  out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-cutover-tests"))/"cutover";out.mkdir(parents=True,exist_ok=True)
@@ -103,10 +104,14 @@ def isolated_positive():
    p=subprocess.run(["node","--input-type=module","-e",NODE],input=json.dumps({"action":action,"input":value}),text=True,capture_output=True,cwd=ROOT,env=environment,timeout=45)
    expect(p.returncode==0,"actual isolated module process failed");return json.loads(p.stdout)
   expect(call("disableAdmission")["ok"],"private namespace admission failed")
+  outside=base/"outside-hardlink.db";os.link(database,outside)
   old_fd=os.open(database,os.O_RDWR);mounted=False
   try:
    subprocess.run(["mount","--bind",str(data),str(data)],check=True,capture_output=True);mounted=True
    subprocess.run(["mount","-o","remount,bind,ro",str(data)],check=True,capture_output=True)
+   outside_fd=os.open(outside,os.O_WRONLY);original=database.read_bytes()[:1];os.pwrite(outside_fd,original,0);os.close(outside_fd)
+   linked=call("observeIsolation");expect(not linked["ok"] and linked["error"]["code"]=="LEGACY_LINK_ALIAS","outside writable hardlink passed readonly isolation")
+   outside.unlink()
    old=call("observeIsolation");expect(not old["ok"] and old["error"]["code"]=="LEGACY_WRITER_ACTIVE","preexisting writable descriptor passed isolation")
    os.close(old_fd);old_fd=None
    kernel_errno=None
@@ -124,7 +129,7 @@ def isolated_positive():
    result=call("observeIsolation");expect(result["ok"],"actual readonly mount proof refused: "+str(result))
    proof=result["result"]
    expect(all(proof[k]==v for k,v in value.items()) and proof["writable_fds"]==0 and proof["writable_shared_mappings"]==0 and proof["read_only_aliases"]>=1,"isolation receipt is not bound to actual scope")
-   print(json.dumps({"proof":proof,"preexisting_writer_refused":True,"kernel_write_errno":kernel_errno,"stale_sqlite_reconnect_blocked":stale}))
+   print(json.dumps({"proof":proof,"preexisting_writer_refused":True,"outside_hardlink_refused":True,"kernel_write_errno":kernel_errno,"stale_sqlite_reconnect_blocked":stale}))
   finally:
    if old_fd is not None:os.close(old_fd)
    if mounted:subprocess.run(["umount",str(data)],check=True,capture_output=True)

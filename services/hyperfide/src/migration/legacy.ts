@@ -84,7 +84,7 @@ async function identities(roots:string[]):Promise<Set<string>>{
  const st=await fs.lstat(name,{bigint:true});
  if(st.isSymbolicLink())fail('LEGACY_CONFIG_INVALID','Legacy data scope contains a symlink');
  if(st.isDirectory()){found.add(device(st.dev)+':'+st.ino.toString());for(const child of await fs.readdir(name))await walk(path.join(name,child));}
- else if(st.isFile())found.add(device(st.dev)+':'+st.ino.toString());
+ else if(st.isFile()){if(st.nlink!==1n)fail('LEGACY_LINK_ALIAS','Multiply linked legacy files require independently established whole-device isolation');found.add(device(st.dev)+':'+st.ino.toString());}
  else fail('LEGACY_CONFIG_INVALID','Legacy data scope contains a special file');
  }
  for(const root of roots)await walk(root);return found;

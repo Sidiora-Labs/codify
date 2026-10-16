@@ -8,6 +8,7 @@ import {FoundationError,object} from '../policy/programme.js';
 import {identityTransaction,invocationOf} from '../identity/enrollment.js';
 import type {IdentityTransaction} from '../identity/enrollment.js';
 import {createLegacyWriterAdmission} from './legacy.js';
+import {isArtifactStoreCapability} from '../artifacts/objects.js';
 
 type Json=Record<string,unknown>;
 interface Profile {id:string;source_id:string;repository_id:string;organisation_id:string;root:string;database:string;external?:{label:string;path:string;kind:string;sensitive?:boolean}[];archive_approved_digests?:string[]}
@@ -172,25 +173,43 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  const primary=cols.filter(c=>BigInt(String(c.pk))>0n).sort((a,b)=>Number(a.pk)-Number(b.pk));
  const keyNames=primary.map(c=>String(c.name));
  const names=cols.map(c=>String(c.name));
+ if(names.length>256)fail('MIGRATION_COLUMN_BOUND','Logical history table exceeds bounded column count; immutable source remains preserved');
  const rowidAlias=['rowid','_rowid_','oid'].find(n=>!names.includes(n));
  if(!keyNames.length&&!rowidAlias)fail('MIGRATION_UNSUPPORTED','No unambiguous stable legacy key');
  const rowid=!keyNames.length;
  const order=rowid?quote(rowidAlias!):keyNames.map(quote).join(',');
  const expressions=names.flatMap((n,i)=>['typeof('+quote(n)+') AS '+quote('type_'+i),quote(n)+' AS '+quote('value_'+i),'CAST('+quote(n)+' AS BLOB) AS '+quote('bytes_'+i)]);
  if(rowid)expressions.push(quote(rowidAlias!)+' AS "__hf_rowid"');
+ // Length metadata is inspected before any BLOB/TEXT value crosses into JS.
+ // Both the scan and retained logical batch have explicit byte budgets.
+ const lengths=names.map(n=>'CASE WHEN typeof('+quote(n)+") IN ('blob','text') THEN length(CAST("+quote(n)+' AS BLOB)) ELSE 32 END');
+ const preflight=db.prepare('SELECT '+lengths.join(',')+' FROM '+quote(table)+' ORDER BY '+order+' LIMIT ? OFFSET ?');preflight.setReadBigInts(true);
+ let rawBatch=0n;
+ for(const row of preflight.iterate(BigInt(limit),BigInt(offset)) as Iterable<Record<string,unknown>>){
+ let rawRow=0n;
+ for(const value of Object.values(row)){
+ const bytes=BigInt(String(value??0));if(bytes>4n*1024n*1024n)fail('MIGRATION_CELL_SIZE_BOUND','One legacy cell exceeds bounded logical import; original archive remains preserved');
+ rawRow+=bytes;
+ }
+ if(rawRow>6n*1024n*1024n)fail('MIGRATION_ROW_SIZE_BOUND','One legacy row exceeds bounded logical import; original archive remains preserved');
+ rawBatch+=rawRow;if(rawBatch>6n*1024n*1024n)fail('MIGRATION_BATCH_SIZE_BOUND','Requested logical batch exceeds its aggregate byte budget; reduce the batch limit');
+ }
  const q=db.prepare('SELECT '+expressions.join(',')+' FROM '+quote(table)+' ORDER BY '+order+' LIMIT ? OFFSET ?');q.setReadBigInts(true);
- const fetched=q.all(BigInt(limit),BigInt(offset)) as Record<string,unknown>[];
+ const fetched=q.iterate(BigInt(limit),BigInt(offset)) as Iterable<Record<string,unknown>>;
  total=BigInt(String(meta.rows));
  if(BigInt(offset)>total)fail('MIGRATION_INPUT','Offset exceeds immutable source row count');
- payloads=fetched.map(r=>{
+ let encodedBatch=0;
+ for(const r of fetched){
  const values=names.map((_n,i)=>r['type_'+i]==='text'?{type:'text',utf8_base64:Buffer.from(r['bytes_'+i] as Uint8Array).toString('base64')}:cell(r['value_'+i]));
  const key=rowid?[cell(r.__hf_rowid)]:keyNames.map(n=>values[names.indexOf(n)]);
  const data=names.map((n,i)=>({column:n,value:values[i]}));
  const encoded=canonical(data);
- if(Buffer.byteLength(encoded)>8*1024*1024)fail('MIGRATION_UNSUPPORTED','Logical row exceeds bounded representation; original archive preserved');
- return {key,data,mapped:mappedId(p.source_id,p.repository_id,table,key),digest:hash(encoded),
- disposition:live.has(table)?'REQUIRES_RECONCILIATION':String(meta.disposition)};
- });
+ const encodedBytes=Buffer.byteLength(encoded);
+ if(encodedBytes>8*1024*1024)fail('MIGRATION_ROW_SIZE_BOUND','Logical row exceeds bounded representation; original archive preserved');
+ encodedBatch+=encodedBytes;if(encodedBatch>8*1024*1024)fail('MIGRATION_BATCH_SIZE_BOUND','Logical batch exceeds aggregate encoded byte budget; reduce batch limit');
+ payloads.push({key,data,mapped:mappedId(p.source_id,p.repository_id,table,key),digest:hash(encoded),
+ disposition:live.has(table)?'REQUIRES_RECONCILIATION':String(meta.disposition)});
+ }
  }finally{db.close();}
  const requestDigest=hash(canonical({importId,table,offset,limit,snapshot:prior.snapshot_digest}));
  try{return await identityTransaction(ctx,async client=>{
@@ -213,7 +232,6 @@ async function importBatch(p:Profile,value:Json,ctx:ComponentContext):Promise<un
  throw error;
  }
 }
-interface ArchiveStore {invoke(action:string,input:unknown,ctx:ComponentContext):Promise<unknown>}
 function verifiedArtifact(raw:unknown,expectedDigest?:string,expectedSize?:string):Record<string,unknown>|null {
  if(!object(raw)||raw.outcome!=='SUCCEEDED'||raw.availability!=='VERIFIED'||!object(raw.artifact)||!object(raw.receipt)||typeof raw.receipt.receipt_id!=='string'||!digestPattern.test(raw.receipt.receipt_id))return null;
  const a=raw.artifact;
@@ -225,7 +243,7 @@ async function preserve(p:Profile,importId:string,ctx:ComponentContext):Promise<
  // Approval comes from trusted server configuration and binds the exact bytes.
  // No caller assertion can classify an arbitrary historical database as safe.
  if(!p.archive_approved_digests?.includes(snapshotDigest))fail('SECRET_REVIEW_REQUIRED','Exact snapshot digest requires trusted sanitisation approval before external archival');
- const store=ctx.dependencies.require('15.2','artifact.store.v1',(v:unknown):v is ArchiveStore=>object(v)&&typeof v.invoke==='function');
+ const store=ctx.dependencies.require('15.2','artifact.store.v1',isArtifactStoreCapability);
  const scope={organisation_id:i.principal.organisation_id,run_id:i.principal.run_id},retention={retention_class:'RUN',retention_until:null,retention_hold:false};
  const filename=String(stored.archive_path),size=(await fs.stat(filename)).size;
  if(size>2048*256*1024)fail('MIGRATION_ARCHIVE_SIZE_BOUND','Archive exceeds bounded complete-manifest capacity; local snapshot remains preserved and unqualified');
@@ -234,7 +252,7 @@ async function preserve(p:Profile,importId:string,ctx:ComponentContext):Promise<
  while(offset<size){
  const bytes=Buffer.alloc(Math.min(256*1024,size-offset)),observed=await handle.read(bytes,0,bytes.length,offset);
  if(observed.bytesRead!==bytes.length)fail('MIGRATION_CORRUPT','Immutable archive changed during preservation');
- const digest=hash(bytes),raw=await store.invoke('artifact.object.put',{...scope,...retention,digest,size_bytes:String(bytes.length),data_base64:bytes.toString('base64')},ctx);
+ const digest=hash(bytes),raw=await store.invoke('artifact.object.put',{...scope,...retention,digest,size_bytes:String(bytes.length),data_base64:bytes.toString('base64')},i);
  const artifact=verifiedArtifact(raw,digest,String(bytes.length));
  if(!artifact)return identityTransaction(ctx,async()=>({outcome:'UNKNOWN',import_id:importId,snapshot_digest:snapshotDigest,archive_durability:'UNQUALIFIED',automatic_replay:false,reconcile:'REPEAT_IDENTICAL_ARCHIVE',authority:'NONE',qualification:'UNQUALIFIED'}));
  chunks.push({sequence:chunks.length,artifact_id:artifact.artifact_id,digest,size_bytes:String(bytes.length),offset_bytes:String(offset)});offset+=bytes.length;
@@ -242,9 +260,9 @@ async function preserve(p:Profile,importId:string,ctx:ComponentContext):Promise<
  }finally{await handle.close();}
  if(await fileHash(filename)!==snapshotDigest)fail('MIGRATION_CORRUPT','Snapshot changed during external preservation');
  const manifest={...scope,...retention,expected_chunks:chunks.length,total_size_bytes:String(size),content_digest:snapshotDigest,complete:true,truncated:false,missing_ranges:[],chunks};
- const raw=await store.invoke('artifact.manifest.commit',manifest,ctx),artifact=verifiedArtifact(raw);
+ const raw=await store.invoke('artifact.manifest.commit',manifest,i),artifact=verifiedArtifact(raw);
  if(!artifact)return identityTransaction(ctx,async()=>({outcome:'UNKNOWN',import_id:importId,snapshot_digest:snapshotDigest,archive_durability:'UNQUALIFIED',automatic_replay:false,reconcile:'REPEAT_IDENTICAL_ARCHIVE',authority:'NONE',qualification:'UNQUALIFIED'}));
- const observed=await store.invoke('artifact.manifest.read',{...scope,artifact_id:artifact.artifact_id},ctx);
+ const observed=await store.invoke('artifact.manifest.read',{...scope,artifact_id:artifact.artifact_id},i);
  if(!verifiedArtifact(observed)||!object(observed)||observed.content_digest!==snapshotDigest)fail('MIGRATION_ARCHIVE_UNAVAILABLE','Committed archive closure could not be verified');
  const evidence={classification:'TRUSTED_DIGEST_APPROVED',approved_snapshot_digest:snapshotDigest,manifest_artifact_id:artifact.artifact_id,manifest_digest:artifact.digest,receipt:object(raw)?raw.receipt:null,content_digest:snapshotDigest,size_bytes:String(size),availability:'VERIFIED'};
  try{return await identityTransaction(ctx,async tx=>{
