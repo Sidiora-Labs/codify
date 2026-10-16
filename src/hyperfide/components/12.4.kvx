@@ -1,0 +1,9 @@
+[component]
+schema_version = 1
+id = "12.4"
+source = "src/hyperfide/control.c"
+entry = "hf_component_12_4"
+actions = ["runner.observe", "runner.stop", "runner.pause", "runner.drain", "runner.job.execute"]
+requires = ["12.3"]
+support_sources = ["src/hyperfide/job.c"]
+headers = ["src/hyperfide/supervisor.h"]
