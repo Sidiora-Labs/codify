@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-14.2-real-journal-identity-v1",
+  "campaign_id": "hyperfide-task-14.2-real-journal-identity-v2",
   "registered_variant": "task:14.2",
   "scope": "task-component",
   "case_ids": [
@@ -1283,24 +1283,9 @@
       "size": 487
     },
     {
-      "path": "tests/hyperfide/cases/tasks/14_1.py",
-      "sha256": "329589828e29db122edd6dfbc2819ddf6dca94cad7e62d5ea3636e08f0ce4343",
-      "size": 27794
-    },
-    {
       "path": "tests/hyperfide/cases/tasks/14_2.py",
       "sha256": "13bdc03013afbba2f4271ca3e5350911ff8f06e234768ab762ee0a305295e036",
       "size": 19946
-    },
-    {
-      "path": "tests/hyperfide/cases/tasks/14_3.py",
-      "sha256": "5011610e136373cf18c598dcc08b934a70c54b771ee9186dd5c588e90b110653",
-      "size": 11405
-    },
-    {
-      "path": "tests/hyperfide/cases/tasks/14_4.py",
-      "sha256": "9d86428d6a8e4d35c9c3875632a299f22a7f609b8e8ade94950f6fdf18ee7510",
-      "size": 9134
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -1319,8 +1304,8 @@
     },
     {
       "path": "tests/hyperfide/registrations/14.2.json",
-      "sha256": "e643dc728868fbfdf826dedca9ca9d4c02953206541160233b4e54831b24c16c",
-      "size": 18701
+      "sha256": "7270e3b8f6bbd1a33e2692798a950f560265aea0c4a04b82834b686c285bf714",
+      "size": 18572
     },
     {
       "path": "tests/hyperfide/registry.json",
