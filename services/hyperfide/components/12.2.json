@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "12.2",
+  "task": "12.2",
+  "roles": [
+    "control"
+  ],
+  "module": "runner/dispatch.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "runner.dispatch.describe",
+    "runner.dispatch.consume"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "5.2",
+    "6.2",
+    "6.3"
+  ]
+}
