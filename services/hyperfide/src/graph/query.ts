@@ -11,7 +11,7 @@ import type {JsonObject} from './extraction.js';
 
 function bounded(value:unknown,base:number,min:number,max:number):number{if(value===undefined)return base;if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)fail('GRAPH_INVALID','Invalid query budget');return Number(value);}
 function ids(value:unknown,max=128):string[]{if(!Array.isArray(value)||value.length>max)fail('GRAPH_INVALID','Bounded ID array required');const all=value.map(uuid);if(new Set(all).size!==all.length)fail('GRAPH_INVALID','Duplicate query IDs');return all;}
-function provenance(manifest:JsonObject):JsonObject{return {manifest_id:manifest.id,manifest_digest:manifest.manifest_digest,source_manifest_digest:manifest.source_manifest_digest,source_set:manifest.source_set,provenance:{route:'PRIMARY',exact_version:true,cache:'NONE',snapshot:'SERIALIZABLE_PRIMARY'}};}
+function provenance(manifest:JsonObject):JsonObject{return {manifest_id:manifest.id,manifest_digest:manifest.manifest_digest,source_manifest_digest:manifest.source_manifest_digest,source_set:manifest.source_set,source_coverage:manifest.source_coverage,provenance:{route:'PRIMARY',exact_version:true,cache:'NONE',snapshot:'SERIALIZABLE_PRIMARY'}};}
 function budget(value:unknown):number{return bounded(value,262144,4096,786432);}
 function packet<T extends JsonObject>(value:T,max:number):T {if(Buffer.byteLength(JSON.stringify(value))>max)fail('GRAPH_PACKET_TOO_LARGE','Exact graph packet exceeds requested byte budget');return value;}
 async function status(input:unknown,ctx:ComponentContext):Promise<unknown>{
