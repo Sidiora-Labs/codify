@@ -27,7 +27,6 @@ int hf_runner_processes(const HfRunnerBinding *,HfProcessIdentity *,size_t);
 int hf_runner_job_claim(const char *,const char *,HfHttpResponse *);
 int hf_runner_job_placement(const char *,const char *);
 int hf_runner_job_execute(const char *,FILE *);
-#endif
 
 /* Dedicated slot UID cleanup survives a blocked or dead supervising broker. */
 pid_t hf_slot_watchdog(uid_t uid, long long deadline_ns, int *writer, const char *owner);
@@ -43,3 +42,19 @@ typedef struct {
  uid_t uid;gid_t gid;
 } HfPreparationStage;
 int hf_runner_stage_preparation(const char *config_path,const HfJson *claim,int result,HfPreparationStage *stage);
+typedef struct {
+ char charge_id[37],charge_generation[32],sandbox_id[37],boot_id[37],boot_generation[32],kernel_boot_id[37];
+ char cgroup_path[4096],evidence_digest[72];
+ unsigned long long cpu_millis,memory_bytes,disk_bytes;
+ int cpu_enforced,memory_enforced,disk_enforced,root_fd,scope_fd,child_attached,status;
+ HfProcessIdentity attached;char reason[128];
+ dev_t root_dev,scope_dev;ino_t root_ino,scope_ino;
+} HfBudgetHandle;
+enum {HF_BUDGET_ERROR=-1,HF_BUDGET_UNAVAILABLE=0,HF_BUDGET_READY=1};
+int hf_budget_prepare(const char *trusted_config_path,const char *authenticated_charge_json,HfBudgetHandle *);
+int hf_budget_attach(HfBudgetHandle *,const HfProcessIdentity *);
+int hf_budget_observe(const HfBudgetHandle *,FILE *);
+int hf_budget_release(HfBudgetHandle *);
+int hf_supervisor_daemon(const char *request,FILE *out);
+
+#endif
