@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {assertInvocation} from '../../transport/protocol.js';
 import {isCredentialAuthority,composeEnvironment,type CredentialAuthority} from '../../identity/credentials.js';
-import {isArtifactStoreCapability} from '../../artifacts/objects.js';
+import {isArtifactStoreCapability,assertCompleteArtifactReferences} from '../../artifacts/objects.js';
 import type {ProviderPersistenceHooks as RuntimeProviderPersistenceHooks,ProviderPreparationBinding} from '../pools.js';
 import { Sandbox, ExecControlUnsupportedError } from 'railway';
 import type { Component, ComponentContext } from '../../components/registry.js';
@@ -120,13 +120,15 @@ function refused(operation:ProviderOperation):ProviderOutcome {
     reconcile_required:false,retry:'NEVER'} as ProviderOutcome;
 }
 export type RailwayAdapter=ProviderAdapter&{
-  sealCapturedOutput(operation:ProviderOperation<'execute'>):ReturnType<RailwaySessionSpool['sealStreams']>;
+  sealCapturedOutput(operation:ProviderOperation<'execute'>):Promise<Awaited<ReturnType<RailwaySessionSpool['sealStreams']>>&{
+    custody:{archive_id:string;evidence_digest:string}}>;
   reconcileCapturedOutput(operation:ProviderOperation<'execute'>):Promise<boolean>;
   readCapturedOutput(scope:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number):Promise<{
     stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;
   }>;
 };
 export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAdapterDependencies):RailwayAdapter {
+  const capturedOperations=new Map<string,ProviderOperation<'execute'>>();
   const execute=async(operation:ProviderOperation,signal=AbortSignal.timeout(client.config.request_timeout_ms)):Promise<ProviderOutcome>=>{
     validateProviderOperation(operation);client.assertScope(operation.scope);
     if(dependencies.boundScope&&!sameScope(operation.scope,dependencies.boundScope))throw new Error('Railway adapter scope mismatch');
@@ -211,6 +213,7 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
           let logical:string|null=null;
           if(trusted){
             logical='railway-'+operation.identity.operation_id;
+            capturedOperations.set(logical,operation);
             const claim=await dependencies.persistence.claimProcess(operation,{process_ref:logical,
               payload_digest:operation.identity.payload_digest,resource:resource!,state:'SUBMITTED',provider_metadata:{provider:'railway'}});
             if(claim.disposition!=='NEW'){outcome=unknown(operation,resource);break;}
@@ -314,7 +317,12 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
       if(record.operation_id!==operation.identity.operation_id||record.payload_digest!==operation.identity.payload_digest)
         throw new Error('Railway archive operation mismatch');
       await dependencies.sessions.uploadPending(record.operation_id,dependencies.artifactSink);
-      return dependencies.sessions.sealStreams(record.operation_id,dependencies.archive.invoke,await dependencies.archive.binding(operation));
+      const sealed=await dependencies.sessions.sealStreams(record.operation_id,dependencies.archive.invoke,await dependencies.archive.binding(operation));
+      // Verified provider bytes become cleanup-eligible only after08 pins every
+      // actual15 reference under the original terminal process/boot transaction.
+      const custody=await dependencies.persistence.persistOutputArchive(operation,{
+        index_reference:sealed.reference,segment_references:sealed.segment_references});
+      return {...sealed,custody};
     },
     reconcileCapturedOutput:async(operation:ProviderOperation<'execute'>)=>{
       validateProviderOperation(operation);client.assertScope(operation.scope);
@@ -327,8 +335,20 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
     readCapturedOutput:async(s:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number)=>{
       client.assertScope(s);
       if(dependencies.boundScope&&!sameScope(s,dependencies.boundScope))throw new Error('Railway output scope mismatch');
-      if(dependencies.sessions.find(resource,processRef).scope_digest!==hash(s))throw new Error('Railway output scope binding');
-      return dependencies.sessions.readCapturedOutput(resource,processRef,maxBytes);
+      let native=processRef;
+      if(client.config.mode==='live'||dependencies.requireTrustedBindings===true){
+        const operation=capturedOperations.get(processRef);
+        if(!operation||!sameScope(operation.scope,s)||hash(operation.resource)!==hash(resource))
+          throw new Error('Railway output operation binding unavailable');
+        assertInvocation(dependencies.persistence.invocation);
+        await dependencies.persistence.assertResourceBinding(operation);
+        const bound=await dependencies.persistence.resolveProcess(operation,processRef);
+        if(!bound?.native_process_ref||bound.process_ref!==processRef||bound.payload_digest!==operation.identity.payload_digest||
+          hash(bound.resource)!==hash(resource))throw new Error('Railway output logical/native binding');
+        native=bound.native_process_ref;
+      }
+      if(dependencies.sessions.find(resource,native).scope_digest!==hash(s))throw new Error('Railway output scope binding');
+      return dependencies.sessions.readCapturedOutput(resource,native,maxBytes);
     }} as RailwayAdapter;
 }
 export type RailwayRegistrar=(provider:'railway',factory:(scope:ProviderScope,hooks:ProviderPersistenceHooks)=>ProviderAdapter)=>()=>void;
@@ -501,17 +521,21 @@ function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void
   const client=configuredClient(context),policies=railwayRuntimePolicies(context);
   const registrar=context.dependencies.require('8.2','provider.registry.v1',(v):v is {
     registerProviderAdapter:RailwayRegistrar;
+    registerArtifactReferenceReader:(reader:typeof assertCompleteArtifactReferences)=>()=>void;
     registerIsolationTransport:(provider:'railway',factory:(scope:ProviderScope)=>RailwayIsolationTransport)=>()=>void
   }=>!!v&&typeof v==='object'&&typeof (v as {registerProviderAdapter?:unknown}).registerProviderAdapter==='function'&&
-    typeof (v as {registerIsolationTransport?:unknown}).registerIsolationTransport==='function');
+    typeof (v as {registerIsolationTransport?:unknown}).registerIsolationTransport==='function'&&
+    typeof (v as {registerArtifactReferenceReader?:unknown}).registerArtifactReferenceReader==='function');
   const credentials=context.dependencies.require('14.2','identity.credentials',isCredentialAuthority);
   const artifacts=context.dependencies.require('15.2','artifact.store.v1',isArtifactStoreCapability);
   const root=context.env.HF_RAILWAY_PROCESS_ROOT;if(!root)throw new Error('Railway process root missing');
   const sessions=new RailwaySessionSpool(root);
-  const unregisterIsolation=registrar.registerIsolationTransport('railway',s=>{
+  const unregisterReader=registrar.registerArtifactReferenceReader(assertCompleteArtifactReferences);
+  let unregisterIsolation:()=>void;
+  try{unregisterIsolation=registrar.registerIsolationTransport('railway',s=>{
     if(!policies.some(v=>sameScope(v.scope,s)))throw new Error('Railway isolation pool policy unavailable');
     return createRailwayIsolationTransport(client,s);
-  });
+  });}catch(error){unregisterReader();void sessions.detachAll();throw error;}
   let unregister:()=>void;
   try{unregister=registerRailwayProvider(registrar.registerProviderAdapter,client,(s,hooks)=>{
     assertInvocation(hooks.invocation);
@@ -566,6 +590,6 @@ function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void
       }
     };
   });
-  }catch(error){unregisterIsolation();void sessions.detachAll();throw error;}
-  return {close:async()=>{unregister();unregisterIsolation();await sessions.detachAll();}};
+  }catch(error){unregisterIsolation();unregisterReader();void sessions.detachAll();throw error;}
+  return {close:async()=>{unregister();unregisterIsolation();unregisterReader();await sessions.detachAll();}};
 }

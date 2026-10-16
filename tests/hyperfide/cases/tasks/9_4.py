@@ -10,13 +10,88 @@ IDS=[
  "railway.sessions.unavailable-not-empty","railway.reconcile.unique-enrolled-candidate","railway.reconcile.marker-not-authority",
  "railway.reconcile.ambiguous-candidates","railway.reconcile.partial-inventory","railway.reconcile.no-blind-retry",
  "railway.reconcile.excludes-baseline","railway.adapter.actual-early-id","railway.adapter.early-id-before-observation",
- "railway.adapter.database-ambiguity-keeps-id","railway.adapter.lost-response-is-unknown","railway.adapter.no-implicit-create-retry",
- "railway.adapter.destroy-awaits-terminal","railway.adapter.destroy-confirmed","railway.adapter.expired-before-dispatch","railway.adapter.malformed-observation-keeps-id",
+ "railway.adapter.database-ambiguity-keeps-id","railway.adapter.malformed-observation-keeps-id","railway.adapter.lost-response-is-unknown","railway.adapter.no-implicit-create-retry",
+ "railway.adapter.destroy-awaits-terminal","railway.adapter.destroy-confirmed","railway.adapter.expired-before-dispatch",
  "railway.isolation.accepted-delete-is-not-absence","railway.isolation.exact-deletion-confirmed",
  "railway.isolation.exact-absence-observation","railway.isolation.http-failure-unknown",
  "railway.isolation.wrong-native-id-unknown","railway.isolation.pure-live-construction",
- "railway.adapter.restore-source-id-is-unknown"
+ "railway.adapter.restore-source-id-is-unknown",
+ "railway.factory.durable-intent-before-sdk","railway.factory.actual-early-id","railway.factory.trusted-placement-and-vars",
+ "railway.factory.no-provider-readiness","railway.factory.no-duplicate-create","railway.factory.private-policy-pin"
 ]
+
+def actual_factory_checks(fixture,folder):
+ """Genuine08/05/14 transaction/identity hooks; only the external cloud HTTP API is simulated."""
+ import importlib.util,uuid
+ spec=importlib.util.spec_from_file_location("railway_real_provider_intents",c.ROOT/"tests/hyperfide/cases/tasks/8_3.py")
+ shared=importlib.util.module_from_spec(spec);spec.loader.exec_module(shared)
+ policy={"seed_reference":"fixture-approved-seed","seed_source":{"kind":"FRESH","reference":None},
+  "idle_timeout_minutes":0,"domains":[],"runtime_variables":{"CI":{"kind":"PUBLIC","value":"true"}},
+  "build_variables":{"BUILD_MODE":"release"},"retention":{"retention_class":"RUN","retention_until":None,"retention_hold":False}}
+ fixture.config.update(environment_id="fixture-env",region="fixture-region",account_id="fixture-account");fixture.write_config()
+ original_observed=c.observed
+ c.observed=lambda:original_observed()|{"environmentId":"fixture-env","region":"fixture-region"}
+ f=None
+ try:
+  def setup(actual):
+   shared.prepare_provider_intent_fixture(actual)
+   actual.config["pools"][0]["create_policy"]["adapter_policy_digest"]=c.digest(policy)
+   actual.configfile.write_text(json.dumps(actual.config));actual.configfile.chmod(0o600)
+   actual.env.update(HF_RAILWAY_CONFIG=str(fixture.config_path),HF_RAILWAY_FIXTURE_TOKEN="not-a-real-credential",
+      HF_RAILWAY_PROCESS_ROOT=str(Path(folder)/"factory-spool"))
+  f=shared.pools.ProvisionerFixture(extra_components=["8.1","8.2","8.3","11.1","9.1","9.2","9.3","9.4","14.2","15.2"],extra_setup=setup)
+  def invoke(action,input,component="8.3",key="operator"):
+   status,response=f.invoke(action,input,component=component,key=key)
+   c.expect(status==200 and response.get("ok") is True,(status,response))
+   return response["result"]
+  invoke("provider.pools.configure",{},"8.2")
+  shared.seed_provider_capacity(f)
+  scope={"organisation_id":f.ids["organisation"],"pool_id":f.pool,"provider":"railway",
+   "provider_account_id":"fixture-account","environment_id":"fixture-env","region":"fixture-region",
+   "configuration_digest":f.sql("SELECT configuration_digest FROM hyperfide.provider_pool_configurations WHERE organisation_id=$1 AND pool_id=$2 AND active",
+      [f.ids["organisation"],f.pool])[0]["configuration_digest"]}
+  runtime=f.path/"railway-runtime.json";runtime.write_text(json.dumps({"schema_version":1,"pools":[{**policy,"scope":scope}]}));runtime.chmod(0o600)
+  f.stop();f.env["HF_RAILWAY_RUNTIME_POLICY"]=str(runtime);f.env["HF_RAILWAY_RUNTIME_POLICY_DIGEST"]=c.sha(runtime.read_bytes());f.start()
+  request={"run_id":f.ids["run"],"pool_id":f.pool,"sandbox_id":str(uuid.uuid4()),"request_key":str(uuid.uuid4()),
+   "deadline_at":shared.utc(),"reservation_ids":f.reservations,"profile_id":f.profile,"preparation_digest":f.preparation,"purpose":"PREPARATION"}
+  before=len(fixture.requests);created=invoke("provider.intents.prepare-create",request);intent=created["intent"]
+  c.check(IDS[32],lambda:c.expect(created["created"] and created["external_call_performed"] is False and
+     len(fixture.requests)==before and intent["state"]=="RECORDED","real durable intent was not established before SDK effects"))
+  executed=invoke("provider.intents.execute",{"intent_id":intent["id"]},key="provisioner")
+  physical=f.sql("SELECT state,native_sandbox_id,boot_generation::text FROM hyperfide.provisioning_intents WHERE organisation_id=$1 AND id=$2",
+     [f.ids["organisation"],intent["id"]])[0]
+  observed=invoke("provider.intents.reconcile",{"intent_id":intent["id"]},key="provisioner")
+  acknowledged=f.sql("SELECT state,native_sandbox_id,boot_generation::text FROM hyperfide.provisioning_intents WHERE organisation_id=$1 AND id=$2",
+     [f.ids["organisation"],intent["id"]])[0]
+  c.check(IDS[33],lambda:c.expect(physical["state"]=="ID_KNOWN" and physical["native_sandbox_id"]=="sandbox-1" and
+     physical["boot_generation"]==str(intent["boot_generation"]) and acknowledged["state"]=="ACKNOWLEDGED" and
+     acknowledged["native_sandbox_id"]==physical["native_sandbox_id"],
+     "durable identity / CREATING to observed RUNNING progression failed: "+json.dumps({"before":physical,"after":acknowledged})))
+  creates=[row for row in fixture.requests[before:] if "sandboxCreate" in row["query"]]
+  c.check(IDS[34],lambda:c.expect(len(creates)==1 and creates[0]["variables"]["input"]["environmentId"]=="fixture-env" and
+     creates[0]["variables"]["input"]["region"]=="fixture-region" and
+     creates[0]["variables"]["input"]["variables"]=={"CI":"true","HF_PROVISION_OPERATION_ID":intent["id"]},
+     "registered private pool policy did not control placement/public variables"))
+  c.check(IDS[35],lambda:c.expect(executed.get("readiness_granted") is False and
+     f.sql("SELECT observed_state FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2",[f.ids["organisation"],request["sandbox_id"]])[0]["observed_state"]!="READY",
+     "provider acceptance was promoted to runner readiness"))
+  count=len(creates);again=invoke("provider.intents.execute",{"intent_id":intent["id"]},key="provisioner")
+  c.check(IDS[36],lambda:c.expect(again.get("executed") is False and
+     len([row for row in fixture.requests[before:] if "sandboxCreate" in row["query"]])==count,"same actual durable operation was blindly replayed"))
+  f.stop();original=runtime.read_bytes();runtime.write_bytes(original+b" ")
+  rejected=False
+  try:f.start()
+  except AssertionError:
+   rejected=True
+   if f.child:
+    f.child.communicate(timeout=10);c.expect(f.child.returncode!=0,"tampered private policy service unexpectedly succeeded");f.child=None
+  finally:runtime.write_bytes(original)
+  c.check(IDS[37],lambda:c.expect(rejected and len([row for row in fixture.requests[before:] if "sandboxCreate" in row["query"]])==count,
+     "private runtime policy bytes changed without fail-closed startup"))
+ finally:
+  c.observed=original_observed
+  if f is not None:f.close()
+
 def main():
  if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:19]+IDS[24:25]+IDS[19:24]+IDS[25:]));return 0
  complete=False
@@ -174,6 +249,7 @@ process.stdout.write(JSON.stringify({constructed:typeof transport.destroy==='fun
       same_source["outcome"]["resource"]["native_sandbox_id"]==params["base"]["source_native_sandbox_id"] and
       same_source["events"]==["assigned-generation","early-id:"+params["base"]["source_native_sandbox_id"],"observation:UNKNOWN"],
       "source resource identity was adopted as a fresh restore"))
+   actual_factory_checks(fixture,folder)
    service.close();fixture.close();complete=True
   finally:
    if service.process.poll() is None:service.process.kill();service.process.wait()
