@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "22.3",
+  "task": "22.3",
+  "roles": [
+    "control"
+  ],
+  "module": "evaluation/trials.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "evaluation.trial.create",
+    "evaluation.trial.report"
+  ],
+  "requires": [
+    "22.1",
+    "22.2"
+  ]
+}
