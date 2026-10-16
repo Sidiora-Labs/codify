@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-14.1-real-journal-identity-v2",
+  "campaign_id": "hyperfide-task-14.1-real-journal-identity-v3",
   "registered_variant": "task:14.1",
   "scope": "task-component",
   "case_ids": [
@@ -275,13 +275,13 @@
     },
     {
       "path": "services/hyperfide/dist/identity/native_auth.js",
-      "sha256": "ccca88113f34968d68a646fd46c44ab317965b0aa9e341bc3e34fd66f8ed682b",
-      "size": 12311
+      "sha256": "1d0485b1794d448a06c6345f16e0195daa593b2699f0cd39922435fa54fe4690",
+      "size": 12556
     },
     {
       "path": "services/hyperfide/dist/identity/native_auth.js.map",
-      "sha256": "4bb9786ffa4a264b5a675851fb850adf3ed13b0ce1fca1dec3dfa6eba553dfbd",
-      "size": 13483
+      "sha256": "da4951e1f00f45e10424bab159a8671e92e97e3b60d9acbaa0feb7c3fe3b2be3",
+      "size": 13641
     },
     {
       "path": "services/hyperfide/dist/policy/programme.d.ts",
@@ -1220,8 +1220,8 @@
     },
     {
       "path": "services/hyperfide/src/identity/native_auth.ts",
-      "sha256": "812862dfc8d514d7fe506b60b689ec7c19f7b08491854ef6175ed4a589f753e5",
-      "size": 12739
+      "sha256": "70f63bc88c1f304a672a46cfe72c568b3f52689dcfe12cfff917c8a2aa2dd177",
+      "size": 12955
     },
     {
       "path": "services/hyperfide/src/policy/programme.ts",
@@ -1320,8 +1320,8 @@
     },
     {
       "path": "tests/hyperfide/support/identity_fixture.py",
-      "sha256": "a9625f2bae9c7dabe289ca98bc768a6fb75d022036135c7aced099fe9903ba2f",
-      "size": 28940
+      "sha256": "b5463ce7741f46fc1552532d6ecbc53a82461707a1d56e93364b2d310fa7c7d7",
+      "size": 29146
     }
   ],
   "resources": [
