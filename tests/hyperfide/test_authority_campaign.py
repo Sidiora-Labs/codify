@@ -91,6 +91,7 @@ def fixture(mode="RESTORE"):
             "sequence": str(len(final_history)), "evidence_digest": digest, "observed_at": STAMP,
             "expires_at": END, "checked_at": STAMP},
         "timing": {"pending_observed_ns": "100", "commit_observed_ns": "200", "published_observed_ns": "300"}}
+    proof["journal_raw"] = {name: None if proof["journal_"+name] is None else a.canonical(proof["journal_"+name]).decode() for name in ("before", "pending", "after")}
     return proof, expected
 
 class AuthorityMetadataTests(unittest.TestCase):
@@ -121,6 +122,7 @@ class AuthorityMetadataTests(unittest.TestCase):
         pending = proof["journal_pending"]
         pending["pending"]["expected_database_epoch"] = uid(99)
         proof["journal_pending"] = seal_document(pending)
+        proof["journal_raw"]["pending"] = a.canonical(proof["journal_pending"]).decode()
         with self.assertRaises(a.AuthorityError):
             a.inspect_transition(proof, expected)
 
@@ -189,6 +191,7 @@ class AuthorityMetadataTests(unittest.TestCase):
         pending["pending"]["fence_evidence_digest"] = "sha256:" + "d" * 64
         pending["pending"]["candidate_digests"].append("sha256:" + "d" * 64)
         proof["journal_pending"] = seal_document(pending)
+        proof["journal_raw"]["pending"] = a.canonical(proof["journal_pending"]).decode()
         self.assertTrue(a.inspect_transition(proof, expected)["checked"])
 
     def test_current_attestation_must_match_published_head(self):
@@ -213,7 +216,7 @@ class AuthorityMetadataTests(unittest.TestCase):
             "slot_id": "old-slot", "generation": 1})
         event = {"sequence": 2, "virtual_ms": 1, "kind": "epoch",
             "operation_id": expected["operation_id"], "epoch": B, "accepted": True,
-            "new_epoch": C, "database_previous_epoch": A, "activation_kind": "RESTORE",
+            "new_epoch": C, "database_previous_epoch": A, "activation_mode": "RESTORE",
             "activation_contract": "04-journal-v1", "activation_proof": proof}
         model.apply(event)
         self.assertEqual(model.epoch, C)
@@ -226,7 +229,7 @@ class AuthorityMetadataTests(unittest.TestCase):
         proof, expected = fixture()
         event = {"sequence": 1, "virtual_ms": 0, "kind": "epoch",
             "operation_id": expected["operation_id"], "epoch": B, "accepted": True,
-            "new_epoch": C, "database_previous_epoch": A, "activation_kind": "RESTORE",
+            "new_epoch": C, "database_previous_epoch": A, "activation_mode": "RESTORE",
             "activation_contract": "04-journal-v1", "activation_proof": proof}
         for field in ("activation_contract", "database_previous_epoch"):
             with self.subTest(field=field):
@@ -241,10 +244,21 @@ class AuthorityMetadataTests(unittest.TestCase):
         model = d.Reference(100, 200, B, uid(93), "04-journal-v1")
         event = {"sequence": 1, "virtual_ms": 0, "kind": "epoch",
             "operation_id": expected["operation_id"], "epoch": B, "accepted": True,
-            "new_epoch": C, "database_previous_epoch": A, "activation_kind": "RESTORE",
+            "new_epoch": C, "database_previous_epoch": A, "activation_mode": "RESTORE",
             "activation_contract": "04-journal-v1", "activation_proof": proof}
         with self.assertRaises(d.CampaignError):
             model.apply(event)
+
+    def test_original_journal_bytes_and_absence_are_bound(self):
+        for name in ("before", "pending", "after"):
+            proof, expected = fixture()
+            proof["journal_raw"][name] += " "
+            with self.assertRaises(a.AuthorityError):
+                a.inspect_transition(proof, expected)
+        proof, expected = fixture("BOOTSTRAP")
+        proof["journal_raw"]["before"] = "null"
+        with self.assertRaises(a.AuthorityError):
+            a.inspect_transition(proof, expected)
 
     def test_opaque_unsealed_or_unknown_contract_cannot_pass(self):
         proof, expected = fixture()

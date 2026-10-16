@@ -83,6 +83,7 @@
     "campaign.authority.fixture-deployment-cannot-rotate-live-reference",
     "campaign.authority.missing-pending-cannot-be-replaced-by-active-head",
     "campaign.authority.opaque-unsealed-or-unknown-contract-cannot-pass",
+    "campaign.authority.original-journal-bytes-and-absence-are-bound",
     "campaign.authority.pending-must-precede-positive-commit-and-publication",
     "campaign.authority.reference-consumes-current-restore-and-fences-old-owner",
     "campaign.authority.resealed-history-cannot-reuse-epoch-or-drop-lineage",
@@ -115,7 +116,7 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "700ecf4225c7c53a89de060d83e5a2d49cfa3fbc59cd91eb3bdaf7b7a045c9c6",
+      "sha256": "69f2b5803b785a177847c3719c0fba0515b1b494bdbdca1cedd4c8a0de5b546c",
       "size": 45929
     },
     {
@@ -125,13 +126,13 @@
     },
     {
       "path": "tests/hyperfide/campaigns/authority.py",
-      "sha256": "33346cf240c5fd06e88e3ac12db0b61d659b54434e74885e7164cdccc46e9a51",
-      "size": 16173
+      "sha256": "1e6c2ba995bffa4eb765e98926ac35de3dd366d7c49a9ca8eaa9706eab6bdc3a",
+      "size": 16901
     },
     {
       "path": "tests/hyperfide/test_authority_campaign.py",
-      "sha256": "3d0f2fb591159402be2769b74f0dee8e3ca01eca62f842abd418e0bfdef59d5b",
-      "size": 13531
+      "sha256": "b33e393c41379a6e7444aa7cabd86f0ca450ac61cde5aed5fdcdfb0108f10324",
+      "size": 14383
     }
   ],
   "policy": {

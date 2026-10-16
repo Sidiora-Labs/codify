@@ -76,6 +76,7 @@
     "campaign.authority.fixture-deployment-cannot-rotate-live-reference",
     "campaign.authority.missing-pending-cannot-be-replaced-by-active-head",
     "campaign.authority.opaque-unsealed-or-unknown-contract-cannot-pass",
+    "campaign.authority.original-journal-bytes-and-absence-are-bound",
     "campaign.authority.pending-must-precede-positive-commit-and-publication",
     "campaign.authority.reference-consumes-current-restore-and-fences-old-owner",
     "campaign.authority.resealed-history-cannot-reuse-epoch-or-drop-lineage",

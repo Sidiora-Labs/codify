@@ -500,7 +500,7 @@ class Reference:
                     expected = {"deployment_id": self.deployment_id, "operation_id": op,
                         "external_previous_epoch": self.epoch,
                         "database_previous_epoch": event.get("database_previous_epoch"),
-                        "new_epoch": epoch, "mode": event.get("activation_kind")}
+                        "new_epoch": epoch, "mode": event.get("activation_mode")}
                     try:
                         current_authority.inspect_transition(event["activation_proof"], expected)
                     except current_authority.AuthorityError as error:

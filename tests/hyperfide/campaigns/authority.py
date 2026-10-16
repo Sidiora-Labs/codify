@@ -155,8 +155,17 @@ def inspect_transition(proof, expected):
     require(mode != "ROTATE" or external is not None and external == database, "ordinary rotation requires one exact shared predecessor")
     require(mode != "RESTORE" or external is not None, "restore requires independently accepted external authority")
     require(epoch not in (external, database), "activation epoch must be fresh across both lineages")
-    closed(proof, "activation authority_epoch database_predecessor_authority_epoch fencer_receipt_json journal_before journal_pending journal_after external_attestation primary_admission_now timing".split(), "observed activation proof")
+    closed(proof, "activation authority_epoch database_predecessor_authority_epoch fencer_receipt_json journal_before journal_pending journal_after journal_raw external_attestation primary_admission_now timing".split(), "observed activation proof")
     before, pending, after = proof["journal_before"], proof["journal_pending"], proof["journal_after"]
+    raw_journal = proof["journal_raw"]
+    closed(raw_journal, ("before", "pending", "after"), "original journal bytes")
+    for name, document in (("before", before), ("pending", pending), ("after", after)):
+        original = raw_journal[name]
+        if document is None:
+            require(name == "before" and original is None, "missing journal must retain actual absence, not invented bytes")
+        else:
+            require(type(original) is str and 0 < len(original.encode()) <= 4 * 1024 * 1024, "bounded original journal bytes required")
+            require(strict_json(original) == document and original.encode() == canonical(document), "original journal bytes differ from captured canonical document")
     if before is None:
         require(mode == "BOOTSTRAP", "missing external journal cannot reconstruct authority from restored database")
         before_history, before_sequence, before_head = [], "0", sha({"deployment_id": deployment, "initial": True})
