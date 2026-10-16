@@ -52,7 +52,7 @@ export function bindProviderIsolation(capability:ProviderIsolationCapability,aut
  if(!capability||typeof capability.isolateConfiguredResource!=='function')fail('EXTERNAL_FENCE_BACKEND_UNAVAILABLE','Actual provisioner isolation capability is required');
  return Object.freeze({isolateConfiguredResource:(key:string,id:string,signal:AbortSignal,journal:IsolationJournal)=>capability.isolateConfiguredResource(key,id,authority,signal,journal)});
 }
-type JournalDocument={schema_version:1;binding:Binding;authorizations:{authority_digest:string;authority_nonce:string|null}[];resources:Record<string,IsolationJournalRecord>;completion_receipt?:ExternalFenceReceipt;completion_receipt_json?:string};
+type JournalDocument={schema_version:1;binding:Binding;authorizations:{authority_digest:string;authority_nonce:string|null}[];resources:Record<string,IsolationJournalRecord>;completion_receipt?:ExternalFenceReceipt;completion_receipt_json?:string;completion_receipts?:{json:string;digest:string}[]};
 function coreBinding(v:Binding){return {deployment_id:v.deployment_id,operation_id:v.operation_id,source_epoch:v.source_epoch,topology_digest:v.topology_digest}}
 function fail(code:string,message:string):never{throw new FoundationError(code,message)}
 function canonical(v:unknown):string{if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(canonical).join(',')+']';return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonical((v as Record<string,unknown>)[k])).join(',')+'}'}
@@ -77,7 +77,7 @@ function checkFresh(observed:string,expires:string,now:number):void{
  */
 export class FileExternalFenceJournal {
  constructor(private readonly directory:string){}
- async readCompleted(input:{deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string}):Promise<ExternalFenceReceipt>{
+ async readCompleted(input:{deployment_id:string;operation_id:string;source_epoch:string|null;topology_digest:string;expected_proof_digest?:string}):Promise<ExternalFenceReceipt>{
   if(!uuid(input.deployment_id)||!uuid(input.operation_id)||input.source_epoch!==null&&!uuid(input.source_epoch)||!digest(input.topology_digest))fail('EXTERNAL_FENCE_INVALID','Exact completed operation identity is required');
   if(!path.isAbsolute(this.directory)||path.resolve(this.directory)!==this.directory)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Canonical private journal required');
   const rootInfo=await fs.lstat(this.directory);
@@ -89,10 +89,14 @@ export class FileExternalFenceJournal {
    try{
     const info=await file.stat();if(!info.isFile()||info.nlink!==1||info.uid!==process.getuid?.()||(info.mode&0o077)!==0||info.size>1048576)fail('EXTERNAL_FENCE_JOURNAL_UNSAFE','Private bounded completion record required');
     const doc=JSON.parse(await file.readFile('utf8')) as JournalDocument;
-    if(doc.schema_version!==1||!object(doc.binding)||canonical(coreBinding(doc.binding))!==canonical(input)||!object(doc.completion_receipt))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','No matching durable completed physical fence');
+    if(doc.schema_version!==1||!object(doc.binding)||canonical(coreBinding(doc.binding))!==canonical({deployment_id:input.deployment_id,operation_id:input.operation_id,source_epoch:input.source_epoch,topology_digest:input.topology_digest})||!object(doc.completion_receipt))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','No matching durable completed physical fence');
     if(typeof doc.completion_receipt_json!=='string'||doc.completion_receipt_json.length>16384)fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Exact completed receipt bytes are absent');
-    const receipt=JSON.parse(doc.completion_receipt_json) as ExternalFenceReceipt;
-    if(canonical(receipt)!==canonical(doc.completion_receipt))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Completed receipt bytes differ from journal value');
+    const history=doc.completion_receipts??[{json:doc.completion_receipt_json,digest:'sha256:'+createHash('sha256').update(doc.completion_receipt_json).digest('hex')}];
+    if(!Array.isArray(history)||history.length<1||history.length>16||history.some(v=>!object(v)||typeof v.json!=='string'||v.json.length>16384||v.digest!=='sha256:'+createHash('sha256').update(v.json).digest('hex'))||history.at(-1)?.json!==doc.completion_receipt_json)fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Completed receipt history is invalid');
+    const candidate=input.expected_proof_digest===undefined?history.at(-1):history.find(v=>v.digest===input.expected_proof_digest);
+    if(!candidate)fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Exact accepted completion proof is absent from retained history');
+    const receipt=JSON.parse(candidate.json) as ExternalFenceReceipt;
+    if(canonical(JSON.parse(doc.completion_receipt_json))!==canonical(doc.completion_receipt))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Completed receipt bytes differ from journal value');
     if(receipt.deployment_id!==input.deployment_id||receipt.operation_id!==input.operation_id||receipt.source_epoch!==input.source_epoch||receipt.fence_id!==input.operation_id||receipt.isolated_writer!=='topology:'+input.topology_digest.slice(7)||!digest(receipt.evidence_digest))fail('EXTERNAL_FENCE_COMPLETION_UNVERIFIED','Completed physical fence scope mismatch');
     time(receipt.observed_at);time(receipt.expires_at);
     return Object.freeze(structuredClone(receipt));
@@ -155,7 +159,7 @@ export class FileExternalFenceJournal {
       const observations=[...row.observations,...outcome.observations].filter((v,i,all)=>all.findIndex(other=>canonical(other)===canonical(v))===i);
       if(observations.length>8)fail('EXTERNAL_FENCE_JOURNAL_LIMIT','Observation history exceeds its immutable bounded record');
       if(outcome.receipt)checkReceipt(outcome.receipt,binding,row.binding);
-      document.resources={...document.resources,[key]:{binding:row.binding,state:outcome.receipt?.status==='ISOLATED'?'ISOLATED':'UNKNOWN',receipt:outcome.receipt?structuredClone(outcome.receipt):null,observations:structuredClone(observations)}};await save();
+      document.resources={...document.resources,[key]:{...row,binding:row.binding,state:outcome.receipt?.status==='ISOLATED'?'ISOLATED':'UNKNOWN',receipt:outcome.receipt?structuredClone(outcome.receipt):null,observations:structuredClone(observations)}};await save();
      })
     });
    };
@@ -178,7 +182,10 @@ export class FileExternalFenceJournal {
    return await body(resource,receipt=>serialize(async()=>{
     if(receipt.deployment_id!==binding.deployment_id||receipt.operation_id!==binding.operation_id||receipt.source_epoch!==binding.source_epoch||receipt.fence_id!==binding.operation_id||!digest(receipt.evidence_digest)||receipt.isolated_writer!=='topology:'+binding.topology_digest.slice(7))fail('EXTERNAL_FENCE_JOURNAL_CONFLICT','Completed fence receipt differs from its immutable topology');
     checkFresh(receipt.observed_at,receipt.expires_at,Date.now());
-    document.completion_receipt=structuredClone(receipt);document.completion_receipt_json=JSON.stringify(receipt);await save();
+    const json=JSON.stringify(receipt),proofDigest='sha256:'+createHash('sha256').update(json).digest('hex');
+    const history=document.completion_receipts??(document.completion_receipt_json?[{json:document.completion_receipt_json,digest:'sha256:'+createHash('sha256').update(document.completion_receipt_json).digest('hex')}]:[]);
+    if(!history.some(v=>v.digest===proofDigest)){if(history.length>=16)fail('EXTERNAL_FENCE_JOURNAL_LIMIT','Completed proof history exhausted its bounded retention');history.push({json,digest:proofDigest})}
+    document.completion_receipts=history;document.completion_receipt_json=history.at(-1)!.json;document.completion_receipt=JSON.parse(document.completion_receipt_json) as ExternalFenceReceipt;await save();
    }),observations);
   }finally{
    await queue;active=false;
