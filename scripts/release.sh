@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Legacy Codify release construction; canonical Hyperfide artifact packaging follows.
 # Build the static release binary and publish it plus the install scripts
 # to the web root served at https://codify.centra.ag.
 # Usage: scripts/release.sh [webroot]   (default /var/www/codify)

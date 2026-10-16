@@ -1,0 +1,7 @@
+[component]
+schema_version = 1
+id = "26.1"
+source = "src/hyperfide/branding.c"
+entry = "hf_component_branding"
+actions = ["branding.identity.describe", "branding.compatibility.inventory"]
+requires = []

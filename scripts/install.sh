@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Codify installer/updater — https://codify.centra.ag
+# Hyperfide installer/updater (legacy release endpoint until explicitly configured) — https://codify.centra.ag
 #   curl -fsSL https://codify.centra.ag/install | bash
-# Env overrides: CODIFY_INSTALL_DIR (target directory), CODIFY_BASE_URL.
+# Legacy CODIFY_* settings remain accepted during the explicit naming transition.
+# Canonical HYPERFIDE_* settings are added by the artifact-aware installer.
 set -euo pipefail
 
 BASE="${CODIFY_BASE_URL:-https://codify.centra.ag}"
@@ -15,7 +16,7 @@ else
 fi
 
 say()  { printf '%s\n' "$*"; }
-die()  { printf 'codify install: %s\n' "$*" >&2; exit 1; }
+die()  { printf 'hyperfide install: %s\n' "$*" >&2; exit 1; }
 
 # ---- platform ----
 os="$(uname -s)"; arch="$(uname -m)"
