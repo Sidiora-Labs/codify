@@ -22,10 +22,11 @@ def apply_migration(f,name):
  data=(ROOT/"services/hyperfide/migrations"/(name+".sql")).read_bytes()
  f.sql("BEGIN;"+data.decode()+";INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES("+str(int(name[:4]))+",'"+name+"','"+sha(data)+"');COMMIT;")
 class HierarchyFixture(IdentityFixture):
- def __init__(self,extra_components=(),extra_setup=None,bootstrap=True,extra_env=None,seed_historical_runtime=True):
+ def __init__(self,extra_components=(),extra_setup=None,bootstrap=True,extra_env=None,seed_historical_runtime=True,source_object_id=None):
   def setup(f):
    apply_migration(f,"0003-hierarchy")
    i=f.ids
+   source=source_object_id or "a"*40
    for key in ("package","package2","wave_package","task","task2","repository","worker","slot","attempt","lease","finding"):i[key]=uid()
    identity=json.loads(f.identity_config.read_text())
    for key,role in (("leader","LEADER"),("leader2","LEADER"),("manager","FEATURE_MANAGER"),("manager2","FEATURE_MANAGER"),("watcher","COMMIT_WATCHER")):
@@ -37,8 +38,8 @@ class HierarchyFixture(IdentityFixture):
     identity["principals"].append(dict(identity["principals"][0],credential_id=ident,actor_id=ident,role=role,public_key_b64=f.keys[key]["public_key_b64"]))
    f.identity_config.write_text(json.dumps(identity))
    f.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'fixture','https://example.invalid/fixture.git')",[i["organisation"],i["repository"],i["project"]])
-   f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i["organisation"],i["repository"],"a"*40])
-   f.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i["organisation"],i["run"],i["repository"],"a"*40])
+   f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i["organisation"],i["repository"],source])
+   f.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i["organisation"],i["run"],i["repository"],source])
    for key,feature,wave in (("package","alpha",1),("package2","alpha",2),("wave_package","beta",1)):
     f.sql("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,$4,$5)",[i["organisation"],i["run"],i[key],"feature:"+feature+":wave:"+str(wave),wave])
    for key,package,wave in (("task","package",1),("task2","package2",2)):
@@ -49,7 +50,7 @@ class HierarchyFixture(IdentityFixture):
     f.sql("UPDATE hyperfide.tasks SET generation=1,current_attempt_id=$1,state='RUNNING',state_version=state_version+1 WHERE organisation_id=$2 AND run_id=$3 AND id=$4",[i["attempt"],i["organisation"],i["run"],i["task"]])
     f.sql("INSERT INTO hyperfide.compute_leases(organisation_id,run_id,id,attempt_id,attempt_generation,authority_epoch,sandbox_boot_generation,expires_at) VALUES($1,$2,$3,$4,1,$5,1,clock_timestamp()+interval '1 hour')",[i["organisation"],i["run"],i["lease"],i["attempt"],i["epoch"]])
     f.sql("INSERT INTO hyperfide.agent_sessions(organisation_id,run_id,id,role,parent_session_id,connector,account_key,native_session_id,slot_id,sandbox_id,sandbox_boot_generation,attempt_id,state) VALUES($1,$2,$3,'WORKER',$4,'fixture','fixture','worker-one',$5,$6,1,$7,'RUNNING')",[i["organisation"],i["run"],i["worker"],i["manager"],i["slot"],i["sandbox"],i["attempt"]])
-   f.sql("INSERT INTO hyperfide.findings(organisation_id,run_id,id,dedup_digest,owner_package_id,repository_id,source_object_id,severity,summary) VALUES($1,$2,$3,$4,$5,$6,$7,'ERROR','Persistent accountable finding')",[i["organisation"],i["run"],i["finding"],sha(b"finding"),i["package"],i["repository"],"a"*40])
+   f.sql("INSERT INTO hyperfide.findings(organisation_id,run_id,id,dedup_digest,owner_package_id,repository_id,source_object_id,severity,summary) VALUES($1,$2,$3,$4,$5,$6,$7,'ERROR','Persistent accountable finding')",[i["organisation"],i["run"],i["finding"],sha(b"finding"),i["package"],i["repository"],source])
    if extra_setup:extra_setup(f)
   super().__init__(extra_components=("3.1",)+tuple(extra_components),extra_setup=setup,extra_env=extra_env)
   if bootstrap:self.bootstrap()
