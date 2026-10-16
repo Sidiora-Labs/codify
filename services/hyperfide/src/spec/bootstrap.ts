@@ -5,6 +5,9 @@ import {promisify} from 'node:util';
 import {createHash} from 'node:crypto';
 import type pg from 'pg';
 import {FoundationError,object} from '../policy/programme.js';
+import type {TransactionGateway} from '../storage/transactions.js';
+import {assertCurrentAuthority} from '../storage/durability.js';
+import type {SpecTransaction} from './import.js';
 import {importRunTransaction,parseKvx,canonical,digest} from './import.js';
 import type {SpecScope} from './import.js';
 
@@ -82,14 +85,14 @@ async function verifySources(metadata:BootstrapMetadata):Promise<void>{
   }
  }catch(error){if(error instanceof FoundationError)throw error;fail('BOOTSTRAP_SOURCE_INVALID','An approved local Git source could not be verified');}
 }
-async function metadataTransaction(client:pg.PoolClient,scope:SpecScope,metadata:BootstrapMetadata):Promise<void>{
+async function metadataTransaction(client:SpecTransaction,scope:SpecScope,metadata:BootstrapMetadata):Promise<void>{
  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':bootstrap-metadata']);
  await client.query('INSERT INTO hyperfide.organisations(id,name) VALUES($1,$2) ON CONFLICT DO NOTHING',[metadata.organisation.id,metadata.organisation.name]);
  const org=await client.query('SELECT name FROM hyperfide.organisations WHERE id=$1 FOR SHARE',[scope.organisation_id]);
- if(org.rows.length!==1||org.rows[0].name!==metadata.organisation.name)fail('BOOTSTRAP_METADATA_CONFLICT','Existing organisation differs from approved metadata');
+ if(org.rows.length!==1||org.rows[0]?.name!==metadata.organisation.name)fail('BOOTSTRAP_METADATA_CONFLICT','Existing organisation differs from approved metadata');
  await client.query('INSERT INTO hyperfide.projects(organisation_id,id,name) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[scope.organisation_id,metadata.project.id,metadata.project.name]);
  const project=await client.query('SELECT name FROM hyperfide.projects WHERE organisation_id=$1 AND id=$2 FOR SHARE',[scope.organisation_id,scope.project_id]);
- if(project.rows.length!==1||project.rows[0].name!==metadata.project.name)fail('BOOTSTRAP_METADATA_CONFLICT','Existing project differs from approved metadata');
+ if(project.rows.length!==1||project.rows[0]?.name!==metadata.project.name)fail('BOOTSTRAP_METADATA_CONFLICT','Existing project differs from approved metadata');
  for(const repo of metadata.repositories){
   await client.query('INSERT INTO hyperfide.repositories(organisation_id,project_id,id,name,url,object_format) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',
    [scope.organisation_id,scope.project_id,repo.id,repo.name,repo.url,repo.object_format]);
@@ -102,7 +105,7 @@ async function metadataTransaction(client:pg.PoolClient,scope:SpecScope,metadata
     [scope.organisation_id,repo.id,source.object_id,source.object_type]);
    const result=await client.query('SELECT object_type FROM hyperfide.source_objects WHERE organisation_id=$1 AND repository_id=$2 AND object_id=$3 FOR SHARE',
     [scope.organisation_id,repo.id,source.object_id]);
-   if(result.rows.length!==1||result.rows[0].object_type!==source.object_type)fail('BOOTSTRAP_METADATA_CONFLICT','Existing source object differs from its verified type');
+   if(result.rows.length!==1||result.rows[0]?.object_type!==source.object_type)fail('BOOTSTRAP_METADATA_CONFLICT','Existing source object differs from its verified type');
   }
  }
 }
@@ -135,7 +138,7 @@ export interface BootstrapQuery {query(text:string,values?:unknown[]):Promise<{r
 export interface AcceptedBootstrapPins {organisation_id:string;run_id:string;authority_epoch:string;accepted_revision_digest:string}
 export async function assertAcceptedBootstrap(tx:BootstrapQuery,pins:AcceptedBootstrapPins):Promise<{
  organisation_id:string;run_id:string;project_id:string;authority_epoch:string;
- spec_revision_id:string;spec_generation:string;state_version:string;revision_digest:string;source_digest:string;task_count:number;
+ spec_revision_id:string;spec_generation:string;state_version:string;revision_digest:string;source_digest:string;task_count:number;allowed_actions:readonly string[];
 }>{
  if(![pins.organisation_id,pins.run_id,pins.authority_epoch].every(value=>UUID.test(value))||
   !/^sha256:[0-9a-f]{64}$/.test(pins.accepted_revision_digest))
@@ -152,9 +155,10 @@ export async function assertAcceptedBootstrap(tx:BootstrapQuery,pins:AcceptedBoo
   row.state==='PLANNED'||row.schema_version!==1||row.revision_digest!==pins.accepted_revision_digest||
   !object(row.document)||row.document.schema_version!==1||row.document.revision_digest!==row.revision_digest||
   row.document.source_digest!==row.source_digest||!object(row.document.parsed)||!Array.isArray(row.document.repositories)||
-  !Array.isArray(row.document.allowed_actions)||!row.document.allowed_actions.length||!object(row.document.closure_policy))
+  !Array.isArray(row.document.allowed_actions)||!row.document.allowed_actions.length||row.document.allowed_actions.some((action:unknown)=>typeof action!=='string'||!/^[a-z][a-z0-9._:-]{0,127}$/.test(action))||!object(row.document.closure_policy))
   fail('BOOTSTRAP_ACCEPTANCE_MISMATCH','A genuine current accepted intake is required before credential issuance');
  const document=row.document;
+ const allowed_actions=Array.isArray(document.allowed_actions)?document.allowed_actions.filter((action:unknown):action is string=>typeof action==='string'):[];
  const parsed=parseKvx(row.source_content),tasks=parsed.sections.filter(section=>section.name.startsWith('task.'));
  const accepted={schema_version:1,source_digest:row.source_digest,repositories:document.repositories,
   allowed_actions:document.allowed_actions,closure_policy:document.closure_policy,provenance:document.provenance};
@@ -174,5 +178,24 @@ export async function assertAcceptedBootstrap(tx:BootstrapQuery,pins:AcceptedBoo
   fail('BOOTSTRAP_ACCEPTANCE_MISMATCH','Typed accepted repositories do not match the accepted envelope');
  return {organisation_id:pins.organisation_id,run_id:pins.run_id,project_id:row.project_id,authority_epoch:row.authority_epoch,
   spec_revision_id:row.spec_revision_id,spec_generation:row.spec_generation,state_version:row.state_version,
-  revision_digest:row.revision_digest,source_digest:row.source_digest,task_count:tasks.length};
+  revision_digest:row.revision_digest,source_digest:row.source_digest,task_count:tasks.length,allowed_actions:Object.freeze(allowed_actions)};
+}
+
+// Production bootstrap shares the real gateway's primary transaction and global
+// deployment fence. Metadata, accepted intent and the fence check commit together.
+export async function bootstrapAcceptedIntentWithGateway(
+ gateway:TransactionGateway,scope:SpecScope,rawMetadata:unknown,input:unknown,deployment_id:string
+):Promise<unknown>{
+ const metadata=validateBootstrapMetadata(rawMetadata,scope);
+ await verifySources(metadata);
+ return gateway.withPrimaryTransaction({timeoutMs:30000,maxRetries:2},async tx=>{
+  await metadataTransaction(tx,scope,metadata);
+  const result=await importRunTransaction(tx,scope,input);
+  if(!object(result)||typeof result.revision_digest!=='string')
+   fail('BOOTSTRAP_ACCEPTANCE_MISMATCH','Importer did not return an exact accepted intake');
+  await assertAcceptedBootstrap(tx,{organisation_id:scope.organisation_id,run_id:scope.run_id,
+   authority_epoch:scope.authority_epoch,accepted_revision_digest:result.revision_digest});
+  await assertCurrentAuthority(tx,{deployment_id,organisation_id:scope.organisation_id,run_id:scope.run_id,authority_epoch:scope.authority_epoch});
+  return result;
+ });
 }
