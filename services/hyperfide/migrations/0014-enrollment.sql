@@ -108,3 +108,6 @@ CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON
 CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_credential_references FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
 CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_credential_attachments FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
 CREATE TRIGGER identity_authority_isolation BEFORE INSERT OR UPDATE OR DELETE ON hyperfide.identity_runner_status FOR EACH ROW EXECUTE FUNCTION hyperfide.require_authority_isolation();
+
+-- Platform reviewers use separate job leases; only coding WORKER identities carry implementation attempts.
+ALTER TABLE hyperfide.identity_principals ADD CONSTRAINT identity_worker_attempt CHECK ((role='WORKER')=(attempt_id IS NOT NULL));

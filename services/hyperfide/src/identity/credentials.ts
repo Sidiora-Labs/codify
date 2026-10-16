@@ -32,15 +32,15 @@ export class StreamingRedactor {
  constructor(secrets:readonly string[]){if(secrets.length>128||secrets.some(s=>!s||s.length>65536))fail('REDACTION_CONFIG','Bounded nonempty secret values required');this.secrets=[...new Set(secrets)].sort((a,b)=>b.length-a.length);this.reserve=Math.max(0,...this.secrets.map(s=>s.length-1));}
  push(chunk:string,final=false):string{this.pending+=chunk;let out='';const boundary=final?this.pending.length:Math.max(0,this.pending.length-this.reserve);let index=0;while(index<boundary){const found=this.secrets.find(s=>this.pending.startsWith(s,index));if(found){out+='[REDACTED]';index+=found.length;}else out+=this.pending[index++];}this.pending=this.pending.slice(index);if(final){if(this.pending)throw new Error('Redaction finalization invariant');}return out;}
 }
-async function privateRoot(filename:string):Promise<string>{if(!path.isAbsolute(filename))fail('CREDENTIAL_CONFIG','Absolute private root required');const real=await fs.realpath(filename),s=await fs.lstat(filename);if(real!==path.resolve(filename)||!s.isDirectory()||s.isSymbolicLink()||(s.mode&0o022)!==0)fail('CREDENTIAL_CONFIG','Trusted root must not be writable by other users');return real;}
+async function privateRoot(filename:string):Promise<string>{if(!path.isAbsolute(filename))fail('CREDENTIAL_CONFIG','Absolute private root required');const real=await fs.realpath(filename),s=await fs.lstat(filename);if(real!==path.resolve(filename)||!s.isDirectory()||s.isSymbolicLink()||s.uid!==process.getuid?.()||(s.mode&0o022)!==0)fail('CREDENTIAL_CONFIG','Trusted root must not be writable by other users');return real;}
 async function privateRead(root:string,relative:string):Promise<Buffer>{
  if(!reference(relative))fail('CREDENTIAL_CONFIG','Unsafe private secret locator');let current=root;
  for(const part of relative.split('/')){current=path.join(current,part);const s=await fs.lstat(current);if(s.isSymbolicLink())fail('CREDENTIAL_CONFIG','Secret symlinks forbidden');}
- const fd=await fs.open(current,'r');try{const s=await fd.stat(),n=await fs.lstat(current);if(!s.isFile()||s.ino!==n.ino||s.dev!==n.dev||(s.mode&0o077)!==0||s.size<1||s.size>1048576)fail('CREDENTIAL_CONFIG','Secret files require bounded private ownership');return await fd.readFile();}finally{await fd.close();}
+ const fd=await fs.open(current,'r');try{const s=await fd.stat(),n=await fs.lstat(current);if(!s.isFile()||s.ino!==n.ino||s.dev!==n.dev||s.uid!==process.getuid?.()||(s.mode&0o077)!==0||s.size<1||s.size>1048576)fail('CREDENTIAL_CONFIG','Secret files require bounded private ownership');return await fd.readFile();}finally{await fd.close();}
 }
 async function configuration(ctx:ComponentContext):Promise<Configuration>{
  const file=ctx.env.HF_CREDENTIAL_CONFIG_FILE;if(!file)fail('CREDENTIAL_CONFIG','Trusted credential-store configuration required');
- const info=await fs.lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size>1048576)fail('CREDENTIAL_CONFIG','Bounded configuration file required');
+ const info=await fs.lstat(file);if(!path.isAbsolute(file)||!info.isFile()||info.isSymbolicLink()||info.uid!==process.getuid?.()||(info.mode&0o077)!==0||info.size>1048576)fail('CREDENTIAL_CONFIG','Bounded configuration file required');
  const v=strictJSON(await fs.readFile(file));exact(v,['schema_version','secret_root','attachment_root','sources','targets']);
  if(v.schema_version!==1||typeof v.secret_root!=='string'||typeof v.attachment_root!=='string'||!Array.isArray(v.sources)||!Array.isArray(v.targets)||v.sources.length>256||v.targets.length>256)fail('CREDENTIAL_CONFIG','Invalid store configuration');
  const sources:Source[]=[],targets:Target[]=[];
@@ -54,10 +54,10 @@ function availability(reference_id:string,row:Record<string,any>|undefined,i:Inv
 }
 export async function createComponent(ctx:ComponentContext):Promise<Component>{
  const config=await configuration(ctx),gateway=gatewayOf(ctx);
- const transact=<T>(i:InvocationContext,fn:(tx:IdentityTransaction)=>Promise<T>)=>{assertInvocation(i);return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:i.guard},fn);};
+ const transact=<T>(i:InvocationContext,fn:(tx:IdentityTransaction)=>Promise<T>)=>{assertInvocation(i);return gateway.withPrimaryTransaction({timeoutMs:5000,maxRetries:2,signal:i.signal,guard:i.guard},async tx=>{const result=await fn(tx);await i.guard(tx);return result;});};
  const inspectInTransaction:CredentialAuthority['inspectInTransaction']=async(tx,i,ref)=>{assertInvocation(i);await i.guard(tx);if(!reference(ref))fail('INVALID_REQUEST','Credential reference required');const row=(await tx.query('SELECT * FROM hyperfide.identity_credential_references WHERE organisation_id=$1 AND run_id=$2 AND reference_id=$3 FOR SHARE',[i.principal.organisation_id,i.principal.run_id,ref])).rows[0];if(row&&!row.allowed_roles.includes(i.principal.role))fail('AUTH_SCOPE_DENIED','Credential role scope denied');const now=(await tx.query('SELECT clock_timestamp() AS db_now')).rows[0]!.db_now;return availability(ref,row?{...row,db_now:now}:undefined,i);};
  const inspect:CredentialAuthority['inspect']=async(i,ref)=>transact(i,tx=>inspectInTransaction(tx,i,ref));
- const privateAttachment:CredentialAuthority['privateAttachment']=async(i,id)=>{if(!uuid(id))fail('INVALID_REQUEST','Attachment ID required');return transact(i,async tx=>{const a=(await tx.query('SELECT a.*,r.credential_version AS current_version,r.state AS reference_state,clock_timestamp() AS db_now FROM hyperfide.identity_credential_attachments a JOIN hyperfide.identity_credential_references r USING(organisation_id,run_id,reference_id) WHERE a.id=$1 AND a.organisation_id=$2 AND a.run_id=$3 AND a.actor_id=$4 FOR SHARE OF a,r',[id,i.principal.organisation_id,i.principal.run_id,i.principal.actor_id])).rows[0];if(!a||a.attempt_id!==i.principal.attempt_id||a.state!=='AVAILABLE'||a.reference_state!=='AVAILABLE'||String(a.current_version)!==String(a.credential_version)||new Date(a.expires_at).getTime()<=new Date(a.db_now).getTime())fail('AUTH_REVOKED','Credential attachment not current');return {path:path.join(config.attachment_root,a.locator,'value'),uid:a.target_uid,expires_at:new Date(a.expires_at).toISOString()};});};
+ const privateAttachment:CredentialAuthority['privateAttachment']=async(i,id)=>{if(!uuid(id))fail('INVALID_REQUEST','Attachment ID required');return transact(i,async tx=>{const a=(await tx.query('SELECT a.*,r.credential_version AS current_version,r.state AS reference_state,r.expires_at AS reference_expires_at FROM hyperfide.identity_credential_attachments a JOIN hyperfide.identity_credential_references r USING(organisation_id,run_id,reference_id) WHERE a.id=$1 AND a.organisation_id=$2 AND a.run_id=$3 AND a.actor_id=$4 FOR SHARE OF a,r',[id,i.principal.organisation_id,i.principal.run_id,i.principal.actor_id])).rows[0];const now=new Date((await tx.query('SELECT clock_timestamp() AS db_now')).rows[0]!.db_now).getTime();if(!a||a.attempt_id!==i.principal.attempt_id||a.state!=='AVAILABLE'||a.reference_state!=='AVAILABLE'||String(a.current_version)!==String(a.credential_version)||new Date(a.expires_at).getTime()<=now||new Date(a.reference_expires_at).getTime()<=now)fail('AUTH_REVOKED','Credential attachment not current');return {path:path.join(config.attachment_root,a.locator,'value'),uid:a.target_uid,expires_at:new Date(a.expires_at).toISOString()};});};
  const attach:CredentialAuthority['attach']=async(i,ref,layer)=>{
   if(!reference(ref)||!['build','runtime','process'].includes(layer))fail('INVALID_REQUEST','Secret attachment requires runtime layer');
   const target=config.targets.find(t=>t.actor_id===i.principal.actor_id&&t.layers.includes(layer));if(!target)fail('ISOLATION_REQUIRED','Qualified actor UID/layer isolation profile required');
@@ -88,12 +88,16 @@ export async function createComponent(ctx:ComponentContext):Promise<Component>{
  return {apiVersion:1,capabilities:{'identity.credentials':authority},actions:{
  'credentials.inspect':act(async(v,i)=>{exact(v,['reference_id']);if(typeof v.reference_id!=='string')fail('INVALID_REQUEST','Reference required');return inspect(i,v.reference_id);}),
  'credentials.attach':act(async(v,i)=>{exact(v,['reference_id','layer']);if(typeof v.reference_id!=='string'||typeof v.layer!=='string')fail('INVALID_REQUEST','Reference/layer required');return attach(i,v.reference_id,v.layer);}),
- 'credentials.environment.plan':act(async(v,_i)=>{exact(v,['layers','secret_bindings']);const env=composeEnvironment(v.layers);if(!Array.isArray(v.secret_bindings)||v.secret_bindings.length>128)fail('INVALID_REQUEST','Bounded secret bindings required');for(const b of v.secret_bindings){exact(b,['name','reference_id','layer']);if(typeof b.name!=='string'||!/^[A-Za-z_][A-Za-z0-9_]*$/.test(b.name)||!reference(b.reference_id)||!['build','runtime','process'].includes(String(b.layer)))fail('AUTH_SCOPE_DENIED','Secrets cannot enter reusable image layer');}return {schema_version:1,environment_keys:Object.keys(env).sort(),secret_bindings:v.secret_bindings,contains_secret_values:false};}),
+ 'credentials.environment.plan':act(async(v,i)=>{exact(v,['layers','secret_bindings']);const env=composeEnvironment(v.layers);
+  await transact(i,async()=>{});
+  // Inline image/build/runtime text is untrusted. Known configured canaries and secret bytes must remain reference-only.
+  const texts=Object.values(v.layers as Record<string,Record<string,string>>).flatMap(layer=>Object.values(layer));for(const source of config.sources){const bytes=await privateRead(config.secret_root,source.relative_path);try{const secret=new TextDecoder('utf-8',{fatal:true}).decode(bytes);if(secret&&texts.some(text=>text.includes(secret)))fail('ENVIRONMENT_DENIED','Inline environment contains a protected secret; use an approved reference');}finally{bytes.fill(0);}}
+  await transact(i,async()=>{});if(!Array.isArray(v.secret_bindings)||v.secret_bindings.length>128)fail('INVALID_REQUEST','Bounded secret bindings required');for(const b of v.secret_bindings){exact(b,['name','reference_id','layer']);if(typeof b.name!=='string'||!/^[A-Za-z_][A-Za-z0-9_]*$/.test(b.name)||!reference(b.reference_id)||!['build','runtime','process'].includes(String(b.layer)))fail('AUTH_SCOPE_DENIED','Secrets cannot enter reusable image layer');}return {schema_version:1,environment_keys:Object.keys(env).sort(),secret_bindings:v.secret_bindings,contains_secret_values:false};}),
  'credentials.reference.rotate':act(async(v,i)=>{
   exact(v,['reference_id','source_name','expected_version','expires_at','allowed_layers','allowed_roles','refresh_owner','purposes']);
   if(!['OPERATOR','COORDINATOR'].includes(i.principal.role)||!reference(v.reference_id)||typeof v.source_name!=='string'||!decimal(v.expected_version)||typeof v.expires_at!=='string'||!Number.isFinite(Date.parse(v.expires_at))||!uuid(v.refresh_owner))fail('AUTH_SCOPE_DENIED','Scoped credential administration required');
   const source=config.sources.find(s=>s.name===v.source_name);if(!source||Date.parse(v.expires_at)>Date.parse(source.expires_at)||Date.parse(v.expires_at)<=Date.now())fail('CREDENTIAL_CONFIG','Secret source/expiry not authorized');
-  const purposeList=strings(v.purposes,purposes);if(purposeList.some(x=>!source.purposes.includes(x as CredentialPurpose))||purposeList.includes('PROVIDER_API')&&(purposeList.length!==1||(v.allowed_roles as unknown[]).some(x=>x!=='PROVISIONER')))fail('AUTH_SCOPE_DENIED','Purpose exceeds trusted source ceiling');const layers=strings(v.allowed_layers,['build','runtime','process']),roles=strings(v.allowed_roles),bytes=await privateRead(config.secret_root,source.relative_path),locator=randomUUID(),file=await fs.open(path.join(config.secret_root,locator),'wx',0o600);
+  const purposeList=strings(v.purposes,purposes),layers=strings(v.allowed_layers,['build','runtime','process']),roles=strings(v.allowed_roles);if(purposeList.some(x=>!source.purposes.includes(x as CredentialPurpose))||purposeList.includes('PROVIDER_API')&&(purposeList.length!==1||(v.allowed_roles as unknown[]).some(x=>x!=='PROVISIONER')))fail('AUTH_SCOPE_DENIED','Purpose exceeds trusted source ceiling');const bytes=await privateRead(config.secret_root,source.relative_path),locator=randomUUID(),file=await fs.open(path.join(config.secret_root,locator),'wx',0o600);
   try{await file.writeFile(bytes);await file.sync();}finally{await file.close();bytes.fill(0);}
   try{return await transact(i,async tx=>recorded(tx,i.principal.credential_id,'credentials.reference.rotate',i.operation,async()=>{
    const prior=(await tx.query('SELECT * FROM hyperfide.identity_credential_references WHERE organisation_id=$1 AND run_id=$2 AND reference_id=$3 FOR UPDATE',[i.principal.organisation_id,i.principal.run_id,v.reference_id])).rows[0];
@@ -171,4 +175,53 @@ export async function loadIsolationPermitVerifier(configFile:string):Promise<Iso
   if(canonicalPermitJSON(claims)!==payload.toString('utf8')||canonicalPermitJSON(envelope)!==envelopeBytes.toString('utf8')||!verify(null,isolationSigningBytes(envelope.key_id,payload),keys.get(envelope.key_id)!,signature))fail('ISOLATION_PERMIT_INVALID','Isolation permit bytes or signature are invalid');
   const result=frozen({...claims,permit_digest:hash(envelopeBytes),issuer_key_id:envelope.key_id}) as VerifiedIsolationPermit;verifiedIsolationPermits.add(result);return result;
  };return Object.freeze({verifySigned,verify:(serialized:Buffer|string,expected:IsolationPermitExpectation)=>{const result=verifySigned(serialized);assertIsolationPermit(result,expected);return result;}});
+}
+
+
+export type WriterObservationPermitClaims=Omit<IsolationPermitClaims,'purpose'>&{readonly purpose:'EXTERNAL_WRITER_OBSERVATION_ONLY'};
+export interface VerifiedWriterObservationPermit extends WriterObservationPermitClaims {readonly permit_digest:string;readonly issuer_key_id:string}
+export interface WriterObservationPermitVerifier {
+ verifySigned(serialized:Buffer|string):VerifiedWriterObservationPermit;
+ verify(serialized:Buffer|string,expected:IsolationPermitExpectation):VerifiedWriterObservationPermit;
+}
+const verifiedWriterObservationPermits=new WeakSet<object>();
+function validateWriterObservationClaims(value:unknown,nowMs:number):asserts value is WriterObservationPermitClaims {
+ if(!object(value)||value.purpose!=='EXTERNAL_WRITER_OBSERVATION_ONLY')fail('OBSERVATION_PERMIT_INVALID','A distinct observation-only permit is required');
+ // Share only inert binding validation. This never registers an isolation brand or authorises an effect.
+ validateIsolationClaims({...value,purpose:'EXTERNAL_WRITER_ISOLATION_ONLY'},nowMs);
+}
+export function isVerifiedWriterObservationPermit(value:unknown):value is VerifiedWriterObservationPermit{return object(value)&&verifiedWriterObservationPermits.has(value);}
+export function assertVerifiedWriterObservationPermit(value:unknown):asserts value is VerifiedWriterObservationPermit {
+ if(!isVerifiedWriterObservationPermit(value))fail('OBSERVATION_PERMIT_REQUIRED','A genuinely verified observation-only permit is required');
+ const {permit_digest:_digest,issuer_key_id:_issuer,...claims}=value;validateWriterObservationClaims(claims,Date.now());
+}
+export function assertWriterObservationPermit(value:unknown,expected:IsolationPermitExpectation):asserts value is VerifiedWriterObservationPermit {
+ assertVerifiedWriterObservationPermit(value);
+ exact(expected,['deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest',...(Object.hasOwn(expected,'resource_reference')?['resource_reference']:[]),...(Object.hasOwn(expected,'resource_topology_digest')?['resource_topology_digest']:[])]);
+ for(const key of ['deployment_id','operation_id','organisation_id','run_id','source_epoch','topology_digest'] as const)if(value[key]!==expected[key])fail('OBSERVATION_PERMIT_SCOPE','Observation permit differs from the existing durable operation');
+ if((expected.resource_reference===undefined)!==(expected.resource_topology_digest===undefined))fail('OBSERVATION_PERMIT_SCOPE','Complete resource identity is required');
+ if(expected.resource_reference!==undefined&&!value.resources.some(r=>r.reference_key===expected.resource_reference&&r.topology_digest===expected.resource_topology_digest))fail('OBSERVATION_PERMIT_SCOPE','Resource is outside the observation allowlist');
+}
+function writerObservationSigningBytes(keyId:string,payload:Buffer):Buffer{return Buffer.from('HYPERFIDE-WRITER-OBSERVATION-PERMIT-V1\n'+keyId+'\n'+hash(payload)+'\n','utf8');}
+export async function issueWriterObservationPermit(claims:WriterObservationPermitClaims,issuer:{key_id:string;private_key_file:string}):Promise<string>{
+ validateWriterObservationClaims(claims,Date.now());exact(issuer,['key_id','private_key_file']);if(typeof issuer.key_id!=='string'||!NAME.test(issuer.key_id)||typeof issuer.private_key_file!=='string'||!path.isAbsolute(issuer.private_key_file))fail('OBSERVATION_PERMIT_CONFIG','Explicit trusted operator signing key required');
+ const file=await fs.open(issuer.private_key_file,constants.O_RDONLY|constants.O_NOFOLLOW);let bytes:Buffer;
+ try{const stat=await file.stat();if(!stat.isFile()||stat.uid!==process.getuid?.()||stat.size<1||stat.size>4096||(stat.mode&0o077)!==0)fail('OBSERVATION_PERMIT_CONFIG','Bounded private operator signing key required');bytes=await file.readFile();}finally{await file.close();}
+ let key;try{key=createPrivateKey(bytes!);}finally{bytes!.fill(0);}if(key.asymmetricKeyType!=='ed25519')fail('OBSERVATION_PERMIT_CONFIG','Observation signer must use Ed25519');
+ const payload=Buffer.from(canonicalPermitJSON(claims)),signature=sign(null,writerObservationSigningBytes(issuer.key_id,payload),key);
+ return canonicalPermitJSON({schema_version:1,key_id:issuer.key_id,payload_b64:payload.toString('base64url'),signature_b64:signature.toString('base64url')});
+}
+export async function loadWriterObservationPermitVerifier(configFile:string):Promise<WriterObservationPermitVerifier>{
+ if(!path.isAbsolute(configFile))fail('OBSERVATION_PERMIT_CONFIG','Trusted verifier configuration must be absolute');
+ const file=await fs.open(configFile,constants.O_RDONLY|constants.O_NOFOLLOW);let bytes:Buffer;
+ try{const stat=await file.stat();if(!stat.isFile()||stat.uid!==process.getuid?.()||stat.size<1||stat.size>65536||(stat.mode&0o022)!==0)fail('OBSERVATION_PERMIT_CONFIG','Bounded operator-owned verifier configuration required');bytes=await file.readFile();}finally{await file.close();}
+ const config=strictJSON(bytes!);exact(config,['schema_version','issuers']);if(config.schema_version!==1||!Array.isArray(config.issuers)||!config.issuers.length||config.issuers.length>16)fail('OBSERVATION_PERMIT_CONFIG','Explicit bounded trusted operator public keys required');
+ const keys=new Map<string,ReturnType<typeof createPublicKey>>();for(const issuer of config.issuers){exact(issuer,['key_id','public_key_b64']);if(typeof issuer.key_id!=='string'||!NAME.test(issuer.key_id)||keys.has(issuer.key_id))fail('OBSERVATION_PERMIT_CONFIG','Unique trusted observation issuer required');const publicBytes=base64(issuer.public_key_b64,32);keys.set(issuer.key_id,createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),publicBytes]),format:'der',type:'spki'}));}
+ const verifySigned=(serialized:Buffer|string):VerifiedWriterObservationPermit=>{
+  const envelopeBytes=Buffer.isBuffer(serialized)?Buffer.from(serialized):Buffer.from(serialized,'utf8');if(envelopeBytes.length>131072)fail('OBSERVATION_PERMIT_INVALID','Bounded observation permit envelope required');
+  const envelope=strictJSON(envelopeBytes);exact(envelope,['schema_version','key_id','payload_b64','signature_b64']);if(envelope.schema_version!==1||typeof envelope.key_id!=='string'||typeof envelope.payload_b64!=='string'||!keys.has(envelope.key_id))fail('OBSERVATION_PERMIT_INVALID','Unknown observation permit issuer');
+  const payload=base64(envelope.payload_b64),signature=base64(envelope.signature_b64,64),claims=strictJSON(payload);validateWriterObservationClaims(claims,Date.now());
+  if(canonicalPermitJSON(claims)!==payload.toString('utf8')||canonicalPermitJSON(envelope)!==envelopeBytes.toString('utf8')||!verify(null,writerObservationSigningBytes(envelope.key_id,payload),keys.get(envelope.key_id)!,signature))fail('OBSERVATION_PERMIT_INVALID','Observation permit bytes or signature are invalid');
+  const result=frozen({...claims,permit_digest:hash(envelopeBytes),issuer_key_id:envelope.key_id}) as VerifiedWriterObservationPermit;verifiedWriterObservationPermits.add(result);return result;
+ };return Object.freeze({verifySigned,verify:(serialized:Buffer|string,expected:IsolationPermitExpectation)=>{const result=verifySigned(serialized);assertWriterObservationPermit(result,expected);return result;}});
 }
