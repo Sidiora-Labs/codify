@@ -1,3 +1,9 @@
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import {assertInvocation} from '../../transport/protocol.js';
+import {isCredentialAuthority,composeEnvironment,type CredentialAuthority} from '../../identity/credentials.js';
+import {isArtifactStoreCapability} from '../../artifacts/objects.js';
+import type {ProviderPersistenceHooks as RuntimeProviderPersistenceHooks,ProviderPreparationBinding} from '../pools.js';
 import { Sandbox, ExecControlUnsupportedError } from 'railway';
 import type { Component, ComponentContext } from '../../components/registry.js';
 import {
@@ -5,9 +11,9 @@ import {
   type ProviderAdapter, type ProviderScope, type ProviderOperation, type ProviderOutcome, type ResourceRef,
   type InventoryPage, type CapabilityProfile, type ProviderState
 } from '../contract.js';
-import { RailwayClient, RailwayRequestError, configuredClient, digest, hash, integer, object, sameScope, scope, text,
+import { RailwayClient, RailwayRequestError, configuredClient, absolute, digest, hash, instant, integer, object, sameScope, scope, text,
   validatePreparedBase, type PreparedRailwayBase } from './preparation.js';
-import { RailwaySessionSpool } from './processes.js';
+import { RailwaySessionSpool, createRailwayArtifactChunkSink, type RailwayChunkSink, type RailwayArchiveBinding, type RailwayArtifactInvoke } from './processes.js';
 import { validateRuntimeProfile, runtimeOptions, runtimeGraphQLInput, type RailwayRuntimeProfile, type CredentialResolver } from './profile.js';
 
 const fields='id status networkIsolation environmentId region idleTimeoutMinutes createdAt domains{prefix port domain}';
@@ -71,15 +77,16 @@ export async function completeSessions(client:RailwayClient,sandboxId:string,sig
   }
   return {sessions,enumeration_complete:false,available:true};
 }
-export interface ProviderPersistenceHooks {
-  assignedBootGeneration(operation:ProviderOperation<'create'>):Promise<string>;
-  persistEarlyResource(operation:ProviderOperation<'create'>,nativeSandboxId:string):Promise<ResourceRef>;
-  recordObservation(operation:ProviderOperation,outcome:ProviderOutcome):Promise<void>;
-}
+export type ProviderPersistenceHooks=RuntimeProviderPersistenceHooks;
 export interface RailwayAdapterDependencies {
   persistence:ProviderPersistenceHooks;
+  boundScope?:ProviderScope;
+  artifactSink?:RailwayChunkSink;
+  archive?:{invoke:RailwayArtifactInvoke;binding(operation:ProviderOperation<'execute'>):Promise<RailwayArchiveBinding>};
+  requireTrustedBindings?:true;
   runtimeProfile(operation:ProviderOperation<'create'>):Promise<RailwayRuntimeProfile>;
   preparedBase(reference:string,scope:ProviderScope):Promise<PreparedRailwayBase>;
+  allowSeedPreparation?(operation:ProviderOperation<'create'>,profile:RailwayRuntimeProfile):Promise<boolean>;
   allowFreshPreparation?(operation:ProviderOperation<'create'>,profile:RailwayRuntimeProfile):Promise<boolean>;
   verifyForkSource?(operation:ProviderOperation<'create'>,profile:RailwayRuntimeProfile,base:PreparedRailwayBase):Promise<boolean>;
   credentials:CredentialResolver;
@@ -113,6 +120,8 @@ function refused(operation:ProviderOperation):ProviderOutcome {
     reconcile_required:false,retry:'NEVER'} as ProviderOutcome;
 }
 export type RailwayAdapter=ProviderAdapter&{
+  sealCapturedOutput(operation:ProviderOperation<'execute'>):ReturnType<RailwaySessionSpool['sealStreams']>;
+  reconcileCapturedOutput(operation:ProviderOperation<'execute'>):Promise<boolean>;
   readCapturedOutput(scope:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number):Promise<{
     stdout:Uint8Array;stderr:Uint8Array;exit_code:number;complete:true;spool_digest:string;
   }>;
@@ -120,12 +129,17 @@ export type RailwayAdapter=ProviderAdapter&{
 export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAdapterDependencies):RailwayAdapter {
   const execute=async(operation:ProviderOperation,signal=AbortSignal.timeout(client.config.request_timeout_ms)):Promise<ProviderOutcome>=>{
     validateProviderOperation(operation);client.assertScope(operation.scope);
+    if(dependencies.boundScope&&!sameScope(operation.scope,dependencies.boundScope))throw new Error('Railway adapter scope mismatch');
     const remaining=Date.parse(operation.deadline_at)-Date.now();
     signal=AbortSignal.any([signal,AbortSignal.timeout(Math.max(1,Math.min(remaining,2147483647)))]);
     let resource=operation.resource;
     let outcome:ProviderOutcome;
     if(signal.aborted||Date.now()>=Date.parse(operation.deadline_at))outcome=refused(operation);
     else try{
+      if(client.config.mode==='live'||dependencies.requireTrustedBindings===true){
+        assertInvocation(dependencies.persistence.invocation);
+        if(operation.kind!=='prepare')await dependencies.persistence.assertResourceBinding(operation);
+      }
       switch(operation.kind){
         case 'capabilities':{
           if(!dependencies.capabilities){outcome=unsupported(operation);break;}
@@ -144,7 +158,10 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
           if(!sameScope(profile.scope,operation.scope)||profile.preparation_digest!==operation.preparation_digest||
             hash(profile.resources)!==hash(operation.parameters.resources)||profile.network!==operation.parameters.network)
             throw new Error('Railway operation/profile mismatch');
-          if(profile.source.kind==='FRESH'){
+          const seedAllowed=dependencies.allowSeedPreparation?await dependencies.allowSeedPreparation(operation,profile):false;
+          if(seedAllowed){
+            if(profile.source.kind==='FORK')throw new Error('Railway seed preparation cannot inherit a running source');
+          }else if(profile.source.kind==='FRESH'){
             if(!dependencies.allowFreshPreparation||!await dependencies.allowFreshPreparation(operation,profile)){
               outcome=unsupported(operation);break;
             }
@@ -187,14 +204,40 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
             row.status==='DESTROYED'?'ABSENT':row.status==='FAILED'?'SUSPECT':'UNKNOWN'});break;
         }
         case 'execute':{
-          const result=await dependencies.sessions.start(client,operation,dependencies.credentials,signal);
-          outcome=success(operation,resource,result.result);break;
+          const trusted=client.config.mode==='live'||dependencies.requireTrustedBindings===true;
+          let logical:string|null=null;
+          if(trusted){
+            logical='railway-'+operation.identity.operation_id;
+            const claim=await dependencies.persistence.claimProcess(operation,{process_ref:logical,
+              payload_digest:operation.identity.payload_digest,resource:resource!,state:'SUBMITTED',provider_metadata:{provider:'railway'}});
+            if(claim.disposition!=='NEW'){outcome=unknown(operation,resource);break;}
+            if(claim.record.process_ref!==logical||claim.record.payload_digest!==operation.identity.payload_digest||
+              hash(claim.record.resource)!==hash(resource))throw new Error('Railway durable process claim mismatch');
+          }
+          const result=await dependencies.sessions.start(client,operation,dependencies.credentials,signal,dependencies.artifactSink,
+            trusted?native=>dependencies.persistence.persistEarlyProcess(operation,native):undefined);
+          outcome=success(operation,resource,{...result.result,process_ref:logical??result.result.process_ref});break;
         }
-        case 'inspect':outcome=success(operation,resource,dependencies.sessions.inspect(resource!,operation.parameters.process_ref));break;
+        case 'inspect':{
+          let native=operation.parameters.process_ref;
+          if(client.config.mode==='live'||dependencies.requireTrustedBindings===true){
+            const bound=await dependencies.persistence.resolveProcess(operation,native);
+            if(!bound?.native_process_ref){outcome=unknown(operation,resource);break;}
+            native=bound.native_process_ref;
+          }
+          const result=dependencies.sessions.inspect(resource!,native);
+          outcome=success(operation,resource,{...result,process_ref:operation.parameters.process_ref});break;
+        }
         case 'attach':{
           // Native supervisor owns agent IPC. Reattachment recovers diagnostics, never resumes caller stdin.
+          let native=operation.parameters.process_ref;
+          if(client.config.mode==='live'||dependencies.requireTrustedBindings===true){
+            const bound=await dependencies.persistence.resolveProcess(operation,native);
+            if(!bound?.native_process_ref){outcome=unknown(operation,resource);break;}
+            native=bound.native_process_ref;
+          }
           const inventory=await completeSessions(client,resource!.native_sandbox_id,signal);
-          const row=inventory.sessions.find(item=>item.name===operation.parameters.process_ref);
+          const row=inventory.sessions.find(item=>item.name===native);
           if(!inventory.available||!inventory.enumeration_complete||!row){outcome=unknown(operation,resource);break;}
           const state=object(row.runState);
           if(typeof state.running!=='boolean')throw new Error('Railway process state');
@@ -208,7 +251,13 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
           }break;
         }
         case 'stop':{
-          const result=await dependencies.sessions.stop(client,resource!,operation.parameters.process_ref,operation.parameters.signal);
+          let native=operation.parameters.process_ref;
+          if(client.config.mode==='live'||dependencies.requireTrustedBindings===true){
+            const bound=await dependencies.persistence.resolveProcess(operation,native);
+            if(!bound?.native_process_ref){outcome=unknown(operation,resource);break;}
+            native=bound.native_process_ref;
+          }
+          const result=await dependencies.sessions.stop(client,resource!,native,operation.parameters.signal);
           if(!result.termination_confirmed||result.exit_code===null)throw new Error('Railway termination unknown');
           outcome=success(operation,resource,{process_ref:operation.parameters.process_ref,termination:'CONFIRMED',exit_code:result.exit_code});break;
         }
@@ -251,14 +300,38 @@ export function createRailwayAdapter(client:RailwayClient,dependencies:RailwayAd
   };
   return {provider:'railway',capabilities:execute,prepare:execute,create:execute,list:execute,observe:execute,
     attach:execute,execute,inspect:execute,stop:execute,transfer:execute,lifetime:execute,destroy:execute,
+    sealCapturedOutput:async(operation:ProviderOperation<'execute'>)=>{
+      validateProviderOperation(operation);client.assertScope(operation.scope);
+      if(operation.kind!=='execute'||!dependencies.archive||!dependencies.artifactSink||
+        !dependencies.boundScope||!sameScope(operation.scope,dependencies.boundScope))throw new Error('Railway archive unavailable');
+      assertInvocation(dependencies.persistence.invocation);await dependencies.persistence.assertResourceBinding(operation);
+      const bound=await dependencies.persistence.resolveProcess(operation,'railway-'+operation.identity.operation_id);
+      if(!bound?.native_process_ref)throw new Error('Railway archive native session unavailable');
+      const record=dependencies.sessions.find(operation.resource!,bound.native_process_ref);
+      if(record.operation_id!==operation.identity.operation_id||record.payload_digest!==operation.identity.payload_digest)
+        throw new Error('Railway archive operation mismatch');
+      await dependencies.sessions.uploadPending(record.operation_id,dependencies.artifactSink);
+      return dependencies.sessions.sealStreams(record.operation_id,dependencies.archive.invoke,await dependencies.archive.binding(operation));
+    },
+    reconcileCapturedOutput:async(operation:ProviderOperation<'execute'>)=>{
+      validateProviderOperation(operation);client.assertScope(operation.scope);
+      if(operation.kind!=='execute'||!dependencies.archive||!dependencies.boundScope||
+        !sameScope(operation.scope,dependencies.boundScope))throw new Error('Railway artifact recovery unavailable');
+      assertInvocation(dependencies.persistence.invocation);await dependencies.persistence.assertResourceBinding(operation);
+      return dependencies.sessions.reconcileArtifactUploads(operation.identity.operation_id,dependencies.archive.invoke,
+        await dependencies.archive.binding(operation));
+    },
     readCapturedOutput:async(s:ProviderScope,resource:ResourceRef,processRef:string,maxBytes:number)=>{
-      client.assertScope(s);return dependencies.sessions.readCapturedOutput(resource,processRef,maxBytes);
+      client.assertScope(s);
+      if(dependencies.boundScope&&!sameScope(s,dependencies.boundScope))throw new Error('Railway output scope mismatch');
+      if(dependencies.sessions.find(resource,processRef).scope_digest!==hash(s))throw new Error('Railway output scope binding');
+      return dependencies.sessions.readCapturedOutput(resource,processRef,maxBytes);
     }} as RailwayAdapter;
 }
 export type RailwayRegistrar=(provider:'railway',factory:(scope:ProviderScope,hooks:ProviderPersistenceHooks)=>ProviderAdapter)=>()=>void;
 export function registerRailwayProvider(registrar:RailwayRegistrar,client:RailwayClient,
   dependencies:(scope:ProviderScope,hooks:ProviderPersistenceHooks)=>RailwayAdapterDependencies):()=>void {
-  return registrar('railway',(s,hooks)=>{client.assertScope(s);return createRailwayAdapter(client,dependencies(s,hooks));});
+  return registrar('railway',(s,hooks)=>{client.assertScope(s);return createRailwayAdapter(client,{...dependencies(s,hooks),boundScope:s});});
 }
 export function reconcileCreate(input:unknown):{decision:'ADOPT_CANDIDATE'|'QUARANTINE'|'NO_MATCH';
   candidate_id:string|null;retry_create:false;authority:'NONE'} {
@@ -283,8 +356,10 @@ export function reconcileCreate(input:unknown):{decision:'ADOPT_CANDIDATE'|'QUAR
   if(verified.length===1)return {decision:'ADOPT_CANDIDATE',candidate_id:verified[0]!,retry_create:false,authority:'NONE'};
   return {decision:'NO_MATCH',candidate_id:null,retry_create:false,authority:'NONE'};
 }
-export function createComponent(_context:ComponentContext):Component {
-  return {apiVersion:1,actions:{
+export function createComponent(context:ComponentContext):Component {
+  const configured=context.env.HF_RAILWAY_CONFIG?configuredClient(context):undefined;
+  const runtime=configured&&(configured.config.mode==='live'||context.env.HF_RAILWAY_RUNTIME_POLICY)?installRailwayRuntime(context):undefined;
+  return {apiVersion:1,close:()=>runtime?.close(),actions:{
     'railway.reconciliation.create':input=>reconcileCreate(input),
     'railway.inventory.list':async(input,context)=>{
       const v=object(input,['scope','max_pages']);const client=configuredClient(context);
@@ -299,4 +374,195 @@ export function createComponent(_context:ComponentContext):Component {
         ...client.provenance(),authority:'NONE'};
     }
   }};
+}
+
+
+/** This transport is reachable only through8.4's guarded isolation registry.
+ * The caller supplies real14 isolation authority; no worker invocation is fabricated. */
+export interface RailwayIsolationTransport {
+  destroy(operation:ProviderOperation<'destroy'>,signal:AbortSignal):Promise<ProviderOutcome>;
+  observe(operation:ProviderOperation<'observe'>,signal:AbortSignal):Promise<ProviderOutcome>;
+}
+export function createRailwayIsolationTransport(client:RailwayClient,fixedScope:ProviderScope):RailwayIsolationTransport {
+  client.assertScope(fixedScope);
+  const perform=async(operation:ProviderOperation,signal:AbortSignal):Promise<ProviderOutcome>=>{
+    validateProviderOperation(operation);client.assertScope(operation.scope);
+    if(!sameScope(operation.scope,fixedScope)||operation.resource===null||
+      (operation.kind!=='destroy'&&operation.kind!=='observe'))throw new Error('Railway isolation operation binding');
+    if(signal.aborted||Date.now()>=Date.parse(operation.deadline_at))return refused(operation);
+    const bounded=AbortSignal.any([signal,AbortSignal.timeout(Math.max(1,Math.min(
+      Date.parse(operation.deadline_at)-Date.now(),2147483647)))]);
+    const resource=operation.resource;
+    try{
+      if(operation.kind==='destroy'){
+        const accepted=await client.request<{sandboxDestroy:boolean}>(
+          'mutation RailwayIsolationDestroy($environmentId:String!,$id:String!){sandboxDestroy(environmentId:$environmentId,id:$id)}',
+          {environmentId:fixedScope.environment_id,id:resource.native_sandbox_id},bounded);
+        if(accepted.sandboxDestroy!==true)return unknown(operation,resource);
+      }
+      // A scoped exact get is independent of mutation acceptance and inventory enumeration.
+      const data=await client.request<{sandbox:unknown}>(sandboxQuery,
+        {environmentId:fixedScope.environment_id,id:resource.native_sandbox_id},bounded);
+      const observed=data.sandbox===null?null:info(data.sandbox,client);
+      if(observed&&observed.id!==resource.native_sandbox_id)throw new Error('Railway isolation observed different resource');
+      const absent=observed===null||observed.status==='DESTROYED';
+      const outcome=operation.kind==='destroy'?
+        absent?success(operation,resource,{deletion:'CONFIRMED'}):unknown(operation,resource):
+        success(operation,resource,{provider_state:absent?'DESTROYED':observed!.status,health:absent?'ABSENT':'UNKNOWN'});
+      validateProviderOutcome({operation,outcome});return outcome;
+    }catch{return unknown(operation,resource);}
+  };
+  return {destroy:perform,observe:perform};
+}
+
+/** Pure provisioner boot seam.08/24 supply the independently trusted topology scope.
+ * Construction creates no database connection, worker identity or provider effect. */
+export function configuredRailwayIsolationTransport(
+  config:Pick<ComponentContext,'env'>,fixedScope:ProviderScope):RailwayIsolationTransport {
+  const client=configuredClient(config);
+  if(client.config.mode!=='live')throw new Error('Railway production isolation requires LIVE_PROVIDER configuration');
+  return createRailwayIsolationTransport(client,fixedScope);
+}
+
+/** Trusted deployment policy, never populated from a component action input. */
+interface RailwayPoolPolicy {
+  scope:ProviderScope; seed_reference:string; seed_source:{kind:'FRESH'|'CHECKPOINT';reference:string|null};
+  idle_timeout_minutes:number;domains:RailwayRuntimeProfile['domains'];
+  runtime_variables:RailwayRuntimeProfile['runtime_variables'];build_variables:Record<string,string>;
+  retention:{retention_class:'EPHEMERAL'|'RUN'|'RELEASE'|'LEGAL_HOLD';retention_until:string|null;retention_hold:boolean};
+}
+function railwayRuntimePolicies(context:ComponentContext):RailwayPoolPolicy[] {
+  const filename=context.env.HF_RAILWAY_RUNTIME_POLICY,expected=context.env.HF_RAILWAY_RUNTIME_POLICY_DIGEST;
+  if(!filename||!expected)throw new Error('Railway trusted runtime policy unavailable');
+  digest(expected);
+  const fd=fs.openSync(absolute(filename),fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+  let bytes:Buffer;
+  try{const stat=fs.fstatSync(fd);
+    if(!stat.isFile()||stat.size<2||stat.size>1024*1024||(stat.mode&0o077)!==0||
+      (stat.uid!==0&&stat.uid!==process.geteuid?.()))throw new Error('Railway runtime policy ownership');
+    bytes=fs.readFileSync(fd);
+  }finally{fs.closeSync(fd);}
+  if('sha256:'+createHash('sha256').update(bytes).digest('hex')!==expected)throw new Error('Railway runtime policy pin mismatch');
+  const envelope=object(JSON.parse(bytes.toString('utf8')),['schema_version','pools']);
+  if(envelope.schema_version!==1||!Array.isArray(envelope.pools)||!envelope.pools.length||envelope.pools.length>1000)
+    throw new Error('Railway runtime policy schema');
+  const seen=new Set<string>();
+  return envelope.pools.map(value=>{
+    const v=object(value,['scope','seed_reference','seed_source','idle_timeout_minutes','domains','runtime_variables','build_variables','retention']);
+    const s=scope(v.scope),key=hash(s);if(seen.has(key))throw new Error('Railway duplicate runtime pool');seen.add(key);
+    text(v.seed_reference);
+    const seed=object(v.seed_source,['kind','reference']);
+    if(seed.kind==='FRESH'){if(seed.reference!==null)throw new Error('Railway fresh seed reference');}
+    else if(seed.kind!=='CHECKPOINT'||typeof seed.reference!=='string'||!seed.reference.trim())throw new Error('Railway seed source');
+    const retention=object(v.retention,['retention_class','retention_until','retention_hold']);
+    if(!['EPHEMERAL','RUN','RELEASE','LEGAL_HOLD'].includes(String(retention.retention_class))||
+      typeof retention.retention_hold!=='boolean')throw new Error('Railway output retention');
+    if(retention.retention_until!==null)instant(retention.retention_until);
+    integer(v.idle_timeout_minutes,0,10080);
+    return {...v,scope:s} as unknown as RailwayPoolPolicy;
+  });
+}
+export function railwayRuntimePolicyDigest(policy:Omit<RailwayPoolPolicy,'scope'>|RailwayPoolPolicy):string {
+  return hash({seed_reference:policy.seed_reference,seed_source:policy.seed_source,
+    idle_timeout_minutes:policy.idle_timeout_minutes,domains:policy.domains,runtime_variables:policy.runtime_variables,
+    build_variables:policy.build_variables,retention:policy.retention});
+}
+function railwayBaseFromRow(row:Record<string,unknown>|null,s:ProviderScope,preparation:string):PreparedRailwayBase {
+  if(!row)throw new Error('Railway qualified preparation missing');
+  const reference=object(row.provider_reference);
+  return validatePreparedBase(reference.railway_prepared_base,s,preparation);
+}
+function railwayCredentialResolver(authority:CredentialAuthority,hooks:ProviderPersistenceHooks):CredentialResolver {
+  assertInvocation(hooks.invocation);
+  return async(references,signal,layer='process',operation)=>{
+    signal.throwIfAborted();
+    if(Object.keys(references).length===0)return {};
+    if(layer!=='process'||!operation||operation.kind!=='execute')
+      throw new Error('Railway worker credentials require post-binding native execution');
+    if(Object.keys(references).length>128)throw new Error('Railway credential count');
+    const refs=Object.entries(references).map(([name,encoded])=>{
+      if(!encoded.startsWith('secret-ref:'))throw new Error('Railway credential reference encoding');
+      const reference_id=encoded.slice('secret-ref:'.length);
+      if(!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/.test(reference_id))
+        throw new Error('Railway credential reference identity');
+      return {name,reference_id};
+    });
+    const target=await hooks.resolveResourceBinding(operation);
+    const values=await authority.resolveCredentialReferences(hooks.invocation,{
+      references:refs,purpose:'WORKER_PROCESS',sandbox_id:target.sandbox_id,
+      boot_id:target.boot_id,boot_generation:target.boot_generation},signal);
+    return {...composeEnvironment({image:{},build:{},runtime:{},process:values})};
+  };
+}
+function installRailwayRuntime(context:ComponentContext):{close:()=>Promise<void>} {
+  const client=configuredClient(context),policies=railwayRuntimePolicies(context);
+  const registrar=context.dependencies.require('8.2','provider.registry.v1',(v):v is {
+    registerProviderAdapter:RailwayRegistrar;
+    registerIsolationTransport:(provider:'railway',factory:(scope:ProviderScope)=>RailwayIsolationTransport)=>()=>void
+  }=>!!v&&typeof v==='object'&&typeof (v as {registerProviderAdapter?:unknown}).registerProviderAdapter==='function'&&
+    typeof (v as {registerIsolationTransport?:unknown}).registerIsolationTransport==='function');
+  const credentials=context.dependencies.require('14.2','identity.credentials',isCredentialAuthority);
+  const artifacts=context.dependencies.require('15.2','artifact.store.v1',isArtifactStoreCapability);
+  const root=context.env.HF_RAILWAY_PROCESS_ROOT;if(!root)throw new Error('Railway process root missing');
+  const sessions=new RailwaySessionSpool(root);
+  const unregisterIsolation=registrar.registerIsolationTransport('railway',s=>{
+    if(!policies.some(v=>sameScope(v.scope,s)))throw new Error('Railway isolation pool policy unavailable');
+    return createRailwayIsolationTransport(client,s);
+  });
+  let unregister:()=>void;
+  try{unregister=registerRailwayProvider(registrar.registerProviderAdapter,client,(s,hooks)=>{
+    assertInvocation(hooks.invocation);
+    const policy=policies.find(v=>sameScope(v.scope,s));if(!policy)throw new Error('Railway configured pool policy unavailable');
+    const resolve=(operation:ProviderOperation<'create'>)=>hooks.resolvePreparation(operation);
+    let binding:ProviderPreparationBinding|undefined;
+    return {
+      persistence:hooks,sessions,boundScope:s,requireTrustedBindings:true,
+      archive:{invoke:(action,input)=>artifacts.invoke(action,input,hooks.invocation),binding:async operation=>{
+        const target=await hooks.resolveResourceBinding(operation);
+        const process=await hooks.resolveProcess(operation,'railway-'+operation.identity.operation_id);
+        if(!process?.native_process_ref)throw new Error('Railway archive process binding unavailable');
+        return {organisation_id:target.organisation_id,run_id:target.run_id,sandbox_id:target.sandbox_id,
+          boot_id:target.boot_id,boot_generation:target.boot_generation,logical_process_ref:process.process_ref,...policy.retention};
+      }},
+      credentials:railwayCredentialResolver(credentials,hooks),
+      artifactSink:createRailwayArtifactChunkSink((action,input)=>artifacts.invoke(action,input,hooks.invocation),{
+        organisation_id:hooks.invocation.principal.organisation_id,run_id:hooks.invocation.principal.run_id,...policy.retention}),
+      runtimeProfile:async operation=>{
+        binding=await resolve(operation);
+        if(binding.adapter_policy_digest!==railwayRuntimePolicyDigest(policy))throw new Error('Railway approved adapter policy changed');
+        if(!sameScope(binding.scope,s)||binding.preparation_digest!==operation.preparation_digest||
+          hash(binding.parameters)!==hash(operation.parameters))throw new Error('Railway durable preparation binding mismatch');
+        let source:RailwayRuntimeProfile['source'];
+        if(binding.purpose==='PREPARATION'){
+          if(binding.parameters.preparation_reference!==policy.seed_reference)throw new Error('Railway approved seed mismatch');
+          source=policy.seed_source.kind==='FRESH'?{kind:'FRESH',reference:null,environment_id:null,region:null}:
+            {kind:'CHECKPOINT',reference:text(policy.seed_source.reference),environment_id:s.environment_id,region:s.region};
+        }else{
+          const base=railwayBaseFromRow(binding.prepared_base,s,binding.preparation_digest);
+          source={kind:'CHECKPOINT',reference:base.checkpoint.key,environment_id:s.environment_id,region:s.region};
+        }
+        if(Object.values(policy.runtime_variables).some(v=>v.kind!=='PUBLIC'))
+          throw new Error('Railway CREATE policy cannot inject pre-enrollment credentials');
+        const body={schema_version:1,scope:s,preparation_digest:binding.preparation_digest,source,
+          resources:binding.parameters.resources,network:binding.parameters.network,idle_timeout_minutes:policy.idle_timeout_minutes,
+          domains:policy.domains,runtime_variables:policy.runtime_variables,build_variables:policy.build_variables};
+        return validateRuntimeProfile({...body,digest:hash(body)});
+      },
+      allowSeedPreparation:async(operation,profile)=>{
+        const actual=await resolve(operation);
+        return actual.purpose==='PREPARATION'&&actual.adapter_policy_digest===railwayRuntimePolicyDigest(policy)&&sameScope(actual.scope,s)&&
+          actual.preparation_digest===profile.preparation_digest&&actual.parameters.preparation_reference===policy.seed_reference&&
+          hash(actual.parameters)===hash(operation.parameters)&&
+          (policy.seed_source.kind==='FRESH'?profile.source.kind==='FRESH':
+            profile.source.kind==='CHECKPOINT'&&profile.source.reference===policy.seed_source.reference);
+      },
+      preparedBase:async(reference,expected)=>{
+        if(!binding||binding.purpose!=='EXECUTION'||reference!==binding.parameters.preparation_reference||!sameScope(expected,s))
+          throw new Error('Railway execution preparation binding unavailable');
+        return railwayBaseFromRow(binding.prepared_base,s,binding.preparation_digest);
+      }
+    };
+  });
+  }catch(error){unregisterIsolation();void sessions.detachAll();throw error;}
+  return {close:async()=>{unregister();unregisterIsolation();await sessions.detachAll();}};
 }

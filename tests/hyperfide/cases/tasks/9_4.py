@@ -11,10 +11,13 @@ IDS=[
  "railway.reconcile.ambiguous-candidates","railway.reconcile.partial-inventory","railway.reconcile.no-blind-retry",
  "railway.reconcile.excludes-baseline","railway.adapter.actual-early-id","railway.adapter.early-id-before-observation",
  "railway.adapter.database-ambiguity-keeps-id","railway.adapter.lost-response-is-unknown","railway.adapter.no-implicit-create-retry",
- "railway.adapter.destroy-awaits-terminal","railway.adapter.destroy-confirmed","railway.adapter.expired-before-dispatch","railway.adapter.malformed-observation-keeps-id"
+ "railway.adapter.destroy-awaits-terminal","railway.adapter.destroy-confirmed","railway.adapter.expired-before-dispatch","railway.adapter.malformed-observation-keeps-id",
+ "railway.isolation.accepted-delete-is-not-absence","railway.isolation.exact-deletion-confirmed",
+ "railway.isolation.exact-absence-observation","railway.isolation.http-failure-unknown",
+ "railway.isolation.wrong-native-id-unknown","railway.isolation.pure-live-construction"
 ]
 def main():
- if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:19]+IDS[24:]+IDS[19:24]));return 0
+ if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:19]+IDS[24:25]+IDS[19:24]+IDS[25:]));return 0
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway94-") as folder:
   fixture=c.Fixture(folder);service=c.Service(folder,fixture)
@@ -62,11 +65,11 @@ def main():
    js=r"""
 import fs from 'node:fs';
 import {RailwayClient} from './services/hyperfide/dist/providers/railway/preparation.js';
-import {createRailwayAdapter} from './services/hyperfide/dist/providers/railway/reconciliation.js';
+import {createRailwayAdapter,createRailwayIsolationTransport} from './services/hyperfide/dist/providers/railway/reconciliation.js';
 import {RailwaySessionSpool} from './services/hyperfide/dist/providers/railway/processes.js';
 const data=JSON.parse(fs.readFileSync(process.argv[1])),events=[];
 const client=new RailwayClient(data.config,{HF_RAILWAY_FIXTURE_TOKEN:'not-real'});
-const adapter=createRailwayAdapter(client,{
+const adapter=data.isolation?createRailwayIsolationTransport(client,data.create.scope):createRailwayAdapter(client,{
  persistence:{
   assignedBootGeneration:async()=>{events.push('assigned-generation');return '17';},
   persistEarlyResource:async(op,id)=>{events.push('early-id:'+id);if(data.fail_persist)throw new Error('fixture DB commit response lost');
@@ -77,11 +80,11 @@ const adapter=createRailwayAdapter(client,{
  credentials:async()=>({GIT_TOKEN:'fixture-worker-value'}),sessions:new RailwaySessionSpool(data.spool)
 });
 const op=data.operation||data.create;
-const result=await adapter[op.kind](op);
+const result=await adapter[op.kind](op,new AbortController().signal);
 process.stdout.write(JSON.stringify({outcome:result,events}));
 """
-   def adapter(operation=None,fail=False):
-    params["operation"]=operation or params["create"];params["fail_persist"]=fail
+   def adapter(operation=None,fail=False,isolation=False):
+    params["operation"]=operation or params["create"];params["fail_persist"]=fail;params["isolation"]=isolation
     driver.write_text(json.dumps(params))
     run=subprocess.run(["node","--input-type=module","-e",js,str(driver)],cwd=c.ROOT,capture_output=True,text=True,timeout=30)
     c.expect(run.returncode==0,run.stderr)
@@ -120,6 +123,47 @@ process.stdout.write(JSON.stringify({outcome:result,events}));
    before=len(fixture.requests);denied=adapter(expired)
    c.check(IDS[23],lambda:c.expect(denied["outcome"]["status"]=="FAILED" and denied["outcome"]["acceptance"]==
       "CONFIRMED_REJECTED" and len(fixture.requests)==before,"expired dispatch reached provider"))
+   fixture.state["mode"]="normal"
+   isolated_pending=adapter(params["destroy"],isolation=True)
+   c.check(IDS[25],lambda:c.expect(isolated_pending["outcome"]["status"]=="UNKNOWN" and
+      isolated_pending["outcome"]["result"] is None,"accepted deletion became writer-isolation proof"))
+   fixture.state["mode"]="destroyed";before=len(fixture.requests)
+   isolated_deleted=adapter(params["destroy"],isolation=True)
+   c.check(IDS[26],lambda:c.expect(isolated_deleted["outcome"]["status"]=="SUCCEEDED" and
+      isolated_deleted["outcome"]["result"]=={"deletion":"CONFIRMED"} and len(fixture.requests)==before+2,
+      "destroy needs independent exact resource observation"))
+   observe=c.operation("observe","isolated-observe")
+   isolated_absent=adapter(observe,isolation=True)
+   c.check(IDS[27],lambda:c.expect(isolated_absent["outcome"]["status"]=="SUCCEEDED" and
+      isolated_absent["outcome"]["result"]=={"provider_state":"DESTROYED","health":"ABSENT"},
+      "exact deletion observation unavailable"))
+   fixture.state["mode"]="http-failure"
+   isolated_unavailable=adapter(observe,isolation=True)
+   c.check(IDS[28],lambda:c.expect(isolated_unavailable["outcome"]["status"]=="UNKNOWN" and
+      isolated_unavailable["outcome"]["acceptance"]=="UNKNOWN","HTTP outage became physical absence"))
+   fixture.state["mode"]="normal"
+   other=c.alter(observe,["resource","native_sandbox_id"],"other-native")
+   other["identity"]["payload_digest"]=c.digest({k:other[k] for k in
+      ["kind","scope","resource","preparation_digest","deadline_at","parameters"]})
+   isolated_wrong=adapter(other,isolation=True)
+   c.check(IDS[29],lambda:c.expect(isolated_wrong["outcome"]["status"]=="UNKNOWN",
+      "other native resource supplied isolation evidence"))
+   pure_config=c.clone(fixture.config);pure_config.update(mode="live",endpoint="https://backboard.railway.com/graphql/v2",exec_ws_endpoint=None)
+   pure_path=Path(folder)/"pure-live-config.json";pure_path.write_text(json.dumps(pure_config));pure_path.chmod(0o600)
+   pure_js=r"""
+import {configuredRailwayIsolationTransport} from './services/hyperfide/dist/providers/railway/reconciliation.js';
+delete process.env.DATABASE_URL;
+const scope=JSON.parse(process.argv[2]);
+const transport=configuredRailwayIsolationTransport({env:{HF_RAILWAY_CONFIG:process.argv[1],HF_RAILWAY_FIXTURE_TOKEN:'not-real'}},scope);
+let denied=false;try{configuredRailwayIsolationTransport({env:{HF_RAILWAY_CONFIG:process.argv[1],HF_RAILWAY_FIXTURE_TOKEN:'not-real'}},
+ {...scope,environment_id:'unapproved-other'});}catch{denied=true;}
+process.stdout.write(JSON.stringify({constructed:typeof transport.destroy==='function'&&typeof transport.observe==='function',denied}));
+"""
+   before=len(fixture.requests)
+   pure=subprocess.run(["node","--input-type=module","-e",pure_js,str(pure_path),json.dumps(c.SCOPE)],
+      cwd=c.ROOT,capture_output=True,text=True,timeout=20)
+   c.check(IDS[30],lambda:c.expect(pure.returncode==0 and json.loads(pure.stdout)=={"constructed":True,"denied":True} and
+      len(fixture.requests)==before,"pure live construction usedPG/provider effects or accepted another scope: "+pure.stderr))
    service.close();fixture.close();complete=True
   finally:
    if service.process.poll() is None:service.process.kill();service.process.wait()
