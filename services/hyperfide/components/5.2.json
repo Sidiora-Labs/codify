@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "5.2",
+  "task": "5.2",
+  "roles": [
+    "control"
+  ],
+  "module": "scheduler/leases.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "scheduler.lease.renew",
+    "scheduler.compute.cancel",
+    "scheduler.compute.expire"
+  ],
+  "requires": [
+    "5.1",
+    "4.2",
+    "3.1",
+    "6.1",
+    "14.1"
+  ]
+}
