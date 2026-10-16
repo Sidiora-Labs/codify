@@ -56,6 +56,8 @@ ASSERTIONS = [
     'harness.proof.portable-rejects-wrong-commit-and-escape',
     'harness.proof.postcheck-bytes-are-rechecked',
     "harness.proof.git-filter-no-execution",
+    "harness.proof.external-campaign-closed-environment",
+    "harness.proof.private-staging-lock",
 ]
 
 PROBE = r"""import json
@@ -703,6 +705,10 @@ class HarnessTests(unittest.TestCase):
 
     def test_65_proof_git_filter_no_execution(self):
         self.proof_regression("test_git_filter_configuration_never_executes")
+    def test_66_proof_external_campaign_environment(self):
+        self.proof_regression("test_portable_external_campaign_with_closed_environment")
+    def test_67_proof_private_staging_lock(self):
+        self.proof_regression("test_portable_stage_permissions_and_exclusive_lock")
 
 class InventoryResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):

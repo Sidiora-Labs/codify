@@ -16,6 +16,9 @@ import subprocess
 import sys
 import uuid
 
+# Isolated Python imports only this qualified verifier directory and stdlib.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 class InvalidEvidence(Exception):
     pass
@@ -484,7 +487,8 @@ def check(args):
         selected = matches[0]
     receipt, events, artifacts, path = selected
     verify_selected(root, receipt, manifest, registry, registration, events, artifacts)
-    return {"schema_version": 1, "checked": True, "receipt_id": receipt["receipt_id"], "receipt_sha256": digest_file(path)[0], "scope": receipt["scope"], "observed_outcome": receipt["outcome"], "full_case_status": receipt["full_case_status"], "receipt_count": len(receipts), "seal_authentication": "unanchored-consistency-only"}
+    import proof_relocation
+    return {"schema_version": 1, "checked": True, "receipt_id": receipt["receipt_id"], "receipt_sha256": digest_file(path)[0], "scope": receipt["scope"], "observed_outcome": receipt["outcome"], "full_case_status": receipt["full_case_status"], "receipt_count": len(receipts), "seal_authentication": "unanchored-consistency-only", "git_executable": proof_relocation.GIT_IDENTITY}
 
 
 def main():

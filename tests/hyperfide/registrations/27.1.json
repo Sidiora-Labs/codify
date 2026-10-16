@@ -68,7 +68,9 @@
     "harness.proof.portable-rejects-missing-map-and-changed-tool",
     "harness.proof.portable-rejects-wrong-commit-and-escape",
     "harness.proof.postcheck-bytes-are-rechecked",
-    "harness.proof.git-filter-no-execution"
+    "harness.proof.git-filter-no-execution",
+    "harness.proof.external-campaign-closed-environment",
+    "harness.proof.private-staging-lock"
   ],
   "cases": [
     "V-056"

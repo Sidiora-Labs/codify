@@ -26,6 +26,10 @@ def policy():
 class ProofInspectionTests(unittest.TestCase):
     def setUp(self):
         self.fixture = Fixture()
+        self.external = None
+        if self._testMethodName == "test_portable_external_campaign_with_closed_environment":
+            self.external = tempfile.TemporaryDirectory(prefix="hyperfide-external-campaign-")
+            self.fixture.output = Path(self.external.name) / "campaign"
         self.fixture.manifest["policy"] = {"cutover_parity": policy()}
         self.fixture.save()
         for argv in (["init", "-q"], ["add", "--all"], ["-c", "user.name=Proof fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "real disposable proof source"]):
@@ -38,11 +42,13 @@ class ProofInspectionTests(unittest.TestCase):
 
     def tearDown(self):
         self.fixture.close()
+        if self.external:
+            self.external.cleanup()
         if self.staging:
             self.staging.cleanup()
 
     def run_inspector(self, request=None, full=False, root=None, raw=None, environment=None):
-        return subprocess.run([sys.executable, str(INSPECTOR), "--evidence-root", str(root or self.fixture.root)] + (["--require-full"] if full else []), input=raw if raw is not None else json.dumps(request or self.request), text=True, capture_output=True, timeout=25, env=environment)
+        return subprocess.run([str(Path(sys.executable).resolve()), "-I", str(INSPECTOR), "--evidence-root", str(root or self.fixture.root)] + (["--require-full"] if full else []), input=raw if raw is not None else json.dumps(request or self.request), text=True, capture_output=True, timeout=25, env=environment)
 
     def reject(self, result):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -183,6 +189,10 @@ class ProofInspectionTests(unittest.TestCase):
         os.utime(source / "probe.py", None)
         self.reject(self.run_inspector(root=root))
         self.assertFalse(marker.exists(), "repository clean filter executed during read-only inspection")
+        # Indented sections can be INI continuations but active Git sections.
+        config.write_text(original + '\n\t[filter "untrusted"]\n\t\tclean = ' + script + '\n')
+        self.reject(self.run_inspector(root=root))
+        self.assertFalse(marker.exists(), "ambiguous Git grammar executed a filter")
         config.write_text(original)
         environment = dict(os.environ, GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="filter.untrusted.clean", GIT_CONFIG_VALUE_0=script)
         result = self.run_inspector(root=root, environment=environment)
@@ -203,13 +213,50 @@ class ProofInspectionTests(unittest.TestCase):
         parsed['remote "origin"']['promisor'] = "true"
         parsed['remote "origin"']['partialclonefilter'] = "blob:none"
         with config.open("w") as stream:
-            parsed.write(stream)
+            for section in parsed.sections():
+                stream.write("[" + section + "]\n")
+                for key, value in parsed[section].items():
+                    stream.write("\t" + key + " = " + value + "\n")
         def required(value, message):
             if not value:
                 raise AssertionError(message)
         result = module.safe_git(source, ["cat-file", "-p", blob], required, portable=True)
         self.assertNotEqual(result.returncode, 0, "missing promised object incorrectly accepted")
         self.assertFalse(marker.exists(), "promisor fetch helper executed during read-only inspection")
+
+    def test_portable_external_campaign_with_closed_environment(self):
+        import os
+        root, mapping = self.portable()
+        self.assertFalse(Path(mapping["campaign_original"]).is_relative_to(Path(mapping["workspace"]["original"])))
+        environment = dict(os.environ, PATH=str(root / "absent-bin"), PYTHONHOME=str(root / "absent-home"), PYTHONPATH=str(root / "absent-imports"))
+        result = self.run_inspector(root=root, environment=environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "CHECKED_COMPONENT")
+        self.assertIs(json.loads(result.stdout)["grants_authority"], False)
+
+    def test_portable_stage_permissions_and_exclusive_lock(self):
+        import fcntl
+        import os
+        root, mapping = self.portable()
+        root.chmod(0o755)
+        self.reject(self.run_inspector(root=root))
+        root.chmod(0o700)
+        config = root / "source/.git/config"
+        config.chmod(0o666)
+        self.reject(self.run_inspector(root=root))
+        config.chmod(0o644)
+        linked = root / "linked-probe"
+        os.link(root / "source/probe.py", linked)
+        self.reject(self.run_inspector(root=root))
+        linked.unlink()
+        descriptor = os.open(root / ".inspection.lock", os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.reject(self.run_inspector(root=root))
+        finally:
+            os.close(descriptor)
+        result = self.run_inspector(root=root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

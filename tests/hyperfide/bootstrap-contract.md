@@ -15,7 +15,7 @@ Default campaign directories are fingerprinted by the actual Git HEAD, dirty and
 
 ## Registered checks
 
-The 65 assertion IDs in registrations/27.1.json correspond, in order, to these actual subprocess experiments:
+The 67 assertion IDs in registrations/27.1.json correspond, in order, to these actual subprocess experiments:
 
 1. Reject absent selector.
 2. Reject unknown case.
@@ -104,7 +104,7 @@ The disposable Git fixture disables background auto-maintenance, automatic garba
 
 ## Read-only retained proof inspection
 
-`inspect-proof.py --evidence-root <service-owned absolute staging root> --require-full`
+`<deployment-python> -I inspect-proof.py --evidence-root <service-owned absolute staging root> --require-full`
 reads a bounded, closed JSON request on stdin. The admission service supplies the
 root, trusted expected pins and qualified inspector/checker assets. It must not
 forward caller-selected roots, checker paths, executables or argument vectors.
@@ -154,7 +154,7 @@ source, cases, assertions and policy with `grants_authority: false`; mismatch
 returns nonzero `REJECTED`. The trusted service must bind that bounded result to
 its durable admission transaction and the original actual15 custody receipt.
 
-Checks54–65 exercise real versioned component receipts, closed request/policy
+Checks54–67 exercise real versioned component receipts, closed request/policy
 validation, anchors, case/source pin mismatches, symbolic/path escapes, artifact
 changes, byte reread, and portable verification after deleting the original
 checkout. Changed tools, missing mappings and wrong staged revisions reject.
@@ -163,3 +163,9 @@ They are delegated by the standard selftest entrypoint and cannot skip.
 Git inspection rejects non-neutral local configuration (including filters, includes and process helpers) and strips inherited Git configuration; LFS/normalising filters remain unsupported and fail closed. Check65 uses an actual configured clean filter plus environment injection and proves its marker is never written. The external receipt anchor must originate from an authenticated qualified campaign producer and actual trusted custody, never an arbitrary caller digest; server-owned staging alone does not authenticate copied bytes.
 
 Promisor metadata is inert only with forced GIT_NO_LAZY_FETCH=1 and all Git transports disabled. Missing required objects reject; inspection never fetches or executes remote helpers. Check65 also deletes an actual promised blob and proves that read fails without running its configured ext helper.
+
+Accepted Git configuration uses an explicit single-line grammar: neutral sections and keys only, unique keys, indented key=value lines, unindented sections, and no escaped/quoted values or continuation lines. Ambiguous or valid-but-unsupported Git syntax rejects. A generic INI parser is not used. Check65 includes an indented-section ambiguity negative and proves no filter execution.
+
+The service must launch its pinned absolute Python interpreter with -I and a closed environment (no caller PATH/PYTHON*/LD*/SSH variables). The inspector enforces isolated Python and a closed environment for its checker; the checker uses fixed root-owned/nonwritable /usr/bin/git, verifies its digest remains unchanged, and reports that tool identity. Check66 verifies an originally external campaign relocated after original source deletion and benign invalid inherited PATH/PYTHONHOME/PYTHONPATH values. Both internal/external original campaign layouts retain sealed identities.
+
+Full admission requires portable staging: root mode0700 owned by the admission-service effective UID; every staged path must share that owner, forbid symlinks/group-world writes/nonregular files and hardlinks. An exclusive .inspection.lock coordinates service writers. The service must never share this UID/filesystem with untrusted workers and must keep its stage quiescent throughout checking; root permissions and process/VM separation enforce this boundary, not a final digest check. Check67 rejects exposed/writable/linked stages and lock contention, then accepts the unchanged private stage after lock release. A live worker checkout is unsupported for admission.

@@ -114,10 +114,10 @@ def canonical_check(campaign, receipt_id, relocation=None):
     pin = bounded_read(checker)
     # No caller-selected executable, checker, shell or argv is accepted.
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        argv = [sys.executable, str(checker), "--campaign", str(campaign), "--receipt", receipt_id]
+        argv = [str(Path(sys.executable).resolve()), "-I", str(checker), "--campaign", str(campaign), "--receipt", receipt_id]
         if relocation is not None:
             argv += ["--relocation", str(relocation)]
-        child = subprocess.Popen(argv, stdout=output, stderr=errors, start_new_session=True)
+        child = subprocess.Popen(argv, stdout=output, stderr=errors, start_new_session=True, env={"PATH": os.defpath, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
         try:
             code = child.wait(timeout=120)
         finally:
@@ -135,9 +135,9 @@ def canonical_check(campaign, receipt_id, relocation=None):
     checked = decode(raw)
     require(checked.get("checked") is True and checked.get("receipt_id") == receipt_id, "canonical checker identity mismatch")
     require(bounded_read(checker) == pin, "canonical checker changed during inspection")
-    return checked, {"sha256": digest(pin), "stdout_digest": digest(raw)}
+    return checked, {"sha256": digest(pin), "stdout_digest": digest(raw), "git_executable": checked.get("git_executable")}
 
-def inspect(request, evidence_root, require_full=False):
+def _inspect(request, evidence_root, require_full=False):
     validate_request(request)
     root = Path(evidence_root)
     require(root.is_absolute() and root.is_dir() and not root.is_symlink(), "trusted absolute evidence root required")
@@ -180,6 +180,28 @@ def inspect(request, evidence_root, require_full=False):
     require("sha256:" + checked.get("receipt_sha256", "") == request["receipt_digest"], "checker did not inspect anchored receipt")
     require(checked.get("scope") == receipt.get("scope") and checked.get("full_case_status") == receipt.get("full_case_status"), "checker scope mismatch")
     return {"schema_version": 1, "status": "VERIFIED_FULL" if full and require_full else "CHECKED_COMPONENT" if receipt.get("scope") == "task-component" else "CHECKED_ONLY", "request_id": request["request_id"], "request_digest": digest(canonical(request)), "receipt_digest": request["receipt_digest"], "manifest_digest": digest(pins[1][1]), "source_revision": needed["source_revision"], "scope": receipt["scope"], "full_case_status": receipt["full_case_status"], "case_ids": receipt["case_ids"], "selected_case_ids": receipt["selected_case_ids"], "assertion_ids": receipt["expected_assertion_ids"], "policy": needed["policy"], "checker": checker, "grants_authority": False}
+
+def inspect(request, evidence_root, require_full=False):
+    root = Path(evidence_root)
+    relocation = root / "trusted-relocation.json"
+    portable = relocation.exists() or relocation.is_symlink()
+    require(not require_full or portable, "full admission requires private portable staging")
+    if not portable:
+        return _inspect(request, evidence_root, require_full)
+    # Only the admission service may own this tree; workers run elsewhere.
+    # The lock coordinates trusted service writers. UID/VM isolation excludes
+    # untrusted writers; a live worker checkout is never an admission stage.
+    sys.path.insert(0, str(HERE))
+    from proof_relocation import guard_staging
+    import fcntl
+    guard_staging(root, require)
+    descriptor = os.open(root / ".inspection.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return _inspect(request, evidence_root, require_full)
+    finally:
+        os.close(descriptor)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

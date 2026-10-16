@@ -8,10 +8,22 @@ import json
 import os
 from pathlib import Path
 
+def guard_staging(root, require):
+    root = Path(root)
+    stat = root.lstat()
+    require(root.is_dir() and not root.is_symlink() and stat.st_uid == os.geteuid() and (stat.st_mode & 0o777) == 0o700, "private service-owned staging root required")
+    for index, path in enumerate(root.rglob("*")):
+        require(index < 200000, "staging inventory exceeds bound")
+        stat = path.lstat()
+        require(not path.is_symlink() and stat.st_uid == os.geteuid() and not (stat.st_mode & 0o022), "staging is accessible to untrusted writers")
+        require(path.is_dir() or (path.is_file() and stat.st_nlink == 1), "staging requires regular nonlinked files")
+
+
 class Relocation:
     def __init__(self, mapping, base, require):
         self.require = require
         self.base = Path(base).resolve()
+        guard_staging(self.base, require)
         require(type(mapping) is dict and set(mapping) == {"schema_version", "workspace", "campaign_original", "files", "executables", "checker_original", "runner_original"}, "invalid trusted relocation schema")
         require(type(mapping["schema_version"]) is int and mapping["schema_version"] == 1, "unknown relocation version")
         workspace = mapping["workspace"]
@@ -85,13 +97,15 @@ class Relocation:
         return self.file(original)
 
 
+GIT_IDENTITY = None
+
 def safe_git(workspace, arguments, require, portable=False):
+    global GIT_IDENTITY
     """Read Git state without evaluating repository/global executable helpers.
 
     Filtered/LFS or other non-neutral configurations are unsupported and reject.
     This does not replace source, worktree or commit comparisons.
     """
-    import configparser
     import re
     import subprocess
     marker = Path(workspace) / ".git"
@@ -111,36 +125,57 @@ def safe_git(workspace, arguments, require, portable=False):
     require(not (gitdir / "objects/info/alternates").exists(), "external Git object stores unsupported")
     config = gitdir / "config"
     require(config.is_file() and not config.is_symlink() and config.stat().st_size <= 65536, "neutral local Git config required")
-    parsed = configparser.ConfigParser(interpolation=None, strict=True)
-    try:
-        parsed.read_string(config.read_text())
-    except (configparser.Error, ValueError):
-        require(False, "unsupported local Git configuration syntax")
-    require(not parsed.defaults(), "default Git configuration unsupported")
-    for section in parsed.sections():
-        if section == "core":
-            allowed = {"repositoryformatversion", "filemode", "bare", "logallrefupdates", "symlinks", "ignorecase", "precomposeunicode"}
-        elif section == "extensions":
-            allowed = {"objectformat"}
-        elif re.fullmatch(r'remote "[^"\n]+"', section):
-            allowed = {"url", "fetch", "promisor", "partialclonefilter"}
-        elif re.fullmatch(r'branch "[^"\n]+"', section):
-            allowed = {"remote", "merge"}
-        elif section == "user":
-            allowed = {"name", "email"}
-        elif section == "gc":
-            allowed = {"auto", "autodetach"}
-        elif section == "maintenance":
-            allowed = {"auto"}
+    # Git and generic INI parsers have different continuation grammars. Accept
+    # only the single-line subset emitted by our neutral staging preparation.
+    section = None
+    seen = set()
+    for line in config.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";")):
+            continue
+        if stripped.startswith("["):
+            require(line == stripped and stripped.endswith("]"), "ambiguous Git section syntax unsupported")
+            section = stripped[1:-1]
+            if section == "core":
+                allowed = {"repositoryformatversion", "filemode", "bare", "logallrefupdates", "symlinks", "ignorecase", "precomposeunicode"}
+            elif section == "extensions":
+                allowed = {"objectformat"}
+            elif re.fullmatch(r'remote "[^"\n\\]+"', section):
+                allowed = {"url", "fetch", "promisor", "partialclonefilter"}
+            elif re.fullmatch(r'branch "[^"\n\\]+"', section):
+                allowed = {"remote", "merge"}
+            elif section == "user":
+                allowed = {"name", "email"}
+            elif section == "gc":
+                allowed = {"auto", "autodetach"}
+            elif section == "maintenance":
+                allowed = {"auto"}
+            else:
+                require(False, "non-neutral Git configuration is unsupported")
         else:
-            require(False, "non-neutral Git configuration is unsupported")
-        require(set(parsed[section]).issubset(allowed), "non-neutral Git configuration is unsupported")
+            match = re.fullmatch(r"[ \t]+([A-Za-z][A-Za-z0-9-]*)[ \t]*=[ \t]*(.*)", line)
+            require(section is not None and match is not None, "ambiguous Git value syntax unsupported")
+            key, value = match.group(1).lower(), match.group(2)
+            require(key in allowed and (section, key) not in seen, "non-neutral or duplicate Git key unsupported")
+            require(not any(character in value for character in ('\\', '"', '\x00')), "quoted or continued Git values unsupported")
+            seen.add((section, key))
     # Git's environment config can inject helpers even when .git/config is clean.
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env = {"PATH": os.defpath, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM=os.devnull,
                GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM="1", GIT_OPTIONAL_LOCKS="0", GIT_NO_LAZY_FETCH="1")
-    return subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+    git_binary = Path("/usr/bin/git")
+    require(git_binary.is_file() and not git_binary.is_symlink(), "fixed deployment Git executable missing")
+    stat = git_binary.stat()
+    require(stat.st_uid == 0 and not (stat.st_mode & 0o022), "Git executable is not owned and protected by deployment")
+    with git_binary.open("rb") as stream:
+        before = hashlib.file_digest(stream, "sha256").hexdigest()
+    result = subprocess.run([str(git_binary), "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
                            "-c", "core.attributesFile=/dev/null", "-c", "protocol.allow=never",
                            "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "maintenance.auto=false",
                            "-c", "gc.auto=0", "-c", "gc.autoDetach=false", "-C", str(workspace)] + arguments,
                           env=env, capture_output=True, timeout=30)
+
+    with git_binary.open("rb") as stream:
+        require(hashlib.file_digest(stream, "sha256").hexdigest() == before, "deployment Git executable changed during inspection")
+    GIT_IDENTITY = {"path": str(git_binary), "sha256": before, "size": stat.st_size}
+    return result
