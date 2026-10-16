@@ -54,6 +54,20 @@ def drain_owned_children():
         time.sleep(.05)
     return not children.read_text().strip()
 
+def actual_supervisory_host():
+    result=subprocess.run([sys.executable,str(ROOT/"tests/hyperfide/cases/tasks/13_1_host.py")],cwd=ROOT,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=240)
+    rows=[json.loads(line)for line in result.stdout.splitlines()if line.strip()]
+    assertions=[row for row in rows if row.get("type")=="assertion"]
+    cleanup=[row for row in rows if row.get("type")=="cleanup"]
+    expect(len(assertions)==65 and len({row.get("id")for row in assertions})==65,"host assertion inventory changed or duplicated")
+    for row in assertions:
+        expect(row.get("id")not in IDS,"duplicate host/native assertion identity")
+        IDS.append(row["id"])
+        if row.get("actual")!=row.get("expected"):FAILED.append(row["id"])
+        print(json.dumps(row),flush=True)
+    expect(result.returncode==0 and all(row.get("actual")==row.get("expected")for row in assertions),"actual supervisory host probe failed: "+result.stderr[-1000:])
+    expect(len(cleanup)==1 and cleanup[0].get("complete")is True and cleanup[0].get("resources")==[],"host fixture cleanup incomplete")
+
 def main():
     enable_subreaper()
     with tempfile.TemporaryDirectory(prefix="hyperfide-13-1-") as temporary:
@@ -166,6 +180,7 @@ def main():
         claude={"connector":"claude","request_id":"user-1","native_session_id":"session-exact","operation":"input","text":"bounded instruction"}
         check("connectors.claude-user-frame",lambda:expect(success("connector.encode",claude,env)["frame"]["message"]["content"]=="bounded instruction","Claude frame lost input"))
         check("connectors.claude-steer-unsupported",lambda:refuse("connector.encode",dict(claude,operation="steer",turn_id="turn-1"),env))
+    check("connectors.supervisory-host-probe-complete",actual_supervisory_host)
     absent=drain_owned_children()
     print(json.dumps({"type":"cleanup","resources":[],"complete":absent,"descendant_processes_observed_absent":absent}),flush=True)
     expect(absent,"actual native descendants survived fixture cleanup")
