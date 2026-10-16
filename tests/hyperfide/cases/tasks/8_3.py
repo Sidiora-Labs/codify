@@ -11,6 +11,7 @@ prepared=load("provider_preparation_fixture","tests/hyperfide/cases/tasks/11_1.p
 expect=pools.expect
 IDS=["provider.intent.configure","provider.intent.seed-admission","provider.intent.persist-before-effects","provider.intent.resource-reservations-bound","provider.intent.idempotent","provider.intent.key-payload-conflict","provider.intent.no-parameter-overrides","provider.intent.no-reservation","provider.intent.duplicate-reservation","provider.intent.stale-deadline","provider.intent.wrong-run","provider.intent.wrong-preparation","provider.intent.execution-needs-qualified-base","provider.intent.operator-no-effects","provider.intent.missing-adapter-no-submission","provider.intent.recorded-reconcile-no-effects","provider.intent.crash-state-no-replay","provider.intent.unknown-state-held","provider.intent.no-caller-remote-execution","provider.intent.no-known-resource-from-model","provider.intent.empty-boot-destroy","provider.intent.destroy-idempotent","provider.intent.destroy-stops-admission","provider.intent.worked-boot-needs-custody","provider.intent.remote-history-needs-custody","provider.intent.orphans-observation-only","provider.intent.exact-primary-brand","provider.intent.absence-unproven"]
 IDS+=["provider.intent.physical-reservation-single-owner"]
+IDS+=["provider.lineage.unregistered-refused","provider.lineage.exact-derived-selection","provider.lineage.full-manifest-tamper","provider.lineage.policy-escalation","provider.lineage.stale-refused","provider.lineage.expired-refused","provider.lineage.hash-tamper","provider.lineage.retained-proof-required","provider.lineage.parent-binding","provider.lineage.v2-full-body","provider.lineage.immutable-proof"]
 FAILED=[]
 def check(name,fn):
  try:fn();actual="observed"
@@ -114,6 +115,67 @@ def main():
   check(IDS[26],branded)
   check(IDS[27],lambda:expect(f.sql("SELECT count(*)::int AS n FROM hyperfide.provider_observations WHERE organisation_id=$1",[org])[0]["n"]==0,"absence evidence invented without actual provider observation"))
   check(IDS[28],lambda:reject("provider.intents.prepare-create",changed(request_key=str(uuid.uuid4()),sandbox_id=str(uuid.uuid4()),deadline_at=utc()),"RESERVATION_ALREADY_BOUND"))
+  parent=f.sql("SELECT manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2",[org,f.profile])[0]["manifest"]
+  canonical=lambda value:json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+  policy_script="import fs from 'node:fs';import{approvedProfilePolicyDigest}from'./services/hyperfide/dist/providers/pools.js';process.stdout.write(approvedProfilePolicyDigest(JSON.parse(fs.readFileSync(0,'utf8'))));"
+  policy=subprocess.run(["node","--input-type=module","-e",policy_script],input=json.dumps(parent["profile"]),cwd=ROOT,env=f.env,text=True,capture_output=True,timeout=10)
+  expect(policy.returncode==0,policy.stderr);parent_policy=policy.stdout
+  config_digest=f.sql("SELECT configuration_digest FROM hyperfide.provider_pool_configurations WHERE organisation_id=$1 AND pool_id=$2 AND active",[org,f.pool])[0]["configuration_digest"]
+  def child_manifest(escalate=False,v2=False,tamper=False):
+   value=copy.deepcopy(parent);value["profile"]["profile_version"]="derived-"+uuid.uuid4().hex[:8]
+   if escalate:value["profile"]["resources"]["cpu_millis"]+=1
+   if v2:value.update(schema_version=2,symlinks=[],hardlinks=[])
+   value.pop("digest");value["digest"]=sha(canonical(value));identity=str(uuid.uuid4())
+   if tamper:value["profile"]["profile_version"]="tampered-without-rehash"
+   f.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,'railway','linux-x86_64',$3,$4)",[org,identity,value["digest"],value])
+   return identity,value
+  def lineage(child,manifest,*,state="QUALIFIED",expired=False,tamper=False,parent_id=None):
+   artifacts=[]
+   for label in ["source","execution","verification"]:
+    raw=("COMPONENT_FIXTURE_LINEAGE_ONLY:"+label+":"+child).encode();digest=sha(raw);aid=str(uuid.uuid4());artifact=f.path/(aid+".proof");artifact.write_bytes(raw)
+    f.sql("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status,completed_at) VALUES($1,$2,$3,$4,$5,'COMPONENT_FIXTURE',$6,'COMPLETE',clock_timestamp())",[org,run,aid,digest,str(len(raw)),str(artifact)]);artifacts.append((aid,digest))
+   identity={"organisation_id":org,"id":str(uuid.uuid4()),"pool_id":f.pool,"configuration_digest":config_digest,"parent_profile_id":parent_id or f.profile,"parent_preparation_digest":f.preparation,"derived_profile_id":child,"derived_preparation_digest":manifest["digest"],"source_run_id":run,"source_manifest_digest":sha(b"component-source-manifest"),"source_manifest_artifact_digest":artifacts[0][1],"execution_receipt_artifact_digest":artifacts[1][1],"verification_receipt_artifact_digest":artifacts[2][1],"accepted_policy_digest":parent_policy,"allowed_delta":["source","dependency_pins","build_config_pins"]}
+   record={**identity,"lineage_digest":sha(b"tampered-lineage") if tamper else sha(canonical(identity)),"state":state,"observed_at":utc(-120000),"expires_at":utc(-60000 if expired else 60000)}
+   columns=list(record)
+   f.sql("INSERT INTO hyperfide.provider_profile_lineage("+",".join(columns)+") VALUES("+",".join("$"+str(i+1) for i in range(len(columns)))+")",[json.dumps(record[k]) if k=="allowed_delta" else record[k] for k in columns])
+   return record,artifacts
+  def select(child,manifest,code):
+   reject("provider.intents.prepare-create",changed(request_key=str(uuid.uuid4()),sandbox_id=str(uuid.uuid4()),profile_id=child,preparation_digest=manifest["digest"],deadline_at=utc()),code)
+  child,manifest=child_manifest()
+  check(IDS[29],lambda:select(child,manifest,"PREPARATION_MISMATCH"))
+  row,proofs=lineage(child,manifest)
+  check(IDS[30],lambda:select(child,manifest,"RESERVATION_ALREADY_BOUND"))
+  def manifest_tamper():
+   badid,bad=child_manifest(tamper=True)
+   select(badid,bad,"PREPARATION_MISMATCH")
+  check(IDS[31],manifest_tamper)
+  def escalated():
+   cid,body=child_manifest(escalate=True);lineage(cid,body);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[32],escalated)
+  def stale():
+   cid,body=child_manifest();lineage(cid,body,state="STALE");select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[33],stale)
+  def expired():
+   cid,body=child_manifest();lineage(cid,body,expired=True);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[34],expired)
+  def hash_tamper():
+   cid,body=child_manifest();lineage(cid,body,tamper=True);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[35],hash_tamper)
+  def lost_custody():
+   f.sql("UPDATE hyperfide.artifacts SET status='QUARANTINED',state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,proofs[1][0]])
+   select(child,manifest,"PREPARATION_MISMATCH")
+  check(IDS[36],lost_custody)
+  def parent_binding():
+   cid,body=child_manifest();other,_=child_manifest();lineage(cid,body,parent_id=other);select(cid,body,"PREPARATION_MISMATCH")
+  check(IDS[37],parent_binding)
+  def v2_body():
+   cid,body=child_manifest(v2=True);lineage(cid,body);select(cid,body,"RESERVATION_ALREADY_BOUND")
+  check(IDS[38],v2_body)
+  def immutable_lineage():
+   try:f.sql("UPDATE hyperfide.provider_profile_lineage SET source_manifest_digest=$3 WHERE organisation_id=$1 AND id=$2",[org,row["id"],sha(b"rewrite")])
+   except AssertionError:return
+   raise AssertionError("lineage proof identity was rewritten")
+  check(IDS[39],immutable_lineage)
   f.close();f=None;cleanup=True
  finally:
   if f is not None:f.close()
