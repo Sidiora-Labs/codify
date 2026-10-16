@@ -120,8 +120,7 @@ INSERT INTO symbol_fts VALUES('name_test');
   backend=artifact_module.ObjectFixture()
   proxy_directory=base/"pg-proxy";proxy_directory.mkdir(mode=0o700);proxy=history_commit_proxy(proxy_directory)
   def setup(fixture):
-   data=(ROOT/'services/hyperfide/migrations/0025-sqlite-history.sql').read_bytes()
-   fixture.sql("BEGIN;"+data.decode()+"INSERT INTO hyperfide.schema_migrations(version,name,checksum) VALUES(25,'0025-sqlite-history','"+sha(data)+"');COMMIT;")
+   fixture.apply_migration('0025-sqlite-history')
    i=fixture.ids;repository=profiles[0]['repository_id'];profiles[0]['organisation_id']=i['organisation'];pf.write_text(json.dumps(profiles))
    from urllib.parse import parse_qsl,urlencode
    parsed=urlsplit(fixture.url);query=dict(parse_qsl(parsed.query));query['host']=str(proxy_directory)
@@ -131,6 +130,16 @@ INSERT INTO symbol_fts VALUES('name_test');
    fixture.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,$3)",[i['organisation'],repository,'1'*40])
    fixture.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,$4,'refs/heads/main')",[i['organisation'],i['run'],repository,'1'*40])
   FIXTURE=IdentityFixture(extra_components=['15.2','25.1'],extra_env={'HF_MIGRATION_SOURCES_FILE':str(pf),'HF_MIGRATION_ARCHIVE_ROOT':str(archive)},extra_setup=setup)
+  # The owner14 fixture runs the real4.4 migration engine and a least-privilege
+  # runtime role. History lives in its own non-authoritative schema.
+  FIXTURE.sql('GRANT USAGE ON SCHEMA hyperfide_history TO "'+FIXTURE.runtime_role+'"; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA hyperfide_history TO "'+FIXTURE.runtime_role+'"')
+  FIXTURE.stop()
+  from urllib.parse import parse_qsl,urlencode
+  parsed=urlsplit(FIXTURE.runtime_url);query=dict(parse_qsl(parsed.query));query['host']=str(proxy_directory)
+  proxy_url=urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(query),parsed.fragment))
+  FIXTURE.env['DATABASE_URL']=proxy_url
+  for role in ('CONTROL','PROVISIONER','DISPATCH'):FIXTURE.env['HYPERFIDE_'+role+'_PRIMARY_DATABASE_URL']=proxy_url
+  FIXTURE.start()
   import atexit
   atexit.register(FIXTURE.close)
   def request(action,value):
