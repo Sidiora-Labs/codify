@@ -3,6 +3,7 @@
   "id": "8.3",
   "task": "8.3",
   "roles": [
+    "control",
     "provisioner"
   ],
   "module": "providers/reconcile.js",
@@ -14,7 +15,8 @@
     "provider.intents.get",
     "provider.intents.execute",
     "provider.intents.reconcile",
-    "provider.orphans.list"
+    "provider.orphans.list",
+    "provider.inventory.observe-known"
   ],
   "requires": [
     "8.2"
