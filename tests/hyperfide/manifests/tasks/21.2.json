@@ -36,8 +36,8 @@
     },
     {
       "path": "services/hyperfide/components/21.1.json",
-      "sha256": "17960464a44d96f1619de4b50ecc85fbdc1bb6adb64a250fb3f1fcb70278d8c6",
-      "size": 372
+      "sha256": "82199add6c9366dd326ef683d6ac5c0de77421b9aecf7ff70e335eb8318be98d",
+      "size": 409
     },
     {
       "path": "services/hyperfide/components/21.2.json",
@@ -181,18 +181,18 @@
     },
     {
       "path": "services/hyperfide/dist/decisions/spec_critique.d.ts",
-      "sha256": "819d8cd996c630a34be6a26909e913f2763d9a2b454732717a259bda4852455e",
-      "size": 453
+      "sha256": "e141a696d87e40e0b7ded1f4b972fbd2f323f8a5dac6ddaeb7e0260df03a0190",
+      "size": 517
     },
     {
       "path": "services/hyperfide/dist/decisions/spec_critique.js",
-      "sha256": "f7b0fa403e2d646c92f8c57bf59a5872674851d1a27f388ea0a2221f5c6bb17a",
-      "size": 6111
+      "sha256": "87c4d50518e67c3e2c50b82c0a93edbccd207b276f37c06d545aa4e3e1ea06ca",
+      "size": 11225
     },
     {
       "path": "services/hyperfide/dist/decisions/spec_critique.js.map",
-      "sha256": "e7820f3305b154415fc8a38c105c30669a77f35e86cc3c810fa38b83efd270dd",
-      "size": 6746
+      "sha256": "36e4dc70e0126d9c01d3953ad5a4d9e7ae1fa6674de4a53d0333f4198675d1f9",
+      "size": 11489
     },
     {
       "path": "services/hyperfide/dist/dispatch.d.ts",
@@ -371,8 +371,8 @@
     },
     {
       "path": "services/hyperfide/src/decisions/spec_critique.ts",
-      "sha256": "4a24758de895e235d70e23d67e39f8a6b0ffac2dbbe50c0ab6170aceba66ff6d",
-      "size": 5250
+      "sha256": "979c30c738c570eb9696ec75a7d2db57d5980b24fff1d789bf2eef48ac60f630",
+      "size": 9880
     },
     {
       "path": "services/hyperfide/src/dispatch.ts",
@@ -426,8 +426,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/21_4.py",
-      "sha256": "444460c88b87f65f1b3a4f7f5b21e1d60ac2461a7b5689d3582cf1ccedadf895",
-      "size": 49908
+      "sha256": "86ac270357cad70f4643be8450f1e6d24fb26666ef608b6516cc4e78246f8213",
+      "size": 60910
     },
     {
       "path": "tests/hyperfide/cases/tasks/4_1.py",
