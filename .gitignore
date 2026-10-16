@@ -34,3 +34,6 @@ tmp/
 
 # Private Hyperfide execution logs, deployment manifests and raw receipts
 /artifacts/hyperfide/
+
+# Generated Python caches from Hyperfide qualification
+/tests/hyperfide/**/__pycache__/

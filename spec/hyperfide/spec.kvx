@@ -260,7 +260,7 @@ heading = "Hyperfide implementation plan — pending user approval"
 
 [task.27.1]
 title = "Bootstrap strict qualification harness and independent receipt checker"
-status = "pending"
+status = "done"
 wave = 1
 requires = []
 touches = ["tests/hyperfide/qualify.py", "tests/hyperfide/manifests/tasks/27.1.json", "tests/hyperfide/check-evidence.py", "tests/hyperfide/registry.json", "tests/hyperfide/selftest_harness.py", "tests/hyperfide/manifest.schema.json", "tests/hyperfide/cases/tasks/27_1.py", "tests/hyperfide/registrations/27.1.json", "tests/hyperfide/bootstrap-contract.md"]
