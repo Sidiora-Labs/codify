@@ -3,7 +3,7 @@
     "allowed_actions": [],
     "approved": true
   },
-  "campaign_id": "hyperfide-driver-component-27-3-v1",
+  "campaign_id": "hyperfide-driver-component-27-3-v2",
   "case_ids": [
     "V-036",
     "V-037",
@@ -52,6 +52,22 @@
     "campaign.live.cleanup-omitted-resource",
     "campaign.live.explicit-retention",
     "campaign.live.expired-retention",
+    "campaign.live.nonrunning-resources-reserve-quota",
+    "campaign.live.idle-native-reserves-quota",
+    "campaign.live.actual-ed25519-reader-proof",
+    "campaign.live.trusted-reader-scope",
+    "campaign.live.signed-content-tamper",
+    "campaign.live.invalid-actual-signature",
+    "campaign.live.unapproved-signed-reader",
+    "campaign.live.wrong-signed-scope",
+    "campaign.live.wrong-signed-source",
+    "campaign.live.wrong-signed-repositories",
+    "campaign.live.signed-replay-other-request",
+    "campaign.live.reader-proof-required",
+    "campaign.live.approved-trust-reference-required",
+    "campaign.live.same-controller-reader-rejected",
+    "campaign.live.verification-key-pin-tamper",
+    "campaign.live.missing-durable-reader-role",
     "campaign.live.no-implicit-execution"
   ],
   "inputs": [
@@ -77,18 +93,18 @@
     },
     {
       "path": "tests/hyperfide/campaigns/deterministic.py",
-      "sha256": "dc07481704f5e1020a9fd15f72ddf77525d83154913522b5a444ec946a2d6913",
-      "size": 25259
+      "sha256": "f45deed3643f1e74b542e480666049c5d68627679cfe64e8e5ac7e6ff7eefcee",
+      "size": 38730
     },
     {
       "path": "tests/hyperfide/campaigns/live.py",
-      "sha256": "7538e3360f3210c18a0de1a4a1bca70276414ab3d8446a20bad032a061f2fb21",
-      "size": 17033
+      "sha256": "44f1e3dc4c69ccb6e49d4add1d3f8bc8fb03b94530d5a1257ec5c50b65386ab1",
+      "size": 18222
     },
     {
       "path": "tests/hyperfide/cases/tasks/27_3.py",
-      "sha256": "e5f62782be8fd45a0bd366c3bbd36ba4c2071534ca5b9a86b1360c3b8221dfa9",
-      "size": 7780
+      "sha256": "8695d876c992bb71b4d96d759e8d32da3fae4d93f2a04eb7e1a6e20836a6166c",
+      "size": 13487
     }
   ],
   "policy": {

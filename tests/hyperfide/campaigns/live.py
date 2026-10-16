@@ -104,8 +104,12 @@ def inspect_snapshot(snapshot, manifest, previous=None):
     for key in ("errors", "queue_latency_ms"):
         common.integer(metrics.get(key), key, 0)
     common.require(metrics["errors"] <= manifest["slo"]["maximum_errors"] and metrics["queue_latency_ms"] <= manifest["slo"]["maximum_queue_latency_ms"], "frozen live SLO exceeded")
-    return {"running_sandboxes": sum(row["state"] == "RUNNING" for row in sandboxes), "active_frontier_sessions": active, "providers": providers, "connectors": connectors, "lifetimes": lifetimes, "useful_workloads": useful, "monotonic_ns": elapsed, "observed_at": snapshot["observed_at"]}
+    return {"allocated_sessions": sum(row["state"] not in {"EXITED", "FAILED"} for row in sessions), "allocated_sandboxes": sum(row["state"] != "DESTROYED" for row in sandboxes), "running_sandboxes": sum(row["state"] == "RUNNING" for row in sandboxes), "active_frontier_sessions": active, "providers": providers, "connectors": connectors, "lifetimes": lifetimes, "useful_workloads": useful, "monotonic_ns": elapsed, "observed_at": snapshot["observed_at"]}
 
+
+def enforce_allocation(state, manifest):
+    common.require(state["allocated_sandboxes"] <= manifest["profile"]["sandboxes"] and state["allocated_sessions"] <= manifest["profile"]["slots"], "actual resource/session allocation exceeds approved profile")
+    return True
 
 def cleanup_result(result, retained, expected_ids=None):
     common.require(result.get("inventory_complete") is True and result.get("unknown_operations") == [], "cleanup incomplete/UNKNOWN debt remains")
@@ -129,10 +133,11 @@ def cleanup_result(result, retained, expected_ids=None):
 def run(path, evidence):
     manifest, root = common.load_manifest(path, "live")
     profile = validate_live(manifest)
+    trust = common.observer_trust(manifest, root)
+    common.require({"PROVIDER_READER", "DURABLE_READER", "NATIVE_READER", "MAIN_HOST_AUDITOR"} <= set(trust["roles"]), "live observer must hold every independently approved reader role")
     if profile["duration_hours"] == 72:
-        _, prior_data = common.pinned_file(manifest["inputs"]["prior48"][0], root)
-        prior = common.decode(prior_data)
-        common.require(prior.get("evidence_scope") == "LIVE_CAMPAIGN" and prior.get("status") == "PASS" and prior.get("duration_hours") == 48 and prior.get("independent_qualification_receipt"), "prior48-hour independently qualified campaign absent")
+        pin = manifest["inputs"]["prior48"][0]
+        common.anchored_full_receipt({"pin": pin, "trusted_anchor_sha256": pin["sha256"]}, manifest, root, "prior48", policy={"campaign_kind": "LIVE_CAMPAIGN", "duration_hours": 48})
     directory = Path(evidence) / (manifest["campaign_id"] + "-" + str(uuid.uuid4()))
     directory.mkdir(parents=True, mode=0o700)
     common.sealed_write(directory / "manifest.json", manifest)
@@ -145,8 +150,12 @@ def run(path, evidence):
         # Qualify providers separately before mixed placement, without granting a
         # preview/capability declaration the status of a live canary receipt.
         for provider in sorted(PROVIDERS):
-            canary, _ = adapters["control"].call({"operation": "provider_canary", "campaign_id": run_id, "provider": provider, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"], "auth_references": manifest["auth_references"]})
-            common.require(canary.get("provider") == provider and canary.get("live_canary_qualified") is True and isinstance(canary.get("independent_receipt_digest"), str) and len(canary["independent_receipt_digest"]) == 64, "provider canary not independently qualified")
+            adapters["control"].call({"operation": "provider_canary", "campaign_id": run_id, "provider": provider, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"], "auth_references": manifest["auth_references"]})
+            request = {"operation": "observe_canary", "campaign_id": run_id, "provider": provider, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"]}
+            canary, _ = adapters["observer"].call(request)
+            common.verify_observation(canary, manifest, root, request, {"PROVIDER_READER", "NATIVE_READER"})
+            common.require(canary.get("provider") == provider, "observed canary provider mismatch")
+            common.anchored_full_receipt(canary.get("qualification_receipt"), manifest, root, "provider_canaries", directory / "canary-checks", {"provider": provider, "campaign_kind": "PROVIDER_CANARY"})
         previous = None
         for sandbox_count, session_count in STAGES:
             adapters["control"].call({"operation": "start_stage", "campaign_id": run_id, "sandboxes": sandbox_count, "sessions": session_count, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"]})
@@ -154,8 +163,10 @@ def run(path, evidence):
             # The final stage runs the approved wall-clock endurance interval.
             duration = profile["duration_hours"] * 3600 if sandbox_count == 100 else profile["sustained_window_seconds"]
             while True:
-                observation, receipt = adapters["observer"].call({"operation": "observe", "campaign_id": run_id, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"]})
+                request = {"operation": "observe", "campaign_id": run_id, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"]}
+                observation, receipt = adapters["observer"].call(request)
                 snapshot = observation.get("snapshot")
+                common.verify_observation(snapshot, manifest, root, request, {"PROVIDER_READER", "DURABLE_READER", "NATIVE_READER", "MAIN_HOST_AUDITOR"})
                 if isinstance(snapshot, dict) and isinstance(snapshot.get("sandboxes"), list):
                     resource_ids.update(row.get("id") for row in snapshot["sandboxes"])
                 state = inspect_snapshot(snapshot, manifest, previous)
@@ -166,7 +177,7 @@ def run(path, evidence):
                 meets = state["running_sandboxes"] >= sandbox_count and state["active_frontier_sessions"] >= session_count and state["connectors"] == CONNECTORS
                 if sandbox_count == 100:
                     meets = meets and state["providers"] == PROVIDERS
-                common.require(state["running_sandboxes"] <= manifest["profile"]["sandboxes"] and state["active_frontier_sessions"] <= manifest["profile"]["slots"], "actual resource/session allocation exceeds approved profile")
+                enforce_allocation(state, manifest)
                 if meets:
                     sustained_start = sustained_start or time.monotonic()
                     if time.monotonic() - sustained_start >= duration:
@@ -186,7 +197,9 @@ def run(path, evidence):
         # Cleanup is scoped to this campaign. It cannot delete unrelated workers.
         try:
             adapters["cleanup"].call({"operation": "cleanup", "campaign_id": run_id})
-            cleanup, _ = adapters["observer"].call({"operation": "observe_cleanup", "campaign_id": run_id})
+            request = {"operation": "observe_cleanup", "campaign_id": run_id, "source_revision": manifest["source_revision"], "source_manifest_digest": manifest["source_manifest_digest"]}
+            cleanup, _ = adapters["observer"].call(request)
+            common.verify_observation(cleanup, manifest, root, request, {"PROVIDER_READER", "DURABLE_READER"})
             retained = manifest.get("retained_resources", {})
             common.require(isinstance(retained, dict), "explicit retained resource inventory required")
             cleanup_result(cleanup, retained, resource_ids)

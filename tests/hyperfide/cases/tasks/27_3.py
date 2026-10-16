@@ -4,6 +4,8 @@ import copy
 import json
 from pathlib import Path
 import subprocess
+import tempfile
+import shutil
 import sys
 ROOT=Path(__file__).resolve().parents[4]
 sys.path.insert(0,str(ROOT/'tests/hyperfide/campaigns'))
@@ -68,6 +70,57 @@ def run():
     check('campaign.live.explicit-retention',lambda:live.cleanup_result(retained_result,retained,{'sandbox'}))
     expired=copy.deepcopy(retained);expired['sandbox']['expires_at']='2000-01-01T00:00:00Z';expired_result=copy.deepcopy(retained_result);expired_result['resources'][0]['expires_at']=expired['sandbox']['expires_at']
     check('campaign.live.expired-retention',lambda:reject(lambda:live.cleanup_result(expired_result,expired)))
+    allocated=copy.deepcopy(s);allocated['sandboxes'] += [{'id':'unknown-allocation','provider':'railway','state':'UNKNOWN'},{'id':'stopped-allocation','provider':'blaxel','state':'STOPPED'}]
+    bounded=copy.deepcopy(m);bounded['profile']['sandboxes']=2
+    check('campaign.live.nonrunning-resources-reserve-quota',lambda:reject(lambda:live.enforce_allocation(live.inspect_snapshot(allocated,bounded),bounded)))
+    parked=copy.deepcopy(s);parked['sessions'].append({**s['sessions'][0],'id':'parked','native_id':'parked-native','state':'IDLE','lifetime_id':'parked-lifetime'})
+    bounded=copy.deepcopy(m);bounded['profile']['slots']=2
+    check('campaign.live.idle-native-reserves-quota',lambda:reject(lambda:live.enforce_allocation(live.inspect_snapshot(parked,bounded),bounded)))
+    # Real Ed25519 key generation/signature verification exercises only this
+    # component fixture. It creates no product identity or authenticated session.
+    with tempfile.TemporaryDirectory(prefix='hyperfide-observer-component-') as directory:
+        root=Path(directory);openssl=Path(shutil.which('openssl')).resolve()
+        key=root/'component-private.pem';public=root/'component-public.pem'
+        subprocess.run([str(openssl),'genpkey','-algorithm','ED25519','-out',str(key)],check=True,capture_output=True)
+        key.chmod(0o600)
+        subprocess.run([str(openssl),'pkey','-in',str(key),'-pubout','-out',str(public)],check=True,capture_output=True)
+        def pin(path):
+            data=Path(path).read_bytes();return {'path':str(path),'sha256':d.digest(data),'size':len(data)}
+        trust={'schema_version':1,'controller_id':'component-controller','observer_id':'component-reader','key_id':'component-public-key','roles':['DURABLE_READER','MAIN_HOST_AUDITOR','NATIVE_READER','PROVIDER_READER'],'scope':{'organisation_id':'component-org','run_id':'component-run','authority_epoch':1},'public_key':pin(public),'verifier_executable':pin(openssl)}
+        trust_path=root/'component-trust.json';trust_path.write_bytes(d.canonical(trust))
+        approved=copy.deepcopy(m);approved['inputs']['observer_trust']=[pin(trust_path)]
+        request={'operation':'observe','campaign_id':'component-only','nonce':'unique-component-request','source_revision':m['source_revision'],'source_manifest_digest':m['source_manifest_digest']}
+        def signed(changes=None):
+            value=copy.deepcopy(s)
+            proof={'reader_id':trust['observer_id'],'key_id':trust['key_id'],'scope':trust['scope'],'roles':trust['roles'],'source_revision':m['source_revision'],'source_manifest_digest':m['source_manifest_digest'],'request_sha256':d.digest(d.canonical(request)+b'\n'),'observation_sha256':d.digest(d.canonical(value))}
+            proof.update(changes or {})
+            message=root/'signed-message.json';signature=root/'signature.bin';message.write_bytes(d.canonical(proof))
+            subprocess.run([str(openssl),'pkeyutl','-sign','-inkey',str(key),'-rawin','-in',str(message),'-out',str(signature)],check=True,capture_output=True)
+            value['provenance']={**proof,'signature_hex':signature.read_bytes().hex()};return value
+        observed=signed()
+        verify=lambda value=observed,selected=approved,challenge=request:d.verify_observation(value,selected,root,challenge,{'DURABLE_READER','PROVIDER_READER'})
+        check('campaign.live.actual-ed25519-reader-proof',verify)
+        check('campaign.live.trusted-reader-scope',lambda:d.observer_trust(approved,root)['scope']==trust['scope'])
+        bad=copy.deepcopy(observed);bad['metrics']['errors']=20
+        check('campaign.live.signed-content-tamper',lambda:reject(lambda:verify(bad)))
+        bad=copy.deepcopy(observed);bad['provenance']['signature_hex']='0'*128
+        check('campaign.live.invalid-actual-signature',lambda:reject(lambda:verify(bad)))
+        check('campaign.live.unapproved-signed-reader',lambda:reject(lambda:verify(signed({'reader_id':'component-controller'}))))
+        check('campaign.live.wrong-signed-scope',lambda:reject(lambda:verify(signed({'scope':{**trust['scope'],'authority_epoch':2}}))))
+        check('campaign.live.wrong-signed-source',lambda:reject(lambda:verify(signed({'source_revision':'c'*40}))))
+        check('campaign.live.wrong-signed-repositories',lambda:reject(lambda:verify(signed({'source_manifest_digest':'sha256:'+'c'*64}))))
+        check('campaign.live.signed-replay-other-request',lambda:reject(lambda:verify(challenge={**request,'nonce':'different-component-request'})))
+        check('campaign.live.reader-proof-required',lambda:reject(lambda:verify(s)))
+        missing=copy.deepcopy(approved);missing['inputs'].pop('observer_trust')
+        check('campaign.live.approved-trust-reference-required',lambda:reject(lambda:d.observer_trust(missing,root)))
+        same=copy.deepcopy(trust);same['observer_id']=same['controller_id'];trust_path.write_bytes(d.canonical(same));same_manifest=copy.deepcopy(approved);same_manifest['inputs']['observer_trust']=[pin(trust_path)]
+        check('campaign.live.same-controller-reader-rejected',lambda:reject(lambda:d.observer_trust(same_manifest,root)))
+        trust_path.write_bytes(d.canonical(trust))
+        changed=public.read_bytes();public.write_bytes(changed+b'\n')
+        check('campaign.live.verification-key-pin-tamper',lambda:reject(lambda:verify()))
+        public.write_bytes(changed)
+        reduced=copy.deepcopy(trust);reduced['roles']=['PROVIDER_READER'];trust_path.write_bytes(d.canonical(reduced));limited=copy.deepcopy(approved);limited['inputs']['observer_trust']=[pin(trust_path)]
+        check('campaign.live.missing-durable-reader-role',lambda:reject(lambda:verify(selected=limited)))
     command=subprocess.run([sys.executable,str(ROOT/'tests/hyperfide/campaigns/live.py'),'--manifest','missing','--evidence','unused'],capture_output=True,text=True)
     check('campaign.live.no-implicit-execution',lambda:command.returncode==2 and 'BLOCKED'in command.stderr)
     print(json.dumps({"type":"cleanup","resources":[],"complete":True}))
