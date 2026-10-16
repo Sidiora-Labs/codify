@@ -17,6 +17,7 @@
     "admission.existing-reservation-observed",
     "admission.no-forged-frontier-recovery-context",
     "admission.rate-limit-bounded-backoff",
+    "admission.foreign-runner-report-replay-denied",
     "admission.report-operation-replay",
     "admission.report-operation-conflict",
     "admission.reject-missing-diagnostics",

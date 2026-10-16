@@ -47,7 +47,7 @@ def main():
     try:
         check('admission.main-startup-sizing-only',startup_budget)
         f=AgentFixture(admission=True);f.bind()
-        f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"])
+        f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"]);f.foreign_runner()
         reserve={"scope":f.scope,"reservation_id":uid(),"quota_key":"fixture-quota"}
         def blocked():
             f.bad("agent.admission.reserve",reserve,"ADMISSION_NATIVE_UNQUALIFIED",component="13.4")
@@ -92,6 +92,7 @@ def main():
             result.update(call("agent.admission.report",report))
             expect(result["reservation"]["state"]=="RETRY_WAIT" and result["reservation"]["attempt_count"]==2 and result["retry_delay_ms"]==100 and result["capacity_retained"],"bounded rate-limit accounting wrong")
         check("admission.rate-limit-bounded-backoff",first)
+        check("admission.foreign-runner-report-replay-denied",lambda:f.bad("agent.admission.report",report,"AGENT_SCOPE_DENIED",component="13.4",key="foreign_runner"))
         check("admission.report-operation-replay",lambda:expect(call("agent.admission.report",report)["reservation"]["attempt_count"]==2,"same report charged twice"))
         check("admission.report-operation-conflict",lambda:bad(dict(report,reason="QUOTA_LIMIT"),"AGENT_OPERATION_CONFLICT"))
         check("admission.reject-missing-diagnostics",lambda:bad(dict(base,operation_id=uid(),reason="RATE_LIMIT",diagnostic_refs=[uid()]),"ADMISSION_DIAGNOSTICS_UNAVAILABLE"))

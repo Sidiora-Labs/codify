@@ -29,6 +29,7 @@
     "sessions.pid-reuse-rejected",
     "sessions.checkpoint-source-mismatch",
     "sessions.actual-checkpoint-registration",
+    "sessions.foreign-runner-checkpoint-replay-denied",
     "sessions.live-process-reconcile",
     "sessions.worker-cannot-observe-own-exit",
     "sessions.operator-cannot-invent-exit",

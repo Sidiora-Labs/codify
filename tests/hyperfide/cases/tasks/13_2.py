@@ -180,6 +180,19 @@ COMMIT;"""
             self.inner=SessionIdentityFixture(extra_components=["14.2","14.3","13.2"]+(["13.4"]if admission else[]),extra_setup=setup)
         except BaseException:
             self.terminate();raise
+    def foreign_runner(self):
+        f=self.inner;original=dict(f.ids);original_key=f.keys["runner"];original_grant=f.grant
+        pool,sandbox,intent=uid(),uid(),uid()
+        f.sql("INSERT INTO hyperfide.provider_pools(organisation_id,id,provider,account_key,environment_key,region) VALUES($1,$2,'fixture','foreign-fixture','foreign-fixture','fixture')",[original["organisation"],pool])
+        f.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state,preparation_digest) VALUES($1,$2,$3,'fixture-resource','RUNNING',$4)",[original["organisation"],sandbox,pool,f.preparation])
+        boot=f.sql("SELECT boot_id FROM hyperfide.sandbox_boots WHERE organisation_id=$1 AND sandbox_id=$2",[original["organisation"],sandbox])[0]["boot_id"]
+        try:
+            f.ids.update(pool=pool,sandbox=sandbox,intent=intent,boot=boot);f.keys["runner"]=f.keys["other"];f.grant=uid()
+            result=f.bootstrap_runner()
+        finally:
+            f.ids.clear();f.ids.update(original);f.keys["runner"]=original_key;f.grant=original_grant
+        f.ids["foreign_runner"]=result["credential_id"];f.keys["foreign_runner"]=f.keys["other"]
+        return result
     def invoke(self,action,value,component="13.2",key="operator"):
         return self.inner.invoke(action,value,component=component,key=key)
     def ok(self,action,value,component="13.2",key="operator"):
@@ -237,7 +250,7 @@ def main():
         check('sessions.handshake-cleanup-preserves-peer',handshake_isolation)
         fixture=AgentFixture();f=fixture
         check("sessions.signed-registration",lambda:expect(f.bind()["bound"]is True,"binding missing"))
-        f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"])
+        f.inner.bootstrap_runner();f.inner.delegate_principal("native_worker",f.scope["session_id"]);f.foreign_runner()
         registered_version=str(f.ok("agent.session.inspect",{"scope":f.scope})["session"]["state_version"]);running_version=str(int(registered_version)+1)
         def first_binding():
             row=f.ok("agent.session.inspect",{"scope":f.scope})["session"]
@@ -270,7 +283,9 @@ def main():
         check("sessions.stale-state-version",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),state="DISCONNECTED"),"AGENT_STATE_STALE"))
         check("sessions.pid-reuse-rejected",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="DISCONNECTED",process=dict(process,process_start_time=str(int(process["process_start_time"])+1))),"AGENT_PROCESS_MISMATCH"))
         check("sessions.checkpoint-source-mismatch",lambda:f.bad("agent.session.checkpoint",{"scope":f.scope,"operation_id":uid(),"checkpoint":dict(f.checkpoint,source_manifest_digest=sha(b"different"))},"AGENT_CHECKPOINT_MISMATCH"))
-        check("sessions.actual-checkpoint-registration",lambda:expect(f.ok("agent.session.checkpoint",{"scope":f.scope,"operation_id":uid(),"checkpoint":f.checkpoint})["context_restored"]is False,"metadata registration claimed restored context"))
+        checkpoint_request={"scope":f.scope,"operation_id":uid(),"checkpoint":f.checkpoint}
+        check("sessions.actual-checkpoint-registration",lambda:expect(f.ok("agent.session.checkpoint",checkpoint_request)["context_restored"]is False,"metadata registration claimed restored context"))
+        check("sessions.foreign-runner-checkpoint-replay-denied",lambda:f.bad("agent.session.checkpoint",checkpoint_request,"AGENT_SCOPE_DENIED",key="foreign_runner"))
         resume={"scope":f.scope,"checkpoint_id":f.inner.ids["checkpoint"],"native_session_id":f.binding["native_session_id"],"configuration_digest":f.configuration,"source_manifest_digest":f.source}
         check("sessions.live-process-reconcile",lambda:expect(f.ok("agent.session.resume-check",resume)["decision"]=="RECONCILE_PROCESS","live process duplicated"))
         check("sessions.worker-cannot-observe-own-exit",lambda:f.bad("agent.session.transition",dict(running,operation_id=uid(),expected_state_version=running_version,state="STOPPED",process=dict(process,exit_observed=True)),"AGENT_EXIT_REPORTER_DENIED",key="native_worker"))

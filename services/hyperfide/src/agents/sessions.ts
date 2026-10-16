@@ -91,9 +91,9 @@ async function binding(client:AuthorityTransaction,s:AgentScope):Promise<RecordV
  const row=await client.query('SELECT * FROM hyperfide.native_session_bindings WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3 FOR UPDATE',key(s));
  if(row.rows.length!==1)agentError('AGENT_BINDING_NOT_FOUND');return row.rows[0] as RecordValue;
 }
-export async function agentOperation(client:AuthorityTransaction,s:AgentScope,id:string,payload:unknown,run:()=>Promise<RecordValue>):Promise<RecordValue>{
+export async function agentOperation(client:AuthorityTransaction,s:AgentScope,id:string,payload:unknown,run:()=>Promise<RecordValue>,invocation:InvocationContext):Promise<RecordValue>{
  // Locking the session serialises same-scope operation IDs and protects source/session binding.
- await session(client,s);
+ const admitted=await session(client,s),native=await binding(client,s);assertNativeRunnerScope(invocation,admitted,native);
  const digest=agentDigest(payload);
  const old=await client.query('SELECT session_id,payload_digest,result FROM hyperfide.native_session_events WHERE organisation_id=$1 AND run_id=$2 AND operation_id=$3',[s.organisation_id,s.run_id,id]);
  if(old.rows.length){const row=old.rows[0] as RecordValue;if(row.session_id!==s.session_id||row.payload_digest!==digest)agentError('AGENT_OPERATION_CONFLICT');return row.result as RecordValue;}
@@ -166,7 +166,7 @@ export function createComponent(ctx:ComponentContext):Component{
  const updated=await client.query('UPDATE hyperfide.agent_sessions SET state=$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING state,state_version',[...key(s),v.state]);
  if(p.exit_observed)await client.query('UPDATE hyperfide.native_session_bindings SET process_exited=true WHERE organisation_id=$1 AND run_id=$2 AND session_id=$3',key(s));
  return {scope:s,...updated.rows[0] as RecordValue,grants_authority:false};
- });
+ },invocation);
  });
  }),
  'agent.session.checkpoint':guard(async(input,invocation)=>{
@@ -181,7 +181,7 @@ export function createComponent(ctx:ComponentContext):Component{
  if(!row||row.agent_session_id!==s.session_id||row.digest!==c.checkpoint_digest||row.status!=='COMPLETE')agentError('AGENT_CHECKPOINT_UNAVAILABLE');
  await client.query('INSERT INTO hyperfide.native_session_checkpoints(organisation_id,run_id,session_id,checkpoint_id,checkpoint_digest,manifest_digest,source_manifest_digest,configuration_digest,native_session_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[...key(s),c.checkpoint_id,c.checkpoint_digest,c.manifest_digest,c.source_manifest_digest,c.configuration_digest,c.native_session_id]);
  return {recorded:true,checkpoint_id:c.checkpoint_id,support_level:row.support_level,context_restored:false,grants_authority:false};
- }));
+ },invocation));
  }),
  'agent.session.resume-check':guard(async(input,invocation)=>{
  const v=exactAgentObject(input,['scope','checkpoint_id','native_session_id','configuration_digest','source_manifest_digest']),s=agentScope(v.scope,invocation);

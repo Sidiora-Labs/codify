@@ -139,7 +139,7 @@ let state:string,delay=0,attempts=Number(row.attempt_count);
  const result=await client.query('UPDATE hyperfide.agent_admission_reservations SET state=$4,attempt_count=$5,retry_after=CASE WHEN $6::integer>0 THEN clock_timestamp()+($6::text||\' milliseconds\')::interval ELSE NULL END,reason=$7 WHERE organisation_id=$1 AND run_id=$2 AND id=$3 RETURNING *',[s.organisation_id,s.run_id,id,state,attempts,delay,v.reason]);
  return {kind:'ADMISSION_REPORT',reservation_id:id,reservation:result.rows[0],diagnostic_refs:diagnosticRefs,command_receipt_refs:commandRefs,condition_digest:v.condition_digest??null,retry_delay_ms:delay,capacity_retained:!release,requires_escalation:state==='ESCALATED',grants_authority:false};
  };
- if(name==='report')return agentOperation(client,s,agentString(v.operation_id,'uuid'),{kind:'agent.admission.report',...v},execute);
+ if(name==='report')return agentOperation(client,s,agentString(v.operation_id,'uuid'),{kind:'agent.admission.report',...v},execute,invocation);
  return execute();
  };
  if(providedTransaction){assertPrimaryTransaction(providedTransaction);await invocation.guard(providedTransaction);return run(providedTransaction);}
