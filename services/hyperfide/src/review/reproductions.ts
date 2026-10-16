@@ -103,8 +103,16 @@ async function lockJob(db:ReviewDb,binding:ReviewScope,id:string):Promise<Data>{
 async function currentJob(db:ReviewDb,binding:ReviewScope,job:Data):Promise<void>{
  if(hash(job.snapshot)!==job.input_manifest_digest||!await reviewInputCurrent(db,binding,job.snapshot))fail('REPRODUCTION_INPUTS_STALE','Immutable reproduction source and current spec/dependency/environment differ');
  const registry=await loadRegistry(db,binding,job.snapshot.task_id);
- const origin=await loadRegistry(db,binding,job.snapshot.origin_task_id);
- if(origin.registry_digest!==job.snapshot.origin_registry_digest)fail('REPRODUCTION_REGISTRY_STALE','Original accepted failure criterion changed');
+ if(job.snapshot.plan_kind==='CURRENT_SOURCE'){
+  const record=await custody(db,binding,job.snapshot.custody_id),source=await integratedSource(db,binding,record,registry,job.snapshot.publication_operation_id,job.candidate_digest);
+  const causal=await inspectReproduction(db,binding,job.snapshot.causal_plan_id) as Data;
+  if(causal.original?.job_id!==job.snapshot.historical_original_job_id||causal.original?.receipt_id!==job.snapshot.historical_original_receipt_id||causal.original?.outcome!=='FAIL'||causal.original?.check_definition_digest!==hash(job.snapshot.check))fail('REPRODUCTION_CAUSAL_PROOF_STALE','Exact original failing proof is no longer available');
+  for(const key of ['source_object_id','source_manifest_digest','qualification_receipt_digest','git_provenance_manifest_digest','integration_input_manifest_digest'])if(source[key]!==job.snapshot[key])fail('REPRODUCTION_PUBLICATION_STALE','Current integrated proof source changed');
+  if(source.tree!==job.snapshot.source_tree_id)fail('REPRODUCTION_PUBLICATION_STALE','Current integrated tree changed');
+ }else{
+  const origin=await loadRegistry(db,binding,job.snapshot.origin_task_id);
+  if(origin.registry_digest!==job.snapshot.origin_registry_digest)fail('REPRODUCTION_REGISTRY_STALE','Original accepted failure criterion changed');
+ }
  if(registry.registry_digest!==job.snapshot.registry_digest||canonical(selectedCheck(registry,job.template_id))!==canonical(job.snapshot.check))fail('REPRODUCTION_REGISTRY_STALE','Accepted registered executable or criterion changed');
 }
 export async function assignReproduction(ctx:ComponentContext,value:unknown):Promise<unknown>{
@@ -114,7 +122,7 @@ export async function assignReproduction(ctx:ComponentContext,value:unknown):Pro
  if(typeof seconds!=='number'||!Number.isSafeInteger(seconds)||seconds<30||seconds>3600)fail('REPRODUCTION_INPUT_INVALID','Lease must be 30..3600 seconds');
  return transaction(ctx,binding,async db=>{
   const job=await lockJob(db,binding,id);await currentJob(db,binding,job);
-  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id??null,'ADMISSION');
+  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id??null,'ADMISSION',[job.snapshot.task_id]);
   if(!['PENDING','LEASED'].includes(job.state)||job.lease_current)fail('REPRODUCTION_ASSIGNMENT_CONFLICT','Job is terminal or already has a current lease');
   const found=await db.query<Data>(`SELECT session.id,session.slot_id,session.sandbox_id,session.sandbox_boot_generation FROM hyperfide.agent_sessions session JOIN hyperfide.sandboxes box ON box.organisation_id=session.organisation_id AND box.id=session.sandbox_id AND box.boot_generation=session.sandbox_boot_generation JOIN hyperfide.worker_slots slot ON slot.organisation_id=session.organisation_id AND slot.id=session.slot_id AND slot.sandbox_id=box.id AND slot.boot_generation=box.boot_generation WHERE session.organisation_id=$1 AND session.run_id=$2 AND session.id=$3 AND session.role='VERIFIER' AND session.state IN ('REGISTERED','RUNNING') AND box.observed_state='RUNNING' AND slot.capacity_kind='TEST' AND slot.state IN ('READY','ALLOCATED') FOR SHARE OF session,box,slot`,[binding.organisation_id,binding.run_id,worker]);
   const owner=found.rows[0];if(!owner)fail('REPRODUCTION_RESERVATION_INVALID','Actual independent remote TEST session and current boot are required');
@@ -140,14 +148,25 @@ async function upload(ctx:ComponentContext,binding:ReviewScope,bytes:Buffer):Pro
  for(let offset=0;offset<bytes.length||offset===0;offset+=256*1024){
   const part=bytes.subarray(offset,Math.min(offset+256*1024,bytes.length));
   const result=await store.invoke('artifact.object.put',{...common,digest:bytesDigest(part),size_bytes:String(part.length),data_base64:part.toString('base64')},ctx) as Data;
-  if(result?.outcome!=='SUCCEEDED'||result?.availability!=='VERIFIED'||result?.artifact?.status!=='COMPLETE'||!result.receipt||result.artifact.digest!==bytesDigest(part))fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Complete verified output chunk was not persisted');
+  if(result?.outcome!=='SUCCEEDED'||result?.availability!=='VERIFIED'||result?.artifact?.status!=='COMPLETE'||!result.receipt||result.artifact.digest!==bytesDigest(part)||String(result.artifact.size_bytes)!==String(part.length))fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Complete verified output chunk was not persisted');
   chunks.push({sequence:chunks.length,artifact_id:uuid(result.artifact.artifact_id),digest:bytesDigest(part),size_bytes:String(part.length),offset_bytes:String(offset)});
   if(bytes.length===0)break;
  }
- if(chunks.length===1)return {artifact_id:chunks[0]!.artifact_id,digest:bytesDigest(bytes),size_bytes:String(bytes.length)};
+ if(chunks.length===1)return {kind:'OBJECT',artifact_id:chunks[0]!.artifact_id,digest:bytesDigest(bytes),content_digest:bytesDigest(bytes),size_bytes:String(bytes.length),manifest_size_bytes:String(bytes.length)};
  const result=await store.invoke('artifact.manifest.commit',{...common,expected_chunks:chunks.length,total_size_bytes:String(bytes.length),content_digest:bytesDigest(bytes),complete:true,truncated:false,missing_ranges:[],chunks},ctx) as Data;
- if(result?.outcome!=='SUCCEEDED'||result?.availability!=='VERIFIED'||result?.artifact?.status!=='COMPLETE'||!result.receipt)fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Complete output manifest was not persisted');
- return {artifact_id:uuid(result.artifact.artifact_id),digest:bytesDigest(bytes),size_bytes:String(bytes.length)};
+ if(result?.outcome!=='SUCCEEDED'||result?.availability!=='VERIFIED'||result?.artifact?.status!=='COMPLETE'||!result.receipt||result.content_digest!==bytesDigest(bytes))fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Complete output manifest was not persisted');
+ const id=uuid(result.artifact.artifact_id),observed=await store.invoke('artifact.manifest.read',{...binding,artifact_id:id},ctx) as Data;
+ if(observed?.outcome!=='SUCCEEDED'||observed?.availability!=='VERIFIED'||observed?.artifact?.status!=='COMPLETE'||!observed.receipt||observed.artifact.artifact_id!==id||observed.artifact.digest!==result.artifact.digest||observed.manifest?.content_digest!==bytesDigest(bytes)||observed.manifest?.total_size_bytes!==String(bytes.length)||observed.manifest?.complete!==true||observed.manifest?.truncated!==false||observed.manifest?.chunks?.length!==chunks.length)fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Exact complete logical output could not be independently read through its manifest');
+ return {kind:'CHUNK_MANIFEST',artifact_id:id,digest:digest(observed.artifact.digest),content_digest:bytesDigest(bytes),size_bytes:String(bytes.length),manifest_size_bytes:String(observed.artifact.size_bytes),chunk_count:chunks.length};
+}
+async function artifactRefCurrent(db:ReviewDb,binding:ReviewScope,ref:Data):Promise<boolean>{
+ if(!ref||!['OBJECT','CHUNK_MANIFEST'].includes(ref.kind)||typeof ref.artifact_id!=='string'||typeof ref.digest!=='string'||typeof ref.content_digest!=='string'||typeof ref.size_bytes!=='string'||typeof ref.manifest_size_bytes!=='string'||!(/^(0|[1-9][0-9]*)$/).test(ref.size_bytes)||!(/^(0|[1-9][0-9]*)$/).test(ref.manifest_size_bytes))return false;
+ const rows=await db.query<Data>(`WITH RECURSIVE closure(id) AS (SELECT $3::uuid UNION SELECT edge.child_artifact_id FROM hyperfide.artifact_dependencies edge JOIN closure parent ON parent.id=edge.parent_artifact_id WHERE edge.organisation_id=$1 AND edge.run_id=$2) SELECT artifact.id,artifact.status,artifact.digest,artifact.size_bytes::text FROM hyperfide.artifacts artifact WHERE artifact.organisation_id=$1 AND artifact.run_id=$2 AND artifact.id IN (SELECT id FROM closure) ORDER BY artifact.id FOR SHARE OF artifact`,[binding.organisation_id,binding.run_id,ref.artifact_id]);
+ const parent=rows.rows.find(row=>row.id===ref.artifact_id);
+ if(!parent||parent.status!=='COMPLETE'||parent.digest!==ref.digest||parent.size_bytes!==ref.manifest_size_bytes||rows.rows.length>1025||rows.rows.some(row=>row.status!=='COMPLETE'))return false;
+ if(ref.kind==='OBJECT')return rows.rows.length===1&&ref.digest===ref.content_digest&&ref.size_bytes===ref.manifest_size_bytes;
+ const edges=await db.query<Data>('SELECT count(*)::text AS count FROM hyperfide.artifact_dependencies WHERE organisation_id=$1 AND run_id=$2 AND parent_artifact_id=$3',[binding.organisation_id,binding.run_id,ref.artifact_id]);
+ return rows.rows.length>1&&Number.isSafeInteger(ref.chunk_count)&&ref.chunk_count>1&&edges.rows[0]?.count===String(ref.chunk_count);
 }
 function captured(value:unknown):Buffer{
  if(!value||typeof value!=='object')fail('REPRODUCTION_RECEIPT_INCOMPLETE','Complete captured bytes are required');
@@ -162,7 +181,7 @@ export async function renewReproduction(ctx:ComponentContext,value:unknown):Prom
  authorizeReview(ctx,binding,['VERIFIER']);
  return transaction(ctx,binding,async db=>{
   const job=await lockJob(db,binding,id);ownerJob(ctx,binding,job,generation);await currentJob(db,binding,job);
-  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT');
+  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT',[job.snapshot.task_id]);
   const resources=capability<Data>(ctx,'5.1','scheduler.allocations.v1',['assertJobReservation','readJobAllocation']);
   const allocation=await resources.readJobAllocation(db,{...binding,reservation_id:job.reservation_id});
   if(!allocation||allocation.assignee_session_id!==job.worker_session_id||allocation.slot_id!==job.slot_id||String(allocation.generation)!==String(job.allocation_generation))fail('REPRODUCTION_LEASE_STALE','Current allocated reservation no longer belongs to this exact job owner');
@@ -184,7 +203,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
  if(recorded)return recorded;
  const prepared=await transaction(ctx,binding,async db=>{
   const job=await lockJob(db,binding,id);ownerJob(ctx,binding,job,generation);await currentJob(db,binding,job);
-  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT');
+  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT',[job.snapshot.task_id]);
   if(!['LEASED','RUNNING','OUTCOME_UNKNOWN'].includes(job.state))fail('REPRODUCTION_DISPATCH_CONFLICT','Only the same current recorded remote operation may be resumed');
   const check=job.snapshot.check as Data;
   const artifactPaths=Array.isArray(check.required_artifacts)?check.required_artifacts:[];
@@ -225,7 +244,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   if(found.length!==1)fail('REPRODUCTION_ARTIFACT_UNAVAILABLE','Required registered artifact is missing or ambiguous');
   additional.push({path,...await upload(ctx,binding,captured(found[0]))});
  }
- const physicalMetadata={...physical,requested_cwd:'.',verified_workspace_path:prepared.job.workspace_path,stdout:{digest:out.digest,size_bytes:String(stdout.length),complete:true},stderr:{digest:err.digest,size_bytes:String(stderr.length),complete:true},artifacts:additional};
+ const physicalMetadata={...physical,requested_cwd:'.',verified_workspace_path:prepared.job.workspace_path,stdout:{digest:out.content_digest,size_bytes:String(stdout.length),complete:true},stderr:{digest:err.content_digest,size_bytes:String(stderr.length),complete:true},artifacts:additional};
  const outcome=physical.exit_code===0?'PASS':'FAIL',checks=[{id:check.id,status:outcome,exit_code:physical.exit_code}];
  const limitations:string[]=[];
  if((prepared.job.snapshot.source_set as Data[]).some(source=>source.repository_id!==prepared.job.snapshot.repository_id))limitations.push('PHYSICAL_SOURCE_SET_PARTIAL');
@@ -237,7 +256,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
  const receiptArtifact=await upload(ctx,binding,Buffer.from(canonical(receiptBody),'utf8'));
  return transaction(ctx,binding,async db=>{
   const job=await lockJob(db,binding,id);ownerJob(ctx,binding,job,generation);await currentJob(db,binding,job);
-  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT');
+  await assertReviewExecutionAllowed(ctx,db,binding,job.snapshot.source_set,job.sandbox_id,'CHECKPOINT',[job.snapshot.task_id]);
   if(job.state!=='RUNNING')fail('REPRODUCTION_LEASE_STALE','Job was fenced after physical execution');
   const resources=capability<Data>(ctx,'5.1','scheduler.allocations.v1',['assertJobReservation','readJobAllocation']);
   await resources.assertJobReservation(db,{...binding,task_id:job.snapshot.task_id,job_kind:'TEST',reservation_id:job.reservation_id});
@@ -249,7 +268,7 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   const evidenceId=evidence.rows[0]!.id;
   for(const [artifact,role] of [[out,'stdout'],[err,'stderr']] as const)await db.query('INSERT INTO hyperfide.evidence_artifacts(organisation_id,run_id,evidence_id,artifact_id,role) VALUES($1,$2,$3,$4,$5)',[binding.organisation_id,binding.run_id,evidenceId,artifact.artifact_id,role]);
   for(const artifact of additional)await db.query('INSERT INTO hyperfide.evidence_artifacts(organisation_id,run_id,evidence_id,artifact_id,role) VALUES($1,$2,$3,$4,$5)',[binding.organisation_id,binding.run_id,evidenceId,artifact.artifact_id,artifact.path]);
-  const result={...receiptBody,evidence_ids:[evidenceId]};
+  const result={...receiptBody,receipt_artifact:receiptArtifact,evidence_ids:[evidenceId]};
   const receipt=await db.query<Data>('INSERT INTO hyperfide.review_reproduction_receipts(organisation_id,run_id,job_id,lease_generation,input_manifest_digest,candidate_digest,result,stdout_artifact_id,stderr_artifact_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
    [binding.organisation_id,binding.run_id,id,generation,job.input_manifest_digest,job.candidate_digest,result,out.artifact_id,err.artifact_id]);
   await db.query('UPDATE hyperfide.review_reproduction_jobs SET state=$4 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[binding.organisation_id,binding.run_id,id,outcome==='PASS'?'PASSED':'FAILED']);
@@ -261,37 +280,55 @@ export async function executeReproduction(ctx:ComponentContext,value:unknown):Pr
   throw error;
  }finally{clearInterval(heartbeat);}
 }
-function receiptManifestDigest(result:Data):string{const body={...result};delete body.evidence_ids;return hash(body);}
+function receiptManifestDigest(result:Data):string{const body={...result};delete body.evidence_ids;delete body.receipt_artifact;return hash(body);}
 export async function inspectReproduction(db:ReviewDb,binding:ReviewScope,planId:string):Promise<unknown>{
  await primary(db);await lockReviewDisposition(db,binding);uuid(planId);
  const rows=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=ANY($3::uuid[])`,[binding.organisation_id,binding.run_id,[planId,pairedId(planId)]]);
+ const currentPlan=rows.rows.find(row=>row.snapshot?.plan_id===planId&&row.snapshot?.plan_kind==='CURRENT_SOURCE'&&row.snapshot?.variant==='REPAIRED');
+ if(currentPlan){
+  const causal=await db.query<Data>(`SELECT job.*,receipt.id AS receipt_id,receipt.lease_generation AS receipt_generation,receipt.result FROM hyperfide.review_reproduction_jobs job LEFT JOIN hyperfide.review_reproduction_receipts receipt ON receipt.organisation_id=job.organisation_id AND receipt.run_id=job.run_id AND receipt.job_id=job.id AND receipt.lease_generation=job.lease_generation WHERE job.organisation_id=$1 AND job.run_id=$2 AND job.id=$3 AND job.snapshot->>'variant'='ORIGINAL' AND job.snapshot->>'plan_id'=$4`,[binding.organisation_id,binding.run_id,currentPlan.snapshot.historical_original_job_id,currentPlan.snapshot.causal_plan_id]);
+  rows.rows.push(...causal.rows);
+ }
  let status:'COMPLETE'|'INCOMPLETE'|'STALE'|'CONFLICT'='COMPLETE';
  const results:Data={};
  for(const variant of ['ORIGINAL','REPAIRED']){
-  const matches=rows.rows.filter(row=>row.snapshot?.plan_id===planId&&row.snapshot?.variant===variant);
+  const matches=rows.rows.filter(row=>row.snapshot?.variant===variant&&(variant==='ORIGINAL'&&currentPlan?row.id===currentPlan.snapshot.historical_original_job_id:row.snapshot?.plan_id===planId));
   if(matches.length!==1){status=matches.length?'CONFLICT':status==='COMPLETE'?'INCOMPLETE':status;continue;}
   const row=matches[0]!,result=row.result as Data|undefined;
-  let current=hash(row.snapshot)===row.input_manifest_digest&&await reviewInputCurrent(db,binding,row.snapshot);
-  try{const registry=await loadRegistry(db,binding,row.snapshot.task_id),origin=await loadRegistry(db,binding,row.snapshot.origin_task_id);current=current&&registry.registry_digest===row.snapshot.registry_digest&&origin.registry_digest===row.snapshot.origin_registry_digest&&canonical(selectedCheck(registry,row.template_id))===canonical(row.snapshot.check)&&canonical(selectedCheck(origin,row.template_id))===canonical(row.snapshot.check);}catch{current=false;}
+  const historical=variant==='ORIGINAL'&&!!currentPlan;
+  let current=hash(row.snapshot)===row.input_manifest_digest&&(historical||await reviewInputCurrent(db,binding,row.snapshot)),registryCurrent=false,originRegistryCurrent=false;
+  try{
+   const registry=await loadRegistry(db,binding,row.snapshot.task_id);
+   registryCurrent=registry.registry_digest===row.snapshot.registry_digest&&canonical(selectedCheck(registry,row.template_id))===canonical(row.snapshot.check);
+   try{const origin=await loadRegistry(db,binding,row.snapshot.origin_task_id);originRegistryCurrent=origin.registry_digest===row.snapshot.origin_registry_digest&&canonical(selectedCheck(origin,row.template_id))===canonical(row.snapshot.check);}catch{originRegistryCurrent=false;}
+   if(!historical)current=current&&registryCurrent&&(row.snapshot.plan_kind==='CURRENT_SOURCE'||originRegistryCurrent);
+   if(row.snapshot.plan_kind==='CURRENT_SOURCE')await currentJob(db,binding,row);
+  }catch{if(!historical)current=false;}
   if(!current)status='STALE';
   let admitted=false;
   if(result&&Array.isArray(result.evidence_ids)&&result.evidence_ids.length){
-   const proof=await db.query<Data>(`SELECT evidence.id FROM hyperfide.evidence evidence JOIN hyperfide.artifacts artifact ON artifact.organisation_id=evidence.organisation_id AND artifact.run_id=evidence.run_id AND artifact.id=evidence.artifact_id WHERE evidence.organisation_id=$1 AND evidence.run_id=$2 AND evidence.id=ANY($3::uuid[]) AND evidence.admission_state='ADMITTED' AND evidence.repository_id=$4 AND evidence.source_object_id=$5 AND evidence.manifest_digest=$6 AND artifact.digest=$6 AND artifact.status='COMPLETE' AND evidence.attempt_id=$7 AND evidence.attempt_generation=$8 AND evidence.criteria_digest=$9 AND NOT EXISTS(SELECT 1 FROM hyperfide.evidence_artifacts support LEFT JOIN hyperfide.artifacts bytes ON bytes.organisation_id=support.organisation_id AND bytes.run_id=support.run_id AND bytes.id=support.artifact_id WHERE support.organisation_id=evidence.organisation_id AND support.run_id=evidence.run_id AND support.evidence_id=evidence.id AND (bytes.id IS NULL OR bytes.status<>'COMPLETE'))`,[binding.organisation_id,binding.run_id,result.evidence_ids,row.snapshot.repository_id,row.snapshot.source_object_id,receiptManifestDigest(result),row.snapshot.attempt_id,row.snapshot.attempt_generation,row.snapshot.source_criteria_digest]);
-   admitted=proof.rows.length===new Set(result.evidence_ids).size;
+   const proof=await db.query<Data>(`SELECT evidence.id FROM hyperfide.evidence evidence JOIN hyperfide.artifacts artifact ON artifact.organisation_id=evidence.organisation_id AND artifact.run_id=evidence.run_id AND artifact.id=evidence.artifact_id WHERE evidence.organisation_id=$1 AND evidence.run_id=$2 AND evidence.id=ANY($3::uuid[]) AND evidence.admission_state='ADMITTED' AND evidence.repository_id=$4 AND evidence.source_object_id=$5 AND evidence.manifest_digest=$6 AND artifact.status='COMPLETE' AND evidence.attempt_id=$7 AND evidence.attempt_generation=$8 AND evidence.criteria_digest=$9 AND NOT EXISTS(SELECT 1 FROM hyperfide.evidence_artifacts support LEFT JOIN hyperfide.artifacts bytes ON bytes.organisation_id=support.organisation_id AND bytes.run_id=support.run_id AND bytes.id=support.artifact_id WHERE support.organisation_id=evidence.organisation_id AND support.run_id=evidence.run_id AND support.evidence_id=evidence.id AND (bytes.id IS NULL OR bytes.status<>'COMPLETE'))`,[binding.organisation_id,binding.run_id,result.evidence_ids,row.snapshot.repository_id,row.snapshot.source_object_id,receiptManifestDigest(result),row.snapshot.attempt_id,row.snapshot.attempt_generation,row.snapshot.source_criteria_digest]);
+   const receiptBytes={...result};delete receiptBytes.evidence_ids;delete receiptBytes.receipt_artifact;
+   const receiptRef=result.receipt_artifact;
+   admitted=proof.rows.length===new Set(result.evidence_ids).size&&receiptRef?.content_digest===receiptManifestDigest(result)&&receiptRef?.size_bytes===String(Buffer.byteLength(canonical(receiptBytes)))&&await artifactRefCurrent(db,binding,receiptRef);
+   if(admitted){
+    const primary=await db.query('SELECT id FROM hyperfide.evidence WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) AND artifact_id=$4',[binding.organisation_id,binding.run_id,result.evidence_ids,receiptRef.artifact_id]);
+    admitted=primary.rows.length===new Set(result.evidence_ids).size;
+   }
    const required=[{role:'stdout',...result.stdout},{role:'stderr',...result.stderr},...(result.physical?.artifacts??[]).map((v:Data)=>({role:v.path,...v}))];
    for(const ref of required){
-    if(!ref.artifact_id||!ref.digest||!ref.size_bytes){admitted=false;break;}
-    const complete=await db.query(`SELECT 1 FROM hyperfide.evidence_artifacts support JOIN hyperfide.artifacts artifact ON artifact.organisation_id=support.organisation_id AND artifact.run_id=support.run_id AND artifact.id=support.artifact_id WHERE support.organisation_id=$1 AND support.run_id=$2 AND support.evidence_id=ANY($3::uuid[]) AND support.artifact_id=$4 AND support.role=$5 AND artifact.status='COMPLETE' AND artifact.digest=$6 AND artifact.size_bytes=$7`,[binding.organisation_id,binding.run_id,result.evidence_ids,ref.artifact_id,ref.role,ref.digest,ref.size_bytes]);
-    if(complete.rows.length!==1){admitted=false;break;}
+    if(!await artifactRefCurrent(db,binding,ref)){admitted=false;break;}
+    const linked=await db.query('SELECT 1 FROM hyperfide.evidence_artifacts WHERE organisation_id=$1 AND run_id=$2 AND evidence_id=ANY($3::uuid[]) AND artifact_id=$4 AND role=$5',[binding.organisation_id,binding.run_id,result.evidence_ids,ref.artifact_id,ref.role]);
+    if(linked.rows.length!==1){admitted=false;break;}
    }
   }
-  if(result&&Array.isArray(result.limitations)&&result.limitations.length&&status==='COMPLETE')status='INCOMPLETE';
-  const checks=result?.checks,terminal=['PASSED','FAILED'].includes(row.state),valid=terminal&&row.receipt_id&&String(row.receipt_generation)===String(row.lease_generation)&&admitted&&Array.isArray(checks)&&checks.length===1&&checks[0]?.id===row.template_id&&['PASS','FAIL'].includes(checks[0]?.status);
+  if(!historical&&result&&Array.isArray(result.limitations)&&result.limitations.length&&status==='COMPLETE')status='INCOMPLETE';
+  const checks=result?.checks,terminal=['PASSED','FAILED'].includes(row.state),valid=terminal&&row.receipt_id&&String(row.receipt_generation)===String(row.lease_generation)&&admitted&&Array.isArray(checks)&&checks.length===1&&checks[0]?.id===row.template_id&&checks[0]?.status===(row.state==='PASSED'?'PASS':'FAIL')&&result?.outcome===checks[0]?.status&&result?.job_id===row.id&&result?.candidate_digest===row.candidate_digest&&result?.input_manifest_digest===row.input_manifest_digest&&String(result?.lease_generation)===String(row.lease_generation)&&canonical(result?.source_set)===canonical(row.snapshot.source_set);
   if(!valid&&status==='COMPLETE')status='INCOMPLETE';
-  results[variant.toLowerCase()]={job_id:row.id,task_id:row.snapshot.task_id,source_task_id:row.snapshot.source_task_id,origin_task_id:row.snapshot.origin_task_id,criteria_digest:row.snapshot.criteria_digest,source_criteria_digest:row.snapshot.source_criteria_digest,registry_digest:row.snapshot.registry_digest,origin_registry_digest:row.snapshot.origin_registry_digest,template_id:row.template_id,check_definition_digest:hash(row.snapshot.check),qualification_scope:row.qualification_scope,source_set:row.snapshot.source_set,input_manifest_digest:row.input_manifest_digest,outcome:valid?(row.state==='PASSED'?'PASS':'FAIL'):'UNKNOWN',receipt_id:row.receipt_id??null,evidence_ids:admitted?result!.evidence_ids:[],checks:valid?checks:[],job_state:row.state,last_error_code:row.last_error_code??null};
+  results[variant.toLowerCase()]={historical,currentness:historical?'HISTORICAL_CAUSAL_PROOF':'CURRENT_EXECUTION_PROOF',causal_plan_id:historical?currentPlan!.snapshot.causal_plan_id:row.snapshot.plan_id,causal_job_id:historical?row.id:null,registry_current:registryCurrent,origin_registry_current:originRegistryCurrent,source_origin:row.snapshot.source_origin??'SUBMITTED_RESULT',publication_operation_id:row.snapshot.publication_operation_id??null,qualification_receipt_digest:row.snapshot.qualification_receipt_digest??null,git_provenance_manifest_digest:row.snapshot.git_provenance_manifest_digest??null,integration_input_manifest_digest:row.snapshot.integration_input_manifest_digest??null,limitations:result?.limitations??[],job_id:row.id,task_id:row.snapshot.task_id,source_task_id:row.snapshot.source_task_id,origin_task_id:row.snapshot.origin_task_id,criteria_digest:row.snapshot.criteria_digest,source_criteria_digest:row.snapshot.source_criteria_digest,registry_digest:row.snapshot.registry_digest,origin_registry_digest:row.snapshot.origin_registry_digest,template_id:row.template_id,check_definition_digest:hash(row.snapshot.check),qualification_scope:row.qualification_scope,source_set:row.snapshot.source_set,input_manifest_digest:row.input_manifest_digest,outcome:valid?(row.state==='PASSED'?'PASS':'FAIL'):'UNKNOWN',receipt_id:row.receipt_id??null,evidence_ids:admitted?result!.evidence_ids:[],checks:valid?checks:[],job_state:row.state,last_error_code:row.last_error_code??null};
  }
  const first=rows.rows[0];
- return {status,plan_id:planId,candidate_digest:first?.candidate_digest??null,candidate_input_manifest_digest:first?.snapshot?.candidate_input_manifest_digest??null,...results};
+ return {status,plan_id:planId,plan_kind:currentPlan?'CURRENT_SOURCE':'PAIRED',causal_plan_id:currentPlan?.snapshot?.causal_plan_id??planId,candidate_digest:(currentPlan??first)?.candidate_digest??null,candidate_input_manifest_digest:(currentPlan??first)?.snapshot?.candidate_input_manifest_digest??null,...results};
 }
 export async function fenceReproductionJobs(db:ReviewDb,binding:ReviewScope,control:ReviewControl):Promise<unknown>{
  await primary(db);await lockReviewDisposition(db,binding,true);
@@ -306,10 +343,64 @@ export async function fenceReproductionJobs(db:ReviewDb,binding:ReviewScope,cont
  }
  return {fenced,physical,cleanup_status:'UNKNOWN',reassignment_authorized:false,control_operation_id:control.operation_id,control_generation:control.control_generation};
 }
+
+async function integratedSource(db:ReviewDb,binding:ReviewScope,record:Data,registry:Data,operationId:string,candidateDigest:string):Promise<Data>{
+ let proof:Data,publication:Data;
+ try{const path='../assurance/coverage.js',module=await import(path) as Data;proof=await module.inspectCoverage(db,binding,record.id);}
+ catch{fail('REPRODUCTION_QUALIFICATION_UNAVAILABLE','Actual current qualification inspector is unavailable');}
+ if(proof.applicability!=='CURRENT'||proof.proof_complete!==true||proof.proof_registry_current!==true||proof.proof_source_origin!=='INTEGRATED_PUBLICATION'||proof.proof_registry_digest!==registry.registry_digest||proof.proof_criteria_digest!==registry.task.criteria_digest||proof.proof_publication_operation_id!==operationId||!Array.isArray(proof.required_check_ids)||!Array.isArray(proof.passed_check_ids)||!proof.required_check_ids.every((id:string)=>proof.passed_check_ids.includes(id)))fail('REPRODUCTION_QUALIFICATION_INCOMPLETE','Fresh current integrated qualification proof and exact accepted registry are required');
+ try{const path='../integration/publication.js',module=await import(path) as Data;publication=await module.inspectIntegratedPublication(db,binding,{task_id:record.task_id,custody_id:record.id,custody_generation:String(record.custody_generation)});}
+ catch{fail('REPRODUCTION_PUBLICATION_UNAVAILABLE','Actual contributor and custody publication lineage is unavailable');}
+ const source=publication.current_source;
+ if(publication.status!=='PUBLISHED'||publication.lineage_status!=='VERIFIED_PUBLISHED_CHAIN'||!source||source.operation_id!==operationId||source.repository_id!==record.repository_id||source.source_object_id!==publication.latest_repository_head||source.source_object_id!==proof.proof_source_object_id||source.tree!==proof.proof_source_tree_id||source.integration_input_manifest_digest!==candidateDigest||source.integration_input_manifest_digest!==proof.proof_integration_input_manifest_digest||source.git_provenance_manifest_digest!==proof.proof_git_provenance_manifest_digest)fail('REPRODUCTION_PUBLICATION_STALE','Qualification must name the exact latest verified publication contributor chain');
+ if(source.source_manifest_digest!==null&&source.source_manifest_digest!==undefined&&source.source_manifest_digest!==proof.proof_source_manifest_digest)fail('REPRODUCTION_PUBLICATION_STALE','Independent physical source manifest identities differ');
+ return {...source,source_manifest_digest:digest(proof.proof_source_manifest_digest),qualification_receipt_digest:digest(proof.receipt_digest),source_object_id:oid(source.source_object_id),tree:oid(source.tree),git_provenance_manifest_digest:digest(source.git_provenance_manifest_digest),integration_input_manifest_digest:digest(source.integration_input_manifest_digest)};
+}
+export async function planCurrentSourceReproduction(ctx:ComponentContext,value:unknown):Promise<unknown>{
+ const v=obj(value,['organisation_id','run_id','request_id','causal_plan_id','repair_custody_id','publication_operation_id','candidate_digest','candidate_input_manifest_digest','template_id','qualification_scope','snapshot']);
+ const binding=scope(v);authorizeReview(ctx,binding,['OPERATOR','LEADER','COORDINATOR','FEATURE_MANAGER']);
+ const requestId=uuid(v.request_id),causalId=uuid(v.causal_plan_id),custodyId=uuid(v.repair_custody_id),operationId=uuid(v.publication_operation_id),candidate=digest(v.candidate_digest),candidateInput=digest(v.candidate_input_manifest_digest),template=text(v.template_id,128),requestDigest=hash(v);
+ if(!['COMPONENT','CONTRACT','SYSTEM'].includes(String(v.qualification_scope)))fail('REPRODUCTION_INPUT_INVALID','Unknown qualification scope');
+ return transaction(ctx,binding,async db=>{
+  const prior=await db.query<Data>('SELECT id,request_digest,snapshot FROM hyperfide.review_reproduction_jobs WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3',[binding.organisation_id,binding.run_id,requestId]);
+  if(prior.rows[0]){
+   if(prior.rows[0].request_digest!==requestDigest||prior.rows[0].snapshot.plan_kind!=='CURRENT_SOURCE')fail('REPRODUCTION_REQUEST_CONFLICT','Stable current-source request already has different immutable inputs');
+   return {plan_id:prior.rows[0].snapshot.plan_id,job_id:prior.rows[0].id,plan_kind:'CURRENT_SOURCE',causal_plan_id:causalId,replayed:true,status:'UNRUN'};
+  }
+  const causal=await inspectReproduction(db,binding,causalId) as Data,original=causal.original;
+  if(causal.plan_kind!=='PAIRED'||!original||original.outcome!=='FAIL'||!Array.isArray(original.evidence_ids)||!original.evidence_ids.length||original.template_id!==template||!original.receipt_id)fail('REPRODUCTION_CAUSAL_PROOF_INCOMPLETE','An actual immutable original failing execution is required; an unrun pair cannot authorize current-source reproduction');
+  const record=await custody(db,binding,custodyId);
+  if(!['ACTIVE','RELEASED'].includes(record.authority))fail('REPRODUCTION_CUSTODY_STALE','Current-source proof cannot revive disposed custody');
+  const registry=await loadRegistry(db,binding,record.task_id),check=selectedCheck(registry,template);
+  if(hash(check)!==original.check_definition_digest)fail('REPRODUCTION_CHECK_MISMATCH','Current accepted check differs from the recorded original failure definition');
+  const source=await integratedSource(db,binding,record,registry,operationId,candidate);
+  const current=await buildReviewSnapshot(db,binding,candidate,v.snapshot,ctx);
+  if(hash(current)!==candidateInput||!(current.source_set as Data[]).some(row=>row.repository_id===record.repository_id&&row.source_object_id===source.source_object_id))fail('REPRODUCTION_INPUT_MISMATCH','New execution must use exact server-bound current publication inputs');
+  const admitted=await db.query('SELECT 1 FROM hyperfide.review_obligation_inputs i JOIN hyperfide.review_obligations o ON o.organisation_id=i.organisation_id AND o.run_id=i.run_id AND o.id=i.obligation_id AND o.generation=i.generation JOIN hyperfide.review_policies p ON p.organisation_id=o.organisation_id AND p.run_id=o.run_id AND p.digest=o.policy_digest AND p.active WHERE i.organisation_id=$1 AND i.run_id=$2 AND i.input_manifest_digest=$3 AND i.candidate_digest=$4 AND o.repository_id=$5 AND o.source_object_id=$6 LIMIT 1',[binding.organisation_id,binding.run_id,candidateInput,candidate,record.repository_id,source.source_object_id]);
+  if(!admitted.rows.length)fail('REPRODUCTION_INPUT_UNBOUND','Current-source review inputs must be admitted independently');
+  const discovered=await db.query<Data>('SELECT tree_object_id FROM hyperfide.review_commits WHERE organisation_id=$1 AND run_id=$2 AND repository_id=$3 AND source_object_id=$4',[binding.organisation_id,binding.run_id,record.repository_id,source.source_object_id]);
+  if(discovered.rows[0]?.tree_object_id!==source.tree)fail('REPRODUCTION_DISCOVERY_REQUIRED','Actual Git discovery must confirm the exact published commit and tree');
+  const planId=randomUUID(),jobId=pairedId(planId);
+  const snapshot:Data={...current,plan_id:planId,plan_kind:'CURRENT_SOURCE',variant:'REPAIRED',causal_plan_id:causalId,historical_original_job_id:original.job_id,historical_original_receipt_id:original.receipt_id,candidate_input_manifest_digest:candidateInput,
+   task_id:record.task_id,source_task_id:record.task_id,origin_task_id:original.origin_task_id,origin_registry_digest:original.origin_registry_digest,registry_digest:registry.registry_digest,
+   custody_id:record.id,custody_source_object_id:record.source_object_id,custody_criteria_digest:record.criteria_digest,custody_source_manifest_digest:record.source_manifest_digest,attempt_id:record.source_attempt_id,attempt_generation:String(record.source_generation),
+   source_origin:'INTEGRATED_PUBLICATION',publication_operation_id:operationId,qualification_receipt_digest:source.qualification_receipt_digest,
+   git_provenance_manifest_digest:source.git_provenance_manifest_digest,integration_input_manifest_digest:source.integration_input_manifest_digest,
+   repository_id:record.repository_id,source_object_id:source.source_object_id,source_tree_id:source.tree,source_manifest_digest:source.source_manifest_digest,
+   source_criteria_digest:registry.task.criteria_digest,criteria_digest:registry.task.criteria_digest,check,contract_ids:(current.contract_versions as Data[]).map(row=>row.id)};
+  snapshot.execution_inputs={source:{source_manifest_digest:snapshot.source_manifest_digest,source_set:current.source_set,publication_operation_id:operationId,git_provenance_manifest_digest:source.git_provenance_manifest_digest,integration_input_manifest_digest:source.integration_input_manifest_digest},dependency:{manifest_digest:current.dependency_manifest_digest},toolchain:{environment_profile_id:current.environment_profile_id,digest:current.toolchain_digest},configuration:{digest:current.configuration_digest},graph:{manifest_id:current.graph_manifest_id,digest:current.graph_manifest_digest,source_set:current.graph_source_set},contract:{versions:current.contract_versions}};
+  if(!Array.isArray(check.input_keys)||!check.input_keys.length||check.input_keys.some((key:unknown)=>typeof key!=='string'||!Object.hasOwn(snapshot.execution_inputs,key)))fail('REPRODUCTION_REGISTRY_INVALID','Registered execution inputs are unavailable');
+  const inputDigest=hash(snapshot);
+  await db.query('INSERT INTO hyperfide.review_reproduction_jobs(organisation_id,run_id,id,request_id,request_digest,candidate_digest,input_manifest_digest,snapshot,template_id,qualification_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[binding.organisation_id,binding.run_id,jobId,requestId,requestDigest,candidate,inputDigest,snapshot,template,v.qualification_scope]);
+  return {plan_id:planId,job_id:jobId,jobs:[{job_id:jobId,variant:'REPAIRED',input_manifest_digest:inputDigest}],plan_kind:'CURRENT_SOURCE',causal_plan_id:causalId,source_origin:'INTEGRATED_PUBLICATION',publication_operation_id:operationId,status:'UNRUN',replayed:false};
+ });
+}
+
 export function createComponent(_context:ComponentContext):Component{
  const guarded=(fn:(ctx:ComponentContext,input:unknown)=>Promise<unknown>)=>async(input:unknown,ctx:ComponentContext)=>{try{return await fn(ctx,input);}catch(error){throw reviewError(error);}};
  return {apiVersion:1,actions:{
-  'review.reproduction.renew':guarded(renewReproduction),'review.reproduction.plan':guarded(planReproduction),'review.reproduction.assign':guarded(assignReproduction),'review.reproduction.execute':guarded(executeReproduction),
+  'review.reproduction.renew':guarded(renewReproduction),'review.reproduction.plan':guarded(planReproduction),
+  'review.reproduction.current.plan':guarded(planCurrentSourceReproduction),'review.reproduction.assign':guarded(assignReproduction),'review.reproduction.execute':guarded(executeReproduction),
   'review.reproduction.inspect':guarded(async(ctx,input)=>{const v=obj(input,['organisation_id','run_id','plan_id']);return transaction(ctx,scope(v),db=>inspectReproduction(db,scope(v),uuid(v.plan_id)));})
  }};
 }

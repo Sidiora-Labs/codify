@@ -13,7 +13,8 @@
     "review.reproduction.assign",
     "review.reproduction.execute",
     "review.reproduction.inspect",
-    "review.reproduction.renew"
+    "review.reproduction.renew",
+    "review.reproduction.current.plan"
   ],
   "requires": [
     "spec-obligations",

@@ -28,7 +28,9 @@
     "review.reproduction.unassigned-execution-refused",
     "review.reproduction.cross-run-refused",
     "review.reproduction.no-physical-execution-inferred",
-    "review.reproduction.exact-registry-inspector"
+    "review.reproduction.exact-registry-inspector",
+    "review.reproduction.current-source-unrun-causal-refused",
+    "review.reproduction.current-source-caller-head-refused"
   ],
   "argv": [
     "python3",

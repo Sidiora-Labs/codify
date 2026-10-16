@@ -21,7 +21,7 @@ IDS=[
 "review.reproduction.immutable-job-inputs","review.reproduction.unrun-never-proof",
 "review.reproduction.non-verifier-assignment-refused","review.reproduction.capacity-required",
 "review.reproduction.unassigned-execution-refused","review.reproduction.cross-run-refused",
-"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector",
+"review.reproduction.no-physical-execution-inferred","review.reproduction.exact-registry-inspector","review.reproduction.current-source-unrun-causal-refused","review.reproduction.current-source-caller-head-refused",
 ]
 SOURCE='''[meta]
 slug = "fixture"
@@ -56,10 +56,13 @@ def setup(f,d):
  f.git("add","scenario.py");f.git("commit","-m","[spec:fixture/1.1] record failing system fixture");f.first=f.git("rev-parse","HEAD").strip()
  (f.repo/"scenario.py").write_text(SCENARIO.replace("CONVERSION","value/100").replace("LOCAL_INPUT","100"))
  f.git("add","scenario.py");f.git("commit","-m","[spec:fixture/1.1] align monetary units");f.second=f.git("rev-parse","HEAD").strip()
- parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e","import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=SOURCE.encode(),cwd=ROOT))
+ executable=str(Path(sys.executable).resolve())
+ fields={"argv":[executable,"scenario.py","integration"],"executable_digest":sha(Path(executable).read_bytes()),"timeout_ms":30000,"required_artifacts":["result.json"],"input_keys":["source","dependency","toolchain","configuration","graph","contract"]}
+ source=SOURCE.replace("[task.1.1]",'checks = ["units-system"]\n[task.1.1]')+'\n[proof]\nrubric_digest = '+json.dumps(m.DIGEST)+'\n[proof.check.units-system]\n'+"".join(key+" = "+json.dumps(value)+"\n" for key,value in fields.items())
+ parsed=json.loads(subprocess.check_output(["node","--input-type=module","-e","import{parseKvx}from'./services/hyperfide/dist/spec/import.js';let s='';for await(const c of process.stdin)s+=c;process.stdout.write(JSON.stringify(parseKvx(s)));"],input=source.encode(),cwd=ROOT))
  accepted=m.xid(0xa00)
- document={"schema_version":1,"revision_digest":sha(b"review17-accepted-envelope"),"source_digest":sha(SOURCE.encode()),"repositories":[{"repository_id":m.REPOSITORY,"source_object_id":f.pinned,"integration_ref":"refs/heads/main"}],"allowed_actions":d.actions,"closure_policy":{"required_evidence":["units-system"],"required_review_roles":[],"publication":"AFTER_QUALIFICATION"},"provenance":None,"parsed":parsed,"runtime_wave_offset":0}
- d.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[m.ORG,d.ids["project"],accepted,sha(SOURCE.encode()),SOURCE,document,document["revision_digest"]])
+ document={"schema_version":1,"revision_digest":sha(b"review17-accepted-envelope"),"source_digest":sha(source.encode()),"repositories":[{"repository_id":m.REPOSITORY,"source_object_id":f.pinned,"integration_ref":"refs/heads/main"}],"allowed_actions":d.actions,"closure_policy":{"required_evidence":["units-system"],"required_review_roles":[],"publication":"AFTER_QUALIFICATION"},"provenance":None,"parsed":parsed,"runtime_wave_offset":0}
+ d.sql("INSERT INTO hyperfide.spec_revisions(organisation_id,project_id,id,source_digest,source_content,document,schema_version,revision_digest) VALUES($1,$2,$3,$4,$5,$6,1,$7)",[m.ORG,d.ids["project"],accepted,sha(source.encode()),source,document,document["revision_digest"]])
  d.sql("INSERT INTO hyperfide.run_spec_revisions(organisation_id,run_id,spec_generation,spec_revision_id) VALUES($1,$2,2,$3)",[m.ORG,m.RUN,accepted])
  d.sql("UPDATE hyperfide.runs SET spec_revision_id=$3,spec_generation=2,state='PENDING_VALIDATION',state_version=2 WHERE organisation_id=$1 AND id=$2",[m.ORG,m.RUN,accepted])
  section=next(s for s in parsed["sections"] if s["name"]=="task.1.1")
@@ -132,6 +135,9 @@ def main():
    m.check(IDS[17],lambda:f.reject("review.reproduction.inspect",dict(m.SCOPE,run_id=m.xid(0xdead),plan_id=planned["plan_id"]),"REVIEW_SCOPE_DENIED",component="17.4"))
    m.check(IDS[18],lambda:m.expect(f.identity.sql("SELECT count(*)::text AS n FROM hyperfide.runner_remote_jobs")[0]["n"]=="0" and f.identity.sql("SELECT count(*)::text AS n FROM hyperfide.review_reproduction_receipts")[0]["n"]=="0","unassigned validation fabricated physical execution"))
    m.check(IDS[19],lambda:m.expect(inspection["original"]["task_id"]==m.xid(0x301) and inspection["original"]["check_definition_digest"]==sha(canonical(check)) and inspection["original"]["registry_digest"]==inspection["repaired"]["registry_digest"] and inspection["original"]["qualification_scope"]=="SYSTEM","inspector lost exact accepted executable/source identity"))
+   current_request=dict(m.SCOPE,request_id=m.xid(0xf01),causal_plan_id=planned["plan_id"],repair_custody_id=m.xid(0xa22),publication_operation_id=m.xid(0xf02),candidate_digest=m.DIGEST,candidate_input_manifest_digest=bound["input_manifest_digest"],template_id="units-system",qualification_scope="SYSTEM",snapshot=snapshot)
+   m.check(IDS[20],lambda:f.reject("review.reproduction.current.plan",current_request,"REPRODUCTION_CAUSAL_PROOF_INCOMPLETE",component="17.4"))
+   m.check(IDS[21],lambda:f.reject("review.reproduction.current.plan",dict(current_request,source_object_id=f.second),"REVIEW_INPUT_INVALID",component="17.4"))
    (m.evidence_dir("17.4")/"remote-fixture-observations.json").write_text(json.dumps(outcomes,indent=2)+"\n")
   finally:f.identity.close();f.save(m.FAILED)
  return int(bool(m.FAILED))
