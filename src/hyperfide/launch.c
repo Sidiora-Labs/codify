@@ -170,7 +170,7 @@ static int read_plan(const RunnerConfig *c,const Instruction *i,HfJson *j,char *
  !hf_json_bool(j,hf_json_field(j,0,"dispatch_eligible"),&dispatch)||!dispatch||!hf_json_bool(j,hf_json_field(j,0,"requires_supervisor"),&supervised)||!supervised||
  !hf_json_get(j,"binary_digest",expected,sizeof expected)||strlen(expected)!=71||strncmp(expected,"sha256:",7)||!hf_json_get(j,"cwd",cwd,sizeof cwd)||!hf_json_get(j,"home",home,sizeof home)||!hf_json_get(j,"temp",tmp,sizeof tmp))return 0;
  snprintf(path,sizeof path,"%s/%s/worktree",c->slots,i->slot);if(strcmp(cwd,path))return 0;snprintf(path,sizeof path,"%s/%s/home",c->slots,i->slot);if(strcmp(home,path))return 0;snprintf(path,sizeof path,"%s/%s/tmp",c->slots,i->slot);if(strcmp(tmp,path))return 0;
- int array=hf_json_field(j,0,"argv");if(array<0||j->tokens[array].type!='a'||j->tokens[array].count<1||j->tokens[array].count>256)return 0;
+ int array=hf_json_field(j,0,"argv");if(array<0||j->tokens[array].type!='['||j->tokens[array].count<1||j->tokens[array].count>256)return 0;
  *argv=calloc((size_t)j->tokens[array].count+1,sizeof(char*));if(!*argv)return 0;int k=0;
  for(int t=array+1;t<j->tokens[array].next;t=j->tokens[t].next){(*argv)[k]=malloc(4096);if(!(*argv)[k]||!hf_json_string(j,t,(*argv)[k],4096))return 0;++k;}
  if((*argv)[0][0]!='/')return 0;
