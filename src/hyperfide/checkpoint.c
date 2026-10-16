@@ -539,7 +539,8 @@ static int collect(int repo, int dir, const char *prefix, Buf *tracked, Buf *tre
     closedir(d);
     if (result)
         goto done;
-    qsort(names, n, sizeof *names, cmpname);
+    if (n > 1)
+        qsort(names, n, sizeof *names, cmpname);
     for (size_t i = 0; i < n && !result; i++) {
         char path[4097];
         int k = snprintf(path, sizeof path, "%s%s%s", prefix, *prefix ? "/" : "", names[i].name);
@@ -1022,6 +1023,44 @@ static int clearwork(int fd) {
     closedir(d);
     return r;
 }
+/* A restored Git database contains only this freshly cloned repository's
+ * metadata. Flush its regular files and directory entries before publishing it. */
+static int flush_git_tree(int dir, unsigned depth) {
+    if (depth > 128)
+        return bad("PATH_DEPTH_LIMIT");
+    DIR *stream = fdopendir(dup(dir));
+    if (!stream)
+        return bad("IO_ERROR");
+    rewinddir(stream);
+    struct dirent *entry;
+    int result = 0;
+    while (!result && (entry = readdir(stream))) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+        struct stat st;
+        if (fstatat(dir, entry->d_name, &st, AT_SYMLINK_NOFOLLOW)) {
+            result = bad("IO_ERROR");
+            break;
+        }
+        if (S_ISLNK(st.st_mode))
+            continue;
+        int fd =
+            openat(dir, entry->d_name,
+                   O_RDONLY | O_NOFOLLOW | O_CLOEXEC | (S_ISDIR(st.st_mode) ? O_DIRECTORY : 0));
+        if (fd < 0) {
+            result = bad("IO_ERROR");
+            break;
+        }
+        result = S_ISDIR(st.st_mode)   ? flush_git_tree(fd, depth + 1)
+                 : S_ISREG(st.st_mode) ? fsync(fd)
+                                       : bad("UNSUPPORTED_ENTRY");
+        close(fd);
+    }
+    closedir(stream);
+    if (!result && fsync(dir))
+        result = bad("IO_ERROR");
+    return result;
+}
 static int restore_tree(int dir, Buf *tree) {
     size_t off = 0;
     unsigned count = 0;
@@ -1122,7 +1161,7 @@ static int restore_tree(int dir, Buf *tree) {
                 memcpy(path, tree->p + off + 17, pn);
                 path[pn] = 0;
                 int fd = relative_dir(dir, path);
-                if (fd < 0 || fchmod(fd, mode)) {
+                if (fd < 0 || fchmod(fd, mode) || fsync(fd)) {
                     if (fd >= 0)
                         close(fd);
                     r = bad("IO_ERROR");
@@ -1214,7 +1253,19 @@ static int restore(Obj *o, int root, int spool, FILE *out) {
         goto done;
     }
     if (clearwork(repo) || restore_tree(repo, &p.tree) ||
-        GIT(repo, NULL, "remote", "remove", "origin") || fchmod(repo, rootmode) || fsync(repo)) {
+        GIT(repo, NULL, "remote", "remove", "origin")) {
+        close(repo);
+        goto done;
+    }
+    int gitdir = openat(repo, ".git", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (gitdir < 0 || flush_git_tree(gitdir, 0)) {
+        if (gitdir >= 0)
+            close(gitdir);
+        close(repo);
+        goto done;
+    }
+    close(gitdir);
+    if (fchmod(repo, rootmode) || fsync(repo)) {
         close(repo);
         goto done;
     }
