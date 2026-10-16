@@ -2,7 +2,21 @@
 """Observe native CLI/MCP against actual signed HTTPS/PostgreSQL authority. Synthetic data only."""
 import json,os,subprocess,tempfile,sys
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[4];FAILED=[];IDS=[]
+ROOT=Path(__file__).resolve().parents[4];FAILED=[];IDS=[];CLEANUP=[]
+def artifacts():
+ p=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/domain25-client-tests"))/"client";p.mkdir(parents=True,exist_ok=True);return p
+def cleanup():
+ file=artifacts()/"cleanup.json";records=json.loads(file.read_text()) if file.is_file() else []
+ complete=len(records)==4 and all(r.get("observed_absent") is True for r in records)
+ print(json.dumps({"type":"cleanup","complete":complete,"resources":[{"id":r["id"],"status":"deleted" if r["observed_absent"] else "unknown","observed_absent":r["observed_absent"],"evidence_artifact":"client/cleanup.json"} for r in records]}));return 0 if complete else 1
+def close_fixture(f,resource):
+ import socket
+ database=f.database;role=f.runtime_role;port=f.port;root=f.path
+ f.close()
+ absent=not f.sql("SELECT datname FROM pg_database WHERE datname=$1",[database],admin=True) and not f.sql("SELECT rolname FROM pg_roles WHERE rolname=$1",[role],admin=True)
+ with socket.socket() as sock:sock.settimeout(1);listener_absent=sock.connect_ex(("127.0.0.1",port))!=0
+ CLEANUP.append({"id":resource,"observed_absent":bool(absent and listener_absent and not root.exists()),"database_observed_absent":bool(absent),"https_observed_absent":listener_absent,"private_root_observed_absent":not root.exists()})
+ expect(CLEANUP[-1]["observed_absent"],"owned native service fixture retained database/role/listener/private files")
 def expect(v,m):
  if not v:raise AssertionError(m)
 def check(name,fn):
@@ -47,6 +61,9 @@ def main():
  network_checks()
  mapping_checks()
  business_unknown_checks()
+ check('client.cleanup.actual-absence',lambda:expect(len(CLEANUP)==4 and all(r['observed_absent'] for r in CLEANUP),'native fixture cleanup incomplete'))
+ (artifacts()/'cleanup.json').write_text(json.dumps(CLEANUP,sort_keys=True))
+ (artifacts()/'observations.json').write_text(json.dumps({'scope':'task-component','assertion_ids':IDS,'failed_ids':FAILED,'full_cases_qualified':False},sort_keys=True))
  return 1 if FAILED else 0
 
 def network_checks():
@@ -153,7 +170,7 @@ def network_checks():
    p,r,_,_=invoke("identity.describe",{})
    expect(p.returncode!=0 and r and r["ok"] is False,"revoked credential accepted")
   check("client.https.revoked-principal",revoked)
- finally:fixture.close()
+ finally:close_fixture(fixture,'hf-task25.3-network')
 
 
 
@@ -236,7 +253,7 @@ def mapping_checks():
    expect(p.returncode==0 and r["result"]["isError"] and json.loads(r["result"]["content"][0]["text"])["error"]["code"]=="AUTHORITY_SUBJECT_MISMATCH","operator credential acquired supervisor authority")
    policy.write_text(json.dumps({"schema_version":1,"allowed_tools":["fleet_status"]}))
   check("client.mcp.wrong-supervisor-credential-refused",wrong_subject)
- finally:fixture.close()
+ finally:close_fixture(fixture,'hf-task25.3-mapping')
 
 def business_unknown_checks():
  sys.path.insert(0,str(ROOT/"tests/hyperfide/support"))
@@ -280,8 +297,9 @@ def business_unknown_checks():
    observed(json.loads(response["result"]["content"][0]["text"]),data)
   check("client.mcp.business-unknown-error-real-pending",mcp_unknown)
  finally:
-  if fixture:fixture.close()
+  if fixture:close_fixture(fixture,'hf-task25.3-business')
   absent=backend.stop()
+  CLEANUP.append({'id':'hf-task25.3-object-backend','observed_absent':absent})
   expect(absent,"owned artifact fault fixture retained a listener")
 
-if __name__=="__main__":sys.exit(main())
+if __name__=="__main__":sys.exit(cleanup() if "--cleanup" in sys.argv else main())
