@@ -1,0 +1,69 @@
+import type {Component,ComponentContext} from '../components/registry.js';
+import {authority,object,text,uuid,digest,integer,generation,timestamp,hash,fail,lockRun,requireArtifact,numbers,requireCollector} from './views.js';
+import type {Session,Principal} from './views.js';
+export const DIMENSIONS=['SANDBOX','AGENT_SESSION','CPU_MILLIS','MEMORY_BYTES','DISK_BYTES','BUILD','LINK','TEST','EXCLUSIVE_SERVICE','INDEX','MODEL_REQUEST','MODEL_TOKEN','PROVIDER_API'] as const;
+const UNITS:Record<string,string>={SANDBOX:'instances',AGENT_SESSION:'sessions',CPU_MILLIS:'millicpu',MEMORY_BYTES:'bytes',DISK_BYTES:'bytes',BUILD:'jobs',LINK:'jobs',TEST:'jobs',EXCLUSIVE_SERVICE:'services',INDEX:'jobs',MODEL_REQUEST:'requests',MODEL_TOKEN:'tokens',PROVIDER_API:'requests'};
+export function decimal(value:unknown):string{
+ const s=text(value,32);if(!/^(0|[1-9][0-9]{0,23})(\.[0-9]{1,6})?$/.test(s))fail('OBSERVABILITY_INPUT_INVALID','Nonnegative decimal string with at most six fraction digits required');
+ return s.includes('.')?s.replace(/0+$/,'').replace(/\.$/,''):s;
+}
+export function micros(value:string):bigint{const [whole,fraction='']=value.split('.');return BigInt(whole!)*1000000n+BigInt(fraction.padEnd(6,'0'));}
+export async function putProfile(tx:Session,p:Principal,input:unknown):Promise<unknown>{
+ requireCollector(p);
+ const v=object(input,['id','profile_key','revision','declared_agents_per_sandbox','dimensions']),id=uuid(v.id),key=text(v.profile_key),revision=generation(v.revision),density=integer(v.declared_agents_per_sandbox,0,1000);
+ if(!Array.isArray(v.dimensions)||v.dimensions.length<1||v.dimensions.length>DIMENSIONS.length)fail('OBSERVABILITY_INPUT_INVALID','One to thirteen resource dimensions required');
+ const seen=new Set<string>(),dimensions=v.dimensions.map(raw=>{const d=object(raw,['dimension','configured_limit','declared_reservation','window_ms']),name=text(d.dimension);
+  if(!(DIMENSIONS as readonly string[]).includes(name)||seen.has(name))fail('OBSERVABILITY_INPUT_INVALID','Unknown or duplicate resource dimension');seen.add(name);
+  const limit=decimal(d.configured_limit),reservation=decimal(d.declared_reservation);if(micros(reservation)>micros(limit))fail('OBSERVABILITY_INPUT_INVALID','Reservation exceeds declared limit');
+  const rate=['MODEL_REQUEST','MODEL_TOKEN','PROVIDER_API'].includes(name),window=rate?integer(d.window_ms,1,86400000):null;if(!rate&&d.window_ms!==undefined)fail('OBSERVABILITY_INPUT_INVALID','Only rate dimensions have a time window');
+  return {dimension:name,configured_limit:limit,declared_reservation:reservation,unit:UNITS[name]!,window_ms:window};
+ }).sort((a,b)=>a.dimension.localeCompare(b.dimension));
+ const content={profile_key:key,revision,declared_agents_per_sandbox:density,dimensions},identity=hash(content);await lockRun(tx,p,'resources');
+ const prior=await tx.query('SELECT profile_digest FROM hyperfide.observability_resource_profiles WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[p.organisation_id,p.run_id,id]);
+ if(prior.rows.length){if(prior.rows[0]!.profile_digest!==identity)fail('OBSERVABILITY_CONFLICT','Profile identity already has different content');return {id,profile_digest:identity,replayed:true};}
+ const count=await tx.query('SELECT count(*) AS n FROM hyperfide.observability_resource_profiles WHERE organisation_id=$1 AND run_id=$2',[p.organisation_id,p.run_id]);if(BigInt(count.rows[0]!.n as string)>=64n)fail('OBSERVABILITY_BACKPRESSURE','Profile count budget exhausted');
+ await tx.query('INSERT INTO hyperfide.observability_resource_profiles(organisation_id,run_id,id,profile_key,revision,profile_digest,declared_agents_per_sandbox,publisher_actor_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[p.organisation_id,p.run_id,id,key,revision,identity,density,p.actor_id]);
+ await tx.query('INSERT INTO hyperfide.observability_resource_limits(organisation_id,run_id,profile_id,dimension,configured_limit,declared_reservation,unit,window_ms) SELECT $1,$2,$3,x.dimension,x.configured_limit::numeric,x.declared_reservation::numeric,x.unit,x.window_ms FROM jsonb_to_recordset($4::jsonb) AS x(dimension text,configured_limit text,declared_reservation text,unit text,window_ms integer)',[p.organisation_id,p.run_id,id,JSON.stringify(dimensions)]);
+ return {id,profile_digest:identity,replayed:false,declared:content,measurements:'UNKNOWN_UNTIL_OBSERVED'};
+}
+interface Sample {profile_id:string;subject_id:string;dimension:string;value:string;observed_at:string;producer_sequence:string;origin:string;source_digest:string;source_artifact_id:string}
+export async function recordSamples(tx:Session,p:Principal,input:unknown,allowReplay:boolean):Promise<unknown>{
+ const v=object(input,['samples']);if(!Array.isArray(v.samples)||v.samples.length<1||v.samples.length>100)fail('OBSERVABILITY_INPUT_INVALID','A bounded batch of one to one hundred measurements is required');
+ const keys=new Set<string>(),samples:Sample[]=v.samples.map(raw=>{const s=object(raw,['profile_id','subject_id','dimension','value','observed_at','producer_sequence','origin','source_digest','source_artifact_id']),dimension=text(s.dimension),origin=text(s.origin);
+ if(!(DIMENSIONS as readonly string[]).includes(dimension)||!['HOST_COLLECTOR','PROVIDER_REPORT','REPLAY'].includes(origin)||(origin==='REPLAY'&&!allowReplay))fail('OBSERVABILITY_INPUT_INVALID','Unsupported dimension or measurement origin');
+ const sample={profile_id:uuid(s.profile_id),subject_id:uuid(s.subject_id),dimension,value:decimal(s.value),observed_at:timestamp(s.observed_at),producer_sequence:generation(s.producer_sequence),origin,source_digest:digest(s.source_digest),source_artifact_id:uuid(s.source_artifact_id)};
+ const key=sample.profile_id+':'+sample.subject_id+':'+dimension;if(keys.has(key))fail('OBSERVABILITY_INPUT_INVALID','Duplicate measurement key in batch');keys.add(key);return sample;});
+ for(const sample of samples)requireCollector(p,sample.subject_id);
+ await lockRun(tx,p,'resources');
+ const clock=await tx.query('SELECT clock_timestamp() AS now');const now=new Date(clock.rows[0]!.now as Date).getTime();if(samples.some(s=>Date.parse(s.observed_at)>now+5000))fail('OBSERVABILITY_INPUT_INVALID','Future measurement timestamp rejected');
+ const artifacts=[...new Set(samples.map(s=>s.source_artifact_id))];
+ const available=await tx.query('SELECT id FROM hyperfide.artifacts WHERE organisation_id=$1 AND run_id=$2 AND id=ANY($3::uuid[]) AND status=$4 ORDER BY id FOR SHARE',[p.organisation_id,p.run_id,artifacts,'COMPLETE']);
+ if(available.rows.length!==artifacts.length)fail('OBSERVABILITY_EVIDENCE_UNAVAILABLE','Every measurement requires a complete artifact in the same run');
+ const scope=[p.organisation_id,p.run_id,JSON.stringify(samples)];
+ const size=await tx.query("WITH input AS (SELECT * FROM jsonb_to_recordset($3::jsonb) AS x(profile_id uuid,subject_id uuid,dimension text)) SELECT (SELECT count(*) FROM hyperfide.observability_resource_samples WHERE organisation_id=$1 AND run_id=$2)+(SELECT count(*) FROM input i WHERE NOT EXISTS(SELECT 1 FROM hyperfide.observability_resource_samples s WHERE s.organisation_id=$1 AND s.run_id=$2 AND s.profile_id=i.profile_id AND s.subject_id=i.subject_id AND s.dimension=i.dimension)) AS n",scope);
+ if(BigInt(size.rows[0]!.n as string)>10000n)fail('OBSERVABILITY_BACKPRESSURE','Latest measurement cardinality budget exhausted');
+ const existing=await tx.query("SELECT s.* FROM hyperfide.observability_resource_samples s JOIN jsonb_to_recordset($3::jsonb) AS x(profile_id uuid,subject_id uuid,dimension text) ON s.profile_id=x.profile_id AND s.subject_id=x.subject_id AND s.dimension=x.dimension WHERE s.organisation_id=$1 AND s.run_id=$2",scope);
+ const old=new Map(existing.rows.map(r=>[r.profile_id+':'+r.subject_id+':'+r.dimension,r]));
+ let replayed=0;for(const s of samples){const prior=old.get(s.profile_id+':'+s.subject_id+':'+s.dimension);if(!prior)continue;
+ if(prior.producer_actor_id!==p.actor_id||BigInt(prior.producer_sequence as string)>BigInt(s.producer_sequence))fail('OBSERVABILITY_STALE_OBSERVATION','Measurement producer or sequence is stale');
+ if(prior.producer_sequence===s.producer_sequence){if(micros(prior.value as string)!==micros(s.value)||new Date(prior.observed_at as Date).toISOString()!==s.observed_at||prior.origin!==s.origin||prior.source_digest!==s.source_digest||prior.source_artifact_id!==s.source_artifact_id)fail('OBSERVABILITY_CONFLICT','Measurement sequence reused with different content');replayed++;}
+ }
+ const result=await tx.query("INSERT INTO hyperfide.observability_resource_samples(organisation_id,run_id,profile_id,subject_id,dimension,value,observed_at,producer_sequence,producer_actor_id,origin,source_digest,source_artifact_id) SELECT $1,$2,x.profile_id,x.subject_id,x.dimension,x.value::numeric,x.observed_at::timestamptz,x.producer_sequence::bigint,$4,x.origin,x.source_digest,x.source_artifact_id FROM jsonb_to_recordset($3::jsonb) AS x(profile_id uuid,subject_id uuid,dimension text,value text,observed_at text,producer_sequence text,origin text,source_digest text,source_artifact_id uuid) ON CONFLICT(organisation_id,run_id,profile_id,subject_id,dimension) DO UPDATE SET value=EXCLUDED.value,observed_at=EXCLUDED.observed_at,received_at=clock_timestamp(),producer_sequence=EXCLUDED.producer_sequence,producer_actor_id=EXCLUDED.producer_actor_id,origin=EXCLUDED.origin,source_digest=EXCLUDED.source_digest,source_artifact_id=EXCLUDED.source_artifact_id WHERE hyperfide.observability_resource_samples.producer_sequence<EXCLUDED.producer_sequence RETURNING profile_id,subject_id,dimension",[...scope,p.actor_id]);
+ return {recorded:result.rows.length,replayed,provenance:'AUTHENTICATED_EXTERNAL_REPORT',independently_verified:false,physical_billing_claim:false};
+}
+export async function resourceSnapshot(tx:Session,p:Principal,input:unknown):Promise<unknown>{
+ const v=object(input,['profile_id','limit','after']),profile=v.profile_id===undefined?null:uuid(v.profile_id),limit=v.limit===undefined?100:integer(v.limit,1,500),after=v.after===undefined?'':text(v.after,128),scope=[p.organisation_id,p.run_id];
+ const profiles=await tx.query('SELECT id,profile_key,revision,profile_digest,declared_agents_per_sandbox FROM hyperfide.observability_resource_profiles WHERE organisation_id=$1 AND run_id=$2 AND ($3::uuid IS NULL OR id=$3) ORDER BY profile_key,revision LIMIT 64',[...scope,profile]);
+ const limits=await tx.query('SELECT profile_id,dimension,configured_limit,declared_reservation,unit,window_ms FROM hyperfide.observability_resource_limits WHERE organisation_id=$1 AND run_id=$2 AND ($3::uuid IS NULL OR profile_id=$3) ORDER BY profile_id,dimension',[...scope,profile]);
+ const q=await tx.query("SELECT s.*,l.configured_limit,l.declared_reservation,l.unit,l.window_ms,clock_timestamp() AS sampled_at FROM hyperfide.observability_resource_samples s JOIN hyperfide.observability_resource_limits l USING(organisation_id,run_id,profile_id,dimension) WHERE s.organisation_id=$1 AND s.run_id=$2 AND ($3::uuid IS NULL OR s.profile_id=$3) AND s.profile_id::text||':'||s.subject_id::text||':'||s.dimension>$4 ORDER BY s.profile_id,s.subject_id,s.dimension LIMIT $5",[...scope,profile,after,limit+1]);
+ const measured=q.rows.slice(0,limit).map(r=>{const age=Math.max(0,new Date(r.sampled_at as Date).getTime()-new Date(r.observed_at as Date).getTime()),current=age<=15000;return {...r,age_ms:age,freshness:current?'CURRENT':'STALE',utilisation_status:!current?'STALE':micros(r.configured_limit as string)===0n?'DISABLED':micros(r.value as string)>=micros(r.configured_limit as string)?'SATURATED':'BELOW_DECLARED_LIMIT',provenance:'AUTHENTICATED_EXTERNAL_REPORT',independently_verified:false,simulation:r.origin==='REPLAY'};});
+ const infrastructure=await tx.query("SELECT a.dimension,a.configured_limit,a.reserved,a.allocated,a.qualification_state,p.provider,p.region FROM hyperfide.capacity_accounts a JOIN hyperfide.provider_pools p ON p.organisation_id=a.organisation_id AND p.id=a.pool_id WHERE a.organisation_id=$1 AND EXISTS(SELECT 1 FROM hyperfide.reservations r WHERE r.organisation_id=a.organisation_id AND r.run_id=$2 AND r.capacity_account_id=a.id) ORDER BY a.dimension,a.id LIMIT 500",scope);
+ const sessions=await tx.query("SELECT state,role,count(*) AS count FROM hyperfide.agent_sessions WHERE organisation_id=$1 AND run_id=$2 GROUP BY state,role ORDER BY state,role",scope);
+ return numbers({schema_version:1,profiles:profiles.rows.map(r=>({...r,dimensions:DIMENSIONS.map(d=>limits.rows.find(l=>l.profile_id===r.id&&l.dimension===d)??{dimension:d,configured_limit:null,declared_reservation:null,unit:UNITS[d],status:'UNDECLARED'})})),measurements:measured,capacity_accounts:infrastructure.rows,registered_sessions:sessions.rows,prepared_spares_are_running_sessions:false,uniform_agent_capacity_assumed:false,pagination:{limit,next:q.rows.length>limit?(()=>{const r=q.rows[limit-1]!;return r.profile_id+':'+r.subject_id+':'+r.dimension;})():null},admission_authority:false});
+}
+export function createComponent(_startup:ComponentContext):Component{return {apiVersion:1,actions:{
+ 'fleet.resources.describe':async input=>{object(input,[]);return {schema_version:1,dimensions:DIMENSIONS,profile_limit:64,measurement_limit:10000,batch_limit:100,unknown_measurements:'NULL_OR_ABSENT',admission_authority:false};},
+ 'fleet.resources.profile.put':(input,ctx)=>authority(ctx,'fleet.resources.profile.put',(tx,p)=>putProfile(tx,p,input)),
+ 'fleet.resources.observe':(input,ctx)=>authority(ctx,'fleet.resources.observe',(tx,p)=>recordSamples(tx,p,input,ctx.env.HYPERFIDE_OBSERVABILITY_ALLOW_REPLAY==='1')),
+ 'fleet.resources.snapshot':(input,ctx)=>authority(ctx,'fleet.resources.snapshot',(tx,p)=>resourceSnapshot(tx,p,input))
+}};}

@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "variant": "task:23.2",
+  "task": "23.2",
+  "scope": "task-component",
+  "cases": [
+    "V-007",
+    "V-048"
+  ],
+  "assertion_ids": [
+    "observability.resources.dimensions",
+    "observability.resources.profile-density-2",
+    "observability.resources.profile-density-4",
+    "observability.resources.profile-density-8",
+    "observability.resources.profile-replay",
+    "observability.resources.profile-conflict",
+    "observability.resources.unknown-dimension",
+    "observability.resources.duplicate-dimension",
+    "observability.resources.reservation-over-limit",
+    "observability.resources.numeric-quantity-denied",
+    "observability.resources.unobserved-unknown",
+    "observability.resources.record-saturation",
+    "observability.resources.simulated-origin-visible",
+    "observability.resources.saturation-distinct",
+    "observability.resources.report-not-verification",
+    "observability.resources.sample-replay",
+    "observability.resources.sample-conflict",
+    "observability.resources.duplicate-batch-key",
+    "observability.resources.batch-bound",
+    "observability.resources.absent-artifact-denied",
+    "observability.resources.untrusted-producer-denied",
+    "observability.resources.stale-not-saturation",
+    "observability.resources.old-sequence-denied",
+    "observability.resources.profile-density-not-session-count",
+    "observability.resources.observation-not-admission",
+    "observability.resources.cross-run-denied"
+  ],
+  "argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/23_2.py"
+  ],
+  "timeout_seconds": 600,
+  "required_env": [
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGUSER"
+  ],
+  "fixtures": [
+    "services/hyperfide/dist/control.js",
+    "services/hyperfide/dist/transport/protocol.js",
+    "services/hyperfide/dist/observability/resources.js"
+  ],
+  "resources": [
+    {
+      "id": "hf-task-23.2-database",
+      "kind": "postgresql-database",
+      "scope": "task23.2-disposable"
+    }
+  ],
+  "cleanup_argv": [
+    "python3",
+    "tests/hyperfide/cases/tasks/23_2.py",
+    "--cleanup"
+  ],
+  "cleanup_timeout_seconds": 60,
+  "required_artifacts": [
+    "observability/database-absence.json",
+    "observability/observations.json",
+    "observability/assertion-inventory.json"
+  ],
+  "source_files": [
+    "services/hyperfide/components/23.2.json",
+    "services/hyperfide/migrations/0023-observability.sql",
+    "services/hyperfide/package-lock.json",
+    "services/hyperfide/package.json",
+    "services/hyperfide/src/observability/resources.ts",
+    "services/hyperfide/tsconfig.json",
+    "tests/hyperfide/cases/tasks/23_1.py",
+    "tests/hyperfide/cases/tasks/23_2.py",
+    "tests/hyperfide/check-evidence.py",
+    "tests/hyperfide/manifest.schema.json",
+    "tests/hyperfide/qualify.py",
+    "tests/hyperfide/registrations/23.2.json"
+  ],
+  "source_roots": [
+    "services/hyperfide/src",
+    "services/hyperfide/dist",
+    "services/hyperfide/components",
+    "services/hyperfide/migrations"
+  ],
+  "actions": [
+    "postgresql.fixture.create",
+    "postgresql.fixture.drop",
+    "https.fixture.listen"
+  ]
+}
