@@ -18,6 +18,9 @@
     "ranking.incomplete-intent",
     "ranking.shortlist-bound",
     "ranking.typed-noul",
+    "ranking.finding-observation-identities",
+    "ranking.finding-shortlist-bound",
+    "ranking.finding-unavailable-explicit",
     "ranking.deterministic-fallback"
   ],
   "argv": [
