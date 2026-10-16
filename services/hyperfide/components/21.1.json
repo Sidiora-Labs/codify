@@ -12,7 +12,8 @@
     "decision.spec.describe",
     "decision.spec.packet",
     "decision.spec.propose",
-    "decision.spec.flags"
+    "decision.spec.flags",
+    "decision.spec.amendment.check"
   ],
   "requires": [
     "4.2",

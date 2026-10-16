@@ -16,6 +16,11 @@
     "critique.valid-proposal",
     "critique.outside-source",
     "critique.authority-injection",
+    "critique.validation-nonaccepting",
+    "critique.validation-authority-forgery",
+    "critique.validation-dispatch-forgery",
+    "critique.validation-full-impact-digest",
+    "critique.validation-bounded-impact",
     "critique.source-immutable"
   ],
   "argv": [
