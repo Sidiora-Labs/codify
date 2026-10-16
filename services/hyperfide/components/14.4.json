@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "14.4",
+  "task": "14.4",
+  "roles": [
+    "control"
+  ],
+  "module": "identity/authorization.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "authorization.resource.check",
+    "authorization.inspect"
+  ],
+  "requires": [
+    "14.1"
+  ]
+}
