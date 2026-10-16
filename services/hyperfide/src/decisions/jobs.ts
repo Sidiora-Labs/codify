@@ -21,7 +21,7 @@ export interface PurposeLoader {
 type Outbox={enqueue:typeof enqueue;claimPending:typeof claimPending;acknowledge:typeof acknowledge};
 type Inbox={receive:typeof receive};
 interface JobPolicy{
- schema_version:1;revision:string;allowed_purposes:Record<string,string[]>;consumers:Record<string,string>;
+ schema_version:1;revision:string;allowed_purposes:Record<string,string[]>;consumers:Record<string,string>;quota_groups:Record<string,string>;
  max_active:number;max_queued:number;requests_per_minute:number;circuit_failures:number;circuit_cooldown_ms:number;max_job_cost_microusd:number;
 }
 interface JobRow extends Scope{
@@ -32,14 +32,15 @@ function uuid(value:unknown):string{if(typeof value!=='string'||!UUID.test(value
 function scoped(i:InvocationContext):Scope{assertInvocation(i);return{organisation_id:i.principal.organisation_id,run_id:i.principal.run_id};}
 function policy(env:Readonly<NodeJS.ProcessEnv>):JobPolicy{
  const p=record(env.HYPERFIDE_DECISION_JOB_POLICY?strictJson(env.HYPERFIDE_DECISION_JOB_POLICY):null,'decision job policy');
- exact(p,['schema_version','revision','allowed_purposes','consumers','max_active','max_queued','requests_per_minute','circuit_failures','circuit_cooldown_ms','max_job_cost_microusd'],
- ['schema_version','revision','allowed_purposes','consumers','max_active','max_queued','requests_per_minute','circuit_failures','circuit_cooldown_ms','max_job_cost_microusd']);
+ exact(p,['schema_version','revision','allowed_purposes','consumers','quota_groups','max_active','max_queued','requests_per_minute','circuit_failures','circuit_cooldown_ms','max_job_cost_microusd'],
+ ['schema_version','revision','allowed_purposes','consumers','quota_groups','max_active','max_queued','requests_per_minute','circuit_failures','circuit_cooldown_ms','max_job_cost_microusd']);
  if(p.schema_version!==1)fail('DECISION_SCHEMA','Unsupported job policy');
  text(p.revision,'job policy revision',128);
  for(const [purpose,ids]of Object.entries(record(p.allowed_purposes,'egress allow-list'))){
   text(purpose,'purpose',128);if(!Array.isArray(ids)||!ids.length||ids.some(id=>{route(id);return false;}))fail('DECISION_SCHEMA','Purpose requires explicit route permission');
  }
  for(const [run,id]of Object.entries(record(p.consumers,'standing consumers'))){uuid(run);uuid(id);}
+ for(const [id,group]of Object.entries(record(p.quota_groups,'account quota groups'))){route(id);if(typeof group!=='string'||!/^[A-Za-z][A-Za-z0-9._/-]{0,127}$/.test(group))fail('DECISION_SCHEMA','Bounded account quota group required');}
  integer(p.max_active,'active limit',1,16);integer(p.max_queued,'queue limit',0,256);
  integer(p.requests_per_minute,'route rate',1,100000);integer(p.circuit_failures,'circuit failure threshold',1,100);
  integer(p.circuit_cooldown_ms,'circuit cooldown',1,300000);integer(p.max_job_cost_microusd,'cost bound',0,1000000000);
@@ -91,29 +92,30 @@ export class DecisionJobs{
   const purpose=text(v.purpose,'purpose',128),p=policy(this.env),loader=this.loader(purpose);
   if(!Array.isArray(v.route_ids)||v.route_ids.length<1||v.route_ids.length>2||new Set(v.route_ids).size!==v.route_ids.length)fail('DECISION_SCHEMA','One or two distinct routes required');
   const routes=(v.route_ids as unknown[]).map(id=>route(id).id);
-  if(routes.some(id=>!p.allowed_purposes[purpose]?.includes(id)))fail('DECISION_EGRESS_DENIED','Purpose is not permitted on every requested/fallback route');
   if(!['online','background'].includes(String(v.mode)))fail('DECISION_SCHEMA','Unknown deadline class');
   const duration=integer(v.deadline_ms,'total job deadline',1,v.mode==='online'?2000:30000),id=randomUUID(),eventId=randomUUID();
-  const consumer=uuid(p.consumers[s.run_id]);
+  const submissionHash=hash({purpose,input:v.input,route_ids:routes,mode:v.mode,deadline_ms:duration});
   return this.tx(i,async tx=>{
    await this.lock(tx,s);
+   const old=await tx.query('SELECT id,submission_hash,state FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND idempotency_key=$3',[...scopeValues(s),i.operation.idempotency_key]);
+   if(old.rowCount){if(old.rows[0]!.submission_hash!==submissionHash)fail('DECISION_IDEMPOTENCY_CONFLICT','Job replay changed the original submission');return{decision_id:old.rows[0]!.id,state:old.rows[0]!.state,replayed:true,authority:'NONE'};}
+   if(routes.some(id=>!p.allowed_purposes[purpose]?.includes(id)))fail('DECISION_EGRESS_DENIED','Purpose is not permitted on every requested/fallback route');
+   const consumer=uuid(p.consumers[s.run_id]);
    const loaded=await loader.load(tx,i,v.input);exact(record(loaded,'purpose loader result'),['packet','request','rubric_version'],['packet','request','rubric_version']);
    const pack=packet(loaded.packet,purpose),packetHash=hash(pack);
    if(!(await tx.query('SELECT $1::timestamptz<=clock_timestamp() AND $2::timestamptz>clock_timestamp() AS fresh',[pack.created_at,pack.expires_at])).rows[0]!.fresh)fail('DECISION_EXPIRED','Packet is not currently valid at primary');
    const request=JSON.parse(canonical(loaded.request)) as unknown,rubric=text(loaded.rubric_version,'rubric version',128);
    if(!sameRevision(pack.revision,await loader.current(tx,s,pack,i)))fail('DECISION_STALE','Packet was stale at admission');
    const digest=hash({packet:pack,request,rubric,route_ids:routes,mode:v.mode,deadline_ms:duration});
-   const old=await tx.query('SELECT id,request_hash,state FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND idempotency_key=$3',[...scopeValues(s),i.operation.idempotency_key]);
-   if(old.rowCount){if(old.rows[0]!.request_hash!==digest)fail('DECISION_IDEMPOTENCY_CONFLICT','Job replay changed immutable inputs');return{decision_id:old.rows[0]!.id,state:old.rows[0]!.state,replayed:true,authority:'NONE'};}
    const count=await tx.query("SELECT count(*)::int AS n FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND state='QUEUED' AND deadline_at>clock_timestamp()",[s.organisation_id]);
    if(count.rows[0]!.n>=p.max_queued)fail('DECISION_OVERLOADED','Bounded decision queue is full');
    const standing=await tx.query("SELECT 1 FROM hyperfide.event_consumers WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND state='ACTIVE'",[...scopeValues(s),consumer]);
    if(standing.rowCount!==1)fail('DECISION_UNAVAILABLE','Configured decision admission consumer is not standing');
    await this.outbox.enqueue(tx,{...s,id:eventId,aggregate_type:'decision.job',aggregate_id:id,aggregate_version:'1',event_type:'decision.admitted',payload:{decision_id:id,packet_hash:packetHash}},{consumer_ids:[consumer]});
    const applied=await this.inbox.receive(tx,{...s,event_id:eventId,consumer_id:consumer},async()=>{
-    await tx.query(`INSERT INTO hyperfide.decision_jobs(organisation_id,run_id,id,idempotency_key,request_hash,purpose,packet_hash,packet,request,rubric_version,route_ids,policy_revision,consumer_id,event_id,mode,deadline_at)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11::jsonb,$12,$13,$14,$15,least(clock_timestamp()+($16::int*interval '1 millisecond'),$17::timestamptz))`,
-     [...scopeValues(s),id,i.operation.idempotency_key,digest,purpose,packetHash,canonical(pack),canonical(request),rubric,canonical(routes),p.revision,consumer,eventId,v.mode,duration,pack.expires_at]);
+    await tx.query(`INSERT INTO hyperfide.decision_jobs(organisation_id,run_id,id,idempotency_key,submission_hash,request_hash,purpose,packet_hash,packet,request,rubric_version,route_ids,policy_revision,consumer_id,event_id,mode,deadline_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14,$15,$16,least(clock_timestamp()+($17::int*interval '1 millisecond'),$18::timestamptz))`,
+     [...scopeValues(s),id,i.operation.idempotency_key,submissionHash,digest,purpose,packetHash,canonical(pack),canonical(request),rubric,canonical(routes),p.revision,consumer,eventId,v.mode,duration,pack.expires_at]);
     return{decision_id:id};
    });
    if(applied.status!=='APPLIED')fail('DECISION_IDEMPOTENCY_CONFLICT','New admission did not apply once');
@@ -156,6 +158,24 @@ export class DecisionJobs{
   try{return{available:true,envelope:{key_id:text(config.key_id,'signer id',128),signature:sign(null,Buffer.from(canonical(body)),createPrivateKey(this.env[keyEnv]!)).toString('base64'),body}};}
   catch{return{available:false,reason:'signer-failed'};}
  }
+ async replay(i:InvocationContext,raw:unknown):Promise<unknown>{
+  const v=record(raw,'replay');exact(v,['decision_id','part','attempt_no'],['decision_id','part']);
+  const id=uuid(v.decision_id),s=scoped(i);
+  if(!['packet','attempt'].includes(String(v.part)))fail('DECISION_SCHEMA','Unknown replay part');
+  const number=v.part==='attempt'?integer(v.attempt_no,'attempt number',1,2):null;
+  if(v.part==='packet'&&v.attempt_no!==undefined)fail('DECISION_SCHEMA','Packet replay has no attempt number');
+  return this.tx(i,async tx=>{
+   const job=await this.row(tx,s,id);
+   if(v.part==='packet')return{schema_version:1,decision_id:id,packet_hash:job.packet_hash,packet:job.packet,rubric_version:job.rubric_version,authority:'NONE'};
+   const row=(await tx.query('SELECT request_body,request_headers,configuration,metadata,outcome FROM hyperfide.decision_attempts WHERE organisation_id=$1 AND run_id=$2 AND decision_id=$3 AND attempt_no=$4',[...scopeValues(s),id,number])).rows[0];
+   if(!row)return{available:false,reason:'attempt-not-found',authority:'NONE'};
+   const result=(await tx.query('SELECT payload FROM hyperfide.decision_results WHERE organisation_id=$1 AND run_id=$2 AND decision_id=$3',[...scopeValues(s),id])).rows[0]?.payload as Record<string,unknown>|undefined;
+   const rawOutput=result?.raw_output;
+   const retained=rawOutput!==undefined&&object(row.metadata)&&row.metadata.response_hash===hash(rawOutput);
+   return{schema_version:1,decision_id:id,packet_hash:job.packet_hash,attempt_no:number,request:{body:row.request_body,headers:row.request_headers,hash:hash(row.request_body)},
+    configuration:row.configuration,outcome:row.outcome,response:retained?{available:true,body:rawOutput,hash:hash(rawOutput)}:{available:false,reason:'provider-response-not-retained'},authority:'NONE'};
+  });
+ }
  private async finish(tx:PrimaryTransaction,s:Scope,j:JobRow,status:string,reason:string|null,decision:ValidatedDecision|null):Promise<void>{
   const attempts=await this.attempts(tx,s,j.id),last=attempts.at(-1);
   const payload={decision_id:j.id,packet_hash:j.packet_hash,rubric_version:j.rubric_version,calibration_version:decision?.calibration_version??null,adapter_version:'decision-adapters-v1',
@@ -181,8 +201,8 @@ export class DecisionJobs{
   const job=await this.tx(i,async tx=>{
    await this.lock(tx,s);const j=await this.row(tx,s,id);
    if(['COMPLETED','CANCELLED','EXPIRED'].includes(j.state))return null;
-   if(j.state==='RUNNING'&&j.lease_id&&j.lease_live)fail('DECISION_BUSY','Job already has a live dispatcher');
    if(Number(j.remaining_ms)<=0){await this.finish(tx,s,j,'expired','queue-or-total-deadline',null);return null;}
+   if(j.state==='RUNNING'&&j.lease_id&&j.lease_live)fail('DECISION_BUSY','Job already has a live dispatcher');
    if(j.policy_revision!==p.revision){await this.finish(tx,s,j,'abstained','job-policy-revision-changed',null);return null;}
    try{await this.fresh(tx,s,j,i);}catch(error){await this.finish(tx,s,j,'abstained',error instanceof DecisionError?error.code:'freshness-unavailable',null);return null;}
    const active=await tx.query("SELECT count(*)::int AS n FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND state='RUNNING' AND lease_expires_at>clock_timestamp()",[s.organisation_id]);
@@ -216,21 +236,33 @@ export class DecisionJobs{
      const transport=configuredTransport(profile,this.env);
      if(prepared.metadata.qualification_class!==transport.mode)fail('DECISION_UNSUPPORTED','Capability and transport qualification classes differ');
      const req=record(j.request,'stored request'),q=record(req.questions,'questions');
-     const cost=billing({route_id:routeId,questions:Object.keys(q).length,state_tokens:Buffer.byteLength(canonical(req.state)),question_tokens:Buffer.byteLength(canonical(q))},this.env);
+     const cost=billing({route_id:routeId,questions:Object.keys(q).length,state_tokens:Buffer.byteLength(canonical(prepared.prepared.body)),question_tokens:0},this.env);
      if(typeof cost.estimated_usd!=='number')fail('DECISION_BUDGET','Unqualified/unknown price cannot admit a bounded paid send');
      const reserve=Math.ceil((cost.estimated_usd as number)*1000000);
      if(Number(j.reserved_microusd)+reserve>p.max_job_cost_microusd)fail('DECISION_BUDGET','Total reserved cost exceeds job budget');
      await tx.query(`INSERT INTO hyperfide.decision_route_windows(organisation_id,run_id,route,minute) VALUES($1,$2,$3,floor(extract(epoch FROM clock_timestamp())/60)) ON CONFLICT DO NOTHING`,[...scopeValues(s),routeId]);
      const window=await tx.query('SELECT *,floor(extract(epoch FROM clock_timestamp())/60)::bigint AS now_minute,open_until>clock_timestamp() AS open FROM hyperfide.decision_route_windows WHERE organisation_id=$1 AND run_id=$2 AND route=$3 FOR UPDATE',[...scopeValues(s),routeId]),w=window.rows[0]!;
      if(w.open)fail('DECISION_CIRCUIT_OPEN','Provider circuit is open');
-     const sends=w.minute===w.now_minute?w.sends:0;if(sends>=p.requests_per_minute)fail('DECISION_RATE_LIMIT','Configured route rate exceeded');
-     await tx.query('UPDATE hyperfide.decision_route_windows SET sends=$4,minute=$5 WHERE organisation_id=$1 AND run_id=$2 AND route=$3',[...scopeValues(s),routeId,sends+1,w.now_minute]);
+     const group=p.quota_groups[routeId];if(!group)fail('DECISION_SCHEMA','Route has no trusted account quota group');
+     await tx.query('INSERT INTO hyperfide.decision_quota_windows(quota_group,minute,rate_limit) VALUES($1,floor(extract(epoch FROM clock_timestamp())/60),$2) ON CONFLICT DO NOTHING',[group,p.requests_per_minute]);
+     const quota=(await tx.query('SELECT *,floor(extract(epoch FROM clock_timestamp())/60)::bigint AS now_minute FROM hyperfide.decision_quota_windows WHERE quota_group=$1 FOR UPDATE',[group])).rows[0]!;
+     if(quota.rate_limit!==p.requests_per_minute)fail('DECISION_SCHEMA','Shared account quota policy differs between service instances');
+     const sends=quota.minute===quota.now_minute?quota.sends:0;
+     if(sends>=quota.rate_limit)fail('DECISION_RATE_LIMIT','Shared account route quota exceeded');
+     await tx.query('UPDATE hyperfide.decision_quota_windows SET sends=$2,minute=$3 WHERE quota_group=$1',[group,sends+1,quota.now_minute]);
      await tx.query('UPDATE hyperfide.decision_jobs SET reserved_microusd=reserved_microusd+$4,state_version=state_version+1 WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...scopeValues(s),id,reserve]);
      observed=performance.now();
      const clock=await tx.query('SELECT floor(extract(epoch FROM(deadline_at-clock_timestamp()))*1000)::int AS remaining_ms FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...scopeValues(s),id]);
      remaining=Number(clock.rows[0]!.remaining_ms);
      if(remaining<=0)fail('DECISION_EXPIRED','Preparation consumed the total deadline');
-     await tx.query('INSERT INTO hyperfide.decision_attempts(organisation_id,run_id,decision_id,attempt_no,route,requested_model,lease_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...scopeValues(s),id,number,routeId,profile.model,lease]);
+     const rawCalibrations=this.env.HYPERFIDE_DECISION_CALIBRATIONS?strictJson(this.env.HYPERFIDE_DECISION_CALIBRATIONS):[];
+     if(!Array.isArray(rawCalibrations))fail('DECISION_SCHEMA','Calibration profiles must be an array');
+     const calibrations=(rawCalibrations as unknown[]).map(value=>{
+      const c=record(value,'calibration');exact(c,['version','purpose','route_id','returned_model','rubric_version','minimum_concentration','qualification_ref'],['version','purpose','route_id','returned_model','rubric_version','minimum_concentration','qualification_ref']);return c;
+     }).filter(c=>c.purpose===j.purpose&&c.route_id===routeId&&c.rubric_version===j.rubric_version);
+     const configuration={schema_version:1,job_policy_revision:p.revision,capability:prepared.metadata,transport,billing_estimate:cost,calibrations};
+     if(Buffer.byteLength(canonical(prepared.prepared.body))>500000||Buffer.byteLength(canonical(configuration))>60000)fail('DECISION_LIMIT','Replayable request/configuration exceeds storage budget');
+     await tx.query('INSERT INTO hyperfide.decision_attempts(organisation_id,run_id,decision_id,attempt_no,route,requested_model,lease_id,request_body,request_headers,configuration) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)',[...scopeValues(s),id,number,routeId,profile.model,lease,canonical(prepared.prepared.body),canonical(prepared.prepared.headers),canonical(configuration)]);
      job.reserved_microusd=String(Number(j.reserved_microusd)+reserve);
      return{number,prepared:prepared.prepared,remaining,observed,routeId};
     },databaseTimeout());
@@ -247,7 +279,7 @@ export class DecisionJobs{
     }catch(e){error=e;decision=null;lastReason=e instanceof DecisionError?e.code:'DECISION_UNAVAILABLE';}
     await this.tx(i,async tx=>{
      const j=await this.row(tx,s,id);
-     await tx.query('UPDATE hyperfide.decision_attempts SET finished_at=clock_timestamp(),outcome=$5,metadata=$6::jsonb WHERE organisation_id=$1 AND run_id=$2 AND decision_id=$3 AND attempt_no=$4 AND finished_at IS NULL',[...scopeValues(s),id,attempt.number,error?'error':'validated',canonical({duration_ms:performance.now()-started,code:error?lastReason:null,response_hash:decision?.response_hash??null,usage:decision?.usage??null,returned_model:decision?.returned_model??null})]);
+     await tx.query('UPDATE hyperfide.decision_attempts SET finished_at=clock_timestamp(),outcome=$5,metadata=$6::jsonb WHERE organisation_id=$1 AND run_id=$2 AND decision_id=$3 AND attempt_no=$4 AND finished_at IS NULL',[...scopeValues(s),id,attempt.number,error?'error':'validated',canonical({duration_ms:performance.now()-started,request_hash:attempt.prepared.request_hash,replay_ref:{decision_id:id,attempt_no:attempt.number},code:error?lastReason:null,response_hash:decision?.response_hash??null,usage:decision?.usage??null,returned_model:decision?.returned_model??null})]);
      await tx.query(`UPDATE hyperfide.decision_route_windows SET failures=CASE WHEN $4 THEN failures+1 ELSE 0 END,
        open_until=CASE WHEN $4 AND failures+1>=$5 THEN clock_timestamp()+($6::int*interval '1 millisecond') ELSE NULL END
        WHERE organisation_id=$1 AND run_id=$2 AND route=$3`,[...scopeValues(s),attempt.routeId,!!error,p.circuit_failures,p.circuit_cooldown_ms]);
@@ -263,12 +295,24 @@ export class DecisionJobs{
    decision=null;lastReason=error instanceof DecisionError?error.code:'DECISION_UNAVAILABLE';
    status=lastReason==='DECISION_BUDGET'?'budget_exhausted':lastReason==='DECISION_EXPIRED'?'expired':lastReason==='DECISION_CANCELLED'?'cancelled':'abstained';
   }finally{this.controllers.delete(id);this.shutdown.removeEventListener('abort',abort);i.signal.removeEventListener('abort',abort);}
-  await this.tx(i,async tx=>{
+  const complete=async(checkFresh:boolean,timeoutMs:number):Promise<void>=>this.tx(i,async tx=>{
    const j=await this.row(tx,s,id);if(j.state!=='RUNNING'||j.lease_id!==lease)return;
-   if(Number(j.remaining_ms)>0){try{await this.fresh(tx,s,j,i);}catch{status='abstained';lastReason='stale-at-completion';}}
-   if(Number(j.remaining_ms)<=0){status='expired';lastReason='total-deadline';}
+   if(checkFresh&&Number(j.remaining_ms)>0){try{await this.fresh(tx,s,j,i);}catch(error){
+    if(error instanceof Error&&'code'in error&&error.code==='TX_TIMEOUT')throw error;
+    status='abstained';lastReason='stale-at-completion';
+   }}
+   const clock=await tx.query('SELECT deadline_at<=clock_timestamp() AS expired FROM hyperfide.decision_jobs WHERE organisation_id=$1 AND run_id=$2 AND id=$3',[...scopeValues(s),id]);
+   if(clock.rows[0]!.expired){status='expired';lastReason='total-deadline';}
+   else if(!checkFresh)fail('DECISION_UNAVAILABLE','Completion freshness deadline interrupted before job expiry');
    await this.finish(tx,s,j,status,lastReason||null,decision);
-  });
+  },timeoutMs);
+  try{await complete(true,performance.now()>=processDeadline?5000:databaseTimeout());}
+  catch(error){
+   if(!(error instanceof Error)||!('code'in error)||error.code!=='TX_TIMEOUT')throw error;
+   // A cancelled freshness query rolls back. Retain the bounded provider response only
+   // after a new guarded primary transaction proves the absolute job deadline elapsed.
+   await complete(false,5000);
+  }
   return this.status(i,{decision_id:id});
  }
  async completedAudit(tx:PrimaryTransaction,s:Scope,input:{decision_id:string;packet_hash:string},i:InvocationContext):Promise<unknown>{
@@ -293,9 +337,10 @@ export function createComponent(ctx:ComponentContext):Component{
  const inbox=ctx.dependencies.require('6.2','events.inbox.v1',(v):v is Inbox=>object(v)&&typeof v.receive==='function');
  const jobs=new DecisionJobs(g,outbox,inbox,ctx.env,ctx.signal);
  const invocation=(context:ComponentContext):InvocationContext=>{if(!context.invocation)fail('AUTH_REQUIRED','Authenticated invocation required');assertInvocation(context.invocation);return context.invocation;};
- return{apiVersion:1,capabilities:{'decision.jobs.v1':Object.freeze({schemaVersion:1,registerPurpose:jobs.registerPurpose.bind(jobs),submit:jobs.submit.bind(jobs),completedAudit:jobs.completedAudit.bind(jobs)})},
+ return{apiVersion:1,capabilities:{'decision.jobs.v1':Object.freeze({schemaVersion:1,registerPurpose:jobs.registerPurpose.bind(jobs),submit:jobs.submit.bind(jobs),replay:jobs.replay.bind(jobs),completedAudit:jobs.completedAudit.bind(jobs)})},
  actions:{'decision.jobs.submit':(input,context)=>jobs.submit(invocation(context),input),
   'decision.jobs.status':(input,context)=>jobs.status(invocation(context),input),
+  'decision.jobs.replay':(input,context)=>jobs.replay(invocation(context),input),
   'decision.jobs.process':(input,context)=>jobs.process(invocation(context),input),
   'decision.jobs.cancel':(input,context)=>jobs.cancel(invocation(context),input)},close:()=>jobs.close()};
 }

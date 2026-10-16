@@ -12,7 +12,8 @@
     "decision.jobs.submit",
     "decision.jobs.status",
     "decision.jobs.process",
-    "decision.jobs.cancel"
+    "decision.jobs.cancel",
+    "decision.jobs.replay"
   ],
   "requires": [
     "4.2",
