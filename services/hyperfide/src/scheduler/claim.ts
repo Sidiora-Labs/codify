@@ -197,7 +197,7 @@ export function gatewayFor(context:ComponentContext):Pick<TransactionGateway,'wi
   if(!resources?.gateway)fail('DEPENDENCY_UNAVAILABLE','The registered primary transaction gateway is required');
   const gateway=resources.gateway,invocation=invocationFor(context);
   return {withPrimaryTransaction:async <T>(options:Parameters<TransactionGateway['withPrimaryTransaction']>[0],operation:(tx:PrimaryTransaction)=>Promise<T>|T):Promise<T>=>{
-   return gateway.withPrimaryTransaction(options,async tx=>{
+   return gateway.withPrimaryTransaction({...options,guard:async tx=>{await invocation.guard(tx);await options.guard?.(tx);}},async tx=>{
     const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
     const key=invocation.operation.idempotency_key,name='envelope.'+invocation.payload.action;
     const payload={payload_digest:invocation.operation.payload_digest};
@@ -222,8 +222,8 @@ export function actorFor(context:ComponentContext,scope:SchedulerScope,request:R
     leader_generation:decimal(request.leader_generation,'leader_generation'),
     ...(request.package_generation===undefined?{}:{package_generation:decimal(request.package_generation,'package_generation')})};
 }
-export function dispatchRecipients(context:ComponentContext):{consumer_ids:string[]}{
-  const primary=uuid(context.env.HF_SCHEDULER_DISPATCH_CONSUMER_ID,'trusted dispatch consumer');
+export function dispatchRecipients(context:ComponentContext,kind:'dispatch'|'native'='dispatch'):{consumer_ids:string[]}{
+  const primary=uuid(kind==='native'?context.env.HF_SCHEDULER_NATIVE_CONSUMER_ID:context.env.HF_SCHEDULER_DISPATCH_CONSUMER_ID,'trusted '+kind+' consumer');
   const audit=(context.env.HF_SCHEDULER_AUDIT_CONSUMER_IDS??'').split(',').filter(Boolean)
     .map(value=>uuid(value,'trusted audit consumer'));
   return {consumer_ids:[...new Set([primary,...audit])]};

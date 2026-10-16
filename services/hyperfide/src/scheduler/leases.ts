@@ -223,7 +223,7 @@ export function createComponent(context:ComponentContext):Component{
           [token.organisation_id,token.run_id,token.task_id]);
         const result={token,cancel_requested:true,termination_confirmed:false,resource_disposition:'RELEASE_PENDING'};
         await enqueue(tx,{organisation_id:token.organisation_id,run_id:token.run_id,id:randomUUID(),aggregate_type:'scheduler-cancel',
-          aggregate_id:request,aggregate_version:'1',event_type:'scheduler.compute.cancel.requested',payload:result},dispatchRecipients(context));
+          aggregate_id:request,aggregate_version:'1',event_type:'scheduler.compute.cancel.requested',payload:result},dispatchRecipients(context,'native'));
         await recordOutcome(tx,token,actor.session_id,'scheduler.cancel',request,input,result);return result;
       });
     },
@@ -233,7 +233,7 @@ export function createComponent(context:ComponentContext):Component{
       const actor=actorFor(context,scope,input);
       return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,guard:tx=>invocationFor(context).guard(tx)},
         tx=>expireCompute(tx,scope,actor,uuid(input.authority_epoch,'authority_epoch'),
-          input.limit===undefined?100:boundedInteger(input.limit,'limit',1,1000),dispatchRecipients(context)));
+          input.limit===undefined?100:boundedInteger(input.limit,'limit',1,1000),dispatchRecipients(context,'native')));
     }
   }};
 }

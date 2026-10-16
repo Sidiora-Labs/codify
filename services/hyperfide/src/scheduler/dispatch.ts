@@ -2,9 +2,10 @@ import {randomUUID} from 'node:crypto';
 import type {Component,ComponentContext} from '../components/registry.js';
 import type {PrimaryTransaction} from '../storage/transactions.js';
 import {assertPrimaryTransaction} from '../storage/transactions.js';
-import {enqueue,lockRun} from '../events/outbox.js';
+import {enqueue,lockRun,claimPending,acknowledge} from '../events/outbox.js';
 import {actorFor,decimal,dispatchRecipients,fail,fields,gatewayFor,invocationFor,object,requestDigest,
   requireSchedulerAuthority,uuid} from './claim.js';
+import {receive} from '../events/inbox.js';
 import type {ComputeToken,SchedulerScope} from './claim.js';
 import {assertCurrentCompute,parseComputeToken} from './leases.js';
 
@@ -84,23 +85,10 @@ export class DispatchReconciler {
    replacement_allowed:false,resource_release_confirmed:false};
  }
 }
-export function createComponent(_startup:ComponentContext):Component{
- const reconciler=new DispatchReconciler();
- return {apiVersion:1,capabilities:{'scheduler.dispatch.v1':Object.freeze({
-  registerReceiptReader:reconciler.registerReceiptReader.bind(reconciler),reconcile:reconciler.reconcile.bind(reconciler)})},
-  close:()=>reconciler.close(),actions:{
-  'scheduler.dispatch.ensure':async(value,context)=>{
-   const input=fields(value,['token','request_id','leader_generation'],['package_generation']);
-   const token=parseComputeToken(input.token),scope={organisation_id:token.organisation_id,run_id:token.run_id};
-   const actor=actorFor(context,scope,{...input,authority_epoch:token.authority_epoch}),request=uuid(input.request_id,'request_id');
-   return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
-    guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+export async function ensureDispatch(tx:PrimaryTransaction,token:ComputeToken,request:string,recipients:{consumer_ids:string[]}):Promise<unknown>{
+ assertPrimaryTransaction(tx);const scope={organisation_id:token.organisation_id,run_id:token.run_id};
     await lockRun(tx,scope);
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[scope.organisation_id+':'+scope.run_id+':dispatch:'+token.attempt_id]);
-    const task=await tx.query<{feature_package_id:string}>('SELECT feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
-     [scope.organisation_id,scope.run_id,token.task_id]);
-    if(!task.rows[0])fail('TASK_MISSING','Dispatch task is absent');
-    await requireSchedulerAuthority(tx,scope,actor,token.authority_epoch,task.rows[0].feature_package_id);
     const old=await tx.query<DispatchRow>('SELECT * FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND request_id=$3 FOR UPDATE',
      [scope.organisation_id,scope.run_id,request]);
     if(old.rows[0]){
@@ -119,12 +107,63 @@ export function createComponent(_startup:ComponentContext):Component{
     const operation=randomUUID(),event=randomUUID(),payload={command_id:operation,token,packet_digest:authority.input_packet_digest};
     const payload_digest=requestDigest(payload);
     await enqueue(tx,{...scope,id:event,aggregate_type:'scheduler-spawn',aggregate_id:operation,aggregate_version:'1',
-     event_type:'runner.spawn.requested',payload:{...payload,payload_digest}},dispatchRecipients(context));
+     event_type:'runner.spawn.requested',payload:{...payload,payload_digest}},recipients);
     await tx.query('INSERT INTO hyperfide.scheduler_dispatches(organisation_id,run_id,id,request_id,task_id,attempt_id,attempt_generation,authority_epoch,'+
      'sandbox_id,slot_id,sandbox_boot_generation,payload_digest,event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
      [scope.organisation_id,scope.run_id,operation,request,token.task_id,token.attempt_id,token.attempt_generation,token.authority_epoch,
       token.sandbox_id,token.slot_id,token.sandbox_boot_generation,payload_digest,event]);
     return {operation_id:operation,state:'INTENT',replayed:false,replacement_allowed:false,execution_confirmed:false};
+}
+export async function consumeDispatchEvent(tx:PrimaryTransaction,input:SchedulerScope&{event_id:string;consumer_id:string;native_recipients:{consumer_ids:string[]}}):Promise<Awaited<ReturnType<typeof receive>>>{
+ return receive(tx,{organisation_id:input.organisation_id,run_id:input.run_id,event_id:input.event_id,consumer_id:input.consumer_id},async(tx,event)=>{
+  if(event.event_type!=='scheduler.dispatch.requested'||event.aggregate_type!=='scheduler-claim'||event.aggregate_version!=='1')fail('DISPATCH_EVENT_INVALID','This consumer accepts committed scheduler claims only');
+  const payload=fields(event.payload,['token','request_id','input_packet_digest']),token=parseComputeToken(payload.token),request=uuid(payload.request_id,'claim request');
+  if(event.aggregate_id!==request||token.organisation_id!==input.organisation_id||token.run_id!==input.run_id)fail('DISPATCH_EVENT_INVALID','Committed claim event has inconsistent authority scope');
+  const admission=await tx.query<{result:unknown}>("SELECT result FROM hyperfide.command_inbox WHERE organisation_id=$1 AND run_id=$2 AND operation='scheduler.claim' AND idempotency_key=$3 AND state='COMPLETED'",[input.organisation_id,input.run_id,request]);
+  if(admission.rows.length!==1||requestDigest(object(admission.rows[0]!.result).token)!==requestDigest(token))fail('DISPATCH_ADMISSION_MISSING','Event has no exact committed scheduler claim receipt');
+  const target=await tx.query<{compute_authority:string;input_packet_digest:string}>('SELECT compute_authority,input_packet_digest FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3 AND generation=$4',[input.organisation_id,input.run_id,token.attempt_id,token.attempt_generation]);
+  if(target.rows[0]?.input_packet_digest!==payload.input_packet_digest)fail('DISPATCH_EVENT_INVALID','Claim packet differs from immutable admitted attempt');
+  if(target.rows[0]!.compute_authority!=='CURRENT')return {effect:'OBSOLETE_COMPUTE_SUPPRESSED',attempt_id:token.attempt_id,execution_granted:false};
+  await assertCurrentCompute(tx,token);
+  const existing=await tx.query<{request_id:string}>('SELECT request_id FROM hyperfide.scheduler_dispatches WHERE organisation_id=$1 AND run_id=$2 AND attempt_id=$3 AND attempt_generation=$4',[input.organisation_id,input.run_id,token.attempt_id,token.attempt_generation]);
+  return {effect:'DURABLE_DISPATCH_INTENT',dispatch:await ensureDispatch(tx,token,existing.rows[0]?.request_id??request,input.native_recipients),execution_granted:false};
+ });
+}
+export function createComponent(_startup:ComponentContext):Component{
+ const reconciler=new DispatchReconciler();
+ return {apiVersion:1,capabilities:{'scheduler.dispatch.v1':Object.freeze({
+  registerReceiptReader:reconciler.registerReceiptReader.bind(reconciler),reconcile:reconciler.reconcile.bind(reconciler),ensureDispatch,consumeDispatchEvent})},
+  close:()=>reconciler.close(),actions:{
+  'scheduler.dispatch.consume':async(value,context)=>{
+   const input=fields(value,[],['limit']),invocation=invocationFor(context);
+   if(!['COORDINATOR','DISPATCH'].includes(invocation.principal.role))fail('ROLE_DENIED','Claim-event processing requires a registered controller service identity');
+   const scope={organisation_id:invocation.principal.organisation_id,run_id:invocation.principal.run_id};
+   if(context.policy.programme_id!==scope.run_id)fail('RUN_SCOPE_DENIED','Controller must match the activated run');
+   const consumer=uuid(context.env.HF_SCHEDULER_DISPATCH_CONSUMER_ID,'trusted scheduler consumer');
+   const limit=input.limit===undefined?1:Number(input.limit);
+   if(!Number.isSafeInteger(limit)||limit<1||limit>64)fail('INVALID_REQUEST','A bounded delivery page is required');
+   return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal},async tx=>{
+    const deliveries=await claimPending(tx,{...scope,consumer_id:consumer,limit,lease_ms:30000}),results:unknown[]=[];
+    for(const delivery of deliveries){
+     const result=await consumeDispatchEvent(tx,{...scope,event_id:delivery.id,consumer_id:consumer,native_recipients:dispatchRecipients(context,'native')});
+     if(result.inbox_id)await acknowledge(tx,{...scope,event_id:delivery.id,consumer_id:consumer,attempt_count:delivery.attempt_count,inbox_id:result.inbox_id});
+     results.push(result);
+    }
+    return {consumer_id:consumer,processed:results.length,results};
+   });
+  },
+  'scheduler.dispatch.ensure':async(value,context)=>{
+   const input=fields(value,['token','request_id','leader_generation'],['package_generation']);
+   const token=parseComputeToken(input.token),scope={organisation_id:token.organisation_id,run_id:token.run_id};
+   const actor=actorFor(context,scope,{...input,authority_epoch:token.authority_epoch}),request=uuid(input.request_id,'request_id');
+   return gatewayFor(context).withPrimaryTransaction({timeoutMs:10000,maxRetries:3,signal:context.signal,
+    guard:tx=>invocationFor(context).guard(tx)},async tx=>{
+    await lockRun(tx,scope);
+    const task=await tx.query<{feature_package_id:string}>('SELECT feature_package_id FROM hyperfide.tasks WHERE organisation_id=$1 AND run_id=$2 AND id=$3 FOR SHARE',
+     [scope.organisation_id,scope.run_id,token.task_id]);
+    if(!task.rows[0])fail('TASK_MISSING','Dispatch task is absent');
+    await requireSchedulerAuthority(tx,scope,actor,token.authority_epoch,task.rows[0].feature_package_id);
+    return ensureDispatch(tx,token,request,dispatchRecipients(context,'native'));
    });
   },
   'scheduler.dispatch.reconcile':async(value,context)=>{

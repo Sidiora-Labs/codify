@@ -26,6 +26,9 @@ class SchedulerFixture(PacketFixture):
    i["dispatch_consumer"]=uid()
    f.sql("INSERT INTO hyperfide.event_consumers(organisation_id,run_id,id,consumer_key) VALUES($1,$2,$3,'scheduler-dispatch')",[i["organisation"],i["run"],i["dispatch_consumer"]])
    f.env["HF_SCHEDULER_DISPATCH_CONSUMER_ID"]=i["dispatch_consumer"]
+   i["native_consumer"]=uid()
+   f.sql("INSERT INTO hyperfide.event_consumers(organisation_id,run_id,id,consumer_key) VALUES($1,$2,$3,'native-control')",[i["organisation"],i["run"],i["native_consumer"]])
+   f.env["HF_SCHEDULER_NATIVE_CONSUMER_ID"]=i["native_consumer"]
    limits={"AGENT":agent_limit,"CPU_MILLIS":8000,"MEMORY_BYTES":17179869184,"DISK_BYTES":34359738368,"BUILD":2,"TEST":2,"REVIEW":2,"INDEX":2,"INTEGRATION":2,"PREPARATION":2}
    for dimension,limit in limits.items():
     ident=uid();f.accounts[dimension]=ident
