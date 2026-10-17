@@ -158,10 +158,11 @@ export function prepareCapabilities(raw:unknown,env:Readonly<NodeJS.ProcessEnv>)
     non_authoritative:true}};
 }
 export function billing(raw:unknown,env:Readonly<NodeJS.ProcessEnv>):Record<string,unknown> {
-  const input=record(raw,'billing');exact(input,['route_id','questions','state_tokens','question_tokens','image_tokens','observed_usage','observed_cost'],['route_id','questions','state_tokens','question_tokens']);
+  const input=record(raw,'billing');exact(input,['route_id','questions','state_tokens','question_tokens','image_tokens','output_tokens_bound','observed_usage','observed_cost'],['route_id','questions','state_tokens','question_tokens']);
   const r=route(input.route_id),p=profileFor(r.id,env),n=integer(input.questions,'questions',1,256);
   const state=integer(input.state_tokens,'state tokens',0,100000000),q=integer(input.question_tokens,'question tokens',0,100000000);
   const images=integer(input.image_tokens??0,'image tokens',0,100000000);
+  const outputBound=input.output_tokens_bound===undefined?null:integer(input.output_tokens_bound,'output tokens bound',0,100000000);
   const estimatedInput=p.billing==='unknown'?null:(p.billing==='repeated-state'?(state+images)*n:state+images)+q;
   let observed:Record<string,unknown>|null=null,cost:Record<string,unknown>|null=null;
   if(input.observed_usage!==undefined) {
@@ -174,10 +175,14 @@ export function billing(raw:unknown,env:Readonly<NodeJS.ProcessEnv>):Record<stri
     if(typeof c.usd!=='number'||!Number.isFinite(c.usd)||c.usd<0||typeof c.reconciled!=='boolean')fail('DECISION_SCHEMA','Invalid observed cost');
     text(c.provenance,'cost provenance');cost=c;
   }
-  const estimatedUsd=estimatedInput!==null&&p.price_input_per_million!==null&&p.price_output_per_million===0?
-    estimatedInput*p.price_input_per_million/1000000:null;
+  // Output is priced explicitly: an estimate exists only when output is qualified as free or bounded by the caller;
+  // a nonzero or unknown output price without a bound leaves the whole estimate unknown rather than understated.
+  const outputUsd=p.price_output_per_million===null?null:p.price_output_per_million===0?0:
+    outputBound===null?null:outputBound*p.price_output_per_million/1000000;
+  const estimatedUsd=estimatedInput!==null&&outputUsd!==null&&p.price_input_per_million!==null?
+    estimatedInput*p.price_input_per_million/1000000+outputUsd:null;
   return {schema_version:1,route_id:r.id,accounting:p.billing,questions:n,estimated_input_tokens:estimatedInput,
-    estimated_usd:estimatedUsd,estimate_provenance:p.qualification_ref,
+    output_tokens_bound:outputBound,estimated_usd:estimatedUsd,estimate_provenance:p.qualification_ref,
     observed_usage:observed,observed_cost:cost,usage_class:observed?'actual':'unknown',
     cost_class:cost?'actual':estimatedUsd===null?'unknown':'estimated',unknown_is_zero:false,
     evidence_class:'untrusted-preview',non_authoritative:true};

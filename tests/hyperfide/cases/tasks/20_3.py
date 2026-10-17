@@ -14,7 +14,8 @@ IDS=["decision.capability.default-disabled","decision.capability.span-off","deci
 "decision.capability.long-context","decision.capability.header-forwarding","decision.capability.number-on",
 "decision.capability.box-presence","decision.capability.liquid-repeated","decision.capability.jev-unknown",
 "decision.capability.qualified-shared","decision.capability.observed-separate","decision.capability.unknown-price",
-"decision.capability.selfhost-default","decision.capability.expanded-references","decision.capability.profile-not-wire","decision.capability.question-id-context"]
+"decision.capability.selfhost-default","decision.capability.expanded-references","decision.capability.profile-not-wire","decision.capability.question-id-context",
+"decision.capability.output-price"]
 ACTIONS=["decision.capabilities.prepare","decision.capabilities.billing"]
 def png(width=280,height=280):
  def chunk(k,b):return struct.pack(">I",len(b))+k+b+struct.pack(">I",zlib.crc32(k+b)&0xffffffff)
@@ -111,6 +112,13 @@ def main():
    p=profile();p["context_request_tokens"]=2000;p["context_question_tokens"]=2000
    bad(r,p)
   check(IDS[30],key_context)
+  def output_price():
+   p=profile("ultra-native");p["price_output_per_million"]=.5
+   v=bill("ultra-native",p);shared.expect(v["estimated_usd"]is None and v["cost_class"]=="unknown","unbounded paid output understated as input-only cost")
+   v=bill("ultra-native",p,output_tokens_bound=2000);shared.expect(abs(v["estimated_usd"]-.0052)<1e-12 and v["cost_class"]=="estimated","bounded output cost wrong")
+   p["price_output_per_million"]=None
+   v=bill("ultra-native",p,output_tokens_bound=2000);shared.expect(v["estimated_usd"]is None and v["cost_class"]=="unknown","unknown output price changed to zero")
+  check(IDS[31],output_price)
  print(json.dumps({"type":"cleanup","resources":[],"complete":True}),flush=True)
  return 1 if failed else 0
 if __name__=="__main__":sys.exit(main())
