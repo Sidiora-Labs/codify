@@ -16,6 +16,7 @@ IDS=[
 "provider.observation.wrong-resource-scope","provider.observation.cancel-before-effect","provider.observation.expired-permit",
 "provider.isolation.invalid-topology-mode","provider.isolation.incomplete-delete-no-absence"]
 IDS+=["provider.placement.real-configure","provider.placement.no-caller-failure","provider.placement.no-invented-observation","provider.placement.recorded-failure-backoff","provider.placement.idempotent-backoff","provider.placement.unknown-no-retry-authority","provider.placement.cross-run-observation","provider.placement.private-connectivity-policy","provider.placement.no-probe-from-metadata","provider.placement.no-invented-enrollment"]
+IDS+=["provider.relocation.incompatible-profile-refused","provider.relocation.unbound-manifest-refused","provider.relocation.compatible-profile-accepted","provider.relocation.identities-preserved","provider.relocation.old-attempt-fenced","provider.relocation.idempotent-replay","provider.relocation.fresh-enrollment-required"]
 SCRIPT=r"""
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -133,6 +134,22 @@ def main():
   f.connectivity=f.path/"connectivity.json"
   policy={"schema_version":1,"evidence_scope":"COMPONENT_FIXTURE","targets":[{"name":name,"url":"https://"+name+".component.invalid/check","header_name":"Authorization","header_prefix":"Bearer ","credential_ref":"secret-ref:fixture/"+name,"expected_status":200,"denied_statuses":[401,403],"expected_body_sha256":None} for name in ["coordinator","git","artifact","model"]],"timeout_ms":100,"maximum_attempts":3,"base_backoff_ms":100,"max_backoff_ms":2000,"proof_max_age_ms":10000}
   f.connectivity.write_text(json.dumps(policy));f.connectivity.chmod(0o600);f.env["HYPERFIDE_CONNECTIVITY_CONFIG"]=str(f.connectivity)
+  # Distinct target pools publish self-digested manifests derived from the source preparation.
+  org=f.ids["organisation"];parent=f.sql("SELECT manifest FROM hyperfide.environment_profiles WHERE organisation_id=$1 AND id=$2",[org,f.profile])[0]["manifest"]
+  canonical=lambda value:json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+  def lower_cpu(profile):profile["resources"]["cpu_millis"]-=1
+  def unbound(value):value["profile"]["profile_version"]="tampered-without-rehash"
+  f.targets={}
+  for key,change,tamper in [("compatible",None,None),("incompatible",lower_cpu,None),("unbound",None,unbound)]:
+   value=copy.deepcopy(parent);value["profile"]["profile_version"]=key+"-"+uuid.uuid4().hex[:8]
+   if change:change(value["profile"])
+   value.pop("digest");value["digest"]=m.sha(canonical(value))
+   if tamper:tamper(value)
+   profile=str(uuid.uuid4());pool=str(uuid.uuid4())
+   f.sql("INSERT INTO hyperfide.environment_profiles(organisation_id,id,provider,runtime_platform,content_digest,manifest) VALUES($1,$2,'railway','linux-x86_64',$3,$4)",[org,profile,value["digest"],value])
+   entry=copy.deepcopy(f.config["pools"][0]);entry.update(id=pool,profile_id=profile,preparation_digest=value["digest"])
+   f.config["pools"].append(entry);f.targets[key]={"pool":pool,"profile":profile,"preparation":value["digest"]}
+  f.configfile.write_text(json.dumps(f.config));f.connectivity_policy=policy
  def invoke(action,value,component="8.4",key="provisioner"):
   return f.invoke(action,value,component=component,key=key)
  def result(action,value,component="8.4",key="provisioner"):
@@ -142,7 +159,7 @@ def main():
   if code:m.expect(code in json.dumps(response),response)
  try:
   f=m.pools.ProvisionerFixture(extra_components=["8.2","8.3","8.4"],extra_setup=setup)
-  check(28,lambda:m.expect(result("provider.pools.configure",{},"8.2","operator")["configured"]==1,"actual pool not configured"))
+  check(28,lambda:m.expect(result("provider.pools.configure",{},"8.2","operator")["configured"]==1+len(f.targets),"actual pools not configured"))
   m.seed_provider_capacity(f);org=f.ids["organisation"];run=f.ids["run"]
   request={"run_id":run,"pool_id":f.pool,"sandbox_id":str(uuid.uuid4()),"request_key":str(uuid.uuid4()),"deadline_at":m.utc(),"reservation_ids":f.reservations,"profile_id":f.profile,"preparation_digest":f.preparation,"purpose":"PREPARATION"}
   created=result("provider.intents.prepare-create",request,"8.3","operator")["intent"];op=created["operation"]
@@ -175,6 +192,69 @@ def main():
   check(35,private_policy)
   check(36,lambda:reject("provider.placement.probe",{"pool_id":f.pool,"sandbox_id":request["sandbox_id"],"run_id":run,"native_sandbox_id":"caller"}))
   check(37,lambda:reject("provider.relocation.confirm-enrollment",{"run_id":run,"plan_id":str(uuid.uuid4()),"sandbox_id":request["sandbox_id"]},"RELOCATION_PLAN_INVALID"))
+  # Relocation fixture: durable task/attempt/checkpoint rows for the original sandbox and
+  # seeded COMPONENT_FIXTURE connectivity records for the targets (no live pool probe).
+  rel={k:str(uuid.uuid4()) for k in ("feature","task","slot","attempt","lease","repository","artifact","checkpoint")}
+  old_sandbox=request["sandbox_id"];epoch=f.ids["epoch"];packet=m.sha(b"relocation-packet")
+  m.expect(len(f.sql("SELECT 1 FROM hyperfide.sandboxes WHERE organisation_id=$1 AND id=$2 AND pool_id=$3",[org,old_sandbox,f.pool]))==1,"original sandbox missing")
+  f.sql("INSERT INTO hyperfide.feature_packages(organisation_id,run_id,id,package_key,wave) VALUES($1,$2,$3,'relocation-fixture',1)",[org,run,rel["feature"]])
+  f.sql("INSERT INTO hyperfide.tasks(organisation_id,run_id,id,task_key,feature_package_id,spec_revision_id,criteria_digest,definition,wave,generation,state) VALUES($1,$2,$3,'relocation-fixture',$4,$5,$6,'{}',1,1,'RUNNING')",[org,run,rel["task"],rel["feature"],f.ids["spec"],m.sha(b"criteria")])
+  f.sql("INSERT INTO hyperfide.worker_slots(organisation_id,id,sandbox_id,slot_key,boot_generation,capacity_kind) VALUES($1,$2,$3,'relocation-fixture',1,'AGENT')",[org,rel["slot"],old_sandbox])
+  f.sql("INSERT INTO hyperfide.attempts(organisation_id,run_id,id,task_id,generation,authority_epoch,input_packet_digest,execution_state,compute_authority,sandbox_id,slot_id,sandbox_boot_generation,lease_expires_at) VALUES($1,$2,$3,$4,1,$5,$6,'RUNNING','CURRENT',$7,$8,1,clock_timestamp()+interval '10 minutes')",[org,run,rel["attempt"],rel["task"],epoch,packet,old_sandbox,rel["slot"]])
+  f.sql("INSERT INTO hyperfide.compute_leases(organisation_id,run_id,id,attempt_id,attempt_generation,authority_epoch,sandbox_boot_generation,expires_at) VALUES($1,$2,$3,$4,1,$5,1,clock_timestamp()+interval '10 minutes')",[org,run,rel["lease"],rel["attempt"],epoch])
+  f.sql("INSERT INTO hyperfide.repositories(organisation_id,id,project_id,name,url) VALUES($1,$2,$3,'relocation-fixture','https://example.invalid/relocation.git')",[org,rel["repository"],f.ids["project"]])
+  f.sql("INSERT INTO hyperfide.source_objects(organisation_id,repository_id,object_id) VALUES($1,$2,repeat('b',40))",[org,rel["repository"]])
+  f.sql("INSERT INTO hyperfide.run_repositories(organisation_id,run_id,repository_id,source_object_id,integration_ref) VALUES($1,$2,$3,repeat('b',40),'refs/heads/main')",[org,run,rel["repository"]])
+  checkpoint_digest=m.sha(b"relocation-checkpoint")
+  f.sql("INSERT INTO hyperfide.artifacts(organisation_id,run_id,id,digest,size_bytes,storage_backend,storage_key,status) VALUES($1,$2,$3,$4,21,'fixture','relocation-checkpoint','COMPLETE')",[org,run,rel["artifact"],checkpoint_digest])
+  f.sql("INSERT INTO hyperfide.checkpoints(organisation_id,run_id,id,attempt_id,attempt_generation,artifact_id,repository_id,source_object_id,input_packet_digest,support_level) VALUES($1,$2,$3,$4,1,$5,$6,repeat('b',40),$7,'SOURCE_ONLY')",[org,run,rel["checkpoint"],rel["attempt"],rel["artifact"],rel["repository"],packet])
+  digest_script="import fs from 'node:fs';import{digestDocument}from'./services/hyperfide/dist/providers/pools.js';process.stdout.write(digestDocument(JSON.parse(fs.readFileSync(0,'utf8'))));"
+  endpoints=subprocess.run(["node","--input-type=module","-e",digest_script],input=json.dumps(f.connectivity_policy["targets"]),cwd=ROOT,env=f.env,text=True,capture_output=True,timeout=10)
+  m.expect(endpoints.returncode==0,endpoints.stderr)
+  saved=f.pool;saved_reservations=list(f.reservations)
+  for target in f.targets.values():
+   f.pool=target["pool"];m.seed_provider_capacity(f)
+   target["config"]=f.sql("SELECT configuration_digest FROM hyperfide.provider_pool_configurations WHERE organisation_id=$1 AND pool_id=$2 AND active",[org,target["pool"]])[0]["configuration_digest"]
+   target["sandbox"]=str(uuid.uuid4())
+   f.sql("INSERT INTO hyperfide.sandboxes(organisation_id,id,pool_id,native_sandbox_id,observed_state,preparation_digest) VALUES($1,$2,$3,$4,'RUNNING',$5)",[org,target["sandbox"],target["pool"],"relocation-target-"+target["sandbox"],target["preparation"]])
+   f.sql("INSERT INTO hyperfide.provider_connectivity_probes(organisation_id,id,pool_id,sandbox_id,boot_generation,configuration_digest,endpoints_digest,credential_lineage,enrollment_evidence_digest,evidence_digest,evidence_scope,status,observation,expires_at) VALUES($1,$2,$3,$4,1,$5,$6,'component-fixture',$7,$8,'COMPONENT_FIXTURE','PASS',$9,clock_timestamp()+interval '10 minutes')",[org,str(uuid.uuid4()),target["pool"],target["sandbox"],target["config"],endpoints.stdout,m.sha(b"fixture-enrollment"),m.sha(b"fixture-probe"),{"evidence_scope":"COMPONENT_FIXTURE","live_pool_qualified":False}])
+  f.pool=saved;f.reservations=saved_reservations
+  plan_input=lambda key:{"run_id":run,"old_attempt_id":rel["attempt"],"expected_generation":"1","expected_authority_epoch":epoch,"target_pool_id":f.targets[key]["pool"],"checkpoint_id":rel["checkpoint"],"reason_observation_id":observation_id}
+  attempt_state=lambda:f.sql("SELECT compute_authority FROM hyperfide.attempts WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,rel["attempt"]])[0]["compute_authority"]
+  def incompatible():
+   reject("provider.relocation.plan",plan_input("incompatible"),"ENVIRONMENT_INCOMPATIBLE")
+   m.expect(attempt_state()=="CURRENT","refused relocation fenced the source attempt")
+  check(38,incompatible)
+  def unbound():
+   reject("provider.relocation.plan",plan_input("unbound"),"ENVIRONMENT_COMPATIBILITY_UNVERIFIED")
+   m.expect(attempt_state()=="CURRENT","unbound manifest fenced the source attempt")
+  check(39,unbound)
+  plan={}
+  def compatible():
+   plan.update(result("provider.relocation.plan",plan_input("compatible")))
+   m.expect(plan["created"] is True and plan["state"]=="PENDING_ADMISSION" and plan["preparation_digest"]==f.targets["compatible"]["preparation"],plan)
+   m.expect(isinstance(plan["environment_compatibility_evidence_digest"],str) and plan["environment_compatibility_evidence_digest"].startswith("sha256:"),"compatibility evidence missing")
+  check(40,compatible)
+  def preserved():
+   source=plan["source_manifest"]
+   m.expect(source=={"checkpoint_id":rel["checkpoint"],"artifact_digest":checkpoint_digest,"repository_id":rel["repository"],"source_object_id":"b"*40,"input_packet_digest":packet,"support_level":"SOURCE_ONLY"},source)
+   row=f.sql("SELECT task_id,old_authority_epoch,source_manifest_digest,target_pool_id FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,plan["id"]])[0]
+   m.expect(row=={"task_id":rel["task"],"old_authority_epoch":epoch,"source_manifest_digest":plan["source_manifest_digest"],"target_pool_id":f.targets["compatible"]["pool"]},row)
+  check(41,preserved)
+  def fenced():
+   lease=f.sql("SELECT state FROM hyperfide.compute_leases WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,rel["lease"]])[0]["state"]
+   m.expect(attempt_state()=="REVOKED" and lease=="REVOKED" and plan["old_compute_fenced"] is True and plan["admission_granted"] is False,"old compute authority not fenced")
+  check(42,fenced)
+  def replay():
+   again=result("provider.relocation.plan",plan_input("compatible"))
+   m.expect(again["created"] is False and again["plan"]["id"]==plan["id"],again)
+   reject("provider.relocation.plan",plan_input("incompatible"),"IDEMPOTENCY_CONFLICT")
+  check(43,replay)
+  def fresh():
+   m.expect(plan["fresh_enrollment_required"] is True,"fresh enrollment not demanded")
+   reject("provider.relocation.confirm-enrollment",{"run_id":run,"plan_id":plan["id"],"sandbox_id":f.targets["compatible"]["sandbox"]},"ENROLLMENT_UNVERIFIED")
+   m.expect(f.sql("SELECT state FROM hyperfide.provider_relocation_plans WHERE organisation_id=$1 AND run_id=$2 AND id=$3",[org,run,plan["id"]])[0]["state"]=="PENDING_ADMISSION","unenrolled target admitted")
+  check(44,fresh)
   f.close();f=None;cleanup=True
  finally:
   if f is not None:f.close()
