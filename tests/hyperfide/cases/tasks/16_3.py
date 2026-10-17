@@ -369,7 +369,7 @@ def primary_cases():
     original_primary_cases()
     behaviour_cases()
 
-def quiet_cleanup():
+def quiet_cleanup(report=False):
     # The registered --cleanup command is the single observed cleanup event.
     with contextlib.redirect_stdout(io.StringIO()):
         return original_cleanup()

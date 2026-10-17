@@ -1,16 +1,9 @@
 {
   "task": "16.3",
-  "commit": "a31370325a6a87db64023d0ee8a33b3641927e1c",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-013 --manifest tests/hyperfide/manifests/tasks/16.3.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/16.3.json",
   "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"dc8af1d5-4547-4a69-80b5-3fb27fa898b0\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.3/campaigns/a43151db4a4d886b083e0836e035fc2e4c8311e89c14af66543906f136b5d34a\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"b5f776e0-a2dd-4664-833e-607255da6c44\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.3/campaigns/a43151db4a4d886b083e0836e035fc2e4c8311e89c14af66543906f136b5d34a\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\nexit=0\n",
-  "ran_at": "2026-10-17T09:20:30Z",
-  "receipts": [
-    "dc8af1d5-4547-4a69-80b5-3fb27fa898b0",
-    "b5f776e0-a2dd-4664-833e-607255da6c44"
-  ],
-  "independent_checks": "PASS (both receipts)",
-  "cleanup_events_per_receipt": 1,
-  "execution_note": "Executed as repository owner uid hf (the checker's hardened git refuses root on an hf-owned worktree) against the local PostgreSQL fixture; node copied from the mise install to /tmp/hf-node/bin because /root is not readable by hf.",
-  "verification_scope": "Registered task-component variant only; full V-013/V-034 remain UNRUN."
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"844e9d85-96d0-4fd9-bef1-9108a6050a32\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.3/campaigns/fa9514f0fbd6187daa9818f579d3136f8a56b5973a76157bcaf600775f31aec8\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"4ef04151-2ad6-4250-9bf5-fbae60524505\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.3/campaigns/fa9514f0fbd6187daa9818f579d3136f8a56b5973a76157bcaf600775f31aec8\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
+  "ran_at": "2026-10-17T14:10:53.654724+00:00"
 }
