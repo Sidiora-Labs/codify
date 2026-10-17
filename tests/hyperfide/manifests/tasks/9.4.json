@@ -29,33 +29,33 @@
     "railway.adapter.actual-early-id",
     "railway.adapter.early-id-before-observation",
     "railway.adapter.database-ambiguity-keeps-id",
-    "railway.adapter.expired-before-dispatch",
     "railway.adapter.malformed-observation-keeps-id",
     "railway.adapter.lost-response-is-unknown",
     "railway.adapter.no-implicit-create-retry",
     "railway.adapter.destroy-awaits-terminal",
     "railway.adapter.destroy-confirmed",
+    "railway.adapter.expired-before-dispatch",
     "railway.isolation.accepted-delete-is-not-absence",
     "railway.isolation.exact-deletion-confirmed",
     "railway.isolation.exact-absence-observation",
     "railway.isolation.http-failure-unknown",
     "railway.isolation.wrong-native-id-unknown",
     "railway.isolation.pure-live-construction",
+    "railway.quota.live-unqualified",
+    "railway.qualification.all-unqualified",
+    "railway.qualification.rejects-injected-evidence",
+    "railway.qualification.rejects-invalid-inputs",
     "railway.adapter.restore-source-id-is-unknown",
     "railway.factory.durable-intent-before-sdk",
     "railway.factory.actual-early-id",
     "railway.factory.trusted-placement-and-vars",
     "railway.factory.no-provider-readiness",
     "railway.factory.no-duplicate-create",
-    "railway.factory.private-policy-pin",
     "railway.quota.registered-provider-api",
     "railway.quota.labelled-simulated",
     "railway.quota.scope-mismatch-rejected",
-    "railway.quota.live-unqualified",
-    "railway.qualification.all-unqualified",
-    "railway.qualification.rejects-injected-evidence",
-    "railway.qualification.rejects-invalid-inputs",
-    "railway.qualification.idle-policy-pin"
+    "railway.qualification.idle-policy-pin",
+    "railway.factory.private-policy-pin"
   ],
   "inputs": [
     {
@@ -1180,8 +1180,8 @@
     },
     {
       "path": "tests/hyperfide/cases/tasks/9_4.py",
-      "sha256": "2725245bde7d48ebaec11d3fd56493e94cbfa887f89939a2959f4159c86b9537",
-      "size": 25861
+      "sha256": "3d5e3abc6d799741ece58953ee6dae44d41c27e861874f173143c6aefe4f51d6",
+      "size": 25969
     },
     {
       "path": "tests/hyperfide/check-evidence.py",
@@ -1200,7 +1200,7 @@
     },
     {
       "path": "tests/hyperfide/registrations/9.4.json",
-      "sha256": "5fc60da1183ea06b160fcf6292f9bd4836907d10c69fe16b388dde3eb4ebed5c",
+      "sha256": "74f90aac170e5cf97d56a2b1f697773d1d2e1b97fe3a6a4d9c83ec31af3be452",
       "size": 14693
     },
     {

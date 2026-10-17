@@ -135,7 +135,7 @@ def actual_factory_checks(fixture,folder):
   if f is not None:f.close()
 
 def main():
- if sys.argv[1:]==["--inventory"]:print(json.dumps(IDS[:19]+IDS[24:25]+IDS[19:24]+IDS[25:]));return 0
+ if sys.argv[1:]==["--inventory"]:print(json.dumps([IDS[i] for i in [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,41,42,43,44,31,32,33,34,35,36,38,39,40,45,37]]));return 0
  complete=False
  with tempfile.TemporaryDirectory(prefix="hyperfide-railway94-") as folder:
   fixture=c.Fixture(folder);simulate_quota(fixture);service=c.Service(folder,fixture)
@@ -219,27 +219,27 @@ process.stdout.write(JSON.stringify({outcome:result,events}));
       ambiguous_db["outcome"]["retry"]=="AFTER_RECONCILIATION","early ID lost on DB uncertainty"))
    fixture.state["mode"]="create-wrong-region"
    malformed=adapter()
-   c.check(IDS[24],lambda:c.expect(malformed["outcome"]["status"]=="UNKNOWN" and
+   c.check(IDS[19],lambda:c.expect(malformed["outcome"]["status"]=="UNKNOWN" and
       malformed["outcome"]["resource"]=={"native_sandbox_id":"sandbox-1","sandbox_boot_generation":"17"} and
       malformed["events"]==["assigned-generation","early-id:sandbox-1","observation:UNKNOWN"],
       "malformed returned placement lost the submitted resource ID"))
    fixture.state["mode"]="lost-create-response";before=fixture.state.get("creates",0)
    lost=adapter()
-   c.check(IDS[19],lambda:c.expect(lost["outcome"]["status"]=="UNKNOWN" and lost["outcome"]["acceptance"]=="UNKNOWN" and
+   c.check(IDS[20],lambda:c.expect(lost["outcome"]["status"]=="UNKNOWN" and lost["outcome"]["acceptance"]=="UNKNOWN" and
       lost["outcome"]["resource"] is None,"lost response became rejection/success"))
-   c.check(IDS[20],lambda:c.expect(fixture.state["creates"]==before+1,"adapter retried ambiguous create"))
+   c.check(IDS[21],lambda:c.expect(fixture.state["creates"]==before+1,"adapter retried ambiguous create"))
    fixture.state["mode"]="normal"
    pending=adapter(params["destroy"])
-   c.check(IDS[21],lambda:c.expect(pending["outcome"]["status"]=="UNKNOWN","destroy request freed allocation before observation"))
+   c.check(IDS[22],lambda:c.expect(pending["outcome"]["status"]=="UNKNOWN","destroy request freed allocation before observation"))
    fixture.state["mode"]="destroyed"
    deleted=adapter(params["destroy"])
-   c.check(IDS[22],lambda:c.expect(deleted["outcome"]["status"]=="SUCCEEDED" and deleted["outcome"]["result"]==
+   c.check(IDS[23],lambda:c.expect(deleted["outcome"]["status"]=="SUCCEEDED" and deleted["outcome"]["result"]==
       {"deletion":"CONFIRMED"},"terminal deletion unconfirmed"))
    expired=c.alter(params["create"],["deadline_at"],"2020-01-01T00:00:00.000Z")
    expired["identity"]["payload_digest"]=c.digest({k:expired[k] for k in
       ["kind","scope","resource","preparation_digest","deadline_at","parameters"]})
    before=len(fixture.requests);denied=adapter(expired)
-   c.check(IDS[23],lambda:c.expect(denied["outcome"]["status"]=="FAILED" and denied["outcome"]["acceptance"]==
+   c.check(IDS[24],lambda:c.expect(denied["outcome"]["status"]=="FAILED" and denied["outcome"]["acceptance"]==
       "CONFIRMED_REJECTED" and len(fixture.requests)==before,"expired dispatch reached provider"))
    fixture.state["mode"]="normal"
    isolated_pending=adapter(params["destroy"],isolation=True)
