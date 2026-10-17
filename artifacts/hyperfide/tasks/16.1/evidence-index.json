@@ -1,9 +1,9 @@
 {
   "task": "16.1",
-  "commit": "ff4632c9bc896057147975b600323af8f8b21f89",
-  "requalified_on": "ff4632c9bc896057147975b600323af8f8b21f89",
+  "commit": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
+  "requalified_on": "a80cd7edbb1c3021b76c18c53fdc95d634a77a09",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-013 --manifest tests/hyperfide/manifests/tasks/16.1.json && python3 tests/hyperfide/qualify.py --case V-034 --manifest tests/hyperfide/manifests/tasks/16.1.json",
-  "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"25384084-3e4a-4226-98fb-2598de6ca870\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/a7ccc3de11c911cb9970f9b0c6d44c713cd464eb8c0ebf7fff7f4e132eb605d2\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"8b2ed4bc-8c6d-4c4a-bdea-bc11bddb22ca\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/a7ccc3de11c911cb9970f9b0c6d44c713cd464eb8c0ebf7fff7f4e132eb605d2\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T18:57:18.059Z"
+  "exit_code": 1,
+  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"856caa87-0819-4a5d-ab9b-6ae34e8bf122\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/c8b3502ad5e187c26eadbdcd3ab02970687ccbf97db371eaccdbe5667bb9a5cb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"FAIL\", \"receipt_id\": \"6995242a-d833-4783-b7bf-ac78ce90d352\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/16.1/campaigns/c8b3502ad5e187c26eadbdcd3ab02970687ccbf97db371eaccdbe5667bb9a5cb\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"one or more behavioural assertions failed\", \"probe failed, was unavailable, or timed out\"]}\n",
+  "ran_at": "2026-10-17T19:23:58.426066+00:00"
 }
