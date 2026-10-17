@@ -21,10 +21,10 @@ class SchedulerFixture(m.SchedulerFixture):
    values=list(values);index=max(n for n,v in enumerate(values) if isinstance(v,str) and v.startswith("{"))
    definition=json.loads(values[index]);definition["section"]={"name":"task.fixture","fields":{"reqs":{"value":["3.2.1"]}}};values[index]=json.dumps(definition)
   elif sql.startswith("INSERT INTO hyperfide.proof_registries("):
-   values=list(values);policy=json.loads(values[6])
+   values=list(values);policy=json.loads(values[7])
    for clause in policy["clauses"]:
     if clause["mode"]=="REVIEW":clause["reviewers"]=[REVIEWER]
-   values[5]=m.identity(policy);values[6]=json.dumps(policy)
+   values[6]=m.identity(policy);values[7]=json.dumps(policy)
   return super().sql(sql,values,admin=admin,serial=serial)
 FRAGMENT=json.loads((ROOT/"services/hyperfide/components/5.2.json").read_text())
 SPARE_SLOTS=12
