@@ -86,6 +86,8 @@
     "tests/hyperfide/check-evidence.py",
     "tests/hyperfide/manifest.schema.json",
     "tests/hyperfide/qualify.py",
+    "services/hyperfide/src/storage/replicas.ts",
+    "services/hyperfide/components/4.3.json",
     "tests/hyperfide/cases/tasks/4_3.py",
     "tests/hyperfide/registrations/4.3.json"
   ],
