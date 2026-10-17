@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "11.4",
+  "task": "11.4",
+  "roles": [
+    "control"
+  ],
+  "module": "preparation/prewarm.js",
+  "entry": "createComponent",
+  "api_version": 1,
+  "actions": [
+    "preparation.prewarm.schedule",
+    "preparation.prewarm.inspect",
+    "preparation.recipe.resolve"
+  ],
+  "requires": [
+    "4.2",
+    "14.1",
+    "5.4",
+    "8.3"
+  ]
+}
