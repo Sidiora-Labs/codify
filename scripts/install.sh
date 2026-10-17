@@ -3,6 +3,19 @@
 # HYPERFIDE_BASE_URL (legacy CODIFY_BASE_URL) selects a controlled release endpoint.
 # HYPERFIDE_INSTALL_DIR (legacy CODIFY_INSTALL_DIR) selects the command directory.
 set -euo pipefail
+case "${1:-}" in
+ -h|--help)
+  cat <<'USAGE'
+Hyperfide installer: installs a verified prebuilt Hyperfide release.
+Commands installed: hyperfide (canonical) and cg (compatibility alias).
+Environment:
+  HYPERFIDE_BASE_URL                  controlled release endpoint (legacy CODIFY_BASE_URL)
+  HYPERFIDE_INSTALL_DIR               command directory (legacy CODIFY_INSTALL_DIR)
+  HYPERFIDE_TRUSTED_RELEASE_KEY_FILE  trusted Ed25519 release key
+  HYPERFIDE_MANIFEST_SHA256           explicit release manifest pin
+USAGE
+  exit 0 ;;
+esac
 python3 - <<'PY'
 from pathlib import Path,PurePosixPath
 import fcntl,hashlib,json,os,re,shutil,stat,subprocess,sys,tarfile,tempfile,urllib.parse,urllib.request,uuid
