@@ -1,0 +1,183 @@
+{
+  "approval": {
+    "allowed_actions": [
+      "postgresql.fixture.create",
+      "postgresql.fixture.drop",
+      "https.loopback.listen"
+    ],
+    "approved": true
+  },
+  "campaign_id": "hyperfide-task-5.4-component-v1",
+  "case_ids": [
+    "V-007",
+    "V-047"
+  ],
+  "expected_assertion_ids": [
+    "resources.eligible.real-pins",
+    "resources.eligible.manager-private",
+    "resources.eligible.no-authority",
+    "resources.prewarm.full-provisioned-profile",
+    "resources.prewarm.execution-separate",
+    "resources.prewarm.manager-spares-denied",
+    "resources.task-required",
+    "resources.manager.scope",
+    "resources.full-vector-required",
+    "resources.queue-not-compute",
+    "resources.queue-replay",
+    "resources.queue-conflict",
+    "resources.test.admitted",
+    "resources.agent-independent",
+    "resources.admission-replay",
+    "resources.no-proof.no-release",
+    "resources.primary-snapshot",
+    "resources.queue.primary-deadline",
+    "resources.deadline.no-physical-release",
+    "resources.limit.review.named",
+    "resources.limit.index.named",
+    "resources.limit.integration.named",
+    "resources.limit.exclusive-service.named",
+    "resources.backpressure.review-wait",
+    "resources.inspect.wait-vs-stalled",
+    "resources.backpressure.no-head-of-line",
+    "resources.release.proof-positive",
+    "resources.backpressure.relieved",
+    "resources.service.registered",
+    "resources.cleanup.observed",
+    "resources.fairness.priority-first",
+    "resources.fairness.bounded-bypass",
+    "resources.queue.overload",
+    "resources.child.aggregate-budget",
+    "resources.child.counted-until-proof",
+    "resources.provision.counted-until-absence",
+    "resources.rate.window-limit",
+    "resources.rate.idempotent-receipts",
+    "resources.no-fixed-concurrency-ceiling",
+    "resources.no-fixed-start-ceiling",
+    "resources.v047.component-replay.reference-match",
+    "resources.v047.component-replay.labelled",
+    "resources.cleanup.observed.second"
+  ],
+  "inputs": [
+    {
+      "path": "services/hyperfide/components/5.4.json",
+      "sha256": "adee1129c656bf133182d518734ce496a8c80f3942756000a4a954e9389519df",
+      "size": 479
+    },
+    {
+      "path": "services/hyperfide/dist/control.js",
+      "sha256": "1383288f00472de29607207d1d318e257c6e80c0fb2c05ca9fb2d974040e8032",
+      "size": 118
+    },
+    {
+      "path": "services/hyperfide/dist/scheduler/claim.js",
+      "sha256": "ff642da8e5847330106e672224cdf327bd2fc9ecf234b9595af5da878ea795d4",
+      "size": 82328
+    },
+    {
+      "path": "services/hyperfide/dist/scheduler/resources.js",
+      "sha256": "ec62e4f9221a32b9900759b8e2ca8220138e8319332dfd69b4579a5ac541b3da",
+      "size": 55412
+    },
+    {
+      "path": "services/hyperfide/dist/spec/import.js",
+      "sha256": "a68f6bb7f7dc3497a95ecc64febfbbacb0dc8d22a7cad1922ef314cc1a34e015",
+      "size": 28676
+    },
+    {
+      "path": "services/hyperfide/dist/storage/runtime.js",
+      "sha256": "79edb921337c7546f593720dd063655e6843a0ca09c270973077da79b1bb26cd",
+      "size": 18037
+    },
+    {
+      "path": "services/hyperfide/migrations/0005-scheduling.sql",
+      "sha256": "6cad3cae3af9117c8215520ee3b78ebaedfb69a79b9281f3566f56c9e01f9e78",
+      "size": 26704
+    },
+    {
+      "path": "services/hyperfide/package-lock.json",
+      "sha256": "101f5bc9fbb5864f227051eb2d0388449925df88c0fdd0e5755b40b808a4cfbb",
+      "size": 128778
+    },
+    {
+      "path": "services/hyperfide/package.json",
+      "sha256": "51c686f08fdfa47386af869cd6cdb63f1d2553f99366741239ded92dfe0d4398",
+      "size": 766
+    },
+    {
+      "path": "services/hyperfide/src/scheduler/resources.ts",
+      "sha256": "c1d3ddc7a71cf32f0755f218bb910e31a1783d8df8823e336d1fe540a56ad6b1",
+      "size": 54471
+    },
+    {
+      "path": "services/hyperfide/tsconfig.json",
+      "sha256": "2b45e09325652f23d0bf4ec53439e4552cf4c2854d7288ce40186d4074f894bb",
+      "size": 487
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/3_1.py",
+      "sha256": "22b1a340de54a04dff4cc4624eb458f28efa54b28c9d881669331472b9801c36",
+      "size": 16972
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/3_2.py",
+      "sha256": "675fd19acd8e8b8a640bef9d5d3c02827b2fe7abb6569b598a493c3954f09b1e",
+      "size": 21727
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/5_1.py",
+      "sha256": "a11d99d172589ee58ba36ce21d87e9372097eb3bedc3d21b8fb741b89cead09b",
+      "size": 22309
+    },
+    {
+      "path": "tests/hyperfide/cases/tasks/5_4.py",
+      "sha256": "2e76eeb6f51708e53b080a8c4eaff67ec407a303703d0176a04b1fcb80a2e1ee",
+      "size": 48636
+    },
+    {
+      "path": "tests/hyperfide/check-evidence.py",
+      "sha256": "cc8de56fb25bea153490b4143a231f1ff6f4dac758baaea4bf90fb7d9ba236a0",
+      "size": 30633
+    },
+    {
+      "path": "tests/hyperfide/manifest.schema.json",
+      "sha256": "3407092d7e6e452bb288e996f840bd5bab22d6c0f494a49bf944cd73c18078b8",
+      "size": 3216
+    },
+    {
+      "path": "tests/hyperfide/qualify.py",
+      "sha256": "8aa17f5e2572c8557f15353f7267e98600547fb0f2693486c0e0f2fc1abce8c2",
+      "size": 37538
+    },
+    {
+      "path": "tests/hyperfide/registrations/5.4.json",
+      "sha256": "4fd01fde1aaabb22bd419e077f5e173e81735baee6dd4b0d6a47ce294a10df9b",
+      "size": 3612
+    },
+    {
+      "path": "tests/hyperfide/support/identity_fixture.py",
+      "sha256": "2b992fd5eab4d903909a4dd621b2ce3c7278fa932e163cbad8f33cf2b65efe0a",
+      "size": 29318
+    }
+  ],
+  "policy": {
+    "authentication_scope": "genuine Ed25519 signed HTTPS through the established service entrypoint plus trusted lower scheduler APIs in branded primary transactions",
+    "cloud_provisioning": false,
+    "component_only": true,
+    "execution": "remote-only",
+    "fixture_cleanup": "observed PostgreSQL database/role/key directory/listener absence; no retained external resources",
+    "frontier_calls": false,
+    "full_case_status": "INCOMPLETE",
+    "v047_scope": "seeded component replay against an independent reference model; not the full V-047 campaign and not live qualification"
+  },
+  "registered_variant": "task:5.4",
+  "resources": [
+    {
+      "id": "hf-task-5.4-runtime",
+      "kind": "postgresql-database-role-listener",
+      "scope": "task5.4-disposable"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "task-component",
+  "seed": 1
+}
