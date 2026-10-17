@@ -153,7 +153,7 @@ try{
 if(failures.length)process.exitCode=1;
 """
 def main():
- out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/isolation14-transport"))/"transport"
+ out=Path(os.environ.get("HYPERFIDE_CAMPAIGN_DIR","/tmp/hyperfide/isolation14-transport"))/"isolation14-transport"
  out.mkdir(parents=True,exist_ok=True)
  with tempfile.TemporaryDirectory(prefix="hf-isolation-transport-") as temp:
   base=Path(temp)
