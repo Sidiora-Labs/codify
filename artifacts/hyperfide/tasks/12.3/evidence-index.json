@@ -1,9 +1,9 @@
 {
   "task": "12.3",
-  "commit": "85b69cbbc9d52e8ebf214eddc9f2c0fcfc401500",
+  "commit": "12aa390190b3d3e360e079254378a381103fc236",
+  "requalified_on": "12aa390190b3d3e360e079254378a381103fc236",
   "verify_cmd": "python3 tests/hyperfide/qualify.py --case V-007 --manifest tests/hyperfide/manifests/tasks/12.3.json && python3 tests/hyperfide/qualify.py --case V-044 --manifest tests/hyperfide/manifests/tasks/12.3.json",
-  "exit_code": 0,
-  "stdout_tail": "{\"status\": \"PASS\", \"receipt_id\": \"acea2c5c-62c2-41f0-8cb5-13bba5f59b3c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/12.3/campaigns/ce8d06a10e50c76f5de444ad0afd49749b80cc6750b5c162ab50677804293ee6\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n{\"status\": \"PASS\", \"receipt_id\": \"03db1525-1f1e-421d-9e55-619af318093f\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/12.3/campaigns/ce8d06a10e50c76f5de444ad0afd49749b80cc6750b5c162ab50677804293ee6\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": []}\n",
-  "ran_at": "2026-10-17T09:26:45Z",
-  "notes": "Executed as root (the case needs euid 0) against the PostgreSQL fixture. The checkout is owned by hf; the checker's isolated git refuses root on a foreign-owned repository, so /work/hyperfide and /work/hyperfide/.git (top-level directories only) were chowned to root for the run and restored to hf afterwards. Task-component variant only; V-007/V-044 full cases remain UNRUN."
+  "exit_code": 1,
+  "stdout_tail": "{\"status\": \"FAIL\", \"receipt_id\": \"358acee7-0bba-4f52-a410-088e78ab303c\", \"campaign_dir\": \"/work/hyperfide/artifacts/hyperfide/tasks/12.3/campaigns/e6158130923a0c8cfabfd8bed8d9ed182ea7a9f94a47338512e0ab140abbf0af\", \"scope\": \"task-component\", \"full_case_status\": \"INCOMPLETE\", \"diagnostics\": [\"executed assertion inventory differs from exact registration\", \"probe failed, was unavailable, or timed out\"]}",
+  "ran_at": "2026-10-17T14:01:21.633247Z"
 }
