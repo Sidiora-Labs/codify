@@ -6,7 +6,7 @@
     ],
     "approved": true
   },
-  "campaign_id": "hyperfide-task-26.1-branding-identity-v1",
+  "campaign_id": "hyperfide-task-26.1-branding-identity-v1-requal-12aa390190b3",
   "case_ids": [
     "V-026",
     "V-028"
@@ -59,8 +59,8 @@
     },
     {
       "path": "src/cg.h",
-      "sha256": "6c58363f66c65e4e7f91960845596626a41abbbf966ea75e0f70523c1635cb3d",
-      "size": 93626
+      "sha256": "feb03659cfb42cfbecc796aca90b467dd954e44065b18dcc2526f8899c991e4a",
+      "size": 93698
     },
     {
       "path": "scripts/install.sh",
@@ -74,8 +74,8 @@
     },
     {
       "path": "editors/vscode/package.json",
-      "sha256": "e4fe4e2abb33181b2419bd68f0be57de24dce3f9b230a392fc72f769b9992e29",
-      "size": 27511
+      "sha256": "a2832e85d70b5db1f0841aef28a2cab13d412b317b1a1aeac74a88e62776803a",
+      "size": 27635
     },
     {
       "path": "src/hyperfide/component_main.c",
@@ -89,18 +89,18 @@
     },
     {
       "path": "scripts/hyperfide-native-components.py",
-      "sha256": "5eb01214a3a91430cf2b66b2f15b40b91d06db8a87a00d88a11aca90985a23c2",
-      "size": 9165
+      "sha256": "e9d35c48c7fa582299809f03e485451ba86eb4585f9262150e38b49979ae1ef3",
+      "size": 14830
     },
     {
       "path": "build/hyperfide-native",
-      "sha256": "25648b3af546495a255eae77f130a053072ff8a9b04883a0a8c1737fb8f90155",
-      "size": 396328
+      "sha256": "e9cafa47ac941c06fde622534b92fa1fc56470ebfb80a4a7f98977e24e725171",
+      "size": 574552
     },
     {
       "path": "build/hyperfide-native-registry.inc",
-      "sha256": "281b423c9b11c4dfa42b66a2634bd0159e423364d196f147c09f56d4d4eaafe1",
-      "size": 2838
+      "sha256": "a223fb3d8ab1ef79ed7a160ef3eb9afb2f9bf69128302a55740c24e25acc756f",
+      "size": 3793
     },
     {
       "path": "tests/hyperfide/cases/tasks/26_1.py",
