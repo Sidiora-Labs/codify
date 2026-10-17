@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "campaign_id": "hyperfide-task-16.1-bounded-authenticated-authority-v4-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89",
+  "campaign_id": "hyperfide-task-16.1-bounded-authenticated-authority-v4-requal-12aa390190b3-requal-6a91b0130b1d-requal-ff4632c9bc89-requal-a80cd7edbb1c",
   "registered_variant": "task:16.1",
   "scope": "task-component",
   "case_ids": [
@@ -693,13 +693,13 @@
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js",
-      "sha256": "9abeaa4969356c069cc2cc2eb93c2e2e34bd832a7ef85697eb3ac14347aecadf",
-      "size": 44952
+      "sha256": "19d6bb9bdaaf2f7bc921b1982e2c9458c51b5c7c471f1be120c540d8ab92cc77",
+      "size": 45109
     },
     {
       "path": "services/hyperfide/dist/identity/enrollment.js.map",
-      "sha256": "d9cd049195ad20693bba1ec3a5643115d250ad05738859475e134113c2622ecc",
-      "size": 40781
+      "sha256": "9fd0b32676af66b6363df95dca7256046f95bb6df7bd3fbb0857086055b077d7",
+      "size": 40852
     },
     {
       "path": "services/hyperfide/dist/identity/native_auth.d.ts",
@@ -768,13 +768,13 @@
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js",
-      "sha256": "bfde63817f4a875e228c5e8b8b196443c14ea1498e7c868bfcf00efc8fff8cfa",
-      "size": 37891
+      "sha256": "e917b16b6dc7baab4db10c36cc3f3640ed58f9999f474560e3b927c709ea3abe",
+      "size": 37926
     },
     {
       "path": "services/hyperfide/dist/providers/blaxel/images.js.map",
-      "sha256": "9bde26102d9dd8ae92499ff17cc99ad6409e76aa92ef7e9fe56f9c5fc5fa720d",
-      "size": 34501
+      "sha256": "97de28dcf4323d992fcd66be890728064ebefc1900c67b36f46c7a6b6793db88",
+      "size": 34541
     },
     {
       "path": "services/hyperfide/dist/providers/contract.d.ts",
@@ -1358,8 +1358,8 @@
     },
     {
       "path": "services/hyperfide/src/identity/enrollment.ts",
-      "sha256": "250a4803207e6737f979453bb12da5b56cba70a62b89d0c1d58dd87bf00937b2",
-      "size": 43464
+      "sha256": "19ad53360ebcc6c62c9a53b80859fa09dadbda8879a609f6222a0588c778e8ef",
+      "size": 43604
     },
     {
       "path": "services/hyperfide/src/identity/native_auth.ts",
@@ -1383,8 +1383,8 @@
     },
     {
       "path": "services/hyperfide/src/providers/blaxel/images.ts",
-      "sha256": "ebc8ed106ab67e78cbe59a832f9bd9dbd047f54fc359655ff6773a2e87f20649",
-      "size": 36311
+      "sha256": "d464cb1f1d4aa1a77bf5505fe4f5f7fada0ff0e5dec320c5fe7d52c214c23ff3",
+      "size": 36342
     },
     {
       "path": "services/hyperfide/src/providers/contract.ts",
